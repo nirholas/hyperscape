@@ -191,8 +191,7 @@ export class SpriteGenerationService {
     animations?: string[],
     outputSize: number = 256
   ): Promise<Record<string, SpriteResult[]>> {
-    // TODO: Implement animation frame extraction
-    // For now, just return idle poses
+    // Animation frame extraction not yet implemented - returns idle pose only
     const idleSprites = await this.generateSprites({
       modelPath,
       outputSize,
