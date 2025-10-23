@@ -19,6 +19,8 @@ interface IPlayerSystem {
 
   function hyperscape__updateMaxHealth(address player, uint8 constitutionLevel) external;
 
+  function hyperscape__setItemsContract(address _itemsContract) external;
+
   function hyperscape__getPosition(address player) external view returns (int32 x, int32 y, int32 z);
 
   function hyperscape__isAlive(address player) external view returns (bool);
