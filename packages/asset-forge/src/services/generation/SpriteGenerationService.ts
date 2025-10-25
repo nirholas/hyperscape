@@ -4,8 +4,7 @@
  */
 
 import * as THREE from 'three'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { GLTFLoader, GLTF } from 'three-stdlib'
 
 export interface SpriteGenerationOptions {
   modelPath: string
