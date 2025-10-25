@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from 'react'
 import * as THREE from 'three'
 import { SkeletonHelper } from 'three'
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js'
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 
 export interface Transform {
   position: { x: number; y: number; z: number }

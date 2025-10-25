@@ -138,7 +138,7 @@ export function useExportHandlers({
                     exportScene.add(grid)
 
                     // Export
-                    const { GLTFExporter } = await import('three/examples/jsm/exporters/GLTFExporter.js')
+                    const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js')
                     const exporter = new GLTFExporter()
                     const gltf = await exporter.parseAsync(exportScene, {
                         binary: true,

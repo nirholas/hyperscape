@@ -1,7 +1,7 @@
 import { THREE, System } from "@hyperscape/shared";
 import { logger } from "@elizaos/core";
-import type { GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import type { GLTF } from "three/addons/loaders/GLTFLoader.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { PlaywrightManager } from "../managers/playwright-manager";
 import { resolveUrl } from "../utils";
 import { AgentAvatar } from "./avatar";

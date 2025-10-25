@@ -1,6 +1,6 @@
 import * as THREE from 'three'
-import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js'
-import { GLTFLoader, GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js'
+import { GLTFLoader, GLTF } from 'three/addons/loaders/GLTFLoader.js'
 
 import type { GLTFExportJSON as _GLTFExportJSON } from '../../types/service-types'
 
