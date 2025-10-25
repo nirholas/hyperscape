@@ -5,6 +5,11 @@
  */
 
 class PrivyAuthManager {
+  getToken(): string | null {
+    // TODO: Implement actual auth when PR #144 is merged
+    return null
+  }
+
   async getAccessToken(): Promise<string | null> {
     // TODO: Implement actual auth when PR #144 is merged
     return null

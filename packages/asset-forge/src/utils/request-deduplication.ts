@@ -13,6 +13,14 @@ class RequestDeduplicator {
   private pendingRequests: Map<string, PendingRequest> = new Map()
   private readonly CACHE_TTL = 60000 // 1 minute
 
+  /**
+   * Generate a cache key from request parameters
+   */
+  generateKey(url: string, method: string = 'GET', body?: any): string {
+    const bodyHash = body ? JSON.stringify(body) : ''
+    return `${method}:${url}:${bodyHash}`
+  }
+
   async deduplicate(key: string, fetcher: () => Promise<Response>): Promise<Response> {
     // Check if there's a pending request for this key
     const pending = this.pendingRequests.get(key)
