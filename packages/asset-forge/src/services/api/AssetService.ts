@@ -11,9 +11,9 @@
 import { MaterialPreset, AssetMetadata } from '../../types'
 
 import { apiFetch } from '@/utils/api'
-import { AssetCacheService, type CacheStats } from '../AssetCacheService'
-import { IndexedDBCache } from '../IndexedDBCache'
-import { CacheInvalidationService } from '../CacheInvalidationService'
+import { AssetCacheService, type CacheStats } from '@/services/AssetCacheService'
+import { IndexedDBCache } from '@/services/IndexedDBCache'
+import { CacheInvalidationService } from '@/services/CacheInvalidationService'
 import { createLogger } from '@/utils/logger'
 
 const logger = createLogger('AssetService')
