@@ -7,7 +7,6 @@
 
 import { useCallback } from 'react'
 import { Menu, X } from 'lucide-react'
-import { useCallback } from 'react'
 
 import { navigationConfig } from '../../config/navigation-config'
 import { useNavigationStore } from '../../store/useNavigationStore'
