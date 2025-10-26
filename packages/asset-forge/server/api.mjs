@@ -56,11 +56,22 @@ app.use('/assets', express.static(path.join(ROOT_DIR, 'public/assets'), {
   }
 }))
 
+// Serve temp images for Meshy.ai concept art (merged from separate image server)
+// Ensure temp-images directory exists
+await fs.promises.mkdir(path.join(ROOT_DIR, 'temp-images'), { recursive: true })
+app.use('/temp-images', express.static(path.join(ROOT_DIR, 'temp-images'), {
+  setHeaders: (res) => {
+    res.set('X-Content-Type-Options', 'nosniff')
+    res.set('Access-Control-Allow-Origin', '*') // Allow Meshy.ai to fetch images
+  }
+}))
+
 // Initialize services
 const assetService = new AssetService(path.join(ROOT_DIR, 'gdd-assets'))
+const apiPort = process.env.API_PORT || 3004
 const retextureService = new RetextureService({
   meshyApiKey: process.env.MESHY_API_KEY || '',
-  imageServerBaseUrl: process.env.IMAGE_SERVER_URL || 'http://localhost:8080'
+  imageServerBaseUrl: process.env.IMAGE_SERVER_URL || `http://localhost:${apiPort}`
 })
 const generationService = new GenerationService()
 

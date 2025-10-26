@@ -1,7 +1,19 @@
 #!/usr/bin/env node
 
 /**
- * Start Image Server
+ * DEPRECATED: Image Server (Standalone)
+ *
+ * This standalone image server has been MERGED into the main Express API server (server/api.mjs).
+ * The API server now serves temp-images at /temp-images endpoint on port 3004.
+ *
+ * This file is kept for reference only and should NOT be used in production.
+ *
+ * Migration details:
+ * - Old: Separate server on port 8081 serving /temp-images
+ * - New: Integrated into API server on port 3004 at /temp-images
+ * - Updated: env.example, package.json scripts, server/api.mjs
+ *
+ * Original functionality:
  * Serves images from temp-images directory for Meshy AI to access
  */
 
