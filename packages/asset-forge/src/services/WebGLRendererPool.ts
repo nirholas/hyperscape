@@ -87,30 +87,35 @@ export class WebGLRendererPool {
         entry.cleanupTimer = null
       }
 
-      logger.debug(`Renderer ${compatibleId} acquired (refCount: ${entry.refCount})`)
+      logger.debug(`Reusing renderer ${compatibleId} (refCount: ${entry.refCount})`)
       this.updateMetrics()
       return compatibleId
     }
 
     // Create new renderer if under limit
     if (this.renderers.size < this.maxRenderers) {
+      const id = this.createRenderer(options)
+      logger.debug(`Created new renderer ${id} (pool size: ${this.renderers.size}/${this.maxRenderers})`)
+      return id
+    }
+
+    // Pool exhausted - try to reclaim an idle renderer
+    const reclaimedId = this.reclaimIdleRenderer()
+    if (reclaimedId) {
+      logger.warn(`Pool exhausted, reclaimed idle renderer ${reclaimedId}`)
+      // Dispose and recreate with new options
+      this.disposeRenderer(reclaimedId)
       return this.createRenderer(options)
     }
 
-    // Pool exhausted - try to find and dispose idle renderers
-    const idleRenderer = this.findIdleRenderer()
-    if (idleRenderer) {
-      this.disposeRenderer(idleRenderer)
-      return this.createRenderer(options)
-    }
-
-    // Last resort - create renderer anyway with warning
-    logger.warn(`WebGL renderer pool exhausted (${this.renderers.size}/${this.maxRenderers}), creating anyway`)
+    // Fallback: create a temporary renderer that will be disposed immediately
+    logger.error(`Pool exhausted (${this.renderers.size}/${this.maxRenderers}), creating temporary renderer`)
     return this.createRenderer(options)
   }
 
   /**
-   * Release a renderer back to the pool. Decrements reference count and schedules cleanup if idle.
+   * Release a renderer back to the pool. Decrements reference count and
+   * schedules cleanup if no longer in use.
    */
   release(id: string): void {
     const entry = this.renderers.get(id)
@@ -122,42 +127,50 @@ export class WebGLRendererPool {
     entry.refCount = Math.max(0, entry.refCount - 1)
     entry.lastUsed = Date.now()
 
-    logger.debug(`Renderer ${id} released (refCount: ${entry.refCount})`)
+    logger.debug(`Released renderer ${id} (refCount: ${entry.refCount})`)
 
-    // Schedule cleanup if idle
-    if (entry.refCount === 0) {
+    // Schedule cleanup if no longer in use
+    if (entry.refCount === 0 && !entry.cleanupTimer) {
       entry.cleanupTimer = setTimeout(() => {
-        this.disposeRenderer(id)
+        this.cleanupRenderer(id)
       }, this.idleTimeout)
+
+      logger.debug(`Scheduled cleanup for renderer ${id} in ${this.idleTimeout}ms`)
     }
 
     this.updateMetrics()
   }
 
   /**
-   * Get the WebGLRenderer instance for a given ID
+   * Get the renderer instance by ID
    */
-  getRenderer(id: string): WebGLRenderer | undefined {
-    return this.renderers.get(id)?.renderer
+  getRenderer(id: string): WebGLRenderer | null {
+    const entry = this.renderers.get(id)
+    return entry ? entry.renderer : null
   }
 
   /**
-   * Render a scene with the given renderer ID
+   * Update renderer size (useful for responsive layouts)
    */
-  render(id: string, scene: Scene, camera: Camera): boolean {
-    const entry = this.renderers.get(id)
-    if (!entry) {
-      logger.error(`Attempted to render with unknown renderer: ${id}`)
-      return false
+  setSize(id: string, width: number, height: number, pixelRatio?: number): void {
+    const renderer = this.getRenderer(id)
+    if (renderer) {
+      renderer.setSize(width, height)
+      if (pixelRatio !== undefined) {
+        renderer.setPixelRatio(pixelRatio)
+      }
     }
+  }
 
-    try {
-      entry.renderer.render(scene, camera)
-      entry.lastUsed = Date.now()
-      return true
-    } catch (err) {
-      logger.error(`Render failed for ${id}:`, err)
-      return false
+  /**
+   * Render a scene with the specified renderer
+   */
+  render(id: string, scene: Scene, camera: Camera): void {
+    const renderer = this.getRenderer(id)
+    if (renderer) {
+      renderer.render(scene, camera)
+    } else {
+      logger.warn(`Attempted to render with unknown renderer: ${id}`)
     }
   }
 
@@ -169,29 +182,44 @@ export class WebGLRendererPool {
   }
 
   /**
-   * Dispose all renderers and clear the pool
+   * Force cleanup of all idle renderers (refCount === 0)
+   */
+  cleanupIdleRenderers(): void {
+    const idleIds: string[] = []
+
+    this.renderers.forEach((entry, id) => {
+      if (entry.refCount === 0) {
+        idleIds.push(id)
+      }
+    })
+
+    logger.debug(`Cleaning up ${idleIds.length} idle renderers`)
+    idleIds.forEach(id => this.cleanupRenderer(id))
+  }
+
+  /**
+   * Dispose all renderers and clear the pool (use with caution)
    */
   disposeAll(): void {
-    logger.debug(`Disposing all renderers (${this.renderers.size} total)`)
+    logger.warn('Disposing all renderers in pool')
 
-    for (const [id, entry] of this.renderers.entries()) {
-      if (entry.cleanupTimer) {
+    const ids = Array.from(this.renderers.keys())
+    ids.forEach(id => {
+      const entry = this.renderers.get(id)
+      if (entry?.cleanupTimer) {
         clearTimeout(entry.cleanupTimer)
       }
-      entry.renderer.dispose()
-      logger.debug(`Renderer ${id} disposed`)
-    }
+      this.disposeRenderer(id)
+    })
 
     this.renderers.clear()
-    this.metrics.totalDisposed += this.metrics.activeCount
-    this.metrics.activeCount = 0
     this.updateMetrics()
   }
 
   // Private methods
 
   private createRenderer(options: RendererOptions): string {
-    const id = `renderer-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    const id = `renderer_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 
     const renderer = new WebGLRenderer({
       antialias: options.antialias !== false,
@@ -200,13 +228,18 @@ export class WebGLRendererPool {
       powerPreference: options.powerPreference || 'high-performance'
     })
 
-    // Configure renderer
-    renderer.setPixelRatio(options.pixelRatio || window.devicePixelRatio)
-    if (options.width && options.height) {
-      renderer.setSize(options.width, options.height)
-    }
+    // Apply size and pixel ratio
+    const width = options.width || 800
+    const height = options.height || 600
+    const pixelRatio = options.pixelRatio || Math.min(window.devicePixelRatio, 2)
+
+    renderer.setSize(width, height)
+    renderer.setPixelRatio(pixelRatio)
+
+    // Default settings for quality
     renderer.outputColorSpace = SRGBColorSpace
     renderer.toneMapping = ACESFilmicToneMapping
+    renderer.toneMappingExposure = 1
 
     const entry: RendererEntry = {
       id,
@@ -219,34 +252,13 @@ export class WebGLRendererPool {
 
     this.renderers.set(id, entry)
     this.metrics.totalCreated++
-    this.metrics.activeCount++
-
-    logger.debug(`Renderer ${id} created (total: ${this.renderers.size}/${this.maxRenderers})`)
     this.updateMetrics()
 
     return id
   }
 
-  private disposeRenderer(id: string): void {
-    const entry = this.renderers.get(id)
-    if (!entry) {
-      return
-    }
-
-    if (entry.cleanupTimer) {
-      clearTimeout(entry.cleanupTimer)
-    }
-
-    entry.renderer.dispose()
-    this.renderers.delete(id)
-    this.metrics.activeCount--
-    this.metrics.totalDisposed++
-
-    logger.debug(`Renderer ${id} disposed (remaining: ${this.renderers.size})`)
-    this.updateMetrics()
-  }
-
   private findCompatibleRenderer(options: RendererOptions): string | null {
+    // Look for a renderer with matching options and refCount === 0
     for (const [id, entry] of this.renderers.entries()) {
       if (entry.refCount === 0 && this.optionsMatch(entry.options, options)) {
         return id
@@ -255,21 +267,8 @@ export class WebGLRendererPool {
     return null
   }
 
-  private findIdleRenderer(): string | null {
-    let oldestIdle: { id: string; lastUsed: number } | null = null
-
-    for (const [id, entry] of this.renderers.entries()) {
-      if (entry.refCount === 0) {
-        if (!oldestIdle || entry.lastUsed < oldestIdle.lastUsed) {
-          oldestIdle = { id, lastUsed: entry.lastUsed }
-        }
-      }
-    }
-
-    return oldestIdle?.id || null
-  }
-
   private optionsMatch(a: RendererOptions, b: RendererOptions): boolean {
+    // Match key options (ignoring size which can be changed dynamically)
     return (
       a.antialias === b.antialias &&
       a.alpha === b.alpha &&
@@ -278,13 +277,80 @@ export class WebGLRendererPool {
     )
   }
 
+  private cleanupRenderer(id: string): void {
+    const entry = this.renderers.get(id)
+    if (!entry) return
+
+    // Only cleanup if still idle
+    if (entry.refCount === 0) {
+      logger.debug(`Cleaning up idle renderer ${id}`)
+
+      if (entry.cleanupTimer) {
+        clearTimeout(entry.cleanupTimer)
+      }
+
+      this.disposeRenderer(id)
+      this.renderers.delete(id)
+      this.metrics.totalDisposed++
+      this.updateMetrics()
+    }
+  }
+
+  private disposeRenderer(id: string): void {
+    const entry = this.renderers.get(id)
+    if (!entry) return
+
+    const { renderer } = entry
+
+    // Dispose render targets if any
+    const renderTarget = renderer.getRenderTarget()
+    if (renderTarget) {
+      renderTarget.dispose()
+    }
+
+    // Dispose renderer
+    renderer.dispose()
+
+    // Remove canvas if in DOM
+    if (renderer.domElement.parentNode) {
+      renderer.domElement.parentNode.removeChild(renderer.domElement)
+    }
+
+    logger.debug(`Disposed renderer ${id}`)
+  }
+
+  private reclaimIdleRenderer(): string | null {
+    let oldestId: string | null = null
+    let oldestTime = Infinity
+
+    this.renderers.forEach((entry, id) => {
+      if (entry.refCount === 0 && entry.lastUsed < oldestTime) {
+        oldestTime = entry.lastUsed
+        oldestId = id
+      }
+    })
+
+    return oldestId
+  }
+
   private updateMetrics(): void {
     if (!this.enableMetrics) return
 
-    this.metrics.poolUtilization = this.renderers.size / this.maxRenderers
+    let activeCount = 0
+    let memoryEstimate = 0
 
-    // Rough memory estimate: ~10MB per renderer context
-    this.metrics.memoryEstimateMB = this.renderers.size * 10
+    this.renderers.forEach(entry => {
+      if (entry.refCount > 0) {
+        activeCount++
+      }
+
+      // Rough memory estimate: ~50MB per renderer (conservative)
+      memoryEstimate += 50
+    })
+
+    this.metrics.activeCount = activeCount
+    this.metrics.poolUtilization = (this.renderers.size / this.maxRenderers) * 100
+    this.metrics.memoryEstimateMB = memoryEstimate
   }
 }
 
@@ -292,7 +358,7 @@ export class WebGLRendererPool {
 let poolInstance: WebGLRendererPool | null = null
 
 /**
- * Get the global WebGL renderer pool instance
+ * Get the global renderer pool instance
  */
 export function getRendererPool(): WebGLRendererPool {
   if (!poolInstance) {
@@ -306,7 +372,7 @@ export function getRendererPool(): WebGLRendererPool {
 }
 
 /**
- * Reset the global pool (mainly for testing)
+ * Reset the global pool (useful for testing)
  */
 export function resetRendererPool(): void {
   if (poolInstance) {
