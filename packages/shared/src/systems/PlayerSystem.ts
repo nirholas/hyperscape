@@ -501,6 +501,32 @@ export class PlayerSystem extends SystemBase {
       (playerData as Player & { userId?: string }).userId = data.userId;
     }
 
+    // Ensure health equals constitution level (per user requirement)
+    const constitutionLevel =
+      Number.isFinite(playerData.skills.constitution.level) &&
+      playerData.skills.constitution.level > 0
+        ? playerData.skills.constitution.level
+        : 10;
+    if (playerData.health.max !== constitutionLevel) {
+      playerData.health.max = constitutionLevel;
+      playerData.health.current = Math.min(
+        playerData.health.current,
+        constitutionLevel,
+      );
+    }
+
+    // Validate health values to prevent NaN
+    if (
+      !Number.isFinite(playerData.health.current) ||
+      playerData.health.current < 0
+    ) {
+      playerData.health.current = playerData.health.max;
+    }
+    if (!Number.isFinite(playerData.health.max) || playerData.health.max <= 0) {
+      playerData.health.max = constitutionLevel;
+      playerData.health.current = constitutionLevel;
+    }
+
     // Add to our system using entity ID for runtime lookups
     this.players.set(data.playerId, playerData);
 
@@ -611,7 +637,15 @@ export class PlayerSystem extends SystemBase {
   }
 
   private handleDeath(data: PlayerDeathEvent): void {
-    const player = this.players.get(data.playerId)!;
+    const player = this.players.get(data.playerId);
+    if (!player) {
+      return; // Player not found, ignore
+    }
+
+    // Prevent infinite recursion: if player is already dead, don't process again
+    if (!player.alive) {
+      return; // Already dead, ignore duplicate death events
+    }
 
     player.alive = false;
     player.death.deathLocation = { ...player.position };
@@ -625,7 +659,7 @@ export class PlayerSystem extends SystemBase {
 
     this.respawnTimers.set(data.playerId, timer!);
 
-    // Emit death event
+    // Emit death event (only once, since we check alive above)
     this.emitTypedEvent(EventType.PLAYER_DIED, {
       playerId: data.playerId,
       deathLocation: {
@@ -671,7 +705,63 @@ export class PlayerSystem extends SystemBase {
       this.respawnTimers.delete(playerId);
     }
 
-    // Update PlayerLocal position if available
+    // Update PlayerEntity if it exists (server-side entity)
+    const playerEntity = this.world.getPlayer?.(playerId);
+    if (
+      playerEntity &&
+      typeof (playerEntity as { respawn?: unknown }).respawn === "function"
+    ) {
+      // Update spawn position on entity so respawn() uses the correct location
+      (playerEntity as { spawnPosition?: Position3D }).spawnPosition =
+        spawnPosition;
+
+      // Call entity's respawn method which handles all state resets
+      // This will reset health, position, combat state, AI state, etc.
+      const spawnVec = new THREE.Vector3(
+        spawnPosition.x,
+        spawnPosition.y,
+        spawnPosition.z,
+      );
+      (
+        playerEntity as {
+          respawn: (position?: THREE.Vector3, health?: number) => void;
+        }
+      ).respawn(spawnVec, player.health.max);
+
+      // Mark entity as dirty for network sync
+      (playerEntity as { markNetworkDirty?: () => void }).markNetworkDirty?.();
+    } else if (playerEntity) {
+      // Fallback: manually update entity if it doesn't have respawn method
+      // Restore health
+      (playerEntity as { setHealth?: (health: number) => void }).setHealth?.(
+        player.health.max,
+      );
+
+      // Update health component
+      const healthComponent = (
+        playerEntity as {
+          getComponent?: (name: string) => { data?: unknown } | null;
+        }
+      ).getComponent?.("health");
+      if (healthComponent && healthComponent.data) {
+        (
+          healthComponent.data as { current?: number; isDead?: boolean }
+        ).current = player.health.max;
+        (healthComponent.data as { isDead?: boolean }).isDead = false;
+      }
+
+      // Teleport entity to spawn position
+      (
+        playerEntity as {
+          setPosition?: (x: number, y: number, z: number) => void;
+        }
+      ).setPosition?.(spawnPosition.x, spawnPosition.y, spawnPosition.z);
+
+      // Mark entity as dirty for network sync
+      (playerEntity as { markNetworkDirty?: () => void }).markNetworkDirty?.();
+    }
+
+    // Update PlayerLocal position if available (client-side)
     const playerLocal = this.playerLocalRefs.get(playerId);
     if (playerLocal) {
       playerLocal.position.set(
@@ -679,6 +769,14 @@ export class PlayerSystem extends SystemBase {
         spawnPosition.y,
         spawnPosition.z,
       );
+    }
+
+    // Clear combat state if player was in combat
+    const combatSystem = this.world.getSystem("combat") as {
+      forceEndCombat?: (entityId: string) => void;
+    } | null;
+    if (combatSystem && typeof combatSystem.forceEndCombat === "function") {
+      combatSystem.forceEndCombat(playerId);
     }
 
     // Force client snap to server-grounded respawn
@@ -933,7 +1031,54 @@ export class PlayerSystem extends SystemBase {
     const player = this.players.get(playerId);
     if (!player || !player.alive) return false;
 
-    player.health.current = Math.max(0, player.health.current - amount);
+    // Validate amount to prevent NaN
+    const validAmount = Number.isFinite(amount) && amount > 0 ? amount : 0;
+    if (validAmount <= 0) return false;
+
+    // Validate current health before applying damage
+    const currentHealth =
+      Number.isFinite(player.health.current) && player.health.current > 0
+        ? player.health.current
+        : player.health.max;
+
+    player.health.current = Math.max(0, currentHealth - validAmount);
+
+    // Sync damage to PlayerEntity if it exists
+    const playerEntity = this.world.getPlayer?.(playerId);
+    if (playerEntity) {
+      // Update Entity's health using setHealth method (which updates health bar)
+      playerEntity.setHealth(player.health.current);
+
+      // Update health component
+      const healthComponent = playerEntity.getComponent("health");
+      if (healthComponent && healthComponent.data) {
+        healthComponent.data.current = player.health.current;
+        healthComponent.data.isDead = player.health.current <= 0;
+      }
+
+      // Update stats component health
+      const statsComponent = playerEntity.getComponent("stats");
+      if (statsComponent && statsComponent.data && statsComponent.data.health) {
+        const healthData = statsComponent.data.health as {
+          current: number;
+          max: number;
+        };
+        healthData.current = player.health.current;
+      }
+
+      // Emit combat damage event for damage splatter (red for damage > 0, blue for 0)
+      const playerPosition =
+        playerEntity.position || playerEntity.getPosition();
+      this.emitTypedEvent(EventType.COMBAT_DAMAGE_DEALT, {
+        attackerId: _source || "unknown",
+        targetId: playerId,
+        damage: validAmount,
+        targetType: "player",
+        position: playerPosition
+          ? { x: playerPosition.x, y: playerPosition.y, z: playerPosition.z }
+          : { x: 0, y: 0, z: 0 },
+      });
+    }
 
     this.emitTypedEvent(EventType.PLAYER_HEALTH_UPDATED, {
       playerId,
@@ -1189,16 +1334,32 @@ export class PlayerSystem extends SystemBase {
       safeY = 10; // Safe default
     }
 
+    // Health should equal constitution level (per user requirement)
+    const constitutionLevel =
+      Number.isFinite(player.skills.constitution.level) &&
+      player.skills.constitution.level > 0
+        ? player.skills.constitution.level
+        : 10;
+    const maxHealth = constitutionLevel; // Health equals constitution level
+
     // NEVER save invalid health values to database
     let safeHealth = player.health.current;
     let safeMaxHealth = player.health.max;
-    if (!Number.isFinite(safeMaxHealth) || safeMaxHealth <= 0) {
-      console.error(
-        `[PlayerSystem] WARNING: Invalid maxHealth detected: ${safeMaxHealth}, using 100 instead. Player health object:`,
-        player.health,
-      );
-      safeMaxHealth = 100;
+
+    // Ensure maxHealth equals constitution level
+    if (
+      !Number.isFinite(safeMaxHealth) ||
+      safeMaxHealth <= 0 ||
+      safeMaxHealth !== constitutionLevel
+    ) {
+      if (safeMaxHealth !== constitutionLevel) {
+        console.log(
+          `[PlayerSystem] Updating maxHealth from ${safeMaxHealth} to constitution level ${constitutionLevel}`,
+        );
+      }
+      safeMaxHealth = maxHealth;
     }
+
     if (!Number.isFinite(safeHealth) || safeHealth < 0) {
       console.error(
         `[PlayerSystem] WARNING: Invalid health detected: ${safeHealth}, using maxHealth instead. Player health object:`,
@@ -1207,6 +1368,12 @@ export class PlayerSystem extends SystemBase {
       safeHealth = safeMaxHealth;
     }
     safeHealth = Math.min(safeHealth, safeMaxHealth); // Ensure current <= max
+
+    // Update player's health to match constitution level if it doesn't
+    if (player.health.max !== maxHealth) {
+      player.health.max = maxHealth;
+      player.health.current = Math.min(player.health.current, maxHealth);
+    }
 
     this.databaseSystem.savePlayer(databaseId, {
       name: player.name,

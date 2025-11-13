@@ -208,6 +208,16 @@ export class CombatSystem extends SystemBase {
     // Apply damage
     this.applyDamage(targetId, targetType, damage, attackerId);
 
+    // Emit damage splatter event even for 0 damage (blue splatter)
+    const targetPosition = target.position || target.getPosition();
+    this.emitTypedEvent(EventType.COMBAT_DAMAGE_DEALT, {
+      attackerId,
+      targetId,
+      damage,
+      targetType,
+      position: targetPosition,
+    });
+
     // Set attack cooldown
     this.attackCooldowns.set(typedAttackerId, now);
 
@@ -278,6 +288,16 @@ export class CombatSystem extends SystemBase {
 
     // Apply damage
     this.applyDamage(targetId, targetType, damage, attackerId);
+
+    // Emit damage splatter event even for 0 damage (blue splatter)
+    const targetPosition = target.position || target.getPosition();
+    this.emitTypedEvent(EventType.COMBAT_DAMAGE_DEALT, {
+      attackerId,
+      targetId,
+      damage,
+      targetType,
+      position: targetPosition,
+    });
 
     // Set attack cooldown
     this.attackCooldowns.set(typedAttackerId, now);
@@ -490,13 +510,9 @@ export class CombatSystem extends SystemBase {
       return;
     }
 
-    // Emit combat damage event for visual effects (damage numbers)
-    this.emitTypedEvent(EventType.COMBAT_DAMAGE_DEALT, {
-      attackerId,
-      targetId,
-      damage,
-      targetType,
-    });
+    // Note: Damage splatter events are now emitted at the call sites
+    // (handleMeleeAttack, handleRangedAttack, processAutoAttack) to ensure
+    // they're emitted even for 0 damage hits
   }
 
   /**
@@ -1161,7 +1177,18 @@ export class CombatSystem extends SystemBase {
 
     console.log(`[CombatSystem] Calculated damage: ${damage}`);
 
+    // Apply damage (even if 0, we still want to show a blue splatter)
     this.applyDamage(targetId, combatState.targetType, damage, attackerId);
+
+    // Emit damage splatter event even for 0 damage (blue splatter)
+    const targetPosition = target.position || target.getPosition();
+    this.emitTypedEvent(EventType.COMBAT_DAMAGE_DEALT, {
+      attackerId,
+      targetId,
+      damage,
+      targetType: combatState.targetType,
+      position: targetPosition,
+    });
 
     // Set attack cooldown to prevent bypass
     this.attackCooldowns.set(typedAttackerId, now);

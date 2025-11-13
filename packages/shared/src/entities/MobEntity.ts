@@ -1329,6 +1329,9 @@ export class MobEntity extends CombatantEntity {
       max: this.config.maxHealth,
     });
 
+    // Update health bar visual (setHealth already does this, but ensure it's called)
+    this.updateHealthBar();
+
     // Update userData for mesh
     if (this.mesh?.userData) {
       const userData = this.mesh.userData as MeshUserData;
@@ -1337,11 +1340,14 @@ export class MobEntity extends CombatantEntity {
       }
     }
 
-    // Show damage numbers
+    // Show damage numbers (red for damage > 0, blue for 0 damage)
+    const targetPosition = this.getPosition();
     this.world.emit(EventType.COMBAT_DAMAGE_DEALT, {
+      attackerId: attackerId || "unknown",
       targetId: this.id,
       damage,
-      position: this.getPosition(),
+      targetType: "mob",
+      position: targetPosition,
     });
 
     // Check if mob died
@@ -1765,12 +1771,22 @@ export class MobEntity extends CombatantEntity {
 
     // Update health from server
     if ("currentHealth" in data) {
-      this.config.currentHealth = data.currentHealth as number;
+      const newHealth = data.currentHealth as number;
+      this.config.currentHealth = newHealth;
+      // CRITICAL: Update entity health and health bar by calling setHealth
+      // This ensures the health bar visual updates on the client
+      this.setHealth(newHealth);
     }
 
     // Update max health from server
     if ("maxHealth" in data) {
-      this.config.maxHealth = data.maxHealth as number;
+      const newMaxHealth = data.maxHealth as number;
+      this.config.maxHealth = newMaxHealth;
+      this.maxHealth = newMaxHealth;
+      // Update entity data for consistency
+      (this.data as { maxHealth?: number }).maxHealth = newMaxHealth;
+      // Refresh health bar to show updated max health
+      this.updateHealthBar();
     }
 
     // Update target from server

@@ -127,12 +127,16 @@ export class PlayerMigration {
    * Convert from old PlayerRow to new Player
    */
   static fromPlayerRow(old: PlayerRow, hyperscapePlayerId: string): Player {
-    // Validate health values to prevent NaN
-    const maxHealth =
-      Number.isFinite(old.maxHealth) && old.maxHealth > 0 ? old.maxHealth : 100;
-    const currentHealth = Number.isFinite(old.health)
-      ? Math.min(old.health, maxHealth)
-      : maxHealth;
+    // Health should equal constitution level (per user requirement)
+    const constitutionLevel =
+      Number.isFinite(old.constitutionLevel) && old.constitutionLevel > 0
+        ? old.constitutionLevel
+        : 10;
+    const maxHealth = constitutionLevel; // Health equals constitution level
+    const currentHealth =
+      Number.isFinite(old.health) && old.health > 0
+        ? Math.min(old.health, maxHealth)
+        : maxHealth;
 
     return {
       id: old.playerId,
