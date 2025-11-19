@@ -433,16 +433,36 @@ export class HeadstoneEntity extends InteractableEntity {
    * Remove an item from the corpse loot
    */
   public removeItem(itemId: string, quantity: number): boolean {
+    console.log(
+      `[HeadstoneEntity] removeItem called: itemId=${itemId}, quantity=${quantity}, ` +
+        `current items count=${this.lootItems.length}`,
+    );
+
     const itemIndex = this.lootItems.findIndex(
       (item) => item.itemId === itemId,
     );
-    if (itemIndex === -1) return false;
+    if (itemIndex === -1) {
+      console.log(
+        `[HeadstoneEntity] Item ${itemId} not found in lootItems (already removed?)`,
+      );
+      return false;
+    }
 
     const item = this.lootItems[itemIndex];
+    console.log(
+      `[HeadstoneEntity] Found item at index ${itemIndex}: ${item.itemId} x${item.quantity}`,
+    );
+
     if (item.quantity > quantity) {
       item.quantity -= quantity;
+      console.log(
+        `[HeadstoneEntity] Decreased quantity: ${item.itemId} now has ${item.quantity}`,
+      );
     } else {
       this.lootItems.splice(itemIndex, 1);
+      console.log(
+        `[HeadstoneEntity] Removed item entirely: ${item.itemId}, remaining items: ${this.lootItems.length}`,
+      );
     }
 
     // Update userData
@@ -450,10 +470,20 @@ export class HeadstoneEntity extends InteractableEntity {
       this.mesh.userData.corpseData.itemCount = this.lootItems.length;
     }
 
+    console.log(
+      `[HeadstoneEntity] After removal, lootItems.length = ${this.lootItems.length}`,
+    );
+
     // If no items left, mark for despawn
     if (this.lootItems.length === 0) {
+      console.log(`[HeadstoneEntity] ========== GRAVESTONE EMPTY ==========`);
+      console.log(
+        `[HeadstoneEntity] Emitting CORPSE_EMPTY event for ${this.id}, playerId=${this.config.headstoneData.playerId}`,
+      );
+
       this.world.emit(EventType.CORPSE_EMPTY, {
         corpseId: this.id,
+        playerId: this.config.headstoneData.playerId,
       });
 
       console.log(
@@ -462,9 +492,28 @@ export class HeadstoneEntity extends InteractableEntity {
 
       // Despawn almost immediately after all items taken (RuneScape-style)
       setTimeout(() => {
-        console.log(`[HeadstoneEntity] Removing ${this.id} from world...`);
-        this.world.entities.remove(this.id);
+        console.log(
+          `[HeadstoneEntity] ⏰ Timeout triggered! Removing ${this.id} from world...`,
+        );
+
+        // Use EntityManager to properly remove entity (sends entityRemoved packet to clients)
+        const entityManager = this.world.getSystem("entity-manager") as any;
+        if (entityManager) {
+          entityManager.destroyEntity(this.id);
+          console.log(
+            `[HeadstoneEntity] ✓ Called EntityManager.destroyEntity(${this.id})`,
+          );
+        } else {
+          console.warn(
+            `[HeadstoneEntity] ⚠️ No EntityManager found, using fallback`,
+          );
+          this.world.entities.remove(this.id);
+        }
       }, 500);
+    } else {
+      console.log(
+        `[HeadstoneEntity] Gravestone still has ${this.lootItems.length} items remaining`,
+      );
     }
 
     this.markNetworkDirty();
