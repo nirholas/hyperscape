@@ -61,7 +61,7 @@ import type {
   HeadstoneEntityConfig,
   EntityInteractionData,
 } from "../../types/entities";
-import type { InventoryItem } from "../../types/core/core";
+import type { InventoryItem, EntityData } from "../../types/core/core";
 import {
   InteractableEntity,
   type InteractableConfig,
@@ -72,6 +72,11 @@ export class HeadstoneEntity extends InteractableEntity {
   protected config: HeadstoneEntityConfig;
   private lootItems: InventoryItem[] = [];
   private lootRequestHandler?: (data: unknown) => void;
+
+  // Atomic loot operations (prevents concurrent duplication)
+  private lootQueue: Promise<void> = Promise.resolve();
+  private lootProtectionUntil: number = 0; // Timestamp when loot protection expires
+  private protectedFor?: string; // Player ID who has loot protection (killer in PvP)
 
   constructor(world: World, config: HeadstoneEntityConfig) {
     // Convert HeadstoneEntityConfig to InteractableConfig format
@@ -92,6 +97,27 @@ export class HeadstoneEntity extends InteractableEntity {
     this.config = config;
     this.lootItems = [...(config.headstoneData.items || [])];
 
+    // Initialize loot protection from config
+    this.lootProtectionUntil = config.headstoneData.lootProtectionUntil || 0;
+    this.protectedFor = config.headstoneData.protectedFor;
+
+    console.log(
+      `[HeadstoneEntity] Constructed ${this.id} with ${this.lootItems.length} items:`,
+      this.lootItems
+        .map((item) => `${item.itemId} x${item.quantity}`)
+        .join(", ") || "(none)",
+    );
+
+    if (this.lootProtectionUntil > 0) {
+      const protectionSeconds = Math.ceil(
+        (this.lootProtectionUntil - Date.now()) / 1000,
+      );
+      console.log(
+        `[HeadstoneEntity] Loot protection active for ${protectionSeconds}s, ` +
+          `protected for player: ${this.protectedFor || "owner"}`,
+      );
+    }
+
     // Listen for loot requests on this specific corpse
     this.lootRequestHandler = (data: unknown) => {
       const lootData = data as {
@@ -108,28 +134,216 @@ export class HeadstoneEntity extends InteractableEntity {
     this.world.on(EventType.CORPSE_LOOT_REQUEST, this.lootRequestHandler);
   }
 
+  /**
+   * Check if player can loot this gravestone
+   * Enforces time-based and owner-based loot protection
+   */
+  private canPlayerLoot(playerId: string): boolean {
+    const now = Date.now();
+
+    // Check if loot protection is active
+    if (this.lootProtectionUntil && now < this.lootProtectionUntil) {
+      // Loot is protected
+      if (this.protectedFor && this.protectedFor !== playerId) {
+        // Not the protected player
+        const remainingSeconds = Math.ceil(
+          (this.lootProtectionUntil - now) / 1000,
+        );
+        console.log(
+          `[HeadstoneEntity] Loot protection active for ${this.id}, ` +
+            `protected for ${this.protectedFor}, ` +
+            `${playerId} cannot loot yet (${remainingSeconds}s remaining)`,
+        );
+        return false;
+      }
+    }
+
+    // Player can loot
+    return true;
+  }
+
+  /**
+   * Check if player has inventory space for item
+   * CRITICAL: Must check BEFORE removing from gravestone to prevent item deletion
+   */
+  private checkInventorySpace(
+    playerId: string,
+    itemId: string,
+    quantity: number,
+  ): boolean {
+    const inventorySystem = this.world.getSystem("inventory") as any;
+    if (!inventorySystem) {
+      console.error("[HeadstoneEntity] InventorySystem not available");
+      return false;
+    }
+
+    const inventory = inventorySystem.getInventory(playerId);
+    if (!inventory) {
+      console.error(`[HeadstoneEntity] No inventory for ${playerId}`);
+      return false;
+    }
+
+    // Check if inventory is full (28 max slots - standard RuneScape inventory)
+    const isFull = inventory.items.length >= 28;
+
+    if (isFull) {
+      // Check if item is stackable and already exists
+      const existingItem = inventory.items.find(
+        (item: any) => item.itemId === itemId,
+      );
+
+      // If item exists and is stackable, we can add to existing stack
+      if (existingItem) {
+        // Assume stackable for now - proper check would need item definition
+        console.log(
+          `[HeadstoneEntity] Player ${playerId} inventory full but item ${itemId} is stackable`,
+        );
+        return true;
+      }
+
+      // Inventory full and item not stackable
+      console.log(
+        `[HeadstoneEntity] Player ${playerId} inventory full (${inventory.items.length}/28), ` +
+          `cannot loot ${itemId}`,
+      );
+
+      // Emit UI message to player
+      this.world.emit(EventType.UI_MESSAGE, {
+        playerId,
+        message: "Your inventory is full!",
+        type: "error",
+      });
+
+      return false;
+    }
+
+    // Has space
+    return true;
+  }
+
   private handleLootRequest(data: {
     playerId: string;
     itemId: string;
     quantity: number;
     slot?: number;
   }): void {
-    // Remove item from corpse
-    const removed = this.removeItem(data.itemId, data.quantity);
-
-    if (removed) {
-      // Add to player inventory
-      this.world.emit(EventType.INVENTORY_ITEM_ADDED, {
-        playerId: data.playerId,
-        item: {
-          id: `loot_${data.playerId}_${Date.now()}`,
-          itemId: data.itemId,
-          quantity: data.quantity,
-          slot: -1, // Auto-assign slot
-          metadata: null,
-        },
-      });
+    // CRITICAL: Server authority check - prevent client from looting
+    if (!this.world.isServer) {
+      console.error(
+        `[HeadstoneEntity] ⚠️  Client attempted server-only loot operation for ${this.id} - BLOCKED`,
+      );
+      return;
     }
+
+    // Queue loot operation to ensure atomicity
+    // Only ONE loot operation can execute at a time (prevents duplication)
+    this.lootQueue = this.lootQueue
+      .then(() => this.processLootRequest(data))
+      .catch((error) => {
+        console.error(`[HeadstoneEntity] Loot request failed:`, error);
+      });
+  }
+
+  /**
+   * Process loot request atomically
+   * Queued to prevent concurrent access and item duplication
+   */
+  private async processLootRequest(data: {
+    playerId: string;
+    itemId: string;
+    quantity: number;
+    slot?: number;
+  }): Promise<void> {
+    console.log(
+      `[HeadstoneEntity] Processing loot request from ${data.playerId} ` +
+        `for ${data.itemId} x${data.quantity} from ${this.id}`,
+    );
+
+    // Step 1: Check loot protection
+    if (!this.canPlayerLoot(data.playerId)) {
+      this.world.emit(EventType.UI_MESSAGE, {
+        playerId: data.playerId,
+        message: "This loot is protected!",
+        type: "error",
+      });
+      return;
+    }
+
+    // Step 2: Check if item exists in gravestone
+    const itemIndex = this.lootItems.findIndex(
+      (item) => item.itemId === data.itemId,
+    );
+
+    if (itemIndex === -1) {
+      console.log(
+        `[HeadstoneEntity] Item ${data.itemId} not found in ${this.id} ` +
+          `(already looted by another player)`,
+      );
+      this.world.emit(EventType.UI_MESSAGE, {
+        playerId: data.playerId,
+        message: "Item already looted!",
+        type: "warning",
+      });
+      return;
+    }
+
+    const item = this.lootItems[itemIndex];
+
+    // Validate quantity
+    const quantityToLoot = Math.min(data.quantity, item.quantity);
+    if (quantityToLoot <= 0) {
+      console.warn(`[HeadstoneEntity] Invalid quantity: ${data.quantity}`);
+      return;
+    }
+
+    // Step 3: CRITICAL - Check inventory space BEFORE removing item
+    // This prevents item deletion if inventory is full
+    const hasSpace = this.checkInventorySpace(
+      data.playerId,
+      data.itemId,
+      quantityToLoot,
+    );
+
+    if (!hasSpace) {
+      // Inventory full - item NOT removed from gravestone
+      // This prevents permanent item loss!
+      return;
+    }
+
+    // Step 4: Atomic remove from gravestone (compare-and-swap pattern)
+    const removed = this.removeItem(data.itemId, quantityToLoot);
+
+    if (!removed) {
+      // Another player looted it between our check and remove
+      // This should be rare due to queue, but defensive programming
+      console.log(
+        `[HeadstoneEntity] Item ${data.itemId} removed by another player ` +
+          `during loot operation (race condition prevented)`,
+      );
+      this.world.emit(EventType.UI_MESSAGE, {
+        playerId: data.playerId,
+        message: "Item already looted!",
+        type: "warning",
+      });
+      return;
+    }
+
+    // Step 5: Add to player inventory (safe now, space already checked)
+    this.world.emit(EventType.INVENTORY_ITEM_ADDED, {
+      playerId: data.playerId,
+      item: {
+        id: `loot_${data.playerId}_${Date.now()}`,
+        itemId: data.itemId,
+        quantity: quantityToLoot,
+        slot: -1, // Auto-assign slot
+        metadata: null,
+      },
+    });
+
+    console.log(
+      `[HeadstoneEntity] ✓ ${data.playerId} looted ${data.itemId} x${quantityToLoot} ` +
+        `from ${this.id}`,
+    );
   }
 
   protected async createMesh(): Promise<void> {
@@ -196,29 +410,73 @@ export class HeadstoneEntity extends InteractableEntity {
    * Handle corpse interaction - shows loot interface
    */
   public async handleInteraction(data: EntityInteractionData): Promise<void> {
-    // Emit corpse click event to show loot interface
-    this.world.emit(EventType.CORPSE_CLICK, {
+    console.log(
+      `[HeadstoneEntity] ${this.id} handleInteraction called by ${data.playerId}`,
+    );
+    console.log(
+      `[HeadstoneEntity] Emitting CORPSE_CLICK with ${this.lootItems.length} items:`,
+      this.lootItems
+        .map((item) => `${item.itemId} x${item.quantity}`)
+        .join(", ") || "(none)",
+    );
+
+    const lootData = {
       corpseId: this.id,
       playerId: data.playerId,
       lootItems: this.lootItems,
       position: this.getPosition(),
-    });
+    };
+
+    // Emit local event for server-side systems
+    // NOTE: No loot protection needed - gravestone spawns AFTER respawn (RuneScape-style)
+    this.world.emit(EventType.CORPSE_CLICK, lootData);
+
+    // Send to specific client over network (opens loot UI immediately)
+    if (this.world.isServer && this.world.network) {
+      const network = this.world.network as any;
+      if (network.sendTo) {
+        network.sendTo(data.playerId, "corpseLoot", lootData);
+        console.log(
+          `[HeadstoneEntity] Sent corpseLoot packet to ${data.playerId}`,
+        );
+      }
+    }
   }
 
   /**
    * Remove an item from the corpse loot
    */
   public removeItem(itemId: string, quantity: number): boolean {
+    console.log(
+      `[HeadstoneEntity] removeItem called: itemId=${itemId}, quantity=${quantity}, ` +
+        `current items count=${this.lootItems.length}`,
+    );
+
     const itemIndex = this.lootItems.findIndex(
       (item) => item.itemId === itemId,
     );
-    if (itemIndex === -1) return false;
+    if (itemIndex === -1) {
+      console.log(
+        `[HeadstoneEntity] Item ${itemId} not found in lootItems (already removed?)`,
+      );
+      return false;
+    }
 
     const item = this.lootItems[itemIndex];
+    console.log(
+      `[HeadstoneEntity] Found item at index ${itemIndex}: ${item.itemId} x${item.quantity}`,
+    );
+
     if (item.quantity > quantity) {
       item.quantity -= quantity;
+      console.log(
+        `[HeadstoneEntity] Decreased quantity: ${item.itemId} now has ${item.quantity}`,
+      );
     } else {
       this.lootItems.splice(itemIndex, 1);
+      console.log(
+        `[HeadstoneEntity] Removed item entirely: ${item.itemId}, remaining items: ${this.lootItems.length}`,
+      );
     }
 
     // Update userData
@@ -226,16 +484,50 @@ export class HeadstoneEntity extends InteractableEntity {
       this.mesh.userData.corpseData.itemCount = this.lootItems.length;
     }
 
+    console.log(
+      `[HeadstoneEntity] After removal, lootItems.length = ${this.lootItems.length}`,
+    );
+
     // If no items left, mark for despawn
     if (this.lootItems.length === 0) {
+      console.log(`[HeadstoneEntity] ========== GRAVESTONE EMPTY ==========`);
+      console.log(
+        `[HeadstoneEntity] Emitting CORPSE_EMPTY event for ${this.id}, playerId=${this.config.headstoneData.playerId}`,
+      );
+
       this.world.emit(EventType.CORPSE_EMPTY, {
         corpseId: this.id,
+        playerId: this.config.headstoneData.playerId,
       });
 
-      // Despawn after a short delay
+      console.log(
+        `[HeadstoneEntity] ${this.id} is empty, despawning in 500ms...`,
+      );
+
+      // Despawn almost immediately after all items taken (RuneScape-style)
       setTimeout(() => {
-        this.destroy();
-      }, 2000);
+        console.log(
+          `[HeadstoneEntity] ⏰ Timeout triggered! Removing ${this.id} from world...`,
+        );
+
+        // Use EntityManager to properly remove entity (sends entityRemoved packet to clients)
+        const entityManager = this.world.getSystem("entity-manager") as any;
+        if (entityManager) {
+          entityManager.destroyEntity(this.id);
+          console.log(
+            `[HeadstoneEntity] ✓ Called EntityManager.destroyEntity(${this.id})`,
+          );
+        } else {
+          console.warn(
+            `[HeadstoneEntity] ⚠️ No EntityManager found, using fallback`,
+          );
+          this.world.entities.remove(this.id);
+        }
+      }, 500);
+    } else {
+      console.log(
+        `[HeadstoneEntity] Gravestone still has ${this.lootItems.length} items remaining`,
+      );
     }
 
     this.markNetworkDirty();
@@ -257,15 +549,41 @@ export class HeadstoneEntity extends InteractableEntity {
   }
 
   /**
-   * Network data override
+   * Network data override - MUST include lootItems for client LootWindow
    */
   getNetworkData(): Record<string, unknown> {
     const baseData = super.getNetworkData();
     return {
       ...baseData,
       lootItemCount: this.lootItems.length,
+      lootItems: this.lootItems, // CRITICAL: Send actual items to client for LootWindow
       despawnTime: this.config.headstoneData.despawnTime,
+      playerId: this.config.headstoneData.playerId,
+      deathMessage: this.config.headstoneData.deathMessage,
     };
+  }
+
+  /**
+   * Override serialize() to include lootItems in network packet
+   * CRITICAL: Base Entity.serialize() only copies this.data, but lootItems is a private field
+   */
+  serialize(): EntityData {
+    const baseData = super.serialize();
+    return {
+      ...baseData,
+      headstoneData: {
+        playerId: this.config.headstoneData.playerId,
+        playerName: this.config.headstoneData.playerName,
+        deathTime: this.config.headstoneData.deathTime,
+        deathMessage: this.config.headstoneData.deathMessage,
+        position: this.config.headstoneData.position,
+        items: this.lootItems, // CRITICAL: Include actual loot items for client
+        itemCount: this.lootItems.length,
+        despawnTime: this.config.headstoneData.despawnTime,
+      },
+      lootItems: this.lootItems, // Also include at root level for easy access
+      lootItemCount: this.lootItems.length,
+    } as unknown as EntityData;
   }
 
   protected serverUpdate(deltaTime: number): void {
@@ -273,7 +591,10 @@ export class HeadstoneEntity extends InteractableEntity {
 
     // Check if corpse should despawn
     if (this.world.getTime() > this.config.headstoneData.despawnTime) {
-      this.destroy();
+      console.log(
+        `[HeadstoneEntity] ${this.id} reached despawn time, removing from world...`,
+      );
+      this.world.entities.remove(this.id);
     }
   }
 
