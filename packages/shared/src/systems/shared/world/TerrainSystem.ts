@@ -878,7 +878,7 @@ export class TerrainSystem extends System {
         return {
           id: r.id,
           type: r.type,
-          subType: r.type === "tree" ? "normal_tree" : r.type,
+          subType: r.type === "tree" ? "normal" : r.type,
           position: worldPos,
         };
       });
@@ -899,7 +899,7 @@ export class TerrainSystem extends System {
         return {
           id: r.id,
           type: r.type,
-          subType: r.type === "tree" ? "normal_tree" : r.type,
+          subType: r.type === "tree" ? "normal" : r.type,
           position: worldPos,
         };
       });

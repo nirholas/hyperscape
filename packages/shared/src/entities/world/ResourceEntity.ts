@@ -183,8 +183,9 @@ export class ResourceEntity extends InteractableEntity {
       this.mesh = null;
     }
 
-    // Load stump model
+    // Load stump model from config (set by manifest) or fallback to hardcoded
     const stumpModelPath =
+      this.config.stumpModelPath ||
       "asset://models/basic-reg-tree-stump/basic-tree-stump.glb";
     try {
       const { scene } = await modelCache.loadModel(stumpModelPath, this.world);
@@ -192,8 +193,8 @@ export class ResourceEntity extends InteractableEntity {
       this.mesh = scene;
       this.mesh.name = `ResourceStump_${this.config.resourceType}`;
 
-      // Stump model is much larger than tree model, use smaller scale
-      const modelScale = 0.3; // Much smaller than tree (3.0)
+      // Use scale from config (set by manifest) or fallback to default
+      const modelScale = this.config.stumpModelScale ?? 0.3;
       this.mesh.scale.set(modelScale, modelScale, modelScale);
       this.mesh.updateMatrix();
       this.mesh.updateMatrixWorld(true);
