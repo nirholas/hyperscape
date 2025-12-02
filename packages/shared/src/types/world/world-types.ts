@@ -135,15 +135,17 @@ export interface BiomeResource {
 
 /**
  * NPC location - where NPCs spawn in the world
+ * Only id, type, and position are required - all other data comes from npcs.json manifest
  */
 export interface NPCLocation {
-  id: string;
-  name: string;
+  id: string; // Must match ID in npcs.json
   type: "bank" | "general_store" | "skill_trainer" | "quest_giver";
   position: WorldPosition;
-  services: string[];
+  // The following are optional - data should come from npcs.json manifest
+  name?: string;
+  services?: string[];
   modelPath?: string;
-  description: string;
+  description?: string;
 }
 
 /**
