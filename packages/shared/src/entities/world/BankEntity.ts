@@ -11,7 +11,7 @@
  * - Right-click: Context menu with "Use Bank" and "Examine"
  *
  * **Visual Representation**:
- * - Black 2x2x2 box
+ * - Black chest-sized box (1 tile)
  *
  * **Runs on**: Server (authoritative), Client (visual)
  */
@@ -78,8 +78,9 @@ export class BankEntity extends InteractableEntity {
       return;
     }
 
-    // Create a black box for the bank (2x2x2)
-    const geometry = new THREE.BoxGeometry(2, 2, 2);
+    // Create a black box for the bank (1 tile size, chest-like proportions)
+    const boxHeight = 0.7;
+    const geometry = new THREE.BoxGeometry(0.9, boxHeight, 0.9);
     const material = new THREE.MeshLambertMaterial({
       color: 0x111111, // Very dark black
       transparent: false,
@@ -89,6 +90,8 @@ export class BankEntity extends InteractableEntity {
     mesh.name = `Bank_${this.id}`;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
+    // Offset mesh up so it sits on the ground (BoxGeometry is centered at origin)
+    mesh.position.y = boxHeight / 2;
     this.mesh = mesh;
 
     // Set up userData for interaction detection
