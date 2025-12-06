@@ -53,6 +53,7 @@ const Skill = {
   FISHING: "fishing" as keyof Skills,
   FIREMAKING: "firemaking" as keyof Skills,
   COOKING: "cooking" as keyof Skills,
+  MINING: "mining" as keyof Skills,
 };
 
 import type {
@@ -350,6 +351,7 @@ export class SkillsSystem extends SystemBase {
       Skill.FISHING,
       Skill.FIREMAKING,
       Skill.COOKING,
+      Skill.MINING,
     ];
 
     for (const skill of skills) {
@@ -376,6 +378,7 @@ export class SkillsSystem extends SystemBase {
       Skill.FISHING,
       Skill.FIREMAKING,
       Skill.COOKING,
+      Skill.MINING,
     ];
 
     for (const skill of skills) {
@@ -515,6 +518,7 @@ export class SkillsSystem extends SystemBase {
       Skill.FISHING,
       Skill.FIREMAKING,
       Skill.COOKING,
+      Skill.MINING,
     ];
 
     for (const skill of skills) {
