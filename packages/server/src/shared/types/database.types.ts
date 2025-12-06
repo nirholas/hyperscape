@@ -40,6 +40,7 @@ export interface PlayerRow {
   defenseLevel: number;
   constitutionLevel: number;
   rangedLevel: number;
+  miningLevel: number;
   woodcuttingLevel: number;
   fishingLevel: number;
   firemakingLevel: number;
@@ -49,6 +50,7 @@ export interface PlayerRow {
   defenseXp: number;
   constitutionXp: number;
   rangedXp: number;
+  miningXp: number;
   woodcuttingXp: number;
   fishingXp: number;
   firemakingXp: number;

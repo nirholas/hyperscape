@@ -192,6 +192,7 @@ export const characters = pgTable(
     rangedLevel: integer("rangedLevel").default(1),
 
     // Gathering skills
+    miningLevel: integer("miningLevel").default(1),
     woodcuttingLevel: integer("woodcuttingLevel").default(1),
     fishingLevel: integer("fishingLevel").default(1),
     firemakingLevel: integer("firemakingLevel").default(1),
@@ -203,6 +204,7 @@ export const characters = pgTable(
     defenseXp: integer("defenseXp").default(0),
     constitutionXp: integer("constitutionXp").default(1154),
     rangedXp: integer("rangedXp").default(0),
+    miningXp: integer("miningXp").default(0),
     woodcuttingXp: integer("woodcuttingXp").default(0),
     fishingXp: integer("fishingXp").default(0),
     firemakingXp: integer("firemakingXp").default(0),

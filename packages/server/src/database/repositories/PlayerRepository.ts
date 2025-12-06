@@ -106,6 +106,9 @@ export class PlayerRepository extends BaseRepository {
     if (data.rangedLevel !== undefined) {
       updateData.rangedLevel = data.rangedLevel;
     }
+    if (data.miningLevel !== undefined) {
+      updateData.miningLevel = data.miningLevel;
+    }
     if (data.woodcuttingLevel !== undefined) {
       updateData.woodcuttingLevel = data.woodcuttingLevel;
     }
@@ -133,6 +136,9 @@ export class PlayerRepository extends BaseRepository {
     }
     if (data.rangedXp !== undefined) {
       updateData.rangedXp = data.rangedXp;
+    }
+    if (data.miningXp !== undefined) {
+      updateData.miningXp = data.miningXp;
     }
     if (data.woodcuttingXp !== undefined) {
       updateData.woodcuttingXp = data.woodcuttingXp;
