@@ -3,6 +3,7 @@ import { uuid } from "../../../utils";
 import type { World } from "../../../types";
 import { EventType } from "../../../types/events";
 import { Resource, ResourceDrop } from "../../../types/core/core";
+import type { ChatMessage } from "../../../types";
 import { PlayerID, ResourceID } from "../../../types/core/identifiers";
 import { calculateDistance } from "../../../utils/game/EntityUtils";
 import {
@@ -12,8 +13,32 @@ import {
 import type { TerrainResourceSpawnPoint } from "../../../types/world/terrain";
 import { TICK_DURATION_MS } from "../movement/TileSystem";
 import { getExternalResource } from "../../../utils/ExternalAssetUtils";
-import type { ExternalResourceData } from "../../../data/DataManager";
 import { ALL_WORLD_AREAS } from "../../../data/world-areas";
+
+interface EmoteCapableEntity {
+  emote?: string;
+  data?: { e?: string };
+  markNetworkDirty?: () => void;
+}
+
+interface ChatSystem {
+  chat: {
+    add: (msg: ChatMessage, broadcast?: boolean) => void;
+  };
+}
+
+interface EntityManagerSystem {
+  spawnEntity: (
+    config: Record<string, unknown>,
+  ) => Promise<{ id: string } | null>;
+}
+
+interface InventorySystem {
+  getInventory: (playerId: string) => {
+    items?: Array<{ itemId?: string }>;
+    capacity?: number;
+  };
+}
 
 /**
  * Resource System
@@ -154,21 +179,19 @@ export class ResourceSystem extends SystemBase {
   }
 
   private sendChat(playerId: string, text: string): void {
-    const chat = (
-      this.world as unknown as {
-        chat: { add: (msg: unknown, broadcast?: boolean) => void };
-      }
-    ).chat;
-    const msg = {
+    const worldChat = this.world as unknown as ChatSystem;
+    if (!worldChat.chat) return; // Safety check
+
+    const msg: ChatMessage = {
       id: uuid(),
       from: "System",
-      fromId: null,
+      fromId: undefined, // undefined instead of null to match ChatMessage type
       body: text,
       text,
       timestamp: Date.now(),
       createdAt: new Date().toISOString(),
     };
-    chat.add(msg, true);
+    worldChat.chat.add(msg, true);
   }
 
   /**
@@ -180,11 +203,12 @@ export class ResourceSystem extends SystemBase {
       console.log(`[ResourceSystem] 🪓 Setting ${emote} emote for ${playerId}`);
 
       // Set emote STRING KEY (players use emote strings which get mapped to URLs)
-      if ((playerEntity as any).emote !== undefined) {
-        (playerEntity as any).emote = emote;
+      const entity = playerEntity as unknown as EmoteCapableEntity;
+      if (entity.emote !== undefined) {
+        entity.emote = emote;
       }
-      if ((playerEntity as any).data) {
-        (playerEntity as any).data.e = emote;
+      if (entity.data) {
+        entity.data.e = emote;
       }
 
       // Send immediate network update for emote (same pattern as CombatSystem)
@@ -196,7 +220,7 @@ export class ResourceSystem extends SystemBase {
         });
       }
 
-      (playerEntity as any).markNetworkDirty?.();
+      entity.markNetworkDirty?.();
     }
   }
 
@@ -211,11 +235,12 @@ export class ResourceSystem extends SystemBase {
       );
 
       // Reset to idle
-      if ((playerEntity as any).emote !== undefined) {
-        (playerEntity as any).emote = "idle";
+      const entity = playerEntity as unknown as EmoteCapableEntity;
+      if (entity.emote !== undefined) {
+        entity.emote = "idle";
       }
-      if ((playerEntity as any).data) {
-        (playerEntity as any).data.e = "idle";
+      if (entity.data) {
+        entity.data.e = "idle";
       }
 
       // Send immediate network update for emote reset (same pattern as CombatSystem)
@@ -226,7 +251,7 @@ export class ResourceSystem extends SystemBase {
         });
       }
 
-      (playerEntity as any).markNetworkDirty?.();
+      entity.markNetworkDirty?.();
     }
   }
 
@@ -340,9 +365,10 @@ export class ResourceSystem extends SystemBase {
     }
 
     // Get EntityManager for spawning
-    const entityManager = this.world.getSystem("entity-manager") as {
-      spawnEntity?: (config: unknown) => Promise<unknown>;
-    } | null;
+    // Get EntityManager for spawning
+    const entityManager = this.world.getSystem(
+      "entity-manager",
+    ) as unknown as EntityManagerSystem | null;
     if (!entityManager?.spawnEntity) {
       console.error(
         "[ResourceSystem] EntityManager not available, cannot spawn resources!",
@@ -437,9 +463,7 @@ export class ResourceSystem extends SystemBase {
       };
 
       try {
-        const spawnedEntity = (await entityManager.spawnEntity(
-          resourceConfig,
-        )) as { id?: string } | null;
+        const spawnedEntity = await entityManager.spawnEntity(resourceConfig);
         if (spawnedEntity) {
           spawned++;
         } else {
@@ -454,7 +478,11 @@ export class ResourceSystem extends SystemBase {
       }
     }
 
-    if (spawned > 0) {
+    if (spawned > 0 || failed > 0) {
+      // Log success if needed, or leave empty if intentional but now causing lint error
+      console.log(
+        `[ResourceSystem] Spawned ${spawned} resources (failed: ${failed}).`,
+      );
     }
   }
 
@@ -753,7 +781,7 @@ export class ResourceSystem extends SystemBase {
       return;
     }
 
-    // Tool check (RuneScape-style: any hatchet qualifies; tier affects speed)
+    // Tool check (RuneScape-style: any hatchet/pickaxe qualifies; tier affects speed)
     if (resource.skillRequired === "woodcutting") {
       const axeInfo = this.getBestAxeTier(data.playerId);
       if (!axeInfo) {
@@ -773,6 +801,29 @@ export class ResourceSystem extends SystemBase {
         this.emitTypedEvent(EventType.UI_MESSAGE, {
           playerId: data.playerId,
           message: `You need level ${axeInfo.levelRequired} woodcutting to use this axe.`,
+          type: "error",
+        });
+        return;
+      }
+    } else if (resource.skillRequired === "mining") {
+      const pickaxeInfo = this.getBestPickaxeTier(data.playerId);
+      if (!pickaxeInfo) {
+        this.sendChat(data.playerId, `You need a pickaxe to mine this rock.`);
+        this.emitTypedEvent(EventType.UI_MESSAGE, {
+          playerId: data.playerId,
+          message: `You need a pickaxe to mine this rock.`,
+          type: "error",
+        });
+        return;
+      }
+
+      // Enforce pickaxe level requirement
+      const cached = this.playerSkills.get(data.playerId);
+      const miningLevel = cached?.[resource.skillRequired]?.level ?? 1;
+      if (miningLevel < pickaxeInfo.levelRequired) {
+        this.emitTypedEvent(EventType.UI_MESSAGE, {
+          playerId: data.playerId,
+          message: `You need level ${pickaxeInfo.levelRequired} mining to use this pickaxe.`,
           type: "error",
         });
         return;
@@ -939,14 +990,14 @@ export class ResourceSystem extends SystemBase {
       if (tickNumber < session.nextAttemptTick) continue;
 
       // Proximity check before attempt
-      const p = this.world.getPlayer?.(playerId as unknown as string);
+      const p = this.world.getPlayer?.(playerId);
       const playerPos =
         p && (p as { position?: { x: number; y: number; z: number } }).position
           ? (p as { position: { x: number; y: number; z: number } }).position
           : null;
       if (!playerPos || calculateDistance(playerPos, resource.position) > 4.0) {
         this.emitTypedEvent(EventType.RESOURCE_GATHERING_STOPPED, {
-          playerId: playerId as unknown as string,
+          playerId: playerId,
           resourceId: session.resourceId,
         });
         completedSessions.push(playerId);
@@ -961,17 +1012,17 @@ export class ResourceSystem extends SystemBase {
         };
       } | null;
       if (inventorySystem?.getInventory) {
-        const inv = inventorySystem.getInventory(playerId as unknown as string);
+        const inv = inventorySystem.getInventory(playerId);
         const capacity = (inv?.capacity as number) ?? 28;
         const count = Array.isArray(inv?.items) ? inv!.items!.length : 0;
         if (count >= capacity) {
           this.emitTypedEvent(EventType.UI_MESSAGE, {
-            playerId: playerId as unknown as string,
+            playerId: playerId,
             message: "Your inventory is too full to hold any more logs.",
             type: "warning",
           });
           this.emitTypedEvent(EventType.RESOURCE_GATHERING_STOPPED, {
-            playerId: playerId as unknown as string,
+            playerId: playerId,
             resourceId: session.resourceId,
           });
           completedSessions.push(playerId);
@@ -979,10 +1030,21 @@ export class ResourceSystem extends SystemBase {
         }
       }
 
-      // Get variant tuning for this resource
+      // Get variant tuning and full manifest for this resource
       const variant =
         this.resourceVariants.get(session.resourceId) || "tree_normal";
+      const manifestData = getExternalResource(variant); // Direct manifest access
+      if (
+        !manifestData ||
+        !manifestData.harvestYield ||
+        manifestData.harvestYield.length === 0
+      ) {
+        // Should not happen if confirmed valid at start, but safety first
+        continue;
+      }
+
       const tuned = this.getVariantTuning(variant);
+      const yieldData = manifestData.harvestYield[0]; // Primary yield
 
       // Schedule next attempt (tick-based)
       session.nextAttemptTick = tickNumber + session.cycleTickInterval;
@@ -997,34 +1059,34 @@ export class ResourceSystem extends SystemBase {
       if (isSuccessful) {
         session.successes++;
 
-        // Add one log to inventory
+        // Add item to inventory
         this.emitTypedEvent(EventType.INVENTORY_ITEM_ADDED, {
-          playerId: playerId as unknown as string,
+          playerId: playerId,
           item: {
-            id: `inv_${playerId}_${Date.now()}_logs`,
-            itemId: "logs",
-            quantity: 1,
+            id: `inv_${playerId}_${Date.now()}_${yieldData.itemId}`,
+            itemId: yieldData.itemId,
+            quantity: yieldData.quantity,
             slot: -1,
             metadata: null,
           },
         });
 
-        // Award XP per log immediately
-        const xpPerLog = tuned.xpPerLog;
+        // Award XP
+        const xpAmount = yieldData.xpAmount;
         this.emitTypedEvent(EventType.SKILLS_XP_GAINED, {
-          playerId: playerId as unknown as string,
+          playerId: playerId,
           skill: resource.skillRequired,
-          amount: xpPerLog,
+          amount: xpAmount,
         });
 
         // Feedback
         this.sendChat(
-          playerId as unknown as string,
-          `You receive 1x ${"Logs"}.`,
+          playerId,
+          `You receive ${yieldData.quantity}x ${yieldData.itemName}.`,
         );
         this.emitTypedEvent(EventType.UI_MESSAGE, {
-          playerId: playerId as unknown as string,
-          message: `You get some logs. (+${xpPerLog} ${resource.skillRequired} XP)`,
+          playerId: playerId,
+          message: `You get some ${yieldData.itemName.toLowerCase()}. (+${xpAmount} ${resource.skillRequired} XP)`,
           type: "success",
         });
 
@@ -1047,10 +1109,15 @@ export class ResourceSystem extends SystemBase {
             resourceId: session.resourceId,
             position: resource.position,
           });
-          this.sendChat(
-            playerId as unknown as string,
-            "The tree is chopped down.",
-          );
+
+          const depletionMessage =
+            resource.type === "ore"
+              ? "The rock is mined away."
+              : resource.type === "tree"
+                ? "The tree is chopped down."
+                : "The resource is depleted.";
+
+          this.sendChat(playerId, depletionMessage);
           this.sendNetworkMessage("resourceDepleted", {
             resourceId: session.resourceId,
             position: resource.position,
@@ -1073,11 +1140,19 @@ export class ResourceSystem extends SystemBase {
         }
       } else {
         // Failure feedback (optional gentle info)
-        this.emitTypedEvent(EventType.UI_MESSAGE, {
-          playerId: playerId as unknown as string,
-          message: `You fail to chop the tree.`,
-          type: "info",
-        });
+        // Only show occasionally or if verbose? For now keeping it simple.
+        const failMsg =
+          resource.skillRequired === "mining"
+            ? "You fail to mine the rock."
+            : "You fail to chop the tree.";
+        if (Math.random() < 0.2) {
+          // Reduce spam
+          this.emitTypedEvent(EventType.UI_MESSAGE, {
+            playerId: playerId,
+            message: failMsg,
+            type: "info",
+          });
+        }
       }
     }
 
@@ -1085,7 +1160,7 @@ export class ResourceSystem extends SystemBase {
     for (const playerId of completedSessions) {
       this.activeGathering.delete(playerId);
       // Reset emote back to idle when gathering completes
-      this.resetGatheringEmote(playerId as unknown as string);
+      this.resetGatheringEmote(playerId);
     }
   }
 
@@ -1232,12 +1307,86 @@ export class ResourceSystem extends SystemBase {
       },
     ];
 
-    const inventorySystem = this.world.getSystem?.("inventory") as {
-      getInventory?: (playerId: string) => {
-        items?: Array<{ itemId?: string }>;
-        capacity?: number;
-      };
-    } | null;
+    const inventorySystem = this.world.getSystem?.(
+      "inventory",
+    ) as unknown as InventorySystem | null;
+    const inv = inventorySystem?.getInventory
+      ? inventorySystem.getInventory(playerId)
+      : undefined;
+    const items = (inv?.items as Array<{ itemId?: string }> | undefined) || [];
+    let best: {
+      id: string;
+      levelRequired: number;
+      cycleMultiplier: number;
+    } | null = null;
+    for (const t of tiers) {
+      const found = items.some(
+        (it) =>
+          typeof it?.itemId === "string" && t.match(it.itemId!.toLowerCase()),
+      );
+      if (found) {
+        best = {
+          id: t.id,
+          levelRequired: t.levelRequired,
+          cycleMultiplier: t.cycleMultiplier,
+        };
+        break;
+      }
+    }
+    return best;
+  }
+
+  private getBestPickaxeTier(
+    playerId: string,
+  ): { id: string; levelRequired: number; cycleMultiplier: number } | null {
+    // Known pickaxe tiers: bronze, iron, steel, mithril, adamant, rune, dragon
+    const tiers: Array<{
+      id: string;
+      levelRequired: number;
+      cycleMultiplier: number;
+      match: (id: string) => boolean;
+    }> = [
+      {
+        id: "rune_pickaxe",
+        levelRequired: 41,
+        cycleMultiplier: 0.78,
+        match: (id) => id.includes("rune") && id.includes("pickaxe"),
+      },
+      {
+        id: "adamant_pickaxe",
+        levelRequired: 31,
+        cycleMultiplier: 0.84,
+        match: (id) => id.includes("adamant") && id.includes("pickaxe"),
+      },
+      {
+        id: "mithril_pickaxe",
+        levelRequired: 21,
+        cycleMultiplier: 0.88,
+        match: (id) => id.includes("mithril") && id.includes("pickaxe"),
+      },
+      {
+        id: "steel_pickaxe",
+        levelRequired: 6,
+        cycleMultiplier: 0.92,
+        match: (id) => id.includes("steel") && id.includes("pickaxe"),
+      },
+      {
+        id: "iron_pickaxe",
+        levelRequired: 1,
+        cycleMultiplier: 0.96,
+        match: (id) => id.includes("iron") && id.includes("pickaxe"),
+      },
+      {
+        id: "bronze_pickaxe",
+        levelRequired: 1,
+        cycleMultiplier: 1.0,
+        match: (id) => id.includes("bronze") && id.includes("pickaxe"),
+      },
+    ];
+
+    const inventorySystem = this.world.getSystem?.(
+      "inventory",
+    ) as unknown as InventorySystem | null;
     const inv = inventorySystem?.getInventory
       ? inventorySystem.getInventory(playerId)
       : undefined;

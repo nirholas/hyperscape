@@ -24,6 +24,7 @@ export interface Skills {
   fishing: SkillData;
   firemaking: SkillData;
   cooking: SkillData;
+  mining: SkillData;
 }
 
 // Component data map - strongly typed, no optionals
@@ -66,6 +67,7 @@ export interface ComponentDataMap {
     fishing: number;
     firemaking: number;
     cooking: number;
+    mining: number;
   };
 }
 
@@ -114,6 +116,7 @@ export interface StatsComponent {
   fishing: SkillData;
   firemaking: SkillData;
   cooking: SkillData;
+  mining: SkillData;
   activePrayers: {
     protectFromMelee: boolean;
     protectFromRanged: boolean;
