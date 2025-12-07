@@ -6,8 +6,7 @@ import { getSystem } from "../../../utils/SystemUtils";
 import type { World } from "../../../types";
 import type { InventoryItemAddedPayload } from "../../../types/events";
 import { EventType } from "../../../types/events";
-import { getItem, ITEMS } from "../../../data/items";
-import { dataManager } from "../../../data/DataManager";
+import { getItem } from "../../../data/items";
 import type { PlayerInventory } from "../../../types/core/core";
 import type {
   InventoryCanAddEvent,
@@ -52,22 +51,16 @@ export class InventorySystem extends SystemBase {
   }
 
   async init(): Promise<void> {
-    const isServer = this.world.network?.isServer || false;
-    const isClient = this.world.network?.isClient || false;
-    if (typeof process !== "undefined" && process.env.DEBUG_RPG === "1") {
-    }
+    const _isServer = this.world.network?.isServer || false;
+    const _isClient = this.world.network?.isClient || false;
 
     // Subscribe to inventory events
     this.subscribe(
       EventType.PLAYER_REGISTERED,
       async (data: { playerId: string }) => {
-        if (process.env.DEBUG_RPG === "1") {
-        }
         // Use async method to properly load from database
         const loaded = await this.loadPersistedInventoryAsync(data.playerId);
         if (!loaded) {
-          if (process.env.DEBUG_RPG === "1") {
-          }
           this.initializeInventory({ id: data.playerId });
         }
       },
@@ -149,9 +142,6 @@ export class InventorySystem extends SystemBase {
     const db = this.getDatabase();
     if (!db) return;
 
-    let savedCount = 0;
-    let totalItems = 0;
-
     for (const playerId of this.playerInventories.keys()) {
       // Only persist inventories for real characters that exist in DB
       try {
@@ -168,8 +158,6 @@ export class InventorySystem extends SystemBase {
         }));
         db.savePlayerInventory(playerId, saveItems);
         db.savePlayer(playerId, { coins: inv.coins });
-        savedCount++;
-        totalItems += saveItems.length;
       } catch {
         // Skip on DB errors during autosave
       }
@@ -237,6 +225,7 @@ export class InventorySystem extends SystemBase {
       { itemId: "arrows", quantity: 100 },
       { itemId: "tinderbox", quantity: 1 },
       { itemId: "bronze_hatchet", quantity: 1 },
+      { itemId: "bronze_pickaxe", quantity: 1 },
       { itemId: "fishing_rod", quantity: 1 },
     ];
 
@@ -328,9 +317,6 @@ export class InventorySystem extends SystemBase {
         new Error(`Item not found: ${itemId}`),
       );
       return false;
-    }
-
-    if (process.env.DEBUG_RPG === "1") {
     }
 
     // Special handling for coins
@@ -1266,7 +1252,7 @@ export class InventorySystem extends SystemBase {
     return true;
   }
 
-  private loadPersistedInventory(playerId: string): boolean {
+  private loadPersistedInventory(_playerId: string): boolean {
     // This is now a sync wrapper that always returns false to trigger async load
     // The actual loading happens in the async init flow
     return false;
@@ -1514,7 +1500,7 @@ export class InventorySystem extends SystemBase {
     }
 
     // Pass slot to addItem for proper sync (e.g., from bank withdrawal)
-    const result = this.addItem({ playerId, itemId, quantity, slot });
+    this.addItem({ playerId, itemId, quantity, slot });
   }
 
   /**
