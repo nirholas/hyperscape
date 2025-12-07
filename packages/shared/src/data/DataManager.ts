@@ -453,6 +453,133 @@ export class DataManager {
   }
 
   /**
+   * Validate that asset model files exist on CDN
+   * Runs HEAD requests to verify modelPath URLs are accessible
+   */
+  public async validateAssetFiles(): Promise<{
+    valid: string[];
+    missing: string[];
+    errors: string[];
+  }> {
+    const valid: string[] = [];
+    const missing: string[] = [];
+    const errors: string[] = [];
+
+    // Get CDN URL
+    let cdnUrl = "http://localhost:8080";
+    if (
+      typeof process !== "undefined" &&
+      typeof process.env !== "undefined" &&
+      process.env.PUBLIC_CDN_URL
+    ) {
+      cdnUrl = process.env.PUBLIC_CDN_URL;
+    }
+
+    // Get all external resources
+    const externalResources = (
+      globalThis as { EXTERNAL_RESOURCES?: Map<string, ExternalResourceData> }
+    ).EXTERNAL_RESOURCES;
+
+    if (!externalResources || externalResources.size === 0) {
+      console.warn("[DataManager] No external resources loaded to validate");
+      return { valid, missing, errors };
+    }
+
+    console.log(
+      `[DataManager] 🔍 Validating ${externalResources.size} resource model files...`,
+    );
+
+    // Collect all unique model paths to check
+    const modelPaths = new Map<string, string>(); // path -> resourceId
+    for (const [resourceId, resource] of externalResources) {
+      if (resource.modelPath) {
+        // Convert asset:// to CDN URL
+        const httpPath = resource.modelPath.replace("asset://", `${cdnUrl}/`);
+        modelPaths.set(httpPath, resourceId);
+      }
+      if (resource.depletedModelPath) {
+        const httpPath = resource.depletedModelPath.replace(
+          "asset://",
+          `${cdnUrl}/`,
+        );
+        modelPaths.set(httpPath, `${resourceId}_depleted`);
+      }
+    }
+
+    // Also validate NPC/mob model paths
+    for (const [npcId, npc] of ALL_NPCS) {
+      if (npc.appearance?.modelPath) {
+        const httpPath = npc.appearance.modelPath.replace(
+          "asset://",
+          `${cdnUrl}/`,
+        );
+        modelPaths.set(httpPath, `npc_${npcId}`);
+      }
+    }
+
+    // Validate each path with HEAD request
+    const results = await Promise.allSettled(
+      Array.from(modelPaths.entries()).map(async ([url, resourceId]) => {
+        try {
+          const response = await fetch(url, { method: "HEAD" });
+          if (response.ok) {
+            return { status: "valid", url, resourceId };
+          } else {
+            return {
+              status: "missing",
+              url,
+              resourceId,
+              code: response.status,
+            };
+          }
+        } catch (err) {
+          return {
+            status: "error",
+            url,
+            resourceId,
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
+      }),
+    );
+
+    // Process results
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        const data = result.value;
+        if (data.status === "valid") {
+          valid.push(`✅ ${data.resourceId}: ${data.url}`);
+        } else if (data.status === "missing") {
+          missing.push(
+            `❌ ${data.resourceId}: ${data.url} (HTTP ${(data as { code: number }).code})`,
+          );
+        } else {
+          errors.push(
+            `⚠️ ${data.resourceId}: ${data.url} - ${(data as { error: string }).error}`,
+          );
+        }
+      } else {
+        errors.push(`⚠️ Promise rejected: ${result.reason}`);
+      }
+    }
+
+    // Log summary
+    console.log(
+      `[DataManager] Asset validation complete: ${valid.length} valid, ${missing.length} missing, ${errors.length} errors`,
+    );
+    if (missing.length > 0) {
+      console.error("[DataManager] ❌ Missing asset files:");
+      missing.forEach((m) => console.error(`  ${m}`));
+    }
+    if (errors.length > 0) {
+      console.warn("[DataManager] ⚠️ Asset validation errors:");
+      errors.forEach((e) => console.warn(`  ${e}`));
+    }
+
+    return { valid, missing, errors };
+  }
+
+  /**
    * Get validation result
    */
   public getValidationResult(): DataValidationResult | null {

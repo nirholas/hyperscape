@@ -791,7 +791,11 @@ export class ClientNetwork extends SystemBase {
     this.world.chat.clear();
   };
 
-  onSystemMessage = (data: { message: string; type: string }) => {
+  onSystemMessage = (data: {
+    message: string;
+    type: string;
+    position?: { x: number; y: number; z: number };
+  }) => {
     // Add system message to chat (from UI_MESSAGE events)
     // These are server-generated messages like equipment requirements, combat info, etc.
     const chatMessage: ChatMessage = {
@@ -803,6 +807,16 @@ export class ClientNetwork extends SystemBase {
       createdAt: new Date().toISOString(),
     };
     this.world.chat.add(chatMessage, false);
+
+    // Also emit UI_TOAST for error/info messages so they appear as floating text
+    // If position is provided, CoreUI will project it to screen coordinates
+    if (data.type === "error" || data.type === "info") {
+      this.world.emit(EventType.UI_TOAST, {
+        message: data.message,
+        type: data.type,
+        position: data.position as unknown as { x: number; y: number },
+      });
+    }
   };
 
   onEntityAdded = (data: EntityData) => {
@@ -1806,7 +1820,13 @@ export class ClientNetwork extends SystemBase {
       this.world.emit(EventType.PLAYER_SET_DEAD, {
         playerId: data.playerId,
         isDead: data.isDead,
-        deathPosition: data.deathPosition,
+        deathPosition: data.deathPosition
+          ? {
+              x: data.deathPosition[0],
+              y: data.deathPosition[1],
+              z: data.deathPosition[2],
+            }
+          : undefined,
       });
     }
   };

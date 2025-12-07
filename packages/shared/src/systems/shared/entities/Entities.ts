@@ -620,8 +620,10 @@ export class Entities extends SystemBase implements IEntities {
             : (data as { resourceType?: string }).resourceType ===
                 "fishing_spot"
               ? ResourceType.FISHING_SPOT
-              : (data as { resourceType?: string }).resourceType ===
-                  "mining_rock"
+              : (data as { resourceType?: string }).resourceType === "ore" ||
+                  (data as { resourceType?: string }).resourceType === "rock" ||
+                  (data as { resourceType?: string }).resourceType ===
+                    "mining_rock"
                 ? ResourceType.MINING_ROCK
                 : ResourceType.TREE,
         resourceId:

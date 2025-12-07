@@ -1,29 +1,9 @@
-/**
- * World Module - Game world initialization and entity loading
- *
- * Handles creation of the Hyperscape ECS world, system registration,
- * world configuration, and entity loading from world.json.
- *
- * Responsibilities:
- * - Create server world instance
- * - Register server-specific systems (DatabaseSystem, ServerNetwork, etc.)
- * - Attach database connections to world
- * - Configure world settings (environment model, assets URL)
- * - Initialize world and start systems
- * - Load entities from world.json
- *
- * Usage:
- * ```typescript
- * const world = await initializeWorld(config, dbContext);
- * // World is now ready with all systems running and entities loaded
- * ```
- */
-
 import fs from "fs-extra";
 import path from "path";
 import {
   createServerWorld,
   installThreeJSExtensions,
+  DataManager,
 } from "@hyperscape/shared";
 import { NodeStorage as Storage } from "@hyperscape/shared";
 import type { World, SystemDatabase } from "@hyperscape/shared";
@@ -116,6 +96,20 @@ export async function initializeWorld(
   }
 
   console.log("[World] ✅ World initialized");
+
+  // Validate asset files exist on CDN
+  console.log("[World] Validating asset files...");
+  const dataManager = DataManager.getInstance();
+  const assetValidation = await dataManager.validateAssetFiles();
+  if (assetValidation.missing.length > 0) {
+    console.warn(
+      `[World] ⚠️ ${assetValidation.missing.length} asset files missing on CDN`,
+    );
+  } else {
+    console.log(
+      `[World] ✅ All ${assetValidation.valid.length} asset files validated`,
+    );
+  }
 
   // Load entities from world.json
   await loadWorldEntities(world, config);

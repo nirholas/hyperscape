@@ -369,7 +369,19 @@ export function Minimap({
               type = "item";
               break;
             case "resource":
-              color = "#22cc55"; // Green for resources (trees, rocks, etc)
+              // Differentiate ore (brown) from trees (green)
+              const resourceEntity = entity as unknown as {
+                resourceType?: string;
+                config?: { resourceType?: string };
+              };
+              const resourceType =
+                resourceEntity.resourceType ||
+                resourceEntity.config?.resourceType;
+              if (resourceType === "ore") {
+                color = "#8B4513"; // Brown for ore/rocks
+              } else {
+                color = "#22cc55"; // Green for trees and other resources
+              }
               type = "resource";
               break;
             default:
@@ -842,7 +854,7 @@ export function Minimap({
         ref={overlayCanvasRef}
         width={width}
         height={height}
-        className="absolute inset-0 block w-full h-full pointer-events-auto cursor-crosshair z-[1] rounded-full overflow-hidden"
+        className="absolute inset-0 block w-full h-full pointer-events-auto cursor-crosshair z-1 rounded-full overflow-hidden"
         onClick={onOverlayClick}
         onMouseDown={(e) => {
           e.preventDefault();

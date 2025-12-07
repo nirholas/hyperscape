@@ -152,7 +152,9 @@ class ErrorReportingService {
   public async reportError(errorData: ErrorReport) {
     // Construct URL - use PUBLIC_API_URL if set, otherwise default to localhost:5555 in dev
     const baseUrl = import.meta.env.PUBLIC_API_URL || "http://localhost:5555";
-    const endpoint = `${baseUrl}/api${this.endpoint}`;
+    // Avoid double /api if baseUrl already includes it
+    const apiPath = baseUrl.endsWith("/api") ? "" : "/api";
+    const endpoint = `${baseUrl}${apiPath}${this.endpoint}`;
 
     const response = await fetch(endpoint, {
       method: "POST",

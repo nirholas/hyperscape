@@ -58,8 +58,26 @@ export const ALL_WORLD_AREAS: Record<string, WorldArea> = {
       },
     ],
     resources: [
-      // Resources are now defined in world-areas.json manifest only
-      // Do not add hardcoded resources here
+      // Copper ore near spawn
+      {
+        type: "ore",
+        subType: "copper",
+        position: { x: 8, y: 15, z: -5 },
+        resourceId: "ore_copper",
+      },
+      // Tin ore near spawn
+      {
+        type: "ore",
+        subType: "tin",
+        position: { x: -2, y: 15, z: -5 },
+        resourceId: "ore_tin",
+      },
+      // Tree near spawn
+      {
+        type: "tree",
+        position: { x: 12, y: 15, z: 0 },
+        resourceId: "tree_normal",
+      },
     ],
     mobSpawns: [
       // Starter area is a safe zone - no mob spawns

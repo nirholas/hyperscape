@@ -124,11 +124,12 @@ export interface BiomeData {
  * Biome resource - resource spawn location in a biome
  */
 export interface BiomeResource {
-  type: "tree" | "fishing_spot" | "mine" | "herb_patch";
+  type: "tree" | "fishing_spot" | "mine" | "herb_patch" | "ore";
+  subType?: string; // For ore: "copper", "tin", etc.
   position: WorldPosition;
   resourceId: string;
-  respawnTime: number;
-  level: number; // Required level to harvest
+  respawnTime?: number; // Optional - loaded from resources.json
+  level?: number; // Optional - loaded from resources.json
 }
 
 // ============== NPC AND MOB LOCATIONS ==============
