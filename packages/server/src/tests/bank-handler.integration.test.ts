@@ -299,12 +299,17 @@ describe("Bank Handler Integration - Input Validation", () => {
     const maxSlots = INPUT_LIMITS.MAX_INVENTORY_SLOTS;
 
     // Valid slots
+    // eslint-disable-next-line no-constant-binary-expression
     expect(0 >= 0 && 0 < maxSlots).toBe(true);
+    // eslint-disable-next-line no-constant-binary-expression
     expect(27 >= 0 && 27 < maxSlots).toBe(true);
 
     // Invalid slots
+    // eslint-disable-next-line no-constant-binary-expression
     expect(-1 >= 0 && -1 < maxSlots).toBe(false);
+    // eslint-disable-next-line no-constant-binary-expression
     expect(28 >= 0 && 28 < maxSlots).toBe(false);
+    // eslint-disable-next-line no-constant-binary-expression
     expect(100 >= 0 && 100 < maxSlots).toBe(false);
   });
 });

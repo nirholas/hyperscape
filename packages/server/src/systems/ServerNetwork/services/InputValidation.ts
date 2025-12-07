@@ -9,7 +9,7 @@
 
 import { INPUT_LIMITS } from "@hyperscape/shared";
 
-const CONTROL_CHAR_REGEX = /[\x00-\x1f]/;
+const CONTROL_CHAR_REGEX = /[\x00-\x1f]/; // eslint-disable-line no-control-regex
 
 /**
  * Validate itemId - must be non-empty string within length limits
