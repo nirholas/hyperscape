@@ -296,7 +296,7 @@ export class ResourceEntity extends InteractableEntity {
       }
     }
 
-    // CRITICAL: Enforce uniform node scale to prevent stretching
+    // Enforce uniform node scale to prevent stretching
     // Some network updates might try to apply non-uniform scale
     if (
       this.node &&
@@ -324,11 +324,11 @@ export class ResourceEntity extends InteractableEntity {
         this.mesh = scene;
         this.mesh.name = `Resource_${this.config.resourceType}`;
 
-        // CRITICAL: Force node scale to be uniform (prevent stretching)
+        // Force node scale to be uniform (prevent stretching)
         // Some systems might try to apply non-uniform scale - prevent this
         this.node.scale.set(1, 1, 1);
 
-        // CRITICAL: Scale and orient based on resource type
+        // Scale and orient based on resource type
         // Different Meshy models have different base scales and orientations
         // ALWAYS use uniform scaling to preserve model proportions
         let modelScale = 1.0;

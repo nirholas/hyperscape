@@ -38,6 +38,7 @@ import { BIOMES } from "../../../data/world-structure";
 import { GrassSystem } from "..";
 import { WaterSystem } from "..";
 import type { DatabaseSystem } from "../../../types/systems/system-interfaces";
+import { Logger } from "../../../utils/Logger";
 
 interface BiomeCenter {
   x: number;
@@ -85,6 +86,8 @@ export class TerrainSystem extends System {
   private _tempVec2 = new THREE.Vector2();
   private _tempVec2_2 = new THREE.Vector2();
   private _tempBox3 = new THREE.Box3();
+  // Reusable array for water meshes to avoid array spreading allocations
+  private readonly _reusableWaterMeshes: THREE.Mesh[] = [];
   private grassSystem?: GrassSystem;
   private waterSystem?: WaterSystem;
   private textureAtlasManager!: TextureAtlasManager;
@@ -345,10 +348,10 @@ export class TerrainSystem extends System {
 
     // Initialize texture atlas manager on client
     if (this.world.isClient) {
-      console.log("[TerrainSystem] Initializing texture atlas on client...");
+      Logger.system("TerrainSystem", "Initializing texture atlas on client...");
       this.textureAtlasManager = new TextureAtlasManager();
       await this.textureAtlasManager.init();
-      console.log("[TerrainSystem] Texture atlas initialized");
+      Logger.system("TerrainSystem", "Texture atlas initialized");
 
       const cdnUrl =
         typeof window !== "undefined"
@@ -367,7 +370,7 @@ export class TerrainSystem extends System {
         noiseTexture,
         this.textureAtlasManager.getMaterialScales(),
       );
-      console.log("[TerrainSystem] Triplanar material created successfully");
+      Logger.system("TerrainSystem", "Triplanar material created successfully");
     }
 
     // Initialize grass and water systems
@@ -416,12 +419,16 @@ export class TerrainSystem extends System {
       this.setupServerTerrain();
     } else {
       // Should never happen since isClient defaults to true if network not set
-      console.error(
-        "[TerrainSystem] Neither client nor server detected - this should not happen!",
+      Logger.systemError(
+        "TerrainSystem",
+        "Neither client nor server detected - this should not happen!",
+        new Error("Invalid world configuration"),
+        {
+          hasNetwork: !!this.world.network,
+          isClient: this.world.isClient,
+          isServer: this.world.isServer,
+        },
       );
-      console.error("[TerrainSystem] world.network:", this.world.network);
-      console.error("[TerrainSystem] world.isClient:", this.world.isClient);
-      console.error("[TerrainSystem] world.isServer:", this.world.isServer);
       // Default to client mode to avoid blocking
       await this.setupClientTerrain();
     }
@@ -502,8 +509,9 @@ export class TerrainSystem extends System {
           toNodes: () => Map<string, THREE.Object3D>;
         };
         if (!loadedModel || !loadedModel.toNodes) {
-          console.warn(
-            `[TerrainSystem] Loaded model from ${path} doesn't have toNodes method`,
+          Logger.systemWarn(
+            "TerrainSystem",
+            `Loaded model from ${path} doesn't have toNodes method`,
           );
           return null;
         }
@@ -512,13 +520,22 @@ export class TerrainSystem extends System {
         const rootNode = nodeMap.get("root");
 
         if (!rootNode || !(rootNode instanceof THREE.Object3D)) {
-          console.warn(`[TerrainSystem] No valid root node found in ${path}`);
+          Logger.systemWarn(
+            "TerrainSystem",
+            `No valid root node found in ${path}`,
+          );
           return null;
         }
 
         return rootNode;
       } catch (e) {
-        console.warn(`[TerrainSystem] Failed to load model from ${path}:`, e);
+        Logger.systemWarn(
+          "TerrainSystem",
+          `Failed to load model from ${path}`,
+          e instanceof Error
+            ? { error: e.message, stack: e.stack }
+            : { error: String(e) },
+        );
         return null;
       }
     };
@@ -537,7 +554,10 @@ export class TerrainSystem extends System {
             extracted.material,
             2000,
           );
-          console.log("[TerrainSystem] Registered jungle tree mesh from GLB");
+          Logger.system(
+            "TerrainSystem",
+            "Registered jungle tree mesh from GLB",
+          );
         } else {
           throw new Error("No mesh found in tree model");
         }
@@ -545,9 +565,12 @@ export class TerrainSystem extends System {
         throw new Error("Failed to load tree model nodes");
       }
     } catch (e) {
-      console.warn(
-        "[TerrainSystem] Failed to load tree model, using placeholder:",
-        e,
+      Logger.systemWarn(
+        "TerrainSystem",
+        "Failed to load tree model, using placeholder",
+        e instanceof Error
+          ? { error: e.message, stack: e.stack }
+          : { error: String(e) },
       );
       const treeGeometry = new THREE.BoxGeometry(1.2, 3.0, 1.2);
       const treeMaterial = new THREE.MeshStandardMaterial({ color: 0x2f7d32 });
@@ -585,7 +608,7 @@ export class TerrainSystem extends System {
             extracted.material,
             200,
           );
-          console.log("[TerrainSystem] Registered big rock mesh from GLB");
+          Logger.system("TerrainSystem", "Registered big rock mesh from GLB");
         } else {
           throw new Error("No mesh found in rock model");
         }
@@ -593,9 +616,12 @@ export class TerrainSystem extends System {
         throw new Error("Failed to load rock model nodes");
       }
     } catch (e) {
-      console.warn(
-        "[TerrainSystem] Failed to load rock model, using placeholder:",
-        e,
+      Logger.systemWarn(
+        "TerrainSystem",
+        "Failed to load rock model, using placeholder",
+        e instanceof Error
+          ? { error: e.message, stack: e.stack }
+          : { error: String(e) },
       );
       const rockGeometry = new THREE.BoxGeometry(1.0, 1.0, 1.0);
       const rockMaterial = new THREE.MeshLambertMaterial({ color: 0x8a8a8a });
@@ -633,7 +659,7 @@ export class TerrainSystem extends System {
             extracted.material,
             800,
           );
-          console.log("[TerrainSystem] Registered herb mesh from GLB");
+          Logger.system("TerrainSystem", "Registered herb mesh from GLB");
         } else {
           throw new Error("No mesh found in bush model");
         }
@@ -641,9 +667,12 @@ export class TerrainSystem extends System {
         throw new Error("Failed to load bush model nodes");
       }
     } catch (e) {
-      console.warn(
-        "[TerrainSystem] Failed to load bush model, using placeholder:",
-        e,
+      Logger.systemWarn(
+        "TerrainSystem",
+        "Failed to load bush model, using placeholder",
+        e instanceof Error
+          ? { error: e.message, stack: e.stack }
+          : { error: String(e) },
       );
       const herbGeometry = new THREE.BoxGeometry(0.6, 0.8, 0.6);
       const herbMaterial = new THREE.MeshLambertMaterial({ color: 0x66bb6a });
@@ -669,7 +698,7 @@ export class TerrainSystem extends System {
             extracted.material,
             1000,
           );
-          console.log("[TerrainSystem] Registered stone mesh from GLB");
+          Logger.system("TerrainSystem", "Registered stone mesh from GLB");
         } else {
           throw new Error("No mesh found in stone model");
         }
@@ -677,9 +706,12 @@ export class TerrainSystem extends System {
         throw new Error("Failed to load stone model nodes");
       }
     } catch (e) {
-      console.warn(
-        "[TerrainSystem] Failed to load stone model, using placeholder:",
-        e,
+      Logger.systemWarn(
+        "TerrainSystem",
+        "Failed to load stone model, using placeholder",
+        e instanceof Error
+          ? { error: e.message, stack: e.stack }
+          : { error: String(e) },
       );
       const stoneGeometry = new THREE.BoxGeometry(0.5, 0.5, 0.5);
       const stoneMaterial = new THREE.MeshLambertMaterial({ color: 0x999999 });
@@ -772,8 +804,9 @@ export class TerrainSystem extends System {
     );
 
     if (existingAtPosition) {
-      console.log(
-        `[TerrainSystem] Tile already exists at ${tileX},${tileZ} with key ${existingAtPosition.key}, skipping new tile ${key}`,
+      Logger.system(
+        "TerrainSystem",
+        `Tile already exists at ${tileX},${tileZ} with key ${existingAtPosition.key}, skipping new tile ${key}`,
       );
       return existingAtPosition;
     }
@@ -798,13 +831,14 @@ export class TerrainSystem extends System {
       );
     } else {
       // Fallback - use visible green material for debugging
-      console.warn(
-        "[TerrainSystem] Using fallback material - textures not loaded. isClient:",
-        this.world.isClient,
-        "hasAtlas:",
-        !!this.textureAtlasManager,
-        "hasMaterial:",
-        !!this.terrainMaterial,
+      Logger.systemWarn(
+        "TerrainSystem",
+        "Using fallback material - textures not loaded",
+        {
+          isClient: this.world.isClient,
+          hasAtlas: !!this.textureAtlasManager,
+          hasMaterial: !!this.terrainMaterial,
+        },
       );
       material = new THREE.MeshStandardMaterial({
         color: 0x228b22,
@@ -974,17 +1008,21 @@ export class TerrainSystem extends System {
       );
 
       if (existingAtPosition) {
-        console.warn("[TerrainSystem] Duplicate tile detected!", {
+        Logger.systemWarn("TerrainSystem", "Duplicate tile detected", {
           newKey: key,
           existingKey: existingAtPosition.key,
-          position: mesh.position,
+          position: {
+            x: mesh.position.x,
+            y: mesh.position.y,
+            z: mesh.position.z,
+          },
         });
         // Don't add duplicate
         return tile;
       }
 
       this.terrainContainer.add(mesh);
-      console.log("[TerrainSystem] Added terrain mesh to scene:", {
+      Logger.system("TerrainSystem", "Added terrain mesh to scene", {
         key,
         position: mesh.position,
         totalTilesInScene: this.terrainContainer.children.length,
@@ -1057,8 +1095,9 @@ export class TerrainSystem extends System {
         // Force immediate visibility update for this tile's resources
         if (tile.resources.length > 0) {
           this.instancedMeshManager.updateAllInstanceVisibility(true);
-          console.log(
-            `[TerrainSystem] Forced visibility update after adding ${tile.resources.length} resources`,
+          Logger.system(
+            "TerrainSystem",
+            `Forced visibility update after adding ${tile.resources.length} resources`,
           );
         }
       }
@@ -1211,13 +1250,13 @@ export class TerrainSystem extends System {
     // 2. Determine biome influences
     const _temp = this.noise.temperatureNoise(worldX, worldZ);
     const _humidity = this.noise.humidityNoise(worldX, worldZ);
-    // TODO: Implement getBiomeFromTempHumidity
+    // Note: Using getBiomeAtWorldPosition - biome selection can be enhanced with temperature/humidity if needed
     const biome = this.getBiomeAtWorldPosition(worldX, worldZ);
 
     // 3. Calculate liquid
     const oceanValue = this.noise.oceanNoise(worldX, worldZ);
     const riverValue = this.noise.riverNoise(worldX, worldZ, oceanValue);
-    // TODO: Implement determineLiquidType and calculateLiquidHeight
+    // Note: Liquid type determination simplified - can be enhanced with multiple liquid types if needed
     const liquidType =
       height < this.CONFIG.WATER_THRESHOLD
         ? oceanValue > 0.5
@@ -1676,9 +1715,13 @@ export class TerrainSystem extends System {
 
     // Fallback biome data if JSON not loaded
     if (!biomeData) {
-      console.warn(
-        `[TerrainSystem] BIOMES[${tile.biome}] not found - using fallback. Available biomes:`,
-        Object.keys(BIOMES),
+      Logger.systemWarn(
+        "TerrainSystem",
+        `BIOMES[${tile.biome}] not found - using fallback`,
+        {
+          biome: tile.biome,
+          availableBiomes: Object.keys(BIOMES),
+        },
       );
       biomeData = {
         id: tile.biome,
@@ -1710,19 +1753,24 @@ export class TerrainSystem extends System {
     }
 
     if (!heightfields) {
-      console.warn(`[TerrainSystem] No heightfields for tile ${tile.key}`);
+      Logger.systemWarn(
+        "TerrainSystem",
+        `No heightfields for tile ${tile.key}`,
+      );
       return;
     }
 
-    console.log(
-      `[TerrainSystem] Generating resources for tile ${tile.key}, biome: ${tile.biome}, resources: [${biomeData.resources.join(", ")}]`,
+    Logger.system(
+      "TerrainSystem",
+      `Generating resources for tile ${tile.key}, biome: ${tile.biome}, resources: [${biomeData.resources.join(", ")}]`,
     );
     this.generateTreesForTile(tile, biomeData, heightfields);
     this.generateRocksForTile(tile, biomeData, heightfields);
     this.generateOtherResourcesForTile(tile, biomeData);
     this.generateGrassForTile(tile, biomeData);
-    console.log(
-      `[TerrainSystem] Generated ${tile.resources.length} resources for tile ${tile.key}`,
+    Logger.system(
+      "TerrainSystem",
+      `Generated ${tile.resources.length} resources for tile ${tile.key}`,
     );
   }
 
@@ -2254,13 +2302,17 @@ export class TerrainSystem extends System {
 
       // Update water system
       if (this.waterSystem) {
-        const allWaterMeshes: THREE.Mesh[] = [];
+        // Optimize: reuse array and push elements directly instead of spreading
+        this._reusableWaterMeshes.length = 0;
         for (const tile of this.terrainTiles.values()) {
           if (tile.waterMeshes) {
-            allWaterMeshes.push(...tile.waterMeshes);
+            const waterMeshes = tile.waterMeshes;
+            for (let i = 0; i < waterMeshes.length; i++) {
+              this._reusableWaterMeshes.push(waterMeshes[i]);
+            }
           }
         }
-        this.waterSystem.update(dt, allWaterMeshes);
+        this.waterSystem.update(dt, this._reusableWaterMeshes);
       }
     }
   }
@@ -2417,7 +2469,10 @@ export class TerrainSystem extends System {
 
     // Guard against missing biome data
     if (!biomeData) {
-      console.warn(`[TerrainSystem] Biome data not found for biome: ${biome}`);
+      Logger.systemWarn(
+        "TerrainSystem",
+        `Biome data not found for biome: ${biome}`,
+      );
       return { walkable: true }; // Default to walkable if biome data missing
     }
 
@@ -2947,7 +3002,7 @@ export class TerrainSystem extends System {
     // Return currently loaded terrain tiles as "active chunks"
     const activeChunks: Array<{ x: number; z: number }> = [];
     for (const [key, _tile] of this.terrainTiles.entries()) {
-      // FIX: Use '_' separator, not ','
+      // Use '_' separator, not ','
       const [x, z] = key.split("_").map(Number);
       activeChunks.push({ x, z });
     }
