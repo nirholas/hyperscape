@@ -63,16 +63,134 @@ export class WaterSystem {
   }
 
   /**
-   * Generate water mesh for a tile
+   * Generate water mesh for a tile - only covers underwater areas
+   * Water geometry is shaped to match actual underwater terrain, not a full rectangle
+   *
+   * @param tile - The terrain tile
+   * @param waterThreshold - Height below which is considered underwater
+   * @param tileSize - Size of the tile in world units
+   * @param getHeightAt - Function to get terrain height at world coordinates
    */
   generateWaterMesh(
     tile: TerrainTile,
     waterThreshold: number,
     tileSize: number,
-  ): THREE.Mesh {
-    const waterGeometry = new THREE.PlaneGeometry(tileSize, tileSize);
-    waterGeometry.rotateX(-Math.PI / 2);
+    getHeightAt?: (worldX: number, worldZ: number) => number,
+  ): THREE.Mesh | null {
+    // If no height function provided, fall back to full plane (legacy behavior)
+    if (!getHeightAt) {
+      const waterGeometry = new THREE.PlaneGeometry(tileSize, tileSize);
+      waterGeometry.rotateX(-Math.PI / 2);
+      return this.createWaterMeshWithMaterial(
+        waterGeometry,
+        tile,
+        waterThreshold,
+      );
+    }
 
+    // Create shaped water geometry that only covers underwater areas
+    const resolution = 32; // Grid resolution for water mesh
+    const cellSize = tileSize / resolution;
+    const tileOriginX = tile.x * tileSize;
+    const tileOriginZ = tile.z * tileSize;
+
+    // Sample terrain heights across the tile
+    const heightGrid: number[][] = [];
+    for (let i = 0; i <= resolution; i++) {
+      heightGrid[i] = [];
+      for (let j = 0; j <= resolution; j++) {
+        const localX = (i / resolution - 0.5) * tileSize;
+        const localZ = (j / resolution - 0.5) * tileSize;
+        const worldX = tileOriginX + localX;
+        const worldZ = tileOriginZ + localZ;
+        heightGrid[i][j] = getHeightAt(worldX, worldZ);
+      }
+    }
+
+    // Build geometry - only include quads where at least one corner is underwater
+    // This provides natural "wiggle room" at shorelines
+    const vertices: number[] = [];
+    const uvs: number[] = [];
+    const indices: number[] = [];
+    const vertexMap = new Map<string, number>();
+    let vertexIndex = 0;
+
+    for (let i = 0; i < resolution; i++) {
+      for (let j = 0; j < resolution; j++) {
+        // Check all 4 corners of this quad
+        const h00 = heightGrid[i][j];
+        const h10 = heightGrid[i + 1][j];
+        const h01 = heightGrid[i][j + 1];
+        const h11 = heightGrid[i + 1][j + 1];
+
+        // Include this quad if ANY corner is underwater (provides shoreline wiggle room)
+        const anyUnderwater =
+          h00 < waterThreshold ||
+          h10 < waterThreshold ||
+          h01 < waterThreshold ||
+          h11 < waterThreshold;
+
+        if (!anyUnderwater) continue;
+
+        // Add vertices for this quad's corners (if not already added)
+        const corners = [
+          [i, j],
+          [i + 1, j],
+          [i, j + 1],
+          [i + 1, j + 1],
+        ];
+        const quadIndices: number[] = [];
+
+        for (const [ci, cj] of corners) {
+          const key = `${ci},${cj}`;
+          if (!vertexMap.has(key)) {
+            const localX = (ci / resolution - 0.5) * tileSize;
+            const localZ = (cj / resolution - 0.5) * tileSize;
+
+            // Water surface is flat at waterThreshold height
+            vertices.push(localX, 0, localZ); // Y will be set by mesh position
+            uvs.push(ci / resolution, cj / resolution);
+            vertexMap.set(key, vertexIndex++);
+          }
+          quadIndices.push(vertexMap.get(key)!);
+        }
+
+        // Add two triangles for this quad (0,1,2) and (1,3,2)
+        indices.push(quadIndices[0], quadIndices[2], quadIndices[1]);
+        indices.push(quadIndices[1], quadIndices[2], quadIndices[3]);
+      }
+    }
+
+    // No underwater areas found
+    if (vertices.length === 0) {
+      return null;
+    }
+
+    // Create buffer geometry
+    const waterGeometry = new THREE.BufferGeometry();
+    waterGeometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(vertices, 3),
+    );
+    waterGeometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    waterGeometry.setIndex(indices);
+    waterGeometry.computeVertexNormals();
+
+    return this.createWaterMeshWithMaterial(
+      waterGeometry,
+      tile,
+      waterThreshold,
+    );
+  }
+
+  /**
+   * Create the water mesh with material (shared by both geometry approaches)
+   */
+  private createWaterMeshWithMaterial(
+    waterGeometry: THREE.BufferGeometry,
+    tile: TerrainTile,
+    waterThreshold: number,
+  ): THREE.Mesh {
     // Upgraded water material with fresnel tint and animated ripples
     const waterMaterial = new THREE.MeshStandardMaterial({
       color: 0x1e6ba8,

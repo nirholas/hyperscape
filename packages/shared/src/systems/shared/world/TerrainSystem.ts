@@ -26,7 +26,11 @@ import { TerrainLODManager } from "../../TerrainLODManager";
  */
 
 import type { BiomeData } from "../../../types/core/core";
-import type { Heightfield, ResourceNode, TerrainTile } from "../../../types/world/terrain";
+import type {
+  Heightfield,
+  ResourceNode,
+  TerrainTile,
+} from "../../../types/world/terrain";
 import { PhysicsHandle } from "../../../types/systems/physics";
 import { getPhysX } from "../../../physics/PhysXManager";
 import { Layers } from "../../../physics/Layers";
@@ -296,13 +300,14 @@ export class TerrainSystem extends System {
   }
 
   // World Configuration - Your Specifications
+  // OSRS-STYLE: Gentle rolling terrain, not dramatic peaks
   private readonly CONFIG = {
     // Core World Specs
     TILE_SIZE: 100, // 100m x 100m tiles
     WORLD_SIZE: 100, // 100x100 grid = 10km x 10km world
     TILE_RESOLUTION: 64, // 64x64 vertices per tile for smooth terrain
-    MAX_HEIGHT: 80, // 80m max height variation
-    WATER_THRESHOLD: 14.4, // Water appears below 14.4m (0.18 * MAX_HEIGHT)
+    MAX_HEIGHT: 30, // 30m max height variation (OSRS-style: gentle, not dramatic)
+    WATER_THRESHOLD: 5.4, // Water appears below 5.4m (0.18 * MAX_HEIGHT)
 
     // Chunking - Only adjacent tiles
     VIEW_DISTANCE: 1, // Load only 1 tile in each direction (3x3 = 9 tiles)
@@ -1091,7 +1096,7 @@ export class TerrainSystem extends System {
         return {
           id: r.id,
           type: r.type,
-          subType: r.type === "tree" ? "normal_tree" : r.type,
+          subType: r.type === "tree" ? "normal" : r.type,
           position: worldPos,
         };
       });
@@ -1112,7 +1117,7 @@ export class TerrainSystem extends System {
         return {
           id: r.id,
           type: r.type,
-          subType: r.type === "tree" ? "normal_tree" : r.type,
+          subType: r.type === "tree" ? "normal" : r.type,
           position: worldPos,
         };
       });
@@ -1436,32 +1441,32 @@ export class TerrainSystem extends System {
       2.5,
     );
 
-    // Combine layers with carefully tuned weights
+    // Combine layers with OSRS-style tuning (gentle, not dramatic)
     let height = 0;
 
     // Base continental elevation (40% weight)
     height += continentNoise * 0.4;
 
-    // Add mountain ridges with squared effect for sharper peaks (30% weight)
-    const ridgeContribution = ridgeNoise * Math.abs(ridgeNoise);
-    height += ridgeContribution * 0.3;
+    // Add mountain ridges - LINEAR, not squared (10% weight)
+    // OSRS-style: gentle ridges, not sharp peaks
+    height += ridgeNoise * 0.1;
 
-    // Add rolling hills (20% weight)
-    height += hillNoise * 0.2;
+    // Add rolling hills (12% weight) - reduced for flatter terrain
+    height += hillNoise * 0.12;
 
-    // Apply erosion to create valleys (10% weight, subtractive)
-    height += erosionNoise * 0.1;
+    // Apply erosion to create valleys (8% weight, subtractive)
+    height += erosionNoise * 0.08;
 
-    // Add fine detail (5% weight)
-    height += detailNoise * 0.05;
+    // Add fine detail (3% weight) - subtle texture
+    height += detailNoise * 0.03;
 
     // Normalize to [0, 1] range
     height = (height + 1) * 0.5;
     height = Math.max(0, Math.min(1, height));
 
-    // Apply power curve to create more dramatic elevation changes
-    // Lower values = more valleys, higher values = more peaks
-    height = Math.pow(height, 1.4);
+    // Apply gentle power curve (OSRS-style: mostly flat with gentle variation)
+    // 1.1 instead of 1.4 = much less dramatic peaks
+    height = Math.pow(height, 1.1);
 
     // Create ocean depressions
     const oceanScale = 0.0015;
@@ -1476,8 +1481,8 @@ export class TerrainSystem extends System {
       height *= Math.max(0.1, 1 - oceanDepth);
     }
 
-    // Scale to actual world height
-    const MAX_HEIGHT = 80; // Maximum terrain height in meters
+    // Scale to actual world height (OSRS-style: gentle terrain)
+    const MAX_HEIGHT = 30; // Maximum terrain height in meters
     const finalHeight = height * MAX_HEIGHT;
 
     return finalHeight;
@@ -1547,7 +1552,7 @@ export class TerrainSystem extends System {
   ): Array<{ type: string; weight: number }> {
     // Get height for biome weighting
     const height = this.getHeightAt(worldX, worldZ);
-    const normalizedHeight = height / 80;
+    const normalizedHeight = height / 30; // Max height is 30 (OSRS-style)
 
     const biomeInfluences: Array<{ type: string; weight: number }> = [];
 
@@ -2545,18 +2550,23 @@ export class TerrainSystem extends System {
 
   /**
    * Generate water meshes for low areas
-   * Simple v1: Just a flat plane at the fixed water threshold height
+   * Water geometry is shaped to only cover actual underwater terrain
    */
   private generateWaterMeshes(tile: TerrainTile): void {
     if (!this.waterSystem) return;
 
+    // Pass height function so water mesh can be shaped to underwater areas only
+    // Water will only be created where terrain is below WATER_THRESHOLD
+    // Geometry is shaped to match shorelines (not a full rectangle)
     const waterMesh = this.waterSystem.generateWaterMesh(
       tile,
       this.CONFIG.WATER_THRESHOLD,
       this.CONFIG.TILE_SIZE,
+      (worldX: number, worldZ: number) => this.getHeightAt(worldX, worldZ),
     );
 
-    if (tile.mesh) {
+    // waterMesh is null if no underwater areas exist
+    if (waterMesh && tile.mesh) {
       tile.mesh.add(waterMesh);
       tile.waterMeshes.push(waterMesh);
     }
@@ -2564,11 +2574,11 @@ export class TerrainSystem extends System {
 
   /**
    * Generate visual lake meshes for water bodies
-   * Note: generateWaterMeshes already handles the global water plane,
-   * so this is now a no-op. Keeping for future enhancements.
+   * Note: generateWaterMeshes now only creates water where terrain is underwater,
+   * so this is a no-op. Keeping for future enhancements (special lake effects).
    */
   private generateLakeMeshes(_tile: TerrainTile): void {
-    // V1: Global water plane is handled by generateWaterMeshes
+    // Water is handled by generateWaterMeshes (only where terrain < WATER_THRESHOLD)
     // Future: Could add special effects for lake biomes here (waves, ripples, etc.)
   }
 

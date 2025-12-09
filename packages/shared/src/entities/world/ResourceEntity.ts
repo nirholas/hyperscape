@@ -183,17 +183,21 @@ export class ResourceEntity extends InteractableEntity {
       this.mesh = null;
     }
 
-    // Load stump model
-    const stumpModelPath =
-      "asset://models/basic-tree-stump/basic-tree-stump.glb";
+    // Load depleted model from config (set by manifest) or fallback to hardcoded
+    const depletedModelPath =
+      this.config.depletedModelPath ||
+      "asset://models/basic-reg-tree-stump/basic-tree-stump.glb";
     try {
-      const { scene } = await modelCache.loadModel(stumpModelPath, this.world);
+      const { scene } = await modelCache.loadModel(
+        depletedModelPath,
+        this.world,
+      );
 
       this.mesh = scene;
-      this.mesh.name = `ResourceStump_${this.config.resourceType}`;
+      this.mesh.name = `ResourceDepleted_${this.config.resourceType}`;
 
-      // Stump model is much larger than tree model, use smaller scale
-      const modelScale = 0.3; // Much smaller than tree (3.0)
+      // Use scale from config (set by manifest) or fallback to default
+      const modelScale = this.config.depletedModelScale ?? 0.3;
       this.mesh.scale.set(modelScale, modelScale, modelScale);
       this.mesh.updateMatrix();
       this.mesh.updateMatrixWorld(true);

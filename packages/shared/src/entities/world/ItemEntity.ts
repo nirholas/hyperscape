@@ -227,8 +227,22 @@ export class ItemEntity extends InteractableEntity {
   protected clientUpdate(deltaTime: number): void {
     super.clientUpdate(deltaTime);
 
+    // OSRS-style pile visibility - only top item in pile is visible
+    if (this.mesh) {
+      const visibleInPile = this.getProperty("visibleInPile", true);
+      if (this.mesh.visible !== visibleInPile) {
+        this.mesh.visible = visibleInPile;
+      }
+    }
+
     // Same floating animation on client - mesh position is RELATIVE to node
-    if (this.mesh && this.mesh.position && this.mesh.rotation) {
+    // Only animate if visible
+    if (
+      this.mesh &&
+      this.mesh.visible &&
+      this.mesh.position &&
+      this.mesh.rotation
+    ) {
       const time = this.world.getTime() * 0.001;
       this.mesh.position.y = 0.5 + Math.sin(time * 2) * 0.1; // Float above node position
       this.mesh.rotation.y += deltaTime * 0.5;
@@ -271,11 +285,6 @@ export class ItemEntity extends InteractableEntity {
       modelPath: this.config.modelPath || "",
       iconPath: this.config.iconPath || "",
       healAmount: this.config.healAmount || 0,
-      stats: {
-        attack: this.config.stats.attack || 0,
-        defense: this.config.stats.defense || 0,
-        strength: this.config.stats.strength || 0,
-      },
       bonuses: {
         attack: 0,
         defense: 0,
