@@ -55,47 +55,26 @@ uniform sampler2D terrainRockTexture;
 uniform sampler2D terrainSandTexture;
 uniform sampler2D terrainSnowTexture;
 
-uniform sampler2D terrainGrassNormal;
-uniform sampler2D terrainDirtNormal;
-uniform sampler2D terrainRockNormal;
-uniform sampler2D terrainSandNormal;
-uniform sampler2D terrainSnowNormal;
-
 uniform vec3 cameraPosition;
 
 // Triplanar texture sampling - eliminates UV stretching on slopes
+// OPTIMIZED: Precompute blend weights once, reuse for all samples
 vec3 triplanarSample(sampler2D tex, vec3 worldPos, vec3 normal) {
   float scale = 0.02;
   vec3 scaledPos = worldPos * scale;
 
+  // Calculate blend weights (sharp transitions between planes)
   vec3 blendWeights = abs(normal);
-  blendWeights = pow(blendWeights, vec3(4.0));
-  blendWeights = blendWeights / (blendWeights.x + blendWeights.y + blendWeights.z);
+  blendWeights = blendWeights * blendWeights * blendWeights * blendWeights; // pow 4 without function call
+  float weightSum = blendWeights.x + blendWeights.y + blendWeights.z;
+  blendWeights /= weightSum;
 
+  // Sample all three projection planes
   vec3 xAxis = texture2D(tex, scaledPos.yz).rgb;
   vec3 yAxis = texture2D(tex, scaledPos.xz).rgb;
   vec3 zAxis = texture2D(tex, scaledPos.xy).rgb;
 
   return xAxis * blendWeights.x + yAxis * blendWeights.y + zAxis * blendWeights.z;
-}
-
-// Triplanar normal map sampling
-vec3 triplanarNormal(sampler2D normalTex, vec3 worldPos, vec3 normal) {
-  float scale = 0.02;
-  vec3 scaledPos = worldPos * scale;
-
-  vec3 blendWeights = abs(normal);
-  blendWeights = pow(blendWeights, vec3(4.0));
-  blendWeights = blendWeights / (blendWeights.x + blendWeights.y + blendWeights.z);
-
-  // Sample normal maps and convert from [0,1] to [-1,1]
-  vec3 xNormal = texture2D(normalTex, scaledPos.yz).rgb * 2.0 - 1.0;
-  vec3 yNormal = texture2D(normalTex, scaledPos.xz).rgb * 2.0 - 1.0;
-  vec3 zNormal = texture2D(normalTex, scaledPos.xy).rgb * 2.0 - 1.0;
-
-  // Blend normals
-  vec3 blendedNormal = xNormal * blendWeights.x + yNormal * blendWeights.y + zNormal * blendWeights.z;
-  return normalize(blendedNormal);
 }
 
 void main() {
@@ -241,31 +220,7 @@ export function createTerrainMaterial(
     depthTest: true,
   });
 
-  console.log(
-    "[TerrainShader] Material created with uniforms:",
-    Object.keys(uniforms),
-  );
-
-  // Add shader compilation error logging
-  material.onBeforeCompile = () => {
-    console.log("[TerrainShader] Shader compiling...");
-    console.log(
-      "[TerrainShader] Vertex shader length:",
-      terrainVertexShader.length,
-    );
-    console.log(
-      "[TerrainShader] Fragment shader length:",
-      terrainFragmentShader.length,
-    );
-
-    // Log the actual shader code being compiled (first 500 chars)
-    console.log(
-      "[TerrainShader] Fragment shader start:",
-      terrainFragmentShader.substring(0, 500),
-    );
-  };
-
-  // Check for compilation errors after first render
+  // Check for shader compilation errors after first render
   let checked = false;
   const originalOnBeforeRender = material.onBeforeRender;
   material.onBeforeRender = function (
@@ -279,38 +234,28 @@ export function createTerrainMaterial(
     if (!checked) {
       checked = true;
 
-      // Check WebGL program for errors
-      const program = (renderer as any).properties.get(material).program;
+      // Check WebGL program for errors - only log on failure
+      // Access internal Three.js properties for shader debugging
+      const rendererProps = renderer.properties.get(material) as { program?: { program: WebGLProgram; vertexShader: WebGLShader; fragmentShader: WebGLShader } };
+      const program = rendererProps?.program;
       if (program) {
-        const gl = (renderer as any).getContext();
+        const gl = renderer.getContext();
         const valid = gl.getProgramParameter(
           program.program,
           gl.VALIDATE_STATUS,
         );
         const linked = gl.getProgramParameter(program.program, gl.LINK_STATUS);
 
-        console.log("[TerrainShader] Program status:", { valid, linked });
-
         if (!valid || !linked) {
           const log = gl.getProgramInfoLog(program.program);
-          console.error("[TerrainShader] ❌ Program error:", log);
+          console.error("[TerrainShader] Program error:", log);
 
           const vertLog = gl.getShaderInfoLog(program.vertexShader);
           const fragLog = gl.getShaderInfoLog(program.fragmentShader);
           console.error("[TerrainShader] Vertex shader log:", vertLog);
           console.error("[TerrainShader] Fragment shader log:", fragLog);
-        } else {
-          console.log("[TerrainShader] ✅ Material rendered successfully");
         }
       }
-
-      console.log("[TerrainShader] Uniforms:", {
-        hasGrass: !!material.uniforms.terrainGrassTexture.value,
-        hasDirt: !!material.uniforms.terrainDirtTexture.value,
-        hasRock: !!material.uniforms.terrainRockTexture.value,
-        hasSand: !!material.uniforms.terrainSandTexture.value,
-        hasSnow: !!material.uniforms.terrainSnowTexture.value,
-      });
     }
     if (originalOnBeforeRender) {
       originalOnBeforeRender.call(

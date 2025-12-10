@@ -26,7 +26,7 @@
 
 import THREE from "../../../extras/three/three";
 
-import { System } from "..";
+import { System } from "../infrastructure/System";
 import type { World } from "../../../types";
 import type { WindUniforms } from "../../../types/systems/physics";
 

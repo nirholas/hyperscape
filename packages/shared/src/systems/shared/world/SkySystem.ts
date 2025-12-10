@@ -10,7 +10,7 @@
  */
 
 import THREE from "../../../extras/three/three";
-import { System } from "..";
+import { System } from "../infrastructure/System";
 import type { World, WorldOptions } from "../../../types";
 import { Lensflare, LensflareElement } from "three/addons/objects/Lensflare.js";
 
@@ -425,20 +425,34 @@ const skyFragmentShader = `
   uniform sampler2D starTexture;
 
   void main() {
+    // Normalized sun height for day/night calculations
+    float sunHeight = uSunPosition.y / length(uSunPosition);
+    
+    //################################################## Improved Day/Night Transition ##################################################
+    // More accurate day/night factor with smooth transitions
+    // dayFactor: 0 = full night, 1 = full day
+    float dayFactor = smoothstep(-0.2, 0.3, sunHeight);
+    
+    // Dawn/dusk factor for special lighting (peaks at sunrise/sunset)
+    float dawnFactor = 1.0 - abs(sunHeight) * 3.0;
+    dawnFactor = max(0.0, dawnFactor);
 
-    //################################################## Moon light color ################################################## 
-    float moonSize = 1.;
+    //################################################## Moon Light Color ################################################## 
+    float moonSize = 1.0;
     float moonInnerBound = 0.1;
     float moonOuterBound = 2.0;
-    vec4 moonColor = vec4(0.1, 0.7, 0.9, 1.0);
+    vec4 moonColor = vec4(0.15, 0.75, 0.95, 1.0);
     vec3 moonPosition = vec3(-uSunPosition.x, -uSunPosition.y, -uSunPosition.z);
     float moonDist = distance(normalize(vPos), moonPosition);
-    float moonArea = 1. - moonDist / moonSize;
+    float moonArea = 1.0 - moonDist / moonSize;
     moonArea = smoothstep(moonInnerBound, moonOuterBound, moonArea);
+    
+    // Moon only visible at night
+    float moonVisibility = 1.0 - dayFactor;
     vec3 fallmoonColor = moonColor.rgb * 0.4;
-    vec3 finalmoonColor = mix(fallmoonColor, moonColor.rgb, smoothstep(-0.03, 0.03, moonPosition.y)) * moonArea;
+    vec3 finalmoonColor = mix(fallmoonColor, moonColor.rgb, smoothstep(-0.03, 0.03, moonPosition.y)) * moonArea * moonVisibility;
 
-    //################################################## Galaxy color (add noise texture 2 times) ################################################## 
+    //################################################## Galaxy Color ################################################## 
     vec4 galaxyColor1 = vec4(0.11, 0.38, 0.98, 1.0);
     vec4 galaxyColor = vec4(0.62, 0.11, 0.74, 1.0);
     vec4 galaxyNoiseTex = texture2D(
@@ -452,12 +466,12 @@ const skyFragmentShader = `
         vPos.y * 0.00007 + (galaxyNoiseTex.g - 0.5) * 0.3
       )
     );
-    vec4 finalGalaxyColor =  (galaxyColor * (-galaxy.r + galaxy.g) + galaxyColor1 * galaxy.r) * smoothstep(0., 0.2, 1. - galaxy.g);
+    vec4 finalGalaxyColor = (galaxyColor * (-galaxy.r + galaxy.g) + galaxyColor1 * galaxy.r) * smoothstep(0.0, 0.2, 1.0 - galaxy.g);
     galaxyNoiseTex = texture2D(
       noiseTexture2,
       vec2(
-        vUv.x * 2. + uTime * 0.002,
-        vUv.y * 2. + uTime * 0.003
+        vUv.x * 2.0 + uTime * 0.002,
+        vUv.y * 2.0 + uTime * 0.003
       )
     );
     galaxy = texture2D(
@@ -467,10 +481,10 @@ const skyFragmentShader = `
         vPos.y * 0.00007 + (galaxyNoiseTex.g - 0.5) * 0.3
       )
     );
-    finalGalaxyColor += (galaxyColor * (-galaxy.r + galaxy.g) + galaxyColor1 * galaxy.r) * smoothstep(0., 0.3, 1. - galaxy.g);
+    finalGalaxyColor += (galaxyColor * (-galaxy.r + galaxy.g) + galaxyColor1 * galaxy.r) * smoothstep(0.0, 0.3, 1.0 - galaxy.g);
     finalGalaxyColor *= 0.1;
 
-    //################################################## Star color ################################################## 
+    //################################################## Star Color - IMPROVED MASKING ################################################## 
     vec4 starTex = texture2D(
       starTexture, 
       vPos.xz * 0.00025
@@ -478,23 +492,40 @@ const skyFragmentShader = `
     vec4 starNoiseTex = texture2D(
       noiseTexture,
       vec2(
-        vUv.x * 5. + uTime * 0.01,
-        vUv.y * 5. + uTime * 0.02
+        vUv.x * 5.0 + uTime * 0.01,
+        vUv.y * 5.0 + uTime * 0.02
       )
     );
     
     float starPos = smoothstep(0.21, 0.31, starTex.r);
     float starBright = smoothstep(0.513, 0.9, starNoiseTex.a);
-    // Stars cover whole sky - only fade near very bottom horizon
-    starPos = vUv.y > 0.2 ? starPos : starPos * smoothstep(0.0, 0.2, vUv.y);
-    float finalStarColor = starPos * starBright;
-    finalStarColor = finalStarColor * finalGalaxyColor.b * 5. + finalStarColor * (1. - finalGalaxyColor.b) * 0.7;
-
-    float sunNightStep = smoothstep(-0.3, 0.25, uSunPosition.y);
-    float starMask = 1. - sunNightStep * (1. - step(0.2, finalmoonColor.b));
-
     
-    gl_FragColor = vec4(vColor + (vec3(finalStarColor) + finalGalaxyColor.rgb) * starMask + finalmoonColor.rgb, 1.0);
+    // Horizon fade (stars fade near horizon)
+    float horizonFade = smoothstep(0.0, 0.25, vUv.y);
+    starPos *= horizonFade;
+    
+    // Twinkling intensity
+    float finalStarColor = starPos * starBright;
+    finalStarColor = finalStarColor * finalGalaxyColor.b * 5.0 + finalStarColor * (1.0 - finalGalaxyColor.b) * 0.7;
+
+    // IMPROVED: Proper star masking during day
+    // Stars completely invisible during day, gradually appear at dusk
+    float starMask = 1.0 - dayFactor;
+    
+    // Additional masking near sun position (bright sky washes out stars)
+    float distToSun = distance(normalize(vPos), normalize(uSunPosition));
+    float sunProximityMask = smoothstep(0.3, 0.8, distToSun);
+    starMask *= sunProximityMask;
+    
+    // Extra horizon masking during dawn/dusk (bright horizon)
+    float horizonGlowMask = 1.0 - (dawnFactor * (1.0 - vUv.y) * 2.0);
+    horizonGlowMask = max(0.0, horizonGlowMask);
+    starMask *= horizonGlowMask;
+
+    //################################################## Final Composition ################################################## 
+    vec3 nightElements = (vec3(finalStarColor) + finalGalaxyColor.rgb) * starMask + finalmoonColor;
+    
+    gl_FragColor = vec4(vColor + nightElements, 1.0);
   }
 `;
 
@@ -659,6 +690,9 @@ export class SkySystem extends System {
 
   private elapsed = 0;
   private dayDurationSec = 240; // full day cycle in seconds
+
+  // Reusable vector to avoid allocations in update()
+  private _sunDir = new THREE.Vector3();
 
   constructor(world: World) {
     super(world);
@@ -938,11 +972,12 @@ export class SkySystem extends System {
     const inc = 0.01; // small elevation to reduce horizon flicker
     const theta = Math.PI * (inc - 0.5);
     const phi = 2 * Math.PI * (dayPhase - 0.5);
-    const sun = new THREE.Vector3(
+    this._sunDir.set(
       Math.cos(phi),
       Math.sin(phi) * Math.sin(theta),
       Math.sin(phi) * Math.cos(theta),
     );
+    const sun = this._sunDir;
 
     // Position sun/moon far away (match reference radius of 4000)
     const radius = 4000;

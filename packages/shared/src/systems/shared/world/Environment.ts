@@ -1,7 +1,7 @@
 import THREE from "../../../extras/three/three";
 
 import { Node as NodeClass } from "../../../nodes/Node";
-import { System } from "..";
+import { System } from "../infrastructure/System";
 
 import { CSM } from "../../../libs/csm/CSM";
 import { SkySystem } from "..";
@@ -140,7 +140,7 @@ export class Environment extends System {
 
     // Enhanced dynamic sky (client-only)
     this.skySystem = new SkySystem(this.world);
-    await this.skySystem.init({} as unknown as WorldOptions);
+    await this.skySystem.init();
     this.skySystem.start();
     // Ensure legacy sky sphere never occludes dynamic sky
     if (this.sky) {

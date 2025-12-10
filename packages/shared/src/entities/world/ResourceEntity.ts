@@ -175,8 +175,6 @@ export class ResourceEntity extends InteractableEntity {
       return;
     }
 
-    console.log("[ResourceEntity] 🪵 Swapping to stump model");
-
     // Remove current tree mesh
     if (this.mesh) {
       this.node.remove(this.mesh);
@@ -221,7 +219,6 @@ export class ResourceEntity extends InteractableEntity {
       };
 
       this.node.add(this.mesh);
-      console.log("[ResourceEntity] ✅ Stump model loaded");
     } catch (error) {
       console.error("[ResourceEntity] Failed to load stump model:", error);
       // Fallback: just hide the original mesh
@@ -233,8 +230,6 @@ export class ResourceEntity extends InteractableEntity {
 
   private async swapToFullModel(): Promise<void> {
     if (this.world.isServer || !this.node) return;
-
-    console.log("[ResourceEntity] 🌳 Swapping to full tree model");
 
     // Remove current stump mesh
     if (this.mesh) {

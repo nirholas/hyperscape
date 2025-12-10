@@ -5,7 +5,7 @@ import {
   PMeshHandle,
 } from "../../../extras/three/geometryToPxMesh";
 import THREE from "../../../extras/three/three";
-import { System } from "..";
+import { System } from "../infrastructure/System";
 import { EventType } from "../../../types/events";
 import { NoiseGenerator } from "../../../utils/NoiseGenerator";
 import { InstancedMeshManager } from "../../../utils/rendering/InstancedMeshManager";
@@ -355,8 +355,8 @@ export class TerrainSystem extends System {
 
       const cdnUrl =
         typeof window !== "undefined"
-          ? (window as any).__CDN_URL || "http://localhost:8088"
-          : "http://localhost:8088";
+          ? ((window as { __CDN_URL?: string }).__CDN_URL ?? "http://localhost:8080")
+          : "http://localhost:8080";
 
       const noiseTexture = await new THREE.TextureLoader().loadAsync(
         `${cdnUrl}/noise/simplex-noise.png`,
@@ -911,32 +911,40 @@ export class TerrainSystem extends System {
     const physics = this.world.physics;
     const PHYSX = getPhysX();
 
-    // Create a simple plane at the average height of the terrain
-    // This is sufficient for click-to-move raycasting
+    // Skip physics if not available (e.g., in tests)
+    if (!physics || !PHYSX) {
+      this.terrainTiles.set(key, tile);
+      return tile;
+    }
+
+    // Create a collision box that covers the full terrain height range
+    // This prevents players from falling through near water edges
     const positionAttribute = geometry.attributes.position;
     const vertices = positionAttribute.array as Float32Array;
 
-    // Calculate average height and bounds
+    // Calculate min/max height bounds
     let minY = Infinity;
     let maxY = -Infinity;
-    let avgY = 0;
     const vertexCount = positionAttribute.count;
 
     for (let i = 0; i < vertexCount; i++) {
       const y = vertices[i * 3 + 1]; // Y is at index 1 in each vertex
-      avgY += y;
       minY = Math.min(minY, y);
       maxY = Math.max(maxY, y);
     }
-    avgY /= vertexCount;
 
-    // Create a box shape that covers the terrain tile
-    // Use a thicker box to ensure proper collision
-    const heightRange = maxY - minY;
-    const boxThickness = Math.max(5, heightRange * 0.5); // At least 5 units thick or half the height range
+    // Create a box shape that covers the FULL terrain height range
+    // Add buffer below minY to prevent edge cases near water
+    const bufferBelow = 10; // 10m buffer below lowest point
+    const bufferAbove = 2; // 2m buffer above highest point
+    const effectiveMinY = minY - bufferBelow;
+    const effectiveMaxY = maxY + bufferAbove;
+    const boxHeight = effectiveMaxY - effectiveMinY;
+    const boxCenterY = (effectiveMinY + effectiveMaxY) / 2;
+
     const halfExtents = {
       x: this.CONFIG.TILE_SIZE / 2, // Half width
-      y: boxThickness / 2, // Half thickness of the collision box
+      y: boxHeight / 2, // Half height of the collision box
       z: this.CONFIG.TILE_SIZE / 2, // Half depth
     };
     const boxGeometry = new PHYSX!.PxBoxGeometry(
@@ -978,12 +986,12 @@ export class TerrainSystem extends System {
       shape.setSimulationFilterData(simFilterData);
     }
 
-    // Create actor at tile position with average height
+    // Create actor at tile position, centered on the full height range
     const transform = new PHYSX!.PxTransform(
       new PHYSX!.PxVec3(
-        mesh.position.x + this.CONFIG.TILE_SIZE / 2, // Center of tile
-        avgY, // Average terrain height
-        mesh.position.z + this.CONFIG.TILE_SIZE / 2, // Center of tile
+        mesh.position.x + this.CONFIG.TILE_SIZE / 2, // Center of tile X
+        boxCenterY, // Center of the full height range
+        mesh.position.z + this.CONFIG.TILE_SIZE / 2, // Center of tile Z
       ),
       new PHYSX!.PxQuat(0, 0, 0, 1),
     );
@@ -1053,11 +1061,13 @@ export class TerrainSystem extends System {
         this.generateGrassForTile(tile, BIOMES[tile.biome]);
 
         // Add visible resource meshes (instanced proxies) on client
+        // PERFORMANCE: Use _tempVec3 to avoid allocation per resource
         if (tile.resources.length > 0 && tile.mesh) {
           for (const resource of tile.resources) {
             if (resource.instanceId != null) continue;
 
-            const worldPosition = new THREE.Vector3(
+            // Reuse temp vector - addInstance clones internally
+            this._tempVec3.set(
               tile.x * this.CONFIG.TILE_SIZE + resource.position.x,
               resource.position.y,
               tile.z * this.CONFIG.TILE_SIZE + resource.position.z,
@@ -1066,7 +1076,7 @@ export class TerrainSystem extends System {
             const instanceId = this.instancedMeshManager.addInstance(
               resource.type,
               resource.id,
-              worldPosition,
+              this._tempVec3,
               resource.rotation,
               resource.scale,
             );
@@ -1076,16 +1086,15 @@ export class TerrainSystem extends System {
               resource.meshType = resource.type;
 
               // Emit resource created event for InteractionSystem registration
-              // For instanced resources, we pass the instanceId instead of a mesh
               this.world.emit(EventType.RESOURCE_MESH_CREATED, {
                 mesh: undefined,
                 instanceId: instanceId,
                 resourceId: resource.id,
                 resourceType: resource.type,
                 worldPosition: {
-                  x: worldPosition.x,
-                  y: worldPosition.y,
-                  z: worldPosition.z,
+                  x: this._tempVec3.x,
+                  y: this._tempVec3.y,
+                  z: this._tempVec3.z,
                 },
               });
             }
@@ -1124,46 +1133,13 @@ export class TerrainSystem extends System {
       resources: resourcesPayload,
     });
 
-    // Also emit resource spawn points for ResourceSystem (server-only authoritative)
-    if (tile.resources.length > 0 && this.world.network?.isServer) {
-      const spawnPoints = tile.resources.map((r) => {
-        const worldPos = {
-          x: originX + r.position.x,
-          y: r.position.y,
-          z: originZ + r.position.z,
-        };
-        return {
-          id: r.id,
-          type: r.type,
-          subType: r.type === "tree" ? "normal" : r.type,
-          position: worldPos,
-        };
-      });
-      this.world.emit(EventType.RESOURCE_SPAWN_POINTS_REGISTERED, {
-        spawnPoints,
-      });
-    } else if (
-      tile.resources.length > 0 &&
-      this.world.network?.isClient &&
-      !this.world.network?.isServer
-    ) {
-      const spawnPoints = tile.resources.map((r) => {
-        const worldPos = {
-          x: originX + r.position.x,
-          y: r.position.y,
-          z: originZ + r.position.z,
-        };
-        return {
-          id: r.id,
-          type: r.type,
-          subType: r.type === "tree" ? "normal" : r.type,
-          position: worldPos,
-        };
-      });
-      this.world.emit(EventType.RESOURCE_SPAWN_POINTS_REGISTERED, {
-        spawnPoints,
-      });
-    }
+    // NOTE: Procedural resources (trees, rocks) are VISUAL DECORATION ONLY
+    // They are rendered via InstancedMeshManager but are NOT interactable
+    // Interactable resources come ONLY from world-areas.json manifest
+    // via ResourceSystem.initializeWorldAreaResources()
+    // 
+    // DO NOT emit RESOURCE_SPAWN_POINTS_REGISTERED for procedural resources
+    // This prevents duplicate trees and ensures manifest-driven approach
 
     // Store tile
     this.terrainTiles.set(key, tile);
@@ -1316,10 +1292,17 @@ export class TerrainSystem extends System {
     return heightfield;
   }
 
+  /**
+   * Material indices:
+   * 0 = Grass (stylized_grass)
+   * 1 = Dirt (dirt_ground)
+   * 2 = Rock (stylized_stone)
+   * 3 = Snow (stylized_snow)
+   */
   private calculateMaterials(
     height: number,
     slope: number,
-    _biome: string,
+    biome: string,
     liquidType: string,
     worldX: number,
     worldZ: number,
@@ -1330,7 +1313,7 @@ export class TerrainSystem extends System {
     const materials = [0, 0, 0, 0];
     const weights = [0, 0, 0, 0];
 
-    // Water gets no materials
+    // Water gets underwater materials
     if (liquidType !== "none") {
       materials[0] = 1; // Dirt/sand under water
       weights[0] = 1.0;
@@ -1345,25 +1328,99 @@ export class TerrainSystem extends System {
     const adjustedHeight = height + detailNoise * 2.0;
     const adjustedSlope = slope + detailNoise * 0.05;
 
-    // Material 0: Grass (low elevation, flat)
-    let grassWeight = 1.0 - Math.min(1.0, adjustedHeight / 15.0);
-    grassWeight *= 1.0 - Math.min(1.0, adjustedSlope / 0.5);
-    grassWeight = Math.max(0, grassWeight);
+    // =========================================================
+    // BIOME-SPECIFIC MATERIAL WEIGHTS
+    // Each biome has different base material preferences
+    // =========================================================
 
-    // Material 1: Dirt (mid elevation)
-    let dirtWeight = 1.0 - Math.abs(adjustedHeight - 8.0) / 10.0;
+    let grassWeight = 0;
+    let dirtWeight = 0;
+    let rockWeight = 0;
+    let snowWeight = 0;
+
+    switch (biome) {
+      case "desert":
+        // Desert: Primarily dirt (sand-colored), some rock
+        dirtWeight = 0.85 + detailNoise * 0.1;
+        rockWeight = 0.15 + Math.max(0, adjustedSlope / 0.4);
+        grassWeight = Math.max(0, 0.1 - adjustedSlope); // Rare oasis grass
+        break;
+
+      case "tundra":
+        // Tundra: Snow-covered with rock outcrops
+        snowWeight = 0.7 + detailNoise * 0.2;
+        rockWeight = 0.2 + Math.max(0, adjustedSlope / 0.5);
+        grassWeight = Math.max(0, 0.1 - height / 20.0); // Low areas might have sparse grass
+        break;
+
+      case "mountains":
+        // Mountains: Rock dominant, snow on peaks, sparse grass at base
+        rockWeight = 0.5 + Math.min(0.4, adjustedSlope);
+        snowWeight = Math.max(0, (adjustedHeight - 12.0) / 8.0);
+        grassWeight = Math.max(0, 0.3 - adjustedHeight / 15.0);
+        dirtWeight = Math.max(0, 0.2 - adjustedSlope);
+        break;
+
+      case "swamp":
+        // Swamp: Dark dirt/mud dominant, some grass
+        dirtWeight = 0.6 + detailNoise * 0.2;
+        grassWeight = 0.35 - adjustedSlope * 0.3;
+        rockWeight = Math.max(0, adjustedSlope - 0.3);
+        break;
+
+      case "lakes":
+        // Lake edges: Dirt/sand near water, grass further
+        dirtWeight = 0.5 + detailNoise * 0.2;
+        grassWeight = 0.4 - dirtWeight * 0.2;
+        rockWeight = Math.max(0, adjustedSlope - 0.4);
+        break;
+
+      case "forest":
+        // Forest: Lush grass with dirt patches
+        grassWeight = 0.7 + detailNoise * 0.15;
+        dirtWeight = 0.25 - detailNoise * 0.1;
+        rockWeight = Math.max(0, adjustedSlope / 0.6);
+        break;
+
+      case "valley":
+        // Valley: Rich grass, some dirt
+        grassWeight = 0.8 + detailNoise * 0.1;
+        dirtWeight = 0.15;
+        rockWeight = Math.max(0, adjustedSlope / 0.5 - 0.1);
+        break;
+
+      case "plains":
+      default:
+        // Plains: Standard grass-dominant terrain
+        grassWeight = 1.0 - Math.min(1.0, adjustedHeight / 15.0);
+        grassWeight *= 1.0 - Math.min(1.0, adjustedSlope / 0.5);
+        dirtWeight = 1.0 - Math.abs(adjustedHeight - 8.0) / 10.0;
+        rockWeight = Math.max(
+          adjustedSlope / 0.6,
+          Math.max(0, (adjustedHeight - 12.0) / 8.0),
+        );
+        snowWeight = Math.max(0, (adjustedHeight - 18.0) / 10.0);
+        break;
+    }
+
+    // Apply universal height/slope modifiers
+    // High elevation always gets some snow
+    if (adjustedHeight > 20.0) {
+      const highSnow = Math.min(1.0, (adjustedHeight - 20.0) / 10.0);
+      snowWeight = Math.max(snowWeight, highSnow * 0.6);
+    }
+
+    // Steep slopes always get some rock
+    if (adjustedSlope > 0.5) {
+      const steepRock = Math.min(1.0, (adjustedSlope - 0.5) / 0.3);
+      rockWeight = Math.max(rockWeight, steepRock * 0.7);
+    }
+
+    // Clamp all weights
+    grassWeight = Math.max(0, Math.min(1.0, grassWeight));
     dirtWeight = Math.max(0, Math.min(1.0, dirtWeight));
-
-    // Material 2: Rock (steep slopes or high elevation)
-    let rockWeight = Math.max(
-      adjustedSlope / 0.6,
-      Math.max(0, (adjustedHeight - 12.0) / 8.0),
-    );
-    rockWeight = Math.min(1.0, rockWeight);
-
-    // Material 3: Snow (very high elevation)
-    let snowWeight = Math.max(0, (adjustedHeight - 18.0) / 10.0);
-    snowWeight = Math.min(1.0, snowWeight);
+    rockWeight = Math.max(0, Math.min(1.0, rockWeight));
+    snowWeight = Math.max(0, Math.min(1.0, snowWeight));
 
     // Store weights
     weights[0] = grassWeight;
@@ -1893,27 +1950,25 @@ export class TerrainSystem extends System {
 
           if (heightfield.rockVisibility > ROCK_THRESHOLD) {
             if (heightfield.liquidType === "none" && heightfield.slope < 0.13) {
-              const scale = 0.85 + this.noise.scaleNoise(worldX, worldZ) * 0.25;
-              const rotation = this.noise.rotationNoise(worldX, worldZ);
+              const _scale = 0.85 + this.noise.scaleNoise(worldX, worldZ) * 0.25;
+              const _rotation = this.noise.rotationNoise(worldX, worldZ);
 
-              const rock: ResourceNode = {
+              // PERFORMANCE: Use plain objects instead of THREE types
+              tile.resources.push({
                 id: `${tile.key}_rock_${cx}_${cz}_${i}`,
                 type: "rock",
-                position: new THREE.Vector3(
-                  worldX - tile.x * this.CONFIG.TILE_SIZE,
-                  heightfield.height,
-                  worldZ - tile.z * this.CONFIG.TILE_SIZE,
-                ),
-                rotation: new THREE.Euler(0, rotation.y * Math.PI * 2, 0),
-                scale: new THREE.Vector3(scale, scale, scale),
+                position: {
+                  x: worldX - tile.x * this.CONFIG.TILE_SIZE,
+                  y: heightfield.height,
+                  z: worldZ - tile.z * this.CONFIG.TILE_SIZE,
+                },
                 mesh: null,
                 health: 100,
                 maxHealth: 100,
                 respawnTime: 300000,
                 harvestable: true,
                 requiredLevel: 1,
-              };
-              tile.resources.push(rock);
+              } as ResourceNode);
 
               this.generateSurroundingStones(
                 tile,
@@ -1956,28 +2011,25 @@ export class TerrainSystem extends System {
 
       const stoneHeight = this.getHeightAt(stoneX, stoneZ);
 
-      const scale = 0.8 + rng() * 0.2;
-      const rotation = rng() * Math.PI * 2;
+      const _scale = 0.8 + rng() * 0.2;
+      const _rotation = rng() * Math.PI * 2;
 
-      const stone: ResourceNode = {
+      // PERFORMANCE: Use plain objects instead of THREE types
+      tile.resources.push({
         id: `${tile.key}_stone_${cx}_${cz}_${i}`,
         type: "stone",
-        position: new THREE.Vector3(
-          stoneX - tile.x * this.CONFIG.TILE_SIZE,
-          stoneHeight,
-          stoneZ - tile.z * this.CONFIG.TILE_SIZE,
-        ),
-        rotation: new THREE.Euler(0, rotation, 0),
-        scale: new THREE.Vector3(scale, scale, scale),
+        position: {
+          x: stoneX - tile.x * this.CONFIG.TILE_SIZE,
+          y: stoneHeight,
+          z: stoneZ - tile.z * this.CONFIG.TILE_SIZE,
+        },
         mesh: null,
         health: 50,
         maxHealth: 50,
         respawnTime: 180000,
         harvestable: true,
         requiredLevel: 1,
-      };
-
-      tile.resources.push(stone);
+      } as ResourceNode);
     }
   }
 
@@ -2397,21 +2449,19 @@ export class TerrainSystem extends System {
       }
     }
 
-    // Clean up water meshes
+    // Clean up water meshes (dispose geometry only - material is shared across all tiles)
     if (tile.waterMeshes) {
       for (const waterMesh of tile.waterMeshes) {
         if (waterMesh.parent) {
           waterMesh.parent.remove(waterMesh);
-          waterMesh.geometry.dispose();
-          if (waterMesh.material instanceof THREE.Material) {
-            waterMesh.material.dispose();
-          }
         }
+        waterMesh.geometry.dispose();
+        // Note: Do NOT dispose material - it's shared via WaterSystem.sharedMaterial
       }
       tile.waterMeshes = [];
     }
 
-    // Clean up grass meshes
+    // Clean up grass meshes (dispose geometry only - material is shared)
     const grassMeshes = (tile as { grassMeshes?: THREE.InstancedMesh[] })
       .grassMeshes;
     if (grassMeshes) {
@@ -2420,6 +2470,7 @@ export class TerrainSystem extends System {
           grassMesh.parent.remove(grassMesh);
         }
         grassMesh.geometry.dispose();
+        // Note: Do NOT dispose material - it's shared via GrassSystem.grassMaterial
       }
       (tile as { grassMeshes?: THREE.InstancedMesh[] }).grassMeshes = [];
     }
@@ -2462,6 +2513,13 @@ export class TerrainSystem extends System {
     worldX: number,
     worldZ: number,
   ): { walkable: boolean; reason?: string } {
+    // FIRST: Check water threshold - must be checked before biome data
+    // to ensure underwater positions are marked non-walkable even if biome data is missing
+    const height = this.getHeightAt(worldX, worldZ);
+    if (height < this.CONFIG.WATER_THRESHOLD) {
+      return { walkable: false, reason: "Water bodies are impassable" };
+    }
+
     const tileX = Math.floor(worldX / this.CONFIG.TILE_SIZE);
     const tileZ = Math.floor(worldZ / this.CONFIG.TILE_SIZE);
     const biome = this.getBiomeAt(tileX, tileZ);
@@ -2469,19 +2527,7 @@ export class TerrainSystem extends System {
 
     // Guard against missing biome data
     if (!biomeData) {
-      Logger.systemWarn(
-        "TerrainSystem",
-        `Biome data not found for biome: ${biome}`,
-      );
       return { walkable: true }; // Default to walkable if biome data missing
-    }
-
-    // Get height at position
-    const height = this.getHeightAt(worldX, worldZ);
-
-    // Check if underwater (water impassable rule)
-    if (height < this.CONFIG.WATER_THRESHOLD) {
-      return { walkable: false, reason: "Water bodies are impassable" };
     }
 
     // Check slope constraints
@@ -2924,50 +2970,6 @@ export class TerrainSystem extends System {
     return tilesData;
   }
 
-  destroy(): void {
-    // Perform final serialization before shutdown
-    this.performImmediateSerialization();
-
-    // Dispose instanced mesh manager
-    if (this.instancedMeshManager) {
-      this.instancedMeshManager.dispose();
-    }
-
-    // Clear save interval
-    if (this.chunkSaveInterval) {
-      clearInterval(this.chunkSaveInterval);
-    }
-    if (this.terrainUpdateIntervalId) {
-      clearInterval(this.terrainUpdateIntervalId);
-    }
-    if (this.serializationIntervalId) {
-      clearInterval(this.serializationIntervalId);
-    }
-    if (this.boundingBoxIntervalId) {
-      clearInterval(this.boundingBoxIntervalId);
-    }
-
-    // Save all modified chunks before shutdown
-    this.saveModifiedChunks();
-
-    // Unload all tiles
-    for (const tile of this.terrainTiles.values()) {
-      this.unloadTile(tile);
-    }
-
-    // Remove terrain container
-    if (this.terrainContainer && this.terrainContainer.parent) {
-      this.terrainContainer.parent.remove(this.terrainContainer);
-    }
-
-    // Clear tracking data
-    this.playerChunks.clear();
-    this.simulatedChunks.clear();
-    this.chunkPlayerCounts.clear();
-    this.terrainBoundingBoxes.clear();
-    this.pendingSerializationData.clear();
-  }
-
   private emitTileUnloaded(tileId: string): void {
     this.world.emit(EventType.TERRAIN_TILE_UNLOADED, { tileId });
   }
@@ -3075,6 +3077,14 @@ export class TerrainSystem extends System {
    */
   getHeightAtPosition(x: number, z: number): number {
     return this.getHeightAt(x, z);
+  }
+
+  /**
+   * Get the water threshold height
+   * Terrain below this height is considered underwater
+   */
+  getWaterThreshold(): number {
+    return this.CONFIG.WATER_THRESHOLD;
   }
 
   // ===== MMOCHUNK LOADING AND SIMULATION SYSTEM =====
@@ -3395,5 +3405,70 @@ export class TerrainSystem extends System {
 
   public getWaterLevel(): number {
     return this.CONFIG.WATER_THRESHOLD;
+  }
+
+  /**
+   * Clean up all terrain resources and intervals
+   */
+  destroy(): void {
+    // Clear all intervals to prevent memory leaks
+    if (this.terrainUpdateIntervalId) {
+      clearInterval(this.terrainUpdateIntervalId);
+      this.terrainUpdateIntervalId = undefined;
+    }
+    if (this.serializationIntervalId) {
+      clearInterval(this.serializationIntervalId);
+      this.serializationIntervalId = undefined;
+    }
+    if (this.boundingBoxIntervalId) {
+      clearInterval(this.boundingBoxIntervalId);
+      this.boundingBoxIntervalId = undefined;
+    }
+    if (this.chunkSaveInterval) {
+      clearInterval(this.chunkSaveInterval);
+      this.chunkSaveInterval = undefined;
+    }
+
+    // Unload all tiles
+    for (const tile of this.terrainTiles.values()) {
+      this.unloadTile(tile);
+    }
+    this.terrainTiles.clear();
+
+    // Dispose grass system
+    if (this.grassSystem) {
+      this.grassSystem.dispose();
+    }
+
+    // Dispose water system
+    if (this.waterSystem) {
+      this.waterSystem.dispose();
+    }
+
+    // Dispose instanced mesh manager
+    if (this.instancedMeshManager) {
+      this.instancedMeshManager.dispose();
+    }
+
+    // Dispose texture atlas
+    if (this.textureAtlasManager) {
+      this.textureAtlasManager.dispose();
+    }
+
+    // Remove terrain container from scene
+    if (this.terrainContainer && this.terrainContainer.parent) {
+      this.terrainContainer.parent.remove(this.terrainContainer);
+    }
+
+    // Clear pending queues
+    this.pendingTileKeys.length = 0;
+    this.pendingTileSet.clear();
+    this.pendingCollisionKeys.length = 0;
+    this.pendingCollisionSet.clear();
+    this.activeChunks.clear();
+    this.biomeCenters.length = 0;
+
+    this._terrainInitialized = false;
+    this._initialTilesReady = false;
   }
 }
