@@ -13,6 +13,12 @@ interface ActionPanelProps {
   onItemUse?: (item: InventorySlotItem, index: number) => void;
 }
 
+import { ItemIcon } from "../../components/ItemIcon";
+
+// ... (rest of imports)
+
+// ... (rest of code)
+
 export function ActionPanel({ items, onItemUse }: ActionPanelProps) {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [currentPage, setCurrentPage] = useState(0);
@@ -42,47 +48,6 @@ export function ActionPanel({ items, onItemUse }: ActionPanelProps) {
 
   const handleNext = () => {
     setCurrentPage(Math.min(totalPages - 1, currentPage + 1));
-  };
-
-  const getItemIcon = (itemId: string) => {
-    if (
-      itemId.includes("sword") ||
-      itemId.includes("dagger") ||
-      itemId.includes("scimitar")
-    )
-      return "⚔️";
-    if (itemId.includes("shield") || itemId.includes("defender")) return "🛡️";
-    if (
-      itemId.includes("helmet") ||
-      itemId.includes("helm") ||
-      itemId.includes("hat")
-    )
-      return "⛑️";
-    if (itemId.includes("boots") || itemId.includes("boot")) return "👢";
-    if (itemId.includes("glove") || itemId.includes("gauntlet")) return "🧤";
-    if (itemId.includes("cape") || itemId.includes("cloak")) return "🧥";
-    if (itemId.includes("amulet") || itemId.includes("necklace")) return "📿";
-    if (itemId.includes("ring")) return "💍";
-    if (itemId.includes("arrow") || itemId.includes("bolt")) return "🏹";
-    if (
-      itemId.includes("fish") ||
-      itemId.includes("lobster") ||
-      itemId.includes("shark")
-    )
-      return "🐟";
-    if (itemId.includes("log") || itemId.includes("wood")) return "🪵";
-    if (itemId.includes("ore") || itemId.includes("bar")) return "⛏️";
-    if (itemId.includes("coin")) return "💰";
-    if (itemId.includes("potion") || itemId.includes("vial")) return "🧪";
-    if (
-      itemId.includes("food") ||
-      itemId.includes("bread") ||
-      itemId.includes("meat")
-    )
-      return "🍖";
-    if (itemId.includes("axe")) return "🪓";
-    if (itemId.includes("pickaxe")) return "⛏️";
-    return itemId.substring(0, 2).toUpperCase();
   };
 
   const slotSize = isMobile
@@ -207,13 +172,13 @@ export function ActionPanel({ items, onItemUse }: ActionPanelProps) {
               {/* Item Icon */}
               {!isEmpty ? (
                 <div
-                  className="flex items-center justify-center h-full transition-transform duration-200 group-hover:scale-110"
+                  className="flex items-center justify-center w-full h-full transition-transform duration-200 group-hover:scale-110"
                   style={{
                     color: COLORS.ACCENT,
-                    fontSize: iconSize,
+                    fontSize: iconSize, // We can override this via ItemIcon's size prop if needed, but the wrapper div handles sizing
                   }}
                 >
-                  {getItemIcon(item.itemId)}
+                  <ItemIcon itemId={item.itemId} />
                 </div>
               ) : (
                 <div

@@ -23,12 +23,6 @@ import {
 import { EventType, getItem, uuid } from "@hyperscape/shared";
 import type { ClientWorld, InventorySlotItem } from "../../types";
 
-/**
- * Maximum inventory slots (OSRS-style: 28 slots)
- * Matches INPUT_LIMITS.MAX_INVENTORY_SLOTS from shared constants
- */
-const MAX_SLOTS = 28;
-
 type InventorySlotViewItem = Pick<
   InventorySlotItem,
   "slot" | "itemId" | "quantity"
@@ -95,6 +89,22 @@ const snapCenterToCursor: Modifier = ({
   return transform;
 };
 
+/**
+ * Helper to resolve asset paths for the client
+ */
+
+import { ItemIcon } from "../../components/ItemIcon";
+
+// ... (rest of imports)
+
+/**
+ * Maximum inventory slots (OSRS-style: 28 slots)
+ * Matches INPUT_LIMITS.MAX_INVENTORY_SLOTS from shared constants
+ */
+const MAX_SLOTS = 28;
+
+// ... (rest of code)
+
 function DraggableInventorySlot({
   item,
   index,
@@ -126,48 +136,6 @@ function DraggableInventorySlot({
   // Slots stay fixed - no transform! Only the DragOverlay moves.
   const isEmpty = !item;
 
-  // Get icon for item
-  const getItemIcon = (itemId: string) => {
-    if (
-      itemId.includes("sword") ||
-      itemId.includes("dagger") ||
-      itemId.includes("scimitar")
-    )
-      return "⚔️";
-    if (itemId.includes("shield") || itemId.includes("defender")) return "🛡️";
-    if (
-      itemId.includes("helmet") ||
-      itemId.includes("helm") ||
-      itemId.includes("hat")
-    )
-      return "⛑️";
-    if (itemId.includes("boots") || itemId.includes("boot")) return "👢";
-    if (itemId.includes("glove") || itemId.includes("gauntlet")) return "🧤";
-    if (itemId.includes("cape") || itemId.includes("cloak")) return "🧥";
-    if (itemId.includes("amulet") || itemId.includes("necklace")) return "📿";
-    if (itemId.includes("ring")) return "💍";
-    if (itemId.includes("arrow") || itemId.includes("bolt")) return "🏹";
-    if (
-      itemId.includes("fish") ||
-      itemId.includes("lobster") ||
-      itemId.includes("shark")
-    )
-      return "🐟";
-    if (itemId.includes("log") || itemId.includes("wood")) return "🪵";
-    if (itemId.includes("ore") || itemId.includes("bar")) return "⛏️";
-    if (itemId.includes("coin")) return "💰";
-    if (itemId.includes("potion") || itemId.includes("vial")) return "🧪";
-    if (
-      itemId.includes("food") ||
-      itemId.includes("bread") ||
-      itemId.includes("meat")
-    )
-      return "🍖";
-    if (itemId.includes("axe")) return "🪓";
-    if (itemId.includes("pickaxe")) return "⛏️";
-    return itemId.substring(0, 2).toUpperCase();
-  };
-
   return (
     <button
       ref={setNodeRef}
@@ -187,8 +155,11 @@ function DraggableInventorySlot({
         e.stopPropagation();
         if (!item) return;
 
-        // Determine if item is equippable based on itemId
+        // Determine if item is equippable based on itemId or itemData
+        const itemData = getItem(item.itemId);
+        // Basic hardcoded logic for now, but respect itemData if present
         const isEquippable =
+          itemData?.equipable ||
           item.itemId.includes("sword") ||
           item.itemId.includes("bow") ||
           item.itemId.includes("shield") ||
@@ -201,9 +172,19 @@ function DraggableInventorySlot({
 
         const items = [
           ...(isEquippable
-            ? [{ id: "equip", label: `Equip ${item.itemId}`, enabled: true }]
+            ? [
+                {
+                  id: "equip",
+                  label: `Equip ${itemData?.name || item.itemId}`,
+                  enabled: true,
+                },
+              ]
             : []),
-          { id: "drop", label: `Drop ${item.itemId}`, enabled: true },
+          {
+            id: "drop",
+            label: `Drop ${itemData?.name || item.itemId}`,
+            enabled: true,
+          },
           { id: "examine", label: "Examine", enabled: true },
         ];
         const evt = new CustomEvent("contextmenu", {
@@ -246,13 +227,13 @@ function DraggableInventorySlot({
       {/* Item Icon - Centered */}
       {!isEmpty && (
         <div
-          className="flex items-center justify-center h-full transition-transform duration-150 group-hover:scale-105 text-sm md:text-base"
+          className="flex items-center justify-center h-full w-full transition-transform duration-150 group-hover:scale-105"
           style={{
             color: "rgba(220, 200, 160, 0.95)",
             filter: "drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5))",
           }}
         >
-          {getItemIcon(item.itemId)}
+          <ItemIcon itemId={item.itemId} />
         </div>
       )}
 
@@ -263,7 +244,7 @@ function DraggableInventorySlot({
           const { text, color } = formatQuantity(item.quantity);
           return (
             <div
-              className="absolute top-0 left-0.5 font-bold leading-none"
+              className="absolute top-0 left-0.5 font-bold leading-none pointer-events-none"
               style={{
                 color: color,
                 fontSize: "clamp(0.5rem, 1.2vw, 0.625rem)",
@@ -643,40 +624,6 @@ export function InventoryPanel({
         <DragOverlay dropAnimation={null} modifiers={[snapCenterToCursor]}>
           {activeItem
             ? (() => {
-                // Get icon for drag overlay
-                const getOverlayIcon = (itemId: string) => {
-                  if (
-                    itemId.includes("sword") ||
-                    itemId.includes("dagger") ||
-                    itemId.includes("scimitar")
-                  )
-                    return "⚔️";
-                  if (itemId.includes("shield") || itemId.includes("defender"))
-                    return "🛡️";
-                  if (
-                    itemId.includes("helmet") ||
-                    itemId.includes("helm") ||
-                    itemId.includes("hat")
-                  )
-                    return "⛑️";
-                  if (itemId.includes("boots") || itemId.includes("boot"))
-                    return "👢";
-                  if (
-                    itemId.includes("fish") ||
-                    itemId.includes("lobster") ||
-                    itemId.includes("shark")
-                  )
-                    return "🐟";
-                  if (itemId.includes("log") || itemId.includes("wood"))
-                    return "🪵";
-                  if (itemId.includes("ore") || itemId.includes("bar"))
-                    return "⛏️";
-                  if (itemId.includes("coin")) return "💰";
-                  if (itemId.includes("potion") || itemId.includes("vial"))
-                    return "🧪";
-                  if (itemId.includes("axe")) return "🪓";
-                  return itemId.substring(0, 2).toUpperCase();
-                };
                 const qtyDisplay =
                   activeItem.quantity > 1
                     ? formatQuantity(activeItem.quantity)
@@ -690,14 +637,15 @@ export function InventoryPanel({
                       borderColor: "rgba(242, 208, 138, 0.6)",
                       background:
                         "linear-gradient(135deg, rgba(242, 208, 138, 0.2) 0%, rgba(242, 208, 138, 0.1) 100%)",
-                      fontSize: dragSlotSize
-                        ? `${dragSlotSize * 0.4}px`
-                        : "1rem", // Scale icon with slot
                       color: COLORS.ACCENT,
                       boxShadow: "0 4px 12px rgba(0, 0, 0, 0.5)",
                     }}
                   >
-                    {getOverlayIcon(activeItem.itemId)}
+                    {/* Reuse ItemIcon component ensures consistent rendering */}
+                    <div className="w-full h-full p-0.5">
+                      <ItemIcon itemId={activeItem.itemId} />
+                    </div>
+
                     {qtyDisplay && (
                       <div
                         className="absolute bottom-0.5 right-0.5 font-bold rounded px-0.5 py-0.5 leading-none"

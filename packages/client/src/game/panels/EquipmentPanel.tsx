@@ -13,6 +13,7 @@ import type {
   PlayerStats,
   ClientWorld,
 } from "../../types";
+import { ItemIcon } from "../../components/ItemIcon";
 
 interface EquipmentPanelProps {
   equipment: PlayerEquipmentItems | null;
@@ -113,41 +114,9 @@ function DroppableEquipmentSlot({
           </span>
         ) : (
           <>
-            <span
-              className="transition-transform duration-200 group-hover:scale-110 mb-1"
-              style={{
-                fontSize: "clamp(1.25rem, 2.5vw, 1.5rem)",
-                filter: "drop-shadow(0 2px 4px rgba(0, 0, 0, 0.8))",
-              }}
-            >
-              {slot.icon}
-            </span>
-            <div
-              className="text-center px-1"
-              style={{
-                fontSize: "clamp(0.563rem, 1vw, 0.625rem)",
-                color: "rgba(242, 208, 138, 0.9)",
-                lineHeight: "1.2",
-                maxWidth: "100%",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {slot.item!.name}
+            <div className="w-4/5 h-4/5 flex items-center justify-center">
+              <ItemIcon itemId={slot.item!.id} size="large" />
             </div>
-            {(slot.item!.quantity ?? 1) > 1 && (
-              <div
-                className="absolute bottom-1 right-1.5 font-bold"
-                style={{
-                  fontSize: "clamp(0.625rem, 1.1vw, 0.75rem)",
-                  color: COLORS.ACCENT,
-                  textShadow: "0 1px 2px rgba(0, 0, 0, 0.8)",
-                }}
-              >
-                {slot.item!.quantity ?? 1}
-              </div>
-            )}
           </>
         )}
       </div>
