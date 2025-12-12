@@ -371,27 +371,23 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     });
 
     // Sync tile position when player respawns at spawn point
-    // CRITICAL: Without this, TileMovementManager has stale tile position from death location
-    // and paths would be calculated from wrong starting tile
-    this.world.on(
-      EventType.PLAYER_RESPAWNED,
-      (event: {
+    this.world.on(EventType.PLAYER_RESPAWNED, (e) => {
+      const event = e as {
         playerId: string;
         spawnPosition: { x: number; y: number; z: number };
-      }) => {
-        if (event.playerId && event.spawnPosition) {
-          this.tileMovementManager.syncPlayerPosition(
-            event.playerId,
-            event.spawnPosition,
-          );
-          // Also clear any pending actions from before death
-          this.actionQueue.cleanup(event.playerId);
-          console.log(
-            `[ServerNetwork] Synced tile position for respawned player ${event.playerId} at (${event.spawnPosition.x}, ${event.spawnPosition.z})`,
-          );
-        }
-      },
-    );
+      };
+      if (event.playerId && event.spawnPosition) {
+        this.tileMovementManager.syncPlayerPosition(
+          event.playerId,
+          event.spawnPosition,
+        );
+        // Also clear any pending actions from before death
+        this.actionQueue.cleanup(event.playerId);
+        console.log(
+          `[ServerNetwork] Synced tile position for respawned player ${event.playerId} at (${event.spawnPosition.x}, ${event.spawnPosition.z})`,
+        );
+      }
+    });
 
     // Handle mob tile movement requests from MobEntity AI
     this.world.on(EventType.MOB_NPC_MOVE_REQUEST, (event) => {
@@ -509,11 +505,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   private registerHandlers(): void {
     // Character selection handlers
     this.handlers["characterSelected"] = (socket, data) =>
-      handleCharacterSelected(
-        socket,
-        data,
-        this.world,
-        this.broadcastManager.sendTo.bind(this.broadcastManager),
+      handleCharacterSelected(socket, data, (socketId, name, payload) =>
+        this.broadcastManager.sendToSocket(socketId, name, payload),
       );
 
     this.handlers["enterWorld"] = (socket, data) =>
@@ -521,16 +514,16 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         socket,
         data,
         this.world,
-        this.db,
-        this.broadcastManager.sendToAll.bind(this.broadcastManager),
+        this.spawn,
+        (name, payload, ignoreSocketId) =>
+          this.broadcastManager.sendToAll(name, payload, ignoreSocketId),
+        (socketId, name, payload) =>
+          this.broadcastManager.sendToSocket(socketId, name, payload),
       );
 
     this.handlers["onChatAdded"] = (socket, data) =>
-      handleChatAdded(
-        socket,
-        data,
-        this.world,
-        this.broadcastManager.sendToAll.bind(this.broadcastManager),
+      handleChatAdded(socket, data, this.world, (event, payload) =>
+        this.broadcastManager.sendToAll(event, payload),
       );
 
     this.handlers["onCommand"] = (socket, data) =>
@@ -539,16 +532,13 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         data,
         this.world,
         this.db,
-        this.broadcastManager.sendToAll.bind(this.broadcastManager),
+        (event, payload) => this.broadcastManager.sendToAll(event, payload),
         this.isBuilder.bind(this),
       );
 
     this.handlers["onEntityModified"] = (socket, data) =>
-      handleEntityModified(
-        socket,
-        data,
-        this.world,
-        this.broadcastManager.sendToAll.bind(this.broadcastManager),
+      handleEntityModified(socket, data, this.world, (event, payload) =>
+        this.broadcastManager.sendToAll(event, payload),
       );
 
     this.handlers["onEntityEvent"] = (socket, data) =>
@@ -629,18 +619,13 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       handleCharacterListRequest(socket, this.world);
 
     this.handlers["onCharacterCreate"] = (socket, data) =>
-      handleCharacterCreate(
-        socket,
-        data,
-        this.world,
-        this.broadcastManager.sendToSocket.bind(this.broadcastManager),
+      handleCharacterCreate(socket, data, this.world, (event, payload) =>
+        this.broadcastManager.sendToSocket(socket.id, event, payload),
       );
 
     this.handlers["onCharacterSelected"] = (socket, data) =>
-      handleCharacterSelected(
-        socket,
-        data,
-        this.broadcastManager.sendToSocket.bind(this.broadcastManager),
+      handleCharacterSelected(socket, data, (event, payload) =>
+        this.broadcastManager.sendToSocket(socket.id, event, payload),
       );
 
     this.handlers["onEnterWorld"] = (socket, data) =>
@@ -649,8 +634,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         data,
         this.world,
         this.spawn,
-        this.broadcastManager.sendToAll.bind(this.broadcastManager),
-        this.broadcastManager.sendToSocket.bind(this.broadcastManager),
+        (event, payload) => this.broadcastManager.sendToAll(event, payload),
+        (event, payload) =>
+          this.broadcastManager.sendToSocket(socket.id, event, payload),
       );
 
     // Agent goal sync handler - stores goal and available goals for dashboard display
@@ -704,7 +690,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       );
 
     this.handlers["onBankDepositAll"] = (socket, data) =>
-      handleBankDepositAll(socket, data, this.world);
+      handleBankDepositAll(
+        socket,
+        data as { targetTabIndex?: number },
+        this.world,
+      );
 
     this.handlers["onBankDepositCoins"] = (socket, data) =>
       handleBankDepositCoins(socket, data as { amount: number }, this.world);
@@ -718,7 +708,12 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.handlers["onBankMove"] = (socket, data) =>
       handleBankMove(
         socket,
-        data as { fromSlot: number; toSlot: number; mode: "swap" | "insert" },
+        data as {
+          fromSlot: number;
+          toSlot: number;
+          mode: "swap" | "insert";
+          tabIndex: number;
+        },
         this.world,
       );
 

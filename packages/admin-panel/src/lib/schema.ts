@@ -1,6 +1,6 @@
 /**
  * Database Schema for Admin Panel
- * 
+ *
  * Mirrors the server schema for type consistency.
  * This is a read-only view - write operations should go through the game server.
  */
@@ -15,106 +15,106 @@ import {
   serial,
   unique,
   index,
-} from 'drizzle-orm/pg-core';
-import { relations } from 'drizzle-orm';
+} from "drizzle-orm/pg-core";
+import { relations, sql } from "drizzle-orm";
 
 // Users Table
 export const users = pgTable(
-  'users',
+  "users",
   {
-    id: text('id').primaryKey(),
-    name: text('name').notNull(),
-    roles: text('roles').notNull(),
-    createdAt: text('createdAt').notNull(),
-    avatar: text('avatar'),
-    wallet: text('wallet'),
-    privyUserId: text('privyUserId').unique(),
-    farcasterFid: text('farcasterFid'),
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    roles: text("roles").notNull(),
+    createdAt: text("createdAt").notNull(),
+    avatar: text("avatar"),
+    wallet: text("wallet"),
+    privyUserId: text("privyUserId").unique(),
+    farcasterFid: text("farcasterFid"),
   },
   (table) => ({
-    privyIdx: index('idx_users_privy').on(table.privyUserId),
-    farcasterIdx: index('idx_users_farcaster').on(table.farcasterFid),
+    privyIdx: index("idx_users_privy").on(table.privyUserId),
+    farcasterIdx: index("idx_users_farcaster").on(table.farcasterFid),
   }),
 );
 
 // Characters Table
 export const characters = pgTable(
-  'characters',
+  "characters",
   {
-    id: text('id').primaryKey(),
-    accountId: text('accountId').notNull(),
-    name: text('name').notNull(),
-    createdAt: bigint('createdAt', { mode: 'number' }),
-    
+    id: text("id").primaryKey(),
+    accountId: text("accountId").notNull(),
+    name: text("name").notNull(),
+    createdAt: bigint("createdAt", { mode: "number" }),
+
     // Combat stats
-    combatLevel: integer('combatLevel').default(3),
-    attackLevel: integer('attackLevel').default(1),
-    strengthLevel: integer('strengthLevel').default(1),
-    defenseLevel: integer('defenseLevel').default(1),
-    constitutionLevel: integer('constitutionLevel').default(10),
-    rangedLevel: integer('rangedLevel').default(1),
-    
+    combatLevel: integer("combatLevel").default(3),
+    attackLevel: integer("attackLevel").default(1),
+    strengthLevel: integer("strengthLevel").default(1),
+    defenseLevel: integer("defenseLevel").default(1),
+    constitutionLevel: integer("constitutionLevel").default(10),
+    rangedLevel: integer("rangedLevel").default(1),
+
     // Gathering skills
-    miningLevel: integer('miningLevel').default(1),
-    woodcuttingLevel: integer('woodcuttingLevel').default(1),
-    fishingLevel: integer('fishingLevel').default(1),
-    firemakingLevel: integer('firemakingLevel').default(1),
-    cookingLevel: integer('cookingLevel').default(1),
-    
+    miningLevel: integer("miningLevel").default(1),
+    woodcuttingLevel: integer("woodcuttingLevel").default(1),
+    fishingLevel: integer("fishingLevel").default(1),
+    firemakingLevel: integer("firemakingLevel").default(1),
+    cookingLevel: integer("cookingLevel").default(1),
+
     // XP
-    attackXp: integer('attackXp').default(0),
-    strengthXp: integer('strengthXp').default(0),
-    defenseXp: integer('defenseXp').default(0),
-    constitutionXp: integer('constitutionXp').default(1154),
-    rangedXp: integer('rangedXp').default(0),
-    miningXp: integer('miningXp').default(0),
-    woodcuttingXp: integer('woodcuttingXp').default(0),
-    fishingXp: integer('fishingXp').default(0),
-    firemakingXp: integer('firemakingXp').default(0),
-    cookingXp: integer('cookingXp').default(0),
-    
+    attackXp: integer("attackXp").default(0),
+    strengthXp: integer("strengthXp").default(0),
+    defenseXp: integer("defenseXp").default(0),
+    constitutionXp: integer("constitutionXp").default(1154),
+    rangedXp: integer("rangedXp").default(0),
+    miningXp: integer("miningXp").default(0),
+    woodcuttingXp: integer("woodcuttingXp").default(0),
+    fishingXp: integer("fishingXp").default(0),
+    firemakingXp: integer("firemakingXp").default(0),
+    cookingXp: integer("cookingXp").default(0),
+
     // Status
-    health: integer('health').default(100),
-    maxHealth: integer('maxHealth').default(100),
-    coins: integer('coins').default(0),
-    
+    health: integer("health").default(100),
+    maxHealth: integer("maxHealth").default(100),
+    coins: integer("coins").default(0),
+
     // Position
-    positionX: real('positionX').default(0),
-    positionY: real('positionY').default(10),
-    positionZ: real('positionZ').default(0),
-    
-    attackStyle: text('attackStyle').default('accurate'),
-    lastLogin: bigint('lastLogin', { mode: 'number' }).default(0),
-    avatar: text('avatar'),
-    wallet: text('wallet'),
-    isAgent: integer('isAgent').default(0).notNull(),
+    positionX: real("positionX").default(0),
+    positionY: real("positionY").default(10),
+    positionZ: real("positionZ").default(0),
+
+    attackStyle: text("attackStyle").default("accurate"),
+    lastLogin: bigint("lastLogin", { mode: "number" }).default(0),
+    avatar: text("avatar"),
+    wallet: text("wallet"),
+    isAgent: integer("isAgent").default(0).notNull(),
   },
   (table) => ({
-    accountIdx: index('idx_characters_account').on(table.accountId),
-    walletIdx: index('idx_characters_wallet').on(table.wallet),
-    isAgentIdx: index('idx_characters_is_agent').on(table.isAgent),
+    accountIdx: index("idx_characters_account").on(table.accountId),
+    walletIdx: index("idx_characters_wallet").on(table.wallet),
+    isAgentIdx: index("idx_characters_is_agent").on(table.isAgent),
   }),
 );
 
 // Inventory Table
-export const inventory = pgTable('inventory', {
-  id: serial('id').primaryKey(),
-  playerId: text('playerId').notNull(),
-  itemId: text('itemId').notNull(),
-  quantity: integer('quantity').default(1),
-  slotIndex: integer('slotIndex').default(-1),
-  metadata: text('metadata'),
+export const inventory = pgTable("inventory", {
+  id: serial("id").primaryKey(),
+  playerId: text("playerId").notNull(),
+  itemId: text("itemId").notNull(),
+  quantity: integer("quantity").default(1),
+  slotIndex: integer("slotIndex").default(-1),
+  metadata: text("metadata"),
 });
 
 // Equipment Table
 export const equipment = pgTable(
-  'equipment',
+  "equipment",
   {
-    id: serial('id').primaryKey(),
-    playerId: text('playerId').notNull(),
-    slotType: text('slotType').notNull(),
-    itemId: text('itemId'),
-    quantity: integer('quantity').default(1),
+    id: serial("id").primaryKey(),
+    playerId: text("playerId").notNull(),
+    slotType: text("slotType").notNull(),
+    itemId: text("itemId"),
+    quantity: integer("quantity").default(1),
   },
   (table) => ({
     uniquePlayerSlot: unique().on(table.playerId, table.slotType),
@@ -123,60 +123,118 @@ export const equipment = pgTable(
 
 // Bank Storage Table
 export const bankStorage = pgTable(
-  'bank_storage',
+  "bank_storage",
   {
-    id: serial('id').primaryKey(),
-    playerId: text('playerId').notNull(),
-    itemId: text('itemId').notNull(),
-    quantity: integer('quantity').default(1).notNull(),
-    slot: integer('slot').default(0).notNull(),
+    id: serial("id").primaryKey(),
+    playerId: text("playerId").notNull(),
+    itemId: text("itemId").notNull(),
+    quantity: integer("quantity").default(1).notNull(),
+    slot: integer("slot").default(0).notNull(),
+    tabIndex: integer("tabIndex").default(0).notNull(),
   },
   (table) => ({
-    uniquePlayerSlot: unique().on(table.playerId, table.slot),
-    playerIdx: index('idx_bank_storage_player').on(table.playerId),
+    uniquePlayerTabSlot: unique().on(
+      table.playerId,
+      table.tabIndex,
+      table.slot,
+    ),
+    playerIdx: index("idx_bank_storage_player").on(table.playerId),
+    playerTabIdx: index("idx_bank_storage_player_tab").on(
+      table.playerId,
+      table.tabIndex,
+    ),
+  }),
+);
+
+// Bank Tabs Table
+export const bankTabs = pgTable(
+  "bank_tabs",
+  {
+    id: serial("id").primaryKey(),
+    playerId: text("playerId")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    tabIndex: integer("tabIndex").notNull(),
+    iconItemId: text("iconItemId"),
+    createdAt: bigint("createdAt", { mode: "number" })
+      .notNull()
+      .default(sql`(EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT`),
+  },
+  (table) => ({
+    uniquePlayerTab: unique().on(table.playerId, table.tabIndex),
+    playerIdx: index("idx_bank_tabs_player").on(table.playerId),
+  }),
+);
+
+// Bank Placeholders Table
+export const bankPlaceholders = pgTable(
+  "bank_placeholders",
+  {
+    id: serial("id").primaryKey(),
+    playerId: text("playerId")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    tabIndex: integer("tabIndex").default(0).notNull(),
+    slot: integer("slot").notNull(),
+    itemId: text("itemId").notNull(),
+    createdAt: bigint("createdAt", { mode: "number" })
+      .notNull()
+      .default(sql`(EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT`),
+  },
+  (table) => ({
+    uniquePlayerTabSlot: unique().on(
+      table.playerId,
+      table.tabIndex,
+      table.slot,
+    ),
+    playerIdx: index("idx_bank_placeholders_player").on(table.playerId),
+    playerItemIdx: index("idx_bank_placeholders_player_item").on(
+      table.playerId,
+      table.itemId,
+    ),
   }),
 );
 
 // Player Sessions Table
-export const playerSessions = pgTable('player_sessions', {
-  id: text('id').primaryKey(),
-  playerId: text('playerId').notNull(),
-  sessionStart: bigint('sessionStart', { mode: 'number' }).notNull(),
-  sessionEnd: bigint('sessionEnd', { mode: 'number' }),
-  playtimeMinutes: integer('playtimeMinutes').default(0),
-  reason: text('reason'),
-  lastActivity: bigint('lastActivity', { mode: 'number' }).default(0),
+export const playerSessions = pgTable("player_sessions", {
+  id: text("id").primaryKey(),
+  playerId: text("playerId").notNull(),
+  sessionStart: bigint("sessionStart", { mode: "number" }).notNull(),
+  sessionEnd: bigint("sessionEnd", { mode: "number" }),
+  playtimeMinutes: integer("playtimeMinutes").default(0),
+  reason: text("reason"),
+  lastActivity: bigint("lastActivity", { mode: "number" }).default(0),
 });
 
 // NPC Kills Table
 export const npcKills = pgTable(
-  'npc_kills',
+  "npc_kills",
   {
-    id: serial('id').primaryKey(),
-    playerId: text('playerId').notNull(),
-    npcId: text('npcId').notNull(),
-    killCount: integer('killCount').default(1).notNull(),
+    id: serial("id").primaryKey(),
+    playerId: text("playerId").notNull(),
+    npcId: text("npcId").notNull(),
+    killCount: integer("killCount").default(1).notNull(),
   },
   (table) => ({
     uniquePlayerNpc: unique().on(table.playerId, table.npcId),
-    playerIdx: index('idx_npc_kills_player').on(table.playerId),
+    playerIdx: index("idx_npc_kills_player").on(table.playerId),
   }),
 );
 
 // Agent Mappings Table - ElizaOS agent tracking
 export const agentMappings = pgTable(
-  'agent_mappings',
+  "agent_mappings",
   {
-    agentId: text('agent_id').primaryKey().notNull(),
-    accountId: text('account_id').notNull(),
-    characterId: text('character_id').notNull(),
-    agentName: text('agent_name').notNull(),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    agentId: text("agent_id").primaryKey().notNull(),
+    accountId: text("account_id").notNull(),
+    characterId: text("character_id").notNull(),
+    agentName: text("agent_name").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => ({
-    accountIdx: index('idx_agent_mappings_account').on(table.accountId),
-    characterIdx: index('idx_agent_mappings_character').on(table.characterId),
+    accountIdx: index("idx_agent_mappings_account").on(table.accountId),
+    characterIdx: index("idx_agent_mappings_character").on(table.characterId),
   }),
 );
 
