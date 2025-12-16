@@ -72,5 +72,39 @@ body {
       0 0 10px hsl(var(--neon-blue)),
       0 0 20px hsl(var(--neon-blue) / 0.5);
   }
+
+  /* Themed Scrollbar */
+  .themed-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: oklch(var(--glass-border)) transparent;
+  }
+
+  .themed-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .themed-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+    border-radius: 3px;
+  }
+
+  .themed-scrollbar::-webkit-scrollbar-thumb {
+    background: oklch(var(--glass-border));
+    border-radius: 3px;
+    transition: background 0.2s ease;
+  }
+
+  .themed-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: oklch(var(--neon-blue) / 0.6);
+  }
+
+  .dark .themed-scrollbar::-webkit-scrollbar-thumb {
+    background: oklch(35% 0 0);
+  }
+
+  .dark .themed-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: oklch(var(--neon-blue) / 0.7);
+  }
 }
 

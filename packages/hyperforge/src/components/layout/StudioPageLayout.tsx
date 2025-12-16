@@ -126,7 +126,7 @@ export function StudioPageLayout({
         </div>
 
         {/* Studio Pages */}
-        <div className="flex-1 p-3 overflow-hidden">
+        <div className="flex-1 p-3 overflow-y-auto themed-scrollbar">
           {!sidebarCollapsed && (
             <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 px-2">
               Studio
