@@ -1,11 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronRight, ChevronLeft, Filter, FileStack } from "lucide-react";
+import {
+  ChevronRight,
+  ChevronLeft,
+  Filter,
+  FileStack,
+  Upload,
+} from "lucide-react";
 import { SpectacularButton } from "@/components/ui/spectacular-button";
 import { AssetLibrary } from "./AssetLibrary";
 import { CategoryTree } from "./CategoryTree";
 import { AssetFilters } from "./AssetFilters";
+import { AssetUploadModal } from "./AssetUploadModal";
 
 import type { AssetData } from "@/types/asset";
 
@@ -22,6 +29,13 @@ export function AssetLibrarySidebar({
 }: AssetLibrarySidebarProps) {
   const [showFilters, setShowFilters] = useState(false);
   const [showCategories, setShowCategories] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const handleUploadComplete = () => {
+    // Refresh the asset library
+    setRefreshKey((prev) => prev + 1);
+  };
 
   if (isCollapsed) {
     return (
@@ -40,6 +54,13 @@ export function AssetLibrarySidebar({
 
   return (
     <div className="w-80 border-r border-glass-border flex flex-col h-full">
+      {/* Upload Modal */}
+      <AssetUploadModal
+        isOpen={showUploadModal}
+        onClose={() => setShowUploadModal(false)}
+        onUploadComplete={handleUploadComplete}
+      />
+
       {/* Header */}
       <div className="p-4 border-b border-glass-border">
         <div className="flex items-center justify-between mb-3">
@@ -54,6 +75,15 @@ export function AssetLibrarySidebar({
             </SpectacularButton>
             <h2 className="text-lg font-semibold">VAULT</h2>
           </div>
+          <SpectacularButton
+            variant="default"
+            size="sm"
+            onClick={() => setShowUploadModal(true)}
+            className="flex items-center gap-1"
+          >
+            <Upload className="w-4 h-4" />
+            Upload
+          </SpectacularButton>
         </div>
 
         {/* Filters Toggle */}
@@ -96,7 +126,7 @@ export function AssetLibrarySidebar({
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          <AssetLibrary onAssetSelect={onAssetSelect} />
+          <AssetLibrary key={refreshKey} onAssetSelect={onAssetSelect} />
         </div>
 
         {/* Categories */}
