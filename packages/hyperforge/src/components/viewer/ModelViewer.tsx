@@ -145,6 +145,45 @@ function LoadedModel({
 }
 
 /**
+ * Check if a URL points to a valid 3D model file
+ */
+function isValidModelUrl(url: string): boolean {
+  if (!url || url.trim() === "") return false;
+
+  const lowerUrl = url.toLowerCase();
+
+  // Must end with a valid 3D model extension
+  const validExtensions = [".glb", ".gltf"];
+  const hasValidExtension = validExtensions.some((ext) =>
+    lowerUrl.endsWith(ext),
+  );
+
+  // Check for audio/video/image extensions that should NOT be loaded
+  const invalidExtensions = [
+    ".mp3",
+    ".wav",
+    ".ogg",
+    ".mp4",
+    ".webm",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+  ];
+  const hasInvalidExtension = invalidExtensions.some((ext) =>
+    lowerUrl.endsWith(ext),
+  );
+
+  if (hasInvalidExtension) {
+    console.warn("[ModelViewer] Rejecting non-3D asset URL:", url);
+    return false;
+  }
+
+  return hasValidExtension;
+}
+
+/**
  * Main ModelViewer component
  * Loads and displays GLB/GLTF models from URLs
  */
@@ -158,6 +197,12 @@ export function ModelViewer({ modelUrl, onModelLoad }: ModelViewerProps) {
 
   // Show placeholder if no URL or invalid URL (just base CDN URL with no path)
   if (!modelUrl || modelUrl.trim() === "") {
+    return <PlaceholderBox />;
+  }
+
+  // Validate that the URL is a valid 3D model file
+  if (!isValidModelUrl(modelUrl)) {
+    console.warn("[ModelViewer] Invalid model URL (not a 3D model):", modelUrl);
     return <PlaceholderBox />;
   }
 

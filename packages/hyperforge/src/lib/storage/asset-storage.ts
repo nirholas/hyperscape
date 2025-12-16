@@ -312,16 +312,40 @@ export async function downloadAndSaveModel(
   });
 }
 
+// Directories that are not 3D asset folders (used for other purposes)
+const EXCLUDED_DIRECTORIES = [
+  "audio", // Voice, SFX, and music files
+  "sprites", // Sprite sheets
+  "textures", // Shared textures
+  "temp", // Temporary files
+  "cache", // Cache files
+  ".DS_Store", // macOS system files
+];
+
 /**
  * List all asset IDs in storage
+ * Filters out special directories that are not 3D assets
  */
 export async function listAssetIds(): Promise<string[]> {
   try {
     await ensureAssetsDir();
     const entries = await fs.readdir(ASSETS_BASE_DIR, { withFileTypes: true });
-    return entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name);
+
+    // Filter to only include actual asset directories
+    const assetDirs = entries.filter((entry) => {
+      // Must be a directory
+      if (!entry.isDirectory()) return false;
+
+      // Exclude special/reserved directories
+      if (EXCLUDED_DIRECTORIES.includes(entry.name)) return false;
+
+      // Exclude hidden directories (starting with .)
+      if (entry.name.startsWith(".")) return false;
+
+      return true;
+    });
+
+    return assetDirs.map((entry) => entry.name);
   } catch {
     return [];
   }
