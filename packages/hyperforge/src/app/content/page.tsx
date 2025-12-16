@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { NPCContentGenerator } from "@/components/content/NPCContentGenerator";
 import { QuestGenerator } from "@/components/content/QuestGenerator";
 import { AreaGenerator } from "@/components/content/AreaGenerator";
@@ -52,10 +52,19 @@ type GeneratedContent = {
 
 export default function ContentGenerationPage() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState<ContentTab>("npc");
   const [generatedContent, setGeneratedContent] = useState<GeneratedContent[]>(
     [],
   );
+
+  // Read tab from URL query parameter
+  useEffect(() => {
+    const tabParam = searchParams.get("tab");
+    if (tabParam && ["npc", "quest", "area", "item"].includes(tabParam)) {
+      setActiveTab(tabParam as ContentTab);
+    }
+  }, [searchParams]);
 
   const contentTabs = [
     { id: "npc" as const, label: "NPCs", icon: Users },

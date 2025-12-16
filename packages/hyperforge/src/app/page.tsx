@@ -22,6 +22,10 @@ import {
   Mic,
   Volume2,
   Upload,
+  Users,
+  Scroll,
+  Map,
+  Sword,
   type LucideIcon,
 } from "lucide-react";
 import { Viewport3D } from "@/components/viewer/Viewport3D";
@@ -232,7 +236,7 @@ export default function HomePage() {
             </nav>
           </div>
 
-          {/* Content Generation Link */}
+          {/* Content Generation Links */}
           <div
             className={`mt-6 pt-4 border-t border-glass-border ${sidebarCollapsed ? "px-0" : ""}`}
           >
@@ -241,18 +245,84 @@ export default function HomePage() {
                 Content
               </div>
             )}
-            <Link
-              href="/content"
-              title={sidebarCollapsed ? "NPC Dialogue" : undefined}
-              className={`
-                w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
-                text-muted-foreground hover:text-foreground hover:bg-glass-bg transition-all duration-200
-                ${sidebarCollapsed ? "justify-center" : ""}
-              `}
-            >
-              <MessageSquare className="w-4 h-4 flex-shrink-0" />
-              {!sidebarCollapsed && <span>NPC Dialogue</span>}
-            </Link>
+            <nav className="space-y-1">
+              <Link
+                href="/content"
+                title={
+                  sidebarCollapsed
+                    ? "NPCs & Dialogue"
+                    : "Generate NPC dialogue trees"
+                }
+                className={`
+                  w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
+                  text-muted-foreground hover:text-foreground hover:bg-glass-bg transition-all duration-200
+                  ${sidebarCollapsed ? "justify-center" : ""}
+                `}
+              >
+                <Users className="w-4 h-4 flex-shrink-0" />
+                {!sidebarCollapsed && (
+                  <>
+                    <span className="truncate flex-1">NPCs & Dialogue</span>
+                    <ExternalLink className="w-3 h-3 text-muted-foreground/50" />
+                  </>
+                )}
+              </Link>
+              <Link
+                href="/content?tab=quest"
+                title={sidebarCollapsed ? "Quests" : "Generate quest chains"}
+                className={`
+                  w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
+                  text-muted-foreground hover:text-foreground hover:bg-glass-bg transition-all duration-200
+                  ${sidebarCollapsed ? "justify-center" : ""}
+                `}
+              >
+                <Scroll className="w-4 h-4 flex-shrink-0" />
+                {!sidebarCollapsed && (
+                  <>
+                    <span className="truncate flex-1">Quests</span>
+                    <ExternalLink className="w-3 h-3 text-muted-foreground/50" />
+                  </>
+                )}
+              </Link>
+              <Link
+                href="/content?tab=area"
+                title={
+                  sidebarCollapsed ? "World Areas" : "Generate world areas"
+                }
+                className={`
+                  w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
+                  text-muted-foreground hover:text-foreground hover:bg-glass-bg transition-all duration-200
+                  ${sidebarCollapsed ? "justify-center" : ""}
+                `}
+              >
+                <Map className="w-4 h-4 flex-shrink-0" />
+                {!sidebarCollapsed && (
+                  <>
+                    <span className="truncate flex-1">World Areas</span>
+                    <ExternalLink className="w-3 h-3 text-muted-foreground/50" />
+                  </>
+                )}
+              </Link>
+              <Link
+                href="/content?tab=item"
+                title={
+                  sidebarCollapsed ? "Items" : "Generate items & equipment"
+                }
+                className={`
+                  w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
+                  text-muted-foreground hover:text-foreground hover:bg-glass-bg transition-all duration-200
+                  ${sidebarCollapsed ? "justify-center" : ""}
+                `}
+              >
+                <Sword className="w-4 h-4 flex-shrink-0" />
+                {!sidebarCollapsed && (
+                  <>
+                    <span className="truncate flex-1">Items</span>
+                    <ExternalLink className="w-3 h-3 text-muted-foreground/50" />
+                  </>
+                )}
+              </Link>
+            </nav>
           </div>
 
           {/* Audio Section */}
