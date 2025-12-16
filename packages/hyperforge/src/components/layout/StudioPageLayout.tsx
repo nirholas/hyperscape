@@ -9,8 +9,7 @@ import {
   Shield,
   Hand,
   RefreshCw,
-  ChevronLeft,
-  ChevronRight,
+  Globe,
   Sparkles,
   MessageSquare,
   Plus,
@@ -20,6 +19,7 @@ import {
   Mic,
   type LucideIcon,
 } from "lucide-react";
+import { WorldView } from "@/components/world/WorldView";
 
 interface StudioPageLayoutProps {
   children: ReactNode;
@@ -53,6 +53,7 @@ export function StudioPageLayout({
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [vaultOpen, setVaultOpen] = useState(showVault);
   const [mounted, setMounted] = useState(false);
+  const [worldViewOpen, setWorldViewOpen] = useState(false);
 
   // Ensure consistent rendering between server and client
   useEffect(() => {
@@ -79,9 +80,13 @@ export function StudioPageLayout({
           transition-all duration-300 ease-in-out
         `}
       >
-        {/* Logo */}
+        {/* Logo - Click to collapse */}
         <div className="p-4 border-b border-glass-border">
-          <div className="flex items-center gap-2">
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className="flex items-center gap-2 w-full hover:opacity-80 transition-opacity"
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 flex-shrink-0">
               <Sparkles className="w-4 h-4 text-white" />
             </div>
@@ -90,7 +95,7 @@ export function StudioPageLayout({
                 HYPERFORGE
               </span>
             )}
-          </div>
+          </button>
         </div>
 
         {/* Back to Library */}
@@ -255,7 +260,7 @@ export function StudioPageLayout({
           </div>
         </div>
 
-        {/* Vault Toggle & Collapse */}
+        {/* Vault Toggle & World View */}
         <div className="p-3 border-t border-glass-border space-y-2">
           {assetSidebar && (
             <button
@@ -277,19 +282,19 @@ export function StudioPageLayout({
             </button>
           )}
 
-          {/* Collapse Toggle */}
+          {/* World View Button */}
           <button
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-glass-bg transition-all duration-200"
+            onClick={() => setWorldViewOpen(true)}
+            title={sidebarCollapsed ? "World View" : "View game world entities"}
+            className={`
+              w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm
+              transition-all duration-200
+              ${sidebarCollapsed ? "justify-center" : ""}
+              text-muted-foreground hover:text-foreground hover:bg-glass-bg
+            `}
           >
-            {sidebarCollapsed ? (
-              <ChevronRight className="w-4 h-4" />
-            ) : (
-              <>
-                <ChevronLeft className="w-4 h-4" />
-                <span>Collapse</span>
-              </>
-            )}
+            <Globe className="w-4 h-4 flex-shrink-0" />
+            {!sidebarCollapsed && <span>World View</span>}
           </button>
         </div>
       </aside>
@@ -318,6 +323,12 @@ export function StudioPageLayout({
 
       {/* === MAIN VIEWPORT === */}
       <main className="flex-1 relative overflow-hidden">{children}</main>
+
+      {/* === WORLD VIEW MODAL === */}
+      <WorldView
+        isOpen={worldViewOpen}
+        onClose={() => setWorldViewOpen(false)}
+      />
     </div>
   );
 }
