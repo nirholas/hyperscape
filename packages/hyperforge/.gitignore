@@ -50,7 +50,7 @@ hyperforge.db
 *.swo
 *~
 
-# Generated Assets - local storage
+# Generated Assets - local storage (root-level folders only)
 /public/assets/
 /public/generated/
 /storage/
