@@ -20,6 +20,7 @@
 import THREE from "../../extras/three/three";
 import { System } from "../shared/infrastructure/System";
 import { EventType } from "../../types/events";
+import { SKILL_ICONS } from "../../data/skill-icons";
 import type { World } from "../../core/World";
 
 interface XPDrop {
@@ -29,25 +30,6 @@ interface XPDrop {
   startY: number;
   riseDistance: number;
 }
-
-// Skill emoji icons (matching SkillsPanel.tsx)
-const SKILL_ICONS: Record<string, string> = {
-  attack: "⚔️",
-  strength: "💪",
-  defence: "🛡️",
-  defense: "🛡️",
-  constitution: "❤️",
-  hitpoints: "❤️",
-  ranged: "🏹",
-  prayer: "✨",
-  magic: "🔮",
-  cooking: "🍖",
-  woodcutting: "🪓",
-  fishing: "🐟",
-  firemaking: "🔥",
-  mining: "⛏️",
-  smithing: "🔨",
-};
 
 export class XPDropSystem extends System {
   name = "xp-drop";

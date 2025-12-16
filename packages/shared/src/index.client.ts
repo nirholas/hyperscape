@@ -94,6 +94,9 @@ export { getItem } from "./data/items";
 // Export avatar options for character creation
 export { AVATAR_OPTIONS } from "./data/avatars";
 
+// Export skill icons for XP displays
+export { SKILL_ICONS, getSkillIcon } from "./data/skill-icons";
+
 // Export CLIENT system classes only (NO SERVER SYSTEMS)
 export { Entities } from "./systems/shared";
 export { Physics } from "./systems/shared";

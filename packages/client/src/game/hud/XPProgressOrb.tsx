@@ -1,12 +1,15 @@
 /**
- * XPProgressOrb - RuneScape 3 / RuneLite XP Globes-style XP Progress Display
+ * XPProgressOrb - XP Progress Display (RuneLite XP Globes-style)
  *
- * Shows multiple circular progress orbs at the top-center of the screen:
- * - Separate orb for each active skill (displayed side by side)
- * - Each orb has its own progress ring, skill icon, and level badge
- * - Floating XP numbers (grouped by game tick) rise toward the orbs
- * - Hover tooltip on each orb shows current XP and XP to next level
- * - Orbs fade after a number of game ticks (600ms each) without XP gain
+ * Shows circular progress orbs at top-center of screen:
+ * - Separate orb per active skill (side by side)
+ * - Progress ring shows XP to next level
+ * - Floating XP numbers (grouped by game tick) rise toward orbs
+ * - Hover tooltip shows detailed XP info
+ * - Orbs fade after ~10 seconds of inactivity
+ * - Smooth fade-out animation (1 second)
+ *
+ * @see XPDropSystem for alternative 3D sprite-based drops (disabled)
  */
 
 import React, {
@@ -17,27 +20,8 @@ import React, {
   useMemo,
 } from "react";
 import styled, { keyframes, css } from "styled-components";
-import { EventType } from "@hyperscape/shared";
+import { EventType, SKILL_ICONS } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
-
-// Skill icons mapping
-const SKILL_ICONS: Record<string, string> = {
-  attack: "\u2694\uFE0F",
-  strength: "\uD83D\uDCAA",
-  defence: "\uD83D\uDEE1\uFE0F",
-  defense: "\uD83D\uDEE1\uFE0F",
-  constitution: "\u2764\uFE0F",
-  hitpoints: "\u2764\uFE0F",
-  ranged: "\uD83C\uDFF9",
-  prayer: "\u2728",
-  magic: "\uD83D\uDD2E",
-  cooking: "\uD83C\uDF56",
-  woodcutting: "\uD83E\uDE93",
-  fishing: "\uD83D\uDC1F",
-  firemaking: "\uD83D\uDD25",
-  mining: "\u26CF\uFE0F",
-  smithing: "\uD83D\uDD28",
-};
 
 // Game tick duration in ms (OSRS-style)
 const GAME_TICK_MS = 600;
