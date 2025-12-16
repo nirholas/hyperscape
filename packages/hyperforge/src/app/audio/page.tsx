@@ -2,6 +2,7 @@
 
 import { StudioPageLayout } from "@/components/layout/StudioPageLayout";
 import { AudioStudioPanel } from "@/components/modules/AudioStudioPanel";
+import { AudioAssetsViewer } from "@/components/audio/AudioAssetsViewer";
 
 export default function AudioStudioPage() {
   return (
@@ -94,9 +95,12 @@ export default function AudioStudioPage() {
             </div>
 
             {/* Audio Studio Panel */}
-            <div className="rounded-xl border border-glass-border bg-glass-bg/30 backdrop-blur-sm overflow-hidden">
+            <div className="rounded-xl border border-glass-border bg-glass-bg/30 backdrop-blur-sm overflow-hidden mb-8">
               <AudioStudioPanel />
             </div>
+
+            {/* Audio Assets Viewer */}
+            <AudioAssetsViewer />
           </div>
         </div>
       </div>
