@@ -4,6 +4,9 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { NPCContentGenerator } from "@/components/content/NPCContentGenerator";
+import { QuestGenerator } from "@/components/content/QuestGenerator";
+import { AreaGenerator } from "@/components/content/AreaGenerator";
+import { ItemGenerator } from "@/components/content/ItemGenerator";
 import { GlassPanel } from "@/components/ui/glass-panel";
 import {
   Users,
@@ -14,9 +17,14 @@ import {
   MessageSquare,
   Settings,
   Sparkles,
-  ChevronLeft,
+  Store,
 } from "lucide-react";
 import type { GeneratedNPCContent } from "@/types/game/dialogue-types";
+import type {
+  GeneratedQuestContent,
+  GeneratedAreaContent,
+  GeneratedItemContent,
+} from "@/types/game/content-types";
 
 const mainNavItems = [
   {
@@ -35,22 +43,73 @@ const mainNavItems = [
 
 type ContentTab = "npc" | "quest" | "area" | "item";
 
+type GeneratedContent = {
+  type: "npc" | "quest" | "area" | "item";
+  name: string;
+  id: string;
+  timestamp: string;
+};
+
 export default function ContentGenerationPage() {
   const pathname = usePathname();
   const [activeTab, setActiveTab] = useState<ContentTab>("npc");
-  const [generatedContent, setGeneratedContent] = useState<
-    GeneratedNPCContent[]
-  >([]);
+  const [generatedContent, setGeneratedContent] = useState<GeneratedContent[]>(
+    [],
+  );
 
   const contentTabs = [
     { id: "npc" as const, label: "NPCs", icon: Users },
-    { id: "quest" as const, label: "Quests", icon: Scroll, disabled: true },
-    { id: "area" as const, label: "Areas", icon: Map, disabled: true },
-    { id: "item" as const, label: "Items", icon: Sword, disabled: true },
+    { id: "quest" as const, label: "Quests", icon: Scroll },
+    { id: "area" as const, label: "Areas", icon: Map },
+    { id: "item" as const, label: "Items", icon: Sword },
   ];
 
   const handleNPCGenerated = (content: GeneratedNPCContent) => {
-    setGeneratedContent((prev) => [content, ...prev]);
+    setGeneratedContent((prev) => [
+      {
+        type: "npc",
+        name: content.name,
+        id: content.id,
+        timestamp: content.generatedAt,
+      },
+      ...prev,
+    ]);
+  };
+
+  const handleQuestGenerated = (content: GeneratedQuestContent) => {
+    setGeneratedContent((prev) => [
+      {
+        type: "quest",
+        name: content.quest.name,
+        id: content.quest.id,
+        timestamp: content.generatedAt,
+      },
+      ...prev,
+    ]);
+  };
+
+  const handleAreaGenerated = (content: GeneratedAreaContent) => {
+    setGeneratedContent((prev) => [
+      {
+        type: "area",
+        name: content.area.name,
+        id: content.area.id,
+        timestamp: content.generatedAt,
+      },
+      ...prev,
+    ]);
+  };
+
+  const handleItemGenerated = (content: GeneratedItemContent) => {
+    setGeneratedContent((prev) => [
+      {
+        type: "item",
+        name: content.item.name,
+        id: content.item.id,
+        timestamp: content.generatedAt,
+      },
+      ...prev,
+    ]);
   };
 
   return (
@@ -105,27 +164,19 @@ export default function ContentGenerationPage() {
           {contentTabs.map((tab) => (
             <button
               key={tab.id}
-              onClick={() => !tab.disabled && setActiveTab(tab.id)}
-              disabled={tab.disabled}
+              onClick={() => setActiveTab(tab.id)}
               className={`
                 w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left
                 transition-all duration-200
                 ${
                   activeTab === tab.id
                     ? "bg-secondary/50 text-foreground"
-                    : tab.disabled
-                      ? "text-muted-foreground/50 cursor-not-allowed"
-                      : "text-muted-foreground hover:text-foreground hover:bg-glass-bg"
+                    : "text-muted-foreground hover:text-foreground hover:bg-glass-bg"
                 }
               `}
             >
               <tab.icon className="w-4 h-4" />
               <span className="text-sm">{tab.label}</span>
-              {tab.disabled && (
-                <span className="ml-auto text-xs text-muted-foreground/50">
-                  Soon
-                </span>
-              )}
             </button>
           ))}
 
@@ -136,16 +187,23 @@ export default function ContentGenerationPage() {
                 Recent ({generatedContent.length})
               </p>
               <div className="space-y-1">
-                {generatedContent.slice(0, 5).map((content) => (
-                  <div
+                {generatedContent.slice(0, 8).map((content) => (
+                  <button
                     key={content.id}
-                    className="px-3 py-2 rounded-lg text-sm cursor-pointer hover:bg-glass-bg"
+                    onClick={() => setActiveTab(content.type)}
+                    className="w-full px-3 py-2 rounded-lg text-sm cursor-pointer hover:bg-glass-bg text-left"
                   >
                     <div className="font-medium truncate">{content.name}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {content.dialogue.nodes.length} nodes
+                    <div className="text-xs text-muted-foreground flex items-center gap-1">
+                      {content.type === "npc" && <Users className="w-3 h-3" />}
+                      {content.type === "quest" && (
+                        <Scroll className="w-3 h-3" />
+                      )}
+                      {content.type === "area" && <Map className="w-3 h-3" />}
+                      {content.type === "item" && <Sword className="w-3 h-3" />}
+                      <span className="capitalize">{content.type}</span>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -183,41 +241,15 @@ export default function ContentGenerationPage() {
           )}
 
           {activeTab === "quest" && (
-            <div className="flex items-center justify-center h-full">
-              <GlassPanel className="p-8 text-center max-w-md">
-                <Scroll className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-                <h3 className="text-lg font-semibold mb-2">Quest Generator</h3>
-                <p className="text-sm text-muted-foreground">
-                  Coming soon - Generate complete quest chains with objectives,
-                  rewards, and dialogue.
-                </p>
-              </GlassPanel>
-            </div>
+            <QuestGenerator onContentGenerated={handleQuestGenerated} />
           )}
 
           {activeTab === "area" && (
-            <div className="flex items-center justify-center h-full">
-              <GlassPanel className="p-8 text-center max-w-md">
-                <Map className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-                <h3 className="text-lg font-semibold mb-2">Area Generator</h3>
-                <p className="text-sm text-muted-foreground">
-                  Coming soon - Generate area descriptions, spawn tables, and
-                  environmental details.
-                </p>
-              </GlassPanel>
-            </div>
+            <AreaGenerator onContentGenerated={handleAreaGenerated} />
           )}
 
           {activeTab === "item" && (
-            <div className="flex items-center justify-center h-full">
-              <GlassPanel className="p-8 text-center max-w-md">
-                <Sword className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-                <h3 className="text-lg font-semibold mb-2">Item Generator</h3>
-                <p className="text-sm text-muted-foreground">
-                  Coming soon - Generate item stats, descriptions, and lore.
-                </p>
-              </GlassPanel>
-            </div>
+            <ItemGenerator onContentGenerated={handleItemGenerated} />
           )}
         </div>
       </main>
