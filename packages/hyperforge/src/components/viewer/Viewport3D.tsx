@@ -234,6 +234,7 @@ export function Viewport3D({ selectedAsset, onAssetDeleted }: Viewport3DProps) {
           selectedAsset={selectedAsset}
           onClose={closeViewportPanel}
           onSwitchPanel={setViewportPanel}
+          onAssetDeleted={onAssetDeleted}
         />
       )}
     </div>
@@ -246,11 +247,13 @@ function ViewportPanelOverlay({
   selectedAsset,
   onClose,
   onSwitchPanel,
+  onAssetDeleted,
 }: {
   panelType: ViewportPanelType;
   selectedAsset?: AssetData | null;
   onClose: () => void;
   onSwitchPanel: (panel: ViewportPanelType) => void;
+  onAssetDeleted?: (assetId: string) => void;
 }) {
   const panelConfig: Record<
     ViewportPanelType,
