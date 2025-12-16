@@ -25,9 +25,10 @@ import type { AssetData } from "@/types/asset";
 
 interface Viewport3DProps {
   selectedAsset?: AssetData | null;
+  onAssetDeleted?: (assetId: string) => void;
 }
 
-export function Viewport3D({ selectedAsset }: Viewport3DProps) {
+export function Viewport3D({ selectedAsset, onAssetDeleted }: Viewport3DProps) {
   const { viewportPanel, closeViewportPanel, setViewportPanel } = useAppStore();
   const { theme, setTheme } = useTheme();
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -336,6 +337,7 @@ function ViewportPanelOverlay({
             asset={selectedAsset}
             isOpen={true}
             onClose={onClose}
+            onAssetDeleted={onAssetDeleted}
             isViewportOverlay
           />
         )}

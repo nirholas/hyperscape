@@ -107,6 +107,15 @@ export default function HomePage() {
     setAssetRefreshKey((prev) => prev + 1);
   };
 
+  const handleAssetDeleted = (assetId: string) => {
+    // Clear selection if deleted asset was selected
+    if (selectedAsset?.id === assetId) {
+      setSelectedAsset(null);
+    }
+    // Refresh the asset library
+    setAssetRefreshKey((prev) => prev + 1);
+  };
+
   // Show a minimal skeleton during SSR to avoid hydration mismatch with Lucide icons
   if (!mounted) {
     return (
@@ -499,7 +508,10 @@ export default function HomePage() {
 
       {/* === MAIN VIEWPORT === */}
       <main className="flex-1 relative overflow-hidden">
-        <Viewport3D selectedAsset={selectedAsset} />
+        <Viewport3D
+          selectedAsset={selectedAsset}
+          onAssetDeleted={handleAssetDeleted}
+        />
       </main>
 
       {/* === WORLD VIEW MODAL === */}
