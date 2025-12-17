@@ -66,6 +66,3 @@ export interface PlayerPositionUpdatedEvent {
   playerId: string;
   position: Position3D;
 }
-
-// All remaining types bundled together for expediency
-// TODO: Further modularize if time permits

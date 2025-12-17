@@ -23,6 +23,9 @@
 
 import { System } from "../shared/infrastructure/System";
 import type { World, WorldOptions } from "../../types";
+import { MaterialPool } from "../../utils/rendering/MaterialPool";
+import { AnimationClipPool } from "../../utils/rendering/AnimationClipPool";
+import { ModelCache } from "../../utils/rendering/ModelCache";
 
 /** Timing data for a single frame phase */
 export interface PhaseTiming {
@@ -64,6 +67,13 @@ export interface TerrainStats {
   visibleChunks: number;
 }
 
+/** Pool statistics for optimization tracking */
+export interface PoolStats {
+  materials: { cached: number; refCount: number };
+  animationClips: { clips: number; hitRate: number };
+  models: { total: number; clones: number };
+}
+
 /** Complete performance snapshot */
 export interface PerformanceSnapshot {
   timestamp: number;
@@ -93,6 +103,7 @@ export interface PerformanceSnapshot {
     contacts: number;
   } | null;
   terrain: TerrainStats | null;
+  pools: PoolStats | null;
 }
 
 /** Rolling buffer for FPS history */
@@ -372,6 +383,9 @@ export class PerformanceMonitor extends System {
     // Gather terrain stats
     const terrain = this._getTerrainStats();
 
+    // Gather pool stats
+    const pools = this._getPoolStats();
+
     this._lastSnapshot = {
       timestamp: now,
       fps: {
@@ -389,6 +403,7 @@ export class PerformanceMonitor extends System {
       renderStats,
       physics,
       terrain,
+      pools,
     };
 
     // Notify listeners
@@ -562,6 +577,37 @@ export class PerformanceMonitor extends System {
     return activeTiles > 0 || pendingTiles > 0
       ? { activeTiles, pendingTiles, visibleChunks }
       : null;
+  }
+
+  private _getPoolStats(): PoolStats | null {
+    const materialPool = MaterialPool.getInstance();
+    const animationPool = AnimationClipPool.getInstance();
+    const modelCache = ModelCache.getInstance();
+
+    const materialStats = materialPool.getStats();
+    const animationStats = animationPool.getStats();
+    const modelStats = modelCache.getStats();
+
+    // Calculate hit rate for animations
+    const totalAnimRequests =
+      animationStats.cacheHits + animationStats.cacheMisses;
+    const hitRate =
+      totalAnimRequests > 0 ? animationStats.cacheHits / totalAnimRequests : 0;
+
+    return {
+      materials: {
+        cached: materialStats.cachedMaterials,
+        refCount: materialStats.totalRefCount,
+      },
+      animationClips: {
+        clips: animationStats.totalRetargetedClips,
+        hitRate,
+      },
+      models: {
+        total: modelStats.total,
+        clones: modelStats.totalClones,
+      },
+    };
   }
 
   private _reset(): void {

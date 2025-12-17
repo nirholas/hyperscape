@@ -238,11 +238,8 @@ export function createTerrainMaterial(
       // Access internal Three.js properties for shader debugging
       const rendererProps = renderer.properties.get(material) as {
         program?: {
-          // eslint-disable-next-line no-undef
           program: WebGLProgram;
-          // eslint-disable-next-line no-undef
           vertexShader: WebGLShader;
-          // eslint-disable-next-line no-undef
           fragmentShader: WebGLShader;
         };
       };

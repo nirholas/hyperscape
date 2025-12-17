@@ -463,11 +463,10 @@ export class ClientInterface extends SystemBase {
   modify(key: PrefsKey, value: PrefsValue) {
     if (!this.changes) this.changes = {};
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const prev = (this as any)[key];
+    const prefs = this as unknown as Record<PrefsKey, PrefsValue>;
+    const prev = prefs[key];
     if (prev !== value) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (this as any)[key] = value;
+      prefs[key] = value;
       this.changes[key] = { prev, value };
     }
   }

@@ -119,6 +119,61 @@ export interface Player {
   setRotation?: (x: number, y: number, z: number, w: number) => void;
 }
 
+export interface VRMAvatarData {
+  raw?: { scene?: THREE.Object3D; userData?: { vrm?: unknown } };
+}
+
+export interface HyperscapeAvatar {
+  instance?: VRMAvatarData;
+  position?: THREE.Vector3;
+  visible?: boolean;
+  getHeight?: () => number;
+  getHeadToHeight?: () => number;
+  setEmote?: (emote: string) => void;
+  getBoneTransform?: (boneName: string) => THREE.Matrix4 | null;
+}
+
+/** Minimal player entity for safe casting from world.entities.get() */
+export interface RuntimePlayerEntity {
+  emote?: string;
+  data?: {
+    e?: string;
+    name?: string;
+    visible?: boolean;
+    [key: string]: unknown;
+  };
+  node?: { position: THREE.Vector3; quaternion?: THREE.Quaternion };
+  setHealth?: (health: number) => void;
+  getMaxHealth?: () => number;
+  getHealth?: () => number;
+  markNetworkDirty?: () => void;
+  _avatar?: HyperscapeAvatar;
+  [key: string]: unknown;
+}
+
+/** Player with Hyperscape runtime extensions */
+export interface HyperscapePlayerEntity extends Player {
+  emote?: string;
+  data?: Player["data"] & { e?: string; name?: string };
+  node?: { position: THREE.Vector3; quaternion?: THREE.Quaternion };
+  setHealth?: (health: number) => void;
+  getMaxHealth?: () => number;
+  getHealth?: () => number;
+  markNetworkDirty?: () => void;
+  _avatar?: HyperscapeAvatar;
+}
+
+/**
+ * Death location with headstone tracking
+ */
+export interface PlayerDeathLocationData {
+  x: number;
+  y: number;
+  z: number;
+  timestamp: number;
+  headstoneId?: string;
+}
+
 /**
  * Migration utilities to convert from old interfaces
  */

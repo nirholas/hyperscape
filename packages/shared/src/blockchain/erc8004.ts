@@ -492,7 +492,7 @@ export async function isAddressBanned(target: Address): Promise<boolean> {
 export async function checkPlayerAccess(
   playerAddress: Address,
   playerAgentId?: bigint,
-  appId: `0x${string}` = "0xc54b8b0f8e2f7d3f5c0b8d9b7e4a1f0e3d6c9b8a7f6e5d4c3b2a1908070605040",
+  appId: `0x${string}` = "0xdd395054c8bd83c102f9ff98f10af40091368e7f59f145a04bd5c7e3e42d9819", // keccak256("hyperscape")
 ): Promise<AccessCheckResult> {
   const banManagerAddress = getOptionalAddress("BAN_MANAGER_ADDRESS");
 

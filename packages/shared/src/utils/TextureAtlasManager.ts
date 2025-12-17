@@ -75,8 +75,9 @@ export class TextureAtlasManager {
       },
       {
         name: "sand",
-        diffuse: `${cdnUrl}/terrain/textures/sand/sand_d.png`,
-        normal: `${cdnUrl}/terrain/textures/sand/sand_n.png`,
+        // Using dirt_ground as sand substitute until proper sand texture is added
+        diffuse: `${cdnUrl}/terrain/textures/dirt_ground/dirt_ground_d.png`,
+        normal: `${cdnUrl}/terrain/textures/dirt_ground/dirt_ground_n.png`,
         scale: 5.0, // ~8m per repeat - desert and beaches
       },
       {

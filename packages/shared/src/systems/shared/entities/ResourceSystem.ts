@@ -14,6 +14,7 @@ import type { TerrainResourceSpawnPoint } from "../../../types/world/terrain";
 import { TICK_DURATION_MS } from "../movement/TileSystem";
 import { getExternalResource } from "../../../utils/ExternalAssetUtils";
 import { ALL_WORLD_AREAS } from "../../../data/world-areas";
+import type { RuntimePlayerEntity } from "../../../types/entities/player-types";
 
 /**
  * Resource System
@@ -172,56 +173,27 @@ export class ResourceSystem extends SystemBase {
   }
 
   /**
-   * Set gathering emote for a player
+   * Set player emote and sync to network
    */
-  private setGatheringEmote(playerId: string, emote: string): void {
-    const playerEntity = this.world.getPlayer?.(playerId);
-    if (playerEntity) {
-      // Set emote STRING KEY (players use emote strings which get mapped to URLs)
-      if ((playerEntity as any).emote !== undefined) {
-        (playerEntity as any).emote = emote;
-      }
-      if ((playerEntity as any).data) {
-        (playerEntity as any).data.e = emote;
-      }
+  private setPlayerEmote(playerId: string, emote: string): void {
+    const playerEntity = this.world.getPlayer?.(playerId) as unknown as RuntimePlayerEntity | undefined;
+    if (!playerEntity) return;
 
-      // Send immediate network update for emote (same pattern as CombatSystem)
-      // This ensures the emote update arrives at clients immediately
-      if (this.world.isServer && this.world.network?.send) {
-        this.world.network.send("entityModified", {
-          id: playerId,
-          e: emote,
-        });
-      }
+    if (playerEntity.emote !== undefined) playerEntity.emote = emote;
+    if (playerEntity.data) playerEntity.data.e = emote;
 
-      (playerEntity as any).markNetworkDirty?.();
+    if (this.world.isServer && this.world.network?.send) {
+      this.world.network.send("entityModified", { id: playerId, e: emote });
     }
+    playerEntity.markNetworkDirty?.();
   }
 
-  /**
-   * Reset gathering emote back to idle
-   */
+  private setGatheringEmote(playerId: string, emote: string): void {
+    this.setPlayerEmote(playerId, emote);
+  }
+
   private resetGatheringEmote(playerId: string): void {
-    const playerEntity = this.world.getPlayer?.(playerId);
-    if (playerEntity) {
-      // Reset to idle
-      if ((playerEntity as any).emote !== undefined) {
-        (playerEntity as any).emote = "idle";
-      }
-      if ((playerEntity as any).data) {
-        (playerEntity as any).data.e = "idle";
-      }
-
-      // Send immediate network update for emote reset (same pattern as CombatSystem)
-      if (this.world.isServer && this.world.network?.send) {
-        this.world.network.send("entityModified", {
-          id: playerId,
-          e: "idle",
-        });
-      }
-
-      (playerEntity as any).markNetworkDirty?.();
-    }
+    this.setPlayerEmote(playerId, "idle");
   }
 
   async start(): Promise<void> {

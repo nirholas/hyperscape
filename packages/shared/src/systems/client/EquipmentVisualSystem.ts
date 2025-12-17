@@ -25,6 +25,7 @@ import { SystemBase } from "../shared/infrastructure/SystemBase";
 import type { World } from "../../types";
 import type { VRM, VRMHumanBoneName } from "@pixiv/three-vrm";
 import { getItem } from "../../data/items";
+import type { RuntimePlayerEntity } from "../../types/entities/player-types";
 
 interface EquipmentAttachmentData {
   vrmBoneName: string; // VRM bone to attach to (e.g., "rightHand")
@@ -95,13 +96,13 @@ export class EquipmentVisualSystem extends SystemBase {
     }
 
     // Get player entity to access VRM
-    const player = this.world.entities.get(playerId);
+    const player = this.world.entities.get(playerId) as unknown as RuntimePlayerEntity | undefined;
     if (!player) {
       return;
     }
 
     // CRITICAL: instance.raw is GLTF, VRM is in userData.vrm!
-    const avatarInstance = (player as any)._avatar?.instance;
+    const avatarInstance = player._avatar?.instance;
     const vrm = avatarInstance?.raw?.userData?.vrm as VRM | undefined;
 
     if (!avatarInstance || !vrm) {
@@ -310,7 +311,8 @@ export class EquipmentVisualSystem extends SystemBase {
       // Traverse the avatar's visual root (instance.raw) to find the bone
       // player.node is just a container and might not hold the full hierarchy
       // instance.raw might be the GLTF result object or VRM object, so check for .scene
-      const rawInstance = (player as any)._avatar?.instance?.raw;
+      const typedPlayer = player as unknown as RuntimePlayerEntity;
+      const rawInstance = typedPlayer._avatar?.instance?.raw;
       const avatarRoot = (rawInstance?.scene || rawInstance) as THREE.Object3D;
 
       if (avatarRoot && avatarRoot.traverse) {
@@ -367,14 +369,14 @@ export class EquipmentVisualSystem extends SystemBase {
     for (const [playerId, pendingItems] of this.pendingEquipment.entries()) {
       if (pendingItems.length === 0) continue;
 
-      const player = this.world.entities.get(playerId);
+      const player = this.world.entities.get(playerId) as unknown as RuntimePlayerEntity | undefined;
       if (!player) {
         // Player is gone, clear queue
         this.pendingEquipment.delete(playerId);
         continue;
       }
 
-      const avatar = (player as any)._avatar;
+      const avatar = player._avatar;
       const avatarInstance = avatar?.instance;
 
       // CRITICAL: instance.raw is GLTF, VRM is in userData.vrm!

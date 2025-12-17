@@ -5,9 +5,7 @@
  * - Items and equipment
  * - NPCs (categorized as: mob, boss, neutral, quest)
  * - World areas and spawn points
- * - Treasure locations
  * - Banks and stores
- * - Starting items and equipment requirements
  *
  * This system validates data on load and provides type-safe access methods.
  *
@@ -29,24 +27,11 @@ import {
 } from "./world-areas";
 import { BIOMES } from "./world-structure";
 
-// ============ Deprecated Features ============
-// Starting items and treasure locations have been removed from the game.
-// These stubs remain for API compatibility but return empty arrays.
-// TODO: Remove these deprecated methods in next major version.
-const STARTING_ITEMS: Array<{ id: string }> = [];
-const TREASURE_LOCATIONS: TreasureLocation[] = [];
-/** @deprecated Treasure locations feature removed */
-const getAllTreasureLocations = () => TREASURE_LOCATIONS;
-/** @deprecated Treasure locations feature removed */
-const getTreasureLocationsByDifficulty = (_difficulty: number) =>
-  TREASURE_LOCATIONS;
-
 import type {
   Item,
   NPCData,
   NPCDataInput,
   NPCCategory,
-  TreasureLocation,
   StoreData,
   BiomeData,
 } from "../types/core/core";
@@ -104,24 +89,12 @@ export class DataManager {
   }
 
   /**
-   * Load manifests from CDN or filesystem
-   * Server loads from filesystem, client loads from CDN
+   * Load manifests from CDN (both client and server)
    */
   private async loadManifestsFromCDN(): Promise<void> {
-    // Check if we're on server (Node.js) and have ASSETS_DIR set
-    const isServer =
-      typeof process !== "undefined" &&
-      typeof process.env !== "undefined" &&
-      process.env.ASSETS_DIR;
-
-    // Server: load from filesystem directly (avoids bootstrap timing issues)
-    if (isServer) {
-      await this.loadManifestsFromFilesystem(process.env.ASSETS_DIR!);
-      return;
-    }
-
-    // Client: load from CDN
-    let cdnUrl = "http://localhost:5555/assets";
+    // Load directly from CDN (localhost:8080 in dev, R2/S3 in prod)
+    // Server uses process.env, client will use hardcoded default
+    let cdnUrl = "http://localhost:8080";
     if (
       typeof process !== "undefined" &&
       typeof process.env !== "undefined" &&
@@ -234,111 +207,10 @@ export class DataManager {
   }
 
   /**
-   * Load manifests from filesystem (server-side only)
-   */
-  private async loadManifestsFromFilesystem(assetsDir: string): Promise<void> {
-    const fs = await import("fs/promises");
-    const path = await import("path");
-    const baseDir = path.join(assetsDir, "manifests");
-
-    // Load items
-    const itemsData = await fs.readFile(
-      path.join(baseDir, "items.json"),
-      "utf-8",
-    );
-    const list = JSON.parse(itemsData) as Array<Item>;
-    for (const it of list) {
-      const normalized = this.normalizeItem(it);
-      (ITEMS as Map<string, Item>).set(normalized.id, normalized);
-    }
-
-    // Load NPCs
-    const npcsData = await fs.readFile(
-      path.join(baseDir, "npcs.json"),
-      "utf-8",
-    );
-    const npcList = JSON.parse(npcsData) as Array<NPCDataInput>;
-    for (const npc of npcList) {
-      const normalized = this.normalizeNPC(npc);
-      (ALL_NPCS as Map<string, NPCData>).set(normalized.id, normalized);
-    }
-
-    // Load resources
-    const resourcesData = await fs.readFile(
-      path.join(baseDir, "resources.json"),
-      "utf-8",
-    );
-    const resourceList = JSON.parse(
-      resourcesData,
-    ) as Array<ExternalResourceData>;
-    if (
-      !(
-        globalThis as {
-          EXTERNAL_RESOURCES?: Map<string, ExternalResourceData>;
-        }
-      ).EXTERNAL_RESOURCES
-    ) {
-      (
-        globalThis as {
-          EXTERNAL_RESOURCES?: Map<string, ExternalResourceData>;
-        }
-      ).EXTERNAL_RESOURCES = new Map();
-    }
-    for (const resource of resourceList) {
-      (
-        globalThis as unknown as {
-          EXTERNAL_RESOURCES: Map<string, ExternalResourceData>;
-        }
-      ).EXTERNAL_RESOURCES.set(resource.id, resource);
-    }
-
-    // Load world areas
-    const worldAreasData = await fs.readFile(
-      path.join(baseDir, "world-areas.json"),
-      "utf-8",
-    );
-    const worldAreas = JSON.parse(worldAreasData) as {
-      starterTowns: Record<string, WorldArea>;
-      level1Areas: Record<string, WorldArea>;
-      level2Areas: Record<string, WorldArea>;
-      level3Areas: Record<string, WorldArea>;
-    };
-    Object.assign(
-      ALL_WORLD_AREAS,
-      worldAreas.starterTowns,
-      worldAreas.level1Areas,
-      worldAreas.level2Areas,
-      worldAreas.level3Areas,
-    );
-    Object.assign(STARTER_TOWNS, worldAreas.starterTowns);
-
-    // Load biomes
-    const biomesData = await fs.readFile(
-      path.join(baseDir, "biomes.json"),
-      "utf-8",
-    );
-    const biomeList = JSON.parse(biomesData) as Array<BiomeData>;
-    for (const biome of biomeList) {
-      BIOMES[biome.id] = biome;
-    }
-
-    // Load stores
-    const storesData = await fs.readFile(
-      path.join(baseDir, "stores.json"),
-      "utf-8",
-    );
-    const storeList = JSON.parse(storesData) as Array<StoreData>;
-    for (const store of storeList) {
-      GENERAL_STORES[store.id] = store;
-    }
-
-    console.log("[DataManager] ✅ Loaded manifests from filesystem");
-  }
-
-  /**
-   * Load external assets from CDN or filesystem
+   * Load external assets from CDN (works for both client and server)
    */
   private async loadExternalAssetsFromWorld(): Promise<void> {
+    // Both client and server now load from CDN
     await this.loadManifestsFromCDN();
   }
 
@@ -524,9 +396,6 @@ export class DataManager {
       errors.push("No world areas found in ALL_WORLD_AREAS");
     }
 
-    // Treasure locations feature deprecated - count for summary only
-    const treasureCount = Object.keys(TREASURE_LOCATIONS).length;
-
     // Validate cross-references (only if we have data)
     if (itemCount > 0 && npcCount > 0) {
       this.validateCrossReferences(errors, warnings);
@@ -539,7 +408,6 @@ export class DataManager {
       itemCount,
       npcCount,
       areaCount,
-      treasureCount,
     };
   }
 
@@ -557,15 +425,6 @@ export class DataManager {
             );
           }
         }
-      }
-    }
-
-    // Check that starter items reference valid items
-    for (const startingItem of STARTING_ITEMS) {
-      if (!ITEMS.has(startingItem.id)) {
-        errors.push(
-          `Starting item references unknown item: ${startingItem.id}`,
-        );
       }
     }
   }
@@ -669,37 +528,6 @@ export class DataManager {
   }
 
   // =============================================================================
-  // TREASURE DATA ACCESS METHODS
-  // =============================================================================
-
-  /**
-   * Get all treasure locations
-   */
-  public getAllTreasureLocations(): TreasureLocation[] {
-    return getAllTreasureLocations();
-  }
-
-  /**
-   * Get treasure locations by difficulty
-   */
-  public getTreasureLocationsByDifficulty(
-    difficulty: 1 | 2 | 3,
-  ): TreasureLocation[] {
-    return getTreasureLocationsByDifficulty(difficulty);
-  }
-
-  /**
-   * Get treasure location by ID
-   */
-  public getTreasureLocation(locationId: string): TreasureLocation | null {
-    return (
-      TREASURE_LOCATIONS.find(
-        (loc) => (loc as TreasureLocation & { id?: string }).id === locationId,
-      ) || null
-    );
-  }
-
-  // =============================================================================
   // STORE AND BANK DATA ACCESS METHODS
   // =============================================================================
 
@@ -715,17 +543,6 @@ export class DataManager {
    */
   public getBanks() {
     return BANKS;
-  }
-
-  // =============================================================================
-  // STARTING DATA ACCESS METHODS
-  // =============================================================================
-
-  /**
-   * Get starting items
-   */
-  public getStartingItems() {
-    return STARTING_ITEMS;
   }
 
   // =============================================================================
@@ -751,10 +568,8 @@ export class DataManager {
       items: ITEMS.size,
       npcs: ALL_NPCS.size,
       worldAreas: Object.keys(ALL_WORLD_AREAS).length,
-      treasureLocations: TREASURE_LOCATIONS.length,
       stores: Object.keys(GENERAL_STORES).length,
       banks: Object.keys(BANKS).length,
-      startingItems: STARTING_ITEMS.length,
       isValid: this.validationResult?.isValid || false,
     };
   }

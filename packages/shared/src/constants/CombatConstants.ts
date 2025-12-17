@@ -53,13 +53,6 @@ export const COMBAT_CONSTANTS = {
   EFFECTIVE_LEVEL_CONSTANT: 8, // Added to effective levels
   DAMAGE_DIVISOR: 640, // Used in max hit calculation
 
-  // Damage calculations (DEPRECATED - keeping for backward compatibility)
-  DAMAGE_MULTIPLIERS: {
-    MELEE_ATTACK: 0.5, // Deprecated - use OSRS formula
-    RANGED_ATTACK: 0.5, // Deprecated - use OSRS formula
-    DEFENSE_REDUCTION: 0.25, // Deprecated - defense doesn't reduce damage in OSRS
-  },
-
   // Minimum values
   MIN_DAMAGE: 0, // OSRS: Can hit 0 (miss)
   MAX_DAMAGE: 200, // OSRS damage cap

@@ -1818,6 +1818,7 @@ export interface DeathLocationData {
   deathPosition: { x: number; y: number; z: number };
   timestamp: number;
   items: InventoryItem[]; // Items dropped at death location (headstone)
+  headstoneId?: string; // ID of the headstone entity spawned at death location
 }
 
 // ============== WORLD AREAS INTERFACES ==============

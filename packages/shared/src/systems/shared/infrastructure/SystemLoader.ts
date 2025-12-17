@@ -74,6 +74,7 @@ import type {
   Position3D,
   Skills,
 } from "../../../types/core/core";
+import type { GroundItemData } from "../../../types/death/death-types";
 import type { PlayerRow } from "../../../types/network/database";
 import type { EntityConfig } from "../../../types/entities";
 import { EventType } from "../../../types/events";
@@ -368,7 +369,7 @@ export async function registerSystems(world: World): Promise<void> {
   systems.database =
     dbSystem && "getPlayer" in dbSystem
       ? (dbSystem as DatabaseSystem)
-      : (null as any);
+      : undefined;
   systems.combat = getSystem(world, "combat") as CombatSystem;
   systems.inventory = getSystem(world, "inventory") as InventorySystem;
   systems.skills = getSystem(world, "skills") as SkillsSystem;
@@ -723,10 +724,31 @@ function setupAPI(world: World, systems: Systems): void {
         droppedBy,
       });
     },
-    getItemsInRange: (_position: Position3D, _range?: number) => [], // Not exposed by current systems
-    getGroundItem: (_itemId: string) => null, // Not exposed by current systems
-    getAllGroundItems: () => [], // Not exposed by current systems
-    clearAllItems: () => {}, // Not exposed by current systems
+    getItemsInRange: (position: Position3D, range: number = 10) =>
+      systems.groundItems?.getItemsNearPosition(position, range) || [],
+    getGroundItem: (itemId: string) =>
+      systems.groundItems?.getGroundItem(itemId) || null,
+    getAllGroundItems: () => {
+      const items: GroundItemData[] = [];
+      if (systems.groundItems) {
+        // Access the internal Map via the public getter or iterate
+        const count = systems.groundItems.getItemCount();
+        if (count > 0) {
+          // Get items at a very large radius from origin
+          items.push(...systems.groundItems.getItemsNearPosition({ x: 0, y: 0, z: 0 }, 100000));
+        }
+      }
+      return items;
+    },
+    clearAllItems: () => {
+      // Clear all ground items via despawn
+      if (systems.groundItems) {
+        const items = systems.groundItems.getItemsNearPosition({ x: 0, y: 0, z: 0 }, 100000);
+        for (const item of items) {
+          systems.groundItems.removeGroundItem(item.entityId);
+        }
+      }
+    },
 
     // Item Actions API
     // registerItemAction removed - ItemActionSystem not available
@@ -802,9 +824,14 @@ function setupAPI(world: World, systems: Systems): void {
         | undefined;
       return cameraSystem?.getCameraInfo?.();
     },
-    setCameraTarget: (_target: THREE.Object3D | null) => {}, // setTarget is private
-    setCameraEnabled: (_enabled: boolean) => undefined,
-    resetCamera: () => {}, // resetCamera is private
+    setCameraTarget: (target: THREE.Object3D | null) => {
+      // Camera target is set via event
+      if (target) {
+        world.emit(EventType.CAMERA_SET_TARGET, { target });
+      }
+    },
+    setCameraEnabled: (_enabled: boolean) => undefined, // Not exposed by camera system
+    resetCamera: () => world.emit(EventType.CAMERA_RESET, {}),
 
     // UI Components API (Client only)
     updateHealthBar: (data: { health: number; maxHealth: number }) =>

@@ -252,18 +252,24 @@ export class GrassSystem {
         varying vec4 vMaterials;
         varying float vFade;
         
+        // Stylized grass colors - vibrant, Genshin-like palette
         vec3 getGrassColor(float materialIndex) {
-          int matIdx = int(materialIndex);
-          // Rich, natural grass colors
-          vec3 grassColorGrass = vec3(0.18, 0.55, 0.22); // Forest green
-          vec3 grassColorDirt = vec3(0.45, 0.55, 0.15);  // Olive-yellow
-          vec3 grassColorRock = vec3(0.35, 0.45, 0.25);  // Sage green
-          vec3 grassColorSnow = vec3(0.50, 0.60, 0.40);  // Pale green
+          int matIdx = int(materialIndex + 0.5);
+          
+          // Base colors - rich and saturated for stylized look
+          vec3 grassColorGrass = vec3(0.22, 0.58, 0.25);  // Vibrant green
+          vec3 grassColorDirt = vec3(0.48, 0.52, 0.18);   // Yellow-olive
+          vec3 grassColorRock = vec3(0.32, 0.42, 0.22);   // Muted sage
+          vec3 grassColorSnow = vec3(0.45, 0.55, 0.35);   // Pale green-gray
+          vec3 grassColorSand = vec3(0.55, 0.50, 0.25);   // Golden-tan
+          vec3 grassColorPath = vec3(0.40, 0.45, 0.20);   // Path-side grass
           
           if(matIdx == 0) return grassColorGrass;
           if(matIdx == 1) return grassColorDirt;
           if(matIdx == 2) return grassColorRock;
           if(matIdx == 3) return grassColorSnow;
+          if(matIdx == 4) return grassColorSand;
+          if(matIdx == 5) return grassColorPath;
           return grassColorGrass;
         }
         
@@ -275,11 +281,10 @@ export class GrassSystem {
           vec4 tex = texture2D(grassTexture, vUv);
           
           // Alpha cutout with distance-based threshold
-          // Distant grass fades out gradually
-          float alphaThreshold = mix(0.3, 0.5, vFade);
+          float alphaThreshold = mix(0.25, 0.45, vFade);
           if (tex.a < alphaThreshold) discard;
           
-          // Material blending
+          // Material blending for grass color
           vec3 grassColor = vec3(0.0);
           float totalWeight = 0.0;
           
@@ -304,24 +309,32 @@ export class GrassSystem {
             grassColor /= totalWeight;
           }
           
-          // Height-based color gradient (darker at base, lighter tips)
-          float heightGradient = smoothstep(0.0, 0.8, 1.0 - vUv.y);
-          vec3 baseColor = grassColor * 0.4;  // Dark base
-          vec3 tipColor = grassColor * 1.2;    // Bright tips
+          // Stylized height-based color gradient
+          float heightGradient = smoothstep(0.0, 0.75, 1.0 - vUv.y);
+          
+          // Dark saturated base, bright vibrant tips
+          vec3 baseColor = grassColor * vec3(0.35, 0.38, 0.3);
+          vec3 tipColor = grassColor * vec3(1.25, 1.3, 1.15);
           grassColor = mix(baseColor, tipColor, heightGradient);
           
-          // Subsurface scattering approximation (backlit grass glows)
-          float sss = heightGradient * 0.15;
-          grassColor += vec3(0.2, 0.35, 0.1) * sss;
+          // Subsurface scattering - stylized warm glow
+          float sss = heightGradient * 0.2;
+          grassColor += vec3(0.25, 0.4, 0.12) * sss;
           
-          // Modulate by texture
-          grassColor *= tex.rgb * 1.3;
+          // Modulate by texture with saturation boost
+          vec3 texColor = tex.rgb;
+          texColor = mix(vec3(dot(texColor, vec3(0.299, 0.587, 0.114))), texColor, 1.3);
+          grassColor *= texColor * 1.35;
           
-          // Wave/wind brightness variation
-          float waveColorScale = 0.25;
-          grassColor += vec3(clamp(vWave - 0.3, 0.0, 1.0) * waveColorScale) * heightGradient;
+          // Wind wave brightness - stylized shimmer
+          float waveStrength = clamp(vWave - 0.25, 0.0, 1.0);
+          vec3 waveColor = vec3(0.15, 0.2, 0.08) * waveStrength * heightGradient;
+          grassColor += waveColor;
           
-          // Apply distance fade to alpha
+          // Stylized contrast boost
+          grassColor = pow(grassColor, vec3(0.92));
+          
+          // Distance fade to alpha
           float finalAlpha = tex.a * vFade;
           
           // Gamma correction
@@ -346,8 +359,9 @@ export class GrassSystem {
     context: TerrainContext,
   ): void {
     const grassInstances: GrassInstance[] = [];
-    const MAX_GRASS_PER_CHUNK = 3000; // Increased for denser grass
-    const CHUNK_SIZE = 16;
+    // Much higher density for lush grass fields - mobile 2026 can handle this
+    const MAX_GRASS_PER_CHUNK = 6000;
+    const CHUNK_SIZE = 12; // Smaller chunks = more even distribution
     const tileSize = Number(context.CONFIG.TILE_SIZE);
     const chunksPerSide = Math.floor(tileSize / CHUNK_SIZE);
     
@@ -363,7 +377,7 @@ export class GrassSystem {
         const chunkSeed = context.noise.hashNoise(chunkWorldX, chunkWorldZ);
         const chunkRng = context.seedRngFromFloat(chunkSeed);
 
-        // Adjust iterations based on biome density
+        // Higher base iterations for denser grass
         const grassIterations = Math.floor(MAX_GRASS_PER_CHUNK * grassSettings.density);
 
         for (let i = 0; i < grassIterations; i++) {
@@ -380,27 +394,29 @@ export class GrassSystem {
           );
           if (!heightfield) continue;
 
-          // More permissive grass placement with biome-specific thresholds
-          const effectiveGrassVisibility = heightfield.grassVisibility + grassSettings.visibilityBoost;
+          // More permissive grass placement with high visibility boost
+          const effectiveGrassVisibility = heightfield.grassVisibility + grassSettings.visibilityBoost + 0.2;
           
-          if (effectiveGrassVisibility > grassSettings.threshold) {
+          // Lower threshold = more grass everywhere
+          if (effectiveGrassVisibility > grassSettings.threshold * 0.5) {
             if (
               heightfield.liquidType === "none" &&
               heightfield.slope < grassSettings.maxSlope &&
-              heightfield.rockVisibility < 0.85
+              heightfield.rockVisibility < 0.9
             ) {
               const simplexm10 = context.noise.simplex2D(
-                worldX * 10,
-                worldZ * 10,
+                worldX * 8,
+                worldZ * 8,
               );
               
-              // Biome-specific height scaling
-              const baseHeight = grassSettings.baseHeight + simplexm10 * 0.4;
-              const heightScale = baseHeight * (0.8 + chunkRng() * 0.4);
+              // Varied height for natural look
+              const baseHeight = grassSettings.baseHeight + simplexm10 * 0.5;
+              const heightScale = baseHeight * (0.7 + chunkRng() * 0.5);
               
               const rotation = context.noise.rotationNoise(worldX, worldZ);
               const scaleNoise = context.noise.scaleNoise(worldX, worldZ);
-              const scale = (0.7 + scaleNoise * 0.3) * grassSettings.scaleMultiplier;
+              // More scale variation for natural clumping
+              const scale = (0.6 + scaleNoise * 0.5) * grassSettings.scaleMultiplier;
 
               grassInstances.push({
                 posX: worldX,
@@ -446,6 +462,7 @@ export class GrassSystem {
     baseHeight: number;
     scaleMultiplier: number;
   } {
+    // Stylized grass settings for lush, Genshin-like appearance
     const settings: Record<string, {
       density: number;
       threshold: number;
@@ -455,68 +472,68 @@ export class GrassSystem {
       scaleMultiplier: number;
     }> = {
       plains: {
-        density: 1.0,
-        threshold: 0.02,
-        visibilityBoost: 0.3,
-        maxSlope: 0.35,
-        baseHeight: 1.2,
-        scaleMultiplier: 1.0,
+        density: 1.3,        // Very dense grass fields
+        threshold: 0.01,     // Almost everywhere
+        visibilityBoost: 0.4,
+        maxSlope: 0.45,      // Grass even on moderate slopes
+        baseHeight: 1.4,     // Taller grass
+        scaleMultiplier: 1.1,
       },
       forest: {
-        density: 0.8,
-        threshold: 0.02,
-        visibilityBoost: 0.25,
-        maxSlope: 0.30,
-        baseHeight: 1.0,
-        scaleMultiplier: 0.9,
-      },
-      valley: {
-        density: 1.2,
+        density: 1.0,        // Dense undergrowth
         threshold: 0.01,
         visibilityBoost: 0.35,
         maxSlope: 0.40,
-        baseHeight: 1.4,
-        scaleMultiplier: 1.1,
+        baseHeight: 1.2,
+        scaleMultiplier: 1.0,
+      },
+      valley: {
+        density: 1.5,        // Lush valley grass
+        threshold: 0.005,    // Very permissive
+        visibilityBoost: 0.45,
+        maxSlope: 0.50,
+        baseHeight: 1.6,     // Tall grass
+        scaleMultiplier: 1.2,
       },
       mountains: {
-        density: 0.3,
-        threshold: 0.15,
-        visibilityBoost: 0.1,
-        maxSlope: 0.20,
-        baseHeight: 0.6,
-        scaleMultiplier: 0.7,
+        density: 0.5,        // Some grass at lower elevations
+        threshold: 0.08,
+        visibilityBoost: 0.15,
+        maxSlope: 0.30,
+        baseHeight: 0.8,
+        scaleMultiplier: 0.75,
       },
       tundra: {
-        density: 0.2,
-        threshold: 0.20,
+        density: 0.35,       // Sparse but visible
+        threshold: 0.12,
+        visibilityBoost: 0.1,
+        maxSlope: 0.35,
+        baseHeight: 0.5,
+        scaleMultiplier: 0.65,
+      },
+      desert: {
+        density: 0.12,       // Occasional desert grass clumps
+        threshold: 0.25,
         visibilityBoost: 0.05,
         maxSlope: 0.25,
         baseHeight: 0.4,
-        scaleMultiplier: 0.6,
-      },
-      desert: {
-        density: 0.05,
-        threshold: 0.40,
-        visibilityBoost: 0.0,
-        maxSlope: 0.15,
-        baseHeight: 0.3,
-        scaleMultiplier: 0.5,
+        scaleMultiplier: 0.55,
       },
       lakes: {
-        density: 0.6,
-        threshold: 0.05,
-        visibilityBoost: 0.2,
-        maxSlope: 0.30,
-        baseHeight: 1.0,
-        scaleMultiplier: 0.9,
+        density: 0.9,        // Reed-like grass near water
+        threshold: 0.02,
+        visibilityBoost: 0.3,
+        maxSlope: 0.40,
+        baseHeight: 1.3,
+        scaleMultiplier: 1.0,
       },
       swamp: {
-        density: 0.5,
-        threshold: 0.08,
-        visibilityBoost: 0.15,
-        maxSlope: 0.25,
-        baseHeight: 0.8,
-        scaleMultiplier: 0.8,
+        density: 0.7,        // Wetland grasses
+        threshold: 0.04,
+        visibilityBoost: 0.2,
+        maxSlope: 0.35,
+        baseHeight: 1.0,
+        scaleMultiplier: 0.9,
       },
     };
 

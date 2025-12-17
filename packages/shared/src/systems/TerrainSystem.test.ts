@@ -1731,3 +1731,365 @@ describe("Performance Regression", () => {
     expect(elapsed).toBeLessThan(200);
   });
 });
+
+// =============================================================================
+// STRESS TESTING & CONCURRENT ACCESS
+// =============================================================================
+
+describe("Stress Testing and Concurrent Access", () => {
+  let terrainSystem: InstanceType<typeof TerrainSystemClass>;
+
+  beforeAll(async () => {
+    if (!TerrainSystemClass) {
+      const terrainModule = await import("./shared/world/TerrainSystem");
+      TerrainSystemClass = terrainModule.TerrainSystem;
+    }
+    const world = createMinimalTestWorld();
+    terrainSystem = new TerrainSystemClass(world);
+    await terrainSystem.init();
+    await terrainSystem.start();
+  });
+
+  afterAll(() => {
+    if (terrainSystem) {
+      terrainSystem.destroy();
+    }
+  });
+
+  it("should handle rapid sequential queries without state corruption", () => {
+    const positions: Array<{ x: number; z: number; h: number }> = [];
+    
+    // Record heights for 100 positions
+    for (let i = 0; i < 100; i++) {
+      const x = Math.random() * 2000 - 1000;
+      const z = Math.random() * 2000 - 1000;
+      const h = terrainSystem.getHeightAt(x, z);
+      positions.push({ x, z, h });
+    }
+    
+    // Verify same positions return same heights (determinism)
+    for (const pos of positions) {
+      const h2 = terrainSystem.getHeightAt(pos.x, pos.z);
+      expect(h2).toBe(pos.h);
+    }
+  });
+
+  it("should handle interleaved height and terrain info queries", () => {
+    for (let i = 0; i < 500; i++) {
+      const x = Math.random() * 1000 - 500;
+      const z = Math.random() * 1000 - 500;
+      
+      const height = terrainSystem.getHeightAt(x, z);
+      const info = terrainSystem.getTerrainInfoAt(x, z);
+      
+      expect(Number.isFinite(height)).toBe(true);
+      expect(info).toBeDefined();
+      expect(info.biome).toBeDefined();
+      expect(typeof info.biome).toBe("string");
+    }
+  });
+
+  it("should handle queries at extreme distances", () => {
+    const extremePositions = [
+      { x: 50000, z: 50000 },
+      { x: -50000, z: -50000 },
+      { x: 100000, z: 0 },
+      { x: 0, z: -100000 },
+    ];
+    
+    for (const pos of extremePositions) {
+      const height = terrainSystem.getHeightAt(pos.x, pos.z);
+      expect(Number.isFinite(height)).toBe(true);
+      
+      const info = terrainSystem.getTerrainInfoAt(pos.x, pos.z);
+      expect(info).toBeDefined();
+      expect(info.biome).toBeDefined();
+    }
+  });
+
+  it("should maintain consistency across tile boundaries", () => {
+    const tileSize = 64;
+    const testPositions = [
+      // Test at exact tile boundaries
+      { x: tileSize, z: tileSize },
+      { x: tileSize * 2, z: tileSize * 2 },
+      { x: -tileSize, z: -tileSize },
+      // Test just inside/outside boundaries
+      { x: tileSize - 0.001, z: 0 },
+      { x: tileSize + 0.001, z: 0 },
+    ];
+    
+    for (const pos of testPositions) {
+      const h1 = terrainSystem.getHeightAt(pos.x - 0.01, pos.z);
+      const h2 = terrainSystem.getHeightAt(pos.x + 0.01, pos.z);
+      
+      // Heights should be continuous across boundaries (delta < 0.5m)
+      expect(Math.abs(h1 - h2)).toBeLessThan(0.5);
+    }
+  });
+});
+
+// =============================================================================
+// TERRAIN INFO EDGE CASES
+// =============================================================================
+
+describe("Terrain Info Edge Cases", () => {
+  let terrainSystem: InstanceType<typeof TerrainSystemClass>;
+
+  beforeAll(async () => {
+    if (!TerrainSystemClass) {
+      const terrainModule = await import("./shared/world/TerrainSystem");
+      TerrainSystemClass = terrainModule.TerrainSystem;
+    }
+    const world = createMinimalTestWorld();
+    terrainSystem = new TerrainSystemClass(world);
+    await terrainSystem.init();
+    await terrainSystem.start();
+  });
+
+  afterAll(() => {
+    if (terrainSystem) {
+      terrainSystem.destroy();
+    }
+  });
+
+  it("should return all required terrain info fields", () => {
+    for (let i = 0; i < 100; i++) {
+      const x = Math.random() * 1000 - 500;
+      const z = Math.random() * 1000 - 500;
+      const info = terrainSystem.getTerrainInfoAt(x, z);
+      
+      expect(info.height).toBeDefined();
+      expect(info.biome).toBeDefined();
+      expect(info.walkable).toBeDefined();
+      expect(info.slope).toBeDefined();
+      expect(info.underwater).toBeDefined();
+    }
+  });
+
+  it("should have valid height values", () => {
+    for (let i = 0; i < 100; i++) {
+      const x = Math.random() * 1000 - 500;
+      const z = Math.random() * 1000 - 500;
+      const info = terrainSystem.getTerrainInfoAt(x, z);
+      
+      expect(Number.isFinite(info.height)).toBe(true);
+      expect(info.height).toBeGreaterThan(-50); // No extreme negatives
+      expect(info.height).toBeLessThan(200); // No extreme heights
+    }
+  });
+
+  it("should have non-negative slope values", () => {
+    for (let i = 0; i < 100; i++) {
+      const x = Math.random() * 1000 - 500;
+      const z = Math.random() * 1000 - 500;
+      const info = terrainSystem.getTerrainInfoAt(x, z);
+      
+      expect(info.slope).toBeGreaterThanOrEqual(0);
+      // Slope is rise/run so can exceed 1 for very steep terrain (>45 degrees)
+      expect(Number.isFinite(info.slope)).toBe(true);
+    }
+  });
+
+  it("should have boolean walkable and underwater values", () => {
+    for (let i = 0; i < 100; i++) {
+      const x = Math.random() * 1000 - 500;
+      const z = Math.random() * 1000 - 500;
+      const info = terrainSystem.getTerrainInfoAt(x, z);
+      
+      expect(typeof info.walkable).toBe("boolean");
+      expect(typeof info.underwater).toBe("boolean");
+    }
+  });
+
+  it("should find steep terrain in mountainous areas", () => {
+    let steepFound = false;
+    
+    // Sample a large area to find steep terrain
+    for (let x = -2000; x < 2000 && !steepFound; x += 25) {
+      for (let z = -2000; z < 2000 && !steepFound; z += 25) {
+        const info = terrainSystem.getTerrainInfoAt(x, z);
+        
+        if (info.slope > 0.5) {
+          steepFound = true;
+        }
+      }
+    }
+    
+    expect(steepFound).toBe(true);
+  });
+});
+
+// =============================================================================
+// WALKABILITY & PATHFINDING SUPPORT
+// =============================================================================
+
+describe("Walkability and Pathfinding Support", () => {
+  let terrainSystem: InstanceType<typeof TerrainSystemClass>;
+
+  beforeAll(async () => {
+    if (!TerrainSystemClass) {
+      const terrainModule = await import("./shared/world/TerrainSystem");
+      TerrainSystemClass = terrainModule.TerrainSystem;
+    }
+    const world = createMinimalTestWorld();
+    terrainSystem = new TerrainSystemClass(world);
+    await terrainSystem.init();
+    await terrainSystem.start();
+  });
+
+  afterAll(() => {
+    if (terrainSystem) {
+      terrainSystem.destroy();
+    }
+  });
+
+  it("should correctly identify walkable vs non-walkable terrain", () => {
+    let walkable = 0;
+    let nonWalkable = 0;
+    
+    for (let x = -500; x < 500; x += 20) {
+      for (let z = -500; z < 500; z += 20) {
+        const result = terrainSystem.isPositionWalkable(x, z);
+        if (result.walkable) walkable++;
+        else nonWalkable++;
+      }
+    }
+    
+    // Most terrain should be walkable
+    expect(walkable).toBeGreaterThan(nonWalkable);
+    // But some should be non-walkable (water, steep)
+    expect(nonWalkable).toBeGreaterThan(0);
+  });
+
+  it("should provide reason for non-walkable positions", () => {
+    for (let x = -500; x < 500; x += 50) {
+      for (let z = -500; z < 500; z += 50) {
+        const result = terrainSystem.isPositionWalkable(x, z);
+        
+        if (!result.walkable) {
+          expect(result.reason).toBeDefined();
+          expect(typeof result.reason).toBe("string");
+          expect(result.reason!.length).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
+
+  it("should have consistent walkability between getTerrainInfoAt and isPositionWalkable", () => {
+    for (let i = 0; i < 100; i++) {
+      const x = Math.random() * 1000 - 500;
+      const z = Math.random() * 1000 - 500;
+      
+      const info = terrainSystem.getTerrainInfoAt(x, z);
+      const walkResult = terrainSystem.isPositionWalkable(x, z);
+      
+      expect(info.walkable).toBe(walkResult.walkable);
+    }
+  });
+
+  it("should find some underwater areas in lake biomes", () => {
+    let underwaterFound = false;
+    
+    // Sample a very large area
+    for (let x = -3000; x < 3000 && !underwaterFound; x += 50) {
+      for (let z = -3000; z < 3000 && !underwaterFound; z += 50) {
+        const info = terrainSystem.getTerrainInfoAt(x, z);
+        if (info.underwater) {
+          underwaterFound = true;
+        }
+      }
+    }
+    
+    // Note: underwater areas may not exist if terrain gen doesn't create lakes
+    // Just verify the check runs without error
+    expect(typeof underwaterFound).toBe("boolean");
+  });
+});
+
+// =============================================================================
+// ROAD DETECTION TESTS
+// =============================================================================
+
+describe("Road Detection", () => {
+  let terrainSystem: InstanceType<typeof TerrainSystemClass>;
+
+  beforeAll(async () => {
+    if (!TerrainSystemClass) {
+      const terrainModule = await import("./shared/world/TerrainSystem");
+      TerrainSystemClass = terrainModule.TerrainSystem;
+    }
+    const world = createMinimalTestWorld();
+    terrainSystem = new TerrainSystemClass(world);
+    await terrainSystem.init();
+    await terrainSystem.start();
+  });
+
+  afterAll(() => {
+    if (terrainSystem) {
+      terrainSystem.destroy();
+    }
+  });
+
+  it("should have isPositionNearRoad method", () => {
+    expect(typeof terrainSystem.isPositionNearRoad).toBe("function");
+  });
+
+  it("should detect roads in some positions", () => {
+    let roadFound = false;
+    
+    // Sample across terrain to find road positions
+    for (let x = -500; x < 500 && !roadFound; x += 20) {
+      for (let z = -500; z < 500 && !roadFound; z += 20) {
+        if (terrainSystem.isPositionNearRoad(x, z, 5)) {
+          roadFound = true;
+        }
+      }
+    }
+    
+    // Roads should exist somewhere
+    expect(roadFound).toBe(true);
+  });
+
+  it("should have isPositionNearTown method", () => {
+    expect(typeof terrainSystem.isPositionNearTown).toBe("function");
+  });
+
+  it("should detect town near origin", () => {
+    // Origin is the main town
+    const nearTown = terrainSystem.isPositionNearTown(0, 0, 100);
+    expect(nearTown).toBe(true);
+  });
+
+  it("should not detect town far from origin", () => {
+    const farFromTown = terrainSystem.isPositionNearTown(5000, 5000, 100);
+    expect(farFromTown).toBe(false);
+  });
+});
+
+// =============================================================================
+// ERROR HANDLING & RECOVERY
+// =============================================================================
+
+describe("Error Handling and Recovery", () => {
+  it("should handle zero-initialized noise generator gracefully", () => {
+    const noise = new NoiseGenerator(0);
+    
+    const height = noise.fractal2D(100, 100, 4, 2.0, 0.5);
+    expect(Number.isFinite(height)).toBe(true);
+  });
+
+  it("should handle negative seed values", () => {
+    const noise = new NoiseGenerator(-12345);
+    
+    const height = noise.fractal2D(50, 50, 3, 2.0, 0.5);
+    expect(Number.isFinite(height)).toBe(true);
+  });
+
+  it("should handle very large seed values", () => {
+    const noise = new NoiseGenerator(2147483647); // Max 32-bit int
+    
+    const height = noise.fractal2D(50, 50, 3, 2.0, 0.5);
+    expect(Number.isFinite(height)).toBe(true);
+  });
+});

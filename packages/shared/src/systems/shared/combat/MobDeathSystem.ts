@@ -64,8 +64,8 @@ export class MobDeathSystem extends SystemBase {
       this.emitTypedEvent(EventType.MOB_NPC_DESPAWN, { mobId });
 
       // Remove from entity manager
-      if (this.world.entities && "remove" in this.world.entities) {
-        (this.world.entities as any).remove(mobId);
+      if (this.world.entities?.remove) {
+        this.world.entities.remove(mobId);
       }
     }
   }

@@ -17,6 +17,11 @@
 
 import type { TileCoord } from "./TileSystem";
 
+// Reusable candidate tiles to avoid allocations in hot path
+const _candidate0: TileCoord = { x: 0, z: 0 };
+const _candidate1: TileCoord = { x: 0, z: 0 };
+const _candidate2: TileCoord = { x: 0, z: 0 };
+
 /**
  * Calculate the next tile when chasing a target.
  *
@@ -43,12 +48,14 @@ export function chaseStep(
     return null;
   }
 
-  // Build list of tiles to try, in priority order
-  const candidates: TileCoord[] = [];
-
+  // Use reusable candidate tiles instead of allocating new arrays
   // Priority 1: Diagonal (if moving on both axes)
   if (dx !== 0 && dz !== 0) {
-    candidates.push({ x: current.x + dx, z: current.z + dz });
+    _candidate0.x = current.x + dx;
+    _candidate0.z = current.z + dz;
+    if (isWalkable(_candidate0)) {
+      return { x: _candidate0.x, z: _candidate0.z };
+    }
   }
 
   // Priority 2: Cardinal directions (prioritize greater distance axis)
@@ -57,18 +64,35 @@ export function chaseStep(
 
   if (absDx >= absDz) {
     // X axis has greater or equal distance, try it first
-    if (dx !== 0) candidates.push({ x: current.x + dx, z: current.z });
-    if (dz !== 0) candidates.push({ x: current.x, z: current.z + dz });
+    if (dx !== 0) {
+      _candidate1.x = current.x + dx;
+      _candidate1.z = current.z;
+      if (isWalkable(_candidate1)) {
+        return { x: _candidate1.x, z: _candidate1.z };
+      }
+    }
+    if (dz !== 0) {
+      _candidate2.x = current.x;
+      _candidate2.z = current.z + dz;
+      if (isWalkable(_candidate2)) {
+        return { x: _candidate2.x, z: _candidate2.z };
+      }
+    }
   } else {
     // Z axis has greater distance, try it first
-    if (dz !== 0) candidates.push({ x: current.x, z: current.z + dz });
-    if (dx !== 0) candidates.push({ x: current.x + dx, z: current.z });
-  }
-
-  // Try each candidate in order, return first walkable one
-  for (const candidate of candidates) {
-    if (isWalkable(candidate)) {
-      return candidate;
+    if (dz !== 0) {
+      _candidate1.x = current.x;
+      _candidate1.z = current.z + dz;
+      if (isWalkable(_candidate1)) {
+        return { x: _candidate1.x, z: _candidate1.z };
+      }
+    }
+    if (dx !== 0) {
+      _candidate2.x = current.x + dx;
+      _candidate2.z = current.z;
+      if (isWalkable(_candidate2)) {
+        return { x: _candidate2.x, z: _candidate2.z };
+      }
     }
   }
 

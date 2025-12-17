@@ -9,7 +9,7 @@
  * - Entity-based queries
  */
 
-import { describe, it, expect, beforeEach, mock, spyOn } from "bun:test";
+import { describe, it, expect, beforeEach, mock } from "bun:test";
 import {
   CombatEventBus,
   DamageDealtEvent,

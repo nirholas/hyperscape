@@ -46,6 +46,8 @@ import type { VRMHooks } from "../../types/systems/physics";
 import { getTextureBytesFromMaterial } from "./getTextureBytesFromMaterial";
 import { getTrianglesFromGeometry } from "./getTrianglesFromGeometry";
 import THREE from "./three";
+import { AnimationClipPool } from "../../utils/rendering/AnimationClipPool";
+import { MaterialPool } from "../../utils/rendering/MaterialPool";
 
 const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
@@ -124,6 +126,11 @@ export function createVRMFactory(
   const isVRM1OrHigher =
     version !== "0" &&
     (!version || (typeof version === "string" && !version.startsWith("0.")));
+
+  // Factory-level clip cache: shared across all instances of this VRM
+  // Key: emote URL, Value: retargeted AnimationClip
+  // All instances from this factory share the same skeleton naming, so clips can be reused
+  const factoryClipCache = new Map<string, THREE.AnimationClip>();
 
   // Track whether we've logged missing update pipeline warning
   let hasLoggedUpdatePipeline = false;
@@ -414,8 +421,11 @@ export function createVRMFactory(
           hasLoggedUpdatePipeline = true;
         }
 
-        // Step 3: Update skeleton matrices for skinning
-        skeleton.bones.forEach((bone) => bone.updateMatrixWorld());
+        // Step 3: Update skeleton matrices for skinning (avoid forEach for perf)
+        const bones = skeleton.bones;
+        for (let i = 0, len = bones.length; i < len; i++) {
+          bones[i].updateMatrixWorld();
+        }
         skeleton.update();
 
         elapsed = 0;
@@ -428,16 +438,13 @@ export function createVRMFactory(
       action: THREE.AnimationAction | null;
     }
 
-    const emotes: { [url: string]: EmoteData } = {
-      // [url]: {
-      //   url: String
-      //   loading: Boolean
-      //   action: AnimationAction
-      // }
-    };
+    // Per-instance emote cache: stores AnimationAction per URL
+    // AnimationAction is instance-specific (bound to this mixer)
+    const emotes: { [url: string]: EmoteData } = {};
     let currentEmote: EmoteData | null;
     let _setEmoteCallCount = 0;
-    const setEmote = (url) => {
+
+    const setEmote = (url: string | null) => {
       _setEmoteCallCount++;
 
       if (currentEmote?.url === url) {
@@ -454,6 +461,7 @@ export function createVRMFactory(
       const loop = opts.l !== "0";
       const speed = parseFloat(opts.s || "1");
 
+      // Check instance's action cache first
       if (emotes[url]) {
         currentEmote = emotes[url];
         if (currentEmote.action) {
@@ -464,46 +472,86 @@ export function createVRMFactory(
           );
           currentEmote.action.reset().fadeIn(0.15).play();
         }
-      } else {
-        const newEmote: EmoteData = {
-          url,
-          loading: true,
-          action: null,
-        };
-        emotes[url] = newEmote;
-        currentEmote = newEmote;
-        type LoaderType = {
-          load: (
-            type: string,
-            url: string,
-          ) => Promise<{ toClip: (opts: unknown) => THREE.AnimationClip }>;
-        };
-        (hooks.loader as LoaderType)
-          .load("emote", url)
-          .then((emo) => {
-            const clip = emo.toClip({
-              rootToHips,
-              version,
-              getBoneName,
-            });
-            const action = mixer.clipAction(clip);
-            action.timeScale = speed;
-            newEmote.action = action;
-            newEmote.loading = false;
-            // if its still this emote, play it!
-            if (currentEmote === newEmote) {
-              action.clampWhenFinished = !loop;
-              action.setLoop(
-                loop ? THREE.LoopRepeat : THREE.LoopOnce,
-                Infinity,
-              );
-              action.play();
-            }
-          })
-          .catch((err) => {
-            console.error(`[VRM] Failed to load emote:`, url, err);
-          });
+        return;
       }
+
+      // Create emote entry in loading state
+      const newEmote: EmoteData = {
+        url,
+        loading: true,
+        action: null,
+      };
+      emotes[url] = newEmote;
+      currentEmote = newEmote;
+
+      // Check factory-level clip cache first (shared across instances)
+      const cachedClip = factoryClipCache.get(url);
+      if (cachedClip) {
+        // Create action from cached clip (action is per-instance, clip is shared)
+        const action = mixer.clipAction(cachedClip);
+        action.timeScale = speed;
+        newEmote.action = action;
+        newEmote.loading = false;
+        if (currentEmote === newEmote) {
+          action.clampWhenFinished = !loop;
+          action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
+          action.play();
+        }
+        return;
+      }
+
+      // Use AnimationClipPool for loading (global cache across all factories)
+      const pool = AnimationClipPool.getInstance();
+      const loaderForPool = {
+        load: (type: "emote", emoteUrl: string) => {
+          return (
+            hooks.loader as {
+              load: (
+                t: string,
+                u: string,
+              ) => Promise<{
+                toClip: (opts: {
+                  rootToHips: number;
+                  version: string;
+                  getBoneName: (name: string) => string | undefined;
+                }) => THREE.AnimationClip | null;
+              }>;
+            }
+          ).load(type, emoteUrl);
+        },
+      };
+
+      pool
+        .getClip(url, loaderForPool, {
+          rootToHips,
+          version: version || "1",
+          getBoneName,
+        })
+        .then((clip) => {
+          if (!clip) {
+            console.error(`[VRM] Failed to create clip for emote:`, url);
+            return;
+          }
+
+          // Cache at factory level for other instances
+          factoryClipCache.set(url, clip);
+
+          // Create action from clip
+          const action = mixer.clipAction(clip);
+          action.timeScale = speed;
+          newEmote.action = action;
+          newEmote.loading = false;
+
+          // If still current emote, play it
+          if (currentEmote === newEmote) {
+            action.clampWhenFinished = !loop;
+            action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
+            action.play();
+          }
+        })
+        .catch((err) => {
+          console.error(`[VRM] Failed to load emote:`, url, err);
+        });
     };
 
     const bonesByName = {};
@@ -612,6 +660,20 @@ function cloneGLB(glb: GLBData): GLBData {
   // CRITICAL: Preserve scale from original scene (height normalization)
   clonedScene.scale.copy(glb.scene.scale);
   clonedScene.updateMatrixWorld(true);
+
+  // OPTIMIZATION: Replace cloned materials with pooled shared materials
+  // SkeletonUtils.clone() deep-clones materials, but we can share identical ones
+  const pool = MaterialPool.getInstance();
+  clonedScene.traverse((object) => {
+    if (object instanceof THREE.Mesh || object instanceof THREE.SkinnedMesh) {
+      const mesh = object;
+      if (Array.isArray(mesh.material)) {
+        mesh.material = mesh.material.map((mat) => pool.getSharedMaterial(mat));
+      } else {
+        mesh.material = pool.getSharedMaterial(mesh.material);
+      }
+    }
+  });
 
   const originalVRM = glb.userData?.vrm;
 

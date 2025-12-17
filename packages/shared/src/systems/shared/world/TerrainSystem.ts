@@ -302,14 +302,14 @@ export class TerrainSystem extends System {
   }
 
   // World Configuration
-  // Gentle rolling hills with very occasional dramatic peaks
+  // Rolling hills with occasional dramatic peaks - stylized terrain
   private readonly CONFIG = {
     // Core World Specs
     TILE_SIZE: 100, // 100m x 100m tiles
     WORLD_SIZE: 100, // 100x100 grid = 10km x 10km world
     TILE_RESOLUTION: 64, // 64x64 vertices per tile for smooth terrain
-    MAX_HEIGHT: 60, // 60m max height for gentle hills with occasional peaks
-    WATER_THRESHOLD: 4.0, // Water appears below 4m (creates lakes in depressions)
+    MAX_HEIGHT: 80, // 80m max height for visible rolling hills
+    WATER_THRESHOLD: 3.0, // Water appears below 3m (creates lakes in depressions)
 
     // Chunking - Only adjacent tiles
     VIEW_DISTANCE: 1, // Load only 1 tile in each direction (3x3 = 9 tiles)
@@ -321,25 +321,25 @@ export class TerrainSystem extends System {
     SLOPE_CHECK_DISTANCE: 1, // Distance to check for slope calculation
 
     // Features
-    ROAD_WIDTH: 4, // 4m wide roads
-    RESOURCE_DENSITY: 0.15, // 15% chance per area for resources
-    TREE_DENSITY: 0.25, // 25% chance for trees in forest biomes
-    TOWN_RADIUS: 25, // Safe radius around towns
+    ROAD_WIDTH: 5, // 5m wide roads for better visibility
+    RESOURCE_DENSITY: 0.2, // 20% chance per area for resources
+    TREE_DENSITY: 0.35, // 35% chance for trees in forest biomes
+    TOWN_RADIUS: 30, // Safe radius around towns
     
-    // Height variation by biome type
+    // Height variation by biome type - MORE DRAMATIC for visible terrain
     BIOME_HEIGHT_MULTIPLIERS: {
-      plains: 0.4,     // Very gentle
-      forest: 0.5,     // Slightly more varied
-      valley: 0.3,     // Low-lying, gentle
-      mountains: 1.5,  // Dramatic peaks (very occasional)
-      tundra: 0.8,     // Moderate with some peaks
-      desert: 0.35,    // Gentle dunes
-      lakes: 0.2,      // Very flat around water
-      swamp: 0.25,     // Very flat, wet
+      plains: 0.55,    // Gentle rolling hills
+      forest: 0.65,    // Moderate hills with trees
+      valley: 0.35,    // Low-lying but varied
+      mountains: 1.8,  // Dramatic peaks
+      tundra: 1.0,     // Moderate with some peaks
+      desert: 0.45,    // Dunes and ridges
+      lakes: 0.25,     // Low around water but with shores
+      swamp: 0.3,      // Mostly flat, some mounds
     } as Record<string, number>,
     
     // Mountain occurrence (lower = rarer)
-    MOUNTAIN_RARITY: 0.08, // Only ~8% of terrain has mountain-level peaks
+    MOUNTAIN_RARITY: 0.12, // ~12% of terrain has mountain-level peaks
   };
 
   // Biomes now loaded from assets/manifests/biomes.json via DataManager
@@ -1114,7 +1114,8 @@ export class TerrainSystem extends System {
 
     // Store heightfields for this tile
     const heightfields: Heightfield[] = [];
-    const materials = new Int32Array(vertexCount * 4);
+    // Use Float32Array for WebGL compatibility (shader casts to int)
+    const materials = new Float32Array(vertexCount * 4);
     const materialsWeights = new Float32Array(vertexCount * 4);
 
     // Generate heightmap and vertex colors
@@ -1133,17 +1134,17 @@ export class TerrainSystem extends System {
       // Set height
       positions.setY(i, heightfield.height);
 
-      // Set materials
+      // Set materials (as floats for WebGL compatibility)
       for (let j = 0; j < 4; j++) {
         materials[i * 4 + j] = heightfield.materials[j];
         materialsWeights[i * 4 + j] = heightfield.materialsWeights[j];
       }
     }
 
-    // Add custom attributes (Int32 for materials, Float32 for weights)
+    // Add custom attributes (Float32 for both - shader casts materials to int)
     geometry.setAttribute(
       "materials",
-      new THREE.Int32BufferAttribute(materials, 4),
+      new THREE.Float32BufferAttribute(materials, 4),
     );
     geometry.setAttribute(
       "materialsWeights",
@@ -1356,12 +1357,7 @@ export class TerrainSystem extends System {
     const adjustedHeight = height + detailNoise * 2.0;
     const adjustedSlope = slope + detailNoise * 0.05;
 
-    // =========================================================
-    // BIOME-SPECIFIC MATERIAL WEIGHTS
     // Material indices: 0=Grass, 1=Dirt, 2=Rock, 3=Snow, 4=Sand, 5=Cobblestone
-    // Each biome has different base material preferences
-    // =========================================================
-
     let grassWeight = 0;
     let dirtWeight = 0;
     let rockWeight = 0;
@@ -1448,50 +1444,36 @@ export class TerrainSystem extends System {
       rockWeight = Math.max(rockWeight, steepRock * 0.65);
     }
 
-    // =========================================================
-    // ROAD SYSTEM - Noise-based paths with biome-aware surfacing
-    // =========================================================
+    // Road network: primary (0.72), secondary (0.78), tertiary (0.82) thresholds
+    const roadNoise1 = this.noise.ridgeNoise2D(worldX * 0.006, worldZ * 0.006);
+    const roadNoise2 = this.noise.ridgeNoise2D(worldX * 0.015 + 100, worldZ * 0.015 + 100);
+    const roadNoise3 = this.noise.ridgeNoise2D(worldX * 0.025 + 200, worldZ * 0.025 + 200);
     
-    // Primary road network (larger paths connecting areas)
-    const roadNoise1 = this.noise.ridgeNoise2D(worldX * 0.008, worldZ * 0.008);
-    const roadNoise2 = this.noise.ridgeNoise2D(worldX * 0.012 + 50, worldZ * 0.012 + 50);
-    const combinedRoadNoise = (roadNoise1 + roadNoise2 * 0.6) / 1.6;
+    const primaryRoad = roadNoise1 > 0.72 ? (roadNoise1 - 0.72) * 4.0 : 0;
+    const secondaryRoad = roadNoise2 > 0.78 ? (roadNoise2 - 0.78) * 3.0 : 0;
+    const tertiaryRoad = roadNoise3 > 0.82 ? (roadNoise3 - 0.82) * 2.0 : 0;
+    const roadStrength = Math.min(1.0, primaryRoad + secondaryRoad * 0.6 + tertiaryRoad * 0.3);
     
-    // Road threshold - higher values = wider roads
-    const roadThreshold = 0.78;
-    const isOnRoad = combinedRoadNoise > roadThreshold;
-    const roadStrength = isOnRoad ? Math.min(1.0, (combinedRoadNoise - roadThreshold) * 8.0) : 0;
-    
-    // Check if near a town for cobblestone
     const distToTownCenter = Math.sqrt(worldX * worldX + worldZ * worldZ);
-    const nearTown = distToTownCenter < this.CONFIG.TOWN_RADIUS * 2;
+    const townBlend = Math.max(0, 1.0 - distToTownCenter / (this.CONFIG.TOWN_RADIUS * 2.5));
     
-    if (roadStrength > 0.1) {
-      if (nearTown) {
-        // Cobblestone roads near towns
-        cobblestoneWeight = roadStrength * 0.85;
-        dirtWeight *= (1.0 - roadStrength * 0.7);
-        grassWeight *= (1.0 - roadStrength * 0.9);
-      } else {
-        // Dirt paths in wilderness
-        dirtWeight += roadStrength * 0.75;
-        grassWeight *= (1.0 - roadStrength * 0.7);
-      }
+    if (roadStrength > 0.05) {
+      const cobblestoneAmount = roadStrength * townBlend * 0.9;
+      const dirtAmount = roadStrength * (1.0 - townBlend * 0.7) * 0.85;
+      cobblestoneWeight = Math.max(cobblestoneWeight, cobblestoneAmount);
+      dirtWeight = Math.max(dirtWeight, dirtAmount);
+      const roadCutout = roadStrength * 0.85;
+      grassWeight *= (1.0 - roadCutout);
+      sandWeight *= (1.0 - roadCutout * 0.5);
     }
 
-    // Clamp helper
     const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
-
-    // Build material weights array: [grass, dirt, rock, snow, sand, cobblestone]
     const allWeights = [grassWeight, dirtWeight, rockWeight, snowWeight, sandWeight, cobblestoneWeight]
       .map((w, i) => ({ index: i, weight: clamp01(w) }));
-    
-    // Sort by weight descending and take top 4 (shader limit)
     allWeights.sort((a, b) => b.weight - a.weight);
     const top4 = allWeights.slice(0, 4);
     const totalWeight = top4.reduce((sum, m) => sum + m.weight, 0);
 
-    // Normalize weights or fallback to pure grass
     if (totalWeight < 0.01) {
       return { indices: [0, 1, 2, 3], weights: [1, 0, 0, 0] };
     }
@@ -1518,35 +1500,37 @@ export class TerrainSystem extends System {
 
     // Get biome for height modulation
     const biome = this.getBiomeAtWorldPosition(worldX, worldZ);
-    const biomeMultiplier = this.CONFIG.BIOME_HEIGHT_MULTIPLIERS[biome] ?? 0.5;
+    const biomeMultiplier = this.CONFIG.BIOME_HEIGHT_MULTIPLIERS[biome] ?? 0.55;
 
-    // =========================================================
-    // MULTI-LAYERED TERRAIN GENERATION
-    // Creates gentle rolling hills with very occasional peaks
-    // =========================================================
-
-    // Layer 1: Base terrain - large gentle undulations
-    const baseScale = 0.002;
-    const baseNoise = this.noise.fractal2D(
-      worldX * baseScale,
-      worldZ * baseScale,
-      3,
-      0.6,
+    // Multi-layered terrain: continental -> regional -> local -> bump -> detail
+    const continentalScale = 0.0008;
+    const continentalNoise = this.noise.fractal2D(
+      worldX * continentalScale,
+      worldZ * continentalScale,
+      2,
+      0.5,
       2.0,
     );
 
-    // Layer 2: Rolling hills - primary terrain variation
-    const hillScale = 0.008;
-    const hillNoise = this.noise.fractal2D(
-      worldX * hillScale,
-      worldZ * hillScale,
+    const regionalScale = 0.004;
+    const regionalNoise = this.noise.fractal2D(
+      worldX * regionalScale,
+      worldZ * regionalScale,
       4,
-      0.55,
-      2.1,
+      0.5,
+      2.0,
     );
 
-    // Layer 3: Gentle bumps - small-scale variation
-    const bumpScale = 0.025;
+    const localScale = 0.012;
+    const localNoise = this.noise.fractal2D(
+      worldX * localScale,
+      worldZ * localScale,
+      3,
+      0.45,
+      2.2,
+    );
+
+    const bumpScale = 0.03;
     const bumpNoise = this.noise.fractal2D(
       worldX * bumpScale,
       worldZ * bumpScale,
@@ -1555,99 +1539,99 @@ export class TerrainSystem extends System {
       2.3,
     );
 
-    // Layer 4: Fine detail - surface texture
-    const detailScale = 0.06;
+    const detailScale = 0.08;
     const detailNoise = this.noise.simplex2D(
       worldX * detailScale,
       worldZ * detailScale,
     );
 
-    // =========================================================
-    // VERY OCCASIONAL MOUNTAIN PEAKS
-    // Uses cellular noise to create rare, isolated peaks
-    // =========================================================
-    
-    // Check for mountain occurrence (rare peaks)
-    const mountainCheckScale = 0.0008;
+    // Mountain peaks via cellular noise
+    const mountainCheckScale = 0.001;
     const mountainCellular = this.noise.cellular2D(
       worldX * mountainCheckScale,
       worldZ * mountainCheckScale,
-      0.7,
-    );
-    
-    // Only create peaks in small percentage of world
-    const isMountainPeak = mountainCellular < this.CONFIG.MOUNTAIN_RARITY;
-    
-    // Mountain peak height (if applicable)
-    let peakContribution = 0;
-    if (isMountainPeak && (biome === "mountains" || biome === "tundra")) {
-      const peakIntensity = 1.0 - (mountainCellular / this.CONFIG.MOUNTAIN_RARITY);
-      const ridgeNoise = this.noise.ridgeNoise2D(worldX * 0.004, worldZ * 0.004);
-      peakContribution = peakIntensity * ridgeNoise * 0.8;
-    }
-
-    // =========================================================
-    // LAKE AND WATER DEPRESSIONS
-    // Creates natural lakes using cellular noise
-    // =========================================================
-    
-    const lakeScale = 0.003;
-    const lakeCellular = this.noise.cellular2D(
-      worldX * lakeScale + 100,
-      worldZ * lakeScale + 100,
       0.6,
     );
     
-    // Lakes form in low cellular areas (near cell centers)
-    const isLakeArea = lakeCellular < 0.2 && (biome === "lakes" || biome === "swamp" || biome === "valley");
-    let lakeDepression = 0;
-    if (lakeCellular < 0.25) {
-      const lakeDepth = (0.25 - lakeCellular) / 0.25;
-      lakeDepression = lakeDepth * 0.4; // Depress terrain for lakes
+    const isMountainBiome = biome === "mountains" || biome === "tundra";
+    const canHavePeaks = isMountainBiome || (biome === "forest" && mountainCellular < 0.05);
+    const isMountainPeak = mountainCellular < this.CONFIG.MOUNTAIN_RARITY && canHavePeaks;
+    
+    let peakContribution = 0;
+    if (isMountainPeak) {
+      const peakIntensity = 1.0 - (mountainCellular / this.CONFIG.MOUNTAIN_RARITY);
+      const ridgeNoise = this.noise.ridgeNoise2D(worldX * 0.005, worldZ * 0.005);
+      const peakMultiplier = isMountainBiome ? 1.0 : 0.5;
+      peakContribution = peakIntensity * ridgeNoise * peakMultiplier;
     }
 
-    // =========================================================
-    // COMBINE ALL LAYERS
-    // =========================================================
+    // Lake depressions via cellular noise
+    const lakeScale = 0.0025;
+    const lakeCellular = this.noise.cellular2D(
+      worldX * lakeScale + 100,
+      worldZ * lakeScale + 100,
+      0.5,
+    );
+    
+    const isLakeBiome = biome === "lakes" || biome === "swamp";
+    const isLakeArea = lakeCellular < 0.18 && (isLakeBiome || (biome === "valley" && lakeCellular < 0.1));
+    let lakeDepression = 0;
+    if (lakeCellular < 0.22 && (isLakeBiome || biome === "valley")) {
+      lakeDepression = ((0.22 - lakeCellular) / 0.22) * 0.5;
+    }
 
-    // Base height from layers (mostly gentle, some variation)
+    // Combine all layers
     let height = 0;
-    height += baseNoise * 0.25;        // Large gentle undulations
-    height += hillNoise * 0.45;        // Primary rolling hills
-    height += bumpNoise * 0.18;        // Gentle bumps
-    height += detailNoise * 0.05;      // Fine surface detail
-    height += peakContribution * 0.4;  // Rare mountain peaks
+    height += continentalNoise * 0.20;   // Large scale base
+    height += regionalNoise * 0.35;      // Primary rolling hills - VISIBLE
+    height += localNoise * 0.25;         // Secondary hills
+    height += bumpNoise * 0.12;          // Bumps and mounds
+    height += detailNoise * 0.04;        // Surface texture
+    height += peakContribution * 0.45;   // Mountain peaks
 
-    // Normalize to [0, 1] range
-    height = (height + 1) * 0.5;
-    height = Math.max(0, Math.min(1, height));
+    // Map from approximately [-1, 1] to [0, 1] with bias toward middle
+    height = (height + 1.0) * 0.5;
+    
+    // Soft clamp to avoid harsh cutoffs
+    height = Math.max(0.05, Math.min(0.95, height));
 
-    // Apply biome-specific height curve
-    // Plains/valley: very gentle (pow 1.0-1.1)
-    // Mountains: allow peaks (pow 1.3-1.5)
-    const curvePower = biome === "mountains" ? 1.4 : biome === "tundra" ? 1.2 : 1.05;
+    // Apply biome-specific height curve for stylized look
+    const curvePowers: Record<string, number> = {
+      mountains: 1.3,
+      tundra: 1.15,
+      forest: 1.0,
+      plains: 0.95,
+      valley: 0.9,
+      desert: 1.05,
+      lakes: 0.85,
+      swamp: 0.8,
+    };
+    const curvePower = curvePowers[biome] ?? 1.0;
     height = Math.pow(height, curvePower);
 
     // Apply biome height multiplier
     height *= biomeMultiplier;
 
     // Apply lake depression
-    if (isLakeArea || lakeDepression > 0.1) {
+    if (isLakeArea || lakeDepression > 0.15) {
       height *= (1.0 - lakeDepression);
     }
 
     // Scale to actual world height
     let finalHeight = height * this.CONFIG.MAX_HEIGHT;
 
+    // Add base elevation to prevent everything being at water level
+    const baseElevation = 5.0;
+    finalHeight += baseElevation;
+
     // Ensure minimum height above water for non-lake areas
     if (!isLakeArea && finalHeight > this.CONFIG.WATER_THRESHOLD - 1) {
-      // Keep some terrain just above water level
-      finalHeight = Math.max(finalHeight, this.CONFIG.WATER_THRESHOLD + 0.5);
+      finalHeight = Math.max(finalHeight, this.CONFIG.WATER_THRESHOLD + 1.0);
     }
 
     // Lakes should go below water threshold
     if (isLakeArea) {
-      finalHeight = Math.min(finalHeight, this.CONFIG.WATER_THRESHOLD - 1);
+      finalHeight = Math.min(finalHeight, this.CONFIG.WATER_THRESHOLD - 0.5);
     }
 
     return finalHeight;
@@ -1948,10 +1932,27 @@ export class TerrainSystem extends System {
       return;
     }
 
-    const CHUNK_SIZE = 16; // meters per chunk
+    // Biome-specific tree density from JSON or defaults
+    const biomeDensities: Record<string, number> = {
+      plains: 0.15,    // Scattered trees
+      forest: 0.45,    // Dense woodland
+      valley: 0.25,    // Moderate trees
+      mountains: 0.05, // Sparse alpine trees
+      tundra: 0.02,    // Very sparse
+      desert: 0.01,    // Rare oasis trees
+      lakes: 0.1,      // Trees around shores
+      swamp: 0.2,      // Twisted trees
+    };
+    const treeDensity = (biomeData as { treeDensity?: number }).treeDensity ?? 
+      (biomeDensities[tile.biome] ?? 0.15);
+
+    const CHUNK_SIZE = 12; // Smaller chunks for better distribution
     const chunksPerSide = Math.floor(this.CONFIG.TILE_SIZE / CHUNK_SIZE);
-    const MAX_TREES_PER_CHUNK = 12;
-    const TREE_THRESHOLD = 0.3;
+    const BASE_TREES_PER_CHUNK = 20;
+    const treesPerChunk = Math.floor(BASE_TREES_PER_CHUNK * treeDensity);
+    
+    // Lower threshold for more tree placement opportunities
+    const TREE_THRESHOLD = 0.15;
 
     for (let cz = 0; cz < chunksPerSide; cz++) {
       for (let cx = 0; cx < chunksPerSide; cx++) {
@@ -1961,7 +1962,7 @@ export class TerrainSystem extends System {
         const chunkSeed = this.noise.hashNoise(chunkWorldX, chunkWorldZ);
         const chunkRng = this.seedRngFromFloat(chunkSeed);
 
-        for (let i = 0; i < MAX_TREES_PER_CHUNK; i++) {
+        for (let i = 0; i < treesPerChunk; i++) {
           const offsetX = chunkRng() * CHUNK_SIZE;
           const offsetZ = chunkRng() * CHUNK_SIZE;
           const worldX = chunkWorldX + offsetX;
@@ -1975,20 +1976,23 @@ export class TerrainSystem extends System {
           );
           if (!heightfield) continue;
 
+          // More permissive tree placement
           if (heightfield.treeVisibility > TREE_THRESHOLD) {
             if (
               heightfield.liquidType === "none" &&
-              heightfield.slope < 0.13 &&
+              heightfield.slope < 0.35 && // Allow on moderate slopes
               heightfield.height >= this.CONFIG.WATER_THRESHOLD
             ) {
               const variationSeed = this.noise.hashNoise(
                 worldX * 5,
                 worldZ * 5,
               );
-              const treeVariation = Math.floor(variationSeed * 3);
+              // More tree variations for visual diversity
+              const treeVariation = Math.floor(variationSeed * 6);
 
               const scaleNoise = this.noise.scaleNoise(worldX, worldZ);
-              const scale = 1.0 + scaleNoise * 0.4;
+              // More scale variation for natural look
+              const scale = 0.8 + scaleNoise * 0.6;
 
               const rotation = this.noise.rotationNoise(worldX, worldZ);
 
@@ -2023,13 +2027,31 @@ export class TerrainSystem extends System {
     biomeData: BiomeData,
     heightfields: Heightfield[],
   ) {
-    const hasRocks = biomeData.resources.includes("rock");
+    const hasRocks = biomeData.resources.includes("rock") ||
+      biomeData.resources.includes("rocks");
     if (!hasRocks) return;
 
-    const CHUNK_SIZE = 16;
+    // Biome-specific rock density
+    const biomeDensities: Record<string, number> = {
+      plains: 0.08,    // Occasional boulders
+      forest: 0.1,     // Scattered rocks
+      valley: 0.05,    // Few rocks
+      mountains: 0.35, // Lots of rocks
+      tundra: 0.2,     // Rocky terrain
+      desert: 0.15,    // Desert rocks
+      lakes: 0.05,     // Shoreline rocks
+      swamp: 0.08,     // Scattered
+    };
+    const rockDensity = (biomeData as { rockDensity?: number }).rockDensity ?? 
+      (biomeDensities[tile.biome] ?? 0.1);
+
+    const CHUNK_SIZE = 12;
     const chunksPerSide = Math.floor(this.CONFIG.TILE_SIZE / CHUNK_SIZE);
-    const MAX_ROCKS_PER_CHUNK = 10;
-    const ROCK_THRESHOLD = 0.5;
+    const BASE_ROCKS_PER_CHUNK = 15;
+    const rocksPerChunk = Math.floor(BASE_ROCKS_PER_CHUNK * rockDensity);
+    
+    // Lower threshold for more rock placement
+    const ROCK_THRESHOLD = 0.25;
 
     for (let cz = 0; cz < chunksPerSide; cz++) {
       for (let cx = 0; cx < chunksPerSide; cx++) {
@@ -2039,7 +2061,7 @@ export class TerrainSystem extends System {
         const chunkSeed = this.noise.hashNoise(chunkWorldX, chunkWorldZ);
         const chunkRng = this.seedRngFromFloat(chunkSeed);
 
-        for (let i = 0; i < MAX_ROCKS_PER_CHUNK; i++) {
+        for (let i = 0; i < rocksPerChunk; i++) {
           const offsetX = chunkRng() * CHUNK_SIZE;
           const offsetZ = chunkRng() * CHUNK_SIZE;
           const worldX = chunkWorldX + offsetX;
@@ -2054,9 +2076,10 @@ export class TerrainSystem extends System {
           if (!heightfield) continue;
 
           if (heightfield.rockVisibility > ROCK_THRESHOLD) {
-            if (heightfield.liquidType === "none" && heightfield.slope < 0.13) {
+            // Rocks can appear on steeper slopes than trees
+            if (heightfield.liquidType === "none" && heightfield.slope < 0.6) {
               const _scale =
-                0.85 + this.noise.scaleNoise(worldX, worldZ) * 0.25;
+                0.6 + this.noise.scaleNoise(worldX, worldZ) * 0.6;
               const _rotation = this.noise.rotationNoise(worldX, worldZ);
 
               // PERFORMANCE: Use plain objects instead of THREE types
@@ -2485,7 +2508,7 @@ export class TerrainSystem extends System {
     this.emitTileUnloaded(`${tile.x},${tile.z}`);
   }
 
-  // ===== TERRAIN MOVEMENT CONSTRAINTS (GDD Requirement) =====
+  // Movement Constraints
 
   /**
    * Check if a position is walkable based on terrain constraints
@@ -2614,7 +2637,7 @@ export class TerrainSystem extends System {
     };
   }
 
-  // ===== TERRAIN-BASED MOB SPAWNING (GDD Integration) =====
+  // Mob Spawning
 
   /**
    * Generate visual features (road meshes, lake meshes) for a tile
@@ -2978,7 +3001,7 @@ export class TerrainSystem extends System {
     this.saveModifiedChunks();
   }
 
-  // ===== TEST INTEGRATION METHODS (expected by test-terrain.mjs) =====
+  // Test Integration
 
   /**
    * Get comprehensive terrain statistics for testing
@@ -3048,7 +3071,7 @@ export class TerrainSystem extends System {
     return this.CONFIG.WATER_THRESHOLD;
   }
 
-  // ===== MMOCHUNK LOADING AND SIMULATION SYSTEM =====
+  // Chunk Loading
 
   /**
    * Initialize chunk loading system

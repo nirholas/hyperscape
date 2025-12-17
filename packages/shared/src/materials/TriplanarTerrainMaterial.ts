@@ -1,14 +1,15 @@
 import THREE from "../extras/three/three";
 
 /**
- * TriplanarTerrainMaterial - Blended terrain material with normal mapping
+ * TriplanarTerrainMaterial - Stylized terrain with painterly blending
  *
  * Features:
  * - 6-way material blending (grass, dirt, rock, snow, sand, cobblestone)
- * - Tiling-free texture sampling to avoid repeating patterns
+ * - Stochastic sampling to reduce visible tiling patterns
  * - Normal map support for surface detail
- * - Basic directional lighting
- * - Planar XZ projection (optimized for terrain)
+ * - Stylized directional lighting with warm/cool bias
+ * - Height-based detail variation for organic transitions
+ * - Planar XZ projection optimized for terrain
  * 
  * Material indices:
  * 0 = Grass, 1 = Dirt, 2 = Rock, 3 = Snow, 4 = Sand, 5 = Cobblestone
@@ -23,6 +24,7 @@ export class TriplanarTerrainMaterial extends THREE.ShaderMaterial {
     uSunColor: { value: THREE.Color };
     uAmbientColor: { value: THREE.Color };
     uNormalStrength: { value: number };
+    uTime: { value: number };
   };
 
   constructor(
@@ -37,37 +39,38 @@ export class TriplanarTerrainMaterial extends THREE.ShaderMaterial {
         uNormalMap: { value: normalAtlas },
         uNoiseTexture: { value: noiseTexture },
         uTextureScales: { value: textureScales },
-        // Lighting uniforms
-        uSunDirection: { value: new THREE.Vector3(0.5, 0.8, 0.3).normalize() },
-        uSunColor: { value: new THREE.Color(1.0, 0.98, 0.9) },
-        uAmbientColor: { value: new THREE.Color(0.15, 0.18, 0.25) },
-        uNormalStrength: { value: 0.8 },
+        // Lighting uniforms - warm sunlight with cool shadows for stylized look
+        uSunDirection: { value: new THREE.Vector3(0.4, 0.7, 0.5).normalize() },
+        uSunColor: { value: new THREE.Color(1.0, 0.95, 0.85) },
+        uAmbientColor: { value: new THREE.Color(0.25, 0.28, 0.35) },
+        uNormalStrength: { value: 0.7 },
+        uTime: { value: 0.0 },
       },
+      // Use vec4 for materials instead of ivec4 for WebGL compatibility
       vertexShader: /* glsl */ `
-        attribute ivec4 materials;
+        attribute vec4 materials;
         attribute vec4 materialsWeights;
         
-        flat varying ivec4 vMaterials;
+        varying vec4 vMaterials;
         varying vec4 vMaterialsWeights;
         varying vec3 vPosition;
         varying vec3 vWorldPosition;
-        varying vec3 vNormal;
         varying vec3 vWorldNormal;
+        varying float vHeight;
         
         void main() {
           vMaterials = materials;
           vMaterialsWeights = materialsWeights;
           vPosition = position;
           vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
-          vNormal = normal;
           vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+          vHeight = position.y;
           
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `,
       fragmentShader: /* glsl */ `
         precision highp float;
-        precision highp int;
         
         uniform sampler2D uDiffMap;
         uniform sampler2D uNormalMap;
@@ -77,20 +80,26 @@ export class TriplanarTerrainMaterial extends THREE.ShaderMaterial {
         uniform vec3 uSunColor;
         uniform vec3 uAmbientColor;
         uniform float uNormalStrength;
+        uniform float uTime;
         
-        flat varying ivec4 vMaterials;
+        varying vec4 vMaterials;
         varying vec4 vMaterialsWeights;
         varying vec3 vPosition;
         varying vec3 vWorldPosition;
-        varying vec3 vNormal;
         varying vec3 vWorldNormal;
+        varying float vHeight;
         
         const float TEXTURE_SCALE = 40.0;
         // 3x2 atlas grid: 3 columns, 2 rows
         const float ATLAS_COLS = 3.0;
         const float ATLAS_ROWS = 2.0;
-        const float TEXTURE_WIDTH = 1.0 / ATLAS_COLS;   // 0.333...
-        const float TEXTURE_HEIGHT = 1.0 / ATLAS_ROWS;  // 0.5
+        const float TEXTURE_WIDTH = 1.0 / ATLAS_COLS;
+        const float TEXTURE_HEIGHT = 1.0 / ATLAS_ROWS;
+        
+        // Hash function for stochastic sampling
+        float hash(vec2 p) {
+          return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+        }
         
         vec2 getSubTextureOffset(int textureIndex) {
           float idx = float(textureIndex);
@@ -104,7 +113,6 @@ export class TriplanarTerrainMaterial extends THREE.ShaderMaterial {
           return texture2D(tex, subUv);
         }
         
-        // Get scale for material index, clamped to valid range
         float getTextureScale(int idx) {
           if (idx == 0) return uTextureScales[0];
           if (idx == 1) return uTextureScales[1];
@@ -112,56 +120,64 @@ export class TriplanarTerrainMaterial extends THREE.ShaderMaterial {
           if (idx == 3) return uTextureScales[3];
           if (idx == 4) return uTextureScales[4];
           if (idx == 5) return uTextureScales[5];
-          return uTextureScales[0]; // Fallback to grass
+          return uTextureScales[0];
         }
         
-        // Stochastic sampling to reduce tiling artifacts
+        // Enhanced stochastic sampling with better anti-tiling
         vec4 textureNoTile(sampler2D tex, int textureIndex, vec2 inputUv, float noiseVal) {
           float UV_SCALE = getTextureScale(textureIndex);
           vec2 uv = inputUv * (1.0 / UV_SCALE);
           
-          // Use pre-sampled noise for offset
-          float l = noiseVal * 8.0;
-          float ia = floor(l + 0.5);
-          vec2 offset = fract(sin(vec2(ia * 30.0, ia * 7.0)) * 103.0);
+          // Improved stochastic offset using noise texture
+          vec2 noiseUv = inputUv * 0.01;
+          float n1 = texture2D(uNoiseTexture, noiseUv).r;
+          float n2 = texture2D(uNoiseTexture, noiseUv + vec2(0.5, 0.5)).r;
+          
+          // Create smooth offset that varies across the terrain
+          float angle = n1 * 6.28318;
+          vec2 offset = vec2(cos(angle), sin(angle)) * n2 * 0.5;
+          
+          // Add height-based variation for organic look
+          offset += vec2(hash(floor(uv * 4.0))) * 0.25;
           
           vec2 textureOffset = getSubTextureOffset(textureIndex);
           return subTexture2D(tex, uv + offset, textureOffset);
         }
         
-        // Blend up to 4 materials with weight-based sampling
+        // Blend materials with height-based detail variation
         vec4 blendMaterials(sampler2D tex, vec2 uv, float noiseVal) {
           vec4 result = vec4(0.0);
           float weightSum = 0.0;
           
-          // Only sample materials with significant weight (>1%)
+          // Sample with noise-based anti-tiling
           if(vMaterialsWeights.x > 0.01) {
-            result += textureNoTile(tex, vMaterials.x, uv, noiseVal) * vMaterialsWeights.x;
+            int matIdx = int(vMaterials.x + 0.5);
+            result += textureNoTile(tex, matIdx, uv, noiseVal) * vMaterialsWeights.x;
             weightSum += vMaterialsWeights.x;
           }
           if(vMaterialsWeights.y > 0.01) {
-            result += textureNoTile(tex, vMaterials.y, uv, noiseVal) * vMaterialsWeights.y;
+            int matIdx = int(vMaterials.y + 0.5);
+            result += textureNoTile(tex, matIdx, uv, noiseVal) * vMaterialsWeights.y;
             weightSum += vMaterialsWeights.y;
           }
           if(vMaterialsWeights.z > 0.01) {
-            result += textureNoTile(tex, vMaterials.z, uv, noiseVal) * vMaterialsWeights.z;
+            int matIdx = int(vMaterials.z + 0.5);
+            result += textureNoTile(tex, matIdx, uv, noiseVal) * vMaterialsWeights.z;
             weightSum += vMaterialsWeights.z;
           }
           if(vMaterialsWeights.w > 0.01) {
-            result += textureNoTile(tex, vMaterials.w, uv, noiseVal) * vMaterialsWeights.w;
+            int matIdx = int(vMaterials.w + 0.5);
+            result += textureNoTile(tex, matIdx, uv, noiseVal) * vMaterialsWeights.w;
             weightSum += vMaterialsWeights.w;
           }
           
           return weightSum > 0.001 ? result / weightSum : result;
         }
         
-        // Convert normal map sample to world-space normal
         vec3 perturbNormal(vec3 normalMapSample, vec3 surfaceNormal) {
-          // Unpack from [0,1] to [-1,1]
           vec3 mapNormal = normalMapSample * 2.0 - 1.0;
           mapNormal.xy *= uNormalStrength;
           
-          // Build TBN matrix from surface normal (terrain is roughly Y-up)
           vec3 up = abs(surfaceNormal.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
           vec3 tangent = normalize(cross(up, surfaceNormal));
           vec3 bitangent = cross(surfaceNormal, tangent);
@@ -173,25 +189,38 @@ export class TriplanarTerrainMaterial extends THREE.ShaderMaterial {
         void main() {
           vec2 textureUv = vPosition.xz * (1.0 / TEXTURE_SCALE);
           
-          // Sample noise once and reuse for all materials
-          float noiseVal = texture2D(uNoiseTexture, 0.0025 * textureUv).x;
+          // Sample noise for anti-tiling
+          float noiseVal = texture2D(uNoiseTexture, textureUv * 0.005).r;
           
-          // Sample diffuse and normal maps with shared noise
+          // Sample diffuse and normal maps
           vec4 diffMapColor = blendMaterials(uDiffMap, textureUv, noiseVal);
           vec4 normalMapSample = blendMaterials(uNormalMap, textureUv, noiseVal);
           
           // Calculate perturbed normal
           vec3 normal = perturbNormal(normalMapSample.rgb, normalize(vWorldNormal));
           
-          // Simple directional lighting
+          // Stylized lighting with warm/cool bias
           float NdotL = max(dot(normal, uSunDirection), 0.0);
-          vec3 diffuse = diffMapColor.rgb * uSunColor * NdotL;
-          vec3 ambient = diffMapColor.rgb * uAmbientColor;
           
-          // Final color with basic lighting
-          vec3 finalColor = ambient + diffuse;
+          // Soft wrap lighting for painterly look
+          float wrapLight = NdotL * 0.5 + 0.5;
+          wrapLight = pow(wrapLight, 1.5);
           
-          // Apply gamma correction
+          // Warm light in direct sun, cool in shadow
+          vec3 warmLight = uSunColor * wrapLight;
+          vec3 coolShadow = uAmbientColor * (1.0 - NdotL * 0.5);
+          
+          vec3 finalColor = diffMapColor.rgb * (warmLight + coolShadow);
+          
+          // Subtle height-based color variation (atmospheric perspective)
+          float heightFog = smoothstep(0.0, 60.0, vHeight);
+          vec3 atmosphereColor = vec3(0.7, 0.8, 0.95);
+          finalColor = mix(finalColor, finalColor * atmosphereColor, heightFog * 0.15);
+          
+          // Stylized contrast boost
+          finalColor = pow(finalColor, vec3(0.95));
+          
+          // Gamma correction
           finalColor = pow(finalColor, vec3(1.0 / 2.2));
           
           gl_FragColor = vec4(finalColor, 1.0);
@@ -202,6 +231,13 @@ export class TriplanarTerrainMaterial extends THREE.ShaderMaterial {
       depthWrite: true,
       depthTest: true,
     });
+  }
+
+  /**
+   * Update time uniform for animated effects
+   */
+  setTime(time: number): void {
+    this.uniforms.uTime.value = time;
   }
 
   /**

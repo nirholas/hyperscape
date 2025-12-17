@@ -9,7 +9,7 @@
  * NO MOCKS - Tests real pool behavior, allocation patterns, and edge cases
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import {
   bfsPool,
   getCachedTimestamp,

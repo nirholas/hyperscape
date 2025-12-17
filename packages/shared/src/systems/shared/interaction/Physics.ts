@@ -1584,12 +1584,6 @@ export class Physics extends SystemBase implements IPhysics {
       return transform;
     };
 
-    const setPose = (newTransform: PhysX.PxTransform) => {
-      if ("setGlobalPose" in actor) {
-        (actor as PxRigidDynamic).setGlobalPose(newTransform);
-      }
-    };
-
     const getVelocity = () => {
       if ("getLinearVelocity" in actor) {
         return (actor as PxRigidDynamic).getLinearVelocity();

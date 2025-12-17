@@ -777,7 +777,7 @@ export class ClientCameraSystem extends SystemBase {
     } else if (!localPlayer && this.target) {
       // SPECTATOR FIX: Camera already has target, but avatar just loaded - reinitialize camera position
       // with the correct camHeight now that we know the avatar's actual height
-      const targetId = (this.target as any).id;
+      const targetId = this.target.data?.id;
       if (targetId === event.playerId) {
         this.initializeCameraPosition();
       }

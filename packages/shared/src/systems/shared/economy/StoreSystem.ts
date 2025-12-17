@@ -65,11 +65,6 @@ export class StoreSystem extends SystemBase {
       this.closeStore(data);
     });
 
-    // NOTE: STORE_BUY and STORE_SELL are now handled by the server handler
-    // (packages/server/src/systems/ServerNetwork/handlers/store.ts)
-    // with proper database transactions, input validation, and security measures.
-    // The buyItem and sellItem methods below are deprecated but kept for backwards compatibility.
-
     // Listen for NPC registrations from world content system
     this.subscribe<{
       npcId: string;
@@ -134,14 +129,7 @@ export class StoreSystem extends SystemBase {
 
   private closeStore(_data: StoreCloseEvent): void {
     // Store close is handled by the client UI
-    // No server-side cleanup needed for now
   }
-
-  // NOTE: buyItem and sellItem methods have been removed.
-  // All store transactions now go through the secure server handler
-  // (packages/server/src/systems/ServerNetwork/handlers/store.ts)
-  // which provides database transactions, input validation, distance checks,
-  // overflow protection, and rate limiting.
 
   /**
    * Cleanup when system is destroyed

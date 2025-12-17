@@ -79,6 +79,7 @@ import type { StageSystem } from "../types/systems/system-interfaces";
 import { LODs } from "../systems/shared";
 import { Nametags } from "../systems/client/Nametags";
 import { HealthBars } from "../systems/client/HealthBars";
+import { MobInstancedRenderer } from "../systems/client/MobInstancedRenderer";
 import { EquipmentVisualSystem } from "../systems/client/EquipmentVisualSystem";
 import { Particles } from "../systems/shared";
 import { Wind } from "../systems/shared";
@@ -110,8 +111,7 @@ export function createClientWorld() {
   // CLEAR MODEL CACHE
   // ============================================================================
   // Clear model cache on world creation to prevent stale Hyperscape Nodes
-  // from being returned instead of pure THREE.Object3D
-  modelCache.resetAndVerify();
+  modelCache.clear();
 
   // ============================================================================
   // BROWSER TEST UTILITIES
@@ -185,6 +185,7 @@ export function createClientWorld() {
   world.register("lods", LODs); // Level-of-detail mesh management
   world.register("nametags", Nametags); // Player/NPC name labels
   world.register("healthbars", HealthBars); // Entity health bars (separate from nametags)
+  world.register("mob-instanced-renderer", MobInstancedRenderer); // GPU-instanced mob rendering
   world.register("equipment-visual", EquipmentVisualSystem); // Visual weapon/equipment attachment
   world.register("particles", Particles); // Particle effects system
   world.register("wind", Wind); // Environmental wind effects

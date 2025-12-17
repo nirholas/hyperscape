@@ -84,6 +84,7 @@ import type { Position3D } from "../types/core/core";
 import { COMBAT_CONSTANTS } from "../constants/CombatConstants";
 import { calculateDamage } from "../utils/game/CombatCalculations";
 import { AttackType } from "../types/core/core";
+import { getCachedTimestamp } from "../systems/shared/movement/ObjectPools";
 
 export interface CombatantConfig extends EntityConfig<PlayerEntityProperties> {
   rotation: Quaternion;
@@ -170,7 +171,7 @@ export abstract class CombatantEntity extends Entity {
       aggroRadius: this.aggroRadius,
       attackRange: this.attackRange,
       state: "idle", // idle, chasing, attacking, returning
-      lastStateChange: Date.now(),
+      lastStateChange: getCachedTimestamp(),
       homePosition: { ...this.spawnPosition },
     });
 
@@ -206,7 +207,7 @@ export abstract class CombatantEntity extends Entity {
    * Attack another combatant entity
    */
   public attackTarget(target: CombatantEntity): boolean {
-    const now = Date.now();
+    const now = getCachedTimestamp();
     const timeSinceLastAttack = now - this.combatLastAttackTime;
 
     // Use consistent attack cooldown with CombatSystem

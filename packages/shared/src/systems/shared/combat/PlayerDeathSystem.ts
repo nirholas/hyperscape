@@ -22,6 +22,7 @@ import { ZoneType } from "../../../types/death";
 import type { InventorySystem } from "../character/InventorySystem";
 import type { DatabaseTransaction } from "../../../types/network/database";
 import { getCachedTimestamp } from "../movement/ObjectPools";
+import type { RuntimePlayerEntity } from "../../../types/entities/player-types";
 
 /**
  * Player Death and Respawn System - Orchestrator Pattern
@@ -554,46 +555,23 @@ export class PlayerDeathSystem extends SystemBase {
       deathPosition,
     });
 
-    // Play death animation (same as mobs) - keep player VISIBLE during animation
-    const playerEntity = this.world.entities?.get?.(playerId);
-    if (playerEntity && "data" in playerEntity) {
-      const entityData = playerEntity.data as { e?: string; visible?: boolean };
-      // IMPORTANT: Keep visible during death animation
-      entityData.visible = true;
-
-      // Set emote STRING KEY (players use 'death' string which gets mapped to URL)
-      // This matches how CombatSystem sets 'combat' emote
-      if ((playerEntity as any).emote !== undefined) {
-        (playerEntity as any).emote = "death";
-      }
-      if ((playerEntity as any).data) {
-        (playerEntity as any).data.e = "death";
-      }
-
-      if ("markNetworkDirty" in playerEntity) {
-        (playerEntity as { markNetworkDirty: () => void }).markNetworkDirty();
-      }
+    // Play death animation - keep player VISIBLE during animation
+    const playerEntity = this.world.entities?.get?.(playerId) as unknown as RuntimePlayerEntity | undefined;
+    if (playerEntity?.data) {
+      playerEntity.data.visible = true;
+      playerEntity.data.e = "death";
+      if (playerEntity.emote !== undefined) playerEntity.emote = "death";
+      playerEntity.markNetworkDirty?.();
     }
 
-    // RuneScape-style: Just play animation, then teleport to spawn
-    // NO loading screen - player sees the death animation, then they're at spawn
-    // Death animation is 4.5 seconds (same as mobs)
-    const DEATH_ANIMATION_DURATION = 4500; // 4.5 seconds to match mob death animation
+    // Death animation duration matches mobs (4.5s), then respawn
     const respawnTimer = setTimeout(() => {
-      // Hide player after death animation completes
-      if (playerEntity && "data" in playerEntity) {
-        const entityData = playerEntity.data as {
-          e?: string;
-          visible?: boolean;
-        };
-        entityData.visible = false;
-        if ("markNetworkDirty" in playerEntity) {
-          (playerEntity as { markNetworkDirty: () => void }).markNetworkDirty();
-        }
+      if (playerEntity?.data) {
+        playerEntity.data.visible = false;
+        playerEntity.markNetworkDirty?.();
       }
-
       this.initiateRespawn(playerId);
-    }, DEATH_ANIMATION_DURATION);
+    }, 4500);
 
     this.respawnTimers.set(playerId, respawnTimer);
   }
@@ -612,12 +590,8 @@ export class PlayerDeathSystem extends SystemBase {
     const headstoneId = `headstone_${playerId}_${timestamp}`;
 
     // Get player's name from entity or use playerId
-    const playerEntity = this.world.entities?.get?.(playerId);
-    const playerName =
-      (playerEntity &&
-        "data" in playerEntity &&
-        (playerEntity.data as any).name) ||
-      playerId;
+    const playerEntity = this.world.entities?.get?.(playerId) as unknown as RuntimePlayerEntity | undefined;
+    const playerName = playerEntity?.data?.name || playerId;
 
     const entityManager = this.cachedEntityManager;
     if (!entityManager) {
@@ -680,7 +654,7 @@ export class PlayerDeathSystem extends SystemBase {
     // Store headstone entity ID for tracking
     const deathData = this.deathLocations.get(playerId);
     if (deathData) {
-      (deathData as any).headstoneId = headstoneId;
+      deathData.headstoneId = headstoneId;
     }
   }
 
@@ -722,102 +696,58 @@ export class PlayerDeathSystem extends SystemBase {
     spawnPosition: { x: number; y: number; z: number },
     townName: string,
   ): void {
-    // Restore player entity health and visibility FIRST
-    const playerEntity = this.world.entities?.get?.(playerId);
+    // Restore player entity health and visibility
+    const playerEntity = this.world.entities?.get?.(playerId) as unknown as RuntimePlayerEntity | undefined;
     if (playerEntity) {
-      // Restore health
-      if ("setHealth" in playerEntity && "getMaxHealth" in playerEntity) {
-        const maxHealth = (playerEntity as any).getMaxHealth();
-        (playerEntity as any).setHealth(maxHealth);
+      // Restore health to max
+      if (playerEntity.setHealth && playerEntity.getMaxHealth) {
+        playerEntity.setHealth(playerEntity.getMaxHealth());
       }
 
       // Make visible and reset emote
-      if ("data" in playerEntity) {
-        const entityData = playerEntity.data as {
-          e?: string;
-          visible?: boolean;
-        };
-
-        entityData.e = "idle";
-        entityData.visible = true;
-
-        if ("markNetworkDirty" in playerEntity) {
-          (playerEntity as { markNetworkDirty: () => void }).markNetworkDirty();
-        }
+      if (playerEntity.data) {
+        playerEntity.data.e = "idle";
+        playerEntity.data.visible = true;
       }
     }
 
+    // Calculate grounded spawn position
     const terrainSystem = this.cachedTerrainSystem;
-    let groundedY = spawnPosition.y;
-
+    let groundedY = 10; // Safe fallback height
     if (terrainSystem?.isReady?.() && terrainSystem.getHeightAt) {
-      // Get terrain height at respawn position
-      const terrainHeight = terrainSystem.getHeightAt(
-        spawnPosition.x,
-        spawnPosition.z,
-      );
-      if (Number.isFinite(terrainHeight)) {
-        // Use +0.1 offset like initial spawn (not +2.0)
-        groundedY = terrainHeight + 0.1;
-      } else {
-        groundedY = 10; // Fallback safe height
-      }
-    } else {
-      // Terrain not ready; use safe height
-      groundedY = 10;
+      const terrainHeight = terrainSystem.getHeightAt(spawnPosition.x, spawnPosition.z);
+      if (Number.isFinite(terrainHeight)) groundedY = terrainHeight + 0.1;
     }
 
-    const groundedPosition = {
-      x: spawnPosition.x,
-      y: groundedY,
-      z: spawnPosition.z,
-    };
+    const groundedPosition = { x: spawnPosition.x, y: groundedY, z: spawnPosition.z };
 
-    // Update server-side entity position directly (no PLAYER_SPAWN_REQUEST to avoid triggering goblin spawns)
-    // Reuse playerEntity from above
+    // Update entity positions
     if (playerEntity) {
-      // Update Three.js node position (server-side authoritative position)
-      if ("node" in playerEntity && playerEntity.node) {
-        (playerEntity.node as any).position.set(
-          groundedPosition.x,
-          groundedPosition.y,
-          groundedPosition.z,
-        );
+      playerEntity.node?.position?.set(groundedPosition.x, groundedPosition.y, groundedPosition.z);
+
+      const posArray = (playerEntity.data as { position?: number[] } | undefined)?.position;
+      if (Array.isArray(posArray)) {
+        posArray[0] = groundedPosition.x;
+        posArray[1] = groundedPosition.y;
+        posArray[2] = groundedPosition.z;
       }
 
-      // Update entity.data.position array (network sync data)
-      if ("data" in playerEntity) {
-        const entityData = playerEntity.data as {
-          position?: number[];
-        };
-
-        if (Array.isArray(entityData.position)) {
-          entityData.position[0] = groundedPosition.x;
-          entityData.position[1] = groundedPosition.y;
-          entityData.position[2] = groundedPosition.z;
-        }
-
-        if ("markNetworkDirty" in playerEntity) {
-          (playerEntity as { markNetworkDirty: () => void }).markNetworkDirty();
-        }
-      }
-
-      // Update entity.position if it exists
-      if ("position" in playerEntity && playerEntity.position) {
-        const pos = playerEntity.position as {
-          x: number;
-          y: number;
-          z: number;
-        };
+      const pos = (playerEntity as { position?: { x: number; y: number; z: number } }).position;
+      if (pos) {
         pos.x = groundedPosition.x;
         pos.y = groundedPosition.y;
         pos.z = groundedPosition.z;
       }
+
+      playerEntity.markNetworkDirty?.();
     }
 
     // Send teleport packet to client
-    if (this.world.network && "sendTo" in this.world.network) {
-      (this.world.network as any).sendTo(playerId, "playerTeleport", {
+    if (this.world.isServer && this.world.network) {
+      const network = this.world.network as {
+        sendTo?: (playerId: string, event: string, data: unknown) => void;
+      };
+      network.sendTo?.(playerId, "playerTeleport", {
         playerId,
         position: [groundedPosition.x, groundedPosition.y, groundedPosition.z],
       });
@@ -1102,7 +1032,7 @@ export class PlayerDeathSystem extends SystemBase {
     if (!deathData) return;
 
     // Get headstone ID from death data
-    const headstoneId = (deathData as any).headstoneId;
+    const headstoneId = deathData.headstoneId;
     if (headstoneId) {
       // Destroy headstone entity via EntityManager
       const entityManager =
@@ -1202,7 +1132,7 @@ export class PlayerDeathSystem extends SystemBase {
   getPlayerHeadstoneId(playerId: string): string | undefined {
     const deathData = this.deathLocations.get(playerId);
     if (!deathData) return undefined;
-    return (deathData as any).headstoneId;
+    return deathData.headstoneId;
   }
 
   // Required System lifecycle methods

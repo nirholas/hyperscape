@@ -1,5 +1,5 @@
 {
-  "$schema": "../../jeju-manifest.schema.json",
+  "$schema": "../../packages/config/jeju-manifest.schema.json",
   "name": "hyperscape",
   "displayName": "Hyperscape MMORPG",
   "version": "1.0.0",
@@ -21,6 +21,29 @@
   "optional": true,
   "enabled": true,
   "autoStart": false,
+  "tags": ["game", "3d", "engine", "elizaos", "mmorpg"],
+  "jns": {
+    "name": "hyperscape.jeju",
+    "description": "Hyperscape MMORPG with on-chain assets",
+    "url": "https://hyperscape.jeju.network"
+  },
+  "healthCheck": {
+    "url": "http://localhost:5009/health",
+    "interval": 30000
+  },
+  "agent": {
+    "enabled": true,
+    "a2aEndpoint": "/api/a2a",
+    "mcpEndpoint": "/api/mcp",
+    "tags": ["jeju-app", "game", "mmorpg", "3d"],
+    "metadata": {
+      "category": "gaming",
+      "provider": "hyperscape"
+    },
+    "trustModels": ["open"],
+    "x402Support": true,
+    "jnsName": "hyperscape.jeju"
+  },
   "contracts": {
     "mmo/": "contracts/mmo/"
   },
@@ -28,5 +51,41 @@
     "pages": ["app/games/hyperscape/"],
     "components": ["components/"]
   },
-  "tags": ["game", "3d", "engine", "elizaos", "mmorpg"]
+  "decentralization": {
+    "cdn": {
+      "enabled": true,
+      "regions": ["global"],
+      "cacheRules": [
+        { "pattern": "/assets/**", "ttl": 31536000, "immutable": true },
+        { "pattern": "/api/**", "ttl": 0 },
+        { "pattern": "/**/*.html", "ttl": 300, "staleWhileRevalidate": 3600 }
+      ],
+      "serviceWorker": true
+    },
+    "frontend": {
+      "ipfs": true,
+      "arweave": true,
+      "jnsName": "hyperscape.jeju",
+      "buildDir": "dist",
+      "spa": true,
+      "fallbackOrigins": ["https://hyperscape.jeju.network"]
+    },
+    "robustness": {
+      "multiOrigin": true,
+      "offlineSupport": true,
+      "p2pFallback": true,
+      "contentAddressed": true
+    }
+  },
+  "testing": {
+    "unit": {
+      "command": "bun test tests/",
+      "timeout": 120000
+    },
+    "e2e": {
+      "command": "bunx playwright test",
+      "timeout": 300000,
+      "requiresChain": true
+    }
+  }
 }

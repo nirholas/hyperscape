@@ -121,13 +121,30 @@ export class CombatSystem extends SystemBase {
   private readonly reusablePos = { x: 0, y: 0, z: 0 };
   private readonly reusablePos2 = { x: 0, y: 0, z: 0 };
   private readonly reusableQuat = { x: 0, y: 0, z: 0, w: 1 };
+  // Reusable nested objects to avoid allocations in calculateMeleeDamage
+  private readonly _reusableAttackerStats: CombatStats = {
+    attack: 0,
+    strength: 0,
+    defense: 0,
+    ranged: 0,
+    attackPower: 0,
+  };
+  private readonly _reusableAttackerConfig = { attackPower: 0 };
+  private readonly _reusableTargetStats: CombatStats = {
+    attack: 0,
+    strength: 0,
+    defense: 0,
+    ranged: 0,
+    attackPower: 0,
+  };
+  private readonly _reusableTargetConfig = { defense: 0 };
   private readonly reusableAttackerData = {
-    stats: {} as CombatStats,
-    config: {} as { attackPower?: number },
+    stats: this._reusableAttackerStats,
+    config: this._reusableAttackerConfig,
   };
   private readonly reusableTargetData = {
-    stats: {} as CombatStats,
-    config: {} as { defense?: number },
+    stats: this._reusableTargetStats,
+    config: this._reusableTargetConfig,
   };
   private readonly reusableCombatStatesArray: Array<[EntityID, CombatData]> =
     [];
@@ -555,11 +572,19 @@ export class CombatSystem extends SystemBase {
     const attackerData = this.reusableAttackerData;
     const targetData = this.reusableTargetData;
 
-    // Clear previous data
-    attackerData.stats = {} as CombatStats;
-    attackerData.config = {};
-    targetData.stats = {} as CombatStats;
-    targetData.config = {};
+    // Reset stats to zero (reuse objects to avoid allocations)
+    attackerData.stats.attack = 0;
+    attackerData.stats.strength = 0;
+    attackerData.stats.defense = 0;
+    attackerData.stats.ranged = 0;
+    attackerData.stats.attackPower = 0;
+    attackerData.config.attackPower = 0;
+    targetData.stats.attack = 0;
+    targetData.stats.strength = 0;
+    targetData.stats.defense = 0;
+    targetData.stats.ranged = 0;
+    targetData.stats.attackPower = 0;
+    targetData.config.defense = 0;
 
     // Strong type assumption - check if attacker has getMobData method (MobEntity)
     const attackerMob = attacker as MobEntity;
@@ -658,21 +683,30 @@ export class CombatSystem extends SystemBase {
   ): number {
     if (!attacker || !target) return 1;
 
-    // Extract required properties for damage calculation
-    let attackerData: {
-      stats?: CombatStats;
-      config?: { attackPower?: number };
-    } = {};
-    let targetData: { stats?: CombatStats; config?: { defense?: number } } = {};
+    // Reuse the same objects as calculateMeleeDamage (these methods are not called concurrently)
+    const attackerData = this.reusableAttackerData;
+    const targetData = this.reusableTargetData;
+
+    // Reset stats to zero (reuse objects to avoid allocations)
+    attackerData.stats.attack = 0;
+    attackerData.stats.strength = 0;
+    attackerData.stats.defense = 0;
+    attackerData.stats.ranged = 0;
+    attackerData.stats.attackPower = 0;
+    attackerData.config.attackPower = 0;
+    targetData.stats.attack = 0;
+    targetData.stats.strength = 0;
+    targetData.stats.defense = 0;
+    targetData.stats.ranged = 0;
+    targetData.stats.attackPower = 0;
+    targetData.config.defense = 0;
 
     // Strong type assumption - check if attacker has getMobData method (MobEntity)
     const attackerMob = attacker as MobEntity;
     if (attackerMob.getMobData) {
       const mobData = attackerMob.getMobData();
-      attackerData = {
-        stats: { attack: mobData.attack }, // Pass attack stat for accuracy calculation
-        config: { attackPower: mobData.attackPower },
-      };
+      attackerData.stats.attack = mobData.attack;
+      attackerData.config.attackPower = mobData.attackPower;
     } else {
       // Handle player or other Entity - get stats from components
       const statsComponent = attacker.getComponent("stats");
@@ -684,26 +718,22 @@ export class CombatSystem extends SystemBase {
           defense?: { level: number } | number;
           ranged?: { level: number } | number;
         };
-        attackerData = {
-          stats: {
-            attack:
-              typeof stats.attack === "object"
-                ? stats.attack.level
-                : (stats.attack ?? 1),
-            strength:
-              typeof stats.strength === "object"
-                ? stats.strength.level
-                : (stats.strength ?? 1),
-            defense:
-              typeof stats.defense === "object"
-                ? stats.defense.level
-                : (stats.defense ?? 1),
-            ranged:
-              typeof stats.ranged === "object"
-                ? stats.ranged.level
-                : (stats.ranged ?? 1),
-          },
-        };
+        attackerData.stats.attack =
+          typeof stats.attack === "object"
+            ? stats.attack.level
+            : (stats.attack ?? 1);
+        attackerData.stats.strength =
+          typeof stats.strength === "object"
+            ? stats.strength.level
+            : (stats.strength ?? 1);
+        attackerData.stats.defense =
+          typeof stats.defense === "object"
+            ? stats.defense.level
+            : (stats.defense ?? 1);
+        attackerData.stats.ranged =
+          typeof stats.ranged === "object"
+            ? stats.ranged.level
+            : (stats.ranged ?? 1);
       }
     }
 
@@ -711,10 +741,8 @@ export class CombatSystem extends SystemBase {
     const targetMob = target as MobEntity;
     if (targetMob.getMobData) {
       const mobData = targetMob.getMobData();
-      targetData = {
-        stats: { defense: mobData.defense }, // Pass defense stat for accuracy calculation
-        config: { defense: mobData.defense },
-      };
+      targetData.stats.defense = mobData.defense;
+      targetData.config.defense = mobData.defense;
     } else {
       // Handle player or other Entity
       const statsComponent = target.getComponent("stats");
@@ -726,26 +754,22 @@ export class CombatSystem extends SystemBase {
           defense?: { level: number } | number;
           ranged?: { level: number } | number;
         };
-        targetData = {
-          stats: {
-            attack:
-              typeof stats.attack === "object"
-                ? stats.attack.level
-                : (stats.attack ?? 1),
-            strength:
-              typeof stats.strength === "object"
-                ? stats.strength.level
-                : (stats.strength ?? 1),
-            defense:
-              typeof stats.defense === "object"
-                ? stats.defense.level
-                : (stats.defense ?? 1),
-            ranged:
-              typeof stats.ranged === "object"
-                ? stats.ranged.level
-                : (stats.ranged ?? 1),
-          },
-        };
+        targetData.stats.attack =
+          typeof stats.attack === "object"
+            ? stats.attack.level
+            : (stats.attack ?? 1);
+        targetData.stats.strength =
+          typeof stats.strength === "object"
+            ? stats.strength.level
+            : (stats.strength ?? 1);
+        targetData.stats.defense =
+          typeof stats.defense === "object"
+            ? stats.defense.level
+            : (stats.defense ?? 1);
+        targetData.stats.ranged =
+          typeof stats.ranged === "object"
+            ? stats.ranged.level
+            : (stats.ranged ?? 1);
       }
     }
 

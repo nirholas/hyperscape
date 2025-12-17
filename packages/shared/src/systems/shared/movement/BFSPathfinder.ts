@@ -23,6 +23,10 @@ import {
   tilesEqual,
   isDiagonal,
 } from "./TileSystem";
+import { bfsPool, tileCoordPool } from "./ObjectPools";
+
+// Reusable tile for neighbor checks to avoid allocations in BFS hot path
+const _neighborCheck: TileCoord = { x: 0, z: 0 };
 
 /**
  * Walkability check function type
@@ -169,73 +173,83 @@ export class BFSPathfinder {
 
   /**
    * BFS pathfinding - used when naive diagonal path is blocked by obstacles
+   * Uses pooled data structures to minimize allocations
    */
   private findBFSPath(
     start: TileCoord,
     end: TileCoord,
     isWalkable: WalkabilityChecker,
   ): TileCoord[] {
-    // BFS setup
-    const visited = new Set<string>();
-    const parent = new Map<string, TileCoord>();
-    const queue: TileCoord[] = [];
+    // Acquire pooled data structures
+    const pooledData = bfsPool.acquire();
+    const { visited, parent, queue } = pooledData;
 
-    // Start BFS from start tile
-    queue.push(start);
-    visited.add(tileKey(start));
+    try {
+      // Start BFS from start tile
+      queue.push(start);
+      visited.add(tileKey(start));
 
-    // Track bounds for 128x128 limit
-    const minX = start.x - PATHFIND_RADIUS;
-    const maxX = start.x + PATHFIND_RADIUS;
-    const minZ = start.z - PATHFIND_RADIUS;
-    const maxZ = start.z + PATHFIND_RADIUS;
+      // Track bounds for 128x128 limit
+      const minX = start.x - PATHFIND_RADIUS;
+      const maxX = start.x + PATHFIND_RADIUS;
+      const minZ = start.z - PATHFIND_RADIUS;
+      const maxZ = start.z + PATHFIND_RADIUS;
 
-    while (queue.length > 0) {
-      const current = queue.shift()!;
+      while (queue.length > 0) {
+        const current = queue.shift()!;
 
-      // Found the destination
-      if (tilesEqual(current, end)) {
-        return this.reconstructPath(start, end, parent);
+        // Found the destination
+        if (tilesEqual(current, end)) {
+          const path = this.reconstructPath(start, end, parent);
+          return path;
+        }
+
+        // Check all 8 directions in OSRS order: W, E, S, N, SW, SE, NW, NE
+        for (const dir of TILE_DIRECTIONS) {
+          // Use reusable tile for neighbor check to avoid allocation
+          _neighborCheck.x = current.x + dir.x;
+          _neighborCheck.z = current.z + dir.z;
+
+          // Skip if out of search bounds
+          if (
+            _neighborCheck.x < minX ||
+            _neighborCheck.x > maxX ||
+            _neighborCheck.z < minZ ||
+            _neighborCheck.z > maxZ
+          ) {
+            continue;
+          }
+
+          const neighborKey = tileKey(_neighborCheck);
+
+          // Skip if already visited
+          if (visited.has(neighborKey)) {
+            continue;
+          }
+
+          // Check walkability (including diagonal corner checks)
+          if (!this.canMoveTo(current, _neighborCheck, isWalkable)) {
+            continue;
+          }
+
+          // Only allocate a new tile when we're actually adding to queue
+          const neighbor = tileCoordPool.acquire(
+            _neighborCheck.x,
+            _neighborCheck.z,
+          );
+          visited.add(neighborKey);
+          parent.set(neighborKey, current);
+          queue.push(neighbor);
+        }
       }
 
-      // Check all 8 directions in OSRS order: W, E, S, N, SW, SE, NW, NE
-      for (const dir of TILE_DIRECTIONS) {
-        const neighbor: TileCoord = {
-          x: current.x + dir.x,
-          z: current.z + dir.z,
-        };
-
-        // Skip if out of search bounds
-        if (
-          neighbor.x < minX ||
-          neighbor.x > maxX ||
-          neighbor.z < minZ ||
-          neighbor.z > maxZ
-        ) {
-          continue;
-        }
-
-        const neighborKey = tileKey(neighbor);
-
-        // Skip if already visited
-        if (visited.has(neighborKey)) {
-          continue;
-        }
-
-        // Check walkability (including diagonal corner checks)
-        if (!this.canMoveTo(current, neighbor, isWalkable)) {
-          continue;
-        }
-
-        // Add to queue
-        visited.add(neighborKey);
-        parent.set(neighborKey, current);
-        queue.push(neighbor);
-      }
+      // No path found - return partial path to closest point
+      return this.findPartialPath(start, end, visited, parent);
+    } finally {
+      // Return tiles to pool (best effort - some may have been used in path)
+      // The pooled data structures are released
+      bfsPool.release(pooledData);
     }
-
-    // No path found - return partial path to closest point
-    return this.findPartialPath(start, end, visited, parent);
   }
 
   /**

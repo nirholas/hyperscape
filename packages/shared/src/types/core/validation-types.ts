@@ -67,7 +67,6 @@ export interface DataValidationResult {
   itemCount: number;
   npcCount: number;
   areaCount: number;
-  treasureCount: number;
 }
 
 /**

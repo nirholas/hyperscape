@@ -41,6 +41,7 @@ import {
   getStatsComponent,
   requireStatsComponent,
 } from "../../../utils/game/ComponentUtils";
+import { getCachedTimestamp } from "../movement/ObjectPools";
 
 /** Skill name constants for type-safe skill references */
 const Skill = {
@@ -150,7 +151,7 @@ export class SkillsSystem extends SystemBase {
   update(_deltaTime: number): void {
     // Clean up old XP drops (for UI)
     // Optimize: avoid filter allocation - remove items in-place
-    const currentTime = Date.now();
+    const currentTime = getCachedTimestamp();
     const drops = this.xpDrops;
     for (let i = drops.length - 1; i >= 0; i--) {
       if (currentTime - drops[i].timestamp >= 3000) {
@@ -223,7 +224,7 @@ export class SkillsSystem extends SystemBase {
       playerId: entityId,
       skill,
       amount: actualGain,
-      timestamp: Date.now(),
+      timestamp: getCachedTimestamp(),
       position: { x: 0, y: 0, z: 0 }, // Position not used for non-visual drops
     });
 
