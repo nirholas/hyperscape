@@ -3,11 +3,11 @@
  *
  * Features:
  * - Centered modal with skill icon and level
+ * - CSS fireworks animation celebration
  * - Auto-dismiss after 5 seconds
  * - Click anywhere to dismiss early
  * - Non-blocking (player can continue actions)
  *
- * Fireworks animation added in Phase 3.
  * Unlocks section added in Phase 5.
  */
 
@@ -16,6 +16,7 @@ import styled, { keyframes } from "styled-components";
 import { SKILL_ICONS } from "@hyperscape/shared";
 import type { LevelUpEvent } from "./useLevelUpState";
 import { capitalizeSkill } from "./utils";
+import { FireworksEffect } from "./FireworksEffect";
 
 /** Auto-dismiss duration in milliseconds */
 const AUTO_DISMISS_MS = 5000;
@@ -97,6 +98,9 @@ const PopupContainer = styled.div`
 
   min-width: 280px;
   max-width: 400px;
+
+  /* Allow fireworks to extend beyond container */
+  overflow: visible;
 `;
 
 const SkillIconLarge = styled.div`
@@ -166,6 +170,7 @@ export function LevelUpPopup({ event, onDismiss }: LevelUpPopupProps) {
     <>
       <Overlay onClick={onDismiss} />
       <PopupContainer>
+        <FireworksEffect />
         <SkillIconLarge>{skillIcon}</SkillIconLarge>
         <CongratsText>Congratulations!</CongratsText>
         <LevelText>You've advanced a {capitalizeSkill(skill)} level!</LevelText>
