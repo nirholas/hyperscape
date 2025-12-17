@@ -1869,6 +1869,18 @@ export class ClientNetwork extends SystemBase {
     }
   };
 
+  onAutoRetaliateChanged = (data: { enabled: boolean }) => {
+    // Only handle for local player
+    const localPlayer = this.world.getPlayer();
+    if (localPlayer) {
+      // Forward to local event system so CombatPanel UI can update
+      this.world.emit(EventType.UI_AUTO_RETALIATE_CHANGED, {
+        playerId: localPlayer.id,
+        enabled: data.enabled,
+      });
+    }
+  };
+
   onCombatDamageDealt = (data: {
     attackerId: string;
     targetId: string;
