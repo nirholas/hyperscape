@@ -282,6 +282,42 @@ export interface SkillsLevelUpEvent {
   timestamp?: number; // Client adds this
 }
 
+// ============================================================================
+// AUTO-RETALIATE EVENT PAYLOADS
+// ============================================================================
+
+/**
+ * Request to get player's auto-retaliate setting
+ */
+export interface AutoRetaliateGetEvent {
+  /** Player requesting their setting */
+  playerId: string;
+  /** Optional callback for synchronous response */
+  callback?: (enabled: boolean) => void;
+}
+
+/**
+ * Request to update player's auto-retaliate setting
+ * Server validates before applying (server authority)
+ */
+export interface AutoRetaliateUpdateEvent {
+  /** Player making the request */
+  playerId: string;
+  /** Desired auto-retaliate state */
+  enabled: boolean;
+}
+
+/**
+ * Notification that auto-retaliate setting changed
+ * Sent from server to client after validation
+ */
+export interface AutoRetaliateChangedEvent {
+  /** Player whose setting changed */
+  playerId: string;
+  /** New auto-retaliate state */
+  enabled: boolean;
+}
+
 export interface HealthUpdateEvent {
   entityId: string;
   previousHealth: number;
@@ -667,6 +703,11 @@ export interface EventMap {
 
   // Skills Events
   [EventType.SKILLS_LEVEL_UP]: SkillsLevelUpEvent;
+
+  // Auto-Retaliate Events
+  [EventType.UI_AUTO_RETALIATE_GET]: AutoRetaliateGetEvent;
+  [EventType.UI_AUTO_RETALIATE_UPDATE]: AutoRetaliateUpdateEvent;
+  [EventType.UI_AUTO_RETALIATE_CHANGED]: AutoRetaliateChangedEvent;
 }
 
 /**
