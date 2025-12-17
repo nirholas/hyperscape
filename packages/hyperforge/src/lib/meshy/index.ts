@@ -73,6 +73,7 @@ export {
   DEFAULT_AI_MODEL,
   DEFAULT_TOPOLOGY,
   DEFAULT_TEXTURE_RESOLUTION,
+  DEFAULT_CHARACTER_HEIGHT,
   THREE_JS_BEST_PRACTICES,
   getPolycountPreset,
   getRecommendedPolycount,
@@ -84,6 +85,7 @@ export {
 export {
   startImageTo3D,
   pollTaskStatus as pollImageTo3DStatus,
+  type ImageTo3DPipelineResult,
 } from "./image-to-3d";
 
 export {
@@ -95,6 +97,7 @@ export {
 
 export {
   pollTaskStatus,
+  MeshyTaskError,
   type PollTaskResult,
   type PollOptions,
   type TextureUrls,

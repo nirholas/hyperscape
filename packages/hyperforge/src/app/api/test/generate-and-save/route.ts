@@ -5,6 +5,9 @@ import {
   getTaskStatus,
 } from "@/lib/meshy/client";
 import { downloadAndSaveModel } from "@/lib/storage/asset-storage";
+import { logger } from "@/lib/utils";
+
+const routeLogger = logger.child("API:test/generate-and-save");
 
 /**
  * Test endpoint to generate a 3D model and save it locally
@@ -21,11 +24,11 @@ export async function POST(request: NextRequest) {
   const startTime = Date.now();
   const logs: string[] = [];
 
-  function log(message: string) {
+  function logStep(message: string) {
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     const entry = `[${elapsed}s] ${message}`;
     logs.push(entry);
-    console.log(entry);
+    routeLogger.info(entry);
   }
 
   try {
@@ -36,24 +39,24 @@ export async function POST(request: NextRequest) {
       skipGeneration = false, // For testing save flow without waiting
     } = body;
 
-    log(`Starting generation for: ${name}`);
-    log(`Prompt: ${prompt}`);
+    logStep(`Starting generation for: ${name}`);
+    logStep(`Prompt: ${prompt}`);
 
     // Generate unique asset ID
     const assetId = `gen-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-    log(`Asset ID: ${assetId}`);
+    logStep(`Asset ID: ${assetId}`);
 
-    let modelUrl: string;
+    let modelUrl = "";
     let thumbnailUrl: string | undefined;
 
     if (skipGeneration) {
       // Use a placeholder for testing
-      log("Skipping generation (test mode)");
+      logStep("Skipping generation (test mode)");
       modelUrl = "https://assets.meshy.ai/sample/sample.glb";
       thumbnailUrl = undefined;
     } else {
       // Step 1: Create preview task
-      log("Creating preview task...");
+      logStep("Creating preview task...");
       const previewTaskId = await createTextTo3DPreviewTask({
         prompt,
         art_style: "realistic",
@@ -61,10 +64,10 @@ export async function POST(request: NextRequest) {
         topology: "triangle",
         target_polycount: 10000,
       });
-      log(`Preview task created: ${previewTaskId}`);
+      logStep(`Preview task created: ${previewTaskId}`);
 
       // Step 2: Poll for preview completion
-      log("Polling preview status...");
+      logStep("Polling preview status...");
       let previewComplete = false;
       let pollCount = 0;
       const maxPolls = 60; // 5 minutes max
@@ -74,12 +77,15 @@ export async function POST(request: NextRequest) {
         pollCount++;
 
         const status = await getTaskStatus(previewTaskId);
-        log(`Preview status: ${status.status} (poll ${pollCount})`);
+        logStep(`Preview status: ${status.status} (poll ${pollCount})`);
 
         if (status.status === "SUCCEEDED") {
           previewComplete = true;
-          log("Preview completed!");
-        } else if (status.status === "FAILED" || status.status === "EXPIRED") {
+          logStep("Preview completed!");
+        } else if (
+          status.status === "FAILED" ||
+          (status.status as string) === "EXPIRED"
+        ) {
           throw new Error(`Preview failed: ${status.status}`);
         }
       }
@@ -89,16 +95,16 @@ export async function POST(request: NextRequest) {
       }
 
       // Step 3: Create refine task
-      log("Creating refine task...");
+      logStep("Creating refine task...");
       const refineTaskId = await createTextTo3DRefineTask(previewTaskId, {
         prompt,
         enable_pbr: true,
         texture_resolution: 2048,
       });
-      log(`Refine task created: ${refineTaskId}`);
+      logStep(`Refine task created: ${refineTaskId}`);
 
       // Step 4: Poll for refine completion
-      log("Polling refine status...");
+      logStep("Polling refine status...");
       let refineComplete = false;
       pollCount = 0;
 
@@ -107,14 +113,17 @@ export async function POST(request: NextRequest) {
         pollCount++;
 
         const status = await getTaskStatus(refineTaskId);
-        log(`Refine status: ${status.status} (poll ${pollCount})`);
+        logStep(`Refine status: ${status.status} (poll ${pollCount})`);
 
         if (status.status === "SUCCEEDED") {
           refineComplete = true;
           modelUrl = status.model_urls?.glb || "";
           thumbnailUrl = status.thumbnail_url;
-          log(`Refine completed! Model URL: ${modelUrl}`);
-        } else if (status.status === "FAILED" || status.status === "EXPIRED") {
+          logStep(`Refine completed! Model URL: ${modelUrl}`);
+        } else if (
+          status.status === "FAILED" ||
+          (status.status as string) === "EXPIRED"
+        ) {
           throw new Error(`Refine failed: ${status.status}`);
         }
       }
@@ -124,8 +133,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (!modelUrl) {
+      throw new Error("No model URL available");
+    }
+
     // Step 5: Download and save locally
-    log("Downloading and saving model...");
+    logStep("Downloading and saving model...");
     const savedFiles = await downloadAndSaveModel(
       assetId,
       modelUrl!,
@@ -143,10 +156,10 @@ export async function POST(request: NextRequest) {
         meshyModelUrl: modelUrl,
       },
     );
-    log(`Model saved! Path: ${savedFiles.modelPath}`);
+    logStep(`Model saved! Path: ${savedFiles.modelPath}`);
 
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
-    log(`Total time: ${totalTime}s`);
+    logStep(`Total time: ${totalTime}s`);
 
     return NextResponse.json({
       success: true,
@@ -157,7 +170,9 @@ export async function POST(request: NextRequest) {
       totalTimeSeconds: parseFloat(totalTime),
     });
   } catch (error) {
-    log(`ERROR: ${error instanceof Error ? error.message : "Unknown error"}`);
+    logStep(
+      `ERROR: ${error instanceof Error ? error.message : "Unknown error"}`,
+    );
 
     return NextResponse.json(
       {

@@ -66,11 +66,18 @@ interface GenerationState {
   reset: () => void;
 }
 
-const initialState = {
+const initialState: Pick<
+  GenerationState,
+  | "selectedCategory"
+  | "currentGeneration"
+  | "progress"
+  | "generatedAssets"
+  | "batchQueue"
+> = {
   selectedCategory: null,
   currentGeneration: null,
   progress: {
-    status: "idle",
+    status: "idle" as const,
     progress: 0,
   },
   generatedAssets: [],
@@ -79,7 +86,7 @@ const initialState = {
 
 export const useGenerationStore = create<GenerationState>()(
   devtools(
-    (set, get) => ({
+    (set) => ({
       ...initialState,
 
       setSelectedCategory: (category) => set({ selectedCategory: category }),

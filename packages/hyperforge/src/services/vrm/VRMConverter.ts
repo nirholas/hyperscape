@@ -32,16 +32,46 @@
 import "@/lib/server/three-polyfills";
 
 import * as THREE from "three";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("VRMConverter");
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 
 import { MESHY_VARIATIONS, findMeshyBoneName } from "./BoneMappings";
 import { parseGLB, buildGLB } from "@/lib/utils/glb-binary-utils";
+import type {
+  GLTFNode,
+  GLTFMesh,
+  GLTFMaterial,
+  GLTFTexture,
+  GLTFImage,
+  GLTFExtensionData,
+} from "@/types/service-types";
+
+/**
+ * Type definitions for glTF JSON structure used in VRM conversion
+ */
+interface GLTFBuffer {
+  byteLength: number;
+  uri?: string;
+}
+
+interface GLTFJson {
+  nodes?: GLTFNode[];
+  meshes?: GLTFMesh[];
+  materials?: GLTFMaterial[];
+  textures?: GLTFTexture[];
+  images?: GLTFImage[];
+  buffers?: GLTFBuffer[];
+  extensionsUsed?: string[];
+  extensions?: Record<string, GLTFExtensionData>;
+}
 
 /**
  * VRM HumanoidBone names (VRM 1.0 standard)
  * These are the standardized bone names used by VRM format
  */
-const VRM_HUMANOID_BONES = {
+export const VRM_HUMANOID_BONES = {
   // Torso
   hips: "hips",
   spine: "spine",
@@ -175,7 +205,7 @@ export class VRMConverter {
     glbData: THREE.Group | THREE.Scene,
     options: VRMConversionOptions = {},
   ): Promise<VRMConversionResult> {
-    console.log("🎭 Starting VRM conversion...");
+    log.info("🎭 Starting VRM conversion...");
 
     // Reset state
     this.boneMappings.clear();
@@ -200,17 +230,17 @@ export class VRMConverter {
     // Export as VRM GLB (this will create VRM extensions internally with correct node indices)
     const vrmData = await this.exportVRM(options);
 
-    console.log("✅ VRM conversion complete!");
-    console.log(`   Bones mapped: ${this.boneMappings.size}`);
-    console.log(`   Warnings: ${this.warnings.length}`);
-    console.log(
+    log.info("✅ VRM conversion complete!");
+    log.info(`   Bones mapped: ${this.boneMappings.size}`);
+    log.info(`   Warnings: ${this.warnings.length}`);
+    log.info(
       `   VRM file size: ${(vrmData.byteLength / 1024 / 1024).toFixed(2)} MB`,
     );
 
     // Debug: Log bone mappings
-    console.log("   Bone mappings:");
+    log.info("   Bone mappings:");
     for (const [meshyBone, vrmBone] of this.boneMappings.entries()) {
-      console.log(`     ${meshyBone} → ${vrmBone}`);
+      log.info(`     ${meshyBone} → ${vrmBone}`);
     }
 
     return {
@@ -225,7 +255,7 @@ export class VRMConverter {
    * Extract skeleton from scene
    */
   private extractSkeleton(): void {
-    console.log("🦴 Extracting skeleton...");
+    log.info("🦴 Extracting skeleton...");
 
     // Find first SkinnedMesh
     this.scene.traverse((obj) => {
@@ -233,7 +263,7 @@ export class VRMConverter {
         this.skinnedMesh = obj;
         if (obj.skeleton) {
           this.bones = obj.skeleton.bones;
-          console.log(`   Found skeleton with ${this.bones.length} bones`);
+          log.info(`   Found skeleton with ${this.bones.length} bones`);
         }
       }
     });
@@ -247,11 +277,11 @@ export class VRMConverter {
     }
 
     // DEBUG: Log initial bone transforms (BEFORE any modifications)
-    console.log("🔍 [DEBUG] Initial bone transforms after extraction:");
+    log.info("🔍 [DEBUG] Initial bone transforms after extraction:");
     this.logBoneTransforms("AFTER_EXTRACTION");
 
     // DEBUG: Log scene hierarchy
-    console.log("🔍 [DEBUG] Scene hierarchy:");
+    log.info("🔍 [DEBUG] Scene hierarchy:");
     this.logSceneHierarchy(this.scene, 0);
   }
 
@@ -263,16 +293,14 @@ export class VRMConverter {
    * NOT into scene.scale, to avoid bone rotation issues during glTF export
    */
   private normalizeScale(): void {
-    console.log("📏 Normalizing scale...");
+    log.info("📏 Normalizing scale...");
 
     // Find hips and head bones to measure height
     const hipsBone = this.findBoneByName("Hips");
     const headBone = this.findBoneByName("Head");
 
     if (!hipsBone || !headBone) {
-      console.log(
-        "   ⚠️  Could not find hips/head bones for scale normalization",
-      );
+      log.info("   ⚠️  Could not find hips/head bones for scale normalization");
       this.warnings.push("Could not normalize scale - bones not found");
       return;
     }
@@ -286,14 +314,15 @@ export class VRMConverter {
       }
     });
 
-    if (armature && armature.parent) {
-      const armatureScale = armature.scale.x; // Assume uniform scale
-      console.log(`   Found Armature with scale: ${armatureScale.toFixed(3)}`);
+    if (armature && (armature as THREE.Object3D).parent) {
+      const armatureObj = armature as THREE.Object3D;
+      const armatureScale = armatureObj.scale.x; // Assume uniform scale
+      log.info(`   Found Armature with scale: ${armatureScale.toFixed(3)}`);
 
       if (Math.abs(armatureScale - 1.0) > 0.001) {
         // Calculate compensation factor: if armature is 0.01, we need to scale up by 100
         const compensationScale = 1.0 / armatureScale;
-        console.log(
+        log.info(
           `   Baking Armature scale ${armatureScale} → compensating by ${compensationScale.toFixed(1)}x...`,
         );
 
@@ -310,7 +339,7 @@ export class VRMConverter {
             meshCount++;
           }
         });
-        console.log(
+        log.info(
           `   ✅ Scaled ${meshCount} mesh geometries by ${compensationScale.toFixed(1)}x`,
         );
 
@@ -318,12 +347,12 @@ export class VRMConverter {
         this.bones.forEach((bone) => {
           bone.position.multiplyScalar(compensationScale);
         });
-        console.log(
+        log.info(
           `   ✅ Scaled ${this.bones.length} bone positions by ${compensationScale.toFixed(1)}x`,
         );
 
         // Set Armature scale to 1.0 (removing the parent scale)
-        armature.scale.set(1, 1, 1);
+        armatureObj.scale.set(1, 1, 1);
 
         // Update world matrices
         this.scene.updateMatrixWorld(true);
@@ -334,9 +363,9 @@ export class VRMConverter {
             obj.skeleton.calculateInverses();
           }
         });
-        console.log("   ✅ Recalculated skeleton inverse bind matrices");
+        log.info("   ✅ Recalculated skeleton inverse bind matrices");
 
-        console.log(`   ✅ Armature scale baked into geometry and skeleton`);
+        log.info(`   ✅ Armature scale baked into geometry and skeleton`);
       }
     }
 
@@ -351,7 +380,7 @@ export class VRMConverter {
 
     // Calculate current height
     const currentHeight = hipsPos.distanceTo(headPos);
-    console.log(
+    log.info(
       `   Current height (hips to head): ${currentHeight.toFixed(3)} units`,
     );
 
@@ -361,7 +390,7 @@ export class VRMConverter {
 
     // Only scale if significantly off (more than 10% difference)
     if (Math.abs(scaleFactor - 1.0) > 0.1) {
-      console.log(
+      log.info(
         `   Applying height normalization scale: ${scaleFactor.toFixed(3)}`,
       );
 
@@ -373,7 +402,7 @@ export class VRMConverter {
           meshCount++;
         }
       });
-      console.log(
+      log.info(
         `   ✅ Scaled ${meshCount} mesh geometries by ${scaleFactor.toFixed(3)}`,
       );
 
@@ -381,7 +410,7 @@ export class VRMConverter {
       this.bones.forEach((bone) => {
         bone.position.multiplyScalar(scaleFactor);
       });
-      console.log(
+      log.info(
         `   ✅ Scaled ${this.bones.length} bone positions by ${scaleFactor.toFixed(3)}`,
       );
 
@@ -394,18 +423,16 @@ export class VRMConverter {
           obj.skeleton.calculateInverses();
         }
       });
-      console.log(
-        "   ✅ Recalculated inverse bind matrices after height scaling",
-      );
+      log.info("   ✅ Recalculated inverse bind matrices after height scaling");
 
       // DEBUG: Log bone transforms after scaling
-      console.log("🔍 [DEBUG] Bone transforms after scaling:");
+      log.info("🔍 [DEBUG] Bone transforms after scaling:");
       this.logBoneTransforms("AFTER_SCALING");
 
       // Verify mesh and skeleton alignment
       this.verifyMeshSkeletonAlignment();
     } else {
-      console.log("   ✅ Scale is already appropriate");
+      log.info("   ✅ Scale is already appropriate");
     }
 
     // VALIDATION: Verify final height is 1.6m
@@ -416,20 +443,20 @@ export class VRMConverter {
     if (headBone) headBone.getWorldPosition(finalHeadPos);
     const finalHeight = finalHipsPos.distanceTo(finalHeadPos);
 
-    console.log("📏 [VALIDATION] Final avatar height verification:");
-    console.log(`   Hips to Head distance: ${finalHeight.toFixed(3)}m`);
-    console.log(`   Target height: 1.600m`);
-    console.log(`   Difference: ${Math.abs(finalHeight - 1.6).toFixed(3)}m`);
+    log.info("📏 [VALIDATION] Final avatar height verification:");
+    log.info(`   Hips to Head distance: ${finalHeight.toFixed(3)}m`);
+    log.info(`   Target height: 1.600m`);
+    log.info(`   Difference: ${Math.abs(finalHeight - 1.6).toFixed(3)}m`);
 
     if (Math.abs(finalHeight - 1.6) > 0.05) {
-      console.warn(
+      log.warn(
         `   ⚠️  WARNING: Final height ${finalHeight.toFixed(3)}m deviates from target 1.6m!`,
       );
       this.warnings.push(
         `Final height ${finalHeight.toFixed(3)}m deviates from target 1.6m`,
       );
     } else {
-      console.log("   ✅ Height normalization successful");
+      log.info("   ✅ Height normalization successful");
     }
   }
 
@@ -438,10 +465,10 @@ export class VRMConverter {
    * by checking the bounding boxes match
    */
   private verifyMeshSkeletonAlignment(): void {
-    console.log("🔍 Verifying mesh-skeleton alignment...");
+    log.info("🔍 Verifying mesh-skeleton alignment...");
 
     if (!this.skinnedMesh || !this.skinnedMesh.geometry) {
-      console.warn("   ⚠️  Cannot verify - no skinned mesh");
+      log.warn("   ⚠️  Cannot verify - no skinned mesh");
       return;
     }
 
@@ -449,7 +476,7 @@ export class VRMConverter {
     this.skinnedMesh.geometry.computeBoundingBox();
     const meshBBox = this.skinnedMesh.geometry.boundingBox;
     if (!meshBBox) {
-      console.warn("   ⚠️  Cannot compute mesh bounding box");
+      log.warn("   ⚠️  Cannot compute mesh bounding box");
       return;
     }
 
@@ -467,25 +494,25 @@ export class VRMConverter {
     const meshSize = meshBBox.max.clone().sub(meshBBox.min);
     const skeletonSize = skeletonMax.clone().sub(skeletonMin);
 
-    console.log("   Mesh bounding box:");
-    console.log(
+    log.info("   Mesh bounding box:");
+    log.info(
       `     Min: [${meshBBox.min.x.toFixed(3)}, ${meshBBox.min.y.toFixed(3)}, ${meshBBox.min.z.toFixed(3)}]`,
     );
-    console.log(
+    log.info(
       `     Max: [${meshBBox.max.x.toFixed(3)}, ${meshBBox.max.y.toFixed(3)}, ${meshBBox.max.z.toFixed(3)}]`,
     );
-    console.log(
+    log.info(
       `     Size: [${meshSize.x.toFixed(3)}, ${meshSize.y.toFixed(3)}, ${meshSize.z.toFixed(3)}]`,
     );
 
-    console.log("   Skeleton bounding box:");
-    console.log(
+    log.info("   Skeleton bounding box:");
+    log.info(
       `     Min: [${skeletonMin.x.toFixed(3)}, ${skeletonMin.y.toFixed(3)}, ${skeletonMin.z.toFixed(3)}]`,
     );
-    console.log(
+    log.info(
       `     Max: [${skeletonMax.x.toFixed(3)}, ${skeletonMax.y.toFixed(3)}, ${skeletonMax.z.toFixed(3)}]`,
     );
-    console.log(
+    log.info(
       `     Size: [${skeletonSize.x.toFixed(3)}, ${skeletonSize.y.toFixed(3)}, ${skeletonSize.z.toFixed(3)}]`,
     );
 
@@ -493,10 +520,10 @@ export class VRMConverter {
     const heightRatio = meshSize.y / skeletonSize.y;
     if (heightRatio < 0.5 || heightRatio > 2.0) {
       const warning = `Mesh-skeleton height mismatch! Mesh height: ${meshSize.y.toFixed(3)}, Skeleton height: ${skeletonSize.y.toFixed(3)}, Ratio: ${heightRatio.toFixed(2)}x`;
-      console.warn(`   ⚠️  ${warning}`);
+      log.warn(`   ⚠️  ${warning}`);
       this.warnings.push(warning);
     } else {
-      console.log(
+      log.info(
         `   ✅ Mesh and skeleton alignment OK (height ratio: ${heightRatio.toFixed(2)}x)`,
       );
     }
@@ -506,7 +533,7 @@ export class VRMConverter {
    * Map Meshy bones to VRM HumanoidBone names
    */
   private mapBonesToVRM(): void {
-    console.log("🗺️  Mapping bones to VRM HumanoidBone standard...");
+    log.info("🗺️  Mapping bones to VRM HumanoidBone standard...");
 
     let mappedCount = 0;
 
@@ -533,7 +560,7 @@ export class VRMConverter {
       }
     }
 
-    console.log(`   Mapped ${mappedCount}/${this.bones.length} bones`);
+    log.info(`   Mapped ${mappedCount}/${this.bones.length} bones`);
 
     // Verify required bones
     const requiredBones = [
@@ -564,7 +591,7 @@ export class VRMConverter {
 
     // SKIP T-pose normalization - preserve original bind pose like online VRM viewers do
     // Our AnimationRetargeting.ts already handles bind pose compensation (lines 85-120)
-    console.log(
+    log.info(
       "🤸 Preserving original bind pose (matches online VRM viewers)...",
     );
 
@@ -583,17 +610,17 @@ export class VRMConverter {
    * 4. Recalculating inverse bind matrices to preserve skin weights
    */
   private normalizeBindPoseToTPose(): void {
-    console.log("🔧 Normalizing bind pose from A-pose to T-pose...");
+    log.info("🔧 Normalizing bind pose from A-pose to T-pose...");
 
     const hipsBone = this.findBoneByName("Hips");
     if (!hipsBone) {
-      console.error("   ❌ Cannot normalize - Hips bone not found");
+      log.error("   ❌ Cannot normalize - Hips bone not found");
       return;
     }
 
     // Store the original Hips rotation (to compensate children)
     const hipsOriginalRot = hipsBone.quaternion.clone();
-    console.log(
+    log.info(
       `   Hips original rotation: [${hipsOriginalRot.x.toFixed(3)}, ${hipsOriginalRot.y.toFixed(3)}, ${hipsOriginalRot.z.toFixed(3)}, ${hipsOriginalRot.w.toFixed(3)}]`,
     );
 
@@ -611,7 +638,7 @@ export class VRMConverter {
           // This preserves the child's world rotation when parent changes
           child.quaternion.copy(parentDeltaRot).multiply(childOriginalLocal);
 
-          console.log(
+          log.info(
             `      Compensated ${child.name}: [${childOriginalLocal.x.toFixed(3)}, ${childOriginalLocal.y.toFixed(3)}, ${childOriginalLocal.z.toFixed(3)}, ${childOriginalLocal.w.toFixed(3)}] -> [${child.quaternion.x.toFixed(3)}, ${child.quaternion.y.toFixed(3)}, ${child.quaternion.z.toFixed(3)}, ${child.quaternion.w.toFixed(3)}]`,
           );
 
@@ -624,7 +651,7 @@ export class VRMConverter {
     // 1. Fix Hips to T-pose (identity rotation)
     compensateDescendants(hipsBone, hipsOriginalRot);
     hipsBone.quaternion.set(0, 0, 0, 1);
-    console.log("   ✅ Set Hips to identity and compensated all descendants");
+    log.info("   ✅ Set Hips to identity and compensated all descendants");
 
     // Update world matrices after Hips change
     this.scene.updateMatrixWorld(true);
@@ -641,7 +668,7 @@ export class VRMConverter {
     // Fix left shoulder first, then arm
     if (leftShoulderBone) {
       const leftShoulderOriginalRot = leftShoulderBone.quaternion.clone();
-      console.log(
+      log.info(
         `   LeftShoulder original rotation: [${leftShoulderOriginalRot.x.toFixed(3)}, ${leftShoulderOriginalRot.y.toFixed(3)}, ${leftShoulderOriginalRot.z.toFixed(3)}, ${leftShoulderOriginalRot.w.toFixed(3)}]`,
       );
 
@@ -650,14 +677,12 @@ export class VRMConverter {
 
       // Set shoulder to T-pose (identity)
       leftShoulderBone.quaternion.set(0, 0, 0, 1);
-      console.log(
-        "   ✅ Set LeftShoulder to T-pose and compensated descendants",
-      );
+      log.info("   ✅ Set LeftShoulder to T-pose and compensated descendants");
     }
 
     if (leftArmBone) {
       const leftArmOriginalRot = leftArmBone.quaternion.clone();
-      console.log(
+      log.info(
         `   LeftArm original rotation: [${leftArmOriginalRot.x.toFixed(3)}, ${leftArmOriginalRot.y.toFixed(3)}, ${leftArmOriginalRot.z.toFixed(3)}, ${leftArmOriginalRot.w.toFixed(3)}]`,
       );
 
@@ -666,17 +691,15 @@ export class VRMConverter {
 
       // Set arm to T-pose (identity - straight out)
       leftArmBone.quaternion.set(0, 0, 0, 1);
-      console.log("   ✅ Set LeftArm to T-pose and compensated descendants");
+      log.info("   ✅ Set LeftArm to T-pose and compensated descendants");
     } else {
-      console.warn(
-        "   ⚠️  LeftArm bone not found - skipping arm normalization",
-      );
+      log.warn("   ⚠️  LeftArm bone not found - skipping arm normalization");
     }
 
     // Fix right shoulder first, then arm
     if (rightShoulderBone) {
       const rightShoulderOriginalRot = rightShoulderBone.quaternion.clone();
-      console.log(
+      log.info(
         `   RightShoulder original rotation: [${rightShoulderOriginalRot.x.toFixed(3)}, ${rightShoulderOriginalRot.y.toFixed(3)}, ${rightShoulderOriginalRot.z.toFixed(3)}, ${rightShoulderOriginalRot.w.toFixed(3)}]`,
       );
 
@@ -685,14 +708,12 @@ export class VRMConverter {
 
       // Set shoulder to T-pose (identity)
       rightShoulderBone.quaternion.set(0, 0, 0, 1);
-      console.log(
-        "   ✅ Set RightShoulder to T-pose and compensated descendants",
-      );
+      log.info("   ✅ Set RightShoulder to T-pose and compensated descendants");
     }
 
     if (rightArmBone) {
       const rightArmOriginalRot = rightArmBone.quaternion.clone();
-      console.log(
+      log.info(
         `   RightArm original rotation: [${rightArmOriginalRot.x.toFixed(3)}, ${rightArmOriginalRot.y.toFixed(3)}, ${rightArmOriginalRot.z.toFixed(3)}, ${rightArmOriginalRot.w.toFixed(3)}]`,
       );
 
@@ -701,11 +722,9 @@ export class VRMConverter {
 
       // Set arm to T-pose (identity - straight out)
       rightArmBone.quaternion.set(0, 0, 0, 1);
-      console.log("   ✅ Set RightArm to T-pose and compensated descendants");
+      log.info("   ✅ Set RightArm to T-pose and compensated descendants");
     } else {
-      console.warn(
-        "   ⚠️  RightArm bone not found - skipping arm normalization",
-      );
+      log.warn("   ⚠️  RightArm bone not found - skipping arm normalization");
     }
 
     // Update world matrices after all bone changes
@@ -713,12 +732,12 @@ export class VRMConverter {
 
     // CRITICAL: Recalculate inverse bind matrices for the new T-pose bind pose
     // We changed the skeleton's bind pose from A-pose to T-pose, so we MUST recalculate
-    console.log(
+    log.info(
       "   🔧 Recalculating inverse bind matrices for new T-pose bind pose...",
     );
     if (this.skinnedMesh && this.skinnedMesh.skeleton) {
       this.skinnedMesh.skeleton.calculateInverses();
-      console.log("   ✅ Inverse bind matrices recalculated");
+      log.info("   ✅ Inverse bind matrices recalculated");
     }
 
     // Verify T-pose
@@ -728,24 +747,22 @@ export class VRMConverter {
         newHipsRot.y * newHipsRot.y +
         newHipsRot.z * newHipsRot.z,
     );
-    console.log(
+    log.info(
       `   Final Hips rotation: [${newHipsRot.x.toFixed(3)}, ${newHipsRot.y.toFixed(3)}, ${newHipsRot.z.toFixed(3)}, ${newHipsRot.w.toFixed(3)}]`,
     );
-    console.log(
-      `   Final rotation magnitude: ${newRotationMagnitude.toFixed(3)}`,
-    );
+    log.info(`   Final rotation magnitude: ${newRotationMagnitude.toFixed(3)}`);
 
     if (newRotationMagnitude < 0.001) {
-      console.log("   ✅ Successfully normalized to T-pose");
+      log.info("   ✅ Successfully normalized to T-pose");
     } else {
-      console.warn("   ⚠️  T-pose normalization may be incomplete");
+      log.warn("   ⚠️  T-pose normalization may be incomplete");
     }
 
     // Update world matrices one more time
     this.scene.updateMatrixWorld(true);
 
     // Debug: Log bone transforms after T-pose normalization
-    console.log("🔍 [DEBUG] Bone transforms after T-pose normalization:");
+    log.info("🔍 [DEBUG] Bone transforms after T-pose normalization:");
     this.logBoneTransforms("AFTER_TPOSE_NORMALIZATION");
   }
 
@@ -757,13 +774,11 @@ export class VRMConverter {
    * we need Hips to have its world Y position as local translation.
    */
   private ensureHipsTranslation(): void {
-    console.log("📏 Ensuring Hips bone has local translation...");
+    log.info("📏 Ensuring Hips bone has local translation...");
 
     const hipsBone = this.findBoneByName("Hips");
     if (!hipsBone) {
-      console.warn(
-        "   ⚠️  Cannot ensure Hips translation - Hips bone not found",
-      );
+      log.warn("   ⚠️  Cannot ensure Hips translation - Hips bone not found");
       return;
     }
 
@@ -772,23 +787,23 @@ export class VRMConverter {
     hipsBone.getWorldPosition(worldPos);
     const localPos = hipsBone.position;
 
-    console.log(
+    log.info(
       `   Current Hips local position: [${localPos.x.toFixed(3)}, ${localPos.y.toFixed(3)}, ${localPos.z.toFixed(3)}]`,
     );
-    console.log(
+    log.info(
       `   Current Hips world position: [${worldPos.x.toFixed(3)}, ${worldPos.y.toFixed(3)}, ${worldPos.z.toFixed(3)}]`,
     );
 
     // Check if parent is Armature or similar container (not a Bone)
     const parent = hipsBone.parent;
     if (parent && parent.type !== "Bone") {
-      console.log(
+      log.info(
         `   Parent is ${parent.type} (${parent.name}) - need to bake transform`,
       );
 
       // ALWAYS bake world position into Hips local position when parent is not a bone
       // This ensures Hips.translation is set in the exported glTF
-      console.log("   🔧 Baking Hips world position into local position...");
+      log.info("   🔧 Baking Hips world position into local position...");
 
       // Set Hips local position to its current world position
       hipsBone.position.copy(worldPos);
@@ -800,7 +815,7 @@ export class VRMConverter {
       parent.updateMatrix();
       parent.updateMatrixWorld(true);
 
-      console.log(
+      log.info(
         `   ✅ Baked world position into Hips local: [${hipsBone.position.x.toFixed(3)}, ${hipsBone.position.y.toFixed(3)}, ${hipsBone.position.z.toFixed(3)}]`,
       );
 
@@ -810,12 +825,10 @@ export class VRMConverter {
       // Recalculate inverse bind matrices since we changed bone positions
       if (this.skinnedMesh.skeleton) {
         this.skinnedMesh.skeleton.calculateInverses();
-        console.log("   ✅ Recalculated inverse bind matrices");
+        log.info("   ✅ Recalculated inverse bind matrices");
       }
     } else {
-      console.log(
-        "   ✅ Hips parent is a Bone - local position already correct",
-      );
+      log.info("   ✅ Hips parent is a Bone - local position already correct");
     }
   }
 
@@ -827,28 +840,28 @@ export class VRMConverter {
    * the accessor/bufferView references in the JSON.
    */
   private async exportVRM(options: VRMConversionOptions): Promise<ArrayBuffer> {
-    console.log("💾 Exporting VRM GLB...");
+    log.info("💾 Exporting VRM GLB...");
 
     // DEBUG: Log bone transforms BEFORE export
-    console.log("🔍 [DEBUG] Bone transforms BEFORE export:");
+    log.info("🔍 [DEBUG] Bone transforms BEFORE export:");
     this.logBoneTransforms("BEFORE_EXPORT");
 
     // CRITICAL FIX: Ensure GLTFExporter uses TRS instead of matrix
     // The exporter will use TRS if matrixAutoUpdate is true and we don't touch the matrix
-    console.log("🔧 Preparing bones for TRS export (not matrix)...");
+    log.info("🔧 Preparing bones for TRS export (not matrix)...");
     this.bones.forEach((bone) => {
       // Enable matrixAutoUpdate so GLTFExporter knows to use TRS
       bone.matrixAutoUpdate = true;
     });
 
-    console.log(
+    log.info(
       "   ✅ All bones configured for TRS export (matrixAutoUpdate enabled)",
     );
 
     const exporter = new GLTFExporter();
 
     // Export as binary GLB FIRST - this gives us consistent JSON + BIN chunks
-    console.log("📦 Exporting as binary GLB...");
+    log.info("📦 Exporting as binary GLB...");
     const glbBinary: ArrayBuffer = await new Promise((resolve, reject) => {
       exporter.parse(
         this.scene,
@@ -873,82 +886,75 @@ export class VRMConverter {
       );
     });
 
-    console.log(
+    log.info(
       `   Original GLB size: ${(glbBinary.byteLength / 1024).toFixed(2)} KB`,
     );
 
     // Parse the binary GLB to extract JSON and BIN chunks
-    const { json: gltfJson, bin: binChunkData } = parseGLB(glbBinary);
+    const { json, bin: binChunkData } = parseGLB(glbBinary);
+    const gltfJson = json as GLTFJson;
 
-    console.log("📝 Parsed glTF JSON from GLB");
-    console.log(
-      `   Nodes: ${(gltfJson.nodes as unknown[])?.length || 0}, Meshes: ${(gltfJson.meshes as unknown[])?.length || 0}`,
+    log.info("📝 Parsed glTF JSON from GLB");
+    log.info(
+      `   Nodes: ${gltfJson.nodes?.length || 0}, Meshes: ${gltfJson.meshes?.length || 0}`,
     );
     if (binChunkData) {
-      console.log(
+      log.info(
         `   BIN chunk size: ${(binChunkData.length / 1024).toFixed(2)} KB`,
       );
     }
 
     // Convert matrix to TRS in nodes (GLTFExporter sometimes uses matrix for skinned nodes)
-    console.log("🔧 Post-processing: converting matrix to TRS...");
+    log.info("🔧 Post-processing: converting matrix to TRS...");
     let matrixCount = 0;
     let convertedCount = 0;
 
     if (gltfJson.nodes) {
-      gltfJson.nodes.forEach(
-        (node: {
-          name?: string;
-          matrix?: number[];
-          translation?: number[];
-          rotation?: number[];
-          scale?: number[];
-        }) => {
-          if (node.matrix) {
-            matrixCount++;
+      gltfJson.nodes.forEach((node) => {
+        if (node.matrix) {
+          matrixCount++;
 
-            // Decompose 4x4 matrix into TRS
-            const mat = new THREE.Matrix4();
-            mat.fromArray(node.matrix);
+          // Decompose 4x4 matrix into TRS
+          const mat = new THREE.Matrix4();
+          mat.fromArray(node.matrix);
 
-            const position = new THREE.Vector3();
-            const quaternion = new THREE.Quaternion();
-            const scale = new THREE.Vector3();
-            mat.decompose(position, quaternion, scale);
+          const position = new THREE.Vector3();
+          const quaternion = new THREE.Quaternion();
+          const scale = new THREE.Vector3();
+          mat.decompose(position, quaternion, scale);
 
-            // Set TRS properties
-            node.translation = [position.x, position.y, position.z];
-            node.rotation = [
-              quaternion.x,
-              quaternion.y,
-              quaternion.z,
-              quaternion.w,
-            ];
-            node.scale = [scale.x, scale.y, scale.z];
+          // Set TRS properties
+          node.translation = [position.x, position.y, position.z];
+          node.rotation = [
+            quaternion.x,
+            quaternion.y,
+            quaternion.z,
+            quaternion.w,
+          ];
+          node.scale = [scale.x, scale.y, scale.z];
 
-            // Remove matrix property
-            delete node.matrix;
-            convertedCount++;
-          }
-        },
-      );
+          // Remove matrix property
+          delete node.matrix;
+          convertedCount++;
+        }
+      });
     }
 
-    console.log(
+    log.info(
       `   Converted ${convertedCount}/${matrixCount} nodes from matrix to TRS`,
     );
 
     // Build node name to index map
     const nodeNameToIndex = new Map<string, number>();
     if (gltfJson.nodes) {
-      gltfJson.nodes.forEach((node: { name?: string }, index: number) => {
+      gltfJson.nodes.forEach((node, index) => {
         if (node.name) {
           nodeNameToIndex.set(node.name, index);
         }
       });
     }
 
-    console.log(`   Found ${nodeNameToIndex.size} named nodes`);
+    log.info(`   Found ${nodeNameToIndex.size} named nodes`);
 
     // Build humanoid bone mappings using node indices from THIS export
     const humanBones: Record<string, { node: number }> = {};
@@ -957,13 +963,11 @@ export class VRMConverter {
       const nodeIndex = nodeNameToIndex.get(meshyBoneName);
       if (nodeIndex !== undefined) {
         humanBones[vrmBoneName] = { node: nodeIndex };
-        console.log(
+        log.info(
           `   Mapped ${vrmBoneName} → node ${nodeIndex} (${meshyBoneName})`,
         );
       } else {
-        console.warn(
-          `   ⚠️  Could not find node index for bone: ${meshyBoneName}`,
-        );
+        log.warn(`   ⚠️  Could not find node index for bone: ${meshyBoneName}`);
       }
     }
 
@@ -1000,7 +1004,7 @@ export class VRMConverter {
     gltfJson.extensions = gltfJson.extensions || {};
     gltfJson.extensions.VRMC_vrm = vrmExtension;
 
-    console.log(
+    log.info(
       `   Added VRMC_vrm extension with ${Object.keys(humanBones).length} humanoid bones`,
     );
 
@@ -1008,7 +1012,7 @@ export class VRMConverter {
     const materialCount = gltfJson.materials?.length || 0;
     const textureCount = gltfJson.textures?.length || 0;
     const imageCount = gltfJson.images?.length || 0;
-    console.log(
+    log.info(
       `   Materials: ${materialCount}, Textures: ${textureCount}, Images: ${imageCount}`,
     );
 
@@ -1016,11 +1020,11 @@ export class VRMConverter {
     if (gltfJson.buffers && gltfJson.buffers.length > 0 && binChunkData) {
       const declaredBufferLength = gltfJson.buffers[0].byteLength;
       const actualBinLength = binChunkData.length;
-      console.log(
+      log.info(
         `   Buffer validation: declared=${declaredBufferLength}, actual=${actualBinLength}`,
       );
       if (declaredBufferLength !== actualBinLength) {
-        console.warn(
+        log.warn(
           `   ⚠️  Buffer length mismatch! Updating JSON to match BIN chunk.`,
         );
         gltfJson.buffers[0].byteLength = actualBinLength;
@@ -1028,9 +1032,12 @@ export class VRMConverter {
     }
 
     // Rebuild GLB with modified JSON and SAME BIN chunk
-    const glb = buildGLB(gltfJson, binChunkData);
+    const glb = buildGLB(
+      gltfJson as unknown as Record<string, unknown>,
+      binChunkData,
+    );
 
-    console.log(`✅ VRM GLB created: ${(glb.byteLength / 1024).toFixed(2)} KB`);
+    log.info(`✅ VRM GLB created: ${(glb.byteLength / 1024).toFixed(2)} KB`);
 
     return glb;
   }
@@ -1068,20 +1075,20 @@ export class VRMConverter {
         bone.getWorldQuaternion(worldRot);
         bone.getWorldScale(worldScale);
 
-        console.log(`   ${boneName} [${stage}]:`);
-        console.log(
+        log.info(`   ${boneName} [${stage}]:`);
+        log.info(
           `     Local Position: [${localPos.x.toFixed(3)}, ${localPos.y.toFixed(3)}, ${localPos.z.toFixed(3)}]`,
         );
-        console.log(
+        log.info(
           `     Local Rotation: [${localRot.x.toFixed(3)}, ${localRot.y.toFixed(3)}, ${localRot.z.toFixed(3)}, ${localRot.w.toFixed(3)}]`,
         );
-        console.log(
+        log.info(
           `     Local Scale: [${localScale.x.toFixed(3)}, ${localScale.y.toFixed(3)}, ${localScale.z.toFixed(3)}]`,
         );
-        console.log(
+        log.info(
           `     World Position: [${worldPos.x.toFixed(3)}, ${worldPos.y.toFixed(3)}, ${worldPos.z.toFixed(3)}]`,
         );
-        console.log(
+        log.info(
           `     World Rotation: [${worldRot.x.toFixed(3)}, ${worldRot.y.toFixed(3)}, ${worldRot.z.toFixed(3)}, ${worldRot.w.toFixed(3)}]`,
         );
 
@@ -1089,7 +1096,7 @@ export class VRMConverter {
         if (bone.parent) {
           const parentWorldRot = new THREE.Quaternion();
           bone.parent.getWorldQuaternion(parentWorldRot);
-          console.log(
+          log.info(
             `     Parent World Rotation: [${parentWorldRot.x.toFixed(3)}, ${parentWorldRot.y.toFixed(3)}, ${parentWorldRot.z.toFixed(3)}, ${parentWorldRot.w.toFixed(3)}]`,
           );
         }
@@ -1108,11 +1115,11 @@ export class VRMConverter {
       const height = hipsPos.distanceTo(headPos);
       const rootToHips = hipsPos.y;
 
-      console.log(`   Height Metrics [${stage}]:`);
-      console.log(`     Hips world Y: ${hipsPos.y.toFixed(3)}`);
-      console.log(`     Head world Y: ${headPos.y.toFixed(3)}`);
-      console.log(`     Height (hips to head): ${height.toFixed(3)}`);
-      console.log(`     rootToHips: ${rootToHips.toFixed(3)}`);
+      log.info(`   Height Metrics [${stage}]:`);
+      log.info(`     Hips world Y: ${hipsPos.y.toFixed(3)}`);
+      log.info(`     Head world Y: ${headPos.y.toFixed(3)}`);
+      log.info(`     Height (hips to head): ${height.toFixed(3)}`);
+      log.info(`     rootToHips: ${rootToHips.toFixed(3)}`);
     }
   }
 
@@ -1125,7 +1132,7 @@ export class VRMConverter {
     const rot = obj.quaternion;
     const scale = obj.scale;
 
-    console.log(`${indent}${obj.type} "${obj.name}"`);
+    log.info(`${indent}${obj.type} "${obj.name}"`);
     if (
       pos.length() > 0.001 ||
       rot.x !== 0 ||
@@ -1136,13 +1143,13 @@ export class VRMConverter {
       scale.y !== 1 ||
       scale.z !== 1
     ) {
-      console.log(
+      log.info(
         `${indent}  pos: [${pos.x.toFixed(3)}, ${pos.y.toFixed(3)}, ${pos.z.toFixed(3)}]`,
       );
-      console.log(
+      log.info(
         `${indent}  rot: [${rot.x.toFixed(3)}, ${rot.y.toFixed(3)}, ${rot.z.toFixed(3)}, ${rot.w.toFixed(3)}]`,
       );
-      console.log(
+      log.info(
         `${indent}  scale: [${scale.x.toFixed(3)}, ${scale.y.toFixed(3)}, ${scale.z.toFixed(3)}]`,
       );
     }
@@ -1198,23 +1205,22 @@ export async function convertGLBToVRMPreservingTextures(
   glbData: ArrayBuffer,
   options: VRMConversionOptions = {},
 ): Promise<VRMConversionResult> {
-  console.log("🎭 Starting texture-preserving VRM conversion...");
+  log.info("🎭 Starting texture-preserving VRM conversion...");
 
   const warnings: string[] = [];
   const boneMappings = new Map<string, string>();
 
   // Parse the GLB binary
-  const { json: gltfJson, bin: binChunkData } = parseGLB(glbData);
+  const { json, bin: binChunkData } = parseGLB(glbData);
+  const gltfJson = json as GLTFJson;
 
-  console.log(`   GLB size: ${(glbData.byteLength / 1024).toFixed(2)} KB`);
-  console.log(`   Nodes: ${(gltfJson.nodes as unknown[])?.length || 0}`);
-  console.log(
-    `   Materials: ${(gltfJson.materials as unknown[])?.length || 0}`,
-  );
-  console.log(`   Textures: ${(gltfJson.textures as unknown[])?.length || 0}`);
-  console.log(`   Images: ${(gltfJson.images as unknown[])?.length || 0}`);
+  log.info(`   GLB size: ${(glbData.byteLength / 1024).toFixed(2)} KB`);
+  log.info(`   Nodes: ${gltfJson.nodes?.length || 0}`);
+  log.info(`   Materials: ${gltfJson.materials?.length || 0}`);
+  log.info(`   Textures: ${gltfJson.textures?.length || 0}`);
+  log.info(`   Images: ${gltfJson.images?.length || 0}`);
   if (binChunkData) {
-    console.log(
+    log.info(
       `   BIN chunk size: ${(binChunkData.length / 1024).toFixed(2)} KB`,
     );
   }
@@ -1222,7 +1228,7 @@ export async function convertGLBToVRMPreservingTextures(
   // Build node name to index map for bone mapping
   const nodeNameToIndex = new Map<string, number>();
   if (gltfJson.nodes) {
-    gltfJson.nodes.forEach((node: { name?: string }, index: number) => {
+    gltfJson.nodes.forEach((node, index) => {
       if (node.name) {
         nodeNameToIndex.set(node.name, index);
       }
@@ -1290,7 +1296,7 @@ export async function convertGLBToVRMPreservingTextures(
 
   // Also try reverse lookup: iterate all nodes and see if any match known bone patterns
   const nodeNames = Array.from(nodeNameToIndex.keys());
-  console.log(`   Checking ${nodeNames.length} nodes for bone matches...`);
+  log.info(`   Checking ${nodeNames.length} nodes for bone matches...`);
 
   for (const [vrmBone, meshyCanonical] of Object.entries(vrmToMeshyCanonical)) {
     // Skip if already mapped
@@ -1300,7 +1306,7 @@ export async function convertGLBToVRMPreservingTextures(
     if (result) {
       humanBones[vrmBone] = { node: result.nodeIndex };
       boneMappings.set(result.actualName, vrmBone);
-      console.log(
+      log.info(
         `   Mapped ${vrmBone} → node ${result.nodeIndex} (${result.actualName})`,
       );
     } else {
@@ -1311,7 +1317,7 @@ export async function convertGLBToVRMPreservingTextures(
           const nodeIndex = nodeNameToIndex.get(nodeName)!;
           humanBones[vrmBone] = { node: nodeIndex };
           boneMappings.set(nodeName, vrmBone);
-          console.log(
+          log.info(
             `   Mapped ${vrmBone} → node ${nodeIndex} (${nodeName} via findMeshyBoneName)`,
           );
           break;
@@ -1320,7 +1326,7 @@ export async function convertGLBToVRMPreservingTextures(
     }
   }
 
-  console.log(`   Total bones mapped: ${Object.keys(humanBones).length}`);
+  log.info(`   Total bones mapped: ${Object.keys(humanBones).length}`);
 
   // Check for required bones
   const requiredBones = ["hips", "spine", "head"];
@@ -1363,9 +1369,12 @@ export async function convertGLBToVRMPreservingTextures(
   gltfJson.extensions.VRMC_vrm = vrmExtension;
 
   // Rebuild GLB with modified JSON and ORIGINAL BIN chunk (preserves textures!)
-  const vrmGlb = buildGLB(gltfJson, binChunkData);
+  const vrmGlb = buildGLB(
+    gltfJson as unknown as Record<string, unknown>,
+    binChunkData,
+  );
 
-  console.log(
+  log.info(
     `✅ VRM GLB created: ${(vrmGlb.byteLength / 1024).toFixed(2)} KB (textures preserved!)`,
   );
 

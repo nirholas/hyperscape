@@ -18,6 +18,9 @@ import {
   isSupabaseConfigured,
 } from "@/lib/storage/supabase-storage";
 import { loadCDNAssets } from "@/lib/cdn/loader";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:audio:assets");
 
 interface AudioAsset {
   id: string;
@@ -82,9 +85,9 @@ export async function GET() {
           },
         });
       }
-      console.log(`[Audio Assets API] Loaded ${musicAssets.length} music tracks from CDN`);
+      log.info("Loaded music tracks from CDN", { count: musicAssets.length });
     } catch (error) {
-      console.warn("[Audio Assets API] Failed to load from CDN:", error);
+      log.warn("Failed to load from CDN", { error });
     }
     
     // 2. Load from Supabase audio-generations bucket (HyperForge generations)
@@ -106,9 +109,9 @@ export async function GET() {
             source: "supabase",
           });
         }
-        console.log(`[Audio Assets API] Loaded ${supabaseAudio.length} audio files from Supabase`);
+        log.info("Loaded audio files from Supabase", { count: supabaseAudio.length });
       } catch (error) {
-        console.warn("[Audio Assets API] Failed to load from Supabase:", error);
+        log.warn("Failed to load from Supabase", { error });
       }
     }
     
@@ -176,11 +179,11 @@ export async function GET() {
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
     
-    console.log(`[Audio Assets API] Returning ${assets.length} total audio assets`);
+    log.info("Returning audio assets", { count: assets.length });
     
     return NextResponse.json(assets);
   } catch (error) {
-    console.error("[Audio Assets API] Error loading audio assets:", error);
+    log.error("Error loading audio assets", { error });
     return NextResponse.json(
       { error: "Failed to load audio assets" },
       { status: 500 }

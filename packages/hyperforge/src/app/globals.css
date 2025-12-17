@@ -68,13 +68,13 @@ body {
   }
 
   .text-glow {
-    text-shadow: 0 0 10px rgba(var(--neon-blue), 0.5);
+    text-shadow: 0 0 10px oklch(var(--neon-blue) / 0.5);
   }
 
   .neon-blue-glow {
     box-shadow:
-      0 0 10px hsl(var(--neon-blue)),
-      0 0 20px hsl(var(--neon-blue) / 0.5);
+      0 0 10px oklch(var(--neon-blue)),
+      0 0 20px oklch(var(--neon-blue) / 0.5);
   }
 
   /* Themed Scrollbar */

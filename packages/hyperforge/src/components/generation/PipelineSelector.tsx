@@ -17,7 +17,11 @@ export function PipelineSelector({ value, onChange }: PipelineSelectorProps) {
   return (
     <div className="space-y-2">
       <label className="text-sm font-medium">Pipeline</label>
-      <Select value={value} onChange={onChange} options={pipelineOptions} />
+      <Select
+        value={value}
+        onChange={(v) => onChange(v as GenerationPipeline)}
+        options={pipelineOptions}
+      />
     </div>
   );
 }

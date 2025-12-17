@@ -13,6 +13,9 @@ import {
   isSupabaseConfigured,
   uploadReferenceImage,
 } from "@/lib/storage/supabase-storage";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:upload:image");
 
 const ASSETS_DIR =
   process.env.HYPERFORGE_ASSETS_DIR || path.join(process.cwd(), "assets");
@@ -53,7 +56,7 @@ export async function POST(request: NextRequest) {
 
     // Try Supabase Storage first (recommended for production)
     if (isSupabaseConfigured()) {
-      console.log("[Upload] Using Supabase Storage");
+      log.info("Using Supabase Storage");
 
       const result = await uploadReferenceImage(file, file.name, file.type);
 
@@ -67,16 +70,16 @@ export async function POST(request: NextRequest) {
           storage: "supabase",
         });
       } else {
-        console.warn(
-          "[Upload] Supabase upload failed, falling back to local:",
-          result.error,
+        log.warn(
+          { error: result.error },
+          "Supabase upload failed, falling back to local",
         );
         // Fall through to local storage
       }
     }
 
     // Fallback: Local file storage
-    console.log("[Upload] Using local file storage");
+    log.info("Using local file storage");
     await ensureUploadsDir();
 
     // Generate unique filename
@@ -100,7 +103,7 @@ export async function POST(request: NextRequest) {
       "http://localhost:3500";
     const publicUrl = `${cdnUrl}/api/upload/image/${filename}`;
 
-    console.log(`[Upload] Saved reference image locally: ${filename}`);
+    log.info({ filename }, "Saved reference image locally");
 
     return NextResponse.json({
       success: true,
@@ -111,7 +114,7 @@ export async function POST(request: NextRequest) {
       storage: "local",
     });
   } catch (error) {
-    console.error("[Upload] Error:", error);
+    log.error({ error }, "Upload error");
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Upload failed" },
       { status: 500 },
@@ -166,7 +169,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error("[Upload] GET Error:", error);
+    log.error({ error }, "GET error");
     return NextResponse.json(
       { error: "Failed to serve image" },
       { status: 500 },

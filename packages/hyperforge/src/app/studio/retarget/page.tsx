@@ -2,7 +2,10 @@
 
 import { useState, useEffect, useRef, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import * as THREE from "three";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("Retarget");
+import * as _THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import {
   RefreshCw,
@@ -16,7 +19,6 @@ import {
   AlertTriangle,
   FileCode,
   Bone,
-  Sparkles,
   RotateCcw,
   Search,
   User,
@@ -149,7 +151,7 @@ function RetargetContent() {
                   // Relative path - prepend CDN
                   vrmUrlToSet = `${CDN_URL}/${vrmPath}`;
                 }
-                console.log("[Retarget] Pre-selecting VRM:", vrmUrlToSet);
+                log.info("Pre-selecting VRM:", vrmUrlToSet);
                 setVrmUrl(vrmUrlToSet);
                 setVrmConverted(true);
               }
@@ -157,11 +159,11 @@ function RetargetContent() {
           }
         }
 
-        console.log(
-          `[Retarget] Loaded ${avatarAssets.length} avatars, ${emotesData.length} emotes`,
+        log.info(
+          `Loaded ${avatarAssets.length} avatars, ${emotesData.length} emotes`,
         );
       } catch (error) {
-        console.error("Failed to load assets:", error);
+        log.error("Failed to load assets:", error);
       } finally {
         setLoading(false);
       }
@@ -223,13 +225,13 @@ function RetargetContent() {
         throw new Error("No model selected");
       }
 
-      console.log("[Retarget] Loading GLB from:", modelUrl);
+      log.info("Loading GLB from:", modelUrl);
 
       // Load the GLB file
       const loader = new GLTFLoader();
       const gltf = await loader.loadAsync(modelUrl);
 
-      console.log("[Retarget] GLB loaded, starting VRM conversion...");
+      log.info("GLB loaded, starting VRM conversion...");
 
       // Convert to VRM using real converter
       const result: VRMConversionResult = await convertGLBToVRM(gltf.scene, {
@@ -240,9 +242,9 @@ function RetargetContent() {
         commercialUsage: "personalNonProfit",
       });
 
-      console.log("[Retarget] VRM conversion complete!");
-      console.log(`  - Bones mapped: ${result.boneMappings.size}`);
-      console.log(`  - Warnings: ${result.warnings.length}`);
+      log.info("VRM conversion complete!");
+      log.debug(`Bones mapped: ${result.boneMappings.size}`);
+      log.debug(`Warnings: ${result.warnings.length}`);
 
       // Create blob URL for the VRM
       const blob = new Blob([result.vrmData], {
@@ -254,7 +256,7 @@ function RetargetContent() {
       setConversionWarnings(result.warnings);
       setVrmConverted(true);
     } catch (error) {
-      console.error("[Retarget] VRM conversion failed:", error);
+      log.error("VRM conversion failed:", error);
       setConversionWarnings([`Conversion failed: ${(error as Error).message}`]);
     } finally {
       setIsConverting(false);
@@ -263,7 +265,7 @@ function RetargetContent() {
 
   // Handle VRM load from viewer
   const handleVRMLoad = useCallback((vrm: VRM, info: VRMInfo) => {
-    console.log("[Retarget] VRM loaded in viewer:", info);
+    log.info("VRM loaded in viewer:", info);
     setVrmInfo(info);
   }, []);
 
@@ -276,7 +278,7 @@ function RetargetContent() {
         ? emote.path
         : `${CDN_URL}/${emote.path}`;
 
-      console.log("[Retarget] Playing animation:", animUrl);
+      log.info("Playing animation:", animUrl);
 
       await viewerRef.current.loadAnimation(animUrl);
       setSelectedAnimation(emote.id);
@@ -356,7 +358,7 @@ function RetargetContent() {
             vrmUrlToSet = `${CDN_URL}/${vrmPath}`;
           }
 
-          console.log("[Retarget] Loading VRM directly:", vrmUrlToSet);
+          log.info("Loading VRM directly:", vrmUrlToSet);
           setVrmUrl(vrmUrlToSet);
           setVrmConverted(true);
           setConversionWarnings([]);
@@ -427,7 +429,7 @@ function RetargetContent() {
         {/* Divider */}
         <div className="relative">
           <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-glass-border"></div>
+            <div className="w-full border-t border-glass-border" />
           </div>
           <div className="relative flex justify-center text-xs">
             <span className="px-2 bg-background text-muted-foreground">

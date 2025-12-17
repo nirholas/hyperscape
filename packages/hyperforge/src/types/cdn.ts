@@ -1,11 +1,14 @@
 /**
- * Re-export CDN types for convenience
+ * CDN Types Re-export
+ *
+ * @deprecated Import from '@/types' instead.
+ * This file is maintained for backwards compatibility only.
  */
 
 export type {
   AssetSource,
-  AssetRarity,
   AssetCategory,
+  Rarity as AssetRarity,
   CDNAsset,
   LocalAsset,
   BaseAsset,
@@ -13,4 +16,4 @@ export type {
   ItemManifest,
   NPCManifest,
   ResourceManifest,
-} from "@/lib/cdn/types";
+} from "./index";

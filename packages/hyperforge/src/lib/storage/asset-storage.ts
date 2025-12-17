@@ -11,15 +11,18 @@
 
 import { promises as fs } from "fs";
 import path from "path";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("AssetStorage");
 import {
   isSupabaseConfigured,
   saveForgeAsset,
-  listForgeAssets,
   readForgeAssetMetadata,
   deleteForgeAsset,
   forgeAssetExists,
   type ForgeAsset,
   type ForgeAssetFiles,
+  type TextureFile,
 } from "./supabase-storage";
 
 // Base directory for local asset storage (fallback)
@@ -27,12 +30,7 @@ const ASSETS_BASE_DIR =
   process.env.HYPERFORGE_ASSETS_DIR || path.join(process.cwd(), "assets");
 
 // Re-export Supabase types
-export type { ForgeAsset, ForgeAssetFiles };
-
-export interface TextureFile {
-  name: string;
-  buffer: Buffer | ArrayBuffer;
-}
+export type { ForgeAsset, ForgeAssetFiles, TextureFile };
 
 export interface SaveAssetOptions {
   assetId: string;
@@ -149,7 +147,7 @@ export async function saveAssetFiles(
 
   // Try Supabase Storage first (recommended)
   if (isSupabaseConfigured()) {
-    console.log(`[Asset Storage] Using Supabase Storage for asset: ${assetId}`);
+    log.info(`Using Supabase Storage for asset: ${assetId}`);
 
     try {
       // Convert texture files to Buffer format
@@ -207,16 +205,13 @@ export async function saveAssetFiles(
         metadataPath: forgeResult.metadataPath,
       };
     } catch (error) {
-      console.error(
-        "[Asset Storage] Supabase save failed, falling back to local:",
-        error,
-      );
+      log.error("Supabase save failed, falling back to local", { error });
       // Fall through to local storage
     }
   }
 
   // Fallback: Local filesystem storage
-  console.log(`[Asset Storage] Using local filesystem for asset: ${assetId}`);
+  log.info(`Using local filesystem for asset: ${assetId}`);
 
   // Ensure directory exists
   await ensureAssetDir(assetId);
@@ -264,7 +259,7 @@ export async function saveAssetFiles(
     await fs.writeFile(previewPath, previewBuf);
     result.previewPath = previewPath;
     result.previewUrl = `/api/assets/${assetId}/preview.glb`;
-    console.log(`[Asset Storage] Saved preview model: ${previewPath}`);
+    log.info(`Saved preview model: ${previewPath}`);
   }
 
   // Save metadata if provided
@@ -359,7 +354,7 @@ export async function deleteAssetFiles(assetId: string): Promise<void> {
   if (isSupabaseConfigured()) {
     const supabaseDeleted = await deleteForgeAsset(assetId);
     if (supabaseDeleted) {
-      console.log(`[Asset Storage] Deleted from Supabase: ${assetId}`);
+      log.info(`Deleted from Supabase: ${assetId}`);
     }
   }
 
@@ -367,7 +362,7 @@ export async function deleteAssetFiles(assetId: string): Promise<void> {
   try {
     const dir = getAssetDir(assetId);
     await fs.rm(dir, { recursive: true, force: true });
-    console.log(`[Asset Storage] Deleted from local: ${assetId}`);
+    log.info(`Deleted from local: ${assetId}`);
   } catch {
     // Ignore if doesn't exist locally
   }
@@ -461,7 +456,7 @@ export async function downloadAndSaveModel(
     try {
       thumbnailBuffer = await downloadFile(thumbnailUrl);
     } catch (error) {
-      console.warn("Failed to download thumbnail:", error);
+      log.warn("Failed to download thumbnail", { error });
     }
   }
 

@@ -19,6 +19,26 @@ import {
   isSupabaseConfigured,
   uploadConceptArt,
 } from "@/lib/storage/supabase-storage";
+import { TASK_MODELS } from "./providers";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("Concept Art");
+
+/**
+ * System prompt for concept art generation
+ * Instructs the model to ONLY generate a concept art image
+ */
+export const CONCEPT_ART_SYSTEM_PROMPT = `You are a professional concept artist for video games. Your ONLY task is to generate high-quality concept art images.
+
+CRITICAL INSTRUCTIONS:
+- Generate EXACTLY ONE concept art image based on the description
+- Do NOT include any text, labels, annotations, or watermarks
+- Do NOT include any explanations or descriptions in your response
+- Do NOT ask clarifying questions
+- Focus on clear material definition, lighting, and form
+- The image should be suitable as a reference for 3D modeling
+
+Your response must contain ONLY the generated concept art image.`;
 
 export interface ConceptArtResult {
   imageUrl: string; // HTTP URL for Meshy (preferred) or data URL (fallback)
@@ -37,7 +57,7 @@ export interface ConceptArtOptions {
 /**
  * Build a detailed prompt for concept art generation
  */
-function buildConceptArtPrompt(
+export function buildConceptArtPrompt(
   assetDescription: string,
   options: ConceptArtOptions = {},
 ): string {
@@ -112,7 +132,7 @@ Generate ONLY the concept art image, no text, labels, or annotations.`;
 }
 
 /**
- * Generate concept art using Google Gemini via Vercel AI Gateway
+ * Generate concept art using AI Gateway
  * Saves the image to Supabase Storage (preferred) or local filesystem
  * Returns an HTTP URL for Meshy API compatibility
  */
@@ -120,16 +140,18 @@ export async function generateConceptArt(
   assetDescription: string,
   options: ConceptArtOptions = {},
 ): Promise<ConceptArtResult | null> {
-  console.log(
-    `[Concept Art] Generating concept art for: ${assetDescription.substring(0, 100)}...`,
+  log.debug(
+    `Generating concept art for: ${assetDescription.substring(0, 100)}...`,
   );
 
   try {
     const prompt = buildConceptArtPrompt(assetDescription, options);
+    const model = TASK_MODELS.imageGeneration;
 
-    // Use Vercel AI Gateway with Google's image generation model
+    // Use AI Gateway with system prompt for consistent image-only output
     const result = await generateText({
-      model: gateway("google/gemini-2.5-flash-image"),
+      model: gateway(model),
+      system: CONCEPT_ART_SYSTEM_PROMPT,
       prompt,
     });
 
@@ -149,14 +171,12 @@ export async function generateConceptArt(
 
       // Try Supabase Storage first (recommended for production)
       if (isSupabaseConfigured()) {
-        console.log("[Concept Art] Uploading to Supabase Storage...");
+        log.debug("Uploading to Supabase Storage...");
 
         const uploadResult = await uploadConceptArt(buffer, mediaType);
 
         if (uploadResult.success) {
-          console.log(
-            `[Concept Art] Uploaded to Supabase: ${uploadResult.url}`,
-          );
+          log.info(`Uploaded to Supabase: ${uploadResult.url}`);
 
           return {
             imageUrl: uploadResult.url, // Supabase public URL
@@ -165,8 +185,8 @@ export async function generateConceptArt(
             mediaType,
           };
         } else {
-          console.warn(
-            "[Concept Art] Supabase upload failed, falling back to local:",
+          log.warn(
+            "Supabase upload failed, falling back to local:",
             uploadResult.error,
           );
           // Fall through to local storage
@@ -174,7 +194,7 @@ export async function generateConceptArt(
       }
 
       // Fallback: Save to local filesystem
-      console.log("[Concept Art] Saving to local filesystem...");
+      log.debug("Saving to local filesystem...");
       const assetsDir =
         process.env.HYPERFORGE_ASSETS_DIR || path.join(process.cwd(), "assets");
       const uploadsDir = path.join(assetsDir, "uploads");
@@ -197,7 +217,7 @@ export async function generateConceptArt(
         "http://localhost:3500";
       const httpUrl = `${cdnUrl}/api/upload/image/${filename}`;
 
-      console.log(`[Concept Art] Saved locally: ${httpUrl}`);
+      log.info(`Saved locally: ${httpUrl}`);
 
       return {
         imageUrl: httpUrl, // HTTP URL for Meshy
@@ -206,14 +226,14 @@ export async function generateConceptArt(
         mediaType,
       };
     } else {
-      console.warn(
-        `[Concept Art] No image generated, text response:`,
+      log.warn(
+        `No image generated, text response:`,
         result.text?.substring(0, 100),
       );
       return null;
     }
   } catch (error) {
-    console.error(`[Concept Art] Generation failed:`, error);
+    log.error(`Generation failed:`, error);
     return null;
   }
 }
@@ -249,7 +269,7 @@ export async function generateAndSaveConceptArt(
   const buffer = Buffer.from(result.base64, "base64");
   await fs.writeFile(filepath, buffer);
 
-  console.log(`[Concept Art] Saved to: ${filepath}`);
+  log.info(`Saved to: ${filepath}`);
 
   return `/api/assets/${assetId}/${filename}`;
 }

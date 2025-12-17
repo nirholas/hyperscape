@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import dynamic from "next/dynamic";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("AudioStudioPanel");
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SpectacularButton } from "@/components/ui/spectacular-button";
 import { Badge } from "@/components/ui/badge";
@@ -49,7 +51,7 @@ interface MusicPreset {
 }
 
 export function AudioStudioPanel({
-  selectedAsset,
+  selectedAsset: _selectedAsset,
   npcId,
   dialogueNodeId,
 }: AudioStudioPanelProps) {
@@ -126,7 +128,7 @@ export function AudioStudioPanel({
         setMusicPresets(data.presets || []);
       }
     } catch (err) {
-      console.error("Failed to load presets:", err);
+      log.error("Failed to load presets", err);
     }
   }
 

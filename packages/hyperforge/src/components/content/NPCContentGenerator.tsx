@@ -10,6 +10,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/components/ui/toast";
 import { Wand2, Loader2, Save, Eye, Mic, Volume2 } from "lucide-react";
 import { DialogueTreeEditor } from "./DialogueTreeEditor";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("NPCContentGenerator");
 import type {
   DialogueTree,
   DialogueNode,
@@ -78,7 +81,7 @@ export function NPCContentGenerator({
           setVoicePresets(data.voices || []);
         }
       } catch (error) {
-        console.error("Failed to load voice presets:", error);
+        log.error("Failed to load voice presets:", error);
       }
     }
     loadPresets();
@@ -200,7 +203,7 @@ export function NPCContentGenerator({
           updatedNodes.push(node);
         }
       } catch (error) {
-        console.error(`Failed to generate voice for node ${node.id}:`, error);
+        log.error(`Failed to generate voice for node ${node.id}:`, error);
         updatedNodes.push(node);
       }
     }
@@ -334,7 +337,7 @@ export function NPCContentGenerator({
 
       onContentGenerated?.(result.content);
     } catch (error) {
-      console.error("Generation failed:", error);
+      log.error("Generation failed:", error);
       toast({
         variant: "destructive",
         title: "Generation Failed",
@@ -385,7 +388,7 @@ export function NPCContentGenerator({
       });
 
       const result = await response.json();
-      console.log("Manifest preview:", result);
+      log.info("Manifest preview:", result);
 
       toast({
         variant: "success",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, useRef } from "react";
+import React, { useState, useCallback, useMemo, useRef } from "react";
 import {
   ReactFlow,
   Background,
@@ -40,6 +40,9 @@ import type {
   DialogueResponse,
   DialogueAudio,
 } from "@/types/game/dialogue-types";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("DialogueTreeEditor");
 
 interface DialogueTreeEditorProps {
   initialTree?: DialogueTree;
@@ -137,7 +140,7 @@ const nodeTypes = {
 
 export function DialogueTreeEditor({
   initialTree,
-  npcName,
+  npcName: _npcName, // Reserved for future display in header
   npcId,
   onSave,
   onGenerate,
@@ -155,8 +158,8 @@ export function DialogueTreeEditor({
   const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
   const [isGeneratingAllAudio, setIsGeneratingAllAudio] = useState(false);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
-  const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [, setCurrentAudioUrl] = useState<string | null>(null); // Value used by audio player
+  const audioRef = useRef<globalThis.HTMLAudioElement | null>(null);
 
   // Load voice presets on mount
   useState(() => {
@@ -171,7 +174,7 @@ export function DialogueTreeEditor({
           }
         }
       } catch (err) {
-        console.error("Failed to load voice presets:", err);
+        log.error("Failed to load voice presets:", err);
       }
     }
     loadVoicePresets();
@@ -295,17 +298,6 @@ export function DialogueTreeEditor({
     setIsGeneratingAllAudio(false);
   }, [selectedVoice, npcId, initialTree, toast]);
 
-  // Play/pause audio
-  const toggleAudioPlayback = useCallback(() => {
-    if (!audioRef.current) return;
-    if (isPlayingAudio) {
-      audioRef.current.pause();
-    } else {
-      audioRef.current.play();
-    }
-    setIsPlayingAudio(!isPlayingAudio);
-  }, [isPlayingAudio]);
-
   // Play node audio
   const playNodeAudio = useCallback(
     (nodeId: string) => {
@@ -365,7 +357,7 @@ export function DialogueTreeEditor({
     }
 
     return { initialNodes: nodes, initialEdges: edges };
-  }, [initialTree]);
+  }, [initialTree, nodeAudio]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -387,7 +379,7 @@ export function DialogueTreeEditor({
   );
 
   const onNodeClick = useCallback(
-    (_: unknown, node: Node) => {
+    (_event: React.MouseEvent, node: Node) => {
       setSelectedNodeId(node.id);
       // Find the full node data
       const dialogueNode = initialTree?.nodes.find((n) => n.id === node.id);

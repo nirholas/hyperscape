@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:images");
 
 /**
  * DELETE /api/images/[id]
@@ -53,7 +56,7 @@ export async function DELETE(
 
     return NextResponse.json({ error: "Image not found" }, { status: 404 });
   } catch (error) {
-    console.error("[Images API] Error deleting image:", error);
+    log.error({ error }, "Error deleting image");
     return NextResponse.json(
       { error: "Failed to delete image" },
       { status: 500 },
@@ -110,7 +113,7 @@ export async function GET(
 
     return NextResponse.json({ error: "Image not found" }, { status: 404 });
   } catch (error) {
-    console.error("[Images API] Error getting image:", error);
+    log.error({ error }, "Error getting image");
     return NextResponse.json({ error: "Failed to get image" }, { status: 500 });
   }
 }

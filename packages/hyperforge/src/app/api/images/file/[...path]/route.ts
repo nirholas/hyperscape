@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:images:file");
 
 /**
  * GET /api/images/file/[...path]
@@ -58,7 +61,7 @@ export async function GET(
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
   } catch (error) {
-    console.error("[Images API] Error serving file:", error);
+    log.error({ error }, "Error serving file");
     return NextResponse.json(
       { error: "Failed to serve file" },
       { status: 500 },

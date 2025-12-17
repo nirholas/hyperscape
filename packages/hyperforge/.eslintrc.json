@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json.schemastore.org/eslintrc",
+  "root": true,
+  "extends": [
+    "next/core-web-vitals",
+    "next/typescript"
+  ],
+  "ignorePatterns": [
+    "node_modules/**",
+    ".next/**",
+    "out/**",
+    "public/**",
+    "*.config.js",
+    "*.config.mjs",
+    "*.config.ts"
+  ],
+  "rules": {
+    "@typescript-eslint/no-explicit-any": "error",
+    "@typescript-eslint/no-unused-vars": ["error", {
+      "argsIgnorePattern": "^_",
+      "varsIgnorePattern": "^_",
+      "caughtErrorsIgnorePattern": "^_"
+    }],
+    "@typescript-eslint/no-unused-expressions": "off",
+    "@typescript-eslint/ban-ts-comment": ["error", {
+      "ts-expect-error": "allow-with-description",
+      "ts-ignore": false,
+      "ts-nocheck": false
+    }],
+    "@next/next/no-img-element": "off",
+    "@next/next/no-html-link-for-pages": "error",
+    "@next/next/no-sync-scripts": "error",
+    "react/jsx-no-target-blank": "error",
+    "react/self-closing-comp": "warn",
+    "no-console": ["warn", { "allow": ["warn", "error", "info"] }],
+    "prefer-const": "error",
+    "no-var": "error",
+    "eqeqeq": ["error", "always", { "null": "ignore" }]
+  },
+  "overrides": [
+    {
+      "files": ["*.config.{js,mjs,ts}", "scripts/**/*"],
+      "rules": {
+        "@typescript-eslint/no-explicit-any": "off",
+        "@typescript-eslint/no-require-imports": "off",
+        "no-console": "off"
+      }
+    }
+  ]
+}

@@ -7,6 +7,9 @@ import {
   isSupabaseConfigured,
   uploadConceptArt,
 } from "@/lib/storage/supabase-storage";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:images/generate");
 
 interface GenerateRequest {
   type: "concept-art" | "sprite" | "texture";
@@ -51,7 +54,7 @@ function buildConceptArtPrompt(
   const {
     style = "stylized",
     viewAngle = "isometric",
-    background = "simple",
+    background: _background = "simple",
     assetType = "item",
   } = options;
 
@@ -231,9 +234,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(
-      `[Image Gen] Generating ${type}: ${prompt.substring(0, 100)}...`,
-    );
+    log.info({ type, prompt: prompt.substring(0, 100) }, "Generating image");
 
     // Build the full prompt
     const fullPrompt = buildPrompt(type, prompt, options);
@@ -250,9 +251,9 @@ export async function POST(request: NextRequest) {
     );
 
     if (!imageFiles || imageFiles.length === 0) {
-      console.warn(
-        `[Image Gen] No image generated, text response:`,
-        result.text?.substring(0, 100),
+      log.warn(
+        { textResponse: result.text?.substring(0, 100) },
+        "No image generated",
       );
       return NextResponse.json(
         { error: "Failed to generate image - no image in response" },
@@ -277,14 +278,14 @@ export async function POST(request: NextRequest) {
 
     // Try to upload to Supabase for persistent storage
     if (isSupabaseConfigured()) {
-      console.log("[Image Gen] Uploading to Supabase Storage...");
+      log.info("Uploading to Supabase Storage...");
       const uploadResult = await uploadConceptArt(buffer, mediaType);
 
       if (uploadResult.success) {
         imageUrl = uploadResult.url;
-        console.log(`[Image Gen] Uploaded to Supabase: ${imageUrl}`);
+        log.info({ imageUrl }, "Uploaded to Supabase");
       } else {
-        console.warn("[Image Gen] Supabase upload failed, using local storage");
+        log.warn("Supabase upload failed, using local storage");
       }
     }
 
@@ -304,7 +305,7 @@ export async function POST(request: NextRequest) {
         "http://localhost:3500";
       imageUrl = `${cdnUrl}/api/images/file/${type}/${filename}`;
 
-      console.log(`[Image Gen] Saved locally: ${imageUrl}`);
+      log.info({ imageUrl }, "Saved locally");
     }
 
     return NextResponse.json({
@@ -321,7 +322,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error("[Image Gen] Error:", error);
+    log.error({ error }, "Image generation failed");
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Generation failed" },
       { status: 500 },

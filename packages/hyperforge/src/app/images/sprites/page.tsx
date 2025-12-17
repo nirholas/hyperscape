@@ -6,13 +6,15 @@ import {
   Sparkles,
   Download,
   Loader2,
-  Image as ImageIcon,
   Check,
   Wand2,
+  Image as ImageIcon,
 } from "lucide-react";
 import { StudioPageLayout } from "@/components/layout/StudioPageLayout";
 import { SpectacularButton } from "@/components/ui/spectacular-button";
-import { cn } from "@/lib/utils";
+import { cn, logger } from "@/lib/utils";
+
+const log = logger.child("SpritesPage");
 
 type SpriteStyle = "pixel-16" | "pixel-32" | "pixel-64" | "hand-drawn" | "flat";
 type SpriteType = "character" | "item" | "tile" | "ui" | "effect";
@@ -125,7 +127,7 @@ export default function SpritesPage() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (error) {
-      console.error("Failed to download:", error);
+      log.error("Failed to download:", error);
     }
   };
 

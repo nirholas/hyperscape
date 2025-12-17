@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:audio/file");
 
 const ASSETS_BASE_DIR =
   process.env.HYPERFORGE_ASSETS_DIR || path.join(process.cwd(), "assets");
@@ -53,7 +56,7 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error("[API] Failed to serve audio file:", error);
+    log.error("Failed to serve audio file", { error });
     return NextResponse.json(
       { error: "Failed to serve audio file" },
       { status: 500 },

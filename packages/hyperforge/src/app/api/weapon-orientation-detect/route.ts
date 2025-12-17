@@ -4,6 +4,9 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:weapon-orientation-detect");
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
@@ -18,7 +21,7 @@ export async function POST(request: NextRequest) {
 
     // If no API key, use heuristic
     if (!OPENAI_API_KEY) {
-      console.log("[Orientation Detection] No API key, using heuristic");
+      log.info("No API key, using heuristic");
       return NextResponse.json({
         success: true,
         needsFlip: false,
@@ -75,7 +78,7 @@ Respond with ONLY a JSON object (no markdown):
     });
 
     if (!response.ok) {
-      console.error("[Orientation Detection] OpenAI API error");
+      log.error("OpenAI API error");
       return NextResponse.json({
         success: true,
         needsFlip: false,
@@ -102,7 +105,7 @@ Respond with ONLY a JSON object (no markdown):
 
       const data = JSON.parse(jsonStr);
 
-      console.log("[Orientation Detection] Result:", data);
+      log.info({ data }, "Orientation detection result");
 
       return NextResponse.json({
         success: true,
@@ -117,7 +120,7 @@ Respond with ONLY a JSON object (no markdown):
       });
     }
   } catch (error) {
-    console.error("[API] Orientation detection failed:", error);
+    log.error({ error }, "Orientation detection failed");
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Detection failed" },
       { status: 500 },

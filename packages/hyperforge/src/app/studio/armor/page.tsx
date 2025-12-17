@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("Armor");
 import {
   Shield,
   AlertTriangle,
@@ -77,10 +80,14 @@ export default function ArmorFittingPage() {
 
   // Fitting state
   const [isFitting, setIsFitting] = useState(false);
+  const [isBinding, setIsBinding] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [fittingProgress, setFittingProgress] = useState(0);
   const [isArmorFitted, setIsArmorFitted] = useState(false);
   const [isArmorBound, setIsArmorBound] = useState(false);
   const [isAnimationPlaying, setIsAnimationPlaying] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [fittedArmorUrl, setFittedArmorUrl] = useState<string | null>(null);
   const [fittingStats, setFittingStats] = useState<{
     bodyRegions: number;
     vertexCount: number;
@@ -136,7 +143,7 @@ export default function ArmorFittingPage() {
           ),
         );
       } catch (error) {
-        console.error("Failed to load assets:", error);
+        log.error("Failed to load assets:", error);
       } finally {
         setLoading(false);
       }
@@ -167,6 +174,8 @@ export default function ArmorFittingPage() {
     setIsFitting(true);
     setFittingProgress(0);
     setFittingStats(null);
+    setSessionId(null);
+    setFittedArmorUrl(null);
 
     try {
       // Get model URLs
@@ -177,7 +186,7 @@ export default function ArmorFittingPage() {
         throw new Error("Missing model URLs");
       }
 
-      console.log("[Armor] Starting fitting:", { avatarUrl, armorUrl });
+      log.info("Starting fitting:", { avatarUrl, armorUrl });
 
       // Progress simulation for UX (real fitting happens server-side)
       const progressInterval = setInterval(() => {
@@ -211,13 +220,28 @@ export default function ArmorFittingPage() {
 
       const result = await response.json();
 
+      // Store session ID for subsequent bind/export operations
+      setSessionId(result.sessionId);
+
+      // Create blob URL from base64 GLB for preview
+      if (result.fittedArmorGlb) {
+        const binaryString = atob(result.fittedArmorGlb);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], { type: "model/gltf-binary" });
+        const url = URL.createObjectURL(blob);
+        setFittedArmorUrl(url);
+      }
+
       setFittingProgress(100);
       setIsArmorFitted(true);
       setFittingStats(result.stats);
 
-      console.log("[Armor] Fitting complete:", result);
+      log.info("Fitting complete:", result);
     } catch (error) {
-      console.error("[Armor] Fitting failed:", error);
+      log.error("Fitting failed:", error);
       setFittingProgress(0);
     } finally {
       setIsFitting(false);
@@ -231,27 +255,89 @@ export default function ArmorFittingPage() {
   ]);
 
   const handleBindToSkeleton = useCallback(async () => {
-    if (!isArmorFitted) return;
+    if (!isArmorFitted || !sessionId) return;
 
-    // In a real implementation, this would transfer weights
-    // For now, simulate the binding process
-    setIsArmorBound(true);
-    console.log("[Armor] Bound to skeleton");
-  }, [isArmorFitted]);
+    setIsBinding(true);
+
+    try {
+      const response = await fetch("/api/armor/fit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "bind",
+          sessionId,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Binding failed");
+      }
+
+      const result = await response.json();
+      setIsArmorBound(true);
+      log.info("Bound to skeleton:", result);
+    } catch (error) {
+      log.error("Binding failed:", error);
+      alert(error instanceof Error ? error.message : "Binding failed");
+    } finally {
+      setIsBinding(false);
+    }
+  }, [isArmorFitted, sessionId]);
 
   const handleReset = useCallback(() => {
     setIsArmorFitted(false);
     setIsArmorBound(false);
     setFittingProgress(0);
     setFittingStats(null);
-  }, []);
+    setSessionId(null);
+    // Clean up blob URL
+    if (fittedArmorUrl) {
+      URL.revokeObjectURL(fittedArmorUrl);
+      setFittedArmorUrl(null);
+    }
+  }, [fittedArmorUrl]);
 
-  const handleExport = useCallback(() => {
-    if (!isArmorBound) return;
-    // TODO: Implement real export
-    console.log("[Armor] Exporting fitted armor...");
-    alert("Export functionality coming soon!");
-  }, [isArmorBound]);
+  const handleExport = useCallback(async () => {
+    if (!isArmorBound || !sessionId) return;
+
+    setIsExporting(true);
+
+    try {
+      const response = await fetch("/api/armor/fit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "export",
+          sessionId,
+          exportMethod: "minimal",
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Export failed");
+      }
+
+      // Download the GLB file
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `fitted-armor-${Date.now()}.glb`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      log.info("Export complete");
+    } catch (error) {
+      log.error("Export failed:", error);
+      alert(error instanceof Error ? error.message : "Export failed");
+    } finally {
+      setIsExporting(false);
+    }
+  }, [isArmorBound, sessionId]);
 
   // Show loading skeleton during SSR to avoid hydration mismatch
   if (!mounted) {
@@ -508,14 +594,19 @@ export default function ArmorFittingPage() {
 
           <button
             onClick={handleBindToSkeleton}
-            disabled={!isArmorFitted || isArmorBound}
+            disabled={!isArmorFitted || isArmorBound || isBinding}
             className={`w-full py-2 rounded-lg font-medium transition-all flex items-center justify-center gap-2 text-sm ${
               isArmorBound
                 ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/40"
                 : "bg-gradient-to-r from-cyan-500 to-blue-600 text-white hover:from-cyan-400 hover:to-blue-500"
             } disabled:opacity-50 disabled:cursor-not-allowed`}
           >
-            {isArmorBound ? (
+            {isBinding ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Binding...
+              </>
+            ) : isArmorBound ? (
               <>
                 <Check className="w-4 h-4" />
                 Bound
@@ -577,11 +668,20 @@ export default function ArmorFittingPage() {
         </button>
         <button
           onClick={handleExport}
-          disabled={!isArmorBound}
+          disabled={!isArmorBound || isExporting}
           className="w-full py-2 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-medium hover:from-cyan-400 hover:to-blue-500 transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <Download className="w-4 h-4" />
-          Export Fitted Armor
+          {isExporting ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Exporting...
+            </>
+          ) : (
+            <>
+              <Download className="w-4 h-4" />
+              Export Fitted Armor
+            </>
+          )}
         </button>
       </div>
     </div>
@@ -607,7 +707,8 @@ export default function ArmorFittingPage() {
   };
 
   const avatarModelUrl = resolveModelUrl(selectedAvatar);
-  const armorModelUrl = resolveModelUrl(selectedArmor);
+  // Use fitted armor URL if available, otherwise use original armor URL
+  const armorModelUrl = fittedArmorUrl || resolveModelUrl(selectedArmor);
 
   return (
     <StudioPageLayout

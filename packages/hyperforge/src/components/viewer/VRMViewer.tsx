@@ -7,6 +7,7 @@
  * Based on asset-forge's VRMTestViewer but adapted for hyperforge.
  */
 
+import { logger } from "@/lib/utils";
 import {
   useRef,
   useEffect,
@@ -21,6 +22,18 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
 import type { VRM } from "@pixiv/three-vrm";
 import { retargetAnimation } from "@/services/retargeting/AnimationRetargeting";
+
+const log = logger.child("VRMViewer");
+
+/**
+ * Material type for VRM models that may have texture maps
+ * Covers both MeshStandardMaterial and MToonMaterial properties
+ */
+interface VRMMaterialWithMaps extends THREE.Material {
+  map?: THREE.Texture | null;
+  shadeMultiplyTexture?: THREE.Texture | null;
+  color?: THREE.Color;
+}
 
 export interface VRMViewerRef {
   loadAnimation: (url: string) => Promise<void>;
@@ -200,7 +213,7 @@ export const VRMViewer = forwardRef<VRMViewerRef, VRMViewerProps>(
       setIsLoading(true);
       setError(null);
 
-      console.log("[VRMViewer] Loading VRM:", vrmUrl);
+      log.info("Loading VRM:", vrmUrl);
 
       loader.load(
         vrmUrl,
@@ -215,7 +228,7 @@ export const VRMViewer = forwardRef<VRMViewerRef, VRMViewerProps>(
             return;
           }
 
-          console.log("[VRMViewer] VRM loaded:", vrm);
+          log.info("VRM loaded:", vrm);
 
           // #region agent log
           const vrmMaterialDetails: {
@@ -230,13 +243,13 @@ export const VRMViewer = forwardRef<VRMViewerRef, VRMViewerProps>(
                 ? child.material
                 : [child.material];
               mats.forEach((m: THREE.Material) => {
-                const anyMat = m as any;
+                const vrmMat = m as VRMMaterialWithMaps;
                 vrmMaterialDetails.push({
                   name: m.name || "unnamed",
                   type: m.type,
-                  hasMap: !!(anyMat.map || anyMat.shadeMultiplyTexture),
-                  color: anyMat.color
-                    ? `#${anyMat.color.getHexString()}`
+                  hasMap: !!(vrmMat.map || vrmMat.shadeMultiplyTexture),
+                  color: vrmMat.color
+                    ? `#${vrmMat.color.getHexString()}`
                     : "none",
                 });
               });
@@ -273,7 +286,7 @@ export const VRMViewer = forwardRef<VRMViewerRef, VRMViewerProps>(
             (meta?.specVersion?.startsWith("0.") ? "0" : "1");
 
           if (vrmVersion === "0") {
-            console.log("[VRMViewer] Rotating VRM 0.0 by 180°");
+            log.info("Rotating VRM 0.0 by 180°");
             VRMUtils.rotateVRM0(vrm);
           }
 
@@ -341,11 +354,11 @@ export const VRMViewer = forwardRef<VRMViewerRef, VRMViewerProps>(
             controlsRef.current.update();
           }
 
-          console.log(
-            `[VRMViewer] Model bounds: ${size.x.toFixed(2)} x ${size.y.toFixed(2)} x ${size.z.toFixed(2)}`,
+          log.info(
+            `Model bounds: ${size.x.toFixed(2)} x ${size.y.toFixed(2)} x ${size.z.toFixed(2)}`,
           );
-          console.log(
-            `[VRMViewer] Camera distance: ${cameraDistance.toFixed(2)}, center: [${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)}]`,
+          log.info(
+            `Camera distance: ${cameraDistance.toFixed(2)}, center: [${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)}]`,
           );
 
           const info: VRMInfo = {
@@ -357,11 +370,11 @@ export const VRMViewer = forwardRef<VRMViewerRef, VRMViewerProps>(
           onLoad?.(vrm, info);
           setIsLoading(false);
         },
-        (progress) => {
+        (_progress) => {
           // Progress callback
         },
         (err) => {
-          console.error("[VRMViewer] Load error:", err);
+          log.error("Load error:", err);
           const error = err instanceof Error ? err : new Error(String(err));
           setError(error.message);
           onError?.(error);
@@ -394,7 +407,7 @@ export const VRMViewer = forwardRef<VRMViewerRef, VRMViewerProps>(
     // Load and play animation
     const loadAnimation = useCallback(async (url: string) => {
       if (!vrmRef.current || !mixerRef.current || !loaderRef.current) {
-        console.warn("[VRMViewer] Cannot load animation - VRM not ready");
+        log.warn("Cannot load animation - VRM not ready");
         return;
       }
 
@@ -402,13 +415,13 @@ export const VRMViewer = forwardRef<VRMViewerRef, VRMViewerProps>(
       const mixer = mixerRef.current;
       const loader = loaderRef.current;
 
-      console.log("[VRMViewer] Loading animation:", url);
+      log.info("Loading animation:", url);
 
       try {
         const gltf = await loader.loadAsync(url);
 
         if (!gltf.animations || gltf.animations.length === 0) {
-          console.error("[VRMViewer] No animations in file");
+          log.error("No animations in file");
           return;
         }
 
@@ -420,11 +433,11 @@ export const VRMViewer = forwardRef<VRMViewerRef, VRMViewerProps>(
         );
 
         if (!retargetedClip) {
-          console.error("[VRMViewer] Animation retargeting failed");
+          log.error("Animation retargeting failed");
           return;
         }
 
-        console.log("[VRMViewer] Animation retargeted:", retargetedClip.name);
+        log.info("Animation retargeted:", retargetedClip.name);
 
         // Stop current animation
         if (currentActionRef.current) {
@@ -436,11 +449,11 @@ export const VRMViewer = forwardRef<VRMViewerRef, VRMViewerProps>(
         action.reset().fadeIn(0.2).play();
         currentActionRef.current = action;
       } catch (err) {
-        console.error("[VRMViewer] Failed to load animation:", err);
+        log.error("Failed to load animation:", err);
       }
     }, []);
 
-    const playAnimation = useCallback((name?: string) => {
+    const playAnimation = useCallback((_name?: string) => {
       if (currentActionRef.current) {
         currentActionRef.current.paused = false;
         currentActionRef.current.play();

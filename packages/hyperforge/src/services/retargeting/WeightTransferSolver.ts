@@ -13,7 +13,14 @@
 
 import * as THREE from "three";
 
-import { createBoneMapping, MESHY_TO_MIXAMO } from "./BoneMappings";
+import { logger } from "@/lib/utils";
+
+import {
+  createBoneMapping,
+  MESHY_TO_MIXAMO,
+} from "@/services/vrm/BoneMappings";
+
+const log = logger.child("WeightTransferSolver");
 
 export interface BoneMapping {
   [sourceBoneName: string]: string; // maps to target bone name
@@ -38,7 +45,7 @@ export class WeightTransferSolver {
     // Use provided mapping, or try Meshy→Mixamo, or fall back to fuzzy matching
     if (boneMapping) {
       this.boneMapping = boneMapping;
-      console.log("🎯 Using provided bone mapping");
+      log.info("🎯 Using provided bone mapping");
     } else {
       // Try to use semantic mapping (Meshy → Mixamo)
       const sourceBoneNames = sourceSkeleton.bones.map((b) => b.name);
@@ -53,35 +60,29 @@ export class WeightTransferSolver {
       if (semanticMapping.size > 0) {
         // Convert Map to Record
         this.boneMapping = Object.fromEntries(semanticMapping);
-        console.log("🎯 Using semantic Meshy→Mixamo bone mapping");
+        log.info("🎯 Using semantic Meshy→Mixamo bone mapping");
       } else {
-        console.warn(
-          "⚠️  Semantic mapping failed, falling back to fuzzy matching",
-        );
+        log.warn("⚠️  Semantic mapping failed, falling back to fuzzy matching");
         this.boneMapping = this.generateBoneMapping();
       }
     }
 
     const mappingQuality =
       Object.keys(this.boneMapping).length / sourceSkeleton.bones.length;
-    console.log("📊 WeightTransferSolver initialized");
-    console.log("  Source bones:", sourceSkeleton.bones.length);
-    console.log("  Target bones:", targetSkeleton.bones.length);
-    console.log(
-      "  Bone mapping:",
-      Object.keys(this.boneMapping).length,
-      "mapped",
+    log.info(
+      {
+        sourceBones: sourceSkeleton.bones.length,
+        targetBones: targetSkeleton.bones.length,
+        mappedBones: Object.keys(this.boneMapping).length,
+        quality: `${(mappingQuality * 100).toFixed(1)}%`,
+      },
+      "📊 WeightTransferSolver initialized",
     );
-    console.log("  Mapping quality:", (mappingQuality * 100).toFixed(1) + "%");
 
     if (mappingQuality < 0.5) {
-      console.error(
-        "❌ POOR BONE MAPPING! Only",
-        (mappingQuality * 100).toFixed(1) + "% of bones mapped",
-      );
-      console.error("   Weight transfer will produce bad results!");
-      console.error(
-        "   Consider using distance-based weight calculation instead",
+      log.error(
+        { quality: `${(mappingQuality * 100).toFixed(1)}%` },
+        "❌ POOR BONE MAPPING! Weight transfer will produce bad results. Consider using distance-based weight calculation instead.",
       );
     }
   }
@@ -105,7 +106,7 @@ export class WeightTransferSolver {
    * The target skeleton's user-applied scale is preserved at the ROOT level only
    */
   alignToSourceBindPose(): void {
-    console.log("🔄 Aligning target skeleton to source bind pose...");
+    log.debug("🔄 Aligning target skeleton to source bind pose...");
 
     const sourceRoot = this.sourceSkeleton.bones[0];
     const targetRoot = this.targetSkeleton.bones[0];
@@ -129,9 +130,14 @@ export class WeightTransferSolver {
 
     const scaleRatio = targetRootScale.x / sourceRootScale.x; // Assume uniform scale
 
-    console.log("  Source root scale:", sourceRootScale.toArray());
-    console.log("  Target root scale:", targetRootScale.toArray());
-    console.log("  Scale ratio:", scaleRatio.toFixed(3));
+    log.debug(
+      {
+        sourceRootScale: sourceRootScale.toArray(),
+        targetRootScale: targetRootScale.toArray(),
+        scaleRatio: scaleRatio.toFixed(3),
+      },
+      "Root scale comparison",
+    );
 
     let alignedCount = 0;
 
@@ -167,12 +173,10 @@ export class WeightTransferSolver {
     // Update all matrices
     this.targetSkeleton.bones.forEach((bone) => bone.updateMatrixWorld(true));
 
-    console.log("✅ Aligned", alignedCount, "bones to source bind pose");
-    console.log(
-      "   Rotations matched, positions scaled by ratio:",
-      scaleRatio.toFixed(3),
+    log.info(
+      { alignedCount, scaleRatio: scaleRatio.toFixed(3) },
+      "✅ Aligned bones to source bind pose - mesh will maintain original shape",
     );
-    console.log("   Mesh will maintain its original shape (no deformation)");
   }
 
   /**
@@ -191,13 +195,13 @@ export class WeightTransferSolver {
       .skinWeight as THREE.BufferAttribute;
 
     if (!sourceSkinIndices || !sourceSkinWeights) {
-      console.error("❌ Source mesh has no skin weights! Cannot transfer.");
+      log.error("❌ Source mesh has no skin weights! Cannot transfer.");
       throw new Error(
         "Source mesh must have skinIndex and skinWeight attributes",
       );
     }
 
-    console.log("📊 Transferring weights for", vertexCount, "vertices...");
+    log.debug({ vertexCount }, "📊 Transferring weights for vertices...");
 
     let transferredCount = 0;
     let unmappedCount = 0;
@@ -272,14 +276,13 @@ export class WeightTransferSolver {
       skinWeights.push(...newWeights);
     }
 
-    console.log("✅ Weight transfer complete!");
-    console.log("  Weights transferred:", transferredCount);
-    console.log("  Unmapped weights:", unmappedCount);
-    console.log(
-      "  Transfer success rate:",
-      ((transferredCount / (transferredCount + unmappedCount)) * 100).toFixed(
-        1,
-      ) + "%",
+    log.info(
+      {
+        transferred: transferredCount,
+        unmapped: unmappedCount,
+        successRate: `${((transferredCount / (transferredCount + unmappedCount)) * 100).toFixed(1)}%`,
+      },
+      "✅ Weight transfer complete!",
     );
 
     return { skinIndices, skinWeights };
@@ -306,7 +309,7 @@ export class WeightTransferSolver {
   private generateBoneMapping(): BoneMapping {
     const mapping: BoneMapping = {};
 
-    console.log("🔍 Auto-generating bone mapping...");
+    log.debug("🔍 Auto-generating bone mapping...");
 
     for (const sourceBone of this.sourceSkeleton.bones) {
       const targetBone = this.findBestMatch(
@@ -318,22 +321,25 @@ export class WeightTransferSolver {
       }
     }
 
-    console.log(
-      "📋 Generated mapping for",
-      Object.keys(mapping).length,
-      "bones",
+    log.debug(
+      {
+        mappedBones: Object.keys(mapping).length,
+        sampleMappings: Object.entries(mapping).slice(0, 10),
+      },
+      "📋 Generated bone mapping",
     );
-    console.log("   Sample mappings:", Object.entries(mapping).slice(0, 10));
 
     // Log unmapped bones
     const unmappedSource = this.sourceSkeleton.bones.filter(
       (b) => !mapping[b.name],
     );
     if (unmappedSource.length > 0) {
-      console.warn("⚠️ Unmapped source bones:", unmappedSource.length);
-      console.warn(
-        "   Examples:",
-        unmappedSource.slice(0, 5).map((b) => b.name),
+      log.warn(
+        {
+          count: unmappedSource.length,
+          examples: unmappedSource.slice(0, 5).map((b) => b.name),
+        },
+        "⚠️ Unmapped source bones",
       );
     }
 
@@ -395,7 +401,7 @@ export class WeightTransferSolver {
       pinky: ["pinky", "little"],
     };
 
-    for (const [semantic, patterns] of Object.entries(semanticMap)) {
+    for (const [_semantic, patterns] of Object.entries(semanticMap)) {
       if (patterns.some((p) => sourceNorm.includes(p))) {
         for (const bone of targetBones) {
           const targetNorm = normalize(bone.name);

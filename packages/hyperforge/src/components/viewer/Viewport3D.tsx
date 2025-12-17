@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { logger } from "@/lib/utils";
+import { useState, useCallback } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Environment, Grid } from "@react-three/drei";
 import { Suspense } from "react";
@@ -24,6 +25,8 @@ import {
 import { useAppStore, type ViewportPanelType } from "@/stores/app-store";
 import type { AssetData } from "@/types/asset";
 
+const log = logger.child("Viewport3D");
+
 interface Viewport3DProps {
   selectedAsset?: AssetData | null;
   onAssetDeleted?: (assetId: string) => void;
@@ -32,13 +35,24 @@ interface Viewport3DProps {
 export function Viewport3D({ selectedAsset, onAssetDeleted }: Viewport3DProps) {
   const { viewportPanel, closeViewportPanel, setViewportPanel } = useAppStore();
   const { theme, setTheme } = useTheme();
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [environment, setEnvironment] = useState("studio");
   const [showGrid, setShowGrid] = useState(true);
   const [showModel, setShowModel] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const environmentPresets = {
+  const environmentPresets: Record<
+    string,
+    | "forest"
+    | "studio"
+    | "warehouse"
+    | "sunset"
+    | "apartment"
+    | "night"
+    | "city"
+    | "dawn"
+    | "lobby"
+    | "park"
+  > = {
     neutral: "warehouse",
     studio: "studio",
     outdoor: "sunset",
@@ -76,10 +90,7 @@ export function Viewport3D({ selectedAsset, onAssetDeleted }: Viewport3DProps) {
 
     // Open enhancement panel with retexture tab
     setViewportPanel("enhancement");
-    console.log(
-      "[Viewport] Opening retexture panel for asset:",
-      selectedAsset.id,
-    );
+    log.info("Opening retexture panel for asset:", selectedAsset.id);
   }, [selectedAsset, isVRM, setViewportPanel]);
 
   // Handle regenerate - calls real API
@@ -88,10 +99,7 @@ export function Viewport3D({ selectedAsset, onAssetDeleted }: Viewport3DProps) {
 
     // Open enhancement panel with regenerate tab
     setViewportPanel("enhancement");
-    console.log(
-      "[Viewport] Opening regenerate panel for asset:",
-      selectedAsset.id,
-    );
+    log.info("Opening regenerate panel for asset:", selectedAsset.id);
   }, [selectedAsset, isVRM, setViewportPanel]);
 
   // Handle sprites generation
@@ -99,7 +107,7 @@ export function Viewport3D({ selectedAsset, onAssetDeleted }: Viewport3DProps) {
     if (!selectedAsset?.id || !selectedAsset?.name) return;
 
     setIsProcessing(true);
-    console.log("[Viewport] Generating sprites for asset:", selectedAsset.id);
+    log.info("Generating sprites for asset:", selectedAsset.id);
 
     try {
       const response = await fetch("/api/sprites/generate", {
@@ -119,19 +127,19 @@ export function Viewport3D({ selectedAsset, onAssetDeleted }: Viewport3DProps) {
       const result = await response.json();
 
       if (result.success) {
-        console.log(
-          `[Viewport] Generated ${result.sprites.length} sprites`,
+        log.info(
+          `Generated ${result.sprites.length} sprites`,
           result.thumbnailUrl ? `Thumbnail: ${result.thumbnailUrl}` : "",
         );
         alert(
           `Successfully generated ${result.sprites.length} sprites!${result.thumbnailUrl ? " Thumbnail updated." : ""}`,
         );
       } else {
-        console.error("[Viewport] Sprite generation failed:", result.error);
+        log.error("Sprite generation failed:", result.error);
         alert(`Sprite generation failed: ${result.error}`);
       }
     } catch (error) {
-      console.error("[Viewport] Sprite generation error:", error);
+      log.error("Sprite generation error:", error);
       alert(
         `Sprite generation error: ${error instanceof Error ? error.message : "Unknown error"}`,
       );
@@ -162,7 +170,7 @@ export function Viewport3D({ selectedAsset, onAssetDeleted }: Viewport3DProps) {
     // Get canvas element from the DOM
     const canvas = document.querySelector("canvas");
     if (!canvas) {
-      console.warn("No canvas found for capture");
+      log.warn("No canvas found for capture");
       return;
     }
 
@@ -209,10 +217,10 @@ export function Viewport3D({ selectedAsset, onAssetDeleted }: Viewport3DProps) {
           vrmUrl={vrmUrl}
           className="h-full w-full"
           onLoad={(vrm, info) => {
-            console.log("[Viewport3D] VRM loaded via VRMViewer:", info);
+            log.info("VRM loaded via VRMViewer:", info);
           }}
           onError={(error) => {
-            console.error("[Viewport3D] VRM load error:", error);
+            log.error("VRM load error:", error);
           }}
         />
 

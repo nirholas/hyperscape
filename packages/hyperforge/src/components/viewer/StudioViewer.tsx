@@ -5,7 +5,8 @@ import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Environment, Grid, Html } from "@react-three/drei";
 import { ModelViewer, type ModelInfo } from "./ModelViewer";
 import { VRMViewer, type VRMViewerRef, type VRMInfo } from "./VRMViewer";
-import { Eye, EyeOff, Grid3X3, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
+import type { VRM } from "@pixiv/three-vrm";
+import { Eye, EyeOff, Grid3X3 } from "lucide-react";
 
 export interface StudioViewerProps {
   /** URL of the GLB/GLTF model to display */
@@ -21,7 +22,7 @@ export interface StudioViewerProps {
   /** Callback when primary model loads */
   onModelLoad?: (info: ModelInfo) => void;
   /** Callback when VRM loads */
-  onVRMLoad?: (vrm: unknown, info: VRMInfo) => void;
+  onVRMLoad?: (vrm: VRM, info: VRMInfo) => void;
   /** Show grid by default */
   showGrid?: boolean;
   /** Show skeleton/bones overlay */
@@ -84,7 +85,7 @@ export function StudioViewer({
         <VRMViewer
           ref={vrmRef}
           vrmUrl={vrmUrl}
-          onLoad={onVRMLoad as (vrm: unknown, info: VRMInfo) => void}
+          onLoad={onVRMLoad}
           showSkeleton={showBones}
           className="h-full"
         />

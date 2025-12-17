@@ -18,7 +18,10 @@ import {
   uploadAudio,
   isSupabaseConfigured,
 } from "@/lib/storage/supabase-storage";
+import { logger } from "@/lib/utils";
 import type { VoiceAsset } from "@/types/audio";
+
+const log = logger.child("API:audio/voice/generate");
 
 export async function POST(request: NextRequest) {
   try {
@@ -61,7 +64,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log("[API] Generating voice:", {
+    log.info("Generating voice", {
       text: text.substring(0, 50) + "...",
       voiceId: effectiveVoiceId,
       voicePreset,
@@ -104,7 +107,14 @@ export async function POST(request: NextRequest) {
       url: "", // Will be set after saving
       duration: durationSeconds,
       format: "mp3",
-      timestamps: "timestamps" in result ? result.timestamps : undefined,
+      timestamps:
+        "timestamps" in result
+          ? (result.timestamps as Array<{
+              character: string;
+              start: number;
+              end: number;
+            }>)
+          : undefined,
       generatedAt: new Date().toISOString(),
     };
 
@@ -122,15 +132,12 @@ export async function POST(request: NextRequest) {
           );
           if (uploadResult.success) {
             asset.url = uploadResult.url;
-            console.log("[API] Voice saved to Supabase:", uploadResult.url);
+            log.info("Voice saved to Supabase", { url: uploadResult.url });
           } else {
             throw new Error(uploadResult.error || "Upload failed");
           }
         } catch (error) {
-          console.warn(
-            "[API] Supabase upload failed, falling back to local:",
-            error,
-          );
+          log.warn("Supabase upload failed, falling back to local", { error });
           // Fall through to local storage
         }
       }
@@ -151,7 +158,7 @@ export async function POST(request: NextRequest) {
 
         asset.url = `/api/audio/file/voice/${filename}`;
 
-        console.log("[API] Voice saved locally:", filepath);
+        log.info("Voice saved locally", { filepath });
       }
     }
 
@@ -164,7 +171,7 @@ export async function POST(request: NextRequest) {
       audio: `data:audio/mp3;base64,${audioBase64}`,
     });
   } catch (error) {
-    console.error("[API] Voice generation error:", error);
+    log.error("Voice generation error", { error });
 
     const errorMessage = error instanceof Error ? error.message : String(error);
 

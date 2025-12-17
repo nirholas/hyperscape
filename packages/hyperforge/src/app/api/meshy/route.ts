@@ -5,6 +5,9 @@ import {
   createTextTo3DRefineTask,
   getTaskStatus,
 } from "@/lib/meshy/client";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:meshy");
 
 export async function POST(request: NextRequest) {
   try {
@@ -67,7 +70,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   } catch (error) {
-    console.error("[API] Meshy request failed:", error);
+    log.error({ error }, "Meshy request failed");
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Meshy request failed",

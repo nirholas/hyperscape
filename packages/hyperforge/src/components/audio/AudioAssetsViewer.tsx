@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { logger } from "@/lib/utils";
 import {
   Play,
   Pause,
   Volume2,
   Download,
-  Trash2,
   Mic,
   Music,
   Wand2,
@@ -18,6 +18,8 @@ import { SpectacularButton } from "@/components/ui/spectacular-button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+
+const log = logger.child("AudioAssetsViewer");
 
 interface AudioAsset {
   id: string;
@@ -166,7 +168,7 @@ export function AudioAssetsViewer() {
         setAssets(data);
       }
     } catch (error) {
-      console.error("Failed to fetch audio assets:", error);
+      log.error("Failed to fetch audio assets", error);
     } finally {
       setIsLoading(false);
     }

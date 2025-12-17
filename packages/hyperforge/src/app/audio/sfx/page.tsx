@@ -3,8 +3,6 @@
 import { useState, useRef, useEffect } from "react";
 import { StudioPageLayout } from "@/components/layout/StudioPageLayout";
 import { SpectacularButton } from "@/components/ui/spectacular-button";
-import { Select } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
 import {
   Volume2,
@@ -17,12 +15,12 @@ import {
   Clock,
   AudioWaveform,
   Sword,
-  Footprints,
   Coins,
-  DoorOpen,
-  Flame,
   Wind,
 } from "lucide-react";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("SFXPage");
 
 interface SFXPreset {
   id: string;
@@ -74,7 +72,7 @@ export default function SoundEffectsPage() {
           setSfxPresets(data.presets || []);
         }
       } catch (err) {
-        console.error("Failed to load SFX presets:", err);
+        log.error({ error: err }, "Failed to load SFX presets");
       }
     }
     loadPresets();

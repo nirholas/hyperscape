@@ -3,11 +3,10 @@
  * Centralized exports for all utility functions
  */
 
-// Helpers (ID generation, sleep, retry, parsing, materials)
+// Helpers (ID generation, sleep, parsing, materials)
 export {
   generateId,
   sleep,
-  retry,
   formatBytes,
   createProgressBar,
   parseAssetType,
@@ -57,6 +56,9 @@ export { TypedEventEmitter } from "./typed-event-emitter";
 
 // Toast notifications
 export { toast, notify } from "./toast";
+
+// Centralized logger (Pino-based)
+export { logger, pinoLogger, type Logger, type ChildLogger } from "./logger";
 
 // API utilities
 export {

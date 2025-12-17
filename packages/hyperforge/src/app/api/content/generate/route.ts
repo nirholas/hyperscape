@@ -2,14 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateText } from "ai";
 import { gateway } from "@ai-sdk/gateway";
 import { v4 as uuidv4 } from "uuid";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:content");
 import type {
   Quest,
   QuestObjective,
-  QuestReward,
   WorldArea,
   Item,
   Store,
-  Biome,
 } from "@/types/game/content-types";
 import {
   uploadGameContent,
@@ -318,6 +319,20 @@ interface StoreGenerationRequest {
   priceRange?: "cheap" | "normal" | "expensive";
 }
 
+/**
+ * Union type for all content generation request types
+ */
+type ContentGenerationRequest =
+  | (QuestGenerationRequest & { saveToStorage?: boolean })
+  | (AreaGenerationRequest & { saveToStorage?: boolean })
+  | (ItemGenerationRequest & { saveToStorage?: boolean })
+  | (StoreGenerationRequest & { saveToStorage?: boolean });
+
+/**
+ * Generated content type - union of all content types
+ */
+type GeneratedContent = Quest | WorldArea | Item | Store;
+
 async function generateStore(req: StoreGenerationRequest): Promise<Store> {
   const prompt = `Generate a shop/store for a RuneScape-style MMORPG.
 
@@ -382,18 +397,25 @@ Rules:
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = (await request.json()) as ContentGenerationRequest;
     const { type, saveToStorage = true, ...params } = body;
 
-    let result;
-    let generatedContent: Record<string, unknown> | null = null;
+    let result: {
+      quest?: Quest;
+      area?: WorldArea;
+      item?: Item;
+      store?: Store;
+      generatedAt: string;
+      prompt: string;
+    };
+    let generatedContent: GeneratedContent | null = null;
     let contentId = "";
     const generatedAt = new Date().toISOString();
 
     switch (type) {
-      case "quest":
+      case "quest": {
         const quest = await generateQuest({ type, ...params });
-        generatedContent = quest as unknown as Record<string, unknown>;
+        generatedContent = quest;
         contentId = quest.id;
         result = {
           quest,
@@ -401,10 +423,11 @@ export async function POST(request: NextRequest) {
           prompt: JSON.stringify(params),
         };
         break;
+      }
 
-      case "area":
+      case "area": {
         const area = await generateArea({ type, ...params });
-        generatedContent = area as unknown as Record<string, unknown>;
+        generatedContent = area;
         contentId = area.id;
         result = {
           area,
@@ -412,10 +435,11 @@ export async function POST(request: NextRequest) {
           prompt: JSON.stringify(params),
         };
         break;
+      }
 
-      case "item":
+      case "item": {
         const item = await generateItem({ type, ...params });
-        generatedContent = item as unknown as Record<string, unknown>;
+        generatedContent = item;
         contentId = item.id;
         result = {
           item,
@@ -423,10 +447,11 @@ export async function POST(request: NextRequest) {
           prompt: JSON.stringify(params),
         };
         break;
+      }
 
-      case "store":
+      case "store": {
         const store = await generateStore({ type, ...params });
-        generatedContent = store as unknown as Record<string, unknown>;
+        generatedContent = store;
         contentId = store.id;
         result = {
           store,
@@ -434,6 +459,7 @@ export async function POST(request: NextRequest) {
           prompt: JSON.stringify(params),
         };
         break;
+      }
 
       default:
         return NextResponse.json(
@@ -446,17 +472,22 @@ export async function POST(request: NextRequest) {
     let storageUrl: string | undefined;
     if (saveToStorage && generatedContent && isSupabaseConfigured()) {
       try {
+        // Cast to Record<string, unknown> for JSON serialization
+        const contentForUpload = generatedContent as unknown as Record<
+          string,
+          unknown
+        >;
         const uploadResult = await uploadGameContent(
-          generatedContent,
+          contentForUpload,
           type as "quest" | "npc" | "dialogue" | "item" | "area",
           contentId,
         );
         if (uploadResult.success) {
           storageUrl = uploadResult.url;
-          console.log(`[Content Gen] Saved ${type} to Supabase: ${storageUrl}`);
+          log.info(`Saved ${type} to Supabase: ${storageUrl}`);
         }
       } catch (error) {
-        console.warn("[Content Gen] Failed to save to Supabase:", error);
+        log.warn({ error }, "Failed to save to Supabase");
       }
     }
 
@@ -466,7 +497,7 @@ export async function POST(request: NextRequest) {
       storageUrl,
     });
   } catch (error) {
-    console.error("[API] Content generation failed:", error);
+    log.error({ error }, "Content generation failed");
     return NextResponse.json(
       {
         error: "Content generation failed",

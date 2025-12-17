@@ -10,6 +10,9 @@ import {
   getModelPath,
 } from "@/lib/storage/asset-storage";
 import { promises as fs } from "fs";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:assets:download");
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -36,7 +39,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     }
 
     // Try to read the model in the requested format
-    let modelBuffer: Buffer;
+    let modelBuffer: Buffer | null = null;
     let actualFormat = format;
 
     try {
@@ -44,7 +47,6 @@ export async function GET(request: Request, { params }: RouteParams) {
     } catch {
       // If requested format not found, try other formats
       const formats = ["glb", "vrm", "gltf"];
-      let found = false;
       
       for (const fmt of formats) {
         if (fmt === format) continue;
@@ -53,19 +55,18 @@ export async function GET(request: Request, { params }: RouteParams) {
           await fs.access(modelPath);
           modelBuffer = await readAssetModel(assetId, fmt);
           actualFormat = fmt;
-          found = true;
           break;
         } catch {
           // Try next format
         }
       }
+    }
 
-      if (!found) {
-        return NextResponse.json(
-          { error: `Model file not found for asset: ${assetId}` },
-          { status: 404 }
-        );
-      }
+    if (!modelBuffer) {
+      return NextResponse.json(
+        { error: `Model file not found for asset: ${assetId}` },
+        { status: 404 }
+      );
     }
 
     // Set appropriate content type
@@ -78,7 +79,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     const contentType = contentTypes[actualFormat] || "application/octet-stream";
     const filename = `${assetId}.${actualFormat}`;
 
-    return new NextResponse(modelBuffer, {
+    return new NextResponse(new Uint8Array(modelBuffer), {
       status: 200,
       headers: {
         "Content-Type": contentType,
@@ -87,7 +88,7 @@ export async function GET(request: Request, { params }: RouteParams) {
       },
     });
   } catch (error) {
-    console.error("[Assets Download API] Error:", error);
+    log.error("Download error", { error });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to download asset" },
       { status: 500 }

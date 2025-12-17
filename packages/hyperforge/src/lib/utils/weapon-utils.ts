@@ -4,6 +4,9 @@
  */
 
 import * as THREE from "three";
+import { logger } from "./logger";
+
+const log = logger.child("WeaponUtils");
 
 /**
  * Bone mapping for different naming conventions
@@ -115,8 +118,9 @@ export function calculateAvatarHeight(avatar: THREE.Object3D): number {
 
   // Sanity check - if height seems wrong, use default
   if (height < 0.1 || height > 10) {
-    console.warn(
-      `⚠️ Calculated height seems incorrect (${height.toFixed(2)}m), using default 1.8m`,
+    log.warn(
+      { calculatedHeight: height },
+      `Calculated height seems incorrect (${height.toFixed(2)}m), using default 1.8m`,
     );
     return 1.8;
   }

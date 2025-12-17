@@ -12,6 +12,9 @@ import {
   updateAssetPaths,
 } from "@/lib/db/asset-queries";
 import { downloadAndSaveModel } from "@/lib/storage/asset-storage";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:retexture");
 
 export async function POST(request: NextRequest) {
   try {
@@ -62,7 +65,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(`🎨 Starting retexture for asset ${assetId}`);
+    log.info({ assetId }, "Starting retexture");
 
     // Create retexture task
     const taskId = await createRetextureTask({
@@ -75,20 +78,18 @@ export async function POST(request: NextRequest) {
       enable_original_uv: true,
     });
 
-    console.log(`🎨 Retexture task started: ${taskId}`);
+    log.debug({ taskId }, "Retexture task started");
 
     // Poll for completion
     const result = await pollTaskStatus(taskId, {
       pollIntervalMs: 5000,
       timeoutMs: 600000, // 10 minutes for retexture
       onProgress: (progress, precedingTasks) => {
-        console.log(
-          `⏳ Retexture progress: ${progress}%${precedingTasks ? ` (${precedingTasks} ahead)` : ""}`,
-        );
+        log.debug({ progress, precedingTasks }, "Retexture progress");
       },
     });
 
-    console.log(`✅ Retexture completed: ${result.modelUrl}`);
+    log.info({ modelUrl: result.modelUrl }, "Retexture completed");
 
     // Generate variant name
     const styleSuffix =
@@ -96,7 +97,6 @@ export async function POST(request: NextRequest) {
         ? textPrompt.slice(0, 20).replace(/\s+/g, "-").toLowerCase()
         : "image-style";
     const variantName = outputName || `${sourceAsset.name}-${styleSuffix}`;
-    const variantId = crypto.randomUUID();
 
     // Create new asset record for variant
     const newAsset = await createAsset({
@@ -151,7 +151,7 @@ export async function POST(request: NextRequest) {
       message: "Asset retextured successfully",
     });
   } catch (error) {
-    console.error("[API] Retexture failed:", error);
+    log.error({ error }, "Retexture failed");
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Retexture failed",

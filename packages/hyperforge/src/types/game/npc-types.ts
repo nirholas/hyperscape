@@ -1,12 +1,22 @@
 /**
  * Game NPC Types
- * Matches packages/shared/src/types/entities/npc-mob-types.ts
+ *
+ * Extended NPC types for game content generation.
  */
 
+import type { NPCCategory, Position3D, AttackType } from "../core";
 import type { DialogueTree } from "./dialogue-types";
 
-export type NPCCategory = "mob" | "boss" | "neutral" | "quest";
+// Re-export for convenience
+export type { NPCCategory } from "../core";
 
+// =============================================================================
+// NPC STATS
+// =============================================================================
+
+/**
+ * NPC combat and attribute stats
+ */
 export interface NPCStats {
   health: number;
   maxHealth: number;
@@ -17,15 +27,25 @@ export interface NPCStats {
   ranged?: number;
 }
 
+// =============================================================================
+// NPC CONFIG
+// =============================================================================
+
+/**
+ * NPC combat configuration
+ */
 export interface NPCCombatConfig {
   enabled: boolean;
-  attackType: "melee" | "ranged" | "magic";
+  attackType: AttackType;
   attackSpeed: number;
   attackRange: number;
   canRetreat: boolean;
   aggroRange: number;
 }
 
+/**
+ * NPC movement configuration
+ */
 export interface NPCMovementConfig {
   enabled: boolean;
   speed: number;
@@ -33,6 +53,9 @@ export interface NPCMovementConfig {
   canSwim?: boolean;
 }
 
+/**
+ * NPC appearance configuration
+ */
 export interface NPCAppearanceConfig {
   modelPath?: string;
   thumbnailPath?: string;
@@ -41,12 +64,20 @@ export interface NPCAppearanceConfig {
   tint?: string;
 }
 
+// =============================================================================
+// NPC DATA
+// =============================================================================
+
+/**
+ * Complete NPC data input for generation/creation
+ */
 export interface NPCDataInput {
   // Required
   id: string;
   name: string;
   description: string;
   category: NPCCategory;
+
   // Optional
   faction?: string;
   stats?: Partial<NPCStats>;
@@ -58,12 +89,28 @@ export interface NPCDataInput {
   combatLevel?: number;
   modelPath?: string;
   thumbnailPath?: string;
-  position?: { x: number; y: number; z: number };
+  position?: Position3D;
   spawnBiomes?: string[];
   dialogue?: DialogueTree;
   drops?: Record<string, unknown>;
+
   // Generation metadata
   personality?: string;
   backstory?: string;
   services?: string[];
+}
+
+/**
+ * Generated NPC content with metadata
+ */
+export interface GeneratedNPCContent {
+  id: string;
+  name: string;
+  description: string;
+  category: NPCCategory;
+  personality: string;
+  backstory?: string;
+  dialogue: DialogueTree;
+  generatedAt: string;
+  prompt: string;
 }

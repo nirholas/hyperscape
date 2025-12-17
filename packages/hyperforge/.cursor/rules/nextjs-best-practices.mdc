@@ -1,0 +1,348 @@
+---
+alwaysApply: true
+---
+# Next.js Best Practices (2025 Edition) - HyperForge
+
+This guide enforces elite-level Next.js patterns for the HyperForge package.
+
+## Core Architecture
+
+### 1. App Router (Required)
+- All new routes MUST use the `/app` directory, NOT `/pages`
+- Use nested layouts for shared UI across routes
+- Leverage parallel routes and intercepting routes for complex UIs
+
+```typescript
+// ✅ Correct structure
+/app
+  /dashboard
+    layout.tsx    // Shared dashboard layout
+    page.tsx      // Dashboard main page
+    /assets
+      page.tsx    // Dashboard assets subpage
+```
+
+### 2. React Server Components (RSC) by Default
+- **All components are Server Components by default** - keep them that way unless you need client interactivity
+- Only add `'use client'` when you need:
+  - React hooks (useState, useEffect, etc.)
+  - Browser APIs (window, document, localStorage)
+  - Event handlers (onClick, onChange)
+  - Third-party client-only libraries
+
+```typescript
+// ✅ Server Component (default) - fetches data on server
+export default async function AssetList() {
+  const assets = await fetchAssets() // Runs on server
+  return <div>{assets.map(a => <AssetCard key={a.id} asset={a} />)}</div>
+}
+
+// ✅ Client Component - only when needed
+'use client'
+export function AssetPreviewInteractive({ asset }: Props) {
+  const [rotation, setRotation] = useState(0) // Needs state
+  return <Canvas onRotate={setRotation}>...</Canvas>
+}
+```
+
+### 3. Minimize Client Component Boundaries
+- Push `'use client'` as far down the component tree as possible
+- Wrap only the interactive parts, not entire pages
+- Pass Server Component children to Client Components when possible
+
+```typescript
+// ✅ Good - minimal client boundary
+export default async function AssetPage() {
+  const asset = await fetchAsset(id)
+  return (
+    <div>
+      <AssetDetails asset={asset} /> {/* Server Component */}
+      <InteractivePreview assetUrl={asset.url}> {/* Client Component */}
+        <AssetMetadata asset={asset} /> {/* Server Component child */}
+      </InteractivePreview>
+    </div>
+  )
+}
+```
+
+## Data Fetching
+
+### 4. Server-Side Data Fetching
+- Fetch data in Server Components using async/await
+- Next.js automatically deduplicates and caches fetch requests
+- Use `revalidate` or `tags` for cache control
+
+```typescript
+// ✅ Direct fetch in Server Component
+async function getAsset(id: string): Promise<Asset> {
+  const res = await fetch(`${API_URL}/assets/${id}`, {
+    next: { revalidate: 60, tags: ['asset', id] } // Cache for 60s, can revalidate by tag
+  })
+  if (!res.ok) throw new Error('Failed to fetch asset')
+  return res.json()
+}
+```
+
+### 5. Caching Strategy
+- Use `'use cache'` directive for cacheable dynamic data
+- Use `revalidateTag()` or `revalidatePath()` for on-demand revalidation
+- Set appropriate `revalidate` times based on data freshness needs
+
+```typescript
+// Cached data fetching
+'use cache'
+export async function getCachedAssets() {
+  cacheLife('hours') // Cache for hours
+  return await db.assets.findMany()
+}
+
+// Revalidation in Server Actions
+'use server'
+export async function createAsset(data: AssetData) {
+  await db.assets.create(data)
+  revalidateTag('assets') // Invalidate assets cache
+}
+```
+
+### 6. Streaming & Suspense
+- Use `<Suspense>` boundaries for progressive loading
+- Show skeleton/loading UI immediately
+- Stream expensive components
+
+```typescript
+export default function AssetGallery() {
+  return (
+    <div>
+      <h1>Assets</h1>
+      <Suspense fallback={<AssetGridSkeleton />}>
+        <AssetGrid /> {/* Streams when ready */}
+      </Suspense>
+    </div>
+  )
+}
+```
+
+## Performance
+
+### 7. Image Optimization (Required)
+- **ALWAYS use `next/image`** - never use `<img>` tags
+- Configure proper `width` and `height` or use `fill`
+- Use `priority` for above-the-fold images
+
+```typescript
+import Image from 'next/image'
+
+// ✅ Correct
+<Image 
+  src={asset.thumbnailUrl}
+  alt={asset.name}
+  width={400}
+  height={300}
+  className="rounded-lg"
+/>
+
+// ❌ NEVER
+<img src={asset.thumbnailUrl} alt={asset.name} />
+```
+
+### 8. Lazy Loading & Code Splitting
+- Use `next/dynamic` for heavy components
+- Disable SSR for client-only libraries (Three.js, etc.)
+
+```typescript
+import dynamic from 'next/dynamic'
+
+// Heavy 3D viewer - loaded only when needed
+const ThreeViewer = dynamic(() => import('@/components/ThreeViewer'), {
+  loading: () => <ViewerSkeleton />,
+  ssr: false // Three.js needs browser APIs
+})
+```
+
+### 9. Bundle Optimization
+- Use `optimizePackageImports` in next.config.mjs for large libraries
+- Avoid importing entire packages when you only need parts
+
+```javascript
+// next.config.mjs
+experimental: {
+  optimizePackageImports: ['lucide-react', '@react-three/fiber', '@react-three/drei']
+}
+```
+
+## Routing & Navigation
+
+### 10. Link Component
+- **ALWAYS use `<Link>`** for navigation - never use `<a>` for internal links
+- Link provides automatic prefetching and client-side navigation
+
+```typescript
+import Link from 'next/link'
+
+// ✅ Correct
+<Link href="/assets/new" className="btn">Create Asset</Link>
+
+// ❌ NEVER for internal routes
+<a href="/assets/new">Create Asset</a>
+```
+
+### 11. Programmatic Navigation
+- Use `useRouter` from `next/navigation` (NOT `next/router`)
+
+```typescript
+'use client'
+import { useRouter } from 'next/navigation'
+
+export function AssetActions({ id }: { id: string }) {
+  const router = useRouter()
+  
+  const handleDelete = async () => {
+    await deleteAsset(id)
+    router.push('/assets') // Navigate after action
+    router.refresh() // Refresh server data
+  }
+}
+```
+
+## Server Actions
+
+### 12. Use Server Actions for Mutations
+- Replace API routes with Server Actions for form handling and mutations
+- Always validate input with Zod
+- Return typed responses
+
+```typescript
+'use server'
+import { z } from 'zod'
+
+const AssetSchema = z.object({
+  name: z.string().min(1),
+  type: z.enum(['model', 'texture', 'audio']),
+  prompt: z.string().optional(),
+})
+
+type ActionResult = { success: true; asset: Asset } | { success: false; error: string }
+
+export async function createAsset(formData: FormData): Promise<ActionResult> {
+  const parsed = AssetSchema.safeParse({
+    name: formData.get('name'),
+    type: formData.get('type'),
+    prompt: formData.get('prompt'),
+  })
+  
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.message }
+  }
+  
+  const asset = await db.assets.create(parsed.data)
+  revalidateTag('assets')
+  return { success: true, asset }
+}
+```
+
+## Metadata & SEO
+
+### 13. Route Metadata
+- Define metadata in `layout.tsx` or `page.tsx` using the Metadata API
+- Use dynamic metadata for pages with variable content
+
+```typescript
+// Static metadata
+export const metadata: Metadata = {
+  title: 'HyperForge - AI Asset Generation',
+  description: 'Generate 3D models, textures, and audio with AI',
+  openGraph: {
+    title: 'HyperForge',
+    images: ['/og-image.png'],
+  },
+}
+
+// Dynamic metadata
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const asset = await getAsset(params.id)
+  return {
+    title: `${asset.name} | HyperForge`,
+    description: asset.description,
+  }
+}
+```
+
+## Error Handling
+
+### 14. Error Boundaries
+- Create `error.tsx` files for route-level error handling
+- Create `not-found.tsx` for 404 pages
+- Always provide recovery options
+
+```typescript
+// app/assets/[id]/error.tsx
+'use client'
+
+export default function Error({ error, reset }: {
+  error: Error & { digest?: string }
+  reset: () => void
+}) {
+  return (
+    <div className="error-container">
+      <h2>Failed to load asset</h2>
+      <button onClick={reset}>Try again</button>
+    </div>
+  )
+}
+```
+
+## Project Structure
+
+### 15. Feature-Based Organization
+```
+/app
+  /assets              # Asset management routes
+    /[id]
+      page.tsx
+      loading.tsx
+      error.tsx
+    /new
+      page.tsx
+    layout.tsx
+    page.tsx
+  /generate            # Generation workflow routes
+  layout.tsx           # Root layout
+  page.tsx             # Home page
+
+/src
+  /components
+    /ui               # Shared UI components
+    /assets           # Asset-specific components
+    /generation       # Generation-specific components
+  /lib
+    /db              # Database utilities
+    /ai              # AI service integrations
+    /utils           # General utilities
+  /hooks             # Custom React hooks
+  /types             # TypeScript types
+  /actions           # Server Actions
+```
+
+## Forbidden Patterns
+
+- ❌ Using `<img>` instead of `next/image`
+- ❌ Using `<a>` for internal navigation instead of `<Link>`
+- ❌ Using `useRouter` from `next/router` (old pages router)
+- ❌ Putting `'use client'` at the top of pages unnecessarily
+- ❌ Fetching data in Client Components when it could be on the server
+- ❌ Not using Suspense boundaries for streaming
+- ❌ Creating API routes for simple mutations (use Server Actions)
+- ❌ Not validating Server Action inputs
+- ❌ Using `any` types (see TypeScript rules)
+
+## Required Patterns
+
+- ✅ App Router with nested layouts
+- ✅ React Server Components by default
+- ✅ `next/image` for all images
+- ✅ `<Link>` for all internal navigation
+- ✅ Server Actions for mutations with Zod validation
+- ✅ Suspense boundaries for async components
+- ✅ Proper metadata for SEO
+- ✅ Error boundaries with recovery options
+- ✅ Dynamic imports for heavy client components

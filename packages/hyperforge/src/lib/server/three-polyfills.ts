@@ -44,18 +44,14 @@ if (typeof globalThis.FileReader === "undefined") {
             const mimeType = blob.type || "application/octet-stream";
             this.result = `data:${mimeType};base64,${base64}`;
             this.readyState = 2;
-            const event = new (
-              globalThis as Record<string, typeof ProgressEvent>
-            ).ProgressEvent("load");
+            const event = new ProgressEvent("load");
             if (this.onload) this.onload.call(this, event);
             if (this.onloadend) this.onloadend.call(this, event);
           })
           .catch((err) => {
             this.error = err;
             this.readyState = 2;
-            const event = new (
-              globalThis as Record<string, typeof ProgressEvent>
-            ).ProgressEvent("error");
+            const event = new ProgressEvent("error");
             if (this.onerror) this.onerror.call(this, event);
             if (this.onloadend) this.onloadend.call(this, event);
           });
@@ -68,18 +64,14 @@ if (typeof globalThis.FileReader === "undefined") {
           .then((buffer) => {
             this.result = buffer;
             this.readyState = 2;
-            const event = new (
-              globalThis as Record<string, typeof ProgressEvent>
-            ).ProgressEvent("load");
+            const event = new ProgressEvent("load");
             if (this.onload) this.onload.call(this, event);
             if (this.onloadend) this.onloadend.call(this, event);
           })
           .catch((err) => {
             this.error = err;
             this.readyState = 2;
-            const event = new (
-              globalThis as Record<string, typeof ProgressEvent>
-            ).ProgressEvent("error");
+            const event = new ProgressEvent("error");
             if (this.onerror) this.onerror.call(this, event);
             if (this.onloadend) this.onloadend.call(this, event);
           });

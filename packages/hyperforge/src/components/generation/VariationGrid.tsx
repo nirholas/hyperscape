@@ -4,7 +4,7 @@ import { useState } from "react";
 import { GlassPanel } from "@/components/ui/glass-panel";
 import { SpectacularButton } from "@/components/ui/spectacular-button";
 import { Trash2, Download, Check } from "lucide-react";
-import type { GenerationResult } from "./BatchGenerator";
+import type { GenerationResult } from "@/types";
 
 interface VariationGridProps {
   variations: GenerationResult[];
@@ -72,14 +72,16 @@ export function VariationGrid({
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         {variations.map((variation, index) => {
-          const isSelected = selectedIds.has(variation.id);
+          const variationId =
+            variation.id || variation.taskId || `var-${index}`;
+          const isSelected = selectedIds.has(variationId);
           return (
             <GlassPanel
-              key={variation.id}
+              key={variationId}
               className={`relative cursor-pointer transition-all ${
                 isSelected ? "ring-2 ring-neon-blue" : ""
               }`}
-              onClick={() => toggleSelection(variation.id)}
+              onClick={() => toggleSelection(variationId)}
               intensity="low"
             >
               <div className="aspect-square bg-glass-bg rounded mb-2 flex items-center justify-center">
@@ -111,7 +113,7 @@ export function VariationGrid({
                     variant="ghost"
                     onClick={(e) => {
                       e.stopPropagation();
-                      onDownload(variation.id);
+                      onDownload(variationId);
                     }}
                   >
                     <Download className="w-4 h-4" />

@@ -1,6 +1,18 @@
 "use client";
 
 import { VRMLoaderPlugin, VRM, VRMHumanBoneName } from "@pixiv/three-vrm";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("EquipmentViewer");
+
+/**
+ * VRM meta type for accessing name across VRM0 and VRM1 versions
+ * VRM0 uses 'title', VRM1 uses 'name' - this covers both
+ */
+interface VRMMeta {
+  name?: string;
+  title?: string;
+}
 import React, {
   useEffect,
   useRef,
@@ -303,7 +315,7 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
       const scene = sceneRef.current;
 
       const loadAvatar = async () => {
-        console.log("[EquipmentViewer] Loading avatar:", avatarUrl);
+        log.info("Loading avatar:", avatarUrl);
 
         try {
           // Cleanup previous avatar
@@ -338,17 +350,15 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
           if (gltf.userData.vrm) {
             const vrm = gltf.userData.vrm as VRM;
             vrmRef.current = vrm;
-            // VRM1 uses metaVersion, VRM0 has different structure
-            const vrmName =
-              (vrm.meta as unknown as { name?: string })?.name ?? "Unknown VRM";
-            console.log("[EquipmentViewer] VRM loaded:", vrmName);
+            // VRM1 uses 'name', VRM0 uses 'title' - handle both
+            const meta = vrm.meta as VRMMeta;
+            const vrmName = meta?.name ?? meta?.title ?? "Unknown VRM";
+            log.info("VRM loaded:", vrmName);
           }
 
           // Setup animations if available
           if (gltf.animations && gltf.animations.length > 0) {
-            console.log(
-              `[EquipmentViewer] Found ${gltf.animations.length} animations`,
-            );
+            log.info(`Found ${gltf.animations.length} animations`);
             animationClipsRef.current = gltf.animations;
             animationMixerRef.current = new THREE.AnimationMixer(avatar);
           }
@@ -364,7 +374,7 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
           avatarRef.current = avatar;
           scene.add(avatar);
 
-          console.log("[EquipmentViewer] Avatar loaded successfully");
+          log.info("Avatar loaded successfully");
 
           // Update skeleton helper
           updateSkeletonHelper();
@@ -374,11 +384,12 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
             setTimeout(() => attachEquipmentToAvatar(), 100);
           }
         } catch (error) {
-          console.error("[EquipmentViewer] Failed to load avatar:", error);
+          log.error("Failed to load avatar:", error);
         }
       };
 
       loadAvatar();
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- Callbacks called after load, not triggers
     }, [isInitialized, avatarUrl]);
 
     // Load equipment
@@ -395,7 +406,7 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
       const scene = sceneRef.current;
 
       const loadEquipment = async () => {
-        console.log("[EquipmentViewer] Loading equipment:", equipmentUrl);
+        log.info("Loading equipment:", equipmentUrl);
 
         try {
           // Cleanup previous equipment
@@ -434,7 +445,7 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
           });
 
           equipmentRef.current = equipment;
-          console.log("[EquipmentViewer] Equipment loaded successfully");
+          log.info("Equipment loaded successfully");
 
           // Attach to avatar if loaded
           if (avatarRef.current && vrmRef.current) {
@@ -445,11 +456,12 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
             scene.add(equipment);
           }
         } catch (error) {
-          console.error("[EquipmentViewer] Failed to load equipment:", error);
+          log.error("Failed to load equipment:", error);
         }
       };
 
       loadEquipment();
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- Callback called after load, not a trigger
     }, [
       isInitialized,
       equipmentUrl,
@@ -510,33 +522,27 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
     // Attach equipment to VRM bone
     const attachEquipmentToAvatar = useCallback(() => {
       if (!vrmRef.current || !equipmentRef.current || !sceneRef.current) {
-        console.warn(
-          "[EquipmentViewer] Cannot attach: missing VRM or equipment",
-        );
+        log.warn("Cannot attach: missing VRM or equipment");
         return;
       }
 
       const vrm = vrmRef.current;
       const equipment = equipmentRef.current;
-      const scene = sceneRef.current;
 
       // Get target bone from VRM
       const vrmBoneName = SLOT_TO_VRM_BONE[equipmentSlot];
       if (!vrmBoneName) {
-        console.warn(
-          "[EquipmentViewer] Unknown equipment slot:",
-          equipmentSlot,
-        );
+        log.warn("Unknown equipment slot:", equipmentSlot);
         return;
       }
 
       const targetBone = vrm.humanoid.getNormalizedBoneNode(vrmBoneName);
       if (!targetBone) {
-        console.warn("[EquipmentViewer] Could not find bone:", vrmBoneName);
+        log.warn("Could not find bone:", vrmBoneName);
         return;
       }
 
-      console.log(`[EquipmentViewer] Attaching to bone: ${vrmBoneName}`);
+      log.info(`Attaching to bone: ${vrmBoneName}`);
 
       // Remove from previous parent
       if (equipment.parent) {
@@ -600,7 +606,7 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
       // Add wrapper to bone
       targetBone.add(wrapper);
 
-      console.log("[EquipmentViewer] Equipment attached successfully");
+      log.info("Equipment attached successfully");
     }, [
       equipmentSlot,
       avatarHeight,
@@ -930,9 +936,7 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
 
       // Start procedural animation for VRM
       if (isAnimating && animationType !== "tpose" && vrmRef.current) {
-        console.log(
-          `[EquipmentViewer] Starting procedural ${animationType} animation`,
-        );
+        log.info(`Starting procedural ${animationType} animation`);
 
         animationTimeRef.current = 0;
         const startTime = performance.now();

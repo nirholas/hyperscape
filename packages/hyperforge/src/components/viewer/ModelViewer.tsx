@@ -1,8 +1,11 @@
 "use client";
 
+import { logger } from "@/lib/utils";
 import { useGLTF, Center, Html } from "@react-three/drei";
 import { Suspense, useMemo, useEffect, useState } from "react";
 import * as THREE from "three";
+
+const log = logger.child("ModelViewer");
 
 interface ModelViewerProps {
   modelUrl?: string;
@@ -67,7 +70,7 @@ function LoadedModel({
   onModelLoad?: (info: ModelInfo) => void;
 }) {
   const gltf = useGLTF(modelUrl);
-  const [error, setError] = useState<string | null>(null);
+  const [error, _setError] = useState<string | null>(null);
 
   // Calculate model info
   const modelInfo = useMemo(() => {
@@ -149,7 +152,7 @@ function LoadedModel({
       animations: gltf.animations?.length || 0,
       hasRig,
     };
-  }, [gltf]);
+  }, [gltf, modelUrl]);
 
   // Notify parent of model info
   useEffect(() => {
@@ -220,7 +223,7 @@ function isValidModelUrl(url: string): boolean {
   );
 
   if (hasInvalidExtension) {
-    console.warn("[ModelViewer] Rejecting non-3D asset URL:", url);
+    log.warn("Rejecting non-3D asset URL:", url);
     return false;
   }
 
@@ -246,7 +249,7 @@ export function ModelViewer({ modelUrl, onModelLoad }: ModelViewerProps) {
 
   // Validate that the URL is a valid 3D model file
   if (!isValidModelUrl(modelUrl)) {
-    console.warn("[ModelViewer] Invalid model URL (not a 3D model):", modelUrl);
+    log.warn("Invalid model URL (not a 3D model):", modelUrl);
     return <PlaceholderBox />;
   }
 
@@ -254,7 +257,7 @@ export function ModelViewer({ modelUrl, onModelLoad }: ModelViewerProps) {
   try {
     const url = new URL(modelUrl);
     if (url.pathname === "/" || url.pathname === "") {
-      console.warn("[ModelViewer] Invalid model URL (no path):", modelUrl);
+      log.warn("Invalid model URL (no path):", modelUrl);
       return <PlaceholderBox />;
     }
   } catch {

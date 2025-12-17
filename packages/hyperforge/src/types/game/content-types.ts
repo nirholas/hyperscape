@@ -1,11 +1,15 @@
 /**
  * Game Content Types for HyperForge
- * Matches the game's manifest structures exactly
+ *
+ * Types for generated game content (quests, areas, stores, biomes).
+ * These match the game's manifest structures.
  */
 
-// ============================================
+import type { Position3D } from "../core";
+
+// =============================================================================
 // QUEST TYPES
-// ============================================
+// =============================================================================
 
 export type QuestDifficulty = "easy" | "medium" | "hard" | "legendary";
 export type QuestCategory = "main" | "side" | "daily" | "event";
@@ -64,14 +68,14 @@ export interface Quest {
   requirements?: QuestRequirement[];
   startNpcId: string;
   startNpcName: string;
-  completeNpcId?: string; // If different from start NPC
+  completeNpcId?: string;
   completeNpcName?: string;
   dialogue?: QuestDialogueRef[];
   lore?: string;
   hint?: string;
-  timeLimit?: number; // In minutes, for timed quests
+  timeLimit?: number; // In minutes
   repeatable?: boolean;
-  cooldown?: number; // In minutes, for repeatable quests
+  cooldown?: number; // In minutes
 }
 
 export interface GeneratedQuestContent {
@@ -80,15 +84,9 @@ export interface GeneratedQuestContent {
   prompt: string;
 }
 
-// ============================================
+// =============================================================================
 // WORLD AREA TYPES
-// ============================================
-
-export interface Position {
-  x: number;
-  y: number;
-  z: number;
-}
+// =============================================================================
 
 export interface AreaBounds {
   minX: number;
@@ -99,22 +97,22 @@ export interface AreaBounds {
 
 export interface AreaNPCSpawn {
   id: string;
-  type: string; // NPC type/role
-  position: Position;
-  storeId?: string; // For shopkeepers
+  type: string;
+  position: Position3D;
+  storeId?: string;
 }
 
 export interface AreaResourceSpawn {
-  type: string; // tree, rock, fishing_spot
+  type: string;
   resourceId: string;
-  position: Position;
+  position: Position3D;
   respawnTime?: number;
 }
 
 export interface AreaMobSpawn {
   mobId: string;
   mobName?: string;
-  position: Position;
+  position: Position3D;
   spawnRadius: number;
   maxCount: number;
   respawnTicks?: number;
@@ -147,114 +145,9 @@ export interface GeneratedAreaContent {
   prompt: string;
 }
 
-// ============================================
-// ITEM TYPES (Enhanced from CDN types)
-// ============================================
-
-export type ItemType =
-  | "weapon"
-  | "armor"
-  | "tool"
-  | "resource"
-  | "consumable"
-  | "quest"
-  | "currency"
-  | "material";
-
-export type EquipSlot =
-  | "weapon"
-  | "shield"
-  | "head"
-  | "body"
-  | "legs"
-  | "hands"
-  | "feet"
-  | "cape"
-  | "neck"
-  | "ring";
-
-export type WeaponType =
-  | "SWORD"
-  | "AXE"
-  | "MACE"
-  | "DAGGER"
-  | "SPEAR"
-  | "BOW"
-  | "STAFF"
-  | "WAND";
-
-export type AttackType = "MELEE" | "RANGED" | "MAGIC";
-
-export type ItemRarity =
-  | "common"
-  | "uncommon"
-  | "rare"
-  | "epic"
-  | "legendary"
-  | "unique";
-
-export interface ItemBonuses {
-  attack?: number;
-  strength?: number;
-  defense?: number;
-  ranged?: number;
-  magic?: number;
-  prayer?: number;
-  health?: number;
-}
-
-export interface ItemRequirements {
-  level?: number;
-  skills?: Record<string, number>;
-  quest?: string;
-}
-
-export interface ItemEffect {
-  type: "heal" | "buff" | "debuff" | "teleport" | "unlock";
-  value?: number;
-  duration?: number; // In seconds
-  target?: string; // For teleport/unlock
-}
-
-export interface Item {
-  id: string;
-  name: string;
-  type: ItemType;
-  subtype?: string;
-  description: string;
-  examine: string;
-  rarity: ItemRarity;
-  value: number;
-  weight: number;
-  stackable: boolean;
-  tradeable: boolean;
-  // Equipment properties
-  equipSlot?: EquipSlot;
-  weaponType?: WeaponType;
-  attackType?: AttackType;
-  attackSpeed?: number;
-  attackRange?: number;
-  twoHanded?: boolean;
-  // Stats
-  bonuses?: ItemBonuses;
-  requirements?: ItemRequirements;
-  // Consumable effects
-  effects?: ItemEffect[];
-  // Model paths
-  modelPath?: string;
-  iconPath?: string;
-  equippedModelPath?: string;
-}
-
-export interface GeneratedItemContent {
-  item: Item;
-  generatedAt: string;
-  prompt: string;
-}
-
-// ============================================
+// =============================================================================
 // BIOME TYPES
-// ============================================
+// =============================================================================
 
 export interface Biome {
   id: string;
@@ -283,9 +176,9 @@ export interface GeneratedBiomeContent {
   prompt: string;
 }
 
-// ============================================
+// =============================================================================
 // STORE TYPES
-// ============================================
+// =============================================================================
 
 export interface StoreItem {
   itemId: string;
@@ -299,13 +192,13 @@ export interface Store {
   id: string;
   name: string;
   type: "general" | "weapon" | "armor" | "magic" | "food" | "specialty";
-  ownerId?: string; // NPC ID
+  ownerId?: string;
   ownerName?: string;
   location?: string;
   description?: string;
   items: StoreItem[];
-  buybackRate: number; // 0.0-1.0 multiplier for selling
-  currency?: string; // Default: coins
+  buybackRate: number; // 0.0-1.0 multiplier
+  currency?: string;
 }
 
 export interface GeneratedStoreContent {
@@ -313,3 +206,13 @@ export interface GeneratedStoreContent {
   generatedAt: string;
   prompt: string;
 }
+
+// =============================================================================
+// BACKWARDS COMPATIBILITY RE-EXPORTS
+// =============================================================================
+
+/**
+ * Re-export Item types for backwards compatibility
+ * Consumers should migrate to importing from '@/types' or '@/types/game'
+ */
+export type { Item, GeneratedItemContent } from "./item-types";

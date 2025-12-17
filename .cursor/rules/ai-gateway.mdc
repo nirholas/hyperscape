@@ -1,0 +1,357 @@
+---
+description: Vercel AI Gateway integration for HyperForge - unified AI access, model selection, and user preferences
+alwaysApply: false
+---
+# Vercel AI Gateway Integration
+
+HyperForge uses Vercel AI Gateway exclusively for all AI model inference. This provides unified access to multiple providers (OpenAI, Anthropic, Google) through a single API.
+
+## 📌 Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        HyperForge                                │
+│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐        │
+│  │  gateway.ts  │   │ providers.ts │   │ preferences  │        │
+│  │  (AI SDK)    │   │ (TASK_MODELS)│   │ (Zustand)    │        │
+│  └──────┬───────┘   └──────┬───────┘   └──────┬───────┘        │
+│         │                  │                   │                │
+│         └──────────────────┴───────────────────┘                │
+│                            │                                     │
+│                            ↓                                     │
+│                  ┌─────────────────────┐                        │
+│                  │    AI SDK           │                        │
+│                  │    gateway()        │                        │
+│                  └──────────┬──────────┘                        │
+└─────────────────────────────┼───────────────────────────────────┘
+                              ↓
+                    ┌─────────────────────┐
+                    │  Vercel AI Gateway  │
+                    │  ai-gateway.vercel  │
+                    └─────────┬───────────┘
+                              ↓
+         ┌────────────────────┼────────────────────┐
+         ↓                    ↓                    ↓
+   ┌───────────┐        ┌───────────┐        ┌───────────┐
+   │  OpenAI   │        │ Anthropic │        │  Google   │
+   │  GPT-4o   │        │  Claude   │        │  Gemini   │
+   └───────────┘        └───────────┘        └───────────┘
+```
+
+## 🔧 Core Files
+
+```
+packages/hyperforge/src/lib/ai/
+├── gateway.ts          # AI SDK functions (generateText, streamText, etc.)
+├── providers.ts        # Task-specific models with user preferences
+├── concept-art-service.ts  # Image generation via Gemini
+├── sprite-service.ts   # Sprite generation
+└── README.md           # Developer documentation
+
+packages/hyperforge/src/stores/
+└── model-preferences-store.ts  # Zustand store for user model preferences
+
+packages/hyperforge/src/app/api/settings/
+├── ai-gateway/
+│   ├── route.ts        # GET credits/balance
+│   └── models/route.ts # GET available models
+└── preferences/route.ts # GET/POST user preferences
+```
+
+## ⚡ Using AI Gateway
+
+### Import Pattern
+
+```typescript
+// ✅ CORRECT: Use gateway.ts functions
+import {
+  generateTextWithProvider,
+  streamTextWithProvider,
+  generateStructuredOutput,
+  analyzeImage,
+} from "@/lib/ai/gateway";
+
+// ✅ CORRECT: Use TASK_MODELS for model selection
+import { TASK_MODELS, getTaskModel } from "@/lib/ai/providers";
+```
+
+### Text Generation
+
+```typescript
+const response = await generateTextWithProvider(prompt, {
+  model: TASK_MODELS.contentGeneration, // Uses user preference if set
+  temperature: 0.8,
+  maxTokens: 4000,
+  systemPrompt: "You are a game content writer...",
+});
+```
+
+### Image Analysis
+
+```typescript
+const description = await analyzeImage(imageUrl, "Describe this weapon for 3D generation", {
+  model: TASK_MODELS.vision,
+});
+```
+
+### Structured Output (JSON)
+
+```typescript
+import { z } from "zod";
+
+const schema = z.object({
+  name: z.string(),
+  description: z.string(),
+  stats: z.object({
+    attack: z.number(),
+    defense: z.number(),
+  }),
+});
+
+const result = await generateStructuredOutput(prompt, schema, {
+  model: TASK_MODELS.contentGeneration,
+});
+```
+
+### Streaming
+
+```typescript
+for await (const chunk of streamTextWithProvider(prompt, {
+  model: TASK_MODELS.textGeneration,
+})) {
+  process.stdout.write(chunk);
+}
+```
+
+## 🎨 Image Generation
+
+HyperForge supports two types of image generation models:
+
+### Model Types
+
+| Type | Method | Models | Use Case |
+|------|--------|--------|----------|
+| **Multimodal** | `generateText()` + `result.files` | Gemini 2.5 Flash Image | Concept art, sprites (uses system prompt) |
+| **Dedicated** | `experimental_generateImage()` | Flux 2 Pro, Imagen 4.0 | High-quality standalone images |
+
+### Image Generation with System Prompt (Recommended for Sprites/Concept Art)
+
+```typescript
+import { generateText } from "ai";
+import { gateway } from "@ai-sdk/gateway";
+
+const SYSTEM_PROMPT = `You are an image generation assistant. 
+Generate EXACTLY ONE image. Do NOT include any text or explanations.
+Output ONLY the generated image.`;
+
+const result = await generateText({
+  model: gateway("google/gemini-2.5-flash-image"),
+  system: SYSTEM_PROMPT,
+  prompt: "Create a 2D game sprite of a bronze sword...",
+});
+
+// Extract image from result.files
+const imageFiles = result.files?.filter(f => f.mediaType?.startsWith("image/"));
+```
+
+### Dedicated Image Models (Flux, Imagen)
+
+```typescript
+import { experimental_generateImage as generateImage } from "ai";
+import { gateway } from "@ai-sdk/gateway";
+
+const result = await generateImage({
+  model: gateway("bfl/flux-2-pro"),
+  prompt: "A turquoise hummingbird on a neon flower",
+  size: "1024x1024",
+});
+
+// Access images directly
+const base64 = result.images[0].base64;
+```
+
+### Sprite Generation Best Practices
+
+1. **Use detailed prompts** with specific style descriptions
+2. **Maintain consistent color palette** across sprites
+3. **Generate at higher resolution** (512x512) and downscale
+4. **Specify transparent background** explicitly in prompt
+5. **Use system prompt** to ensure image-only output
+6. **Define view angles clearly** (front, side, isometric, etc.)
+
+```typescript
+import { generateSpritesForAsset } from "@/lib/ai/sprite-service";
+
+const sprites = await generateSpritesForAsset(
+  { id: "sword_bronze", name: "Bronze Sword", category: "weapon" },
+  {
+    views: ["front", "side", "isometric"],
+    style: "pixel", // or "clean", "detailed"
+    resolution: 512,
+    colorPalette: "bronze, brown, silver accents",
+  }
+);
+```
+
+## 🎯 Task-Specific Models
+
+Models are selected based on task type. Users can customize via Settings page.
+
+### Default Models
+
+| Task | Default Model | Use Case |
+|------|---------------|----------|
+| `promptEnhancement` | `openai/gpt-4o-mini` | Fast, cheap prompt optimization |
+| `textGeneration` | `openai/gpt-4o-mini` | General text tasks |
+| `dialogueGeneration` | `google/gemini-2.0-flash` | NPC dialogue trees (structured JSON) |
+| `contentGeneration` | `anthropic/claude-sonnet-4` | Quests, lore, descriptions |
+| `imageGeneration` | `google/gemini-2.5-flash-image` | Concept art, sprites |
+| `vision` | `openai/gpt-4o` | Image analysis |
+| `reasoning` | `anthropic/claude-sonnet-4` | Complex problem solving |
+
+### Using Task Models
+
+```typescript
+// ✅ Automatic preference lookup
+const model = TASK_MODELS.contentGeneration;
+
+// ✅ Explicit function call
+const model = getTaskModel("contentGeneration");
+
+// Both respect user preferences if set in localStorage
+```
+
+## 👤 User Model Preferences
+
+Users can customize models per task via Settings page.
+
+### Storage
+
+- **localStorage**: `hyperforge:model-preferences` (primary, instant)
+- **Supabase**: `content-generations/settings/model-preferences/{userId}.json` (optional sync)
+
+### Preference Flow
+
+```
+Settings UI → Zustand Store → localStorage → providers.ts → gateway.ts
+                    ↓
+              Supabase (sync)
+```
+
+### API Endpoints
+
+```http
+# Fetch available models
+GET /api/settings/ai-gateway/models
+→ Returns models grouped by capability (text, image, vision, code, embedding)
+
+# Fetch user preferences
+GET /api/settings/preferences?type=model-preferences&userId=xxx
+
+# Save user preferences
+POST /api/settings/preferences
+{ "type": "model-preferences", "userId": "xxx", "data": { ... } }
+```
+
+## 🔑 Environment Variables
+
+```bash
+# Required for local development
+AI_GATEWAY_API_KEY=your-vercel-ai-gateway-key
+
+# On Vercel deployments (automatic)
+# VERCEL_OIDC_TOKEN is provided automatically
+```
+
+Get your key: Vercel Dashboard → AI Gateway → API Keys
+
+## 🚫 Forbidden Patterns
+
+### ❌ Direct API Calls
+
+```typescript
+// ❌ NEVER DO THIS
+const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+  // ...
+});
+
+// ✅ INSTEAD USE
+import { generateTextWithProvider } from "@/lib/ai/gateway";
+const response = await generateTextWithProvider(prompt, { model: TASK_MODELS.textGeneration });
+```
+
+### ❌ Direct SDK Usage
+
+```typescript
+// ❌ NEVER DO THIS
+import OpenAI from "openai";
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const response = await openai.chat.completions.create({ ... });
+
+// ✅ INSTEAD USE gateway.ts functions
+```
+
+### ❌ Hardcoded Model Names
+
+```typescript
+// ❌ NEVER DO THIS
+const result = await generateText({
+  model: gateway("anthropic/claude-sonnet-4-20250514"), // Hardcoded!
+  prompt,
+});
+
+// ✅ INSTEAD USE TASK_MODELS
+const result = await generateTextWithProvider(prompt, {
+  model: TASK_MODELS.contentGeneration, // Respects user preferences
+});
+```
+
+### ❌ Deprecated Imports
+
+```typescript
+// ❌ DEPRECATED - These files no longer exist
+import { ... } from "@/lib/ai/openai-service";
+import { ... } from "@/lib-core/openai";
+
+// ✅ Use gateway.ts instead
+import { generateTextWithProvider, enhancePromptWithGPT4 } from "@/lib/ai/gateway";
+```
+
+## 📦 Asset Generation Pipeline
+
+| Asset Type | Generator | Storage Bucket | Manifest |
+|------------|-----------|----------------|----------|
+| 3D Models | Meshy API | `meshy-models` | `items.json`, `npcs.json` |
+| VRM Avatars | VRM Converter | `vrm-conversion` | `npcs.json` |
+| Concept Art | Gemini (gateway.ts) | `image-generation` | (texture refs) |
+| Sprites | Gemini (gateway.ts) | `image-generation` | (thumbnails) |
+| Voice/SFX/Music | ElevenLabs | `audio-generations` | `music.json` |
+| Quests/NPCs/Items | Claude/GPT (gateway.ts) | `content-generations` | manifests |
+
+## 🧪 Testing Model Selection
+
+1. Start dev server: `bun run dev`
+2. Navigate to Settings page
+3. Verify models list populates from AI Gateway
+4. Select different models for each task
+5. Verify preferences persist after page reload
+6. Test generation with selected models
+7. Verify Supabase sync (if configured)
+
+## 📖 Related Documentation
+
+| File | Description |
+|------|-------------|
+| `.cursor/rules/hyperforge.mdc` | Full HyperForge documentation |
+| `.cursor/rules/meshy.mdc` | Meshy 3D generation |
+| `.cursor/rules/elevenlabs.mdc` | Audio generation |
+| `packages/hyperforge/src/lib/ai/README.md` | Developer quick start |
+
+## ⚠️ Key Rules
+
+1. **AI Gateway Only** - All AI inference routes through Vercel AI Gateway
+2. **No Direct SDKs** - Never import OpenAI, Anthropic, or Google SDKs directly
+3. **Use TASK_MODELS** - Always use task-specific models for generation
+4. **Respect Preferences** - User model selections take priority over defaults
+5. **Zero-Key on Vercel** - OIDC tokens are automatic on Vercel deployments

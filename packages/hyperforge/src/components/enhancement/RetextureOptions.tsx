@@ -8,6 +8,9 @@ import { SpectacularButton } from "@/components/ui/spectacular-button";
 import { useToast } from "@/components/ui/toast";
 import { ProgressTracker } from "../generation/ProgressTracker";
 import type { AssetData } from "@/types/asset";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("RetextureOptions");
 
 interface RetextureOptionsProps {
   asset: AssetData;
@@ -59,7 +62,7 @@ export function RetextureOptions({ asset }: RetextureOptionsProps) {
         });
       }, 1000);
     } catch (error) {
-      console.error("Retexture error:", error);
+      log.error({ error }, "Retexture error");
       setIsProcessing(false);
       toast({
         variant: "destructive",

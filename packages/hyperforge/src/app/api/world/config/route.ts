@@ -6,6 +6,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:world:config");
 
 // Path to world.json in the server package
 const SERVER_WORLD_DIR =
@@ -83,7 +86,7 @@ export async function GET() {
       entityCount: config.entities?.length || 0,
     });
   } catch (error) {
-    console.error("[World Config API] GET error:", error);
+    log.error("GET error:", error);
     return NextResponse.json(
       {
         error:
@@ -186,7 +189,7 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   } catch (error) {
-    console.error("[World Config API] POST error:", error);
+    log.error("POST error:", error);
     return NextResponse.json(
       {
         error:

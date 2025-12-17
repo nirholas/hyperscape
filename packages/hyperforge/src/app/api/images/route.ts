@@ -6,6 +6,9 @@ import {
   isSupabaseConfigured,
 } from "@/lib/storage/supabase-storage";
 import { loadCDNAssets } from "@/lib/cdn/loader";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:images");
 
 interface ImageMetadata {
   id: string;
@@ -28,7 +31,7 @@ interface ImageMetadata {
  * 2. Supabase image-generation bucket (HyperForge generations)
  * 3. Local filesystem (fallback)
  */
-export async function GET(request: NextRequest) {
+export async function GET(_request: NextRequest) {
   try {
     const images: ImageMetadata[] = [];
     const loadedIds = new Set<string>();
@@ -64,9 +67,9 @@ export async function GET(request: NextRequest) {
           });
         }
       }
-      console.log(`[Images API] Loaded ${images.length} icons from CDN`);
+      log.info(`Loaded ${images.length} icons from CDN`);
     } catch (error) {
-      console.warn("[Images API] Failed to load from CDN:", error);
+      log.warn({ error }, "Failed to load from CDN");
     }
 
     // 2. Load from Supabase image-generation bucket (HyperForge generations)
@@ -87,11 +90,9 @@ export async function GET(request: NextRequest) {
             size: img.size,
           });
         }
-        console.log(
-          `[Images API] Loaded ${supabaseImages.length} images from Supabase`,
-        );
+        log.info(`Loaded ${supabaseImages.length} images from Supabase`);
       } catch (error) {
-        console.warn("[Images API] Failed to load from Supabase:", error);
+        log.warn({ error }, "Failed to load from Supabase");
       }
     }
 
@@ -99,7 +100,7 @@ export async function GET(request: NextRequest) {
     const assetsDir =
       process.env.HYPERFORGE_ASSETS_DIR || path.join(process.cwd(), "assets");
     const imagesDir = path.join(assetsDir, "images");
-    const cdnUrl =
+    const localApiUrl =
       process.env.CDN_URL ||
       process.env.NEXT_PUBLIC_API_URL ||
       "http://localhost:3500";
@@ -131,8 +132,8 @@ export async function GET(request: NextRequest) {
             images.push({
               id,
               filename,
-              url: `${cdnUrl}/api/images/file/${type}/${filename}`,
-              thumbnailUrl: `${cdnUrl}/api/images/file/${type}/${filename}`,
+              url: `${localApiUrl}/api/images/file/${type}/${filename}`,
+              thumbnailUrl: `${localApiUrl}/api/images/file/${type}/${filename}`,
               type,
               source: "local",
               createdAt: stats.mtime.toISOString(),
@@ -166,8 +167,8 @@ export async function GET(request: NextRequest) {
           images.push({
             id,
             filename,
-            url: `${cdnUrl}/api/upload/image/${filename}`,
-            thumbnailUrl: `${cdnUrl}/api/upload/image/${filename}`,
+            url: `${localApiUrl}/api/upload/image/${filename}`,
+            thumbnailUrl: `${localApiUrl}/api/upload/image/${filename}`,
             type: "concept-art",
             source: "local",
             createdAt: stats.mtime.toISOString(),
@@ -187,7 +188,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ images });
   } catch (error) {
-    console.error("[Images API] Error listing images:", error);
+    log.error({ error }, "Error listing images");
     return NextResponse.json(
       { error: "Failed to list images" },
       { status: 500 },

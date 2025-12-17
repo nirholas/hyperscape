@@ -28,7 +28,7 @@ export function AssetLibrarySidebar({
   onAssetSelect,
 }: AssetLibrarySidebarProps) {
   const [showFilters, setShowFilters] = useState(false);
-  const [showCategories, setShowCategories] = useState(false);
+  const [_showCategories, _setShowCategories] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 

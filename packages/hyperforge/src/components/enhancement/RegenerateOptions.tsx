@@ -8,6 +8,9 @@ import { SpectacularButton } from "@/components/ui/spectacular-button";
 import { useToast } from "@/components/ui/toast";
 import { ProgressTracker } from "../generation/ProgressTracker";
 import type { AssetData } from "@/types/asset";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("RegenerateOptions");
 
 interface RegenerateOptionsProps {
   asset: AssetData;
@@ -57,7 +60,7 @@ export function RegenerateOptions({ asset }: RegenerateOptionsProps) {
         });
       }, 1000);
     } catch (error) {
-      console.error("Regeneration error:", error);
+      log.error({ error }, "Regeneration error");
       setIsProcessing(false);
       toast({
         variant: "destructive",

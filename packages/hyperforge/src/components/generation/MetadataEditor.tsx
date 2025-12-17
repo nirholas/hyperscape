@@ -7,17 +7,30 @@ import { Select } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { SpectacularButton } from "@/components/ui/spectacular-button";
 import { useToast } from "@/components/ui/toast";
-import {
-  validateAsset,
-  generateAssetId,
-} from "@/lib/generation/category-schemas";
+import { validateAsset } from "@/lib/generation/category-schemas";
 import type { AssetCategory } from "@/types/categories";
-import type { GenerationConfig } from "./GenerationFormRouter";
+
+/**
+ * Valid metadata value types for asset metadata fields
+ * Used for type-safe metadata editing in forms
+ */
+export type MetadataValue =
+  | string
+  | number
+  | boolean
+  | string[]
+  | null
+  | undefined;
+
+/**
+ * Asset metadata record with typed values
+ */
+export type AssetMetadata = Record<string, MetadataValue>;
 
 interface MetadataEditorProps {
   category: AssetCategory;
-  initialMetadata: Record<string, unknown>;
-  onSave: (metadata: Record<string, unknown>) => void;
+  initialMetadata: AssetMetadata;
+  onSave: (metadata: AssetMetadata) => void;
   onCancel: () => void;
 }
 
@@ -58,7 +71,7 @@ export function MetadataEditor({
     });
   };
 
-  const updateField = (field: string, value: unknown) => {
+  const updateField = (field: string, value: MetadataValue) => {
     setMetadata((prev) => ({ ...prev, [field]: value }));
   };
 

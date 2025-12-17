@@ -2,12 +2,21 @@
 
 import { useState, useEffect } from "react";
 import { GlassPanel } from "@/components/ui/glass-panel";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("VariantDefinitionPanel");
 import { SpectacularButton } from "@/components/ui/spectacular-button";
 import { NeonInput } from "@/components/ui/neon-input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, Palette, Image, Sparkles } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  Palette,
+  Image as ImageIcon,
+  Sparkles,
+} from "lucide-react";
 import type { TextureVariant } from "./GenerationFormRouter";
 import {
   generateVariantId,
@@ -49,7 +58,7 @@ export function VariantDefinitionPanel({
       fetch("/prompts/material-presets.json")
         .then((res) => res.json())
         .then((data) => setPresets(data))
-        .catch(console.error);
+        .catch((err) => log.error("Failed to load material presets", err));
     }
   }, [materialPresets]);
 
@@ -223,7 +232,7 @@ export function VariantDefinitionPanel({
 
             <div className="space-y-2">
               <Label className="flex items-center gap-2">
-                <Image className="w-4 h-4" />
+                <ImageIcon className="w-4 h-4" aria-hidden="true" />
                 Reference Image URL (optional)
               </Label>
               <NeonInput

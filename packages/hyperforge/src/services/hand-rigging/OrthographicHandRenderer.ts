@@ -6,6 +6,10 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
+import { logger } from "@/lib/utils";
+
+const log = logger.child("OrthographicHandRenderer");
+
 export interface CaptureOptions {
   resolution?: number;
   backgroundColor?: string;
@@ -163,7 +167,7 @@ export class OrthographicHandRenderer {
               side: isLeft ? "left" : "right",
             });
 
-            console.log(
+            log.info(
               `🦴 Found wrist bone: ${child.name} (${isLeft ? "left" : "right"})`,
             );
           }
@@ -465,7 +469,7 @@ export class OrthographicHandRenderer {
    * Debug: Save capture to image
    */
   saveCapture(capture: HandCaptureResult, filename: string): void {
-    console.log(`💾 Saving capture: ${filename}`);
+    log.info(`💾 Saving capture: ${filename}`);
     const link = document.createElement("a");
     link.download = filename;
     link.href = capture.canvas.toDataURL();
@@ -474,7 +478,7 @@ export class OrthographicHandRenderer {
     document.body.removeChild(link);
 
     // Also log the data URL for debugging
-    console.log(
+    log.info(
       `📸 Capture preview: ${capture.canvas.toDataURL().substring(0, 100)}...`,
     );
   }

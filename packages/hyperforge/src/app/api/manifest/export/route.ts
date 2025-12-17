@@ -4,11 +4,35 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:manifest");
 import { promises as fs } from "fs";
 import path from "path";
 import { generateManifestEntry } from "@/lib/manifest/manifest-exporter";
 import { getAssetById } from "@/lib/db/asset-queries";
 import type { AssetCategory } from "@/types/categories";
+import type {
+  ItemManifest,
+  NPCManifest,
+  ResourceManifest,
+} from "@/types/manifest";
+
+/**
+ * Union type for all manifest entry types
+ */
+type ManifestEntry = ItemManifest | NPCManifest | ResourceManifest;
+
+/**
+ * Request body for POST /api/manifest/export
+ */
+interface ManifestExportRequest {
+  assetId?: string;
+  category?: AssetCategory;
+  metadata?: Record<string, unknown>;
+  modelPath?: string;
+  action?: "preview" | "write";
+}
 
 // Path to game manifests
 const MANIFESTS_DIR =
@@ -39,11 +63,11 @@ function getManifestFileName(category: AssetCategory): string {
 /**
  * Read existing manifest file
  */
-async function readManifest(filename: string): Promise<unknown[]> {
+async function readManifest(filename: string): Promise<ManifestEntry[]> {
   try {
     const filePath = path.join(MANIFESTS_DIR, filename);
     const content = await fs.readFile(filePath, "utf-8");
-    return JSON.parse(content);
+    return JSON.parse(content) as ManifestEntry[];
   } catch {
     return [];
   }
@@ -52,7 +76,10 @@ async function readManifest(filename: string): Promise<unknown[]> {
 /**
  * Write manifest file
  */
-async function writeManifest(filename: string, data: unknown[]): Promise<void> {
+async function writeManifest(
+  filename: string,
+  data: ManifestEntry[],
+): Promise<void> {
   await fs.mkdir(MANIFESTS_DIR, { recursive: true });
   const filePath = path.join(MANIFESTS_DIR, filename);
   await fs.writeFile(filePath, JSON.stringify(data, null, 2));
@@ -60,7 +87,7 @@ async function writeManifest(filename: string, data: unknown[]): Promise<void> {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = (await request.json()) as ManifestExportRequest;
     const { assetId, category, metadata, modelPath, action = "preview" } = body;
 
     // If assetId is provided, fetch from database
@@ -95,11 +122,11 @@ export async function POST(request: NextRequest) {
     // Generate manifest entry
     const manifestEntry = generateManifestEntry(
       assetCategory,
-      assetMetadata,
+      assetMetadata as Record<string, unknown>,
       modelPath ||
-        assetMetadata.modelPath ||
+        (assetMetadata.modelPath as string) ||
         `asset://models/${assetMetadata.id}/${assetMetadata.id}.glb`,
-    );
+    ) as ManifestEntry;
 
     // Determine manifest file
     const manifestFileName = getManifestFileName(assetCategory);
@@ -122,20 +149,20 @@ export async function POST(request: NextRequest) {
       const existingManifest = await readManifest(manifestFileName);
 
       // Check if entry already exists
-      const existingIndex = (existingManifest as { id: string }[]).findIndex(
+      const existingIndex = existingManifest.findIndex(
         (entry) => entry.id === manifestEntry.id,
       );
 
       if (existingIndex >= 0) {
         // Update existing entry
         existingManifest[existingIndex] = manifestEntry;
-        console.log(
+        log.info(
           `📝 Updated existing entry in ${manifestFileName}: ${manifestEntry.id}`,
         );
       } else {
         // Add new entry
         existingManifest.push(manifestEntry);
-        console.log(
+        log.info(
           `📝 Added new entry to ${manifestFileName}: ${manifestEntry.id}`,
         );
       }
@@ -159,7 +186,7 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   } catch (error) {
-    console.error("[API] Manifest export failed:", error);
+    log.error({ error }, "Manifest export failed");
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Export failed",

@@ -310,3 +310,4 @@ Asset class presets and AI model configs:
 | `lib/ai/openai-service.ts` | GPT-4 prompt enhancement |
 | `lib/cdn/` | CDN caching for generated assets |
 | `lib/db/` | Database for task tracking |
+

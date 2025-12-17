@@ -185,6 +185,12 @@ export const DEFAULT_TOPOLOGY: MeshTopology = "triangle";
  */
 export const DEFAULT_TEXTURE_RESOLUTION = 2048;
 
+/**
+ * Default character height in meters for rigging
+ * Standard adult human height used for skeleton scaling
+ */
+export const DEFAULT_CHARACTER_HEIGHT = 1.7;
+
 // ============================================================================
 // Best Practices for Three.js Web MMO
 // ============================================================================

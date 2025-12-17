@@ -1,14 +1,30 @@
 /**
  * Service Factory
  * Initializes and provides access to all specialized services
+ *
+ * Usage:
+ *   import { getServiceFactory } from "@/lib/services";
+ *   const armorService = getServiceFactory().getArmorFittingService();
+ *
+ * Benefits:
+ * - Singleton pattern ensures consistent service instances
+ * - Enables future dependency injection, lazy loading, mocking
+ * - Centralized service lifecycle management
  */
 
+import * as THREE from "three";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("ServiceFactory");
 import { VRMConverter } from "@/services/vrm/VRMConverter";
 import { ArmorFittingService } from "@/services/fitting/ArmorFittingService";
+import { MeshFittingService } from "@/services/fitting/MeshFittingService";
 import { WeaponFittingService } from "@/services/fitting/WeaponFittingService";
 import { AssetNormalizationService } from "@/services/processing/AssetNormalizationService";
 import { HandRiggingService } from "@/services/hand-rigging/HandRiggingService";
-import { AnimationRetargeter } from "@/services/retargeting/AnimationRetargeter";
+// AnimationRetargeter is instantiated per-use with specific skeletons
+import type { AnimationRetargeter } from "@/services/retargeting/AnimationRetargeter";
+export { AnimationRetargeter } from "@/services/retargeting/AnimationRetargeter";
 import { SpriteGenerationService } from "@/services/generation/SpriteGenerationService";
 
 /**
@@ -20,16 +36,17 @@ export class ServiceFactory {
 
   private vrmConverter: VRMConverter;
   private armorFittingService: ArmorFittingService;
+  private meshFittingService: MeshFittingService;
   private weaponFittingService: WeaponFittingService;
   private normalizationService: AssetNormalizationService;
   private handRiggingService: HandRiggingService | null;
-  private animationRetargeter: AnimationRetargeter;
   private spriteGenerationService: SpriteGenerationService;
 
   private constructor() {
     // Initialize services
     this.vrmConverter = new VRMConverter();
     this.armorFittingService = new ArmorFittingService();
+    this.meshFittingService = new MeshFittingService();
     this.weaponFittingService = new WeaponFittingService();
     this.normalizationService = new AssetNormalizationService();
 
@@ -37,13 +54,12 @@ export class ServiceFactory {
     try {
       this.handRiggingService = new HandRiggingService();
     } catch {
-      console.warn(
+      log.warn(
         "HandRiggingService not available - dependencies may be missing",
       );
       this.handRiggingService = null;
     }
 
-    this.animationRetargeter = new AnimationRetargeter();
     this.spriteGenerationService = new SpriteGenerationService();
   }
 
@@ -62,6 +78,10 @@ export class ServiceFactory {
     return this.armorFittingService;
   }
 
+  getMeshFittingService(): MeshFittingService {
+    return this.meshFittingService;
+  }
+
   getWeaponFittingService(): WeaponFittingService {
     return this.weaponFittingService;
   }
@@ -74,8 +94,24 @@ export class ServiceFactory {
     return this.handRiggingService;
   }
 
-  getAnimationRetargeter(): AnimationRetargeter {
-    return this.animationRetargeter;
+  /**
+   * AnimationRetargeter is instantiated per-use with specific skeletons.
+   * Import and construct it directly:
+   *   import { AnimationRetargeter } from "@/services/retargeting/AnimationRetargeter";
+   *   const retargeter = new AnimationRetargeter(animations, sourceSkeleton, targetSkeleton);
+   *
+   * @deprecated Use direct import instead
+   */
+  async createAnimationRetargeter(
+    sourceAnimations: THREE.AnimationClip[],
+    sourceSkeleton: THREE.Skeleton,
+    targetSkeleton: THREE.Skeleton,
+  ): Promise<AnimationRetargeter> {
+    // Dynamic import to avoid issues with the constructor
+    const { AnimationRetargeter: Retargeter } = await import(
+      "@/services/retargeting/AnimationRetargeter"
+    );
+    return new Retargeter(sourceAnimations, sourceSkeleton, targetSkeleton);
   }
 
   getSpriteGenerationService(): SpriteGenerationService {

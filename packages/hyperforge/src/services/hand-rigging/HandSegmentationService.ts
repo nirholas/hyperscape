@@ -5,7 +5,10 @@
 
 import * as THREE from "three";
 
+import { logger } from "@/lib/utils";
 import { Point2D, Point3D, HandLandmarks } from "./HandPoseDetectionService";
+
+const log = logger.child("HandSegmentationService");
 
 export interface PixelMask {
   width: number;
@@ -65,7 +68,7 @@ export class HandSegmentationService {
     imageWidth: number,
     imageHeight: number,
   ): FingerSegmentation {
-    console.log("🖐️ Segmenting hand into finger regions...");
+    log.info("🖐️ Segmenting hand into finger regions...");
 
     // Initialize masks
     const masks: Record<string, PixelMask> = {};
@@ -467,7 +470,7 @@ export class HandSegmentationService {
       side: "left" | "right";
     },
   ): VertexSegmentation {
-    console.log("🎯 Mapping 2D segmentation to 3D vertices...");
+    log.info("🎯 Mapping 2D segmentation to 3D vertices...");
 
     const geometry = mesh.geometry;
     const positions = geometry.attributes.position;
@@ -543,9 +546,9 @@ export class HandSegmentationService {
     }
 
     // Log statistics
-    console.log("📊 Vertex segmentation results:");
+    log.info("📊 Vertex segmentation results:");
     Object.entries(vertexSegments).forEach(([finger, vertices]) => {
-      console.log(`  ${finger}: ${vertices.length} vertices`);
+      log.info(`  ${finger}: ${vertices.length} vertices`);
     });
 
     return vertexSegments;

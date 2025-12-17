@@ -5,6 +5,9 @@ import {
 } from "@/lib/generation/generation-service";
 import { generateConceptArt } from "@/lib/ai/concept-art-service";
 import type { GenerationConfig } from "@/components/generation/GenerationFormRouter";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:generation");
 
 // Enable streaming responses
 export const dynamic = "force-dynamic";
@@ -125,7 +128,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   } catch (error) {
-    console.error("[API] Generation failed:", error);
+    log.error({ error }, "Generation failed");
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Generation failed",

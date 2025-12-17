@@ -21,11 +21,9 @@ export function GenerationPanel() {
   const {
     selectedCategory,
     setSelectedCategory,
-    currentGeneration,
     setCurrentGeneration,
     progress,
     setProgress,
-    updateProgress,
     addGeneratedAsset,
   } = useGenerationStore();
 

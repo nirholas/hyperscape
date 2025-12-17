@@ -4,7 +4,7 @@ import { GlassPanel } from "@/components/ui/glass-panel";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Save, Image, Layers, Palette } from "lucide-react";
+import { Save, Image as ImageIcon, Layers, Palette } from "lucide-react";
 import type { SaveOptions } from "./GenerationFormRouter";
 
 interface SaveOptionsPanelProps {
@@ -40,7 +40,7 @@ export function SaveOptionsPanel({
       {/* Concept Art Section */}
       <div>
         <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">
-          <Image className="w-4 h-4 text-cyan-400" />
+          <ImageIcon className="w-4 h-4 text-cyan-400" aria-hidden="true" />
           Concept Art Options
         </h3>
 

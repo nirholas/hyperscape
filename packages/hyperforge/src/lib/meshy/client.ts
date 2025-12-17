@@ -33,10 +33,6 @@ import {
 export type { MeshyTask } from "./types";
 type MeshyTask = MeshyTaskType;
 
-// Use constants for API base URLs
-const MESHY_API_BASE_V1 = MESHY_API_V1;
-const MESHY_API_BASE_V2 = MESHY_API_V2;
-
 function getApiKey(): string {
   const key = process.env.MESHY_API_KEY;
   if (!key) {
@@ -49,7 +45,7 @@ async function meshyRequest<T>(
   endpoint: string,
   options: RequestInit & { baseUrl?: string } = {},
 ): Promise<T> {
-  const baseUrl = options.baseUrl || MESHY_API_BASE_V1;
+  const baseUrl = options.baseUrl || MESHY_API_V1;
   const { baseUrl: _, ...fetchOptions } = options;
 
   const response = await fetch(`${baseUrl}${endpoint}`, {
@@ -112,7 +108,7 @@ export async function createImageTo3DTask(
 
   const response = await meshyRequest<MeshyTaskResponse>("/image-to-3d", {
     method: "POST",
-    baseUrl: MESHY_API_BASE_V1,
+    baseUrl: MESHY_API_V1,
     body: JSON.stringify(body),
   });
 
@@ -157,7 +153,7 @@ export async function createTextTo3DPreviewTask(
 
   const response = await meshyRequest<MeshyTaskResponse>("/text-to-3d", {
     method: "POST",
-    baseUrl: MESHY_API_BASE_V2,
+    baseUrl: MESHY_API_V2,
     body: JSON.stringify(body),
   });
 
@@ -211,7 +207,7 @@ export async function createTextTo3DRefineTask(
 
   const response = await meshyRequest<MeshyTaskResponse>("/text-to-3d", {
     method: "POST",
-    baseUrl: MESHY_API_BASE_V2,
+    baseUrl: MESHY_API_V2,
     body: JSON.stringify(body),
   });
 
@@ -228,7 +224,7 @@ export async function getTaskStatusV1(
 ): Promise<MeshyTask> {
   return meshyRequest<MeshyTask>(`/${endpoint}/${taskId}`, {
     method: "GET",
-    baseUrl: MESHY_API_BASE_V1,
+    baseUrl: MESHY_API_V1,
   });
 }
 
@@ -241,7 +237,7 @@ export async function getRiggingTaskStatus(
 ): Promise<RiggingTaskResult> {
   return meshyRequest<RiggingTaskResult>(`/rigging/${taskId}`, {
     method: "GET",
-    baseUrl: MESHY_API_BASE_V1,
+    baseUrl: MESHY_API_V1,
   });
 }
 
@@ -252,7 +248,7 @@ export async function getRiggingTaskStatus(
 export async function getTaskStatusV2(taskId: string): Promise<MeshyTask> {
   return meshyRequest<MeshyTask>(`/tasks/${taskId}`, {
     method: "GET",
-    baseUrl: MESHY_API_BASE_V2,
+    baseUrl: MESHY_API_V2,
   });
 }
 
@@ -321,7 +317,7 @@ export async function createRetextureTask(
 
   const response = await meshyRequest<MeshyTaskResponse>("/retexture", {
     method: "POST",
-    baseUrl: MESHY_API_BASE_V1,
+    baseUrl: MESHY_API_V1,
     body: JSON.stringify(body),
   });
 
@@ -364,7 +360,7 @@ export async function createRiggingTask(
 
   const response = await meshyRequest<MeshyTaskResponse>("/rigging", {
     method: "POST",
-    baseUrl: MESHY_API_BASE_V1,
+    baseUrl: MESHY_API_V1,
     body: JSON.stringify(body),
   });
 

@@ -5,8 +5,11 @@
 
 import * as THREE from "three";
 
+import { logger } from "@/lib/utils";
 import { DistanceChildTargetingSolver } from "./DistanceChildTargetingSolver";
 import { DistanceSolver } from "./DistanceSolver";
+
+const log = logger.child("SkeletonRetargeter");
 
 export type SolverType = "distance" | "distance-child" | "distance-targeting";
 
@@ -39,12 +42,12 @@ export class SkeletonRetargeter {
     sourceMesh: THREE.SkinnedMesh,
     targetSkeleton: THREE.Skeleton,
     solverType: SolverType = "distance",
-    useKeypointAlignment: boolean = true,
+    _useKeypointAlignment: boolean = true,
   ): THREE.SkinnedMesh {
-    console.log(
-      `🔄 Retargeting mesh "${sourceMesh.name}" to new skeleton with ${targetSkeleton.bones.length} bones`,
+    log.info(
+      `Retargeting mesh "${sourceMesh.name}" to new skeleton with ${targetSkeleton.bones.length} bones`,
     );
-    console.log("=== RETARGET DEBUG ===");
+    log.debug("=== RETARGET DEBUG ===");
 
     // Clone geometry (vertices are in LOCAL/geometry space, centered at origin)
     const geometry = sourceMesh.geometry.clone();
@@ -61,15 +64,12 @@ export class SkeletonRetargeter {
         geometry.attributes.position as THREE.BufferAttribute,
       );
     const geomSize = geomBBox.getSize(new THREE.Vector3());
-    console.log(
-      "Geometry bounds (local buffer space):",
-      geomBBox.min.toArray(),
-      "to",
-      geomBBox.max.toArray(),
+    log.debug(
+      `Geometry bounds (local buffer space): ${JSON.stringify(geomBBox.min.toArray())} to ${JSON.stringify(geomBBox.max.toArray())}`,
     );
-    console.log("Geometry size:", geomSize.toArray());
-    console.log(
-      "⚠️  If this size seems wrong, the source mesh was pre-scaled by ThreeViewer",
+    log.debug("Geometry size:", geomSize.toArray());
+    log.debug(
+      "If this size seems wrong, the source mesh was pre-scaled by ThreeViewer",
     );
 
     // CRITICAL: Deep clone the target skeleton to avoid modifying the original
@@ -90,18 +90,15 @@ export class SkeletonRetargeter {
     rootBone.updateMatrix();
     rootBone.updateMatrixWorld(true);
 
-    console.log(
-      "After reset - root bone position:",
-      rootBone.position.toArray(),
-    );
-    console.log("After reset - root bone scale:", rootBone.scale.toArray());
+    log.debug("After reset - root bone position:", rootBone.position.toArray());
+    log.debug("After reset - root bone scale:", rootBone.scale.toArray());
 
     // CRITICAL: Convert Z-up rig to Y-up (rotate -90° around X-axis)
     // Mesh2Motion rigs are exported Z-up, but Three.js/Meshy use Y-up
     rootBone.rotation.x = -Math.PI / 2;
     rootBone.updateMatrix();
     rootBone.updateMatrixWorld(true);
-    console.log("Applied Z-up to Y-up rotation (-90° X)");
+    log.debug("Applied Z-up to Y-up rotation (-90° X)");
 
     // Get skeleton bounds in WORLD space after reset
     clonedSkeleton.bones.forEach((b) => {
@@ -116,44 +113,38 @@ export class SkeletonRetargeter {
       skelBBox.expandByPoint(pos);
     });
     const skelSize = skelBBox.getSize(new THREE.Vector3());
-    console.log("=== SKELETON INFO ===");
-    console.log("Skeleton bone count:", clonedSkeleton.bones.length);
-    console.log(
-      "Skeleton bounds (world after reset):",
-      skelBBox.min.toArray(),
-      "to",
-      skelBBox.max.toArray(),
+    log.debug("=== SKELETON INFO ===");
+    log.debug(`Skeleton bone count: ${clonedSkeleton.bones.length}`);
+    log.debug(
+      `Skeleton bounds (world after reset): ${JSON.stringify(skelBBox.min.toArray())} to ${JSON.stringify(skelBBox.max.toArray())}`,
     );
-    console.log("Skeleton size:", skelSize.toArray());
-    console.log("=== GEOMETRY INFO ===");
-    console.log(
-      "Geometry bounds:",
-      geomBBox.min.toArray(),
-      "to",
-      geomBBox.max.toArray(),
+    log.debug(`Skeleton size: ${JSON.stringify(skelSize.toArray())}`);
+    log.debug("=== GEOMETRY INFO ===");
+    log.debug(
+      `Geometry bounds: ${JSON.stringify(geomBBox.min.toArray())} to ${JSON.stringify(geomBBox.max.toArray())}`,
     );
-    console.log("Geometry size:", geomSize.toArray());
-    console.log("=== SCALE CALCULATION ===");
+    log.debug(`Geometry size: ${JSON.stringify(geomSize.toArray())}`);
+    log.debug("=== SCALE CALCULATION ===");
 
     // Calculate scale factor using average of all dimensions for better proportions
     const scaleX = geomSize.x / skelSize.x;
     const scaleY = geomSize.y / skelSize.y;
     const scaleZ = geomSize.z / skelSize.z;
     let scaleFactor = (scaleX + scaleY + scaleZ) / 3; // Average for uniform scale
-    console.log(
+    log.debug(
       `Scaling skeleton by ${scaleFactor.toFixed(3)} (x:${scaleX.toFixed(2)}, y:${scaleY.toFixed(2)}, z:${scaleZ.toFixed(2)})`,
     );
 
     // SANITY CHECK: If scale factor is extreme (>100 or <0.01), something is wrong
     // This usually means the skeleton and geometry are in vastly different units
     if (scaleFactor > 100 || scaleFactor < 0.01) {
-      console.warn(
-        `⚠️  Extreme scale factor detected (${scaleFactor.toFixed(3)}). Using Y-height only to prevent distortion.`,
+      log.warn(
+        `Extreme scale factor detected (${scaleFactor.toFixed(3)}). Using Y-height only to prevent distortion.`,
       );
       // Fall back to Y-height scaling (most reliable for characters)
       scaleFactor = geomSize.y / skelSize.y;
-      console.log(
-        `   Adjusted scale factor to ${scaleFactor.toFixed(3)} based on height`,
+      log.debug(
+        `Adjusted scale factor to ${scaleFactor.toFixed(3)} based on height`,
       );
     }
 
@@ -169,11 +160,8 @@ export class SkeletonRetargeter {
       bone.getWorldPosition(pos);
       scaledSkelBBox.expandByPoint(pos);
     });
-    console.log(
-      "Skeleton bounds (after scale):",
-      scaledSkelBBox.min.toArray(),
-      "to",
-      scaledSkelBBox.max.toArray(),
+    log.debug(
+      `Skeleton bounds (after scale): ${JSON.stringify(scaledSkelBBox.min.toArray())} to ${JSON.stringify(scaledSkelBBox.max.toArray())}`,
     );
 
     // Align skeleton to geometry CENTER (not just bottom) for better fit
@@ -188,10 +176,12 @@ export class SkeletonRetargeter {
     rootBone.updateMatrixWorld(true);
     clonedSkeleton.bones.forEach((b) => b.updateMatrixWorld(true));
 
-    console.log(
+    log.debug(
       `Center alignment offset: (${offset.x.toFixed(3)}, ${offset.y.toFixed(3)}, ${offset.z.toFixed(3)})`,
     );
-    console.log("Final root bone position:", rootBone.position.toArray());
+    log.debug(
+      `Final root bone position: ${JSON.stringify(rootBone.position.toArray())}`,
+    );
 
     // Final verification
     const finalSkelBBox = new THREE.Box3();
@@ -201,15 +191,14 @@ export class SkeletonRetargeter {
       finalSkelBBox.expandByPoint(pos);
     });
     const finalSkelSize = finalSkelBBox.getSize(new THREE.Vector3());
-    console.log(
-      "Final skeleton bounds:",
-      finalSkelBBox.min.toArray(),
-      "to",
-      finalSkelBBox.max.toArray(),
+    log.debug(
+      `Final skeleton bounds: ${JSON.stringify(finalSkelBBox.min.toArray())} to ${JSON.stringify(finalSkelBBox.max.toArray())}`,
     );
-    console.log("Final skeleton size:", finalSkelSize.toArray());
-    console.log("Expected size:", geomSize.toArray());
-    console.log("=== END DEBUG ===");
+    log.debug(
+      `Final skeleton size: ${JSON.stringify(finalSkelSize.toArray())}`,
+    );
+    log.debug(`Expected size: ${JSON.stringify(geomSize.toArray())}`);
+    log.debug("=== END DEBUG ===");
 
     // Calculate skin weights using the positioned skeleton
     const solver = this.createSolver(
@@ -244,7 +233,7 @@ export class SkeletonRetargeter {
     newMesh.add(rootBone);
     newMesh.bind(clonedSkeleton);
 
-    console.log(`✅ Mesh retargeted and bound to new skeleton`);
+    log.info("Mesh retargeted and bound to new skeleton");
     return newMesh;
   }
 
@@ -295,7 +284,7 @@ export class SkeletonRetargeter {
     ]);
 
     if (!sourceHips || !targetHips) {
-      console.warn("Could not find hips bones for keypoint alignment");
+      log.warn("Could not find hips bones for keypoint alignment");
       return null;
     }
 
@@ -309,10 +298,10 @@ export class SkeletonRetargeter {
     // Calculate offset needed to align target hips to source hips
     const offset = sourcePosWorld.clone().sub(targetPosWorld);
 
-    console.log("Keypoint alignment (hips):");
-    console.log(`  Source hips: ${sourcePosWorld.toArray()}`);
-    console.log(`  Target hips: ${targetPosWorld.toArray()}`);
-    console.log(`  Offset: ${offset.toArray()}`);
+    log.debug("Keypoint alignment (hips):");
+    log.debug(`  Source hips: ${sourcePosWorld.toArray()}`);
+    log.debug(`  Target hips: ${targetPosWorld.toArray()}`);
+    log.debug(`  Offset: ${offset.toArray()}`);
 
     return offset;
   }
@@ -356,7 +345,7 @@ export class SkeletonRetargeter {
       );
 
       if (!tPoseAnim) {
-        console.warn("T-Pose animation not found in human-base-animations.glb");
+        log.warn("T-Pose animation not found in human-base-animations.glb");
         return;
       }
 
@@ -388,9 +377,9 @@ export class SkeletonRetargeter {
       // Update matrices after applying T-pose
       skeleton.bones.forEach((bone) => bone.updateMatrixWorld(true));
 
-      console.log("✓ T-pose applied to skeleton");
+      log.info("T-pose applied to skeleton");
     } catch (error) {
-      console.error("Failed to apply T-pose:", error);
+      log.error("Failed to apply T-pose:", error);
     }
   }
 }

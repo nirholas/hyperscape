@@ -5,8 +5,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/toast";
 import { RetextureOptions } from "./RetextureOptions";
 import { RegenerateOptions } from "./RegenerateOptions";
-import { MetadataEditor } from "../generation/MetadataEditor";
+import {
+  MetadataEditor,
+  type AssetMetadata,
+} from "../generation/MetadataEditor";
 import type { AssetData } from "@/types/asset";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("EnhancementPanel");
 
 interface EnhancementPanelProps {
   asset: AssetData | null;
@@ -61,9 +67,9 @@ export function EnhancementPanel({
           <TabsContent value="metadata" className="mt-0">
             <MetadataEditor
               category={asset.category}
-              initialMetadata={asset as unknown as Record<string, unknown>}
+              initialMetadata={asset as unknown as AssetMetadata}
               onSave={(metadata) => {
-                console.log("Save metadata:", metadata);
+                log.info({ metadata }, "Save metadata");
                 // TODO: Save metadata to API
                 toast({
                   variant: "success",

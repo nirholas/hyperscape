@@ -1,0 +1,375 @@
+---
+alwaysApply: true
+---
+# TypeScript Elite Hardening Rules - HyperForge
+
+This guide enforces compile-time safety patterns that prevent runtime bugs.
+
+## 🚫 NON-NEGOTIABLE RULES
+
+### 1. NO `any` - EVER
+
+```typescript
+// ❌ FORBIDDEN - All of these
+function f(x: any): any { ... }
+const x = data as any;
+const items: any[] = [];
+Record<string, any>
+{[k: string]: any}
+catch (e: any) { ... }
+
+// ✅ REQUIRED - Use specific alternatives
+function f(x: AssetData): GenerationResult { ... }
+const x = data as AssetData;
+const items: Asset[] = [];
+Record<string, unknown>
+catch (e) { const error = toError(e); }
+```
+
+### 2. NO `as Type` on Object Literals
+
+```typescript
+// ❌ FORBIDDEN - Lying assertions
+const config = { name: "test" } as Config;
+
+// ✅ REQUIRED - Use satisfies for validation without losing inference
+const config = { name: "test" } satisfies Config;
+
+// ✅ Or let inference work with explicit typing
+const config: Config = { name: "test" };
+```
+
+### 3. External Data is `unknown` Until Validated
+
+All boundary inputs must be validated before use:
+
+```typescript
+// ❌ FORBIDDEN - Trust external data
+async function handleRequest(req: Request) {
+  const body = await req.json(); // any!
+  return body.userId; // Unsafe
+}
+
+// ✅ REQUIRED - Validate at boundaries
+import { z } from 'zod';
+
+const RequestSchema = z.object({
+  userId: z.string(),
+  action: z.enum(['create', 'update', 'delete']),
+});
+
+async function handleRequest(req: Request) {
+  const body: unknown = await req.json();
+  const parsed = RequestSchema.safeParse(body);
+  if (!parsed.success) {
+    return { error: parsed.error.message };
+  }
+  return parsed.data.userId; // Fully typed
+}
+```
+
+---
+
+## Boundary Surfaces (Must Validate)
+
+These are the entry points where external data enters the system:
+
+| Boundary | Location | Validation Required |
+|----------|----------|---------------------|
+| API Routes | `src/app/api/**` | Zod schema for request body |
+| Database | `src/lib/db/**` | Type assertion or schema validation |
+| Environment | `process.env.*` | `assertDefined()` or wrapper |
+| External APIs | Meshy, ElevenLabs, AI Gateway | Response schema validation |
+| File reads | GLB, JSON imports | Schema validation |
+| WebSocket | (if used) | Message schema validation |
+| localStorage | (if used) | JSON.parse → validate |
+
+---
+
+## Pattern: Discriminated Unions for States
+
+Replace boolean flags with discriminated unions:
+
+```typescript
+// ❌ WRONG - Multiple booleans create invalid states
+type Task = {
+  loading: boolean;
+  error: Error | null;
+  data: Asset | null;
+};
+
+// ✅ CORRECT - Discriminated union prevents invalid states
+type TaskState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'success'; data: Asset }
+  | { status: 'error'; error: AppError };
+
+// Usage with exhaustiveness check
+function renderTask(state: TaskState) {
+  switch (state.status) {
+    case 'idle':
+      return <Placeholder />;
+    case 'loading':
+      return <Spinner />;
+    case 'success':
+      return <AssetCard asset={state.data} />;
+    case 'error':
+      return <ErrorDisplay error={state.error} />;
+    default:
+      assertNever(state); // Compile error if case missing
+  }
+}
+```
+
+---
+
+## Pattern: Branded Types for IDs
+
+Never mix different ID types:
+
+```typescript
+// ❌ WRONG - Raw strings can be mixed
+function getAsset(assetId: string, userId: string) { ... }
+getAsset(userId, assetId); // Compiles but wrong!
+
+// ✅ CORRECT - Branded types prevent mixing
+import { AssetId, UserId, createAssetId, createUserId } from '@/types';
+
+function getAsset(assetId: AssetId, userId: UserId) { ... }
+getAsset(userId, assetId); // ❌ Compile error!
+
+// Create branded IDs only at boundaries
+const assetId = createAssetId(params.id);
+const userId = createUserId(session.userId);
+```
+
+---
+
+## Pattern: Result Types
+
+Use Result<T, E> instead of throwing for expected failures:
+
+```typescript
+import { Result, ok, err, toAppError } from '@/types';
+
+// ❌ WRONG - Throwing for expected failures
+async function generateAsset(prompt: string): Promise<Asset> {
+  if (!prompt) throw new Error('Prompt required');
+  try {
+    return await meshyClient.generate(prompt);
+  } catch (e) {
+    throw new Error('Generation failed');
+  }
+}
+
+// ✅ CORRECT - Result type for expected failures
+async function generateAsset(prompt: string): AsyncResult<Asset, AppError> {
+  if (!prompt) {
+    return err({ code: 'VALIDATION_ERROR', message: 'Prompt required' });
+  }
+  try {
+    const asset = await meshyClient.generate(prompt);
+    return ok(asset);
+  } catch (e) {
+    return err(toAppError(e, 'GENERATION_FAILED'));
+  }
+}
+
+// Usage
+const result = await generateAsset(prompt);
+if (!result.ok) {
+  console.error(result.error.message);
+  return;
+}
+const asset = result.value; // Fully typed
+```
+
+---
+
+## Pattern: Index Access Safety
+
+With `noUncheckedIndexedAccess`, handle undefined:
+
+```typescript
+const items: Record<string, Item> = { ... };
+
+// ❌ WRONG - Ignores potential undefined
+const item = items[key]; // Type is Item | undefined
+item.name; // Compile error!
+
+// ✅ CORRECT - Handle undefined
+import { getOrThrow, getOr } from '@/types';
+
+// Option 1: Throw if missing
+const item = getOrThrow(items, key, `Item not found: ${key}`);
+item.name; // Safe
+
+// Option 2: Use default
+const item = getOr(items, key, defaultItem);
+item.name; // Safe
+
+// Option 3: Check explicitly
+const item = items[key];
+if (item === undefined) {
+  return null;
+}
+item.name; // Safe
+```
+
+---
+
+## Pattern: Error Handling
+
+With `useUnknownInCatchVariables`, catch is unknown:
+
+```typescript
+// ❌ WRONG - Assumes error is Error
+try {
+  await riskyOperation();
+} catch (e) {
+  console.log(e.message); // Compile error! e is unknown
+}
+
+// ✅ CORRECT - Use toError utility
+import { toError, getErrorMessage } from '@/types';
+
+try {
+  await riskyOperation();
+} catch (e) {
+  const error = toError(e);
+  console.error(error.message);
+  // Or just get the message
+  console.error(getErrorMessage(e));
+}
+```
+
+---
+
+## Pattern: Exhaustiveness Checking
+
+Always add exhaustiveness guard in switches:
+
+```typescript
+import { assertNever } from '@/types';
+
+type AssetCategory = 'weapon' | 'armor' | 'tool';
+
+function getCategoryIcon(category: AssetCategory): string {
+  switch (category) {
+    case 'weapon':
+      return '⚔️';
+    case 'armor':
+      return '🛡️';
+    case 'tool':
+      return '🔧';
+    default:
+      // If a new category is added, this becomes a compile error
+      return assertNever(category);
+  }
+}
+```
+
+---
+
+## Pattern: API Route Validation
+
+Standard pattern for Next.js API routes:
+
+```typescript
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { toAppError } from '@/types';
+
+const GenerateRequestSchema = z.object({
+  prompt: z.string().min(1),
+  category: z.enum(['weapon', 'armor', 'tool']),
+  quality: z.enum(['draft', 'standard', 'high']).optional(),
+});
+
+export async function POST(request: Request) {
+  try {
+    // 1. Parse unknown body
+    const body: unknown = await request.json();
+    
+    // 2. Validate with schema
+    const parsed = GenerateRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.flatten() },
+        { status: 400 }
+      );
+    }
+    
+    // 3. Use typed data
+    const { prompt, category, quality } = parsed.data;
+    const result = await generateAsset(prompt, category, quality);
+    
+    return NextResponse.json({ data: result });
+  } catch (e) {
+    const error = toAppError(e);
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    );
+  }
+}
+```
+
+---
+
+## tsconfig.json Strict Flags (Active)
+
+These flags are enabled in HyperForge's tsconfig:
+
+| Flag | Effect |
+|------|--------|
+| `strict: true` | Enables all strict checks |
+| `noImplicitAny: true` | No implicit any |
+| `strictNullChecks: true` | null/undefined must be handled |
+| `noUncheckedIndexedAccess: true` | Index access returns T \| undefined |
+| `exactOptionalPropertyTypes: true` | Optional properties are exact |
+| `useUnknownInCatchVariables: true` | catch variable is unknown |
+| `noImplicitReturns: true` | All paths must return |
+| `noFallthroughCasesInSwitch: true` | No switch fallthrough |
+
+---
+
+## ESLint Rules (Active)
+
+| Rule | Level | Effect |
+|------|-------|--------|
+| `@typescript-eslint/no-explicit-any` | error | Blocks any usage |
+| `@typescript-eslint/ban-ts-comment` | error | Blocks @ts-ignore |
+| `eqeqeq` | error | Requires === |
+| `prefer-const` | error | Use const when possible |
+
+---
+
+## Pre-Commit Hook
+
+HyperForge files are validated before commit:
+
+```
+lint-staged:
+  packages/hyperforge/**/*.{ts,tsx}:
+    - eslint --fix --max-warnings=0
+    - prettier --write
+```
+
+Commits with `any` violations will be blocked!
+
+---
+
+## Quick Reference
+
+| Instead of... | Use... |
+|--------------|--------|
+| `any` | Specific type, `unknown`, or generic |
+| `as Type` on literals | `satisfies Type` |
+| `obj.prop` (might be undefined) | `getOrThrow(obj, key)` |
+| `catch (e: any)` | `catch (e) { toError(e) }` |
+| Boolean flags | Discriminated unions |
+| String IDs | Branded types (`UserId`, `AssetId`) |
+| Throwing for expected errors | `Result<T, E>` |
+| `items[i]` (might be undefined) | Check or use `getOr` |

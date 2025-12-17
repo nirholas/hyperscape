@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { saveAssetFiles } from "@/lib/storage/asset-storage";
 import { v4 as uuidv4 } from "uuid";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:assets:upload");
 
 export interface UploadAssetMetadata {
   name: string;
@@ -190,17 +193,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       asset: {
-        id: assetId,
-        name: metadata.name,
-        category: metadata.category,
-        source: "LOCAL",
+        ...fullMetadata,
         modelUrl: savedFiles.modelUrl,
         thumbnailUrl: savedFiles.thumbnailUrl,
-        ...fullMetadata,
       },
     });
   } catch (error) {
-    console.error("[API] Upload failed:", error);
+    log.error("Upload failed", { error });
     return NextResponse.json(
       {
         error: "Upload failed",

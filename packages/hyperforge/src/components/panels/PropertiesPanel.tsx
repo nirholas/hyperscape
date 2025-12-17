@@ -31,8 +31,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { SpectacularButton } from "@/components/ui/spectacular-button";
 import { useToast } from "@/components/ui/toast";
-import { cn } from "@/lib/utils";
+import { cn, logger } from "@/lib/utils";
 import type { AssetData } from "@/types/asset";
+
+const log = logger.child("PropertiesPanel");
 
 // Game data types
 interface ResourceGameData {
@@ -201,7 +203,7 @@ export function PropertiesPanel({
   );
   const [npcData, setNpcData] = useState<NPCGameData | null>(null);
   const [toolData, setToolData] = useState<ItemGameData | null>(null);
-  const [relatedItems, setRelatedItems] = useState<ItemGameData[]>([]);
+  const [_relatedItems, setRelatedItems] = useState<ItemGameData[]>([]);
   const [dropSources, setDropSources] = useState<DropSource[]>([]);
   const [storeInfo, setStoreInfo] = useState<ItemStoreInfo[]>([]);
   const [isLoadingGameData, setIsLoadingGameData] = useState(false);
@@ -282,13 +284,14 @@ export function PropertiesPanel({
           }
         }
       } catch (error) {
-        console.error("Failed to fetch game data:", error);
+        log.error("Failed to fetch game data:", error);
       } finally {
         setIsLoadingGameData(false);
       }
     };
 
     fetchGameData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Only refetch on id/category/type change, not every asset update
   }, [asset?.id, asset?.category, asset?.type]);
 
   if (!isOpen || !asset) return null;
@@ -349,7 +352,7 @@ export function PropertiesPanel({
         duration: 3000,
       });
     } catch (error) {
-      console.error("Download failed:", error);
+      log.error("Download failed:", error);
       toast({
         variant: "destructive",
         title: "Download Failed",
@@ -395,7 +398,7 @@ export function PropertiesPanel({
         duration: 5000,
       });
     } catch (error) {
-      console.error("Export failed:", error);
+      log.error("Export failed:", error);
       toast({
         variant: "destructive",
         title: "Export Failed",
@@ -434,7 +437,7 @@ export function PropertiesPanel({
       // Notify parent to refresh asset list
       onAssetDuplicated?.({ id: result.asset.id, name: result.asset.name });
     } catch (error) {
-      console.error("Duplicate failed:", error);
+      log.error("Duplicate failed:", error);
       toast({
         variant: "destructive",
         title: "Duplicate Failed",
@@ -477,7 +480,7 @@ export function PropertiesPanel({
       onAssetDeleted?.(asset.id);
       onClose();
     } catch (error) {
-      console.error("Delete failed:", error);
+      log.error("Delete failed:", error);
       toast({
         variant: "destructive",
         title: "Delete Failed",
@@ -610,7 +613,7 @@ export function PropertiesPanel({
         });
       }
     } catch (error) {
-      console.error("Add to world failed:", error);
+      log.error("Add to world failed:", error);
       toast({
         variant: "destructive",
         title: "Failed to Add to World",
@@ -1195,7 +1198,9 @@ export function PropertiesPanel({
                     Created
                   </span>
                   <span className="font-medium">
-                    {new Date(asset.createdAt).toLocaleDateString()}
+                    {asset.createdAt
+                      ? new Date(asset.createdAt).toLocaleDateString()
+                      : "Unknown"}
                   </span>
                 </div>
               </>

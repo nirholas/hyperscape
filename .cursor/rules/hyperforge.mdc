@@ -447,3 +447,4 @@ HYPERFORGE_ASSETS_DIR=./assets
 4. **VRM for Characters** - Convert NPCs/characters to VRM for Hyperscape
 5. **Polycount Budgets** - Follow Three.js web MMO guidelines
 6. **Type Safety** - Match types from `packages/shared/src/types/`
+

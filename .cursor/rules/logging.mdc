@@ -1,0 +1,84 @@
+---
+description: Centralized logging rules - Use Pino logger instead of console.log/warn/error
+alwaysApply: true
+---
+# Logging Standards
+
+Use **Pino** for structured logging. Never use console.log/warn/error directly.
+
+## FORBIDDEN
+
+```typescript
+console.log("message", data);
+console.warn("warning");
+console.error("error:", err);
+```
+
+## REQUIRED
+
+```typescript
+import { logger } from "@/lib/utils";
+const log = logger.child("ModuleName");
+
+log.debug("message", { data });
+log.info("message", { data });
+log.warn("warning", { context });
+log.error("error", { error: err });
+```
+
+## Module Naming
+
+```typescript
+// Services
+const log = logger.child("MeshyService");
+
+// API routes
+const log = logger.child("API:assets");
+
+// Components
+const log = logger.child("EquipmentViewer");
+
+// Pages
+const log = logger.child("Page:generate");
+```
+
+## Log Levels
+
+| Level | Use Case |
+|-------|----------|
+| trace | Very detailed debugging |
+| debug | Development debugging |
+| info | Normal operations |
+| warn | Potential issues |
+| error | Errors and failures |
+| fatal | Critical failures |
+
+## Structured Data
+
+```typescript
+// Good
+log.info("Asset saved", { assetId, bucket, size });
+log.error("Failed", { error, assetId });
+
+// Bad
+log.info("Asset " + assetId + " saved");
+```
+
+## Exceptions (Console Allowed)
+
+- `lib/utils/logger.ts` - Logger implementation
+- `lib/utils/toast.ts` - Toast fallback
+- `components/ui/error-boundary.tsx` - React error boundary
+
+## Package Imports
+
+```typescript
+// HyperForge
+import { logger } from "@/lib/utils";
+
+// Shared
+import { Logger } from "@/utils/Logger";
+
+// Server
+import { logger } from "@/utils/logger";
+```

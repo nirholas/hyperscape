@@ -1,7 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { NeonInput } from "@/components/ui/neon-input";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("BatchGenerator");
+void log; // Logger initialized for future use
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { SpectacularButton } from "@/components/ui/spectacular-button";
@@ -75,7 +78,7 @@ export function BatchGenerator({
       onComplete(results);
       setIsGenerating(false);
     } catch (error) {
-      console.error("Batch generation error:", error);
+      log.error("Batch generation error", error);
       setIsGenerating(false);
     }
   };

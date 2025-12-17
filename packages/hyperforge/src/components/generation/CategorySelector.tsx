@@ -1,7 +1,6 @@
 "use client";
 
 import { Modal } from "@/components/ui/modal";
-import { GlassPanel } from "@/components/ui/glass-panel";
 import { getAllCategories, type AssetCategory } from "@/types/categories";
 import { SpectacularButton } from "@/components/ui/spectacular-button";
 

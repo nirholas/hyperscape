@@ -7,7 +7,6 @@ import { NPCContentGenerator } from "@/components/content/NPCContentGenerator";
 import { QuestGenerator } from "@/components/content/QuestGenerator";
 import { AreaGenerator } from "@/components/content/AreaGenerator";
 import { ItemGenerator } from "@/components/content/ItemGenerator";
-import { GlassPanel } from "@/components/ui/glass-panel";
 import {
   Users,
   Scroll,
@@ -17,7 +16,6 @@ import {
   MessageSquare,
   Settings,
   Sparkles,
-  Store,
 } from "lucide-react";
 import type { GeneratedNPCContent } from "@/types/game/dialogue-types";
 import type {

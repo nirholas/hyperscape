@@ -23,7 +23,6 @@ import {
   Layers,
   Settings,
   Box,
-  FolderOpen,
   type LucideIcon,
 } from "lucide-react";
 import { WorldView } from "@/components/world/WorldView";

@@ -3,14 +3,14 @@
  * Handles normalization of 3D models to meet standard conventions
  */
 
+import { logger } from "@/lib/utils";
 import * as THREE from "three";
+
+const log = logger.child("AssetNormalizationService");
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { GLTFLoader, GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 
-import {
-  getConvention,
-  NormalizationResult,
-} from "../../types/NormalizationConventions";
+import { getConvention } from "@/types";
 
 export interface NormalizedAssetResult {
   glb: ArrayBuffer;
@@ -47,7 +47,7 @@ export class AssetNormalizationService {
     weaponType: string = "sword",
     gripPoint?: THREE.Vector3,
   ): Promise<NormalizedAssetResult> {
-    console.log(`🔧 Normalizing weapon: ${weaponType}`);
+    log.info(`🔧 Normalizing weapon: ${weaponType}`);
 
     // Load model
     const gltf = await this.loadModel(modelPath);
@@ -66,7 +66,7 @@ export class AssetNormalizationService {
         originalBounds.min.y + originalSize.y * 0.2,
         center.z,
       );
-      console.log(
+      log.debug(
         `📍 Estimated grip point: ${gripPoint.x.toFixed(3)}, ${gripPoint.y.toFixed(3)}, ${gripPoint.z.toFixed(3)}`,
       );
     }
@@ -114,7 +114,7 @@ export class AssetNormalizationService {
     modelPath: string,
     targetHeight: number = 1.83,
   ): Promise<NormalizedAssetResult> {
-    console.log(`🔧 Normalizing character to ${targetHeight}m height`);
+    log.info(`🔧 Normalizing character to ${targetHeight}m height`);
 
     // Load model
     const gltf = await this.loadModel(modelPath);
@@ -125,7 +125,7 @@ export class AssetNormalizationService {
     const originalSize = originalBounds.getSize(new THREE.Vector3());
     const originalHeight = originalSize.y;
 
-    console.log(`📏 Original height: ${originalHeight.toFixed(3)}m`);
+    log.debug(`📏 Original height: ${originalHeight.toFixed(3)}m`);
 
     // Calculate scale factor to reach target height
     const scaleFactor = targetHeight / originalHeight;
@@ -147,7 +147,7 @@ export class AssetNormalizationService {
     const normalizedBounds = new THREE.Box3().setFromObject(model);
     const normalizedSize = normalizedBounds.getSize(new THREE.Vector3());
 
-    console.log(`✅ Normalized height: ${normalizedSize.y.toFixed(3)}m`);
+    log.info(`✅ Normalized height: ${normalizedSize.y.toFixed(3)}m`);
 
     // Export normalized model
     const glb = await this.exportModel(model);
@@ -178,7 +178,7 @@ export class AssetNormalizationService {
     modelPath: string,
     armorType: string = "chest",
   ): Promise<NormalizedAssetResult> {
-    console.log(`🔧 Normalizing armor: ${armorType}`);
+    log.info(`🔧 Normalizing armor: ${armorType}`);
 
     // Load model
     const gltf = await this.loadModel(modelPath);
@@ -235,7 +235,7 @@ export class AssetNormalizationService {
    * Normalize building - ground at Y=0, entrance facing +Z
    */
   async normalizeBuilding(modelPath: string): Promise<NormalizedAssetResult> {
-    console.log(`🔧 Normalizing building`);
+    log.info(`🔧 Normalizing building`);
 
     // Load model
     const gltf = await this.loadModel(modelPath);
@@ -364,9 +364,24 @@ export class AssetNormalizationService {
   async validateNormalization(
     modelPath: string,
     assetType: string,
-    subtype?: string,
-  ): Promise<NormalizationResult> {
-    const convention = getConvention(assetType, subtype);
+    _subtype?: string,
+  ): Promise<{
+    success: boolean;
+    normalized: boolean;
+    conventions: import("@/types").NormalizationConventions;
+    transformsApplied: {
+      translation: { x: number; y: number; z: number };
+      rotation: { x: number; y: number; z: number };
+      scale: number;
+    };
+    validation: {
+      originCorrect: boolean;
+      orientationCorrect: boolean;
+      scaleCorrect: boolean;
+      errors: string[];
+    };
+  }> {
+    const convention = getConvention(assetType);
     const gltf = await this.loadModel(modelPath);
     const model = gltf.scene;
 
@@ -376,7 +391,7 @@ export class AssetNormalizationService {
 
     const errors: string[] = [];
     let originCorrect = false;
-    let orientationCorrect = true;
+    const orientationCorrect = true;
     let scaleCorrect = true;
 
     // Check origin
@@ -456,14 +471,41 @@ export class AssetNormalizationService {
 
   /**
    * Load a GLTF/GLB model
+   * Supports both URLs (browser) and file paths (Node.js)
    */
   private async loadModel(modelPath: string): Promise<GLTF> {
-    // Handle file:// URLs
-    const path = modelPath.replace("file://", "");
+    // Handle file:// URLs and local file paths
+    const filePath = modelPath.replace("file://", "");
 
+    // Check if running in Node.js environment (has fs module)
+    const isNodeJS =
+      typeof process !== "undefined" &&
+      process.versions &&
+      process.versions.node;
+
+    if (isNodeJS && !filePath.startsWith("http")) {
+      // In Node.js, read file and use parse() instead of load()
+      const fs = await import("fs/promises");
+      const buffer = await fs.readFile(filePath);
+      const arrayBuffer = buffer.buffer.slice(
+        buffer.byteOffset,
+        buffer.byteOffset + buffer.byteLength,
+      );
+
+      return new Promise((resolve, reject) => {
+        this.loader.parse(
+          arrayBuffer,
+          "",
+          (gltf) => resolve(gltf),
+          (error) => reject(error),
+        );
+      });
+    }
+
+    // Browser environment or HTTP URL - use load()
     return new Promise((resolve, reject) => {
       this.loader.load(
-        path,
+        modelPath,
         (gltf) => resolve(gltf),
         undefined,
         (error) => reject(error),

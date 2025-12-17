@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { TextureVariant } from "@/components/generation/GenerationFormRouter";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:variants");
 
 // Enable streaming responses
 export const dynamic = "force-dynamic";
@@ -33,8 +36,8 @@ export async function POST(request: NextRequest) {
 
       const variantData = variant as TextureVariant;
 
-      console.log(
-        `[Variants] Creating variant "${variantData.name}" for base model: ${baseModelId}`,
+      log.info(
+        `Creating variant "${variantData.name}" for base model: ${baseModelId}`,
       );
 
       // TODO: Implement Meshy retexturing API call
@@ -86,8 +89,8 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      console.log(
-        `[Variants] Batch creating ${variants.length} variants for base model: ${baseModelId}`,
+      log.info(
+        `Batch creating ${variants.length} variants for base model: ${baseModelId}`,
       );
 
       const results = variants.map((v) => ({
@@ -128,7 +131,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   } catch (error) {
-    console.error("[API] Variant creation failed:", error);
+    log.error({ error }, "Variant creation failed");
     return NextResponse.json(
       {
         error:
@@ -162,7 +165,7 @@ export async function GET(request: NextRequest) {
       variants: [],
     });
   } catch (error) {
-    console.error("[API] Failed to list variants:", error);
+    log.error({ error }, "Failed to list variants");
     return NextResponse.json(
       {
         error:

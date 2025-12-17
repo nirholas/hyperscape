@@ -10,6 +10,9 @@
 import "@/lib/server/three-polyfills";
 
 import { NextRequest, NextResponse } from "next/server";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:hand-rigging");
 
 export async function POST(request: NextRequest) {
   try {
@@ -41,7 +44,7 @@ export async function POST(request: NextRequest) {
       const handRiggingService = new SimpleHandRiggingService();
 
       // Run hand rigging on the GLB
-      console.log("🦴 Starting simple hand rigging on GLB...");
+      log.info("🦴 Starting simple hand rigging on GLB...");
       const result = await handRiggingService.rigHands(glbBlobUrl, {
         palmBoneLength: options.palmBoneLength || 300.0,
         fingerBoneLength: options.fingerBoneLength || 400.0,
@@ -64,12 +67,15 @@ export async function POST(request: NextRequest) {
       // Convert ArrayBuffer to base64 for response
       const riggedGlbData = Buffer.from(result.riggedModel).toString("base64");
 
-      console.log("✅ Hand rigging complete:", {
-        originalBones: result.metadata.originalBoneCount,
-        addedBones: result.metadata.addedBoneCount,
-        leftHandBones: result.metadata.leftHandBones?.length || 0,
-        rightHandBones: result.metadata.rightHandBones?.length || 0,
-      });
+      log.info(
+        {
+          originalBones: result.metadata.originalBoneCount,
+          addedBones: result.metadata.addedBoneCount,
+          leftHandBones: result.metadata.leftHandBones?.length || 0,
+          rightHandBones: result.metadata.rightHandBones?.length || 0,
+        },
+        "✅ Hand rigging complete",
+      );
 
       return NextResponse.json({
         success: true,
@@ -88,7 +94,7 @@ export async function POST(request: NextRequest) {
       throw rigError;
     }
   } catch (error) {
-    console.error("[API] Hand rigging failed:", error);
+    log.error({ error }, "Hand rigging failed");
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Hand rigging failed",

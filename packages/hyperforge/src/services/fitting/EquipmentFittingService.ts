@@ -12,6 +12,10 @@
 import * as THREE from "three";
 import type { SkinnedMesh, Skeleton } from "three";
 
+import { logger } from "@/lib/utils";
+
+const log = logger.child("EquipmentFittingService");
+
 export interface FittingConfig {
   method?:
     | "boundingBox"
@@ -38,12 +42,12 @@ export class EquipmentFittingService {
     equipmentMesh: THREE.Group | THREE.Scene,
     characterMesh: SkinnedMesh,
     skeleton: Skeleton,
-    config: FittingConfig = {},
+    _config: FittingConfig = {},
   ): SkinnedMesh | null {
     // TODO: Implement full equipment fitting
     // See: packages/asset-forge/src/services/fitting/ArmorFittingService.ts
 
-    console.warn(
+    log.warn(
       "Equipment fitting not yet implemented. " +
         "Port ArmorFittingService from packages/asset-forge/src/services/fitting/ArmorFittingService.ts",
     );
@@ -57,7 +61,7 @@ export class EquipmentFittingService {
   equipArmorToCharacter(
     loadedArmor: THREE.Group | THREE.Scene,
     characterMesh: SkinnedMesh,
-    options: {
+    _options: {
       autoMatch?: boolean;
       boneNameMapping?: Record<string, string>;
       parentToCharacter?: boolean;

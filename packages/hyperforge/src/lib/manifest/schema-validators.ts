@@ -3,7 +3,6 @@
  * Validates assets against game manifest schemas before export
  */
 
-import { validateAsset } from "../generation/category-schemas";
 import type { AssetCategory } from "@/types/categories";
 import type { Item } from "@/types/game/item-types";
 import type { NPCDataInput } from "@/types/game/npc-types";

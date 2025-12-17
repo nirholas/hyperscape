@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import {
   Palette,
   Sparkles,
@@ -13,7 +14,9 @@ import {
 } from "lucide-react";
 import { StudioPageLayout } from "@/components/layout/StudioPageLayout";
 import { SpectacularButton } from "@/components/ui/spectacular-button";
-import { cn } from "@/lib/utils";
+import { cn, logger } from "@/lib/utils";
+
+const log = logger.child("ConceptArtPage");
 
 type ArtStyle = "realistic" | "stylized" | "pixel" | "painterly";
 type ViewAngle = "front" | "side" | "isometric" | "three-quarter";
@@ -131,7 +134,7 @@ export default function ConceptArtPage() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (error) {
-      console.error("Failed to download:", error);
+      log.error("Failed to download:", error);
     }
   };
 
@@ -294,10 +297,13 @@ export default function ConceptArtPage() {
                         key={image.id}
                         className="group relative rounded-lg overflow-hidden border border-glass-border"
                       >
-                        <img
+                        <Image
                           src={image.url}
                           alt={image.prompt}
+                          width={800}
+                          height={450}
                           className="w-full aspect-video object-contain bg-black/20"
+                          unoptimized
                         />
 
                         {/* Overlay */}

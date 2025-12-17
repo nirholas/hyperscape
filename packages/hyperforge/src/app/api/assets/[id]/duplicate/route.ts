@@ -11,6 +11,9 @@ import {
   getMetadataPath,
 } from "@/lib/storage/asset-storage";
 import { promises as fs } from "fs";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:assets:duplicate");
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -71,7 +74,7 @@ export async function POST(request: Request, { params }: RouteParams) {
       await fs.writeFile(metadataPath, JSON.stringify(newMetadata, null, 2));
     }
 
-    console.log(`[Assets API] Duplicated asset: ${sourceAssetId} -> ${newAssetId}`);
+    log.info("Duplicated asset", { sourceAssetId, newAssetId });
 
     return NextResponse.json({
       success: true,
@@ -84,7 +87,7 @@ export async function POST(request: Request, { params }: RouteParams) {
       },
     });
   } catch (error) {
-    console.error("[Assets Duplicate API] Error:", error);
+    log.error("Duplicate error", { error });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to duplicate asset" },
       { status: 500 }

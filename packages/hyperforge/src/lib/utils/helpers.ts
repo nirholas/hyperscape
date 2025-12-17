@@ -17,34 +17,8 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * Retry a function with exponential backoff
- */
-export async function retry<T>(
-  fn: () => Promise<T>,
-  maxRetries: number = 3,
-  initialDelay: number = 1000,
-): Promise<T> {
-  if (maxRetries <= 0) {
-    throw new Error("maxRetries must be greater than 0");
-  }
-
-  let lastError: Error = new Error("Retry failed");
-
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      return await fn();
-    } catch (error) {
-      lastError = error as Error;
-      if (i < maxRetries - 1) {
-        const delay = initialDelay * Math.pow(2, i);
-        await sleep(delay);
-      }
-    }
-  }
-
-  throw lastError;
-}
+// NOTE: Retry functionality has been consolidated into retryFetch() in api.ts
+// Use retryFetch() for all retry needs - it has more features (shouldRetry callback, maxDelay cap)
 
 /**
  * Format bytes to human readable string

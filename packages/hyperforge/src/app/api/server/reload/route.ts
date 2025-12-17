@@ -6,6 +6,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exec } from "child_process";
 import { promisify } from "util";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:server:reload");
 
 const execAsync = promisify(exec);
 
@@ -92,7 +95,7 @@ export async function POST(request: NextRequest) {
       throw killError;
     }
   } catch (error) {
-    console.error("[Server Reload API] Error:", error);
+    log.error("Reload error:", error);
     return NextResponse.json(
       {
         error:
@@ -135,7 +138,7 @@ export async function GET() {
       },
     });
   } catch (error) {
-    console.error("[Server Reload API] Status error:", error);
+    log.error("Status error:", error);
     return NextResponse.json(
       {
         error:

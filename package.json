@@ -102,6 +102,10 @@
   },
   "packageManager": "bun@1.1.38",
   "lint-staged": {
+    "packages/hyperforge/**/*.{ts,tsx}": [
+      "eslint --fix --max-warnings=0",
+      "prettier --write"
+    ],
     "*.{ts,tsx}": "prettier --write",
     "*.{js,jsx}": "prettier --write"
   },

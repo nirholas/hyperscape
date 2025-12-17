@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import {
   Image as ImageIcon,
   Palette,
@@ -17,7 +18,9 @@ import {
 } from "lucide-react";
 import { StudioPageLayout } from "@/components/layout/StudioPageLayout";
 import { SpectacularButton } from "@/components/ui/spectacular-button";
-import { cn } from "@/lib/utils";
+import { cn, logger } from "@/lib/utils";
+
+const log = logger.child("ImageLibraryPage");
 
 interface GeneratedImage {
   id: string;
@@ -54,7 +57,7 @@ export default function ImageLibraryPage() {
         setImages(data.images || []);
       }
     } catch (error) {
-      console.error("Failed to fetch images:", error);
+      log.error("Failed to fetch images:", error);
     } finally {
       setIsLoading(false);
     }
@@ -86,7 +89,7 @@ export default function ImageLibraryPage() {
         if (selectedImage?.id === id) setSelectedImage(null);
       }
     } catch (error) {
-      console.error("Failed to delete image:", error);
+      log.error("Failed to delete image:", error);
     } finally {
       setIsDeleting(null);
     }
@@ -104,7 +107,7 @@ export default function ImageLibraryPage() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (error) {
-      console.error("Failed to download image:", error);
+      log.error("Failed to download image:", error);
     }
   };
 
@@ -288,10 +291,12 @@ export default function ImageLibraryPage() {
                       className="group relative aspect-square rounded-lg overflow-hidden border border-glass-border bg-glass-bg hover:border-pink-500/50 transition-all cursor-pointer"
                       onClick={() => setSelectedImage(image)}
                     >
-                      <img
+                      <Image
                         src={image.thumbnailUrl || image.url}
                         alt={image.filename}
-                        className="w-full h-full object-cover"
+                        fill
+                        className="object-cover"
+                        unoptimized
                       />
 
                       {/* Overlay */}
@@ -374,10 +379,13 @@ export default function ImageLibraryPage() {
               </button>
             </div>
 
-            <img
+            <Image
               src={selectedImage.url}
               alt={selectedImage.filename}
+              width={1200}
+              height={800}
               className="max-w-full max-h-[70vh] object-contain"
+              unoptimized
             />
 
             <div className="p-4 border-t border-glass-border">

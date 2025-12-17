@@ -601,3 +601,4 @@ const sfx = await generateSoundEffect({ text: "sword swing", durationSeconds: 1 
 ```typescript
 const music = await generateMusic({ prompt: "epic battle", durationMs: 60000 });
 ```
+

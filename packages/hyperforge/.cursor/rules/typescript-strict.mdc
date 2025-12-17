@@ -1,0 +1,298 @@
+---
+alwaysApply: true
+---
+# TypeScript Strict Typing Rules - HyperForge
+
+HyperForge enforces the strictest TypeScript standards. NO `any` types are allowed.
+
+## Core Rules
+
+### 1. NO `any` Type - EVER
+- `any` is banned by ESLint as an **error** (not warning)
+- Commits with `any` will be **blocked** by pre-commit hooks
+- Use `unknown` with proper type guards if type is truly unknown
+
+```typescript
+// ❌ FORBIDDEN - Will fail lint and block commit
+function processData(data: any) { ... }
+const result = response as any;
+const items: any[] = [];
+
+// ✅ CORRECT - Use specific types
+function processData(data: AssetGenerationResult) { ... }
+const result = response as GenerationResponse;
+const items: Asset[] = [];
+```
+
+### 2. Use `unknown` with Type Guards
+When you genuinely don't know the type (external API, user input):
+
+```typescript
+// ✅ Safe unknown handling
+function handleApiResponse(data: unknown): Asset {
+  // Validate with Zod
+  const parsed = AssetSchema.safeParse(data);
+  if (!parsed.success) {
+    throw new Error(`Invalid data: ${parsed.error.message}`);
+  }
+  return parsed.data;
+}
+
+// ✅ Type guard function
+function isAsset(value: unknown): value is Asset {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'id' in value &&
+    'name' in value &&
+    'type' in value
+  );
+}
+```
+
+### 3. Use Generics for Flexible Code
+```typescript
+// ❌ WRONG
+function fetchData(url: string): Promise<any> { ... }
+
+// ✅ CORRECT - Generic with constraint
+async function fetchData<T extends Record<string, unknown>>(
+  url: string,
+  schema: z.ZodSchema<T>
+): Promise<T> {
+  const response = await fetch(url);
+  const data = await response.json();
+  return schema.parse(data); // Validated at runtime
+}
+```
+
+### 4. Define All Types in `types.ts`
+- Create specific type files: `@/types/assets.ts`, `@/types/generation.ts`
+- Import and reuse types - don't recreate them
+- Use `import type` for type-only imports
+
+```typescript
+// @/types/assets.ts
+export type AssetType = 'model' | 'texture' | 'audio' | 'vrm';
+
+export type Asset = {
+  id: string;
+  name: string;
+  type: AssetType;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  url?: string;
+  thumbnailUrl?: string;
+  createdAt: Date;
+};
+
+export type AssetGenerationParams = {
+  prompt: string;
+  type: AssetType;
+  style?: string;
+  quality?: 'draft' | 'standard' | 'high';
+};
+
+// Usage in other files
+import type { Asset, AssetGenerationParams } from '@/types/assets';
+```
+
+### 5. Zod for Runtime Validation
+Always validate external data with Zod:
+
+```typescript
+import { z } from 'zod';
+
+// Define schemas that match your types
+export const AssetSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  type: z.enum(['model', 'texture', 'audio', 'vrm']),
+  status: z.enum(['pending', 'processing', 'completed', 'failed']),
+  url: z.string().url().optional(),
+  thumbnailUrl: z.string().url().optional(),
+  createdAt: z.coerce.date(),
+});
+
+// Type is inferred from schema
+export type Asset = z.infer<typeof AssetSchema>;
+
+// Server Action with validation
+'use server'
+export async function createAsset(formData: FormData): Promise<ActionResult> {
+  const parsed = AssetSchema.safeParse({
+    name: formData.get('name'),
+    type: formData.get('type'),
+    // ...
+  });
+  
+  if (!parsed.success) {
+    return { success: false, errors: parsed.error.flatten() };
+  }
+  
+  // parsed.data is fully typed
+  const asset = await db.assets.create(parsed.data);
+}
+```
+
+### 6. React Component Props
+Always define prop types explicitly:
+
+```typescript
+// ✅ Explicit props type
+type AssetCardProps = {
+  asset: Asset;
+  onSelect?: (asset: Asset) => void;
+  showActions?: boolean;
+};
+
+export function AssetCard({ asset, onSelect, showActions = true }: AssetCardProps) {
+  // ...
+}
+
+// ✅ For components with children
+type LayoutProps = {
+  children: React.ReactNode;
+  title: string;
+};
+
+export function Layout({ children, title }: LayoutProps) {
+  // ...
+}
+```
+
+### 7. Event Handlers
+Always type event handlers:
+
+```typescript
+// ✅ Form events
+const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  e.preventDefault();
+  // ...
+};
+
+// ✅ Input events
+const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  setValue(e.target.value);
+};
+
+// ✅ Custom event data
+type AssetSelectEvent = {
+  asset: Asset;
+  action: 'select' | 'preview' | 'download';
+};
+
+const handleAssetAction = (event: AssetSelectEvent) => {
+  // Fully typed
+};
+```
+
+### 8. API Response Types
+Define types for all API responses:
+
+```typescript
+// API response wrapper
+type ApiResponse<T> = 
+  | { success: true; data: T }
+  | { success: false; error: string };
+
+// Specific responses
+type GenerationStatusResponse = ApiResponse<{
+  taskId: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  progress: number;
+  result?: Asset;
+}>;
+
+// Usage
+async function checkStatus(taskId: string): Promise<GenerationStatusResponse> {
+  const res = await fetch(`/api/status/${taskId}`);
+  return res.json(); // Should be validated with Zod in production
+}
+```
+
+### 9. Error Handling - No `any` in Catch
+```typescript
+// ❌ WRONG
+try {
+  await generateAsset(params);
+} catch (error: any) {
+  console.log(error.message); // Unsafe
+}
+
+// ✅ CORRECT
+try {
+  await generateAsset(params);
+} catch (error) {
+  if (error instanceof Error) {
+    console.log(error.message);
+  } else {
+    console.log('Unknown error:', String(error));
+  }
+}
+
+// ✅ Or use a utility
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  return 'An unknown error occurred';
+}
+```
+
+### 10. Third-Party Library Types
+When library types are incomplete:
+
+```typescript
+// ❌ WRONG - Don't reach for any
+const result = thirdPartyLib.doSomething() as any;
+
+// ✅ CORRECT - Extend or declare types
+declare module 'some-library' {
+  export interface SomeResult {
+    id: string;
+    data: Record<string, unknown>;
+  }
+}
+
+// Or create a typed wrapper
+type ThirdPartyResult = {
+  id: string;
+  data: Record<string, unknown>;
+};
+
+function wrappedDoSomething(): ThirdPartyResult {
+  return thirdPartyLib.doSomething() as ThirdPartyResult;
+}
+```
+
+## Forbidden Patterns
+
+- ❌ `any` - anywhere, anytime
+- ❌ `as any` - casting to any
+- ❌ `as unknown as any` - double casting
+- ❌ `: any` - parameter or return types
+- ❌ `any[]` - any arrays
+- ❌ `Record<string, any>` - any in records
+- ❌ `Function` type - use specific signatures
+- ❌ `Object` type - use specific types
+- ❌ `{}` type - use `Record<string, unknown>`
+
+## Required Patterns
+
+- ✅ Explicit return types on exported functions
+- ✅ Zod validation for external data
+- ✅ Type imports: `import type { ... }`
+- ✅ Generic constraints: `<T extends BaseType>`
+- ✅ Discriminated unions for variant types
+- ✅ Non-null assertions only when 100% certain: `value!`
+- ✅ Type predicates: `function isX(v): v is X`
+
+## Pre-commit Hook
+
+Commits to HyperForge are blocked if ESLint finds `any` violations:
+
+```
+✖ eslint --fix --max-warnings=0 failed
+  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+```
+
+Fix the types before committing!

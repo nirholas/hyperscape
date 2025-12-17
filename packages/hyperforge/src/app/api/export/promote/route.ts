@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:promote");
 
 const SERVER_ASSETS_PATH = path.resolve(
   process.cwd(),
@@ -99,7 +102,7 @@ export async function POST(request: NextRequest) {
       manifestFile,
     });
   } catch (error) {
-    console.error("[Promote] Failed:", error);
+    log.error({ error }, "Promote failed");
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Promote failed" },
       { status: 500 },

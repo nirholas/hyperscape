@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import {
   Sparkles,
   Package,
@@ -14,7 +15,6 @@ import {
   ChevronDown,
   ChevronUp,
   Loader2,
-  Camera,
   Box,
   Check,
   Library,
@@ -26,8 +26,9 @@ import {
 import { GlassPanel } from "@/components/ui/glass-panel";
 import { SpectacularButton } from "@/components/ui/spectacular-button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Slider } from "@/components/ui/slider";
-import { cn } from "@/lib/utils";
+import { cn, logger } from "@/lib/utils";
+
+const log = logger.child("GeneratePage");
 
 // Types for prompts
 interface StyleDefinition {
@@ -154,7 +155,7 @@ export default function GeneratePage() {
         setAssetTypePrompts(types);
         setMaterialPresets(materials);
       } catch (error) {
-        console.error("Failed to load prompts:", error);
+        log.error({ error }, "Failed to load prompts");
       }
     }
     loadPrompts();
@@ -265,11 +266,9 @@ export default function GeneratePage() {
         if (uploadResponse.ok) {
           const uploadResult = await uploadResponse.json();
           referenceImageUrl = uploadResult.url;
-          console.log("Reference image uploaded:", referenceImageUrl);
+          log.info({ referenceImageUrl }, "Reference image uploaded");
         } else {
-          console.warn(
-            "Failed to upload reference image, continuing without it",
-          );
+          log.warn("Failed to upload reference image, continuing without it");
         }
       }
 
@@ -330,6 +329,7 @@ export default function GeneratePage() {
 
       if (reader) {
         let buffer = "";
+
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -363,7 +363,7 @@ export default function GeneratePage() {
                     setProgressPercent(progressValue);
                 } else if (data.type === "complete") {
                   const result = data.result;
-                  console.log("Generation complete:", result);
+                  log.info({ result }, "Generation complete");
 
                   // Store result info for navigation
                   if (result.metadata?.assetId) {
@@ -382,14 +382,14 @@ export default function GeneratePage() {
                   throw new Error(data.error);
                 }
               } catch (e) {
-                console.warn("Failed to parse SSE data:", line, e);
+                log.warn({ line, error: e }, "Failed to parse SSE data");
               }
             }
           }
         }
       }
     } catch (error) {
-      console.error("Generation failed:", error);
+      log.error({ error }, "Generation failed");
       setIsGenerating(false);
       setActiveView("config");
       alert(
@@ -522,7 +522,7 @@ export default function GeneratePage() {
         alert("Failed to generate concept art");
       }
     } catch (error) {
-      console.error("Concept art generation failed:", error);
+      log.error({ error }, "Concept art generation failed");
       alert("Failed to generate concept art");
     } finally {
       setIsGeneratingConceptArt(false);
@@ -708,14 +708,16 @@ export default function GeneratePage() {
                   {(referenceImagePreview || generatedConceptArtUrl) && (
                     <div className="mb-4">
                       <div className="relative aspect-video rounded-lg overflow-hidden border border-glass-border bg-glass-bg">
-                        <img
+                        <Image
                           src={
                             referenceImagePreview ||
                             generatedConceptArtUrl ||
                             ""
                           }
                           alt="Reference image"
-                          className="w-full h-full object-contain"
+                          fill
+                          className="object-contain"
+                          unoptimized
                         />
                         <button
                           onClick={() => {

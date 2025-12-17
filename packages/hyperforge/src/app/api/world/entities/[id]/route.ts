@@ -6,6 +6,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:world:entity");
 
 const SERVER_WORLD_DIR =
   process.env.HYPERSCAPE_WORLD_DIR ||
@@ -17,6 +20,11 @@ interface WorldEntity {
   id: string;
   name: string;
   type: string;
+  position?: [number, number, number];
+  rotation?: [number, number, number];
+  scale?: [number, number, number];
+  blueprint?: string;
+  data?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -44,6 +52,20 @@ interface RouteParams {
 }
 
 /**
+ * Request body for PATCH /api/world/entities/[id]
+ * Allows partial updates to entity properties
+ */
+interface EntityUpdateRequest {
+  name?: string;
+  type?: string;
+  blueprint?: string;
+  position?: { x?: number; y?: number; z?: number };
+  rotation?: { x?: number; y?: number; z?: number };
+  scale?: { x?: number; y?: number; z?: number };
+  data?: Record<string, unknown>;
+}
+
+/**
  * GET /api/world/entities/[id]
  * Get a single entity by ID
  */
@@ -59,7 +81,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     return NextResponse.json({ success: true, entity });
   } catch (error) {
-    console.error("[World Entity API] GET error:", error);
+    log.error("GET error:", error);
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Failed to get entity",
@@ -94,7 +116,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       remainingCount: config.entities.length,
     });
   } catch (error) {
-    console.error("[World Entity API] DELETE error:", error);
+    log.error("DELETE error:", error);
     return NextResponse.json(
       {
         error:
@@ -112,7 +134,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const updates = await request.json();
+    const updates = (await request.json()) as EntityUpdateRequest;
 
     const config = await readWorldConfig();
     const entityIndex = config.entities.findIndex((e) => e.id === id);
@@ -148,7 +170,10 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     if (updates.name) entity.name = updates.name;
     if (updates.type) entity.type = updates.type;
     if (updates.blueprint) entity.blueprint = updates.blueprint;
-    if (updates.data) entity.data = { ...entity.data, ...updates.data };
+    if (updates.data) {
+      const existingData = (entity.data || {}) as Record<string, unknown>;
+      entity.data = { ...existingData, ...updates.data };
+    }
 
     config.entities[entityIndex] = entity;
     await writeWorldConfig(config);
@@ -159,7 +184,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       entity,
     });
   } catch (error) {
-    console.error("[World Entity API] PATCH error:", error);
+    log.error("PATCH error:", error);
     return NextResponse.json(
       {
         error:

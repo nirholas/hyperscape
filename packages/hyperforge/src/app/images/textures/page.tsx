@@ -13,7 +13,9 @@ import {
 } from "lucide-react";
 import { StudioPageLayout } from "@/components/layout/StudioPageLayout";
 import { SpectacularButton } from "@/components/ui/spectacular-button";
-import { cn } from "@/lib/utils";
+import { cn, logger } from "@/lib/utils";
+
+const log = logger.child("TexturesPage");
 
 type TextureStyle = "realistic" | "stylized" | "painted" | "procedural";
 type TextureType =
@@ -138,7 +140,7 @@ export default function TexturesPage() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (error) {
-      console.error("Failed to download:", error);
+      log.error("Failed to download:", error);
     }
   };
 

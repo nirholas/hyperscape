@@ -5,12 +5,33 @@
 
 import * as THREE from "three";
 import type { Object3D } from "three";
+import type { GLTFExtensionData } from "@/types/service-types";
+
+/**
+ * Type for the GLTF parser's JSON structure
+ */
+interface GLTFParserJson {
+  extensions?: {
+    VRMC_vrm?: GLTFExtensionData;
+    [key: string]: GLTFExtensionData | undefined;
+  };
+}
+
+/**
+ * Type for GLTF parser with json property
+ */
+interface GLTFParser {
+  json?: GLTFParserJson;
+}
 
 /**
  * Check if a loaded GLTF/GLB model has VRM extensions
  * VRM models have the VRMC_vrm extension in their glTF JSON
  */
-export function isVRMModel(gltf: { scene: Object3D; parser?: any }): boolean {
+export function isVRMModel(gltf: {
+  scene: Object3D;
+  parser?: GLTFParser;
+}): boolean {
   // Check if the parser has VRM extension data
   if (gltf.parser?.json?.extensions?.VRMC_vrm) {
     return true;
@@ -63,7 +84,7 @@ export function isVRMUrl(url: string): boolean {
  * Validate that a model is VRM format for equipment/weapon fitting
  */
 export function validateVRMForFitting(
-  model: Object3D | { scene: Object3D; parser?: any },
+  model: Object3D | { scene: Object3D; parser?: GLTFParser },
   modelUrl?: string,
 ): { isValid: boolean; error?: string } {
   // Check URL first (fastest check)

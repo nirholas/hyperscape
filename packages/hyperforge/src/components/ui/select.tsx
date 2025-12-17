@@ -4,20 +4,22 @@ import { useState, useRef, useEffect } from "react";
 import { GlassPanel } from "./glass-panel";
 import { ChevronDown, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion as _motion } from "framer-motion";
 
 interface Option {
   value: string;
   label: string;
 }
 
-interface SelectProps {
+export interface SelectProps {
   value: string;
   onChange: (value: string) => void;
   options: Option[];
   placeholder?: string;
   label?: string;
   openUp?: boolean; // Open dropdown upward instead of downward
+  className?: string;
+  disabled?: boolean;
 }
 
 export function Select({
@@ -27,6 +29,8 @@ export function Select({
   placeholder = "Select option...",
   label,
   openUp = false,
+  className,
+  disabled = false,
 }: SelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -48,7 +52,10 @@ export function Select({
   const selectedOption = options.find((opt) => opt.value === value);
 
   return (
-    <div className="w-full flex flex-col gap-1.5" ref={containerRef}>
+    <div
+      className={cn("w-full flex flex-col gap-1.5", className)}
+      ref={containerRef}
+    >
       {label && (
         <label className="text-xs text-muted uppercase tracking-wider font-semibold ml-1">
           {label}
@@ -57,11 +64,13 @@ export function Select({
       <div className="relative">
         <button
           type="button"
-          onClick={() => setIsOpen(!isOpen)}
+          onClick={() => !disabled && setIsOpen(!isOpen)}
+          disabled={disabled}
           className={cn(
             "flex items-center justify-between w-full h-10 px-3 py-2 rounded-md border border-input bg-glass-bg/50 text-sm text-left transition-all",
             "focus:outline-none focus:border-neon-blue focus:ring-1 focus:ring-neon-blue/50",
             isOpen && "border-neon-blue ring-1 ring-neon-blue/50",
+            disabled && "opacity-50 cursor-not-allowed",
           )}
         >
           <span

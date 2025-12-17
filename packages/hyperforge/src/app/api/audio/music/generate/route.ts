@@ -13,7 +13,10 @@ import {
   uploadAudio,
   isSupabaseConfigured,
 } from "@/lib/storage/supabase-storage";
+import { logger } from "@/lib/utils";
 import type { MusicAsset, MusicCategory } from "@/types/audio";
+
+const log = logger.child("API:audio/music/generate");
 
 export async function POST(request: NextRequest) {
   try {
@@ -45,7 +48,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log("[API] Generating music:", {
+    log.info("Generating music", {
       prompt: effectivePrompt.substring(0, 50) + "...",
       category,
       durationMs,
@@ -98,15 +101,12 @@ export async function POST(request: NextRequest) {
           );
           if (uploadResult.success) {
             asset.url = uploadResult.url;
-            console.log("[API] Music saved to Supabase:", uploadResult.url);
+            log.info("Music saved to Supabase", { url: uploadResult.url });
           } else {
             throw new Error(uploadResult.error || "Upload failed");
           }
         } catch (error) {
-          console.warn(
-            "[API] Supabase upload failed, falling back to local:",
-            error,
-          );
+          log.warn("Supabase upload failed, falling back to local", { error });
           // Fall through to local storage
         }
       }
@@ -127,7 +127,7 @@ export async function POST(request: NextRequest) {
 
         asset.url = `/api/audio/file/music/${category}/${filename}`;
 
-        console.log("[API] Music saved locally:", filepath);
+        log.info("Music saved locally", { filepath });
       }
     }
 
@@ -140,7 +140,7 @@ export async function POST(request: NextRequest) {
       audio: `data:audio/mp3;base64,${audioBase64}`,
     });
   } catch (error) {
-    console.error("[API] Music generation error:", error);
+    log.error("Music generation error", { error });
 
     if (
       error instanceof Error &&
@@ -177,7 +177,7 @@ export async function GET() {
   return NextResponse.json({ presets });
 }
 
-function generateMusicId(name?: string, category?: string): string {
+function generateMusicId(name?: string, _category?: string): string {
   const timestamp = Date.now().toString(36);
   const safeName = name
     ? name

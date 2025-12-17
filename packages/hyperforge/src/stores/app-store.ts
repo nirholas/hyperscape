@@ -52,7 +52,7 @@ interface AppState {
   closePropertiesPanel: () => void;
 }
 
-export const useAppStore = create<AppState>((set, get) => ({
+export const useAppStore = create<AppState>((set, _get) => ({
   // Module state
   activeModule: "library",
   setActiveModule: (module) => {

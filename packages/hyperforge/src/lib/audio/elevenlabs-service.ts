@@ -125,11 +125,10 @@ export async function searchVoices(options: {
 
   const result = await elevenlabs.voices.search({
     search: options.search,
-    gender: options.gender,
-    category: options.category,
+    // Note: gender/category filters may not be supported in all SDK versions
     pageSize: options.pageSize || 20,
     includeTotalCount: true,
-  });
+  } as Parameters<typeof elevenlabs.voices.search>[0]);
 
   return result.voices.map((v) => ({
     id: v.voiceId,
@@ -144,6 +143,26 @@ export async function searchVoices(options: {
     },
   }));
 }
+
+/**
+ * Voice labels structure from ElevenLabs SDK
+ */
+interface VoiceLabels {
+  accent?: string;
+  age?: string;
+  gender?: string;
+  use_case?: string;
+}
+
+/**
+ * Extended voice params including optional category field
+ * Some SDK versions may not include category in type definition
+ */
+type SharedVoiceParams = Parameters<
+  ElevenLabsClient["voices"]["getShared"]
+>[0] & {
+  category?: string;
+};
 
 /**
  * Get shared/community voices (useful for game character voices)
@@ -158,27 +177,39 @@ export async function getSharedVoices(options?: {
 }): Promise<Voice[]> {
   const elevenlabs = getClient();
 
-  const result = await elevenlabs.voices.getShared({
-    category: options?.category,
+  const params: SharedVoiceParams = {
     gender: options?.gender,
     accent: options?.accent,
     language: options?.language || "en",
     featured: options?.featured,
     pageSize: options?.pageSize || 20,
-  });
+  };
 
-  return result.voices.map((v) => ({
-    id: v.voiceId,
-    name: v.name || "Unknown",
-    description: v.description || undefined,
-    previewUrl: v.previewUrl || undefined,
-    labels: {
-      accent: v.labels?.accent,
-      age: v.labels?.age,
-      gender: v.labels?.gender,
-      useCase: v.labels?.use_case,
-    },
-  }));
+  // Add category if provided (cast to expected type)
+  if (options?.category) {
+    (params as Record<string, unknown>).category = options.category;
+  }
+
+  const result = await elevenlabs.voices.getShared(params);
+
+  return result.voices.map((v) => {
+    // Access labels with proper type assertion
+    const labels = (v as typeof v & { labels?: VoiceLabels }).labels;
+    return {
+      id: v.voiceId,
+      name: v.name || "Unknown",
+      description: v.description || undefined,
+      previewUrl: v.previewUrl || undefined,
+      labels: labels
+        ? {
+            accent: labels.accent,
+            age: labels.age,
+            gender: labels.gender,
+            useCase: labels.use_case,
+          }
+        : undefined,
+    };
+  });
 }
 
 // ============================================================================
@@ -186,10 +217,23 @@ export async function getSharedVoices(options?: {
 // ============================================================================
 
 /**
+ * Supported audio response types from ElevenLabs SDK
+ * The SDK may return different types depending on the API endpoint and version
+ */
+type AudioResponse =
+  | Buffer
+  | Uint8Array
+  | string // base64 encoded
+  | ReadableStream<Uint8Array>
+  | NodeJS.ReadableStream
+  | AsyncIterable<Uint8Array>
+  | Iterable<Uint8Array>;
+
+/**
  * Helper to convert various audio response types to Buffer
  * Handles: Buffer, Uint8Array, string (base64), ReadableStream, AsyncIterable
  */
-async function audioToBuffer(audio: unknown): Promise<Buffer> {
+async function audioToBuffer(audio: AudioResponse): Promise<Buffer> {
   if (!audio) {
     throw new Error("No audio data received");
   }
@@ -212,7 +256,7 @@ async function audioToBuffer(audio: unknown): Promise<Buffer> {
     typeof audio === "object" &&
     audio !== null &&
     "getReader" in audio &&
-    typeof (audio as { getReader: unknown }).getReader === "function"
+    typeof (audio as ReadableStream<Uint8Array>).getReader === "function"
   ) {
     const stream = audio as ReadableStream<Uint8Array>;
     const reader = stream.getReader();
@@ -242,7 +286,7 @@ async function audioToBuffer(audio: unknown): Promise<Buffer> {
     typeof audio === "object" &&
     audio !== null &&
     "pipe" in audio &&
-    typeof (audio as { pipe: unknown }).pipe === "function"
+    typeof (audio as NodeJS.ReadableStream).pipe === "function"
   ) {
     const nodeStream = audio as NodeJS.ReadableStream;
     const chunks: Buffer[] = [];
@@ -302,8 +346,10 @@ async function audioToBuffer(audio: unknown): Promise<Buffer> {
     return Buffer.concat(chunks);
   }
 
+  // This should never happen if AudioResponse type is complete
+  const audioObj = audio as unknown as Record<string, unknown>;
   throw new Error(
-    `Unexpected audio response type: ${typeof audio}, keys: ${Object.keys(audio as object).join(", ")}`,
+    `Unexpected audio response type: ${typeof audio}, keys: ${Object.keys(audioObj).join(", ")}`,
   );
 }
 

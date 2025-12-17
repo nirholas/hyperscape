@@ -6,7 +6,12 @@
  */
 
 import * as THREE from "three";
-import type { SkinnedMesh, Bone, Object3D } from "three";
+import type { Bone, Object3D } from "three";
+
+import { logger } from "@/lib/utils";
+import { validateVRMForFitting } from "@/lib/utils/vrm-detection";
+
+const log = logger.child("WeaponFittingService");
 
 export interface WeaponAttachmentOptions {
   equipmentSlot?: "Hand_R" | "Hand_L" | "RightHand" | "LeftHand";
@@ -103,7 +108,6 @@ export class WeaponFittingService {
     characterModelUrl?: string,
   ): WeaponAttachmentResult {
     // Validate character is VRM format
-    const { validateVRMForFitting } = require("@/lib/utils/vrm-detection");
     const validation = validateVRMForFitting(character, characterModelUrl);
 
     if (!validation.isValid) {
@@ -120,14 +124,14 @@ export class WeaponFittingService {
       defaultOffsets,
     } = options;
 
-    console.log(`⚔️ Attaching weapon to ${equipmentSlot}`);
+    log.info(`Attaching weapon to ${equipmentSlot}`);
 
     // Find target bone
     const boneNames = BONE_MAPPING[equipmentSlot] || BONE_MAPPING["Hand_R"];
     const targetBone = this.findBone(character, boneNames);
 
     if (!targetBone) {
-      console.warn(`⚠️ Could not find target bone for slot: ${equipmentSlot}`);
+      log.warn(`Could not find target bone for slot: ${equipmentSlot}`);
       // Return weapon as-is with metadata
       return {
         attachedWeapon: weapon as THREE.Group,
@@ -191,7 +195,7 @@ export class WeaponFittingService {
     // Map to VRM bone name
     const vrmBoneName = isRightHand ? "rightHand" : "leftHand";
 
-    console.log(`✅ Weapon attached to ${vrmBoneName}`);
+    log.info(`Weapon attached to ${vrmBoneName}`);
 
     return {
       attachedWeapon: wrapper,

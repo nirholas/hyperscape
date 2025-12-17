@@ -41,7 +41,7 @@ export function ViewportControls({
   onToggleTheme,
   onRefresh,
   onCapture,
-  onSettings,
+  onSettings: _onSettings,
 }: ViewportControlsProps) {
   // Show action buttons only for non-VRM assets
   const showAssetActions = !isVRM;

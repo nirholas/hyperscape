@@ -15,6 +15,9 @@ import type {
 } from "./types";
 import path from "path";
 import fs from "fs/promises";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("CDNLoader");
 
 const CDN_URL = process.env.NEXT_PUBLIC_CDN_URL || "http://localhost:8080";
 
@@ -47,7 +50,7 @@ async function loadManifestFromFS<T>(filename: string): Promise<T[]> {
     const content = await fs.readFile(filePath, "utf-8");
     return JSON.parse(content) as T[];
   } catch (error) {
-    console.warn(`[CDNLoader] Could not read ${filename}:`, error);
+    log.warn(`Could not read ${filename}`, { error });
     return [];
   }
 }
@@ -63,7 +66,7 @@ async function loadManifestFromCDN<T>(filename: string): Promise<T[]> {
     }
     return res.json() as Promise<T[]>;
   } catch (error) {
-    console.warn(`[CDNLoader] Could not fetch ${filename}:`, error);
+    log.warn(`Could not fetch ${filename}`, { error });
     return [];
   }
 }
@@ -253,7 +256,7 @@ async function loadVRMAvatars(): Promise<CDNAsset[]> {
       };
     });
   } catch (error) {
-    console.warn("[CDNLoader] Could not load VRM avatars:", error);
+    log.warn("Could not load VRM avatars", { error });
     return [];
   }
 }
@@ -288,7 +291,7 @@ async function loadEmotes(): Promise<CDNAsset[]> {
       };
     });
   } catch (error) {
-    console.warn("[CDNLoader] Could not load emotes:", error);
+    log.warn("Could not load emotes", { error });
     return [];
   }
 }

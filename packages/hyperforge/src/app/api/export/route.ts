@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:export");
 
 // Server assets paths
 const SERVER_ASSETS_PATH = path.resolve(
@@ -180,7 +183,7 @@ export async function POST(request: NextRequest) {
       serverMetadata,
     });
   } catch (error) {
-    console.error("[Export] Failed:", error);
+    log.error({ error }, "Export failed");
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Export failed" },
       { status: 500 },
@@ -208,7 +211,7 @@ async function addToManifest(
     // Check if entry already exists
     const existingIndex = manifest.findIndex((m) => m.id === targetId);
     if (existingIndex >= 0) {
-      console.log(`[Export] Updating existing manifest entry: ${targetId}`);
+      log.debug({ targetId }, "Updating existing manifest entry");
       manifest[existingIndex] = createManifestEntry(
         targetType,
         targetId,
@@ -216,7 +219,7 @@ async function addToManifest(
         metadata,
       );
     } else {
-      console.log(`[Export] Adding new manifest entry: ${targetId}`);
+      log.debug({ targetId }, "Adding new manifest entry");
       manifest.push(
         createManifestEntry(targetType, targetId, entry!, metadata),
       );
@@ -226,7 +229,7 @@ async function addToManifest(
     await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
     return true;
   } catch (error) {
-    console.error(`[Export] Failed to update manifest:`, error);
+    log.error({ error }, "Failed to update manifest");
     return false;
   }
 }
@@ -350,7 +353,7 @@ export async function GET() {
 
     return NextResponse.json(drafts);
   } catch (error) {
-    console.error("[Export] Failed to list drafts:", error);
+    log.error({ error }, "Failed to list drafts");
     return NextResponse.json(
       { error: "Failed to list exported assets" },
       { status: 500 },

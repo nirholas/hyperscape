@@ -9,8 +9,11 @@ import "@tensorflow/tfjs-backend-webgl";
 import "@mediapipe/hands";
 import * as THREE from "three";
 
-import { HAND_LANDMARKS, FINGER_JOINTS } from "../../constants";
-import { TensorFlowHand, TensorFlowKeypoint } from "../../types/service-types";
+import { HAND_LANDMARKS, FINGER_JOINTS } from "@/constants";
+import { logger } from "@/lib/utils";
+import type { TensorFlowHand, TensorFlowKeypoint } from "@/types";
+
+const log = logger.child("HandPoseDetectionService");
 
 export interface Point2D {
   x: number;
@@ -54,12 +57,12 @@ export class HandPoseDetectionService {
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
 
-    console.log("🤖 Initializing hand pose detection...");
+    log.info("🤖 Initializing hand pose detection...");
 
     try {
       // Wait for TensorFlow.js to be ready
       await tf.ready();
-      console.log("✅ TensorFlow.js ready, backend:", tf.getBackend());
+      log.info("✅ TensorFlow.js ready, backend:", tf.getBackend());
 
       // Create the detector with MediaPipe Hands
       const model = handPoseDetection.SupportedModels.MediaPipeHands;
@@ -77,9 +80,9 @@ export class HandPoseDetectionService {
       );
       this.isInitialized = true;
 
-      console.log("✅ Hand pose detector initialized");
+      log.info("✅ Hand pose detector initialized");
     } catch (error) {
-      console.error("❌ Failed to initialize hand pose detection:", error);
+      log.error("❌ Failed to initialize hand pose detection:", error);
       throw error;
     }
   }
@@ -143,10 +146,10 @@ export class HandPoseDetectionService {
         imageHeight: input.height,
       };
 
-      console.log(`🤚 Detected ${result.hands.length} hand(s)`);
+      log.info(`🤚 Detected ${result.hands.length} hand(s)`);
       return result;
     } catch (error) {
-      console.error("❌ Hand detection failed:", error);
+      log.error("❌ Hand detection failed:", error);
       throw error;
     }
   }

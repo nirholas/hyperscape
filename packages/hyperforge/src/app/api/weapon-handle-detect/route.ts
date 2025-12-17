@@ -4,6 +4,9 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:weapon-handle-detect");
 
 // OpenAI API for vision-based grip detection
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -19,7 +22,7 @@ export async function POST(request: NextRequest) {
 
     // If no API key, use heuristic detection
     if (!OPENAI_API_KEY) {
-      console.log("[Handle Detection] No API key, using heuristic detection");
+      log.info("No API key, using heuristic detection");
       return NextResponse.json({
         success: true,
         gripData: await detectGripHeuristic(image),
@@ -83,8 +86,8 @@ Respond with ONLY a JSON object (no markdown, no explanation):
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      console.error("[Handle Detection] OpenAI API error:", error);
+      const errorText = await response.text();
+      log.error({ error: errorText }, "OpenAI API error");
       // Fallback to heuristic
       return NextResponse.json({
         success: true,
@@ -96,7 +99,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
     const content = result.choices?.[0]?.message?.content;
 
     if (!content) {
-      console.error("[Handle Detection] Empty response from OpenAI");
+      log.error("Empty response from OpenAI");
       return NextResponse.json({
         success: true,
         gripData: await detectGripHeuristic(image),
@@ -122,21 +125,21 @@ Respond with ONLY a JSON object (no markdown, no explanation):
         gripData.gripBounds.height = maxY - minY;
       }
 
-      console.log("[Handle Detection] AI result:", gripData);
+      log.info({ gripData }, "AI result");
 
       return NextResponse.json({
         success: true,
         gripData,
       });
-    } catch (parseError) {
-      console.error("[Handle Detection] Failed to parse response:", content);
+    } catch (_parseError) {
+      log.error({ content }, "Failed to parse response");
       return NextResponse.json({
         success: true,
         gripData: await detectGripHeuristic(image),
       });
     }
   } catch (error) {
-    console.error("[API] Handle detection failed:", error);
+    log.error({ error }, "Handle detection failed");
     return NextResponse.json(
       {
         error:
@@ -148,7 +151,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
 }
 
 // Heuristic-based grip detection (fallback when no API key)
-async function detectGripHeuristic(image: string): Promise<{
+async function detectGripHeuristic(_image: string): Promise<{
   gripBounds: {
     minX: number;
     minY: number;

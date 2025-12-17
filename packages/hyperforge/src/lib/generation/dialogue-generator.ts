@@ -8,10 +8,12 @@ import { TASK_MODELS } from "@/lib/ai/providers";
 import type {
   DialogueTree,
   DialogueNode,
-  DialogueResponse,
   DialogueGenerationContext,
   GeneratedNPCContent,
 } from "@/types/game/dialogue-types";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("DialogueGenerator");
 
 /**
  * System prompt for dialogue generation
@@ -70,8 +72,8 @@ export async function generateDialogueTree(
   try {
     const dialogueTree = JSON.parse(response.trim()) as DialogueTree;
     return validateAndNormalizeDialogueTree(dialogueTree);
-  } catch (error) {
-    console.error("Failed to parse dialogue tree:", response);
+  } catch (_error) {
+    log.error("Failed to parse dialogue tree", { response });
     throw new Error("Failed to generate valid dialogue tree");
   }
 }
@@ -79,7 +81,9 @@ export async function generateDialogueTree(
 /**
  * Build the prompt for dialogue generation
  */
-function buildDialoguePrompt(context: DialogueGenerationContext): string {
+export function buildDialoguePrompt(
+  context: DialogueGenerationContext,
+): string {
   let prompt = `Generate a dialogue tree for this NPC:
 
 NPC NAME: ${context.npcName}
@@ -128,7 +132,9 @@ Description: ${context.questContext.questDescription}
 /**
  * Validate and normalize a dialogue tree
  */
-function validateAndNormalizeDialogueTree(tree: DialogueTree): DialogueTree {
+export function validateAndNormalizeDialogueTree(
+  tree: DialogueTree,
+): DialogueTree {
   if (!tree.entryNodeId) {
     throw new Error("Dialogue tree missing entryNodeId");
   }
@@ -152,7 +158,7 @@ function validateAndNormalizeDialogueTree(tree: DialogueTree): DialogueTree {
           response.nextNodeId !== "end" &&
           !nodeIds.has(response.nextNodeId)
         ) {
-          console.warn(
+          log.warn(
             `Response references non-existent node "${response.nextNodeId}", changing to "end"`,
           );
           response.nextNodeId = "end";
@@ -196,7 +202,7 @@ export async function generateNPCContent(
 /**
  * Generate NPC backstory
  */
-async function generateNPCBackstory(
+export async function generateNPCBackstory(
   context: DialogueGenerationContext,
 ): Promise<string> {
   const prompt = `Write a brief backstory (2-3 paragraphs) for this NPC in a medieval fantasy MMORPG:
@@ -220,7 +226,7 @@ Write in third person, past tense. Include their history, motivations, and how t
 /**
  * Generate a valid NPC ID from name
  */
-function generateNPCId(name: string): string {
+export function generateNPCId(name: string): string {
   return name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")

@@ -1,6 +1,9 @@
 import * as THREE from "three";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("WeaponHandleDetector");
 
 // Local type definitions for grip detection
 export interface GripBounds {
@@ -83,8 +86,8 @@ export class WeaponHandleDetector {
     modelUrl: string,
     useConsensus: boolean = false,
   ): Promise<HandleDetectionResult> {
-    console.log("🎯 Starting weapon handle detection for:", modelUrl);
-    console.log("Using consensus mode:", useConsensus);
+    log.info("Starting weapon handle detection", { modelUrl });
+    log.debug("Consensus mode", { useConsensus });
 
     // Ensure everything is initialized
     if (!this.scene || !this.camera || !this.renderer || !this.loader) {
@@ -162,7 +165,7 @@ export class WeaponHandleDetector {
     const isValid = gripPoint.x !== 0 || gripPoint.y !== 0 || gripPoint.z !== 0;
 
     if (!isValid) {
-      console.warn("Invalid grip point detected, using fallback position");
+      log.warn("Invalid grip point detected, using fallback position");
 
       // Use a reasonable default based on the detected red box position
       const gripY =
@@ -171,13 +174,17 @@ export class WeaponHandleDetector {
           ((gripData.gripBounds.minY + gripData.gripBounds.maxY) / 2 / 512);
       gripPoint.set(0, gripY, 0);
 
-      console.log("Fallback grip point:", gripPoint);
+      log.debug("Fallback grip point", {
+        x: gripPoint.x,
+        y: gripPoint.y,
+        z: gripPoint.z,
+      });
     }
 
     // Ensure grip point is not too far from the model
     const distanceFromCenter = gripPoint.length();
     if (distanceFromCenter > modelSize.length()) {
-      console.warn("Grip point too far from model center, clamping");
+      log.warn("Grip point too far from model center, clamping");
       gripPoint.multiplyScalar(modelSize.length() / distanceFromCenter);
     }
 
@@ -220,7 +227,7 @@ export class WeaponHandleDetector {
     dimensions: { length: number; width: number; height: number };
     orientationFlipped: boolean;
   }> {
-    console.log("🔧 Exporting normalized weapon...");
+    log.info("Exporting normalized weapon");
 
     // Step 1: Detect grip point using our existing detection
     const detection = await this.detectHandleArea(modelPath, true);
@@ -231,15 +238,19 @@ export class WeaponHandleDetector {
 
     // Step 3: Apply orientation correction if needed
     if (detection.orientationFlipped) {
-      console.log("🔄 Applying orientation correction (180° rotation)");
+      log.info("Applying orientation correction (180° rotation)");
       model.rotateZ(Math.PI);
       model.updateMatrixWorld(true);
     }
 
     // Step 4: Move grip point to origin
-    console.log(
-      `📍 Moving grip point to origin from: ${detection.gripPoint.x.toFixed(3)}, ${detection.gripPoint.y.toFixed(3)}, ${detection.gripPoint.z.toFixed(3)}`,
-    );
+    log.debug("Moving grip point to origin", {
+      from: {
+        x: detection.gripPoint.x.toFixed(3),
+        y: detection.gripPoint.y.toFixed(3),
+        z: detection.gripPoint.z.toFixed(3),
+      },
+    });
     model.position.sub(detection.gripPoint);
     model.updateMatrixWorld(true);
 
@@ -270,9 +281,11 @@ export class WeaponHandleDetector {
     const box = new THREE.Box3().setFromObject(model);
     const size = box.getSize(new THREE.Vector3());
 
-    console.log(
-      `📏 Normalized weapon dimensions: ${size.x.toFixed(3)} x ${size.y.toFixed(3)} x ${size.z.toFixed(3)}`,
-    );
+    log.debug("Normalized weapon dimensions", {
+      x: size.x.toFixed(3),
+      y: size.y.toFixed(3),
+      z: size.z.toFixed(3),
+    });
 
     // Step 7: Export normalized model
     const exporter = new GLTFExporter();
@@ -290,7 +303,7 @@ export class WeaponHandleDetector {
       const buffer = Buffer.from(glb);
       const fs = await import("fs");
       await fs.promises.writeFile(outputPath, buffer);
-      console.log(`💾 Saved normalized weapon to: ${outputPath}`);
+      log.info("Saved normalized weapon", { outputPath });
     }
 
     // Clean up
@@ -309,13 +322,13 @@ export class WeaponHandleDetector {
   }
 
   private async loadModel(modelUrl: string): Promise<THREE.Object3D> {
-    console.log("📦 Loading model from:", modelUrl);
+    log.debug("Loading model", { modelUrl });
 
     try {
       const gltf = await this.loader.loadAsync(modelUrl);
       const model = gltf.scene;
 
-      console.log("✅ Model loaded successfully");
+      log.debug("Model loaded successfully");
 
       // Ensure model has proper structure
       if (!model) {
@@ -330,11 +343,11 @@ export class WeaponHandleDetector {
         }
       });
 
-      console.log(`Model contains ${meshCount} meshes`);
+      log.debug("Model mesh count", { meshCount });
 
       return model;
     } catch (error) {
-      console.error("❌ Failed to load model:", error);
+      log.error("Failed to load model", error);
       throw new Error(
         `Failed to load model: ${error instanceof Error ? error.message : "Unknown error"}`,
       );
@@ -344,7 +357,7 @@ export class WeaponHandleDetector {
   private async setupOrthographicCamera(
     model: THREE.Object3D,
   ): Promise<boolean> {
-    console.log("📐 Setting up orthographic camera for weapon");
+    log.debug("Setting up orthographic camera for weapon");
 
     const box = new THREE.Box3().setFromObject(model);
     const size = new THREE.Vector3();
@@ -352,8 +365,8 @@ export class WeaponHandleDetector {
     const center = new THREE.Vector3();
     box.getCenter(center);
 
-    console.log("Model dimensions:", { x: size.x, y: size.y, z: size.z });
-    console.log("Model center:", { x: center.x, y: center.y, z: center.z });
+    log.debug("Model dimensions", { x: size.x, y: size.y, z: size.z });
+    log.debug("Model center", { x: center.x, y: center.y, z: center.z });
 
     // Center the model at origin first
     model.position.sub(center);
@@ -365,16 +378,19 @@ export class WeaponHandleDetector {
       { axis: "z", size: size.z },
     ].sort((a, b) => b.size - a.size);
 
-    console.log("Longest dimension:", dimensions[0].axis, dimensions[0].size);
+    log.debug("Longest dimension", {
+      axis: dimensions[0].axis,
+      size: dimensions[0].size,
+    });
 
     // Rotate to make vertical if needed
     if (dimensions[0].axis !== "y") {
       if (dimensions[0].axis === "x") {
         model.rotation.z = -Math.PI / 2;
-        console.log("Rotating weapon around Z axis");
+        log.debug("Rotating weapon around Z axis");
       } else if (dimensions[0].axis === "z") {
         model.rotation.x = Math.PI / 2;
-        console.log("Rotating weapon around X axis");
+        log.debug("Rotating weapon around X axis");
       }
 
       // Recalculate bounds after rotation
@@ -438,7 +454,7 @@ export class WeaponHandleDetector {
     const needsFlip = await this.detectWeaponOrientation(canvas);
 
     if (needsFlip) {
-      console.log("🔄 Flipping weapon 180 degrees based on AI detection");
+      log.info("Flipping weapon 180 degrees based on AI detection");
       model.rotation.x += Math.PI;
       model.updateMatrixWorld(true);
 
@@ -450,7 +466,7 @@ export class WeaponHandleDetector {
       return true;
     }
 
-    console.log("Camera setup complete");
+    log.debug("Camera setup complete");
     return false;
   }
 
@@ -495,7 +511,7 @@ export class WeaponHandleDetector {
       ctx.fillText("Bottom Third", 5, 512 - 50);
     }
 
-    console.log("✅ Rendered weapon to canvas");
+    log.debug("Rendered weapon to canvas");
 
     return canvas;
   }
@@ -644,7 +660,7 @@ export class WeaponHandleDetector {
       if (gripData.weaponType === "sword" || gripData.weaponType === "dagger") {
         const swordHandle = this.detectSwordHandle(canvas);
         if (swordHandle) {
-          console.log("Using specialized sword handle detection");
+          log.debug("Using specialized sword handle detection");
           const centerX = (bounds.minX + bounds.maxX) / 2;
           bounds.minY = swordHandle.minY;
           bounds.maxY = swordHandle.maxY;
@@ -658,9 +674,7 @@ export class WeaponHandleDetector {
       // Check if the detection is in the blade area (upper part of weapon)
       if (bounds.minY < 150) {
         // Top 30% of image
-        console.warn(
-          "Detection appears to be on blade, adjusting to handle area",
-        );
+        log.warn("Detection appears to be on blade, adjusting to handle area");
 
         // Try specialized detection first
         const swordHandle = this.detectSwordHandle(canvas);
@@ -683,9 +697,7 @@ export class WeaponHandleDetector {
       const height = bounds.maxY - bounds.minY;
 
       if (width > 200 || height > 200) {
-        console.warn(
-          "Detected area too large, likely includes non-handle parts",
-        );
+        log.warn("Detected area too large, likely includes non-handle parts");
         // Shrink to more reasonable size
         const centerX = (bounds.minX + bounds.maxX) / 2;
         const centerY = (bounds.minY + bounds.maxY) / 2;
@@ -698,7 +710,7 @@ export class WeaponHandleDetector {
 
       return gripData;
     } catch (error) {
-      console.error("Failed to get grip coordinates:", error);
+      log.error("Failed to get grip coordinates", error);
       throw new Error(
         `Handle detection failed: ${error instanceof Error ? error.message : "Unknown error"}`,
       );
@@ -708,7 +720,7 @@ export class WeaponHandleDetector {
   private async getConsensusGripCoordinates(
     canvases: { angle: string; canvas: HTMLCanvasElement }[],
   ): Promise<GripDetectionData | null> {
-    console.log("🤖 Running multi-AI consensus detection...");
+    log.info("Running multi-AI consensus detection");
 
     const allDetections: GripDetectionData[] = [];
 
@@ -760,22 +772,23 @@ export class WeaponHandleDetector {
                 promptUsed: promptIndex,
               });
             } else {
-              console.warn(
-                `Invalid detection from angle ${angle}: bounds outside handle area`,
+              log.warn(
+                "Invalid detection from angle: bounds outside handle area",
+                { angle },
               );
             }
           }
         }
       } catch (error) {
-        console.warn(`Detection failed for angle ${angle}:`, error);
+        log.warn("Detection failed for angle", { angle, error });
       }
     }
 
-    console.log(`Got ${allDetections.length} valid detections`);
+    log.debug("Valid detections count", { count: allDetections.length });
 
     if (allDetections.length === 0) {
       // Fallback: use a reasonable default for sword handle
-      console.warn("No valid detections, using fallback position");
+      log.warn("No valid detections, using fallback position");
       return {
         gripBounds: {
           minX: 230,
@@ -829,7 +842,7 @@ export class WeaponHandleDetector {
 
     // Final validation
     if (avgBounds.minY < 250) {
-      console.warn(
+      log.warn(
         "Consensus still detecting blade area, forcing to handle region",
       );
       const height = avgBounds.maxY - avgBounds.minY;
@@ -857,7 +870,7 @@ export class WeaponHandleDetector {
       )
       .pop();
 
-    console.log("Consensus result:", {
+    log.debug("Consensus result", {
       bounds: avgBounds,
       confidence: avgConfidence,
       weaponType: weaponType,
@@ -910,7 +923,7 @@ export class WeaponHandleDetector {
     redBoxBounds: RedPixelBounds,
     model: THREE.Object3D,
   ): THREE.Vector3[] {
-    console.log("🎯 Starting back-projection with bounds:", redBoxBounds);
+    log.debug("Starting back-projection", { bounds: redBoxBounds });
 
     const vertices: THREE.Vector3[] = [];
     const raycaster = new THREE.Raycaster();
@@ -931,18 +944,18 @@ export class WeaponHandleDetector {
       }
     });
 
-    console.log(`Found ${meshes.length} meshes in model`);
+    log.debug("Found meshes in model", { count: meshes.length });
 
     // Debug: Check mesh bounds
     if (meshes.length > 0) {
       const meshBounds = new THREE.Box3().setFromObject(meshes[0]);
-      console.log("First mesh bounds:", {
+      log.debug("First mesh bounds", {
         min: { x: meshBounds.min.x, y: meshBounds.min.y, z: meshBounds.min.z },
         max: { x: meshBounds.max.x, y: meshBounds.max.y, z: meshBounds.max.z },
       });
 
       // Debug camera position and direction
-      console.log("Camera position:", {
+      log.debug("Camera position", {
         x: this.camera.position.x,
         y: this.camera.position.y,
         z: this.camera.position.z,
@@ -951,7 +964,7 @@ export class WeaponHandleDetector {
       // Test direct ray from camera to mesh center
       const meshCenter = new THREE.Vector3();
       meshBounds.getCenter(meshCenter);
-      console.log("Mesh center:", {
+      log.debug("Mesh center", {
         x: meshCenter.x,
         y: meshCenter.y,
         z: meshCenter.z,
@@ -964,12 +977,12 @@ export class WeaponHandleDetector {
 
       testRaycaster.set(rayOrigin, rayDir);
       const testIntersects = testRaycaster.intersectObjects(meshes, true);
-      console.log(
-        `Test ray from camera to mesh center: ${testIntersects.length} hits`,
-      );
+      log.debug("Test ray from camera to mesh center", {
+        hits: testIntersects.length,
+      });
 
       if (testIntersects.length > 0) {
-        console.log("Test hit at:", testIntersects[0].point);
+        log.debug("Test hit at", { point: testIntersects[0].point });
       }
     }
 
@@ -1013,17 +1026,24 @@ export class WeaponHandleDetector {
 
           // Debug first few hits
           if (hitCount <= 3) {
-            console.log(
-              `Hit ${hitCount} at screen (${screenX.toFixed(3)}, ${screenY.toFixed(3)}) -> world (${point.x.toFixed(3)}, ${point.y.toFixed(3)}, ${point.z.toFixed(3)})`,
-            );
+            log.debug("Raycast hit", {
+              hitNumber: hitCount,
+              screen: { x: screenX.toFixed(3), y: screenY.toFixed(3) },
+              world: {
+                x: point.x.toFixed(3),
+                y: point.y.toFixed(3),
+                z: point.z.toFixed(3),
+              },
+            });
           }
         }
       }
     }
 
-    console.log(
-      `Back-projection found ${hitCount} hits out of ${(sampleCount + 1) * (sampleCount + 1)} samples`,
-    );
+    log.debug("Back-projection results", {
+      hits: hitCount,
+      totalSamples: (sampleCount + 1) * (sampleCount + 1),
+    });
 
     // If we found some hits but not many, also sample the exact center
     if (vertices.length > 0 && vertices.length < 50) {
@@ -1041,10 +1061,9 @@ export class WeaponHandleDetector {
         for (let i = 0; i < 5; i++) {
           vertices.push(centerIntersects[0].point.clone());
         }
-        console.log(
-          "Added center point for stability:",
-          centerIntersects[0].point,
-        );
+        log.debug("Added center point for stability", {
+          point: centerIntersects[0].point,
+        });
       }
     }
 
@@ -1053,7 +1072,7 @@ export class WeaponHandleDetector {
 
   private calculateGripCenter(vertices: THREE.Vector3[]): THREE.Vector3 {
     if (vertices.length === 0) {
-      console.warn("No vertices found for grip center calculation");
+      log.warn("No vertices found for grip center calculation");
       return new THREE.Vector3(0, 0, 0);
     }
 
@@ -1089,10 +1108,11 @@ export class WeaponHandleDetector {
     center.y = Math.round(center.y * 1000) / 1000;
     center.z = Math.round(center.z * 1000) / 1000;
 
-    console.log(
-      `Grip center calculated from ${finalVertices.length} vertices (filtered from ${vertices.length})`,
-    );
-    console.log(`Final grip center: (${center.x}, ${center.y}, ${center.z})`);
+    log.debug("Grip center calculated", {
+      usedVertices: finalVertices.length,
+      totalVertices: vertices.length,
+      center: { x: center.x, y: center.y, z: center.z },
+    });
 
     return center;
   }
@@ -1202,7 +1222,7 @@ export class WeaponHandleDetector {
     }
 
     if (guardY !== -1) {
-      console.log(`Found guard/crossguard at Y: ${guardY}`);
+      log.debug("Found guard/crossguard", { y: guardY });
 
       // Handle is below the guard
       const handleStart = guardY + 10;
@@ -1247,20 +1267,20 @@ export class WeaponHandleDetector {
       });
 
       if (!response.ok) {
-        console.warn("Orientation detection failed, using fallback");
+        log.warn("Orientation detection failed, using fallback");
         // Fallback: analyze brightness gradient
         return this.fallbackOrientationCheck(canvas);
       }
 
       const data = await response.json();
       if (data.success && data.needsFlip) {
-        console.log("AI detected weapon needs flipping:", data.reason);
+        log.info("AI detected weapon needs flipping", { reason: data.reason });
         return true;
       }
 
       return false;
     } catch (error) {
-      console.error("Orientation detection error:", error);
+      log.error("Orientation detection error", error);
       // Use fallback method
       return this.fallbackOrientationCheck(canvas);
     }
@@ -1304,9 +1324,7 @@ export class WeaponHandleDetector {
 
       // If bottom is significantly brighter (like a shiny blade), flip it
       if (bottomBrightness > topBrightness * 1.3) {
-        console.log(
-          "Fallback: Bottom appears brighter, likely blade - flipping",
-        );
+        log.debug("Fallback: Bottom appears brighter, likely blade - flipping");
         return true;
       }
     }

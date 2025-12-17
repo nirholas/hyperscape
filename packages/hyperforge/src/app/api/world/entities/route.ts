@@ -6,6 +6,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:world:entities");
 
 // Path to world.json
 const SERVER_WORLD_DIR =
@@ -29,6 +32,22 @@ interface WorldEntity {
 interface WorldConfig {
   entities: WorldEntity[];
   [key: string]: unknown;
+}
+
+/**
+ * Request body for POST /api/world/entities
+ * Creates a new entity in the world
+ */
+interface CreateEntityRequest {
+  id: string;
+  name: string;
+  type?: string;
+  blueprint?: string;
+  modelPath?: string;
+  position?: { x?: number; y?: number; z?: number };
+  rotation?: { x?: number; y?: number; z?: number };
+  scale?: { x?: number; y?: number; z?: number };
+  data?: Record<string, unknown>;
 }
 
 /**
@@ -111,7 +130,7 @@ export async function GET(request: NextRequest) {
       total: formattedEntities.length,
     });
   } catch (error) {
-    console.error("[World Entities API] GET error:", error);
+    log.error("GET error:", error);
     return NextResponse.json(
       {
         error:
@@ -128,7 +147,7 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = (await request.json()) as CreateEntityRequest;
     const {
       id,
       name,
@@ -187,7 +206,7 @@ export async function POST(request: NextRequest) {
       total: config.entities.length,
     });
   } catch (error) {
-    console.error("[World Entities API] POST error:", error);
+    log.error("POST error:", error);
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Failed to add entity",

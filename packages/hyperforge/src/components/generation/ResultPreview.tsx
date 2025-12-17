@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import { useGenerationStore } from "@/stores/generation-store";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("ResultPreview");
 import { useVariantStore } from "@/stores/variant-store";
 import Link from "next/link";
 import {
@@ -22,7 +25,7 @@ import type { TextureVariant } from "./GenerationFormRouter";
 
 export function ResultPreview() {
   const { generatedAssets, reset } = useGenerationStore();
-  const { setBaseModel, variants, clearVariants } = useVariantStore();
+  const { setBaseModel } = useVariantStore();
 
   const [showVariantModal, setShowVariantModal] = useState(false);
   const [pendingVariants, setPendingVariants] = useState<TextureVariant[]>([]);
@@ -82,11 +85,11 @@ export function ResultPreview() {
 
       if (response.ok) {
         const result = await response.json();
-        console.log("Variants created:", result);
+        log.info("Variants created", { result });
         // Could update UI to show pending variants
       }
     } catch (error) {
-      console.error("Failed to create variants:", error);
+      log.error("Failed to create variants", error);
     } finally {
       setIsCreatingVariants(false);
       setShowVariantModal(false);

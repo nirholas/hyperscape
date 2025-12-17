@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("HandRigging");
 import {
   Hand,
   User,
@@ -127,7 +130,7 @@ export default function HandRiggingPage() {
           ),
         );
       } catch (error) {
-        console.error("Failed to load assets:", error);
+        log.error("Failed to load assets:", error);
       } finally {
         setLoading(false);
       }
@@ -141,7 +144,7 @@ export default function HandRiggingPage() {
     // Try modelUrl first, then modelPath
     const rawUrl = selectedAvatar.modelUrl || selectedAvatar.modelPath;
     if (!rawUrl) {
-      console.error("No model URL for avatar");
+      log.error("No model URL for avatar");
       setProcessingStage("error");
       return;
     }
@@ -216,9 +219,9 @@ export default function HandRiggingPage() {
       // Store the rigged model for export
       setRiggedModelData(result.riggedGlbData);
 
-      console.log("✅ Hand rigging complete:", result.metadata);
+      log.info("Hand rigging complete:", result.metadata);
     } catch (error) {
-      console.error("Hand rigging failed:", error);
+      log.error("Hand rigging failed:", error);
       setProcessingStage("error");
     }
   };

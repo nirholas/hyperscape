@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("Equipment");
 import {
   AlertTriangle,
   User,
@@ -177,7 +180,7 @@ export default function EquipmentFittingPage() {
           ),
         );
       } catch (error) {
-        console.error("Failed to load assets:", error);
+        log.error("Failed to load assets:", error);
       } finally {
         setLoading(false);
       }
@@ -194,10 +197,7 @@ export default function EquipmentFittingPage() {
     setGripResult(null);
 
     try {
-      console.log(
-        "[Equipment] Using heuristic grip detection for:",
-        selectedWeapon.name,
-      );
+      log.info("Using heuristic grip detection for:", selectedWeapon.name);
 
       // Simulate detection delay for UX
       await new Promise((resolve) => setTimeout(resolve, 500));
@@ -217,9 +217,9 @@ export default function EquipmentFittingPage() {
         vertexCount: 0,
       });
 
-      console.log("[Equipment] Heuristic grip applied:", heuristicGrip);
+      log.info("Heuristic grip applied:", heuristicGrip);
     } catch (error) {
-      console.error("[Equipment] Grip detection failed:", error);
+      log.error("Grip detection failed:", error);
       setGripResult({
         gripPoint: { x: 0, y: 0, z: 0 },
         confidence: 0,
@@ -271,10 +271,10 @@ export default function EquipmentFittingPage() {
 
       if (!response.ok) throw new Error("Failed to save configuration");
 
-      console.log("[Equipment] Configuration saved:", config);
+      log.info("Configuration saved:", config);
       alert("Configuration saved!");
     } catch (error) {
-      console.error("[Equipment] Save failed:", error);
+      log.error("Save failed:", error);
       alert("Failed to save configuration");
     }
   }, [
@@ -306,7 +306,7 @@ export default function EquipmentFittingPage() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (error) {
-      console.error("[Equipment] Export failed:", error);
+      log.error("Export failed:", error);
       alert("Export failed");
     }
   }, [selectedWeapon]);
@@ -329,7 +329,7 @@ export default function EquipmentFittingPage() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (error) {
-      console.error("[Equipment] Export failed:", error);
+      log.error("Export failed:", error);
       alert("Export failed");
     }
   }, [selectedAvatar]);

@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:game:stores");
 
 export interface StoreItem {
   id: string;
@@ -61,7 +64,7 @@ export async function GET(request: Request) {
       const content = await fs.readFile(storesPath, "utf-8");
       stores = JSON.parse(content);
     } catch (error) {
-      console.error("[API] Failed to read stores manifest:", error);
+      log.error("Failed to read stores manifest:", error);
       // Return empty stores if file doesn't exist
       return NextResponse.json({ stores: [], itemStores: [] });
     }
@@ -111,7 +114,7 @@ export async function GET(request: Request) {
       totalStores: stores.length,
     });
   } catch (error) {
-    console.error("[API] Failed to get stores:", error);
+    log.error("Failed to get stores:", error);
     return NextResponse.json(
       { error: "Failed to get stores" },
       { status: 500 },

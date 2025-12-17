@@ -20,9 +20,10 @@ import {
 import { GlassPanel } from "@/components/ui/glass-panel";
 import { SpectacularButton } from "@/components/ui/spectacular-button";
 import { NeonInput } from "@/components/ui/neon-input";
-import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
+import { cn, logger } from "@/lib/utils";
+
+const log = logger.child("AssetUploadModal");
 
 // Asset categories with icons
 const ASSET_CATEGORIES = [
@@ -286,7 +287,7 @@ export function AssetUploadModal({
         onClose();
       }, 1500);
     } catch (error) {
-      console.error("Upload failed:", error);
+      log.error("Upload failed:", error);
       setUploadError(error instanceof Error ? error.message : "Upload failed");
     } finally {
       setIsUploading(false);

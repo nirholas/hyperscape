@@ -7,6 +7,21 @@
 
 import { getTaskStatusV1, getTaskStatusV2, type MeshyTask } from "./client";
 
+/**
+ * Error thrown when a Meshy task reaches a terminal state (failed, canceled)
+ * Used to distinguish terminal errors from transient network errors during polling
+ */
+export class MeshyTaskError extends Error {
+  constructor(
+    message: string,
+    public readonly status: "FAILED" | "CANCELED",
+    public readonly taskId?: string,
+  ) {
+    super(message);
+    this.name = "MeshyTaskError";
+  }
+}
+
 export interface TextureUrls {
   base_color: string;
   metallic?: string;
@@ -115,27 +130,22 @@ export async function pollTaskStatus(
       if (task.status === "FAILED") {
         const errorMessage =
           task.task_error?.message || task.error || "Task failed";
-        throw new Error(errorMessage);
+        throw new MeshyTaskError(errorMessage, "FAILED", taskId);
       }
 
       if (task.status === "CANCELED") {
-        throw new Error("Task was canceled");
+        throw new MeshyTaskError("Task was canceled", "CANCELED", taskId);
       }
 
       // Wait before next poll
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
       attempts++;
     } catch (error) {
-      // If it's a final error (SUCCEEDED, FAILED, CANCELED), rethrow
-      if (
-        error instanceof Error &&
-        (error.message.includes("failed") ||
-          error.message.includes("canceled") ||
-          error.message.includes("completed"))
-      ) {
+      // If it's a terminal task error, rethrow immediately
+      if (error instanceof MeshyTaskError) {
         throw error;
       }
-      // Otherwise, continue polling
+      // Otherwise, continue polling (transient network errors, etc.)
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
       attempts++;
     }

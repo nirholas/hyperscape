@@ -12,9 +12,11 @@ import {
   type SpriteResult,
   type AssetInfo,
 } from "@/lib/ai/sprite-service";
-import { saveAssetFiles } from "@/lib/storage/asset-storage";
 import fs from "fs/promises";
 import path from "path";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:sprites");
 
 interface SpriteGenerateRequest {
   assetId: string;
@@ -60,7 +62,7 @@ export async function POST(
       );
     }
 
-    console.log(`[Sprites API] Generating sprites for asset: ${assetName}`);
+    log.info(`Generating sprites for asset: ${assetName}`);
 
     // Build asset info for sprite generation
     const assetInfo: AssetInfo = {
@@ -115,7 +117,7 @@ export async function POST(
           imageUrl: localUrl,
         });
 
-        console.log(`[Sprites API] Saved sprite: ${localUrl}`);
+        log.info(`Saved sprite: ${localUrl}`);
       }
     }
 
@@ -149,9 +151,9 @@ export async function POST(
         try {
           await fs.copyFile(sourceSpritePath, thumbnailPath);
           thumbnailUrl = `/assets/${assetId}/${thumbnailFilename}`;
-          console.log(`[Sprites API] Updated thumbnail: ${thumbnailUrl}`);
+          log.info(`Updated thumbnail: ${thumbnailUrl}`);
         } catch (error) {
-          console.warn("[Sprites API] Failed to update thumbnail:", error);
+          log.warn({ error }, "Failed to update thumbnail");
         }
 
         // Update metadata.json with new thumbnail
@@ -175,9 +177,9 @@ export async function POST(
           }));
 
           await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
-          console.log("[Sprites API] Updated metadata.json with sprites info");
+          log.info("Updated metadata.json with sprites info");
         } catch (error) {
-          console.warn("[Sprites API] Failed to update metadata:", error);
+          log.warn({ error }, "Failed to update metadata");
         }
       }
     }
@@ -188,7 +190,7 @@ export async function POST(
       thumbnailUrl,
     });
   } catch (error) {
-    console.error("[Sprites API] Generation failed:", error);
+    log.error({ error }, "Sprite generation failed");
 
     return NextResponse.json(
       {

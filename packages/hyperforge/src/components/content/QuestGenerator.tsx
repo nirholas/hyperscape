@@ -9,8 +9,6 @@ import {
   Target,
   Gift,
   AlertCircle,
-  Plus,
-  Trash2,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
@@ -21,13 +19,10 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
-import { cn } from "@/lib/utils";
-import type {
-  Quest,
-  QuestObjective,
-  QuestReward,
-  GeneratedQuestContent,
-} from "@/types/game/content-types";
+import { cn, logger } from "@/lib/utils";
+import type { GeneratedQuestContent } from "@/types/game/content-types";
+
+const log = logger.child("QuestGenerator");
 
 interface QuestGeneratorProps {
   onContentGenerated?: (content: GeneratedQuestContent) => void;
@@ -143,7 +138,7 @@ export function QuestGenerator({ onContentGenerated }: QuestGeneratorProps) {
 
       onContentGenerated?.(result.content);
     } catch (error) {
-      console.error("Generation failed:", error);
+      log.error("Generation failed:", error);
       toast({
         variant: "destructive",
         title: "Generation Failed",
@@ -384,7 +379,7 @@ export function QuestGenerator({ onContentGenerated }: QuestGeneratorProps) {
 
             {expandedSections.objectives && (
               <div className="space-y-2 mt-3">
-                {generatedContent.quest.objectives.map((obj, i) => (
+                {generatedContent.quest.objectives.map((obj) => (
                   <div
                     key={obj.id}
                     className="flex items-start gap-3 p-2 rounded bg-glass-bg/50"

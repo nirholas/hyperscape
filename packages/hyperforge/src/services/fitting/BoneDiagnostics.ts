@@ -1,6 +1,12 @@
 import * as THREE from "three";
 
-import { GLTFExportResult, GLTFNode } from "../../types/gltf";
+import { logger } from "@/lib/utils";
+import type { GLTFDocument, GLTFNode } from "@/types";
+
+const log = logger.child("BoneDiagnostics");
+
+// GLTFExportResult is the callback type from the exporter
+type GLTFExportResult = GLTFDocument;
 
 /**
  * Diagnostic utilities for understanding bone scaling issues
@@ -13,7 +19,7 @@ export class BoneDiagnostics {
     skeleton: THREE.Skeleton,
     name: string = "Skeleton",
   ): void {
-    console.log(`\n=== BONE DIAGNOSTICS: ${name} ===`);
+    log.info(`=== BONE DIAGNOSTICS: ${name} ===`);
 
     // Calculate various metrics
     const bones = skeleton.bones;
@@ -21,8 +27,8 @@ export class BoneDiagnostics {
       (b) => !b.parent || !(b.parent instanceof THREE.Bone),
     );
 
-    console.log(`Total bones: ${bones.length}`);
-    console.log(`Root bones: ${rootBones.length}`);
+    log.debug(`Total bones: ${bones.length}`);
+    log.debug(`Root bones: ${rootBones.length}`);
 
     // Analyze bone distances
     const distances: number[] = [];
@@ -42,38 +48,34 @@ export class BoneDiagnostics {
       const minDist = Math.min(...distances);
       const maxDist = Math.max(...distances);
 
-      console.log(`\nBone Distance Analysis:`);
-      console.log(`  Average: ${avgDist.toFixed(3)} units`);
-      console.log(`  Min: ${minDist.toFixed(3)} units`);
-      console.log(`  Max: ${maxDist.toFixed(3)} units`);
+      log.debug("Bone Distance Analysis:", {
+        average: `${avgDist.toFixed(3)} units`,
+        min: `${minDist.toFixed(3)} units`,
+        max: `${maxDist.toFixed(3)} units`,
+      });
 
       // Guess the units
       if (avgDist > 10) {
-        console.log(
-          `  Likely units: CENTIMETERS (typical human bone ~10-50cm)`,
-        );
+        log.debug("Likely units: CENTIMETERS (typical human bone ~10-50cm)");
       } else if (avgDist > 0.1 && avgDist < 1) {
-        console.log(`  Likely units: METERS (typical human bone ~0.1-0.5m)`);
+        log.debug("Likely units: METERS (typical human bone ~0.1-0.5m)");
       } else {
-        console.log(`  Units unclear - might be custom scale`);
+        log.debug("Units unclear - might be custom scale");
       }
     }
 
     // Analyze world transforms
-    console.log(`\nRoot Bone World Transforms:`);
+    log.debug("Root Bone World Transforms:");
     rootBones.forEach((bone) => {
       const worldPos = new THREE.Vector3();
       const worldScale = new THREE.Vector3();
       bone.getWorldPosition(worldPos);
       bone.getWorldScale(worldScale);
 
-      console.log(`  ${bone.name}:`);
-      console.log(
-        `    World pos: ${worldPos.toArray().map((v) => v.toFixed(3))}`,
-      );
-      console.log(
-        `    World scale: ${worldScale.toArray().map((v) => v.toFixed(3))}`,
-      );
+      log.debug(`${bone.name}:`, {
+        worldPos: worldPos.toArray().map((v) => v.toFixed(3)),
+        worldScale: worldScale.toArray().map((v) => v.toFixed(3)),
+      });
     });
 
     // Check for scale issues
@@ -87,7 +89,7 @@ export class BoneDiagnostics {
     });
 
     if (hasNonUniformScale) {
-      console.log(`\nWARNING: Some bones have non-uniform scale!`);
+      log.warn("Some bones have non-uniform scale!");
       bones.forEach((bone) => {
         const s = bone.scale;
         if (
@@ -95,12 +97,12 @@ export class BoneDiagnostics {
           Math.abs(s.y - 1) > 0.001 ||
           Math.abs(s.z - 1) > 0.001
         ) {
-          console.log(`  ${bone.name}: scale=${s.toArray()}`);
+          log.warn(`${bone.name}: scale=${s.toArray()}`);
         }
       });
     }
 
-    console.log(`\n=== END DIAGNOSTICS ===\n`);
+    log.info("=== END DIAGNOSTICS ===");
   }
 
   /**
@@ -129,9 +131,10 @@ export class BoneDiagnostics {
     const bones = [root, middle, end];
     const skeleton = new THREE.Skeleton(bones);
 
-    console.log(`Created test skeleton in ${scale}:`);
-    console.log(`  Root->Middle: ${middle.position.y} units`);
-    console.log(`  Middle->End: ${end.position.y} units`);
+    log.debug(`Created test skeleton in ${scale}:`, {
+      rootToMiddle: `${middle.position.y} units`,
+      middleToEnd: `${end.position.y} units`,
+    });
 
     return skeleton;
   }
@@ -145,13 +148,14 @@ export class BoneDiagnostics {
     skeleton2: THREE.Skeleton,
     name2: string,
   ): void {
-    console.log(`\n=== SKELETON COMPARISON ===`);
-    console.log(`Comparing "${name1}" vs "${name2}"`);
+    log.info(`=== SKELETON COMPARISON ===`);
+    log.debug(`Comparing "${name1}" vs "${name2}"`);
 
     // Compare bone counts
-    console.log(`\nBone counts:`);
-    console.log(`  ${name1}: ${skeleton1.bones.length} bones`);
-    console.log(`  ${name2}: ${skeleton2.bones.length} bones`);
+    log.debug("Bone counts:", {
+      [name1]: `${skeleton1.bones.length} bones`,
+      [name2]: `${skeleton2.bones.length} bones`,
+    });
 
     // Compare average bone distances
     const getAvgDistance = (skeleton: THREE.Skeleton): number => {
@@ -171,12 +175,13 @@ export class BoneDiagnostics {
     const avg1 = getAvgDistance(skeleton1);
     const avg2 = getAvgDistance(skeleton2);
 
-    console.log(`\nAverage bone distances:`);
-    console.log(`  ${name1}: ${avg1.toFixed(3)} units`);
-    console.log(`  ${name2}: ${avg2.toFixed(3)} units`);
-    console.log(`  Ratio: ${(avg1 / avg2).toFixed(3)}`);
+    log.debug("Average bone distances:", {
+      [name1]: `${avg1.toFixed(3)} units`,
+      [name2]: `${avg2.toFixed(3)} units`,
+      ratio: (avg1 / avg2).toFixed(3),
+    });
 
-    console.log(`\n=== END COMPARISON ===\n`);
+    log.info("=== END COMPARISON ===");
   }
 
   /**
@@ -186,7 +191,7 @@ export class BoneDiagnostics {
     skeleton: THREE.Skeleton,
     geometry: THREE.BufferGeometry,
   ): Promise<void> {
-    console.log(`\n=== GLTF EXPORT TEST ===`);
+    log.info("=== GLTF EXPORT TEST ===");
 
     const scene = new THREE.Scene();
     const material = new THREE.MeshBasicMaterial();
@@ -209,27 +214,28 @@ export class BoneDiagnostics {
     try {
       const gltf = (await exporter.parseAsync(scene, {
         binary: false,
-      })) as GLTFExportResult;
+      })) as unknown as GLTFExportResult;
 
-      console.log(`\nGLTF Structure:`);
-      console.log(`  Nodes: ${gltf.nodes?.length || 0}`);
-      console.log(`  Skins: ${gltf.skins?.length || 0}`);
+      log.debug("GLTF Structure:", {
+        nodes: gltf.nodes?.length || 0,
+        skins: gltf.skins?.length || 0,
+      });
 
       if (gltf.nodes) {
-        console.log(`\nNode transforms:`);
+        log.debug("Node transforms:");
         gltf.nodes.forEach((node: GLTFNode, i: number) => {
           if (node.translation || node.scale) {
-            console.log(`  Node ${i} (${node.name || "unnamed"}):`);
-            if (node.translation)
-              console.log(`    Translation: ${node.translation}`);
-            if (node.scale) console.log(`    Scale: ${node.scale}`);
+            log.debug(`Node ${i} (${node.name || "unnamed"}):`, {
+              translation: node.translation,
+              scale: node.scale,
+            });
           }
         });
       }
     } catch (error) {
-      console.error("GLTF export test failed:", error);
+      log.error("GLTF export test failed:", error);
     }
 
-    console.log(`\n=== END EXPORT TEST ===\n`);
+    log.info("=== END EXPORT TEST ===");
   }
 }

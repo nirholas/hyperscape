@@ -1,0 +1,135 @@
+---
+description: Bun runtime and package manager rules for Hyperscape
+alwaysApply: true
+---
+# Bun Runtime & Package Manager
+
+This project uses **Bun** as both the package manager and JavaScript runtime.
+
+## FORBIDDEN
+
+```bash
+# NEVER use npm
+npm install
+npm run dev
+npx some-package
+
+# NEVER use yarn
+yarn add
+yarn dev
+
+# NEVER use pnpm
+pnpm install
+pnpm run dev
+```
+
+## REQUIRED
+
+```bash
+# Package management
+bun install              # Install dependencies
+bun add <package>        # Add dependency
+bun add -d <package>     # Add dev dependency
+bun remove <package>     # Remove dependency
+
+# Running scripts
+bun run dev              # Run dev script
+bun run build            # Run build script
+bun run test             # Run tests
+
+# Direct execution
+bun run script.ts        # Run TypeScript directly
+bunx drizzle-kit push    # Execute package binary
+```
+
+## Common Commands
+
+### Root Workspace
+
+```bash
+bun install              # Install all workspace dependencies
+bun run dev              # Start all dev servers (Turbo)
+bun run build            # Build all packages
+bun run clean            # Clean build artifacts
+```
+
+### HyperForge Package
+
+```bash
+cd packages/hyperforge
+bun run dev              # Next.js dev server (port 3500)
+bun run build            # Production build
+bun run db:push          # Push Drizzle schema
+bun run db:studio        # Open Drizzle Studio
+```
+
+### Server Package
+
+```bash
+cd packages/server
+bun run dev              # Dev server with watch
+bun run build            # Production build
+bun run start            # Start production server
+```
+
+## Bun APIs (When Needed)
+
+If you need Bun-specific APIs, use them appropriately:
+
+```typescript
+// File operations (faster than fs)
+const file = Bun.file("./data.json");
+const content = await file.text();
+await Bun.write("./output.json", JSON.stringify(data));
+
+// Shell commands
+import { $ } from "bun";
+await $`echo "Hello"`;
+
+// Environment
+const apiKey = Bun.env.API_KEY;
+
+// Hashing
+const hash = Bun.hash("content");
+
+// Sleep
+await Bun.sleep(1000);
+```
+
+## Package.json Scripts
+
+Always use `bun run` prefix in package.json scripts:
+
+```json
+{
+  "scripts": {
+    "dev": "next dev -p 3500",
+    "build": "next build",
+    "db:push": "bunx drizzle-kit push"
+  }
+}
+```
+
+## Workspace Dependencies
+
+Reference workspace packages with `workspace:*`:
+
+```json
+{
+  "dependencies": {
+    "@hyperscape/shared": "workspace:*"
+  }
+}
+```
+
+## Version Requirements
+
+- Bun: v1.1.38 or higher
+- Check with: `bun --version`
+
+## Notes
+
+- Bun is significantly faster than npm/yarn for installs
+- Bun runs TypeScript directly without transpilation
+- Use `bunx` instead of `npx` for one-off package execution
+- Bun's test runner is available but we use Playwright for E2E tests

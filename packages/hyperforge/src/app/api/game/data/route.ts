@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:game:data");
 
 // Path to the manifests directory
 const MANIFESTS_DIR = path.join(
@@ -246,7 +249,7 @@ export async function GET(request: Request) {
       }
 
       // For items, find which NPCs drop this item
-      let dropSources: DropSource[] = [];
+      const dropSources: DropSource[] = [];
       if (type === "item") {
         const npcsContent = await fs.readFile(
           path.join(MANIFESTS_DIR, "npcs.json"),
@@ -318,14 +321,14 @@ export async function GET(request: Request) {
         source: manifestFile,
       });
     } catch (error) {
-      console.error(`Failed to read ${manifestFile}:`, error);
+      log.error(`Failed to read ${manifestFile}:`, error);
       return NextResponse.json(
         { error: `Failed to read ${manifestFile}` },
         { status: 500 },
       );
     }
   } catch (error) {
-    console.error("[API] Failed to get game data:", error);
+    log.error("Failed to get game data:", error);
     return NextResponse.json(
       { error: "Failed to get game data" },
       { status: 500 },

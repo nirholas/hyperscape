@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import {
-  Wand2,
   Library,
   UserCog,
   Shield,
@@ -92,7 +91,7 @@ export default function HomePage() {
   } = useAppStore();
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [categoryFilter, _setCategoryFilter] = useState("all");
   const [mounted, setMounted] = useState(false);
   const [worldViewOpen, setWorldViewOpen] = useState(false);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);

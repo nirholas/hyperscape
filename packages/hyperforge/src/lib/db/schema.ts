@@ -1,16 +1,27 @@
 /**
  * Hyperforge Database Schema
- * Standalone SQLite database for asset creation and multi-product publishing
+ * Uses PostgreSQL with a separate "hyperforge" schema to avoid conflicts with game tables
  */
 
-import { sqliteTable, text, integer, blob } from "drizzle-orm/sqlite-core";
+import {
+  pgSchema,
+  text,
+  integer,
+  timestamp,
+  boolean,
+  jsonb,
+  bigint,
+} from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
+
+// Create a separate schema to isolate HyperForge tables from the game
+export const hyperforgeSchema = pgSchema("hyperforge");
 
 // ============================================================================
 // USERS - Creator profiles linked to Privy auth
 // ============================================================================
 
-export const users = sqliteTable("users", {
+export const users = hyperforgeSchema.table("users", {
   // Primary key from Privy (shared identity across products)
   userId: text("user_id").primaryKey(),
 
@@ -21,18 +32,16 @@ export const users = sqliteTable("users", {
 
   // Subscription & limits
   subscriptionTier: text("subscription_tier").notNull().default("free"), // free | pro | studio
-  storageUsedBytes: integer("storage_used_bytes").notNull().default(0),
-  storageQuotaBytes: integer("storage_quota_bytes")
+  storageUsedBytes: bigint("storage_used_bytes", { mode: "number" })
+    .notNull()
+    .default(0),
+  storageQuotaBytes: bigint("storage_quota_bytes", { mode: "number" })
     .notNull()
     .default(1073741824), // 1GB default
 
   // Timestamps
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .notNull()
-    .$defaultFn(() => new Date()),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -45,7 +54,7 @@ export const usersRelations = relations(users, ({ many }) => ({
 // USER API KEYS - Encrypted storage for user's AI service keys
 // ============================================================================
 
-export const userApiKeys = sqliteTable("user_api_keys", {
+export const userApiKeys = hyperforgeSchema.table("user_api_keys", {
   id: text("id")
     .primaryKey()
     .$defaultFn(() => crypto.randomUUID()),
@@ -61,10 +70,8 @@ export const userApiKeys = sqliteTable("user_api_keys", {
   encryptedKey: text("encrypted_key").notNull(),
 
   // Metadata
-  lastUsedAt: integer("last_used_at", { mode: "timestamp" }),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .$defaultFn(() => new Date()),
+  lastUsedAt: timestamp("last_used_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 export const userApiKeysRelations = relations(userApiKeys, ({ one }) => ({
@@ -78,7 +85,7 @@ export const userApiKeysRelations = relations(userApiKeys, ({ one }) => ({
 // PROJECTS - Grouping/workspace for assets
 // ============================================================================
 
-export const projects = sqliteTable("projects", {
+export const projects = hyperforgeSchema.table("projects", {
   id: text("id")
     .primaryKey()
     .$defaultFn(() => crypto.randomUUID()),
@@ -96,12 +103,8 @@ export const projects = sqliteTable("projects", {
   defaultLicense: text("default_license").notNull().default("personal"),
 
   // Timestamps
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .notNull()
-    .$defaultFn(() => new Date()),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 export const projectsRelations = relations(projects, ({ one, many }) => ({
@@ -116,7 +119,7 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
 // ASSETS - Created assets with generation metadata
 // ============================================================================
 
-export const assets = sqliteTable("assets", {
+export const assets = hyperforgeSchema.table("assets", {
   id: text("id")
     .primaryKey()
     .$defaultFn(() => crypto.randomUUID()),
@@ -132,13 +135,13 @@ export const assets = sqliteTable("assets", {
   description: text("description"),
   type: text("type").notNull(), // character | item | environment | equipment | weapon | armor
   category: text("category"), // Sub-category
-  tags: text("tags", { mode: "json" }).$type<string[]>().default([]),
+  tags: jsonb("tags").$type<string[]>().default([]),
 
   // File storage (local paths)
   localPath: text("local_path"), // Primary model file
   thumbnailPath: text("thumbnail_path"),
-  previewPaths: text("preview_paths", { mode: "json" }).$type<string[]>(),
-  fileSizeBytes: integer("file_size_bytes"),
+  previewPaths: jsonb("preview_paths").$type<string[]>(),
+  fileSizeBytes: bigint("file_size_bytes", { mode: "number" }),
 
   // CDN storage (after publish)
   cdnUrl: text("cdn_url"),
@@ -147,9 +150,7 @@ export const assets = sqliteTable("assets", {
   // Generation metadata
   prompt: text("prompt"),
   negativePrompt: text("negative_prompt"),
-  generationParams: text("generation_params", { mode: "json" }).$type<
-    Record<string, unknown>
-  >(),
+  generationParams: jsonb("generation_params").$type<Record<string, unknown>>(),
   aiModel: text("ai_model"), // Model used for generation
   pipelineId: text("pipeline_id"), // Reference to generation pipeline
 
@@ -159,7 +160,7 @@ export const assets = sqliteTable("assets", {
   license: text("license").notNull().default("personal"), // personal | commercial | exclusive
 
   // Multi-product publishing
-  publishedTo: text("published_to", { mode: "json" }).$type<
+  publishedTo: jsonb("published_to").$type<
     Array<{
       productId: string;
       externalId: string;
@@ -173,12 +174,8 @@ export const assets = sqliteTable("assets", {
   parentAssetId: text("parent_asset_id"),
 
   // Timestamps
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .notNull()
-    .$defaultFn(() => new Date()),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 export const assetsRelations = relations(assets, ({ one, many }) => ({
@@ -197,7 +194,7 @@ export const assetsRelations = relations(assets, ({ one, many }) => ({
 // CONNECTED PRODUCTS - Registry of products that can receive assets
 // ============================================================================
 
-export const connectedProducts = sqliteTable("connected_products", {
+export const connectedProducts = hyperforgeSchema.table("connected_products", {
   id: text("id").primaryKey(), // Slug: "hyperscape", "future-game"
   name: text("name").notNull(),
   description: text("description"),
@@ -208,7 +205,7 @@ export const connectedProducts = sqliteTable("connected_products", {
   webhookSecret: text("webhook_secret"), // HMAC secret for verification
 
   // Asset requirements
-  assetRequirements: text("asset_requirements", { mode: "json" }).$type<{
+  assetRequirements: jsonb("asset_requirements").$type<{
     formats: string[];
     maxPolycountLow: number;
     maxPolycountHigh: number;
@@ -217,18 +214,12 @@ export const connectedProducts = sqliteTable("connected_products", {
   }>(),
 
   // Status
-  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
-  isPrimary: integer("is_primary", { mode: "boolean" })
-    .notNull()
-    .default(false), // Hyperscape = primary
+  isActive: boolean("is_active").notNull().default(true),
+  isPrimary: boolean("is_primary").notNull().default(false), // Hyperscape = primary
 
   // Timestamps
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .notNull()
-    .$defaultFn(() => new Date()),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 export const connectedProductsRelations = relations(
@@ -242,7 +233,7 @@ export const connectedProductsRelations = relations(
 // PUBLISH HISTORY - Audit log of all publishing actions
 // ============================================================================
 
-export const publishHistory = sqliteTable("publish_history", {
+export const publishHistory = hyperforgeSchema.table("publish_history", {
   id: text("id")
     .primaryKey()
     .$defaultFn(() => crypto.randomUUID()),
@@ -264,12 +255,10 @@ export const publishHistory = sqliteTable("publish_history", {
   // Response from target product
   responseStatus: integer("response_status"),
   responseMessage: text("response_message"),
-  metadata: text("metadata", { mode: "json" }).$type<Record<string, unknown>>(),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>(),
 
   // Timestamp
-  timestamp: integer("timestamp", { mode: "timestamp" })
-    .notNull()
-    .$defaultFn(() => new Date()),
+  timestamp: timestamp("timestamp").notNull().defaultNow(),
 });
 
 export const publishHistoryRelations = relations(publishHistory, ({ one }) => ({

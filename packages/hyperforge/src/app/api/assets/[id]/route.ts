@@ -6,6 +6,9 @@ import {
 } from "@/lib/storage/supabase-storage";
 import { readAssetMetadata, assetExists } from "@/lib/storage/asset-storage";
 import type { CDNAsset } from "@/lib/cdn/types";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:assets");
 
 const CDN_URL = process.env.NEXT_PUBLIC_CDN_URL || "http://localhost:8080";
 
@@ -41,7 +44,7 @@ export async function GET(
         });
       }
     } catch (error) {
-      console.warn("[Assets API] CDN lookup failed:", error);
+      log.warn("CDN lookup failed", { error });
     }
 
     // 2. Check Supabase FORGE assets
@@ -69,7 +72,7 @@ export async function GET(
           });
         }
       } catch (error) {
-        console.warn("[Assets API] Supabase lookup failed:", error);
+        log.warn("Supabase lookup failed", { error });
       }
     }
 
@@ -103,7 +106,7 @@ export async function GET(
 
     return NextResponse.json({ error: "Asset not found" }, { status: 404 });
   } catch (error) {
-    console.error("[Assets API] Error fetching asset:", error);
+    log.error("Error fetching asset", { error });
     return NextResponse.json(
       { error: "Failed to fetch asset" },
       { status: 500 },
@@ -130,7 +133,7 @@ export async function DELETE(
       message: `Asset ${id} deleted`,
     });
   } catch (error) {
-    console.error("[Assets API] Error deleting asset:", error);
+    log.error("Error deleting asset", { error });
     return NextResponse.json(
       { error: "Failed to delete asset" },
       { status: 500 },
@@ -181,7 +184,7 @@ export async function PATCH(
 
     return NextResponse.json(updatedMetadata);
   } catch (error) {
-    console.error("[Assets API] Error updating asset:", error);
+    log.error("Error updating asset", { error });
     return NextResponse.json(
       { error: "Failed to update asset" },
       { status: 500 },

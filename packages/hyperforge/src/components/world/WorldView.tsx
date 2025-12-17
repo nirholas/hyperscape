@@ -8,7 +8,6 @@ import {
   Trash2,
   ChevronRight,
   ChevronDown,
-  MapPin,
   Box,
   User,
   Sword,
@@ -17,7 +16,6 @@ import {
   Gem,
   X,
   Search,
-  Filter,
   Eye,
   EyeOff,
 } from "lucide-react";
@@ -25,7 +23,9 @@ import { GlassPanel } from "@/components/ui/glass-panel";
 import { SpectacularButton } from "@/components/ui/spectacular-button";
 import { Badge } from "@/components/ui/badge";
 import { NeonInput } from "@/components/ui/neon-input";
-import { cn } from "@/lib/utils";
+import { cn, logger } from "@/lib/utils";
+
+const log = logger.child("WorldView");
 
 // Entity types that can exist in the game world
 type EntityType =
@@ -255,12 +255,12 @@ export function WorldView({ isOpen, onClose }: WorldViewProps) {
         setAreas(data.areas || []);
       } else {
         // API returned error - show empty state
-        console.warn("World API returned error:", res.status);
+        log.warn("World API returned error:", res.status);
         setEntities([]);
         setAreas([]);
       }
     } catch (error) {
-      console.error("Failed to fetch world data:", error);
+      log.error("Failed to fetch world data:", error);
       setEntities([]);
       setAreas([]);
     } finally {
@@ -305,12 +305,12 @@ export function WorldView({ isOpen, onClose }: WorldViewProps) {
       if (!res.ok) {
         // Restore on failure
         setEntities(previousEntities);
-        console.error("Failed to remove entity:", await res.text());
+        log.error("Failed to remove entity:", await res.text());
       }
     } catch (error) {
       // Restore on failure
       setEntities(previousEntities);
-      console.error("Failed to remove entity:", error);
+      log.error("Failed to remove entity:", error);
     }
   };
 
@@ -347,7 +347,7 @@ export function WorldView({ isOpen, onClose }: WorldViewProps) {
         body: JSON.stringify(entity),
       });
     } catch (error) {
-      console.error("Failed to add entity:", error);
+      log.error("Failed to add entity:", error);
     }
   };
 

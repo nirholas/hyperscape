@@ -18,6 +18,9 @@ import {
 import { startImageTo3D } from "@/lib/meshy/image-to-3d";
 import { pollTaskStatus } from "@/lib/meshy/poll-task";
 import type { MeshyAIModel } from "@/lib/meshy/types";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:regenerate");
 
 /**
  * Modify prompt based on variation strength
@@ -101,9 +104,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(
-      `🔄 Starting regeneration for asset ${assetId} (${variationStrength}% variation)`,
-    );
+    log.info({ assetId, variationStrength }, "Starting regeneration");
 
     // Create new asset record first
     const modifiedPrompt = modifyPrompt(
@@ -173,7 +174,7 @@ export async function POST(request: NextRequest) {
     try {
       if (pipeline === "text-to-3d") {
         // Two-stage text-to-3D
-        console.log("🔄 Starting text-to-3D preview...");
+        log.debug("Starting text-to-3D preview");
         const { previewTaskId } = await startTextTo3DPreview(modifiedPrompt, {
           ai_model: options.aiModel,
           topology: "triangle",
@@ -186,11 +187,11 @@ export async function POST(request: NextRequest) {
           pollIntervalMs: 5000,
           timeoutMs: 300000,
           onProgress: (progress) => {
-            console.log(`⏳ Preview: ${progress}%`);
+            log.debug({ progress }, "Preview progress");
           },
         });
 
-        console.log("🔄 Starting text-to-3D refine...");
+        log.debug("Starting text-to-3D refine");
         const { refineTaskId } = await startTextTo3DRefine(previewTaskId, {
           enable_pbr: options.enablePBR,
           texture_resolution: options.textureResolution,
@@ -201,7 +202,7 @@ export async function POST(request: NextRequest) {
           pollIntervalMs: 5000,
           timeoutMs: 300000,
           onProgress: (progress) => {
-            console.log(`⏳ Refine: ${progress}%`);
+            log.debug({ progress }, "Refine progress");
           },
         });
 
@@ -210,7 +211,7 @@ export async function POST(request: NextRequest) {
         meshyTaskId = refineTaskId;
       } else {
         // Image-to-3D
-        console.log("🔄 Starting image-to-3D...");
+        log.debug("Starting image-to-3D");
         const { taskId } = await startImageTo3D(imageUrl!, {
           enable_pbr: options.enablePBR,
           ai_model: options.aiModel,
@@ -223,7 +224,7 @@ export async function POST(request: NextRequest) {
           pollIntervalMs: 5000,
           timeoutMs: 300000,
           onProgress: (progress) => {
-            console.log(`⏳ Progress: ${progress}%`);
+            log.debug({ progress }, "Image-to-3D progress");
           },
         });
 
@@ -232,7 +233,7 @@ export async function POST(request: NextRequest) {
         meshyTaskId = taskId;
       }
 
-      console.log(`✅ Regeneration completed: ${modelUrl}`);
+      log.info({ modelUrl }, "Regeneration completed");
 
       // Download and save the model
       const savedFiles = await downloadAndSaveModel(
@@ -275,7 +276,7 @@ export async function POST(request: NextRequest) {
       throw generationError;
     }
   } catch (error) {
-    console.error("[API] Regeneration failed:", error);
+    log.error({ error }, "Regeneration failed");
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Regeneration failed",

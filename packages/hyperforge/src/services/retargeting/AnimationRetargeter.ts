@@ -14,12 +14,16 @@
  */
 
 import * as THREE from "three";
+import type { GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
+
+import { logger } from "@/lib/utils";
 
 import {
   createBoneMapping,
-  MESHY_TO_MIXAMO,
   MIXAMO_TO_MESHY,
-} from "./BoneMappings";
+} from "@/services/vrm/BoneMappings";
+
+const log = logger.child("AnimationRetargeter");
 
 export interface RetargetedAnimation {
   clip: THREE.AnimationClip;
@@ -54,19 +58,15 @@ export class AnimationRetargeter {
       MIXAMO_TO_MESHY,
     );
 
-    console.log("🎬 AnimationRetargeter initialized");
-    console.log(
-      "  Source skeleton:",
-      sourceSkeleton.bones.length,
-      "bones (animation rig)",
+    log.info(
+      {
+        sourceBones: sourceSkeleton.bones.length,
+        targetBones: targetSkeleton.bones.length,
+        mappedBones: this.boneMapping.size,
+        animations: sourceAnimations.length,
+      },
+      "🎬 AnimationRetargeter initialized",
     );
-    console.log(
-      "  Target skeleton:",
-      targetSkeleton.bones.length,
-      "bones (character rig)",
-    );
-    console.log("  Bone mapping:", this.boneMapping.size, "mapped");
-    console.log("  Available animations:", sourceAnimations.length);
 
     // Calculate rest pose offsets for proper retargeting
     this.restPoseOffsets = new Map();
@@ -83,7 +83,7 @@ export class AnimationRetargeter {
    * When applied: finalRotation = animationRotation * offset
    */
   private calculateRestPoseOffsets(): void {
-    console.log("🔄 Calculating rest pose offsets...");
+    log.debug("🔄 Calculating rest pose offsets...");
 
     let offsetCount = 0;
 
@@ -128,8 +128,10 @@ export class AnimationRetargeter {
       },
     );
 
-    console.log(`✅ Calculated ${offsetCount} rest pose offsets (LOCAL space)`);
-    console.log("   This handles T-pose/A-pose differences between skeletons");
+    log.debug(
+      { offsetCount },
+      "✅ Calculated rest pose offsets (LOCAL space) - handles T-pose/A-pose differences",
+    );
   }
 
   /**
@@ -165,8 +167,9 @@ export class AnimationRetargeter {
       }
     }
 
-    console.log(
-      `✅ Retargeted ${retargeted.length}/${this.sourceAnimations.length} animations`,
+    log.info(
+      { retargeted: retargeted.length, total: this.sourceAnimations.length },
+      "✅ Retargeted animations",
     );
     return retargeted;
   }
@@ -176,7 +179,7 @@ export class AnimationRetargeter {
    * Applies rest pose offsets and bone length scaling
    */
   retargetClip(sourceClip: THREE.AnimationClip): RetargetedAnimation | null {
-    console.log(`🎬 Retargeting animation: ${sourceClip.name}`);
+    log.debug({ clipName: sourceClip.name }, "🎬 Retargeting animation");
 
     const retargetedTracks: THREE.KeyframeTrack[] = [];
     let mappedTrackCount = 0;
@@ -243,7 +246,10 @@ export class AnimationRetargeter {
     }
 
     if (retargetedTracks.length === 0) {
-      console.warn(`⚠️  No tracks mapped for animation: ${sourceClip.name}`);
+      log.warn(
+        { clipName: sourceClip.name },
+        "⚠️  No tracks mapped for animation",
+      );
       return null;
     }
 
@@ -256,10 +262,14 @@ export class AnimationRetargeter {
 
     const mappingQuality = mappedTrackCount / sourceClip.tracks.length;
 
-    console.log(
-      `  ✅ Mapped ${mappedTrackCount} tracks, skipped ${skippedTrackCount}`,
+    log.debug(
+      {
+        mapped: mappedTrackCount,
+        skipped: skippedTrackCount,
+        quality: `${(mappingQuality * 100).toFixed(1)}%`,
+      },
+      "✅ Track mapping complete",
     );
-    console.log(`  📊 Mapping quality: ${(mappingQuality * 100).toFixed(1)}%`);
 
     return {
       clip: retargetedClip,
@@ -325,17 +335,17 @@ export class AnimationRetargeter {
 /**
  * Helper: Extract animations from a GLTF file
  */
-export function extractAnimationsFromGLTF(gltf: any): THREE.AnimationClip[] {
+export function extractAnimationsFromGLTF(gltf: GLTF): THREE.AnimationClip[] {
   return gltf.animations || [];
 }
 
 /**
  * Helper: Extract skeleton from a GLTF file
  */
-export function extractSkeletonFromGLTF(gltf: any): THREE.Skeleton | null {
+export function extractSkeletonFromGLTF(gltf: GLTF): THREE.Skeleton | null {
   let skeleton: THREE.Skeleton | null = null;
 
-  gltf.scene.traverse((child: any) => {
+  gltf.scene.traverse((child: THREE.Object3D) => {
     if (child instanceof THREE.SkinnedMesh && child.skeleton && !skeleton) {
       skeleton = child.skeleton;
     }
@@ -344,7 +354,7 @@ export function extractSkeletonFromGLTF(gltf: any): THREE.Skeleton | null {
   // If no SkinnedMesh, try to build skeleton from bones
   if (!skeleton) {
     const bones: THREE.Bone[] = [];
-    gltf.scene.traverse((child: any) => {
+    gltf.scene.traverse((child: THREE.Object3D) => {
       if (child instanceof THREE.Bone) {
         bones.push(child);
       }

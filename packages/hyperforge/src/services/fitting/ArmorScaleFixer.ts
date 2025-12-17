@@ -1,5 +1,9 @@
 import * as THREE from "three";
 
+import { logger } from "@/lib/utils";
+
+const log = logger.child("ArmorScaleFixer");
+
 /**
  * Fixes armature scale issues before export
  */
@@ -23,7 +27,7 @@ export class ArmorScaleFixer {
         Math.abs(worldScale.y - 1) > tolerance ||
         Math.abs(worldScale.z - 1) > tolerance
       ) {
-        console.warn(
+        log.warn(
           `Root bone "${root.name}" has world scale: ${worldScale.toArray()}`,
         );
         return true;
@@ -37,7 +41,7 @@ export class ArmorScaleFixer {
    * Apply/bake the scale into bone positions
    */
   static applySkeletonScale(skinnedMesh: THREE.SkinnedMesh): THREE.SkinnedMesh {
-    console.log("=== APPLYING SKELETON SCALE ===");
+    log.info("=== APPLYING SKELETON SCALE ===");
 
     const skeleton = skinnedMesh.skeleton;
     const rootBones = skeleton.bones.filter(
@@ -48,12 +52,12 @@ export class ArmorScaleFixer {
     const worldScale = new THREE.Vector3();
     if (rootBones.length > 0) {
       rootBones[0].getWorldScale(worldScale);
-      console.log(`Current world scale: ${worldScale.toArray()}`);
+      log.debug(`Current world scale: ${worldScale.toArray()}`);
     }
 
     // If scale is already 1, nothing to do
     if (Math.abs(worldScale.x - 1) < 0.001) {
-      console.log("Scale is already normalized");
+      log.debug("Scale is already normalized");
       return skinnedMesh;
     }
 
@@ -132,9 +136,9 @@ export class ArmorScaleFixer {
 
     clonedMesh.bind(newSkeleton, bindMatrix);
 
-    console.log("Scale applied successfully");
-    console.log(`Geometry scaled by: ${scale}`);
-    console.log(`New bone distances should be ~${19.915 * scale} units`);
+    log.info("Scale applied successfully");
+    log.debug(`Geometry scaled by: ${scale}`);
+    log.debug(`New bone distances should be ~${19.915 * scale} units`);
 
     return clonedMesh;
   }
@@ -152,7 +156,7 @@ export class ArmorScaleFixer {
         parent.scale.y !== 1 ||
         parent.scale.z !== 1
       ) {
-        console.warn(
+        log.warn(
           `Parent "${parent.name}" has scale: ${parent.scale.toArray()}`,
         );
 

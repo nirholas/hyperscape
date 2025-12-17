@@ -16,7 +16,10 @@ import {
   uploadAudio,
   isSupabaseConfigured,
 } from "@/lib/storage/supabase-storage";
+import { logger } from "@/lib/utils";
 import type { SoundEffectAsset, SoundEffectCategory } from "@/types/audio";
+
+const log = logger.child("API:audio/sfx/generate");
 
 export async function POST(request: NextRequest) {
   try {
@@ -47,7 +50,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log("[API] Generating SFX:", {
+    log.info("Generating SFX", {
       prompt: effectivePrompt.substring(0, 50) + "...",
       category,
       durationSeconds,
@@ -91,15 +94,12 @@ export async function POST(request: NextRequest) {
           );
           if (uploadResult.success) {
             asset.url = uploadResult.url;
-            console.log("[API] SFX saved to Supabase:", uploadResult.url);
+            log.info("SFX saved to Supabase", { url: uploadResult.url });
           } else {
             throw new Error(uploadResult.error || "Upload failed");
           }
         } catch (error) {
-          console.warn(
-            "[API] Supabase upload failed, falling back to local:",
-            error,
-          );
+          log.warn("Supabase upload failed, falling back to local", { error });
           // Fall through to local storage
         }
       }
@@ -120,7 +120,7 @@ export async function POST(request: NextRequest) {
 
         asset.url = `/api/audio/file/sfx/${category}/${filename}`;
 
-        console.log("[API] SFX saved locally:", filepath);
+        log.info("SFX saved locally", { filepath });
       }
     }
 
@@ -133,7 +133,7 @@ export async function POST(request: NextRequest) {
       audio: `data:audio/mp3;base64,${audioBase64}`,
     });
   } catch (error) {
-    console.error("[API] SFX generation error:", error);
+    log.error("SFX generation error", { error });
 
     if (
       error instanceof Error &&
@@ -170,7 +170,7 @@ export async function GET() {
   return NextResponse.json({ presets });
 }
 
-function generateSFXId(name?: string, category?: string): string {
+function generateSFXId(name?: string, _category?: string): string {
   const timestamp = Date.now().toString(36);
   const safeName = name
     ? name

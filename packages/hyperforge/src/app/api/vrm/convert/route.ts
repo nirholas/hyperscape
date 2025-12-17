@@ -14,6 +14,9 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:vrm/convert");
 
 export async function POST(request: NextRequest) {
   try {
@@ -36,7 +39,7 @@ export async function POST(request: NextRequest) {
 
     if (glbData) {
       // Decode from base64
-      console.log("🎭 Loading GLB from base64 data...");
+      log.info("🎭 Loading GLB from base64 data...");
       const glbBuffer = Buffer.from(glbData, "base64");
       glbArrayBuffer = glbBuffer.buffer.slice(
         glbBuffer.byteOffset,
@@ -44,7 +47,7 @@ export async function POST(request: NextRequest) {
       );
     } else {
       // Download from URL
-      console.log("🎭 Loading GLB from URL:", modelUrl);
+      log.info({ modelUrl }, "🎭 Loading GLB from URL");
       const response = await fetch(modelUrl);
       if (!response.ok) {
         throw new Error(`Failed to fetch GLB: ${response.statusText}`);
@@ -52,12 +55,12 @@ export async function POST(request: NextRequest) {
       glbArrayBuffer = await response.arrayBuffer();
     }
 
-    console.log(
+    log.info(
       `🎭 GLB loaded: ${(glbArrayBuffer.byteLength / 1024 / 1024).toFixed(2)} MB`,
     );
 
     // Convert to VRM using texture-preserving method
-    console.log("🎭 Converting to VRM format (preserving textures)...");
+    log.info("🎭 Converting to VRM format (preserving textures)...");
     const vrmResult = await convertGLBToVRMPreservingTextures(glbArrayBuffer, {
       avatarName: avatarName || "Generated Avatar",
       author: author || "HyperForge",
@@ -77,7 +80,7 @@ export async function POST(request: NextRequest) {
       coordinateSystemFixed: vrmResult.coordinateSystemFixed,
     });
   } catch (error) {
-    console.error("[API] VRM conversion failed:", error);
+    log.error({ error }, "VRM conversion failed");
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "VRM conversion failed",

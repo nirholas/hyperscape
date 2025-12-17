@@ -21,11 +21,10 @@ import { Select } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
-import { cn } from "@/lib/utils";
-import type {
-  WorldArea,
-  GeneratedAreaContent,
-} from "@/types/game/content-types";
+import { cn, logger } from "@/lib/utils";
+import type { GeneratedAreaContent } from "@/types/game/content-types";
+
+const log = logger.child("AreaGenerator");
 
 interface AreaGeneratorProps {
   onContentGenerated?: (content: GeneratedAreaContent) => void;
@@ -145,7 +144,7 @@ export function AreaGenerator({ onContentGenerated }: AreaGeneratorProps) {
 
       onContentGenerated?.(result.content);
     } catch (error) {
-      console.error("Generation failed:", error);
+      log.error("Generation failed:", error);
       toast({
         variant: "destructive",
         title: "Generation Failed",

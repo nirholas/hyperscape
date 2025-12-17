@@ -3,6 +3,10 @@
  * A type-safe event emitter implementation
  */
 
+import { logger } from "./logger";
+
+const log = logger.child("TypedEventEmitter");
+
 export class TypedEventEmitter<Events extends Record<PropertyKey, unknown>> {
   private listeners: { [K in keyof Events]?: Set<(data: Events[K]) => void> } =
     {};
@@ -82,7 +86,10 @@ export class TypedEventEmitter<Events extends Record<PropertyKey, unknown>> {
       try {
         fn(data);
       } catch (e) {
-        console.error(`Error in event listener for '${String(event)}':`, e);
+        log.error(
+          { event: String(event), error: e },
+          `Error in event listener for '${String(event)}'`,
+        );
       }
     }
     return true;

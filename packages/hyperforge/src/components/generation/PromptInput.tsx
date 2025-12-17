@@ -4,11 +4,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { SpectacularButton } from "@/components/ui/spectacular-button";
 import { Sparkles } from "lucide-react";
 
-interface PromptInputProps {
+export interface PromptInputProps {
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
   onSubmit?: () => void;
+  placeholder?: string;
+  label?: string;
 }
 
 export function PromptInput({
@@ -16,14 +18,16 @@ export function PromptInput({
   onChange,
   disabled,
   onSubmit,
+  placeholder = "Describe the 3D asset you want to create...",
+  label = "Prompt",
 }: PromptInputProps) {
   return (
     <div className="space-y-2">
-      <label className="text-sm font-medium">Prompt</label>
+      <label className="text-sm font-medium">{label}</label>
       <Textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="Describe the 3D asset you want to create..."
+        placeholder={placeholder}
         disabled={disabled}
         rows={4}
         className="resize-none"

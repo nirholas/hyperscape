@@ -4,6 +4,9 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:dialogue");
 import {
   generateDialogueTree,
   generateNPCContent,
@@ -100,7 +103,7 @@ export async function POST(request: NextRequest) {
         );
     }
   } catch (error) {
-    console.error("[API] Dialogue generation failed:", error);
+    log.error({ error }, "Dialogue generation failed");
     return NextResponse.json(
       {
         error:

@@ -4,6 +4,25 @@
  */
 
 /**
+ * JSON-serializable value types for API payloads
+ */
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonObject | JsonArray;
+export type JsonObject = { [key: string]: JsonValue };
+export type JsonArray = JsonValue[];
+
+/**
+ * Error details that can be included in API responses
+ */
+export type ApiErrorDetails = JsonObject | string | null;
+
+/**
+ * Caught error type - what you get in a catch block
+ * More specific than unknown for error handling
+ */
+export type CaughtError = Error | string | null | undefined;
+
+/**
  * Request options extending standard fetch options
  */
 export interface ApiRequestOptions extends RequestInit {
@@ -20,7 +39,7 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public statusCode: number = 500,
-    public details?: unknown,
+    public details?: ApiErrorDetails,
   ) {
     super(message);
     this.name = "ApiError";
@@ -96,7 +115,7 @@ export async function fetchJson<T>(
  */
 export async function postJson<T>(
   url: string,
-  data: unknown,
+  data: JsonValue,
   options: ApiRequestOptions = {},
 ): Promise<T> {
   return fetchJson<T>(url, {
@@ -111,7 +130,7 @@ export async function postJson<T>(
  */
 export async function putJson<T>(
   url: string,
-  data: unknown,
+  data: JsonValue,
   options: ApiRequestOptions = {},
 ): Promise<T> {
   return fetchJson<T>(url, {
@@ -215,7 +234,7 @@ export function apiResponse<T>(data: T, status = 200): Response {
 export function apiErrorResponse(
   message: string,
   status = 500,
-  details?: unknown,
+  details?: ApiErrorDetails,
 ): Response {
   return new Response(
     JSON.stringify({
@@ -234,7 +253,7 @@ export function apiErrorResponse(
 /**
  * Extract error message from various error types
  */
-export function getErrorMessage(error: unknown): string {
+export function getErrorMessage(error: CaughtError): string {
   if (error instanceof Error) {
     return error.message;
   }
@@ -247,9 +266,6 @@ export function getErrorMessage(error: unknown): string {
 /**
  * Check if an error is an abort error (timeout or manual abort)
  */
-export function isAbortError(error: unknown): boolean {
-  return (
-    error instanceof DOMException &&
-    (error as DOMException).name === "AbortError"
-  );
+export function isAbortError(error: CaughtError | DOMException): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
 }

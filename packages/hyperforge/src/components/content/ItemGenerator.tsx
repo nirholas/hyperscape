@@ -17,11 +17,12 @@ import { SpectacularButton } from "@/components/ui/spectacular-button";
 import { NeonInput } from "@/components/ui/neon-input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
-import { cn } from "@/lib/utils";
-import type { Item, GeneratedItemContent } from "@/types/game/content-types";
+import { cn, logger } from "@/lib/utils";
+import type { GeneratedItemContent } from "@/types/game/content-types";
+
+const log = logger.child("ItemGenerator");
 
 interface ItemGeneratorProps {
   onContentGenerated?: (content: GeneratedItemContent) => void;
@@ -131,7 +132,7 @@ export function ItemGenerator({ onContentGenerated }: ItemGeneratorProps) {
 
       onContentGenerated?.(result.content);
     } catch (error) {
-      console.error("Generation failed:", error);
+      log.error("Generation failed:", error);
       toast({
         variant: "destructive",
         title: "Generation Failed",
@@ -308,7 +309,7 @@ export function ItemGenerator({ onContentGenerated }: ItemGeneratorProps) {
 
           {generatedContent.item.examine && (
             <p className="text-sm text-muted-foreground italic">
-              "{generatedContent.item.examine}"
+              &quot;{generatedContent.item.examine}&quot;
             </p>
           )}
 
@@ -316,7 +317,7 @@ export function ItemGenerator({ onContentGenerated }: ItemGeneratorProps) {
           <div className="flex gap-4 text-sm">
             <span className="flex items-center gap-1">
               <Coins className="w-4 h-4 text-yellow-400" />
-              {generatedContent.item.value.toLocaleString()} gp
+              {(generatedContent.item.value ?? 0).toLocaleString()} gp
             </span>
             <span className="text-muted-foreground">
               Weight: {generatedContent.item.weight} kg

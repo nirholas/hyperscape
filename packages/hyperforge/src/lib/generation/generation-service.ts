@@ -21,16 +21,16 @@ import { createRiggingTask, getRiggingTaskStatus } from "@/lib/meshy/client";
 import {
   POLYCOUNT_PRESETS,
   DEFAULT_TEXTURE_RESOLUTION,
+  DEFAULT_CHARACTER_HEIGHT,
 } from "@/lib/meshy/constants";
 import type { MeshyAIModel } from "@/lib/meshy/types";
 import type { GenerationProgress } from "@/stores/generation-store";
-import {
-  downloadAndSaveModel,
-  saveAssetFiles,
-  downloadFile,
-} from "@/lib/storage/asset-storage";
+import { saveAssetFiles, downloadFile } from "@/lib/storage/asset-storage";
 import { enhancePromptWithGPT4 } from "@/lib/ai/gateway";
 import { generateConceptArt } from "@/lib/ai/concept-art-service";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("Generation");
 
 /**
  * Merge skeleton/skin data from a rigged GLB into a textured GLB
@@ -63,28 +63,22 @@ async function mergeSkeletonIntoTexturedModel(
 
   // Check if rigged model has skeleton data
   if (!rigged.json.skins || rigged.json.skins.length === 0) {
-    console.log(
-      "[Skeleton Merge] Rigged model has no skeleton, returning textured model as-is",
-    );
+    log.debug("Rigged model has no skeleton, returning textured model as-is");
     return texturedGlbBuffer;
   }
 
   // Check if textured model already has skeleton
   if (textured.json.skins && textured.json.skins.length > 0) {
-    console.log(
-      "[Skeleton Merge] Textured model already has skeleton, returning as-is",
-    );
+    log.debug("Textured model already has skeleton, returning as-is");
     return texturedGlbBuffer;
   }
 
-  console.log(
-    "[Skeleton Merge] Merging skeleton from rigged model into textured model...",
+  log.debug("Merging skeleton from rigged model into textured model...");
+  log.debug(
+    `Textured: ${textured.json.nodes?.length || 0} nodes, ${textured.json.images?.length || 0} images`,
   );
-  console.log(
-    `  Textured: ${textured.json.nodes?.length || 0} nodes, ${textured.json.images?.length || 0} images`,
-  );
-  console.log(
-    `  Rigged: ${rigged.json.nodes?.length || 0} nodes, ${rigged.json.skins?.[0]?.joints?.length || 0} bones`,
+  log.debug(
+    `Rigged: ${rigged.json.nodes?.length || 0} nodes, ${rigged.json.skins?.[0]?.joints?.length || 0} bones`,
   );
 
   // Copy skeleton-related data from rigged to textured
@@ -219,8 +213,8 @@ async function mergeSkeletonIntoTexturedModel(
   glb.writeUInt32LE(0x004e4942, binChunkStart + 4); // "BIN\0"
   paddedBinBuffer.copy(glb, binChunkStart + 8);
 
-  console.log(
-    `[Skeleton Merge] Merged model: ${(glb.length / 1024 / 1024).toFixed(2)} MB with ${newSkin.joints.length} bones`,
+  log.info(
+    `Merged model: ${(glb.length / 1024 / 1024).toFixed(2)} MB with ${newSkin.joints.length} bones`,
   );
 
   return glb;
@@ -324,9 +318,9 @@ export async function generate3DModel(
 
       if (!enhancementResult.error) {
         effectivePrompt = enhancementResult.enhancedPrompt;
-        console.log("[Generation] Enhanced prompt:", effectivePrompt);
+        log.debug("Enhanced prompt:", effectivePrompt);
       } else {
-        console.warn("[Generation] Prompt enhancement failed, using original");
+        log.warn("Prompt enhancement failed, using original");
       }
     }
 
@@ -337,10 +331,7 @@ export async function generate3DModel(
     if (config.referenceImageUrl) {
       // User provided a custom reference image URL (already uploaded)
       textureImageUrl = config.referenceImageUrl;
-      console.log(
-        "[Generation] Using custom reference image URL:",
-        textureImageUrl,
-      );
+      log.debug("Using custom reference image URL:", textureImageUrl);
 
       onProgress?.({
         status: "generating",
@@ -350,8 +341,8 @@ export async function generate3DModel(
       });
     } else if (config.referenceImageDataUrl) {
       // User provided a data URL - Meshy may not accept data URLs, log a warning
-      console.warn(
-        "[Generation] Reference image provided as data URL. Meshy may require HTTP URL.",
+      log.warn(
+        "Reference image provided as data URL. Meshy may require HTTP URL.",
       );
       textureImageUrl = config.referenceImageDataUrl;
 
@@ -383,20 +374,16 @@ export async function generate3DModel(
 
         if (conceptArt) {
           textureImageUrl = conceptArt.imageUrl;
-          console.log("[Generation] Concept art generated successfully");
+          log.info("Concept art generated successfully");
         } else {
-          console.warn(
-            "[Generation] Concept art generation failed, continuing without",
-          );
+          log.warn("Concept art generation failed, continuing without");
         }
       } catch (error) {
-        console.warn("[Generation] Concept art error:", error);
+        log.warn("Concept art error:", error);
         // Continue without concept art
       }
     } else {
-      console.log(
-        "[Generation] No texture reference image - using text prompt only",
-      );
+      log.debug("No texture reference image - using text prompt only");
     }
 
     // Stage 2: Start 3D generation
@@ -460,7 +447,7 @@ export async function generate3DModel(
 
       // Save preview model URL for later (untextured, fast-loading version)
       previewModelUrl = previewResult.modelUrl;
-      console.log("[Generation] Preview model URL:", previewModelUrl);
+      log.debug("Preview model URL:", previewModelUrl);
 
       // Stage 2: Refine (adds textures based on reference image and/or prompt)
       onProgress?.({
@@ -489,8 +476,8 @@ export async function generate3DModel(
       });
 
       if (textureImageUrl && !isValidHttpUrl) {
-        console.warn(
-          "[Generation] texture_image_url must be HTTP/HTTPS URL, data URLs not supported by Meshy. Using texture_prompt only.",
+        log.warn(
+          "texture_image_url must be HTTP/HTTPS URL, data URLs not supported by Meshy. Using texture_prompt only.",
         );
       }
 
@@ -542,14 +529,14 @@ export async function generate3DModel(
           // The refine task ID is used so Meshy knows the source model's textures
           const riggingTaskId = await createRiggingTask({
             input_task_id: refineResult.taskId,
-            height_meters: 1.7, // Standard adult human height
+            height_meters: DEFAULT_CHARACTER_HEIGHT, // Standard adult human height
           });
 
-          console.log(
-            "[Generation] Started Meshy rigging task with input_task_id:",
+          log.debug(
+            "Started Meshy rigging task with input_task_id:",
             refineResult.taskId,
           );
-          console.log("[Generation] Rigging task ID:", riggingTaskId);
+          log.debug("Rigging task ID:", riggingTaskId);
 
           // Poll rigging task completion
           let riggingStatus = await getRiggingTaskStatus(riggingTaskId);
@@ -580,8 +567,8 @@ export async function generate3DModel(
           const riggedModelUrl = riggingStatus.result?.rigged_character_glb_url;
 
           if (riggingStatus.status === "SUCCEEDED" && riggedModelUrl) {
-            console.log("[Generation] Meshy rigging completed successfully");
-            console.log("[Generation] Rigged model URL:", riggedModelUrl);
+            log.info("Meshy rigging completed successfully");
+            log.debug("Rigged model URL:", riggedModelUrl);
             result = {
               taskId: riggingTaskId,
               modelUrl: riggedModelUrl,
@@ -591,12 +578,9 @@ export async function generate3DModel(
               textureUrls,
             };
           } else {
-            console.warn(
-              "[Generation] Meshy rigging failed with status:",
-              riggingStatus.status,
-            );
-            console.warn(
-              "[Generation] Rigging error details:",
+            log.warn("Meshy rigging failed with status:", riggingStatus.status);
+            log.warn(
+              "Rigging error details:",
               riggingStatus.task_error?.message || "Unknown",
             );
             // Fall back to textured model without rigging
@@ -609,7 +593,7 @@ export async function generate3DModel(
             };
           }
         } catch (riggingError) {
-          console.error("[Generation] Meshy rigging error:", riggingError);
+          log.error("Meshy rigging error:", riggingError);
           // Continue with textured unrigged model
           result = {
             taskId: refineResult.taskId,
@@ -684,10 +668,10 @@ export async function generate3DModel(
     });
 
     // Download the main model (rigged if available, otherwise textured)
-    console.log("[Generation] Downloading model from:", result.modelUrl);
+    log.debug("Downloading model from:", result.modelUrl);
     const modelBuffer = await downloadFile(result.modelUrl);
-    console.log(
-      `[Generation] Downloaded model: ${(modelBuffer.length / 1024 / 1024).toFixed(2)} MB`,
+    log.info(
+      `Downloaded model: ${(modelBuffer.length / 1024 / 1024).toFixed(2)} MB`,
     );
 
     // Download the original textured model if different from main model (rigging strips textures)
@@ -699,13 +683,13 @@ export async function generate3DModel(
       result.texturedModelUrl !== result.modelUrl
     ) {
       try {
-        console.log(
-          "[Generation] Downloading original textured model from:",
+        log.debug(
+          "Downloading original textured model from:",
           result.texturedModelUrl,
         );
         texturedModelBuffer = await downloadFile(result.texturedModelUrl);
-        console.log(
-          `[Generation] Downloaded textured model: ${(texturedModelBuffer.length / 1024 / 1024).toFixed(2)} MB`,
+        log.info(
+          `Downloaded textured model: ${(texturedModelBuffer.length / 1024 / 1024).toFixed(2)} MB`,
         );
 
         // Merge skeleton from rigged model into textured model
@@ -722,16 +706,16 @@ export async function generate3DModel(
             texturedModelBuffer,
             modelBuffer,
           );
-          console.log(
-            `[Generation] Merged model: ${(mergedModelBuffer.length / 1024 / 1024).toFixed(2)} MB`,
+          log.info(
+            `Merged model: ${(mergedModelBuffer.length / 1024 / 1024).toFixed(2)} MB`,
           );
         } catch (mergeError) {
-          console.error("[Generation] Failed to merge skeleton:", mergeError);
+          log.error("Failed to merge skeleton:", mergeError);
           // Fall back to rigged model (no textures but has skeleton)
           mergedModelBuffer = modelBuffer;
         }
       } catch (error) {
-        console.warn("[Generation] Failed to download textured model:", error);
+        log.warn("Failed to download textured model:", error);
       }
     }
 
@@ -751,14 +735,11 @@ export async function generate3DModel(
           try {
             const buffer = await downloadFile(textureSet.base_color);
             textureBuffers.push({ name: "base_color.png", buffer });
-            console.log(
-              `[Generation] Downloaded base_color texture: ${(buffer.length / 1024).toFixed(1)} KB`,
+            log.debug(
+              `Downloaded base_color texture: ${(buffer.length / 1024).toFixed(1)} KB`,
             );
           } catch (e) {
-            console.warn(
-              "[Generation] Failed to download base_color texture:",
-              e,
-            );
+            log.warn("Failed to download base_color texture:", e);
           }
         }
 
@@ -768,10 +749,7 @@ export async function generate3DModel(
             const buffer = await downloadFile(textureSet.metallic);
             textureBuffers.push({ name: "metallic.png", buffer });
           } catch (e) {
-            console.warn(
-              "[Generation] Failed to download metallic texture:",
-              e,
-            );
+            log.warn("Failed to download metallic texture:", e);
           }
         }
 
@@ -780,10 +758,7 @@ export async function generate3DModel(
             const buffer = await downloadFile(textureSet.roughness);
             textureBuffers.push({ name: "roughness.png", buffer });
           } catch (e) {
-            console.warn(
-              "[Generation] Failed to download roughness texture:",
-              e,
-            );
+            log.warn("Failed to download roughness texture:", e);
           }
         }
 
@@ -792,14 +767,12 @@ export async function generate3DModel(
             const buffer = await downloadFile(textureSet.normal);
             textureBuffers.push({ name: "normal.png", buffer });
           } catch (e) {
-            console.warn("[Generation] Failed to download normal texture:", e);
+            log.warn("Failed to download normal texture:", e);
           }
         }
       }
 
-      console.log(
-        `[Generation] Downloaded ${textureBuffers.length} separate texture files`,
-      );
+      log.info(`Downloaded ${textureBuffers.length} separate texture files`);
     }
 
     // Download preview model if available (untextured, fast-loading version)
@@ -807,16 +780,13 @@ export async function generate3DModel(
     let previewBuffer: Buffer | undefined;
     if (previewModelUrl) {
       try {
-        console.log(
-          "[Generation] Downloading preview model from:",
-          previewModelUrl,
-        );
+        log.debug("Downloading preview model from:", previewModelUrl);
         previewBuffer = await downloadFile(previewModelUrl);
-        console.log(
-          `[Generation] Downloaded preview model: ${(previewBuffer.length / 1024 / 1024).toFixed(2)} MB`,
+        log.info(
+          `Downloaded preview model: ${(previewBuffer.length / 1024 / 1024).toFixed(2)} MB`,
         );
       } catch (error) {
-        console.warn("[Generation] Failed to download preview model:", error);
+        log.warn("Failed to download preview model:", error);
       }
     }
 
@@ -826,7 +796,7 @@ export async function generate3DModel(
       try {
         thumbnailBuffer = await downloadFile(result.thumbnailUrl);
       } catch {
-        console.warn("Failed to download thumbnail");
+        log.warn("Failed to download thumbnail");
       }
     }
 
@@ -886,21 +856,21 @@ export async function generate3DModel(
               "base64",
             );
             hasHandRigging = true;
-            console.log("✅ Hand rigging complete:", {
+            log.info("Hand rigging complete:", {
               leftHandBones: handRigData.leftHandBones?.length || 0,
               rightHandBones: handRigData.rightHandBones?.length || 0,
             });
           }
 
           if (handRigData.warnings && handRigData.warnings.length > 0) {
-            console.warn("Hand rigging warnings:", handRigData.warnings);
+            log.warn("Hand rigging warnings:", handRigData.warnings);
           }
         } else {
-          console.error("Hand rigging failed:", await handRigResponse.text());
+          log.error("Hand rigging failed:", await handRigResponse.text());
           // Don't fail - continue with original GLB
         }
       } catch (error) {
-        console.error("Hand rigging error:", error);
+        log.error("Hand rigging error:", error);
         // Don't fail the whole generation if hand rigging fails
       }
     }
@@ -938,14 +908,14 @@ export async function generate3DModel(
         const vrmSourceBuffer = processedModelBuffer;
 
         if (!hasConfirmedTextures) {
-          console.warn(
-            "[Generation] VRM conversion: textures may not be embedded in model. " +
+          log.warn(
+            "VRM conversion: textures may not be embedded in model. " +
               "texturedModelUrl was not separate from modelUrl.",
           );
         }
 
-        console.log(
-          `[Generation] VRM conversion using: processed model (skeleton${hasConfirmedTextures ? " + textures" : ""}${hasHandRigging ? " + hand rigging" : ""})`,
+        log.debug(
+          `VRM conversion using: processed model (skeleton${hasConfirmedTextures ? " + textures" : ""}${hasHandRigging ? " + hand rigging" : ""})`,
         );
 
         // Call VRM conversion API with the processed model
@@ -973,14 +943,14 @@ export async function generate3DModel(
 
           // Log warnings if any
           if (vrmData.warnings && vrmData.warnings.length > 0) {
-            console.warn("VRM conversion warnings:", vrmData.warnings);
+            log.warn("VRM conversion warnings:", vrmData.warnings);
           }
         } else {
-          console.error("VRM conversion failed:", await vrmResponse.text());
+          log.error("VRM conversion failed:", await vrmResponse.text());
           // Don't fail the whole generation if VRM conversion fails
         }
       } catch (error) {
-        console.error("VRM conversion error:", error);
+        log.error("VRM conversion error:", error);
         // Don't fail the whole generation if VRM conversion fails
       }
     }
@@ -1083,7 +1053,7 @@ export async function generateBatch(
       const result = await generate3DModel(variationConfig);
       results.push(result);
     } catch (error) {
-      console.error(`Failed to generate variation ${i + 1}:`, error);
+      log.error(`Failed to generate variation ${i + 1}:`, error);
       // Continue with other variations
     }
   }

@@ -14,7 +14,6 @@ import {
   generateAssetId,
   getDefaultMetadata,
 } from "@/lib/generation/category-schemas";
-import type { AssetCategory } from "@/types/categories";
 
 interface NPCGenerationFormProps {
   onGenerate: (config: GenerationConfig) => void;

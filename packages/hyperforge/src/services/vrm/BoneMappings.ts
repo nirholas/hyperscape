@@ -6,6 +6,10 @@
  * naming schemes but similar anatomical structure.
  */
 
+import { logger } from "@/lib/utils";
+
+const log = logger.child("BoneMappings");
+
 /**
  * Meshy → Mixamo Bone Mapping
  *
@@ -214,9 +218,9 @@ export function createBoneMapping(
 ): Map<string, string> {
   const result = new Map<string, string>();
 
-  console.log("🔗 Creating bone mapping...");
-  console.log("  Source bones:", sourceBoneNames.length);
-  console.log("  Target bones:", targetBoneNames.length);
+  log.info("🔗 Creating bone mapping...");
+  log.debug("  Source bones:", sourceBoneNames.length);
+  log.debug("  Target bones:", targetBoneNames.length);
 
   let mappedCount = 0;
   let unmappedCount = 0;
@@ -240,23 +244,21 @@ export function createBoneMapping(
       if (actualTargetName) {
         result.set(sourceName, actualTargetName);
         mappedCount++;
-        console.log(`  ✅ ${sourceName} → ${actualTargetName}`);
+        log.debug(`  ✅ ${sourceName} → ${actualTargetName}`);
       } else {
         unmappedCount++;
-        console.log(
-          `  ❌ ${sourceName} → ${mappedName} (target bone not found)`,
-        );
+        log.warn(`  ❌ ${sourceName} → ${mappedName} (target bone not found)`);
       }
     } else {
       unmappedCount++;
-      console.log(`  ⚠️  ${sourceName} (no mapping defined)`);
+      log.warn(`  ⚠️  ${sourceName} (no mapping defined)`);
     }
   }
 
-  console.log(
+  log.info(
     `✅ Mapping complete: ${mappedCount} mapped, ${unmappedCount} unmapped`,
   );
-  console.log(
+  log.info(
     `   Mapping quality: ${((mappedCount / sourceBoneNames.length) * 100).toFixed(1)}%`,
   );
 

@@ -15,10 +15,18 @@
  * - AI_GATEWAY_API_KEY: Your Vercel AI Gateway API key
  */
 
-import { generateText, streamText, generateObject } from "ai";
+import {
+  generateText,
+  streamText,
+  generateObject,
+  experimental_generateImage as generateImage,
+} from "ai";
 import { gateway } from "@ai-sdk/gateway";
 import type { z } from "zod";
-import { TASK_MODELS, getTextModel, getVisionModel } from "./providers";
+import { TASK_MODELS, isMultimodalImageModel } from "./providers";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("AI Gateway");
 
 // ============================================================================
 // Types
@@ -35,10 +43,42 @@ export interface StreamTextOptions extends TextGenerationOptions {
   onChunk?: (chunk: string) => void;
 }
 
+/**
+ * Standard image sizes for generation
+ * - 256x256: Thumbnails, icons
+ * - 512x512: Sprites, small images
+ * - 768x768: Intermediate size
+ * - 1024x1024: Standard quality (default)
+ * - 1792x1024: Wide landscape
+ * - 1024x1792: Tall portrait
+ * - 2048x2048: High resolution (Flux only)
+ */
+export type ImageSize =
+  | "256x256"
+  | "512x512"
+  | "768x768"
+  | "1024x1024"
+  | "1792x1024"
+  | "1024x1792"
+  | "2048x2048";
+
 export interface ImageGenerationOptions {
-  provider?: string;
-  size?: "1024x1024" | "1792x1024" | "1024x1792";
+  /** Model to use for image generation (e.g., 'bfl/flux-2-pro', 'google/gemini-2.5-flash-image') */
+  model?: string;
+  /**
+   * Image dimensions
+   * - 256x256: Thumbnails, icons
+   * - 512x512: Sprites, small images
+   * - 768x768: Intermediate size
+   * - 1024x1024: Standard quality (default)
+   * - 1792x1024: Wide landscape
+   * - 1024x1792: Tall portrait
+   * - 2048x2048: High resolution (Flux only)
+   */
+  size?: ImageSize;
+  /** Quality level - 'hd' adds emphasis in prompt */
   quality?: "standard" | "hd";
+  /** Style guidance - affects prompt wording */
   style?: "vivid" | "natural";
 }
 
@@ -81,13 +121,13 @@ export async function generateTextWithProvider(
     systemPrompt,
   } = options;
 
-  console.log(`[AI Gateway] Generating text with model: ${model}`);
+  log.debug(`Generating text with model: ${model}`);
 
   const result = await generateText({
     model: gateway(model),
     prompt,
     system: systemPrompt,
-    maxTokens,
+    maxOutputTokens: maxTokens,
     temperature,
   });
 
@@ -110,13 +150,13 @@ export async function* streamTextWithProvider(
     onChunk,
   } = options;
 
-  console.log(`[AI Gateway] Streaming text with model: ${model}`);
+  log.debug(`Streaming text with model: ${model}`);
 
   const result = streamText({
     model: gateway(model),
     prompt,
     system: systemPrompt,
-    maxTokens,
+    maxOutputTokens: maxTokens,
     temperature,
   });
 
@@ -148,14 +188,14 @@ export async function generateStructuredOutput<T>(
     systemPrompt,
   } = options;
 
-  console.log(`[AI Gateway] Generating structured output with model: ${model}`);
+  log.debug(`Generating structured output with model: ${model}`);
 
   const result = await generateObject({
     model: gateway(model),
     prompt,
     schema,
     system: systemPrompt,
-    maxTokens,
+    maxOutputTokens: maxTokens,
     temperature,
   });
 
@@ -216,7 +256,7 @@ export async function analyzeImage(
     temperature = 0.3,
   } = options;
 
-  console.log(`[AI Gateway] Analyzing image with model: ${model}`);
+  log.debug(`Analyzing image with model: ${model}`);
 
   const result = await generateText({
     model: gateway(model),
@@ -229,7 +269,7 @@ export async function analyzeImage(
         ],
       },
     ],
-    maxTokens,
+    maxOutputTokens: maxTokens,
     temperature,
   });
 
@@ -241,22 +281,60 @@ export async function analyzeImage(
 // ============================================================================
 
 /**
- * Generate an image using AI Gateway
- * Currently uses Google Gemini for image generation
+ * Build enhanced prompt with style/quality hints for image generation
  */
-export async function generateImageWithProvider(
-  prompt: string,
-  options: ImageGenerationOptions = {},
-): Promise<string> {
-  console.log("[AI Gateway] Image generation requested:", { prompt, options });
+function buildImagePrompt(
+  basePrompt: string,
+  options: Pick<ImageGenerationOptions, "quality" | "style">,
+): string {
+  const parts = [basePrompt];
 
-  // Use AI SDK with Gemini for image generation
+  if (options.style === "vivid") {
+    parts.push("Vivid, vibrant colors with dramatic lighting.");
+  } else if (options.style === "natural") {
+    parts.push("Natural, realistic lighting and colors.");
+  }
+
+  if (options.quality === "hd") {
+    parts.push("High detail, sharp, professional quality.");
+  }
+
+  return parts.join(" ");
+}
+
+/**
+ * System prompt for multimodal image generation
+ * Instructs the model to ONLY generate an image, no text
+ */
+const IMAGE_GENERATION_SYSTEM_PROMPT = `You are an image generation assistant. Your ONLY task is to generate images.
+
+CRITICAL INSTRUCTIONS:
+- Generate EXACTLY ONE high-quality image based on the user's description
+- Do NOT include any text, explanations, or descriptions in your response
+- Do NOT describe what you will create or what you have created
+- Do NOT ask clarifying questions
+- ONLY output the generated image, nothing else
+
+Your response must contain ONLY the generated image file.`;
+
+/**
+ * Generate image using multimodal LLM (Gemini)
+ * Uses generateText() and extracts images from result.files
+ */
+async function generateWithMultimodalModel(
+  model: string,
+  prompt: string,
+  size: string,
+): Promise<string | null> {
+  log.debug("Multimodal image generation:", { model, size });
+
   const result = await generateText({
-    model: gateway(TASK_MODELS.imageGeneration),
-    prompt: `Generate an image: ${prompt}`,
+    model: gateway(model),
+    system: IMAGE_GENERATION_SYSTEM_PROMPT,
+    prompt: `Generate an image (${size}): ${prompt}`,
   });
 
-  // Check for generated image files
+  // Multimodal models return images as files in the response
   const imageFiles = result.files?.filter((f) =>
     f.mediaType?.startsWith("image/"),
   );
@@ -265,12 +343,109 @@ export async function generateImageWithProvider(
     const file = imageFiles[0];
     const base64 = Buffer.from(file.uint8Array).toString("base64");
     const mediaType = file.mediaType || "image/png";
+    log.debug(
+      `Generated image: ${mediaType}, ${(file.uint8Array.length / 1024).toFixed(1)} KB`,
+    );
     return `data:${mediaType};base64,${base64}`;
   }
 
-  // Fallback if no image generated
-  console.warn("[AI Gateway] No image generated, returning placeholder");
-  return `https://placeholder.hyperforge.ai/generated?prompt=${encodeURIComponent(prompt)}&size=${options.size || "1024x1024"}`;
+  return null;
+}
+
+/**
+ * Image model type from generateImage parameters
+ * Used for type bridging when gateway() returns a model that supports image generation
+ */
+type ImageModel = Parameters<typeof generateImage>[0]["model"];
+
+/**
+ * Generate image using dedicated image model (Flux, Imagen)
+ * Uses experimental_generateImage() API
+ */
+async function generateWithDedicatedModel(
+  model: string,
+  prompt: string,
+  size: `${number}x${number}`,
+): Promise<string | null> {
+  log.debug("Dedicated image generation:", { model, size });
+
+  // Generate image using the AI SDK
+  // Note: gateway() returns a language model, but some models support image generation
+  // The gateway model is compatible at runtime, but types don't reflect this
+  const gatewayModel = gateway(model);
+  const result = await generateImage({
+    model: gatewayModel as unknown as ImageModel,
+    prompt,
+    size,
+  });
+
+  // Dedicated image models return images array
+  if (result.images && result.images.length > 0) {
+    const image = result.images[0];
+    // Image can be base64 string or have .base64 property
+    const base64 = typeof image === "string" ? image : image.base64;
+    if (base64) {
+      log.debug(
+        `Generated image via dedicated model: ${(base64.length / 1024).toFixed(1)} KB`,
+      );
+      // Return as data URL if not already
+      if (base64.startsWith("data:")) {
+        return base64;
+      }
+      return `data:image/png;base64,${base64}`;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Generate an image using AI Gateway
+ *
+ * Supports two types of image models:
+ * - **Multimodal LLMs** (Gemini): Uses generateText(), returns images in result.files
+ * - **Dedicated image models** (Flux, Imagen): Uses experimental_generateImage()
+ *
+ * The model type is auto-detected based on TASK_MODELS.imageGeneration or explicit model param.
+ *
+ * @param prompt - The image description
+ * @param options - Generation options:
+ *   - model: Override the default model (e.g., 'bfl/flux-2-pro')
+ *   - size: Image dimensions ('1024x1024', '512x512', etc.)
+ *   - quality: 'standard' | 'hd' (affects prompt emphasis)
+ *   - style: 'vivid' | 'natural' (affects prompt style guidance)
+ * @returns Base64 data URL of the generated image
+ *
+ * @see https://vercel.com/docs/ai-gateway/image-generation
+ * @see https://vercel.com/docs/ai-gateway/image-generation/ai-sdk
+ */
+export async function generateImageWithProvider(
+  prompt: string,
+  options: ImageGenerationOptions = {},
+): Promise<string> {
+  const { model: explicitModel, size = "1024x1024", quality, style } = options;
+
+  const model = explicitModel || TASK_MODELS.imageGeneration;
+  const enhancedPrompt = buildImagePrompt(prompt, { quality, style });
+
+  log.debug("Image generation requested:", { model, size });
+
+  let imageUrl: string | null = null;
+
+  // Route to appropriate generation method based on model type
+  if (isMultimodalImageModel(model)) {
+    imageUrl = await generateWithMultimodalModel(model, enhancedPrompt, size);
+  } else {
+    // Dedicated image model (Flux, Imagen, etc.)
+    imageUrl = await generateWithDedicatedModel(model, enhancedPrompt, size);
+  }
+
+  if (imageUrl) {
+    return imageUrl;
+  }
+
+  log.warn("No image generated, returning placeholder");
+  return `https://placeholder.hyperforge.ai/generated?prompt=${encodeURIComponent(prompt)}&size=${size}`;
 }
 
 // ============================================================================
@@ -327,19 +502,19 @@ Keep the enhanced prompt concise but detailed. Return ONLY the enhanced prompt, 
   const userPrompt = `Enhance this ${options.assetType} asset description for 3D generation: "${description}"`;
 
   try {
-    console.log("[AI Gateway] Enhancing prompt via Vercel AI Gateway...");
+    log.debug("Enhancing prompt via Vercel AI Gateway...");
 
     const result = await generateText({
       model: gateway(modelName),
       prompt: userPrompt,
       system: systemPrompt,
       temperature: 0.7,
-      maxTokens: 500,
+      maxOutputTokens: 500,
     });
 
     const enhancedPrompt = result.text.trim();
 
-    console.log("[AI Gateway] Prompt enhanced successfully");
+    log.info("Prompt enhanced successfully");
 
     return {
       originalPrompt: description,
@@ -347,7 +522,7 @@ Keep the enhanced prompt concise but detailed. Return ONLY the enhanced prompt, 
       model: modelName,
     };
   } catch (error) {
-    console.error("[AI Gateway] Enhancement failed:", error);
+    log.error("Enhancement failed:", error);
 
     // Fallback: add basic game-ready suffix
     const fallbackPrompt = `${description}. Game-ready 3D asset, clean geometry, detailed textures.`;

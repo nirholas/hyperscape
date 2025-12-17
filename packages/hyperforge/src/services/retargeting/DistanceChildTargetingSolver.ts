@@ -72,7 +72,7 @@ export class DistanceChildTargetingSolver extends AutoSkinSolver {
   private reassignToParentBones(
     assignments: number[],
     skinIndices: number[],
-    skinWeights: number[],
+    _skinWeights: number[],
   ): void {
     const vertexCount = this.getVertexCount();
 

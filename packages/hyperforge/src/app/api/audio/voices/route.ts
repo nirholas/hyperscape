@@ -10,6 +10,9 @@ import {
   getSharedVoices,
   GAME_VOICE_PRESETS,
 } from "@/lib/audio/elevenlabs-service";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("API:audio/voices");
 
 export async function GET(request: NextRequest) {
   try {
@@ -61,7 +64,7 @@ export async function GET(request: NextRequest) {
     const voices = await getVoices();
     return NextResponse.json({ voices, type: "all" });
   } catch (error) {
-    console.error("[API] Get voices error:", error);
+    log.error("Get voices error", { error });
 
     // Check if it's an API key error
     if (

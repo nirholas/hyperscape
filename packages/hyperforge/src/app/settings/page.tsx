@@ -23,7 +23,10 @@ import {
 import { StudioPageLayout } from "@/components/layout/StudioPageLayout";
 import { GlassPanel } from "@/components/ui/glass-panel";
 import { SpectacularButton } from "@/components/ui/spectacular-button";
-import { cn } from "@/lib/utils";
+import { ModelConfigurationPanel } from "@/components/settings/ModelSelector";
+import { cn, logger } from "@/lib/utils";
+
+const log = logger.child("SettingsPage");
 
 interface ApiStatus {
   meshy: {
@@ -101,7 +104,7 @@ export default function SettingsPage() {
         setApiStatus(data);
       }
     } catch (error) {
-      console.error("Failed to fetch API status:", error);
+      log.error({ error }, "Failed to fetch API status");
     } finally {
       setIsLoadingStatus(false);
     }
@@ -117,7 +120,7 @@ export default function SettingsPage() {
         setMeshyBalance(data);
       }
     } catch (error) {
-      console.error("Failed to fetch Meshy balance:", error);
+      log.error({ error }, "Failed to fetch Meshy balance");
       setMeshyBalance({ configured: false, error: "Failed to fetch balance" });
     } finally {
       setIsLoadingBalance(false);
@@ -134,7 +137,7 @@ export default function SettingsPage() {
         setAiGatewayCredits(data);
       }
     } catch (error) {
-      console.error("Failed to fetch AI Gateway credits:", error);
+      log.error({ error }, "Failed to fetch AI Gateway credits");
       setAiGatewayCredits({
         configured: false,
         error: "Failed to fetch credits",
@@ -154,7 +157,7 @@ export default function SettingsPage() {
         setElevenLabsSub(data);
       }
     } catch (error) {
-      console.error("Failed to fetch ElevenLabs subscription:", error);
+      log.error({ error }, "Failed to fetch ElevenLabs subscription");
       setElevenLabsSub({
         configured: false,
         error: "Failed to fetch subscription",
@@ -426,6 +429,9 @@ export default function SettingsPage() {
                 </div>
               )}
             </GlassPanel>
+
+            {/* AI Model Configuration */}
+            <ModelConfigurationPanel />
 
             {/* ElevenLabs Subscription Card */}
             <GlassPanel className="p-6">

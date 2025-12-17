@@ -67,21 +67,32 @@ export function prepareAssetForExport(
   const { validate = true, generateId = true } = options;
 
   // Determine manifest type
-  const manifestTypeMap: Record<AssetCategory, "items" | "npcs" | "resources"> =
-    {
-      weapon: "items",
-      prop: "items",
-      building: "items",
-      npc: "npcs",
-      character: "npcs",
-      resource: "resources",
-      environment: "resources",
-    };
+  const manifestTypeMap: Partial<
+    Record<AssetCategory, "items" | "npcs" | "resources">
+  > = {
+    weapon: "items",
+    armor: "items",
+    tool: "items",
+    item: "items",
+    currency: "items",
+    prop: "items",
+    building: "items",
+    emote: "items",
+    audio: "items",
+    npc: "npcs",
+    mob: "npcs",
+    character: "npcs",
+    avatar: "npcs",
+    resource: "resources",
+    environment: "resources",
+    biome: "resources",
+    music: "items", // Music tracks stored with items
+  };
 
-  const manifestType = manifestTypeMap[category];
+  const manifestType = manifestTypeMap[category] || "items";
 
   // Ensure ID exists
-  let assetData = { ...metadata };
+  const assetData = { ...metadata };
   if (generateId && !assetData.id) {
     assetData.id = generateAssetId(
       (assetData.name as string) || "asset",
@@ -274,17 +285,26 @@ export function exportAssetWithVariants(
     });
 
     // Determine manifest type
-    const manifestTypeMap: Record<
-      AssetCategory,
-      "items" | "npcs" | "resources"
+    const manifestTypeMap: Partial<
+      Record<AssetCategory, "items" | "npcs" | "resources">
     > = {
       weapon: "items",
+      armor: "items",
+      tool: "items",
+      item: "items",
+      currency: "items",
       prop: "items",
       building: "items",
+      emote: "items",
+      audio: "items",
       npc: "npcs",
+      mob: "npcs",
       character: "npcs",
+      avatar: "npcs",
       resource: "resources",
       environment: "resources",
+      biome: "resources",
+      music: "items",
     };
 
     const warnings: string[] = [];
@@ -301,7 +321,7 @@ export function exportAssetWithVariants(
 
     return {
       success: true,
-      manifestType: manifestTypeMap[category],
+      manifestType: manifestTypeMap[category] || "items",
       asset,
       errors: [],
       warnings,

@@ -41,6 +41,9 @@
  */
 
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("SupabaseStorage");
 
 // Storage buckets for HyperForge assets (6 buckets)
 const IMAGE_GENERATION_BUCKET = "image-generation"; // AI-generated images (concept art, sprites)
@@ -147,21 +150,15 @@ async function ensureBucket(): Promise<void> {
           error.message.includes("does not exist")
         ) {
           // Bucket doesn't exist - it should be created via Supabase dashboard
-          console.warn(
-            `[Supabase Storage] Bucket '${bucketName}' not accessible. Please create it in Supabase dashboard.`,
+          log.warn(
+            `Bucket '${bucketName}' not accessible. Please create it in Supabase dashboard.`,
           );
         } else {
-          console.warn(
-            `[Supabase Storage] Bucket '${bucketName}' access warning:`,
-            error.message,
-          );
+          log.warn(`Bucket '${bucketName}' access warning: ${error.message}`);
         }
       }
     } catch (error) {
-      console.warn(
-        `[Supabase Storage] Bucket '${bucketName}' check failed:`,
-        error,
-      );
+      log.warn(`Bucket '${bucketName}' check failed`, { error });
     }
   }
 }
@@ -205,14 +202,12 @@ export async function uploadReferenceImage(
     );
 
     if (result.success) {
-      console.log(
-        `[Supabase Storage] Uploaded reference image to image-generation: ${result.url}`,
-      );
+      log.info(`Uploaded reference image to image-generation: ${result.url}`);
     }
 
     return result;
   } catch (error) {
-    console.error("[Supabase Storage] Upload failed:", error);
+    log.error("Upload failed", { error });
     return {
       success: false,
       url: "",
@@ -248,14 +243,12 @@ export async function uploadConceptArt(
     );
 
     if (result.success) {
-      console.log(
-        `[Supabase Storage] Uploaded concept art to image-generation: ${result.url}`,
-      );
+      log.info(`Uploaded concept art to image-generation: ${result.url}`);
     }
 
     return result;
   } catch (error) {
-    console.error("[Supabase Storage] Concept art upload error:", error);
+    log.error("Concept art upload error", { error });
     return {
       success: false,
       url: "",
@@ -292,14 +285,12 @@ export async function uploadAudio(
     );
 
     if (result.success) {
-      console.log(
-        `[Supabase Storage] Uploaded audio to audio-generations: ${result.url}`,
-      );
+      log.info(`Uploaded audio to audio-generations: ${result.url}`);
     }
 
     return result;
   } catch (error) {
-    console.error("[Supabase Storage] Audio upload error:", error);
+    log.error("Audio upload error", { error });
     return {
       success: false,
       url: "",
@@ -342,14 +333,12 @@ export async function uploadContent(
     );
 
     if (result.success) {
-      console.log(
-        `[Supabase Storage] Uploaded content to content-generations: ${result.url}`,
-      );
+      log.info(`Uploaded content to content-generations: ${result.url}`);
     }
 
     return result;
   } catch (error) {
-    console.error("[Supabase Storage] Content upload error:", error);
+    log.error("Content upload error", { error });
     return {
       success: false,
       url: "",
@@ -386,13 +375,13 @@ export async function deleteFile(storagePath: string): Promise<boolean> {
       .remove([storagePath]);
 
     if (error) {
-      console.error("[Supabase Storage] Delete error:", error);
+      log.error("Delete error", { error });
       return false;
     }
 
     return true;
   } catch (error) {
-    console.error("[Supabase Storage] Delete failed:", error);
+    log.error("Delete failed", { error });
     return false;
   }
 }
@@ -409,13 +398,13 @@ export async function listFiles(folder: string): Promise<string[]> {
       .list(folder);
 
     if (error) {
-      console.error("[Supabase Storage] List error:", error);
+      log.error("List error", { error });
       return [];
     }
 
     return data?.map((f) => `${folder}/${f.name}`) || [];
   } catch (error) {
-    console.error("[Supabase Storage] List failed:", error);
+    log.error("List failed", { error });
     return [];
   }
 }
@@ -523,8 +512,9 @@ async function uploadFileToBucket(
 
 /**
  * Legacy wrapper for backwards compatibility
+ * @deprecated Use uploadFileToBucket directly
  */
-async function uploadFile(
+async function _uploadFile(
   storagePath: string,
   data: Buffer | ArrayBuffer,
   contentType: string,
@@ -586,9 +576,7 @@ export async function saveForgeAsset(
   if (modelUpload.success) {
     result.modelUrl = modelUpload.url;
     result.modelPath = modelUpload.path;
-    console.log(
-      `[Forge Storage] Uploaded model to meshy-models: ${result.modelUrl}`,
-    );
+    log.info(`Uploaded model to meshy-models: ${result.modelUrl}`);
   } else {
     throw new Error(`Failed to upload model: ${modelUpload.error}`);
   }
@@ -605,7 +593,7 @@ export async function saveForgeAsset(
     if (thumbnailUpload.success) {
       result.thumbnailUrl = thumbnailUpload.url;
       result.thumbnailPath = thumbnailUpload.path;
-      console.log(`[Forge Storage] Uploaded thumbnail: ${result.thumbnailUrl}`);
+      log.info(`Uploaded thumbnail: ${result.thumbnailUrl}`);
     }
   }
 
@@ -622,9 +610,7 @@ export async function saveForgeAsset(
     if (vrmUpload.success) {
       result.vrmUrl = vrmUpload.url;
       result.vrmPath = vrmUpload.path;
-      console.log(
-        `[Forge Storage] Uploaded VRM to vrm-conversion: ${result.vrmUrl}`,
-      );
+      log.info(`Uploaded VRM to vrm-conversion: ${result.vrmUrl}`);
     }
   }
 
@@ -640,9 +626,7 @@ export async function saveForgeAsset(
     if (previewUpload.success) {
       result.previewUrl = previewUpload.url;
       result.previewPath = previewUpload.path;
-      console.log(
-        `[Forge Storage] Uploaded preview to meshy-models: ${result.previewUrl}`,
-      );
+      log.info(`Uploaded preview to meshy-models: ${result.previewUrl}`);
     }
   }
 
@@ -658,8 +642,8 @@ export async function saveForgeAsset(
     if (texturedUpload.success) {
       result.texturedModelUrl = texturedUpload.url;
       result.texturedModelPath = texturedUpload.path;
-      console.log(
-        `[Forge Storage] Uploaded textured model to meshy-models: ${result.texturedModelUrl}`,
+      log.info(
+        `Uploaded textured model to meshy-models: ${result.texturedModelUrl}`,
       );
     }
   }
@@ -684,8 +668,8 @@ export async function saveForgeAsset(
     }
 
     if (result.textureUrls.length > 0) {
-      console.log(
-        `[Forge Storage] Uploaded ${result.textureUrls.length} textures to image-generation`,
+      log.info(
+        `Uploaded ${result.textureUrls.length} textures to image-generation`,
       );
     }
   }
@@ -717,7 +701,7 @@ export async function saveForgeAsset(
     if (metadataUpload.success) {
       result.metadataUrl = metadataUpload.url;
       result.metadataPath = metadataUpload.path;
-      console.log(`[Forge Storage] Uploaded metadata: ${result.metadataUrl}`);
+      log.info(`Uploaded metadata: ${result.metadataUrl}`);
     }
   }
 
@@ -777,7 +761,7 @@ export async function deleteForgeAsset(assetId: string): Promise<boolean> {
       .list(assetFolder);
 
     if (listError) {
-      console.error("[Forge Storage] Error listing files:", listError);
+      log.error("Error listing files", { error: listError });
       return false;
     }
 
@@ -792,14 +776,14 @@ export async function deleteForgeAsset(assetId: string): Promise<boolean> {
       .remove(filePaths);
 
     if (deleteError) {
-      console.error("[Forge Storage] Error deleting files:", deleteError);
+      log.error("Error deleting files", { error: deleteError });
       return false;
     }
 
-    console.log(`[Forge Storage] Deleted asset: ${assetId}`);
+    log.info(`Deleted asset: ${assetId}`);
     return true;
   } catch (error) {
-    console.error("[Forge Storage] Delete failed:", error);
+    log.error("Delete failed", { error });
     return false;
   }
 }
@@ -816,7 +800,7 @@ export async function listForgeAssetIds(): Promise<string[]> {
       .list(FORGE_MODELS_FOLDER);
 
     if (error) {
-      console.error("[Forge Storage] List error:", error);
+      log.error("List error", { error });
       return [];
     }
 
@@ -825,7 +809,7 @@ export async function listForgeAssetIds(): Promise<string[]> {
     const assetFolders = data?.filter((item) => item.id === null) || [];
     return assetFolders.map((f) => f.name);
   } catch (error) {
-    console.error("[Forge Storage] List failed:", error);
+    log.error("List failed", { error });
     return [];
   }
 }
@@ -1009,10 +993,7 @@ export async function listImageAssets(): Promise<ImageAsset[]> {
         .list(folder.path, { limit: 100 });
 
       if (error) {
-        console.warn(
-          `[Supabase] Failed to list ${folder.path}:`,
-          error.message,
-        );
+        log.warn(`Failed to list ${folder.path}: ${error.message}`);
         continue;
       }
 
@@ -1033,7 +1014,7 @@ export async function listImageAssets(): Promise<ImageAsset[]> {
         });
       }
     } catch (error) {
-      console.warn(`[Supabase] Error listing ${folder.path}:`, error);
+      log.warn(`Error listing ${folder.path}`, { error });
     }
   }
 
@@ -1060,7 +1041,7 @@ export async function listAudioAssets(): Promise<AudioAsset[]> {
       .list("generated", { limit: 100 });
 
     if (error) {
-      console.warn("[Supabase] Failed to list audio:", error.message);
+      log.warn(`Failed to list audio: ${error.message}`);
       return [];
     }
 
@@ -1089,7 +1070,7 @@ export async function listAudioAssets(): Promise<AudioAsset[]> {
       });
     }
   } catch (error) {
-    console.warn("[Supabase] Error listing audio:", error);
+    log.warn("Error listing audio", { error });
   }
 
   return assets.sort((a, b) => {
@@ -1146,7 +1127,7 @@ export async function listContentAssets(): Promise<ContentAsset[]> {
         });
       }
     } catch (error) {
-      console.warn(`[Supabase] Error listing ${folder.path}:`, error);
+      log.warn(`Error listing ${folder.path}`, { error });
     }
   }
 
@@ -1180,7 +1161,7 @@ export async function listMeshyModels(): Promise<ForgeAsset[]> {
       .list("", { limit: 100 });
 
     if (error) {
-      console.warn("[Supabase] Failed to list meshy-models:", error.message);
+      log.warn(`Failed to list meshy-models: ${error.message}`);
     } else {
       for (const item of data || []) {
         // Folders have id === null
@@ -1222,7 +1203,7 @@ export async function listMeshyModels(): Promise<ForgeAsset[]> {
       }
     }
   } catch (error) {
-    console.warn("[Supabase] Error listing meshy-models:", error);
+    log.warn("Error listing meshy-models", { error });
   }
 
   // 2. List assets from vrm-conversion bucket (may have assets not in meshy-models)
@@ -1232,7 +1213,7 @@ export async function listMeshyModels(): Promise<ForgeAsset[]> {
       .list("", { limit: 100 });
 
     if (error) {
-      console.warn("[Supabase] Failed to list vrm-conversion:", error.message);
+      log.warn(`Failed to list vrm-conversion: ${error.message}`);
     } else {
       for (const item of data || []) {
         // Folders have id === null
@@ -1242,11 +1223,6 @@ export async function listMeshyModels(): Promise<ForgeAsset[]> {
         const vrmUrl = getBucketPublicUrl(
           VRM_CONVERSION_BUCKET,
           `${assetId}/model.vrm`,
-        );
-        // VRM bucket may also have GLB versions for preview
-        const vrmGlbUrl = getBucketPublicUrl(
-          VRM_CONVERSION_BUCKET,
-          `${assetId}/model.glb`,
         );
 
         if (assetsMap.has(assetId)) {
@@ -1283,7 +1259,7 @@ export async function listMeshyModels(): Promise<ForgeAsset[]> {
       }
     }
   } catch (error) {
-    console.warn("[Supabase] Error listing vrm-conversion:", error);
+    log.warn("Error listing vrm-conversion", { error });
   }
 
   const assets = Array.from(assetsMap.values());
@@ -1292,6 +1268,132 @@ export async function listMeshyModels(): Promise<ForgeAsset[]> {
     const dateB = new Date(b.createdAt || 0).getTime();
     return dateB - dateA;
   });
+}
+
+// ============================================================================
+// Model Preferences Storage
+// ============================================================================
+
+/**
+ * Model preferences data structure
+ */
+export interface StoredModelPreferences {
+  promptEnhancement: string;
+  textGeneration: string;
+  dialogueGeneration: string;
+  contentGeneration: string;
+  imageGeneration: string;
+  vision: string;
+  reasoning: string;
+  updatedAt?: string;
+}
+
+/**
+ * Save model preferences to Supabase
+ * Stores in content-generations bucket under /settings/model-preferences/{userId}.json
+ */
+export async function saveModelPreferences(
+  userId: string,
+  preferences: StoredModelPreferences,
+): Promise<UploadResult> {
+  if (!isSupabaseConfigured()) {
+    return {
+      success: false,
+      url: "",
+      path: "",
+      error: "Supabase is not configured",
+    };
+  }
+
+  try {
+    await ensureBucket();
+
+    const data = {
+      ...preferences,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const content = JSON.stringify(data, null, 2);
+    const buffer = Buffer.from(content, "utf-8");
+    const storagePath = `settings/model-preferences/${userId}.json`;
+
+    const result = await uploadFileToBucket(
+      CONTENT_GENERATIONS_BUCKET,
+      storagePath,
+      buffer,
+      "application/json",
+    );
+
+    if (result.success) {
+      log.info(`Saved model preferences for user: ${userId}`);
+    }
+
+    return result;
+  } catch (error) {
+    log.error("Error saving model preferences", { error });
+    return {
+      success: false,
+      url: "",
+      path: "",
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+/**
+ * Load model preferences from Supabase
+ */
+export async function loadModelPreferences(
+  userId: string,
+): Promise<StoredModelPreferences | null> {
+  if (!isSupabaseConfigured()) {
+    return null;
+  }
+
+  try {
+    const supabase = getSupabaseClient();
+    const storagePath = `settings/model-preferences/${userId}.json`;
+
+    const { data, error } = await supabase.storage
+      .from(CONTENT_GENERATIONS_BUCKET)
+      .download(storagePath);
+
+    if (error) {
+      // File may not exist yet - not an error
+      if (error.message.includes("not found")) {
+        return null;
+      }
+      log.warn(`Failed to load model preferences: ${error.message}`);
+      return null;
+    }
+
+    const text = await data.text();
+    const preferences = JSON.parse(text) as StoredModelPreferences;
+
+    log.info(`Loaded model preferences for user: ${userId}`);
+
+    return preferences;
+  } catch (error) {
+    log.error("Error loading model preferences", { error });
+    return null;
+  }
+}
+
+/**
+ * Delete model preferences from Supabase
+ */
+export async function deleteModelPreferences(userId: string): Promise<boolean> {
+  if (!isSupabaseConfigured()) {
+    return false;
+  }
+
+  try {
+    const storagePath = `settings/model-preferences/${userId}.json`;
+    return await deleteFile(storagePath);
+  } catch (error) {
+    log.error("Error deleting model preferences", { error });
+    return false;
+  }
 }
 
 /**

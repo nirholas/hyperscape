@@ -5,6 +5,11 @@ node_modules/
 
 # Testing
 /coverage
+/test-results/
+/playwright-report/
+/test-assets/*.glb
+/test-assets/*.vrm
+/e2e/__snapshots__/
 
 # Next.js
 /.next/

@@ -8,11 +8,17 @@ import { Modal } from "@/components/ui/modal";
 import { SpectacularButton } from "@/components/ui/spectacular-button";
 import { VariantDefinitionPanel } from "@/components/generation/VariantDefinitionPanel";
 import { useCDNAssets, type LibraryAsset } from "@/hooks/useCDNAssets";
-import { cdnAssetToAssetData } from "@/lib/utils/asset-converter";
+import {
+  cdnAssetToAssetData,
+  type CDNAssetInput,
+} from "@/lib/utils/asset-converter";
 import { useVariantStore } from "@/stores/variant-store";
 import type { AssetData } from "@/types/asset";
 import type { TextureVariant } from "@/components/generation/GenerationFormRouter";
 import { Palette, X, Package } from "lucide-react";
+import { logger } from "@/lib/utils";
+
+const log = logger.child("AssetLibrary");
 
 interface AssetLibraryProps {
   onAssetSelect?: (asset: AssetData) => void;
@@ -55,10 +61,10 @@ export function AssetLibrary({ onAssetSelect }: AssetLibraryProps) {
 
       if (response.ok) {
         const result = await response.json();
-        console.log("Variants created:", result);
+        log.info("Variants created:", result);
       }
     } catch (error) {
-      console.error("Failed to create variants:", error);
+      log.error("Failed to create variants:", error);
     } finally {
       setIsCreatingVariants(false);
       setShowVariantModal(false);
@@ -102,7 +108,9 @@ export function AssetLibrary({ onAssetSelect }: AssetLibraryProps) {
               key={asset.id}
               asset={asset}
               onSelect={(selectedAsset) =>
-                onAssetSelect?.(cdnAssetToAssetData(selectedAsset))
+                onAssetSelect?.(
+                  cdnAssetToAssetData(selectedAsset as CDNAssetInput),
+                )
               }
               onCreateVariant={handleCreateVariant}
             />

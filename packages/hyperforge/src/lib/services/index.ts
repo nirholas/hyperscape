@@ -3,6 +3,9 @@
  * Central export point for all specialized services
  */
 
+// Service Factory (preferred for API routes and components)
+export { ServiceFactory, getServiceFactory } from "./service-factory";
+
 // VRM Services
 export { VRMConverter, convertGLBToVRM } from "@/services/vrm/VRMConverter";
 export type {
@@ -39,7 +42,7 @@ export { SimpleHandRiggingService } from "@/services/hand-rigging/SimpleHandRigg
 
 // Animation Retargeting Services
 export { AnimationRetargeter } from "@/services/retargeting/AnimationRetargeter";
-export { AnimationRetargeting } from "@/services/retargeting/AnimationRetargeting";
+export { retargetAnimation } from "@/services/retargeting/AnimationRetargeting";
 export { AutoSkinSolver } from "@/services/retargeting/AutoSkinSolver";
 export { DistanceSolver } from "@/services/retargeting/DistanceSolver";
 export { DistanceChildTargetingSolver } from "@/services/retargeting/DistanceChildTargetingSolver";
