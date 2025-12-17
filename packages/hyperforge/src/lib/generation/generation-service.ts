@@ -9,7 +9,10 @@ import {
   startTextTo3DRefine,
 } from "@/lib-core/meshy/text-to-3d";
 import { startImageTo3D } from "@/lib-core/meshy/image-to-3d";
-import { pollTaskStatus as pollTaskStatusUnified } from "@/lib-core/meshy/poll-task";
+import {
+  pollTaskStatus as pollTaskStatusUnified,
+  type TextureUrls,
+} from "@/lib-core/meshy/poll-task";
 import {
   createRiggingTask,
   getRiggingTaskStatus,
@@ -104,11 +107,42 @@ export async function generate3DModel(
       }
     }
 
-    // Stage 1: Generate concept art (optional but recommended for better textures)
-    let conceptArtDataUrl: string | undefined;
-    const shouldGenerateConceptArt = config.generateConceptArt !== false; // Default to true
+    // Stage 1: Get texture reference image (custom upload or AI-generated concept art)
+    let textureImageUrl: string | undefined;
 
-    if (shouldGenerateConceptArt && pipeline === "text-to-3d") {
+    // Priority: 1. Custom HTTP URL, 2. Custom data URL, 3. AI-generated concept art
+    if (config.referenceImageUrl) {
+      // User provided a custom reference image URL (already uploaded)
+      textureImageUrl = config.referenceImageUrl;
+      console.log(
+        "[Generation] Using custom reference image URL:",
+        textureImageUrl,
+      );
+
+      onProgress?.({
+        status: "generating",
+        stage: "Reference Image",
+        progress: 3,
+        currentStep: "Using custom reference image for texturing...",
+      });
+    } else if (config.referenceImageDataUrl) {
+      // User provided a data URL - Meshy may not accept data URLs, log a warning
+      console.warn(
+        "[Generation] Reference image provided as data URL. Meshy may require HTTP URL.",
+      );
+      textureImageUrl = config.referenceImageDataUrl;
+
+      onProgress?.({
+        status: "generating",
+        stage: "Reference Image",
+        progress: 3,
+        currentStep: "Using custom reference image...",
+      });
+    } else if (
+      config.generateConceptArt !== false &&
+      pipeline === "text-to-3d"
+    ) {
+      // No custom image - generate concept art with AI
       onProgress?.({
         status: "generating",
         stage: "Concept Art",
@@ -125,7 +159,7 @@ export async function generate3DModel(
         });
 
         if (conceptArt) {
-          conceptArtDataUrl = conceptArt.imageUrl;
+          textureImageUrl = conceptArt.imageUrl;
           console.log("[Generation] Concept art generated successfully");
         } else {
           console.warn(
@@ -136,6 +170,10 @@ export async function generate3DModel(
         console.warn("[Generation] Concept art error:", error);
         // Continue without concept art
       }
+    } else {
+      console.log(
+        "[Generation] No texture reference image - using text prompt only",
+      );
     }
 
     // Stage 2: Start 3D generation
@@ -146,7 +184,14 @@ export async function generate3DModel(
       currentStep: "Starting 3D generation...",
     });
 
-    let result: { taskId: string; modelUrl: string; thumbnailUrl?: string };
+    let result: {
+      taskId: string;
+      modelUrl: string;
+      thumbnailUrl?: string;
+      texturedModelUrl?: string; // Original textured model (before rigging)
+      textureUrls?: TextureUrls[]; // Separate texture files from Meshy
+    };
+    let previewModelUrl: string | undefined; // Preview model URL (untextured, for text-to-3d only)
 
     if (pipeline === "text-to-3d") {
       // Two-stage text-to-3D workflow
@@ -172,8 +217,8 @@ export async function generate3DModel(
         currentStep: "Generating preview mesh...",
       });
 
-      // Poll preview completion
-      await pollTaskStatusUnified(previewTaskId, {
+      // Poll preview completion and get the preview model URL
+      const previewResult = await pollTaskStatusUnified(previewTaskId, {
         pollIntervalMs: 5000,
         timeoutMs: 300000,
         onProgress: (progress, precedingTasks) => {
@@ -190,26 +235,41 @@ export async function generate3DModel(
         },
       });
 
-      // Stage 3: Refine (adds textures based on prompt and/or concept art)
+      // Save preview model URL for later (untextured, fast-loading version)
+      previewModelUrl = previewResult.modelUrl;
+      console.log("[Generation] Preview model URL:", previewModelUrl);
+
+      // Stage 2: Refine (adds textures based on reference image and/or prompt)
       onProgress?.({
         status: "generating",
         stage: "Text-to-3D Refine",
         progress: 45,
-        currentStep: conceptArtDataUrl
-          ? "Starting refine stage with concept art..."
+        currentStep: textureImageUrl
+          ? "Starting refine stage with texture reference..."
           : "Starting refine stage (texturing)...",
       });
 
-      // Use concept art as texture reference if available, otherwise use text prompt
+      // Use texture reference image if available, otherwise use text prompt only
       // Per Meshy docs: texture_image_url OR texture_prompt can guide texturing
+      // IMPORTANT: Meshy requires HTTP/HTTPS URLs, not data URLs for texture_image_url
+      const isValidHttpUrl =
+        textureImageUrl?.startsWith("http://") ||
+        textureImageUrl?.startsWith("https://");
+
       const { refineTaskId } = await startTextTo3DRefine(previewTaskId, {
         enable_pbr: options.enablePBR,
-        // If we have concept art, use it as texture reference for better colors
-        texture_image_url: conceptArtDataUrl,
-        // Also pass the prompt in case image texturing needs guidance
+        // Only pass texture_image_url if it's a valid HTTP URL
+        texture_image_url: isValidHttpUrl ? textureImageUrl : undefined,
+        // Always pass the prompt for texture guidance
         texture_prompt: effectivePrompt,
         ai_model: options.aiModel, // Use same model for consistent results
       });
+
+      if (textureImageUrl && !isValidHttpUrl) {
+        console.warn(
+          "[Generation] texture_image_url must be HTTP/HTTPS URL, data URLs not supported by Meshy. Using texture_prompt only.",
+        );
+      }
 
       onProgress?.({
         status: "generating",
@@ -237,11 +297,16 @@ export async function generate3DModel(
       });
 
       // Stage 3: Meshy Auto-Rigging (if this is an avatar/character)
+      // IMPORTANT: Use input_task_id (refine task ID) instead of model_url to preserve textures
       const needsRigging = config.convertToVRM || config.enableHandRigging;
       const isCharacter =
         config.category === "npc" || config.category === "character";
 
-      if (needsRigging && isCharacter && refineResult.modelUrl) {
+      // Store the textured model info from refine stage (before rigging which may strip textures)
+      const texturedModelUrl = refineResult.modelUrl;
+      const textureUrls = refineResult.textureUrls;
+
+      if (needsRigging && isCharacter && refineResult.taskId) {
         onProgress?.({
           status: "generating",
           stage: "Meshy Auto-Rigging",
@@ -250,16 +315,18 @@ export async function generate3DModel(
         });
 
         try {
-          // Start Meshy rigging task
+          // Start Meshy rigging task using input_task_id to preserve textures
+          // The refine task ID is used so Meshy knows the source model's textures
           const riggingTaskId = await createRiggingTask({
-            model_url: refineResult.modelUrl,
+            input_task_id: refineResult.taskId,
             height_meters: 1.7, // Standard adult human height
           });
 
           console.log(
-            "[Generation] Started Meshy rigging task:",
-            riggingTaskId,
+            "[Generation] Started Meshy rigging task with input_task_id:",
+            refineResult.taskId,
           );
+          console.log("[Generation] Rigging task ID:", riggingTaskId);
 
           // Poll rigging task completion
           let riggingStatus = await getRiggingTaskStatus(riggingTaskId);
@@ -295,7 +362,10 @@ export async function generate3DModel(
             result = {
               taskId: riggingTaskId,
               modelUrl: riggedModelUrl,
-              thumbnailUrl: refineResult.thumbnailUrl, // Keep original thumbnail
+              thumbnailUrl: refineResult.thumbnailUrl,
+              // Also keep textured model info for fallback if rigged model has no textures
+              texturedModelUrl,
+              textureUrls,
             };
           } else {
             console.warn(
@@ -306,19 +376,24 @@ export async function generate3DModel(
               "[Generation] Rigging error details:",
               riggingStatus.task_error?.message || "Unknown",
             );
+            // Fall back to textured model without rigging
             result = {
               taskId: refineResult.taskId,
               modelUrl: refineResult.modelUrl,
               thumbnailUrl: refineResult.thumbnailUrl,
+              texturedModelUrl,
+              textureUrls,
             };
           }
         } catch (riggingError) {
           console.error("[Generation] Meshy rigging error:", riggingError);
-          // Continue with unrigged model
+          // Continue with textured unrigged model
           result = {
             taskId: refineResult.taskId,
             modelUrl: refineResult.modelUrl,
             thumbnailUrl: refineResult.thumbnailUrl,
+            texturedModelUrl,
+            textureUrls,
           };
         }
       } else {
@@ -326,6 +401,8 @@ export async function generate3DModel(
           taskId: refineResult.taskId,
           modelUrl: refineResult.modelUrl,
           thumbnailUrl: refineResult.thumbnailUrl,
+          texturedModelUrl,
+          textureUrls,
         };
       }
     } else {
@@ -378,13 +455,124 @@ export async function generate3DModel(
     // Download and save the GLB model
     onProgress?.({
       status: "generating",
-      stage: "Saving",
-      progress: 90,
-      currentStep: "Saving 3D model locally...",
+      stage: "Downloading",
+      progress: 85,
+      currentStep: "Downloading 3D model from Meshy...",
     });
 
-    // Download the model and thumbnail
+    // Download the main model (rigged if available, otherwise textured)
+    console.log("[Generation] Downloading model from:", result.modelUrl);
     const modelBuffer = await downloadFile(result.modelUrl);
+    console.log(
+      `[Generation] Downloaded model: ${(modelBuffer.length / 1024 / 1024).toFixed(2)} MB`,
+    );
+
+    // Download the original textured model if different from main model (rigging may strip textures)
+    let texturedModelBuffer: Buffer | undefined;
+    if (
+      result.texturedModelUrl &&
+      result.texturedModelUrl !== result.modelUrl
+    ) {
+      try {
+        console.log(
+          "[Generation] Downloading original textured model from:",
+          result.texturedModelUrl,
+        );
+        texturedModelBuffer = await downloadFile(result.texturedModelUrl);
+        console.log(
+          `[Generation] Downloaded textured model: ${(texturedModelBuffer.length / 1024 / 1024).toFixed(2)} MB`,
+        );
+      } catch (error) {
+        console.warn("[Generation] Failed to download textured model:", error);
+      }
+    }
+
+    // Download separate texture files from Meshy (base_color, metallic, roughness, normal)
+    const textureBuffers: { name: string; buffer: Buffer }[] = [];
+    if (result.textureUrls && result.textureUrls.length > 0) {
+      onProgress?.({
+        status: "generating",
+        stage: "Downloading",
+        progress: 87,
+        currentStep: "Downloading texture files...",
+      });
+
+      for (const textureSet of result.textureUrls) {
+        // Download base color texture (always present)
+        if (textureSet.base_color) {
+          try {
+            const buffer = await downloadFile(textureSet.base_color);
+            textureBuffers.push({ name: "base_color.png", buffer });
+            console.log(
+              `[Generation] Downloaded base_color texture: ${(buffer.length / 1024).toFixed(1)} KB`,
+            );
+          } catch (e) {
+            console.warn(
+              "[Generation] Failed to download base_color texture:",
+              e,
+            );
+          }
+        }
+
+        // Download PBR textures if available
+        if (textureSet.metallic) {
+          try {
+            const buffer = await downloadFile(textureSet.metallic);
+            textureBuffers.push({ name: "metallic.png", buffer });
+          } catch (e) {
+            console.warn(
+              "[Generation] Failed to download metallic texture:",
+              e,
+            );
+          }
+        }
+
+        if (textureSet.roughness) {
+          try {
+            const buffer = await downloadFile(textureSet.roughness);
+            textureBuffers.push({ name: "roughness.png", buffer });
+          } catch (e) {
+            console.warn(
+              "[Generation] Failed to download roughness texture:",
+              e,
+            );
+          }
+        }
+
+        if (textureSet.normal) {
+          try {
+            const buffer = await downloadFile(textureSet.normal);
+            textureBuffers.push({ name: "normal.png", buffer });
+          } catch (e) {
+            console.warn("[Generation] Failed to download normal texture:", e);
+          }
+        }
+      }
+
+      console.log(
+        `[Generation] Downloaded ${textureBuffers.length} separate texture files`,
+      );
+    }
+
+    // Download preview model if available (untextured, fast-loading version)
+    // previewModelUrl is only set for text-to-3d pipeline
+    let previewBuffer: Buffer | undefined;
+    if (previewModelUrl) {
+      try {
+        console.log(
+          "[Generation] Downloading preview model from:",
+          previewModelUrl,
+        );
+        previewBuffer = await downloadFile(previewModelUrl);
+        console.log(
+          `[Generation] Downloaded preview model: ${(previewBuffer.length / 1024 / 1024).toFixed(2)} MB`,
+        );
+      } catch (error) {
+        console.warn("[Generation] Failed to download preview model:", error);
+      }
+    }
+
+    // Download thumbnail
     let thumbnailBuffer: Buffer | undefined;
     if (result.thumbnailUrl) {
       try {
@@ -393,6 +581,13 @@ export async function generate3DModel(
         console.warn("Failed to download thumbnail");
       }
     }
+
+    onProgress?.({
+      status: "generating",
+      stage: "Saving",
+      progress: 90,
+      currentStep: "Saving 3D models locally...",
+    });
 
     // Pipeline order: Hand Rigging (GLB) → VRM Conversion (last)
     const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:3500";
@@ -461,6 +656,10 @@ export async function generate3DModel(
     }
 
     // Step 2: VRM conversion (always last in pipeline, if enabled)
+    // IMPORTANT: Use the TEXTURED model for VRM conversion because:
+    // - Meshy rigging strips textures from the model
+    // - VRM needs textures for proper visual rendering
+    // - The textured model from refine stage has embedded textures
     let vrmUrl: string | undefined;
     let vrmBuffer: Buffer | undefined;
     const shouldConvertToVRM =
@@ -476,18 +675,36 @@ export async function generate3DModel(
           currentStep: "Converting to VRM format...",
         });
 
-        // Call VRM conversion API with processed GLB (may have hand rigging)
+        // Determine which model to use for VRM conversion:
+        // Priority: 1. Textured model (has textures), 2. Processed model (may have hand rigging)
+        // We prefer textured model because VRM needs good visual quality
+        const useTexturedForVRM =
+          texturedModelBuffer && texturedModelBuffer.length > 0;
+        const vrmSourceBuffer = useTexturedForVRM
+          ? texturedModelBuffer
+          : processedModelBuffer;
+        const vrmSourceUrl = useTexturedForVRM
+          ? result.texturedModelUrl
+          : hasHandRigging
+            ? undefined
+            : result.modelUrl;
+
+        console.log(
+          `[Generation] VRM conversion using: ${useTexturedForVRM ? "textured model (with textures)" : "rigged/processed model"}`,
+        );
+
+        // Call VRM conversion API with the best available model
         const vrmResponse = await fetch(`${baseUrl}/api/vrm/convert`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            // Use processed model (with hand rigging if applied) or original URL
-            glbData: hasHandRigging
-              ? processedModelBuffer.toString("base64")
+            // Use buffer if available (prefer textured), otherwise fall back to URL
+            glbData: vrmSourceBuffer
+              ? vrmSourceBuffer.toString("base64")
               : undefined,
-            modelUrl: hasHandRigging ? undefined : result.modelUrl,
+            modelUrl: vrmSourceBuffer ? undefined : vrmSourceUrl,
             avatarName: (metadata?.name as string) || "Generated Avatar",
             author: "HyperForge",
           }),
@@ -527,19 +744,21 @@ export async function generate3DModel(
       currentStep: "Saving assets to library...",
     });
 
-    // Save all files (GLB with hand rigging if applied, thumbnail, and optionally VRM)
+    // Save all files (GLB with hand rigging if applied, thumbnail, preview, and optionally VRM)
     const savedFiles = await saveAssetFiles({
       assetId,
       modelBuffer: finalModelBuffer,
       modelFormat: "glb",
       thumbnailBuffer,
       vrmBuffer: finalVrmBuffer,
+      previewBuffer, // Untextured preview model (fast-loading)
       metadata: {
         ...metadata,
         meshyTaskId: result.taskId,
         meshyModelUrl: result.modelUrl,
         meshyThumbnailUrl: result.thumbnailUrl,
         hasVRM: !!finalVrmBuffer,
+        hasPreview: !!previewBuffer,
         hasHandRigging,
         convertToVRM: config.convertToVRM,
         enableHandRigging: config.enableHandRigging,

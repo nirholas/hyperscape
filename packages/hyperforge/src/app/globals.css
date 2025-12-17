@@ -36,7 +36,11 @@
 
 body {
   @apply bg-background text-foreground font-mono;
-  overflow: hidden;
+  /* Allow scrolling - individual pages can control their own overflow */
+  overflow-x: hidden;
+  overflow-y: auto;
+  min-height: 100vh;
+  min-height: 100dvh; /* Dynamic viewport height for mobile */
 }
 
 @layer utilities {

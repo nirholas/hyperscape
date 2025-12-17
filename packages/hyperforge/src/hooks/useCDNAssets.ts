@@ -3,9 +3,15 @@
 import { useState, useEffect, useCallback } from "react";
 import type { CDNAsset } from "@/lib-core/cdn/types";
 
-// Extended asset type that includes local assets
+// Extended asset type that includes local and forge assets
 export interface LibraryAsset extends CDNAsset {
-  source: "CDN" | "LOCAL";
+  /**
+   * Asset source:
+   * - "CDN": Production game assets from Cloudflare S3 CDN
+   * - "FORGE": Generated in HyperForge, stored in Supabase Storage
+   * - "LOCAL": Legacy local filesystem storage (deprecated)
+   */
+  source: "CDN" | "FORGE" | "LOCAL";
   createdAt?: string;
   status?: string;
   // VRM support

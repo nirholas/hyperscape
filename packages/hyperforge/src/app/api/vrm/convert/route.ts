@@ -5,13 +5,13 @@
  * This runs server-side as the FINAL step in the pipeline:
  * GLB → Hand Rigging (optional) → VRM Conversion
  *
+ * IMPORTANT: Uses texture-preserving conversion that works directly with
+ * GLB binary to avoid losing textures during server-side processing.
+ *
  * Accepts either:
  * - modelUrl: URL to download the GLB from
  * - glbData: Base64-encoded GLB data (for hand-rigged models in memory)
  */
-
-// Must import polyfills BEFORE Three.js
-import "@/lib/server/three-polyfills";
 
 import { NextRequest, NextResponse } from "next/server";
 
@@ -27,54 +27,44 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Import Three.js and VRM converter (server-side)
-    const { GLTFLoader } = await import(
-      "three/examples/jsm/loaders/GLTFLoader.js"
+    // Import the texture-preserving VRM converter
+    const { convertGLBToVRMPreservingTextures } = await import(
+      "@/services/vrm/VRMConverter"
     );
-    const { convertGLBToVRM } = await import("@/services/vrm/VRMConverter");
 
-    const loader = new GLTFLoader();
-    let gltf: { scene: THREE.Object3D };
+    let glbArrayBuffer: ArrayBuffer;
 
     if (glbData) {
-      // Load from base64 data (for hand-rigged models)
+      // Decode from base64
       console.log("🎭 Loading GLB from base64 data...");
       const glbBuffer = Buffer.from(glbData, "base64");
-      const arrayBuffer = glbBuffer.buffer.slice(
+      glbArrayBuffer = glbBuffer.buffer.slice(
         glbBuffer.byteOffset,
         glbBuffer.byteOffset + glbBuffer.byteLength,
       );
-
-      gltf = await new Promise<{ scene: THREE.Object3D }>((resolve, reject) => {
-        loader.parse(
-          arrayBuffer,
-          "",
-          (result) => resolve(result as { scene: THREE.Object3D }),
-          (error) => reject(error),
-        );
-      });
     } else {
-      // Load from URL
-      console.log("🎭 Loading GLB from URL...");
-      gltf = await new Promise<{ scene: THREE.Object3D }>((resolve, reject) => {
-        loader.load(
-          modelUrl,
-          (result) => resolve(result as { scene: THREE.Object3D }),
-          undefined,
-          (error) => reject(error),
-        );
-      });
+      // Download from URL
+      console.log("🎭 Loading GLB from URL:", modelUrl);
+      const response = await fetch(modelUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch GLB: ${response.statusText}`);
+      }
+      glbArrayBuffer = await response.arrayBuffer();
     }
 
-    // Convert to VRM
-    console.log("🎭 Converting to VRM format...");
-    const vrmResult = await convertGLBToVRM(gltf.scene as THREE.Group, {
+    console.log(
+      `🎭 GLB loaded: ${(glbArrayBuffer.byteLength / 1024 / 1024).toFixed(2)} MB`,
+    );
+
+    // Convert to VRM using texture-preserving method
+    console.log("🎭 Converting to VRM format (preserving textures)...");
+    const vrmResult = await convertGLBToVRMPreservingTextures(glbArrayBuffer, {
       avatarName: avatarName || "Generated Avatar",
       author: author || "HyperForge",
       version: "1.0",
     });
 
-    // Return VRM as base64 (in production, upload to CDN and return URL)
+    // Return VRM as base64
     const vrmBase64 = Buffer.from(vrmResult.vrmData).toString("base64");
     const vrmDataUrl = `data:model/gltf-binary;base64,${vrmBase64}`;
 
@@ -96,6 +86,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
-// Import THREE type for type safety
-import type * as THREE from "three";

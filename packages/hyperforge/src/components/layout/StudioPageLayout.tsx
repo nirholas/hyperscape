@@ -17,6 +17,13 @@ import {
   Music,
   Volume2,
   Mic,
+  Image as ImageIcon,
+  Palette,
+  Grid3X3,
+  Layers,
+  Settings,
+  Box,
+  FolderOpen,
   type LucideIcon,
 } from "lucide-react";
 import { WorldView } from "@/components/world/WorldView";
@@ -130,42 +137,126 @@ export function StudioPageLayout({
           </Link>
         </div>
 
-        {/* Studio Pages */}
+        {/* All Sections */}
         <div className="flex-1 p-3 overflow-y-auto themed-scrollbar">
+          {/* Assets Section */}
           {!sidebarCollapsed && (
             <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 px-2">
-              Studio
+              Assets
             </div>
           )}
           <nav className="space-y-1">
-            {studioPages.map((page) => {
-              const isActive = pathname === page.href;
-              return (
-                <Link
-                  key={page.href}
-                  href={page.href}
-                  title={sidebarCollapsed ? page.label : undefined}
-                  className={`
-                    w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm
-                    transition-all duration-200
-                    ${sidebarCollapsed ? "justify-center" : ""}
-                    ${
-                      isActive
-                        ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
-                        : "text-muted-foreground hover:text-foreground hover:bg-glass-bg"
-                    }
-                  `}
-                >
-                  <page.icon
-                    className={`w-4 h-4 flex-shrink-0 ${isActive ? "text-cyan-400" : ""}`}
-                  />
-                  {!sidebarCollapsed && (
-                    <span className="truncate">{page.label}</span>
-                  )}
-                </Link>
-              );
-            })}
+            <Link
+              href="/"
+              title={sidebarCollapsed ? "3D Assets" : "View 3D model assets"}
+              className={`
+                w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
+                transition-all duration-200
+                ${sidebarCollapsed ? "justify-center" : ""}
+                ${
+                  pathname === "/"
+                    ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
+                    : "text-muted-foreground hover:text-foreground hover:bg-glass-bg"
+                }
+              `}
+            >
+              <Box className="w-4 h-4 flex-shrink-0" />
+              {!sidebarCollapsed && <span>3D Assets</span>}
+            </Link>
+            <Link
+              href="/assets/audio"
+              title={sidebarCollapsed ? "Audio Assets" : "Browse audio assets"}
+              className={`
+                w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
+                transition-all duration-200
+                ${sidebarCollapsed ? "justify-center" : ""}
+                ${
+                  pathname === "/assets/audio"
+                    ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
+                    : "text-muted-foreground hover:text-foreground hover:bg-glass-bg"
+                }
+              `}
+            >
+              <Volume2 className="w-4 h-4 flex-shrink-0" />
+              {!sidebarCollapsed && <span>Audio Assets</span>}
+            </Link>
+            <Link
+              href="/assets/images"
+              title={sidebarCollapsed ? "Image Assets" : "Browse image assets"}
+              className={`
+                w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
+                transition-all duration-200
+                ${sidebarCollapsed ? "justify-center" : ""}
+                ${
+                  pathname === "/assets/images"
+                    ? "bg-pink-500/10 text-pink-400 border border-pink-500/20"
+                    : "text-muted-foreground hover:text-foreground hover:bg-glass-bg"
+                }
+              `}
+            >
+              <ImageIcon className="w-4 h-4 flex-shrink-0" />
+              {!sidebarCollapsed && <span>Image Assets</span>}
+            </Link>
+            <Link
+              href="/assets/content"
+              title={
+                sidebarCollapsed ? "Content Assets" : "Browse content assets"
+              }
+              className={`
+                w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
+                transition-all duration-200
+                ${sidebarCollapsed ? "justify-center" : ""}
+                ${
+                  pathname === "/assets/content"
+                    ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
+                    : "text-muted-foreground hover:text-foreground hover:bg-glass-bg"
+                }
+              `}
+            >
+              <MessageSquare className="w-4 h-4 flex-shrink-0" />
+              {!sidebarCollapsed && <span>Content Assets</span>}
+            </Link>
           </nav>
+
+          {/* Studio Pages */}
+          <div
+            className={`mt-6 pt-4 border-t border-glass-border ${sidebarCollapsed ? "px-0" : ""}`}
+          >
+            {!sidebarCollapsed && (
+              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 px-2">
+                Studio
+              </div>
+            )}
+            <nav className="space-y-1">
+              {studioPages.map((page) => {
+                const isActive = pathname === page.href;
+                return (
+                  <Link
+                    key={page.href}
+                    href={page.href}
+                    title={sidebarCollapsed ? page.label : undefined}
+                    className={`
+                      w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm
+                      transition-all duration-200
+                      ${sidebarCollapsed ? "justify-center" : ""}
+                      ${
+                        isActive
+                          ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
+                          : "text-muted-foreground hover:text-foreground hover:bg-glass-bg"
+                      }
+                    `}
+                  >
+                    <page.icon
+                      className={`w-4 h-4 flex-shrink-0 ${isActive ? "text-cyan-400" : ""}`}
+                    />
+                    {!sidebarCollapsed && (
+                      <span className="truncate">{page.label}</span>
+                    )}
+                  </Link>
+                );
+              })}
+            </nav>
+          </div>
 
           {/* Content Link */}
           <div
@@ -258,6 +349,87 @@ export function StudioPageLayout({
               </Link>
             </nav>
           </div>
+
+          {/* Images Section */}
+          <div
+            className={`mt-4 pt-4 border-t border-glass-border ${sidebarCollapsed ? "px-0" : ""}`}
+          >
+            {!sidebarCollapsed && (
+              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 px-2">
+                Images
+              </div>
+            )}
+            <nav className="space-y-1">
+              <Link
+                href="/images"
+                title={sidebarCollapsed ? "Image Library" : undefined}
+                className={`
+                  w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
+                  transition-all duration-200
+                  ${sidebarCollapsed ? "justify-center" : ""}
+                  ${
+                    pathname === "/images"
+                      ? "bg-pink-500/10 text-pink-400 border border-pink-500/20"
+                      : "text-muted-foreground hover:text-foreground hover:bg-glass-bg"
+                  }
+                `}
+              >
+                <ImageIcon className="w-4 h-4 flex-shrink-0" />
+                {!sidebarCollapsed && <span>Image Library</span>}
+              </Link>
+              <Link
+                href="/images/concept-art"
+                title={sidebarCollapsed ? "Concept Art" : undefined}
+                className={`
+                  w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
+                  transition-all duration-200
+                  ${sidebarCollapsed ? "justify-center" : ""}
+                  ${
+                    pathname === "/images/concept-art"
+                      ? "bg-pink-500/10 text-pink-400 border border-pink-500/20"
+                      : "text-muted-foreground hover:text-foreground hover:bg-glass-bg"
+                  }
+                `}
+              >
+                <Palette className="w-4 h-4 flex-shrink-0" />
+                {!sidebarCollapsed && <span>Concept Art</span>}
+              </Link>
+              <Link
+                href="/images/sprites"
+                title={sidebarCollapsed ? "Sprites" : undefined}
+                className={`
+                  w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
+                  transition-all duration-200
+                  ${sidebarCollapsed ? "justify-center" : ""}
+                  ${
+                    pathname === "/images/sprites"
+                      ? "bg-pink-500/10 text-pink-400 border border-pink-500/20"
+                      : "text-muted-foreground hover:text-foreground hover:bg-glass-bg"
+                  }
+                `}
+              >
+                <Grid3X3 className="w-4 h-4 flex-shrink-0" />
+                {!sidebarCollapsed && <span>Sprites</span>}
+              </Link>
+              <Link
+                href="/images/textures"
+                title={sidebarCollapsed ? "Textures" : undefined}
+                className={`
+                  w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
+                  transition-all duration-200
+                  ${sidebarCollapsed ? "justify-center" : ""}
+                  ${
+                    pathname === "/images/textures"
+                      ? "bg-pink-500/10 text-pink-400 border border-pink-500/20"
+                      : "text-muted-foreground hover:text-foreground hover:bg-glass-bg"
+                  }
+                `}
+              >
+                <Layers className="w-4 h-4 flex-shrink-0" />
+                {!sidebarCollapsed && <span>Textures</span>}
+              </Link>
+            </nav>
+          </div>
         </div>
 
         {/* Vault Toggle & World View */}
@@ -296,6 +468,25 @@ export function StudioPageLayout({
             <Globe className="w-4 h-4 flex-shrink-0" />
             {!sidebarCollapsed && <span>World View</span>}
           </button>
+
+          {/* Settings Link */}
+          <Link
+            href="/settings"
+            title={sidebarCollapsed ? "Settings" : "API keys & usage"}
+            className={`
+              w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm
+              transition-all duration-200
+              ${sidebarCollapsed ? "justify-center" : ""}
+              ${
+                pathname === "/settings"
+                  ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
+                  : "text-muted-foreground hover:text-foreground hover:bg-glass-bg"
+              }
+            `}
+          >
+            <Settings className="w-4 h-4 flex-shrink-0" />
+            {!sidebarCollapsed && <span>Settings</span>}
+          </Link>
         </div>
       </aside>
 

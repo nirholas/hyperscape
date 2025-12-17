@@ -25,6 +25,8 @@ export interface GenerationConfig {
   enableHandRigging?: boolean; // Add hand bones for proper finger animation (requires VRM)
   useGPT4Enhancement?: boolean; // Enhance prompt with GPT-4 via Vercel AI Gateway
   generateConceptArt?: boolean; // Generate concept art image before 3D (improves texturing)
+  referenceImageUrl?: string; // Custom reference image URL (HTTP URL for Meshy texture_image_url)
+  referenceImageDataUrl?: string; // Custom reference image as data URL (fallback)
 }
 
 export function GenerationFormRouter({

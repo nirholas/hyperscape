@@ -7,10 +7,18 @@
 
 import { getTaskStatusV1, getTaskStatusV2, type MeshyTask } from "./client";
 
+export interface TextureUrls {
+  base_color: string;
+  metallic?: string;
+  normal?: string;
+  roughness?: string;
+}
+
 export interface PollTaskResult {
   taskId: string;
   modelUrl: string;
   thumbnailUrl?: string;
+  textureUrls?: TextureUrls[];
   status: "SUCCEEDED" | "FAILED" | "CANCELED";
 }
 
@@ -99,6 +107,7 @@ export async function pollTaskStatus(
           taskId: task.id || taskId,
           modelUrl,
           thumbnailUrl: task.thumbnail_url,
+          textureUrls: task.texture_urls,
           status: "SUCCEEDED",
         };
       }

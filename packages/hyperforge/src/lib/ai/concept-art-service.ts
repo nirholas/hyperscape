@@ -6,13 +6,23 @@
  * 1. As visual reference for the asset
  * 2. As texture_image_url in Meshy refine stage for better texturing
  * 3. As input for Image-to-3D pipeline
+ *
+ * NOTE: Meshy requires HTTP/HTTPS URLs for texture_image_url, not data URLs.
+ * This service saves generated images to Supabase Storage (preferred) or local filesystem.
  */
 
 import { generateText } from "ai";
 import { gateway } from "@ai-sdk/gateway";
+import { promises as fs } from "fs";
+import path from "path";
+import {
+  isSupabaseConfigured,
+  uploadConceptArt,
+} from "@/lib/storage/supabase-storage";
 
 export interface ConceptArtResult {
-  imageUrl: string; // Data URL or saved file URL
+  imageUrl: string; // HTTP URL for Meshy (preferred) or data URL (fallback)
+  dataUrl: string; // Data URL for preview
   base64: string;
   mediaType: string;
 }
@@ -67,10 +77,13 @@ function buildConceptArtPrompt(
     weapon:
       "Ensure the weapon has clear grip/handle area, detailed blade/head, and visible materials (metal, wood, leather).",
     armor:
-      "Show clear armor structure with visible plates, straps, and material details (metal, leather, cloth).",
+      "Show clear armor structure with visible plates, straps, and material details (metal, leather, cloth). Armor should be form-fitting, not bulky.",
     character:
-      "Full body character in a clear T-pose or A-pose with visible limbs, hands, and feet. No flowing capes or obscuring elements.",
-    npc: "Full body character in a clear T-pose or A-pose with visible limbs, hands, and feet. No flowing capes or obscuring elements.",
+      "Full body character in a clear T-pose or A-pose with visible limbs, hands, and feet. CRITICAL FOR 3D RIGGING: Empty hands (no weapons or items held), no bulky oversized armor, no flowing capes or robes, no loose fabric that obscures the body silhouette.",
+    npc: "Full body NPC in a clear T-pose or A-pose with visible limbs, hands, and feet. CRITICAL FOR 3D RIGGING: Empty hands (no weapons, tools, or items held), no bulky oversized armor, no flowing capes or long robes, no loose fabric that obscures the body silhouette. Clothing should be form-fitting or simple.",
+    mob: "Full body monster/creature in a clear T-pose or A-pose with visible limbs. CRITICAL FOR 3D RIGGING: Empty hands/claws (no weapons or items), no excessive spikes or protrusions, no flowing elements like long tails or capes that would complicate rigging. Body shape should be clearly defined.",
+    enemy:
+      "Full body enemy character in a clear T-pose or A-pose with visible limbs. CRITICAL FOR 3D RIGGING: Empty hands (no weapons held), no bulky armor, no flowing capes or robes. Keep the silhouette clean and form-fitting for easy texturing and rigging.",
     item: "Show the item from a clear angle with visible details and materials.",
     prop: "Environmental prop with clear structure and material definition.",
   };
@@ -100,6 +113,8 @@ Generate ONLY the concept art image, no text, labels, or annotations.`;
 
 /**
  * Generate concept art using Google Gemini via Vercel AI Gateway
+ * Saves the image to Supabase Storage (preferred) or local filesystem
+ * Returns an HTTP URL for Meshy API compatibility
  */
 export async function generateConceptArt(
   assetDescription: string,
@@ -126,16 +141,69 @@ export async function generateConceptArt(
     if (imageFiles && imageFiles.length > 0) {
       const file = imageFiles[0];
 
-      // Convert uint8Array to base64
-      const base64 = Buffer.from(file.uint8Array).toString("base64");
-      const dataUrl = `data:${file.mediaType};base64,${base64}`;
+      // Convert uint8Array to base64 and buffer
+      const buffer = Buffer.from(file.uint8Array);
+      const base64 = buffer.toString("base64");
+      const mediaType = file.mediaType || "image/png";
+      const dataUrl = `data:${mediaType};base64,${base64}`;
 
-      console.log(`[Concept Art] Generated successfully`);
+      // Try Supabase Storage first (recommended for production)
+      if (isSupabaseConfigured()) {
+        console.log("[Concept Art] Uploading to Supabase Storage...");
+
+        const uploadResult = await uploadConceptArt(buffer, mediaType);
+
+        if (uploadResult.success) {
+          console.log(
+            `[Concept Art] Uploaded to Supabase: ${uploadResult.url}`,
+          );
+
+          return {
+            imageUrl: uploadResult.url, // Supabase public URL
+            dataUrl, // Data URL for preview
+            base64,
+            mediaType,
+          };
+        } else {
+          console.warn(
+            "[Concept Art] Supabase upload failed, falling back to local:",
+            uploadResult.error,
+          );
+          // Fall through to local storage
+        }
+      }
+
+      // Fallback: Save to local filesystem
+      console.log("[Concept Art] Saving to local filesystem...");
+      const assetsDir =
+        process.env.HYPERFORGE_ASSETS_DIR || path.join(process.cwd(), "assets");
+      const uploadsDir = path.join(assetsDir, "uploads");
+      await fs.mkdir(uploadsDir, { recursive: true });
+
+      // Generate unique filename
+      const timestamp = Date.now();
+      const randomId = Math.random().toString(36).substring(2, 8);
+      const extension = mediaType.includes("png") ? "png" : "jpg";
+      const filename = `concept_${timestamp}_${randomId}.${extension}`;
+      const filepath = path.join(uploadsDir, filename);
+
+      // Save the file
+      await fs.writeFile(filepath, buffer);
+
+      // Generate HTTP URL
+      const cdnUrl =
+        process.env.CDN_URL ||
+        process.env.NEXT_PUBLIC_API_URL ||
+        "http://localhost:3500";
+      const httpUrl = `${cdnUrl}/api/upload/image/${filename}`;
+
+      console.log(`[Concept Art] Saved locally: ${httpUrl}`);
 
       return {
-        imageUrl: dataUrl,
+        imageUrl: httpUrl, // HTTP URL for Meshy
+        dataUrl, // Data URL for preview
         base64,
-        mediaType: file.mediaType || "image/png",
+        mediaType,
       };
     } else {
       console.warn(

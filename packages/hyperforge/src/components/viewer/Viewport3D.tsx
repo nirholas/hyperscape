@@ -7,6 +7,7 @@ import { Suspense } from "react";
 import { X } from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
 import { ModelViewer } from "./ModelViewer";
+import { VRMViewer } from "./VRMViewer";
 import { ViewportControls } from "./ViewportControls";
 import { EnvironmentControls } from "./EnvironmentControls";
 import { ViewportShortcuts } from "./ViewportShortcuts";
@@ -45,11 +46,29 @@ export function Viewport3D({ selectedAsset, onAssetDeleted }: Viewport3DProps) {
     night: "night",
   };
 
-  // Check if current asset is a VRM file
+  // Check if current asset is a VRM file and get VRM URL
+  const hasVRMFlag =
+    (selectedAsset as { hasVRM?: boolean } | undefined)?.hasVRM === true;
   const isVRM =
     selectedAsset?.modelUrl?.toLowerCase().includes(".vrm") ||
     selectedAsset?.modelUrl?.includes("/model.vrm") ||
-    (selectedAsset as { hasVRM?: boolean } | undefined)?.hasVRM === true;
+    hasVRMFlag;
+
+  // Get the VRM URL - prioritize explicit vrmUrl (if it's actually a .vrm), then construct from asset ID if hasVRM
+  const explicitVrmUrl = (selectedAsset as { vrmUrl?: string } | undefined)
+    ?.vrmUrl;
+  // Only use explicitVrmUrl if it actually ends with .vrm (some assets have wrong vrmUrl pointing to .glb)
+  const validExplicitVrmUrl = explicitVrmUrl?.toLowerCase().endsWith(".vrm")
+    ? explicitVrmUrl
+    : null;
+  const vrmUrl =
+    validExplicitVrmUrl ||
+    (selectedAsset?.modelUrl?.toLowerCase().endsWith(".vrm")
+      ? selectedAsset.modelUrl
+      : null) ||
+    (hasVRMFlag && selectedAsset?.id
+      ? `/api/assets/${selectedAsset.id}/model.vrm`
+      : null);
 
   // Handle retexture - calls real API
   const handleRetexture = useCallback(async () => {
@@ -154,6 +173,89 @@ export function Viewport3D({ selectedAsset, onAssetDeleted }: Viewport3DProps) {
     link.click();
   }, [selectedAsset]);
 
+  // #region agent log - Debug instrumentation
+  if (typeof window !== "undefined") {
+    fetch("http://127.0.0.1:7242/ingest/ef06d7d2-0f29-426d-9574-6692c61c9819", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        location: "Viewport3D.tsx:162",
+        message: "Viewport3D render POST-FIX-v3",
+        data: {
+          isVRM,
+          vrmUrl: vrmUrl?.slice(-50),
+          validExplicitVrmUrl: validExplicitVrmUrl?.slice(-50),
+          explicitVrmUrl: explicitVrmUrl?.slice(-50),
+          modelUrl: selectedAsset?.modelUrl?.slice(-50),
+          hasVRMFlag,
+          assetId: selectedAsset?.id,
+          willUseVRMViewer: !!(isVRM && vrmUrl),
+          showModel,
+        },
+        timestamp: Date.now(),
+        sessionId: "debug-session",
+        runId: "post-fix-v3",
+        hypothesisId: "A",
+      }),
+    }).catch(() => {});
+  }
+  // #endregion
+
+  // Use VRMViewer for VRM assets (standalone component with its own canvas)
+  if (isVRM && vrmUrl && showModel) {
+    return (
+      <div className="relative h-full w-full bg-gradient-to-b from-zinc-900 to-zinc-950">
+        <VRMViewer
+          vrmUrl={vrmUrl}
+          className="h-full w-full"
+          onLoad={(vrm, info) => {
+            console.log("[Viewport3D] VRM loaded via VRMViewer:", info);
+          }}
+          onError={(error) => {
+            console.error("[Viewport3D] VRM load error:", error);
+          }}
+        />
+
+        {/* Viewport Controls - Top Left */}
+        <ViewportControls
+          isVRM={isVRM}
+          isProcessing={isProcessing}
+          onRetexture={handleRetexture}
+          onRegenerate={handleRegenerate}
+          onSprites={handleSprites}
+          onEdit={handleEdit}
+          onToggleVisibility={handleToggleVisibility}
+          onToggleGrid={() => setShowGrid(!showGrid)}
+          onToggleTheme={handleToggleTheme}
+          onRefresh={() => window.location.reload()}
+          onCapture={handleCapture}
+          onSettings={() => setViewportPanel("properties")}
+        />
+
+        {/* Environment Controls - Bottom Right */}
+        <EnvironmentControls
+          environment={environment}
+          onEnvironmentChange={setEnvironment}
+        />
+
+        {/* Shortcuts - Bottom Left */}
+        <ViewportShortcuts />
+
+        {/* Viewport Panel Overlay - Right Side */}
+        {viewportPanel !== "none" && (
+          <ViewportPanelOverlay
+            panelType={viewportPanel}
+            selectedAsset={selectedAsset}
+            onClose={closeViewportPanel}
+            onSwitchPanel={setViewportPanel}
+            onAssetDeleted={onAssetDeleted}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // Use R3F Canvas for regular GLB/GLTF models
   return (
     <div className="relative h-full w-full bg-gradient-to-b from-zinc-900 to-zinc-950">
       <Canvas

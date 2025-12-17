@@ -217,6 +217,52 @@ export const VRMViewer = forwardRef<VRMViewerRef, VRMViewerProps>(
 
           console.log("[VRMViewer] VRM loaded:", vrm);
 
+          // #region agent log
+          const vrmMaterialDetails: {
+            name: string;
+            type: string;
+            hasMap: boolean;
+            color: string;
+          }[] = [];
+          vrm.scene.traverse((child: THREE.Object3D) => {
+            if (child instanceof THREE.Mesh) {
+              const mats = Array.isArray(child.material)
+                ? child.material
+                : [child.material];
+              mats.forEach((m: THREE.Material) => {
+                const anyMat = m as any;
+                vrmMaterialDetails.push({
+                  name: m.name || "unnamed",
+                  type: m.type,
+                  hasMap: !!(anyMat.map || anyMat.shadeMultiplyTexture),
+                  color: anyMat.color
+                    ? `#${anyMat.color.getHexString()}`
+                    : "none",
+                });
+              });
+            }
+          });
+          fetch(
+            "http://127.0.0.1:7242/ingest/ef06d7d2-0f29-426d-9574-6692c61c9819",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                location: "VRMViewer.tsx:218",
+                message: "VRM materials via VRMLoaderPlugin",
+                data: {
+                  vrmUrl,
+                  materialCount: vrmMaterialDetails.length,
+                  materials: vrmMaterialDetails.slice(0, 5),
+                },
+                timestamp: Date.now(),
+                sessionId: "debug-session",
+                hypothesisId: "D",
+              }),
+            },
+          ).catch(() => {});
+          // #endregion
+
           // Handle VRM 0.0 rotation
           // VRM meta can be VRM0Meta or VRM1Meta - check for metaVersion first
           const meta = vrm.meta as

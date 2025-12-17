@@ -3,6 +3,7 @@ import {
   generate3DModel,
   generateBatch,
 } from "@/lib/generation/generation-service";
+import { generateConceptArt } from "@/lib/ai/concept-art-service";
 import type { GenerationConfig } from "@/components/generation/GenerationFormRouter";
 
 // Enable streaming responses
@@ -12,6 +13,36 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { action, config, count, stream } = body;
+
+    // Generate concept art preview (before 3D generation)
+    if (action === "generate-concept-art") {
+      if (!config?.prompt) {
+        return NextResponse.json(
+          { error: "Prompt required for concept art generation" },
+          { status: 400 },
+        );
+      }
+
+      const result = await generateConceptArt(config.prompt, {
+        style: config.style || "stylized",
+        viewAngle: config.viewAngle || "isometric",
+        background: "simple",
+        assetType: config.assetType || "item",
+      });
+
+      if (!result) {
+        return NextResponse.json(
+          { error: "Concept art generation failed" },
+          { status: 500 },
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        conceptArtUrl: result.imageUrl,
+        previewUrl: result.dataUrl,
+      });
+    }
 
     if (action === "generate") {
       if (!config) {

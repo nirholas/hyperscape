@@ -76,6 +76,50 @@ function LoadedModel({
     const materials = new Set<THREE.Material>();
     let hasRig = false;
 
+    // #region agent log
+    const materialDetails: {
+      name: string;
+      type: string;
+      hasMap: boolean;
+      hasNormalMap: boolean;
+      color: string;
+    }[] = [];
+    gltf.scene.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        const mats = Array.isArray(child.material)
+          ? child.material
+          : [child.material];
+        mats.forEach((m: THREE.Material) => {
+          const stdMat = m as THREE.MeshStandardMaterial;
+          materialDetails.push({
+            name: m.name || "unnamed",
+            type: m.type,
+            hasMap: !!stdMat.map,
+            hasNormalMap: !!stdMat.normalMap,
+            color: stdMat.color ? `#${stdMat.color.getHexString()}` : "none",
+          });
+        });
+      }
+    });
+    fetch("http://127.0.0.1:7242/ingest/ef06d7d2-0f29-426d-9574-6692c61c9819", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        location: "ModelViewer.tsx:73",
+        message: "Model materials inspection",
+        data: {
+          modelUrl,
+          materialCount: materialDetails.length,
+          materials: materialDetails.slice(0, 5),
+          isVRMFile: modelUrl?.includes(".vrm"),
+        },
+        timestamp: Date.now(),
+        sessionId: "debug-session",
+        hypothesisId: "A,B",
+      }),
+    }).catch(() => {});
+    // #endregion
+
     gltf.scene.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         const geometry = child.geometry;

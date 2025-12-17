@@ -26,6 +26,12 @@ import {
   Scroll,
   Map,
   Sword,
+  Settings,
+  Box,
+  Image as ImageIcon,
+  Palette,
+  Grid3X3,
+  Layers,
   type LucideIcon,
 } from "lucide-react";
 import { Viewport3D } from "@/components/viewer/Viewport3D";
@@ -37,7 +43,7 @@ import type { AssetData } from "@/types/asset";
 
 // Modules that are just state toggles (stay on this page)
 const stateModules: { id: ModuleView; label: string; icon: LucideIcon }[] = [
-  { id: "library", label: "Asset Library", icon: Library },
+  { id: "library", label: "3D Assets", icon: Box },
 ];
 
 // Studio pages that link to separate routes
@@ -175,14 +181,15 @@ export default function HomePage() {
           </Link>
         </div>
 
-        {/* Modules Section */}
+        {/* Assets Section */}
         <div className="flex-1 p-3 overflow-y-auto themed-scrollbar">
           {!sidebarCollapsed && (
             <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 px-2">
-              Library
+              Assets
             </div>
           )}
           <nav className="space-y-1">
+            {/* 3D Assets - toggle for main viewport */}
             {stateModules.map((module) => {
               const isActive = activeModule === module.id;
               return (
@@ -210,6 +217,65 @@ export default function HomePage() {
                 </button>
               );
             })}
+
+            {/* Audio Assets Link */}
+            <Link
+              href="/assets/audio"
+              title={sidebarCollapsed ? "Audio Assets" : "Browse audio assets"}
+              className={`
+                w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
+                text-muted-foreground hover:text-foreground hover:bg-glass-bg transition-all duration-200
+                ${sidebarCollapsed ? "justify-center" : ""}
+              `}
+            >
+              <Volume2 className="w-4 h-4 flex-shrink-0" />
+              {!sidebarCollapsed && (
+                <>
+                  <span className="truncate flex-1">Audio Assets</span>
+                  <ExternalLink className="w-3 h-3 text-muted-foreground/50" />
+                </>
+              )}
+            </Link>
+
+            {/* Image Assets Link */}
+            <Link
+              href="/assets/images"
+              title={sidebarCollapsed ? "Image Assets" : "Browse image assets"}
+              className={`
+                w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
+                text-muted-foreground hover:text-foreground hover:bg-glass-bg transition-all duration-200
+                ${sidebarCollapsed ? "justify-center" : ""}
+              `}
+            >
+              <ImageIcon className="w-4 h-4 flex-shrink-0" />
+              {!sidebarCollapsed && (
+                <>
+                  <span className="truncate flex-1">Image Assets</span>
+                  <ExternalLink className="w-3 h-3 text-muted-foreground/50" />
+                </>
+              )}
+            </Link>
+
+            {/* Content Assets Link */}
+            <Link
+              href="/assets/content"
+              title={
+                sidebarCollapsed ? "Content Assets" : "Browse content assets"
+              }
+              className={`
+                w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
+                text-muted-foreground hover:text-foreground hover:bg-glass-bg transition-all duration-200
+                ${sidebarCollapsed ? "justify-center" : ""}
+              `}
+            >
+              <MessageSquare className="w-4 h-4 flex-shrink-0" />
+              {!sidebarCollapsed && (
+                <>
+                  <span className="truncate flex-1">Content Assets</span>
+                  <ExternalLink className="w-3 h-3 text-muted-foreground/50" />
+                </>
+              )}
+            </Link>
           </nav>
 
           {/* Studio Pages */}
@@ -405,6 +471,95 @@ export default function HomePage() {
               </Link>
             </nav>
           </div>
+
+          {/* Images Section */}
+          <div
+            className={`mt-4 pt-4 border-t border-glass-border ${sidebarCollapsed ? "px-0" : ""}`}
+          >
+            {!sidebarCollapsed && (
+              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 px-2">
+                Images
+              </div>
+            )}
+            <nav className="space-y-1">
+              <Link
+                href="/images"
+                title={
+                  sidebarCollapsed ? "Image Library" : "Browse generated images"
+                }
+                className={`
+                  w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
+                  text-muted-foreground hover:text-foreground hover:bg-glass-bg transition-all duration-200
+                  ${sidebarCollapsed ? "justify-center" : ""}
+                `}
+              >
+                <ImageIcon className="w-4 h-4 flex-shrink-0" />
+                {!sidebarCollapsed && (
+                  <>
+                    <span className="truncate flex-1">Image Library</span>
+                    <ExternalLink className="w-3 h-3 text-muted-foreground/50" />
+                  </>
+                )}
+              </Link>
+              <Link
+                href="/images/concept-art"
+                title={
+                  sidebarCollapsed ? "Concept Art" : "Generate AI concept art"
+                }
+                className={`
+                  w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
+                  text-muted-foreground hover:text-foreground hover:bg-glass-bg transition-all duration-200
+                  ${sidebarCollapsed ? "justify-center" : ""}
+                `}
+              >
+                <Palette className="w-4 h-4 flex-shrink-0" />
+                {!sidebarCollapsed && (
+                  <>
+                    <span className="truncate flex-1">Concept Art</span>
+                    <ExternalLink className="w-3 h-3 text-muted-foreground/50" />
+                  </>
+                )}
+              </Link>
+              <Link
+                href="/images/sprites"
+                title={
+                  sidebarCollapsed ? "Sprites" : "Generate 2D game sprites"
+                }
+                className={`
+                  w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
+                  text-muted-foreground hover:text-foreground hover:bg-glass-bg transition-all duration-200
+                  ${sidebarCollapsed ? "justify-center" : ""}
+                `}
+              >
+                <Grid3X3 className="w-4 h-4 flex-shrink-0" />
+                {!sidebarCollapsed && (
+                  <>
+                    <span className="truncate flex-1">Sprites</span>
+                    <ExternalLink className="w-3 h-3 text-muted-foreground/50" />
+                  </>
+                )}
+              </Link>
+              <Link
+                href="/images/textures"
+                title={
+                  sidebarCollapsed ? "Textures" : "Generate seamless textures"
+                }
+                className={`
+                  w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
+                  text-muted-foreground hover:text-foreground hover:bg-glass-bg transition-all duration-200
+                  ${sidebarCollapsed ? "justify-center" : ""}
+                `}
+              >
+                <Layers className="w-4 h-4 flex-shrink-0" />
+                {!sidebarCollapsed && (
+                  <>
+                    <span className="truncate flex-1">Textures</span>
+                    <ExternalLink className="w-3 h-3 text-muted-foreground/50" />
+                  </>
+                )}
+              </Link>
+            </nav>
+          </div>
         </div>
 
         {/* Vault Toggle & World View Button */}
@@ -441,6 +596,21 @@ export default function HomePage() {
             <Globe className="w-4 h-4 flex-shrink-0" />
             {!sidebarCollapsed && <span>World View</span>}
           </button>
+
+          {/* Settings Link */}
+          <Link
+            href="/settings"
+            title={sidebarCollapsed ? "Settings" : "API keys & usage"}
+            className={`
+              w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm
+              transition-all duration-200
+              ${sidebarCollapsed ? "justify-center" : ""}
+              text-muted-foreground hover:text-foreground hover:bg-glass-bg
+            `}
+          >
+            <Settings className="w-4 h-4 flex-shrink-0" />
+            {!sidebarCollapsed && <span>Settings</span>}
+          </Link>
         </div>
       </aside>
 
