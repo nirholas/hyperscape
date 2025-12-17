@@ -375,6 +375,7 @@ export class PlayerEntity extends CombatantEntity {
         combatStyle: "attack",
         inCombat: false,
         combatTarget: null,
+        autoRetaliate: true, // OSRS default: ON
       },
 
       // Death system

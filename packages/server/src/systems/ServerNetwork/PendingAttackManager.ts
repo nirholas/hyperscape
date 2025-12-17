@@ -181,6 +181,75 @@ export class PendingAttackManager {
   }
 
   /**
+   * Process pending attack for a specific player
+   *
+   * OSRS-ACCURATE: Called by GameTickProcessor during player phase
+   * This processes just one player's pending attack instead of all.
+   *
+   * @param playerId - The player to process
+   * @param currentTick - Current tick number
+   */
+  processPlayerTick(playerId: string, _currentTick: number): void {
+    const pending = this.pendingAttacks.get(playerId);
+    if (!pending) return;
+
+    // Check if target still exists and is alive
+    if (!this.isMobAlive(pending.targetId)) {
+      this.pendingAttacks.delete(playerId);
+      return;
+    }
+
+    // Get current positions
+    const playerEntity = this.world.entities.get(playerId);
+    if (!playerEntity) {
+      this.pendingAttacks.delete(playerId);
+      return;
+    }
+
+    const targetPos = this.getMobPosition(pending.targetId);
+    if (!targetPos) {
+      this.pendingAttacks.delete(playerId);
+      return;
+    }
+
+    const playerPos = playerEntity.position;
+    const playerTile = worldToTile(playerPos.x, playerPos.z);
+    const targetTile = worldToTile(targetPos.x, targetPos.z);
+
+    // OSRS-accurate melee range check
+    if (tilesWithinMeleeRange(playerTile, targetTile, pending.meleeRange)) {
+      // In range! Start combat
+      this.world.emit(EventType.COMBAT_ATTACK_REQUEST, {
+        playerId,
+        targetId: pending.targetId,
+        attackerType: "player",
+        targetType: "mob",
+        attackType: "melee",
+      });
+
+      // Remove pending attack
+      this.pendingAttacks.delete(playerId);
+      return;
+    }
+
+    // Not in range - check if target moved and re-path if needed
+    if (
+      !pending.lastTargetTile ||
+      pending.lastTargetTile.x !== targetTile.x ||
+      pending.lastTargetTile.z !== targetTile.z
+    ) {
+      // Target moved - re-path using OSRS melee pathfinding
+      this.tileMovementManager.movePlayerToward(
+        playerId,
+        targetPos,
+        true,
+        pending.meleeRange,
+      );
+      pending.lastTargetTile = { x: targetTile.x, z: targetTile.z };
+    }
+  }
+
+  /**
    * Clean up on player disconnect
    */
   onPlayerDisconnect(playerId: string): void {

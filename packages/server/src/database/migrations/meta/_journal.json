@@ -92,6 +92,13 @@
       "when": 1765895485296,
       "tag": "0012_great_outlaw_kid",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1766000000000,
+      "tag": "0013_add_auto_retaliate",
+      "breakpoints": true
     }
   ]
 }

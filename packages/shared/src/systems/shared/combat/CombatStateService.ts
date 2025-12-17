@@ -37,10 +37,12 @@ interface CombatPlayerEntity {
   combat?: {
     inCombat: boolean;
     combatTarget: string | null;
+    pendingAttacker?: string | null; // Stores attacker ID when auto-retaliate is OFF
   };
   data?: {
     c?: boolean;
     ct?: string | null;
+    pa?: string | null; // Pending attacker (abbreviated for network efficiency)
   };
   markNetworkDirty?: () => void;
 }
@@ -215,6 +217,46 @@ export class CombatStateService {
   }
 
   /**
+   * Mark player as in combat but without a target (OSRS auto-retaliate OFF behavior)
+   * Player is being attacked but won't fight back - still triggers combat timer
+   * Stores attackerId so we can start combat if auto-retaliate is toggled ON
+   */
+  markInCombatWithoutTarget(entityId: string, attackerId?: string): void {
+    const playerEntity = this.world.getPlayer?.(
+      entityId,
+    ) as CombatPlayerEntity | null;
+
+    if (!playerEntity) return;
+
+    // Set combat property if it exists (legacy support)
+    if (playerEntity.combat) {
+      playerEntity.combat.inCombat = true;
+      playerEntity.combat.combatTarget = null;
+      // Store attacker for potential retaliation if auto-retaliate is toggled ON
+      playerEntity.combat.pendingAttacker = attackerId || null;
+    }
+
+    // ALWAYS set in data for network sync (abbreviated keys for efficiency)
+    if (playerEntity.data) {
+      playerEntity.data.c = true;
+      playerEntity.data.ct = null;
+      // Store pending attacker (pa) for auto-retaliate toggle
+      playerEntity.data.pa = attackerId || null;
+
+      // Send immediate network update
+      if (this.world.isServer && this.world.network?.send) {
+        this.world.network.send("entityModified", {
+          id: entityId,
+          c: true,
+          ct: null,
+        });
+      }
+    }
+
+    playerEntity.markNetworkDirty?.();
+  }
+
+  /**
    * Clear combat state from player entity when combat ends
    */
   clearCombatStateFromEntity(
@@ -233,12 +275,14 @@ export class CombatStateService {
     if (playerEntity.combat) {
       playerEntity.combat.inCombat = false;
       playerEntity.combat.combatTarget = null;
+      playerEntity.combat.pendingAttacker = null;
     }
 
     // ALWAYS clear in data for network sync (abbreviated keys)
     if (playerEntity.data) {
       playerEntity.data.c = false;
       playerEntity.data.ct = null;
+      playerEntity.data.pa = null;
 
       // Send immediate network update when combat ends
       if (this.world.isServer && this.world.network?.send) {

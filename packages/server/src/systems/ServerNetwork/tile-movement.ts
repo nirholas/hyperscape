@@ -396,6 +396,120 @@ export class TileMovementManager {
   }
 
   /**
+   * Process movement for a specific player on this tick
+   *
+   * OSRS-ACCURATE: Called by GameTickProcessor during player phase
+   * This processes just one player's movement instead of all players.
+   *
+   * @param playerId - The player to process movement for
+   * @param tickNumber - Current tick number
+   */
+  processPlayerTick(playerId: string, tickNumber: number): void {
+    const state = this.playerStates.get(playerId);
+    if (!state) return;
+
+    // Skip if no path or at end
+    if (state.path.length === 0 || state.pathIndex >= state.path.length) {
+      return;
+    }
+
+    const entity = this.world.entities.get(playerId);
+    if (!entity) {
+      this.playerStates.delete(playerId);
+      return;
+    }
+
+    const terrain = this.getTerrain();
+
+    // Store previous position for rotation calculation
+    const prevTile = { ...state.currentTile };
+
+    // Move 1 tile (walk) or 2 tiles (run) per tick
+    const tilesToMove = state.isRunning
+      ? TILES_PER_TICK_RUN
+      : TILES_PER_TICK_WALK;
+
+    for (let i = 0; i < tilesToMove; i++) {
+      if (state.pathIndex >= state.path.length) break;
+
+      const nextTile = state.path[state.pathIndex];
+      state.currentTile = { ...nextTile };
+      state.pathIndex++;
+    }
+
+    // Convert tile to world position
+    const worldPos = tileToWorld(state.currentTile);
+
+    // Get terrain height
+    if (terrain) {
+      const height = terrain.getHeightAt(worldPos.x, worldPos.z);
+      if (height !== null && Number.isFinite(height)) {
+        worldPos.y = (height as number) + 0.1;
+      }
+    }
+
+    // Update entity position on server
+    entity.position.set(worldPos.x, worldPos.y, worldPos.z);
+    entity.data.position = [worldPos.x, worldPos.y, worldPos.z];
+
+    // Calculate rotation based on movement direction
+    const prevWorld = tileToWorld(prevTile);
+    const dx = worldPos.x - prevWorld.x;
+    const dz = worldPos.z - prevWorld.z;
+
+    if (Math.abs(dx) + Math.abs(dz) > 0.01) {
+      const yaw = Math.atan2(-dx, -dz);
+      this._tempQuat.setFromAxisAngle(this._up, yaw);
+
+      if (entity.node) {
+        entity.node.quaternion.copy(this._tempQuat);
+      }
+      entity.data.quaternion = [
+        this._tempQuat.x,
+        this._tempQuat.y,
+        this._tempQuat.z,
+        this._tempQuat.w,
+      ];
+    }
+
+    // Broadcast tile position update to clients
+    this.sendFn("entityTileUpdate", {
+      id: playerId,
+      tile: state.currentTile,
+      worldPos: [worldPos.x, worldPos.y, worldPos.z],
+      quaternion: entity.data.quaternion,
+      emote: state.isRunning ? "run" : "walk",
+      tickNumber,
+      moveSeq: state.moveSeq,
+    });
+
+    // Check if arrived at destination
+    if (state.pathIndex >= state.path.length) {
+      // Broadcast movement end
+      this.sendFn("tileMovementEnd", {
+        id: playerId,
+        tile: state.currentTile,
+        worldPos: [worldPos.x, worldPos.y, worldPos.z],
+        moveSeq: state.moveSeq,
+      });
+
+      // Clear path
+      state.path = [];
+      state.pathIndex = 0;
+
+      // Broadcast idle state
+      this.sendFn("entityModified", {
+        id: playerId,
+        changes: {
+          p: [worldPos.x, worldPos.y, worldPos.z],
+          v: [0, 0, 0],
+          e: "idle",
+        },
+      });
+    }
+  }
+
+  /**
    * Legacy frame-based update (for compatibility during transition)
    * This should be removed once tile movement is fully working
    */

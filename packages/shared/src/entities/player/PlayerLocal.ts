@@ -368,6 +368,7 @@ export class PlayerLocal extends Entity implements HotReloadable {
     combatStyle: "attack",
     inCombat: false,
     combatTarget: null,
+    autoRetaliate: true, // OSRS default: ON
   };
   // Issue #322: Store last combat-facing rotation to preserve facing direction after combat ends
   private _lastCombatRotation: THREE.Quaternion | null = null;
@@ -1263,6 +1264,10 @@ export class PlayerLocal extends Entity implements HotReloadable {
       EventType.PLAYER_RESPAWNED,
       this.handlePlayerRespawned.bind(this),
     );
+    this.world.on(
+      EventType.UI_AUTO_RETALIATE_CHANGED,
+      this.handleAutoRetaliateChanged.bind(this),
+    );
 
     // Signal to UI that the world is ready
     this.world.emit(EventType.READY);
@@ -1957,7 +1962,9 @@ export class PlayerLocal extends Entity implements HotReloadable {
     }
 
     // If no target from our combat state, check for mobs attacking us
-    if (!combatTarget) {
+    // OSRS: Only auto-face attacking mobs if auto-retaliate is ON
+    // When auto-retaliate is OFF, player doesn't turn to face attackers
+    if (!combatTarget && this.combat.autoRetaliate) {
       for (const entity of this.world.entities.items.values()) {
         if (entity.type === "mob" && entity.position) {
           const mobEntity = entity as any;
@@ -2297,6 +2304,20 @@ export class PlayerLocal extends Entity implements HotReloadable {
   }
 
   /**
+   * Handle UI_AUTO_RETALIATE_CHANGED event from server
+   * Updates local combat state for client-side facing behavior
+   */
+  handleAutoRetaliateChanged(event: {
+    playerId: string;
+    enabled: boolean;
+  }): void {
+    // Only handle events for this player
+    if (event.playerId !== this.data.id) return;
+
+    this.combat.autoRetaliate = event.enabled;
+  }
+
+  /**
    * Handle PLAYER_SET_DEAD event from server
    * CRITICAL: This is the entry point to death flow - blocks all input and movement
    */
@@ -2480,6 +2501,10 @@ export class PlayerLocal extends Entity implements HotReloadable {
     this.world.off(EventType.PLAYER_TELEPORT_REQUEST, this.handleTeleport);
     this.world.off(EventType.PLAYER_SET_DEAD, this.handlePlayerSetDead);
     this.world.off(EventType.PLAYER_RESPAWNED, this.handlePlayerRespawned);
+    this.world.off(
+      EventType.UI_AUTO_RETALIATE_CHANGED,
+      this.handleAutoRetaliateChanged,
+    );
 
     // Clean up physics
     if (this.capsule && this.capsuleHandle) {

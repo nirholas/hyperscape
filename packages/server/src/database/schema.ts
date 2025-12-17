@@ -86,6 +86,7 @@ import {
   timestamp,
   serial,
   unique,
+  uniqueIndex,
   index,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
@@ -334,20 +335,30 @@ export const items = pgTable("items", {
  * - `metadata` - JSON string for item-specific data (enchantments, durability, etc.)
  *
  * Design notes:
- * - slotIndex can be -1 for items being moved
- * - No unique constraint on slotIndex (items can temporarily overlap during moves)
+ * - slotIndex can be -1 for items being moved (unassigned)
+ * - Partial unique constraint on (playerId, slotIndex) WHERE slotIndex >= 0
  * - CASCADE DELETE ensures cleanup when character is deleted
  */
-export const inventory = pgTable("inventory", {
-  id: serial("id").primaryKey(),
-  playerId: text("playerId")
-    .notNull()
-    .references(() => characters.id, { onDelete: "cascade" }),
-  itemId: text("itemId").notNull(),
-  quantity: integer("quantity").default(1),
-  slotIndex: integer("slotIndex").default(-1),
-  metadata: text("metadata"),
-});
+export const inventory = pgTable(
+  "inventory",
+  {
+    id: serial("id").primaryKey(),
+    playerId: text("playerId")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    itemId: text("itemId").notNull(),
+    quantity: integer("quantity").default(1),
+    slotIndex: integer("slotIndex").default(-1),
+    metadata: text("metadata"),
+  },
+  (table) => ({
+    // Partial unique index: only one item per slot when slotIndex >= 0
+    // slotIndex = -1 means "unassigned" and can have duplicates
+    playerSlotUnique: uniqueIndex("inventory_player_slot_unique")
+      .on(table.playerId, table.slotIndex)
+      .where(sql`"slotIndex" >= 0`),
+  }),
+);
 
 /**
  * Equipment Table - Items worn/wielded by player

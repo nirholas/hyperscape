@@ -58,6 +58,13 @@ export interface CombatFollowTargetPayload {
   targetPosition: { x: number; y: number; z: number };
 }
 
+/**
+ * OSRS-accurate: Player clicked to move (not on target), cancel their attacking combat
+ */
+export interface CombatPlayerDisengagePayload {
+  playerId: string;
+}
+
 export interface InventoryItemAddedPayload {
   playerId: string;
   item: InventoryItem;
@@ -742,6 +749,7 @@ export type EventPayloads = {
   [EventType.PLAYER_XP_GAINED]: PlayerXPGainedPayload;
   [EventType.COMBAT_STARTED]: CombatStartedPayload;
   [EventType.COMBAT_FOLLOW_TARGET]: CombatFollowTargetPayload;
+  [EventType.COMBAT_PLAYER_DISENGAGE]: CombatPlayerDisengagePayload;
   [EventType.INVENTORY_ITEM_ADDED]: InventoryItemAddedPayload;
   [EventType.NPC_DIED]: NPCDiedPayload;
 };

@@ -188,6 +188,7 @@ export enum EventType {
   COMBAT_KILL = "combat:kill",
   COMBAT_LEVEL_CHANGED = "combat:level:changed",
   COMBAT_FOLLOW_TARGET = "combat:follow_target",
+  COMBAT_PLAYER_DISENGAGE = "combat:player_disengage", // Player clicked away, cancel their attacking combat
 
   // Aggro System
   AGGRO_PLAYER_LEFT = "aggro:player_left",

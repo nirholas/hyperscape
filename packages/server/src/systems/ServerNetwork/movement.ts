@@ -12,7 +12,7 @@
  */
 
 import type { ServerSocket } from "../../shared/types";
-import { THREE, TerrainSystem, World } from "@hyperscape/shared";
+import { THREE, TerrainSystem, World, EventType } from "@hyperscape/shared";
 
 interface MoveTarget {
   target: THREE.Vector3;
@@ -214,6 +214,13 @@ export class MovementManager {
       target,
       maxSpeed,
       lastUpdate: 0,
+    });
+
+    // OSRS-accurate: Player clicked to move = disengage from combat
+    // In OSRS, clicking anywhere else cancels your current action including combat
+    // This allows players to walk away from fights by clicking on the ground
+    this.world.emit(EventType.COMBAT_PLAYER_DISENGAGE, {
+      playerId: playerEntity.id,
     });
 
     // Immediately rotate the player to face the new target and broadcast state

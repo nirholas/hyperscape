@@ -672,6 +672,175 @@ export class MobTileMovementManager {
   }
 
   /**
+   * Process movement for a specific mob on this tick
+   *
+   * OSRS-ACCURATE: Called by GameTickProcessor during NPC phase
+   * This processes just one mob's movement instead of all mobs.
+   * NPCs process BEFORE players in OSRS, which creates damage asymmetry.
+   *
+   * @param mobId - The mob to process movement for
+   * @param tickNumber - Current tick number
+   */
+  processMobTick(mobId: string, tickNumber: number): void {
+    const state = this.mobStates.get(mobId);
+    if (!state) return;
+
+    const entity = this.world.entities.get(mobId);
+    if (!entity) {
+      this.mobStates.delete(mobId);
+      return;
+    }
+
+    const terrain = this.getTerrain();
+
+    // OSRS-STYLE DUMB PATHFINDER FOR CHASE MODE
+    if (state.isChasing && state.targetEntityId) {
+      const targetPlayer = this.world.getPlayer?.(state.targetEntityId);
+      const targetEntity =
+        targetPlayer || this.world.entities.get(state.targetEntityId);
+
+      if (targetEntity) {
+        const currentTargetTile = worldToTile(
+          targetEntity.position.x,
+          targetEntity.position.z,
+        );
+
+        // Check if we're already in combat range
+        const combatRange = state.combatRange || 1;
+        if (
+          tilesWithinMeleeRange(
+            state.currentTile,
+            currentTargetTile,
+            combatRange,
+          )
+        ) {
+          return; // In range, no need to move
+        }
+
+        // Calculate chase path using simple step algorithm
+        const newPath: TileCoord[] = [];
+        let currentPos = { ...state.currentTile };
+
+        for (let step = 0; step < state.tilesPerTick; step++) {
+          const nextTile = chaseStep(currentPos, currentTargetTile, (tile) =>
+            this.isTileWalkable(tile),
+          );
+
+          if (!nextTile) break;
+
+          newPath.push(nextTile);
+          currentPos = nextTile;
+
+          if (tilesWithinMeleeRange(nextTile, currentTargetTile, combatRange))
+            break;
+        }
+
+        if (newPath.length === 0) {
+          return; // Blocked - safespotted
+        }
+
+        state.path = newPath;
+        state.pathIndex = 0;
+        state.lastTargetTile = { ...currentTargetTile };
+      }
+    }
+
+    // Skip if no path or at end
+    if (state.path.length === 0 || state.pathIndex >= state.path.length) {
+      return;
+    }
+
+    // Store previous position for rotation
+    const prevTile = { ...state.currentTile };
+
+    // Move up to tilesPerTick tiles
+    for (let i = 0; i < state.tilesPerTick; i++) {
+      if (state.pathIndex >= state.path.length) break;
+      const nextTile = state.path[state.pathIndex];
+      state.currentTile = { ...nextTile };
+      state.pathIndex++;
+    }
+
+    // Convert tile to world position
+    const worldPos = tileToWorld(state.currentTile);
+
+    // Get terrain height
+    if (terrain) {
+      const height = terrain.getHeightAt(worldPos.x, worldPos.z);
+      if (height !== null && Number.isFinite(height)) {
+        worldPos.y = (height as number) + 0.1;
+      }
+    }
+
+    // Update entity position on server
+    entity.position.set(worldPos.x, worldPos.y, worldPos.z);
+    if (entity.data) {
+      entity.data.position = [worldPos.x, worldPos.y, worldPos.z];
+    }
+
+    // Calculate rotation based on movement direction
+    const prevWorld = tileToWorld(prevTile);
+    const dx = worldPos.x - prevWorld.x;
+    const dz = worldPos.z - prevWorld.z;
+
+    if (Math.abs(dx) + Math.abs(dz) > 0.01) {
+      const yaw = Math.atan2(-dx, -dz);
+      this._tempQuat.setFromAxisAngle(this._up, yaw);
+
+      if (entity.node) {
+        entity.node.quaternion.copy(this._tempQuat);
+      }
+      if (entity.data) {
+        entity.data.quaternion = [
+          this._tempQuat.x,
+          this._tempQuat.y,
+          this._tempQuat.z,
+          this._tempQuat.w,
+        ];
+      }
+    }
+
+    // Broadcast tile position update
+    this.sendFn("entityTileUpdate", {
+      id: mobId,
+      tile: state.currentTile,
+      worldPos: [worldPos.x, worldPos.y, worldPos.z],
+      quaternion: entity.data?.quaternion,
+      emote: "walk",
+      tickNumber,
+      moveSeq: state.moveSeq,
+      isMob: true,
+    });
+
+    // Check if arrived at destination
+    if (state.pathIndex >= state.path.length) {
+      state.hasDestination = false;
+
+      this.sendFn("tileMovementEnd", {
+        id: mobId,
+        tile: state.currentTile,
+        worldPos: [worldPos.x, worldPos.y, worldPos.z],
+        moveSeq: state.moveSeq,
+        isMob: true,
+      });
+
+      state.path = [];
+      state.pathIndex = 0;
+
+      if (!state.isChasing) {
+        this.sendFn("entityModified", {
+          id: mobId,
+          changes: {
+            p: [worldPos.x, worldPos.y, worldPos.z],
+            v: [0, 0, 0],
+            e: "idle",
+          },
+        });
+      }
+    }
+  }
+
+  /**
    * Check if a mob is currently moving
    */
   isMoving(mobId: string): boolean {

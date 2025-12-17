@@ -117,7 +117,8 @@ export class CombatSystem extends SystemBase {
   private playerSystem?: PlayerSystem; // Cached for auto-retaliate checks (hot path optimization)
 
   // Modular services (Phase 5 extraction)
-  private stateService: CombatStateService;
+  // Note: stateService is public for GameTickProcessor access (OSRS-accurate tick processing)
+  public readonly stateService: CombatStateService;
   private animationManager: CombatAnimationManager;
   private rotationManager: CombatRotationManager;
 
@@ -176,6 +177,25 @@ export class CombatSystem extends SystemBase {
     // Cache PlayerSystem for auto-retaliate checks (hot path optimization)
     // Optional dependency - combat still works without it (defaults to retaliate)
     this.playerSystem = this.world.getSystem<PlayerSystem>("player");
+
+    // Listen for auto-retaliate toggle to start combat if toggled ON while being attacked
+    this.subscribe(
+      EventType.UI_AUTO_RETALIATE_CHANGED,
+      (data: { playerId: string; enabled: boolean }) => {
+        if (data.enabled) {
+          this.handleAutoRetaliateEnabled(data.playerId);
+        }
+      },
+    );
+
+    // OSRS-accurate: Player clicked to move = cancel their attacking combat
+    // In OSRS, clicking anywhere else cancels your current action including combat
+    this.subscribe(
+      EventType.COMBAT_PLAYER_DISENGAGE,
+      (data: { playerId: string }) => {
+        this.handlePlayerDisengage(data.playerId);
+      },
+    );
 
     // Set up event listeners - required for combat to function
     this.subscribe(
@@ -608,6 +628,93 @@ export class CombatSystem extends SystemBase {
   }
 
   /**
+   * Handle auto-retaliate being toggled ON while being attacked
+   * OSRS behavior: Player should start fighting back immediately
+   */
+  private handleAutoRetaliateEnabled(playerId: string): void {
+    const playerEntity = this.world.getPlayer?.(playerId) as
+      | {
+          combat?: { inCombat?: boolean; pendingAttacker?: string | null };
+          data?: { c?: boolean; pa?: string | null };
+        }
+      | undefined;
+
+    if (!playerEntity) return;
+
+    // Check if player is in combat with a pending attacker
+    const pendingAttacker =
+      playerEntity.combat?.pendingAttacker || playerEntity.data?.pa;
+
+    if (!pendingAttacker) return;
+
+    // Check if attacker is still alive/valid (mob entity)
+    const attackerEntity = this.getEntity(pendingAttacker, "mob");
+    if (!attackerEntity || !this.isEntityAlive(attackerEntity, "mob")) {
+      // Attacker gone - clear pending attacker state
+      if (playerEntity.combat) {
+        playerEntity.combat.pendingAttacker = null;
+      }
+      if (playerEntity.data) {
+        playerEntity.data.pa = null;
+      }
+      return;
+    }
+
+    // Start combat! Player now retaliates against the mob
+    // Get player attack speed
+    const attackSpeedTicks = this.getAttackSpeedTicks(
+      createEntityID(playerId),
+      "player",
+    );
+
+    // Create combat state for player attacking the mob
+    this.enterCombat(
+      createEntityID(playerId),
+      createEntityID(pendingAttacker),
+      attackSpeedTicks,
+    );
+
+    // Clear pending attacker since we're now actively fighting
+    if (playerEntity.combat) {
+      playerEntity.combat.pendingAttacker = null;
+    }
+    if (playerEntity.data) {
+      playerEntity.data.pa = null;
+    }
+
+    // Face the target and start combat animation
+    this.rotationManager.rotateTowardsTarget(
+      playerId,
+      pendingAttacker,
+      "player",
+      "mob",
+    );
+  }
+
+  /**
+   * OSRS-accurate: Handle player clicking to move (disengage from combat)
+   * In OSRS, clicking anywhere else cancels your current action including combat.
+   * This allows players to walk away from fights regardless of auto-retaliate setting.
+   */
+  private handlePlayerDisengage(playerId: string): void {
+    // Check if player is currently attacking something
+    const combatState = this.stateService.getCombatData(playerId);
+    if (!combatState || combatState.attackerType !== "player") {
+      return; // Not in combat as an attacker, nothing to cancel
+    }
+
+    const targetId = String(combatState.targetId);
+
+    // End the player's attacking combat state
+    this.forceEndCombat(playerId);
+
+    // Mark player as "in combat without target" - the mob is still attacking them
+    // This keeps the combat timer active but player won't auto-attack
+    // If auto-retaliate is ON and mob catches up and hits, player will start fighting again
+    this.stateService.markInCombatWithoutTarget(playerId, targetId);
+  }
+
+  /**
    * Issue #342: Handle combat follow - move player toward target when out of melee range
    * This allows combat to continue when the target moves instead of timing out
    *
@@ -953,7 +1060,16 @@ export class CombatSystem extends SystemBase {
       // Note: If playerSystem is null, canRetaliate stays true (default OSRS behavior)
     }
 
+    // Attacker always faces target
+    this.rotationManager.rotateTowardsTarget(
+      String(attackerId),
+      String(targetId),
+      attackerType,
+      targetType,
+    );
+
     if (canRetaliate) {
+      // OSRS: Only schedule retaliation and face attacker if auto-retaliate is ON
       const retaliationDelay = calculateRetaliationDelay(
         targetAttackSpeedTicks,
       );
@@ -967,33 +1083,40 @@ export class CombatSystem extends SystemBase {
         retaliationDelay,
         targetAttackSpeedTicks,
       );
+
+      // Target only faces attacker if they will retaliate (OSRS behavior)
+      this.rotationManager.rotateTowardsTarget(
+        String(targetId),
+        String(attackerId),
+        targetType,
+        attackerType,
+      );
     }
 
-    // Rotate both entities to face each other (RuneScape-style)
-    this.rotationManager.rotateTowardsTarget(
+    // Sync combat state to player entities for client-side combat awareness
+    // Attacker always gets combat state with target
+    this.stateService.syncCombatStateToEntity(
       String(attackerId),
       String(targetId),
-      attackerType,
-      targetType,
-    );
-    this.rotationManager.rotateTowardsTarget(
-      String(targetId),
-      String(attackerId),
-      targetType,
       attackerType,
     );
 
-    // Sync combat state to player entities for client-side combat awareness
-    this.stateService.syncCombatStateToEntity(
-      String(attackerId),
-      String(targetId),
-      attackerType,
-    );
-    this.stateService.syncCombatStateToEntity(
-      String(targetId),
-      String(attackerId),
-      targetType,
-    );
+    // Target only gets combat target if they will retaliate (OSRS behavior)
+    // If auto-retaliate is OFF, they're "in combat" but have no target
+    if (canRetaliate) {
+      this.stateService.syncCombatStateToEntity(
+        String(targetId),
+        String(attackerId),
+        targetType,
+      );
+    } else if (targetType === "player") {
+      // Mark player as in combat (for logout timer) but without a target
+      // Store attackerId so combat can start if auto-retaliate is toggled ON
+      this.stateService.markInCombatWithoutTarget(
+        String(targetId),
+        String(attackerId),
+      );
+    }
 
     // DON'T set combat emotes here - we set them when attacks happen instead
     // This prevents the animation from looping continuously
@@ -1362,6 +1485,83 @@ export class CombatSystem extends SystemBase {
   }
 
   /**
+   * Process combat for a specific NPC on this tick
+   *
+   * OSRS-ACCURATE: Called by GameTickProcessor during NPC phase
+   * NPCs process BEFORE players, creating the damage asymmetry:
+   * - NPC → Player damage: Applied same tick
+   * - Player → NPC damage: Applied next tick
+   *
+   * @param mobId - The NPC entity ID to process
+   * @param tickNumber - Current tick number
+   */
+  public processNPCCombatTick(mobId: string, tickNumber: number): void {
+    const combatState = this.stateService.getCombatData(mobId);
+
+    if (!combatState) return;
+
+    // Check for combat timeout (8 ticks after last hit)
+    if (combatState.inCombat && tickNumber >= combatState.combatEndTick) {
+      this.endCombat({ entityId: mobId });
+      return;
+    }
+
+    // Skip if not in combat or doesn't have valid target
+    if (!combatState.inCombat || !combatState.targetId) return;
+
+    // Only process mob attackers (not mobs being attacked)
+    if (combatState.attackerType !== "mob") return;
+
+    // Process emote resets for this mob
+    this.animationManager.processEntityEmoteReset(mobId, tickNumber);
+
+    // Check if this mob can attack on this tick
+    if (tickNumber >= combatState.nextAttackTick) {
+      this.processAutoAttackOnTick(combatState, tickNumber);
+    }
+  }
+
+  /**
+   * Process combat for a specific player on this tick
+   *
+   * OSRS-ACCURATE: Called by GameTickProcessor during Player phase
+   * Players process AFTER NPCs, creating the damage asymmetry:
+   * - Player → NPC damage: Applied next tick (queued by GameTickProcessor)
+   * - NPC → Player damage: Applied same tick
+   *
+   * @param playerId - The player entity ID to process
+   * @param tickNumber - Current tick number
+   */
+  public processPlayerCombatTick(playerId: string, tickNumber: number): void {
+    const combatState = this.stateService.getCombatData(playerId);
+
+    if (!combatState) return;
+
+    // Check for combat timeout (8 ticks after last hit)
+    if (combatState.inCombat && tickNumber >= combatState.combatEndTick) {
+      this.endCombat({ entityId: playerId });
+      return;
+    }
+
+    // Skip if not in combat or doesn't have valid target
+    if (!combatState.inCombat || !combatState.targetId) return;
+
+    // Only process player attackers (not players being attacked)
+    if (combatState.attackerType !== "player") return;
+
+    // Process emote resets for this player
+    this.animationManager.processEntityEmoteReset(playerId, tickNumber);
+
+    // OSRS-style: Check range EVERY tick and follow if needed
+    this.checkRangeAndFollow(combatState, tickNumber);
+
+    // Check if this player can attack on this tick
+    if (tickNumber >= combatState.nextAttackTick) {
+      this.processAutoAttackOnTick(combatState, tickNumber);
+    }
+  }
+
+  /**
    * OSRS-style: Check if player is in range of target, emit follow event if not
    * Called EVERY tick to ensure continuous pursuit of moving targets
    */
@@ -1403,7 +1603,10 @@ export class CombatSystem extends SystemBase {
         combatRangeTiles,
       )
     ) {
-      // Out of range - emit follow event to move player toward target
+      // Out of range - follow the target
+      // Note: If player clicked away, their combat would already be ended by
+      // COMBAT_PLAYER_DISENGAGE event (OSRS-accurate: clicking cancels action)
+      // So if we reach here, combat is still active and player should follow
       // Extend combat timeout while pursuing
       combatState.combatEndTick =
         tickNumber + COMBAT_CONSTANTS.COMBAT_TIMEOUT_TICKS;

@@ -96,6 +96,23 @@ export class CombatAnimationManager {
   }
 
   /**
+   * Process emote reset for a specific entity
+   *
+   * OSRS-ACCURATE: Called by GameTickProcessor during per-entity processing
+   * This allows emote resets to be processed per-entity rather than globally.
+   *
+   * @param entityId - The entity to check for emote reset
+   * @param currentTick - Current tick number
+   */
+  processEntityEmoteReset(entityId: string, currentTick: number): void {
+    const resetData = this.emoteResetTicks.get(entityId);
+    if (resetData && currentTick >= resetData.tick) {
+      this.resetEmote(entityId, resetData.entityType);
+      this.emoteResetTicks.delete(entityId);
+    }
+  }
+
+  /**
    * Cancel any pending emote reset for an entity
    * Used when entity dies or disconnects
    */
