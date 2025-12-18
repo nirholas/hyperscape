@@ -240,6 +240,8 @@ function createTestWorld(options: { currentTick?: number } = {}) {
       },
     ),
     getPlayer: (id: string) => players.get(id),
+    // Critical: Return auto-retaliate setting (default true)
+    getPlayerAutoRetaliate: () => true,
   };
 
   return {
@@ -263,6 +265,12 @@ function createTestWorld(options: { currentTick?: number } = {}) {
     },
     getPlayer: (id: string) => players.get(id),
     getSystem: (name: string) => {
+      if (name === "entity-manager") {
+        // Required by CombatSystem.init()
+        return {
+          getEntity: (id: string) => entities.get(id) || players.get(id),
+        };
+      }
       if (name === "equipment") {
         return {
           getPlayerEquipment: () => ({ weapon: null }),
@@ -303,9 +311,11 @@ describe("CombatFlow Integration", () => {
   let combatSystem: CombatSystem;
   let world: ReturnType<typeof createTestWorld>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     world = createTestWorld({ currentTick: 100 });
     combatSystem = new CombatSystem(world as unknown as any);
+    // CRITICAL: Call init() to cache playerSystem for auto-retaliate checks
+    await combatSystem.init();
   });
 
   afterEach(() => {

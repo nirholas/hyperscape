@@ -161,6 +161,9 @@ export class TileMovementManager {
       state.path = [];
       state.pathIndex = 0;
 
+      // RS3-style: Clear movement flag so combat can resume
+      playerEntity.data.tileMovementActive = false;
+
       // Broadcast idle state
       const curr = playerEntity.position;
       this.sendFn("entityModified", {
@@ -203,6 +206,11 @@ export class TileMovementManager {
     // Increment movement sequence for packet ordering
     // Client uses this to ignore stale packets from previous movements
     state.moveSeq = (state.moveSeq || 0) + 1;
+
+    // RS3-style: Set movement flag to suppress combat while moving
+    if (path.length > 0) {
+      playerEntity.data.tileMovementActive = true;
+    }
 
     // Immediately rotate player toward destination and send first tile update
     if (path.length > 0) {
@@ -382,6 +390,9 @@ export class TileMovementManager {
         state.path = [];
         state.pathIndex = 0;
 
+        // RS3-style: Clear movement flag so combat can resume
+        entity.data.tileMovementActive = false;
+
         // Broadcast idle state
         this.sendFn("entityModified", {
           id: playerId,
@@ -497,6 +508,9 @@ export class TileMovementManager {
       state.path = [];
       state.pathIndex = 0;
 
+      // RS3-style: Clear movement flag so combat can resume
+      entity.data.tileMovementActive = false;
+
       // Broadcast idle state
       this.sendFn("entityModified", {
         id: playerId,
@@ -550,6 +564,13 @@ export class TileMovementManager {
       state.path = [];
       state.pathIndex = 0;
       state.moveSeq = (state.moveSeq || 0) + 1; // Increment to invalidate stale client packets
+
+      // RS3-style: Clear movement flag so combat can resume
+      const entity = this.world.entities.get(playerId);
+      if (entity?.data) {
+        entity.data.tileMovementActive = false;
+      }
+
       console.log(
         `[TileMovement] Synced ${playerId} position to tile (${newTile.x},${newTile.z}) after respawn/teleport`,
       );
@@ -668,6 +689,9 @@ export class TileMovementManager {
     state.pathIndex = 0;
     state.isRunning = running;
     state.moveSeq = (state.moveSeq || 0) + 1;
+
+    // RS3-style: Set movement flag to suppress combat while moving
+    entity.data.tileMovementActive = true;
 
     // Broadcast movement start
     const nextTile = path[0];

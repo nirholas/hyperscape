@@ -1097,13 +1097,41 @@ export class CombatSystem extends SystemBase {
         targetAttackSpeedTicks,
       );
 
-      // Target only faces attacker if they will retaliate (OSRS behavior)
-      this.rotationManager.rotateTowardsTarget(
-        String(targetId),
-        String(attackerId),
-        targetType,
-        attackerType,
-      );
+      // RS3-STYLE MOVEMENT PRIORITY (Issue #321):
+      // Only rotate and follow if player is NOT actively moving.
+      // If moving, combat state is set but attacks/following are suppressed.
+      // Player will start following/attacking when they stop moving.
+      // checkRangeAndFollow() handles this when player stops.
+      const isMoving =
+        targetType === "player" && this.isPlayerMoving(String(targetId));
+
+      if (!isMoving) {
+        // Player is standing still - rotate to face attacker
+        this.rotationManager.rotateTowardsTarget(
+          String(targetId),
+          String(attackerId),
+          targetType,
+          attackerType,
+        );
+
+        // Follow the attacker if this is a player target
+        if (targetType === "player" && attackerEntity) {
+          const attackerPos = getEntityPosition(attackerEntity);
+          if (attackerPos) {
+            this.emitTypedEvent(EventType.COMBAT_FOLLOW_TARGET, {
+              playerId: String(targetId),
+              targetId: String(attackerId),
+              targetPosition: {
+                x: attackerPos.x,
+                y: attackerPos.y,
+                z: attackerPos.z,
+              },
+            });
+          }
+        }
+      }
+      // If moving: combat state is created but follow/rotation deferred
+      // checkRangeAndFollow will handle this when player stops
     }
 
     // Sync combat state to player entities for client-side combat awareness
@@ -1610,6 +1638,15 @@ export class CombatSystem extends SystemBase {
     // Only process player attackers (not players being attacked)
     if (combatState.attackerType !== "player") return;
 
+    // RS3-STYLE: Skip attack processing while player is moving
+    // Movement suppresses attacks, but combat state persists
+    if (this.isPlayerMoving(playerId)) {
+      // Extend combat timeout so it doesn't expire while moving
+      combatState.combatEndTick =
+        tickNumber + COMBAT_CONSTANTS.COMBAT_TIMEOUT_TICKS;
+      return; // Skip attack processing this tick
+    }
+
     // Process emote resets for this player
     this.animationManager.processEntityEmoteReset(playerId, tickNumber);
 
@@ -1632,6 +1669,20 @@ export class CombatSystem extends SystemBase {
   ): void {
     const attackerId = String(combatState.attackerId);
     const targetId = String(combatState.targetId);
+
+    // RS3-STYLE: Don't follow while player is actively moving
+    // Movement takes priority - only follow when player stops
+    if (
+      combatState.attackerType === "player" &&
+      this.isPlayerMoving(attackerId)
+    ) {
+      // Player is walking - skip follow this tick
+      // Combat state persists, they'll follow when they stop
+      // Extend combat timeout so it doesn't expire while moving
+      combatState.combatEndTick =
+        tickNumber + COMBAT_CONSTANTS.COMBAT_TIMEOUT_TICKS;
+      return;
+    }
 
     const attacker = this.getEntity(attackerId, combatState.attackerType);
     const target = this.getEntity(targetId, combatState.targetType);
@@ -2053,6 +2104,24 @@ export class CombatSystem extends SystemBase {
     }
 
     return false;
+  }
+
+  /**
+   * RS3-style: Check if player is actively moving
+   * Movement suppresses player attacks - they only attack when standing still
+   *
+   * @param playerId - Player ID to check
+   * @returns true if player has an active movement path
+   */
+  private isPlayerMoving(playerId: string): boolean {
+    const playerEntity = this.getEntity(playerId, "player");
+    if (!playerEntity) return false;
+
+    // Check server-side movement flag set by TileMovementManager
+    // This flag is set when player has an active path and cleared when path completes
+    const data = (playerEntity as { data?: { tileMovementActive?: boolean } })
+      .data;
+    return data?.tileMovementActive === true;
   }
 
   destroy(): void {

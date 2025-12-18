@@ -137,9 +137,23 @@ function createMockWorld(
     },
     getPlayer: (id: string) => players.get(id),
     getSystem: (name: string) => {
+      if (name === "entity-manager") {
+        // Required by CombatSystem.init()
+        return {
+          getEntity: (id: string) => entities.get(id) || players.get(id),
+        };
+      }
       if (name === "equipment") {
         return {
           getPlayerEquipment: () => ({ weapon: null }),
+        };
+      }
+      if (name === "player") {
+        return {
+          damagePlayer: vi.fn(),
+          getPlayer: (id: string) => players.get(id),
+          // Critical: Return auto-retaliate setting (default true)
+          getPlayerAutoRetaliate: () => true,
         };
       }
       if (name === "mob-npc") {
@@ -170,7 +184,7 @@ describe("CombatSystem", () => {
   let mockPlayers: Map<string, any>;
   let mockMobs: Map<string, any>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     mockPlayers = new Map();
     mockMobs = new Map();
     mockWorld = createMockWorld({
@@ -180,6 +194,8 @@ describe("CombatSystem", () => {
     });
 
     combatSystem = new CombatSystem(mockWorld as any);
+    // CRITICAL: Call init() to cache playerSystem for auto-retaliate checks
+    await combatSystem.init();
   });
 
   afterEach(() => {
