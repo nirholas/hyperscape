@@ -42,7 +42,7 @@ function createTestPlayer(
     damageHistory: [],
   };
 
-  const position = options.position ?? { x: 0, y: 0, z: 0 };
+  const position = options.position ?? { x: 0.5, y: 0, z: 0.5 }; // Default cardinal position
   const stats = options.stats ?? { attack: 10, strength: 10, defence: 10 };
 
   return {
@@ -127,7 +127,7 @@ function createTestMob(
     damageHistory: [],
   };
 
-  const position = options.position ?? { x: 1, y: 0, z: 1 };
+  const position = options.position ?? { x: 0.5, y: 0, z: 1.5 }; // Default cardinal north of player
   const stats = options.stats ?? { attack: 5, strength: 5, defence: 5 };
   const combatRange = options.combatRange ?? 1;
   const attackSpeedTicks =
@@ -324,15 +324,15 @@ describe("CombatFlow Integration", () => {
 
   describe("full player-vs-mob combat cycle", () => {
     it("completes combat from start to mob death", () => {
-      // Setup: Player near a low-health mob
+      // Setup: Player near a low-health mob (cardinal adjacent for OSRS melee)
       const player = createTestPlayer("player1", {
-        position: { x: 0, y: 0, z: 0 },
+        position: { x: 0.5, y: 0, z: 0.5 },
         stats: { attack: 50, strength: 50, defence: 10 },
       });
       const mob = createTestMob("mob1", {
         health: 10, // Low health to ensure death
         maxHealth: 10,
-        position: { x: 1, y: 0, z: 1 },
+        position: { x: 0.5, y: 0, z: 1.5 }, // Cardinal north, not diagonal
         stats: { attack: 5, strength: 5, defence: 1 },
       });
 
@@ -367,13 +367,13 @@ describe("CombatFlow Integration", () => {
 
     it("tracks damage dealt throughout combat", () => {
       const player = createTestPlayer("player1", {
-        position: { x: 0, y: 0, z: 0 },
+        position: { x: 0.5, y: 0, z: 0.5 },
         stats: { attack: 30, strength: 30, defence: 10 },
       });
       const mob = createTestMob("mob1", {
         health: 100,
         maxHealth: 100,
-        position: { x: 1, y: 0, z: 1 },
+        position: { x: 0.5, y: 0, z: 1.5 },
       });
 
       world.players.set("player1", player);
@@ -406,11 +406,11 @@ describe("CombatFlow Integration", () => {
   describe("attack cooldowns across multiple ticks", () => {
     it("respects attack cooldown between attacks", () => {
       const player = createTestPlayer("player1", {
-        position: { x: 0, y: 0, z: 0 },
+        position: { x: 0.5, y: 0, z: 0.5 },
       });
       const mob = createTestMob("mob1", {
         health: 200,
-        position: { x: 1, y: 0, z: 1 },
+        position: { x: 0.5, y: 0, z: 1.5 },
       });
 
       world.players.set("player1", player);
@@ -547,7 +547,7 @@ describe("CombatFlow Integration", () => {
       });
       const mob = createTestMob("mob1", {
         health: 5, // Very low health
-        position: { x: 1, y: 0, z: 1 },
+        position: { x: 0.5, y: 0, z: 1.5 },
       });
 
       world.players.set("player1", player);
@@ -661,16 +661,16 @@ describe("CombatFlow Integration", () => {
   describe("multiple concurrent combats", () => {
     it("handles multiple players fighting different mobs", () => {
       const player1 = createTestPlayer("player1", {
-        position: { x: 0, y: 0, z: 0 },
+        position: { x: 0.5, y: 0, z: 0.5 },
       });
       const player2 = createTestPlayer("player2", {
-        position: { x: 10, y: 0, z: 10 },
+        position: { x: 10.5, y: 0, z: 10.5 },
       });
       const mob1 = createTestMob("mob1", {
-        position: { x: 1, y: 0, z: 1 },
+        position: { x: 0.5, y: 0, z: 1.5 },
       });
       const mob2 = createTestMob("mob2", {
-        position: { x: 11, y: 0, z: 11 },
+        position: { x: 10.5, y: 0, z: 11.5 }, // Cardinal north from player2
       });
 
       world.players.set("player1", player1);
@@ -704,14 +704,14 @@ describe("CombatFlow Integration", () => {
 
     it("handles multiple players attacking same mob", () => {
       const player1 = createTestPlayer("player1", {
-        position: { x: 0, y: 0, z: 0 },
+        position: { x: 0.5, y: 0, z: 0.5 }, // Cardinal south of mob
       });
       const player2 = createTestPlayer("player2", {
-        position: { x: 2, y: 0, z: 0 },
+        position: { x: 1.5, y: 0, z: 1.5 }, // Cardinal east of mob
       });
       const mob = createTestMob("mob1", {
         health: 200,
-        position: { x: 1, y: 0, z: 1 },
+        position: { x: 0.5, y: 0, z: 1.5 },
       });
 
       world.players.set("player1", player1);
@@ -790,16 +790,16 @@ describe("CombatFlow Integration", () => {
 
     it("getAllCombatStates returns all active combats", () => {
       const player1 = createTestPlayer("player1", {
-        position: { x: 0, y: 0, z: 0 },
+        position: { x: 0.5, y: 0, z: 0.5 },
       });
       const player2 = createTestPlayer("player2", {
-        position: { x: 10, y: 0, z: 10 },
+        position: { x: 10.5, y: 0, z: 10.5 },
       });
       const mob1 = createTestMob("mob1", {
-        position: { x: 1, y: 0, z: 1 },
+        position: { x: 0.5, y: 0, z: 1.5 },
       });
       const mob2 = createTestMob("mob2", {
-        position: { x: 11, y: 0, z: 11 },
+        position: { x: 10.5, y: 0, z: 11.5 }, // Cardinal north from player2
       });
 
       world.players.set("player1", player1);
@@ -825,7 +825,7 @@ describe("CombatFlow Integration", () => {
   describe("edge cases", () => {
     it("prevents combat when target is out of range", () => {
       const player = createTestPlayer("player1", {
-        position: { x: 0, y: 0, z: 0 },
+        position: { x: 0.5, y: 0, z: 0.5 },
       });
       const mob = createTestMob("mob1", {
         position: { x: 100, y: 0, z: 100 }, // Far away

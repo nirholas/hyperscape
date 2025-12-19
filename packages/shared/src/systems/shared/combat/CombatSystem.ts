@@ -53,6 +53,11 @@ import {
   getGameRngState,
   type SeededRandomState,
 } from "../../../utils/SeededRandom";
+import {
+  DamageHandler,
+  PlayerDamageHandler,
+  MobDamageHandler,
+} from "./handlers";
 
 // Re-export CombatData from CombatStateService for backwards compatibility
 export type { CombatData } from "./CombatStateService";
@@ -158,6 +163,10 @@ export class CombatSystem extends SystemBase {
   // OSRS: Auto-retaliate disabled after 20 minutes of no input
   private lastInputTick = new Map<string, number>();
 
+  // Polymorphic damage handlers (Phase 8 - SOLID refactoring)
+  // Eliminates player/mob conditionals in damage application
+  private damageHandlers: Map<"player" | "mob", DamageHandler>;
+
   constructor(world: World) {
     super(world, {
       name: "combat",
@@ -187,6 +196,11 @@ export class CombatSystem extends SystemBase {
       maxEvents: 100000,
       maxSnapshots: 10,
     });
+
+    // Initialize polymorphic damage handlers (Phase 8 - SOLID refactoring)
+    this.damageHandlers = new Map();
+    this.damageHandlers.set("player", new PlayerDamageHandler(world));
+    this.damageHandlers.set("mob", new MobDamageHandler(world));
   }
 
   async init(): Promise<void> {
@@ -204,6 +218,14 @@ export class CombatSystem extends SystemBase {
     // Cache PlayerSystem for auto-retaliate checks (hot path optimization)
     // Optional dependency - combat still works without it (defaults to retaliate)
     this.playerSystem = this.world.getSystem<PlayerSystem>("player");
+
+    // Cache PlayerSystem into PlayerDamageHandler for damage application
+    const playerHandler = this.damageHandlers.get(
+      "player",
+    ) as PlayerDamageHandler;
+    if (playerHandler) {
+      playerHandler.cachePlayerSystem(this.playerSystem ?? null);
+    }
 
     // Listen for auto-retaliate toggle to start combat if toggled ON while being attacked
     this.subscribe(
@@ -896,120 +918,71 @@ export class CombatSystem extends SystemBase {
     damage: number,
     attackerId: string,
   ): void {
-    // Handle damage based on target type
-    if (targetType === "player") {
-      // Get player system and use its damage method
-      const playerSystem = this.world.getSystem<PlayerSystem>("player");
-      if (!playerSystem) {
-        this.logger.error("PlayerSystem not found");
-        return;
-      }
+    // Validate target type
+    if (targetType !== "player" && targetType !== "mob") {
+      return;
+    }
 
-      const entity = this.getEntity(targetId, "player");
-      if (!entity) {
-        this.logger.error("Player entity not found for damage", undefined, {
+    // Get the appropriate handler for the target type
+    const handler = this.damageHandlers.get(targetType);
+    if (!handler) {
+      this.logger.error("No damage handler for target type", undefined, {
+        targetType,
+      });
+      return;
+    }
+
+    // Create typed EntityID for handler
+    const typedTargetId = createEntityID(targetId);
+    const typedAttackerId = createEntityID(attackerId);
+
+    // Determine attacker type for handler
+    const attackerType = this.getEntityType(attackerId);
+
+    // Apply damage through polymorphic handler
+    const result = handler.applyDamage(
+      typedTargetId,
+      damage,
+      typedAttackerId,
+      attackerType,
+    );
+
+    // Handle failed damage application
+    if (!result.success) {
+      if (result.targetDied) {
+        // Target was already dead - end ALL combat with this entity
+        this.handleEntityDied(targetId, targetType);
+      } else {
+        this.logger.error("Failed to apply damage", undefined, {
           targetId,
+          targetType,
         });
-        return;
       }
+      return;
+    }
 
-      const damaged = playerSystem.damagePlayer(targetId, damage, attackerId);
+    // CRITICAL: Check if target died from THIS attack
+    // This prevents additional auto-attacks from ANY entity in the same frame
+    if (result.targetDied) {
+      this.handleEntityDied(targetId, targetType);
+      return;
+    }
 
-      // CRITICAL: If damage failed, check if player is dead and end combat
-      // damagePlayer() returns false when player.alive = false (line 1097)
-      if (!damaged) {
-        const targetEntity = this.getEntity(targetId, "player");
-        const isAlive = this.isEntityAlive(targetEntity, "player");
-        if (!isAlive) {
-          // Player is dead - end ALL combat with this player immediately
-          this.handleEntityDied(targetId, "player");
-          return;
-        }
-        // Player not dead but damage still failed - log and continue
-        this.logger.error("Failed to damage player", undefined, { targetId });
-        return;
-      }
+    // Emit UI message based on target type
+    if (targetType === "player") {
+      // Get attacker name for message
+      const attackerHandler = this.damageHandlers.get(attackerType);
+      const attackerName = attackerHandler
+        ? attackerHandler.getDisplayName(typedAttackerId)
+        : "enemy";
 
-      // CRITICAL: Check if player died from THIS attack - end ALL combat with this player
-      // This prevents additional auto-attacks from ANY mob in the same frame
-      const targetEntity = this.getEntity(targetId, "player");
-      const isAlive = this.isEntityAlive(targetEntity, "player");
-      if (!isAlive) {
-        this.handleEntityDied(targetId, "player");
-        return;
-      }
-
-      const attacker = this.getEntity(attackerId, "mob");
-      const attackerName = this.getTargetName(attacker);
       this.emitTypedEvent(EventType.UI_MESSAGE, {
         playerId: targetId,
         message: `The ${attackerName} hits you for ${damage} damage!`,
         type: "damage",
       });
-    } else if (targetType === "mob") {
-      // For mobs, get the entity from EntityManager and use its takeDamage method
-      const mobEntity = this.world.entities.get(targetId) as MobEntity;
-      if (!mobEntity) {
-        this.logger.warn("Mob entity not found - may have been destroyed", {
-          targetId,
-        });
-        return;
-      }
-
-      // Check if mob is already dead
-      if (mobEntity.isDead()) {
-        this.logger.warn("Cannot damage dead mob", { targetId });
-        return;
-      }
-
-      // Check if the mob has a takeDamage method (MobEntity)
-      if (typeof mobEntity.takeDamage === "function") {
-        mobEntity.takeDamage(damage, attackerId);
-
-        // Emit MOB_NPC_ATTACKED event so EntityManager can handle death
-        this.emitTypedEvent(EventType.MOB_NPC_ATTACKED, {
-          mobId: targetId,
-          damage: damage,
-          attackerId: attackerId,
-        });
-      } else {
-        // Fallback for entities without takeDamage method
-        const currentHealth = mobEntity.getProperty("health") as
-          | { current: number; max: number }
-          | number;
-        const healthValue =
-          typeof currentHealth === "number"
-            ? currentHealth
-            : currentHealth.current;
-        const maxHealth =
-          typeof currentHealth === "number" ? 100 : currentHealth.max;
-
-        const newHealth = Math.max(0, healthValue - damage);
-
-        if (typeof currentHealth === "number") {
-          mobEntity.setProperty("health", newHealth);
-        } else {
-          mobEntity.setProperty("health", {
-            current: newHealth,
-            max: maxHealth,
-          });
-        }
-
-        // Check if mob died
-        if (newHealth <= 0) {
-          // Don't emit NPC_DIED here - let MobEntity.die() handle it
-          // Don't emit COMBAT_KILL here either - let MobEntity.die() handle it
-
-          this.emitTypedEvent(EventType.UI_MESSAGE, {
-            playerId: attackerId,
-            message: `You have defeated the ${mobEntity.getProperty("name") || mobEntity.getProperty("mobType") || "unknown"}!`,
-            type: "success",
-          });
-        }
-      }
-    } else {
-      return;
     }
+    // Note: Mob death messages are emitted by MobEntity.die() to avoid duplication
 
     // Note: Damage splatter events are now emitted at the call sites
     // (handleMeleeAttack, processAutoAttack) to ensure they're emitted even for 0 damage hits
@@ -1628,6 +1601,26 @@ export class CombatSystem extends SystemBase {
       return null;
     }
     return entity;
+  }
+
+  /**
+   * Determine entity type from entity ID
+   * Returns "player" or "mob" based on entity lookup
+   */
+  private getEntityType(entityId: string): "player" | "mob" {
+    // Check if it's a player first (more common case)
+    if (this.world.entities.players.has(entityId)) {
+      return "player";
+    }
+
+    // Check if it's a mob in the entities map
+    const entity = this.world.entities.get(entityId);
+    if (entity instanceof MobEntity) {
+      return "mob";
+    }
+
+    // Default to mob for unknown entities (could be a mob that was just destroyed)
+    return "mob";
   }
 
   // Combat update loop - DEPRECATED: Combat logic now handled by processCombatTick() via TickSystem
