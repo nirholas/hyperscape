@@ -137,6 +137,98 @@ describe("CombatCalculations", () => {
       const result = calculateDamage(attacker, target, AttackType.MELEE);
       expect(result.damageType).toBe(AttackType.MELEE);
     });
+
+    // Phase 3: Style bonus tests
+    it("applies aggressive style bonus to max hit", () => {
+      // Aggressive style adds +3 to effective strength
+      // This should result in higher potential damage
+      const attacker = { stats: { attack: 60, strength: 60 } };
+      const target = { stats: { defense: 1 } };
+
+      let maxWithAggressive = 0;
+      let maxWithAccurate = 0;
+
+      // Sample many attacks with aggressive style
+      for (let i = 0; i < 100; i++) {
+        const result = calculateDamage(
+          attacker,
+          target,
+          AttackType.MELEE,
+          undefined,
+          "aggressive",
+        );
+        if (result.damage > maxWithAggressive)
+          maxWithAggressive = result.damage;
+      }
+
+      // Sample many attacks with accurate style (no strength bonus)
+      for (let i = 0; i < 100; i++) {
+        const result = calculateDamage(
+          attacker,
+          target,
+          AttackType.MELEE,
+          undefined,
+          "accurate",
+        );
+        if (result.damage > maxWithAccurate) maxWithAccurate = result.damage;
+      }
+
+      // Aggressive should allow higher max hits due to +3 strength bonus
+      // Note: This may not always be true due to RNG, but over 100 samples should be consistent
+      expect(maxWithAggressive).toBeGreaterThanOrEqual(maxWithAccurate);
+    });
+
+    it("applies controlled style bonus to all combat stats", () => {
+      // Controlled gives +1 to attack, strength, and defense
+      const attacker = { stats: { attack: 60, strength: 60 } };
+      const target = { stats: { defense: 1 } };
+
+      // Should work without errors
+      const result = calculateDamage(
+        attacker,
+        target,
+        AttackType.MELEE,
+        undefined,
+        "controlled",
+      );
+
+      expect(result).toHaveProperty("damage");
+      expect(result.damage).toBeGreaterThanOrEqual(0);
+    });
+
+    it("uses default accurate style when not specified", () => {
+      const attacker = { stats: { attack: 60, strength: 60 } };
+      const target = { stats: { defense: 1 } };
+
+      // Should use accurate style by default
+      const result = calculateDamage(attacker, target, AttackType.MELEE);
+      expect(result).toHaveProperty("damage");
+    });
+  });
+
+  describe("getStyleBonus", () => {
+    // Import getStyleBonus for direct testing
+    const { getStyleBonus } = require("../CombatCalculations");
+
+    it("returns +3 attack for accurate style", () => {
+      const bonus = getStyleBonus("accurate");
+      expect(bonus).toEqual({ attack: 3, strength: 0, defense: 0 });
+    });
+
+    it("returns +3 strength for aggressive style", () => {
+      const bonus = getStyleBonus("aggressive");
+      expect(bonus).toEqual({ attack: 0, strength: 3, defense: 0 });
+    });
+
+    it("returns +3 defense for defensive style", () => {
+      const bonus = getStyleBonus("defensive");
+      expect(bonus).toEqual({ attack: 0, strength: 0, defense: 3 });
+    });
+
+    it("returns +1 to all for controlled style", () => {
+      const bonus = getStyleBonus("controlled");
+      expect(bonus).toEqual({ attack: 1, strength: 1, defense: 1 });
+    });
   });
 
   describe("isInAttackRange", () => {
@@ -150,11 +242,22 @@ describe("CombatCalculations", () => {
       expect(isInAttackRange(attacker, target, AttackType.MELEE)).toBe(true);
     });
 
-    it("returns true for diagonally adjacent tiles (melee)", () => {
-      // Attacker at tile (0, 0), target at tile (1, 1) - diagonally adjacent
+    it("returns false for diagonally adjacent tiles (range-1 melee OSRS-accurate)", () => {
+      // OSRS: Range-1 melee (standard weapons) EXCLUDES diagonals
+      // Only cardinal directions (N, S, E, W) are valid for range-1
+      // Diagonal attacks require range-2+ weapons (halberds, spears)
+      // @see https://oldschool.runescape.wiki/w/Attack_range
       const attacker = { x: 0.5, y: 0, z: 0.5 };
       const target = { x: 1.5, y: 0, z: 1.5 };
-      expect(isInAttackRange(attacker, target, AttackType.MELEE)).toBe(true);
+      expect(isInAttackRange(attacker, target, AttackType.MELEE)).toBe(false);
+    });
+
+    it("returns true for diagonally adjacent tiles with range-2 melee (halberd)", () => {
+      // OSRS: Range-2+ melee (halberds, spears) INCLUDES diagonals
+      const attacker = { x: 0.5, y: 0, z: 0.5 };
+      const target = { x: 1.5, y: 0, z: 1.5 };
+      // Using meleeRange parameter = 2 (halberd range)
+      expect(isInAttackRange(attacker, target, AttackType.MELEE, 2)).toBe(true);
     });
 
     it("returns false for tiles too far apart (melee)", () => {

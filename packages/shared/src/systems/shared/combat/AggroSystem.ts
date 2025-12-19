@@ -12,8 +12,39 @@ import { EventType } from "../../../types/events";
 import { AGGRO_CONSTANTS } from "../../../constants/CombatConstants";
 import { AggroTarget, Position3D, MobAIStateData } from "../../../types";
 import { calculateDistance } from "../../../utils/game/EntityUtils";
+import {
+  calculateCombatLevel,
+  normalizeCombatSkills,
+  shouldMobIgnorePlayer,
+} from "../../../utils/game/CombatLevelCalculator";
 import { SystemBase } from "..";
-import { TICK_DURATION_MS } from "../movement/TileSystem";
+import {
+  TICK_DURATION_MS,
+  worldToTile,
+  type TileCoord,
+} from "../movement/TileSystem";
+import type { Entity } from "../../../entities/Entity";
+
+/**
+ * Tolerance state for a player in a region
+ * In OSRS, aggressive mobs stop attacking after player has been in a 21x21 region for 10 minutes
+ *
+ * @see https://oldschool.runescape.wiki/w/Aggression#Tolerance
+ */
+interface ToleranceState {
+  /** Region identifier (21x21 tile zone) */
+  regionId: string;
+  /** Tick when player entered this region */
+  enteredTick: number;
+  /** Tick when tolerance expires (player becomes immune to aggression) */
+  toleranceExpiredTick: number;
+}
+
+/** Tolerance timer duration: 1000 ticks = 10 minutes at 600ms/tick */
+const TOLERANCE_TICKS = 1000;
+
+/** Tolerance region size in tiles (OSRS uses 21x21 regions) */
+const TOLERANCE_REGION_SIZE = 21;
 
 /**
  * Aggression System - GDD Compliant
@@ -30,6 +61,17 @@ export class AggroSystem extends SystemBase {
     string,
     Record<string, { level: number; xp: number }>
   >();
+
+  /**
+   * Tolerance tracking for players per region
+   * Key: playerId, Value: tolerance state
+   */
+  private playerTolerance = new Map<string, ToleranceState>();
+
+  /**
+   * Current server tick (updated on each AI tick)
+   */
+  private currentTick = 0;
 
   constructor(world: World) {
     super(world, {
@@ -243,6 +285,10 @@ export class AggroSystem extends SystemBase {
       return;
     }
 
+    // Update player's tolerance state based on their position
+    // This tracks how long they've been in the current 21x21 region
+    this.updatePlayerTolerance(playerId, playerPosition);
+
     const distance = calculateDistance(
       mobState.currentPosition,
       playerPosition,
@@ -288,44 +334,110 @@ export class AggroSystem extends SystemBase {
     }
   }
 
+  /**
+   * Check if mob should aggro a player based on level and behavior
+   *
+   * OSRS Rule: Mobs ignore players whose combat level is MORE THAN DOUBLE the mob's level.
+   *
+   * Examples:
+   * - Level 2 goblin ignores level 5+ players (5 > 2*2 = 4)
+   * - Level 10 guard ignores level 21+ players (21 > 10*2 = 20)
+   * - Bosses (toleranceImmune) never ignore based on level
+   *
+   * @see https://oldschool.runescape.wiki/w/Aggression
+   */
   private shouldMobAggroPlayer(
     mobState: MobAIStateData,
     playerId: string,
   ): boolean {
-    // Get player combat level from XP system
+    // Non-aggressive mobs never aggro
+    if (mobState.behavior !== "aggressive") {
+      return false;
+    }
+
+    // Get player combat level using OSRS formula
     const playerCombatLevel = this.getPlayerCombatLevel(playerId);
 
-    // Get mob behavior configuration
+    // Get mob's combat level from the entity
+    const mobLevel = this.getMobCombatLevel(mobState.mobId);
+
+    // Check if mob is tolerance-immune (bosses, special mobs)
     const mobType = mobState.type;
     const behaviorConfig =
       AGGRO_CONSTANTS.MOB_BEHAVIORS[mobType] ||
       AGGRO_CONSTANTS.MOB_BEHAVIORS.default;
 
-    // Check level-based aggression per GDD
-    if (
-      playerCombatLevel > behaviorConfig.levelIgnoreThreshold &&
-      behaviorConfig.levelIgnoreThreshold < 999
-    ) {
-      // Player is too high level, mob ignores them (except special cases like Dark Warriors)
+    // Special mobs with levelIgnoreThreshold of 999 are "toleranceImmune"
+    // They always aggro regardless of player level
+    const toleranceImmune = behaviorConfig.levelIgnoreThreshold >= 999;
+
+    // OSRS double-level aggro rule
+    // Player level > (mob level * 2) = mob ignores player
+    if (shouldMobIgnorePlayer(playerCombatLevel, mobLevel, toleranceImmune)) {
       return false;
     }
 
-    return mobState.behavior === "aggressive";
+    // Phase 4: Check tolerance timer
+    // After 10 minutes in a 21x21 region, mobs stop being aggressive to the player
+    // Tolerance-immune mobs (bosses) ignore this check
+    if (!toleranceImmune && this.hasToleranceExpired(playerId)) {
+      return false;
+    }
+
+    return true;
   }
 
+  /**
+   * Get mob's combat level from the entity
+   * Falls back to levelIgnore from state or default of 1
+   */
+  private getMobCombatLevel(mobId: string): number {
+    const mobEntity = this.world.entities.get(mobId) as Entity | undefined;
+    if (mobEntity) {
+      // Try to get level from entity property (set by MobEntity)
+      const level = mobEntity.getProperty<number>("level");
+      if (level !== undefined && level > 0) {
+        return level;
+      }
+    }
+
+    // Fallback: use the levelIgnore stored in mob state (if available)
+    const mobState = this.mobStates.get(mobId);
+    if (mobState && mobState.levelIgnore > 0 && mobState.levelIgnore < 999) {
+      return mobState.levelIgnore;
+    }
+
+    // Default to level 1
+    return 1;
+  }
+
+  /**
+   * Get player combat level using OSRS-accurate formula
+   *
+   * Formula: Base + max(Melee, Ranged, Magic)
+   * Where:
+   *   Base = 0.25 * (Defence + Hitpoints + floor(Prayer / 2))
+   *   Melee = 0.325 * (Attack + Strength)
+   *   Ranged = 0.325 * floor(Ranged * 1.5)
+   *   Magic = 0.325 * floor(Magic * 1.5)
+   *
+   * @see https://oldschool.runescape.wiki/w/Combat_level
+   */
   private getPlayerCombatLevel(playerId: string): number {
-    // Get player combat level from XP system
-    // Combat level is the average of attack, strength, defense, and constitution
     const playerSkills = this.getPlayerSkills(playerId);
 
-    const combatLevel = Math.floor(
-      (playerSkills.attack +
-        playerSkills.strength +
-        playerSkills.defense +
-        playerSkills.constitution) /
-        4,
-    );
-    return Math.max(1, combatLevel); // Minimum level 1
+    // Use OSRS-accurate combat level formula
+    const combatSkills = normalizeCombatSkills({
+      attack: playerSkills.attack,
+      strength: playerSkills.strength,
+      defense: playerSkills.defense,
+      constitution: playerSkills.constitution, // Maps to hitpoints
+      ranged: playerSkills.ranged,
+      magic: playerSkills.magic,
+      prayer: playerSkills.prayer,
+    });
+
+    return calculateCombatLevel(combatSkills);
   }
 
   private getPlayerSkills(playerId: string): {
@@ -333,21 +445,128 @@ export class AggroSystem extends SystemBase {
     strength: number;
     defense: number;
     constitution: number;
+    ranged: number;
+    magic: number;
+    prayer: number;
   } {
     // Use cached skills data (reactive pattern)
     const cachedSkills = this.playerSkills.get(playerId);
 
     if (cachedSkills) {
       return {
-        attack: cachedSkills.attack.level,
-        strength: cachedSkills.strength.level,
-        defense: cachedSkills.defense.level,
-        constitution: cachedSkills.constitution.level,
+        attack: cachedSkills.attack?.level ?? 1,
+        strength: cachedSkills.strength?.level ?? 1,
+        defense: cachedSkills.defense?.level ?? 1,
+        constitution: cachedSkills.constitution?.level ?? 10,
+        ranged: cachedSkills.ranged?.level ?? 1,
+        magic:
+          (cachedSkills as Record<string, { level: number }>).magic?.level ?? 1,
+        prayer:
+          (cachedSkills as Record<string, { level: number }>).prayer?.level ??
+          1,
       };
     }
 
-    return { attack: 1, strength: 1, defense: 1, constitution: 1 };
+    // Default skills for fresh character (OSRS level 3)
+    return {
+      attack: 1,
+      strength: 1,
+      defense: 1,
+      constitution: 10, // Hitpoints starts at 10 in OSRS
+      ranged: 1,
+      magic: 1,
+      prayer: 1,
+    };
   }
+
+  // =============================================================================
+  // TOLERANCE SYSTEM (Phase 4)
+  // =============================================================================
+
+  /**
+   * Update tolerance state for a player based on their current position
+   *
+   * OSRS Tolerance System:
+   * - World is divided into 21x21 tile regions
+   * - When player enters a new region, a 10-minute timer starts
+   * - After 10 minutes in the same region, aggressive mobs stop attacking
+   * - Moving to a new region resets the timer
+   *
+   * @param playerId - Player to update
+   * @param playerPosition - Player's current world position
+   *
+   * @see https://oldschool.runescape.wiki/w/Aggression#Tolerance
+   */
+  private updatePlayerTolerance(
+    playerId: string,
+    playerPosition: Position3D,
+  ): void {
+    const tile = worldToTile(playerPosition.x, playerPosition.z);
+    const regionId = this.getToleranceRegionId(tile);
+    const existing = this.playerTolerance.get(playerId);
+
+    if (!existing || existing.regionId !== regionId) {
+      // Entered new region - reset timer
+      this.playerTolerance.set(playerId, {
+        regionId,
+        enteredTick: this.currentTick,
+        toleranceExpiredTick: this.currentTick + TOLERANCE_TICKS,
+      });
+    }
+  }
+
+  /**
+   * Check if player has tolerance expired in their current region
+   * If expired, aggressive mobs will no longer attack them
+   *
+   * @param playerId - Player to check
+   * @returns true if player's tolerance has expired (mobs should ignore them)
+   */
+  private hasToleranceExpired(playerId: string): boolean {
+    const state = this.playerTolerance.get(playerId);
+    if (!state) return false;
+
+    return this.currentTick >= state.toleranceExpiredTick;
+  }
+
+  /**
+   * Get tolerance region ID for a tile position
+   * OSRS divides the world into 21x21 tile regions for tolerance purposes
+   *
+   * @param tile - Tile coordinates
+   * @returns Region identifier string "x:z"
+   */
+  private getToleranceRegionId(tile: TileCoord): string {
+    const regionX = Math.floor(tile.x / TOLERANCE_REGION_SIZE);
+    const regionZ = Math.floor(tile.z / TOLERANCE_REGION_SIZE);
+    return `${regionX}:${regionZ}`;
+  }
+
+  /**
+   * Clean up tolerance data for a player (on disconnect)
+   */
+  private removePlayerTolerance(playerId: string): void {
+    this.playerTolerance.delete(playerId);
+  }
+
+  /**
+   * Get remaining tolerance time in ticks for a player
+   * Useful for debugging and UI display
+   *
+   * @param playerId - Player to check
+   * @returns Remaining ticks until tolerance expires, or 0 if already expired
+   */
+  getRemainingToleranceTicks(playerId: string): number {
+    const state = this.playerTolerance.get(playerId);
+    if (!state) return 0;
+
+    const remaining = state.toleranceExpiredTick - this.currentTick;
+    return Math.max(0, remaining);
+  }
+
+  // =============================================================================
+  // CHASE AND COMBAT METHODS
+  // =============================================================================
 
   private startChasing(mobState: MobAIStateData, playerId: string): void {
     mobState.isChasing = true;
@@ -413,6 +632,9 @@ export class AggroSystem extends SystemBase {
 
   private updateMobAI(): void {
     const now = Date.now();
+
+    // Increment tick counter for tolerance system
+    this.currentTick++;
 
     for (const [_mobId, mobState] of this.mobStates) {
       // Skip if in combat - combat system handles behavior

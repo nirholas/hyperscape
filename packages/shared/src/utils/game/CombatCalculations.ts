@@ -25,6 +25,59 @@ import {
 } from "../../systems/shared/movement/TileSystem";
 import { getGameRng, SeededRandom } from "../SeededRandom";
 
+// =============================================================================
+// COMBAT STYLE BONUSES (OSRS-accurate)
+// =============================================================================
+
+/**
+ * Combat attack styles
+ * Each style provides different bonuses and XP distribution
+ *
+ * @see https://oldschool.runescape.wiki/w/Combat_Options
+ */
+export type CombatStyle =
+  | "accurate"
+  | "aggressive"
+  | "defensive"
+  | "controlled";
+
+/**
+ * Style bonus values applied to effective levels
+ * These are added to base level + 8 for the effective level calculation
+ */
+export interface StyleBonus {
+  attack: number; // Added to effective attack level for accuracy
+  strength: number; // Added to effective strength level for max hit
+  defense: number; // Added to effective defense level (defender only)
+}
+
+/**
+ * Get the effective level bonuses for a combat style
+ *
+ * OSRS Style Bonuses:
+ * - Accurate: +3 attack (better hit chance)
+ * - Aggressive: +3 strength (higher max hit)
+ * - Defensive: +3 defence (better defense when attacked)
+ * - Controlled: +1 to all three (balanced training)
+ *
+ * @param style - Combat style
+ * @returns Style bonuses for attack, strength, and defense
+ *
+ * @see https://oldschool.runescape.wiki/w/Combat_Options
+ */
+export function getStyleBonus(style: CombatStyle): StyleBonus {
+  switch (style) {
+    case "accurate":
+      return { attack: 3, strength: 0, defense: 0 };
+    case "aggressive":
+      return { attack: 0, strength: 3, defense: 0 };
+    case "defensive":
+      return { attack: 0, strength: 0, defense: 3 };
+    case "controlled":
+      return { attack: 1, strength: 1, defense: 1 };
+  }
+}
+
 export interface CombatStats {
   attack?: number;
   strength?: number;
@@ -45,30 +98,50 @@ export interface DamageResult {
  * Returns true if the attack successfully hits
  *
  * Uses SeededRandom for deterministic outcomes (Phase 1)
+ * Style bonuses are now applied to effective levels (Phase 3)
+ *
+ * OSRS Accuracy Formula:
+ *   Effective Attack = Attack Level + 8 + Style Bonus
+ *   Attack Roll = Effective Attack × (Attack Bonus + 64)
+ *   Defence Roll = Effective Defence × (Defence Bonus + 64)
+ *   Hit Chance = calculated based on roll comparison
  *
  * @param attackerAttackLevel - Attacker's attack level
  * @param attackerAttackBonus - Attacker's equipment attack bonus
  * @param targetDefenseLevel - Target's defense level
  * @param targetDefenseBonus - Target's equipment defense bonus
+ * @param attackerStyle - Attacker's combat style (affects accuracy bonus)
+ * @param defenderStyle - Defender's combat style (affects defense bonus, optional)
  * @param rng - Optional RNG instance (uses global game RNG if not provided)
+ *
+ * @see https://oldschool.runescape.wiki/w/Accuracy
  */
 function calculateAccuracy(
   attackerAttackLevel: number,
   attackerAttackBonus: number,
   targetDefenseLevel: number,
   targetDefenseBonus: number,
+  attackerStyle: CombatStyle = "accurate",
+  defenderStyle?: CombatStyle,
   rng?: SeededRandom,
 ): boolean {
   // Use provided RNG or global game RNG
   const random = rng ?? getGameRng();
 
-  // OSRS formula for attack roll
-  // TODO Phase 3: Add style bonus (+3 for aggressive/accurate/defensive, +1 for controlled)
-  const effectiveAttack = attackerAttackLevel + 8;
+  // Get style bonuses
+  const attackerStyleBonus = getStyleBonus(attackerStyle);
+  const defenderStyleBonus = defenderStyle
+    ? getStyleBonus(defenderStyle)
+    : { attack: 0, strength: 0, defense: 0 };
+
+  // OSRS formula for attack roll (with style bonus)
+  // Effective Attack = Attack Level + 8 + Style Bonus
+  const effectiveAttack = attackerAttackLevel + 8 + attackerStyleBonus.attack;
   const attackRoll = effectiveAttack * (attackerAttackBonus + 64);
 
-  // OSRS formula for defence roll
-  const effectiveDefence = targetDefenseLevel + 9;
+  // OSRS formula for defence roll (with defender's style bonus if applicable)
+  // Note: NPCs don't have a combat style, so defenderStyle is optional
+  const effectiveDefence = targetDefenseLevel + 9 + defenderStyleBonus.defense;
   const defenceRoll = effectiveDefence * (targetDefenseBonus + 64);
 
   // Calculate hit chance based on OSRS formula
@@ -88,6 +161,20 @@ function calculateAccuracy(
 
 /**
  * Calculate damage for any attack type (melee, ranged, or magic)
+ *
+ * OSRS-accurate implementation with:
+ * - Style bonuses applied to effective levels (Phase 3)
+ * - SeededRandom for deterministic outcomes (Phase 1)
+ * - Proper accuracy and damage roll formulas
+ *
+ * @param attacker - Entity with stats or config
+ * @param target - Target entity with defense stats
+ * @param attackType - Type of attack (melee, ranged, magic)
+ * @param equipmentStats - Optional equipment bonuses
+ * @param style - Combat style for bonus calculation (default: "accurate")
+ * @param defenderStyle - Optional defender's combat style
+ *
+ * @see https://oldschool.runescape.wiki/w/Damage_per_second/Melee
  */
 export function calculateDamage(
   attacker: { stats?: CombatStats; config?: { attackPower?: number } },
@@ -99,12 +186,17 @@ export function calculateDamage(
     defense: number;
     ranged: number;
   },
+  style: CombatStyle = "accurate",
+  defenderStyle?: CombatStyle,
 ): DamageResult {
   // OSRS-accurate combat calculation with accuracy system
 
   let maxHit = 1;
   let attackStat = 0;
   let attackBonus = 0;
+
+  // Get style bonuses for max hit calculation
+  const styleBonus = getStyleBonus(style);
 
   if (attackType === AttackType.MELEE) {
     // Use STRENGTH stat for damage calculation (OSRS-correct)
@@ -125,7 +217,9 @@ export function calculateDamage(
       attackStat = effectiveAttackLevel;
 
       // OSRS formula: effective strength determines max hit
-      const effectiveStrength = effectiveStrengthLevel + 8;
+      // Phase 3: Style bonus is now added to effective strength
+      const effectiveStrength =
+        effectiveStrengthLevel + 8 + styleBonus.strength;
       // Get strength bonus from equipment (players have equipment, mobs typically don't)
       const strengthBonus = equipmentStats?.strength || 0;
       attackBonus = equipmentStats?.attack || 0;
@@ -152,6 +246,7 @@ export function calculateDamage(
   }
 
   // OSRS accuracy system: attack roll vs defence roll
+  // Phase 3: Style bonuses now passed to accuracy calculation
   const targetDefense = target.stats?.defense || 1;
   const targetDefenseBonus = 0; // Most NPCs have 0 defense bonus (would come from their equipment)
 
@@ -160,6 +255,8 @@ export function calculateDamage(
     attackBonus,
     targetDefense,
     targetDefenseBonus,
+    style, // Attacker's style for attack bonus
+    defenderStyle, // Defender's style for defense bonus (optional)
   );
 
   // If attack missed, return 0 damage
