@@ -294,8 +294,6 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
           }
           transformControlsRef.current = null;
         }
-        // Force context loss before dispose to prevent "Context Lost" errors during hot reload
-        renderer.forceContextLoss();
         renderer.dispose();
         if (container.contains(renderer.domElement)) {
           container.removeChild(renderer.domElement);

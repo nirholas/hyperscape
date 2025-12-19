@@ -175,9 +175,8 @@ export const VRMViewer = forwardRef<VRMViewerRef, VRMViewerProps>(
         window.removeEventListener("resize", handleResize);
         globalThis.cancelAnimationFrame(animationFrameRef.current);
         controls.dispose();
-        // Force context loss before dispose to prevent "Context Lost" errors during hot reload
-        renderer.forceContextLoss();
         renderer.dispose();
+        rendererRef.current = null;
       };
     }, []);
 
