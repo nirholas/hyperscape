@@ -13,6 +13,7 @@
  * - routes/player-routes.ts - Player management
  * - routes/action-routes.ts - Action registry API
  * - routes/error-routes.ts - Error reporting
+ * - routes/admin-routes.ts - Admin/debug endpoints (combat debugging)
  *
  * Endpoints provided:
  * - GET /health - Health check
@@ -47,6 +48,7 @@ import { registerCharacterRoutes } from "./routes/character-routes.js";
 import { registerAgentRoutes } from "./routes/agent-routes.js";
 import { registerUserRoutes } from "./routes/user-routes.js";
 import { registerTemplateRoutes } from "./routes/template-routes.js";
+import { registerAdminRoutes } from "./routes/admin-routes.js";
 
 /**
  * Register all API routes
@@ -95,6 +97,9 @@ export function registerApiRoutes(
 
   // Character template management
   registerTemplateRoutes(fastify, world);
+
+  // Admin/debug endpoints (combat debugging, anti-cheat)
+  registerAdminRoutes(fastify, world, config);
 
   console.log("[API] ✅ API routes registered");
 }

@@ -20,5 +20,8 @@ export * from "./CombatAntiCheat";
 // OSRS-accurate range calculations
 export * from "./RangeSystem";
 
-// Combat request signing (Phase 5.3 - Security)
-export * from "./CombatRequestValidator";
+// Combat replay and debugging (Phase 7 - EventStore Integration)
+export * from "./CombatReplayService";
+
+// NOTE: CombatRequestValidator is SERVER-ONLY (uses Node.js crypto)
+// Import directly: import { CombatRequestValidator } from "@hyperscape/shared/systems/shared/combat/CombatRequestValidator"

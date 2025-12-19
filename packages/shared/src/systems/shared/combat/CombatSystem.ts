@@ -42,6 +42,17 @@ import { getEntityPosition } from "../../../utils/game/EntityPositionUtils";
 import { quaternionPool } from "../../../utils/pools/QuaternionPool";
 import { EntityIdValidator } from "./EntityIdValidator";
 import { CombatRateLimiter } from "./CombatRateLimiter";
+import {
+  EventStore,
+  GameEventType,
+  type GameStateInfo,
+  type EntitySnapshot,
+  type CombatSnapshot,
+} from "../EventStore";
+import {
+  getGameRngState,
+  type SeededRandomState,
+} from "../../../utils/SeededRandom";
 
 // Re-export CombatData from CombatStateService for backwards compatibility
 export type { CombatData } from "./CombatStateService";
@@ -129,6 +140,10 @@ export class CombatSystem extends SystemBase {
   private entityIdValidator: EntityIdValidator;
   private rateLimiter: CombatRateLimiter;
 
+  // Combat event recording for replay/debugging (Phase 7 - EventStore Integration)
+  private eventStore: EventStore;
+  private eventRecordingEnabled: boolean = true;
+
   // Equipment stats cache per player for damage calculations
   private playerEquipmentStats = new Map<
     string,
@@ -164,6 +179,14 @@ export class CombatSystem extends SystemBase {
     // Initialize input validation and rate limiting (Phase 6.5 - Security Hardening)
     this.entityIdValidator = new EntityIdValidator();
     this.rateLimiter = new CombatRateLimiter();
+
+    // Initialize event store for combat replay/debugging (Phase 7)
+    // Snapshots every 100 ticks (~60 seconds), keeps 100k events and 10 snapshots
+    this.eventStore = new EventStore({
+      snapshotInterval: 100,
+      maxEvents: 100000,
+      maxSnapshots: 10,
+    });
   }
 
   async init(): Promise<void> {
@@ -1174,6 +1197,15 @@ export class CombatSystem extends SystemBase {
       targetId: String(targetId),
     });
 
+    // Record combat start event for replay/debugging (Phase 7)
+    this.recordCombatEvent(GameEventType.COMBAT_START, String(attackerId), {
+      targetId: String(targetId),
+      attackerType,
+      targetType,
+      attackerAttackSpeedTicks,
+      targetAttackSpeedTicks,
+    });
+
     // Show combat UI indicator for the local player (whoever that is)
     const localPlayer = this.world.getPlayer();
     if (
@@ -1241,6 +1273,14 @@ export class CombatSystem extends SystemBase {
       targetId: String(combatState.targetId),
     });
 
+    // Record combat end event for replay/debugging (Phase 7)
+    this.recordCombatEvent(GameEventType.COMBAT_END, data.entityId, {
+      targetId: String(combatState.targetId),
+      attackerType: combatState.attackerType,
+      targetType: combatState.targetType,
+      reason: "timeout_or_manual",
+    });
+
     // Phase 5: Clear face target for players when combat ends (client is display-only)
     // This tells client to stop facing the target since combat is over
     if (combatState.attackerType === "player") {
@@ -1272,6 +1312,17 @@ export class CombatSystem extends SystemBase {
    */
   private handleEntityDied(entityId: string, entityType: string): void {
     const typedEntityId = createEntityID(entityId);
+
+    // Record death event for replay/debugging (Phase 7)
+    const deathEventType =
+      entityType === "player"
+        ? GameEventType.DEATH_PLAYER
+        : GameEventType.DEATH_MOB;
+    const combatState = this.stateService.getCombatData(entityId);
+    this.recordCombatEvent(deathEventType, entityId, {
+      entityType,
+      killedBy: combatState ? String(combatState.targetId) : "unknown",
+    });
 
     // Simply remove the dead entity's combat state - they're no longer in combat
     // But DON'T call endCombat() for attackers - let their combat timer expire naturally
@@ -1892,6 +1943,31 @@ export class CombatSystem extends SystemBase {
       position: targetPosition,
     });
 
+    // Record attack and damage events for replay/debugging (Phase 7)
+    this.recordCombatEvent(GameEventType.COMBAT_ATTACK, attackerId, {
+      targetId,
+      attackerType: combatState.attackerType,
+      targetType: combatState.targetType,
+      attackSpeedTicks: combatState.attackSpeedTicks,
+    });
+
+    if (damage > 0) {
+      this.recordCombatEvent(GameEventType.COMBAT_DAMAGE, attackerId, {
+        targetId,
+        damage,
+        rawDamage,
+        targetHealth: currentHealth,
+        targetPosition: targetPosition
+          ? { x: targetPosition.x, y: targetPosition.y, z: targetPosition.z }
+          : undefined,
+      });
+    } else {
+      this.recordCombatEvent(GameEventType.COMBAT_MISS, attackerId, {
+        targetId,
+        rawDamage,
+      });
+    }
+
     return damage;
   }
 
@@ -2261,6 +2337,205 @@ export class CombatSystem extends SystemBase {
     }
 
     return false;
+  }
+
+  // =========================================================================
+  // EVENT STORE METHODS (Phase 7 - Combat Replay/Debugging)
+  // =========================================================================
+
+  /**
+   * Build GameStateInfo for event recording
+   * Used for checksum calculation to detect desync
+   */
+  private buildGameStateInfo(): GameStateInfo {
+    const combatStatesMap = this.stateService.getCombatStatesMap();
+    return {
+      currentTick: this.world.currentTick,
+      playerCount: this.world.entities.players.size,
+      activeCombats: combatStatesMap.size,
+    };
+  }
+
+  /**
+   * Build a full snapshot of combat state for replay
+   * Called periodically (every 100 ticks) for efficient replay start points
+   */
+  private buildCombatSnapshot(): {
+    entities: Map<string, EntitySnapshot>;
+    combatStates: Map<string, CombatSnapshot>;
+    rngState: SeededRandomState;
+  } {
+    const entities = new Map<string, EntitySnapshot>();
+    const combatStates = new Map<string, CombatSnapshot>();
+
+    // Snapshot all active combat participants
+    for (const [entityId, state] of this.stateService.getCombatStatesMap()) {
+      const attackerEntity = this.getEntity(
+        String(entityId),
+        state.attackerType,
+      );
+      const targetEntity = this.getEntity(
+        String(state.targetId),
+        state.targetType,
+      );
+
+      // Snapshot attacker
+      if (attackerEntity) {
+        const pos = getEntityPosition(attackerEntity);
+        entities.set(String(entityId), {
+          id: String(entityId),
+          type: state.attackerType,
+          position: pos ? { x: pos.x, y: pos.y, z: pos.z } : undefined,
+          health: this.getEntityHealth(attackerEntity),
+          maxHealth: attackerEntity.getMaxHealth?.() ?? 100,
+        });
+      }
+
+      // Snapshot target
+      if (targetEntity) {
+        const pos = getEntityPosition(targetEntity);
+        entities.set(String(state.targetId), {
+          id: String(state.targetId),
+          type: state.targetType,
+          position: pos ? { x: pos.x, y: pos.y, z: pos.z } : undefined,
+          health: this.getEntityHealth(targetEntity),
+          maxHealth: targetEntity.getMaxHealth?.() ?? 100,
+        });
+      }
+
+      // Snapshot combat state
+      combatStates.set(String(entityId), {
+        attackerId: String(entityId),
+        targetId: String(state.targetId),
+        startTick: state.lastAttackTick, // Use lastAttackTick as approximate start
+        lastAttackTick: state.lastAttackTick,
+      });
+    }
+
+    // Get RNG state for deterministic replay
+    const rngState = getGameRngState() ?? { state0: "0", state1: "0" };
+
+    return { entities, combatStates, rngState };
+  }
+
+  /**
+   * Record a combat event to the EventStore
+   * Includes RNG state for deterministic replay
+   */
+  private recordCombatEvent(
+    type: GameEventType,
+    entityId: string,
+    payload: unknown,
+  ): void {
+    if (!this.eventRecordingEnabled) return;
+
+    const tick = this.world.currentTick;
+    const stateInfo = this.buildGameStateInfo();
+
+    // Include snapshot data periodically (every 100 ticks)
+    const snapshot = tick % 100 === 0 ? this.buildCombatSnapshot() : undefined;
+
+    this.eventStore.record(
+      {
+        tick,
+        type,
+        entityId,
+        payload: {
+          ...((payload as object) ?? {}),
+          rngState: getGameRngState(), // Include RNG state for replay
+        },
+      },
+      stateInfo,
+      snapshot,
+    );
+  }
+
+  /**
+   * Enable or disable combat event recording
+   * Useful for performance testing or when replay isn't needed
+   */
+  public setEventRecordingEnabled(enabled: boolean): void {
+    this.eventRecordingEnabled = enabled;
+  }
+
+  /**
+   * Get combat events for a specific entity (for debugging/investigation)
+   * @param entityId - The entity to get events for
+   * @param startTick - Optional start tick
+   * @param endTick - Optional end tick
+   */
+  public getCombatEventHistory(
+    entityId: string,
+    startTick?: number,
+    endTick?: number,
+  ): Array<{
+    tick: number;
+    type: string;
+    entityId: string;
+    payload: unknown;
+  }> {
+    return this.eventStore.getEntityEvents(entityId, startTick, endTick);
+  }
+
+  /**
+   * Get all combat events in a tick range (for replay/investigation)
+   */
+  public getCombatEventsInRange(
+    startTick: number,
+    endTick: number,
+  ): Array<{
+    tick: number;
+    type: string;
+    entityId: string;
+    payload: unknown;
+  }> {
+    return this.eventStore.getCombatEvents(startTick, endTick);
+  }
+
+  /**
+   * Verify checksum at a specific tick (desync detection)
+   * @returns true if checksum matches, false if desync detected
+   */
+  public verifyEventChecksum(tick: number, expectedChecksum: number): boolean {
+    return this.eventStore.verifyChecksum(tick, expectedChecksum);
+  }
+
+  /**
+   * Get nearest snapshot before a tick for efficient replay
+   */
+  public getNearestSnapshot(tick: number):
+    | {
+        tick: number;
+        entities: Map<string, EntitySnapshot>;
+        combatStates: Map<string, CombatSnapshot>;
+        rngState: SeededRandomState;
+      }
+    | undefined {
+    return this.eventStore.getNearestSnapshot(tick);
+  }
+
+  /**
+   * Get event store statistics for monitoring
+   */
+  public getEventStoreStats(): {
+    eventCount: number;
+    snapshotCount: number;
+    oldestTick: number | undefined;
+    newestTick: number | undefined;
+  } {
+    return {
+      eventCount: this.eventStore.getEventCount(),
+      snapshotCount: this.eventStore.getSnapshotCount(),
+      oldestTick: this.eventStore.getOldestEventTick(),
+      newestTick: this.eventStore.getNewestEventTick(),
+    };
+  }
+
+  /**
+   * Clear all recorded events (for testing or memory management)
+   */
+  public clearEventStore(): void {
+    this.eventStore.clear();
   }
 
   destroy(): void {
