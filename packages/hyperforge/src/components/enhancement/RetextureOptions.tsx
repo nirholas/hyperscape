@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
 import { NeonInput } from "@/components/ui/neon-input";
 import { Label } from "@/components/ui/label";
@@ -8,10 +8,29 @@ import { Select } from "@/components/ui/select";
 import { SpectacularButton } from "@/components/ui/spectacular-button";
 import { useToast } from "@/components/ui/toast";
 import { ProgressTracker } from "../generation/ProgressTracker";
-import { Palette, CheckCircle, ExternalLink, Box } from "lucide-react";
+import {
+  Palette,
+  CheckCircle,
+  ExternalLink,
+  Box,
+  Upload,
+  Link,
+  ImageIcon,
+  X,
+  Check,
+} from "lucide-react";
 import type { AssetData } from "@/types/asset";
 import { logger } from "@/lib/utils";
 import { cn } from "@/lib/utils";
+
+interface LibraryImage {
+  id: string;
+  filename: string;
+  url: string;
+  thumbnailUrl: string;
+  type: string;
+  source: "cdn" | "supabase" | "local";
+}
 
 const log = logger.child("RetextureOptions");
 
@@ -35,10 +54,18 @@ export function RetextureOptions({
   const [textPrompt, setTextPrompt] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [styleType, setStyleType] = useState<"text" | "image">("text");
+  const [imageInputMode, setImageInputMode] = useState<
+    "url" | "upload" | "library"
+  >("url");
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [variants, setVariants] = useState<RetextureResult[]>([]);
   const [result, setResult] = useState<RetextureResult | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [libraryImages, setLibraryImages] = useState<LibraryImage[]>([]);
+  const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
+  const [_showLibraryPicker, setShowLibraryPicker] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load variants from localStorage on mount
   useEffect(() => {
@@ -51,6 +78,92 @@ export function RetextureOptions({
       }
     }
   }, [asset.id]);
+
+  // Load library images when switching to library mode
+  useEffect(() => {
+    if (imageInputMode === "library" && libraryImages.length === 0) {
+      loadLibraryImages();
+    }
+  }, [imageInputMode, libraryImages.length]);
+
+  const loadLibraryImages = async () => {
+    setIsLoadingLibrary(true);
+    try {
+      const response = await fetch("/api/images");
+      if (response.ok) {
+        const data = await response.json();
+        setLibraryImages(data.images || []);
+      }
+    } catch (error) {
+      log.error({ error }, "Failed to load library images");
+    } finally {
+      setIsLoadingLibrary(false);
+    }
+  };
+
+  const handleFileUpload = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith("image/")) {
+      toast({
+        variant: "destructive",
+        title: "Invalid File",
+        description: "Please select an image file",
+      });
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("type", "reference");
+
+      const response = await fetch("/api/upload/image", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error("Upload failed");
+      }
+
+      const data = await response.json();
+      setImageUrl(data.url);
+      toast({
+        variant: "success",
+        title: "Image Uploaded",
+        description: "Reference image ready to use",
+      });
+    } catch (error) {
+      log.error({ error }, "Upload failed");
+      toast({
+        variant: "destructive",
+        title: "Upload Failed",
+        description: "Could not upload the image",
+      });
+    } finally {
+      setIsUploading(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleSelectLibraryImage = (image: LibraryImage) => {
+    setImageUrl(image.url);
+    setShowLibraryPicker(false);
+    toast({
+      variant: "success",
+      title: "Image Selected",
+      description: image.filename,
+    });
+  };
 
   // Save variant when created
   const saveVariant = useCallback(
@@ -195,16 +308,192 @@ export function RetextureOptions({
               </p>
             </div>
           ) : (
-            <div className="space-y-2">
-              <Label>Reference Image URL</Label>
-              <NeonInput
-                value={imageUrl}
-                onChange={(e) => setImageUrl(e.target.value)}
-                placeholder="https://..."
-              />
-              <p className="text-xs text-muted-foreground">
-                Provide an image URL to match its style
-              </p>
+            <div className="space-y-3">
+              <Label>Reference Image</Label>
+
+              {/* Image Input Mode Tabs */}
+              <div className="flex gap-1 p-1 bg-zinc-800 rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => setImageInputMode("url")}
+                  className={cn(
+                    "flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors",
+                    imageInputMode === "url"
+                      ? "bg-purple-500/20 text-purple-400"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Link className="w-3.5 h-3.5" />
+                  URL
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setImageInputMode("upload")}
+                  className={cn(
+                    "flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors",
+                    imageInputMode === "upload"
+                      ? "bg-purple-500/20 text-purple-400"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  Upload
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setImageInputMode("library")}
+                  className={cn(
+                    "flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors",
+                    imageInputMode === "library"
+                      ? "bg-purple-500/20 text-purple-400"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <ImageIcon className="w-3.5 h-3.5" />
+                  Library
+                </button>
+              </div>
+
+              {/* URL Input */}
+              {imageInputMode === "url" && (
+                <div className="space-y-2">
+                  <NeonInput
+                    value={imageUrl}
+                    onChange={(e) => setImageUrl(e.target.value)}
+                    placeholder="https://..."
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Paste an image URL to use as reference
+                  </p>
+                </div>
+              )}
+
+              {/* Upload Input */}
+              {imageInputMode === "upload" && (
+                <div className="space-y-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploading}
+                    className={cn(
+                      "w-full p-4 rounded-lg border-2 border-dashed transition-colors",
+                      "flex flex-col items-center justify-center gap-2",
+                      imageUrl
+                        ? "border-green-500/50 bg-green-500/5"
+                        : "border-zinc-600 hover:border-purple-500/50 hover:bg-purple-500/5",
+                    )}
+                  >
+                    {isUploading ? (
+                      <>
+                        <div className="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                        <span className="text-sm text-muted-foreground">
+                          Uploading...
+                        </span>
+                      </>
+                    ) : imageUrl ? (
+                      <>
+                        <Check className="w-6 h-6 text-green-400" />
+                        <span className="text-sm text-green-400">
+                          Image uploaded
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          Click to replace
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-6 h-6 text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground">
+                          Click to upload an image
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          PNG, JPG, WebP up to 10MB
+                        </span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+
+              {/* Library Picker */}
+              {imageInputMode === "library" && (
+                <div className="space-y-2">
+                  {isLoadingLibrary ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  ) : libraryImages.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground text-sm">
+                      No images in library yet.
+                      <br />
+                      Generate some in the Images section first.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto p-1">
+                      {libraryImages.slice(0, 12).map((image) => (
+                        <button
+                          key={image.id}
+                          type="button"
+                          onClick={() => handleSelectLibraryImage(image)}
+                          className={cn(
+                            "relative aspect-square rounded-lg overflow-hidden border-2 transition-all",
+                            imageUrl === image.url
+                              ? "border-purple-500 ring-2 ring-purple-500/30"
+                              : "border-transparent hover:border-purple-500/50",
+                          )}
+                        >
+                          <Image
+                            src={image.thumbnailUrl}
+                            alt={image.filename}
+                            fill
+                            className="object-cover"
+                            unoptimized
+                          />
+                          {imageUrl === image.url && (
+                            <div className="absolute inset-0 bg-purple-500/20 flex items-center justify-center">
+                              <Check className="w-6 h-6 text-white" />
+                            </div>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {libraryImages.length > 12 && (
+                    <p className="text-xs text-muted-foreground text-center">
+                      Showing first 12 of {libraryImages.length} images
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Preview of selected image */}
+              {imageUrl && (
+                <div className="relative">
+                  <div className="aspect-video rounded-lg overflow-hidden bg-zinc-900 border border-zinc-700">
+                    <Image
+                      src={imageUrl}
+                      alt="Reference"
+                      fill
+                      className="object-contain"
+                      unoptimized
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setImageUrl("")}
+                    className="absolute top-2 right-2 p-1 rounded-full bg-zinc-900/80 hover:bg-red-500/80 transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
