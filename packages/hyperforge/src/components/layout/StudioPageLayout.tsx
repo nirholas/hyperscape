@@ -13,6 +13,14 @@ interface StudioPageLayoutProps {
   toolsSidebar?: ReactNode;
   /** Optional asset selection sidebar */
   assetSidebar?: ReactNode;
+  /** Alias for assetSidebar for compatibility */
+  sidebar?: ReactNode;
+  /** Alias for toolsSidebar for compatibility */
+  toolPanel?: ReactNode;
+  /** Optional header content */
+  headerContent?: ReactNode;
+  /** Optional icon for the page */
+  icon?: React.ComponentType<{ className?: string }>;
   /** Show vault by default */
   showVault?: boolean;
 }
@@ -23,8 +31,16 @@ export function StudioPageLayout({
   description,
   toolsSidebar,
   assetSidebar,
+  sidebar,
+  toolPanel,
+  headerContent,
+  icon: Icon,
   showVault = true,
 }: StudioPageLayoutProps) {
+  // Support aliased props for compatibility
+  const effectiveAssetSidebar = assetSidebar || sidebar;
+  const effectiveToolsSidebar = toolsSidebar || toolPanel;
+
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [vaultOpen, setVaultOpen] = useState(showVault);
   const [mounted, setMounted] = useState(false);
@@ -48,7 +64,7 @@ export function StudioPageLayout({
   // Extra content for the sidebar (vault toggle and world view)
   const extraSidebarContent = (
     <div className="mt-6 pt-4 border-t border-glass-border space-y-2">
-      {assetSidebar && (
+      {effectiveAssetSidebar && (
         <button
           onClick={() => setVaultOpen(!vaultOpen)}
           title={sidebarCollapsed ? "Assets" : undefined}
@@ -95,29 +111,49 @@ export function StudioPageLayout({
       />
 
       {/* === ASSET SELECTION SIDEBAR === */}
-      {vaultOpen && assetSidebar && (
+      {vaultOpen && effectiveAssetSidebar && (
         <div className="w-72 border-r border-glass-border bg-glass-bg/20 flex flex-col flex-shrink-0">
-          {assetSidebar}
+          {effectiveAssetSidebar}
         </div>
       )}
 
+      {/* === MAIN CONTENT AREA === */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* === HEADER (if provided) === */}
+        {headerContent && (
+          <header className="flex items-center gap-4 px-4 py-3 border-b border-glass-border bg-glass-bg/30">
+            {Icon && (
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center">
+                <Icon className="w-4 h-4 text-white" />
+              </div>
+            )}
+            <div className="flex-1">{headerContent}</div>
+          </header>
+        )}
+
+        {/* === MAIN VIEWPORT === */}
+        <main className="flex-1 relative overflow-hidden">{children}</main>
+      </div>
+
       {/* === TOOLS SIDEBAR (Right side) === */}
-      {toolsSidebar && (
-        <div className="w-80 border-r border-glass-border bg-glass-bg/20 flex flex-col flex-shrink-0 order-last">
+      {effectiveToolsSidebar && (
+        <div className="w-80 border-l border-glass-border bg-glass-bg/20 flex flex-col flex-shrink-0">
           <div className="p-4 border-b border-glass-border">
-            <h2 className="font-semibold">{title}</h2>
+            <div className="flex items-center gap-2">
+              {Icon && <Icon className="w-4 h-4 text-cyan-400" />}
+              <h2 className="font-semibold">{title}</h2>
+            </div>
             {description && (
               <p className="text-sm text-muted-foreground mt-1">
                 {description}
               </p>
             )}
           </div>
-          <div className="flex-1 overflow-y-auto">{toolsSidebar}</div>
+          <div className="flex-1 overflow-y-auto themed-scrollbar">
+            {effectiveToolsSidebar}
+          </div>
         </div>
       )}
-
-      {/* === MAIN VIEWPORT === */}
-      <main className="flex-1 relative overflow-hidden">{children}</main>
 
       {/* === WORLD VIEW MODAL === */}
       <WorldView
