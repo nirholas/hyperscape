@@ -38,13 +38,9 @@ packages/hyperforge/src/
     └── music/generate/route.ts  # Music generation endpoint
 ```
 
-### Asset-Forge Package (Elysia)
+
 
 ```
-packages/asset-forge/server/services/
-├── ElevenLabsVoiceService.ts       # Voice generation service
-├── ElevenLabsSoundEffectsService.ts # SFX generation service
-└── ElevenLabsMusicService.ts       # Music generation service
 ```
 
 ### Environment Variable

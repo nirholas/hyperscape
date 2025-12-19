@@ -46,6 +46,7 @@
     "test": "turbo run test",
     "lint": "turbo run lint",
     "clean": "turbo run clean && rm -rf test-*.json test-*.png *.log **/*.log test-results packages/docs-site/docs/api",
+    "dev:kill": "lsof -ti:3333,3500,3402,4000,4001,5555 | xargs kill -9 2>/dev/null; pkill -f 'turbo run dev' 2>/dev/null; pkill -f 'next dev' 2>/dev/null; echo 'All dev servers killed'",
     "ios": "cd packages/client && bun run ios",
     "ios:dev": "cd packages/client && bun run ios:dev",
     "ios:build": "cd packages/client && bun run ios:build",
