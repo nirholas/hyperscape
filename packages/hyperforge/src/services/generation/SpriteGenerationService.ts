@@ -213,6 +213,7 @@ export class SpriteGenerationService {
    * Cleanup resources
    */
   dispose(): void {
+    this.renderer.forceContextLoss();
     this.renderer.dispose();
   }
 }

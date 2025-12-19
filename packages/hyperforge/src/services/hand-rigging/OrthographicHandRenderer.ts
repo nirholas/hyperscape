@@ -504,6 +504,7 @@ export class OrthographicHandRenderer {
    */
   dispose(): void {
     if (this.renderer) {
+      this.renderer.forceContextLoss();
       this.renderer.dispose();
     }
     // Dispose of any geometries, materials, textures in the scene

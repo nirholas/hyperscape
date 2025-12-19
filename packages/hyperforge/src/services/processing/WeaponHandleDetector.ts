@@ -1374,6 +1374,7 @@ export class WeaponHandleDetector {
     }
 
     if (this.renderer) {
+      this.renderer.forceContextLoss();
       this.renderer.dispose();
     }
 
