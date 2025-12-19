@@ -25,6 +25,7 @@ import {
   ticksToMs,
   calculateDistance3D,
   calculateDistance2D,
+  getStyleBonus,
 } from "../CombatCalculations";
 import { AttackType } from "../../../types/core/core";
 import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
@@ -207,9 +208,6 @@ describe("CombatCalculations", () => {
   });
 
   describe("getStyleBonus", () => {
-    // Import getStyleBonus for direct testing
-    const { getStyleBonus } = require("../CombatCalculations");
-
     it("returns +3 attack for accurate style", () => {
       const bonus = getStyleBonus("accurate");
       expect(bonus).toEqual({ attack: 3, strength: 0, defense: 0 });

@@ -48,6 +48,10 @@ export enum CombatViolationType {
   INVALID_ENTITY_ID = "invalid_entity_id",
   /** Combat action during invalid state */
   INVALID_COMBAT_STATE = "invalid_combat_state",
+  /** XP gain exceeds theoretical maximum */
+  EXCESSIVE_XP_GAIN = "excessive_xp_gain",
+  /** Damage exceeds calculated maximum for attacker stats */
+  IMPOSSIBLE_DAMAGE = "impossible_damage",
 }
 
 /**
@@ -102,12 +106,17 @@ const VIOLATION_WEIGHTS: Record<CombatViolationSeverity, number> = {
  * All values can be tuned at runtime without code changes
  *
  * @see COMBAT_SYSTEM_IMPROVEMENTS.md Section 4.2
+ * @see OSRS-IMPLEMENTATION-PLAN.md Phase 5.2
  */
 export interface AntiCheatConfig {
   /** Score threshold for logging a warning (default: 25) */
   warningThreshold: number;
   /** Score threshold for logging an alert requiring admin review (default: 75) */
   alertThreshold: number;
+  /** Score threshold for auto-kick (default: 50) */
+  kickThreshold: number;
+  /** Score threshold for auto-ban (default: 150) */
+  banThreshold: number;
   /** Points to decay from score per minute (default: 10) */
   scoreDecayPerMinute: number;
   /** Maximum attacks allowed per tick before flagging (default: 3) */
@@ -116,6 +125,10 @@ export interface AntiCheatConfig {
   maxViolationsPerPlayer: number;
   /** Minimum time between warnings for same player in ms (default: 60000) */
   warningCooldownMs: number;
+  /** Maximum XP gain per tick (99 max hit × 4 = 396, use 400 with buffer) */
+  maxXPPerTick: number;
+  /** Window in ticks for XP rate monitoring (default: 10) */
+  xpRateWindowTicks: number;
 }
 
 /**
@@ -141,14 +154,20 @@ export type MetricsCallback = (metric: AntiCheatMetric) => void;
 /**
  * Default anti-cheat configuration
  * Can be overridden per-instance for different environments
+ *
+ * @see OSRS-IMPLEMENTATION-PLAN.md Phase 5.2
  */
 const DEFAULT_CONFIG: AntiCheatConfig = {
   warningThreshold: 25,
   alertThreshold: 75,
+  kickThreshold: 50,
+  banThreshold: 150,
   scoreDecayPerMinute: 10,
   maxAttacksPerTick: 3,
   maxViolationsPerPlayer: 100,
   warningCooldownMs: 60000,
+  maxXPPerTick: 400, // 99 max hit × 4 XP = 396, plus buffer
+  xpRateWindowTicks: 10,
 };
 
 /**
@@ -175,10 +194,32 @@ const DEFAULT_CONFIG: AntiCheatConfig = {
  * });
  * ```
  */
+/**
+ * Callback for auto-kick/ban actions
+ */
+export type AutoActionCallback = (action: {
+  type: "kick" | "ban";
+  playerId: string;
+  score: number;
+  reason: string;
+}) => void;
+
+/**
+ * XP history entry for rate tracking
+ */
+interface XPHistoryEntry {
+  tick: number;
+  xp: number;
+}
+
 export class CombatAntiCheat {
   private playerStates: Map<string, PlayerViolationState> = new Map();
   private readonly config: AntiCheatConfig;
   private metricsCallback: MetricsCallback | null = null;
+  private autoActionCallback: AutoActionCallback | null = null;
+  private playerXPHistory: Map<string, XPHistoryEntry[]> = new Map();
+  private playersKicked: Set<string> = new Set();
+  private playersBanned: Set<string> = new Set();
 
   /**
    * Create a new CombatAntiCheat instance
@@ -201,6 +242,39 @@ export class CombatAntiCheat {
    */
   setMetricsCallback(callback: MetricsCallback | null): void {
     this.metricsCallback = callback;
+  }
+
+  /**
+   * Set callback for auto-kick/ban actions
+   * Connect to your server's kick/ban system
+   *
+   * @example
+   * ```typescript
+   * antiCheat.setAutoActionCallback((action) => {
+   *   if (action.type === 'kick') {
+   *     server.kickPlayer(action.playerId, action.reason);
+   *   } else if (action.type === 'ban') {
+   *     server.banPlayer(action.playerId, action.reason);
+   *   }
+   * });
+   * ```
+   */
+  setAutoActionCallback(callback: AutoActionCallback | null): void {
+    this.autoActionCallback = callback;
+  }
+
+  /**
+   * Check if a player has been kicked
+   */
+  isPlayerKicked(playerId: string): boolean {
+    return this.playersKicked.has(playerId);
+  }
+
+  /**
+   * Check if a player has been banned
+   */
+  isPlayerBanned(playerId: string): boolean {
+    return this.playersBanned.has(playerId);
   }
 
   /**
@@ -505,10 +579,14 @@ export class CombatAntiCheat {
   /**
    * Clean up state for a disconnected player
    *
+   * Note: Does not clear kicked/banned status - those persist
+   * until explicitly cleared via clearPlayerStatus()
+   *
    * @param playerId - Player to clean up
    */
   cleanup(playerId: string): void {
     this.playerStates.delete(playerId);
+    this.playerXPHistory.delete(playerId);
   }
 
   /**
@@ -516,6 +594,9 @@ export class CombatAntiCheat {
    */
   destroy(): void {
     this.playerStates.clear();
+    this.playerXPHistory.clear();
+    this.playersKicked.clear();
+    this.playersBanned.clear();
   }
 
   /**
@@ -537,45 +618,238 @@ export class CombatAntiCheat {
   }
 
   /**
-   * Check if player has exceeded thresholds and log alerts
+   * Check if player has exceeded thresholds and take action
+   *
+   * Order of checks (highest to lowest):
+   * 1. Ban threshold (150) - Emit ban action
+   * 2. Alert threshold (75) - Log alert for admin review
+   * 3. Kick threshold (50) - Emit kick action
+   * 4. Warning threshold (25) - Log warning
    */
   private checkThresholds(playerId: string, state: PlayerViolationState): void {
     const now = Date.now();
 
-    // Throttle warnings to prevent log spam
-    if (now - state.lastWarningTime < this.config.warningCooldownMs) {
+    // Check for auto-ban (highest priority)
+    if (
+      state.score >= this.config.banThreshold &&
+      !this.playersBanned.has(playerId)
+    ) {
+      console.error(
+        `[CombatAntiCheat] AUTO-BAN: player=${playerId} score=${state.score} - violation threshold exceeded`,
+      );
+
+      this.playersBanned.add(playerId);
+
+      this.emitMetric("anticheat.auto_ban", 1, {
+        player_id: playerId,
+        score: state.score,
+        threshold: this.config.banThreshold,
+      });
+
+      if (this.autoActionCallback) {
+        this.autoActionCallback({
+          type: "ban",
+          playerId,
+          score: state.score,
+          reason: "violation_threshold",
+        });
+      }
+
+      return; // No need to check lower thresholds
+    }
+
+    // Check for alert (admin review required)
+    if (state.score >= this.config.alertThreshold) {
+      // Throttle alerts to prevent log spam
+      if (now - state.lastWarningTime >= this.config.warningCooldownMs) {
+        console.error(
+          `[CombatAntiCheat] ALERT: player=${playerId} score=${state.score} - requires admin review`,
+        );
+
+        this.emitMetric("anticheat.alert", 1, {
+          player_id: playerId,
+          score: state.score,
+          threshold: this.config.alertThreshold,
+          level: "alert",
+          recent_violation_count: state.violations.length,
+        });
+
+        state.lastWarningTime = now;
+      }
+    }
+
+    // Check for auto-kick
+    if (
+      state.score >= this.config.kickThreshold &&
+      !this.playersKicked.has(playerId)
+    ) {
+      console.warn(
+        `[CombatAntiCheat] AUTO-KICK: player=${playerId} score=${state.score} - warning threshold exceeded`,
+      );
+
+      this.playersKicked.add(playerId);
+
+      this.emitMetric("anticheat.auto_kick", 1, {
+        player_id: playerId,
+        score: state.score,
+        threshold: this.config.kickThreshold,
+      });
+
+      if (this.autoActionCallback) {
+        this.autoActionCallback({
+          type: "kick",
+          playerId,
+          score: state.score,
+          reason: "warning_threshold",
+        });
+      }
+
       return;
     }
 
-    if (state.score >= this.config.alertThreshold) {
-      console.error(
-        `[CombatAntiCheat] ALERT: player=${playerId} score=${state.score} - requires admin review`,
-      );
+    // Check for warning (logging only)
+    if (state.score >= this.config.warningThreshold) {
+      // Throttle warnings to prevent log spam
+      if (now - state.lastWarningTime >= this.config.warningCooldownMs) {
+        console.warn(
+          `[CombatAntiCheat] WARNING: player=${playerId} score=${state.score}`,
+        );
 
-      // Emit alert metric for monitoring dashboard
-      this.emitMetric("anticheat.alert", 1, {
-        player_id: playerId,
-        score: state.score,
-        threshold: this.config.alertThreshold,
-        level: "alert",
-        recent_violation_count: state.violations.length,
-      });
+        this.emitMetric("anticheat.warning", 1, {
+          player_id: playerId,
+          score: state.score,
+          threshold: this.config.warningThreshold,
+          level: "warning",
+        });
 
-      state.lastWarningTime = now;
-    } else if (state.score >= this.config.warningThreshold) {
-      console.warn(
-        `[CombatAntiCheat] WARNING: player=${playerId} score=${state.score}`,
-      );
-
-      // Emit warning metric for monitoring dashboard
-      this.emitMetric("anticheat.warning", 1, {
-        player_id: playerId,
-        score: state.score,
-        threshold: this.config.warningThreshold,
-        level: "warning",
-      });
-
-      state.lastWarningTime = now;
+        state.lastWarningTime = now;
+      }
     }
+  }
+
+  // =========================================================================
+  // XP AND DAMAGE VALIDATION (Phase 5.4 & 5.5)
+  // =========================================================================
+
+  /**
+   * Validate XP gain is within possible bounds
+   *
+   * OSRS XP per hit: HP XP = damage × 1.33, combat XP = damage × 4
+   * Max damage per hit ≈ 99, so max XP per hit ≈ 396
+   *
+   * @param playerId - Player gaining XP
+   * @param xpAmount - Amount of XP gained
+   * @param currentTick - Current game tick
+   * @returns true if XP gain is valid, false if suspicious
+   *
+   * @see OSRS-IMPLEMENTATION-PLAN.md Phase 5.4
+   */
+  validateXPGain(
+    playerId: string,
+    xpAmount: number,
+    currentTick: number,
+  ): boolean {
+    // Check single-tick max
+    if (xpAmount > this.config.maxXPPerTick) {
+      this.recordViolation(
+        playerId,
+        CombatViolationType.EXCESSIVE_XP_GAIN,
+        CombatViolationSeverity.CRITICAL,
+        `Gained ${xpAmount} XP in one tick (max ${this.config.maxXPPerTick})`,
+        undefined,
+        currentTick,
+      );
+      return false;
+    }
+
+    // Track and check rate
+    let history = this.playerXPHistory.get(playerId);
+    if (!history) {
+      history = [];
+      this.playerXPHistory.set(playerId, history);
+    }
+
+    history.push({ tick: currentTick, xp: xpAmount });
+
+    // Clean old entries
+    const windowStart = currentTick - this.config.xpRateWindowTicks;
+    const recentHistory = history.filter((h) => h.tick >= windowStart);
+    this.playerXPHistory.set(playerId, recentHistory);
+
+    // Check rate over window
+    const totalXP = recentHistory.reduce((sum, h) => sum + h.xp, 0);
+    const maxPossibleRate =
+      this.config.maxXPPerTick * this.config.xpRateWindowTicks;
+
+    if (totalXP > maxPossibleRate) {
+      this.recordViolation(
+        playerId,
+        CombatViolationType.EXCESSIVE_XP_GAIN,
+        CombatViolationSeverity.CRITICAL,
+        `Gained ${totalXP} XP over ${this.config.xpRateWindowTicks} ticks (max ${maxPossibleRate})`,
+        undefined,
+        currentTick,
+      );
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Validate damage is within possible bounds for attacker's stats
+   *
+   * Uses OSRS max hit formula to calculate theoretical maximum.
+   * Adds 10% tolerance for special attacks / future mechanics.
+   *
+   * @param attackerId - Player/entity dealing damage
+   * @param damage - Damage dealt
+   * @param attackerStrength - Attacker's strength level
+   * @param attackerStrengthBonus - Attacker's equipment strength bonus
+   * @param currentTick - Current game tick (optional)
+   * @returns true if damage is valid, false if suspicious
+   *
+   * @see OSRS-IMPLEMENTATION-PLAN.md Phase 5.5
+   */
+  validateDamage(
+    attackerId: string,
+    damage: number,
+    attackerStrength: number,
+    attackerStrengthBonus: number,
+    currentTick?: number,
+  ): boolean {
+    // Calculate maximum possible hit for this attacker
+    // OSRS formula: Max Hit = floor(0.5 + EffectiveStrength × (StrengthBonus + 64) / 640)
+    // EffectiveStrength = StrengthLevel + 8 + 3 (max style bonus)
+    const effectiveStrength = attackerStrength + 8 + 3;
+    const maxPossibleHit = Math.floor(
+      0.5 + (effectiveStrength * (attackerStrengthBonus + 64)) / 640,
+    );
+
+    // Add 10% tolerance for special attacks / future mechanics
+    const damageLimit = Math.ceil(maxPossibleHit * 1.1);
+
+    if (damage > damageLimit) {
+      this.recordViolation(
+        attackerId,
+        CombatViolationType.IMPOSSIBLE_DAMAGE,
+        CombatViolationSeverity.CRITICAL,
+        `Dealt ${damage} damage (max possible ${maxPossibleHit}, limit ${damageLimit})`,
+        undefined,
+        currentTick,
+      );
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Clear kicked/banned status for a player (e.g., after appeal)
+   */
+  clearPlayerStatus(playerId: string): void {
+    this.playersKicked.delete(playerId);
+    this.playersBanned.delete(playerId);
+    this.playerXPHistory.delete(playerId);
   }
 }

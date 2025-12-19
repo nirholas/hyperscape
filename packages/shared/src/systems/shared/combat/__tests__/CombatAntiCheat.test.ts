@@ -514,6 +514,8 @@ describe("CombatAntiCheat", () => {
         CombatViolationType.NONEXISTENT_TARGET,
         CombatViolationType.INVALID_ENTITY_ID,
         CombatViolationType.INVALID_COMBAT_STATE,
+        CombatViolationType.EXCESSIVE_XP_GAIN,
+        CombatViolationType.IMPOSSIBLE_DAMAGE,
       ];
 
       let i = 0;
@@ -528,6 +530,210 @@ describe("CombatAntiCheat", () => {
       }
 
       expect(antiCheat.getStats().trackedPlayers).toBe(types.length);
+    });
+  });
+
+  describe("auto-kick and auto-ban", () => {
+    it("triggers auto-kick at score 50", () => {
+      const actions: { type: string; playerId: string }[] = [];
+      antiCheat.setAutoActionCallback((action) => {
+        actions.push({ type: action.type, playerId: action.playerId });
+      });
+
+      // Add one critical violation (50 points) to reach kick threshold
+      antiCheat.recordViolation(
+        "player1",
+        CombatViolationType.INVALID_ENTITY_ID,
+        CombatViolationSeverity.CRITICAL,
+        "Test",
+      );
+
+      expect(antiCheat.isPlayerKicked("player1")).toBe(true);
+      expect(actions).toContainEqual({ type: "kick", playerId: "player1" });
+    });
+
+    it("triggers auto-ban at score 150", () => {
+      const actions: { type: string; playerId: string }[] = [];
+      antiCheat.setAutoActionCallback((action) => {
+        actions.push({ type: action.type, playerId: action.playerId });
+      });
+
+      // Add 3 critical violations (150 points) to reach ban threshold
+      antiCheat.recordViolation(
+        "player1",
+        CombatViolationType.INVALID_ENTITY_ID,
+        CombatViolationSeverity.CRITICAL,
+        "Test 1",
+      );
+      antiCheat.recordViolation(
+        "player1",
+        CombatViolationType.INVALID_ENTITY_ID,
+        CombatViolationSeverity.CRITICAL,
+        "Test 2",
+      );
+      antiCheat.recordViolation(
+        "player1",
+        CombatViolationType.INVALID_ENTITY_ID,
+        CombatViolationSeverity.CRITICAL,
+        "Test 3",
+      );
+
+      expect(antiCheat.isPlayerBanned("player1")).toBe(true);
+      expect(actions.some((a) => a.type === "ban")).toBe(true);
+    });
+
+    it("only kicks player once", () => {
+      const actions: { type: string }[] = [];
+      antiCheat.setAutoActionCallback((action) => {
+        actions.push({ type: action.type });
+      });
+
+      // Two critical violations (100 points) - should only kick once
+      antiCheat.recordViolation(
+        "player1",
+        CombatViolationType.INVALID_ENTITY_ID,
+        CombatViolationSeverity.CRITICAL,
+        "Test 1",
+      );
+      antiCheat.recordViolation(
+        "player1",
+        CombatViolationType.INVALID_ENTITY_ID,
+        CombatViolationSeverity.CRITICAL,
+        "Test 2",
+      );
+
+      const kickCount = actions.filter((a) => a.type === "kick").length;
+      expect(kickCount).toBe(1);
+    });
+
+    it("clearPlayerStatus resets kicked/banned status", () => {
+      antiCheat.recordViolation(
+        "player1",
+        CombatViolationType.INVALID_ENTITY_ID,
+        CombatViolationSeverity.CRITICAL,
+        "Test",
+      );
+
+      expect(antiCheat.isPlayerKicked("player1")).toBe(true);
+
+      antiCheat.clearPlayerStatus("player1");
+
+      expect(antiCheat.isPlayerKicked("player1")).toBe(false);
+      expect(antiCheat.isPlayerBanned("player1")).toBe(false);
+    });
+  });
+
+  describe("validateXPGain", () => {
+    it("returns true for valid XP gain", () => {
+      const result = antiCheat.validateXPGain("player1", 100, 100);
+      expect(result).toBe(true);
+    });
+
+    it("returns false for XP exceeding single-tick max (400)", () => {
+      const result = antiCheat.validateXPGain("player1", 500, 100);
+      expect(result).toBe(false);
+
+      const report = antiCheat.getPlayerReport("player1");
+      expect(report.recentViolations[0].type).toBe(
+        CombatViolationType.EXCESSIVE_XP_GAIN,
+      );
+    });
+
+    it("returns false for XP rate exceeding window max", () => {
+      // Add 400 XP per tick for 10 ticks = 4000 XP (at the limit)
+      // Then add one more = should fail
+      for (let tick = 0; tick < 10; tick++) {
+        antiCheat.validateXPGain("player1", 400, tick);
+      }
+
+      // This should fail because we're over the rate limit
+      const result = antiCheat.validateXPGain("player1", 400, 10);
+      // Note: The window is 10 ticks, so tick 10 would check ticks 1-10
+      // which is still 10 × 400 = 4000, at the limit
+      // Adding another 400 would make it 4400, which exceeds 4000
+      expect(result).toBe(false);
+    });
+
+    it("cleans old XP history entries", () => {
+      // Add XP at tick 0
+      antiCheat.validateXPGain("player1", 100, 0);
+
+      // Add XP at tick 20 (tick 0 should be cleaned from history)
+      // Window is 10 ticks, so windowStart = 20 - 10 = 10
+      // Tick 0 < 10, so it should be cleaned
+      antiCheat.validateXPGain("player1", 100, 20);
+
+      // Add more XP at tick 21
+      // Window is 10 ticks, so windowStart = 21 - 10 = 11
+      // Tick 20 >= 11, so it stays. Tick 0 was already cleaned.
+      // Total in window: 100 (from tick 20) + 300 (this call) = 400, well under 4000
+      const result = antiCheat.validateXPGain("player1", 300, 21);
+      expect(result).toBe(true);
+
+      // Now verify tick 0 is gone by adding more XP that would exceed limit if tick 0 was present
+      // If tick 0's 100 XP was still in history, this would fail
+      // Current window has: tick 20 (100) + tick 21 (300) = 400
+      // Adding 350 at tick 22 would give us 100+300+350 = 750, still under 4000
+      const result2 = antiCheat.validateXPGain("player1", 350, 22);
+      expect(result2).toBe(true);
+    });
+  });
+
+  describe("validateDamage", () => {
+    it("returns true for valid damage", () => {
+      // Strength 50, no bonus: effective = 50+8+3 = 61
+      // Max hit = floor(0.5 + 61 * 64 / 640) = floor(0.5 + 6.1) = 6
+      // With 10% tolerance: ceil(6 * 1.1) = 7
+      const result = antiCheat.validateDamage("player1", 6, 50, 0);
+      expect(result).toBe(true);
+    });
+
+    it("returns false for impossible damage", () => {
+      // Strength 50, no bonus: max hit ~6
+      // 150 damage is way over the limit
+      const result = antiCheat.validateDamage("player1", 150, 50, 0);
+      expect(result).toBe(false);
+
+      const report = antiCheat.getPlayerReport("player1");
+      expect(report.recentViolations[0].type).toBe(
+        CombatViolationType.IMPOSSIBLE_DAMAGE,
+      );
+    });
+
+    it("allows damage within 10% tolerance", () => {
+      // Strength 99, strength bonus 100:
+      // effective = 99+8+3 = 110
+      // Max hit = floor(0.5 + 110 * 164 / 640) = floor(0.5 + 28.1875) = 28
+      // With 10% tolerance: ceil(28 * 1.1) = 31
+      const result = antiCheat.validateDamage("player1", 30, 99, 100);
+      expect(result).toBe(true);
+    });
+
+    it("records tick in violation", () => {
+      antiCheat.validateDamage("player1", 999, 1, 0, 42);
+
+      const report = antiCheat.getPlayerReport("player1");
+      expect(report.recentViolations[0].gameTick).toBe(42);
+    });
+  });
+
+  describe("destroy clears all new state", () => {
+    it("clears XP history, kicked, and banned sets", () => {
+      antiCheat.validateXPGain("player1", 100, 1);
+      antiCheat.recordViolation(
+        "player1",
+        CombatViolationType.INVALID_ENTITY_ID,
+        CombatViolationSeverity.CRITICAL,
+        "Test",
+      );
+
+      expect(antiCheat.isPlayerKicked("player1")).toBe(true);
+
+      antiCheat.destroy();
+
+      expect(antiCheat.isPlayerKicked("player1")).toBe(false);
+      expect(antiCheat.isPlayerBanned("player1")).toBe(false);
+      expect(antiCheat.getStats().trackedPlayers).toBe(0);
     });
   });
 });

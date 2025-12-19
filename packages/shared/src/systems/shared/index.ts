@@ -28,3 +28,6 @@ export * from "./interaction";
 
 // Presentation systems (rendering, visual effects, audio, chat, actions)
 export * from "./presentation";
+
+// Event recording and replay (Phase 5.1 - Security & Replay)
+export * from "./EventStore";

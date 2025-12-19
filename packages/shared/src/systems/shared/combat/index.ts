@@ -19,3 +19,6 @@ export * from "./CombatAntiCheat";
 
 // OSRS-accurate range calculations
 export * from "./RangeSystem";
+
+// Combat request signing (Phase 5.3 - Security)
+export * from "./CombatRequestValidator";
