@@ -4,78 +4,24 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   Library,
-  UserCog,
-  Shield,
-  Hand,
-  RefreshCw,
-  Music,
   Filter,
   Search,
   ChevronDown,
   Globe,
-  Sparkles,
-  MessageSquare,
-  Plus,
-  ExternalLink,
-  Volume2,
   Upload,
   Map,
-  Settings,
-  Box,
-  Image as ImageIcon,
-  Palette,
-  type LucideIcon,
 } from "lucide-react";
 import { Viewport3D } from "@/components/viewer/Viewport3D";
 import { AssetLibrary } from "@/components/vault/AssetLibrary";
 import { AssetUploadModal } from "@/components/vault/AssetUploadModal";
 import { WorldView } from "@/components/world/WorldView";
-import { useAppStore, type ModuleView } from "@/stores/app-store";
+import { AppSidebar } from "@/components/layout/AppSidebar";
+import { useAppStore } from "@/stores/app-store";
 import { useHiddenAssets } from "@/hooks/useHiddenAssets";
 import type { AssetData } from "@/types/asset";
 
-// Modules that are just state toggles (stay on this page)
-const stateModules: { id: ModuleView; label: string; icon: LucideIcon }[] = [
-  { id: "library", label: "3D Assets", icon: Box },
-];
-
-// Studio pages that link to separate routes
-const studioPages: {
-  href: string;
-  label: string;
-  icon: LucideIcon;
-  description: string;
-}[] = [
-  {
-    href: "/studio/equipment",
-    label: "Equipment Fitting",
-    icon: UserCog,
-    description: "Attach weapons to VRM avatars",
-  },
-  {
-    href: "/studio/armor",
-    label: "Armor Fitting",
-    icon: Shield,
-    description: "Fit armor to VRM avatars",
-  },
-  {
-    href: "/studio/hands",
-    label: "Hand Rigging",
-    icon: Hand,
-    description: "Add hand bones",
-  },
-  {
-    href: "/studio/retarget",
-    label: "Retarget & Animate",
-    icon: RefreshCw,
-    description: "VRM conversion & animation",
-  },
-];
-
 export default function HomePage() {
   const {
-    activeModule,
-    setActiveModule,
     selectedAsset,
     setSelectedAsset,
     sidebarCollapsed,
@@ -166,304 +112,67 @@ export default function HomePage() {
     );
   }
 
-  return (
-    <div className="flex h-screen bg-background overflow-hidden">
-      {/* === LEFT SIDEBAR: MODULES === */}
-      <aside
+  // Extra sidebar content for the homepage (vault, world view, etc.)
+  const extraSidebarContent = (
+    <div className="mt-6 pt-4 border-t border-glass-border space-y-2">
+      <button
+        onClick={toggleVault}
+        title={sidebarCollapsed ? "Vault" : undefined}
         className={`
-          ${sidebarCollapsed ? "w-16" : "w-56"} 
-          border-r border-glass-border bg-glass-bg/30 flex flex-col flex-shrink-0
-          transition-all duration-300 ease-in-out
+          w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm
+          transition-all duration-200
+          ${sidebarCollapsed ? "justify-center" : ""}
+          ${
+            vaultOpen
+              ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
+              : "text-muted-foreground hover:text-foreground hover:bg-glass-bg"
+          }
         `}
       >
-        {/* Logo - Click to collapse */}
-        <div className="p-4 border-b border-glass-border">
-          <button
-            onClick={toggleSidebar}
-            className="flex items-center gap-2 w-full hover:opacity-80 transition-opacity"
-            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 flex-shrink-0">
-              <Sparkles className="w-4 h-4 text-white" />
-            </div>
-            {!sidebarCollapsed && (
-              <span className="font-bold text-lg tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500 whitespace-nowrap">
-                HYPERFORGE
-              </span>
-            )}
-          </button>
-        </div>
+        <Library className="w-4 h-4 flex-shrink-0" />
+        {!sidebarCollapsed && <span>Vault</span>}
+      </button>
 
-        {/* Generate New Button */}
-        <div className="p-3 border-b border-glass-border">
-          <Link
-            href="/generate"
-            className={`
-              w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
-              bg-gradient-to-r from-cyan-500 to-blue-600 text-white
-              hover:from-cyan-400 hover:to-blue-500
-              transition-all duration-200 shadow-lg shadow-cyan-500/20
-              ${sidebarCollapsed ? "justify-center" : ""}
-            `}
-          >
-            <Plus className="w-4 h-4 flex-shrink-0" />
-            {!sidebarCollapsed && <span>Generate New</span>}
-          </Link>
-        </div>
+      {/* World Editor Link */}
+      <Link
+        href="/world"
+        title={sidebarCollapsed ? "World Editor" : "Visual world editor"}
+        className={`
+          w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm
+          transition-all duration-200
+          ${sidebarCollapsed ? "justify-center" : ""}
+          text-muted-foreground hover:text-foreground hover:bg-glass-bg
+        `}
+      >
+        <Map className="w-4 h-4 flex-shrink-0" />
+        {!sidebarCollapsed && <span>World Editor</span>}
+      </Link>
 
-        {/* Assets Section */}
-        <div className="flex-1 p-3 overflow-y-auto themed-scrollbar">
-          {!sidebarCollapsed && (
-            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 px-2">
-              Assets
-            </div>
-          )}
-          <nav className="space-y-1">
-            {/* 3D Assets - toggle for main viewport */}
-            {stateModules.map((module) => {
-              const isActive = activeModule === module.id;
-              return (
-                <button
-                  key={module.id}
-                  onClick={() => setActiveModule(module.id)}
-                  title={sidebarCollapsed ? module.label : undefined}
-                  className={`
-                    w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm
-                    transition-all duration-200
-                    ${sidebarCollapsed ? "justify-center" : ""}
-                    ${
-                      isActive
-                        ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
-                        : "text-muted-foreground hover:text-foreground hover:bg-glass-bg"
-                    }
-                  `}
-                >
-                  <module.icon
-                    className={`w-4 h-4 flex-shrink-0 ${isActive ? "text-cyan-400" : ""}`}
-                  />
-                  {!sidebarCollapsed && (
-                    <span className="truncate">{module.label}</span>
-                  )}
-                </button>
-              );
-            })}
+      {/* World View Button */}
+      <button
+        onClick={() => setWorldViewOpen(true)}
+        title={sidebarCollapsed ? "World View" : "View game world entities"}
+        className={`
+          w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm
+          transition-all duration-200
+          ${sidebarCollapsed ? "justify-center" : ""}
+          text-muted-foreground hover:text-foreground hover:bg-glass-bg
+        `}
+      >
+        <Globe className="w-4 h-4 flex-shrink-0" />
+        {!sidebarCollapsed && <span>World View</span>}
+      </button>
+    </div>
+  );
 
-            {/* Audio Assets Link */}
-            <Link
-              href="/audio"
-              title={
-                sidebarCollapsed
-                  ? "Audio Studio"
-                  : "Voice, SFX, Music generation"
-              }
-              className={`
-                w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
-                text-muted-foreground hover:text-foreground hover:bg-glass-bg transition-all duration-200
-                ${sidebarCollapsed ? "justify-center" : ""}
-              `}
-            >
-              <Volume2 className="w-4 h-4 flex-shrink-0" />
-              {!sidebarCollapsed && (
-                <span className="truncate flex-1">Audio</span>
-              )}
-            </Link>
-
-            {/* Image Assets Link */}
-            <Link
-              href="/images/concept-art"
-              title={
-                sidebarCollapsed ? "Images" : "Concept art, textures, sprites"
-              }
-              className={`
-                w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
-                text-muted-foreground hover:text-foreground hover:bg-glass-bg transition-all duration-200
-                ${sidebarCollapsed ? "justify-center" : ""}
-              `}
-            >
-              <ImageIcon className="w-4 h-4 flex-shrink-0" />
-              {!sidebarCollapsed && (
-                <span className="truncate flex-1">Images</span>
-              )}
-            </Link>
-
-            {/* Content Generator Link */}
-            <Link
-              href="/content"
-              title={
-                sidebarCollapsed ? "Content" : "NPC dialogues, quests, lore"
-              }
-              className={`
-                w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
-                text-muted-foreground hover:text-foreground hover:bg-glass-bg transition-all duration-200
-                ${sidebarCollapsed ? "justify-center" : ""}
-              `}
-            >
-              <MessageSquare className="w-4 h-4 flex-shrink-0" />
-              {!sidebarCollapsed && (
-                <span className="truncate flex-1">Content</span>
-              )}
-            </Link>
-          </nav>
-
-          {/* Studio Pages */}
-          <div
-            className={`mt-6 pt-4 border-t border-glass-border ${sidebarCollapsed ? "px-0" : ""}`}
-          >
-            {!sidebarCollapsed && (
-              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 px-2">
-                Studio
-              </div>
-            )}
-            <nav className="space-y-1">
-              {studioPages.map((page) => (
-                <Link
-                  key={page.href}
-                  href={page.href}
-                  title={sidebarCollapsed ? page.label : page.description}
-                  className={`
-                    w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm
-                    text-muted-foreground hover:text-foreground hover:bg-glass-bg transition-all duration-200
-                    ${sidebarCollapsed ? "justify-center" : ""}
-                  `}
-                >
-                  <page.icon className="w-4 h-4 flex-shrink-0" />
-                  {!sidebarCollapsed && (
-                    <>
-                      <span className="truncate flex-1">{page.label}</span>
-                      <ExternalLink className="w-3 h-3 text-muted-foreground/50" />
-                    </>
-                  )}
-                </Link>
-              ))}
-            </nav>
-          </div>
-
-          {/* Create Section - consolidated generation tools */}
-          <div
-            className={`mt-6 pt-4 border-t border-glass-border ${sidebarCollapsed ? "px-0" : ""}`}
-          >
-            {!sidebarCollapsed && (
-              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 px-2">
-                Create
-              </div>
-            )}
-            <nav className="space-y-1">
-              <Link
-                href="/content"
-                title={
-                  sidebarCollapsed ? "Content" : "NPCs, Quests, Dialogue, Items"
-                }
-                className={`
-                  w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
-                  text-muted-foreground hover:text-foreground hover:bg-glass-bg transition-all duration-200
-                  ${sidebarCollapsed ? "justify-center" : ""}
-                `}
-              >
-                <MessageSquare className="w-4 h-4 flex-shrink-0" />
-                {!sidebarCollapsed && (
-                  <span className="truncate flex-1">Content</span>
-                )}
-              </Link>
-              <Link
-                href="/audio"
-                title={sidebarCollapsed ? "Audio" : "Voice, SFX, Music"}
-                className={`
-                  w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
-                  text-muted-foreground hover:text-foreground hover:bg-glass-bg transition-all duration-200
-                  ${sidebarCollapsed ? "justify-center" : ""}
-                `}
-              >
-                <Music className="w-4 h-4 flex-shrink-0" />
-                {!sidebarCollapsed && (
-                  <span className="truncate flex-1">Audio</span>
-                )}
-              </Link>
-              <Link
-                href="/images/concept-art"
-                title={
-                  sidebarCollapsed ? "Images" : "Concept Art, Sprites, Textures"
-                }
-                className={`
-                  w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
-                  text-muted-foreground hover:text-foreground hover:bg-glass-bg transition-all duration-200
-                  ${sidebarCollapsed ? "justify-center" : ""}
-                `}
-              >
-                <Palette className="w-4 h-4 flex-shrink-0" />
-                {!sidebarCollapsed && (
-                  <span className="truncate flex-1">Images</span>
-                )}
-              </Link>
-            </nav>
-          </div>
-        </div>
-
-        {/* Vault Toggle & World View Button */}
-        <div className="p-3 border-t border-glass-border space-y-2">
-          <button
-            onClick={toggleVault}
-            title={sidebarCollapsed ? "Vault" : undefined}
-            className={`
-              w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm
-              transition-all duration-200
-              ${sidebarCollapsed ? "justify-center" : ""}
-              ${
-                vaultOpen
-                  ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
-                  : "text-muted-foreground hover:text-foreground hover:bg-glass-bg"
-              }
-            `}
-          >
-            <Library className="w-4 h-4 flex-shrink-0" />
-            {!sidebarCollapsed && <span>Vault</span>}
-          </button>
-
-          {/* World Editor Link */}
-          <Link
-            href="/world"
-            title={sidebarCollapsed ? "World Editor" : "Visual world editor"}
-            className={`
-              w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm
-              transition-all duration-200
-              ${sidebarCollapsed ? "justify-center" : ""}
-              text-muted-foreground hover:text-foreground hover:bg-glass-bg
-            `}
-          >
-            <Map className="w-4 h-4 flex-shrink-0" />
-            {!sidebarCollapsed && <span>World Editor</span>}
-          </Link>
-
-          {/* World View Button */}
-          <button
-            onClick={() => setWorldViewOpen(true)}
-            title={sidebarCollapsed ? "World View" : "View game world entities"}
-            className={`
-              w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm
-              transition-all duration-200
-              ${sidebarCollapsed ? "justify-center" : ""}
-              text-muted-foreground hover:text-foreground hover:bg-glass-bg
-            `}
-          >
-            <Globe className="w-4 h-4 flex-shrink-0" />
-            {!sidebarCollapsed && <span>World View</span>}
-          </button>
-
-          {/* Settings Link */}
-          <Link
-            href="/settings"
-            title={sidebarCollapsed ? "Settings" : "API keys & usage"}
-            className={`
-              w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm
-              transition-all duration-200
-              ${sidebarCollapsed ? "justify-center" : ""}
-              text-muted-foreground hover:text-foreground hover:bg-glass-bg
-            `}
-          >
-            <Settings className="w-4 h-4 flex-shrink-0" />
-            {!sidebarCollapsed && <span>Settings</span>}
-          </Link>
-        </div>
-      </aside>
+  return (
+    <div className="flex h-screen bg-background overflow-hidden">
+      {/* === LEFT SIDEBAR: SHARED NAVIGATION === */}
+      <AppSidebar
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={toggleSidebar}
+        extraContent={extraSidebarContent}
+      />
 
       {/* === UPLOAD MODAL === */}
       <AssetUploadModal
@@ -501,31 +210,31 @@ export default function HomePage() {
                 placeholder="Search assets..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 bg-glass-bg border border-glass-border rounded-lg text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+                className="w-full pl-9 pr-3 py-2 bg-glass-bg border border-glass-border rounded-lg text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-cyan-500/50 text-foreground"
               />
             </div>
 
-            {/* Filter Dropdown */}
+            {/* Category Filter */}
             <div className="relative">
               <button
-                onClick={() => setShowCategoryDropdown(!showCategoryDropdown)}
-                className="w-full flex items-center justify-between px-3 py-2 bg-glass-bg border border-glass-border rounded-lg text-sm hover:bg-glass-bg/80 transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowCategoryDropdown(!showCategoryDropdown);
+                }}
+                className="w-full flex items-center justify-between px-3 py-2 bg-glass-bg border border-glass-border rounded-lg text-sm hover:border-cyan-500/30 transition-colors"
               >
-                <div className="flex items-center gap-2">
+                <span className="flex items-center gap-2">
                   <Filter className="w-4 h-4 text-muted-foreground" />
-                  <span className="capitalize">
-                    {assetCategories.find((c) => c.value === categoryFilter)
-                      ?.label || "All Categories"}
-                  </span>
-                </div>
+                  {assetCategories.find((c) => c.value === categoryFilter)
+                    ?.label || "All Categories"}
+                </span>
                 <ChevronDown
                   className={`w-4 h-4 text-muted-foreground transition-transform ${showCategoryDropdown ? "rotate-180" : ""}`}
                 />
               </button>
 
-              {/* Dropdown Menu */}
               {showCategoryDropdown && (
-                <div className="absolute top-full left-0 right-0 mt-1 z-50 py-1 bg-glass-bg/95 border border-glass-border rounded-lg backdrop-blur-sm shadow-lg max-h-64 overflow-y-auto">
+                <div className="absolute top-full left-0 right-0 mt-1 bg-glass-bg border border-glass-border rounded-lg shadow-lg z-50 max-h-60 overflow-auto">
                   {assetCategories.map((category) => (
                     <button
                       key={category.value}
@@ -533,10 +242,10 @@ export default function HomePage() {
                         setCategoryFilter(category.value);
                         setShowCategoryDropdown(false);
                       }}
-                      className={`w-full px-3 py-2 text-sm text-left hover:bg-glass-bg transition-colors ${
+                      className={`w-full px-3 py-2 text-left text-sm hover:bg-glass-bg/50 transition-colors ${
                         categoryFilter === category.value
                           ? "text-cyan-400 bg-cyan-500/10"
-                          : ""
+                          : "text-foreground"
                       }`}
                     >
                       {category.label}
@@ -548,23 +257,22 @@ export default function HomePage() {
           </div>
 
           {/* Asset List */}
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto themed-scrollbar">
             <AssetLibrary
               key={assetRefreshKey}
               onAssetSelect={handleAssetSelect}
+              selectedAsset={selectedAsset}
               searchQuery={searchQuery}
               categoryFilter={categoryFilter}
+              onAssetDeleted={handleAssetDeleted}
             />
           </div>
         </div>
       )}
 
-      {/* === MAIN VIEWPORT === */}
+      {/* === MAIN 3D VIEWPORT === */}
       <main className="flex-1 relative overflow-hidden">
-        <Viewport3D
-          selectedAsset={selectedAsset}
-          onAssetDeleted={handleAssetDeleted}
-        />
+        <Viewport3D asset={selectedAsset} />
       </main>
 
       {/* === WORLD VIEW MODAL === */}
