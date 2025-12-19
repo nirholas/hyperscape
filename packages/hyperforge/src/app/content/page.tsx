@@ -11,7 +11,7 @@ import { ItemGenerator } from "@/components/content/ItemGenerator";
 import {
   Users,
   Scroll,
-  Map,
+  Map as MapIcon,
   Sword,
   Cuboid,
   MessageSquare,
@@ -223,7 +223,7 @@ export default function ContentGenerationPage() {
   const contentTabs = [
     { id: "npc" as const, label: "NPCs", icon: Users },
     { id: "quest" as const, label: "Quests", icon: Scroll },
-    { id: "area" as const, label: "Areas", icon: Map },
+    { id: "area" as const, label: "Areas", icon: MapIcon },
     { id: "item" as const, label: "Items", icon: Sword },
   ];
 
@@ -429,7 +429,9 @@ export default function ContentGenerationPage() {
                       {content.type === "quest" && (
                         <Scroll className="w-3 h-3" />
                       )}
-                      {content.type === "area" && <Map className="w-3 h-3" />}
+                      {content.type === "area" && (
+                        <MapIcon className="w-3 h-3" />
+                      )}
                       {content.type === "item" && <Sword className="w-3 h-3" />}
                       <span className="capitalize">{content.type}</span>
                     </div>
