@@ -24,16 +24,13 @@ import {
   Box,
   Image as ImageIcon,
   Palette,
-  Layers,
   type LucideIcon,
 } from "lucide-react";
 import { Viewport3D } from "@/components/viewer/Viewport3D";
 import { AssetLibrary } from "@/components/vault/AssetLibrary";
 import { AssetUploadModal } from "@/components/vault/AssetUploadModal";
 import { WorldView } from "@/components/world/WorldView";
-import { GenerationQueuePanel } from "@/components/generation/GenerationQueuePanel";
 import { useAppStore, type ModuleView } from "@/stores/app-store";
-import { useGenerationStore } from "@/stores/generation-store";
 import { useHiddenAssets } from "@/hooks/useHiddenAssets";
 import type { AssetData } from "@/types/asset";
 
@@ -88,19 +85,11 @@ export default function HomePage() {
   } = useAppStore();
 
   const { hiddenCount } = useHiddenAssets();
-  const { progress, batchQueue } = useGenerationStore();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [queuePanelOpen, setQueuePanelOpen] = useState(false);
-
-  // Count for queue badge
-  const activeJobCount = batchQueue.filter(
-    (j) => j.status === "processing" || j.status === "pending",
-  ).length;
-  const isGenerating = progress.status === "generating";
 
   // Available categories for 3D assets
   const assetCategories = [
@@ -459,39 +448,6 @@ export default function HomePage() {
             {!sidebarCollapsed && <span>World View</span>}
           </button>
 
-          {/* Generation Queue Button */}
-          <button
-            onClick={() => setQueuePanelOpen(true)}
-            title={sidebarCollapsed ? "Queue" : "View generation queue"}
-            className={`
-              w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm
-              transition-all duration-200
-              ${sidebarCollapsed ? "justify-center" : ""}
-              ${
-                isGenerating || activeJobCount > 0
-                  ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
-                  : "text-muted-foreground hover:text-foreground hover:bg-glass-bg"
-              }
-            `}
-          >
-            <div className="relative flex-shrink-0">
-              <Layers className="w-4 h-4" />
-              {(isGenerating || activeJobCount > 0) && (
-                <span className="absolute -top-1 -right-1 w-2 h-2 bg-cyan-400 rounded-full animate-pulse" />
-              )}
-            </div>
-            {!sidebarCollapsed && (
-              <span className="flex items-center gap-2">
-                Queue
-                {activeJobCount > 0 && (
-                  <span className="text-xs bg-cyan-500/20 px-1.5 py-0.5 rounded">
-                    {activeJobCount}
-                  </span>
-                )}
-              </span>
-            )}
-          </button>
-
           {/* Settings Link */}
           <Link
             href="/settings"
@@ -615,12 +571,6 @@ export default function HomePage() {
       <WorldView
         isOpen={worldViewOpen}
         onClose={() => setWorldViewOpen(false)}
-      />
-
-      {/* === GENERATION QUEUE PANEL === */}
-      <GenerationQueuePanel
-        isOpen={queuePanelOpen}
-        onClose={() => setQueuePanelOpen(false)}
       />
     </div>
   );
