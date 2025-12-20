@@ -1084,47 +1084,77 @@ export class CombatSystem extends SystemBase {
       targetType,
     );
 
+    // OSRS-ACCURATE: Check if target already has a valid combat target BEFORE any state modifications
+    // @see https://oldschool.runescape.wiki/w/Auto_Retaliate
+    // @see AUTO_RETALIATE_FIX_PLAN.md - Private server pattern: if (playerIndex <= 0 && npcIndex <= 0)
+    //
+    // When player is attacking Goblin 1 and Goblin 2 attacks the player:
+    // - INCORRECT: Player switches to Goblin 2 (old behavior)
+    // - CORRECT: Player continues attacking Goblin 1 (OSRS behavior)
+    //
+    // Auto-retaliate only triggers when player has NO current target
+    // We calculate this ONCE before any state modifications, then reuse for both decisions
+    let targetHasValidTarget = false;
     if (canRetaliate) {
-      // OSRS: Only schedule retaliation and face attacker if auto-retaliate is ON
-      const retaliationDelay = calculateRetaliationDelay(
-        targetAttackSpeedTicks,
+      const targetCombatState = this.stateService.getCombatData(targetId);
+      targetHasValidTarget = !!(
+        targetCombatState &&
+        targetCombatState.inCombat &&
+        this.isEntityAlive(
+          this.getEntity(
+            String(targetCombatState.targetId),
+            targetCombatState.targetType,
+          ),
+          targetCombatState.targetType,
+        )
       );
 
-      this.stateService.createRetaliatorState(
-        targetId,
-        attackerId,
-        targetType,
-        attackerType,
-        currentTick,
-        retaliationDelay,
-        targetAttackSpeedTicks,
-      );
+      if (!targetHasValidTarget) {
+        // Target has no valid target - schedule retaliation (normal OSRS auto-retaliate)
+        const retaliationDelay = calculateRetaliationDelay(
+          targetAttackSpeedTicks,
+        );
 
-      // OSRS-ACCURATE: Auto-retaliate ALWAYS redirects player toward attacker
-      // When hit with auto-retaliate ON, player stops any current movement and turns to fight
-      // The COMBAT_FOLLOW_TARGET event replaces any existing movement destination
-      // Wiki: "the player's character walks/runs towards the monster attacking and fights back"
+        this.stateService.createRetaliatorState(
+          targetId,
+          attackerId,
+          targetType,
+          attackerType,
+          currentTick,
+          retaliationDelay,
+          targetAttackSpeedTicks,
+        );
 
-      // NOTE: We do NOT call rotateTowardsTarget() here because:
-      // 1. COMBAT_FOLLOW_TARGET triggers movePlayerToward() which handles rotation
-      // 2. Having two rotation updates causes visual jank (quick turn-around-then-back)
-      // 3. Client's TileInterpolator will slerp smoothly to the new path direction
+        // OSRS-ACCURATE: Auto-retaliate ALWAYS redirects player toward attacker
+        // When hit with auto-retaliate ON, player stops any current movement and turns to fight
+        // The COMBAT_FOLLOW_TARGET event replaces any existing movement destination
+        // Wiki: "the player's character walks/runs towards the monster attacking and fights back"
 
-      // Always emit follow event - this REPLACES any existing movement
-      // Player was walking to tile A, now walks to attacker instead
-      if (targetType === "player" && attackerEntity) {
-        const attackerPos = getEntityPosition(attackerEntity);
-        if (attackerPos) {
-          this.emitTypedEvent(EventType.COMBAT_FOLLOW_TARGET, {
-            playerId: String(targetId),
-            targetId: String(attackerId),
-            targetPosition: {
-              x: attackerPos.x,
-              y: attackerPos.y,
-              z: attackerPos.z,
-            },
-          });
+        // NOTE: We do NOT call rotateTowardsTarget() here because:
+        // 1. COMBAT_FOLLOW_TARGET triggers movePlayerToward() which handles rotation
+        // 2. Having two rotation updates causes visual jank (quick turn-around-then-back)
+        // 3. Client's TileInterpolator will slerp smoothly to the new path direction
+
+        // Always emit follow event - this REPLACES any existing movement
+        // Player was walking to tile A, now walks to attacker instead
+        if (targetType === "player" && attackerEntity) {
+          const attackerPos = getEntityPosition(attackerEntity);
+          if (attackerPos) {
+            this.emitTypedEvent(EventType.COMBAT_FOLLOW_TARGET, {
+              playerId: String(targetId),
+              targetId: String(attackerId),
+              targetPosition: {
+                x: attackerPos.x,
+                y: attackerPos.y,
+                z: attackerPos.z,
+              },
+            });
+          }
         }
+      } else {
+        // Target already has valid target - just extend their combat timer
+        // They stay locked on their current target (OSRS-accurate)
+        this.stateService.extendCombatTimer(targetId, currentTick);
       }
     }
 
@@ -1136,15 +1166,21 @@ export class CombatSystem extends SystemBase {
       attackerType,
     );
 
-    // Target only gets combat target if they will retaliate (OSRS behavior)
-    // If auto-retaliate is OFF, they're "in combat" but have no target
-    if (canRetaliate) {
+    // Target only gets NEW combat target if:
+    // 1. They will retaliate (auto-retaliate ON), AND
+    // 2. They don't already have a valid target (OSRS-accurate)
+    //
+    // If target already has a valid target, we don't overwrite their target state.
+    // They stay locked on their current enemy.
+    // NOTE: We use the same targetHasValidTarget value calculated BEFORE state modifications
+    if (canRetaliate && !targetHasValidTarget) {
+      // Target has no valid target - sync them to attack this attacker
       this.stateService.syncCombatStateToEntity(
         String(targetId),
         String(attackerId),
         targetType,
       );
-    } else if (targetType === "player") {
+    } else if (!canRetaliate && targetType === "player") {
       // Mark player as in combat (for logout timer) but without a target
       // Store attackerId so combat can start if auto-retaliate is toggled ON
       this.stateService.markInCombatWithoutTarget(
