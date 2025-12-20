@@ -2627,10 +2627,14 @@ export class CombatSystem extends SystemBase {
   }
 
   /**
-   * Decay anti-cheat scores (call periodically, e.g., every minute)
+   * Decay anti-cheat scores and clean stale XP history
+   * Call periodically (e.g., every minute) to prevent memory leaks
    */
   public decayAntiCheatScores(): void {
     this.antiCheat.decayScores();
+    // Also clean stale XP history to prevent memory leaks from disconnected players
+    const currentTick = this.world.currentTick ?? 0;
+    this.antiCheat.cleanupStaleXPHistory(currentTick);
   }
 
   /**
