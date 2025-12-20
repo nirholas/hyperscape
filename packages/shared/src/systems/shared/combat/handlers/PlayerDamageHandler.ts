@@ -22,13 +22,14 @@ interface PlayerSystem {
 
 /**
  * Player entity interface for combat operations
- * Note: Uses intersection type to add combat-specific properties to Entity
+ * Uses intersection to merge player-specific properties with Entity
+ * (intersection merges data, interface extends would override it)
  */
 type PlayerEntity = Entity & {
   health?: number;
   name?: string;
   alive?: boolean;
-  data?: {
+  data?: Entity["data"] & {
     isLoading?: boolean;
   };
 };
@@ -71,7 +72,7 @@ export class PlayerDamageHandler implements DamageHandler {
     const targetIdStr = String(targetId);
 
     // Check if player exists and is alive before damage
-    const player = this.getEntity(targetId) as PlayerEntity | null;
+    const player = this.getEntity(targetId);
     if (!player) {
       return { actualDamage: 0, targetDied: false, success: false };
     }
@@ -100,12 +101,12 @@ export class PlayerDamageHandler implements DamageHandler {
   }
 
   getHealth(entityId: EntityID): number {
-    const player = this.getEntity(entityId) as PlayerEntity | null;
+    const player = this.getEntity(entityId);
     return player?.health ?? 0;
   }
 
   isAlive(entityId: EntityID): boolean {
-    const player = this.getEntity(entityId) as PlayerEntity | null;
+    const player = this.getEntity(entityId);
     if (!player) return false;
 
     // Check both health and alive flag
@@ -125,7 +126,7 @@ export class PlayerDamageHandler implements DamageHandler {
   }
 
   isProtected(entityId: EntityID): boolean {
-    const player = this.getEntity(entityId) as PlayerEntity | null;
+    const player = this.getEntity(entityId);
     return player?.data?.isLoading ?? false;
   }
 
@@ -135,12 +136,16 @@ export class PlayerDamageHandler implements DamageHandler {
     return true;
   }
 
-  getEntity(entityId: EntityID): Entity | null {
-    return this.world.getPlayer?.(String(entityId)) ?? null;
+  /**
+   * Get player entity by ID
+   * Returns PlayerEntity since we're specifically fetching from getPlayer
+   */
+  getEntity(entityId: EntityID): PlayerEntity | null {
+    return (this.world.getPlayer?.(String(entityId)) as PlayerEntity) ?? null;
   }
 
   getDisplayName(entityId: EntityID): string {
-    const player = this.getEntity(entityId) as PlayerEntity | null;
+    const player = this.getEntity(entityId);
     return player?.name ?? "player";
   }
 }

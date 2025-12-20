@@ -181,6 +181,89 @@ export function hasServerEmote(
   return typeof e.setServerEmote === "function";
 }
 
+/**
+ * Entity with health property for damage checks
+ */
+export interface EntityWithHealth {
+  health: number;
+}
+
+/**
+ * Check if entity has health property
+ *
+ * @param entity - Entity to check
+ * @returns true if entity has numeric health property
+ */
+export function hasHealth(entity: unknown): entity is EntityWithHealth {
+  if (!entity || typeof entity !== "object") return false;
+
+  const e = entity as Record<string, unknown>;
+  return typeof e.health === "number";
+}
+
+/**
+ * Check if entity is dead (health <= 0)
+ *
+ * @param entity - Entity to check
+ * @returns true if entity has health and it's <= 0
+ */
+export function isEntityDead(entity: unknown): boolean {
+  if (!hasHealth(entity)) return false;
+  return entity.health <= 0;
+}
+
+/**
+ * Entity with pending attacker for auto-retaliate
+ */
+export interface EntityWithPendingAttacker {
+  combat?: { pendingAttacker?: string | null };
+  data?: { pa?: string | null };
+}
+
+/**
+ * Check if entity has pending attacker properties
+ *
+ * @param entity - Entity to check
+ * @returns true if entity has combat or data with pending attacker
+ */
+export function hasPendingAttacker(
+  entity: unknown,
+): entity is EntityWithPendingAttacker {
+  if (!entity || typeof entity !== "object") return false;
+
+  const e = entity as Record<string, unknown>;
+  // Has combat.pendingAttacker or data.pa
+  if (e.combat && typeof e.combat === "object") return true;
+  if (e.data && typeof e.data === "object") return true;
+  return false;
+}
+
+/**
+ * Get pending attacker ID from entity
+ *
+ * @param entity - Entity to check
+ * @returns Pending attacker ID or null
+ */
+export function getPendingAttacker(entity: unknown): string | null {
+  if (!hasPendingAttacker(entity)) return null;
+  return entity.combat?.pendingAttacker || entity.data?.pa || null;
+}
+
+/**
+ * Clear pending attacker from entity
+ *
+ * @param entity - Entity to clear
+ */
+export function clearPendingAttacker(entity: unknown): void {
+  if (!hasPendingAttacker(entity)) return;
+  if (entity.combat) {
+    entity.combat.pendingAttacker = null;
+  }
+  if (entity.data) {
+    entity.data.pa = null;
+  }
+}
+
 // =============================================================================
 // ENTITY TYPE GUARDS - PLAYER
 // =============================================================================

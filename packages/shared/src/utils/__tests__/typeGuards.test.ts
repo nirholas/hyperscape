@@ -16,6 +16,13 @@ import {
   hasMobConfig,
   getMobRetaliates,
   hasServerEmote,
+  // Entity health guards
+  hasHealth,
+  isEntityDead,
+  // Pending attacker guards
+  hasPendingAttacker,
+  getPendingAttacker,
+  clearPendingAttacker,
   // Player entity guards
   hasNetworkDirty,
   // AI state machine guards
@@ -221,6 +228,137 @@ describe("Type Guards", () => {
 
     it("returns false for non-function setServerEmote", () => {
       expect(hasServerEmote({ setServerEmote: "not a function" })).toBe(false);
+    });
+  });
+
+  // ===========================================================================
+  // ENTITY HEALTH GUARDS
+  // ===========================================================================
+
+  describe("hasHealth", () => {
+    it("returns true for entity with numeric health", () => {
+      expect(hasHealth({ health: 100 })).toBe(true);
+      expect(hasHealth({ health: 0 })).toBe(true);
+      expect(hasHealth({ health: -5 })).toBe(true);
+    });
+
+    it("returns false for null", () => {
+      expect(hasHealth(null)).toBe(false);
+    });
+
+    it("returns false for entity without health", () => {
+      expect(hasHealth({})).toBe(false);
+    });
+
+    it("returns false for non-numeric health", () => {
+      expect(hasHealth({ health: "100" })).toBe(false);
+      expect(hasHealth({ health: undefined })).toBe(false);
+    });
+  });
+
+  describe("isEntityDead", () => {
+    it("returns true for entity with health <= 0", () => {
+      expect(isEntityDead({ health: 0 })).toBe(true);
+      expect(isEntityDead({ health: -10 })).toBe(true);
+    });
+
+    it("returns false for entity with health > 0", () => {
+      expect(isEntityDead({ health: 1 })).toBe(false);
+      expect(isEntityDead({ health: 100 })).toBe(false);
+    });
+
+    it("returns false for null", () => {
+      expect(isEntityDead(null)).toBe(false);
+    });
+
+    it("returns false for entity without health", () => {
+      expect(isEntityDead({})).toBe(false);
+    });
+  });
+
+  // ===========================================================================
+  // PENDING ATTACKER GUARDS
+  // ===========================================================================
+
+  describe("hasPendingAttacker", () => {
+    it("returns true for entity with combat object", () => {
+      expect(hasPendingAttacker({ combat: {} })).toBe(true);
+      expect(hasPendingAttacker({ combat: { pendingAttacker: "mob1" } })).toBe(
+        true,
+      );
+    });
+
+    it("returns true for entity with data object", () => {
+      expect(hasPendingAttacker({ data: {} })).toBe(true);
+      expect(hasPendingAttacker({ data: { pa: "mob1" } })).toBe(true);
+    });
+
+    it("returns false for null", () => {
+      expect(hasPendingAttacker(null)).toBe(false);
+    });
+
+    it("returns false for entity without combat or data", () => {
+      expect(hasPendingAttacker({})).toBe(false);
+    });
+  });
+
+  describe("getPendingAttacker", () => {
+    it("returns pendingAttacker from combat", () => {
+      expect(getPendingAttacker({ combat: { pendingAttacker: "mob1" } })).toBe(
+        "mob1",
+      );
+    });
+
+    it("returns pa from data", () => {
+      expect(getPendingAttacker({ data: { pa: "mob2" } })).toBe("mob2");
+    });
+
+    it("prefers combat.pendingAttacker over data.pa", () => {
+      expect(
+        getPendingAttacker({
+          combat: { pendingAttacker: "mob1" },
+          data: { pa: "mob2" },
+        }),
+      ).toBe("mob1");
+    });
+
+    it("returns null for entity without pending attacker", () => {
+      expect(getPendingAttacker({ combat: {} })).toBe(null);
+      expect(getPendingAttacker({ data: {} })).toBe(null);
+      expect(getPendingAttacker({})).toBe(null);
+      expect(getPendingAttacker(null)).toBe(null);
+    });
+  });
+
+  describe("clearPendingAttacker", () => {
+    it("clears combat.pendingAttacker", () => {
+      const entity = { combat: { pendingAttacker: "mob1" } };
+      clearPendingAttacker(entity);
+      expect(entity.combat.pendingAttacker).toBe(null);
+    });
+
+    it("clears data.pa", () => {
+      const entity = { data: { pa: "mob1" } };
+      clearPendingAttacker(entity);
+      expect(entity.data.pa).toBe(null);
+    });
+
+    it("clears both combat and data", () => {
+      const entity = {
+        combat: { pendingAttacker: "mob1" },
+        data: { pa: "mob2" },
+      };
+      clearPendingAttacker(entity);
+      expect(entity.combat.pendingAttacker).toBe(null);
+      expect(entity.data.pa).toBe(null);
+    });
+
+    it("handles null gracefully", () => {
+      expect(() => clearPendingAttacker(null)).not.toThrow();
+    });
+
+    it("handles entity without combat/data gracefully", () => {
+      expect(() => clearPendingAttacker({})).not.toThrow();
     });
   });
 

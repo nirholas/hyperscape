@@ -60,6 +60,12 @@ import {
 } from "./handlers";
 import { PidManager } from "./PidManager";
 import { getGameRng } from "../../../utils/SeededRandom";
+import {
+  isEntityDead,
+  getMobRetaliates,
+  getPendingAttacker,
+  clearPendingAttacker,
+} from "../../../utils/typeGuards";
 
 // Re-export CombatData from CombatStateService for backwards compatibility
 export type { CombatData } from "./CombatStateService";
@@ -1024,15 +1030,9 @@ export class CombatSystem extends SystemBase {
     const attackerEntity = this.world.entities.get(String(attackerId));
     const targetEntity = this.world.entities.get(String(targetId));
 
-    // Don't enter combat if target is dead
-    if (targetEntity && "health" in targetEntity) {
-      const targetWithHealth = targetEntity as unknown as CombatPlayerEntity;
-      if (
-        targetWithHealth.health !== undefined &&
-        targetWithHealth.health <= 0
-      ) {
-        return;
-      }
+    // Don't enter combat if target is dead (using type guard)
+    if (isEntityDead(targetEntity)) {
+      return;
     }
 
     // Also check if target is a player marked as dead
@@ -1072,13 +1072,8 @@ export class CombatSystem extends SystemBase {
     // Check if target can retaliate (mobs have retaliates flag, players check auto-retaliate setting)
     let canRetaliate = true;
     if (targetType === "mob" && targetEntity) {
-      // Check mob's retaliates config - if false, mob won't fight back
-      const mobConfig = (
-        targetEntity as unknown as { config?: { retaliates?: boolean } }
-      ).config;
-      if (mobConfig && mobConfig.retaliates === false) {
-        canRetaliate = false;
-      }
+      // Check mob's retaliates config using type guard - if false, mob won't fight back
+      canRetaliate = getMobRetaliates(targetEntity);
     } else if (targetType === "player") {
       // Check player's auto-retaliate setting
       // Uses cached reference (no getSystem() call in hot path)
@@ -1392,20 +1387,11 @@ export class CombatSystem extends SystemBase {
     if (entityType === "mob") {
       // Check all players to see if they had this mob as their pending attacker
       for (const player of this.world.entities.players.values()) {
-        const playerEntity = player as unknown as {
-          combat?: { pendingAttacker?: string | null };
-          data?: { pa?: string | null };
-        };
-        const pendingAttacker =
-          playerEntity.combat?.pendingAttacker || playerEntity.data?.pa;
+        // Use type guards for safe property access
+        const pendingAttacker = getPendingAttacker(player);
         if (pendingAttacker === entityId) {
-          // Clear the pending attacker state
-          if (playerEntity.combat) {
-            playerEntity.combat.pendingAttacker = null;
-          }
-          if (playerEntity.data) {
-            playerEntity.data.pa = null;
-          }
+          // Clear the pending attacker state using type guard helper
+          clearPendingAttacker(player);
           // Tell client to stop facing this entity
           this.emitTypedEvent(EventType.COMBAT_CLEAR_FACE_TARGET, {
             playerId: player.id,
@@ -1704,7 +1690,13 @@ export class CombatSystem extends SystemBase {
     const combatStates = this.stateService.getAllCombatStates();
     const combatStatesMap = this.stateService.getCombatStatesMap();
 
-    // Process all active combat sessions
+    // Sort by PID for fair combat priority (Phase 9 - PvP Fairness)
+    // Lower PID = higher priority = attacks first when multiple entities attack on same tick
+    // OSRS-ACCURATE: This determines who wins when both players would kill each other
+    // @see https://oldschool.runescape.wiki/w/PID
+    combatStates.sort((a, b) => this.pidManager.comparePriority(a[0], b[0]));
+
+    // Process all active combat sessions in PID order
     for (const [entityId, combatState] of combatStates) {
       // CRITICAL: Re-check if this combat state still exists
       if (!combatStatesMap.has(entityId)) {
