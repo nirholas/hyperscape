@@ -3,14 +3,11 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import {
-  Map,
   Save,
   Play,
   Undo2,
   Redo2,
   Grid3X3,
-  ZoomIn,
-  ZoomOut,
   Loader2,
   ChevronLeft,
   RefreshCw,
@@ -23,6 +20,8 @@ import {
   Maximize2,
   ChevronDown,
   X,
+  MapPin,
+  Map as MapIcon,
 } from "lucide-react";
 import { StudioPageLayout } from "@/components/layout/StudioPageLayout";
 import { TileGridEditor } from "@/components/world/TileGridEditor";
@@ -39,9 +38,17 @@ import type {
   WorldAreaDefinition,
   PlaceableItem,
   EditorTool,
+  Tile,
 } from "@/lib/world/tile-types";
-import { convertWorldAreasToEditor, convertEditorToWorldAreas, createSpawnFromItem, setTileSpawn } from "@/lib/world/tile-service";
+import {
+  convertWorldAreasToEditor,
+  convertEditorToWorldAreas,
+  createSpawnFromItem,
+  setTileSpawn,
+} from "@/lib/world/tile-service";
 import type { WorldAreasConfig } from "@/lib/game/manifests";
+// World size matches TerrainSystem.CONFIG in the game
+const FULL_WORLD_SIZE = 100; // 100x100 tile grid = 10km x 10km
 
 const log = logger.child("Page:world");
 
@@ -49,7 +56,12 @@ const log = logger.child("Page:world");
 // TOOL CONFIG
 // ============================================================================
 
-const TOOLS: Array<{ id: EditorTool; icon: typeof MousePointer2; label: string; shortcut: string }> = [
+const TOOLS: Array<{
+  id: EditorTool;
+  icon: typeof MousePointer2;
+  label: string;
+  shortcut: string;
+}> = [
   { id: "select", icon: MousePointer2, label: "Select", shortcut: "V" },
   { id: "place", icon: Plus, label: "Place", shortcut: "P" },
   { id: "erase", icon: Trash2, label: "Erase", shortcut: "E" },
@@ -68,7 +80,9 @@ export default function WorldEditorPage() {
 
   // Areas data
   const [areas, setAreas] = useState<WorldAreaDefinition[]>([]);
-  const [currentArea, setCurrentArea] = useState<WorldAreaDefinition | null>(null);
+  const [currentArea, setCurrentArea] = useState<WorldAreaDefinition | null>(
+    null,
+  );
   const [originalAreas, setOriginalAreas] = useState<WorldAreaDefinition[]>([]);
 
   // Selection state
@@ -80,21 +94,26 @@ export default function WorldEditorPage() {
   const [tool, setTool] = useState<EditorTool>("select");
   const [placingItem, setPlacingItem] = useState<PlaceableItem | null>(null);
   const [showGrid, setShowGrid] = useState(true);
-  
+  const [showFullWorld, setShowFullWorld] = useState(false);
+
   // Available entities for quick placement
-  const [availableEntities, setAvailableEntities] = useState<Array<{ id: string; name: string; type: "mob" | "npc" | "resource" }>>([]);
+  const [availableEntities, setAvailableEntities] = useState<
+    Array<{ id: string; name: string; type: "mob" | "npc" | "resource" }>
+  >([]);
 
   // History for undo/redo
   const [history, setHistory] = useState<WorldAreaDefinition[][]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
 
   // Live server connection
-  const [dataSource, setDataSource] = useState<"live" | "manifests">("manifests");
+  const [_dataSource, setDataSource] = useState<"live" | "manifests">(
+    "manifests",
+  );
   const {
     connection,
     connect: connectLive,
     disconnect: disconnectLive,
-    refresh: refreshLive,
+    refresh: _refreshLive,
   } = useLiveServer({
     autoConnect: false,
   });
@@ -114,29 +133,35 @@ export default function WorldEditorPage() {
         const res = await fetch("/api/game/manifests?type=areas");
         if (res.ok) {
           const data = await res.json();
-          
+
           if (data.success && data.data) {
             // Load the raw world areas config to convert to editor format
             const configRes = await fetch("/api/world/config");
             if (configRes.ok) {
               const configData: WorldAreasConfig = await configRes.json();
               const editorAreas = convertWorldAreasToEditor(configData);
-              
+
               setAreas(editorAreas);
-              setOriginalAreas(JSON.parse(JSON.stringify(editorAreas.map(a => ({
-                ...a,
-                tiles: Object.fromEntries(a.tiles),
-              })))));
-              
+              setOriginalAreas(
+                JSON.parse(
+                  JSON.stringify(
+                    editorAreas.map((a) => ({
+                      ...a,
+                      tiles: Object.fromEntries(a.tiles),
+                    })),
+                  ),
+                ),
+              );
+
               // Select first area by default
               if (editorAreas.length > 0) {
                 setCurrentArea(editorAreas[0]);
               }
-              
+
               // Initialize history
               setHistory([editorAreas]);
               setHistoryIndex(0);
-              
+
               log.info("Loaded world areas", { count: editorAreas.length });
             } else {
               // Fallback: create areas from flat list
@@ -145,27 +170,33 @@ export default function WorldEditorPage() {
             }
           }
         }
-        
+
         // Load available entities for quick placement
         try {
           const [npcsRes, resourcesRes] = await Promise.all([
             fetch("/api/game/manifests/npcs"),
             fetch("/api/game/manifests/resources"),
           ]);
-          
-          const entities: Array<{ id: string; name: string; type: "mob" | "npc" | "resource" }> = [];
-          
+
+          const entities: Array<{
+            id: string;
+            name: string;
+            type: "mob" | "npc" | "resource";
+          }> = [];
+
           if (npcsRes.ok) {
             const npcsData = await npcsRes.json();
-            npcsData.forEach((npc: { id: string; name: string; hostile?: boolean }) => {
-              entities.push({
-                id: npc.id,
-                name: npc.name,
-                type: npc.hostile ? "mob" : "npc",
-              });
-            });
+            npcsData.forEach(
+              (npc: { id: string; name: string; hostile?: boolean }) => {
+                entities.push({
+                  id: npc.id,
+                  name: npc.name,
+                  type: npc.hostile ? "mob" : "npc",
+                });
+              },
+            );
           }
-          
+
           if (resourcesRes.ok) {
             const resourcesData = await resourcesRes.json();
             resourcesData.forEach((res: { id: string; name: string }) => {
@@ -176,7 +207,7 @@ export default function WorldEditorPage() {
               });
             });
           }
-          
+
           setAvailableEntities(entities);
           log.info("Loaded available entities", { count: entities.length });
         } catch (e) {
@@ -202,21 +233,21 @@ export default function WorldEditorPage() {
     (updatedArea: WorldAreaDefinition) => {
       setCurrentArea(updatedArea);
       setAreas((prev) =>
-        prev.map((a) => (a.id === updatedArea.id ? updatedArea : a))
+        prev.map((a) => (a.id === updatedArea.id ? updatedArea : a)),
       );
 
       // Save to history
       setHistory((prev) => {
         const newHistory = prev.slice(0, historyIndex + 1);
         const newAreas = areas.map((a) =>
-          a.id === updatedArea.id ? updatedArea : a
+          a.id === updatedArea.id ? updatedArea : a,
         );
         newHistory.push(newAreas);
         return newHistory;
       });
       setHistoryIndex((prev) => prev + 1);
     },
-    [areas, historyIndex]
+    [areas, historyIndex],
   );
 
   // Handle palette item selection
@@ -224,26 +255,29 @@ export default function WorldEditorPage() {
     setPlacingItem(item);
     setTool("place");
   }, []);
-  
+
   // Handle placing entity from inspector
   const handlePlaceEntity = useCallback(
-    (entity: { id: string; name: string; type: "mob" | "npc" | "resource" }, coord: TileCoord) => {
+    (
+      entity: { id: string; name: string; type: "mob" | "npc" | "resource" },
+      coord: TileCoord,
+    ) => {
       if (!currentArea) return;
-      
+
       const item: PlaceableItem = {
         type: entity.type,
         entityId: entity.id,
         name: entity.name,
       };
-      
+
       const spawn = createSpawnFromItem(item, coord);
       const newArea = setTileSpawn(currentArea, coord, spawn);
       handleAreaChange(newArea);
       setSelectedSpawn(spawn);
-      
+
       log.info("Placed entity from inspector", { entityId: entity.id, coord });
     },
-    [currentArea, handleAreaChange]
+    [currentArea, handleAreaChange],
   );
 
   // Clear placing item when tool changes
@@ -293,10 +327,16 @@ export default function WorldEditorPage() {
       }
 
       // Update original for dirty tracking
-      setOriginalAreas(JSON.parse(JSON.stringify(areas.map(a => ({
-        ...a,
-        tiles: Object.fromEntries(a.tiles),
-      })))));
+      setOriginalAreas(
+        JSON.parse(
+          JSON.stringify(
+            areas.map((a) => ({
+              ...a,
+              tiles: Object.fromEntries(a.tiles),
+            })),
+          ),
+        ),
+      );
 
       toast({
         title: "World Saved",
@@ -339,19 +379,25 @@ export default function WorldEditorPage() {
       if (configRes.ok) {
         const configData: WorldAreasConfig = await configRes.json();
         const editorAreas = convertWorldAreasToEditor(configData);
-        
+
         setAreas(editorAreas);
-        setOriginalAreas(JSON.parse(JSON.stringify(editorAreas.map(a => ({
-          ...a,
-          tiles: Object.fromEntries(a.tiles),
-        })))));
-        
+        setOriginalAreas(
+          JSON.parse(
+            JSON.stringify(
+              editorAreas.map((a) => ({
+                ...a,
+                tiles: Object.fromEntries(a.tiles),
+              })),
+            ),
+          ),
+        );
+
         // Keep current area selection if still exists
         if (currentArea) {
           const updated = editorAreas.find((a) => a.id === currentArea.id);
           setCurrentArea(updated || editorAreas[0] || null);
         }
-        
+
         toast({
           title: "Refreshed",
           description: "World data reloaded from manifests",
@@ -374,13 +420,60 @@ export default function WorldEditorPage() {
     window.open("http://localhost:3333", "_blank");
   }, []);
 
+  // Full world view - shows entire 100x100 tile world with procedural terrain
+  const fullWorldArea = useMemo((): WorldAreaDefinition => {
+    const halfSize = FULL_WORLD_SIZE / 2; // 50 tiles in each direction
+
+    // Merge all area tiles into one combined tiles Map
+    const allTiles = new Map<string, Tile>();
+    for (const area of areas) {
+      for (const [key, tile] of area.tiles) {
+        allTiles.set(key, tile);
+      }
+    }
+
+    // Count spawns
+    let mobCount = 0;
+    let npcCount = 0;
+    let resourceCount = 0;
+    for (const tile of allTiles.values()) {
+      for (const spawn of tile.contents.spawns) {
+        if (spawn.type === "mob") mobCount++;
+        else if (spawn.type === "npc") npcCount++;
+        else if (spawn.type === "resource") resourceCount++;
+      }
+    }
+
+    return {
+      id: "__full_world__",
+      name: "Full World",
+      description: "Complete 10km x 10km world view with procedural terrain",
+      bounds: {
+        minX: -halfSize,
+        maxX: halfSize,
+        minZ: -halfSize,
+        maxZ: halfSize,
+      },
+      tiles: allTiles,
+      spawnCounts: {
+        mob: mobCount,
+        npc: npcCount,
+        resource: resourceCount,
+      },
+    };
+  }, [areas]);
+
+  // Active area - either current area or full world view
+  const activeArea = showFullWorld ? fullWorldArea : currentArea;
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
       if (
-        e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLTextAreaElement ||
-        e.target instanceof HTMLSelectElement
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT"
       ) {
         return;
       }
@@ -438,10 +531,12 @@ export default function WorldEditorPage() {
   // Check if dirty (has unsaved changes)
   const isDirty = useMemo(() => {
     // Simple check - compare serialized state
-    const current = JSON.stringify(areas.map(a => ({
-      ...a,
-      tiles: Object.fromEntries(a.tiles),
-    })));
+    const current = JSON.stringify(
+      areas.map((a) => ({
+        ...a,
+        tiles: Object.fromEntries(a.tiles),
+      })),
+    );
     const original = JSON.stringify(originalAreas);
     return current !== original;
   }, [areas, originalAreas]);
@@ -466,7 +561,7 @@ export default function WorldEditorPage() {
   return (
     <StudioPageLayout
       title="World Editor"
-      icon={Map}
+      icon={MapIcon}
       sidebar={leftSidebar}
       headerContent={
         <div className="flex items-center gap-2">
@@ -518,7 +613,7 @@ export default function WorldEditorPage() {
                     "p-1.5 rounded-md transition-colors",
                     tool === t.id
                       ? "bg-cyan-500/20 text-cyan-400"
-                      : "hover:bg-white/5 text-muted-foreground hover:text-foreground"
+                      : "hover:bg-white/5 text-muted-foreground hover:text-foreground",
                   )}
                   title={`${t.label} (${t.shortcut})`}
                 >
@@ -557,7 +652,7 @@ export default function WorldEditorPage() {
                   ? "bg-green-500/20 text-green-400 border border-green-500/30"
                   : connection.connecting
                     ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30"
-                    : "bg-glass-bg text-muted-foreground border border-glass-border hover:border-cyan-500/30"
+                    : "bg-glass-bg text-muted-foreground border border-glass-border hover:border-cyan-500/30",
               )}
               title={
                 connection.connected
@@ -613,14 +708,33 @@ export default function WorldEditorPage() {
 
           <div className="w-px h-6 bg-glass-border mx-2" />
 
+          {/* Full World toggle */}
+          <button
+            onClick={() => setShowFullWorld(!showFullWorld)}
+            className={cn(
+              "p-2 rounded transition-colors flex items-center gap-1",
+              showFullWorld
+                ? "bg-blue-500/20 text-blue-400"
+                : "hover:bg-glass-bg",
+            )}
+            title={
+              showFullWorld
+                ? "Showing full world (100x100 tiles) - click to show area only"
+                : "Click to show full world with procedural terrain"
+            }
+          >
+            <Maximize2 className="w-4 h-4" />
+            <span className="text-xs hidden sm:inline">
+              {showFullWorld ? "World" : "Area"}
+            </span>
+          </button>
+
           {/* Grid toggle */}
           <button
             onClick={() => setShowGrid(!showGrid)}
             className={cn(
               "p-2 rounded transition-colors",
-              showGrid
-                ? "bg-cyan-500/20 text-cyan-400"
-                : "hover:bg-glass-bg"
+              showGrid ? "bg-cyan-500/20 text-cyan-400" : "hover:bg-glass-bg",
             )}
             title="Toggle grid (G)"
           >
@@ -660,13 +774,15 @@ export default function WorldEditorPage() {
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
             <Loader2 className="w-8 h-8 animate-spin text-cyan-500 mx-auto mb-2" />
-            <p className="text-sm text-muted-foreground">Loading world areas...</p>
+            <p className="text-sm text-muted-foreground">
+              Loading world areas...
+            </p>
           </div>
         </div>
       ) : (
         <div className="absolute inset-0 flex">
           <TileGridEditor
-            area={currentArea}
+            area={activeArea}
             onAreaChange={handleAreaChange}
             selectedTile={selectedTile}
             onSelectTile={setSelectedTile}
@@ -680,20 +796,20 @@ export default function WorldEditorPage() {
             }}
             tool={tool}
           />
-          
+
           {/* Floating Tile Inspector Panel */}
-          <div 
+          <div
             className={cn(
               "absolute top-4 right-4 w-72 max-h-[calc(100%-2rem)] bg-zinc-900/95 backdrop-blur-sm border border-zinc-700 rounded-lg shadow-xl transition-all duration-200 overflow-hidden",
-              selectedTile 
-                ? "opacity-100 translate-x-0" 
-                : "opacity-0 translate-x-4 pointer-events-none"
+              selectedTile
+                ? "opacity-100 translate-x-0"
+                : "opacity-0 translate-x-4 pointer-events-none",
             )}
           >
             {/* Panel Header with close button */}
             <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-700 bg-zinc-800/50">
               <div className="flex items-center gap-2">
-                <Map className="w-4 h-4 text-cyan-400" />
+                <MapPin className="w-4 h-4 text-cyan-400" />
                 <span className="text-sm font-medium">Tile Inspector</span>
               </div>
               <button
@@ -707,7 +823,7 @@ export default function WorldEditorPage() {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            
+
             {/* Inspector Content */}
             <TileInspector
               area={currentArea}

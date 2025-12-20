@@ -10,7 +10,7 @@ import {
   User,
   Skull,
   TreeDeciduous,
-  Map,
+  Map as MapIcon,
   Coins,
   Music,
   Building,
@@ -41,7 +41,10 @@ export interface AssetNodeData {
 // CATEGORY ICONS
 // =============================================================================
 
-const CATEGORY_ICONS: Record<AssetCategory, React.ComponentType<{ className?: string; style?: React.CSSProperties }>> = {
+const CATEGORY_ICONS: Record<
+  AssetCategory,
+  React.ComponentType<{ className?: string; style?: React.CSSProperties }>
+> = {
   weapon: Sword,
   armor: Shield,
   tool: Pickaxe,
@@ -54,7 +57,7 @@ const CATEGORY_ICONS: Record<AssetCategory, React.ComponentType<{ className?: st
   prop: Box,
   currency: Coins,
   music: Music,
-  biome: Map,
+  biome: MapIcon,
   environment: Mountain,
   audio: Volume2,
   avatar: User,

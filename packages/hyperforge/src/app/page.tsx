@@ -9,7 +9,7 @@ import {
   ChevronDown,
   Globe,
   Upload,
-  Map,
+  Map as MapIcon,
 } from "lucide-react";
 import { Viewport3D } from "@/components/viewer/Viewport3D";
 import { AssetLibrary } from "@/components/vault/AssetLibrary";
@@ -143,7 +143,7 @@ export default function HomePage() {
           text-muted-foreground hover:text-foreground hover:bg-glass-bg
         `}
       >
-        <Map className="w-4 h-4 flex-shrink-0" />
+        <MapIcon className="w-4 h-4 flex-shrink-0" />
         {!sidebarCollapsed && <span>World Editor</span>}
       </Link>
 

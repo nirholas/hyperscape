@@ -32,8 +32,9 @@ const nextConfig = {
     ],
   },
   experimental: {
+    // NOTE: lucide-react removed from optimizePackageImports because its 'Map' icon
+    // conflicts with the native JavaScript Map constructor due to webpack barrel optimization
     optimizePackageImports: [
-      'lucide-react',
       '@react-three/fiber',
       '@react-three/drei',
       '@xyflow/react',

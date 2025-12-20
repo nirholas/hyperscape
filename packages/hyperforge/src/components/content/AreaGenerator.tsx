@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import {
-  Map,
+  Map as MapIcon,
   Wand2,
   Loader2,
   Save,
@@ -196,7 +196,7 @@ export function AreaGenerator({ onContentGenerated }: AreaGeneratorProps) {
       {/* Basic Info */}
       <GlassPanel className="p-4 space-y-4">
         <h3 className="font-semibold flex items-center gap-2">
-          <Map className="w-4 h-4" />
+          <MapIcon className="w-4 h-4" />
           Area Details
         </h3>
 

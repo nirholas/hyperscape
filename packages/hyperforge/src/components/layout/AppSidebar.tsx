@@ -17,7 +17,7 @@ import {
   Settings,
   Box,
   Palette,
-  Map,
+  Map as MapIcon,
   LayoutDashboard,
   GitGraph,
   type LucideIcon,
@@ -196,7 +196,11 @@ export function AppSidebar({
             {/* Generation Studios */}
             <Link
               href="/images/studio"
-              title={collapsed ? "Image Studio" : "Generate concept art, sprites, and textures"}
+              title={
+                collapsed
+                  ? "Image Studio"
+                  : "Generate concept art, sprites, and textures"
+              }
               className={`
                 w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm 
                 transition-all duration-200
@@ -213,7 +217,9 @@ export function AppSidebar({
             </Link>
             <Link
               href="/audio"
-              title={collapsed ? "Audio Studio" : "Voice, SFX & Music generation"}
+              title={
+                collapsed ? "Audio Studio" : "Voice, SFX & Music generation"
+              }
               className={`
                 w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm
                 transition-all duration-200
@@ -230,7 +236,11 @@ export function AppSidebar({
             </Link>
             <Link
               href="/content/generate"
-              title={collapsed ? "Content Studio" : "Generate NPCs, quests, areas & items"}
+              title={
+                collapsed
+                  ? "Content Studio"
+                  : "Generate NPCs, quests, areas & items"
+              }
               className={`
                 w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm
                 transition-all duration-200
@@ -247,7 +257,9 @@ export function AppSidebar({
             </Link>
 
             {/* Divider */}
-            {!collapsed && <div className="my-2 border-t border-glass-border/50" />}
+            {!collapsed && (
+              <div className="my-2 border-t border-glass-border/50" />
+            )}
 
             {/* 3D Processing Studios */}
             {studioPages.map((page) => {
@@ -300,12 +312,14 @@ export function AppSidebar({
                 }
               `}
             >
-              <Map className="w-4 h-4 flex-shrink-0" />
+              <MapIcon className="w-4 h-4 flex-shrink-0" />
               {!collapsed && <span>World Editor</span>}
             </Link>
             <Link
               href="/graph"
-              title={collapsed ? "Relationship Graph" : "Asset relationship graph"}
+              title={
+                collapsed ? "Relationship Graph" : "Asset relationship graph"
+              }
               className={`
                 w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm
                 transition-all duration-200

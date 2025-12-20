@@ -265,6 +265,14 @@ export interface MobSpawn {
   maxCount: number;
 }
 
+/** Terrain tile definition for visual map features */
+export interface TerrainTile {
+  x: number;
+  z: number;
+  type: string; // "water" | "lake" | "road" | "path" | "rock" | "sand" | etc.
+  walkable?: boolean;
+}
+
 export interface WorldArea {
   id: string;
   name: string;
@@ -276,6 +284,8 @@ export interface WorldArea {
   npcs: NpcSpawn[];
   resources: ResourceSpawn[];
   mobSpawns: MobSpawn[];
+  /** Terrain features like lakes, roads, etc. */
+  terrain?: TerrainTile[];
 }
 
 export interface WorldAreasConfig {
@@ -446,7 +456,9 @@ export async function getAllItems(): Promise<ItemDefinition[]> {
   return Array.from(cache.items.values());
 }
 
-export async function getItemsByType(type: ItemDefinition["type"]): Promise<ItemDefinition[]> {
+export async function getItemsByType(
+  type: ItemDefinition["type"],
+): Promise<ItemDefinition[]> {
   await ensureLoaded();
   return Array.from(cache.items.values()).filter((item) => item.type === type);
 }
@@ -464,16 +476,22 @@ export async function getAllNpcs(): Promise<NpcDefinition[]> {
 
 export async function getMobs(): Promise<NpcDefinition[]> {
   await ensureLoaded();
-  return Array.from(cache.npcs.values()).filter((npc) => npc.category === "mob");
+  return Array.from(cache.npcs.values()).filter(
+    (npc) => npc.category === "mob",
+  );
 }
 
 export async function getNeutralNpcs(): Promise<NpcDefinition[]> {
   await ensureLoaded();
-  return Array.from(cache.npcs.values()).filter((npc) => npc.category === "neutral");
+  return Array.from(cache.npcs.values()).filter(
+    (npc) => npc.category === "neutral",
+  );
 }
 
 // --- Resources ---
-export async function getResource(id: string): Promise<ResourceDefinition | undefined> {
+export async function getResource(
+  id: string,
+): Promise<ResourceDefinition | undefined> {
   await ensureLoaded();
   return cache.resources.get(id);
 }
@@ -483,7 +501,9 @@ export async function getAllResources(): Promise<ResourceDefinition[]> {
   return Array.from(cache.resources.values());
 }
 
-export async function getResourcesBySkill(skill: string): Promise<ResourceDefinition[]> {
+export async function getResourcesBySkill(
+  skill: string,
+): Promise<ResourceDefinition[]> {
   await ensureLoaded();
   return Array.from(cache.resources.values()).filter(
     (r) => r.harvestSkill === skill,
@@ -491,7 +511,9 @@ export async function getResourcesBySkill(skill: string): Promise<ResourceDefini
 }
 
 // --- Stores ---
-export async function getStore(id: string): Promise<StoreDefinition | undefined> {
+export async function getStore(
+  id: string,
+): Promise<StoreDefinition | undefined> {
   await ensureLoaded();
   return cache.stores.get(id);
 }
@@ -502,7 +524,9 @@ export async function getAllStores(): Promise<StoreDefinition[]> {
 }
 
 // --- Music ---
-export async function getMusicTrack(id: string): Promise<MusicTrack | undefined> {
+export async function getMusicTrack(
+  id: string,
+): Promise<MusicTrack | undefined> {
   await ensureLoaded();
   return cache.music.get(id);
 }
@@ -512,9 +536,13 @@ export async function getAllMusic(): Promise<MusicTrack[]> {
   return Array.from(cache.music.values());
 }
 
-export async function getMusicByCategory(category: string): Promise<MusicTrack[]> {
+export async function getMusicByCategory(
+  category: string,
+): Promise<MusicTrack[]> {
   await ensureLoaded();
-  return Array.from(cache.music.values()).filter((t) => t.category === category);
+  return Array.from(cache.music.values()).filter(
+    (t) => t.category === category,
+  );
 }
 
 export async function getMusicByMood(mood: string): Promise<MusicTrack[]> {
@@ -523,7 +551,9 @@ export async function getMusicByMood(mood: string): Promise<MusicTrack[]> {
 }
 
 // --- Buildings ---
-export async function getBuilding(id: string): Promise<BuildingDefinition | undefined> {
+export async function getBuilding(
+  id: string,
+): Promise<BuildingDefinition | undefined> {
   await ensureLoaded();
   return cache.buildings.get(id);
 }
@@ -599,7 +629,11 @@ export async function getWorldEntities(): Promise<{
   }
 
   const entities: WorldEntity[] = [];
-  const areaSummaries: Array<{ id: string; name: string; entityCount: number }> = [];
+  const areaSummaries: Array<{
+    id: string;
+    name: string;
+    entityCount: number;
+  }> = [];
 
   const allAreaCategories = [
     worldAreas.starterTowns,
@@ -621,10 +655,19 @@ export async function getWorldEntities(): Promise<{
           entities.push({
             id: `${area.id}_${spawn.id}_${Math.round(spawn.position.x)}_${Math.round(spawn.position.z)}`,
             name: def?.name || spawn.id,
-            type: spawn.type === "bank" ? "bank" : def?.category === "mob" ? "mob" : "npc",
+            type:
+              spawn.type === "bank"
+                ? "bank"
+                : def?.category === "mob"
+                  ? "mob"
+                  : "npc",
             position: spawn.position,
             scale: def?.appearance?.scale
-              ? { x: def.appearance.scale, y: def.appearance.scale, z: def.appearance.scale }
+              ? {
+                  x: def.appearance.scale,
+                  y: def.appearance.scale,
+                  z: def.appearance.scale,
+                }
               : undefined,
             modelPath: def?.appearance?.modelPath,
             spawnArea: area.id,
@@ -677,7 +720,11 @@ export async function getWorldEntities(): Promise<{
             type: "mob",
             position: spawn.position,
             scale: def?.appearance?.scale
-              ? { x: def.appearance.scale, y: def.appearance.scale, z: def.appearance.scale }
+              ? {
+                  x: def.appearance.scale,
+                  y: def.appearance.scale,
+                  z: def.appearance.scale,
+                }
               : undefined,
             modelPath: def?.appearance?.modelPath,
             spawnArea: area.id,

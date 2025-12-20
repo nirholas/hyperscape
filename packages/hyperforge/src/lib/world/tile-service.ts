@@ -18,11 +18,7 @@ import type {
   AreaBounds,
   PlaceableItem,
 } from "./tile-types";
-import {
-  tileKey,
-  isInBounds,
-  getAreaCategory,
-} from "./tile-types";
+import { tileKey, isInBounds, getAreaCategory } from "./tile-types";
 import type {
   WorldAreasConfig,
   NpcDefinition,
@@ -40,7 +36,7 @@ const log = logger.child("TileService");
  */
 export function getTileContents(
   area: WorldAreaDefinition,
-  coord: TileCoord
+  coord: TileCoord,
 ): TileContents | null {
   const key = tileKey(coord);
   const tile = area.tiles.get(key);
@@ -66,7 +62,7 @@ export function getTileContents(
  */
 export function getOrCreateTile(
   area: WorldAreaDefinition,
-  coord: TileCoord
+  coord: TileCoord,
 ): Tile {
   const key = tileKey(coord);
   let tile = area.tiles.get(key);
@@ -93,12 +89,14 @@ export function getOrCreateTile(
 export function setTileSpawn(
   area: WorldAreaDefinition,
   coord: TileCoord,
-  spawn: TileSpawn
+  spawn: TileSpawn,
 ): WorldAreaDefinition {
   const tile = getOrCreateTile(area, coord);
 
   // Check if spawn already exists
-  const existingIndex = tile.contents.spawns.findIndex((s) => s.id === spawn.id);
+  const existingIndex = tile.contents.spawns.findIndex(
+    (s) => s.id === spawn.id,
+  );
 
   if (existingIndex >= 0) {
     // Update existing spawn
@@ -127,7 +125,7 @@ export function setTileSpawn(
 export function removeTileSpawn(
   area: WorldAreaDefinition,
   coord: TileCoord,
-  spawnId: string
+  spawnId: string,
 ): WorldAreaDefinition {
   const key = tileKey(coord);
   const tile = area.tiles.get(key);
@@ -164,7 +162,7 @@ export function removeTileSpawn(
 export function getTilesInRadius(
   center: TileCoord,
   radius: number,
-  bounds?: AreaBounds
+  bounds?: AreaBounds,
 ): TileCoord[] {
   const tiles: TileCoord[] = [];
   const radiusSquared = radius * radius;
@@ -191,7 +189,7 @@ export function getTilesInRadius(
  */
 export function getTilesWithSpawns(area: WorldAreaDefinition): Tile[] {
   return Array.from(area.tiles.values()).filter(
-    (tile) => tile.contents.spawns.length > 0
+    (tile) => tile.contents.spawns.length > 0,
   );
 }
 
@@ -240,7 +238,7 @@ export interface SpawnValidation {
  */
 export function validateMobSpawn(
   spawn: MobSpawnConfig,
-  availableMobs: NpcDefinition[]
+  availableMobs: NpcDefinition[],
 ): SpawnValidation {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -250,7 +248,9 @@ export function validateMobSpawn(
   if (!mobDef) {
     errors.push(`Mob "${spawn.entityId}" not found in npcs.json`);
   } else if (mobDef.category !== "mob") {
-    warnings.push(`"${spawn.entityId}" is not a mob (category: ${mobDef.category})`);
+    warnings.push(
+      `"${spawn.entityId}" is not a mob (category: ${mobDef.category})`,
+    );
   }
 
   // Validate spawn radius
@@ -284,7 +284,7 @@ export function validateMobSpawn(
  */
 export function validateNpcSpawn(
   spawn: NpcSpawnConfig,
-  availableNpcs: NpcDefinition[]
+  availableNpcs: NpcDefinition[],
 ): SpawnValidation {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -312,7 +312,7 @@ export function validateNpcSpawn(
  */
 export function validateResourceSpawn(
   spawn: ResourceSpawnConfig,
-  availableResources: ResourceDefinition[]
+  availableResources: ResourceDefinition[],
 ): SpawnValidation {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -337,7 +337,7 @@ export function validateSpawn(
   spawn: TileSpawn,
   availableMobs: NpcDefinition[],
   availableNpcs: NpcDefinition[],
-  availableResources: ResourceDefinition[]
+  availableResources: ResourceDefinition[],
 ): SpawnValidation {
   switch (spawn.type) {
     case "mob":
@@ -360,7 +360,7 @@ export function createEmptyArea(
   id: string,
   name: string,
   bounds: AreaBounds,
-  difficultyLevel: 0 | 1 | 2 | 3 = 0
+  difficultyLevel: 0 | 1 | 2 | 3 = 0,
 ): WorldAreaDefinition {
   return {
     id,
@@ -380,7 +380,7 @@ export function createEmptyArea(
  */
 export function resizeAreaBounds(
   area: WorldAreaDefinition,
-  newBounds: AreaBounds
+  newBounds: AreaBounds,
 ): WorldAreaDefinition {
   // Remove tiles outside new bounds
   const keysToRemove: string[] = [];
@@ -426,7 +426,7 @@ export function areasOverlap(a: AreaBounds, b: AreaBounds): boolean {
 export function validateAreaBounds(
   bounds: AreaBounds,
   existingAreas: WorldAreaDefinition[],
-  excludeAreaId?: string
+  excludeAreaId?: string,
 ): { valid: boolean; overlappingAreas: string[] } {
   const overlapping: string[] = [];
 
@@ -451,7 +451,7 @@ export function validateAreaBounds(
  * Convert world-areas.json format to editor format
  */
 export function convertWorldAreasToEditor(
-  config: WorldAreasConfig
+  config: WorldAreasConfig,
 ): WorldAreaDefinition[] {
   const areas: WorldAreaDefinition[] = [];
 
@@ -569,12 +569,44 @@ export function convertWorldAreasToEditor(
         }
       }
 
+      // Convert terrain tiles (lakes, roads, etc.)
+      if (rawArea.terrain && rawArea.terrain.length > 0) {
+        log.debug("Processing terrain tiles", {
+          areaId: rawArea.id,
+          terrainCount: rawArea.terrain.length,
+          firstTerrain: rawArea.terrain[0],
+        });
+
+        for (const terrainTile of rawArea.terrain) {
+          const coord = { x: terrainTile.x, z: terrainTile.z };
+          const key = tileKey(coord);
+          const tile = tiles.get(key) || {
+            coord,
+            contents: {
+              coord,
+              spawns: [],
+              walkable:
+                terrainTile.walkable ??
+                (terrainTile.type !== "water" && terrainTile.type !== "lake"),
+              safeZone: rawArea.safeZone,
+            },
+          };
+
+          tile.contents.terrain = terrainTile.type;
+          tile.contents.walkable =
+            terrainTile.walkable ??
+            (terrainTile.type !== "water" && terrainTile.type !== "lake");
+          tiles.set(key, tile);
+        }
+      }
+
       log.info("Converted area to editor format", {
         areaId: rawArea.id,
         tileCount: tiles.size,
         mobCount,
         npcCount,
         resourceCount,
+        terrainTiles: rawArea.terrain?.length || 0,
         bounds: rawArea.bounds,
       });
 
@@ -587,14 +619,18 @@ export function convertWorldAreasToEditor(
         biomeType: rawArea.biomeType,
         safeZone: rawArea.safeZone,
         tiles,
-        spawnCounts: { mobs: mobCount, npcs: npcCount, resources: resourceCount },
+        spawnCounts: {
+          mobs: mobCount,
+          npcs: npcCount,
+          resources: resourceCount,
+        },
       });
     }
   }
 
-  log.info("Converted world areas to editor format", { 
+  log.info("Converted world areas to editor format", {
     totalAreas: areas.length,
-    areasWithTiles: areas.filter(a => a.tiles.size > 0).length,
+    areasWithTiles: areas.filter((a) => a.tiles.size > 0).length,
   });
 
   return areas;
@@ -604,7 +640,7 @@ export function convertWorldAreasToEditor(
  * Convert editor format back to world-areas.json format
  */
 export function convertEditorToWorldAreas(
-  areas: WorldAreaDefinition[]
+  areas: WorldAreaDefinition[],
 ): WorldAreasConfig {
   const config: WorldAreasConfig = {
     starterTowns: {},
@@ -633,8 +669,17 @@ export function convertEditorToWorldAreas(
       maxCount: number;
     }> = [];
 
-    // Convert tiles back to spawn arrays
+    // Terrain tiles array
+    const terrain: Array<{
+      x: number;
+      z: number;
+      type: string;
+      walkable?: boolean;
+    }> = [];
+
+    // Convert tiles back to spawn arrays and terrain
     for (const tile of area.tiles.values()) {
+      // Convert spawns
       for (const spawn of tile.contents.spawns) {
         switch (spawn.type) {
           case "npc": {
@@ -668,6 +713,16 @@ export function convertEditorToWorldAreas(
           }
         }
       }
+
+      // Convert terrain
+      if (tile.contents.terrain) {
+        terrain.push({
+          x: tile.coord.x,
+          z: tile.coord.z,
+          type: tile.contents.terrain,
+          walkable: tile.contents.walkable,
+        });
+      }
     }
 
     config[category][area.id] = {
@@ -681,6 +736,7 @@ export function convertEditorToWorldAreas(
       npcs,
       resources,
       mobSpawns,
+      ...(terrain.length > 0 ? { terrain } : {}),
     };
   }
 
@@ -694,7 +750,11 @@ export function convertEditorToWorldAreas(
 /**
  * Create a new spawn ID
  */
-function generateSpawnId(type: string, entityId: string, coord: TileCoord): string {
+function generateSpawnId(
+  type: string,
+  entityId: string,
+  coord: TileCoord,
+): string {
   const timestamp = Date.now().toString(36).slice(-4);
   return `${type}_${entityId}_${coord.x}_${coord.z}_${timestamp}`;
 }
@@ -704,11 +764,11 @@ function generateSpawnId(type: string, entityId: string, coord: TileCoord): stri
  */
 export function createMobSpawn(
   item: PlaceableItem,
-  coord: TileCoord
+  coord: TileCoord,
 ): MobSpawnConfig {
   const defaults = item.defaults as MobSpawnConfig | undefined;
   const respawnTicks = defaults?.respawnTicks;
-  
+
   return {
     id: generateSpawnId("mob", item.entityId, coord),
     type: "mob",
@@ -726,11 +786,11 @@ export function createMobSpawn(
  */
 export function createNpcSpawn(
   item: PlaceableItem,
-  coord: TileCoord
+  coord: TileCoord,
 ): NpcSpawnConfig {
   const defaults = item.defaults as NpcSpawnConfig | undefined;
   const storeId = defaults?.storeId;
-  
+
   return {
     id: generateSpawnId("npc", item.entityId, coord),
     type: "npc",
@@ -747,7 +807,7 @@ export function createNpcSpawn(
  */
 export function createResourceSpawn(
   item: PlaceableItem,
-  coord: TileCoord
+  coord: TileCoord,
 ): ResourceSpawnConfig {
   return {
     id: generateSpawnId("resource", item.entityId, coord),
@@ -755,7 +815,8 @@ export function createResourceSpawn(
     entityId: item.entityId,
     name: item.name,
     position: { x: coord.x + 0.5, y: 0, z: coord.z + 0.5 },
-    resourceType: (item.defaults as ResourceSpawnConfig)?.resourceType ?? "generic",
+    resourceType:
+      (item.defaults as ResourceSpawnConfig)?.resourceType ?? "generic",
   };
 }
 
@@ -764,7 +825,7 @@ export function createResourceSpawn(
  */
 export function createSpawnFromItem(
   item: PlaceableItem,
-  coord: TileCoord
+  coord: TileCoord,
 ): TileSpawn {
   switch (item.type) {
     case "mob":
@@ -787,21 +848,21 @@ export function createSpawnFromItem(
 export function getTileAtPosition(
   area: WorldAreaDefinition,
   x: number,
-  z: number
+  z: number,
 ): Tile | null {
   const coord = { x: Math.floor(x), z: Math.floor(z) };
-  
+
   if (!isInBounds(coord, area.bounds)) {
     return null;
   }
-  
+
   const key = tileKey(coord);
   const existingTile = area.tiles.get(key);
-  
+
   if (existingTile) {
     return existingTile;
   }
-  
+
   // Return an empty virtual tile (not stored in map)
   return {
     coord,
@@ -821,27 +882,27 @@ export function getTileAtPosition(
 export function setTileSpawns(
   area: WorldAreaDefinition,
   coord: TileCoord,
-  spawns: TileSpawn[]
+  spawns: TileSpawn[],
 ): WorldAreaDefinition {
   const tile = getOrCreateTile(area, coord);
-  
+
   // Replace all spawns
   tile.contents.spawns = [...spawns];
-  
+
   // If no spawns and tile is walkable, optionally remove it
   if (spawns.length === 0 && tile.contents.walkable && !tile.contents.terrain) {
     area.tiles.delete(tileKey(coord));
   }
-  
+
   // Update spawn counts
   updateSpawnCounts(area);
-  
+
   log.debug("Set tile spawns (batch)", {
     areaId: area.id,
     coord,
     spawnCount: spawns.length,
   });
-  
+
   return area;
 }
 
@@ -850,28 +911,28 @@ export function setTileSpawns(
  */
 export function clearTile(
   area: WorldAreaDefinition,
-  coord: TileCoord
+  coord: TileCoord,
 ): WorldAreaDefinition {
   const key = tileKey(coord);
   const tile = area.tiles.get(key);
-  
+
   if (!tile) {
     return area;
   }
-  
+
   const hadSpawns = tile.contents.spawns.length > 0;
   tile.contents.spawns = [];
-  
+
   // If tile has no special properties, remove it entirely
   if (tile.contents.walkable && !tile.contents.terrain) {
     area.tiles.delete(key);
   }
-  
+
   if (hadSpawns) {
     updateSpawnCounts(area);
     log.debug("Cleared tile", { areaId: area.id, coord });
   }
-  
+
   return area;
 }
 
@@ -882,51 +943,56 @@ export function moveTileSpawn(
   area: WorldAreaDefinition,
   spawnId: string,
   fromCoord: TileCoord,
-  toCoord: TileCoord
+  toCoord: TileCoord,
 ): WorldAreaDefinition {
   const fromKey = tileKey(fromCoord);
   const fromTile = area.tiles.get(fromKey);
-  
+
   if (!fromTile) {
-    log.warn("Cannot move spawn: source tile not found", { fromCoord, spawnId });
+    log.warn("Cannot move spawn: source tile not found", {
+      fromCoord,
+      spawnId,
+    });
     return area;
   }
-  
+
   // Find the spawn
-  const spawnIndex = fromTile.contents.spawns.findIndex((s) => s.id === spawnId);
+  const spawnIndex = fromTile.contents.spawns.findIndex(
+    (s) => s.id === spawnId,
+  );
   if (spawnIndex === -1) {
     log.warn("Cannot move spawn: spawn not found", { fromCoord, spawnId });
     return area;
   }
-  
+
   // Get the spawn before removing (we know it exists from index check)
   const spawn = fromTile.contents.spawns[spawnIndex]!;
-  
+
   // Remove from source tile
   fromTile.contents.spawns.splice(spawnIndex, 1);
-  
+
   // Update spawn position to center of new tile
   const updatedSpawn: TileSpawn = {
     ...spawn,
     position: { x: toCoord.x + 0.5, y: spawn.position.y, z: toCoord.z + 0.5 },
   } as TileSpawn;
-  
+
   // Add to destination tile
   const toTile = getOrCreateTile(area, toCoord);
   toTile.contents.spawns.push(updatedSpawn);
-  
+
   // Clean up empty source tile
   if (fromTile.contents.spawns.length === 0 && fromTile.contents.walkable) {
     area.tiles.delete(fromKey);
   }
-  
+
   log.debug("Moved tile spawn", {
     areaId: area.id,
     spawnId,
     from: fromCoord,
     to: toCoord,
   });
-  
+
   return area;
 }
 
@@ -937,26 +1003,29 @@ export function updateSpawn(
   area: WorldAreaDefinition,
   coord: TileCoord,
   spawnId: string,
-  updates: Partial<TileSpawn>
+  updates: Partial<TileSpawn>,
 ): WorldAreaDefinition {
   const key = tileKey(coord);
   const tile = area.tiles.get(key);
-  
+
   if (!tile) {
     return area;
   }
-  
+
   const spawnIndex = tile.contents.spawns.findIndex((s) => s.id === spawnId);
   if (spawnIndex === -1) {
     return area;
   }
-  
+
   // Merge updates into spawn (preserving type-specific properties)
   const currentSpawn = tile.contents.spawns[spawnIndex];
-  tile.contents.spawns[spawnIndex] = { ...currentSpawn, ...updates } as TileSpawn;
-  
+  tile.contents.spawns[spawnIndex] = {
+    ...currentSpawn,
+    ...updates,
+  } as TileSpawn;
+
   log.debug("Updated spawn", { areaId: area.id, coord, spawnId, updates });
-  
+
   return area;
 }
 
@@ -970,10 +1039,10 @@ export function setTileProperties(
     walkable?: boolean;
     safeZone?: boolean;
     terrain?: string;
-  }
+  },
 ): WorldAreaDefinition {
   const tile = getOrCreateTile(area, coord);
-  
+
   if (properties.walkable !== undefined) {
     tile.contents.walkable = properties.walkable;
   }
@@ -983,9 +1052,9 @@ export function setTileProperties(
   if (properties.terrain !== undefined) {
     tile.contents.terrain = properties.terrain;
   }
-  
+
   log.debug("Set tile properties", { areaId: area.id, coord, properties });
-  
+
   return area;
 }
 
@@ -994,10 +1063,10 @@ export function setTileProperties(
  */
 export function getSpawnsByType(
   area: WorldAreaDefinition,
-  type: "mob" | "npc" | "resource"
+  type: "mob" | "npc" | "resource",
 ): Array<{ coord: TileCoord; spawn: TileSpawn }> {
   const results: Array<{ coord: TileCoord; spawn: TileSpawn }> = [];
-  
+
   for (const tile of area.tiles.values()) {
     for (const spawn of tile.contents.spawns) {
       if (spawn.type === type) {
@@ -1005,7 +1074,7 @@ export function getSpawnsByType(
       }
     }
   }
-  
+
   return results;
 }
 
@@ -1014,7 +1083,7 @@ export function getSpawnsByType(
  */
 export function findSpawnById(
   area: WorldAreaDefinition,
-  spawnId: string
+  spawnId: string,
 ): { coord: TileCoord; spawn: TileSpawn } | null {
   for (const tile of area.tiles.values()) {
     const spawn = tile.contents.spawns.find((s) => s.id === spawnId);
@@ -1032,30 +1101,34 @@ export function duplicateSpawn(
   area: WorldAreaDefinition,
   sourceCoord: TileCoord,
   spawnId: string,
-  targetCoord: TileCoord
+  targetCoord: TileCoord,
 ): { area: WorldAreaDefinition; newSpawnId: string } | null {
   const sourceTile = area.tiles.get(tileKey(sourceCoord));
   if (!sourceTile) {
     return null;
   }
-  
+
   const sourceSpawn = sourceTile.contents.spawns.find((s) => s.id === spawnId);
   if (!sourceSpawn) {
     return null;
   }
-  
+
   // Create new spawn with unique ID
   const timestamp = Date.now().toString(36).slice(-4);
   const newSpawnId = `${sourceSpawn.type}_${sourceSpawn.entityId}_${targetCoord.x}_${targetCoord.z}_${timestamp}`;
-  
+
   const newSpawn: TileSpawn = {
     ...sourceSpawn,
     id: newSpawnId,
-    position: { x: targetCoord.x + 0.5, y: sourceSpawn.position.y, z: targetCoord.z + 0.5 },
+    position: {
+      x: targetCoord.x + 0.5,
+      y: sourceSpawn.position.y,
+      z: targetCoord.z + 0.5,
+    },
   };
-  
+
   setTileSpawn(area, targetCoord, newSpawn);
-  
+
   log.debug("Duplicated spawn", {
     areaId: area.id,
     from: sourceCoord,
@@ -1063,6 +1136,6 @@ export function duplicateSpawn(
     originalId: spawnId,
     newId: newSpawnId,
   });
-  
+
   return { area, newSpawnId };
 }

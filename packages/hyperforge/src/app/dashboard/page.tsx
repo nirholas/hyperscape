@@ -22,7 +22,7 @@ import {
   Palette,
   Users,
   Scroll,
-  Map,
+  Map as MapIcon,
   Sparkles,
   FolderOpen,
   TrendingUp,
@@ -122,7 +122,7 @@ export default function DashboardPage() {
           fetch("/api/assets/cdn").catch(() => null),
           fetch("/api/assets/local").catch(() => null),
         ]);
-        
+
         let modelCount = 0;
         if (cdnRes?.ok) {
           const cdnData = await cdnRes.json();
@@ -132,7 +132,7 @@ export default function DashboardPage() {
           const localData = await localRes.json();
           modelCount += Array.isArray(localData) ? localData.length : 0;
         }
-        
+
         setAssetCounts((prev) => ({
           ...prev,
           models: modelCount,
@@ -266,7 +266,7 @@ export default function DashboardPage() {
       name: "World Editor",
       description: "Place assets in world",
       href: "/world",
-      icon: <Map className="w-5 h-5" />,
+      icon: <MapIcon className="w-5 h-5" />,
       color: "emerald",
     },
   ];
@@ -414,7 +414,7 @@ export default function DashboardPage() {
                         <div
                           className={cn(
                             "w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0",
-                            `bg-${studio.color}-500/20 text-${studio.color}-400`
+                            `bg-${studio.color}-500/20 text-${studio.color}-400`,
                           )}
                         >
                           {studio.icon}
@@ -447,7 +447,7 @@ export default function DashboardPage() {
                         <div
                           className={cn(
                             "w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0",
-                            `bg-${studio.color}-500/20 text-${studio.color}-400`
+                            `bg-${studio.color}-500/20 text-${studio.color}-400`,
                           )}
                         >
                           {studio.icon}
@@ -507,7 +507,7 @@ export default function DashboardPage() {
                     loading={loading}
                   />
                   <GameDataRow
-                    icon={<Map className="w-4 h-4" />}
+                    icon={<MapIcon className="w-4 h-4" />}
                     label="Areas"
                     count={gameDataCounts.areas}
                     loading={loading}
