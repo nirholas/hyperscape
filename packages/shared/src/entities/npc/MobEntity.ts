@@ -215,9 +215,107 @@ export class MobEntity extends CombatantEntity {
   /** Track if occupancy is currently registered */
   private _occupancyRegistered = false;
 
+  /** Reusable tile for spawn checking */
+  private readonly _spawnCheckTile: TileCoord = { x: 0, z: 0 };
+
+  /** Max spiral search radius for unoccupied spawn tile */
+  private readonly MAX_SPAWN_SEARCH_RADIUS = 10;
+
   // ============================================================================
   // ENTITY OCCUPANCY METHODS (OSRS-accurate NPC collision)
   // ============================================================================
+
+  /**
+   * Find an unoccupied tile for spawning using spiral search
+   *
+   * OSRS Mechanic: If spawn tile is occupied, search outward in expanding rings
+   * until an unoccupied tile is found. Uses Chebyshev distance (8-connected).
+   *
+   * @param centerX - Center tile X coordinate
+   * @param centerZ - Center tile Z coordinate
+   * @returns Unoccupied tile coordinates, or null if none found within radius
+   */
+  private findUnoccupiedSpawnTile(
+    centerX: number,
+    centerZ: number,
+  ): TileCoord | null {
+    // Cache NPC size on first call
+    if (!this._cachedNPCSize) {
+      this._cachedNPCSize = getNPCSize(this.config.mobType);
+    }
+
+    // Check center tile first
+    this._spawnCheckTile.x = centerX;
+    this._spawnCheckTile.z = centerZ;
+
+    // For multi-tile NPCs, check all tiles they would occupy
+    const tileCount = getOccupiedTiles(
+      this._spawnCheckTile,
+      this._cachedNPCSize,
+      this._occupiedTilesBuffer,
+    );
+
+    // Check if center is unoccupied (check all tiles for multi-tile NPCs)
+    let centerOccupied = false;
+    for (let i = 0; i < tileCount; i++) {
+      if (this.world.entityOccupancy.isOccupied(this._occupiedTilesBuffer[i])) {
+        centerOccupied = true;
+        break;
+      }
+    }
+    if (!centerOccupied) {
+      return { x: centerX, z: centerZ };
+    }
+
+    // Spiral search outward in expanding rings (Chebyshev distance)
+    // Ring order: distance 1 (8 tiles), distance 2 (16 tiles), etc.
+    for (let dist = 1; dist <= this.MAX_SPAWN_SEARCH_RADIUS; dist++) {
+      // Check all tiles at this Chebyshev distance
+      // Iterate the ring: top row, bottom row, left column, right column (excluding corners already covered)
+      for (let dx = -dist; dx <= dist; dx++) {
+        for (let dz = -dist; dz <= dist; dz++) {
+          // Only check tiles at exactly this distance (ring, not filled square)
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== dist) continue;
+
+          const checkX = centerX + dx;
+          const checkZ = centerZ + dz;
+
+          this._spawnCheckTile.x = checkX;
+          this._spawnCheckTile.z = checkZ;
+
+          // Get occupied tiles for this candidate position
+          const candTileCount = getOccupiedTiles(
+            this._spawnCheckTile,
+            this._cachedNPCSize,
+            this._occupiedTilesBuffer,
+          );
+
+          // Check if all tiles are unoccupied
+          let isValid = true;
+          for (let i = 0; i < candTileCount; i++) {
+            if (
+              this.world.entityOccupancy.isOccupied(
+                this._occupiedTilesBuffer[i],
+              )
+            ) {
+              isValid = false;
+              break;
+            }
+          }
+
+          if (isValid) {
+            return { x: checkX, z: checkZ };
+          }
+        }
+      }
+    }
+
+    // No unoccupied tile found within radius - shouldn't happen in normal gameplay
+    console.warn(
+      `[MobEntity] No unoccupied spawn tile found within ${this.MAX_SPAWN_SEARCH_RADIUS} tiles for ${this.config.name}`,
+    );
+    return null;
+  }
 
   /**
    * Register this mob's tile occupancy in EntityOccupancyMap
@@ -226,6 +324,7 @@ export class MobEntity extends CombatantEntity {
    * Uses pre-allocated buffers to avoid hot path allocations.
    *
    * OSRS Mechanic: Flags set when entity spawns/moves TO a tile
+   * If spawn tile is occupied, finds nearby unoccupied tile first.
    *
    * @see NPC_ENTITY_COLLISION_PLAN.md Phase 2
    */
@@ -242,6 +341,27 @@ export class MobEntity extends CombatantEntity {
     const pos = this.getPosition();
     this._currentTile.x = Math.floor(pos.x);
     this._currentTile.z = Math.floor(pos.z);
+
+    // Check if spawn tile is already occupied by another mob
+    // If so, find an unoccupied tile nearby (OSRS-accurate: NPCs don't stack)
+    const unoccupiedTile = this.findUnoccupiedSpawnTile(
+      this._currentTile.x,
+      this._currentTile.z,
+    );
+
+    if (
+      unoccupiedTile &&
+      (unoccupiedTile.x !== this._currentTile.x ||
+        unoccupiedTile.z !== this._currentTile.z)
+    ) {
+      // Relocate mob to unoccupied tile
+      const worldPos = tileToWorld(unoccupiedTile);
+      this.position.x = worldPos.x;
+      this.position.z = worldPos.z;
+      // Update current tile to the new position
+      this._currentTile.x = unoccupiedTile.x;
+      this._currentTile.z = unoccupiedTile.z;
+    }
 
     // Fill occupied tiles buffer (zero-allocation using pre-allocated buffer)
     const tileCount = getOccupiedTiles(
@@ -496,10 +616,19 @@ export class MobEntity extends CombatantEntity {
       }
     });
 
-    // CRITICAL: Use RespawnManager for INITIAL spawn too (not just respawn)
-    // This ensures the mob spawns at a random location within the spawn area
-    // instead of always at the same fixed point
-    const initialSpawnPoint = this.respawnManager.generateSpawnPoint();
+    // CRITICAL: Server uses RespawnManager to generate random spawn position
+    // Client uses position from config (which comes from network data - the server's authoritative position)
+    // This prevents client from generating its own random position that differs from server
+    let initialSpawnPoint: Position3D;
+
+    if (this.world.isServer) {
+      // Server: Generate random position within spawn area
+      initialSpawnPoint = this.respawnManager.generateSpawnPoint();
+    } else {
+      // Client: Use position from network data (via config.spawnPoint)
+      // The server already determined the correct position, client should not randomize
+      initialSpawnPoint = { ...this.config.spawnPoint };
+    }
 
     // Track current spawn location for AI (patrol, leashing, return)
     this._currentSpawnPoint = { ...initialSpawnPoint };
@@ -1242,27 +1371,22 @@ export class MobEntity extends CombatantEntity {
       isWalkable: (tile) => {
         // Check terrain walkability using TerrainSystem if available
         const terrain = this.world.getSystem("terrain");
-        if (
-          terrain &&
-          typeof (
-            terrain as {
-              isPositionWalkable?: (
-                x: number,
-                z: number,
-              ) => { walkable: boolean };
-            }
-          ).isPositionWalkable === "function"
-        ) {
-          const worldPos = tileToWorld(tile);
-          const result = (
-            terrain as {
-              isPositionWalkable: (
-                x: number,
-                z: number,
-              ) => { walkable: boolean };
-            }
-          ).isPositionWalkable(worldPos.x, worldPos.z);
-          return result.walkable;
+        if (terrain) {
+          // Use unknown intermediate cast for type safety
+          const terrainWithWalkable = terrain as unknown as {
+            isPositionWalkable?: (
+              x: number,
+              z: number,
+            ) => { walkable: boolean };
+          };
+          if (typeof terrainWithWalkable.isPositionWalkable === "function") {
+            const worldPos = tileToWorld(tile);
+            const result = terrainWithWalkable.isPositionWalkable(
+              worldPos.x,
+              worldPos.z,
+            );
+            return result.walkable;
+          }
         }
         // Fallback: assume walkable if no terrain system
         return true;

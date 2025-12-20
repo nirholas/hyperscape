@@ -65,6 +65,7 @@ export * from "./core";
 // Export entity classes
 export { PlayerLocal } from "./entities/player/PlayerLocal";
 export { PlayerRemote } from "./entities/player/PlayerRemote";
+export { MobEntity } from "./entities/npc/MobEntity";
 export type { EventCallback } from "./entities/Entity";
 
 // Export all types from types/index.ts
@@ -699,6 +700,7 @@ export {
   getBestAdjacentTile,
   getBestCombatRangeTile,
   getBestMeleeTile,
+  getBestUnoccupiedMeleeTile,
   getAdjacentTiles,
   isDiagonal,
   tileKey,

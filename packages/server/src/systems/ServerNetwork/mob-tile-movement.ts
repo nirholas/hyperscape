@@ -29,6 +29,7 @@ import {
   tilesWithinMeleeRange,
   chaseStep,
   MobEntity,
+  getBestUnoccupiedMeleeTile,
 } from "@hyperscape/shared";
 import type {
   TileCoord,
@@ -359,8 +360,10 @@ export class MobTileMovementManager {
     const terrain = this.getTerrain();
 
     if (this.DEBUG_MODE && this.mobStates.size > 0) {
+      // Log occupancy stats at tick start
+      const stats = this.world.entityOccupancy.getStats();
       console.log(
-        `[MobTileMovement] onTick #${tickNumber}: Processing ${this.mobStates.size} mobs`,
+        `[MobTileMovement] onTick #${tickNumber}: Processing ${this.mobStates.size} mobs, occupancy: ${stats.occupiedTileCount} tiles, ${stats.trackedEntityCount} entities`,
       );
     }
 
@@ -376,10 +379,16 @@ export class MobTileMovementManager {
         continue;
       }
 
-      if (this.DEBUG_MODE)
+      if (this.DEBUG_MODE) {
+        // Log mob's actual position vs state position
+        const actualTile = worldToTile(entity.position.x, entity.position.z);
+        const tileMatch =
+          actualTile.x === state.currentTile.x &&
+          actualTile.z === state.currentTile.z;
         console.log(
-          `[MobTileMovement] onTick: Mob ${mobId} - hasDestination=${state.hasDestination}, pathLen=${state.path.length}, pathIndex=${state.pathIndex}`,
+          `[MobTileMovement] onTick: Mob ${mobId} - stateTile=(${state.currentTile.x},${state.currentTile.z}), actualTile=(${actualTile.x},${actualTile.z}), match=${tileMatch}, hasDestination=${state.hasDestination}, isChasing=${state.isChasing}`,
         );
+      }
 
       // OSRS-STYLE DUMB PATHFINDER FOR CHASE MODE
       // Instead of expensive BFS repathing every tick, NPCs use a simple algorithm:
@@ -413,11 +422,11 @@ export class MobTileMovementManager {
             )
           ) {
             // Already in combat range - stop moving and clear path
+            if (this.DEBUG_MODE)
+              console.log(
+                `[MobTileMovement] IN RANGE: Mob ${mobId} at (${state.currentTile.x},${state.currentTile.z}) is in combat range (${combatRange}) of target at (${currentTargetTile.x},${currentTargetTile.z}), skipping movement`,
+              );
             if (state.path.length > 0 || state.hasDestination) {
-              if (this.DEBUG_MODE)
-                console.log(
-                  `[MobTileMovement] Already in combat range (${combatRange}) of target at (${currentTargetTile.x},${currentTargetTile.z}), stopping`,
-                );
               state.path = [];
               state.pathIndex = 0;
               state.hasDestination = false;
@@ -438,14 +447,41 @@ export class MobTileMovementManager {
             continue; // Skip movement processing - we're in attack range
           }
 
-          // NOT in combat range - use chase pathfinder to calculate steps toward target
-          // Calculate up to tilesPerTick steps (O(1) per step, unlike BFS which is O(tiles²))
+          // NOT in combat range - find best unoccupied melee tile and path toward it
+          // This prevents all mobs from trying to reach the same tile around the player
+          const destinationTile = getBestUnoccupiedMeleeTile(
+            state.currentTile,
+            currentTargetTile,
+            this.world.entityOccupancy,
+            mobId as EntityID,
+            (tile) => this.isTileWalkable(tile),
+            combatRange,
+          );
+
+          // If no unoccupied melee tile available, wait (creates queuing behavior)
+          if (!destinationTile) {
+            if (this.DEBUG_MODE)
+              console.log(
+                `[MobTileMovement] WAIT: Mob ${mobId} at (${state.currentTile.x},${state.currentTile.z}) - all melee tiles around target (${currentTargetTile.x},${currentTargetTile.z}) are occupied, waiting`,
+              );
+            state.path = [];
+            state.pathIndex = 0;
+            state.hasDestination = false;
+            continue; // Skip movement - wait for a tile to open up
+          }
+
+          if (this.DEBUG_MODE)
+            console.log(
+              `[MobTileMovement] DESTINATION: Mob ${mobId} targeting unoccupied melee tile (${destinationTile.x},${destinationTile.z}) around player at (${currentTargetTile.x},${currentTargetTile.z})`,
+            );
+
+          // Calculate up to tilesPerTick steps toward the unoccupied melee tile (O(1) per step)
           const chasePath: TileCoord[] = [];
           let currentPos = { ...state.currentTile };
 
           for (let step = 0; step < state.tilesPerTick; step++) {
-            // Check if this step would put us in combat range
-            const nextTile = chaseStep(currentPos, currentTargetTile, (tile) =>
+            // Check if this step would put us in combat range (path toward destination tile, not player)
+            const nextTile = chaseStep(currentPos, destinationTile, (tile) =>
               this.isTileWalkable(tile),
             );
 
@@ -490,10 +526,14 @@ export class MobTileMovementManager {
               tilesPerTick: state.tilesPerTick, // Mob-specific speed for client interpolation
             });
 
-            if (this.DEBUG_MODE)
+            if (this.DEBUG_MODE) {
+              const pathStr = chasePath
+                .map((t) => `(${t.x},${t.z})`)
+                .join(" -> ");
               console.log(
-                `[MobTileMovement] Chase: ${chasePath.length} steps toward target (${currentTargetTile.x},${currentTargetTile.z})`,
+                `[MobTileMovement] CHASE PATH: Mob ${mobId} from (${state.currentTile.x},${state.currentTile.z}) path: ${pathStr} toward destination (${destinationTile.x},${destinationTile.z}) [player at (${currentTargetTile.x},${currentTargetTile.z})]`,
               );
+            }
           } else {
             // All directions blocked - NPC is stuck (safespotted!)
             // This is intentional behavior - NPCs don't search around obstacles
@@ -575,13 +615,23 @@ export class MobTileMovementManager {
         // Per OSRS: Pathfinder IGNORES entity collision - it's checked HERE at movement time
         // If blocked: movement fails, path is RETAINED for retry next tick
         // This creates the "waiting behind" behavior seen in OSRS
-        if (this.world.entityOccupancy.isBlocked(nextTile, mobId as EntityID)) {
-          if (this.DEBUG_MODE)
+        const isBlocked = this.world.entityOccupancy.isBlocked(
+          nextTile,
+          mobId as EntityID,
+        );
+        if (isBlocked) {
+          if (this.DEBUG_MODE) {
+            const occupant = this.world.entityOccupancy.getOccupant(nextTile);
             console.log(
-              `[MobTileMovement] Tile (${nextTile.x},${nextTile.z}) blocked by entity, waiting`,
+              `[MobTileMovement] COLLISION: Mob ${mobId} at (${state.currentTile.x},${state.currentTile.z}) cannot move to (${nextTile.x},${nextTile.z}) - blocked by ${occupant?.entityId}`,
             );
+          }
           // Path is RETAINED - will retry next tick (OSRS-accurate)
           break;
+        } else if (this.DEBUG_MODE) {
+          console.log(
+            `[MobTileMovement] MOVE OK: ${mobId} moving to (${nextTile.x},${nextTile.z})`,
+          );
         }
 
         state.currentTile = { ...nextTile };
@@ -613,6 +663,10 @@ export class MobTileMovementManager {
       // Update entity occupancy after movement (OSRS-accurate tile collision)
       // This updates the EntityOccupancyMap to reflect the mob's new position
       if (entity instanceof MobEntity) {
+        if (this.DEBUG_MODE)
+          console.log(
+            `[MobTileMovement] OCCUPANCY UPDATE: ${mobId} now at tile (${state.currentTile.x},${state.currentTile.z})`,
+          );
         entity.updateOccupancy();
       }
 
@@ -738,12 +792,27 @@ export class MobTileMovementManager {
           return; // In range, no need to move
         }
 
-        // Calculate chase path using simple step algorithm
+        // Find best unoccupied melee tile (prevents stacking)
+        const destinationTile = getBestUnoccupiedMeleeTile(
+          state.currentTile,
+          currentTargetTile,
+          this.world.entityOccupancy,
+          mobId as EntityID,
+          (tile) => this.isTileWalkable(tile),
+          combatRange,
+        );
+
+        // If no unoccupied melee tile available, wait
+        if (!destinationTile) {
+          return; // All melee tiles occupied - wait for one to open up
+        }
+
+        // Calculate chase path toward the unoccupied melee tile
         const newPath: TileCoord[] = [];
         let currentPos = { ...state.currentTile };
 
         for (let step = 0; step < state.tilesPerTick; step++) {
-          const nextTile = chaseStep(currentPos, currentTargetTile, (tile) =>
+          const nextTile = chaseStep(currentPos, destinationTile, (tile) =>
             this.isTileWalkable(tile),
           );
 
