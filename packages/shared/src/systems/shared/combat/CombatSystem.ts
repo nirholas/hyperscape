@@ -706,44 +706,35 @@ export class CombatSystem extends SystemBase {
   /**
    * Handle auto-retaliate being toggled ON while being attacked
    * OSRS behavior: Player should start fighting back immediately
+   *
+   * Supports both PvE (mob attacker) and PvP (player attacker) scenarios.
    */
   private handleAutoRetaliateEnabled(playerId: string): void {
-    const playerEntity = this.world.getPlayer?.(playerId) as
-      | {
-          combat?: { inCombat?: boolean; pendingAttacker?: string | null };
-          data?: { c?: boolean; pa?: string | null };
-        }
-      | undefined;
-
+    const playerEntity = this.world.getPlayer?.(playerId);
     if (!playerEntity) return;
 
-    // Check if player is in combat with a pending attacker
-    const pendingAttacker =
-      playerEntity.combat?.pendingAttacker || playerEntity.data?.pa;
-
+    // Use type guard to get pending attacker ID
+    const pendingAttacker = getPendingAttacker(playerEntity);
     if (!pendingAttacker) return;
 
-    // Check if attacker is still alive/valid (mob entity)
-    const attackerEntity = this.getEntity(pendingAttacker, "mob");
-    if (!attackerEntity || !this.isEntityAlive(attackerEntity, "mob")) {
-      // Attacker gone - clear pending attacker state
-      if (playerEntity.combat) {
-        playerEntity.combat.pendingAttacker = null;
-      }
-      if (playerEntity.data) {
-        playerEntity.data.pa = null;
-      }
+    // Detect attacker type dynamically - supports both PvP and PvE
+    // This fixes the bug where PvP retaliation failed because we assumed "mob"
+    const attackerType = this.getEntityType(pendingAttacker);
+    const attackerEntity = this.getEntity(pendingAttacker, attackerType);
+
+    if (!attackerEntity || !this.isEntityAlive(attackerEntity, attackerType)) {
+      // Attacker gone - clear pending attacker state using type guard
+      clearPendingAttacker(playerEntity);
       return;
     }
 
-    // Start combat! Player now retaliates against the mob
-    // Get player attack speed
+    // Start combat! Player now retaliates against the attacker
     const attackSpeedTicks = this.getAttackSpeedTicks(
       createEntityID(playerId),
       "player",
     );
 
-    // Create combat state for player attacking the mob
+    // enterCombat() detects entity types internally
     this.enterCombat(
       createEntityID(playerId),
       createEntityID(pendingAttacker),
@@ -751,15 +742,9 @@ export class CombatSystem extends SystemBase {
     );
 
     // Clear pending attacker since we're now actively fighting
-    if (playerEntity.combat) {
-      playerEntity.combat.pendingAttacker = null;
-    }
-    if (playerEntity.data) {
-      playerEntity.data.pa = null;
-    }
+    clearPendingAttacker(playerEntity);
 
-    // Phase 5: Clear server face target since player now has a combat target
-    // Client will use combatTarget instead of serverFaceTargetId
+    // Clear server face target since player now has a combat target
     this.emitTypedEvent(EventType.COMBAT_CLEAR_FACE_TARGET, {
       playerId: playerId,
     });
@@ -769,7 +754,7 @@ export class CombatSystem extends SystemBase {
       playerId,
       pendingAttacker,
       "player",
-      "mob",
+      attackerType, // Was hardcoded "mob" - now supports PvP
     );
   }
 
