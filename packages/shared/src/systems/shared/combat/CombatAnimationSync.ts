@@ -28,6 +28,7 @@ import type { World } from "../../../core/World";
 import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
 import type { CombatAnimationManager } from "./CombatAnimationManager";
 import type { HitDelayAttackType } from "../../../utils/game/HitDelayCalculator";
+import type { EntityID } from "../../../types/core/identifiers";
 
 /**
  * Scheduled attack data for tracking coordinated animations
@@ -163,8 +164,8 @@ export class CombatAnimationSync {
    * 3. Scheduling damage application at the damage frame
    * 4. Scheduling hitsplat display at the same tick
    *
-   * @param attackerId - Entity performing the attack
-   * @param targetId - Entity receiving the attack
+   * @param attackerId - Entity performing the attack (accepts both EntityID and string)
+   * @param targetId - Entity receiving the attack (accepts both EntityID and string)
    * @param attackerType - "player" or "mob"
    * @param targetType - "player" or "mob"
    * @param attackType - "melee", "ranged", or "magic"
@@ -175,8 +176,8 @@ export class CombatAnimationSync {
    * @returns The scheduled attack ID
    */
   scheduleAttack(
-    attackerId: string,
-    targetId: string,
+    attackerId: EntityID | string,
+    targetId: EntityID | string,
     attackerType: "player" | "mob",
     targetType: "player" | "mob",
     attackType: HitDelayAttackType,
@@ -185,11 +186,13 @@ export class CombatAnimationSync {
     currentTick: number,
     attackSpeedTicks: number = COMBAT_CONSTANTS.DEFAULT_ATTACK_SPEED_TICKS,
   ): string {
+    const attackerIdStr = String(attackerId);
+    const targetIdStr = String(targetId);
     const { ANIMATION, HIT_DELAY } = COMBAT_CONSTANTS;
 
     // 1. Start animation IMMEDIATELY
     this.animationManager.setCombatEmote(
-      attackerId,
+      attackerIdStr,
       attackerType,
       currentTick,
       attackSpeedTicks,
@@ -239,11 +242,11 @@ export class CombatAnimationSync {
       hitsplatDisplayTick + ANIMATION.HITSPLAT_DURATION_TICKS;
 
     // 6. Create scheduled attack record
-    const attackId = `${attackerId}-${targetId}-${currentTick}-${this.attackCounter++}`;
+    const attackId = `${attackerIdStr}-${targetIdStr}-${currentTick}-${this.attackCounter++}`;
     const scheduledAttack: ScheduledAttack = {
       id: attackId,
-      attackerId,
-      targetId,
+      attackerId: attackerIdStr,
+      targetId: targetIdStr,
       attackerType,
       targetType,
       attackType,
@@ -264,8 +267,8 @@ export class CombatAnimationSync {
     // The damage will apply at the calculated tick
     if (this.damageQueueCallback) {
       this.damageQueueCallback(
-        attackerId,
-        targetId,
+        attackerIdStr,
+        targetIdStr,
         damage,
         attackerType,
         targetType,
@@ -277,7 +280,7 @@ export class CombatAnimationSync {
 
     // 8. Schedule hitsplat for synchronized display
     this.scheduleHitsplat(
-      targetId,
+      targetIdStr,
       damage,
       hitsplatDisplayTick,
       hitsplatHideTick,
@@ -379,11 +382,16 @@ export class CombatAnimationSync {
   /**
    * Cancel all scheduled attacks for an entity
    * Used when entity dies or disconnects
+   * @param entityId - Entity ID (accepts both EntityID and string)
    */
-  cancelAttacksForEntity(entityId: string): number {
+  cancelAttacksForEntity(entityId: EntityID | string): number {
+    const entityIdStr = String(entityId);
     let cancelled = 0;
     for (const [attackId, attack] of this.scheduledAttacks.entries()) {
-      if (attack.attackerId === entityId || attack.targetId === entityId) {
+      if (
+        attack.attackerId === entityIdStr ||
+        attack.targetId === entityIdStr
+      ) {
         this.scheduledAttacks.delete(attackId);
         cancelled++;
       }
@@ -391,7 +399,7 @@ export class CombatAnimationSync {
 
     // Also cancel pending hitsplats
     this.scheduledHitsplats = this.scheduledHitsplats.filter(
-      (h) => h.targetId !== entityId,
+      (h) => h.targetId !== entityIdStr,
     );
 
     return cancelled;

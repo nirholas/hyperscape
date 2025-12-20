@@ -12,6 +12,8 @@
  * @see COMBAT_SYSTEM_HARDENING_PLAN.md Phase 6: Game Studio Hardening
  */
 
+import type { EntityID } from "../../../types/core/identifiers";
+
 /**
  * Rate limiter configuration
  */
@@ -103,12 +105,16 @@ export class CombatRateLimiter {
   /**
    * Check if a player's combat request should be allowed
    *
-   * @param playerId - Player making the request
+   * @param playerId - Player making the request (accepts both EntityID and string)
    * @param currentTick - Current game tick
    * @returns Rate limit result with allowed status and details
    */
-  checkLimit(playerId: string, currentTick: number): RateLimitResult {
-    const state = this.getOrCreateState(playerId);
+  checkLimit(
+    playerId: EntityID | string,
+    currentTick: number,
+  ): RateLimitResult {
+    const playerIdStr = String(playerId);
+    const state = this.getOrCreateState(playerIdStr);
     const currentSecond = Math.floor(Date.now() / 1000);
 
     // Check if in cooldown
@@ -135,7 +141,7 @@ export class CombatRateLimiter {
 
     // Check tick limit
     if (state.tickRequests >= this.config.maxRequestsPerTick) {
-      this.handleViolation(playerId, state, currentTick, "tick_limit");
+      this.handleViolation(playerIdStr, state, currentTick, "tick_limit");
       return {
         allowed: false,
         reason: "tick_limit",
@@ -146,7 +152,7 @@ export class CombatRateLimiter {
 
     // Check second limit
     if (state.secondRequests >= this.config.maxRequestsPerSecond) {
-      this.handleViolation(playerId, state, currentTick, "second_limit");
+      this.handleViolation(playerIdStr, state, currentTick, "second_limit");
       return {
         allowed: false,
         reason: "second_limit",
@@ -169,28 +175,28 @@ export class CombatRateLimiter {
   /**
    * Check if request is allowed (simple boolean check)
    *
-   * @param playerId - Player making the request
+   * @param playerId - Player making the request (accepts both EntityID and string)
    * @param currentTick - Current game tick
    * @returns true if allowed, false if rate limited
    */
-  isAllowed(playerId: string, currentTick: number): boolean {
+  isAllowed(playerId: EntityID | string, currentTick: number): boolean {
     return this.checkLimit(playerId, currentTick).allowed;
   }
 
   /**
    * Get rate limit stats for a player (for admin tools)
    *
-   * @param playerId - Player to check
+   * @param playerId - Player to check (accepts both EntityID and string)
    * @returns Player's rate limit state or null if not tracked
    */
-  getPlayerStats(playerId: string): {
+  getPlayerStats(playerId: EntityID | string): {
     tickRequests: number;
     secondRequests: number;
     totalViolations: number;
     inCooldown: boolean;
     cooldownUntil: number;
   } | null {
-    const state = this.playerStates.get(playerId);
+    const state = this.playerStates.get(String(playerId));
     if (!state) return null;
 
     return {
@@ -230,10 +236,10 @@ export class CombatRateLimiter {
   /**
    * Clean up state for a disconnected player
    *
-   * @param playerId - Player to clean up
+   * @param playerId - Player to clean up (accepts both EntityID and string)
    */
-  cleanup(playerId: string): void {
-    this.playerStates.delete(playerId);
+  cleanup(playerId: EntityID | string): void {
+    this.playerStates.delete(String(playerId));
   }
 
   /**
@@ -246,10 +252,10 @@ export class CombatRateLimiter {
   /**
    * Reset a specific player's rate limit (admin action)
    *
-   * @param playerId - Player to reset
+   * @param playerId - Player to reset (accepts both EntityID and string)
    */
-  resetPlayer(playerId: string): void {
-    this.playerStates.delete(playerId);
+  resetPlayer(playerId: EntityID | string): void {
+    this.playerStates.delete(String(playerId));
   }
 
   /**

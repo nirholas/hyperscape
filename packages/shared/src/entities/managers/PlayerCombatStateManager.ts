@@ -21,6 +21,7 @@
  */
 
 import { COMBAT_CONSTANTS } from "../../constants/CombatConstants";
+import type { EntityID } from "../../types/core/identifiers";
 
 export interface PlayerCombatStateConfig {
   /** Attack speed in TICKS (e.g., 4 = attack every 4 ticks / 2.4 seconds) */
@@ -65,13 +66,14 @@ export class PlayerCombatStateManager {
 
   /**
    * Mark as in combat (called when taking damage or attacking)
+   * @param targetId - Target ID (accepts both EntityID and string for backwards compatibility)
    */
-  enterCombat(targetId?: string): void {
+  enterCombat(targetId?: EntityID | string): void {
     const wasInCombat = this.inCombat;
     this.inCombat = true;
 
     if (targetId) {
-      this.targetId = targetId;
+      this.targetId = String(targetId);
     }
 
     if (!wasInCombat) {
@@ -118,22 +120,23 @@ export class PlayerCombatStateManager {
    * Perform attack (validates cooldown and sets next attack tick)
    * Returns true if attack was performed, false if on cooldown
    *
-   * @param targetId - ID of the target entity
+   * @param targetId - ID of the target entity (accepts both EntityID and string)
    * @param currentTick - Current server tick number
    */
-  performAttack(targetId: string, currentTick: number): boolean {
+  performAttack(targetId: EntityID | string, currentTick: number): boolean {
     if (!this.canAttack(currentTick)) {
       return false;
     }
 
+    const targetIdStr = String(targetId);
     this.lastAttackTick = currentTick;
     this.nextAttackTick = currentTick + this.config.attackSpeedTicks;
     this.lastCombatActivityTick = currentTick;
     this.lastActionTick = currentTick;
-    this.enterCombat(targetId);
+    this.enterCombat(targetIdStr);
 
     if (this.onAttackCallback) {
-      this.onAttackCallback(targetId);
+      this.onAttackCallback(targetIdStr);
     }
 
     return true;
@@ -148,11 +151,12 @@ export class PlayerCombatStateManager {
    *
    * @see https://oldschool.runescape.wiki/w/Auto_Retaliate
    *
-   * @param attackerId - ID of the attacking entity
+   * @param attackerId - ID of the attacking entity (accepts both EntityID and string)
    * @param currentTick - Current server tick number
    */
-  onReceiveAttack(attackerId: string, currentTick: number): void {
-    this.lastAttackerId = attackerId;
+  onReceiveAttack(attackerId: EntityID | string, currentTick: number): void {
+    const attackerIdStr = String(attackerId);
+    this.lastAttackerId = attackerIdStr;
     this.lastDamageTakenTick = currentTick;
     this.lastCombatActivityTick = currentTick;
     this.enterCombat();
@@ -165,12 +169,12 @@ export class PlayerCombatStateManager {
 
       // Only set if not already attacking sooner
       if (!this.targetId || retaliationTick < this.nextAttackTick) {
-        this.targetId = attackerId;
+        this.targetId = attackerIdStr;
         this.nextAttackTick = retaliationTick;
       }
 
       if (this.onAutoRetaliateCallback) {
-        this.onAutoRetaliateCallback(attackerId);
+        this.onAutoRetaliateCallback(attackerIdStr);
       }
     }
   }
@@ -265,9 +269,10 @@ export class PlayerCombatStateManager {
 
   /**
    * Set current target
+   * @param targetId - Target ID (accepts both EntityID and string for backwards compatibility)
    */
-  setTarget(targetId: string | null): void {
-    this.targetId = targetId;
+  setTarget(targetId: EntityID | string | null): void {
+    this.targetId = targetId ? String(targetId) : null;
     if (targetId) {
       this.enterCombat(targetId);
     }

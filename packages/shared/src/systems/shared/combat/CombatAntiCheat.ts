@@ -11,6 +11,8 @@
  * @see COMBAT_SYSTEM_HARDENING_PLAN.md Phase 6: Game Studio Hardening
  */
 
+import type { EntityID } from "../../../types/core/identifiers";
+
 /**
  * Combat violation severity levels
  * Higher severity = more points toward threshold
@@ -265,16 +267,18 @@ export class CombatAntiCheat {
 
   /**
    * Check if a player has been kicked
+   * @param playerId - Player ID (accepts both EntityID and string)
    */
-  isPlayerKicked(playerId: string): boolean {
-    return this.playersKicked.has(playerId);
+  isPlayerKicked(playerId: EntityID | string): boolean {
+    return this.playersKicked.has(String(playerId));
   }
 
   /**
    * Check if a player has been banned
+   * @param playerId - Player ID (accepts both EntityID and string)
    */
-  isPlayerBanned(playerId: string): boolean {
-    return this.playersBanned.has(playerId);
+  isPlayerBanned(playerId: EntityID | string): boolean {
+    return this.playersBanned.has(String(playerId));
   }
 
   /**
@@ -305,30 +309,32 @@ export class CombatAntiCheat {
   /**
    * Record a combat violation
    *
-   * @param playerId - Player who committed the violation
+   * @param playerId - Player who committed the violation (accepts both EntityID and string)
    * @param type - Type of violation
    * @param severity - Severity level
    * @param details - Human-readable description
-   * @param targetId - Target entity ID (optional)
+   * @param targetId - Target entity ID (optional, accepts both EntityID and string)
    * @param gameTick - Current game tick (optional)
    */
   recordViolation(
-    playerId: string,
+    playerId: EntityID | string,
     type: CombatViolationType,
     severity: CombatViolationSeverity,
     details: string,
-    targetId?: string,
+    targetId?: EntityID | string,
     gameTick?: number,
   ): void {
-    const state = this.getOrCreateState(playerId);
+    const playerIdStr = String(playerId);
+    const targetIdStr = targetId ? String(targetId) : undefined;
+    const state = this.getOrCreateState(playerIdStr);
 
     const violation: CombatViolationRecord = {
-      playerId,
+      playerId: playerIdStr,
       type,
       severity,
       details,
       timestamp: Date.now(),
-      targetId,
+      targetId: targetIdStr,
       gameTick,
     };
 
@@ -345,7 +351,7 @@ export class CombatAntiCheat {
 
     // Emit metric for every violation
     this.emitMetric("anticheat.violation", 1, {
-      player_id: playerId,
+      player_id: playerIdStr,
       violation_type: type,
       severity: CombatViolationSeverity[severity],
       severity_weight: VIOLATION_WEIGHTS[severity],
@@ -355,23 +361,24 @@ export class CombatAntiCheat {
     // Log major/critical violations immediately
     if (severity >= CombatViolationSeverity.MAJOR) {
       console.warn(
-        `[CombatAntiCheat] ${CombatViolationSeverity[severity]}: player=${playerId} type=${type} "${details}"`,
+        `[CombatAntiCheat] ${CombatViolationSeverity[severity]}: player=${playerIdStr} type=${type} "${details}"`,
       );
     }
 
     // Check thresholds and alert if needed
-    this.checkThresholds(playerId, state);
+    this.checkThresholds(playerIdStr, state);
   }
 
   /**
    * Track attack for rate limiting detection
    *
-   * @param playerId - Player attempting attack
+   * @param playerId - Player attempting attack (accepts both EntityID and string)
    * @param currentTick - Current game tick
    * @returns true if attack rate is suspicious
    */
-  trackAttack(playerId: string, currentTick: number): boolean {
-    const state = this.getOrCreateState(playerId);
+  trackAttack(playerId: EntityID | string, currentTick: number): boolean {
+    const playerIdStr = String(playerId);
+    const state = this.getOrCreateState(playerIdStr);
 
     // Reset count on new tick
     if (state.lastAttackCountTick !== currentTick) {
@@ -384,7 +391,7 @@ export class CombatAntiCheat {
     // Check if exceeding rate
     if (state.attacksThisTick > this.config.maxAttacksPerTick) {
       this.recordViolation(
-        playerId,
+        playerIdStr,
         CombatViolationType.ATTACK_RATE_EXCEEDED,
         CombatViolationSeverity.MAJOR,
         `${state.attacksThisTick} attacks in tick ${currentTick} (max ${this.config.maxAttacksPerTick})`,
@@ -399,10 +406,12 @@ export class CombatAntiCheat {
 
   /**
    * Record out-of-range attack attempt
+   * @param playerId - Player ID (accepts both EntityID and string)
+   * @param targetId - Target ID (accepts both EntityID and string)
    */
   recordOutOfRangeAttack(
-    playerId: string,
-    targetId: string,
+    playerId: EntityID | string,
+    targetId: EntityID | string,
     distance: number,
     maxRange: number,
     gameTick?: number,
@@ -419,17 +428,19 @@ export class CombatAntiCheat {
 
   /**
    * Record attack on dead target
+   * @param playerId - Player ID (accepts both EntityID and string)
+   * @param targetId - Target ID (accepts both EntityID and string)
    */
   recordDeadTargetAttack(
-    playerId: string,
-    targetId: string,
+    playerId: EntityID | string,
+    targetId: EntityID | string,
     gameTick?: number,
   ): void {
     this.recordViolation(
       playerId,
       CombatViolationType.DEAD_TARGET_ATTACK,
       CombatViolationSeverity.MAJOR,
-      `Attacked dead target ${targetId}`,
+      `Attacked dead target ${String(targetId)}`,
       targetId,
       gameTick,
     );
@@ -437,17 +448,19 @@ export class CombatAntiCheat {
 
   /**
    * Record attack on nonexistent target
+   * @param playerId - Player ID (accepts both EntityID and string)
+   * @param targetId - Target ID (accepts both EntityID and string)
    */
   recordNonexistentTargetAttack(
-    playerId: string,
-    targetId: string,
+    playerId: EntityID | string,
+    targetId: EntityID | string,
     gameTick?: number,
   ): void {
     this.recordViolation(
       playerId,
       CombatViolationType.NONEXISTENT_TARGET,
       CombatViolationSeverity.MAJOR,
-      `Attacked nonexistent target ${targetId}`,
+      `Attacked nonexistent target ${String(targetId)}`,
       targetId,
       gameTick,
     );
@@ -455,8 +468,9 @@ export class CombatAntiCheat {
 
   /**
    * Record invalid entity ID format (potential injection)
+   * @param playerId - Player ID (accepts both EntityID and string)
    */
-  recordInvalidEntityId(playerId: string, invalidId: string): void {
+  recordInvalidEntityId(playerId: EntityID | string, invalidId: string): void {
     // Sanitize the ID for logging (truncate, escape)
     const sanitizedId = String(invalidId).slice(0, 64).replace(/[<>&]/g, "_");
 
@@ -470,8 +484,9 @@ export class CombatAntiCheat {
 
   /**
    * Record self-attack attempt
+   * @param playerId - Player ID (accepts both EntityID and string)
    */
-  recordSelfAttack(playerId: string, gameTick?: number): void {
+  recordSelfAttack(playerId: EntityID | string, gameTick?: number): void {
     this.recordViolation(
       playerId,
       CombatViolationType.SELF_ATTACK,
@@ -500,15 +515,15 @@ export class CombatAntiCheat {
   /**
    * Get violation report for a player (for admin tools)
    *
-   * @param playerId - Player to get report for
+   * @param playerId - Player to get report for (accepts both EntityID and string)
    * @returns Report with score and recent violations
    */
-  getPlayerReport(playerId: string): {
+  getPlayerReport(playerId: EntityID | string): {
     score: number;
     recentViolations: CombatViolationRecord[];
     attacksThisTick: number;
   } {
-    const state = this.playerStates.get(playerId);
+    const state = this.playerStates.get(String(playerId));
     if (!state) {
       return { score: 0, recentViolations: [], attacksThisTick: 0 };
     }
@@ -582,11 +597,12 @@ export class CombatAntiCheat {
    * Note: Does not clear kicked/banned status - those persist
    * until explicitly cleared via clearPlayerStatus()
    *
-   * @param playerId - Player to clean up
+   * @param playerId - Player to clean up (accepts both EntityID and string)
    */
-  cleanup(playerId: string): void {
-    this.playerStates.delete(playerId);
-    this.playerXPHistory.delete(playerId);
+  cleanup(playerId: EntityID | string): void {
+    const playerIdStr = String(playerId);
+    this.playerStates.delete(playerIdStr);
+    this.playerXPHistory.delete(playerIdStr);
   }
 
   /**
@@ -737,7 +753,7 @@ export class CombatAntiCheat {
    * OSRS XP per hit: HP XP = damage × 1.33, combat XP = damage × 4
    * Max damage per hit ≈ 99, so max XP per hit ≈ 396
    *
-   * @param playerId - Player gaining XP
+   * @param playerId - Player gaining XP (accepts both EntityID and string)
    * @param xpAmount - Amount of XP gained
    * @param currentTick - Current game tick
    * @returns true if XP gain is valid, false if suspicious
@@ -745,14 +761,16 @@ export class CombatAntiCheat {
    * @see OSRS-IMPLEMENTATION-PLAN.md Phase 5.4
    */
   validateXPGain(
-    playerId: string,
+    playerId: EntityID | string,
     xpAmount: number,
     currentTick: number,
   ): boolean {
+    const playerIdStr = String(playerId);
+
     // Check single-tick max
     if (xpAmount > this.config.maxXPPerTick) {
       this.recordViolation(
-        playerId,
+        playerIdStr,
         CombatViolationType.EXCESSIVE_XP_GAIN,
         CombatViolationSeverity.CRITICAL,
         `Gained ${xpAmount} XP in one tick (max ${this.config.maxXPPerTick})`,
@@ -763,10 +781,10 @@ export class CombatAntiCheat {
     }
 
     // Track and check rate
-    let history = this.playerXPHistory.get(playerId);
+    let history = this.playerXPHistory.get(playerIdStr);
     if (!history) {
       history = [];
-      this.playerXPHistory.set(playerId, history);
+      this.playerXPHistory.set(playerIdStr, history);
     }
 
     history.push({ tick: currentTick, xp: xpAmount });
@@ -774,7 +792,7 @@ export class CombatAntiCheat {
     // Clean old entries
     const windowStart = currentTick - this.config.xpRateWindowTicks;
     const recentHistory = history.filter((h) => h.tick >= windowStart);
-    this.playerXPHistory.set(playerId, recentHistory);
+    this.playerXPHistory.set(playerIdStr, recentHistory);
 
     // Check rate over window
     const totalXP = recentHistory.reduce((sum, h) => sum + h.xp, 0);
@@ -783,7 +801,7 @@ export class CombatAntiCheat {
 
     if (totalXP > maxPossibleRate) {
       this.recordViolation(
-        playerId,
+        playerIdStr,
         CombatViolationType.EXCESSIVE_XP_GAIN,
         CombatViolationSeverity.CRITICAL,
         `Gained ${totalXP} XP over ${this.config.xpRateWindowTicks} ticks (max ${maxPossibleRate})`,
@@ -802,7 +820,7 @@ export class CombatAntiCheat {
    * Uses OSRS max hit formula to calculate theoretical maximum.
    * Adds 10% tolerance for special attacks / future mechanics.
    *
-   * @param attackerId - Player/entity dealing damage
+   * @param attackerId - Player/entity dealing damage (accepts both EntityID and string)
    * @param damage - Damage dealt
    * @param attackerStrength - Attacker's strength level
    * @param attackerStrengthBonus - Attacker's equipment strength bonus
@@ -812,12 +830,13 @@ export class CombatAntiCheat {
    * @see OSRS-IMPLEMENTATION-PLAN.md Phase 5.5
    */
   validateDamage(
-    attackerId: string,
+    attackerId: EntityID | string,
     damage: number,
     attackerStrength: number,
     attackerStrengthBonus: number,
     currentTick?: number,
   ): boolean {
+    const attackerIdStr = String(attackerId);
     // Calculate maximum possible hit for this attacker
     // OSRS formula: Max Hit = floor(0.5 + EffectiveStrength × (StrengthBonus + 64) / 640)
     // EffectiveStrength = StrengthLevel + 8 + 3 (max style bonus)
@@ -831,7 +850,7 @@ export class CombatAntiCheat {
 
     if (damage > damageLimit) {
       this.recordViolation(
-        attackerId,
+        attackerIdStr,
         CombatViolationType.IMPOSSIBLE_DAMAGE,
         CombatViolationSeverity.CRITICAL,
         `Dealt ${damage} damage (max possible ${maxPossibleHit}, limit ${damageLimit})`,
@@ -846,10 +865,12 @@ export class CombatAntiCheat {
 
   /**
    * Clear kicked/banned status for a player (e.g., after appeal)
+   * @param playerId - Player ID (accepts both EntityID and string)
    */
-  clearPlayerStatus(playerId: string): void {
-    this.playersKicked.delete(playerId);
-    this.playersBanned.delete(playerId);
-    this.playerXPHistory.delete(playerId);
+  clearPlayerStatus(playerId: EntityID | string): void {
+    const playerIdStr = String(playerId);
+    this.playersKicked.delete(playerIdStr);
+    this.playersBanned.delete(playerIdStr);
+    this.playerXPHistory.delete(playerIdStr);
   }
 }

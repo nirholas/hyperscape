@@ -60,16 +60,22 @@ export class CombatStateService {
 
   /**
    * Check if entity is in combat
+   * @param entityId - Entity ID (accepts both EntityID and string for backwards compatibility)
    */
-  isInCombat(entityId: string): boolean {
-    return this.combatStates.has(createEntityID(entityId));
+  isInCombat(entityId: EntityID | string): boolean {
+    const typedId =
+      typeof entityId === "string" ? createEntityID(entityId) : entityId;
+    return this.combatStates.has(typedId);
   }
 
   /**
    * Get combat data for an entity
+   * @param entityId - Entity ID (accepts both EntityID and string for backwards compatibility)
    */
-  getCombatData(entityId: string): CombatData | null {
-    return this.combatStates.get(createEntityID(entityId)) || null;
+  getCombatData(entityId: EntityID | string): CombatData | null {
+    const typedId =
+      typeof entityId === "string" ? createEntityID(entityId) : entityId;
+    return this.combatStates.get(typedId) || null;
   }
 
   /**
@@ -178,16 +184,21 @@ export class CombatStateService {
 
   /**
    * Sync combat state to player entity for client-side awareness
+   * @param entityId - Entity ID (accepts both EntityID and string for backwards compatibility)
+   * @param targetId - Target ID (accepts both EntityID and string for backwards compatibility)
    */
   syncCombatStateToEntity(
-    entityId: string,
-    targetId: string,
+    entityId: EntityID | string,
+    targetId: EntityID | string,
     entityType: "player" | "mob",
   ): void {
     if (entityType !== "player") return;
 
+    const entityIdStr = String(entityId);
+    const targetIdStr = String(targetId);
+
     const playerEntity = this.world.getPlayer?.(
-      entityId,
+      entityIdStr,
     ) as CombatPlayerEntity | null;
 
     if (!playerEntity) return;
@@ -195,20 +206,20 @@ export class CombatStateService {
     // Set combat property if it exists (legacy support)
     if (playerEntity.combat) {
       playerEntity.combat.inCombat = true;
-      playerEntity.combat.combatTarget = targetId;
+      playerEntity.combat.combatTarget = targetIdStr;
     }
 
     // ALWAYS set in data for network sync (abbreviated keys for efficiency)
     if (playerEntity.data) {
       playerEntity.data.c = true;
-      playerEntity.data.ct = targetId;
+      playerEntity.data.ct = targetIdStr;
 
       // Send immediate network update when combat starts
       if (this.world.isServer && this.world.network?.send) {
         this.world.network.send("entityModified", {
-          id: entityId,
+          id: entityIdStr,
           c: true,
-          ct: targetId,
+          ct: targetIdStr,
         });
       }
     }
@@ -220,10 +231,18 @@ export class CombatStateService {
    * Mark player as in combat but without a target (OSRS auto-retaliate OFF behavior)
    * Player is being attacked but won't fight back - still triggers combat timer
    * Stores attackerId so we can start combat if auto-retaliate is toggled ON
+   * @param entityId - Entity ID (accepts both EntityID and string for backwards compatibility)
+   * @param attackerId - Attacker ID (accepts both EntityID and string for backwards compatibility)
    */
-  markInCombatWithoutTarget(entityId: string, attackerId?: string): void {
+  markInCombatWithoutTarget(
+    entityId: EntityID | string,
+    attackerId?: EntityID | string,
+  ): void {
+    const entityIdStr = String(entityId);
+    const attackerIdStr = attackerId ? String(attackerId) : null;
+
     const playerEntity = this.world.getPlayer?.(
-      entityId,
+      entityIdStr,
     ) as CombatPlayerEntity | null;
 
     if (!playerEntity) return;
@@ -233,7 +252,7 @@ export class CombatStateService {
       playerEntity.combat.inCombat = true;
       playerEntity.combat.combatTarget = null;
       // Store attacker for potential retaliation if auto-retaliate is toggled ON
-      playerEntity.combat.pendingAttacker = attackerId || null;
+      playerEntity.combat.pendingAttacker = attackerIdStr;
     }
 
     // ALWAYS set in data for network sync (abbreviated keys for efficiency)
@@ -241,12 +260,12 @@ export class CombatStateService {
       playerEntity.data.c = true;
       playerEntity.data.ct = null;
       // Store pending attacker (pa) for auto-retaliate toggle
-      playerEntity.data.pa = attackerId || null;
+      playerEntity.data.pa = attackerIdStr;
 
       // Send immediate network update
       if (this.world.isServer && this.world.network?.send) {
         this.world.network.send("entityModified", {
-          id: entityId,
+          id: entityIdStr,
           c: true,
           ct: null,
         });
@@ -258,15 +277,18 @@ export class CombatStateService {
 
   /**
    * Clear combat state from player entity when combat ends
+   * @param entityId - Entity ID (accepts both EntityID and string for backwards compatibility)
    */
   clearCombatStateFromEntity(
-    entityId: string,
+    entityId: EntityID | string,
     entityType: "player" | "mob",
   ): void {
     if (entityType !== "player") return;
 
+    const entityIdStr = String(entityId);
+
     const playerEntity = this.world.getPlayer?.(
-      entityId,
+      entityIdStr,
     ) as CombatPlayerEntity | null;
 
     if (!playerEntity) return;
@@ -287,7 +309,7 @@ export class CombatStateService {
       // Send immediate network update when combat ends
       if (this.world.isServer && this.world.network?.send) {
         this.world.network.send("entityModified", {
-          id: entityId,
+          id: entityIdStr,
           c: false,
           ct: null,
         });
@@ -299,11 +321,13 @@ export class CombatStateService {
 
   /**
    * Get all attackers targeting a specific entity
+   * @param entityId - Entity ID (accepts both EntityID and string for backwards compatibility)
    */
-  getAttackersTargeting(entityId: string): EntityID[] {
+  getAttackersTargeting(entityId: EntityID | string): EntityID[] {
+    const entityIdStr = String(entityId);
     const attackers: EntityID[] = [];
     for (const [attackerId, state] of this.combatStates) {
-      if (String(state.targetId) === entityId) {
+      if (String(state.targetId) === entityIdStr) {
         attackers.push(attackerId);
       }
     }
