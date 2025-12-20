@@ -520,7 +520,14 @@ export interface MobEntityLike {
     defense?: number;
     level?: number;
     name?: string;
+    health?: number;
   };
+  // Optional methods that may exist on MobEntity
+  isDead?: () => boolean;
+  getHealth?: () => number;
+  getCombatRange?: () => number;
+  isAttackable?: () => boolean;
+  onTargetDied?: (targetId: string) => void;
 }
 
 /**

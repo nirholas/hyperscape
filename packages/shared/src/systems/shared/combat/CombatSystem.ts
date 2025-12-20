@@ -5,28 +5,21 @@
 import { EventType } from "../../../types/events";
 import type { World } from "../../../core/World";
 import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
-import { AttackType, MobInstance } from "../../../types/core/core";
+import { AttackType } from "../../../types/core/core";
 import { EntityID } from "../../../types/core/identifiers";
 import { MobEntity } from "../../../entities/npc/MobEntity";
-import { MobAIState } from "../../../types/entities";
 import { Entity } from "../../../entities/Entity";
 import { PlayerSystem } from "..";
 import {
   calculateDamage,
-  calculateDistance2D,
-  calculateDistance3D,
   CombatStats,
-  isAttackOnCooldown,
   isAttackOnCooldownTicks,
   calculateRetaliationDelay,
-  attackSpeedSecondsToTicks,
-  attackSpeedMsToTicks,
 } from "../../../utils/game/CombatCalculations";
 import { createEntityID } from "../../../utils/IdentifierUtils";
 import { EntityManager } from "..";
 import { MobNPCSystem } from "..";
 import { SystemBase } from "..";
-import { Emotes } from "../../../data/playerEmotes";
 import { getItem } from "../../../data/items";
 import { tilesWithinMeleeRange } from "../movement/TileSystem";
 import { tilePool, PooledTile } from "../../../utils/pools/TilePool";
@@ -71,48 +64,6 @@ import {
 
 // Re-export CombatData from CombatStateService for backwards compatibility
 export type { CombatData } from "./CombatStateService";
-
-/**
- * Interface for player entity properties accessed by CombatSystem
- * Uses abbreviated keys for network bandwidth efficiency:
- * - c = inCombat, ct = combatTarget, e = emote
- */
-interface CombatPlayerEntity {
-  id: string;
-  combat?: {
-    inCombat: boolean;
-    combatTarget: string | null;
-  };
-  data?: {
-    c?: boolean; // inCombat (abbreviated)
-    ct?: string | null; // combatTarget (abbreviated)
-    e?: string; // emote (abbreviated)
-    isLoading?: boolean;
-  };
-  emote?: string;
-  base?: {
-    quaternion: { set(x: number, y: number, z: number, w: number): void };
-  };
-  node?: {
-    quaternion: {
-      set(x: number, y: number, z: number, w: number): void;
-      copy(q: { x: number; y: number; z: number; w: number }): void;
-    };
-  };
-  position?: { x: number; y: number; z: number };
-  getPosition?: () => { x: number; y: number; z: number };
-  markNetworkDirty?: () => void;
-  health?: number;
-  name?: string;
-}
-
-/**
- * Interface for mob entity with optional setServerEmote method
- * Used for type-safe emote setting in combat
- */
-interface MobWithServerEmote {
-  setServerEmote?: (emote: string) => void;
-}
 
 /**
  * Attack data structure for validation and execution
@@ -517,9 +468,8 @@ export class CombatSystem extends SystemBase {
     }
 
     // Check target is attackable (for mobs)
-    if (targetType === "mob") {
-      const mobEntity = target as MobEntity;
-      if (mobEntity.isAttackable && !mobEntity.isAttackable()) {
+    if (targetType === "mob" && isMobEntity(target)) {
+      if (typeof target.isAttackable === "function" && !target.isAttackable()) {
         this.emitTypedEvent(EventType.COMBAT_ATTACK_FAILED, {
           attackerId,
           targetId,
@@ -1356,10 +1306,11 @@ export class CombatSystem extends SystemBase {
         // CRITICAL: If the attacker is a mob, reset its internal CombatStateManager
         // This clears the mob's own nextAttackTick so it can attack immediately when target respawns
         if (state.attackerType === "mob") {
-          const mobEntity = this.world.entities.get(
-            String(attackerId),
-          ) as MobEntity;
-          if (mobEntity && typeof mobEntity.onTargetDied === "function") {
+          const mobEntity = this.world.entities.get(String(attackerId));
+          if (
+            isMobEntity(mobEntity) &&
+            typeof mobEntity.onTargetDied === "function"
+          ) {
             mobEntity.onTargetDied(entityId);
           }
         }
@@ -1568,10 +1519,11 @@ export class CombatSystem extends SystemBase {
 
         // If attacker is a mob, reset its internal combat state
         if (state.attackerType === "mob") {
-          const mobEntity = this.world.entities.get(
-            String(attackerId),
-          ) as MobEntity;
-          if (mobEntity && typeof mobEntity.onTargetDied === "function") {
+          const mobEntity = this.world.entities.get(String(attackerId));
+          if (
+            isMobEntity(mobEntity) &&
+            typeof mobEntity.onTargetDied === "function"
+          ) {
             // Reuse the same method - disconnect is similar to death
             mobEntity.onTargetDied(playerId);
           }
@@ -1602,7 +1554,8 @@ export class CombatSystem extends SystemBase {
         // Only log if this is a new entity that should exist
         return null;
       }
-      return entity as MobEntity;
+      // Validate entity is actually a MobEntity using type guard
+      return isMobEntity(entity) ? entity : (entity as Entity);
     }
 
     if (entityType === "player") {
@@ -2189,9 +2142,8 @@ export class CombatSystem extends SystemBase {
    */
   private getTargetName(entity: Entity | MobEntity | null): string {
     if (!entity) return "Unknown";
-    const mobEntity = entity as MobEntity;
-    if (mobEntity.getMobData) {
-      return mobEntity.getMobData().name;
+    if (isMobEntity(entity)) {
+      return entity.getMobData().name;
     }
     return entity.name || "Enemy";
   }
@@ -2256,15 +2208,12 @@ export class CombatSystem extends SystemBase {
 
     // For mobs, check mob attack speed (stored in ticks in npcs.json)
     const entity = this.getEntity(String(entityId), entityType);
-    if (entity) {
-      const mobEntity = entity as MobEntity;
-      if (mobEntity.getMobData) {
-        const mobData = mobEntity.getMobData();
-        const mobAttackSpeedTicks = (mobData as { attackSpeedTicks?: number })
-          .attackSpeedTicks;
-        if (mobAttackSpeedTicks) {
-          return mobAttackSpeedTicks;
-        }
+    if (entity && isMobEntity(entity)) {
+      const mobData = entity.getMobData();
+      const mobAttackSpeedTicks = (mobData as { attackSpeedTicks?: number })
+        .attackSpeedTicks;
+      if (mobAttackSpeedTicks) {
+        return mobAttackSpeedTicks;
       }
     }
 
@@ -2280,10 +2229,9 @@ export class CombatSystem extends SystemBase {
     entity: Entity | MobEntity,
     entityType: string,
   ): number {
-    if (entityType === "mob") {
-      const mobEntity = entity as MobEntity;
-      if (typeof mobEntity.getCombatRange === "function") {
-        return mobEntity.getCombatRange();
+    if (entityType === "mob" && isMobEntity(entity)) {
+      if (typeof entity.getCombatRange === "function") {
+        return entity.getCombatRange();
       }
     }
 
@@ -2346,24 +2294,23 @@ export class CombatSystem extends SystemBase {
       return playerHealth > 0;
     }
 
-    if (entityType === "mob") {
-      // Check mob health
-      const mob = entity as MobEntity;
-
+    if (entityType === "mob" && isMobEntity(entity)) {
       // Check if mob is marked as dead
-      if (mob.isDead()) {
+      if (typeof entity.isDead === "function" && entity.isDead()) {
         return false;
       }
 
-      // Check mob data if available
-      if (mob.getMobData) {
-        const mobData = mob.getMobData();
+      // Check mob data for health
+      const mobData = entity.getMobData();
+      if (mobData && typeof mobData.health === "number") {
         return mobData.health > 0;
       }
 
       // Fallback to health check
-      const mobHealth = mob.getHealth();
-      return mobHealth > 0;
+      if (typeof entity.getHealth === "function") {
+        return entity.getHealth() > 0;
+      }
+      return false;
     }
 
     return false;
