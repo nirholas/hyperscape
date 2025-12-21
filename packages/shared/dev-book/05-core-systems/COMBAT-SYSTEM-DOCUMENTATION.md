@@ -1,8 +1,6 @@
 # Combat System Documentation
 
 > **The Complete Technical Reference for Hyperscape's OSRS-Accurate Combat System**
->
-> Version: 2.0 | Last Updated: December 2024 | Rating: 10/10
 
 ---
 
@@ -2362,7 +2360,6 @@ This combat system represents a **production-ready, OSRS-accurate** implementati
 - ✅ Server-side combat request validation
 - ✅ Kill statistics persistence to database
 
-**Final Rating: 10/10**
 
 ---
 
