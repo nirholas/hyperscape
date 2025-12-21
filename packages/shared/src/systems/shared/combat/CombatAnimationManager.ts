@@ -58,7 +58,7 @@ export class CombatAnimationManager {
       this.setMobCombatEmote(entityId);
     }
 
-    // Issue #340: Hold combat pose until 1 tick before next attack
+    // Hold combat pose until 1 tick before next attack
     // Minimum 2 ticks to ensure animation plays, but scale with attack speed
     const resetTick = currentTick + Math.max(2, attackSpeedTicks - 1);
     this.emoteResetTicks.set(entityId, {

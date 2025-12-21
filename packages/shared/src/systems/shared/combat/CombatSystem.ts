@@ -272,7 +272,7 @@ export class CombatSystem extends SystemBase {
       },
     );
 
-    // Issue #342: Listen for combat follow events to initiate player movement toward target
+    // Listen for combat follow events to initiate player movement toward target
     this.subscribe(
       EventType.COMBAT_FOLLOW_TARGET,
       (data: {
@@ -415,7 +415,7 @@ export class CombatSystem extends SystemBase {
       return invalidResult;
     }
 
-    // Check target is alive (Issue #265)
+    // Check target is alive
     if (!this.entityResolver.isAlive(target, targetType)) {
       if (attackerType === "player") {
         this.antiCheat.recordDeadTargetAttack(
@@ -427,7 +427,7 @@ export class CombatSystem extends SystemBase {
       return invalidResult;
     }
 
-    // Check target not in loading protection (Issue #356)
+    // Check target not in loading protection
     if (targetType === "player" && target.data?.isLoading) {
       if (attackerType === "player") {
         this.antiCheat.recordViolation(
@@ -584,7 +584,7 @@ export class CombatSystem extends SystemBase {
       targetType,
     );
 
-    // Play attack animation (Issue #340: pass attack speed for proper animation duration)
+    // Play attack animation with attack speed for proper animation duration
     this.animationManager.setCombatEmote(
       attackerId,
       attackerType,
@@ -609,7 +609,7 @@ export class CombatSystem extends SystemBase {
       position: targetPosition,
     });
 
-    // Check if target died - skip remaining logic if so (Issue #265)
+    // Check if target died - skip remaining logic if so
     if (!this.entityResolver.isAlive(target, targetType)) {
       return;
     }
@@ -720,8 +720,8 @@ export class CombatSystem extends SystemBase {
   }
 
   /**
-   * Issue #342: Handle combat follow - move player toward target when out of melee range
-   * This allows combat to continue when the target moves instead of timing out
+   * Handle combat follow - move player toward target when out of melee range.
+   * This allows combat to continue when the target moves instead of timing out.
    *
    * NOTE: Actual movement is handled by ServerNetwork listening for COMBAT_FOLLOW_TARGET event.
    * This handler validates that combat is still active before the server initiates movement.
@@ -1689,7 +1689,7 @@ export class CombatSystem extends SystemBase {
       combatState.targetType,
     );
 
-    // Play attack animation (Issue #340: pass attack speed for proper animation duration)
+    // Play attack animation with attack speed for proper animation duration
     this.animationManager.setCombatEmote(
       attackerId,
       combatState.attackerType,
