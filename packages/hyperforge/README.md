@@ -28,6 +28,14 @@ AI-powered content creation studio for Hyperscape. Generate 3D models, audio, im
 - **Sprites**: 2D game sprites and icons
 - **Textures**: Seamless tileable textures
 
+### Structure Studio
+- **Modular Building**: Generate walls, doors, windows, floors, and roofs with AI
+- **Piece Placement**: Snap-to-grid 3D editor for combining pieces into buildings
+- **Building Baking**: Combine pieces into optimized single-mesh buildings
+- **Town Builder**: Arrange buildings into town layouts
+- **Material Presets**: Stone, wood, marble, and more material options
+- **Polycount Control**: Optimize pieces for game performance
+
 ### Developer Experience
 - **Command Palette** (`Ctrl+P`): Quick access to all actions
 - **Prompt Vault**: Save and reuse Hyperscape-optimized prompts

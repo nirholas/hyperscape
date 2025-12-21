@@ -66,9 +66,9 @@ export function parseTileKey(key: string): TileCoord {
 export interface SpawnConfig {
   /** Unique identifier for this spawn */
   id: string;
-  /** Type of spawn: mob, npc, or resource */
-  type: "mob" | "npc" | "resource";
-  /** Reference to the entity definition (mobId, npcId, or resourceId) */
+  /** Type of spawn: mob, npc, resource, or structure */
+  type: "mob" | "npc" | "resource" | "structure";
+  /** Reference to the entity definition (mobId, npcId, resourceId, or structureId) */
   entityId: string;
   /** Display name (resolved from definition) */
   name: string;
@@ -110,9 +110,35 @@ export interface ResourceSpawnConfig extends SpawnConfig {
 }
 
 /**
+ * Structure spawn configuration for placing buildings
+ */
+export interface StructureSpawnConfig {
+  /** Unique identifier for this spawn */
+  id: string;
+  /** Type is always "structure" */
+  type: "structure";
+  /** Reference to the structure definition ID */
+  structureId: string;
+  /** Display name */
+  name: string;
+  /** Position of the structure (anchor point) */
+  position: Position3D;
+  /** Y-axis rotation in degrees */
+  rotation: number;
+  /** Uniform scale (defaults to 1) */
+  scale?: number;
+  /** Whether players can enter this structure */
+  enterable?: boolean;
+}
+
+/**
  * Union type for all spawn configurations
  */
-export type TileSpawn = MobSpawnConfig | NpcSpawnConfig | ResourceSpawnConfig;
+export type TileSpawn =
+  | MobSpawnConfig
+  | NpcSpawnConfig
+  | ResourceSpawnConfig
+  | StructureSpawnConfig;
 
 // ============================================================================
 // TILE CONTENTS
@@ -247,7 +273,11 @@ export interface WorldAreaDefinition {
 /**
  * Area category based on difficulty
  */
-export type AreaCategory = "starterTowns" | "level1Areas" | "level2Areas" | "level3Areas";
+export type AreaCategory =
+  | "starterTowns"
+  | "level1Areas"
+  | "level2Areas"
+  | "level3Areas";
 
 /**
  * Get the area category for a difficulty level
@@ -278,7 +308,7 @@ export type EditorTool = "select" | "place" | "erase" | "bounds" | "pan";
  * Item being placed (dragged from palette)
  */
 export interface PlaceableItem {
-  type: "mob" | "npc" | "resource";
+  type: "mob" | "npc" | "resource" | "structure";
   entityId: string;
   name: string;
   iconPath?: string;

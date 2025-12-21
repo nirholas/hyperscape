@@ -45,13 +45,14 @@ import { logger } from "@/lib/utils";
 
 const log = logger.child("SupabaseStorage");
 
-// Storage buckets for HyperForge assets (6 buckets)
+// Storage buckets for HyperForge assets (7 buckets)
 const IMAGE_GENERATION_BUCKET = "image-generation"; // AI-generated images (concept art, sprites)
 const AUDIO_GENERATIONS_BUCKET = "audio-generations"; // Audio files (voice, sfx, music)
 const CONTENT_GENERATIONS_BUCKET = "content-generations"; // Text content (JSON, quests, dialogue, code)
 const MESHY_MODELS_BUCKET = "meshy-models"; // Meshy GLB models (preview, textured, rigged)
 const VRM_CONVERSION_BUCKET = "vrm-conversion"; // VRM converted models
 const CONCEPT_ART_BUCKET = "concept-art-pipeline"; // Legacy: metadata, thumbnails, misc
+const BAKED_STRUCTURES_BUCKET = "baked structures"; // Baked buildings and towns
 
 // Folder structure within buckets
 const FORGE_MODELS_FOLDER = "forge/models"; // Legacy: 3D assets in concept-art-pipeline
@@ -135,6 +136,7 @@ async function ensureBucket(): Promise<void> {
     MESHY_MODELS_BUCKET,
     VRM_CONVERSION_BUCKET,
     CONCEPT_ART_BUCKET,
+    BAKED_STRUCTURES_BUCKET,
   ];
 
   for (const bucketName of buckets) {
@@ -339,15 +341,21 @@ export async function uploadImage(
     // Upload metadata JSON alongside the image if provided
     if (metadata) {
       const metadataPath = storagePath.replace(/\.(png|jpg)$/, ".json");
-      const metadataBuffer = Buffer.from(JSON.stringify({
-        ...metadata,
-        type,
-        assetId,
-        filename: finalFilename,
-        storagePath,
-        url: result.url,
-        uploadedAt: new Date().toISOString(),
-      }, null, 2));
+      const metadataBuffer = Buffer.from(
+        JSON.stringify(
+          {
+            ...metadata,
+            type,
+            assetId,
+            filename: finalFilename,
+            storagePath,
+            url: result.url,
+            uploadedAt: new Date().toISOString(),
+          },
+          null,
+          2,
+        ),
+      );
 
       await uploadFileToBucket(
         IMAGE_GENERATION_BUCKET,
@@ -357,7 +365,10 @@ export async function uploadImage(
       );
     }
 
-    log.info(`Uploaded ${type} image: ${storagePath}`, { url: result.url, assetId });
+    log.info(`Uploaded ${type} image: ${storagePath}`, {
+      url: result.url,
+      assetId,
+    });
 
     return result;
   } catch (error) {
@@ -517,9 +528,15 @@ export async function uploadAudio(
       finalFilename = filename || `audio-${Date.now()}.mp3`;
 
       // Try to infer type from filename
-      if (finalFilename.includes("voice") || finalFilename.includes("dialogue")) {
+      if (
+        finalFilename.includes("voice") ||
+        finalFilename.includes("dialogue")
+      ) {
         audioType = "voice";
-      } else if (finalFilename.includes("music") || finalFilename.includes("ambient")) {
+      } else if (
+        finalFilename.includes("music") ||
+        finalFilename.includes("ambient")
+      ) {
         audioType = "music";
       }
     } else {
@@ -536,7 +553,10 @@ export async function uploadAudio(
       // Determine subfolder based on type and metadata
       if (audioType === "voice" && options.metadata?.npcId) {
         subfolder = options.metadata.npcId as string;
-      } else if ((audioType === "sfx" || audioType === "music") && options.metadata?.category) {
+      } else if (
+        (audioType === "sfx" || audioType === "music") &&
+        options.metadata?.category
+      ) {
         subfolder = options.metadata.category as string;
       }
     }
@@ -562,14 +582,20 @@ export async function uploadAudio(
     // Upload metadata JSON alongside the audio if provided
     if (metadata) {
       const metadataPath = storagePath.replace(/\.mp3$/, ".json");
-      const metadataBuffer = Buffer.from(JSON.stringify({
-        ...metadata,
-        type: audioType,
-        filename: finalFilename,
-        storagePath,
-        url: result.url,
-        uploadedAt: new Date().toISOString(),
-      }, null, 2));
+      const metadataBuffer = Buffer.from(
+        JSON.stringify(
+          {
+            ...metadata,
+            type: audioType,
+            filename: finalFilename,
+            storagePath,
+            url: result.url,
+            uploadedAt: new Date().toISOString(),
+          },
+          null,
+          2,
+        ),
+      );
 
       await uploadFileToBucket(
         AUDIO_GENERATIONS_BUCKET,
@@ -579,7 +605,9 @@ export async function uploadAudio(
       );
     }
 
-    log.info(`Uploaded ${audioType} audio: ${storagePath}`, { url: result.url });
+    log.info(`Uploaded ${audioType} audio: ${storagePath}`, {
+      url: result.url,
+    });
 
     return result;
   } catch (error) {
@@ -1476,7 +1504,10 @@ export async function listAudioAssets(): Promise<AudioAsset[]> {
             if (file.id === null || !file.name.endsWith(".mp3")) continue;
 
             const storagePath = `${subfolderPath}/${file.name}`;
-            const url = getBucketPublicUrl(AUDIO_GENERATIONS_BUCKET, storagePath);
+            const url = getBucketPublicUrl(
+              AUDIO_GENERATIONS_BUCKET,
+              storagePath,
+            );
 
             assets.push({
               id: file.name.replace(/\.[^.]+$/, ""),
@@ -1499,7 +1530,10 @@ export async function listAudioAssets(): Promise<AudioAsset[]> {
           if (folder.path === "generated") {
             if (item.name.includes("voice") || item.name.includes("speech")) {
               audioType = "voice";
-            } else if (item.name.includes("music") || item.name.includes("theme")) {
+            } else if (
+              item.name.includes("music") ||
+              item.name.includes("theme")
+            ) {
               audioType = "music";
             }
           }
@@ -1853,6 +1887,7 @@ export const BUCKET_NAMES = {
   MESHY_MODELS: MESHY_MODELS_BUCKET,
   VRM_CONVERSION: VRM_CONVERSION_BUCKET,
   CONCEPT_ART: CONCEPT_ART_BUCKET,
+  BAKED_STRUCTURES: BAKED_STRUCTURES_BUCKET,
 } as const;
 
 /**
@@ -1860,4 +1895,175 @@ export const BUCKET_NAMES = {
  */
 export function getSupabasePublicUrl(bucket: string, path: string): string {
   return getBucketPublicUrl(bucket, path);
+}
+
+// ============================================================================
+// BAKED STRUCTURES STORAGE
+// For baked buildings and town layouts
+// Storage: baked-structures/buildings/{id}/ and baked-structures/towns/{id}/
+// ============================================================================
+
+export interface BakedBuildingFiles {
+  definitionUrl: string;
+  definitionPath: string;
+  thumbnailUrl?: string;
+  thumbnailPath?: string;
+}
+
+export interface SaveBakedBuildingOptions {
+  buildingId: string;
+  definition: Record<string, unknown>;
+  thumbnailBuffer?: Buffer | ArrayBuffer;
+}
+
+/**
+ * Save a baked building to Supabase Storage
+ * Storage: baked-structures/buildings/{buildingId}/
+ *   - definition.json (the structure definition)
+ *   - thumbnail.png (optional)
+ */
+export async function saveBakedBuilding(
+  options: SaveBakedBuildingOptions,
+): Promise<BakedBuildingFiles> {
+  const { buildingId, definition, thumbnailBuffer } = options;
+
+  await ensureBucket();
+
+  const result: BakedBuildingFiles = {
+    definitionUrl: "",
+    definitionPath: "",
+  };
+
+  // Save definition JSON
+  const definitionPath = `buildings/${buildingId}/definition.json`;
+  const definitionBuffer = Buffer.from(JSON.stringify(definition, null, 2));
+
+  const definitionUpload = await uploadFileToBucket(
+    BAKED_STRUCTURES_BUCKET,
+    definitionPath,
+    definitionBuffer,
+    "application/json",
+  );
+
+  if (definitionUpload.success) {
+    result.definitionUrl = definitionUpload.url;
+    result.definitionPath = definitionUpload.path;
+    log.info(`Saved baked building definition: ${buildingId}`);
+  } else {
+    throw new Error(
+      `Failed to save building definition: ${definitionUpload.error}`,
+    );
+  }
+
+  // Save thumbnail if provided
+  if (thumbnailBuffer) {
+    const thumbnailPath = `buildings/${buildingId}/thumbnail.png`;
+    const thumbnailUpload = await uploadFileToBucket(
+      BAKED_STRUCTURES_BUCKET,
+      thumbnailPath,
+      thumbnailBuffer,
+      "image/png",
+    );
+
+    if (thumbnailUpload.success) {
+      result.thumbnailUrl = thumbnailUpload.url;
+      result.thumbnailPath = thumbnailUpload.path;
+      log.info(`Saved baked building thumbnail: ${buildingId}`);
+    }
+  }
+
+  return result;
+}
+
+export interface TownFiles {
+  definitionUrl: string;
+  definitionPath: string;
+  thumbnailUrl?: string;
+  thumbnailPath?: string;
+}
+
+export interface SaveTownOptions {
+  townId: string;
+  definition: Record<string, unknown>;
+  thumbnailBuffer?: Buffer | ArrayBuffer;
+}
+
+/**
+ * Save a town layout to Supabase Storage
+ * Storage: baked-structures/towns/{townId}/
+ *   - definition.json (the town definition with building placements)
+ *   - thumbnail.png (optional)
+ */
+export async function saveTown(options: SaveTownOptions): Promise<TownFiles> {
+  const { townId, definition, thumbnailBuffer } = options;
+
+  await ensureBucket();
+
+  const result: TownFiles = {
+    definitionUrl: "",
+    definitionPath: "",
+  };
+
+  // Save definition JSON
+  const definitionPath = `towns/${townId}/definition.json`;
+  const definitionBuffer = Buffer.from(JSON.stringify(definition, null, 2));
+
+  const definitionUpload = await uploadFileToBucket(
+    BAKED_STRUCTURES_BUCKET,
+    definitionPath,
+    definitionBuffer,
+    "application/json",
+  );
+
+  if (definitionUpload.success) {
+    result.definitionUrl = definitionUpload.url;
+    result.definitionPath = definitionUpload.path;
+    log.info(`Saved town definition: ${townId}`);
+  } else {
+    throw new Error(
+      `Failed to save town definition: ${definitionUpload.error}`,
+    );
+  }
+
+  // Save thumbnail if provided
+  if (thumbnailBuffer) {
+    const thumbnailPath = `towns/${townId}/thumbnail.png`;
+    const thumbnailUpload = await uploadFileToBucket(
+      BAKED_STRUCTURES_BUCKET,
+      thumbnailPath,
+      thumbnailBuffer,
+      "image/png",
+    );
+
+    if (thumbnailUpload.success) {
+      result.thumbnailUrl = thumbnailUpload.url;
+      result.thumbnailPath = thumbnailUpload.path;
+      log.info(`Saved town thumbnail: ${townId}`);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Get public URL for a baked building asset
+ */
+export function getBakedBuildingUrl(
+  buildingId: string,
+  filename: string,
+): string {
+  return getBucketPublicUrl(
+    BAKED_STRUCTURES_BUCKET,
+    `buildings/${buildingId}/${filename}`,
+  );
+}
+
+/**
+ * Get public URL for a town asset
+ */
+export function getTownUrl(townId: string, filename: string): string {
+  return getBucketPublicUrl(
+    BAKED_STRUCTURES_BUCKET,
+    `towns/${townId}/${filename}`,
+  );
 }

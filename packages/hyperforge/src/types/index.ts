@@ -233,6 +233,38 @@ export {
 } from "./utils";
 
 // =============================================================================
+// STRUCTURE TYPES
+// =============================================================================
+
+export type {
+  BuildingPieceType,
+  SnapPoint,
+  PieceDimensions,
+  BuildingPiece,
+  PieceTransform,
+  PlacedPiece,
+  StructureBounds,
+  StructureDefinition,
+  GridSnapConfig,
+  TransformMode,
+  StructureEditorTool,
+  StructureEditorState,
+  BakeStatus,
+  BakeResult,
+  BakeRequest,
+  PieceCategory,
+  PieceLibrary,
+  StructureSpawnConfig,
+} from "./structures";
+
+export {
+  DEFAULT_GRID_CONFIG,
+  DEFAULT_PIECE_DIMENSIONS,
+  DEFAULT_TRANSFORM,
+  PIECE_TYPE_CONFIG,
+} from "./structures";
+
+// =============================================================================
 // LEGACY RE-EXPORTS (for backwards compatibility)
 // =============================================================================
 

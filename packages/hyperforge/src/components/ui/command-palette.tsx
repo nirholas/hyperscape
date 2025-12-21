@@ -37,6 +37,7 @@ import {
   Crown,
   Database,
   ExternalLink,
+  Building,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -90,7 +91,12 @@ const STORAGE_KEY_RECENT = "hyperforge-recent-generations";
 const STORAGE_KEY_INITIALIZED = "hyperforge-prompts-initialized";
 const STORAGE_KEY_GAME_STYLE = "hyperforge-active-game-style";
 
-type PaletteView = "commands" | "prompts" | "prompt-editor" | "game-styles" | "materials";
+type PaletteView =
+  | "commands"
+  | "prompts"
+  | "prompt-editor"
+  | "game-styles"
+  | "materials";
 
 // Hyperscape game-specific prompt categories
 const PROMPT_CATEGORIES = [
@@ -243,7 +249,9 @@ export function CommandPalette() {
   const [newPromptText, setNewPromptText] = useState("");
   const [newPromptCategory, setNewPromptCategory] = useState("mob");
   const [materialPresets, setMaterialPresets] = useState<MaterialPreset[]>([]);
-  const [gameStyles, setGameStyles] = useState<Record<string, GameStyleInfo>>({});
+  const [gameStyles, setGameStyles] = useState<Record<string, GameStyleInfo>>(
+    {},
+  );
   const [activeGameStyle, setActiveGameStyle] = useState<string>("runescape");
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
@@ -444,6 +452,15 @@ export function CommandPalette() {
         keywords: ["vrm", "animation", "avatar"],
       },
       {
+        id: "nav-structures",
+        title: "Structure Studio",
+        description: "Build modular structures and buildings",
+        icon: <Building className="w-4 h-4 text-amber-400" />,
+        category: "navigation",
+        action: () => router.push("/studio/structures"),
+        keywords: ["building", "structure", "house", "modular", "wall", "door"],
+      },
+      {
         id: "nav-audio",
         title: "Audio Studio",
         description: "Generate voice, music, and sound effects",
@@ -576,7 +593,16 @@ export function CommandPalette() {
         icon: <Palette className="w-4 h-4 text-purple-400" />,
         category: "action",
         action: () => setView("materials"),
-        keywords: ["material", "bronze", "iron", "steel", "mithril", "leather", "wood", "texture"],
+        keywords: [
+          "material",
+          "bronze",
+          "iron",
+          "steel",
+          "mithril",
+          "leather",
+          "wood",
+          "texture",
+        ],
       },
     );
 
@@ -789,7 +815,14 @@ export function CommandPalette() {
     });
 
     return items;
-  }, [router, recentGenerations, savedPrompts, materialPresets, gameStyles, activeGameStyle]);
+  }, [
+    router,
+    recentGenerations,
+    savedPrompts,
+    materialPresets,
+    gameStyles,
+    activeGameStyle,
+  ]);
 
   // Filter commands by query
   const filteredCommands = useMemo(() => {
@@ -1133,8 +1166,8 @@ export function CommandPalette() {
       {/* Style Grid */}
       <div className="p-4 space-y-3 max-h-[50vh] overflow-y-auto custom-scrollbar">
         <p className="text-xs text-zinc-400">
-          Select a game style to apply to all new generations. This affects
-          the visual aesthetic and prompt styling.
+          Select a game style to apply to all new generations. This affects the
+          visual aesthetic and prompt styling.
         </p>
 
         <div className="grid grid-cols-2 gap-2">
@@ -1160,9 +1193,7 @@ export function CommandPalette() {
                   {style.name}
                 </span>
               </div>
-              <p className="text-xs text-zinc-500 line-clamp-2">
-                {style.base}
-              </p>
+              <p className="text-xs text-zinc-500 line-clamp-2">{style.base}</p>
             </button>
           ))}
         </div>
@@ -1241,7 +1272,9 @@ export function CommandPalette() {
           {Object.entries(materialsByCategory).map(([category, materials]) => (
             <div key={category}>
               <div className="flex items-center gap-2 mb-2">
-                {categoryIcons[category] || <Hammer className="w-4 h-4 text-zinc-500" />}
+                {categoryIcons[category] || (
+                  <Hammer className="w-4 h-4 text-zinc-500" />
+                )}
                 <span className="text-xs font-medium text-zinc-400 uppercase tracking-wide">
                   {category}
                 </span>

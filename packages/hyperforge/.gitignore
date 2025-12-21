@@ -60,6 +60,11 @@ hyperforge.db
 /public/generated/
 /storage/
 /assets/
+# User-generated structure data (building pieces, structures, towns)
+# These are created during runtime and should not be committed
+/public/data/building-pieces.json
+/public/data/structures.json
+/public/data/towns.json
 
 # Turbo cache
 .turbo/

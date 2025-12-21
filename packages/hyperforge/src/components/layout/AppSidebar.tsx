@@ -20,6 +20,7 @@ import {
   Map as MapIcon,
   LayoutDashboard,
   GitGraph,
+  Building,
   type LucideIcon,
 } from "lucide-react";
 
@@ -36,6 +37,7 @@ const studioPages: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/studio/armor", label: "Armor Fitting", icon: Shield },
   { href: "/studio/hands", label: "Hand Rigging", icon: Hand },
   { href: "/studio/retarget", label: "Retarget & Animate", icon: RefreshCw },
+  { href: "/studio/structures", label: "Structure Studio", icon: Building },
 ];
 
 export function AppSidebar({
