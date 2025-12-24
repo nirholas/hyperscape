@@ -280,10 +280,11 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
   };
 
   // Melee-only MVP: Always show melee attack styles
-  const styles: Array<{ id: string; label: string }> = [
-    { id: "accurate", label: "Accurate" },
-    { id: "aggressive", label: "Aggressive" },
-    { id: "defensive", label: "Defensive" },
+  const styles: Array<{ id: string; label: string; xp: string }> = [
+    { id: "accurate", label: "Accurate", xp: "Attack" },
+    { id: "aggressive", label: "Aggressive", xp: "Strength" },
+    { id: "defensive", label: "Defensive", xp: "Defense" },
+    { id: "controlled", label: "Controlled", xp: "All" },
   ];
 
   const healthPercent = Math.round((health.current / health.max) * 100);
@@ -413,7 +414,7 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
       >
         Attack style
       </div>
-      <div className="grid grid-cols-3 gap-1">
+      <div className="grid grid-cols-2 gap-1">
         {styles.map((s) => (
           <button
             key={s.id}
@@ -444,9 +445,8 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
       </div>
       {/* Show which skill is being trained */}
       <div className="text-[9px] text-gray-400 italic">
-        {style === "accurate" && "Training: Attack + Hitpoints"}
-        {style === "aggressive" && "Training: Strength + Hitpoints"}
-        {style === "defensive" && "Training: Defense + Hitpoints"}
+        Training: {styles.find((s) => s.id === style)?.xp ?? "Attack"} +
+        Hitpoints
       </div>
       {cooldown > 0 && (
         <div
