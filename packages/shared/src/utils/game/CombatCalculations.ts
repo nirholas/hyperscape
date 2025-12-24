@@ -28,18 +28,21 @@ export interface StyleBonus {
   defense: number;
 }
 
+/**
+ * Pre-allocated style bonuses to avoid object creation in hot path.
+ * Frozen to prevent mutation and enable V8 optimizations.
+ * @see https://oldschool.runescape.wiki/w/Combat_Options
+ */
+const STYLE_BONUSES: Readonly<Record<CombatStyle, Readonly<StyleBonus>>> = {
+  accurate: Object.freeze({ attack: 3, strength: 0, defense: 0 }),
+  aggressive: Object.freeze({ attack: 0, strength: 3, defense: 0 }),
+  defensive: Object.freeze({ attack: 0, strength: 0, defense: 3 }),
+  controlled: Object.freeze({ attack: 1, strength: 1, defense: 1 }),
+} as const;
+
 /** Accurate: +3 atk, Aggressive: +3 str, Defensive: +3 def, Controlled: +1 all */
-export function getStyleBonus(style: CombatStyle): StyleBonus {
-  switch (style) {
-    case "accurate":
-      return { attack: 3, strength: 0, defense: 0 };
-    case "aggressive":
-      return { attack: 0, strength: 3, defense: 0 };
-    case "defensive":
-      return { attack: 0, strength: 0, defense: 3 };
-    case "controlled":
-      return { attack: 1, strength: 1, defense: 1 };
-  }
+export function getStyleBonus(style: CombatStyle): Readonly<StyleBonus> {
+  return STYLE_BONUSES[style];
 }
 
 export interface CombatStats {
