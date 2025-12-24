@@ -113,66 +113,58 @@ export class PlayerSystem extends SystemBase {
   private autoRetaliateLastToggle = new Map<string, number>();
   private readonly AUTO_RETALIATE_COOLDOWN_MS = 500; // Max 2 toggles/second
 
-  // Attack styles per GDD - Train one skill exclusively
+  // Attack styles - OSRS-accurate stat bonuses applied via CombatCalculations.getStyleBonus()
+  // @see https://oldschool.runescape.wiki/w/Combat_Options
   private readonly ATTACK_STYLES: Record<string, AttackStyle> = {
     accurate: {
       id: "accurate",
       name: "Accurate",
-      description: "Train Attack only. (Hitpoints always trained separately)",
+      description: "Train Attack. +3 invisible Attack levels.",
       xpDistribution: {
-        attack: 100, // 100% Attack XP
+        attack: 100,
         strength: 0,
         defense: 0,
-        constitution: 0, // Constitution always trained separately at 1.33 XP per damage
+        constitution: 0,
       },
-      damageModifier: 1.0, // Normal damage
-      accuracyModifier: 1.15, // +15% accuracy
       icon: "🎯",
     },
 
     aggressive: {
       id: "aggressive",
       name: "Aggressive",
-      description: "Train Strength only. (Hitpoints always trained separately)",
+      description: "Train Strength. +3 invisible Strength levels.",
       xpDistribution: {
         attack: 0,
-        strength: 100, // 100% Strength XP
+        strength: 100,
         defense: 0,
-        constitution: 0, // Constitution always trained separately at 1.33 XP per damage
+        constitution: 0,
       },
-      damageModifier: 1.15, // +15% damage
-      accuracyModifier: 1.0, // Normal accuracy
       icon: "⚔️",
     },
 
     defensive: {
       id: "defensive",
       name: "Defensive",
-      description: "Train Defense only. (Hitpoints always trained separately)",
+      description: "Train Defense. +3 invisible Defense levels.",
       xpDistribution: {
         attack: 0,
         strength: 0,
-        defense: 100, // 100% Defense XP
-        constitution: 0, // Constitution always trained separately at 1.33 XP per damage
+        defense: 100,
+        constitution: 0,
       },
-      damageModifier: 0.85, // -15% damage dealt
-      accuracyModifier: 1.0, // Normal accuracy
       icon: "🛡️",
     },
 
     controlled: {
       id: "controlled",
       name: "Controlled",
-      description:
-        "Train Attack, Strength, and Defense equally. (Hitpoints always trained separately)",
+      description: "Train all combat skills. +1 to Attack, Strength, Defense.",
       xpDistribution: {
-        attack: 33, // 33% of combat XP to Attack
-        strength: 33, // 33% of combat XP to Strength
-        defense: 34, // 34% of combat XP to Defense
-        constitution: 0, // Constitution always trained separately at 1.33 XP per damage
+        attack: 33,
+        strength: 33,
+        defense: 34,
+        constitution: 0,
       },
-      damageModifier: 1.0, // Normal damage
-      accuracyModifier: 1.0, // Normal accuracy
       icon: "⚖️",
     },
   };
@@ -264,34 +256,8 @@ export class PlayerSystem extends SystemBase {
     this.subscribe(EventType.ATTACK_STYLE_CHANGED, (data) =>
       this.handleStyleChange(data as { playerId: string; newStyle: string }),
     );
-    this.subscribe(EventType.COMBAT_XP_CALCULATE, (data) =>
-      this.handleXPCalculation(
-        data as {
-          playerId: string;
-          baseXP: number;
-          skill: string;
-          callback: (xpAmount: number) => void;
-        },
-      ),
-    );
-    this.subscribe(EventType.COMBAT_DAMAGE_CALCULATE, (data) =>
-      this.handleDamageCalculation(
-        data as {
-          playerId: string;
-          baseDamage: number;
-          callback: (damage: number) => void;
-        },
-      ),
-    );
-    this.subscribe(EventType.COMBAT_ACCURACY_CALCULATE, (data) =>
-      this.handleAccuracyCalculation(
-        data as {
-          playerId: string;
-          baseAccuracy: number;
-          callback: (accuracy: number) => void;
-        },
-      ),
-    );
+    // Note: COMBAT_XP_CALCULATE, COMBAT_DAMAGE_CALCULATE, COMBAT_ACCURACY_CALCULATE
+    // events removed - actual combat bonuses applied via CombatCalculations.getStyleBonus()
     this.subscribe(EventType.UI_ATTACK_STYLE_GET, (data) =>
       this.handleGetStyleInfo(
         data as {
@@ -1598,113 +1564,6 @@ export class PlayerSystem extends SystemBase {
         attackStyle: newStyle,
       });
     }
-  }
-
-  /**
-   * Handle XP calculation based on attack style
-   */
-  private handleXPCalculation(data: {
-    playerId: string;
-    baseXP: number;
-    skill: string;
-    callback: (xpAmount: number) => void;
-  }): void {
-    const { playerId, baseXP, skill } = data;
-
-    const playerState = this.playerAttackStyles.get(playerId);
-    if (!playerState) {
-      // No attack style state, return base XP
-      data.callback(baseXP);
-      return;
-    }
-
-    const attackStyle = this.ATTACK_STYLES[playerState.selectedStyle];
-    if (!attackStyle) {
-      data.callback(baseXP);
-      return;
-    }
-
-    // Calculate XP based on attack style distribution
-    let xpMultiplier = 0;
-
-    switch (skill.toLowerCase()) {
-      case "attack":
-        xpMultiplier = attackStyle.xpDistribution.attack / 100;
-        break;
-      case "strength":
-        xpMultiplier = attackStyle.xpDistribution.strength / 100;
-        break;
-      case "defense":
-        xpMultiplier = attackStyle.xpDistribution.defense / 100;
-        break;
-      case "constitution":
-        xpMultiplier = attackStyle.xpDistribution.constitution / 100;
-        break;
-      default:
-        xpMultiplier = 1; // Non-combat skills unaffected
-    }
-
-    const finalXP = Math.floor(baseXP * xpMultiplier);
-    data.callback(finalXP);
-  }
-
-  /**
-   * Handle damage calculation based on attack style
-   */
-  private handleDamageCalculation(data: {
-    playerId: string;
-    baseDamage: number;
-    callback: (damage: number) => void;
-  }): void {
-    const { playerId, baseDamage } = data;
-
-    const playerState = this.playerAttackStyles.get(playerId);
-    if (!playerState) {
-      data.callback(baseDamage);
-      return;
-    }
-
-    const attackStyle = this.ATTACK_STYLES[playerState.selectedStyle];
-    if (!attackStyle) {
-      data.callback(baseDamage);
-      return;
-    }
-
-    // Apply damage modifier from attack style (default to 1.0 = no modification)
-    const finalDamage = Math.floor(
-      baseDamage * (attackStyle.damageModifier ?? 1.0),
-    );
-    data.callback(finalDamage);
-  }
-
-  /**
-   * Handle accuracy calculation based on attack style
-   */
-  private handleAccuracyCalculation(data: {
-    playerId: string;
-    baseAccuracy: number;
-    callback: (accuracy: number) => void;
-  }): void {
-    const { playerId, baseAccuracy } = data;
-
-    const playerState = this.playerAttackStyles.get(playerId);
-    if (!playerState) {
-      data.callback(baseAccuracy);
-      return;
-    }
-
-    const attackStyle = this.ATTACK_STYLES[playerState.selectedStyle];
-    if (!attackStyle) {
-      data.callback(baseAccuracy);
-      return;
-    }
-
-    // Apply accuracy modifier from attack style (default to 1.0 = no modification)
-    const finalAccuracy = Math.min(
-      1.0,
-      baseAccuracy * (attackStyle.accuracyModifier ?? 1.0),
-    );
-    data.callback(finalAccuracy);
   }
 
   /**
