@@ -1,95 +1,50 @@
 /**
- * Combat-related constants extracted from various systems
- * These values are based on the GDD specifications
+ * Combat Constants
+ *
+ * OSRS-accurate timing and combat values.
+ * All tick-based values assume 600ms per tick.
+ *
+ * @see https://oldschool.runescape.wiki/w/Game_tick
  */
 
 export const COMBAT_CONSTANTS = {
-  // Attack ranges (general)
+  // === Ranges (tiles) ===
   MELEE_RANGE: 2,
   RANGED_RANGE: 10,
-
-  // OSRS-accurate melee range constants
-  // @see https://oldschool.runescape.wiki/w/Attack_range
-  MELEE_RANGE_STANDARD: 1, // Unarmed, swords, daggers - CARDINAL ONLY
-  MELEE_RANGE_HALBERD: 2, // Halberds, spears - allows diagonal
-
-  // Pickup range (server-side validation, slightly larger than client to account for movement)
+  MELEE_RANGE_STANDARD: 1,
+  MELEE_RANGE_HALBERD: 2,
   PICKUP_RANGE: 2.5,
 
-  // Attack timing (RuneScape-style speeds)
-  ATTACK_COOLDOWN_MS: 2400, // 2.4 seconds - standard weapon attack speed (4 ticks)
-  COMBAT_TIMEOUT_MS: 4800, // 4.8 seconds (8 ticks) - OSRS in-combat timer after last hit
+  // === Tick System ===
+  TICK_DURATION_MS: 600,
 
-  // OSRS Constants
-  TICK_DURATION_MS: 600, // 0.6 seconds per game tick
+  // === Combat Timing (ticks) ===
+  DEFAULT_ATTACK_SPEED_TICKS: 4,
+  COMBAT_TIMEOUT_TICKS: 8,
+  LOGOUT_PREVENTION_TICKS: 16,
+  HEALTH_REGEN_COOLDOWN_TICKS: 17,
+  HEALTH_REGEN_INTERVAL_TICKS: 100,
+  AFK_DISABLE_RETALIATE_TICKS: 2000,
 
-  // OSRS-accurate tick-based combat timing
-  DEFAULT_ATTACK_SPEED_TICKS: 4, // Unarmed/standard weapon (2.4s)
-  COMBAT_TIMEOUT_TICKS: 8, // 4.8s - health bar visible after combat ends
-  LOGOUT_PREVENTION_TICKS: 16, // 9.6s - can't logout after taking damage
-  HEALTH_REGEN_COOLDOWN_TICKS: 17, // 10.2s - cooldown after damage before regen starts
-  HEALTH_REGEN_INTERVAL_TICKS: 100, // 60s - regenerate 1 HP every 100 ticks
-  AFK_DISABLE_RETALIATE_TICKS: 2000, // 20 minutes - auto-retaliate disabled after 20 min AFK
-
-  // Weapon speed tiers in ticks (OSRS-accurate)
-  // @see https://oldschool.runescape.wiki/w/Attack_speed
-  ATTACK_SPEED_TICKS: {
-    FASTEST: 3, // Darts, blowpipe (1.8s)
-    FAST: 4, // Scimitars, whip, daggers, unarmed (2.4s)
-    MEDIUM: 5, // Longswords, crossbows (3.0s)
-    SLOW: 6, // Godswords, battleaxes (3.6s)
-    SLOWEST: 7, // Halberds, 2H swords (4.2s)
-  },
-
-  // OSRS-accurate hit delay formulas (Phase 3)
-  // @see https://oldschool.runescape.wiki/w/Hit_delay
-  // Hit delay = ticks from attack to damage appearing on target
-  //
-  // MELEE: 0 ticks (instant - damage appears same tick as attack)
-  // RANGED: 1 + floor((3 + distance) / 6) ticks
-  // MAGIC: 1 + floor((1 + distance) / 3) ticks
-  //
-  // Examples at distance 5:
-  //   Melee: 0 ticks
-  //   Ranged: 1 + floor((3 + 5) / 6) = 1 + 1 = 2 ticks
-  //   Magic: 1 + floor((1 + 5) / 3) = 1 + 2 = 3 ticks
+  // === Hit Delay ===
+  // Formula: MELEE=0, RANGED=1+floor((3+dist)/6), MAGIC=1+floor((1+dist)/3)
   HIT_DELAY: {
-    MELEE_BASE: 0, // Melee is instant
-    RANGED_BASE: 1, // Ranged minimum delay
-    RANGED_DISTANCE_OFFSET: 3, // Added to distance before division
-    RANGED_DISTANCE_DIVISOR: 6, // Distance divisor
-    MAGIC_BASE: 1, // Magic minimum delay
-    MAGIC_DISTANCE_OFFSET: 1, // Added to distance before division
-    MAGIC_DISTANCE_DIVISOR: 3, // Distance divisor
-    MAX_HIT_DELAY: 10, // Maximum hit delay in ticks (cap for sanity)
+    MELEE_BASE: 0,
+    RANGED_BASE: 1,
+    RANGED_DISTANCE_OFFSET: 3,
+    RANGED_DISTANCE_DIVISOR: 6,
+    MAGIC_BASE: 1,
+    MAGIC_DISTANCE_OFFSET: 1,
+    MAGIC_DISTANCE_DIVISOR: 3,
+    MAX_HIT_DELAY: 10,
   },
 
-  // Animation synchronization constants (Phase 4)
-  // @see https://oldschool.runescape.wiki/w/Hitsplat
-  // Damage applies at animation midpoint for visual synchronization
-  //
-  // Animation keyframe structure:
-  // - Frame 0: Wind-up starts (weapon raises)
-  // - Frame 0.5: Weapon connects (DAMAGE APPLIES HERE)
-  // - Frame 1.0: Follow-through completes
+  // === Animation ===
   ANIMATION: {
-    // Ratio of attack animation where damage visually applies
-    // 0.5 = midpoint (weapon connects at center of swing)
     HIT_FRAME_RATIO: 0.5,
-
-    // Minimum animation duration in ticks (ensures animation plays)
     MIN_ANIMATION_TICKS: 2,
-
-    // Hitsplat display timing
-    // In OSRS, hitsplats appear the same tick damage is dealt
     HITSPLAT_DELAY_TICKS: 0,
-
-    // Hitsplat display duration (visible time in ticks)
-    // @see https://oldschool.runescape.wiki/w/Hitsplat
-    // OSRS-accurate: 1-2 ticks (0.6-1.2s), we use 2 for clarity
     HITSPLAT_DURATION_TICKS: 2,
-
-    // Combat animation types
     EMOTE_COMBAT: "combat",
     EMOTE_SWORD_SWING: "sword_swing",
     EMOTE_RANGED: "ranged",
@@ -97,82 +52,74 @@ export const COMBAT_CONSTANTS = {
     EMOTE_IDLE: "idle",
   },
 
-  // Respawn timing in ticks (OSRS-style)
-  // @see https://oldschool.runescape.wiki/w/Respawn_rate
-  RESPAWN_TICKS_MIN: 25, // 15 seconds - minimum respawn time
-  RESPAWN_TICKS_DEFAULT: 25, // 15 seconds - standard mob respawn
-  RESPAWN_TICKS_RANDOMNESS: 8, // +0-8 ticks randomness (~0-5 seconds)
+  // === Death & Loot (ticks) ===
+  RESPAWN_TICKS_RANDOMNESS: 8,
+  GRAVESTONE_TICKS: 1500,
+  GROUND_ITEM_DESPAWN_TICKS: 300,
+  UNTRADEABLE_DESPAWN_TICKS: 300,
+  LOOT_PROTECTION_TICKS: 100,
+  CORPSE_DESPAWN_TICKS: 200,
 
-  // Death/Loot timing in ticks (OSRS-style)
-  // @see https://oldschool.runescape.wiki/w/Gravestone
-  GRAVESTONE_TICKS: 500, // 5 minutes (300 seconds / 0.6)
-  GROUND_ITEM_DESPAWN_TICKS: 200, // 2 minutes (120 seconds / 0.6) - tradeable items
-  UNTRADEABLE_DESPAWN_TICKS: 300, // 3 minutes (180 seconds / 0.6) - untradeable items
-  LOOT_PROTECTION_TICKS: 100, // 1 minute (60 seconds / 0.6) - killer exclusivity
-  CORPSE_DESPAWN_TICKS: 200, // 2 minutes - mob corpse despawn
+  DEATH: {
+    ANIMATION_TICKS: 8,
+    COOLDOWN_TICKS: 17,
+    RECONNECT_RESPAWN_DELAY_TICKS: 1,
+    STALE_LOCK_AGE_TICKS: 6000,
+    DEFAULT_RESPAWN_POSITION: { x: 0, y: 0, z: 0 } as const,
+    DEFAULT_RESPAWN_TOWN: "Central Haven",
+  } as const,
 
-  BASE_CONSTANT: 64, // Added to equipment bonuses in formulas
-  EFFECTIVE_LEVEL_CONSTANT: 8, // Added to effective levels
-  DAMAGE_DIVISOR: 640, // Used in max hit calculation
+  // === Damage Formulas ===
+  BASE_CONSTANT: 64,
+  EFFECTIVE_LEVEL_CONSTANT: 8,
+  DAMAGE_DIVISOR: 640,
+  MIN_DAMAGE: 0,
+  MAX_DAMAGE: 200,
 
-  // Minimum values
-  MIN_DAMAGE: 0, // OSRS: Can hit 0 (miss)
-  MAX_DAMAGE: 200, // OSRS damage cap
-
-  // OSRS-accurate XP formulas
-  // @see https://oldschool.runescape.wiki/w/Combat#Experience
+  // === XP per Damage ===
   XP: {
-    /** Combat skill XP per damage dealt (Attack, Strength, Defence, or Ranged) */
     COMBAT_XP_PER_DAMAGE: 4,
-    /** Hitpoints XP per damage dealt (always granted in addition to combat XP) */
     HITPOINTS_XP_PER_DAMAGE: 1.33,
-    /** Controlled style XP per damage per skill (1.33 to each of 4 skills) */
     CONTROLLED_XP_PER_DAMAGE: 1.33,
   },
 
-  // Combat states
   COMBAT_STATES: {
     IDLE: "idle",
     IN_COMBAT: "in_combat",
     FLEEING: "fleeing",
   } as const,
-} as const;
 
-export const AGGRO_CONSTANTS = {
-  // Default behaviors
-  DEFAULT_BEHAVIOR: "passive" as const,
-
-  // Update intervals
-  AGGRO_UPDATE_INTERVAL_MS: 100,
-
-  // Special level thresholds
-  ALWAYS_AGGRESSIVE_LEVEL: 999, // Used for mobs that ignore level differences
-
-  // Mob behavior configurations - loaded dynamically from mobs.json manifest
-  // Access via getMobById(mobId).behavior from data/mobs.ts
-  // OSRS-accurate defaults: detectionRange=4 (hunt), leashRange=7 (max range)
-  // @see https://oldschool.runescape.wiki/w/Aggressiveness
-  MOB_BEHAVIORS: {
-    default: {
-      behavior: "passive" as const,
-      detectionRange: 4,
-      leashRange: 7,
-      levelIgnoreThreshold: 0,
+  // === Manifest Defaults (fallback when not specified) ===
+  DEFAULTS: {
+    NPC: {
+      ATTACK_SPEED_TICKS: 4,
+      AGGRO_RANGE: 4,
+      COMBAT_RANGE: 1,
+      LEASH_RANGE: 7,
+      RESPAWN_TICKS: 25,
+      WANDER_RADIUS: 5,
+    },
+    ITEM: {
+      ATTACK_SPEED: 4,
+      ATTACK_RANGE: 1,
     },
   } as const,
 } as const;
 
+export const AGGRO_CONSTANTS = {
+  DEFAULT_BEHAVIOR: "passive" as const,
+  AGGRO_UPDATE_INTERVAL_MS: 100,
+  ALWAYS_AGGRESSIVE_LEVEL: 999,
+} as const;
+
 export const LEVEL_CONSTANTS = {
-  // Starting values
   DEFAULT_COMBAT_LEVEL: 3,
   MIN_COMBAT_LEVEL: 3,
   MAX_LEVEL: 99,
 
-  // XP formulas
   XP_BASE: 50,
   XP_GROWTH_FACTOR: 8,
 
-  // Combat level calculation weights
   COMBAT_LEVEL_WEIGHTS: {
     DEFENSE_WEIGHT: 0.25,
     OFFENSE_WEIGHT: 0.325,
@@ -182,4 +129,3 @@ export const LEVEL_CONSTANTS = {
 
 export type CombatState =
   (typeof COMBAT_CONSTANTS.COMBAT_STATES)[keyof typeof COMBAT_CONSTANTS.COMBAT_STATES];
-export type MobBehaviorType = keyof typeof AGGRO_CONSTANTS.MOB_BEHAVIORS;

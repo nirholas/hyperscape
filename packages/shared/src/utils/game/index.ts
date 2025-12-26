@@ -13,8 +13,10 @@ export {
   calculateDamage,
   isInAttackRange,
   calculateDistance3D,
-  isAttackOnCooldown,
-  shouldCombatTimeout,
+  isAttackOnCooldownTicks,
+  shouldCombatTimeoutTicks,
+  ticksToMs,
+  msToTicks,
 } from "./CombatCalculations";
 
 export * from "./CombatUtils";

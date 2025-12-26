@@ -120,6 +120,5 @@ export const WORLD_STRUCTURE_CONSTANTS = {
   WATER_LEVEL: 0,
   MAX_BUILD_HEIGHT: 100,
   SAFE_ZONE_RADIUS: 15, // Radius around starter towns with no hostile mobs
-  RESPAWN_TIME: 30000, // 30 seconds respawn timer per GDD
-  DEATH_ITEM_DESPAWN_TIME: 300000, // 5 minutes for items to despawn at death location
+  // Note: Death/respawn timing constants are in COMBAT_CONSTANTS (tick-based)
 } as const;

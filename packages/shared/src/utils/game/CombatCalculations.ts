@@ -218,22 +218,6 @@ export function isInAttackRange(
 export const calculateDistance3D = mathCalculateDistance;
 export const calculateDistance2D = mathCalculateDistance2D;
 
-export function isAttackOnCooldown(
-  lastAttackTime: number,
-  currentTime: number,
-  attackSpeed?: number,
-): boolean {
-  const cooldown = attackSpeed ?? COMBAT_CONSTANTS.ATTACK_COOLDOWN_MS;
-  return currentTime - lastAttackTime < cooldown;
-}
-
-export function shouldCombatTimeout(
-  combatStartTime: number,
-  currentTime: number,
-): boolean {
-  return currentTime - combatStartTime > COMBAT_CONSTANTS.COMBAT_TIMEOUT_MS;
-}
-
 export function isAttackOnCooldownTicks(
   currentTick: number,
   nextAttackTick: number,

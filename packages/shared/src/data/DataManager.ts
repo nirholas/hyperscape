@@ -21,6 +21,7 @@
 import { BANKS, GENERAL_STORES } from "./banks-stores";
 import { ITEMS } from "./items";
 import { ALL_NPCS } from "./npcs";
+import { COMBAT_CONSTANTS } from "../constants/CombatConstants";
 import { generateAllNotedItems } from "./NoteGenerator";
 import {
   ALL_WORLD_AREAS,
@@ -280,9 +281,12 @@ export class DataManager {
       // Optional properties
       healAmount: item.healAmount,
       attackSpeed: item.attackSpeed,
-      // MVP: Melee-only - all weapons have range 1
+      // Melee weapons default to standard range, others use manifest value
       attackRange:
-        item.attackRange ?? (attackType === AttackType.MELEE ? 1 : undefined),
+        item.attackRange ??
+        (attackType === AttackType.MELEE
+          ? COMBAT_CONSTANTS.DEFAULTS.ITEM.ATTACK_RANGE
+          : undefined),
       equippedModelPath: item.equippedModelPath,
       bonuses: item.bonuses,
       requirements: item.requirements,
@@ -307,10 +311,16 @@ export class DataManager {
         attackable: npc.combat?.attackable ?? true,
         aggressive: npc.combat?.aggressive ?? false,
         retaliates: npc.combat?.retaliates ?? true,
-        aggroRange: npc.combat?.aggroRange ?? 0,
-        combatRange: npc.combat?.combatRange ?? 1.5,
-        attackSpeedTicks: npc.combat?.attackSpeedTicks ?? 4,
-        respawnTime: (npc.combat?.respawnTicks ?? 25) * 600, // Convert ticks to ms
+        aggroRange: npc.combat?.aggroRange ?? 0, // 0 = non-aggressive by default
+        combatRange:
+          npc.combat?.combatRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.COMBAT_RANGE,
+        attackSpeedTicks:
+          npc.combat?.attackSpeedTicks ??
+          COMBAT_CONSTANTS.DEFAULTS.NPC.ATTACK_SPEED_TICKS,
+        respawnTime:
+          (npc.combat?.respawnTicks ??
+            COMBAT_CONSTANTS.DEFAULTS.NPC.RESPAWN_TICKS) *
+          COMBAT_CONSTANTS.TICK_DURATION_MS, // Convert ticks to ms
         xpReward: npc.combat?.xpReward ?? 0,
         poisonous: npc.combat?.poisonous ?? false,
         immuneToPoison: npc.combat?.immuneToPoison ?? false,

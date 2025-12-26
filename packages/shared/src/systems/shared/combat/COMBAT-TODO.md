@@ -40,25 +40,19 @@ These are core OSRS systems planned for future implementation phases.
 
 Address these before next major release.
 
-### 1. Magic Numbers in Death System
-- **Status**: TODO
-- **Location**: `PlayerDeathSystem.ts`
-- **Issue**: Hardcoded timing values should use constants
-- **Instances**:
-  ```
-  Line 502: setTimeout(..., 4500)  // Respawn delay
-  Line 478: DEATH_ANIMATION_DURATION = 3000  // Local constant
-  Line 847: ticksSinceDeath > 500  // Gravestone warning
-  ```
-- **Fix**: Add to `CombatConstants.ts`:
-  ```typescript
-  DEATH: {
-    ANIMATION_DURATION_MS: 3000,
-    RESPAWN_DELAY_MS: 4500,
-    GRAVESTONE_WARNING_TICKS: 500,
-  }
-  ```
-- **Effort**: 1-2 hours
+### ~~1. Magic Numbers in Death System~~ ✅ COMPLETED
+- **Status**: DONE (2025-12-24)
+- **Location**: `PlayerDeathSystem.ts`, `CombatConstants.ts`
+- **Resolution**: Added tick-based `COMBAT_CONSTANTS.DEATH` section with 6 constants:
+  - `ANIMATION_TICKS`, `COOLDOWN_TICKS`, `RECONNECT_RESPAWN_DELAY_TICKS`
+  - `STALE_LOCK_AGE_TICKS`, `DEFAULT_RESPAWN_POSITION`, `DEFAULT_RESPAWN_TOWN`
+- **Cleanup** (2025-12-24): Deleted all deprecated MS constants:
+  - Removed `ATTACK_COOLDOWN_MS`, `COMBAT_TIMEOUT_MS` from CombatConstants
+  - Removed `RESPAWN_TIME`, `DEATH_ITEM_DESPAWN_TIME` from world-structure.ts
+  - Removed unused `CONSTANTS` object from types/index.ts
+  - Removed unused `HEALTH_REGEN_COOLDOWN/INTERVAL` from GameConstants
+  - Removed unused `isAttackOnCooldown()`, `shouldCombatTimeout()` functions
+  - Migrated all usages to tick-based with `ticksToMs()` at point of use
 
 ### 2. Metrics/Monitoring Integration
 - **Status**: TODO
@@ -146,17 +140,14 @@ Plan for upcoming sprints.
   - [ ] UI indicator (crossed swords icon)
 - **Effort**: 6-8 hours
 
-### 8. Combat XP Gain System
-- **Status**: Not implemented
+### ~~8. Combat XP Gain System~~ ✅ COMPLETED
+- **Status**: DONE (2025-12-24)
 - **OSRS Reference**: https://oldschool.runescape.wiki/w/Combat#Experience
-- **Description**: Combat grants XP based on damage dealt and combat style
-- **XP Formula**: `XP = damage * 4` (distributed by style)
-- **Styles**:
-  - Accurate: Attack XP + HP XP
-  - Aggressive: Strength XP + HP XP
-  - Defensive: Defence XP + HP XP
-  - Controlled: Shared XP + HP XP
-- **Effort**: 4-5 hours
+- **Resolution**: Implemented in `SkillsSystem.ts` with OSRS-accurate formulas:
+  - Focused styles: 4 XP/damage to combat skill + 1.33 XP/damage to HP
+  - Controlled: 1.33 XP/damage to each of 4 skills (Attack, Strength, Defence, Constitution)
+  - Constants in `COMBAT_CONSTANTS.XP`: `COMBAT_XP_PER_DAMAGE`, `HITPOINTS_XP_PER_DAMAGE`, `CONTROLLED_XP_PER_DAMAGE`
+  - 19 unit tests in `SkillsSystem.xp.test.ts`
 
 ### 9. Poison/Venom System
 - **Status**: Not implemented
@@ -235,6 +226,10 @@ Items that have been implemented and verified.
 - [x] Cardinal-only melee for range 1, diagonal for range 2+
 - [x] Death/gravestone system with ground items
 - [x] Debug logging cleanup (removed DEBUG_MOB_ATTACK)
+- [x] Combat XP gain system (OSRS-accurate 4/1.33 formulas, all 4 styles)
+- [x] Death system constants extracted to COMBAT_CONSTANTS.DEATH (tick-based)
+- [x] Combat styles system (WeaponStyleConfig, style bonuses, UI)
+- [x] MS-based constant cleanup (removed all deprecated ms constants, dead code)
 
 ---
 

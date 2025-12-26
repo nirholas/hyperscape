@@ -6,8 +6,6 @@ import type { Node as NodeClass } from "../nodes/Node";
 import { System } from "../systems/shared";
 import { World } from "../core/World";
 import type { EntityData, Position2D, Position3D } from "./core/base-types";
-// Import banking constants - single source of truth for MAX_BANK_SLOTS
-import { BANKING_CONSTANTS } from "../constants/BankingConstants";
 
 // Re-enable core imports - circular dependency should be resolved
 import type {
@@ -202,17 +200,6 @@ export type AsyncCallback<T = void> = (result: T) => Promise<void>;
 export type EventCallback<T extends BaseEventData = BaseEventData> = (
   data: T,
 ) => void;
-
-// Constants
-export const CONSTANTS = {
-  MAX_INVENTORY_SLOTS: 28,
-  MAX_BANK_SLOTS: BANKING_CONSTANTS.MAX_BANK_SLOTS, // Single source: BankingConstants.ts
-  DEFAULT_HEALTH: 100,
-  DEFAULT_STAMINA: 100,
-  COMBAT_TIMEOUT_MS: 10000,
-  RESPAWN_TIME_MS: 30000,
-  SAVE_INTERVAL_MS: 60000,
-} as const;
 
 // Error codes for type safety
 export const ERROR_CODES = {

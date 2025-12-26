@@ -4,8 +4,8 @@
  * Tests for OSRS-style combat calculation functions:
  * - Damage calculation with accuracy system
  * - Attack range checking (melee tile-adjacent)
- * - Attack cooldown checking (timestamp and tick-based)
- * - Combat timeout checking
+ * - Attack cooldown checking (tick-based)
+ * - Combat timeout checking (tick-based)
  * - Tick conversion utilities
  * - Retaliation delay calculation
  */
@@ -14,8 +14,6 @@ import { describe, it, expect } from "vitest";
 import {
   calculateDamage,
   isInAttackRange,
-  isAttackOnCooldown,
-  shouldCombatTimeout,
   isAttackOnCooldownTicks,
   calculateRetaliationDelay,
   attackSpeedSecondsToTicks,
@@ -277,62 +275,6 @@ describe("CombatCalculations", () => {
       const attacker = { x: 0.5, y: 0, z: 0.5 };
       const target = { x: 1.5, y: 100, z: 0.5 };
       expect(isInAttackRange(attacker, target, AttackType.MELEE)).toBe(true);
-    });
-  });
-
-  describe("isAttackOnCooldown", () => {
-    const DEFAULT_COOLDOWN = COMBAT_CONSTANTS.ATTACK_COOLDOWN_MS; // 2400ms
-
-    it("returns true when within cooldown period", () => {
-      const lastAttack = 1000;
-      const currentTime = 2000; // 1000ms later (still on cooldown)
-      expect(isAttackOnCooldown(lastAttack, currentTime)).toBe(true);
-    });
-
-    it("returns false when cooldown has passed", () => {
-      const lastAttack = 1000;
-      const currentTime = 1000 + DEFAULT_COOLDOWN + 1; // Just past cooldown
-      expect(isAttackOnCooldown(lastAttack, currentTime)).toBe(false);
-    });
-
-    it("returns false at exactly cooldown time", () => {
-      const lastAttack = 1000;
-      const currentTime = 1000 + DEFAULT_COOLDOWN; // Exactly at cooldown end
-      expect(isAttackOnCooldown(lastAttack, currentTime)).toBe(false);
-    });
-
-    it("uses custom attack speed when provided", () => {
-      const lastAttack = 1000;
-      const customSpeed = 1800; // Faster weapon (3 ticks)
-
-      // Within custom cooldown
-      expect(isAttackOnCooldown(lastAttack, 2500, customSpeed)).toBe(true);
-
-      // Past custom cooldown
-      expect(isAttackOnCooldown(lastAttack, 2801, customSpeed)).toBe(false);
-    });
-  });
-
-  describe("shouldCombatTimeout", () => {
-    const TIMEOUT = COMBAT_CONSTANTS.COMBAT_TIMEOUT_MS; // 4800ms
-
-    it("returns false within timeout period", () => {
-      const combatStart = 1000;
-      const currentTime = 4000; // 3000ms - still in combat
-      expect(shouldCombatTimeout(combatStart, currentTime)).toBe(false);
-    });
-
-    it("returns true after timeout period", () => {
-      const combatStart = 1000;
-      const currentTime = 1000 + TIMEOUT + 1; // Just past timeout
-      expect(shouldCombatTimeout(combatStart, currentTime)).toBe(true);
-    });
-
-    it("returns true at exactly timeout time", () => {
-      const combatStart = 1000;
-      const currentTime = 1000 + TIMEOUT;
-      // At exactly timeout, should still be true (>= check internally is >)
-      expect(shouldCombatTimeout(combatStart, currentTime)).toBe(false);
     });
   });
 

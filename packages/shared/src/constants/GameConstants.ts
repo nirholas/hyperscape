@@ -27,8 +27,7 @@ export const PLAYER_CONSTANTS = {
   BASE_MOVEMENT_SPEED: 1.0,
   RUNNING_SPEED_MULTIPLIER: 1.5,
   HEALTH_REGEN_RATE: 1, // 1 HP per regen tick (RuneScape-style)
-  HEALTH_REGEN_COOLDOWN: 10000, // 10 seconds after combat/damage before regen starts
-  HEALTH_REGEN_INTERVAL: 60000, // Regen 1 HP every 60 seconds (RuneScape-style)
+  // Note: Health regen cooldown/interval use COMBAT_CONSTANTS tick-based values
   STAMINA_REGEN_RATE: 2.0,
   STAMINA_DRAIN_RATE: 5.0,
 } as const;
@@ -73,8 +72,11 @@ export const GATHERING_CONSTANTS = {
 export const MOB_CONSTANTS = {
   SPAWN_RADIUS: 20,
   MAX_MOBS_PER_AREA: 10,
-  MOB_RESPAWN_TIME: 30000, // 30 seconds
-  AI_UPDATE_INTERVAL: 1000, // 1 second
+  // Derived from tick-based constant for consistency (25 ticks * 600ms = 15000ms)
+  MOB_RESPAWN_TIME:
+    COMBAT_CONSTANTS.DEFAULTS.NPC.RESPAWN_TICKS *
+    COMBAT_CONSTANTS.TICK_DURATION_MS,
+  // Note: AI update interval is TICK_DURATION_MS (600ms) - see AggroSystem.ts
 } as const;
 
 // Import health bar dimensions from single source of truth

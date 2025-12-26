@@ -1,7 +1,8 @@
 import { SystemBase } from "..";
 import type { World } from "../../../core/World";
 import { EventType } from "../../../types/events";
-import { WORLD_STRUCTURE_CONSTANTS } from "../../../data/world-structure";
+import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
+import { ticksToMs } from "../../../utils/game/CombatCalculations";
 import type { HeadstoneData } from "../../../types/entities";
 import type {
   ZoneData,
@@ -110,7 +111,9 @@ export class PlayerDeathSystem extends SystemBase {
   >();
 
   private lastDeathTime = new Map<string, number>();
-  private readonly DEATH_COOLDOWN = 10000;
+  private readonly DEATH_COOLDOWN = ticksToMs(
+    COMBAT_CONSTANTS.DEATH.COOLDOWN_TICKS,
+  );
 
   private zoneDetection!: ZoneDetectionSystem;
   private groundItemSystem!: GroundItemSystem;
@@ -499,7 +502,9 @@ export class PlayerDeathSystem extends SystemBase {
       }
     }
 
-    const DEATH_ANIMATION_DURATION = 4500;
+    const DEATH_ANIMATION_DURATION = ticksToMs(
+      COMBAT_CONSTANTS.DEATH.ANIMATION_TICKS,
+    );
     const respawnTimer = setTimeout(() => {
       if (playerEntity && "data" in playerEntity) {
         const entityData = playerEntity.data as {
@@ -570,8 +575,7 @@ export class PlayerDeathSystem extends SystemBase {
         position: groundedPosition,
         items: [...items],
         itemCount: items.length,
-        despawnTime:
-          Date.now() + WORLD_STRUCTURE_CONSTANTS.DEATH_ITEM_DESPAWN_TIME, // 5 minutes for player graves
+        despawnTime: Date.now() + ticksToMs(COMBAT_CONSTANTS.GRAVESTONE_TICKS), // 5 minutes for player graves
       },
       properties: {
         movementComponent: null,
@@ -611,8 +615,9 @@ export class PlayerDeathSystem extends SystemBase {
       );
     }
 
-    const DEATH_RESPAWN_POSITION = { x: 0, y: 0, z: 0 };
-    const DEATH_RESPAWN_TOWN = "Central Haven";
+    const DEATH_RESPAWN_POSITION =
+      COMBAT_CONSTANTS.DEATH.DEFAULT_RESPAWN_POSITION;
+    const DEATH_RESPAWN_TOWN = COMBAT_CONSTANTS.DEATH.DEFAULT_RESPAWN_TOWN;
 
     this.respawnPlayer(playerId, DEATH_RESPAWN_POSITION, DEATH_RESPAWN_TOWN);
 
@@ -770,7 +775,7 @@ export class PlayerDeathSystem extends SystemBase {
     }
 
     const gravestoneId = `gravestone_${playerId}_${Date.now()}`;
-    const GRAVESTONE_DURATION = 5 * 60 * 1000; // 5 minutes
+    const GRAVESTONE_DURATION = ticksToMs(COMBAT_CONSTANTS.GRAVESTONE_TICKS);
     const despawnTime = Date.now() + GRAVESTONE_DURATION;
 
     // Ground to terrain
@@ -851,7 +856,9 @@ export class PlayerDeathSystem extends SystemBase {
     }
 
     // Spawn ground items (2 minute despawn timer)
-    const GROUND_ITEM_DURATION = 2 * 60 * 1000;
+    const GROUND_ITEM_DURATION = ticksToMs(
+      COMBAT_CONSTANTS.GROUND_ITEM_DESPAWN_TICKS,
+    );
     await this.groundItemSystem.spawnGroundItems(items, position, {
       despawnTime: GROUND_ITEM_DURATION,
       droppedBy: playerId,
@@ -890,7 +897,9 @@ export class PlayerDeathSystem extends SystemBase {
     if (deathLock) {
       // Check if death lock is stale (older than 1 hour)
       // Stale death locks should be cleared, not restored
-      const MAX_DEATH_LOCK_AGE = 60 * 60 * 1000; // 1 hour
+      const MAX_DEATH_LOCK_AGE = ticksToMs(
+        COMBAT_CONSTANTS.DEATH.STALE_LOCK_AGE_TICKS,
+      );
       const deathAge = Date.now() - deathLock.timestamp;
 
       if (deathAge > MAX_DEATH_LOCK_AGE) {
@@ -910,7 +919,7 @@ export class PlayerDeathSystem extends SystemBase {
       // Very short delay, then auto-respawn (just enough for world to load)
       setTimeout(() => {
         this.initiateRespawn(playerId);
-      }, 500); // 0.5 second delay
+      }, ticksToMs(COMBAT_CONSTANTS.DEATH.RECONNECT_RESPAWN_DELAY_TICKS));
 
       // Block inventory load until respawn
       return { blockInventoryLoad: true };
@@ -1049,7 +1058,10 @@ export class PlayerDeathSystem extends SystemBase {
     if (!deathData) return 0;
 
     const elapsed = Date.now() - deathData.timestamp;
-    return Math.max(0, WORLD_STRUCTURE_CONSTANTS.RESPAWN_TIME - elapsed);
+    return Math.max(
+      0,
+      ticksToMs(COMBAT_CONSTANTS.DEATH.ANIMATION_TICKS) - elapsed,
+    );
   }
 
   getRemainingDespawnTime(playerId: string): number {
@@ -1057,10 +1069,7 @@ export class PlayerDeathSystem extends SystemBase {
     if (!deathData) return 0;
 
     const elapsed = Date.now() - deathData.timestamp;
-    return Math.max(
-      0,
-      WORLD_STRUCTURE_CONSTANTS.DEATH_ITEM_DESPAWN_TIME - elapsed,
-    );
+    return Math.max(0, ticksToMs(COMBAT_CONSTANTS.GRAVESTONE_TICKS) - elapsed);
   }
 
   forceRespawn(playerId: string): void {

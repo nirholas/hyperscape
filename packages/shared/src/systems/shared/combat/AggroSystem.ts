@@ -9,7 +9,7 @@
 
 import { World } from "../../../core/World";
 import { EventType } from "../../../types/events";
-import { AGGRO_CONSTANTS } from "../../../constants/CombatConstants";
+import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
 import { AggroTarget, Position3D, MobAIStateData } from "../../../types";
 import { calculateDistance } from "../../../utils/game/EntityUtils";
 import {
@@ -192,6 +192,13 @@ export class AggroSystem extends SystemBase {
     type: string;
     level: number;
     position: { x: number; y: number; z: number };
+    /** Optional combat config from manifest (aggroRange, leashRange, etc.) */
+    combat?: {
+      aggressive?: boolean;
+      aggroRange?: number;
+      leashRange?: number;
+      levelIgnoreThreshold?: number;
+    };
   }): void {
     // Strong type assumption - mobData.position is typed and valid from caller
     // If position is missing, that's a bug in the spawning system
@@ -200,15 +207,21 @@ export class AggroSystem extends SystemBase {
     }
 
     const mobType = mobData.type.toLowerCase();
-    const behavior =
-      AGGRO_CONSTANTS.MOB_BEHAVIORS[mobType] ||
-      AGGRO_CONSTANTS.MOB_BEHAVIORS.default;
+
+    // Use manifest values with OSRS-accurate DEFAULTS as fallback
+    // This replaces the legacy MOB_BEHAVIORS lookup pattern
+    const detectionRange =
+      mobData.combat?.aggroRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.AGGRO_RANGE;
+    const leashRange =
+      mobData.combat?.leashRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE;
+    const isAggressive = mobData.combat?.aggressive ?? false;
+    const levelIgnoreThreshold = mobData.combat?.levelIgnoreThreshold ?? 10;
 
     const aiState: MobAIStateData = {
       mobId: mobData.id,
       type: mobType,
       state: "idle",
-      behavior: behavior.behavior,
+      behavior: isAggressive ? "aggressive" : "passive",
       lastStateChange: Date.now(),
       lastAction: Date.now(),
       isPatrolling: false,
@@ -225,14 +238,14 @@ export class AggroSystem extends SystemBase {
         y: mobData.position.y || 0,
         z: mobData.position.z || 0,
       },
-      detectionRange: behavior.detectionRange,
-      leashRange: behavior.leashRange,
+      detectionRange,
+      leashRange,
       chaseSpeed: 3.0, // Default chase speed
       patrolRadius: 5.0, // Default patrol radius
       aggroTargets: new Map(),
       combatCooldown: 0,
       lastAttack: 0,
-      levelIgnore: behavior.levelIgnoreThreshold || 10,
+      levelIgnore: levelIgnoreThreshold,
       targetId: null,
       patrolPath: [],
       patrolIndex: 0,
@@ -362,14 +375,10 @@ export class AggroSystem extends SystemBase {
     const mobLevel = this.getMobCombatLevel(mobState.mobId);
 
     // Check if mob is tolerance-immune (bosses, special mobs)
-    const mobType = mobState.type;
-    const behaviorConfig =
-      AGGRO_CONSTANTS.MOB_BEHAVIORS[mobType] ||
-      AGGRO_CONSTANTS.MOB_BEHAVIORS.default;
-
+    // Use levelIgnore from mobState (set from manifest during registration)
     // Special mobs with levelIgnoreThreshold of 999 are "toleranceImmune"
     // They always aggro regardless of player level
-    const toleranceImmune = behaviorConfig.levelIgnoreThreshold >= 999;
+    const toleranceImmune = mobState.levelIgnore >= 999;
 
     // OSRS double-level aggro rule
     // Player level > (mob level * 2) = mob ignores player
@@ -789,15 +798,13 @@ export class AggroSystem extends SystemBase {
     playerCombatLevel: number,
   ): boolean {
     // Check if mob should ignore player based on level (GDD requirement)
-    const mobType = mobState.type;
-    const behaviorConfig =
-      AGGRO_CONSTANTS.MOB_BEHAVIORS[mobType] ||
-      AGGRO_CONSTANTS.MOB_BEHAVIORS.default;
+    // Use levelIgnore from mobState (set from manifest during registration)
+    const levelIgnoreThreshold = mobState.levelIgnore;
 
     // Check level-based aggression per GDD
-    if (playerCombatLevel > behaviorConfig.levelIgnoreThreshold) {
+    if (playerCombatLevel > levelIgnoreThreshold) {
       // Player is too high level, mob ignores them (except special cases)
-      if (behaviorConfig.levelIgnoreThreshold < 999) {
+      if (levelIgnoreThreshold < 999) {
         // Special cases like Dark Warriors have levelIgnoreThreshold: 999
         return true; // Should ignore this player
       }

@@ -88,6 +88,7 @@ import { getWorldNetwork } from "../utils/SystemUtils";
 import type { World } from "../core/World";
 import { EventType } from "../types/events";
 import { GAME_CONSTANTS } from "../constants/GameConstants";
+import { ticksToMs } from "../utils/game/CombatCalculations";
 import type { MeshUserData } from "../types/core/core";
 import type { Position3D } from "../types/index";
 import type { EntityInteractionData, EntityConfig } from "../types/entities";
@@ -775,7 +776,9 @@ export class Entity implements IEntity {
       isInCombat: false,
       target: null,
       lastAttackTime: 0,
-      attackCooldown: GAME_CONSTANTS.COMBAT.ATTACK_COOLDOWN_MS,
+      attackCooldown: ticksToMs(
+        GAME_CONSTANTS.COMBAT.DEFAULT_ATTACK_SPEED_TICKS,
+      ),
       damage: GAME_CONSTANTS.COMBAT.MIN_DAMAGE,
       range: GAME_CONSTANTS.COMBAT.MELEE_RANGE,
     });

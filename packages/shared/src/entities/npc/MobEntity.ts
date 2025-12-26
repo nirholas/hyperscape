@@ -108,6 +108,7 @@ import type {
   HealthBarHandle,
 } from "../../systems/client/HealthBars";
 import { COMBAT_CONSTANTS } from "../../constants/CombatConstants";
+import { ticksToMs } from "../../utils/game/CombatCalculations";
 import { AggroManager } from "../managers/AggroManager";
 import {
   worldToTile,
@@ -2631,7 +2632,7 @@ export class MobEntity extends CombatantEntity {
         // In combat - show health bar and set/extend timeout
         this._healthBarHandle.show();
         this._healthBarVisibleUntil =
-          Date.now() + COMBAT_CONSTANTS.COMBAT_TIMEOUT_MS;
+          Date.now() + ticksToMs(COMBAT_CONSTANTS.COMBAT_TIMEOUT_TICKS);
       }
       // Note: Hiding is handled by clientUpdate() when timeout expires
     }
