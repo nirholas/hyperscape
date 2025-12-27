@@ -26,7 +26,9 @@ import type { TileMovementManager } from "./tile-movement";
 interface PendingAttack {
   playerId: string;
   targetId: string;
-  /** Last tile we pathed toward (to detect when mob moves) */
+  /** Target type: "mob" for PvE, "player" for PvP */
+  targetType: "mob" | "player";
+  /** Last tile we pathed toward (to detect when target moves) */
   lastTargetTile: { x: number; z: number } | null;
   /** Weapon melee range in tiles (1 = standard melee/unarmed, 2 = halberd) */
   meleeRange: number;
@@ -47,22 +49,24 @@ export class PendingAttackManager {
 
   /**
    * Queue a pending attack for a player
-   * Called when player clicks mob but is not in range
+   * Called when player clicks target but is not in range
    *
-   * OSRS: When clicking an NPC, pathfinding targets all tiles within melee range
+   * OSRS: When clicking an NPC/player, pathfinding targets all tiles within melee range
    *
    * @param meleeRange - Weapon's melee range (1 = standard/unarmed, 2 = halberd)
+   * @param targetType - "mob" for PvE, "player" for PvP
    */
   queuePendingAttack(
     playerId: string,
     targetId: string,
     _currentTick: number,
     meleeRange: number = 1,
+    targetType: "mob" | "player" = "mob",
   ): void {
     // Cancel any existing pending attack
     this.cancelPendingAttack(playerId);
 
-    const targetPos = this.getMobPosition(targetId);
+    const targetPos = this.getTargetPosition(targetId);
     if (!targetPos) {
       return;
     }
@@ -72,6 +76,7 @@ export class PendingAttackManager {
     this.pendingAttacks.set(playerId, {
       playerId,
       targetId,
+      targetType,
       lastTargetTile: { x: targetTile.x, z: targetTile.z },
       meleeRange,
     });
@@ -83,6 +88,44 @@ export class PendingAttackManager {
       true,
       meleeRange,
     );
+  }
+
+  /**
+   * Get target position - works for both mobs and players
+   */
+  private getTargetPosition(
+    targetId: string,
+  ): { x: number; y: number; z: number } | null {
+    // Try mob position first (original callback)
+    const mobPos = this.getMobPosition(targetId);
+    if (mobPos) return mobPos;
+
+    // Try player position
+    const player = this.world.entities.players?.get(targetId);
+    if (player?.position) {
+      return player.position;
+    }
+
+    return null;
+  }
+
+  /**
+   * Check if target is alive - works for both mobs and players
+   */
+  private isTargetAlive(
+    targetId: string,
+    targetType: "mob" | "player",
+  ): boolean {
+    if (targetType === "mob") {
+      return this.isMobAlive(targetId);
+    }
+
+    // For players, check if they exist and have health > 0
+    const player = this.world.entities.players?.get(targetId);
+    if (!player) return false;
+
+    const health = player.getHealth?.();
+    return typeof health === "number" && health > 0;
   }
 
   /**
@@ -120,8 +163,8 @@ export class PendingAttackManager {
     for (const [playerId, pending] of this.pendingAttacks) {
       // NO TIMEOUT - OSRS follows indefinitely (removed timeout check)
 
-      // Check if target still exists and is alive
-      if (!this.isMobAlive(pending.targetId)) {
+      // Check if target still exists and is alive (supports both mobs and players)
+      if (!this.isTargetAlive(pending.targetId, pending.targetType)) {
         this.pendingAttacks.delete(playerId);
         continue;
       }
@@ -133,7 +176,7 @@ export class PendingAttackManager {
         continue;
       }
 
-      const targetPos = this.getMobPosition(pending.targetId);
+      const targetPos = this.getTargetPosition(pending.targetId);
       if (!targetPos) {
         this.pendingAttacks.delete(playerId);
         continue;
@@ -147,12 +190,12 @@ export class PendingAttackManager {
       // - Range 1: Cardinal only (N/S/E/W)
       // - Range 2+: Allows diagonal (Chebyshev distance)
       if (tilesWithinMeleeRange(playerTile, targetTile, pending.meleeRange)) {
-        // In range! Start combat
+        // In range! Start combat (use correct targetType for PvP/PvE)
         this.world.emit(EventType.COMBAT_ATTACK_REQUEST, {
           playerId,
           targetId: pending.targetId,
           attackerType: "player",
-          targetType: "mob",
+          targetType: pending.targetType,
           attackType: "melee",
         });
 
@@ -193,8 +236,8 @@ export class PendingAttackManager {
     const pending = this.pendingAttacks.get(playerId);
     if (!pending) return;
 
-    // Check if target still exists and is alive
-    if (!this.isMobAlive(pending.targetId)) {
+    // Check if target still exists and is alive (supports both mobs and players)
+    if (!this.isTargetAlive(pending.targetId, pending.targetType)) {
       this.pendingAttacks.delete(playerId);
       return;
     }
@@ -206,7 +249,7 @@ export class PendingAttackManager {
       return;
     }
 
-    const targetPos = this.getMobPosition(pending.targetId);
+    const targetPos = this.getTargetPosition(pending.targetId);
     if (!targetPos) {
       this.pendingAttacks.delete(playerId);
       return;
@@ -218,12 +261,12 @@ export class PendingAttackManager {
 
     // OSRS-accurate melee range check
     if (tilesWithinMeleeRange(playerTile, targetTile, pending.meleeRange)) {
-      // In range! Start combat
+      // In range! Start combat (use correct targetType for PvP/PvE)
       this.world.emit(EventType.COMBAT_ATTACK_REQUEST, {
         playerId,
         targetId: pending.targetId,
         attackerType: "player",
-        targetType: "mob",
+        targetType: pending.targetType,
         attackType: "melee",
       });
 

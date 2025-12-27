@@ -740,8 +740,65 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       });
       this.pendingAttackManager.cancelPendingAttack(playerEntity.id);
 
-      // Validate and forward to combat handler
-      handleAttackPlayer(socket, data, this.world);
+      // Get target player entity
+      const targetPlayer = this.world.entities?.players?.get(
+        targetPlayerId,
+      ) as {
+        position?: { x: number; y: number; z: number };
+      } | null;
+
+      if (!targetPlayer || !targetPlayer.position) return;
+
+      // Get player's weapon melee range from equipment system
+      const meleeRange = this.getPlayerWeaponRange(playerEntity.id);
+
+      // OSRS-accurate melee range check (cardinal-only for range 1)
+      const playerPos = playerEntity.position;
+      const playerTile = worldToTile(playerPos.x, playerPos.z);
+      const targetTile = worldToTile(
+        targetPlayer.position.x,
+        targetPlayer.position.z,
+      );
+
+      if (tilesWithinMeleeRange(playerTile, targetTile, meleeRange)) {
+        // In melee range - validate zones and start combat immediately
+        handleAttackPlayer(socket, data, this.world);
+      } else {
+        // Not in range - validate zones first, then queue pending attack
+        // Zone validation happens in handleAttackPlayer, so we do basic checks here
+        const zoneSystem = this.world.getSystem("zone-detection") as {
+          isPvPEnabled?: (pos: { x: number; z: number }) => boolean;
+        } | null;
+
+        if (zoneSystem?.isPvPEnabled) {
+          const attackerPos = playerEntity.position;
+          if (
+            !attackerPos ||
+            !zoneSystem.isPvPEnabled({ x: attackerPos.x, z: attackerPos.z })
+          ) {
+            // Attacker not in PvP zone - silently ignore
+            return;
+          }
+          if (
+            !zoneSystem.isPvPEnabled({
+              x: targetPlayer.position.x,
+              z: targetPlayer.position.z,
+            })
+          ) {
+            // Target not in PvP zone - silently ignore
+            return;
+          }
+        }
+
+        // Queue pending attack - will move toward target and attack when in range
+        this.pendingAttackManager.queuePendingAttack(
+          playerEntity.id,
+          targetPlayerId,
+          this.world.currentTick,
+          meleeRange,
+          "player", // PvP target type
+        );
+      }
     };
 
     // Follow another player (OSRS-style)

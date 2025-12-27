@@ -72,6 +72,7 @@ export class ZoneVisualsSystem extends SystemBase {
         id: a.id,
         safeZone: a.safeZone,
         pvpEnabled: a.pvpEnabled,
+        bounds: a.bounds, // Log bounds to debug positioning
       })),
     );
 

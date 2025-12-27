@@ -208,13 +208,15 @@ export class CombatSystem extends SystemBase {
       (data: {
         playerId: string;
         targetId: string;
+        attackerType?: "player" | "mob";
+        targetType?: "player" | "mob";
         attackType?: AttackType;
       }) => {
         this.handleAttack({
           attackerId: data.playerId,
           targetId: data.targetId,
-          attackerType: "player",
-          targetType: "mob",
+          attackerType: data.attackerType || "player",
+          targetType: data.targetType || "mob",
           attackType: data.attackType || AttackType.MELEE,
         });
       },
