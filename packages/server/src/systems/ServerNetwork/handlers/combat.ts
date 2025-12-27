@@ -45,6 +45,112 @@ function sendCombatError(socket: ServerSocket, reason: string): void {
 }
 
 /**
+ * Handle attack player request from client (PvP)
+ * Validates input and checks zone before forwarding to CombatSystem
+ */
+export function handleAttackPlayer(
+  socket: ServerSocket,
+  data: unknown,
+  world: World,
+): void {
+  const playerEntity = socket.player;
+  if (!playerEntity) {
+    return;
+  }
+
+  const attackerId = playerEntity.id;
+
+  // Rate limiting using shared infrastructure
+  const rateLimiter = getCombatRateLimiter();
+  if (!rateLimiter.check(attackerId)) {
+    return;
+  }
+
+  // Validate request structure
+  if (!data || typeof data !== "object") {
+    console.warn(
+      `[Combat] Invalid attack player request format from ${attackerId}`,
+    );
+    return;
+  }
+
+  const payload = data as Record<string, unknown>;
+
+  // Validate timestamp to prevent replay attacks
+  if (payload.timestamp !== undefined) {
+    const timestampValidation = validateRequestTimestamp(payload.timestamp);
+    if (!timestampValidation.valid) {
+      console.warn(
+        `[Combat] Replay attack blocked from ${attackerId}: ${timestampValidation.reason}`,
+      );
+      return;
+    }
+  }
+
+  // Extract target player ID
+  const targetPlayerId = payload.targetPlayerId;
+  if (typeof targetPlayerId !== "string" || targetPlayerId.length === 0) {
+    console.warn(`[Combat] Invalid target player ID from ${attackerId}`);
+    return;
+  }
+
+  // Prevent self-attack
+  if (targetPlayerId === attackerId) {
+    sendCombatError(socket, "You can't attack yourself.");
+    return;
+  }
+
+  // Verify target player exists
+  const targetPlayer = world.entities?.players?.get(targetPlayerId);
+  if (!targetPlayer) {
+    console.warn(
+      `[Combat] Attack request for non-existent player ${targetPlayerId} from ${attackerId}`,
+    );
+    sendCombatError(socket, "Target not found");
+    return;
+  }
+
+  // Check if attacker is in PvP zone
+  const zoneSystem = world.getSystem("zone-detection") as {
+    isPvPEnabled?: (pos: { x: number; z: number }) => boolean;
+  } | null;
+
+  if (zoneSystem?.isPvPEnabled) {
+    const attackerPos = playerEntity.position;
+    if (
+      !attackerPos ||
+      !zoneSystem.isPvPEnabled({ x: attackerPos.x, z: attackerPos.z })
+    ) {
+      sendCombatError(socket, "You can only attack players in PvP zones.");
+      return;
+    }
+
+    // Also check if target is in PvP zone
+    const targetPos = targetPlayer.position;
+    if (
+      !targetPos ||
+      !zoneSystem.isPvPEnabled({ x: targetPos.x, z: targetPos.z })
+    ) {
+      sendCombatError(socket, "That player is not in a PvP zone.");
+      return;
+    }
+  }
+
+  // Forward validated request to CombatSystem
+  world.emit(EventType.COMBAT_ATTACK_REQUEST, {
+    playerId: attackerId,
+    targetId: targetPlayerId,
+    attackerType: "player",
+    targetType: "player",
+    attackType: "melee",
+  });
+
+  console.log(
+    `[Combat] Player ${attackerId} attacking player ${targetPlayerId} (PvP)`,
+  );
+}
+
+/**
  * Handle attack mob request from client
  * Validates input before forwarding to CombatSystem
  */

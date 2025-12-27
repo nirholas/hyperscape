@@ -16,11 +16,11 @@ import { Chat } from "../shared/presentation/Chat";
 import { ALL_WORLD_AREAS } from "../../data/world-areas";
 import type { WorldArea } from "../../types/core/core";
 
-// Zone visual colors
+// Zone visual colors - brighter for visibility
 const ZONE_COLORS = {
-  PVP: 0x331111, // Dark red tint for PvP zones
-  WILDERNESS: 0x222222, // Dark grey for wilderness
-  SAFE: 0x113311, // Dark green for safe zones (not rendered)
+  PVP: 0x8b0000, // Dark red for PvP zones (more visible)
+  WILDERNESS: 0x4a4a4a, // Medium grey for wilderness
+  SAFE: 0x228b22, // Forest green for safe zones (not rendered)
 } as const;
 
 /**
@@ -50,11 +50,13 @@ export class ZoneVisualsSystem extends SystemBase {
   }
 
   async init(): Promise<void> {
-    // Create zone visual meshes for all PvP areas
-    this.createZoneMeshes();
+    console.log("[ZoneVisualsSystem] init() called");
   }
 
   start(): void {
+    console.log("[ZoneVisualsSystem] start() called, creating zone meshes...");
+    // Create zone visual meshes (moved from init to ensure scene is ready)
+    this.createZoneMeshes();
     // Initialize player zone state
     this.updatePlayerZoneState();
   }
@@ -63,7 +65,17 @@ export class ZoneVisualsSystem extends SystemBase {
    * Create visual ground meshes for dangerous zones
    */
   private createZoneMeshes(): void {
-    for (const area of Object.values(ALL_WORLD_AREAS) as WorldArea[]) {
+    const areas = Object.values(ALL_WORLD_AREAS) as WorldArea[];
+    console.log(
+      `[ZoneVisualsSystem] Creating zone meshes. Total areas: ${areas.length}`,
+      areas.map((a) => ({
+        id: a.id,
+        safeZone: a.safeZone,
+        pvpEnabled: a.pvpEnabled,
+      })),
+    );
+
+    for (const area of areas) {
       // Only create visuals for non-safe zones
       if (area.safeZone) continue;
 
@@ -76,18 +88,32 @@ export class ZoneVisualsSystem extends SystemBase {
       const geometry = new THREE.PlaneGeometry(width, height);
       const color = area.pvpEnabled ? ZONE_COLORS.PVP : ZONE_COLORS.WILDERNESS;
 
-      const material = new THREE.MeshStandardMaterial({
+      // Use MeshBasicMaterial - doesn't require lighting, always visible
+      const material = new THREE.MeshBasicMaterial({
         color,
-        roughness: 0.95,
-        metalness: 0,
         transparent: true,
-        opacity: 0.4,
+        opacity: 0.5,
         side: THREE.DoubleSide,
+        depthWrite: false, // Don't write to depth buffer (renders on top)
       });
+
+      // Get terrain height at center of zone
+      let terrainY = 0;
+      const terrain = this.world.getSystem("terrain") as {
+        getHeightAt?: (x: number, z: number) => number;
+      } | null;
+      if (terrain?.getHeightAt) {
+        terrainY = terrain.getHeightAt(centerX, centerZ);
+      }
 
       const mesh = new THREE.Mesh(geometry, material);
       mesh.rotation.x = -Math.PI / 2; // Lay flat
-      mesh.position.set(centerX, 0.02, centerZ); // Slightly above ground
+      mesh.position.set(centerX, terrainY + 0.15, centerZ); // Above terrain
+      mesh.renderOrder = 999; // Render on top of terrain
+
+      console.log(
+        `[ZoneVisualsSystem] Zone "${area.name}" terrain height: ${terrainY.toFixed(2)}, mesh Y: ${(terrainY + 0.15).toFixed(2)}`,
+      );
       mesh.receiveShadow = true;
       mesh.name = `zone-visual-${area.id}`;
 
@@ -97,7 +123,16 @@ export class ZoneVisualsSystem extends SystemBase {
       mesh.userData.zoneName = area.name;
 
       // Add to scene
-      this.world.stage?.scene.add(mesh);
+      if (this.world.stage?.scene) {
+        this.world.stage.scene.add(mesh);
+        console.log(
+          `[ZoneVisualsSystem] ✅ Added zone mesh for "${area.name}" at (${centerX}, 0.02, ${centerZ}), size: ${width}x${height}`,
+        );
+      } else {
+        console.warn(
+          `[ZoneVisualsSystem] ⚠️ No stage/scene available for zone mesh`,
+        );
+      }
 
       this.zoneVisuals.set(area.id, { mesh, area });
       this.logger.info(`Created zone visual for ${area.name}`);

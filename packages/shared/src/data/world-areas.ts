@@ -66,6 +66,26 @@ export const ALL_WORLD_AREAS: Record<string, WorldArea> = {
       // The default test goblin is spawned by MobNPCSpawnerSystem near origin
     ],
   },
+  // Wilderness test zone - PvP enabled area for testing player vs player combat
+  wilderness_test: {
+    id: "wilderness_test",
+    name: "The Wastes",
+    description:
+      "A dangerous zone where players can attack each other. Enter at your own risk.",
+    difficultyLevel: 1,
+    bounds: {
+      minX: 55,
+      maxX: 75,
+      minZ: -10,
+      maxZ: 10,
+    },
+    biomeType: "wastes",
+    safeZone: false,
+    pvpEnabled: true,
+    npcs: [],
+    resources: [],
+    mobSpawns: [],
+  },
 };
 
 /**

@@ -87,6 +87,7 @@ import { InteractionSessionManager } from "./InteractionSessionManager";
 import { handleChatAdded } from "./handlers/chat";
 import {
   handleAttackMob,
+  handleAttackPlayer,
   handleChangeAttackStyle,
   handleSetAutoRetaliate,
 } from "./handlers/combat";
@@ -704,6 +705,25 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           meleeRange,
         );
       }
+    };
+
+    // PvP - attack another player (only in PvP zones)
+    this.handlers["onAttackPlayer"] = (socket, data) => {
+      const playerEntity = socket.player;
+      if (!playerEntity) return;
+
+      const payload = data as { targetPlayerId?: string };
+      const targetPlayerId = payload.targetPlayerId;
+      if (!targetPlayerId) return;
+
+      // Cancel any existing combat and pending attacks when switching targets
+      this.world.emit(EventType.COMBAT_STOP_ATTACK, {
+        attackerId: playerEntity.id,
+      });
+      this.pendingAttackManager.cancelPendingAttack(playerEntity.id);
+
+      // Validate and forward to combat handler
+      handleAttackPlayer(socket, data, this.world);
     };
 
     this.handlers["onChangeAttackStyle"] = (socket, data) =>

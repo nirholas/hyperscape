@@ -4,7 +4,7 @@
  * Handles interactions with other players (OSRS-accurate).
  *
  * Menu order (matches OSRS):
- * 1. Attack PlayerName (level-XX) - only enabled in PvP zones
+ * 1. Attack PlayerName (level-XX) - ONLY APPEARS in PvP zones (not shown elsewhere)
  * 2. Trade with PlayerName - disabled until trading implemented
  * 3. Follow PlayerName
  * 4. Report PlayerName
@@ -13,6 +13,8 @@
  *
  * Note: Left-click on players does nothing by default (OSRS behavior).
  * All player interactions require right-click context menu.
+ *
+ * @see https://oldschool.runescape.wiki/w/Player_killing - Attack only in PvP areas
  */
 
 import { BaseInteractionHandler } from "./BaseInteractionHandler";
@@ -38,15 +40,17 @@ export class PlayerInteractionHandler extends BaseInteractionHandler {
     const targetLevel = this.getPlayerCombatLevel(target.entityId);
     const inPvPZone = this.isInPvPZone();
 
-    // 1. Attack (only enabled in PvP zones) - Priority 0
-    actions.push({
-      id: "attack",
-      label: `Attack ${target.name} (level-${targetLevel})`,
-      icon: "⚔️",
-      enabled: inPvPZone,
-      priority: 0,
-      handler: () => this.attackPlayer(target),
-    });
+    // 1. Attack (OSRS-accurate: only APPEARS in PvP zones, not just greyed out)
+    if (inPvPZone) {
+      actions.push({
+        id: "attack",
+        label: `Attack ${target.name} (level-${targetLevel})`,
+        icon: "⚔️",
+        enabled: true,
+        priority: 0,
+        handler: () => this.attackPlayer(target),
+      });
+    }
 
     // 2. Trade with - Priority 1
     actions.push({

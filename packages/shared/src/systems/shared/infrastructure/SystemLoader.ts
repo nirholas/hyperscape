@@ -120,7 +120,7 @@ import { NPCSystem } from "..";
 import { DialogueSystem } from "..";
 
 // Client-only visual systems
-import { DamageSplatSystem, ZoneVisualsSystem } from "../../client";
+import { DamageSplatSystem } from "../../client";
 
 // Zone systems
 import { ZoneDetectionSystem } from "../death/ZoneDetectionSystem";
@@ -369,19 +369,9 @@ export async function registerSystems(world: World): Promise<void> {
   world.register("mob-npc-spawner", MobNPCSpawnerSystem);
   world.register("item-spawner", ItemSpawnerSystem);
 
-  // Zone Detection System - Single source of truth for zone type detection
-  world.register("zone-detection", ZoneDetectionSystem);
-
-  // Client-only zone visuals (PvP zone indicators, zone warnings)
-  if (world.isClient) {
-    try {
-      world.register("zone-visuals", ZoneVisualsSystem);
-    } catch (err) {
-      console.error(
-        "[SystemLoader] Failed to register ZoneVisualsSystem:",
-        err,
-      );
-    }
+  // Zone Detection System - registered on server only (client registers in createClientWorld.ts)
+  if (world.isServer) {
+    world.register("zone-detection", ZoneDetectionSystem);
   }
 
   // Get system instances after world initialization

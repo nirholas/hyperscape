@@ -80,6 +80,8 @@ import { LODs } from "../systems/shared";
 import { Nametags } from "../systems/client/Nametags";
 import { HealthBars } from "../systems/client/HealthBars";
 import { EquipmentVisualSystem } from "../systems/client/EquipmentVisualSystem";
+import { ZoneVisualsSystem } from "../systems/client/ZoneVisualsSystem";
+import { ZoneDetectionSystem } from "../systems/shared/death/ZoneDetectionSystem";
 import { Particles } from "../systems/shared";
 import { Wind } from "../systems/shared";
 import { XR } from "../systems/client/XR";
@@ -178,6 +180,8 @@ export function createClientWorld() {
   world.register("nametags", Nametags); // Player/NPC name labels
   world.register("healthbars", HealthBars); // Entity health bars (separate from nametags)
   world.register("equipment-visual", EquipmentVisualSystem); // Visual weapon/equipment attachment
+  world.register("zone-detection", ZoneDetectionSystem); // Zone type detection (safe/pvp/wilderness)
+  world.register("zone-visuals", ZoneVisualsSystem); // PvP zone ground overlays and warnings
   world.register("particles", Particles); // Particle effects system
   world.register("wind", Wind); // Environmental wind effects
   world.register("xr", XR); // VR/AR support

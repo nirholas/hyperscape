@@ -117,6 +117,7 @@ const names = [
   'gatheringComplete',
   // Combat packets
   'attackMob',
+  'attackPlayer',  // PvP attack
   'changeAttackStyle',
   'setAutoRetaliate',
   'autoRetaliateChanged',
