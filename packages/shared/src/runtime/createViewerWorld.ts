@@ -13,7 +13,7 @@
  * - ClientInterface: UI state and preferences
  * - ClientLoader: Asset loading (GLB, textures, etc.)
  * - ClientInput: Basic camera controls (orbit, pan, zoom)
- * - ClientGraphics: WebGL/WebGPU renderer
+ * - ClientGraphics: WebGPU renderer
  * - Environment: Lighting and shadows
  *
  * What's NOT Included (compared to full client world):

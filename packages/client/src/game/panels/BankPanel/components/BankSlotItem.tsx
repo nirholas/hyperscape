@@ -49,7 +49,7 @@ export const BankSlotItem = memo(function BankSlotItem({
   slotIndex,
   itemTabIndex,
   isDragging,
-  isDropTarget,
+  isDropTarget: _isDropTarget,
   showSwapHighlight,
   showInsertLine,
   showFaintGuide,

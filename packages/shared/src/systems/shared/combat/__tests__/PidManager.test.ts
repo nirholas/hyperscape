@@ -201,7 +201,7 @@ describe("PidManager", () => {
       pidManager.assignPid("player2" as EntityID, 0);
       pidManager.assignPid("player3" as EntityID, 0);
 
-      const pidsBefore = [
+      const _pidsBefore = [
         pidManager.getPid("player1" as EntityID),
         pidManager.getPid("player2" as EntityID),
         pidManager.getPid("player3" as EntityID),

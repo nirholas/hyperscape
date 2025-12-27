@@ -52,7 +52,7 @@ Asset Forge is built with modern web technologies, AI services, and 3D rendering
 
 **Features Used:**
 - GLTFLoader for model loading
-- WebGLRenderer with SRGB color space
+- WebGPURenderer with SRGB color space
 - PerspectiveCamera and OrthographicCamera
 - OrbitControls for camera manipulation
 - SkinnedMesh for rigged characters
@@ -111,7 +111,7 @@ set((state) => {
 **Purpose**: Machine learning in browser
 **Why**: Run MediaPipe models client-side
 
-**Backend**: WebGL for GPU acceleration
+**Backend**: WebGPU for GPU acceleration
 
 #### @tensorflow-models/hand-pose-detection 2.0.1
 **Purpose**: Hand pose detection
@@ -537,7 +537,7 @@ Backend:
 
 **Features Required:**
 - ES2020 JavaScript
-- WebGL 2.0
+- WebGPU
 - Web Workers
 - LocalStorage
 - Fetch API

@@ -229,34 +229,25 @@ export class ThreeResourceManager {
   }
 
   /**
-   * Disposes of a WebGL renderer and its resources
+   * Disposes of a renderer and its resources
    *
-   * Cleans up render targets, WebGL context, and extensions.
+   * Cleans up render targets and GPU context.
    * Call this when completely removing a renderer from the application.
    *
-   * @param renderer - The WebGL renderer to dispose
+   * @param renderer - The renderer to dispose
    *
    * @example
    * ```typescript
-   * const renderer = new THREE.WebGLRenderer();
+   * const renderer = await createRenderer();
    * // ... use renderer ...
    * ThreeResourceManager.disposeRenderer(renderer);
    * ```
    *
    * @public
    */
-  static disposeRenderer(renderer: THREE.WebGLRenderer): void {
+  static disposeRenderer(renderer: { dispose: () => void }): void {
     // Dispose of render targets
     renderer.dispose();
-
-    // Clear the context if possible
-    const gl = renderer.getContext();
-    if (gl && "getExtension" in gl) {
-      const loseContext = gl.getExtension("WEBGL_lose_context");
-      if (loseContext) {
-        loseContext.loseContext();
-      }
-    }
   }
 
   /**
@@ -304,30 +295,36 @@ export class ThreeResourceManager {
   }
 
   /**
-   * Gets current Three.js memory usage statistics
+   * Gets current Three.js memory usage statistics from an existing renderer
    *
    * Returns counts of active geometries, textures, and shader programs.
    * Useful for debugging memory leaks and monitoring resource usage.
    *
+   * @param renderer - An existing renderer to query info from
    * @returns Object containing memory statistics
    *
    * @example
    * ```typescript
-   * const stats = ThreeResourceManager.getMemoryInfo();
+   * const stats = ThreeResourceManager.getMemoryInfo(renderer);
    * console.log(`Geometries: ${stats.geometries}, Textures: ${stats.textures}`);
    * ```
    *
    * @public
    */
-  static getMemoryInfo(): {
+  static getMemoryInfo(renderer?: {
+    info: {
+      memory: { geometries: number; textures: number };
+      programs?: unknown[];
+    };
+  }): {
     geometries: number;
     textures: number;
     programs: number;
   } {
-    const renderer = new THREE.WebGLRenderer();
+    if (!renderer) {
+      return { geometries: 0, textures: 0, programs: 0 };
+    }
     const info = renderer.info;
-    renderer.dispose();
-
     return {
       geometries: info.memory.geometries,
       textures: info.memory.textures,

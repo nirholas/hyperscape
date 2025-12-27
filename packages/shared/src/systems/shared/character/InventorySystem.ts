@@ -6,8 +6,7 @@ import { getSystem } from "../../../utils/SystemUtils";
 import type { World } from "../../../types";
 import type { InventoryItemAddedPayload } from "../../../types/events";
 import { EventType } from "../../../types/events";
-import { getItem, ITEMS } from "../../../data/items";
-import { dataManager } from "../../../data/DataManager";
+import { getItem } from "../../../data/items";
 import type { PlayerInventory } from "../../../types/core/core";
 import type {
   InventoryCanAddEvent,
@@ -24,7 +23,7 @@ import {
   toPlayerID,
 } from "../../../utils/IdentifierUtils";
 import { EntityManager } from "..";
-import { SystemBase } from "..";
+import { SystemBase } from "../infrastructure/SystemBase";
 import { Logger } from "../../../utils/Logger";
 import type { DatabaseSystem } from "../../../types/systems/system-interfaces";
 import type { GroundItemSystem } from "../economy/GroundItemSystem";
@@ -160,8 +159,7 @@ export class InventorySystem extends SystemBase {
     const db = this.getDatabase();
     if (!db) return;
 
-    let savedCount = 0;
-    let totalItems = 0;
+    // savedCount and totalItems tracking removed - not needed
 
     for (const playerId of this.playerInventories.keys()) {
       // Skip players locked for transaction - their inventory is being
@@ -185,8 +183,7 @@ export class InventorySystem extends SystemBase {
         }));
         db.savePlayerInventory(playerId, saveItems);
         // NOTE: Coins are now persisted by CoinPouchSystem
-        savedCount++;
-        totalItems += saveItems.length;
+        // savedCount and totalItems tracking removed - not needed
       } catch {
         // Skip on DB errors during autosave
       }
@@ -1750,7 +1747,7 @@ export class InventorySystem extends SystemBase {
     }
   }
 
-  private loadPersistedInventory(playerId: string): boolean {
+  private loadPersistedInventory(_playerId: string): boolean {
     // This is now a sync wrapper that always returns false to trigger async load
     // The actual loading happens in the async init flow
     return false;
@@ -1982,7 +1979,7 @@ export class InventorySystem extends SystemBase {
     }
 
     // Pass slot to addItem for proper sync (e.g., from bank withdrawal)
-    const result = this.addItem({ playerId, itemId, quantity, slot });
+    this.addItem({ playerId, itemId, quantity, slot });
   }
 
   /**

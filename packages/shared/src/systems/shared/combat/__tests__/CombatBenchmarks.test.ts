@@ -8,7 +8,7 @@
  * to support 2000+ concurrent players.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { performance } from "perf_hooks";
 import {
   calculateDamage,

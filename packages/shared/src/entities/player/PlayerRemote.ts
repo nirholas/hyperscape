@@ -122,6 +122,11 @@ export class PlayerRemote extends Entity implements HotReloadable {
   public enableInterpolation: boolean = false; // Disabled - ensure basic movement works first
   private _tempMatrix1 = new THREE.Matrix4();
   private _tempVector3_1 = new THREE.Vector3();
+  // Pre-allocated temps for update/lateUpdate to avoid per-frame allocations
+  private _combatQuat = new THREE.Quaternion();
+  private _combatAxis = new THREE.Vector3(0, 1, 0);
+  private _nametagMatrix = new THREE.Matrix4();
+  private _healthBarMatrix = new THREE.Matrix4();
 
   // Combat state for RuneScape-style auto-retaliate
   combat = {
@@ -342,7 +347,12 @@ export class PlayerRemote extends Entity implements HotReloadable {
       // Set the parent so the node knows where it belongs in the hierarchy
       // Note: PlayerRemote uses Hyperscape Group node (not raw THREE.Group like PlayerLocal)
       // The node system handles matrix updates automatically
-      (nodeObj as any).parent = { matrixWorld: this.base.matrixWorld };
+      interface NodeWithParent {
+        parent?: { matrixWorld: THREE.Matrix4 };
+      }
+      (nodeObj as NodeWithParent).parent = {
+        matrixWorld: this.base.matrixWorld,
+      };
 
       // CRITICAL: Avatar node position should be at origin (0,0,0) (matches PlayerLocal)
       // The instance.move() method will position it at the base's world position
@@ -376,7 +386,15 @@ export class PlayerRemote extends Entity implements HotReloadable {
       }
 
       // CRITICAL: Make avatar visible and ensure proper positioning (matches PlayerLocal)
-      (this.avatar as unknown as { visible: boolean }).visible = true;
+      // Avatar visibility is controlled through the instance's raw scene object
+      if (this.avatar?.instance) {
+        const avatarWithRaw = this.avatar.instance as unknown as {
+          raw?: { scene?: { visible?: boolean } };
+        };
+        if (avatarWithRaw.raw?.scene) {
+          avatarWithRaw.raw.scene.visible = true;
+        }
+      }
       nodeObj.position.set(0, 0, 0);
 
       // Ensure a default idle emote after mount so avatar isn't frozen
@@ -384,8 +402,10 @@ export class PlayerRemote extends Entity implements HotReloadable {
       this.lastEmote = Emotes.IDLE;
 
       // Calculate camera height for spectator mode (same as PlayerLocal)
-      const avatarHeight = (this.avatar as unknown as { height: number })
-        .height;
+      interface AvatarWithHeight {
+        height?: number;
+      }
+      const avatarHeight = (this.avatar as AvatarWithHeight).height ?? 1.5;
       const camHeight = Math.max(1.2, avatarHeight * 0.9);
 
       // Avatar loaded successfully
@@ -501,7 +521,10 @@ export class PlayerRemote extends Entity implements HotReloadable {
     if (!combatTarget) {
       for (const entity of this.world.entities.items.values()) {
         if (entity.type === "mob" && entity.position) {
-          const mobEntity = entity as any;
+          interface MobEntityWithConfig {
+            config?: { aiState?: string; targetPlayerId?: string };
+          }
+          const mobEntity = entity as unknown as MobEntityWithConfig;
           // Check if mob is in ATTACK state and targeting this player
           if (
             mobEntity.config?.aiState === "attack" &&
@@ -535,10 +558,9 @@ export class PlayerRemote extends Entity implements HotReloadable {
       // Otherwise entities face AWAY from each other instead of towards
       angle += Math.PI;
 
-      // Apply rotation to node quaternion
-      const tempQuat = new THREE.Quaternion();
-      tempQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle);
-      this.node.quaternion.copy(tempQuat);
+      // Apply rotation to node quaternion using pre-allocated temps
+      this._combatQuat.setFromAxisAngle(this._combatAxis, angle);
+      this.node.quaternion.copy(this._combatQuat);
     }
 
     // Update node matrices for rendering
@@ -550,9 +572,10 @@ export class PlayerRemote extends Entity implements HotReloadable {
     // Update avatar position to follow player
     if (this.avatar && (this.avatar as AvatarWithInstance).instance) {
       const instance = (this.avatar as AvatarWithInstance).instance;
-      const instanceWithRaw = instance as unknown as {
+      interface InstanceWithRaw {
         raw?: { scene?: THREE.Object3D };
-      };
+      }
+      const instanceWithRaw = instance as InstanceWithRaw;
 
       // Directly set the avatar scene position
       if (instanceWithRaw?.raw?.scene) {
@@ -630,8 +653,10 @@ export class PlayerRemote extends Entity implements HotReloadable {
       // Update animation if changed
       if (desiredUrl !== this.lastEmote) {
         if ("emote" in this.avatar) {
-          (this.avatar as unknown as { emote: string | null }).emote =
-            desiredUrl;
+          interface AvatarWithEmote {
+            emote?: string | null;
+          }
+          (this.avatar as AvatarWithEmote).emote = desiredUrl;
         } else if ("setEmote" in this.avatar) {
           (this.avatar as Avatar).setEmote(desiredUrl);
         }
@@ -660,19 +685,18 @@ export class PlayerRemote extends Entity implements HotReloadable {
     // Update nametag position in Nametags system (name only - no health)
     // This matches PlayerLocal behavior - without this, the nametag renders at origin
     if (this.nametag && this.nametag.handle && this.base) {
-      // Position nametag slightly higher than health bar
-      const nametagMatrix = new THREE.Matrix4();
-      nametagMatrix.copy(this.base.matrixWorld);
-      nametagMatrix.elements[13] += 2.2; // Name slightly higher
-      this.nametag.handle.move(nametagMatrix);
+      // Position nametag slightly higher than health bar using pre-allocated matrix
+      this._nametagMatrix.copy(this.base.matrixWorld);
+      this._nametagMatrix.elements[13] += 2.2; // Name slightly higher
+      this.nametag.handle.move(this._nametagMatrix);
     }
 
     // Update health bar position in HealthBars system (separate from nametag)
     if (this._healthBarHandle && this.base) {
-      const healthBarMatrix = new THREE.Matrix4();
-      healthBarMatrix.copy(this.base.matrixWorld);
-      healthBarMatrix.elements[13] += 2.0; // Health bar at Y=2.0
-      this._healthBarHandle.move(healthBarMatrix);
+      // Use pre-allocated matrix to avoid per-frame allocations
+      this._healthBarMatrix.copy(this.base.matrixWorld);
+      this._healthBarMatrix.elements[13] += 2.0; // Health bar at Y=2.0
+      this._healthBarHandle.move(this._healthBarMatrix);
     }
   }
 

@@ -10,11 +10,27 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { CombatStateService, CombatData } from "../CombatStateService";
-import { createEntityID, EntityID } from "../../../../utils/IdentifierUtils";
+import { createEntityID } from "../../../../utils/IdentifierUtils";
+import { WeaponType } from "../../../../types/game/item-types";
+import type { World } from "../../../../core/World";
+
+interface MockPlayer {
+  id: string;
+  combat: { inCombat: boolean; combatTarget: string | null };
+  data: { c: boolean; ct: string | null };
+  markNetworkDirty: ReturnType<typeof vi.fn>;
+}
+
+interface MockWorld {
+  isServer: boolean;
+  network: { send: ReturnType<typeof vi.fn> };
+  getPlayer: (id: string) => MockPlayer | undefined;
+  players: Map<string, MockPlayer>;
+}
 
 // Mock World
-function createMockWorld() {
-  const players = new Map<string, any>();
+function createMockWorld(): MockWorld {
+  const players = new Map<string, MockPlayer>();
 
   return {
     isServer: true,
@@ -27,7 +43,7 @@ function createMockWorld() {
 }
 
 // Helper to add mock player to world
-function addMockPlayer(world: any, id: string) {
+function addMockPlayer(world: MockWorld, id: string): MockPlayer {
   const player = {
     id,
     combat: { inCombat: false, combatTarget: null },
@@ -44,7 +60,7 @@ describe("CombatStateService", () => {
 
   beforeEach(() => {
     mockWorld = createMockWorld();
-    stateService = new CombatStateService(mockWorld as any);
+    stateService = new CombatStateService(mockWorld as unknown as World);
   });
 
   describe("createAttackerState", () => {
@@ -288,7 +304,7 @@ describe("CombatStateService", () => {
         targetId: createEntityID("mob1"),
         attackerType: "player",
         targetType: "mob",
-        weaponType: 0 as any,
+        weaponType: WeaponType.NONE,
         inCombat: true,
         lastAttackTick: 100,
         nextAttackTick: 104,

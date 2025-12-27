@@ -14,7 +14,7 @@
  * @see {@link COMBAT_CONSTANTS.HEALTH_REGEN_INTERVAL_TICKS} for regen interval (100 ticks)
  */
 
-import { SystemBase } from "..";
+import { SystemBase } from "../infrastructure/SystemBase";
 import type { World } from "../../../core/World";
 import { GAME_CONSTANTS } from "../../../constants/GameConstants";
 import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";

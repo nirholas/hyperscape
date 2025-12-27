@@ -150,19 +150,28 @@ export function createTransform(
 }
 
 /**
+ * Interface for PhysX objects that can be deleted
+ */
+interface DeletablePhysXObject {
+  delete?: () => void;
+}
+
+/**
  * Utility to clean up PhysX vectors
  */
 export function cleanupPxVec3(vec: PxVec3 | PhysX.PxVec3): void {
-  const maybeAny = vec as unknown as { delete?: () => void };
-  if (maybeAny.delete) {
-    maybeAny.delete();
+  const deletable = vec as DeletablePhysXObject;
+  if (deletable.delete) {
+    deletable.delete();
   }
 }
 
 /**
  * Install THREE.js prototype extensions for physics transformations
  *
- * This extends Vector3 and Quaternion prototypes with physics transformation methods
+ * This extends Vector3 and Quaternion prototypes with physics transformation methods.
+ * OPTIMIZED: These methods now directly set p.x/p.y/p.z and q.x/q.y/q.z/q.w components
+ * instead of creating new PxVec3/PxQuat objects every call, avoiding per-frame allocations.
  */
 export function installThreeJSExtensions(): void {
   // Extend Vector3 prototype with physics transform method
@@ -171,9 +180,10 @@ export function installThreeJSExtensions(): void {
       this: THREE.Vector3,
       transform: PxTransform,
     ): void {
-      const PHYSX = getPhysX()!;
-      const pxVec = new PHYSX.PxVec3(this.x, this.y, this.z);
-      transform.p = pxVec;
+      // OPTIMIZED: Directly set position components to avoid allocation
+      transform.p.x = this.x;
+      transform.p.y = this.y;
+      transform.p.z = this.z;
     };
   }
 
@@ -183,9 +193,11 @@ export function installThreeJSExtensions(): void {
       this: THREE.Quaternion,
       transform: PxTransform,
     ): void {
-      const PHYSX = getPhysX()!;
-      const pxQuat = new PHYSX.PxQuat(this.x, this.y, this.z, this.w);
-      transform.q = pxQuat;
+      // OPTIMIZED: Directly set quaternion components to avoid allocation
+      transform.q.x = this.x;
+      transform.q.y = this.y;
+      transform.q.z = this.z;
+      transform.q.w = this.w;
     };
   }
 
@@ -195,17 +207,17 @@ export function installThreeJSExtensions(): void {
       this: THREE.Matrix4,
       transform: PxTransform,
     ): void {
-      const PHYSX = getPhysX()!;
-
       this.decompose(_v1, _q1, _s1);
 
-      // Set position
-      const pxVec = new PHYSX.PxVec3(_v1.x, _v1.y, _v1.z);
-      transform.p = pxVec;
+      // OPTIMIZED: Directly set position and quaternion components to avoid allocation
+      transform.p.x = _v1.x;
+      transform.p.y = _v1.y;
+      transform.p.z = _v1.z;
 
-      // Set rotation
-      const pxQuat = new PHYSX.PxQuat(_q1.x, _q1.y, _q1.z, _q1.w);
-      transform.q = pxQuat;
+      transform.q.x = _q1.x;
+      transform.q.y = _q1.y;
+      transform.q.z = _q1.z;
+      transform.q.w = _q1.w;
     };
   }
 }

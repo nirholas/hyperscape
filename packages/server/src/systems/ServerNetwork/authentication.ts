@@ -150,9 +150,6 @@ export async function authenticateUser(
     try {
       const jwtPayload = await verifyJWT(authToken);
       if (jwtPayload && jwtPayload.userId) {
-        // Check if this is an agent token
-        const isAgent = jwtPayload.isAgent === true;
-
         // Look up user account
         let dbResult = await db("users")
           .where("id", jwtPayload.userId as string)

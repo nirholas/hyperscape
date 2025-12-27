@@ -8,13 +8,6 @@
  * - Event mapping (type-safe emit/on/off)
  */
 
-import { Entity } from "../../entities/Entity";
-import { PlayerLocal } from "../../entities/player/PlayerLocal";
-import { Skills, InventoryItem, Position3D } from "../core/core";
-import type { Resource } from "../core/core";
-import type { Item } from "../core/core";
-import type { EntitySpawnedEvent } from "../systems/system-interfaces";
-
 // ============================================================================
 // EVENT TYPE ENUM
 // ============================================================================
@@ -110,9 +103,6 @@ export enum EventType {
 
   // Graphics System
   GRAPHICS_RESIZE = "graphics:resize",
-
-  // XR System
-  XR_SESSION = "xr:session",
 
   // Terrain System
   TERRAIN_TILE_GENERATED = "terrain:tile:generated",

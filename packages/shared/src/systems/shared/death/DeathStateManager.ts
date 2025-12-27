@@ -29,7 +29,7 @@ type DatabaseSystem = {
       zoneType: string;
       itemCount: number;
     },
-    tx?: any, // Optional transaction context
+    tx?: unknown, // Optional transaction context
   ) => Promise<void>;
   getDeathLockAsync: (playerId: string) => Promise<{
     playerId: string;
@@ -100,7 +100,7 @@ export class DeathStateManager {
       zoneType: ZoneType;
       itemCount: number;
     },
-    tx?: any, // Transaction context (server only, passed through to DatabaseSystem)
+    tx?: unknown, // Transaction context (server only, passed through to DatabaseSystem)
   ): Promise<void> {
     // CRITICAL: Server authority check - prevent client from creating fake death locks
     if (!this.world.isServer) {

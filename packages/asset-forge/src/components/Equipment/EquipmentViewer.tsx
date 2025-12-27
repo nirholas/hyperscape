@@ -12,6 +12,7 @@ import { SkeletonHelper } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { WebGPURenderer } from "three/webgpu";
 
 export interface Transform {
   position: { x: number; y: number; z: number };
@@ -82,7 +83,7 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
     const instanceId = useRef(Math.random().toString(36).substr(2, 9));
     const containerRef = useRef<HTMLDivElement>(null);
     const sceneRef = useRef<THREE.Scene | null>(null);
-    const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+    const rendererRef = useRef<WebGPURenderer | null>(null);
     const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
     const orbitControlsRef = useRef<OrbitControls | null>(null);
     const avatarRef = useRef<THREE.Object3D | null>(null);
@@ -155,22 +156,40 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
       camera.lookAt(0, 0.8, 0);
       cameraRef.current = camera;
 
-      // Renderer setup
-      const renderer = new THREE.WebGLRenderer({
+      // Create canvas for WebGPU renderer
+      const canvas = document.createElement("canvas");
+      containerRef.current.appendChild(canvas);
+
+      // Renderer setup with WebGPU
+      const renderer = new WebGPURenderer({
+        canvas,
         antialias: true,
-        alpha: true,
       });
-      renderer.setSize(
-        containerRef.current.clientWidth,
-        containerRef.current.clientHeight,
-      );
-      renderer.setClearColor(0x000000, 0); // Transparent background
-      renderer.autoClear = true; // Ensure buffer is cleared between frames
-      renderer.outputColorSpace = THREE.SRGBColorSpace;
-      renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1;
-      containerRef.current.appendChild(renderer.domElement);
-      rendererRef.current = renderer;
+
+      // Track if renderer is ready
+      let rendererReady = false;
+
+      // Initialize renderer asynchronously
+      (async () => {
+        await renderer.init();
+
+        if (!containerRef.current) {
+          renderer.dispose();
+          return false;
+        }
+
+        renderer.setSize(
+          containerRef.current.clientWidth,
+          containerRef.current.clientHeight,
+        );
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1;
+        rendererRef.current = renderer;
+        rendererReady = true;
+
+        return true;
+      })();
 
       // Lighting
       const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -181,8 +200,8 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
       directionalLight.castShadow = true;
       scene.add(directionalLight);
 
-      // Orbit controls
-      const orbitControls = new OrbitControls(camera, renderer.domElement);
+      // Orbit controls (use canvas directly)
+      const orbitControls = new OrbitControls(camera, canvas);
       orbitControls.target.set(0, 1, 0);
       orbitControls.update();
       orbitControlsRef.current = orbitControls;
@@ -304,7 +323,10 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
           }
         }
 
-        renderer.render(scene, camera);
+        // Only render if WebGPU is ready
+        if (rendererReady) {
+          renderer.render(scene, camera);
+        }
       };
       animate();
 
@@ -314,10 +336,12 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
         camera.aspect =
           containerRef.current.clientWidth / containerRef.current.clientHeight;
         camera.updateProjectionMatrix();
-        renderer.setSize(
-          containerRef.current.clientWidth,
-          containerRef.current.clientHeight,
-        );
+        if (rendererReady) {
+          renderer.setSize(
+            containerRef.current.clientWidth,
+            containerRef.current.clientHeight,
+          );
+        }
       };
       window.addEventListener("resize", handleResize);
 
@@ -328,7 +352,9 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
         window.removeEventListener("resize", handleResize);
         cancelAnimationFrame(animationFrameId);
         renderer.dispose();
-        containerEl?.removeChild(renderer.domElement);
+        if (containerEl && canvas.parentElement) {
+          containerEl.removeChild(canvas);
+        }
       };
     }, []);
 
@@ -1886,11 +1912,6 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
             console.log(`⚠️ Using fallback userData.boneScale: ${boneScale}`);
           }
         }
-
-        // TWEAK FACTOR: User requested to make it bigger.
-        // 1.0 = Normalized to 1.6m human height.
-        // 1.5 = 50% bigger.
-        const EXPORT_SCALE_MULTIPLIER = 1.5;
 
         const totalScaleFactor = boneScale * heightRatio;
 

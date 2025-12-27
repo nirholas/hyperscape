@@ -395,7 +395,7 @@ export class WeightTransferSolver {
       pinky: ["pinky", "little"],
     };
 
-    for (const [semantic, patterns] of Object.entries(semanticMap)) {
+    for (const [_semantic, patterns] of Object.entries(semanticMap)) {
       if (patterns.some((p) => sourceNorm.includes(p))) {
         for (const bone of targetBones) {
           const targetNorm = normalize(bone.name);

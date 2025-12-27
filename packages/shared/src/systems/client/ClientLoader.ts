@@ -2,7 +2,7 @@ import { VRMLoaderPlugin } from "@pixiv/three-vrm";
 import Hls from "hls.js/dist/hls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { GLTFParser } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { RGBELoader } from "three/examples/jsm/loaders/RGBELoader.js";
+import { HDRLoader } from "three/examples/jsm/loaders/HDRLoader.js";
 import { createEmoteFactory } from "../../extras/three/createEmoteFactory";
 import { createNode } from "../../extras/three/createNode";
 import { createVRMFactory } from "../../extras/three/createVRMFactory";
@@ -23,7 +23,7 @@ import type {
 } from "../../types";
 import type { AvatarFactory } from "../../types/rendering/nodes";
 import { EventType } from "../../types/events";
-import { SystemBase } from "../shared";
+import { SystemBase } from "../shared/infrastructure/SystemBase";
 
 // THREE.Cache.enabled = true
 
@@ -44,7 +44,7 @@ function nodeToINode(node: Node): INode {
  * - Blob/File APIs for binary data
  * - URL.createObjectURL() for temporary blob URLs
  * - HTMLVideoElement + MediaSource for HLS streaming
- * - Three.js loaders (GLTF, RGBE, Texture) with browser context
+ * - Three.js loaders (GLTF, HDR, Texture) with browser context
  *
  * Why browser-specific:
  * This loader uses browser-only APIs that don't exist in Node.js:
@@ -61,7 +61,7 @@ function nodeToINode(node: Node): INode {
  * - **Avatars**: .vrm (VRM humanoid avatars with VRMLoaderPlugin)
  * - **Emotes**: .glb animations (retargetable to VRM skeletons)
  * - **Textures**: .jpg, .png, .webp (via TextureLoader)
- * - **HDR**: .hdr (RGBE environment maps via RGBELoader)
+ * - **HDR**: .hdr (RGBE environment maps via HDRLoader)
  * - **Images**: Raw image elements
  * - **Video**: .mp4, .webm, .m3u8 (HLS with hls.js polyfill)
  * - **Audio**: .mp3, .ogg, .wav (decoded via Web Audio API)
@@ -70,7 +70,7 @@ export class ClientLoader extends SystemBase {
   files: Map<string, File>;
   promises: Map<string, Promise<LoaderResult>>;
   results: Map<string, LoaderResult>;
-  hdrLoader: RGBELoader;
+  hdrLoader: HDRLoader;
   texLoader: THREE.TextureLoader;
   gltfLoader: GLTFLoader;
   preloadItems: Array<{ type: string; url: string }> = [];
@@ -91,7 +91,7 @@ export class ClientLoader extends SystemBase {
     this.files = new Map();
     this.promises = new Map();
     this.results = new Map();
-    this.hdrLoader = new RGBELoader();
+    this.hdrLoader = new HDRLoader();
     this.texLoader = new THREE.TextureLoader();
     this.gltfLoader = new GLTFLoader();
     // Register VRM loader plugin with proper parser typing

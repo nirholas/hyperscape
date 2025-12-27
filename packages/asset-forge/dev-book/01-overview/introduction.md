@@ -265,7 +265,7 @@ graph LR
 - **Skill Level**: No 3D modeling experience required
 - **API Access**: OpenAI and Meshy.ai accounts
 - **Hardware**: 4GB+ RAM recommended
-- **Browser**: Modern browser with WebGL support
+- **Browser**: Modern browser with WebGPU support (Chrome 113+, Safari 17+)
 
 ---
 

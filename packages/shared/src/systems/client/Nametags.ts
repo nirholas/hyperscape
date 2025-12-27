@@ -1,15 +1,8 @@
-import THREE, { toTHREEVector3 } from "../../extras/three/three";
-import CustomShaderMaterial from "../../libs/three-custom-shader-material";
-import { SystemBase } from "../shared";
-import type { World } from "../../types";
-import { EventType } from "../../types/events";
-
-const _v3_1 = new THREE.Vector3();
-
 /**
  * Nametags System
  *
  * Renders player/entity names using a single atlas and instanced mesh for optimal performance.
+ * Now using TSL Node Materials for WebGPU compatibility.
  *
  * IMPORTANT: This system ONLY handles names. Health bars are handled separately by the HealthBars system.
  * This separation ensures clean responsibility:
@@ -19,9 +12,33 @@ const _v3_1 = new THREE.Vector3();
  * @see HealthBars for the health bar rendering system
  */
 
+import THREE, {
+  MeshBasicNodeMaterial,
+  texture,
+  uv,
+  positionLocal,
+  uniform,
+  float,
+  vec2,
+  vec3,
+  vec4,
+  add,
+  sub,
+  mul,
+  div,
+  cross,
+  instancedBufferAttribute,
+  Fn,
+} from "../../extras/three/three";
+import { toTHREEVector3 } from "../../extras/three/three";
+import { SystemBase } from "../shared/infrastructure/SystemBase";
+import type { World } from "../../types";
+
+const _v3_1 = new THREE.Vector3();
+
 const RES = 2;
 const NAMETAG_WIDTH = 160 * RES;
-const NAMETAG_HEIGHT = 20 * RES; // Reduced - no longer need space for health bar
+const NAMETAG_HEIGHT = 20 * RES;
 const NAME_FONT_SIZE = 14 * RES;
 const NAME_OUTLINE_SIZE = 3 * RES;
 
@@ -61,14 +78,11 @@ export class Nametags extends SystemBase {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   texture: THREE.CanvasTexture;
-  uniforms: {
-    uAtlas: { value: THREE.CanvasTexture };
-    uXR: { value: number };
-    uOrientation: { value: THREE.Quaternion };
-  };
-  material: CustomShaderMaterial;
+  material: THREE.Material;
   geometry: THREE.PlaneGeometry;
   mesh: THREE.InstancedMesh;
+  coordsAttribute: THREE.InstancedBufferAttribute;
+  private uOrientation: { value: THREE.Quaternion };
 
   constructor(world: World) {
     super(world, {
@@ -86,130 +100,22 @@ export class Nametags extends SystemBase {
     this.texture.colorSpace = THREE.SRGBColorSpace;
     this.texture.flipY = false;
     this.texture.needsUpdate = true;
-    this.uniforms = {
-      uAtlas: { value: this.texture },
-      uXR: { value: 0 },
-      uOrientation: { value: this.world.camera.quaternion },
-    };
-    this.material = new CustomShaderMaterial({
-      baseMaterial: THREE.MeshBasicMaterial,
-      transparent: true,
-      depthWrite: false,
-      depthTest: false,
-      uniforms: this.uniforms,
-      vertexShader: `
-        attribute vec2 coords;
-        uniform float uXR;
-        uniform vec4 uOrientation;
-        varying vec2 vUv;
 
-        vec3 applyQuaternion(vec3 pos, vec4 quat) {
-          vec3 qv = vec3(quat.x, quat.y, quat.z);
-          vec3 t = 2.0 * cross(qv, pos);
-          return pos + quat.w * t + cross(qv, t);
-        }
+    // Create uniforms
+    this.uOrientation = { value: this.world.camera.quaternion };
 
-        vec4 lookAtQuaternion(vec3 instancePos) {
-          vec3 up = vec3(0.0, 1.0, 0.0);
-          vec3 forward = normalize(cameraPosition - instancePos);
-
-          if(length(forward) < 0.001) {
-            return vec4(0.0, 0.0, 0.0, 1.0);
-          }
-
-          vec3 right = normalize(cross(up, forward));
-          up = cross(forward, right);
-
-          float m00 = right.x;
-          float m01 = right.y;
-          float m02 = right.z;
-          float m10 = up.x;
-          float m11 = up.y;
-          float m12 = up.z;
-          float m20 = forward.x;
-          float m21 = forward.y;
-          float m22 = forward.z;
-
-          float trace = m00 + m11 + m22;
-          vec4 quat;
-
-          if(trace > 0.0) {
-            float s = 0.5 / sqrt(trace + 1.0);
-            quat = vec4(
-              (m12 - m21) * s,
-              (m20 - m02) * s,
-              (m01 - m10) * s,
-              0.25 / s
-            );
-          } else if(m00 > m11 && m00 > m22) {
-            float s = 2.0 * sqrt(1.0 + m00 - m11 - m22);
-            quat = vec4(
-              0.25 * s,
-              (m01 + m10) / s,
-              (m20 + m02) / s,
-              (m12 - m21) / s
-            );
-          } else if(m11 > m22) {
-            float s = 2.0 * sqrt(1.0 + m11 - m00 - m22);
-            quat = vec4(
-              (m01 + m10) / s,
-              0.25 * s,
-              (m12 + m21) / s,
-              (m20 - m02) / s
-            );
-          } else {
-            float s = 2.0 * sqrt(1.0 + m22 - m00 - m11);
-            quat = vec4(
-              (m20 + m02) / s,
-              (m12 + m21) / s,
-              0.25 * s,
-              (m01 - m10) / s
-            );
-          }
-
-          return normalize(quat);
-        }
-
-        void main() {
-          vec3 newPosition = position;
-          if (uXR > 0.5) {
-            vec3 instancePos = vec3(
-              instanceMatrix[3][0],
-              instanceMatrix[3][1],
-              instanceMatrix[3][2]
-            );
-            vec4 lookAtQuat = lookAtQuaternion(instancePos);
-            newPosition = applyQuaternion(newPosition, lookAtQuat);
-          } else {
-            newPosition = applyQuaternion(newPosition, uOrientation);
-          }
-          csm_Position = newPosition;
-
-          vec2 atlasUV = uv;
-          atlasUV.y = 1.0 - atlasUV.y;
-          atlasUV /= vec2(${PER_ROW}, ${PER_COLUMN});
-          atlasUV += coords;
-          vUv = atlasUV;
-        }
-      `,
-      fragmentShader: `
-        uniform sampler2D uAtlas;
-        varying vec2 vUv;
-
-        void main() {
-          vec4 texColor = texture2D(uAtlas, vUv);
-          csm_FragColor = texColor;
-        }
-      `,
-    } as ConstructorParameters<typeof CustomShaderMaterial>[0]);
-    this.geometry = new THREE.PlaneGeometry(1, NAMETAG_HEIGHT / NAMETAG_WIDTH);
-    this.geometry.setAttribute(
-      "coords",
-      new THREE.InstancedBufferAttribute(
-        new Float32Array(MAX_INSTANCES * 2),
-        2,
-      ),
+    // Create coords attribute for atlas UV lookup
+    this.coordsAttribute = new THREE.InstancedBufferAttribute(
+      new Float32Array(MAX_INSTANCES * 2),
+      2,
     );
+
+    // Create TSL Node Material
+    this.material = this.createNametagMaterial();
+
+    this.geometry = new THREE.PlaneGeometry(1, NAMETAG_HEIGHT / NAMETAG_WIDTH);
+    this.geometry.setAttribute("coords", this.coordsAttribute);
+
     this.mesh = new THREE.InstancedMesh(
       this.geometry,
       this.material,
@@ -222,11 +128,87 @@ export class Nametags extends SystemBase {
     this.mesh.count = 0;
   }
 
+  /**
+   * Create TSL Node Material for billboard nametags
+   */
+  private createNametagMaterial(): THREE.Material {
+    const uOrientationUniform = uniform(vec4(0, 0, 0, 1));
+    const atlasTexture = this.texture;
+
+    // Helper function to apply quaternion to position
+    const applyQuaternion = Fn(
+      ([pos, quat]: [ReturnType<typeof vec3>, ReturnType<typeof vec4>]) => {
+        const qv = vec3(quat.x, quat.y, quat.z);
+        const t = mul(cross(qv, pos), float(2.0));
+        return add(add(pos, mul(t, quat.w)), cross(qv, t));
+      },
+    );
+
+    // Position node with billboard orientation
+    const positionNode = Fn(() => {
+      const localPos = positionLocal;
+
+      // Apply camera orientation for billboard effect
+      const newPosition = applyQuaternion(localPos, uOrientationUniform);
+
+      return newPosition;
+    })();
+
+    // Color node with atlas UV lookup
+    const colorNode = Fn(() => {
+      // Get coords from attribute (set per-instance)
+      const coordsAttr = instancedBufferAttribute(this.coordsAttribute);
+
+      // Calculate atlas UV
+      const baseUv = uv();
+      const atlasUv = vec2(
+        add(div(baseUv.x, float(PER_ROW)), coordsAttr.x),
+        add(div(sub(float(1.0), baseUv.y), float(PER_COLUMN)), coordsAttr.y),
+      );
+
+      // Sample atlas texture
+      const texColor = texture(atlasTexture, atlasUv);
+
+      return texColor;
+    })();
+
+    // Create material
+    const material = new MeshBasicNodeMaterial();
+    material.positionNode = positionNode;
+    material.colorNode = colorNode;
+    material.transparent = true;
+    material.depthWrite = false;
+    material.depthTest = false;
+
+    // Store uniforms for external updates
+    (
+      material as THREE.Material & {
+        nametagUniforms?: { uOrientation: typeof uOrientationUniform };
+      }
+    ).nametagUniforms = {
+      uOrientation: uOrientationUniform,
+    };
+
+    return material;
+  }
+
   start() {
     this.world.stage.scene.add(this.mesh);
-    this.subscribe(EventType.XR_SESSION, (session: XRSession | null) =>
-      this.onXRSession(session as unknown),
-    );
+  }
+
+  /**
+   * Update orientation uniform each frame
+   */
+  update() {
+    // Update orientation uniform from camera
+    const mat = this.material as THREE.Material & {
+      nametagUniforms?: {
+        uOrientation: { value: THREE.Quaternion };
+      };
+    };
+    if (mat.nametagUniforms) {
+      mat.nametagUniforms.uOrientation.value.copy(this.world.camera.quaternion);
+    }
   }
 
   /**
@@ -245,10 +227,8 @@ export class Nametags extends SystemBase {
 
     const row = Math.floor(idx / PER_ROW);
     const col = idx % PER_ROW;
-    const coords = this.mesh.geometry.attributes
-      .coords as THREE.InstancedBufferAttribute;
-    coords.setXY(idx, col / PER_ROW, row / PER_COLUMN);
-    coords.needsUpdate = true;
+    this.coordsAttribute.setXY(idx, col / PER_ROW, row / PER_COLUMN);
+    this.coordsAttribute.needsUpdate = true;
 
     const matrix = new THREE.Matrix4();
     const position = _v3_1.set(0, 0, 0);
@@ -301,12 +281,10 @@ export class Nametags extends SystemBase {
       this.undraw(last);
       last.idx = entry.idx;
       this.draw(last);
-      const coords = this.mesh.geometry.attributes
-        .coords as THREE.InstancedBufferAttribute;
       const row = Math.floor(entry.idx / PER_ROW);
       const col = entry.idx % PER_ROW;
-      coords.setXY(entry.idx, col / PER_ROW, row / PER_COLUMN);
-      coords.needsUpdate = true;
+      this.coordsAttribute.setXY(entry.idx, col / PER_ROW, row / PER_COLUMN);
+      this.coordsAttribute.needsUpdate = true;
       this.mesh.setMatrixAt(last.idx, last.matrix);
       this.nametags[last.idx] = last;
       this.nametags.pop();
@@ -369,8 +347,4 @@ export class Nametags extends SystemBase {
     this.ctx.clearRect(x, y, NAMETAG_WIDTH, NAMETAG_HEIGHT);
     this.texture.needsUpdate = true;
   }
-
-  private onXRSession = (session: unknown) => {
-    this.uniforms.uXR.value = session ? 1 : 0;
-  };
 }

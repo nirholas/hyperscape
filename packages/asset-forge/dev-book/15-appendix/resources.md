@@ -556,10 +556,10 @@ This document provides comprehensive links to external documentation, tools, lib
 
 ### Web Standards
 
-**WebGL**
-- **Specification**: https://www.khronos.org/webgl/
-- **WebGL Fundamentals**: https://webglfundamentals.org/
-- **WebGL2 Spec**: https://www.khronos.org/registry/webgl/specs/latest/2.0/
+**WebGPU**
+- **Specification**: https://www.w3.org/TR/webgpu/
+- **WebGPU Fundamentals**: https://webgpufundamentals.org/
+- **WebGPU Samples**: https://webgpu.github.io/webgpu-samples/
 
 **Canvas API**
 - **MDN Canvas Tutorial**: https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial

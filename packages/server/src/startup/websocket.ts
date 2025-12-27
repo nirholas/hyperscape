@@ -48,7 +48,7 @@ export function registerWebSocket(
 
     // Add unique identifier to track this WebSocket on server
     const wsId = `SERVER-WS-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    (ws as any).__wsId = wsId;
+    ws.__wsId = wsId;
 
     fastify.log.info(`[WebSocket] Connection established - ${wsId}`);
 

@@ -29,7 +29,7 @@ import {
  * Create an ElizaOS agent record for a character
  * This allows the character to appear in the dashboard and be managed as an agent
  */
-async function createElizaOSAgent(
+async function _createElizaOSAgent(
   characterId: string,
   accountId: string,
   name: string,
@@ -726,12 +726,10 @@ export async function handleEnterWorld(
       // CRITICAL: Send all existing entities (mobs, items, NPCs) to new client
       // These entities were spawned before this player connected
       if (world.entities?.items) {
-        let entityCount = 0;
         for (const [entityId, entity] of world.entities.items.entries()) {
           // Skip the player we just added
           if (entityId !== socket.player.id) {
             sendToFn(socket.id, "entityAdded", entity.serialize());
-            entityCount++;
           }
         }
       }

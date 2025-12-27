@@ -15,9 +15,10 @@
  * @see https://oldschool.runescape.wiki/w/Pathfinding
  */
 
-import type { World } from "@hyperscape/shared";
+import type { World, TileCoord } from "@hyperscape/shared";
 import {
   worldToTile,
+  worldToTileInto,
   tilesWithinMeleeRange,
   EventType,
 } from "@hyperscape/shared";
@@ -35,6 +36,16 @@ interface PendingAttack {
 export class PendingAttackManager {
   /** Map of playerId -> pending attack data */
   private pendingAttacks = new Map<string, PendingAttack>();
+
+  // ============================================================================
+  // PRE-ALLOCATED BUFFERS (Zero-allocation hot path support)
+  // ============================================================================
+
+  /** Pre-allocated player tile for processTick */
+  private readonly _playerTile: TileCoord = { x: 0, z: 0 };
+
+  /** Pre-allocated target tile for processTick */
+  private readonly _targetTile: TileCoord = { x: 0, z: 0 };
 
   constructor(
     private world: World,
@@ -140,13 +151,20 @@ export class PendingAttackManager {
       }
 
       const playerPos = playerEntity.position;
-      const playerTile = worldToTile(playerPos.x, playerPos.z);
-      const targetTile = worldToTile(targetPos.x, targetPos.z);
+      // Zero-allocation: use pre-allocated tile buffers
+      worldToTileInto(playerPos.x, playerPos.z, this._playerTile);
+      worldToTileInto(targetPos.x, targetPos.z, this._targetTile);
 
       // OSRS-accurate melee range check:
       // - Range 1: Cardinal only (N/S/E/W)
       // - Range 2+: Allows diagonal (Chebyshev distance)
-      if (tilesWithinMeleeRange(playerTile, targetTile, pending.meleeRange)) {
+      if (
+        tilesWithinMeleeRange(
+          this._playerTile,
+          this._targetTile,
+          pending.meleeRange,
+        )
+      ) {
         // In range! Start combat
         this.world.emit(EventType.COMBAT_ATTACK_REQUEST, {
           playerId,
@@ -165,8 +183,8 @@ export class PendingAttackManager {
       // OSRS: recalculates path every tick when target moves
       if (
         !pending.lastTargetTile ||
-        pending.lastTargetTile.x !== targetTile.x ||
-        pending.lastTargetTile.z !== targetTile.z
+        pending.lastTargetTile.x !== this._targetTile.x ||
+        pending.lastTargetTile.z !== this._targetTile.z
       ) {
         // Target moved - re-path using OSRS melee pathfinding
         this.tileMovementManager.movePlayerToward(
@@ -175,7 +193,12 @@ export class PendingAttackManager {
           true,
           pending.meleeRange,
         );
-        pending.lastTargetTile = { x: targetTile.x, z: targetTile.z };
+        // Zero-allocation: reuse or create lastTargetTile
+        if (!pending.lastTargetTile) {
+          pending.lastTargetTile = { x: 0, z: 0 };
+        }
+        pending.lastTargetTile.x = this._targetTile.x;
+        pending.lastTargetTile.z = this._targetTile.z;
       }
     }
   }
@@ -213,11 +236,18 @@ export class PendingAttackManager {
     }
 
     const playerPos = playerEntity.position;
-    const playerTile = worldToTile(playerPos.x, playerPos.z);
-    const targetTile = worldToTile(targetPos.x, targetPos.z);
+    // Zero-allocation: use pre-allocated tile buffers
+    worldToTileInto(playerPos.x, playerPos.z, this._playerTile);
+    worldToTileInto(targetPos.x, targetPos.z, this._targetTile);
 
     // OSRS-accurate melee range check
-    if (tilesWithinMeleeRange(playerTile, targetTile, pending.meleeRange)) {
+    if (
+      tilesWithinMeleeRange(
+        this._playerTile,
+        this._targetTile,
+        pending.meleeRange,
+      )
+    ) {
       // In range! Start combat
       this.world.emit(EventType.COMBAT_ATTACK_REQUEST, {
         playerId,
@@ -235,8 +265,8 @@ export class PendingAttackManager {
     // Not in range - check if target moved and re-path if needed
     if (
       !pending.lastTargetTile ||
-      pending.lastTargetTile.x !== targetTile.x ||
-      pending.lastTargetTile.z !== targetTile.z
+      pending.lastTargetTile.x !== this._targetTile.x ||
+      pending.lastTargetTile.z !== this._targetTile.z
     ) {
       // Target moved - re-path using OSRS melee pathfinding
       this.tileMovementManager.movePlayerToward(
@@ -245,7 +275,12 @@ export class PendingAttackManager {
         true,
         pending.meleeRange,
       );
-      pending.lastTargetTile = { x: targetTile.x, z: targetTile.z };
+      // Zero-allocation: reuse or create lastTargetTile
+      if (!pending.lastTargetTile) {
+        pending.lastTargetTile = { x: 0, z: 0 };
+      }
+      pending.lastTargetTile.x = this._targetTile.x;
+      pending.lastTargetTile.z = this._targetTile.z;
     }
   }
 

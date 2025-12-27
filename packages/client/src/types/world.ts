@@ -42,11 +42,6 @@ export interface TargetSystem {
   hide: () => void;
 }
 
-export interface XRManager {
-  supportsVR: boolean;
-  enter: () => void;
-}
-
 export interface ChatSystem {
   send: (message: string) => void;
   command: (command: string) => void;

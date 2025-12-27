@@ -44,6 +44,7 @@
     "start": "cd packages/server && bun run start",
     "test": "turbo run test --filter='!3d-asset-forge'",
     "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck --filter='!3d-asset-forge' --filter='!@hyperscape/physx-js-webidl' --filter='!@hyperscape/docs'",
     "clean": "turbo run clean && rm -rf test-*.json test-*.png *.log **/*.log test-results packages/docs-site/docs/api",
     "ios": "cd packages/client && bun run ios",
     "ios:dev": "cd packages/client && bun run ios:dev",

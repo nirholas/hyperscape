@@ -19,7 +19,7 @@ import type { BiomeData, ZoneData } from "../types/core/core";
 import { calculateDistance2D } from "../utils/game/EntityUtils";
 
 // Re-export types for external use
-export type { DeathLocationData } from "../types/core/core";
+export type { DeathLocationData, ZoneData } from "../types/core/core";
 
 /**
  * Biome Database - Populated at runtime from JSON manifests

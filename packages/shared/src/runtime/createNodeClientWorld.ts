@@ -10,7 +10,7 @@
  * - Development tools that need to connect as clients
  *
  * Architecture:
- * - Runs in Node.js environment (no DOM, no WebGL)
+ * - Runs in Node.js environment (no DOM, no WebGPU)
  * - Can connect to game servers via WebSocket
  * - Receives and processes game state
  * - No rendering or audio (headless)

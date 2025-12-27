@@ -48,7 +48,7 @@ entity.addComponent<CombatComponent>('combat', {
 **Purpose:** 3D rendering and scene management
 
 **Why Three.js:**
-- Most mature WebGL library
+- Most mature 3D library with WebGPU support
 - Extensive ecosystem and community
 - WebGPU support (future-proof)
 - Great performance
@@ -56,7 +56,7 @@ entity.addComponent<CombatComponent>('combat', {
 
 **Features Used:**
 - Scene graph management
-- WebGL/WebGPU rendering
+- WebGPU rendering
 - GLTF/VRM model loading
 - Skeletal animations
 - Shadow mapping
@@ -210,12 +210,12 @@ export default defineConfig({
 
 **Requirements:**
 - Modern browser (Chrome 90+, Firefox 88+, Safari 14+)
-- WebGL 2.0 support
+- WebGPU support
 - WebAssembly support
 - 4GB+ RAM recommended
 
 **APIs Used:**
-- WebGL/WebGPU
+- WebGPU
 - WebSocket
 - WebRTC
 - Web Workers
@@ -278,7 +278,7 @@ await world.db.savePlayer(playerId, playerData);
 
 ## Graphics Stack
 
-### WebGL 2.0
+### WebGPU
 
 **Purpose:** Primary rendering backend
 
@@ -352,7 +352,7 @@ await avatar.load();
 
 **Why Playwright:**
 - Visual testing
-- WebGL support
+- WebGPU support
 - Multi-browser
 - Headless mode
 - Screenshot comparison
@@ -466,7 +466,6 @@ export default [
 - **WebGPU:** Better graphics performance
 - **WebTransport:** Lower latency networking
 - **WASM Threads:** Multi-threaded physics
-- **WebXR:** VR/AR support improvements
 
 ---
 

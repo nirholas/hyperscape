@@ -52,7 +52,6 @@ import {
   World,
   EventType,
   CombatSystem,
-  LootSystem,
   ResourceSystem,
   worldToTile,
   tilesWithinMeleeRange,
@@ -86,7 +85,6 @@ import { ConnectionHandler } from "./connection-handler";
 import { InteractionSessionManager } from "./InteractionSessionManager";
 import { handleChatAdded } from "./handlers/chat";
 import {
-  handleAttackMob,
   handleChangeAttackStyle,
   handleSetAutoRetaliate,
 } from "./handlers/combat";
@@ -354,7 +352,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.tickSystem.onTick((tickNumber) => {
       const playerDeathSystem = this.world.getSystem(
         "player-death",
-      ) as unknown as PlayerDeathSystemWithTick | null;
+      ) as unknown as PlayerDeathSystemWithTick | undefined;
       if (
         playerDeathSystem &&
         typeof playerDeathSystem.processTick === "function"
@@ -366,15 +364,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Register loot system to process on each tick (after combat)
     // Handles mob corpse despawn (OSRS-accurate tick-based timing)
     this.tickSystem.onTick((tickNumber) => {
-      const lootSystem = this.world.getSystem("loot") as LootSystem | null;
-      if (
-        lootSystem &&
-        typeof (lootSystem as unknown as PlayerDeathSystemWithTick)
-          .processTick === "function"
-      ) {
-        (lootSystem as unknown as PlayerDeathSystemWithTick).processTick(
-          tickNumber,
-        );
+      const lootSystem = this.world.getSystem("loot") as unknown as
+        | PlayerDeathSystemWithTick
+        | undefined;
+      if (lootSystem && typeof lootSystem.processTick === "function") {
+        lootSystem.processTick(tickNumber);
       }
     }, TickPriority.COMBAT); // Same priority as combat (after movement)
 
@@ -408,25 +402,23 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Sync tile position when player respawns at spawn point
     // CRITICAL: Without this, TileMovementManager has stale tile position from death location
     // and paths would be calculated from wrong starting tile
-    this.world.on(
-      EventType.PLAYER_RESPAWNED,
-      (event: {
+    this.world.on(EventType.PLAYER_RESPAWNED, (eventData) => {
+      const event = eventData as {
         playerId: string;
         spawnPosition: { x: number; y: number; z: number };
-      }) => {
-        if (event.playerId && event.spawnPosition) {
-          this.tileMovementManager.syncPlayerPosition(
-            event.playerId,
-            event.spawnPosition,
-          );
-          // Also clear any pending actions from before death
-          this.actionQueue.cleanup(event.playerId);
-          console.log(
-            `[ServerNetwork] Synced tile position for respawned player ${event.playerId} at (${event.spawnPosition.x}, ${event.spawnPosition.z})`,
-          );
-        }
-      },
-    );
+      };
+      if (event.playerId && event.spawnPosition) {
+        this.tileMovementManager.syncPlayerPosition(
+          event.playerId,
+          event.spawnPosition,
+        );
+        // Also clear any pending actions from before death
+        this.actionQueue.cleanup(event.playerId);
+        console.log(
+          `[ServerNetwork] Synced tile position for respawned player ${event.playerId} at (${event.spawnPosition.x}, ${event.spawnPosition.z})`,
+        );
+      }
+    });
 
     // Handle mob tile movement requests from MobEntity AI
     this.world.on(EventType.MOB_NPC_MOVE_REQUEST, (event) => {
@@ -573,8 +565,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       handleCharacterSelected(
         socket,
         data,
-        this.world,
-        this.broadcastManager.sendTo.bind(this.broadcastManager),
+        this.broadcastManager.sendToSocket.bind(this.broadcastManager),
       );
 
     this.handlers["enterWorld"] = (socket, data) =>
@@ -582,8 +573,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         socket,
         data,
         this.world,
-        this.db,
+        this.spawn,
         this.broadcastManager.sendToAll.bind(this.broadcastManager),
+        this.broadcastManager.sendToSocket.bind(this.broadcastManager),
       );
 
     this.handlers["onChatAdded"] = (socket, data) =>
@@ -728,7 +720,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       handleMoveItem(socket, data, this.world);
 
     // Death/respawn handlers
-    this.handlers["onRequestRespawn"] = (socket, data) => {
+    this.handlers["onRequestRespawn"] = (socket, _data) => {
       const playerEntity = socket.player;
       if (playerEntity) {
         console.log(
@@ -875,7 +867,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       );
 
     this.handlers["onBankDepositAll"] = (socket, data) =>
-      handleBankDepositAll(socket, data, this.world);
+      handleBankDepositAll(
+        socket,
+        data as { targetTabIndex?: number },
+        this.world,
+      );
 
     this.handlers["onBankDepositCoins"] = (socket, data) =>
       handleBankDepositCoins(socket, data as { amount: number }, this.world);
@@ -889,7 +885,12 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.handlers["onBankMove"] = (socket, data) =>
       handleBankMove(
         socket,
-        data as { fromSlot: number; toSlot: number; mode: "swap" | "insert" },
+        data as {
+          fromSlot: number;
+          toSlot: number;
+          mode: "swap" | "insert";
+          tabIndex: number;
+        },
         this.world,
       );
 

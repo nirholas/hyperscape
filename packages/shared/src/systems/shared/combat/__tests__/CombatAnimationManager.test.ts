@@ -167,9 +167,9 @@ describe("CombatAnimationManager", () => {
 
       animationManager.setCombatEmote("mob1", "mob", 100);
 
-      // Emotes.COMBAT is the asset path "asset://emotes/emote-punching.glb"
+      // Emotes.COMBAT is the asset path with layer parameter
       expect(mob.setServerEmote).toHaveBeenCalledWith(
-        "asset://emotes/emote-punching.glb",
+        "asset://emotes/emote-punching.glb?l=0",
       );
     });
 

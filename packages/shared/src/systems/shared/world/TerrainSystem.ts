@@ -4,7 +4,23 @@ import {
   geometryToPxMesh,
   PMeshHandle,
 } from "../../../extras/three/geometryToPxMesh";
-import THREE from "../../../extras/three/three";
+import THREE, {
+  MeshStandardNodeMaterial,
+  normalWorld,
+  uniform,
+  float,
+  vec3,
+  abs,
+  pow,
+  add,
+  sub,
+  mul,
+  div,
+  mix,
+  smoothstep,
+  vertexColor,
+  Fn,
+} from "../../../extras/three/three";
 import { System } from "..";
 import { EventType } from "../../../types/events";
 import { NoiseGenerator } from "../../../utils/NoiseGenerator";
@@ -142,6 +158,77 @@ export class TerrainSystem extends System {
     // Always use fixed seed of 0 for deterministic terrain on both client and server
     const FIXED_SEED = 0;
     return FIXED_SEED;
+  }
+
+  /**
+   * Create terrain tile material using TSL Node Material
+   * Features tri-planar slope coloring for realistic rock/grass blending
+   */
+  private createTerrainTileMaterial(): THREE.Material {
+    // Slope color uniforms
+    const uSlopeColor = uniform(vec3(0.42, 0.4, 0.38)); // Gray-brown rock (0x6b6560)
+    const uSlopeThreshold = uniform(float(0.6)); // Normal Y threshold
+    const uSlopeBlend = uniform(float(0.2)); // Blend smoothness
+
+    // Create TSL Node Material
+    const material = new MeshStandardNodeMaterial();
+    material.metalness = 0.1;
+    material.roughness = 0.9;
+
+    // Get world normal for slope calculations
+    const worldNormal = normalWorld;
+
+    // Create color node with tri-planar slope blending
+    const colorNode = Fn(() => {
+      // Get base vertex color (set during geometry creation)
+      const baseColor = vertexColor();
+
+      // Calculate slope factor (0 = flat, 1 = vertical)
+      const slopeFactor = sub(float(1.0), abs(worldNormal.y));
+
+      // Tri-planar blending weights based on world normal
+      const absNormal = abs(worldNormal);
+      const blendWeightsPow = pow(absNormal, vec3(3.0));
+      const weightSum = add(
+        add(blendWeightsPow.x, blendWeightsPow.y),
+        blendWeightsPow.z,
+      );
+      const blendWeights = div(blendWeightsPow, weightSum);
+
+      // Smooth slope color blending
+      const slopeBlendFactor = smoothstep(
+        sub(uSlopeThreshold, uSlopeBlend),
+        add(uSlopeThreshold, uSlopeBlend),
+        slopeFactor,
+      );
+
+      // Blend base color with slope color on steep surfaces (0.7 factor)
+      const mixedColor = mix(
+        baseColor.rgb,
+        uSlopeColor,
+        mul(slopeBlendFactor, float(0.7)),
+      );
+
+      // Apply subtle tri-planar directional variation
+      const xVariation = add(float(0.95), mul(float(0.05), blendWeights.x));
+      const zVariation = add(float(0.92), mul(float(0.08), blendWeights.z));
+
+      const xColor = mul(mixedColor, xVariation);
+      const yColor = mixedColor;
+      const zColor = mul(mixedColor, zVariation);
+
+      // Final blend using weights
+      const finalColor = add(
+        add(mul(xColor, blendWeights.x), mul(yColor, blendWeights.y)),
+        mul(zColor, blendWeights.z),
+      );
+
+      return finalColor;
+    })();
+
+    material.colorNode = colorNode;
+
+    return material;
   }
 
   /**
@@ -559,78 +646,8 @@ export class TerrainSystem extends System {
     // Create geometry for this tile
     const geometry = this.createTileGeometry(tileX, tileZ);
 
-    // Create material with vertex colors and tri-planar slope shading
-    const material = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      wireframe: false,
-      metalness: 0.1,
-      roughness: 0.9,
-    });
-
-    // Add tri-planar slope coloring via onBeforeCompile (most performant approach)
-    material.onBeforeCompile = (shader) => {
-      // Add uniforms for slope coloring
-      shader.uniforms.uSlopeColor = { value: new THREE.Color(0x6b6560) }; // Gray-brown rock
-      shader.uniforms.uSlopeThreshold = { value: 0.6 }; // Normal Y threshold
-      shader.uniforms.uSlopeBlend = { value: 0.2 }; // Blend smoothness
-
-      // Inject varying declaration for normal in vertex shader
-      shader.vertexShader = shader.vertexShader.replace(
-        "#include <common>",
-        `#include <common>
-        varying vec3 vWorldNormal;`,
-      );
-
-      // Calculate world normal in vertex shader
-      shader.vertexShader = shader.vertexShader.replace(
-        "#include <worldpos_vertex>",
-        `#include <worldpos_vertex>
-        vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);`,
-      );
-
-      // Inject uniform declarations and tri-planar logic in fragment shader
-      shader.fragmentShader = shader.fragmentShader.replace(
-        "#include <common>",
-        `#include <common>
-        uniform vec3 uSlopeColor;
-        uniform float uSlopeThreshold;
-        uniform float uSlopeBlend;
-        varying vec3 vWorldNormal;`,
-      );
-
-      // Apply slope coloring to diffuse color
-      shader.fragmentShader = shader.fragmentShader.replace(
-        "#include <color_fragment>",
-        `#include <color_fragment>
-        
-        // Calculate slope factor (0 = flat, 1 = vertical)
-        float slopeFactor = 1.0 - abs(vWorldNormal.y);
-        
-        // Tri-planar blending weights based on world normal
-        vec3 blendWeights = abs(vWorldNormal);
-        blendWeights = pow(blendWeights, vec3(3.0));
-        blendWeights = blendWeights / (blendWeights.x + blendWeights.y + blendWeights.z);
-        
-        // Smooth slope color blending
-        float slopeBlendFactor = smoothstep(
-          uSlopeThreshold - uSlopeBlend,
-          uSlopeThreshold + uSlopeBlend,
-          slopeFactor
-        );
-        
-        // Blend base color with slope color on steep surfaces
-        vec3 finalColor = mix(diffuseColor.rgb, uSlopeColor, slopeBlendFactor * 0.7);
-        
-        // Apply subtle tri-planar directional variation
-        vec3 xColor = finalColor * (0.95 + 0.05 * blendWeights.x);
-        vec3 yColor = finalColor;
-        vec3 zColor = finalColor * (0.92 + 0.08 * blendWeights.z);
-        
-        diffuseColor.rgb = xColor * blendWeights.x + 
-                          yColor * blendWeights.y + 
-                          zColor * blendWeights.z;`,
-      );
-    };
+    // Create material with vertex colors and tri-planar slope shading using TSL Node Material
+    const material = this.createTerrainTileMaterial();
 
     // Create mesh
     const mesh = new THREE.Mesh(geometry, material);
@@ -812,7 +829,8 @@ export class TerrainSystem extends System {
           for (const resource of tile.resources) {
             if (resource.instanceId != null) continue;
 
-            const worldPosition = new THREE.Vector3(
+            // Reuse pre-allocated vector for resource position
+            this._tempVec3.set(
               tile.x * this.CONFIG.TILE_SIZE + resource.position.x,
               resource.position.y,
               tile.z * this.CONFIG.TILE_SIZE + resource.position.z,
@@ -821,7 +839,7 @@ export class TerrainSystem extends System {
             const instanceId = this.instancedMeshManager.addInstance(
               resource.type,
               resource.id,
-              worldPosition,
+              this._tempVec3,
             );
 
             if (instanceId !== null) {
@@ -836,9 +854,9 @@ export class TerrainSystem extends System {
                 resourceId: resource.id,
                 resourceType: resource.type,
                 worldPosition: {
-                  x: worldPosition.x,
-                  y: worldPosition.y,
-                  z: worldPosition.z,
+                  x: this._tempVec3.x,
+                  y: this._tempVec3.y,
+                  z: this._tempVec3.z,
                 },
               });
             }
@@ -1458,7 +1476,7 @@ export class TerrainSystem extends System {
     }
   }
 
-  private generateGrassForTile(tile: TerrainTile, biomeData: BiomeData): void {
+  private generateGrassForTile(tile: TerrainTile, _biomeData: BiomeData): void {
     if (!this.world.network?.isClient) return;
     if (!this.grassSystem) return;
 
@@ -1505,7 +1523,7 @@ export class TerrainSystem extends System {
       key: `temp_${tileX}_${tileZ}`,
       x: tileX,
       z: tileZ,
-      mesh: null as unknown as THREE.Mesh,
+      mesh: null as THREE.Mesh,
       biome: this.getBiomeAt(tileX, tileZ) as TerrainTile["biome"],
       resources: [],
       roads: [],

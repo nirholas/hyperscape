@@ -196,7 +196,12 @@ describe("CombatRotationManager", () => {
 
     it("handles entity with missing position gracefully", () => {
       const player = createMockPlayer("player1", { x: 0, y: 0, z: 0 });
-      const mob = createMockMob("mob1", null as any); // No position
+      interface MockMob {
+        id: string;
+        position: { x: number; y: number; z: number } | null;
+        [key: string]: unknown;
+      }
+      const mob = createMockMob("mob1", null as MockMob["position"]); // No position
       mockPlayers.set("player1", player);
       mockEntities.set("mob1", mob);
 

@@ -66,6 +66,7 @@
     "dev": "tsc --watch",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
-    "lint": "eslint src --fix"
+    "lint": "eslint src --fix",
+    "typecheck": "tsc --noEmit"
   }
 }

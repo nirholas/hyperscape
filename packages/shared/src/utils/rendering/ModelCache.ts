@@ -141,6 +141,15 @@ export class ModelCache {
       resolvedPath = resolvedPath.replace("asset://", `${cdnUrl}/`);
     }
 
+    // Add cache-busting for development to bypass stale browser cache
+    if (
+      typeof window !== "undefined" &&
+      resolvedPath.startsWith("http://localhost")
+    ) {
+      const separator = resolvedPath.includes("?") ? "&" : "?";
+      resolvedPath = `${resolvedPath}${separator}_cb=20251227`;
+    }
+
     // Check cache first (use resolved path as key)
     const cached = this.cache.get(resolvedPath);
     if (cached) {

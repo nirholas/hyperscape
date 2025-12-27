@@ -44,10 +44,8 @@ import type {
   NPCDataInput,
   NPCCategory,
   TreasureLocation,
-  BankEntityData,
   StoreData,
   BiomeData,
-  ZoneData,
 } from "../types/core/core";
 import type { DataValidationResult } from "../types/core/validation-types";
 import type { MobSpawnPoint, NPCLocation, WorldArea } from "./world-areas";
@@ -383,8 +381,7 @@ export class DataManager {
     this.validationResult = await this.validateAllData();
     this.isInitialized = true;
 
-    if (this.validationResult.isValid) {
-    } else {
+    if (!this.validationResult.isValid) {
       throw new Error(
         `[DataManager] ❌ Data validation failed: ${this.validationResult.errors.join(", ")}`,
       );

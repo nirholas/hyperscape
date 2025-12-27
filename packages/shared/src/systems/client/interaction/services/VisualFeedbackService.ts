@@ -19,6 +19,9 @@ import {
   tileToWorld,
 } from "../../../shared/movement/TileSystem";
 
+// Pre-allocated vectors to avoid per-frame allocations
+const _playerPos = new THREE.Vector3();
+
 export class VisualFeedbackService {
   private targetMarker: THREE.Mesh | null = null;
   private targetPosition: THREE.Vector3 | null = null;
@@ -135,11 +138,11 @@ export class VisualFeedbackService {
     const tile = worldToTile(position.x, position.z);
     const snappedPos = tileToWorld(tile);
 
-    this.targetPosition = new THREE.Vector3(
-      snappedPos.x,
-      position.y,
-      snappedPos.z,
-    );
+    // Reuse existing targetPosition or create once
+    if (!this.targetPosition) {
+      this.targetPosition = new THREE.Vector3();
+    }
+    this.targetPosition.set(snappedPos.x, position.y, snappedPos.z);
     this.targetMarker.position.set(snappedPos.x, 0, snappedPos.z);
 
     // Project onto terrain
@@ -225,15 +228,11 @@ export class VisualFeedbackService {
       const scale = 1 + Math.sin(time * 4) * 0.1;
       this.targetMarker.scale.set(scale, 1, scale);
 
-      // Hide when player reaches target
+      // Hide when player reaches target using pre-allocated vector
       const player = this.world.getPlayer();
       if (player && this.targetPosition) {
-        const playerPos = new THREE.Vector3(
-          player.position.x,
-          player.position.y,
-          player.position.z,
-        );
-        const distance = playerPos.distanceTo(this.targetPosition);
+        _playerPos.set(player.position.x, player.position.y, player.position.z);
+        const distance = _playerPos.distanceTo(this.targetPosition);
         if (distance < 0.5) {
           this.hideTargetMarker();
         }

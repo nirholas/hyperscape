@@ -4,18 +4,8 @@
  * APIs for investigating reports, debugging, and replaying combat.
  */
 
-import {
-  EventStore,
-  GameEventType,
-  type GameEvent,
-  type GameSnapshot,
-  type EntitySnapshot,
-  type CombatSnapshot,
-} from "../EventStore";
-import {
-  SeededRandom,
-  type SeededRandomState,
-} from "../../../utils/SeededRandom";
+import { EventStore, GameEventType, type GameEvent } from "../EventStore";
+import { type SeededRandomState } from "../../../utils/SeededRandom";
 
 /**
  * Combat event with parsed payload for easier access
@@ -491,8 +481,8 @@ export class CombatReplayService {
     const errors: Array<{ tick: number; error: string }> = [];
 
     // Check for logical event ordering
-    let lastCombatStartTick = new Map<string, number>();
-    let inCombat = new Set<string>();
+    const lastCombatStartTick = new Map<string, number>();
+    const inCombat = new Set<string>();
 
     for (const event of events) {
       if (event.type === GameEventType.COMBAT_START) {

@@ -118,7 +118,7 @@ import type {
   TriggerEvent,
 } from "../../../types/systems/physics";
 import type { SystemDependencies } from "..";
-import { SystemBase } from "..";
+import { SystemBase } from "../infrastructure/SystemBase";
 
 const _v3_1 = new THREE.Vector3();
 const _v3_2 = new THREE.Vector3();
@@ -126,6 +126,10 @@ const _v3_3 = new THREE.Vector3();
 const _contact_pos = new THREE.Vector3();
 const _contact_nor = new THREE.Vector3();
 const _contact_imp = new THREE.Vector3();
+// Pre-allocated Vector3 for raycast direction normalization
+const _raycastDirNormalized = new THREE.Vector3();
+// Cache for sphere geometries to avoid per-overlap allocations
+const _sphereGeometryCache = new Map<number, PxSphereGeometry>();
 
 // Import PhysX types
 import type PhysX from "@hyperscape/physx-js-webidl";
@@ -379,6 +383,9 @@ export class Physics extends SystemBase implements IPhysics {
   _pv1: PxVec3 | null = null;
   _pv2: PxVec3 | null = null;
   transform!: PxTransform;
+  // Pre-allocated PxHitFlags to avoid per-raycast/sweep allocations
+  _raycastHitFlags: PhysX.PxHitFlags | null = null;
+  _sweepHitFlags: PhysX.PxHitFlags | null = null;
   public controllerManager: PxControllerManager | null = null;
   controllerFilters: PxControllerFilters | null = null;
   ignoreSetGlobalPose = false;
@@ -806,6 +813,12 @@ export class Physics extends SystemBase implements IPhysics {
     this.transform = new PHYSX.PxTransform(
       PHYSX.PxIDENTITYEnum.PxIdentity,
     ) as PxTransform;
+
+    // Pre-allocate PxHitFlags for raycast and sweep to avoid per-query allocations
+    this._raycastHitFlags = new PHYSX.PxHitFlags(
+      PHYSX.PxHitFlagEnum.ePOSITION | PHYSX.PxHitFlagEnum.eNORMAL,
+    );
+    this._sweepHitFlags = new PHYSX.PxHitFlags(PHYSX.PxHitFlagEnum.eDEFAULT);
   }
 
   private setupControllerManager(): void {
@@ -1191,11 +1204,13 @@ export class Physics extends SystemBase implements IPhysics {
         "[Physics.raycast] Direction vector is too small to normalize",
       );
     }
-    const dirNormalized = new THREE.Vector3(
+    // Use pre-allocated Vector3 to avoid per-raycast allocations
+    _raycastDirNormalized.set(
       direction.x / dirLen,
       direction.y / dirLen,
       direction.z / dirLen,
     );
+    const dirNormalized = _raycastDirNormalized;
 
     if (this.queryFilterData) {
       // Set both word0 (query group) and word1 (query mask) to the desired layer mask
@@ -1212,51 +1227,48 @@ export class Physics extends SystemBase implements IPhysics {
 
     // Try to use enhanced Vector3 methods first
 
+    const originWithMethod = origin as unknown as {
+      toPxVec3?: (buffer?: PxVec3) => PxVec3 | null;
+    };
+    const dirWithMethod = dirNormalized as unknown as {
+      toPxVec3?: (buffer?: PxVec3) => PxVec3 | null;
+    };
+
     let pxOrigin: PxVec3 | null =
-      (origin as any).toPxVec3?.(this._pv1 || undefined) || null;
+      originWithMethod.toPxVec3?.(this._pv1 || undefined) || null;
 
     let pxDirection: PxVec3 | null =
-      (dirNormalized as any).toPxVec3?.(this._pv2 || undefined) || null;
+      dirWithMethod.toPxVec3?.(this._pv2 || undefined) || null;
 
-    // If the enhanced method didn't work, create PxVec3 manually
-    if (!pxOrigin) {
-      const PHYSX = getPhysX();
-      if (PHYSX) {
-        const vec = new PHYSX.PxVec3(origin.x, origin.y, origin.z);
-        pxOrigin = vec;
-      }
+    // If the enhanced method didn't work, use pre-allocated PxVec3 instead of allocating
+    if (!pxOrigin && this._pv1) {
+      this._pv1.x = origin.x;
+      this._pv1.y = origin.y;
+      this._pv1.z = origin.z;
+      pxOrigin = this._pv1;
     }
-    if (!pxDirection) {
-      const PHYSX = getPhysX();
-      if (PHYSX) {
-        const vec = new PHYSX.PxVec3(
-          dirNormalized.x,
-          dirNormalized.y,
-          dirNormalized.z,
-        );
-        pxDirection = vec;
-      }
+    if (!pxDirection && this._pv2) {
+      this._pv2.x = dirNormalized.x;
+      this._pv2.y = dirNormalized.y;
+      this._pv2.z = dirNormalized.z;
+      pxDirection = this._pv2;
     }
 
     if (!pxOrigin || !pxDirection) {
       return null;
     }
 
-    const PHYSX = getPhysX();
-    if (!PHYSX) return null;
-
-    // Request full hit data to avoid zeroed position results
-    // Request position and normal; distance is always provided for hits
-    const hitFlags = new PHYSX.PxHitFlags(
-      PHYSX.PxHitFlagEnum.ePOSITION | PHYSX.PxHitFlagEnum.eNORMAL,
-    );
+    // Use pre-allocated PxHitFlags to avoid per-raycast allocations
+    if (!this._raycastHitFlags) {
+      return null;
+    }
     const didHit =
       this.scene?.raycast(
         pxOrigin,
         pxDirection,
         maxDistance,
         this.raycastResult!,
-        hitFlags,
+        this._raycastHitFlags,
         this.queryFilterData || undefined,
       ) || false;
 
@@ -1383,7 +1395,10 @@ export class Physics extends SystemBase implements IPhysics {
       this.queryFilterData.data.word1 = mask;
     }
 
-    const sweepFlags = new PHYSX.PxHitFlags(PHYSX.PxHitFlagEnum.eDEFAULT);
+    // Use pre-allocated PxHitFlags to avoid per-sweep allocations
+    if (!this._sweepHitFlags) {
+      return null;
+    }
     const didHit =
       this.scene?.sweep(
         geometry as PxGeometry,
@@ -1391,7 +1406,7 @@ export class Physics extends SystemBase implements IPhysics {
         sweepDirection,
         maxDist,
         this.sweepResult as PxSweepResult,
-        sweepFlags,
+        this._sweepHitFlags,
         this.queryFilterData || undefined,
       ) || false;
 
@@ -1661,15 +1676,24 @@ export class Physics extends SystemBase implements IPhysics {
 }
 
 // Helper functions
+// Cache sphere geometries by radius to avoid per-overlap allocations
 function getSphereGeometry(radius: number): PxSphereGeometry {
+  // Round radius to 2 decimal places for cache key
+  const cacheKey = Math.round(radius * 100) / 100;
+  let geo = _sphereGeometryCache.get(cacheKey);
+  if (geo) {
+    return geo;
+  }
+
   const PHYSX = getPhysX();
   if (!PHYSX) {
     throw new Error("PhysX not loaded");
   }
-  const geo = new PHYSX.PxSphereGeometry(radius);
+  geo = new PHYSX.PxSphereGeometry(radius);
   if (!geo) {
     throw new Error("Failed to create sphere geometry");
   }
+  _sphereGeometryCache.set(cacheKey, geo);
   return geo;
 }
 

@@ -1,162 +1,145 @@
 /**
  * Renderer Factory
  *
- * Creates WebGPU or WebGL renderers with automatic backend selection.
- * Detects browser capabilities and configures rendering settings.
+ * Creates WebGPU renderers for Hyperscape.
+ * WebGPU-only implementation - no WebGL fallback.
  */
 
 import THREE from "../../extras/three/three";
+import { Logger } from "../Logger";
 
-// WebGPU modules loaded on demand
-let webgpuModulesLoaded = false;
-// Minimal capability surface for the WebGPU capability checker
-let WebGPU: { isAvailable(): Promise<boolean> } | null = null;
-// Constructor type for the WebGPU renderer. We keep this structural to avoid
-// depending on @types/three having WebGPU types available in all environments
-type WebGPURendererClass = new (params: {
-  canvas?: HTMLCanvasElement;
-  antialias?: boolean;
-}) => {
+/**
+ * WebGPU Renderer type definition
+ * Provides the interface for the WebGPU renderer from three/webgpu
+ */
+export type WebGPURenderer = {
   init: () => Promise<void>;
-  setSize: (w: number, h: number) => void;
+  setSize: (w: number, h: number, updateStyle?: boolean) => void;
   setPixelRatio: (r: number) => void;
   render: (scene: THREE.Scene, camera: THREE.Camera) => void;
+  renderAsync: (scene: THREE.Scene, camera: THREE.Camera) => Promise<void>;
   toneMapping: THREE.ToneMapping;
   toneMappingExposure: number;
   outputColorSpace: THREE.ColorSpace;
   domElement: HTMLCanvasElement;
-  setAnimationLoop?: (cb: ((time: number) => void) | null) => void;
-  backend?: unknown;
+  setAnimationLoop: (cb: ((time: number) => void) | null) => void;
+  dispose: () => void;
+  info: {
+    render: { triangles: number; calls: number };
+    memory: { geometries: number; textures: number };
+  };
+  shadowMap: {
+    enabled: boolean;
+    type: THREE.ShadowMapType;
+  };
+  capabilities: {
+    maxAnisotropy: number;
+  };
+  backend: {
+    device?: { features: Set<string> };
+  };
+  outputNode: unknown;
 };
-const WebGPURenderer: WebGPURendererClass | null = null;
 
-// Types for WebGPU capabilities
-type WebGPUBackendLike = { device?: { features?: Iterable<string> } };
-type WebGPURendererWithBackend = { backend?: WebGPUBackendLike };
-
-async function ensureWebGPUModules() {
-  if (webgpuModulesLoaded) return { WebGPU, WebGPURenderer };
-
-  webgpuModulesLoaded = true;
-  const capabilityModules = await import(
-    "three/examples/jsm/capabilities/WebGPU.js"
-  );
-  WebGPU = (
-    capabilityModules as unknown as {
-      default: { isAvailable(): Promise<boolean> };
-    }
-  ).default;
-
-  return { WebGPU, WebGPURenderer };
-}
-
-export type UniversalRenderer =
-  | THREE.WebGLRenderer
-  | InstanceType<WebGPURendererClass>;
+export type UniversalRenderer = WebGPURenderer;
 
 export interface RendererOptions {
   antialias?: boolean;
   alpha?: boolean;
   powerPreference?: "high-performance" | "low-power" | "default";
   preserveDrawingBuffer?: boolean;
-  preferWebGPU?: boolean;
   canvas?: HTMLCanvasElement;
 }
 
 export interface RendererCapabilities {
   supportsWebGPU: boolean;
-  supportsWebGL2: boolean;
-  preferredBackend: "webgpu" | "webgl2";
-  maxAnisotropy?: number;
+  maxAnisotropy: number;
+  backend: "webgpu";
 }
 
 /**
- * Detect available rendering capabilities
+ * Check if WebGPU is available in the current browser
+ */
+export async function isWebGPUAvailable(): Promise<boolean> {
+  if (typeof navigator === "undefined") return false;
+
+  // Access gpu property safely
+  const gpuApi = (
+    navigator as { gpu?: { requestAdapter: () => Promise<unknown | null> } }
+  ).gpu;
+  if (!gpuApi) return false;
+
+  const adapter = await gpuApi.requestAdapter();
+  return adapter !== null;
+}
+
+/**
+ * Detect rendering capabilities
  */
 export async function detectRenderingCapabilities(): Promise<RendererCapabilities> {
-  await ensureWebGPUModules();
+  const supportsWebGPU = await isWebGPUAvailable();
 
-  const supportsWebGPU = WebGPU ? await WebGPU.isAvailable() : false;
-  const supportsWebGL2 = true; // Always available in modern browsers
+  if (!supportsWebGPU) {
+    throw new Error(
+      "WebGPU is not supported in this browser. " +
+        "Please use Chrome 113+, Edge 113+, or Safari 17+.",
+    );
+  }
 
   return {
-    supportsWebGPU,
-    supportsWebGL2,
-    preferredBackend: supportsWebGPU ? "webgpu" : "webgl2",
+    supportsWebGPU: true,
+    maxAnisotropy: 16, // WebGPU default
+    backend: "webgpu",
   };
 }
 
 /**
- * Create a universal renderer (WebGPU or WebGL)
+ * Create a WebGPU renderer
  */
 export async function createRenderer(
   options: RendererOptions = {},
-): Promise<UniversalRenderer> {
-  const {
-    antialias = true,
-    alpha = true,
-    powerPreference = "high-performance",
-    preserveDrawingBuffer = false,
-    preferWebGPU = true,
-    canvas,
-  } = options;
+): Promise<WebGPURenderer> {
+  const { antialias = true, canvas } = options;
 
-  const capabilities = await detectRenderingCapabilities();
+  // Verify WebGPU support
+  await detectRenderingCapabilities();
 
-  // Try WebGPU first if preferred and available
-  if (preferWebGPU && capabilities.supportsWebGPU && WebGPURenderer) {
-    const renderer = new WebGPURenderer({
-      canvas,
-      antialias,
-      // Note: alpha, preserveDrawingBuffer not needed in WebGPU
-      // powerPreference handled differently in WebGPU
-    });
+  // Create WebGPU renderer using Three.js WebGPU build
+  // The THREE namespace from three/webgpu includes WebGPURenderer
+  const WebGPURendererClass = (
+    THREE as unknown as {
+      WebGPURenderer: new (params: {
+        canvas?: HTMLCanvasElement;
+        antialias?: boolean;
+      }) => WebGPURenderer;
+    }
+  ).WebGPURenderer;
 
-    // Wait for WebGPU initialization
-    await renderer.init();
-
-    return renderer as UniversalRenderer;
-  }
-
-  const renderer = new THREE.WebGLRenderer({
+  const renderer = new WebGPURendererClass({
     canvas,
     antialias,
-    alpha,
-    powerPreference,
-    preserveDrawingBuffer,
   });
 
-  return renderer as UniversalRenderer;
+  // Initialize WebGPU backend
+  await renderer.init();
+
+  return renderer;
 }
 
 /**
- * Check if renderer is WebGPU
+ * Check if renderer is WebGPU (always true in this implementation)
  */
 export function isWebGPURenderer(
   renderer: UniversalRenderer,
-): renderer is InstanceType<WebGPURendererClass> {
-  // Structural check: WebGPU renderer exposes an async init()
-  return (
-    typeof (renderer as { init?: () => Promise<void> }).init === "function"
-  );
+): renderer is WebGPURenderer {
+  return typeof renderer.init === "function";
 }
 
 /**
- * Check if renderer is WebGL
+ * Get renderer backend type (always webgpu)
  */
-export function isWebGLRenderer(
-  renderer: UniversalRenderer,
-): renderer is THREE.WebGLRenderer {
-  return renderer instanceof THREE.WebGLRenderer;
-}
-
-/**
- * Get renderer backend type
- */
-export function getRendererBackend(
-  renderer: UniversalRenderer,
-): "webgpu" | "webgl2" {
-  return isWebGPURenderer(renderer) ? "webgpu" : "webgl2";
+export function getRendererBackend(_renderer: UniversalRenderer): "webgpu" {
+  return "webgpu";
 }
 
 /**
@@ -176,8 +159,6 @@ export function configureRenderer(
   },
 ): void {
   const {
-    clearColor = 0xffffff,
-    clearAlpha = 0,
     pixelRatio = 1,
     width,
     height,
@@ -185,13 +166,6 @@ export function configureRenderer(
     toneMappingExposure = 1,
     outputColorSpace = THREE.SRGBColorSpace,
   } = options;
-
-  // Clear color (WebGL only)
-  if (isWebGLRenderer(renderer)) {
-    renderer.setClearColor(clearColor, clearAlpha);
-  } else if (isWebGPURenderer(renderer)) {
-    // WebGPU uses background in scene, not renderer clear color
-  }
 
   // Pixel ratio
   renderer.setPixelRatio(pixelRatio);
@@ -201,20 +175,16 @@ export function configureRenderer(
     renderer.setSize(width, height);
   }
 
-  // Tone mapping (both support this)
+  // Tone mapping
   renderer.toneMapping = toneMapping;
   renderer.toneMappingExposure = toneMappingExposure;
 
-  // Output color space (both support this)
+  // Output color space
   renderer.outputColorSpace = outputColorSpace;
-
-  // WebGPU-specific: Enable sRGB encoding optimizations
-  if (isWebGPURenderer(renderer)) {
-  }
 }
 
 /**
- * Configure shadow maps (WebGL only)
+ * Configure shadow maps
  */
 export function configureShadowMaps(
   renderer: UniversalRenderer,
@@ -225,90 +195,29 @@ export function configureShadowMaps(
 ): void {
   const { enabled = true, type = THREE.PCFSoftShadowMap } = options;
 
-  if (isWebGLRenderer(renderer)) {
-    renderer.shadowMap.enabled = enabled;
-    renderer.shadowMap.type = type;
-  }
-  // WebGPU handles shadows automatically per light
+  renderer.shadowMap.enabled = enabled;
+  renderer.shadowMap.type = type;
 }
 
 /**
- * Get max anisotropy (WebGL only)
+ * Get max anisotropy
  */
 export function getMaxAnisotropy(renderer: UniversalRenderer): number {
-  if (isWebGLRenderer(renderer)) {
-    return renderer.capabilities.getMaxAnisotropy();
-  }
-  // WebGPU has different anisotropy handling
-  return 16; // Default reasonable value
-}
-
-/**
- * Configure XR support
- */
-export function configureXR(
-  renderer: UniversalRenderer,
-  options: {
-    enabled?: boolean;
-    // eslint-disable-next-line no-undef
-    referenceSpaceType?: XRReferenceSpaceType;
-    foveation?: number;
-  } = {},
-): void {
-  const {
-    enabled = true,
-    referenceSpaceType = "local-floor",
-    foveation = 0,
-  } = options;
-
-  if (isWebGLRenderer(renderer) && renderer.xr) {
-    renderer.xr.enabled = enabled;
-    renderer.xr.setReferenceSpaceType(referenceSpaceType);
-    renderer.xr.setFoveation(foveation);
-  }
-  // WebGPU XR support is experimental - handle separately when available
-}
-
-/**
- * Check if XR is presenting
- */
-export function isXRPresenting(renderer: UniversalRenderer): boolean {
-  if (isWebGLRenderer(renderer) && renderer.xr) {
-    return renderer.xr.isPresenting ?? false;
-  }
-  return false;
+  return renderer.capabilities?.maxAnisotropy ?? 16;
 }
 
 /**
  * Get WebGPU capabilities for logging and debugging
  */
-export async function getWebGPUCapabilities(
-  renderer: UniversalRenderer,
-): Promise<{
+export function getWebGPUCapabilities(renderer: UniversalRenderer): {
   backend: string;
   features: string[];
-} | null> {
-  if (!isWebGPURenderer(renderer)) {
-    return null;
-  }
-
-  const gpuRenderer = renderer as WebGPURendererWithBackend;
-  const device = gpuRenderer.backend?.device;
-
-  if (!device) {
-    return { backend: "webgpu", features: [] };
-  }
-
+} {
+  const device = renderer.backend?.device;
   const features: string[] = [];
-  const iterable = device.features as unknown as
-    | { forEach?: (cb: (f: string) => void) => void }
-    | Iterable<string>;
-  if (
-    iterable &&
-    "forEach" in iterable &&
-    typeof iterable.forEach === "function"
-  ) {
-    iterable.forEach((feature: string) => features.push(feature));
+
+  if (device?.features) {
+    device.features.forEach((feature: string) => features.push(feature));
   }
 
   return {
@@ -318,17 +227,17 @@ export async function getWebGPUCapabilities(
 }
 
 /**
- * Apply WebGPU-specific logging after renderer creation
- * Note: Most WebGPU optimizations happen automatically
+ * Log WebGPU info for debugging
  */
 export function logWebGPUInfo(renderer: UniversalRenderer): void {
-  if (!isWebGPURenderer(renderer)) {
-    return;
-  }
+  const caps = getWebGPUCapabilities(renderer);
+  Logger.info("[RendererFactory] WebGPU initialized", {
+    features: caps.features.length,
+  });
 }
 
 /**
- * Optimize materials for better rendering (works on both backends)
+ * Optimize materials for WebGPU rendering
  */
 export function optimizeMaterialForWebGPU(material: THREE.Material): void {
   if (!material) return;
@@ -352,13 +261,13 @@ export function optimizeMaterialForWebGPU(material: THREE.Material): void {
   for (const prop of textureProps) {
     const tex = (material as MaterialWithTextureProps)[prop];
     if (tex instanceof THREE.Texture) {
-      tex.anisotropy = THREE.Texture.DEFAULT_ANISOTROPY;
+      tex.anisotropy = 16;
     }
   }
 }
 
 /**
- * Create optimized instanced mesh (works on both backends)
+ * Create optimized instanced mesh
  */
 export function createOptimizedInstancedMesh(
   geometry: THREE.BufferGeometry,

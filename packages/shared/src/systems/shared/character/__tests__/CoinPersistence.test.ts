@@ -12,15 +12,11 @@
  * CoinPouchSystem.getCoins() returned 0 for uninitialized players.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 
 // ============================================================================
 // Types
 // ============================================================================
-
-interface PlayerID {
-  readonly __brand: "PlayerID";
-}
 
 // ============================================================================
 // Mock Implementations

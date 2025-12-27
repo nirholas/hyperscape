@@ -240,7 +240,10 @@ export function registerAdminRoutes(
         return reply.code(500).send({ error: "CombatSystem not found" });
       }
 
-      const events = combatSystem.getCombatEventsInRange(startTick, endTick);
+      const events = combatSystem.eventStore.getCombatEvents(
+        startTick,
+        endTick,
+      );
 
       return reply.send({
         tickRange: { startTick, endTick },
@@ -263,10 +266,10 @@ export function registerAdminRoutes(
         return reply.code(500).send({ error: "CombatSystem not found" });
       }
 
-      const flaggedPlayers = combatSystem.getPlayersRequiringReview();
+      const flaggedPlayers = combatSystem.antiCheat.getPlayersRequiringReview();
       const reports = flaggedPlayers.map((playerId) => ({
         playerId,
-        ...combatSystem.getAntiCheatPlayerReport(playerId),
+        ...combatSystem.antiCheat.getPlayerReport(playerId),
       }));
 
       return reply.send({

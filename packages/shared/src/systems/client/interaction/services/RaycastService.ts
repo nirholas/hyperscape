@@ -21,6 +21,9 @@ import { INPUT } from "../constants";
 // Pre-allocated objects to avoid per-call allocations
 const _raycaster = new THREE.Raycaster();
 const _mouse = new THREE.Vector2();
+const _worldPos = new THREE.Vector3();
+const _targetPos = new THREE.Vector3();
+const _plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
 export class RaycastService {
   constructor(private world: World) {}
@@ -76,9 +79,8 @@ export class RaycastService {
         if (entityId) {
           const entity = this.world.entities.get(entityId);
           if (entity) {
-            // Get entity world position
-            const worldPos = new THREE.Vector3();
-            obj.getWorldPosition(worldPos);
+            // Get entity world position using pre-allocated Vector3
+            obj.getWorldPosition(_worldPos);
 
             // Determine entity type
             const rawType = entity.type || userData.type || "unknown";
@@ -90,9 +92,9 @@ export class RaycastService {
               entity,
               name: entity.name || userData.name || "Entity",
               position: {
-                x: worldPos.x,
-                y: worldPos.y,
-                z: worldPos.z,
+                x: _worldPos.x,
+                y: _worldPos.y,
+                z: _worldPos.z,
               },
               hitPoint: {
                 x: intersect.point.x,
@@ -180,15 +182,15 @@ export class RaycastService {
         continue;
       }
 
-      // Found terrain
-      return intersect.point.clone();
+      // Found terrain - copy to pre-allocated vector instead of cloning
+      _targetPos.copy(intersect.point);
+      return _targetPos;
     }
 
-    // Fallback: intersect with Y=0 plane
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-    const target = new THREE.Vector3();
-    if (_raycaster.ray.intersectPlane(plane, target)) {
-      return target;
+    // Fallback: intersect with Y=0 plane using pre-allocated objects
+    _plane.set(_plane.normal.set(0, 1, 0), 0);
+    if (_raycaster.ray.intersectPlane(_plane, _targetPos)) {
+      return _targetPos;
     }
 
     return null;

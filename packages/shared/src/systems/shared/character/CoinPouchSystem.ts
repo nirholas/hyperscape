@@ -17,7 +17,7 @@
  * @see {@link BankingSystem} for deposits
  */
 
-import { SystemBase } from "..";
+import { SystemBase } from "../infrastructure/SystemBase";
 import type { World } from "../../../core/World";
 import { EventType } from "../../../types/events";
 import { Logger } from "../../../utils/Logger";

@@ -15,7 +15,7 @@
  */
 
 import type { ServerSocket } from "../../../shared/types";
-import { EventType, World, INPUT_LIMITS } from "@hyperscape/shared";
+import { EventType, World } from "@hyperscape/shared";
 import {
   isValidNpcId,
   validateRequestTimestamp,

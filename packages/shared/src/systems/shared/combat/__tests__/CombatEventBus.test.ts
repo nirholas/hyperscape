@@ -12,16 +12,12 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   CombatEventBus,
-  CombatEvent,
-  CombatStartedEvent,
-  AttackStartedEvent,
   DamageDealtEvent,
-  CombatEndedEvent,
-  EntityDiedEvent,
-  RetaliationEvent,
   getCombatEventBus,
   resetCombatEventBus,
 } from "../CombatEventBus";
+// Unused imports kept for potential future use
+// import type { CombatEvent, CombatStartedEvent, AttackStartedEvent, DamageDealtEvent, CombatEndedEvent, EntityDiedEvent, RetaliationEvent } from "../CombatEventBus";
 
 describe("CombatEventBus", () => {
   let eventBus: CombatEventBus;

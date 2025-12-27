@@ -1,11 +1,17 @@
 /**
  * Sprite Generation Service
  * Renders 2D sprites from 3D models at various angles
+ * Uses WebGPU renderer for optimal performance
  */
 
-import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
+
+import {
+  THREE,
+  createWebGPURenderer,
+  type AssetForgeRenderer,
+} from "../../utils/webgpu-renderer";
 
 export interface SpriteGenerationOptions {
   modelPath: string;
@@ -23,22 +29,13 @@ export interface SpriteResult {
 }
 
 export class SpriteGenerationService {
-  private renderer: THREE.WebGLRenderer;
+  private renderer: AssetForgeRenderer | null = null;
   private scene: THREE.Scene;
   private camera: THREE.OrthographicCamera;
   private loader: GLTFLoader;
+  private initialized: boolean = false;
 
   constructor() {
-    // Create renderer
-    this.renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      alpha: true,
-      preserveDrawingBuffer: true,
-    });
-    this.renderer.setSize(512, 512);
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
     // Create scene
     this.scene = new THREE.Scene();
 
@@ -76,11 +73,41 @@ export class SpriteGenerationService {
   }
 
   /**
+   * Initialize the WebGPU renderer (must be called before generating sprites)
+   */
+  async init(): Promise<void> {
+    if (this.initialized) return;
+
+    this.renderer = await createWebGPURenderer({
+      antialias: true,
+      alpha: true,
+    });
+    this.renderer.setSize(512, 512);
+
+    this.initialized = true;
+  }
+
+  /**
+   * Ensure the renderer is initialized
+   */
+  private async ensureInitialized(): Promise<void> {
+    if (!this.initialized) {
+      await this.init();
+    }
+  }
+
+  /**
    * Generate sprites from a 3D model
    */
   async generateSprites(
     options: SpriteGenerationOptions,
   ): Promise<SpriteResult[]> {
+    await this.ensureInitialized();
+
+    if (!this.renderer) {
+      throw new Error("Renderer not initialized");
+    }
+
     const {
       modelPath,
       outputSize = 256,
@@ -92,11 +119,11 @@ export class SpriteGenerationService {
     // Update renderer size
     this.renderer.setSize(outputSize, outputSize);
 
-    // Set background
+    // Set background via scene.background for WebGPU
     if (backgroundColor === "transparent") {
-      this.renderer.setClearColor(0x000000, 0);
+      this.scene.background = null;
     } else {
-      this.renderer.setClearColor(backgroundColor);
+      this.scene.background = new THREE.Color(backgroundColor);
     }
 
     // Load model
@@ -192,7 +219,7 @@ export class SpriteGenerationService {
    */
   async generateCharacterSprites(
     modelPath: string,
-    animations?: string[],
+    _animations?: string[],
     outputSize: number = 256,
   ): Promise<Record<string, SpriteResult[]>> {
     // TODO: Implement animation frame extraction
@@ -213,9 +240,29 @@ export class SpriteGenerationService {
    * Cleanup resources
    */
   dispose(): void {
-    this.renderer.dispose();
+    if (this.renderer) {
+      this.renderer.dispose();
+      this.renderer = null;
+    }
+    this.initialized = false;
   }
 }
 
-// Export singleton instance
+// Export factory function for creating initialized instance
+export async function createSpriteGenerator(): Promise<SpriteGenerationService> {
+  const service = new SpriteGenerationService();
+  await service.init();
+  return service;
+}
+
+// Export singleton instance (lazy initialization)
+let _spriteGeneratorInstance: SpriteGenerationService | null = null;
+export async function getSpriteGenerator(): Promise<SpriteGenerationService> {
+  if (!_spriteGeneratorInstance) {
+    _spriteGeneratorInstance = await createSpriteGenerator();
+  }
+  return _spriteGeneratorInstance;
+}
+
+// For backwards compatibility - but callers should use getSpriteGenerator() instead
 export const spriteGenerator = new SpriteGenerationService();

@@ -616,7 +616,7 @@ await avatar.load();
 
 **Solution:**
 - Check browser console for errors
-- Verify WebGL is supported: Visit https://get.webgl.org/
+- Verify WebGPU is supported: Visit https://webgpureport.org/
 - Check canvas element exists in HTML
 
 ### No Player Visible

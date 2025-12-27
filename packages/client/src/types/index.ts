@@ -32,7 +32,6 @@ export type {
   ControlsSystem,
   Action,
   TargetSystem,
-  XRManager,
   ChatSystem,
   NetworkManager,
   LoaderManager,

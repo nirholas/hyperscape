@@ -49,7 +49,6 @@ const SpriteGenerationModal: React.FC<SpriteGenerationModalProps> = ({
   const [message, setMessage] = useState('')
   const [sprites, setSprites] = useState<SpriteResult[]>([])
   const [isSaving, setIsSaving] = useState(false)
-  const [hasExistingSprites, setHasExistingSprites] = useState(false)
   const [existingMetadata, setExistingMetadata] = useState<ExistingSpriteMetadata | null>(null)
 
   // Load existing sprites on mount
@@ -65,7 +64,6 @@ const SpriteGenerationModal: React.FC<SpriteGenerationModalProps> = ({
         if (metadataResponse.ok) {
           const metadata: ExistingSpriteMetadata = await metadataResponse.json()
           setExistingMetadata(metadata)
-          setHasExistingSprites(true)
           
           // Update config to match existing sprites
           if (metadata.config) {
@@ -88,13 +86,11 @@ const SpriteGenerationModal: React.FC<SpriteGenerationModalProps> = ({
         } else {
           // No existing sprites
           setStatus('idle')
-          setHasExistingSprites(false)
         }
       } catch (error) {
         console.error('Error loading sprites:', error)
         // No existing sprites, start fresh
         setStatus('idle')
-        setHasExistingSprites(false)
       }
     }
     
@@ -173,7 +169,7 @@ const SpriteGenerationModal: React.FC<SpriteGenerationModalProps> = ({
   }
 
   const handleDownloadAll = () => {
-    sprites.forEach((sprite, index) => {
+    sprites.forEach((sprite) => {
       const link = document.createElement('a')
       link.href = sprite.imageUrl
       link.download = `${asset.id}-${sprite.angle}deg.png`
@@ -458,7 +454,6 @@ const SpriteGenerationModal: React.FC<SpriteGenerationModalProps> = ({
               variant="primary"
               onClick={() => {
                 setStatus('idle')
-                setHasExistingSprites(false)
               }}
             >
               <RefreshCw className="w-4 h-4" />

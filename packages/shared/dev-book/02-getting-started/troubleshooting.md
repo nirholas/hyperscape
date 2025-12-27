@@ -12,13 +12,15 @@
 
 **Solutions:**
 
-1. **Check WebGL Support**
+1. **Check WebGPU Support**
    ```javascript
-   // Visit https://get.webgl.org/
-   const canvas = document.createElement('canvas');
-   const gl = canvas.getContext('webgl2');
-   if (!gl) {
-     console.error('WebGL 2.0 not supported');
+   // Visit https://webgpureport.org/
+   if (!navigator.gpu) {
+     console.error('WebGPU not supported');
+   }
+   const adapter = await navigator.gpu.requestAdapter();
+   if (!adapter) {
+     console.error('No GPU adapter found');
    }
    ```
 

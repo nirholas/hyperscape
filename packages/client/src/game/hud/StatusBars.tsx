@@ -78,32 +78,44 @@ export function StatusBars({ world }: StatusBarsProps) {
 
       if (player) {
         // Get health - try playerData.health first (PlayerLocal), then data.health (PlayerRemote)
+        // Use functional updates to avoid creating new objects when values haven't changed
         if (player.playerData?.health) {
-          setHealth({
-            current: player.playerData.health.current,
-            max: player.playerData.health.max,
-          });
+          const newCurrent = player.playerData.health.current;
+          const newMax = player.playerData.health.max;
+          setHealth((prev) =>
+            prev.current === newCurrent && prev.max === newMax
+              ? prev
+              : { current: newCurrent, max: newMax },
+          );
         } else if (player.data?.health !== undefined) {
           // PlayerRemote stores health in data.health and data.maxHealth
-          setHealth({
-            current: player.data.health,
-            max: player.data.maxHealth ?? 100,
-          });
+          const newCurrent = player.data.health;
+          const newMax = player.data.maxHealth ?? 100;
+          setHealth((prev) =>
+            prev.current === newCurrent && prev.max === newMax
+              ? prev
+              : { current: newCurrent, max: newMax },
+          );
         }
 
-        // Get stamina from player
-        setStamina(player.stamina || 100);
+        // Get stamina from player - only update if changed
+        const newStamina = player.stamina || 100;
+        setStamina((prev) => (prev === newStamina ? prev : newStamina));
 
-        // Get prayer from player stats
+        // Get prayer from player stats - only update if changed
         if (player.playerData?.stats?.prayer) {
-          setPrayer({
-            level: player.playerData.stats.prayer.level || 1,
-            points: player.playerData.stats.prayer.points || 1,
-          });
+          const newLevel = player.playerData.stats.prayer.level || 1;
+          const newPoints = player.playerData.stats.prayer.points || 1;
+          setPrayer((prev) =>
+            prev.level === newLevel && prev.points === newPoints
+              ? prev
+              : { level: newLevel, points: newPoints },
+          );
         }
 
-        // Get run mode from player
-        setRunMode(player.runMode ?? true);
+        // Get run mode from player - only update if changed
+        const newRunMode = player.runMode ?? true;
+        setRunMode((prev) => (prev === newRunMode ? prev : newRunMode));
       }
     };
 

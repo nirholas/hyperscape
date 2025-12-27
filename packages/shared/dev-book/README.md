@@ -133,7 +133,7 @@ Hyperscape Shared is the **core 3D multiplayer game engine** that powers the Hyp
 
 - **Entity Component System (ECS)**: Modular, scalable game object architecture
 - **PhysX Physics**: Industry-standard physics simulation with colliders and rigid bodies
-- **Three.js Rendering**: Advanced 3D rendering with WebGL/WebGPU support
+- **Three.js Rendering**: Advanced 3D rendering with WebGPU support
 - **Client-Server Networking**: Authoritative server with client prediction
 - **VRM Avatar Support**: Load and animate VRM character models
 - **World Management**: Client, server, and headless viewer world types
@@ -143,7 +143,7 @@ Hyperscape Shared is the **core 3D multiplayer game engine** that powers the Hyp
 ### Technology Stack
 
 - **Core**: TypeScript 5.3, Node.js 18+
-- **Graphics**: Three.js 0.178, WebGL/WebGPU
+- **Graphics**: Three.js 0.181, WebGPU
 - **Physics**: PhysX 5.x (WASM + Node.js native)
 - **Networking**: Socket.io, WebRTC (LiveKit)
 - **State**: Event-driven architecture with EventBus
@@ -169,7 +169,7 @@ Hyperscape Shared is the **core 3D multiplayer game engine** that powers the Hyp
 └─────────────────────────────────────────────────────────────┘
          ↓                 ↓                      ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  PhysX WASM/Native │ WebGL/WebGPU │ WebSocket/WebRTC      │
+│  PhysX WASM/Native │ WebGPU       │ WebSocket/WebRTC      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -181,7 +181,7 @@ Hyperscape Shared is the **core 3D multiplayer game engine** that powers the Hyp
 
 - Node.js 18+ or Bun runtime
 - TypeScript 5.3+
-- Modern browser with WebGL 2.0+
+- Modern browser with WebGPU support (Chrome 113+, Safari 17+)
 
 ### Installation
 

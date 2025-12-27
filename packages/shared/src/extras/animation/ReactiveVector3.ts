@@ -88,14 +88,12 @@ export class ReactiveVector3 extends THREE.Vector3 {
 
   /** Convert to PhysX PxVec3 (for physics operations) */
   toPxVec3(pxVec3?: PxVec3): PhysX.PxVec3 | null {
-    return (vector3ToPxVec3(this, pxVec3) as unknown as PhysX.PxVec3) || null;
+    return vector3ToPxVec3(this, pxVec3) || null;
   }
 
   /** Convert to PhysX extended vec3 (for large coordinates) */
   toPxExtVec3(pxExtVec3?: PxVec3): PhysX.PxVec3 | null {
-    return (
-      (vector3ToPxVec3(this, pxExtVec3) as unknown as PhysX.PxVec3) || null
-    );
+    return vector3ToPxVec3(this, pxExtVec3) || null;
   }
 
   /** Set position of a PhysX transform from this vector */

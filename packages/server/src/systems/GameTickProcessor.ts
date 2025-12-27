@@ -178,6 +178,26 @@ export class GameTickProcessor {
   private npcOrderDirty = true;
   private playerOrderDirty = true;
 
+  // ============================================================================
+  // PRE-ALLOCATED BUFFERS (Zero-allocation hot path support)
+  // ============================================================================
+
+  /** Pre-allocated arrays for updateProcessingOrder - avoids per-tick allocation */
+  private readonly _mobsBuffer: MobEntityInterface[] = [];
+  private readonly _playersBuffer: PlayerEntityInterface[] = [];
+
+  /** Pre-allocated array for damage application - avoids double filter allocation */
+  private readonly _damageToApply: QueuedDamage[] = [];
+
+  /** Pre-allocated event data object for COMBAT_DAMAGE_DEALT */
+  private readonly _damageEventData = {
+    attackerId: "",
+    targetId: "",
+    damage: 0,
+    targetType: "player" as "player" | "mob",
+    position: null as { x: number; y: number; z: number } | null,
+  };
+
   constructor(deps: {
     world: World;
     actionQueue: ActionQueue;
@@ -330,11 +350,14 @@ export class GameTickProcessor {
    *
    * NPCs: Order by spawn time (earlier = first, simulates NPC ID order)
    * Players: Order by connection time (earlier = first, simulates PID)
+   *
+   * Zero-allocation: Uses pre-allocated buffers instead of creating new arrays.
    */
   private updateProcessingOrder(): void {
     if (this.npcOrderDirty) {
-      // Get all alive mobs, sort by ID (proxy for spawn order)
-      const mobs: MobEntityInterface[] = [];
+      // Clear and reuse buffer (zero allocation)
+      this._mobsBuffer.length = 0;
+
       for (const entity of this.world.entities.values()) {
         const mob = entity as unknown as MobEntityInterface;
         if (
@@ -342,18 +365,24 @@ export class GameTickProcessor {
           mob.data?.alive !== false &&
           (mob.config?.currentHealth ?? 0) > 0
         ) {
-          mobs.push(mob);
+          this._mobsBuffer.push(mob);
         }
       }
       // Sort by ID for deterministic order
-      mobs.sort((a, b) => a.id.localeCompare(b.id));
-      this.npcProcessingOrder = mobs.map((m) => m.id);
+      this._mobsBuffer.sort((a, b) => a.id.localeCompare(b.id));
+
+      // Update processing order (reuse array, just update contents)
+      this.npcProcessingOrder.length = 0;
+      for (let i = 0; i < this._mobsBuffer.length; i++) {
+        this.npcProcessingOrder.push(this._mobsBuffer[i].id);
+      }
       this.npcOrderDirty = false;
     }
 
     if (this.playerOrderDirty) {
-      // Get all alive players, sort by connection time (PID simulation)
-      const players: PlayerEntityInterface[] = [];
+      // Clear and reuse buffer (zero allocation)
+      this._playersBuffer.length = 0;
+
       for (const entity of this.world.entities.values()) {
         const player = entity as unknown as PlayerEntityInterface;
         if (
@@ -361,17 +390,22 @@ export class GameTickProcessor {
           player.data?.alive !== false &&
           !player.data?.isLoading
         ) {
-          players.push(player);
+          this._playersBuffer.push(player);
         }
       }
       // Sort by connection time, then by ID as tiebreaker
-      players.sort((a, b) => {
+      this._playersBuffer.sort((a, b) => {
         const aTime = a.connectionTime ?? 0;
         const bTime = b.connectionTime ?? 0;
         if (aTime !== bTime) return aTime - bTime;
         return a.id.localeCompare(b.id);
       });
-      this.playerProcessingOrder = players.map((p) => p.id);
+
+      // Update processing order (reuse array, just update contents)
+      this.playerProcessingOrder.length = 0;
+      for (let i = 0; i < this._playersBuffer.length; i++) {
+        this.playerProcessingOrder.push(this._playersBuffer[i].id);
+      }
       this.playerOrderDirty = false;
     }
   }
@@ -444,9 +478,9 @@ export class GameTickProcessor {
    * (Player processes after NPC, so damage is already in player's queue)
    */
   private processNPCCombat(mobId: string, tickNumber: number): void {
-    const combatSystem = this.world.getSystem(
-      "combat",
-    ) as unknown as CombatSystemInterface | null;
+    const combatSystem = this.world.getSystem("combat") as
+      | CombatSystemInterface
+      | undefined;
     if (!combatSystem) return;
 
     // Call combat system's NPC processing
@@ -501,9 +535,9 @@ export class GameTickProcessor {
    * Player → NPC damage is QUEUED for next tick (OSRS asymmetry)
    */
   private processPlayerCombat(playerId: string, tickNumber: number): void {
-    const combatSystem = this.world.getSystem(
-      "combat",
-    ) as unknown as CombatSystemInterface | null;
+    const combatSystem = this.world.getSystem("combat") as
+      | CombatSystemInterface
+      | undefined;
     if (!combatSystem) return;
 
     // Call combat system's player processing
@@ -607,23 +641,41 @@ export class GameTickProcessor {
    * Apply queued damage from previous ticks
    *
    * This is where Player→NPC damage actually gets applied
+   *
+   * Zero-allocation: Uses single-pass partition instead of double filter,
+   * and reuses pre-allocated event data object.
    */
   private applyQueuedDamage(tickNumber: number): void {
-    // Find damage that should apply this tick
-    const toApply = this.damageQueue.filter((d) => d.applyAtTick <= tickNumber);
-    this.damageQueue = this.damageQueue.filter(
-      (d) => d.applyAtTick > tickNumber,
-    );
+    // Single-pass partition: separate damage to apply vs retain (zero allocation)
+    this._damageToApply.length = 0;
+    let writeIndex = 0;
 
-    for (const damage of toApply) {
-      // Emit damage dealt event (queued damage now applied)
-      this.world.emit(EventType.COMBAT_DAMAGE_DEALT, {
-        attackerId: damage.attackerId,
-        targetId: damage.targetId,
-        damage: damage.damage,
-        targetType: damage.targetType,
-        position: null, // Position will be resolved by listener
-      });
+    for (let i = 0; i < this.damageQueue.length; i++) {
+      const d = this.damageQueue[i];
+      if (d.applyAtTick <= tickNumber) {
+        this._damageToApply.push(d);
+      } else {
+        // Keep in queue (shift down if needed)
+        if (writeIndex !== i) {
+          this.damageQueue[writeIndex] = d;
+        }
+        writeIndex++;
+      }
+    }
+    // Truncate the queue to remove processed items
+    this.damageQueue.length = writeIndex;
+
+    // Apply damage using pre-allocated event data object
+    for (let i = 0; i < this._damageToApply.length; i++) {
+      const damage = this._damageToApply[i];
+      // Reuse pre-allocated event object (zero allocation)
+      this._damageEventData.attackerId = damage.attackerId;
+      this._damageEventData.targetId = damage.targetId;
+      this._damageEventData.damage = damage.damage;
+      this._damageEventData.targetType = damage.targetType;
+      this._damageEventData.position = null; // Position will be resolved by listener
+
+      this.world.emit(EventType.COMBAT_DAMAGE_DEALT, this._damageEventData);
     }
   }
 
@@ -632,17 +684,17 @@ export class GameTickProcessor {
    */
   private processDeathAndLoot(tickNumber: number): void {
     // Death system
-    const deathSystem = this.world.getSystem(
-      "player-death",
-    ) as unknown as DeathSystemInterface | null;
+    const deathSystem = this.world.getSystem("player-death") as
+      | DeathSystemInterface
+      | undefined;
     if (deathSystem?.processTick) {
       deathSystem.processTick(tickNumber);
     }
 
     // Loot system
-    const lootSystem = this.world.getSystem(
-      "loot",
-    ) as unknown as LootSystemInterface | null;
+    const lootSystem = this.world.getSystem("loot") as
+      | LootSystemInterface
+      | undefined;
     if (lootSystem?.processTick) {
       lootSystem.processTick(tickNumber);
     }
@@ -652,9 +704,9 @@ export class GameTickProcessor {
    * Process resource gathering
    */
   private processResources(tickNumber: number): void {
-    const resourceSystem = this.world.getSystem(
-      "resource",
-    ) as unknown as ResourceSystemInterface | null;
+    const resourceSystem = this.world.getSystem("resource") as unknown as
+      | ResourceSystemInterface
+      | undefined;
     if (resourceSystem?.processGatheringTick) {
       resourceSystem.processGatheringTick(tickNumber);
     }
@@ -672,16 +724,19 @@ export class GameTickProcessor {
 
   /**
    * Flush all queued broadcasts
+   *
+   * Zero-allocation: Uses length = 0 instead of creating new array.
    */
   private flushBroadcastQueue(): void {
-    for (const broadcast of this.broadcastQueue) {
+    for (let i = 0; i < this.broadcastQueue.length; i++) {
+      const broadcast = this.broadcastQueue[i];
       this.broadcastManager.sendToAll(
         broadcast.event,
         broadcast.data,
         broadcast.excludeSocketId,
       );
     }
-    this.broadcastQueue = [];
+    this.broadcastQueue.length = 0; // Clear without allocation
   }
 
   /**

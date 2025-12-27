@@ -185,7 +185,8 @@ export function calculateDamage(
   return { damage, isCritical: false, damageType: attackType, didHit: true };
 }
 
-function getDefenseValue(entity: {
+// Unused function - kept for potential future use
+function _getDefenseValue(entity: {
   stats?: CombatStats;
   config?: { defense?: number };
 }): number {

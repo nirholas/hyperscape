@@ -394,7 +394,7 @@ world.network   // Client or server network
 ```typescript
 world.ui        // UI system
 world.loader    // Asset loader (GLTF, VRM, textures)
-world.graphics  // WebGL/WebGPU renderer
+world.graphics  // WebGPU renderer
 world.controls  // Input handling (keyboard, mouse, gamepad)
 world.audio     // Spatial audio
 world.music     // Background music
@@ -403,7 +403,6 @@ world.monitor   // Performance monitoring
 world.stats     // FPS/memory stats display
 world.builder   // World editor tools
 world.actions   // Player actions
-world.xr        // VR/AR support
 world.terrain   // Terrain system
 ```
 

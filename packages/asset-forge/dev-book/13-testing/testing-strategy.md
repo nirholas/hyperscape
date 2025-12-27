@@ -50,7 +50,8 @@ const mockRenderer = {
 ```typescript
 // ✅ PREFER: Real testing
 const scene = new THREE.Scene()
-const renderer = new THREE.WebGLRenderer()
+const renderer = new WebGPURenderer()
+await renderer.init()
 
 // Add actual 3D objects
 const weapon = await loadWeapon('bronze-sword')
@@ -144,9 +145,9 @@ export default defineConfig({
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
-        // Enable WebGL for Three.js
+        // Enable WebGPU for Three.js
         launchOptions: {
-          args: ['--enable-webgl', '--use-gl=swiftshader']
+          args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan']
         }
       }
     }

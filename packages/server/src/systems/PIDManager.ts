@@ -84,6 +84,19 @@ export class PIDManager {
   /** Callback for reshuffle events */
   private onReshuffle?: (event: PIDReshuffleEvent) => void;
 
+  // ============================================================================
+  // PRE-ALLOCATED BUFFERS (Zero-allocation hot path support)
+  // ============================================================================
+
+  /** Cached processing order array - recomputed only when dirty */
+  private _processingOrderCache: string[] = [];
+
+  /** Flag to track if processing order needs recomputation */
+  private _processingOrderDirty = true;
+
+  /** Pre-allocated buffer for sorting entries */
+  private readonly _sortBuffer: Array<[string, number]> = [];
+
   constructor() {
     this.rng = getGameRng();
     this.scheduleNextReshuffle(0);
@@ -125,6 +138,7 @@ export class PIDManager {
     this.pidAssignments.set(playerId, pid);
     this.pidToPlayer.set(pid, playerId);
     this.nextPid = (pid + 1) % (MAX_PID + 1);
+    this._processingOrderDirty = true; // Invalidate cache
 
     return pid;
   }
@@ -139,6 +153,7 @@ export class PIDManager {
     if (pid !== undefined) {
       this.pidAssignments.delete(playerId);
       this.pidToPlayer.delete(pid);
+      this._processingOrderDirty = true; // Invalidate cache
     }
   }
 
@@ -154,13 +169,28 @@ export class PIDManager {
 
   /**
    * Get all player IDs sorted by PID (processing order)
+   * Uses cached array to avoid allocations on hot path
    *
    * @returns Array of player IDs in PID order (lowest first)
    */
   getProcessingOrder(): string[] {
-    return Array.from(this.pidAssignments.entries())
-      .sort((a, b) => a[1] - b[1])
-      .map(([playerId]) => playerId);
+    if (this._processingOrderDirty) {
+      // Recompute processing order
+      this._sortBuffer.length = 0;
+      for (const entry of this.pidAssignments.entries()) {
+        this._sortBuffer.push(entry);
+      }
+      this._sortBuffer.sort((a, b) => a[1] - b[1]);
+
+      // Update cache
+      this._processingOrderCache.length = 0;
+      for (const [playerId] of this._sortBuffer) {
+        this._processingOrderCache.push(playerId);
+      }
+
+      this._processingOrderDirty = false;
+    }
+    return this._processingOrderCache;
   }
 
   /**
@@ -215,6 +245,8 @@ export class PIDManager {
       this.pidAssignments.set(playerIds[i], pid);
       this.pidToPlayer.set(pid, playerIds[i]);
     }
+
+    this._processingOrderDirty = true; // Invalidate cache after reshuffle
 
     // Emit event
     if (this.onReshuffle) {
@@ -282,6 +314,9 @@ export class PIDManager {
     this.pidToPlayer.clear();
     this.nextPid = 0;
     this.nextReshuffleTick = 0;
+    this._processingOrderDirty = true; // Invalidate cache
+    this._processingOrderCache.length = 0;
+    this._sortBuffer.length = 0;
   }
 }
 

@@ -47,18 +47,44 @@ export function LootWindow({
       }
 
       // Check if entity has lootItems in its data
-      const entityData = (gravestoneEntity as any).data;
-      if (entityData?.lootItems || (gravestoneEntity as any).lootItems) {
-        const serverItems =
-          entityData?.lootItems || (gravestoneEntity as any).lootItems || [];
+      interface EntityWithLoot {
+        data?: {
+          lootItems?: InventoryItem[];
+          lootItemCount?: number;
+          [key: string]: unknown;
+        };
+        lootItems?: InventoryItem[];
+        [key: string]: unknown;
+      }
+      const entityWithLoot = gravestoneEntity as unknown as EntityWithLoot;
+      const entityData = entityWithLoot.data;
+      if (entityData?.lootItems || entityWithLoot.lootItems) {
+        const serverItems: InventoryItem[] =
+          entityData?.lootItems || entityWithLoot.lootItems || [];
 
-        // Update local state with server data
-        setItems([...serverItems]);
+        // Only update if items actually changed - compare by reference first, then by length/content
+        setItems((prevItems) => {
+          // Quick reference equality check
+          if (prevItems === serverItems) return prevItems;
+          // Length check
+          if (prevItems.length !== serverItems.length) return serverItems;
+          // Deep equality check - compare item IDs and quantities
+          for (let i = 0; i < prevItems.length; i++) {
+            if (
+              prevItems[i].itemId !== serverItems[i].itemId ||
+              prevItems[i].quantity !== serverItems[i].quantity
+            ) {
+              return serverItems;
+            }
+          }
+          // Items are the same, return previous reference to avoid re-render
+          return prevItems;
+        });
       }
 
       // If gravestone is empty, close the window
       if (
-        ((gravestoneEntity as any).lootItems?.length === 0 ||
+        (entityWithLoot.lootItems?.length === 0 ||
           entityData?.lootItems?.length === 0 ||
           entityData?.lootItemCount === 0) &&
         items.length > 0

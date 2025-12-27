@@ -15,7 +15,7 @@
  * - LOD: Level-of-detail container
  * - Avatar: VRM character model
  * - Action: Executable player action
- * - Anchor: Spatial anchor for XR
+ * - Anchor: Spatial anchor point
  * - Nametag: Player/NPC name label
  * - Particles: Particle effect emitter
  * - UI, UIView, UIText: 3D UI elements

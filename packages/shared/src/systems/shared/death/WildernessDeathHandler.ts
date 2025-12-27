@@ -53,7 +53,7 @@ export class WildernessDeathHandler {
     items: InventoryItem[],
     killedBy: string,
     zoneType: ZoneType,
-    tx?: any, // Transaction context for atomic death processing
+    tx?: unknown, // Transaction context for atomic death processing
   ): Promise<void> {
     // CRITICAL: Server authority check - prevent client from spawning fake ground items
     if (!this.world.isServer) {

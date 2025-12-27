@@ -11,7 +11,7 @@
  * NOTE: Uses mocked system logic to avoid circular dependency issues.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 
 // ============================================================================
 // Types
@@ -23,7 +23,8 @@ interface InventoryItem {
   slot: number;
 }
 
-interface ItemPickupEvent {
+// PickupRequest interface for future use
+interface _PickupRequest {
   playerId: string;
   entityId: string;
 }

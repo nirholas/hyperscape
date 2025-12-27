@@ -144,6 +144,64 @@ export {
   uuid,
 } from "./utils/index";
 
+// Export SeededRandom and game RNG utilities (OSRS-accurate deterministic RNG)
+export {
+  SeededRandom,
+  initializeGameRng,
+  getGameRng,
+  getGameSeed,
+  getGameRngState,
+} from "./utils/SeededRandom";
+export type { SeededRandomState } from "./utils/SeededRandom";
+
+// Export branded type identifiers for compile-time type safety
+export type {
+  PlayerID,
+  ItemID,
+  MobID,
+  EntityID,
+  StoreID,
+  BankID,
+  ResourceID,
+  NPCID,
+  SessionID,
+  QuestID,
+  SkillID,
+  ZoneID,
+  ChunkID,
+  SlotNumber,
+} from "./types/core/identifiers";
+export {
+  isValidPlayerID,
+  isValidMobID,
+  isValidEntityID,
+  isValidItemID,
+  isValidStoreID,
+  isValidBankID,
+  isValidResourceID,
+  isValidNPCID,
+  isValidSessionID,
+  isValidSlotNumber,
+  isValidQuestID,
+  isValidSkillID,
+  isValidZoneID,
+  isValidChunkID,
+  createPlayerID,
+  createMobID,
+  createEntityID,
+  createItemID,
+  createStoreID,
+  createBankID,
+  createResourceID,
+  createNPCID,
+  createSessionID,
+  createSlotNumber,
+  createQuestID,
+  createSkillID,
+  createZoneID,
+  createChunkID,
+} from "./types/core/identifiers";
+
 // Export item helpers used by server network snapshot
 export {
   getItem,
@@ -190,10 +248,9 @@ export { ClientGraphics } from "./systems/client/ClientGraphics";
 export { ClientRuntime } from "./systems/client/ClientRuntime"; // Client lifecycle and diagnostics
 export { ClientAudio } from "./systems/client/ClientAudio";
 export { ClientLiveKit } from "./systems/client/ClientLiveKit";
-export { ClientInput } from "./systems/client/ClientInput"; // Keyboard, mouse, touch, XR input handling
+export { ClientInput } from "./systems/client/ClientInput";
 export { ServerRuntime } from "./systems/server/ServerRuntime"; // Server lifecycle and monitoring
 export { ClientActions } from "./systems/client/ClientActions";
-export { XR } from "./systems/client/XR";
 export { EventBus } from "./systems/shared";
 export { System as SystemClass } from "./systems/shared";
 export { SystemBase } from "./systems/shared";
@@ -227,9 +284,7 @@ export {
   createRenderer,
   configureRenderer,
   configureShadowMaps,
-  configureXR,
   isWebGPURenderer,
-  isWebGLRenderer,
   getRendererBackend,
   detectRenderingCapabilities,
   type UniversalRenderer,
@@ -238,8 +293,6 @@ export {
 
 export {
   createPostProcessing,
-  setBloomEnabled,
-  disposePostProcessing,
   type PostProcessingComposer,
 } from "./utils/rendering/PostProcessingFactory";
 
@@ -579,6 +632,8 @@ export type {
 
 // Export event payloads namespace
 export * as Payloads from "./types/events";
+// Export specific event payload types for convenience
+export type { SkillsLevelUpEvent } from "./types/events";
 
 // Export additional core types
 export type { SkillsData } from "./types/systems/system-interfaces";

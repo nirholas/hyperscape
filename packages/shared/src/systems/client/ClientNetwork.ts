@@ -103,7 +103,7 @@ import type {
 import type { Entity } from "../../entities/Entity";
 import { EventType } from "../../types/events";
 import { uuid } from "../../utils";
-import { SystemBase } from "../shared";
+import { SystemBase } from "../shared/infrastructure/SystemBase";
 import { PlayerLocal } from "../../entities/player/PlayerLocal";
 import { TileInterpolator } from "./TileInterpolator";
 import { type TileCoord } from "../shared/movement/TileSystem"; // Internal import within shared package
@@ -184,7 +184,15 @@ export class ClientNetwork extends SystemBase {
     Record<string, { level: number; xp: number }>
   > = {};
   // Cache latest equipment per player so UI can hydrate even if it mounted late
-  lastEquipmentByPlayerId: Record<string, any> = {};
+  lastEquipmentByPlayerId: Record<string, Record<string, unknown>> = {};
+
+  // Spectator mode state
+  private spectatorFollowEntity: string | undefined;
+  private spectatorTargetPending = false;
+  private spectatorRetryInterval:
+    | ReturnType<typeof setInterval>
+    | number
+    | null = null;
 
   // Entity interpolation for smooth remote entity movement
   private interpolationStates: Map<string, InterpolationState> = new Map();
@@ -262,7 +270,7 @@ export class ClientNetwork extends SystemBase {
         ) {
           this.ws.close();
         }
-      } catch (e) {
+      } catch {
         this.logger.debug("Error cleaning up old WebSocket");
       }
       this.ws = null;
@@ -324,7 +332,7 @@ export class ClientNetwork extends SystemBase {
         this.logger.debug("[ClientNetwork] Embedded config loaded", {
           isSpectator: this.isEmbeddedSpectator,
           hasCharacterId: !!this.embeddedCharacterId,
-        } as unknown as Record<string, unknown>);
+        });
       }
     }
 
@@ -392,7 +400,6 @@ export class ClientNetwork extends SystemBase {
     ] of this.pendingModificationTimestamps.entries()) {
       const age = now - timestamp;
       if (age > staleTimeout) {
-        const count = this.pendingModifications.get(entityId)?.length || 0;
         // Silent cleanup to avoid log spam
         this.pendingModifications.delete(entityId);
         this.pendingModificationTimestamps.delete(entityId);
@@ -497,7 +504,7 @@ export class ClientNetwork extends SystemBase {
       // Store followEntity for camera setup after entities are loaded
       if (followEntityId) {
         this.logger.info(`👁️ Spectator will follow entity: ${followEntityId}`);
-        (this as any).spectatorFollowEntity = followEntityId;
+        this.spectatorFollowEntity = followEntityId;
       }
       // Continue to entity processing below
     } else {
@@ -521,7 +528,7 @@ export class ClientNetwork extends SystemBase {
         if (characterId) {
           this.logger.debug(`Auto-selecting character: ${characterId}`, {
             isEmbedded: this.isEmbeddedSpectator,
-          } as unknown as Record<string, unknown>);
+          });
 
           // Embedded spectator mode needs characterSelected packet first
           if (this.isEmbeddedSpectator) {
@@ -687,10 +694,10 @@ export class ClientNetwork extends SystemBase {
     }
 
     // Spectator mode: Auto-follow the target entity after entities are loaded
-    const spectatorFollowId = (this as any).spectatorFollowEntity;
+    const spectatorFollowId = this.spectatorFollowEntity;
     if (isSpectatorMode && spectatorFollowId) {
       // Mark that we're waiting for spectator target
-      (this as any).spectatorTargetPending = true;
+      this.spectatorTargetPending = true;
 
       const MAX_RETRY_SECONDS = 15;
       let retryCount = 0;
@@ -720,10 +727,12 @@ export class ClientNetwork extends SystemBase {
 
         if (targetEntity) {
           // Found the entity - clear pending state and interval
-          (this as any).spectatorTargetPending = false;
-          if ((this as any).spectatorRetryInterval) {
-            clearInterval((this as any).spectatorRetryInterval);
-            (this as any).spectatorRetryInterval = null;
+          this.spectatorTargetPending = false;
+          if (this.spectatorRetryInterval) {
+            clearInterval(
+              this.spectatorRetryInterval as ReturnType<typeof setInterval>,
+            );
+            this.spectatorRetryInterval = null;
           }
           this.logger.info(
             `👁️ Spectator following entity ${spectatorFollowId}`,
@@ -742,7 +751,7 @@ export class ClientNetwork extends SystemBase {
           );
 
           // Start retry interval - check every 1 second for up to 15 seconds
-          (this as any).spectatorRetryInterval = setInterval(() => {
+          this.spectatorRetryInterval = setInterval(() => {
             retryCount++;
 
             if (attemptFollow()) {
@@ -753,9 +762,13 @@ export class ClientNetwork extends SystemBase {
             }
 
             if (retryCount >= MAX_RETRY_SECONDS) {
-              clearInterval((this as any).spectatorRetryInterval);
-              (this as any).spectatorRetryInterval = null;
-              (this as any).spectatorTargetPending = false;
+              if (this.spectatorRetryInterval !== null) {
+                clearInterval(
+                  this.spectatorRetryInterval as ReturnType<typeof setInterval>,
+                );
+              }
+              this.spectatorRetryInterval = null;
+              this.spectatorTargetPending = false;
               this.logger.error(
                 `👁️ Agent entity ${spectatorFollowId} not found after ${MAX_RETRY_SECONDS}s`,
               );
@@ -806,10 +819,6 @@ export class ClientNetwork extends SystemBase {
   };
 
   onEntityAdded = (data: EntityData) => {
-    // Add debugging for mob entities
-    if (data.type === "mob") {
-    }
-
     // Add entity if method exists
     const newEntity = this.world.entities.add(data);
     if (newEntity) {
@@ -841,8 +850,8 @@ export class ClientNetwork extends SystemBase {
       }
 
       // Check if this is the spectator target entity we're waiting for
-      const spectatorFollowId = (this as any).spectatorFollowEntity;
-      const isWaitingForTarget = (this as any).spectatorTargetPending;
+      const spectatorFollowId = this.spectatorFollowEntity;
+      const isWaitingForTarget = this.spectatorTargetPending;
 
       if (isWaitingForTarget && data.id === spectatorFollowId) {
         this.logger.info(
@@ -850,11 +859,13 @@ export class ClientNetwork extends SystemBase {
         );
 
         // Clear retry interval if running
-        if ((this as any).spectatorRetryInterval) {
-          clearInterval((this as any).spectatorRetryInterval);
-          (this as any).spectatorRetryInterval = null;
+        if (this.spectatorRetryInterval) {
+          clearInterval(
+            this.spectatorRetryInterval as ReturnType<typeof setInterval>,
+          );
+          this.spectatorRetryInterval = null;
         }
-        (this as any).spectatorTargetPending = false;
+        this.spectatorTargetPending = false;
 
         // Set camera to follow this entity
         const camera = this.world.getSystem("camera") as {
@@ -1325,20 +1336,14 @@ export class ClientNetwork extends SystemBase {
     depleted?: boolean;
   }) => {
     // Update the ResourceEntity visual
-    const entity = this.world.entities.get(data.resourceId);
-    if (
-      entity &&
-      typeof (
-        entity as unknown as {
-          updateFromNetwork?: (data: Record<string, unknown>) => void;
-        }
-      ).updateFromNetwork === "function"
-    ) {
-      (
-        entity as unknown as {
-          updateFromNetwork: (data: Record<string, unknown>) => void;
-        }
-      ).updateFromNetwork({ depleted: true });
+    interface EntityWithNetworkUpdate {
+      updateFromNetwork?: (data: Record<string, unknown>) => void;
+    }
+    const entity = this.world.entities.get(
+      data.resourceId,
+    ) as EntityWithNetworkUpdate | null;
+    if (entity && typeof entity.updateFromNetwork === "function") {
+      entity.updateFromNetwork({ depleted: true });
     }
 
     // Also emit the event for other systems
@@ -1352,19 +1357,15 @@ export class ClientNetwork extends SystemBase {
   }) => {
     // Update the ResourceEntity visual
     const entity = this.world.entities.get(data.resourceId);
+    interface EntityWithNetworkUpdate {
+      updateFromNetwork?: (data: Record<string, unknown>) => void;
+    }
+    const entityWithUpdate = entity as EntityWithNetworkUpdate | null;
     if (
-      entity &&
-      typeof (
-        entity as unknown as {
-          updateFromNetwork?: (data: Record<string, unknown>) => void;
-        }
-      ).updateFromNetwork === "function"
+      entityWithUpdate &&
+      typeof entityWithUpdate.updateFromNetwork === "function"
     ) {
-      (
-        entity as unknown as {
-          updateFromNetwork: (data: Record<string, unknown>) => void;
-        }
-      ).updateFromNetwork({ depleted: false });
+      entityWithUpdate.updateFromNetwork({ depleted: false });
     }
 
     // Also emit the event for other systems
@@ -1377,12 +1378,6 @@ export class ClientNetwork extends SystemBase {
     coins: number;
     maxSlots: number;
   }) => {
-    type WindowWithDebug = { DEBUG_RPG?: string };
-    if (
-      (window as WindowWithDebug).DEBUG_RPG === "1" ||
-      process.env?.DEBUG_RPG === "1"
-    ) {
-    }
     // Cache latest snapshot for late-mounting UI
     this.lastInventoryByPlayerId[data.playerId] = data;
     // Re-emit with typed event so UI updates without waiting for local add
@@ -1401,7 +1396,18 @@ export class ClientNetwork extends SystemBase {
     });
   };
 
-  onEquipmentUpdated = (data: { playerId: string; equipment: any }) => {
+  onEquipmentUpdated = (data: {
+    playerId: string;
+    equipment: {
+      weapon?: { item?: unknown; itemId?: string } | null;
+      shield?: { item?: unknown; itemId?: string } | null;
+      helmet?: { item?: unknown; itemId?: string } | null;
+      body?: { item?: unknown; itemId?: string } | null;
+      legs?: { item?: unknown; itemId?: string } | null;
+      arrows?: { item?: unknown; itemId?: string } | null;
+      [key: string]: { item?: unknown; itemId?: string } | null | undefined;
+    };
+  }) => {
     // Cache latest equipment for late-mounting UI
     this.lastEquipmentByPlayerId = this.lastEquipmentByPlayerId || {};
     this.lastEquipmentByPlayerId[data.playerId] = data.equipment;
@@ -1410,19 +1416,20 @@ export class ClientNetwork extends SystemBase {
     // Equipment format from server: { weapon: { item: Item, itemId: string }, ... }
     // Local player format: { weapon: Item | null, ... }
     const localPlayer = this.world.getPlayer?.();
+    interface PlayerWithEquipment {
+      equipment: {
+        weapon: unknown;
+        shield: unknown;
+        helmet: unknown;
+        body: unknown;
+        legs: unknown;
+        arrows: unknown;
+      };
+    }
     if (localPlayer && data.playerId === localPlayer.id) {
       const rawEq = data.equipment;
       if (rawEq && "equipment" in localPlayer) {
-        const playerWithEquipment = localPlayer as unknown as {
-          equipment: {
-            weapon: unknown;
-            shield: unknown;
-            helmet: unknown;
-            body: unknown;
-            legs: unknown;
-            arrows: unknown;
-          };
-        };
+        const playerWithEquipment = localPlayer as PlayerWithEquipment;
         playerWithEquipment.equipment = {
           weapon: rawEq.weapon?.item || null,
           shield: rawEq.shield?.item || null,
@@ -1451,7 +1458,13 @@ export class ClientNetwork extends SystemBase {
       for (const slot of slots) {
         const slotData = equipment[slot];
         // Emit for ALL slots, including null (to remove items on death)
-        const itemId = slotData?.itemId || slotData?.item?.id || null;
+        interface SlotDataWithItem {
+          itemId?: string;
+          item?: { id?: string };
+        }
+        const slotDataWithItem = slotData as SlotDataWithItem | undefined;
+        const itemId =
+          slotDataWithItem?.itemId || slotDataWithItem?.item?.id || null;
         this.world.emit(EventType.PLAYER_EQUIPMENT_CHANGED, {
           playerId: data.playerId,
           slot: slot,
@@ -2028,11 +2041,8 @@ export class ClientNetwork extends SystemBase {
     tickNumber: number;
     moveSeq?: number;
   }) => {
-    const worldPos = new THREE.Vector3(
-      data.worldPos[0],
-      data.worldPos[1],
-      data.worldPos[2],
-    );
+    // Use pre-allocated Vector3 to avoid allocation per network message
+    _v3_1.set(data.worldPos[0], data.worldPos[1], data.worldPos[2]);
 
     // Get entity's current position as fallback for smooth interpolation
     // (in case tileMovementStart was missed due to packet loss)
@@ -2045,7 +2055,7 @@ export class ClientNetwork extends SystemBase {
     this.tileInterpolator.onTileUpdate(
       data.id,
       data.tile,
-      worldPos,
+      _v3_1,
       data.emote,
       data.quaternion,
       entityCurrentPos,
@@ -2135,18 +2145,15 @@ export class ClientNetwork extends SystemBase {
     worldPos: [number, number, number];
     moveSeq?: number;
   }) => {
-    const worldPos = new THREE.Vector3(
-      data.worldPos[0],
-      data.worldPos[1],
-      data.worldPos[2],
-    );
+    // Use pre-allocated Vector3 to avoid allocation per network message
+    _v3_1.set(data.worldPos[0], data.worldPos[1], data.worldPos[2]);
     // Let TileInterpolator handle the arrival smoothly
     // It will snap only if already at destination, otherwise let interpolation finish
     // moveSeq ensures stale end packets are ignored
     this.tileInterpolator.onMovementEnd(
       data.id,
       data.tile,
-      worldPos,
+      _v3_1,
       data.moveSeq,
     );
 

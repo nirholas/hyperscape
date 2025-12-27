@@ -254,7 +254,7 @@ interface ThreeSceneConfig {
 interface ThreeSceneRefs {
   scene: THREE.Scene | null
   camera: THREE.PerspectiveCamera | null
-  renderer: THREE.WebGLRenderer | null
+  renderer: WebGPURenderer | null
   orbitControls: OrbitControls | null
 }
 
@@ -314,7 +314,7 @@ export function useThreeScene(
     refs.current.camera = camera
 
     // Renderer setup
-    const renderer = new THREE.WebGLRenderer({
+    const renderer = new WebGPURenderer({
       antialias: true,
       alpha: true
     })
@@ -455,7 +455,7 @@ const MyViewer: React.FC = () => {
 - **isInitialized**: Boolean indicating scene is ready
 - **scene**: THREE.Scene instance
 - **camera**: THREE.PerspectiveCamera instance
-- **renderer**: THREE.WebGLRenderer instance
+- **renderer**: WebGPURenderer instance
 - **orbitControls**: OrbitControls instance
 
 ---

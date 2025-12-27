@@ -25,6 +25,20 @@ import { SystemBase } from "../shared/infrastructure/SystemBase";
 import type { World } from "../../types";
 import type { VRM, VRMHumanBoneName } from "@pixiv/three-vrm";
 import { getItem } from "../../data/items";
+import type { Entity } from "../../entities/Entity";
+
+interface PlayerWithAvatar extends Entity {
+  _avatar?: {
+    instance?: {
+      raw?: {
+        userData?: {
+          vrm?: VRM;
+        };
+        scene?: THREE.Object3D;
+      };
+    };
+  };
+}
 
 interface EquipmentAttachmentData {
   vrmBoneName: string; // VRM bone to attach to (e.g., "rightHand")
@@ -72,12 +86,15 @@ export class EquipmentVisualSystem extends SystemBase {
     }
 
     // Subscribe to equipment changes
-    this.subscribe(EventType.PLAYER_EQUIPMENT_CHANGED, (data: any) => {
-      this.handleEquipmentChange(data);
-    });
+    this.subscribe(
+      EventType.PLAYER_EQUIPMENT_CHANGED,
+      (data: { playerId: string; slot: string; itemId: string | null }) => {
+        this.handleEquipmentChange(data);
+      },
+    );
 
     // Clean up when player leaves
-    this.subscribe(EventType.PLAYER_CLEANUP, (data: any) => {
+    this.subscribe(EventType.PLAYER_CLEANUP, (data: { playerId: string }) => {
       this.cleanupPlayerEquipment(data.playerId);
     });
   }
@@ -101,8 +118,9 @@ export class EquipmentVisualSystem extends SystemBase {
     }
 
     // CRITICAL: instance.raw is GLTF, VRM is in userData.vrm!
-    const avatarInstance = (player as any)._avatar?.instance;
-    const vrm = avatarInstance?.raw?.userData?.vrm as VRM | undefined;
+    const playerWithAvatar = player as PlayerWithAvatar;
+    const avatarInstance = playerWithAvatar._avatar?.instance;
+    const vrm = avatarInstance?.raw?.userData?.vrm;
 
     if (!avatarInstance || !vrm) {
       // Queue this equipment change to retry when VRM is ready
@@ -142,7 +160,7 @@ export class EquipmentVisualSystem extends SystemBase {
     playerId: string,
     slot: string,
     equipment: PlayerEquipmentVisuals,
-    vrm: VRM,
+    _vrm: VRM,
   ): void {
     // Remove existing visual for this slot
     const slotKey = slot.toLowerCase() as keyof PlayerEquipmentVisuals;
@@ -308,8 +326,11 @@ export class EquipmentVisualSystem extends SystemBase {
       // Traverse the avatar's visual root (instance.raw) to find the bone
       // player.node is just a container and might not hold the full hierarchy
       // instance.raw might be the GLTF result object or VRM object, so check for .scene
-      const rawInstance = (player as any)._avatar?.instance?.raw;
-      const avatarRoot = (rawInstance?.scene || rawInstance) as THREE.Object3D;
+      const playerWithAvatar = player as PlayerWithAvatar;
+      const rawInstance = playerWithAvatar._avatar?.instance?.raw;
+      const avatarRoot = (rawInstance?.scene || rawInstance) as
+        | THREE.Object3D
+        | undefined;
 
       if (avatarRoot && avatarRoot.traverse) {
         avatarRoot.traverse((child) => {
@@ -372,7 +393,8 @@ export class EquipmentVisualSystem extends SystemBase {
         continue;
       }
 
-      const avatar = (player as any)._avatar;
+      const playerWithAvatar = player as PlayerWithAvatar;
+      const avatar = playerWithAvatar._avatar;
       const avatarInstance = avatar?.instance;
 
       // CRITICAL: instance.raw is GLTF, VRM is in userData.vrm!

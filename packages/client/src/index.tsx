@@ -27,17 +27,34 @@ import { UsernameSelectionScreen } from "./screens/UsernameSelectionScreen";
 import { EmbeddedGameClient } from "./components/EmbeddedGameClient";
 import { isEmbeddedMode } from "./types/embeddedConfig";
 
+import type {
+  EmbeddedViewportConfig,
+  ViewportMode,
+  GraphicsQuality,
+  HideableUIElement,
+} from "./types/embeddedConfig";
+
 // Buffer polyfill for Privy (required for crypto operations in browser)
 import { Buffer } from "buffer";
 if (!globalThis.Buffer) {
-  (globalThis as { Buffer?: typeof Buffer }).Buffer = Buffer;
+  (globalThis as typeof globalThis & { Buffer: typeof Buffer }).Buffer = Buffer;
 }
 
 // setImmediate polyfill for Privy/Viem
+declare global {
+  interface GlobalThis {
+    setImmediate?: (
+      cb: (...args: unknown[]) => void,
+      ...args: unknown[]
+    ) => number;
+  }
+}
+
 if (!globalThis.setImmediate) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (globalThis as any).setImmediate = (
-    cb: (...args: any[]) => void,
-    ...args: any[]
+    cb: (...args: unknown[]) => void,
+    ...args: unknown[]
   ) => setTimeout(cb, 0, ...args);
 }
 
@@ -46,25 +63,33 @@ const urlParams = new URLSearchParams(window.location.search);
 const isEmbedded = urlParams.get("embedded") === "true";
 
 if (isEmbedded) {
-  (window as any).__HYPERSCAPE_EMBEDDED__ = true;
+  window.__HYPERSCAPE_EMBEDDED__ = true;
 
   // Construct config from URL params
-  const config = {
+  const modeParam = urlParams.get("mode");
+  const qualityParam = urlParams.get("quality");
+  const config: EmbeddedViewportConfig = {
     agentId: urlParams.get("agentId") || "",
     authToken: urlParams.get("authToken") || "",
     characterId: urlParams.get("characterId") || undefined,
     wsUrl: urlParams.get("wsUrl") || "ws://localhost:5555/ws",
-    mode: (urlParams.get("mode") as any) || "spectator",
+    mode: (modeParam === "spectator" || modeParam === "free"
+      ? modeParam
+      : "spectator") as ViewportMode,
     followEntity: urlParams.get("followEntity") || undefined,
     hiddenUI: urlParams.get("hiddenUI")
-      ? urlParams.get("hiddenUI")?.split(",")
+      ? (urlParams.get("hiddenUI")?.split(",") as HideableUIElement[])
       : undefined,
-    quality: (urlParams.get("quality") as any) || "medium",
+    quality: (qualityParam === "low" ||
+    qualityParam === "medium" ||
+    qualityParam === "high"
+      ? qualityParam
+      : "medium") as GraphicsQuality,
     sessionToken: urlParams.get("sessionToken") || "",
     privyUserId: urlParams.get("privyUserId") || undefined,
   };
 
-  (window as any).__HYPERSCAPE_CONFIG__ = config;
+  window.__HYPERSCAPE_CONFIG__ = config;
   console.log("[Hyperscape] Configured from URL params:", config);
 }
 

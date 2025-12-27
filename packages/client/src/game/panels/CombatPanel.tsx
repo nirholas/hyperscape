@@ -1,11 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { COLORS } from "../../constants";
-import {
-  EventType,
-  getAvailableStyles,
-  WeaponType,
-  type CombatStyle,
-} from "@hyperscape/shared";
+import { EventType, getAvailableStyles, WeaponType } from "@hyperscape/shared";
 import type {
   ClientWorld,
   PlayerStats,

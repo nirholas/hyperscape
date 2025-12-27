@@ -49,7 +49,7 @@ import { isNumber } from "lodash-es";
 
 import { LooseOctree } from "../../../utils/physics/LooseOctree";
 import THREE from "../../../extras/three/three";
-import { SystemBase } from "..";
+import { SystemBase } from "../infrastructure/SystemBase";
 import { World } from "../../../core/World";
 
 import type { SkyHandle } from "../../../types";
@@ -195,7 +195,10 @@ export class Stage extends SystemBase {
   }
 
   override update(_delta: number): void {
-    this.models.forEach((model) => model.clean());
+    // Use for-of instead of forEach to avoid callback allocation each frame
+    for (const model of this.models.values()) {
+      model.clean();
+    }
   }
 
   override postUpdate(): void {

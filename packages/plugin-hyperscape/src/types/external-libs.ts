@@ -168,14 +168,14 @@ export interface AnimationMixer
       ) => THREE.AnimationAction);
 }
 
-// Material shader compilation types
+// Material shader compilation types (legacy - TSL node materials are preferred)
 export interface ShaderMaterial
   extends Omit<THREE.ShaderMaterial, "onBeforeCompile"> {
   onBeforeCompile?:
     | ((shader: ShaderCompileParameters) => void)
     | ((
         shader: THREE.WebGLProgramParametersWithUniforms,
-        renderer: THREE.WebGLRenderer | any,
+        renderer: unknown,
       ) => void);
 }
 

@@ -578,7 +578,7 @@ renderer.info
 //   render: { frame: 1234, calls: 45, triangles: 23456 }
 // }
 
-// Check WebGL capabilities
+// Check WebGPU capabilities
 renderer.capabilities
 // {
 //   maxTextures: 16,

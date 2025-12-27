@@ -1,13 +1,10 @@
-import { SystemBase } from "..";
+import { SystemBase } from "../infrastructure/SystemBase";
 import type { World } from "../../../core/World";
 import { EventType } from "../../../types/events";
 import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
 import { ticksToMs } from "../../../utils/game/CombatCalculations";
-import type { HeadstoneData } from "../../../types/entities";
 import type {
-  ZoneData,
   InventoryItem,
-  HeadstoneApp,
   DeathLocationData,
 } from "../../../types/core/core";
 import {
@@ -467,7 +464,7 @@ export class PlayerDeathSystem extends SystemBase {
     playerId: string,
     deathPosition: { x: number; y: number; z: number },
     itemsToDrop: InventoryItem[],
-    killedBy: string,
+    _killedBy: string,
   ): void {
     const deathData: DeathLocationData = {
       playerId,

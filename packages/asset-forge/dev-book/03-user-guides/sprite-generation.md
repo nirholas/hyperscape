@@ -332,7 +332,7 @@ For Each Angle:
    └─ Look at center
 
 5. Render frame
-   ├─ WebGL render call
+   ├─ WebGPU render call
    ├─ Apply anti-aliasing
    └─ Generate image buffer
 

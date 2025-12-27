@@ -170,6 +170,7 @@ export function useXPOrbState(world: ClientWorld): UseXPOrbStateResult {
   }, [activeSkills, calculateProgress, getXPToNextLevel]);
 
   // Game tick timer - each orb fades independently based on its own lastGainTime
+  // Optimized to minimize array allocations in hot path
   useEffect(() => {
     const tickInterval = setInterval(() => {
       const now = Date.now();
@@ -182,29 +183,40 @@ export function useXPOrbState(world: ClientWorld): UseXPOrbStateResult {
         let hasChanges = false;
         let hasRemovals = false;
 
-        for (const skill of prev) {
-          const elapsed = now - skill.lastGainTime;
-          if (!skill.isFading && elapsed >= fadeThreshold) hasChanges = true;
+        for (let i = 0; i < prev.length; i++) {
+          const elapsed = now - prev[i].lastGainTime;
+          if (!prev[i].isFading && elapsed >= fadeThreshold) hasChanges = true;
           if (elapsed >= removeThreshold) hasRemovals = true;
         }
 
         if (!hasChanges && !hasRemovals) return prev;
 
-        if (hasRemovals) {
-          return prev
-            .filter((s) => now - s.lastGainTime < removeThreshold)
-            .map((s) =>
-              !s.isFading && now - s.lastGainTime >= fadeThreshold
-                ? { ...s, isFading: true }
-                : s,
-            );
+        // Build result array only when needed, avoiding chained filter().map()
+        const result: ActiveSkill[] = [];
+        for (let i = 0; i < prev.length; i++) {
+          const skill = prev[i];
+          const elapsed = now - skill.lastGainTime;
+
+          // Skip removed items
+          if (hasRemovals && elapsed >= removeThreshold) continue;
+
+          // Check if we need to mark as fading
+          if (!skill.isFading && elapsed >= fadeThreshold) {
+            // Only create new object when isFading changes
+            result.push({
+              skill: skill.skill,
+              level: skill.level,
+              xp: skill.xp,
+              lastGainTime: skill.lastGainTime,
+              isFading: true,
+            });
+          } else {
+            // Reuse existing object reference
+            result.push(skill);
+          }
         }
 
-        return prev.map((s) =>
-          !s.isFading && now - s.lastGainTime >= fadeThreshold
-            ? { ...s, isFading: true }
-            : s,
-        );
+        return result;
       });
     }, GAME_TICK_MS);
 

@@ -9,6 +9,21 @@ import { Entity, THREE, createRenderer } from "@hyperscape/shared";
 import type { UniversalRenderer } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
 
+// === PRE-ALLOCATED VECTORS FOR HOT PATHS ===
+// These vectors are reused in RAF loops and intervals to avoid GC pressure
+
+/** Temp vector for RAF loop camera direction calculations */
+const _tempForwardVec = new THREE.Vector3();
+
+/** Temp vector for pip position projection in render loop */
+const _tempProjectVec = new THREE.Vector3();
+
+/** Temp vector for destination marker rendering */
+const _tempDestVec = new THREE.Vector3();
+
+/** Temp vector for screenToWorldXZ unprojection */
+const _tempUnprojectVec = new THREE.Vector3();
+
 interface EntityPip {
   id: string;
   type: "player" | "enemy" | "building" | "item" | "resource";
@@ -38,7 +53,7 @@ export function Minimap({
   isVisible = true,
 }: MinimapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const webglCanvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<UniversalRenderer | null>(null);
   const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
@@ -96,9 +111,9 @@ export function Minimap({
 
   // Initialize minimap renderer and camera
   useEffect(() => {
-    const webglCanvas = webglCanvasRef.current;
+    const canvas = canvasRef.current;
     const overlayCanvas = overlayCanvasRef.current;
-    if (!webglCanvas || !overlayCanvas) return;
+    if (!canvas || !overlayCanvas) return;
 
     // console.log('[Minimap] Initializing renderer...');
 
@@ -136,10 +151,9 @@ export function Minimap({
     if (!rendererRef.current || !rendererInitializedRef.current) {
       // console.log('[Minimap] Creating new renderer');
       createRenderer({
-        canvas: webglCanvas,
+        canvas,
         alpha: true,
         antialias: false,
-        preferWebGPU: false, // Use WebGL for minimap (simpler, more compatible)
       })
         .then((renderer) => {
           if (!mounted) {
@@ -149,11 +163,6 @@ export function Minimap({
           }
 
           renderer.setSize(width, height);
-
-          // Configure clear color (WebGL-specific)
-          if ("setClearColor" in renderer) {
-            (renderer as THREE.WebGLRenderer).setClearColor(0x1a1a2e, 0.9);
-          }
 
           rendererRef.current = renderer;
           rendererInitializedRef.current = true;
@@ -174,8 +183,8 @@ export function Minimap({
     }
 
     // Ensure both canvases have the correct backing size
-    webglCanvas.width = width;
-    webglCanvas.height = height;
+    canvas.width = width;
+    canvas.height = height;
     overlayCanvas.width = width;
     overlayCanvas.height = height;
 
@@ -188,7 +197,7 @@ export function Minimap({
         // console.log('[Minimap] Pausing renderer (component hidden)');
         // Pause rendering when hidden
         if ("setAnimationLoop" in rendererRef.current) {
-          (rendererRef.current as THREE.WebGLRenderer).setAnimationLoop(null);
+          rendererRef.current.setAnimationLoop(null);
         }
       }
     };
@@ -212,13 +221,13 @@ export function Minimap({
       // console.log('[Minimap] Resuming renderer (component visible)');
       // Resume rendering when visible
       if ("setAnimationLoop" in rendererRef.current) {
-        (rendererRef.current as THREE.WebGLRenderer).setAnimationLoop(null);
+        rendererRef.current.setAnimationLoop(null);
       }
     } else {
       // console.log('[Minimap] Pausing renderer (component hidden)');
       // Pause rendering when hidden
       if ("setAnimationLoop" in rendererRef.current) {
-        (rendererRef.current as THREE.WebGLRenderer).setAnimationLoop(null);
+        rendererRef.current.setAnimationLoop(null);
       }
     }
   }, [isVisible]);
@@ -261,23 +270,38 @@ export function Minimap({
 
     // console.log('[Minimap] Starting entity detection updates');
     let intervalId: number | null = null;
+
+    // Pre-allocate working arrays/maps to avoid GC pressure in 200ms interval
+    // We swap between two caches to track which entities are still valid
+    const workingPips: EntityPip[] = [];
+    const seenIds = new Set<string>();
+
     const update = () => {
-      const pips: EntityPip[] = [];
-      const newCache = new Map<string, EntityPip>();
+      // Clear working arrays (reuse allocation)
+      workingPips.length = 0;
+      seenIds.clear();
 
       const player = world.entities?.player as Entity | undefined;
       let playerPipId: string | null = null;
 
       if (player?.node?.position) {
         // Normal mode: local player is the green pip
-        const playerPip: EntityPip = {
-          id: "local-player",
-          type: "player",
-          position: player.node.position,
-          color: "#00ff00",
-        };
-        pips.push(playerPip);
-        newCache.set("local-player", playerPip);
+        // Reuse cached pip if available
+        let playerPip = entityCacheRef.current.get("local-player");
+        if (!playerPip) {
+          playerPip = {
+            id: "local-player",
+            type: "player",
+            position: player.node.position,
+            color: "#00ff00",
+          };
+          entityCacheRef.current.set("local-player", playerPip);
+        } else {
+          playerPip.position = player.node.position;
+          playerPip.color = "#00ff00";
+        }
+        workingPips.push(playerPip);
+        seenIds.add("local-player");
         playerPipId = player.id;
       } else {
         // Spectator mode: get spectated entity from camera system as green pip
@@ -294,14 +318,22 @@ export function Minimap({
           } | null;
           const cameraInfo = cameraSystem?.getCameraInfo?.();
           if (cameraInfo?.target?.node?.position) {
-            const spectatedPip: EntityPip = {
-              id: "spectated-player",
-              type: "player",
-              position: cameraInfo.target.node.position,
-              color: "#00ff00",
-            };
-            pips.push(spectatedPip);
-            newCache.set("spectated-player", spectatedPip);
+            // Reuse cached pip if available
+            let spectatedPip = entityCacheRef.current.get("spectated-player");
+            if (!spectatedPip) {
+              spectatedPip = {
+                id: "spectated-player",
+                type: "player",
+                position: cameraInfo.target.node.position,
+                color: "#00ff00",
+              };
+              entityCacheRef.current.set("spectated-player", spectatedPip);
+            } else {
+              spectatedPip.position = cameraInfo.target.node.position;
+              spectatedPip.color = "#00ff00";
+            }
+            workingPips.push(spectatedPip);
+            seenIds.add("spectated-player");
             playerPipId = cameraInfo.target.id ?? null;
           }
         }
@@ -310,30 +342,45 @@ export function Minimap({
       // Add other players using entities system for reliable positions
       if (world.entities) {
         const players = world.entities.getAllPlayers();
-        players.forEach((otherPlayer) => {
+        for (let i = 0; i < players.length; i++) {
+          const otherPlayer = players[i];
           // Skip local player or spectated entity (already shown as green pip)
           if (
             (player && otherPlayer.id === player.id) ||
             (playerPipId && otherPlayer.id === playerPipId)
           ) {
-            return;
+            continue;
           }
           const otherEntity = world.entities.get(otherPlayer.id);
           if (otherEntity && otherEntity.node && otherEntity.node.position) {
-            const playerPip: EntityPip = {
-              id: otherPlayer.id,
-              type: "player",
-              position: new THREE.Vector3(
+            // Reuse existing pip from cache if available to avoid GC pressure
+            let playerPip = entityCacheRef.current.get(otherPlayer.id);
+            if (playerPip) {
+              // Reuse existing Vector3, just update coordinates
+              playerPip.position.set(
                 otherEntity.node.position.x,
                 0,
                 otherEntity.node.position.z,
-              ),
-              color: "#0088ff",
-            };
-            pips.push(playerPip);
-            newCache.set(otherPlayer.id, playerPip);
+              );
+              playerPip.color = "#0088ff";
+            } else {
+              // New entity, create a new Vector3
+              playerPip = {
+                id: otherPlayer.id,
+                type: "player",
+                position: new THREE.Vector3(
+                  otherEntity.node.position.x,
+                  0,
+                  otherEntity.node.position.z,
+                ),
+                color: "#0088ff",
+              };
+              entityCacheRef.current.set(otherPlayer.id, playerPip);
+            }
+            workingPips.push(playerPip);
+            seenIds.add(otherPlayer.id);
           }
-        });
+        }
       }
 
       // Add pips for all known entities safely (cached)
@@ -341,10 +388,11 @@ export function Minimap({
       // Scene traversal was removed as it caused stale dots (matched static objects by name)
       if (world.entities) {
         const allEntities = world.entities.getAll();
-        allEntities.forEach((entity) => {
+        for (let i = 0; i < allEntities.length; i++) {
+          const entity = allEntities[i];
           // Skip if no valid position
           const pos = entity?.position;
-          if (!pos) return;
+          if (!pos) continue;
 
           let color = "#ffffff";
           let type: EntityPip["type"] = "item";
@@ -352,7 +400,7 @@ export function Minimap({
           switch (entity.type) {
             case "player":
               // Already handled above; skip to avoid duplicates
-              return;
+              continue;
             case "mob":
             case "enemy":
               color = "#ff4444";
@@ -378,20 +426,38 @@ export function Minimap({
               type = "item";
           }
 
-          const entityPip: EntityPip = {
-            id: entity.id,
-            type,
-            position: new THREE.Vector3(pos.x, 0, pos.z),
-            color,
-          };
-          pips.push(entityPip);
-          newCache.set(entity.id, entityPip);
-        });
+          // Reuse existing pip from cache if available to avoid GC pressure
+          let entityPip = entityCacheRef.current.get(entity.id);
+          if (entityPip) {
+            // Reuse existing Vector3, just update coordinates
+            entityPip.position.set(pos.x, 0, pos.z);
+            entityPip.type = type;
+            entityPip.color = color;
+          } else {
+            // New entity, create a new Vector3
+            entityPip = {
+              id: entity.id,
+              type,
+              position: new THREE.Vector3(pos.x, 0, pos.z),
+              color,
+            };
+            entityCacheRef.current.set(entity.id, entityPip);
+          }
+          workingPips.push(entityPip);
+          seenIds.add(entity.id);
+        }
       }
 
-      // Update cache
-      entityCacheRef.current = newCache;
-      setEntityPips(pips);
+      // Clean up cache: remove entities that are no longer present
+      // This prevents stale pips from entities that despawned
+      const cacheKeys = entityCacheRef.current.keys();
+      for (const id of cacheKeys) {
+        if (!seenIds.has(id)) {
+          entityCacheRef.current.delete(id);
+        }
+      }
+
+      setEntityPips(workingPips);
     };
 
     update();
@@ -413,8 +479,8 @@ export function Minimap({
     let rafId: number | null = null;
     let _frameCount = 0;
 
-    // Reusable vector to avoid allocations
-    const forwardVec = new THREE.Vector3();
+    // Note: We use module-level pre-allocated vectors (_tempForwardVec, _tempProjectVec, etc.)
+    // to avoid allocations in this hot render loop
 
     const render = () => {
       // Only render if visible
@@ -468,12 +534,13 @@ export function Minimap({
         // Rotate minimap with main camera yaw if enabled
         if (rotateWithCameraRef.current && world.camera) {
           const worldCam = world.camera;
-          worldCam.getWorldDirection(forwardVec);
-          forwardVec.y = 0;
-          if (forwardVec.lengthSq() > 1e-6) {
-            forwardVec.normalize();
+          // Reuse pre-allocated vector to avoid GC pressure
+          worldCam.getWorldDirection(_tempForwardVec);
+          _tempForwardVec.y = 0;
+          if (_tempForwardVec.lengthSq() > 1e-6) {
+            _tempForwardVec.normalize();
             // Compute yaw so that up vector rotates the minimap
-            const yaw = Math.atan2(forwardVec.x, -forwardVec.z);
+            const yaw = Math.atan2(_tempForwardVec.x, -_tempForwardVec.z);
             const upX = Math.sin(yaw);
             const upZ = -Math.cos(yaw);
             cam.up.set(upX, 0, upZ);
@@ -523,7 +590,7 @@ export function Minimap({
         }
       }
 
-      // --- WebGL Render ---
+      // --- Render ---
       if (rendererRef.current && sceneRef.current && cam) {
         rendererRef.current.render(sceneRef.current, cam);
       }
@@ -533,21 +600,25 @@ export function Minimap({
       if (ctx) {
         // Clear the overlay each frame
         ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-        // If no WebGL renderer, fill background on overlay
+        // If no renderer, fill background on overlay
         if (!rendererRef.current) {
           ctx.fillStyle = "#1a1a2e";
           ctx.fillRect(0, 0, overlayCanvas.width, overlayCanvas.height);
         }
 
         // Draw entity pips (use ref to avoid re-creating the render loop)
-        entityPipsRefForRender.current.forEach((pip) => {
+        // Use for-loop instead of forEach to avoid creating callback functions every frame
+        const pipsArray = entityPipsRefForRender.current;
+        for (let pipIdx = 0; pipIdx < pipsArray.length; pipIdx++) {
+          const pip = pipsArray[pipIdx];
           // Convert world position to screen position
           if (cameraRef.current) {
-            const vector = pip.position.clone();
-            vector.project(cameraRef.current);
+            // Reuse pre-allocated vector instead of cloning to avoid GC pressure
+            _tempProjectVec.copy(pip.position);
+            _tempProjectVec.project(cameraRef.current);
 
-            const x = (vector.x * 0.5 + 0.5) * width;
-            const y = (vector.y * -0.5 + 0.5) * height;
+            const x = (_tempProjectVec.x * 0.5 + 0.5) * width;
+            const y = (_tempProjectVec.y * -0.5 + 0.5) * height;
 
             // Only draw if within bounds
             if (x >= 0 && x <= width && y >= 0 && y <= height) {
@@ -607,7 +678,7 @@ export function Minimap({
               }
             }
           }
-        });
+        }
 
         // Draw red click indicator, fading out
         if (clickIndicator && clickIndicator.opacity > 0) {
@@ -640,10 +711,11 @@ export function Minimap({
               ? { x: destWorldRef.x, z: destWorldRef.z }
               : null;
         if (target && cameraRef.current) {
-          const v = new THREE.Vector3(target.x, 0, target.z);
-          v.project(cameraRef.current);
-          const sx = (v.x * 0.5 + 0.5) * width;
-          const sy = (v.y * -0.5 + 0.5) * height;
+          // Reuse pre-allocated vector instead of creating new one
+          _tempDestVec.set(target.x, 0, target.z);
+          _tempDestVec.project(cameraRef.current);
+          const sx = (_tempDestVec.x * 0.5 + 0.5) * width;
+          const sy = (_tempDestVec.y * -0.5 + 0.5) * height;
           ctx.save();
           ctx.globalAlpha = 1;
           ctx.fillStyle = "#ff3333";
@@ -682,16 +754,17 @@ export function Minimap({
   const screenToWorldXZ = useCallback(
     (clientX: number, clientY: number): { x: number; z: number } | null => {
       const cam = cameraRef.current;
-      const canvas = overlayCanvasRef.current || webglCanvasRef.current;
-      if (!cam || !canvas) return null;
+      const cvs = overlayCanvasRef.current || canvasRef.current;
+      if (!cam || !cvs) return null;
 
-      const rect = canvas.getBoundingClientRect();
+      const rect = cvs.getBoundingClientRect();
       const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
       const ndcY = -((clientY - rect.top) / rect.height) * 2 + 1;
-      const v = new THREE.Vector3(ndcX, ndcY, 0);
-      v.unproject(cam);
+      // Reuse pre-allocated vector instead of creating new one
+      _tempUnprojectVec.set(ndcX, ndcY, 0);
+      _tempUnprojectVec.unproject(cam);
       // For top-down ortho, y is constant; grab x/z
-      return { x: v.x, z: v.z };
+      return { x: _tempUnprojectVec.x, z: _tempUnprojectVec.z };
     },
     [],
   );
@@ -830,9 +903,9 @@ export function Minimap({
         e.stopPropagation();
       }}
     >
-      {/* WebGL canvas */}
+      {/* 3D canvas */}
       <canvas
-        ref={webglCanvasRef}
+        ref={canvasRef}
         width={width}
         height={height}
         className="absolute inset-0 block w-full h-full z-0 rounded-full overflow-hidden"

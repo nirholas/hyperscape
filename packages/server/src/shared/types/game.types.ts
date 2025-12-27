@@ -93,11 +93,13 @@ export interface InventorySystemData {
  * Player entity with server-specific properties
  *
  * Extends the base Entity type with player-specific data and methods.
+ * Includes roles for permission checks (admin, builder, etc).
  */
 export type PlayerEntity = Entity & {
   data: {
     id: string;
     userId?: string;
+    roles?: string[];
     [key: string]: unknown;
   };
   serialize: () => unknown;

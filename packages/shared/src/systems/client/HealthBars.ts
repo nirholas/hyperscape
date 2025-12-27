@@ -2,7 +2,7 @@
  * HealthBars System
  *
  * Renders health bars for all entities (players and mobs) using a single
- * instanced mesh for optimal performance.
+ * instanced mesh for optimal performance with TSL Node Materials.
  *
  * Similar architecture to Nametags but ONLY handles health bars.
  * This separation ensures clean responsibility:
@@ -13,16 +13,30 @@
  * @see HealthBarRenderer for the drawing logic
  */
 
-import THREE, { toTHREEVector3 } from "../../extras/three/three";
-import CustomShaderMaterial from "../../libs/three-custom-shader-material";
-import { SystemBase } from "../shared";
+import THREE, {
+  MeshBasicNodeMaterial,
+  texture,
+  uv,
+  positionLocal,
+  uniform,
+  float,
+  vec2,
+  vec3,
+  vec4,
+  add,
+  sub,
+  mul,
+  div,
+  cross,
+  instancedBufferAttribute,
+  Fn,
+} from "../../extras/three/three";
+import { toTHREEVector3 } from "../../extras/three/three";
+import { SystemBase } from "../shared/infrastructure/SystemBase";
 import type { World } from "../../types";
-import { EventType } from "../../types/events";
 import {
   drawHealthBar,
-  clearHealthBar,
   HEALTH_BAR_DIMENSIONS,
-  HEALTH_BAR_COLORS,
 } from "../../utils/rendering/HealthBarRenderer";
 
 const _v3_1 = new THREE.Vector3();
@@ -74,14 +88,11 @@ export class HealthBars extends SystemBase {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   texture: THREE.CanvasTexture;
-  uniforms: {
-    uAtlas: { value: THREE.CanvasTexture };
-    uXR: { value: number };
-    uOrientation: { value: THREE.Quaternion };
-  };
-  material: CustomShaderMaterial;
+  material: THREE.Material;
   geometry: THREE.PlaneGeometry;
   mesh: THREE.InstancedMesh;
+  coordsAttribute: THREE.InstancedBufferAttribute;
+  private uOrientation: { value: THREE.Quaternion };
 
   constructor(world: World) {
     super(world, {
@@ -99,137 +110,25 @@ export class HealthBars extends SystemBase {
     this.texture.colorSpace = THREE.SRGBColorSpace;
     this.texture.flipY = false;
     this.texture.needsUpdate = true;
-    this.uniforms = {
-      uAtlas: { value: this.texture },
-      uXR: { value: 0 },
-      uOrientation: { value: this.world.camera.quaternion },
-    };
-    this.material = new CustomShaderMaterial({
-      baseMaterial: THREE.MeshBasicMaterial,
-      transparent: true,
-      depthWrite: false,
-      depthTest: false,
-      uniforms: this.uniforms,
-      vertexShader: `
-        attribute vec2 coords;
-        uniform float uXR;
-        uniform vec4 uOrientation;
-        varying vec2 vUv;
 
-        vec3 applyQuaternion(vec3 pos, vec4 quat) {
-          vec3 qv = vec3(quat.x, quat.y, quat.z);
-          vec3 t = 2.0 * cross(qv, pos);
-          return pos + quat.w * t + cross(qv, t);
-        }
+    // Create uniforms
+    this.uOrientation = { value: this.world.camera.quaternion };
 
-        vec4 lookAtQuaternion(vec3 instancePos) {
-          vec3 up = vec3(0.0, 1.0, 0.0);
-          vec3 forward = normalize(cameraPosition - instancePos);
-
-          if(length(forward) < 0.001) {
-            return vec4(0.0, 0.0, 0.0, 1.0);
-          }
-
-          vec3 right = normalize(cross(up, forward));
-          up = cross(forward, right);
-
-          float m00 = right.x;
-          float m01 = right.y;
-          float m02 = right.z;
-          float m10 = up.x;
-          float m11 = up.y;
-          float m12 = up.z;
-          float m20 = forward.x;
-          float m21 = forward.y;
-          float m22 = forward.z;
-
-          float trace = m00 + m11 + m22;
-          vec4 quat;
-
-          if(trace > 0.0) {
-            float s = 0.5 / sqrt(trace + 1.0);
-            quat = vec4(
-              (m12 - m21) * s,
-              (m20 - m02) * s,
-              (m01 - m10) * s,
-              0.25 / s
-            );
-          } else if(m00 > m11 && m00 > m22) {
-            float s = 2.0 * sqrt(1.0 + m00 - m11 - m22);
-            quat = vec4(
-              0.25 * s,
-              (m01 + m10) / s,
-              (m20 + m02) / s,
-              (m12 - m21) / s
-            );
-          } else if(m11 > m22) {
-            float s = 2.0 * sqrt(1.0 + m11 - m00 - m22);
-            quat = vec4(
-              (m01 + m10) / s,
-              0.25 * s,
-              (m12 + m21) / s,
-              (m20 - m02) / s
-            );
-          } else {
-            float s = 2.0 * sqrt(1.0 + m22 - m00 - m11);
-            quat = vec4(
-              (m20 + m02) / s,
-              (m12 + m21) / s,
-              0.25 * s,
-              (m01 - m10) / s
-            );
-          }
-
-          return normalize(quat);
-        }
-
-        void main() {
-          vec3 newPosition = position;
-          if (uXR > 0.5) {
-            vec3 instancePos = vec3(
-              instanceMatrix[3][0],
-              instanceMatrix[3][1],
-              instanceMatrix[3][2]
-            );
-            vec4 lookAtQuat = lookAtQuaternion(instancePos);
-            newPosition = applyQuaternion(newPosition, lookAtQuat);
-          } else {
-            newPosition = applyQuaternion(newPosition, uOrientation);
-          }
-          csm_Position = newPosition;
-
-          vec2 atlasUV = uv;
-          atlasUV.y = 1.0 - atlasUV.y;
-          atlasUV /= vec2(${PER_ROW}, ${PER_COLUMN});
-          atlasUV += coords;
-          vUv = atlasUV;
-        }
-      `,
-      fragmentShader: `
-        uniform sampler2D uAtlas;
-        varying vec2 vUv;
-
-        void main() {
-          vec4 texColor = texture2D(uAtlas, vUv);
-          csm_FragColor = texColor;
-        }
-      `,
-    } as ConstructorParameters<typeof CustomShaderMaterial>[0]);
-
-    // Health bar size must match player health bars (drawn inside Nametags)
-    // Player nametag: PlaneGeometry(1, 60/320) = 1.0 × 0.1875 world units
-    // Health bar inside: 160px / 320px = 50% width = 0.5 world units
-    // Height: 16px / 60px * 0.1875 = 0.05 world units
-    const worldWidth = 0.5; // Match player health bar width
-    const worldHeight = 0.05; // Match player health bar height (10:1 aspect)
-    this.geometry = new THREE.PlaneGeometry(worldWidth, worldHeight);
-    this.geometry.setAttribute(
-      "coords",
-      new THREE.InstancedBufferAttribute(
-        new Float32Array(MAX_INSTANCES * 2),
-        2,
-      ),
+    // Create coords attribute for atlas UV lookup
+    this.coordsAttribute = new THREE.InstancedBufferAttribute(
+      new Float32Array(MAX_INSTANCES * 2),
+      2,
     );
+
+    // Create TSL Node Material
+    this.material = this.createHealthBarMaterial();
+
+    // Health bar size must match player health bars
+    const worldWidth = 0.5;
+    const worldHeight = 0.05;
+    this.geometry = new THREE.PlaneGeometry(worldWidth, worldHeight);
+    this.geometry.setAttribute("coords", this.coordsAttribute);
+
     this.mesh = new THREE.InstancedMesh(
       this.geometry,
       this.material,
@@ -242,11 +141,89 @@ export class HealthBars extends SystemBase {
     this.mesh.count = 0;
   }
 
+  /**
+   * Create TSL Node Material for billboard health bars
+   */
+  private createHealthBarMaterial(): THREE.Material {
+    const uOrientationUniform = uniform(vec4(0, 0, 0, 1));
+    const atlasTexture = this.texture;
+
+    // Helper function to apply quaternion to position
+    const applyQuaternion = Fn(
+      ([pos, quat]: [ReturnType<typeof vec3>, ReturnType<typeof vec4>]) => {
+        const qv = vec3(quat.x, quat.y, quat.z);
+        const t = mul(cross(qv, pos), float(2.0));
+        return add(add(pos, mul(t, quat.w)), cross(qv, t));
+      },
+    );
+
+    // Position node with billboard orientation
+    const positionNode = Fn(() => {
+      const localPos = positionLocal;
+
+      // Apply camera orientation for billboard effect
+      const newPosition = applyQuaternion(localPos, uOrientationUniform);
+
+      return newPosition;
+    })();
+
+    // Color node with atlas UV lookup
+    const colorNode = Fn(() => {
+      // Get coords from attribute (set per-instance)
+      const coordsAttr = instancedBufferAttribute(this.coordsAttribute);
+
+      // Calculate atlas UV
+      const baseUv = uv();
+      const atlasUv = vec2(
+        add(div(baseUv.x, float(PER_ROW)), coordsAttr.x),
+        add(div(sub(float(1.0), baseUv.y), float(PER_COLUMN)), coordsAttr.y),
+      );
+
+      // Sample atlas texture
+      const texColor = texture(atlasTexture, atlasUv);
+
+      return texColor;
+    })();
+
+    // Create material
+    const material = new MeshBasicNodeMaterial();
+    material.positionNode = positionNode;
+    material.colorNode = colorNode;
+    material.transparent = true;
+    material.depthWrite = false;
+    material.depthTest = false;
+
+    // Store uniforms for external updates
+    (
+      material as THREE.Material & {
+        healthBarUniforms?: { uOrientation: typeof uOrientationUniform };
+      }
+    ).healthBarUniforms = {
+      uOrientation: uOrientationUniform,
+    };
+
+    return material;
+  }
+
   start() {
     this.world.stage.scene.add(this.mesh);
-    this.subscribe(EventType.XR_SESSION, (session: XRSession | null) =>
-      this.onXRSession(session as unknown),
-    );
+  }
+
+  /**
+   * Update orientation uniform each frame
+   */
+  update() {
+    // Update orientation uniform from camera
+    const mat = this.material as THREE.Material & {
+      healthBarUniforms?: {
+        uOrientation: { value: THREE.Quaternion };
+      };
+    };
+    if (mat.healthBarUniforms) {
+      mat.healthBarUniforms.uOrientation.value.copy(
+        this.world.camera.quaternion,
+      );
+    }
   }
 
   /**
@@ -270,10 +247,8 @@ export class HealthBars extends SystemBase {
     // Set atlas coordinates
     const row = Math.floor(idx / PER_ROW);
     const col = idx % PER_ROW;
-    const coords = this.mesh.geometry.attributes
-      .coords as THREE.InstancedBufferAttribute;
-    coords.setXY(idx, col / PER_ROW, row / PER_COLUMN);
-    coords.needsUpdate = true;
+    this.coordsAttribute.setXY(idx, col / PER_ROW, row / PER_COLUMN);
+    this.coordsAttribute.needsUpdate = true;
 
     // Create entry
     const matrix = new THREE.Matrix4();
@@ -373,12 +348,10 @@ export class HealthBars extends SystemBase {
         this.draw(last);
       }
       // Update coords for swapped instance
-      const coords = this.mesh.geometry.attributes
-        .coords as THREE.InstancedBufferAttribute;
       const row = Math.floor(entry.idx / PER_ROW);
       const col = entry.idx % PER_ROW;
-      coords.setXY(entry.idx, col / PER_ROW, row / PER_COLUMN);
-      coords.needsUpdate = true;
+      this.coordsAttribute.setXY(entry.idx, col / PER_ROW, row / PER_COLUMN);
+      this.coordsAttribute.needsUpdate = true;
       // Update matrix and references
       this.mesh.setMatrixAt(last.idx, last.matrix);
       this.healthBars[last.idx] = last;
@@ -425,10 +398,6 @@ export class HealthBars extends SystemBase {
     this.ctx.clearRect(x, y, SLOT_WIDTH, SLOT_HEIGHT);
     this.texture.needsUpdate = true;
   }
-
-  private onXRSession = (session: unknown) => {
-    this.uniforms.uXR.value = session ? 1 : 0;
-  };
 
   /**
    * Find health bar by entity ID

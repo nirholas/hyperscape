@@ -10,7 +10,7 @@
  * - Right-click context menu for buy/sell options (1, 5, 10, All, X)
  */
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import type { ClientWorld, InventorySlotItem } from "../../types";
 import { COLORS } from "../../constants";
@@ -106,16 +106,6 @@ function getItemIcon(itemId: string): string {
  */
 function formatItemName(itemId: string): string {
   return itemId.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
-}
-
-/**
- * Format quantity for display
- */
-function formatQuantity(quantity: number): string {
-  if (quantity >= 10000000) return `${Math.floor(quantity / 1000000)}M`;
-  if (quantity >= 100000) return `${Math.floor(quantity / 1000)}K`;
-  if (quantity >= 1000) return `${(quantity / 1000).toFixed(1)}K`;
-  return String(quantity);
 }
 
 /**
@@ -326,7 +316,7 @@ export function StorePanel({
   world,
   inventory,
   coins,
-  npcEntityId,
+  npcEntityId: _npcEntityId,
   onClose,
 }: StorePanelProps) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({

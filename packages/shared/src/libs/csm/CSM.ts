@@ -35,6 +35,8 @@ export class CSM {
   private options: CSMOptions;
   private shadowCascades: number;
   private shadowMapSize: number;
+  // Pre-allocated Vector3 for update() to avoid per-frame allocation
+  private _cameraPosition = new THREE.Vector3();
 
   constructor(options: CSMOptions) {
     this.options = options;
@@ -94,8 +96,8 @@ export class CSM {
   public update(): void {
     // Update light positions and shadow cameras to follow the camera
     // This ensures shadows are cast in the visible area around the player
-    const cameraPosition = new THREE.Vector3();
-    this.camera.getWorldPosition(cameraPosition);
+    // Uses pre-allocated Vector3 to avoid per-frame allocation
+    this.camera.getWorldPosition(this._cameraPosition);
 
     for (const light of this.lights) {
       if (light.castShadow) {
@@ -103,10 +105,10 @@ export class CSM {
         light.position
           .copy(this.lightDirection)
           .multiplyScalar(-50)
-          .add(cameraPosition);
+          .add(this._cameraPosition);
 
         // Make light target follow camera too
-        light.target.position.copy(cameraPosition);
+        light.target.position.copy(this._cameraPosition);
 
         light.shadow.camera.updateProjectionMatrix();
       }

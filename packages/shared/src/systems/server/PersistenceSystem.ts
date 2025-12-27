@@ -1,4 +1,4 @@
-import { SystemBase } from "../shared";
+import { SystemBase } from "../shared/infrastructure/SystemBase";
 import { EventType } from "../../types/events";
 import { getSystem } from "../../utils/SystemUtils";
 import type { World } from "../../types/index";
@@ -329,7 +329,7 @@ export class PersistenceSystem extends SystemBase {
       }
     }
 
-    const duration = Date.now() - startTime;
+    const _duration = Date.now() - startTime;
     this.stats.totalSaves += saveCount;
     this.stats.lastSaveTime = Date.now();
   }

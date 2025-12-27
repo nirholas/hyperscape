@@ -41,7 +41,7 @@ import {
 import { NPCBehavior, NPCState } from "../../../types/core/core";
 import { EventType } from "../../../types/events";
 import { TerrainSystem } from "..";
-import { SystemBase } from "..";
+import { SystemBase } from "../infrastructure/SystemBase";
 import { getItem } from "../../../data/items";
 import { getNPCById } from "../../../data/npcs";
 import { getExternalNPC } from "../../../utils/ExternalAssetUtils";
@@ -296,7 +296,8 @@ export class EntityManager extends SystemBase {
 
   update(deltaTime: number): void {
     // Update all entities that need updates
-    this.entitiesNeedingUpdate.forEach((entityId) => {
+    // Use for-of instead of forEach to avoid callback allocation each frame
+    for (const entityId of this.entitiesNeedingUpdate) {
       const entity = this.entities.get(entityId);
       if (entity) {
         entity.update(deltaTime);
@@ -307,7 +308,7 @@ export class EntityManager extends SystemBase {
           entity.networkDirty = false; // Reset flag after adding to set
         }
       }
-    });
+    }
 
     // Send network updates
     if (this.world.isServer && this.networkDirtyEntities.size > 0) {
@@ -317,9 +318,10 @@ export class EntityManager extends SystemBase {
 
   fixedUpdate(deltaTime: number): void {
     // Fixed update for physics
-    this.entities.forEach((entity) => {
+    // Use for-of instead of forEach to avoid callback allocation each frame
+    for (const entity of this.entities.values()) {
       entity.fixedUpdate(deltaTime);
-    });
+    }
   }
 
   async spawnEntity(config: EntityConfig): Promise<Entity | null> {

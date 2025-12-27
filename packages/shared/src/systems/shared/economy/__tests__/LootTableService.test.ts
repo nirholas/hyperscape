@@ -167,7 +167,7 @@ describe("LootTableService", () => {
           "skeleton",
           "zombie",
         ];
-        const foundOne = testMobs.some((mob) => service.hasLootTable(mob));
+        const _foundOne = testMobs.some((mob) => service.hasLootTable(mob));
         // This might still be false if mobs have different names in JSON
         // So we just verify the count is positive
         expect(count).toBeGreaterThan(0);

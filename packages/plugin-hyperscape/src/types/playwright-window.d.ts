@@ -1,11 +1,19 @@
 import { THREE } from "@hyperscape/shared";
 
+// Minimal renderer interface for Playwright window globals
+interface PlaywrightRenderer {
+  render(scene: THREE.Scene, camera: THREE.Camera): void;
+  domElement: HTMLCanvasElement;
+  setSize(width: number, height: number): void;
+  dispose(): void;
+}
+
 declare global {
   interface Window {
     // Three.js globals
     scene: THREE.Scene;
     camera: THREE.Camera;
-    renderer: THREE.WebGLRenderer | any; // Support both WebGL and WebGPU
+    renderer: PlaywrightRenderer;
     environment: THREE.Texture;
 
     // GLTF/VRM loaders

@@ -86,11 +86,9 @@ import { EventType } from "../../types/events";
 import type { World } from "../../core/World";
 import { CombatantEntity, type CombatantConfig } from "../CombatantEntity";
 import { modelCache } from "../../utils/rendering/ModelCache";
-import type { EntityManager } from "../../systems/shared";
 import type {
   VRMAvatarInstance,
   LoadedAvatar,
-  AvatarHooks,
 } from "../../types/rendering/nodes";
 import { Emotes } from "../../data/playerEmotes";
 // NOTE: Loot drops are handled by LootSystem, not MobEntity directly
@@ -101,8 +99,6 @@ import {
   type AIStateContext,
 } from "../managers/AIStateMachine";
 import { RespawnManager } from "../managers/RespawnManager";
-import { UIRenderer } from "../../utils/rendering/UIRenderer";
-import { GAME_CONSTANTS } from "../../constants";
 import type {
   HealthBars as HealthBarsSystem,
   HealthBarHandle,
@@ -124,24 +120,27 @@ import { getGameRng } from "../../utils/SeededRandom";
 import { isTerrainSystem } from "../../utils/typeGuards";
 
 // Polyfill ProgressEvent for Node.js server environment
+
 if (typeof ProgressEvent === "undefined") {
-  (globalThis as unknown as { ProgressEvent: unknown }).ProgressEvent =
-    class extends Event {
-      lengthComputable = false;
-      loaded = 0;
-      total = 0;
-      constructor(
-        type: string,
-        init?: { lengthComputable?: boolean; loaded?: number; total?: number },
-      ) {
-        super(type);
-        if (init) {
-          this.lengthComputable = init.lengthComputable || false;
-          this.loaded = init.loaded || 0;
-          this.total = init.total || 0;
-        }
+  const ProgressEventPolyfill = class extends Event {
+    lengthComputable = false;
+    loaded = 0;
+    total = 0;
+    constructor(
+      type: string,
+      init?: { lengthComputable?: boolean; loaded?: number; total?: number },
+    ) {
+      super(type);
+      if (init) {
+        this.lengthComputable = init.lengthComputable || false;
+        this.loaded = init.loaded || 0;
+        this.total = init.total || 0;
       }
-    };
+    }
+  };
+  (
+    globalThis as unknown as { ProgressEvent?: typeof ProgressEventPolyfill }
+  ).ProgressEvent = ProgressEventPolyfill;
 }
 
 export class MobEntity extends CombatantEntity {
@@ -159,6 +158,12 @@ export class MobEntity extends CombatantEntity {
   private _manualEmoteOverrideUntil: number = 0; // Timestamp until which manual emote override is active
   private _tempMatrix = new THREE.Matrix4();
   private _tempScale = new THREE.Vector3(1, 1, 1);
+  // Pre-allocated temps for update/lateUpdate to avoid per-frame allocations
+  private _healthBarMatrix = new THREE.Matrix4();
+  private _combatQuat = new THREE.Quaternion();
+  private _combatAxis = new THREE.Vector3(0, 1, 0);
+  private _targetQuat = new THREE.Quaternion();
+  private _targetAxis = new THREE.Vector3(0, 1, 0);
   private _terrainWarningLogged = false;
   private _hasValidTerrainHeight = false;
   // Track if we've received authoritative position from server (Issue #416 fix)
@@ -169,12 +174,15 @@ export class MobEntity extends CombatantEntity {
   private _deathPositionTerrainSnapped = false;
   // Placeholder hitbox for click detection before VRM loads (RuneScape-style: entity is functional immediately)
   private _placeholderHitbox: THREE.Mesh | null = null;
+  // Track if visibility needs to be restored after respawn position update
+  private _pendingRespawnRestore = false;
 
   private patrolPoints: Array<{ x: number; z: number }> = [];
   private currentPatrolIndex = 0;
 
   private _wanderTarget: { x: number; z: number } | null = null;
-  private _lastPosition: THREE.Vector3 | null = null;
+  private _lastPosition: THREE.Vector3 = new THREE.Vector3();
+  private _lastPositionValid = false;
   private _stuckTimer = 0;
   private readonly STUCK_TIMEOUT = 3000; // Give up after 3 seconds stuck
   // Tile movement throttling - prevent emitting duplicate move requests
@@ -817,11 +825,6 @@ export class MobEntity extends CombatantEntity {
       // Apply manifest scale on top of VRM's height normalization
       // VRM is auto-normalized to 1.6m, so scale 2.0 = 3.2m tall
       const configScale = this.config.scale;
-      const beforeScale = {
-        x: this.mesh.scale.x,
-        y: this.mesh.scale.y,
-        z: this.mesh.scale.z,
-      };
       this.mesh.scale.set(
         this.mesh.scale.x * configScale.x,
         this.mesh.scale.y * configScale.y,
@@ -927,7 +930,7 @@ export class MobEntity extends CombatantEntity {
           animationClips[name as "walk" | "run"] = clip;
           if (name === "walk") animationClips.idle = clip; // Use walk as idle
         }
-      } catch (err) {
+      } catch (_err) {
         // Animation file not found - skip
       }
     }
@@ -1465,8 +1468,11 @@ export class MobEntity extends CombatantEntity {
     this.combatManager.exitCombat();
 
     // Clear any combat state in CombatSystem
-    const combatSystem = this.world.getSystem("combat") as any;
-    if (combatSystem && typeof combatSystem.forceEndCombat === "function") {
+    const combatSystem =
+      this.world.getSystem<
+        import("../../types/systems/system-interfaces").CombatSystem
+      >("combat");
+    if (combatSystem) {
       combatSystem.forceEndCombat(this.id);
     }
 
@@ -1709,12 +1715,11 @@ export class MobEntity extends CombatantEntity {
 
     // Update health bar position (HealthBars system uses atlas + instanced mesh)
     if (this._healthBarHandle) {
-      // Position health bar above mob's head
-      const healthBarMatrix = new THREE.Matrix4();
-      healthBarMatrix.copyPosition(this.node.matrixWorld);
+      // Position health bar above mob's head using pre-allocated matrix
+      this._healthBarMatrix.copyPosition(this.node.matrixWorld);
       // Offset Y to position above the mob (2.0 units up)
-      healthBarMatrix.elements[13] += 2.0;
-      this._healthBarHandle.move(healthBarMatrix);
+      this._healthBarMatrix.elements[13] += 2.0;
+      this._healthBarHandle.move(this._healthBarMatrix);
     }
 
     // Hide health bar after combat timeout (RuneScape pattern: 4.8 seconds)
@@ -1805,10 +1810,9 @@ export class MobEntity extends CombatantEntity {
             // Otherwise entities face AWAY from each other instead of towards
             angle += Math.PI;
 
-            // Apply rotation to node quaternion
-            const tempQuat = new THREE.Quaternion();
-            tempQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle);
-            this.node.quaternion.copy(tempQuat);
+            // Apply rotation to node quaternion using pre-allocated temps
+            this._combatQuat.setFromAxisAngle(this._combatAxis, angle);
+            this.node.quaternion.copy(this._combatQuat);
           }
           // else: preserve current facing direction (no rotation update)
         }
@@ -1840,7 +1844,7 @@ export class MobEntity extends CombatantEntity {
                 this.node.position.y = terrainHeight + 0.1;
                 this.position.y = terrainHeight + 0.1;
               }
-            } catch (err) {
+            } catch (_err) {
               // Terrain tile not generated yet - keep current Y and retry next frame
               if (
                 this.clientUpdateCalls === 10 &&
@@ -1877,7 +1881,7 @@ export class MobEntity extends CombatantEntity {
                 deathLockedPos.y = terrainHeight;
                 this._deathPositionTerrainSnapped = true;
               }
-            } catch (err) {
+            } catch (_err) {
               // Terrain not ready yet, will retry next frame
             }
           }
@@ -1921,7 +1925,7 @@ export class MobEntity extends CombatantEntity {
               this.node.updateMatrixWorld(true);
               this._avatarInstance.move(this.node.matrixWorld);
             }
-          } catch (err) {
+          } catch (_err) {
             // Terrain tile not generated yet
           }
         }
@@ -1964,49 +1968,74 @@ export class MobEntity extends CombatantEntity {
     if (mixer) {
       mixer.update(deltaTime);
 
-      // Update skeleton bones
+      // Update skeleton bones using pre-defined callback to avoid GC pressure
       if (this.mesh) {
-        this.mesh.traverse((child) => {
-          if (child instanceof THREE.SkinnedMesh && child.skeleton) {
-            const skeleton = child.skeleton;
-
-            // Update bone matrices
-            skeleton.bones.forEach((bone) => bone.updateMatrixWorld());
-            skeleton.update();
-
-            // VALIDATION: Check if bones are actually transforming
-            if (this.clientUpdateCalls === 1) {
-              const hipsBone = skeleton.bones.find((b) =>
-                b.name.toLowerCase().includes("hips"),
-              );
-              if (hipsBone) {
-                this.initialBonePosition = hipsBone.position.clone();
-              }
-            } else if (this.clientUpdateCalls === 60) {
-              const hipsBone = skeleton.bones.find((b) =>
-                b.name.toLowerCase().includes("hips"),
-              );
-              if (hipsBone && this.initialBonePosition) {
-                const distance = hipsBone.position.distanceTo(
-                  this.initialBonePosition,
-                );
-                if (distance < 0.001) {
-                  throw new Error(
-                    `[MobEntity] BONES NOT MOVING: ${this.config.mobType}\n` +
-                      `  Start: [${this.initialBonePosition.toArray().map((v) => v.toFixed(4))}]\n` +
-                      `  Now: [${hipsBone.position.toArray().map((v) => v.toFixed(4))}]\n` +
-                      `  Distance: ${distance.toFixed(6)} (need > 0.001)\n` +
-                      `  Mixer time: ${mixer.time.toFixed(2)}s\n` +
-                      `  Animation runs but doesn't affect bones!`,
-                  );
-                }
-              }
-            }
-          }
-        });
+        this.mesh.traverse(this._updateSkeletonCallback);
       }
     }
   }
+
+  /**
+   * Pre-defined callback for skeleton update to avoid creating new functions every frame
+   * Called from lateUpdate via mesh.traverse()
+   */
+  private _updateSkeletonCallback = (child: THREE.Object3D): void => {
+    if (child instanceof THREE.SkinnedMesh && child.skeleton) {
+      const skeleton = child.skeleton;
+
+      // Update bone matrices using for-loop instead of forEach to avoid callback allocation
+      const bones = skeleton.bones;
+      for (let i = 0; i < bones.length; i++) {
+        bones[i].updateMatrixWorld();
+      }
+      skeleton.update();
+
+      // VALIDATION: Check if bones are actually transforming (only first 60 frames)
+      if (this.clientUpdateCalls === 1) {
+        // Find hips bone using for-loop instead of .find()
+        let hipsBone: THREE.Bone | undefined;
+        for (let i = 0; i < bones.length; i++) {
+          if (bones[i].name.toLowerCase().includes("hips")) {
+            hipsBone = bones[i];
+            break;
+          }
+        }
+        if (hipsBone) {
+          // Use copy instead of clone to reuse existing object if available
+          if (!this.initialBonePosition) {
+            this.initialBonePosition = hipsBone.position.clone();
+          } else {
+            this.initialBonePosition.copy(hipsBone.position);
+          }
+        }
+      } else if (this.clientUpdateCalls === 60) {
+        // Find hips bone using for-loop instead of .find()
+        let hipsBone: THREE.Bone | undefined;
+        for (let i = 0; i < bones.length; i++) {
+          if (bones[i].name.toLowerCase().includes("hips")) {
+            hipsBone = bones[i];
+            break;
+          }
+        }
+        if (hipsBone && this.initialBonePosition) {
+          const distance = hipsBone.position.distanceTo(
+            this.initialBonePosition,
+          );
+          if (distance < 0.001) {
+            const mixer = (this as { mixer?: THREE.AnimationMixer }).mixer;
+            throw new Error(
+              `[MobEntity] BONES NOT MOVING: ${this.config.mobType}\n` +
+                `  Start: [${this.initialBonePosition.toArray().map((v) => v.toFixed(4))}]\n` +
+                `  Now: [${hipsBone.position.toArray().map((v) => v.toFixed(4))}]\n` +
+                `  Distance: ${distance.toFixed(6)} (need > 0.001)\n` +
+                `  Mixer time: ${mixer?.time.toFixed(2) ?? "N/A"}s\n` +
+                `  Animation runs but doesn't affect bones!`,
+            );
+          }
+        }
+      }
+    }
+  };
 
   /**
    * Calculate 2D horizontal distance (XZ plane only, ignoring Y)
@@ -2247,15 +2276,14 @@ export class MobEntity extends CombatantEntity {
         this._terrainWarningLogged = true;
       }
 
-      // Calculate rotation to face movement direction
+      // Calculate rotation to face movement direction using pre-allocated temps
       // VRM 1.0+ models are rotated 180° by the factory (see createVRMFactory.ts:264)
       // so we need to add PI to compensate and face the correct direction
       const angle = Math.atan2(direction.x, direction.z) + Math.PI;
-      const targetQuaternion = new THREE.Quaternion();
-      targetQuaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle);
+      this._targetQuat.setFromAxisAngle(this._targetAxis, angle);
 
       // Smoothly rotate towards target direction
-      this.node.quaternion.slerp(targetQuaternion, 0.1);
+      this.node.quaternion.slerp(this._targetQuat, 0.1);
 
       // Stuck detection: Only check when actively moving (RuneScape-style: give up if stuck)
       // This prevents false positives during IDLE and ATTACK states
@@ -2265,7 +2293,7 @@ export class MobEntity extends CombatantEntity {
         this.config.aiState === MobAIState.RETURN;
 
       if (isMovingState) {
-        if (this._lastPosition) {
+        if (this._lastPositionValid) {
           const moved = this.position.distanceTo(this._lastPosition);
           if (moved < 0.01) {
             // Barely moved - increment stuck timer
@@ -2280,7 +2308,7 @@ export class MobEntity extends CombatantEntity {
               this.aggroManager.clearTarget();
               this._wanderTarget = null;
               this._stuckTimer = 0;
-              this._lastPosition = null;
+              this._lastPositionValid = false;
               this.markNetworkDirty();
               return;
             }
@@ -2289,7 +2317,8 @@ export class MobEntity extends CombatantEntity {
             this._stuckTimer = 0;
           }
         }
-        this._lastPosition = this.position.clone();
+        this._lastPosition.copy(this.position);
+        this._lastPositionValid = true;
       }
 
       // Update position (will be synced to clients via network)
@@ -2616,7 +2645,7 @@ export class MobEntity extends CombatantEntity {
             }
 
             // Mark that we need to restore visibility AFTER position update
-            (this as any)._pendingRespawnRestore = true;
+            this._pendingRespawnRestore = true;
           }
         }
       }
@@ -2739,8 +2768,8 @@ export class MobEntity extends CombatantEntity {
 
     // CRITICAL: Restore visibility AFTER position has been updated from server
     // This ensures VRM is moved to the correct spawn location, not death location
-    if ((this as any)._pendingRespawnRestore) {
-      (this as any)._pendingRespawnRestore = false;
+    if (this._pendingRespawnRestore) {
+      this._pendingRespawnRestore = false;
 
       // CRITICAL: Update client's _currentSpawnPoint to match new position from server
       // This ensures client and server are in sync (defense in depth)

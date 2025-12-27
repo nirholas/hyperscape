@@ -11,7 +11,87 @@
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { CombatSystem } from "../CombatSystem";
-import { EventType } from "../../../../types/events";
+import type { World } from "../../../../core/World";
+
+interface MockPlayerEntity {
+  id: string;
+  type: string;
+  position: { x: number; y: number; z: number };
+  health: number;
+  stats: {
+    attack: number;
+    strength: number;
+    defence: number;
+    hitpoints: number;
+  };
+  data: {
+    isLoading: boolean;
+    stats: {
+      attack: number;
+      strength: number;
+      defence: number;
+      hitpoints: number;
+    };
+  };
+  combat: { combatTarget: string | null };
+  emote: string;
+  base: {
+    quaternion: {
+      set: ReturnType<typeof vi.fn>;
+      copy: ReturnType<typeof vi.fn>;
+    };
+  };
+  node: {
+    position: { x: number; y: number; z: number };
+    quaternion: {
+      set: ReturnType<typeof vi.fn>;
+      copy: ReturnType<typeof vi.fn>;
+    };
+  };
+  getPosition: () => { x: number; y: number; z: number };
+  markNetworkDirty: ReturnType<typeof vi.fn>;
+  takeDamage: ReturnType<typeof vi.fn>;
+  getHealth: () => number;
+  getComponent: (name: string) => unknown;
+}
+
+interface MockMobEntity {
+  id: string;
+  type: string;
+  position: { x: number; y: number; z: number };
+  health: number;
+  stats: {
+    attack: number;
+    strength: number;
+    defence: number;
+    hitpoints: number;
+  };
+  node: {
+    position: { x: number; y: number; z: number };
+    quaternion: {
+      set: ReturnType<typeof vi.fn>;
+      copy: ReturnType<typeof vi.fn>;
+    };
+  };
+  getPosition: () => { x: number; y: number; z: number };
+  getMobData: () => {
+    health: number;
+    stats: {
+      attack: number;
+      strength: number;
+      defence: number;
+      hitpoints: number;
+    };
+    combatRange: number;
+    attackSpeedTicks: number;
+  };
+  getHealth: () => number;
+  takeDamage: ReturnType<typeof vi.fn>;
+  isAttackable: () => boolean;
+  setServerEmote: ReturnType<typeof vi.fn>;
+  markNetworkDirty: ReturnType<typeof vi.fn>;
+  isDead: () => boolean;
+}
 
 // Mock player entity
 function createMockPlayer(
@@ -113,21 +193,23 @@ function createMockMob(
 // Mock World
 function createMockWorld(
   options: {
-    players?: Map<string, any>;
-    mobs?: Map<string, any>;
+    players?: Map<string, MockPlayerEntity>;
+    mobs?: Map<string, MockMobEntity>;
     currentTick?: number;
     isServer?: boolean;
   } = {},
 ) {
-  const players = options.players || new Map();
-  const mobs = options.mobs || new Map();
-  const eventHandlers = new Map<string, Function[]>();
+  const players = options.players || new Map<string, MockPlayerEntity>();
+  const mobs = options.mobs || new Map<string, MockMobEntity>();
+  const eventHandlers = new Map<string, Array<(data: unknown) => void>>();
 
   // CombatSystem.getEntity() expects:
   // - world.entities.players.get() for players
   // - world.entities.get() for mobs
   // NOTE: Use the mobs Map directly (not a copy) so test can add mobs after creation
-  const entities = mobs as Map<string, any> & { players: Map<string, any> };
+  const entities = mobs as Map<string, MockMobEntity> & {
+    players: Map<string, MockPlayerEntity>;
+  };
   entities.players = players;
 
   return {
@@ -172,7 +254,7 @@ function createMockWorld(
       eventHandlers.get(event)!.push(handler);
     },
     off: vi.fn(),
-    emit: vi.fn((event: string, data: any) => {
+    emit: vi.fn((event: string, data: unknown) => {
       const handlers = eventHandlers.get(event) || [];
       handlers.forEach((h) => h(data));
     }),
@@ -183,8 +265,8 @@ function createMockWorld(
 describe("CombatSystem", () => {
   let combatSystem: CombatSystem;
   let mockWorld: ReturnType<typeof createMockWorld>;
-  let mockPlayers: Map<string, any>;
-  let mockMobs: Map<string, any>;
+  let mockPlayers: Map<string, MockPlayerEntity>;
+  let mockMobs: Map<string, MockMobEntity>;
 
   beforeEach(async () => {
     mockPlayers = new Map();
@@ -195,7 +277,7 @@ describe("CombatSystem", () => {
       currentTick: 100,
     });
 
-    combatSystem = new CombatSystem(mockWorld as any);
+    combatSystem = new CombatSystem(mockWorld as unknown as World);
     // CRITICAL: Call init() to cache playerSystem for auto-retaliate checks
     await combatSystem.init();
   });
@@ -375,7 +457,7 @@ describe("CombatSystem", () => {
 
     it("cleans up anti-cheat tracking on disconnect", () => {
       // Record a violation first
-      const antiCheatStats = combatSystem.antiCheat.getStats();
+      const _antiCheatStats = combatSystem.antiCheat.getStats();
       // The cleanup should work even with no violations
       expect(() => {
         combatSystem.cleanupPlayerDisconnect("player1");

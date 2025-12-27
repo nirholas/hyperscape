@@ -8,11 +8,20 @@ interface AgentSettingsProps {
   onDelete?: (agentId: string) => Promise<void>;
 }
 
+interface AgentSettingsData {
+  accountId?: string;
+  characterType?: string;
+  avatar?: string;
+  [key: string]: unknown;
+}
+
 export const AgentSettings: React.FC<AgentSettingsProps> = ({
   agent,
   onDelete,
 }) => {
-  const [settings, setSettings] = React.useState<any>(null);
+  const [settings, setSettings] = React.useState<AgentSettingsData | null>(
+    null,
+  );
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
@@ -59,16 +68,19 @@ export const AgentSettings: React.FC<AgentSettingsProps> = ({
       });
       if (response.ok) {
         console.log("[AgentSettings] ✅ Settings updated successfully");
+        // eslint-disable-next-line no-undef
         alert("Settings saved successfully!");
       } else {
         const errorData = await response.json().catch(() => ({}));
         console.error("[AgentSettings] ❌ Failed to save settings:", errorData);
+        // eslint-disable-next-line no-undef
         alert(
           `Failed to save settings: ${errorData.error || response.statusText}`,
         );
       }
     } catch (error) {
       console.error("[AgentSettings] ❌ Error saving settings:", error);
+      // eslint-disable-next-line no-undef
       alert("Error saving settings.");
     } finally {
       setSaving(false);
@@ -84,6 +96,7 @@ export const AgentSettings: React.FC<AgentSettingsProps> = ({
       // Navigation will happen automatically when agent is removed from list
     } catch (error) {
       console.error("[AgentSettings] ❌ Error deleting agent:", error);
+      // eslint-disable-next-line no-undef
       alert("Failed to delete agent. Please try again.");
       setDeleting(false);
       setShowDeleteConfirm(false);
@@ -152,7 +165,7 @@ export const AgentSettings: React.FC<AgentSettingsProps> = ({
               </label>
               <input
                 type="text"
-                value={settings.name || ""}
+                value={(settings.name as string | undefined) || ""}
                 onChange={(e) =>
                   setSettings({ ...settings, name: e.target.value })
                 }
@@ -169,7 +182,7 @@ export const AgentSettings: React.FC<AgentSettingsProps> = ({
               </label>
               <input
                 type="text"
-                value={settings.username || ""}
+                value={(settings.username as string | undefined) || ""}
                 onChange={(e) =>
                   setSettings({ ...settings, username: e.target.value })
                 }
@@ -187,7 +200,7 @@ export const AgentSettings: React.FC<AgentSettingsProps> = ({
               </label>
               <textarea
                 rows={6}
-                value={settings.bio || ""}
+                value={(settings.bio as string | undefined) || ""}
                 onChange={(e) =>
                   setSettings({ ...settings, bio: e.target.value })
                 }

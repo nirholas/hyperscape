@@ -1,7 +1,6 @@
 import {
   Image as ImageIcon,
   Link as LinkIcon,
-  Upload as UploadIcon,
   X as XIcon,
   Info,
 } from "lucide-react";
@@ -34,7 +33,6 @@ interface ReferenceImageCardProps {
 export const ReferenceImageCard: React.FC<ReferenceImageCardProps> = ({
   generationType,
   mode,
-  source,
   url,
   dataUrl,
   onModeChange,

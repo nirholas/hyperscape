@@ -726,7 +726,8 @@ export class EventBridge {
     const entity = this.world.entities?.get?.(entityId);
     if (entity) {
       // Try to get npcId from various possible locations on the entity
-      const entityWithConfig = entity as {
+      // Cast through unknown because Entity.config is protected but NPCEntity.config is public
+      const entityWithConfig = entity as unknown as {
         config?: { npcId?: string };
         data?: { npcId?: string };
         npcId?: string;

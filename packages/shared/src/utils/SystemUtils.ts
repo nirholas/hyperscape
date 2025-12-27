@@ -129,7 +129,7 @@ export function getLoaderSystem(world: World): LoaderSystem | null {
  * Graphics system interface
  */
 export interface GraphicsSystem extends System {
-  renderer?: THREE.WebGLRenderer | unknown; // Support both WebGL and WebGPU
+  renderer?: unknown; // WebGPU renderer
   isWebGPU?: boolean;
 }
 
@@ -151,9 +151,15 @@ export function getStageSystem(world: World): StageSystem | null {
 
 /**
  * Camera system interface for PlayerLocal
+ * Matches ClientCameraSystem implementation
  */
 export interface CameraSystem extends System {
-  setTarget: (data: { target: Entity | THREE.Object3D }) => void;
+  setTarget: (
+    target: { position: THREE.Vector3 } | Entity | THREE.Object3D,
+  ) => void;
+  resetCamera?: () => void;
+  getCamera?: () => THREE.PerspectiveCamera;
+  removeTarget?: (target: unknown) => void;
 }
 
 export function getCameraSystem(world: World): CameraSystem | null {

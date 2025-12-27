@@ -29,7 +29,7 @@ The sprite generation system centers around the `SpriteGenerationService`:
 ┌────────────────────────────────────┐
 │   SpriteGenerationService          │
 ├────────────────────────────────────┤
-│ - WebGLRenderer                    │
+│ - WebGPURenderer                   │
 │ - Scene                            │
 │ - OrthographicCamera               │
 │ - Lighting Setup                   │
@@ -47,7 +47,7 @@ The sprite generation system centers around the `SpriteGenerationService`:
 
 ### Core Components
 
-**WebGLRenderer**
+**WebGPURenderer**
 - Renders 3D scenes to 2D images
 - Supports transparency (alpha channel)
 - Antialiasing for smooth edges
@@ -76,14 +76,14 @@ The main service class manages the entire sprite generation pipeline.
 
 ```typescript
 export class SpriteGenerationService {
-  private renderer: WebGLRenderer
+  private renderer: WebGPURenderer
   private scene: Scene
   private camera: OrthographicCamera
   private loader: GLTFLoader
 
   constructor() {
     // Create renderer
-    this.renderer = new WebGLRenderer({
+    this.renderer = new WebGPURenderer({
       antialias: true,
       alpha: true,
       preserveDrawingBuffer: true
@@ -148,7 +148,7 @@ The renderer is configured for optimal sprite quality:
 
 ```typescript
 constructor() {
-  this.renderer = new WebGLRenderer({
+  this.renderer = new WebGPURenderer({
     antialias: true,              // Smooth edges
     alpha: true,                  // Transparency support
     preserveDrawingBuffer: true   // Allow canvas readback
@@ -906,7 +906,7 @@ for (const model of models) {
 
 // Bad: New renderer for each sprite
 for (const model of models) {
-  const service = new SpriteGenerationService()  // Creates new WebGL context
+  const service = new SpriteGenerationService()  // Creates new WebGPU context
   await service.generateSprites({ modelPath: model })
   service.dispose()  // Cleanup
 }
@@ -1029,7 +1029,7 @@ const ambientLight = new AmbientLight(0xffffff, 0.8)  // Was 0.6
 **Solution:**
 ```typescript
 // Ensure antialiasing and use higher resolution
-this.renderer = new WebGLRenderer({
+this.renderer = new WebGPURenderer({
   antialias: true,
   // ...
 })

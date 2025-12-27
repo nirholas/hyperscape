@@ -42,6 +42,60 @@ import { getAvailableGoals } from "../providers/goalProvider.js";
 const packr = new Packr({ structuredClone: true });
 const unpackr = new Unpackr();
 
+// Pre-allocated temp objects for hot path optimizations (avoid GC pressure)
+const _tempPosition: [number, number, number] = [0, 0, 0];
+const _tempTranslated: Record<string, unknown> = {};
+
+/**
+ * Check if a position is valid (non-allocating check)
+ * Used for hot path checks without creating arrays
+ */
+function hasValidPositionData(pos: unknown): boolean {
+  if (Array.isArray(pos) && pos.length >= 3) {
+    return typeof pos[0] === "number" && typeof pos[2] === "number";
+  }
+  if (pos && typeof pos === "object" && "x" in pos) {
+    const objPos = pos as { x: number; z?: number };
+    return typeof objPos.x === "number";
+  }
+  return false;
+}
+
+/**
+ * Update an existing position array in place, or create new if none exists
+ * Optimized for hot paths - avoids allocation when possible
+ */
+function updatePositionInPlace(
+  existingPos: [number, number, number] | null | undefined,
+  newPos: unknown,
+): [number, number, number] | null {
+  if (Array.isArray(newPos) && newPos.length >= 3) {
+    if (existingPos && Array.isArray(existingPos)) {
+      // Update existing array in place - no allocation!
+      existingPos[0] = newPos[0];
+      existingPos[1] = newPos[1];
+      existingPos[2] = newPos[2];
+      return existingPos;
+    }
+    // No existing array, must create new one
+    return [newPos[0], newPos[1], newPos[2]];
+  }
+  if (newPos && typeof newPos === "object" && "x" in newPos) {
+    const objPos = newPos as { x: number; y?: number; z?: number };
+    const z = objPos.z ?? 0;
+    if (existingPos && Array.isArray(existingPos)) {
+      // Update existing array in place - no allocation!
+      existingPos[0] = objPos.x;
+      existingPos[1] = objPos.y ?? 0;
+      existingPos[2] = z;
+      return existingPos;
+    }
+    // No existing array, must create new one
+    return [objPos.x, objPos.y ?? 0, z];
+  }
+  return null;
+}
+
 export class HyperscapeService
   extends Service
   implements HyperscapeServiceInterface
@@ -927,6 +981,8 @@ export class HyperscapeService
    * Normalize position to [x, y, z] array format
    * Handles both array [x, y, z] and object {x, y, z} formats from server
    * Returns null if position cannot be normalized
+   *
+   * NOTE: For hot paths (frequent calls), use normalizePositionInPlace which reuses a temp array
    */
   private normalizePosition(pos: unknown): [number, number, number] | null {
     if (Array.isArray(pos) && pos.length >= 3) {
@@ -942,27 +998,60 @@ export class HyperscapeService
   }
 
   /**
+   * Normalize position IN PLACE using pre-allocated temp array
+   * Use this for hot paths to avoid GC pressure
+   * Returns the _tempPosition array (reused) or null if invalid
+   * WARNING: The returned array is reused - copy values if you need to store them!
+   */
+  private normalizePositionInPlace(
+    pos: unknown,
+  ): [number, number, number] | null {
+    if (Array.isArray(pos) && pos.length >= 3) {
+      _tempPosition[0] = pos[0];
+      _tempPosition[1] = pos[1];
+      _tempPosition[2] = pos[2];
+      return _tempPosition;
+    }
+    if (pos && typeof pos === "object" && "x" in pos) {
+      const objPos = pos as { x: number; y?: number; z: number };
+      _tempPosition[0] = objPos.x;
+      _tempPosition[1] = objPos.y ?? 0;
+      _tempPosition[2] = "z" in objPos ? objPos.z : 0;
+      return _tempPosition;
+    }
+    return null;
+  }
+
+  // Static abbreviation map - no need to recreate each call
+  private static readonly ENTITY_ABBREVIATIONS: Record<string, string> = {
+    p: "position",
+    v: "velocity",
+    q: "quaternion",
+    e: "emote",
+  };
+
+  /**
    * Translate abbreviated entity property names from server to full names
    * Server sends: p (position), v (velocity), q (quaternion), e (emote)
    * Plugin expects: position, velocity, quaternion, emote
+   *
+   * NOTE: Uses pre-allocated temp object to avoid GC pressure.
+   * The returned object is REUSED - copy values if you need to store them!
    */
   private translateEntityChanges(
     changes: Record<string, unknown>,
   ): Record<string, unknown> {
-    const translated: Record<string, unknown> = {};
-    const abbreviations: Record<string, string> = {
-      p: "position",
-      v: "velocity",
-      q: "quaternion",
-      e: "emote",
-    };
-
-    for (const [key, value] of Object.entries(changes)) {
-      const fullName = abbreviations[key] || key;
-      translated[fullName] = value;
+    // Clear the temp object for reuse
+    for (const key in _tempTranslated) {
+      delete _tempTranslated[key];
     }
 
-    return translated;
+    for (const [key, value] of Object.entries(changes)) {
+      const fullName = HyperscapeService.ENTITY_ABBREVIATIONS[key] || key;
+      _tempTranslated[fullName] = value;
+    }
+
+    return _tempTranslated;
   }
 
   /**
@@ -1180,8 +1269,12 @@ export class HyperscapeService
           Object.assign(this.gameState.playerEntity, translatedChanges);
 
           // Normalize position to [x, y, z] array format if it was updated
+          // Use in-place update to avoid allocation when possible
           if (translatedChanges.position) {
-            const normalizedPos = this.normalizePosition(
+            const normalizedPos = updatePositionInPlace(
+              this.gameState.playerEntity.position as
+                | [number, number, number]
+                | null,
               translatedChanges.position,
             );
             if (normalizedPos) {
@@ -1249,14 +1342,19 @@ export class HyperscapeService
       case "playerState":
         // Handle player position/state updates
         if (this.gameState.playerEntity && data) {
-          // Check if we had a valid position before this update
-          const hadPositionBefore = !!this.normalizePosition(
+          // Check if we had a valid position before this update (non-allocating check)
+          const hadPositionBefore = hasValidPositionData(
             this.gameState.playerEntity.position,
           );
 
-          // Normalize and update position if present
+          // Normalize and update position if present (in-place to avoid allocation)
           if (data.position) {
-            const normalizedPos = this.normalizePosition(data.position);
+            const normalizedPos = updatePositionInPlace(
+              this.gameState.playerEntity.position as
+                | [number, number, number]
+                | null,
+              data.position,
+            );
             if (normalizedPos) {
               this.gameState.playerEntity.position = normalizedPos;
               logger.info(
@@ -1305,23 +1403,26 @@ export class HyperscapeService
         };
 
         if (moveData.id === this.characterId && this.gameState.playerEntity) {
-          // Check if we had a valid position before this update
-          const hadPositionBefore = !!this.normalizePosition(
+          // Check if we had a valid position before this update (non-allocating)
+          const hadPositionBefore = hasValidPositionData(
             this.gameState.playerEntity.position,
           );
 
           // Update player's movement state
           if (moveData.startTile) {
-            // Convert tile {x, z} to world position [x, y, z]
-            const prevPos = this.normalizePosition(
-              this.gameState.playerEntity.position,
-            );
-            const currentY = prevPos ? prevPos[1] : 0;
-            this.gameState.playerEntity.position = [
-              moveData.startTile.x,
-              currentY,
-              moveData.startTile.z,
-            ];
+            // Convert tile {x, z} to world position [x, y, z] - update in place
+            const existingPos = this.gameState.playerEntity.position as
+              | [number, number, number]
+              | null;
+            const currentY = existingPos ? existingPos[1] : 0;
+            const updatedPos = updatePositionInPlace(existingPos, {
+              x: moveData.startTile.x,
+              y: currentY,
+              z: moveData.startTile.z,
+            });
+            if (updatedPos) {
+              this.gameState.playerEntity.position = updatedPos;
+            }
 
             // Start autonomous exploration if this is the first position
             if (!hadPositionBefore && !this.isAutonomousBehaviorRunning()) {
@@ -1335,15 +1436,21 @@ export class HyperscapeService
             `[HyperscapeService] 🚶 Tile movement started: ${moveData.path?.length || 0} tiles, running: ${moveData.running}`,
           );
         } else if (moveData.id) {
-          // Update nearby entity
+          // Update nearby entity - update in place
           const entity = this.gameState.nearbyEntities.get(moveData.id);
           if (entity && moveData.startTile) {
-            const currentY = entity.position?.[1] || 0;
-            entity.position = [
-              moveData.startTile.x,
-              currentY,
-              moveData.startTile.z,
-            ];
+            const existingPos = entity.position as
+              | [number, number, number]
+              | null;
+            const currentY = existingPos?.[1] || 0;
+            const updatedPos = updatePositionInPlace(existingPos, {
+              x: moveData.startTile.x,
+              y: currentY,
+              z: moveData.startTile.z,
+            });
+            if (updatedPos) {
+              entity.position = updatedPos;
+            }
           }
         }
         break;
@@ -1360,12 +1467,16 @@ export class HyperscapeService
 
         if (tileData.id === this.characterId && this.gameState.playerEntity) {
           if (tileData.worldPos) {
-            // worldPos is already [x, y, z] tuple
-            this.gameState.playerEntity.position = [
-              tileData.worldPos[0],
-              tileData.worldPos[1],
-              tileData.worldPos[2],
-            ];
+            // worldPos is already [x, y, z] tuple - update in place
+            const updatedPos = updatePositionInPlace(
+              this.gameState.playerEntity.position as
+                | [number, number, number]
+                | null,
+              tileData.worldPos,
+            );
+            if (updatedPos) {
+              this.gameState.playerEntity.position = updatedPos;
+            }
             logger.debug(
               `[HyperscapeService] 📍 Tile update: [${tileData.worldPos[0].toFixed(0)}, ${tileData.worldPos[2].toFixed(0)}]`,
             );
@@ -1373,21 +1484,14 @@ export class HyperscapeService
         } else if (tileData.id) {
           const entity = this.gameState.nearbyEntities.get(tileData.id);
           if (entity && tileData.worldPos) {
-            // Debug: Log mob tile position updates
-            const entityAny = entity as unknown as Record<string, unknown>;
-            const isMob =
-              entityAny.mobType ||
-              entityAny.type === "mob" ||
-              /goblin/i.test(String(entity.name || ""));
-            // Disabled verbose mob tile logging
-            // if (isMob) {
-            //   logger.debug(`[HyperscapeService] MOB TILE UPDATE: "${entity.name}" id=${tileData.id}`);
-            // }
-            entity.position = [
-              tileData.worldPos[0],
-              tileData.worldPos[1],
-              tileData.worldPos[2],
-            ];
+            // Update in place to avoid allocation
+            const updatedPos = updatePositionInPlace(
+              entity.position as [number, number, number] | null,
+              tileData.worldPos,
+            );
+            if (updatedPos) {
+              entity.position = updatedPos;
+            }
           }
         }
         break;
@@ -1404,12 +1508,16 @@ export class HyperscapeService
 
         if (endData.id === this.characterId && this.gameState.playerEntity) {
           if (endData.worldPos) {
-            // worldPos is already [x, y, z] tuple
-            this.gameState.playerEntity.position = [
-              endData.worldPos[0],
-              endData.worldPos[1],
-              endData.worldPos[2],
-            ];
+            // worldPos is already [x, y, z] tuple - update in place
+            const updatedPos = updatePositionInPlace(
+              this.gameState.playerEntity.position as
+                | [number, number, number]
+                | null,
+              endData.worldPos,
+            );
+            if (updatedPos) {
+              this.gameState.playerEntity.position = updatedPos;
+            }
           }
           logger.debug(
             `[HyperscapeService] 🏁 Tile movement ended at tile (${endData.tile?.x}, ${endData.tile?.z})`,
@@ -1417,11 +1525,13 @@ export class HyperscapeService
         } else if (endData.id) {
           const entity = this.gameState.nearbyEntities.get(endData.id);
           if (entity && endData.worldPos) {
-            entity.position = [
-              endData.worldPos[0],
-              endData.worldPos[1],
-              endData.worldPos[2],
-            ];
+            const updatedPos = updatePositionInPlace(
+              entity.position as [number, number, number] | null,
+              endData.worldPos,
+            );
+            if (updatedPos) {
+              entity.position = updatedPos;
+            }
           }
         }
         break;

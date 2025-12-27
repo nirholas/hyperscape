@@ -21,6 +21,7 @@ import {
   TILES_PER_TICK_WALK,
   TILES_PER_TICK_RUN,
   worldToTile,
+  worldToTileInto,
   tileToWorld,
   tilesEqual,
   tilesWithinMeleeRange,
@@ -56,6 +57,22 @@ export class TileMovementManager {
   private readonly antiCheat = new MovementAntiCheat();
   private readonly movementRateLimiter = getTileMovementRateLimiter();
   private readonly pathfindRateLimiter = getPathfindRateLimiter();
+
+  // ============================================================================
+  // PRE-ALLOCATED BUFFERS (Zero-allocation hot path support)
+  // ============================================================================
+
+  /** Reusable tile coordinate for previous position in onTick/processPlayerTick */
+  private readonly _prevTile: TileCoord = { x: 0, z: 0 };
+
+  /** Reusable tile coordinate for target position calculations */
+  private readonly _targetTile: TileCoord = { x: 0, z: 0 };
+
+  /** Reusable tile coordinate for entity position sync */
+  private readonly _actualEntityTile: TileCoord = { x: 0, z: 0 };
+
+  /** Pre-allocated buffer for network path transmission (avoids .map() allocation) */
+  private readonly _networkPathBuffer: Array<{ x: number; z: number }> = [];
 
   constructor(
     private world: World,
@@ -159,7 +176,7 @@ export class TileMovementManager {
 
     // Handle cancellation
     if (payload.cancel) {
-      state.path = [];
+      state.path.length = 0; // Zero-allocation clear
       state.pathIndex = 0;
 
       // RS3-style: Clear movement flag so combat can resume
@@ -260,10 +277,21 @@ export class TileMovementManager {
       // destinationTile: final target (for verification)
       // moveSeq: packet ordering to ignore stale packets
       // emote: bundled animation (OSRS-style, no separate packet)
+
+      // Zero-allocation: copy path to pre-allocated network buffer
+      this._networkPathBuffer.length = path.length;
+      for (let i = 0; i < path.length; i++) {
+        if (!this._networkPathBuffer[i]) {
+          this._networkPathBuffer[i] = { x: 0, z: 0 };
+        }
+        this._networkPathBuffer[i].x = path[i].x;
+        this._networkPathBuffer[i].z = path[i].z;
+      }
+
       this.sendFn("tileMovementStart", {
         id: playerId,
         startTile: { x: state.currentTile.x, z: state.currentTile.z },
-        path: path.map((t) => ({ x: t.x, z: t.z })),
+        path: this._networkPathBuffer,
         running: state.isRunning,
         destinationTile: { x: payload.targetTile.x, z: payload.targetTile.z },
         moveSeq: state.moveSeq,
@@ -323,8 +351,9 @@ export class TileMovementManager {
         continue;
       }
 
-      // Store previous position for rotation calculation
-      const prevTile = { ...state.currentTile };
+      // Store previous position for rotation calculation (zero allocation)
+      this._prevTile.x = state.currentTile.x;
+      this._prevTile.z = state.currentTile.z;
 
       // Move 1 tile (walk) or 2 tiles (run) per tick
       const tilesToMove = state.isRunning
@@ -335,7 +364,9 @@ export class TileMovementManager {
         if (state.pathIndex >= state.path.length) break;
 
         const nextTile = state.path[state.pathIndex];
-        state.currentTile = { ...nextTile };
+        // Copy values instead of spread (zero allocation)
+        state.currentTile.x = nextTile.x;
+        state.currentTile.z = nextTile.z;
         state.pathIndex++;
       }
 
@@ -355,7 +386,7 @@ export class TileMovementManager {
       entity.data.position = [worldPos.x, worldPos.y, worldPos.z];
 
       // Calculate rotation based on movement direction (from previous to current tile)
-      const prevWorld = tileToWorld(prevTile);
+      const prevWorld = tileToWorld(this._prevTile);
       const dx = worldPos.x - prevWorld.x;
       const dz = worldPos.z - prevWorld.z;
 
@@ -401,7 +432,7 @@ export class TileMovementManager {
         });
 
         // Clear path
-        state.path = [];
+        state.path.length = 0; // Zero-allocation clear
         state.pathIndex = 0;
 
         // RS3-style: Clear movement flag so combat can resume
@@ -426,6 +457,8 @@ export class TileMovementManager {
    * OSRS-ACCURATE: Called by GameTickProcessor during player phase
    * This processes just one player's movement instead of all players.
    *
+   * Zero-allocation: Uses pre-allocated tile buffers.
+   *
    * @param playerId - The player to process movement for
    * @param tickNumber - Current tick number
    */
@@ -446,8 +479,9 @@ export class TileMovementManager {
 
     const terrain = this.getTerrain();
 
-    // Store previous position for rotation calculation
-    const prevTile = { ...state.currentTile };
+    // Store previous position for rotation calculation (zero allocation)
+    this._prevTile.x = state.currentTile.x;
+    this._prevTile.z = state.currentTile.z;
 
     // Move 1 tile (walk) or 2 tiles (run) per tick
     const tilesToMove = state.isRunning
@@ -458,7 +492,9 @@ export class TileMovementManager {
       if (state.pathIndex >= state.path.length) break;
 
       const nextTile = state.path[state.pathIndex];
-      state.currentTile = { ...nextTile };
+      // Copy values instead of spread (zero allocation)
+      state.currentTile.x = nextTile.x;
+      state.currentTile.z = nextTile.z;
       state.pathIndex++;
     }
 
@@ -477,8 +513,8 @@ export class TileMovementManager {
     entity.position.set(worldPos.x, worldPos.y, worldPos.z);
     entity.data.position = [worldPos.x, worldPos.y, worldPos.z];
 
-    // Calculate rotation based on movement direction
-    const prevWorld = tileToWorld(prevTile);
+    // Calculate rotation based on movement direction (zero allocation - use pre-allocated tile)
+    const prevWorld = tileToWorld(this._prevTile);
     const dx = worldPos.x - prevWorld.x;
     const dz = worldPos.z - prevWorld.z;
 
@@ -519,7 +555,7 @@ export class TileMovementManager {
       });
 
       // Clear path
-      state.path = [];
+      state.path.length = 0; // Zero-allocation clear
       state.pathIndex = 0;
 
       // RS3-style: Clear movement flag so combat can resume
@@ -575,7 +611,7 @@ export class TileMovementManager {
     if (state) {
       // Clear any pending movement and update tile
       state.currentTile = newTile;
-      state.path = [];
+      state.path.length = 0; // Zero-allocation clear
       state.pathIndex = 0;
       state.moveSeq = (state.moveSeq || 0) + 1; // Increment to invalidate stale client packets
 
@@ -647,14 +683,19 @@ export class TileMovementManager {
     const state = this.getOrCreateState(playerId);
 
     // CRITICAL: Sync state.currentTile with entity's actual position
-    // The state might be stale if the player has been moving
-    const actualEntityTile = worldToTile(entity.position.x, entity.position.z);
-    if (!tilesEqual(state.currentTile, actualEntityTile)) {
-      state.currentTile = actualEntityTile;
+    // The state might be stale if the player has been moving (zero allocation)
+    worldToTileInto(
+      entity.position.x,
+      entity.position.z,
+      this._actualEntityTile,
+    );
+    if (!tilesEqual(state.currentTile, this._actualEntityTile)) {
+      state.currentTile.x = this._actualEntityTile.x;
+      state.currentTile.z = this._actualEntityTile.z;
     }
 
-    // Convert target to tile
-    const targetTile = worldToTile(targetPosition.x, targetPosition.z);
+    // Convert target to tile (zero allocation)
+    worldToTileInto(targetPosition.x, targetPosition.z, this._targetTile);
 
     // Determine destination tile based on combat or non-combat movement
     let destinationTile: TileCoord;
@@ -662,13 +703,15 @@ export class TileMovementManager {
     if (meleeRange > 0) {
       // COMBAT MOVEMENT: Use OSRS-accurate melee positioning
       // Check if already in valid melee range (cardinal-only for range 1)
-      if (tilesWithinMeleeRange(state.currentTile, targetTile, meleeRange)) {
+      if (
+        tilesWithinMeleeRange(state.currentTile, this._targetTile, meleeRange)
+      ) {
         return; // Already in position, no movement needed
       }
 
       // Find best melee tile (cardinal-only for range 1, diagonal allowed for range 2+)
       const meleeTile = getBestMeleeTile(
-        targetTile,
+        this._targetTile,
         state.currentTile,
         meleeRange,
         (tile) => this.isTileWalkable(tile),
@@ -681,10 +724,10 @@ export class TileMovementManager {
       destinationTile = meleeTile;
     } else {
       // NON-COMBAT MOVEMENT: Go directly to target tile
-      if (tilesEqual(targetTile, state.currentTile)) {
+      if (tilesEqual(this._targetTile, state.currentTile)) {
         return; // Already at target
       }
-      destinationTile = targetTile;
+      destinationTile = this._targetTile;
     }
 
     // Calculate BFS path to the destination tile (NOT to target, then truncate!)
@@ -734,10 +777,21 @@ export class TileMovementManager {
 
     // Send movement start packet
     const actualDestination = path[path.length - 1];
+
+    // Zero-allocation: copy path to pre-allocated network buffer
+    this._networkPathBuffer.length = path.length;
+    for (let i = 0; i < path.length; i++) {
+      if (!this._networkPathBuffer[i]) {
+        this._networkPathBuffer[i] = { x: 0, z: 0 };
+      }
+      this._networkPathBuffer[i].x = path[i].x;
+      this._networkPathBuffer[i].z = path[i].z;
+    }
+
     this.sendFn("tileMovementStart", {
       id: playerId,
       startTile: { x: state.currentTile.x, z: state.currentTile.z },
-      path: path.map((t) => ({ x: t.x, z: t.z })),
+      path: this._networkPathBuffer,
       running: state.isRunning,
       destinationTile: { x: actualDestination.x, z: actualDestination.z },
       moveSeq: state.moveSeq,

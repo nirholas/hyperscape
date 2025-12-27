@@ -759,17 +759,17 @@ curl http://localhost:3004/api/health
 
 **Symptoms:**
 ```
-THREE.WebGLRenderer: Context Lost
-Unable to initialize WebGL
-WebGL is not supported
+THREE.WebGPURenderer: Context Lost
+Unable to initialize WebGPU
+WebGPU is not supported
 ```
 
 **Causes & Solutions:**
 
-**Cause 1: Browser doesn't support WebGL**
+**Cause 1: Browser doesn't support WebGPU**
 ```bash
-# Test WebGL support
-# Visit: https://get.webgl.org/
+# Test WebGPU support
+# Visit: https://webgpureport.org/
 
 # If not supported:
 # - Update graphics drivers
@@ -907,37 +907,37 @@ lsof -i :3004  # Should only show one process
 ### Safari Issues
 
 **Known Issues:**
-- WebGL shader compilation slower
+- WebGPU support requires Safari 17+
 - Some Three.js features unsupported
 - CORS handling different
 
 **Solutions:**
 ```bash
-# Use Chrome or Firefox for best experience
+# Use Chrome or Firefox for best WebGPU experience
 # If must use Safari:
-# - Update to latest version
+# - Update to Safari 17+
 # - Enable "Develop" menu
-# - Allow experimental features
+# - Enable WebGPU in experimental features
 ```
 
 ### Firefox Issues
 
 **Known Issues:**
-- WebGL performance slightly slower
+- WebGPU requires Firefox Nightly or enabling in about:config
 - Different memory management
 
 **Solutions:**
 ```bash
 # Update to latest Firefox
-# Enable WebGL
-# about:config → webgl.force-enabled = true
+# Enable WebGPU
+# about:config → dom.webgpu.enabled = true
 ```
 
 ### Chrome Recommended
 
 **Best support:**
-- Full WebGL support
-- Best Three.js performance
+- Full WebGPU support (Chrome 113+)
+- Best Three.js WebGPU performance
 - Comprehensive DevTools
 
 **Optimization:**
@@ -946,7 +946,7 @@ lsof -i :3004  # Should only show one process
 # chrome://settings/system
 # Toggle "Use hardware acceleration"
 
-# Check WebGL status
+# Check WebGPU status
 # chrome://gpu/
 ```
 

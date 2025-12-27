@@ -1,13 +1,13 @@
 /**
- * Anchor.ts - Spatial Anchor Node for XR
+ * Anchor.ts - Spatial Anchor Node
  *
  * Represents a spatial anchor point in the world.
- * Used for XR (VR/AR) to anchor virtual objects to real-world positions.
+ * Used to anchor virtual objects to world positions.
  *
  * **Purpose:**
- * - Create persistent anchor points in XR environments
+ * - Create persistent anchor points in environments
  * - Register anchors with the world's Anchors system
- * - Provide stable reference frames for XR interactions
+ * - Provide stable reference frames for interactions
  *
  * **Lifecycle:**
  * - mount(): Registers anchor with world.anchors system
@@ -22,16 +22,16 @@
  * // Anchor automatically registers on mount
  * ```
  *
- * **Referenced by:** XR system, entity effects, anchored objects
+ * **Referenced by:** Entity effects, anchored objects
  */
 
 import { Node } from "./Node";
 import type { NodeData } from "../types";
 
 /**
- * Anchor Node - XR Spatial Anchor
+ * Anchor Node - Spatial Anchor
  *
- * Provides stable reference points for XR experiences.
+ * Provides stable reference points in the world.
  */
 export class Anchor extends Node {
   anchorId!: string;

@@ -1,319 +1,286 @@
 /**
- * WaterSystem.ts - Water Rendering
- *
- * Manages water plane rendering with animated normals, fresnel tint, and wave effects.
- * Based on reference implementation with depth-based effects and reflections.
+ * WaterSystem - Water rendering with TSL Node Materials
  */
 
-import THREE from "../../../extras/three/three";
+import THREE, {
+  MeshStandardNodeMaterial,
+  texture,
+  uv,
+  positionWorld,
+  cameraPosition,
+  uniform,
+  float,
+  vec2,
+  vec3,
+  sin,
+  cos,
+  pow,
+  add,
+  sub,
+  mul,
+  mix,
+  dot,
+  normalize,
+  max,
+  Fn,
+} from "../../../extras/three/three";
 import type { World } from "../../../types";
 import type { TerrainTile } from "../../../types/world/terrain";
+
+type UniformRef<T> = { value: T };
+
+export type WaterUniforms = {
+  time: UniformRef<number>;
+  waveScale: UniformRef<number>;
+  waveSpeed: UniformRef<number>;
+  distortion: UniformRef<number>;
+  fresnelPower: UniformRef<number>;
+  opacity: UniformRef<number>;
+};
 
 export class WaterSystem {
   private world: World;
   private waterNormal?: THREE.Texture;
   private waterNormalRepeat = 16;
   private waterTime = 0;
+  private waterMaterial?: THREE.Material;
+  private uniforms: WaterUniforms | null = null;
 
   constructor(world: World) {
     this.world = world;
   }
 
-  /**
-   * Initialize water textures
-   */
-  async init(): Promise<void> {
-    // Only load textures on client (server has no DOM/document)
-    if (this.world.isServer) {
-      return;
-    }
-
-    // Load water normal texture from local assets (async, non-blocking)
-    if (!this.waterNormal) {
-      const url = "/textures/waterNormal.png";
-      const loader = new THREE.TextureLoader();
-
-      // Load asynchronously to avoid blocking
-      try {
-        this.waterNormal = await new Promise<THREE.Texture>(
-          (resolve, reject) => {
-            loader.load(
-              url,
-              (texture) => resolve(texture),
-              undefined,
-              (error) => reject(error),
-            );
-          },
-        );
-
-        this.waterNormal.wrapS = THREE.RepeatWrapping;
-        this.waterNormal.wrapT = THREE.RepeatWrapping;
-        this.waterNormal.repeat.set(
-          this.waterNormalRepeat,
-          this.waterNormalRepeat,
-        );
-      } catch (error) {
-        console.warn(
-          "[WaterSystem] Failed to load water normal texture:",
-          error,
-        );
-        // Continue without normal map - water will still work
-      }
-    }
+  get waterUniforms(): WaterUniforms | null {
+    return this.uniforms;
   }
 
-  /**
-   * Generate water mesh for a tile - only covers underwater areas
-   * Water geometry is shaped to match actual underwater terrain, not a full rectangle
-   *
-   * @param tile - The terrain tile
-   * @param waterThreshold - Height below which is considered underwater
-   * @param tileSize - Size of the tile in world units
-   * @param getHeightAt - Function to get terrain height at world coordinates
-   */
+  async init(): Promise<void> {
+    if (this.world.isServer) return;
+
+    const loader = new THREE.TextureLoader();
+    this.waterNormal = await new Promise<THREE.Texture>((resolve) => {
+      loader.load(
+        "/textures/waterNormal.png",
+        (tex) => resolve(tex),
+        undefined,
+        (err) => {
+          console.warn("[WaterSystem] Using placeholder normal map:", err);
+          const canvas = document.createElement("canvas");
+          canvas.width = canvas.height = 2;
+          const ctx = canvas.getContext("2d")!;
+          ctx.fillStyle = "#8080ff";
+          ctx.fillRect(0, 0, 2, 2);
+          resolve(new THREE.CanvasTexture(canvas));
+        },
+      );
+    });
+
+    this.waterNormal.wrapS = this.waterNormal.wrapT = THREE.RepeatWrapping;
+    this.waterNormal.repeat.set(this.waterNormalRepeat, this.waterNormalRepeat);
+    this.waterMaterial = this.createWaterMaterial();
+  }
+
+  private createWaterMaterial(): THREE.Material {
+    const uTime = uniform(float(0));
+    const uWaveScale = uniform(float(0.08));
+    const uWaveSpeed = uniform(float(0.6));
+    const uDistortion = uniform(float(0.06));
+    const uFresnelPower = uniform(float(5.0));
+    const uOpacity = uniform(float(0.65));
+
+    this.uniforms = {
+      time: uTime,
+      waveScale: uWaveScale,
+      waveSpeed: uWaveSpeed,
+      distortion: uDistortion,
+      fresnelPower: uFresnelPower,
+      opacity: uOpacity,
+    };
+
+    const material = new MeshStandardNodeMaterial();
+    material.transparent = true;
+    material.depthWrite = false;
+    material.side = THREE.FrontSide;
+    material.roughness = 0.2;
+    material.metalness = 0.02;
+
+    const waveTilt = Fn(
+      ([xz, t, scale, speed, dist]: [
+        ReturnType<typeof vec2>,
+        ReturnType<typeof float>,
+        ReturnType<typeof float>,
+        ReturnType<typeof float>,
+        ReturnType<typeof float>,
+      ]) => {
+        const time = mul(t, speed);
+        const waveX = mul(xz.x, mul(float(6.2831), scale));
+        const waveZ = mul(xz.y, mul(mul(float(6.2831), scale), float(1.3)));
+        return mul(
+          vec2(sin(add(waveX, time)), cos(sub(waveZ, mul(time, float(0.85))))),
+          dist,
+        );
+      },
+    );
+
+    material.colorNode = Fn(() => {
+      const worldPos = positionWorld;
+      const V = normalize(sub(cameraPosition, worldPos));
+      const tilt = waveTilt(
+        vec2(worldPos.x, worldPos.z),
+        uTime,
+        uWaveScale,
+        uWaveSpeed,
+        uDistortion,
+      );
+      const N = normalize(vec3(tilt.x, float(1.0), tilt.y));
+      const NdotV = max(dot(N, V), float(0.0));
+      const F = pow(sub(float(1.0), NdotV), uFresnelPower);
+
+      const shallowColor = vec3(0.25, 0.72, 0.83);
+      const deepColor = vec3(0.06, 0.24, 0.35);
+      const baseColor = vec3(0.118, 0.42, 0.66);
+      return mix(baseColor, mix(deepColor, shallowColor, F), float(0.85));
+    })();
+
+    material.opacityNode = uOpacity;
+
+    if (this.waterNormal) {
+      material.normalNode = Fn(() => {
+        const baseUv = uv();
+        const timeOffset = mul(uTime, float(0.02));
+        const animatedUv = vec2(
+          add(baseUv.x, timeOffset),
+          add(baseUv.y, mul(timeOffset, float(0.65))),
+        );
+        const normalSample = texture(this.waterNormal!, animatedUv).rgb;
+        const normalValue = sub(mul(normalSample, float(2.0)), float(1.0));
+        return normalize(
+          vec3(
+            mul(normalValue.x, float(0.8)),
+            normalValue.y,
+            mul(normalValue.z, float(0.8)),
+          ),
+        );
+      })();
+    }
+
+    return material;
+  }
+
   generateWaterMesh(
     tile: TerrainTile,
     waterThreshold: number,
     tileSize: number,
     getHeightAt?: (worldX: number, worldZ: number) => number,
   ): THREE.Mesh | null {
-    // If no height function provided, fall back to full plane (legacy behavior)
     if (!getHeightAt) {
-      const waterGeometry = new THREE.PlaneGeometry(tileSize, tileSize);
-      waterGeometry.rotateX(-Math.PI / 2);
-      return this.createWaterMeshWithMaterial(
-        waterGeometry,
-        tile,
-        waterThreshold,
-      );
+      const geom = new THREE.PlaneGeometry(tileSize, tileSize);
+      geom.rotateX(-Math.PI / 2);
+      return this.createMesh(geom, tile, waterThreshold);
     }
 
-    // Create shaped water geometry that only covers underwater areas
-    const resolution = 32; // Grid resolution for water mesh
-    const cellSize = tileSize / resolution;
+    const resolution = 32;
     const tileOriginX = tile.x * tileSize;
     const tileOriginZ = tile.z * tileSize;
 
-    // Sample terrain heights across the tile
-    const heightGrid: number[][] = [];
+    const heights: number[][] = [];
     for (let i = 0; i <= resolution; i++) {
-      heightGrid[i] = [];
+      heights[i] = [];
       for (let j = 0; j <= resolution; j++) {
-        const localX = (i / resolution - 0.5) * tileSize;
-        const localZ = (j / resolution - 0.5) * tileSize;
-        const worldX = tileOriginX + localX;
-        const worldZ = tileOriginZ + localZ;
-        heightGrid[i][j] = getHeightAt(worldX, worldZ);
+        const worldX = tileOriginX + (i / resolution - 0.5) * tileSize;
+        const worldZ = tileOriginZ + (j / resolution - 0.5) * tileSize;
+        heights[i][j] = getHeightAt(worldX, worldZ);
       }
     }
 
-    // Build geometry - only include quads where at least one corner is underwater
-    // This provides natural "wiggle room" at shorelines
     const vertices: number[] = [];
     const uvs: number[] = [];
     const indices: number[] = [];
     const vertexMap = new Map<string, number>();
-    let vertexIndex = 0;
+    let vertexIdx = 0;
 
     for (let i = 0; i < resolution; i++) {
       for (let j = 0; j < resolution; j++) {
-        // Check all 4 corners of this quad
-        const h00 = heightGrid[i][j];
-        const h10 = heightGrid[i + 1][j];
-        const h01 = heightGrid[i][j + 1];
-        const h11 = heightGrid[i + 1][j + 1];
+        const h = [
+          heights[i][j],
+          heights[i + 1][j],
+          heights[i][j + 1],
+          heights[i + 1][j + 1],
+        ];
+        if (!h.some((h) => h < waterThreshold)) continue;
 
-        // Include this quad if ANY corner is underwater (provides shoreline wiggle room)
-        const anyUnderwater =
-          h00 < waterThreshold ||
-          h10 < waterThreshold ||
-          h01 < waterThreshold ||
-          h11 < waterThreshold;
-
-        if (!anyUnderwater) continue;
-
-        // Add vertices for this quad's corners (if not already added)
         const corners = [
           [i, j],
           [i + 1, j],
           [i, j + 1],
           [i + 1, j + 1],
         ];
-        const quadIndices: number[] = [];
+        const quadIdx: number[] = [];
 
         for (const [ci, cj] of corners) {
           const key = `${ci},${cj}`;
           if (!vertexMap.has(key)) {
             const localX = (ci / resolution - 0.5) * tileSize;
             const localZ = (cj / resolution - 0.5) * tileSize;
-
-            // Water surface is flat at waterThreshold height
-            vertices.push(localX, 0, localZ); // Y will be set by mesh position
+            vertices.push(localX, 0, localZ);
             uvs.push(ci / resolution, cj / resolution);
-            vertexMap.set(key, vertexIndex++);
+            vertexMap.set(key, vertexIdx++);
           }
-          quadIndices.push(vertexMap.get(key)!);
+          quadIdx.push(vertexMap.get(key)!);
         }
 
-        // Add two triangles for this quad (0,1,2) and (1,3,2)
-        indices.push(quadIndices[0], quadIndices[2], quadIndices[1]);
-        indices.push(quadIndices[1], quadIndices[2], quadIndices[3]);
+        indices.push(
+          quadIdx[0],
+          quadIdx[2],
+          quadIdx[1],
+          quadIdx[1],
+          quadIdx[2],
+          quadIdx[3],
+        );
       }
     }
 
-    // No underwater areas found
-    if (vertices.length === 0) {
-      return null;
-    }
+    if (vertices.length === 0) return null;
 
-    // Create buffer geometry
-    const waterGeometry = new THREE.BufferGeometry();
-    waterGeometry.setAttribute(
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute(
       "position",
       new THREE.Float32BufferAttribute(vertices, 3),
     );
-    waterGeometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-    waterGeometry.setIndex(indices);
-    waterGeometry.computeVertexNormals();
+    geom.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    geom.setIndex(indices);
+    geom.computeVertexNormals();
 
-    return this.createWaterMeshWithMaterial(
-      waterGeometry,
-      tile,
-      waterThreshold,
-    );
+    return this.createMesh(geom, tile, waterThreshold);
   }
 
-  /**
-   * Create the water mesh with material (shared by both geometry approaches)
-   */
-  private createWaterMeshWithMaterial(
-    waterGeometry: THREE.BufferGeometry,
+  private createMesh(
+    geom: THREE.BufferGeometry,
     tile: TerrainTile,
     waterThreshold: number,
   ): THREE.Mesh {
-    // Upgraded water material with fresnel tint and animated ripples
-    const waterMaterial = new THREE.MeshStandardMaterial({
-      color: 0x1e6ba8,
-      metalness: 0.02,
-      roughness: 0.2,
-      transparent: true,
-      opacity: 0.65,
-    }) as THREE.MeshStandardMaterial & { userData: Record<string, unknown> };
-
-    waterMaterial.depthWrite = false;
-    waterMaterial.side = THREE.FrontSide;
-    waterMaterial.envMapIntensity = 1.2;
-
-    if (this.waterNormal) {
-      waterMaterial.normalMap = this.waterNormal;
-      waterMaterial.normalScale = new THREE.Vector2(0.8, 0.8);
-    }
-
-    // Water animation uniforms
-    const waterUniforms = {
-      uTime: { value: 0 },
-      uWaveScale: { value: 0.08 },
-      uWaveSpeed: { value: 0.6 },
-      uDistortion: { value: 0.06 },
-      uFresnelPower: { value: 5.0 },
-      uShallowColor: { value: new THREE.Color(0x40b8d4) },
-      uDeepColor: { value: new THREE.Color(0x0f3c5a) },
-      uOpacity: { value: 0.65 },
-    };
-    waterMaterial.userData = waterMaterial.userData || {};
-    (waterMaterial.userData as { _waterUniforms?: unknown })._waterUniforms =
-      waterUniforms;
-
-    // Inject animated ripple and fresnel shader
-    waterMaterial.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, waterUniforms);
-
-      shader.vertexShader = shader.vertexShader.replace(
-        "#include <common>",
-        `#include <common>\nvarying vec3 vWorldPos;`,
-      );
-      shader.vertexShader = shader.vertexShader.replace(
-        "#include <worldpos_vertex>",
-        `#include <worldpos_vertex>\n  vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`,
-      );
-
-      shader.fragmentShader = shader.fragmentShader.replace(
-        "#include <common>",
-        `#include <common>
-        uniform float uTime;
-        uniform float uWaveScale;
-        uniform float uWaveSpeed;
-        uniform float uDistortion;
-        uniform float uFresnelPower;
-        uniform vec3 uShallowColor;
-        uniform vec3 uDeepColor;
-        uniform float uOpacity;
-        varying vec3 vWorldPos;
-
-        vec2 waveTilt(vec2 xz) {
-          float t = uTime * uWaveSpeed;
-          float sx = sin(xz.x * 6.2831 * uWaveScale + t);
-          float cz = cos(xz.y * 6.2831 * uWaveScale * 1.3 - t * 0.85);
-          return vec2(sx, cz) * uDistortion;
-        }
-        `,
-      );
-
-      shader.fragmentShader = shader.fragmentShader.replace(
-        "#include <color_fragment>",
-        `#include <color_fragment>
-        vec3 V = normalize(cameraPosition - vWorldPos);
-        vec2 tilt = waveTilt(vWorldPos.xz);
-        vec3 n = normalize(vec3(tilt.x, 1.0, tilt.y));
-        float F = pow(1.0 - max(dot(n, V), 0.0), uFresnelPower);
-        vec3 waterTint = mix(uDeepColor, uShallowColor, F);
-        diffuseColor.rgb = mix(diffuseColor.rgb, waterTint, 0.85);
-        diffuseColor.a = uOpacity;
-        `,
-      );
-    };
-
-    const waterMesh = new THREE.Mesh(waterGeometry, waterMaterial);
-    waterMesh.position.y = waterThreshold;
-    waterMesh.name = `Water_${tile.key}`;
-    waterMesh.userData = {
-      type: "water",
-      walkable: false,
-      clickable: false,
-    };
-
-    return waterMesh;
+    const mesh = new THREE.Mesh(
+      geom,
+      this.waterMaterial || this.createWaterMaterial(),
+    );
+    mesh.position.y = waterThreshold;
+    mesh.name = `Water_${tile.key}`;
+    mesh.userData = { type: "water", walkable: false, clickable: false };
+    return mesh;
   }
 
-  /**
-   * Update water animation each frame
-   */
-  update(deltaTime: number, waterMeshes: THREE.Mesh[]): void {
+  update(deltaTime: number, _waterMeshes: THREE.Mesh[]): void {
     const dt =
       typeof deltaTime === "number" && isFinite(deltaTime) ? deltaTime : 1 / 60;
     this.waterTime += dt;
 
-    // Scroll normal map
+    if (this.uniforms) {
+      this.uniforms.time.value = this.waterTime;
+    }
+
     if (this.waterNormal) {
       this.waterNormal.offset.x += 0.02 * dt;
       this.waterNormal.offset.y += 0.013 * dt;
-    }
-
-    // Update water material uniforms
-    for (const waterMesh of waterMeshes) {
-      const mat = waterMesh.material as THREE.Material & {
-        userData?: Record<string, unknown>;
-      };
-      const uniforms =
-        mat?.userData &&
-        (
-          mat.userData as {
-            _waterUniforms?: Record<string, { value: unknown }>;
-          }
-        )._waterUniforms;
-      if (uniforms && (uniforms as { uTime?: { value: number } }).uTime) {
-        (uniforms as { uTime: { value: number } }).uTime.value = this.waterTime;
-      }
     }
   }
 }

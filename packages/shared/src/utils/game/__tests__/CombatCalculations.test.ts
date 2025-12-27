@@ -26,7 +26,6 @@ import {
   getStyleBonus,
 } from "../CombatCalculations";
 import { AttackType } from "../../../types/core/core";
-import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
 
 describe("CombatCalculations", () => {
   describe("calculateDamage", () => {

@@ -243,7 +243,7 @@ export class ActionQueue {
     if (!state) return;
 
     state.pendingAction = null;
-    state.interactionQueue = [];
+    state.interactionQueue.length = 0; // Zero-allocation clear
     state.combatTarget = null;
   }
 
@@ -255,7 +255,7 @@ export class ActionQueue {
     this.currentTick = tickNumber;
     const now = getCachedTimestamp();
 
-    for (const [playerId, state] of this.playerQueues) {
+    for (const [_playerId, state] of this.playerQueues) {
       // Skip if already processed this tick
       if (state.lastProcessedTick >= tickNumber) {
         continue;

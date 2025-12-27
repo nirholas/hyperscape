@@ -9,7 +9,6 @@
  * - Visual progress indicator (circular fill)
  * - Input integration (E key to trigger)
  * - Canvas-based HUD rendering
- * - XR-compatible positioning
  *
  * **Action Flow:**
  * 1. System detects nearby Action nodes
@@ -39,14 +38,10 @@ import type { Action } from "../../nodes/Action";
 import type { ControlBinding, World } from "../../types";
 import { clamp } from "../../utils";
 import { ClientGraphics as GraphicsSystem } from "../client/ClientGraphics";
-import { SystemBase } from "../shared";
-import { XR as XRSystem } from "../client/XR";
+import { SystemBase } from "../shared/infrastructure/SystemBase";
 
 /** Max vertices per canvas batch draw */
 const BATCH_SIZE = 500;
-
-/** Forward direction vector (reused) */
-const FORWARD = new THREE.Vector3(0, 0, 1);
 
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -54,7 +49,6 @@ const v3 = new THREE.Vector3();
 const _v4 = new THREE.Vector3();
 const _v5 = new THREE.Vector3();
 const _q1 = new THREE.Quaternion();
-const e1 = new THREE.Euler(0, 0, 0, "YXZ");
 const _m1 = new THREE.Matrix4();
 
 // Use Action class from core/nodes/Action.ts directly
@@ -135,14 +129,7 @@ export class ClientActions extends SystemBase {
     this.btnDown = false;
     if (this.control) {
       this.btnDown =
-        this.control.keyE?.down ||
-        false ||
-        this.control.touchB?.down ||
-        false ||
-        this.control.xrLeftTrigger?.down ||
-        false ||
-        this.control.xrRightTrigger?.down ||
-        false;
+        this.control.keyE?.down || false || this.control.touchB?.down || false;
     }
 
     // clear current action if its no longer in distance
@@ -189,24 +176,13 @@ export class ClientActions extends SystemBase {
       actionsSystem.btnDown = false;
     }
 
-    // Update action UI
-    const xrSystem = this.world.findSystem("XR") as XRSystem | undefined;
-    if (xrSystem?.session) {
-      // VR mode action rendering
-      const _camPosition = v3.setFromMatrixPosition(
-        xrSystem.camera?.matrixWorld || new THREE.Matrix4(),
-      );
-      // ... existing VR code ...
-    } else {
-      // Desktop mode action rendering
-      const _graphicsSystem = this.world.findSystem("ClientGraphics") as
-        | GraphicsSystem
-        | undefined;
-      // ... existing code ...
+    // Update action UI - Desktop mode action rendering
+    const _graphicsSystem = this.world.findSystem("ClientGraphics") as
+      | GraphicsSystem
+      | undefined;
 
-      if (actionsSystem?.btnDown) {
-        // Action trigger UI feedback handled in createAction.update when btnDown is true
-      }
+    if (actionsSystem?.btnDown) {
+      // Action trigger UI feedback handled in createAction.update when btnDown is true
     }
   }
 
@@ -224,12 +200,6 @@ function createAction(world: World): ClientActionHandler {
   const heightPx = 44;
   const pxToMeters = 0.01;
   const board = createBoard(widthPx, heightPx, pxToMeters, world);
-
-  const _update_pos = new THREE.Vector3();
-  const _update_qua = new THREE.Quaternion();
-  const _update_sca = new THREE.Vector3();
-  const _update_camPosition = new THREE.Vector3();
-  const _update_direction = new THREE.Vector3();
 
   const draw = (label: string, ratio: number) => {
     // console.time('draw')
@@ -288,40 +258,18 @@ function createAction(world: World): ClientActionHandler {
     },
     update(delta: number) {
       if (!node) return;
-      let distance;
-      if (world.xr?.session) {
-        node.matrixWorld.decompose(_update_pos, _update_qua, _update_sca);
-
-        _update_camPosition.setFromMatrixPosition(
-          world.xr?.camera?.matrixWorld || new THREE.Matrix4(),
-        );
-        distance = _update_camPosition.distanceTo(_update_pos);
-
-        _update_direction
-          .subVectors(_update_camPosition, _update_pos)
-          .normalize();
-        _update_qua.setFromUnitVectors(FORWARD, _update_direction);
-        e1.setFromQuaternion(_update_qua);
-        e1.z = 0;
-        _update_qua.setFromEuler(e1);
-        mesh.position.copy(_update_pos);
-        mesh.quaternion.copy(_update_qua);
-        mesh.scale.copy(_update_sca);
-      } else {
-        const camPosition = v3.setFromMatrixPosition(world.camera.matrixWorld);
-        mesh.position.setFromMatrixPosition(node.matrixWorld);
-        distance = camPosition.distanceTo(mesh.position);
-        mesh.quaternion.setFromRotationMatrix(world.camera.matrixWorld);
-      }
+      const camPosition = v3.setFromMatrixPosition(world.camera.matrixWorld);
+      mesh.position.setFromMatrixPosition(node.matrixWorld);
+      const distance = camPosition.distanceTo(mesh.position);
+      mesh.quaternion.setFromRotationMatrix(world.camera.matrixWorld);
       const worldToScreenFactor = world.graphics?.worldToScreenFactor || 0.001;
       const [minDistance, maxDistance, baseScale = 1] = [3, 5, 1];
       const clampedDistance = clamp(distance, minDistance, maxDistance);
       // calculate scale factor based on the distance
       // When distance is at min, scale is 1.0 (or some other base scale)
       // When distance is at max, scale adjusts proportionally
-      let scaleFactor =
+      const scaleFactor =
         baseScale * (worldToScreenFactor * clampedDistance) * 100;
-      if (world.xr?.session) scaleFactor *= 0.2; // shrink because its HUGE in VR
       mesh.scale.setScalar(scaleFactor);
       if (world.actions?.btnDown) {
         if (node.progress === 0) {

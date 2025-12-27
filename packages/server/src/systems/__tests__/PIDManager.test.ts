@@ -9,7 +9,12 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { PIDManager, resetPIDManager, getPIDManager } from "../PIDManager";
+import {
+  PIDManager,
+  resetPIDManager,
+  getPIDManager,
+  type PIDReshuffleEvent,
+} from "../PIDManager";
 import { initializeGameRng } from "@hyperscape/shared";
 
 describe("PIDManager", () => {
@@ -72,7 +77,7 @@ describe("PIDManager", () => {
     });
 
     it("allows PID reuse after removal", () => {
-      const pid1 = manager.assignPID("player1");
+      manager.assignPID("player1");
       manager.removePID("player1");
       // The next player might get a different PID due to increment
       // but the old PID slot is now available
@@ -132,7 +137,7 @@ describe("PIDManager", () => {
       manager.assignPID("player2");
       manager.assignPID("player3");
 
-      const originalOrder = manager.getProcessingOrder().slice();
+      manager.getProcessingOrder().slice();
       const reshuffleTick = manager.getNextReshuffleTick();
 
       // Process ticks up to reshuffle
@@ -146,7 +151,7 @@ describe("PIDManager", () => {
 
     it("emits reshuffle event", () => {
       let eventReceived = false;
-      let eventData: { tick: number } | null = null;
+      let eventData: PIDReshuffleEvent | null = null;
 
       manager.setReshuffleCallback((event) => {
         eventReceived = true;
@@ -158,7 +163,7 @@ describe("PIDManager", () => {
       manager.processTick(reshuffleTick);
 
       expect(eventReceived).toBe(true);
-      expect(eventData?.tick).toBe(reshuffleTick);
+      expect(eventData!.tick).toBe(reshuffleTick);
     });
 
     it("changes PID assignments on reshuffle", () => {

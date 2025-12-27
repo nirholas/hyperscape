@@ -55,6 +55,15 @@ export class TickSystem {
   private listeners: TickListener[] = [];
   private isRunning = false;
 
+  // ============================================================================
+  // PRE-ALLOCATED BUFFERS (Zero-allocation hot path support)
+  // ============================================================================
+
+  /** Cached sorted listeners array - only rebuilt when listeners change */
+  private sortedListeners: TickListener[] = [];
+  /** Flag indicating listeners have changed and need re-sorting */
+  private listenersDirty = true;
+
   /**
    * Start the tick loop
    */
@@ -138,13 +147,21 @@ export class TickSystem {
       this.nextTickTime = now + TICK_DURATION_MS;
     }
 
-    // Sort listeners by priority (stable sort preserves registration order within same priority)
-    const sortedListeners = [...this.listeners].sort(
-      (a, b) => a.priority - b.priority,
-    );
+    // Only re-sort listeners if they've changed (zero-allocation in steady state)
+    if (this.listenersDirty) {
+      // Clear and repopulate the cached array (avoids allocation)
+      this.sortedListeners.length = 0;
+      for (let i = 0; i < this.listeners.length; i++) {
+        this.sortedListeners.push(this.listeners[i]);
+      }
+      // Sort by priority (stable sort preserves registration order within same priority)
+      this.sortedListeners.sort((a, b) => a.priority - b.priority);
+      this.listenersDirty = false;
+    }
 
-    // Call all listeners in priority order
-    for (const listener of sortedListeners) {
+    // Call all listeners in priority order (zero allocation)
+    for (let i = 0; i < this.sortedListeners.length; i++) {
+      const listener = this.sortedListeners[i];
       try {
         listener.callback(this.tickNumber, deltaMs);
       } catch (error) {
@@ -168,12 +185,14 @@ export class TickSystem {
   ): () => void {
     const listener: TickListener = { callback, priority };
     this.listeners.push(listener);
+    this.listenersDirty = true; // Mark for re-sort
 
     // Return unsubscribe function
     return () => {
       const index = this.listeners.indexOf(listener);
       if (index !== -1) {
         this.listeners.splice(index, 1);
+        this.listenersDirty = true; // Mark for re-sort
       }
     };
   }

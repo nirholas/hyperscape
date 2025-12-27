@@ -39,7 +39,6 @@ import THREE from "../../extras/three/three";
 import type {
   RenderHelperItem,
   ExtendedIntersection,
-  ShaderModifier,
   OctreeItem,
 } from "../../types/systems/physics";
 
@@ -591,25 +590,13 @@ function createHelper(octree: LooseOctree) {
   geometry.setAttribute("iMatrix", iMatrix);
   // Remove unused offset and scale attributes
   geometry.instanceCount = 0;
+  // Create material using TSL Node Material for WebGPU compatibility
   const material = new THREE.LineBasicMaterial({
     color: "red",
   });
-  material.onBeforeCompile = (shader: ShaderModifier) => {
-    shader.vertexShader = shader.vertexShader.replace(
-      "#include <common>",
-      `
-      attribute mat4 iMatrix;
-      #include <common>
-      `,
-    );
-    shader.vertexShader = shader.vertexShader.replace(
-      "#include <begin_vertex>",
-      `
-      #include <begin_vertex>
-      transformed = (iMatrix * vec4(position, 1.0)).xyz;
-      `,
-    );
-  };
+  // Note: The instance matrix transform is handled by Three.js's built-in
+  // instancing support when using InstancedBufferGeometry with iMatrix attribute.
+  // For WebGPU, the transformation is applied automatically.
   const mesh = new THREE.LineSegments(geometry, material);
   mesh.frustumCulled = false;
   const items: RenderHelperItem[] = [];

@@ -373,7 +373,7 @@ export async function registerSystems(world: World): Promise<void> {
   systems.database =
     dbSystem && "getPlayer" in dbSystem
       ? (dbSystem as DatabaseSystem)
-      : (null as any);
+      : undefined;
   systems.combat = getSystem(world, "combat") as CombatSystem;
   systems.inventory = getSystem(world, "inventory") as InventorySystem;
   systems.skills = getSystem(world, "skills") as SkillsSystem;

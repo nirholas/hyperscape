@@ -686,12 +686,6 @@ export interface CameraSystem {
   update(delta: number): void;
 }
 
-// XRSystem interface in system-interfaces.ts is the full system interface
-export interface XRSessionState {
-  session?: unknown;
-  camera?: THREE.Camera;
-}
-
 // VRM factory interfaces
 export interface VRMHooks {
   scene: THREE.Scene;

@@ -1,7 +1,7 @@
 /**
  * Global Type Declarations
  *
- * Type definitions for browser APIs, WebXR, PhysX, and environment variables.
+ * Type definitions for browser APIs, PhysX, and environment variables.
  */
 
 import THREE from "../extras/three/three";
@@ -24,37 +24,6 @@ declare global {
     monaco?: unknown; // Monaco editor instance
     gc?: () => void; // Garbage collection function
     PARTICLES_PATH?: string;
-  }
-
-  // WebXR ambient typings
-  interface Navigator {
-    xr?: XRSystem;
-  }
-
-  type XRSessionMode = "inline" | "immersive-vr" | "immersive-ar";
-
-  interface XRSystem {
-    isSessionSupported(mode: XRSessionMode): Promise<boolean>;
-    requestSession(
-      mode: XRSessionMode,
-      options?: XRSessionInit,
-    ): Promise<XRSession>;
-  }
-
-  interface XRSession extends EventTarget {
-    updateTargetFrameRate?(rate: number): void;
-    addEventListener?(type: string, listener: (event?: Event) => void): void;
-    inputSources?: ReadonlyArray<{
-      handedness: "left" | "right" | "none";
-      gamepad?: {
-        axes: readonly number[];
-        buttons: readonly { pressed: boolean }[];
-      };
-    }>;
-    renderState?: {
-      baseLayer?: { framebufferWidth?: number; framebufferHeight?: number };
-      layers?: Array<{ framebufferWidth?: number; framebufferHeight?: number }>;
-    };
   }
 
   // Node.js/Browser timer functions
@@ -109,14 +78,6 @@ declare interface Touch {
   rotationAngle: number;
   force: number;
 }
-
-// WebXR Reference Space Types
-declare type XRReferenceSpaceType =
-  | "viewer"
-  | "local"
-  | "local-floor"
-  | "bounded-floor"
-  | "unbounded";
 
 // Database item row type (for system interfaces)
 declare interface ItemRow {

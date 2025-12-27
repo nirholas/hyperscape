@@ -312,8 +312,17 @@ export interface ComponentDefinition {
   createComponent: (data: unknown) => Component;
 }
 
+import type { EntityConfig } from "./entities/entities";
+
+// EntityConstructor accepts EntityData or any EntityConfig subtype
+// Specialized entity classes (ItemEntity, MobEntity, etc.) take specific config types
+// that extend EntityConfig, so we use a flexible type that accepts both
 export interface EntityConstructor {
-  new (world: World, data: EntityData, local?: boolean): Entity;
+  new (
+    world: World,
+    data: EntityData | EntityConfig | Record<string, unknown>,
+    local?: boolean,
+  ): Entity;
 }
 
 // Action system types
@@ -421,7 +430,7 @@ export type ExtendedChatMessage = ChatMessage;
 export { Chat } from "../systems/shared";
 export { ClientActions } from "../systems/client/ClientActions";
 export { ClientAudio } from "../systems/client/ClientAudio";
-export { ClientInput } from "../systems/client/ClientInput"; // Keyboard, mouse, touch, XR input handling
+export { ClientInput } from "../systems/client/ClientInput"; // Keyboard, mouse, touch input handling
 export { ClientGraphics } from "../systems/client/ClientGraphics";
 export { ClientLiveKit } from "../systems/client/ClientLiveKit";
 export { ClientLoader } from "../systems/client/ClientLoader";
@@ -433,7 +442,6 @@ export { ClientRuntime } from "../systems/client/ClientRuntime"; // Client lifec
 // ServerNetwork is server-only and should not be exported for client use
 // Use type-only import if needed: import type { ServerNetwork } from '../systems/server/ServerRuntime';
 export { Settings } from "../systems/shared";
-export { XR as XRSystem } from "../systems/client/XR";
 
 // Export missing core system types
 export { Anchors } from "../systems/shared";
@@ -463,7 +471,7 @@ export interface WorldOptions {
   assetsDir?: string;
   assetsUrl?: string;
   physics?: boolean;
-  renderer?: "webgl" | "webgl2" | "headless";
+  renderer?: "webgpu" | "headless";
   networkRate?: number;
   maxDeltaTime?: number;
   fixedDeltaTime?: number;
@@ -548,8 +556,6 @@ export interface ControlBinding {
   tab?: ButtonEntry;
   mouseLeft?: MouseInput;
   touchB?: ButtonEntry;
-  xrLeftTrigger?: ButtonEntry;
-  xrRightTrigger?: ButtonEntry;
 
   // Special control objects
   pointer?: {
@@ -656,20 +662,6 @@ export interface Control {
     position?: Vector3;
     delta?: Vector2;
   };
-
-  // XR controls
-  xrLeftStick?: {
-    value: { x: number; z: number };
-  };
-  xrLeftTrigger?: InputState;
-  xrLeftBtn1?: InputState;
-  xrLeftBtn2?: InputState;
-  xrRightStick?: {
-    value: { x: number; y: number };
-  };
-  xrRightTrigger?: InputState;
-  xrRightBtn1?: InputState;
-  xrRightBtn2?: InputState;
 
   // Touch controls
   touchA?: InputState;
@@ -893,7 +885,12 @@ export interface Physics {
   scene?: unknown; // PhysX scene instance
 
   // Actor management
-  addActor(actor: unknown, handle?: unknown): unknown;
+  addActor(
+    actor:
+      | import("./systems/physics").PxActor
+      | import("./systems/physics").PxRigidDynamic,
+    handle?: import("./systems/physics").PhysicsHandle,
+  ): import("./systems/physics").ActorHandle | null;
 
   // Plugin-specific extensions
   enabled?: boolean;
@@ -1110,14 +1107,6 @@ export interface ControlsBinding {
   release(): void;
 }
 
-export interface XRInputSource {
-  handedness: "left" | "right" | "none";
-  gamepad?: {
-    axes: readonly number[];
-    buttons: readonly { pressed: boolean }[];
-  };
-}
-
 // Environment Types
 export interface BaseEnvironment {
   model?: string;
@@ -1241,7 +1230,17 @@ export interface GLBData {
           humanBones?: Record<string, { node?: THREE.Object3D }>;
         };
         update?: (delta: number) => void;
-        clone?: () => any; // Returns a cloned VRMHumanoid instance
+        clone?: () => {
+          _rawHumanBones?: {
+            humanBones?: Record<string, { node?: THREE.Object3D }>;
+          };
+          _normalizedHumanBones?: {
+            humanBones?: Record<string, { node?: THREE.Object3D }>;
+          };
+          getNormalizedBoneNode?: (name: string) => THREE.Object3D | undefined;
+          getRawBoneNode?: (name: string) => THREE.Object3D | null;
+          update?: (delta: number) => void;
+        };
       };
       meta?: {
         metaVersion?: string;

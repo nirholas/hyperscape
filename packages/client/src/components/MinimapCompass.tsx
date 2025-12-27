@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { THREE } from "@hyperscape/shared";
 import type { ClientWorld } from "../types";
 
@@ -8,24 +8,34 @@ interface MinimapCompassProps {
   isCollapsed: boolean;
 }
 
+// Pre-allocated temp vector for RAF loop - avoids GC pressure
+const _tempForward = new THREE.Vector3();
+
 export function MinimapCompass({
   world,
   onClick,
   isCollapsed,
 }: MinimapCompassProps) {
   const [yawDeg, setYawDeg] = useState<number>(0);
+  // Ref to track previous yaw to avoid unnecessary state updates
+  const prevYawRef = useRef<number>(0);
 
   useEffect(() => {
     let rafId: number | null = null;
     const loop = () => {
       if (world.camera) {
-        const forward = new THREE.Vector3();
-        world.camera.getWorldDirection(forward);
-        forward.y = 0;
-        if (forward.lengthSq() > 1e-6) {
-          forward.normalize();
-          const yaw = Math.atan2(forward.x, -forward.z);
-          setYawDeg(THREE.MathUtils.radToDeg(yaw));
+        // Reuse pre-allocated vector instead of creating new one
+        world.camera.getWorldDirection(_tempForward);
+        _tempForward.y = 0;
+        if (_tempForward.lengthSq() > 1e-6) {
+          _tempForward.normalize();
+          const yaw = Math.atan2(_tempForward.x, -_tempForward.z);
+          const newYawDeg = THREE.MathUtils.radToDeg(yaw);
+          // Only update state if yaw changed significantly (> 0.1 degrees)
+          if (Math.abs(prevYawRef.current - newYawDeg) > 0.1) {
+            prevYawRef.current = newYawDeg;
+            setYawDeg(newYawDeg);
+          }
         }
       }
       rafId = requestAnimationFrame(loop);

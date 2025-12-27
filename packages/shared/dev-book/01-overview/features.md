@@ -270,7 +270,7 @@ world.on('entityModified', (data) => {
 **Description:** Advanced 3D rendering
 
 **Features:**
-- WebGL 2.0 / WebGPU
+- WebGPU
 - PBR materials
 - Shadow mapping
 - LOD system

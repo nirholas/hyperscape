@@ -124,11 +124,13 @@ export class TileInterpolator {
   private entityStates: Map<string, EntityMovementState> = new Map();
   private debugMode = false;
 
-  // Reusable vectors
+  // Reusable vectors - pre-allocated to avoid per-frame allocations
   private _tempDir = new THREE.Vector3();
   private _tempQuat = new THREE.Quaternion();
   // Y-axis for yaw rotation
   private _up = new THREE.Vector3(0, 1, 0);
+  // Pre-allocated Vector3 for tile transitions in update()
+  private _nextPos = new THREE.Vector3();
 
   /**
    * Calculate Chebyshev distance between two tiles (max of dx, dz)
@@ -865,14 +867,11 @@ export class TileInterpolator {
             // Calculate rotation to face next tile (only update if distance is sufficient)
             const nextTile = state.fullPath[state.targetTileIndex];
             const nextWorld = tileToWorld(nextTile);
-            const nextPos = new THREE.Vector3(
-              nextWorld.x,
-              state.visualPosition.y,
-              nextWorld.z,
-            );
+            // Use pre-allocated Vector3 to avoid per-frame allocations
+            this._nextPos.set(nextWorld.x, state.visualPosition.y, nextWorld.z);
             const nextRotation = this.calculateFacingRotation(
               state.visualPosition,
-              nextPos,
+              this._nextPos,
             );
             if (nextRotation) {
               // Only update rotation if direction changed significantly (>~16°)

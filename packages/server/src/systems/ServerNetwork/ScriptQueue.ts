@@ -153,6 +153,16 @@ export class PlayerScriptQueue {
     (playerId: string, socket: ServerSocket, data: unknown) => void
   > = new Map();
 
+  // ============================================================================
+  // PRE-ALLOCATED BUFFERS (Zero-allocation hot path support)
+  // ============================================================================
+
+  /** Pre-allocated array for scripts to execute during processPlayerTick */
+  private readonly _toExecute: QueuedScript[] = [];
+
+  /** Pre-allocated array for scripts to retain during processPlayerTick */
+  private readonly _toRetain: QueuedScript[] = [];
+
   /**
    * Register a handler for a script type
    */
@@ -383,6 +393,8 @@ export class PlayerScriptQueue {
    * 2. STRONG scripts execute and close modals
    * 3. NORMAL scripts execute if no modal open (else delay)
    * 4. WEAK scripts execute if no STRONG pending
+   *
+   * Zero-allocation: Uses pre-allocated toExecute/toRetain arrays.
    */
   processPlayerTick(playerId: string, tickNumber: number): void {
     const state = this.playerStates.get(playerId);
@@ -394,11 +406,13 @@ export class PlayerScriptQueue {
     this.currentTick = tickNumber;
 
     const now = getCachedTimestamp();
-    const toExecute: QueuedScript[] = [];
-    const toRetain: QueuedScript[] = [];
+    // Clear and reuse pre-allocated buffers (zero allocation)
+    this._toExecute.length = 0;
+    this._toRetain.length = 0;
 
     // Sort scripts into execute vs retain
-    for (const script of state.scripts) {
+    for (let i = 0; i < state.scripts.length; i++) {
+      const script = state.scripts[i];
       // Skip already executed scripts
       if (script.executed) continue;
 
@@ -407,7 +421,7 @@ export class PlayerScriptQueue {
 
       // Check execute tick
       if (script.executeOnTick > tickNumber) {
-        toRetain.push(script);
+        this._toRetain.push(script);
         continue;
       }
 
@@ -415,13 +429,13 @@ export class PlayerScriptQueue {
       switch (script.priority) {
         case ScriptPriority.SOFT:
           // SOFT always executes
-          toExecute.push(script);
+          this._toExecute.push(script);
           break;
 
         case ScriptPriority.STRONG:
           // STRONG always executes and closes modals
           this.closeAllModals(playerId);
-          toExecute.push(script);
+          this._toExecute.push(script);
           break;
 
         case ScriptPriority.NORMAL:
@@ -429,34 +443,42 @@ export class PlayerScriptQueue {
           if (state.modal.anyModalOpen) {
             script.delayedTicks++;
             if (script.delayedTicks < MAX_NORMAL_DELAY_TICKS) {
-              toRetain.push(script);
+              this._toRetain.push(script);
             }
             // else: discard after too many delays
           } else {
-            toExecute.push(script);
+            this._toExecute.push(script);
           }
           break;
 
-        case ScriptPriority.WEAK:
+        case ScriptPriority.WEAK: {
           // WEAK executes if no STRONG in queue
-          const hasStrong = state.scripts.some(
-            (s) => s.priority === ScriptPriority.STRONG && !s.executed,
-          );
-          if (!hasStrong) {
-            toExecute.push(script);
-          } else {
-            // WEAK is removed by STRONG, don't retain
+          let hasStrong = false;
+          for (let j = 0; j < state.scripts.length; j++) {
+            const s = state.scripts[j];
+            if (s.priority === ScriptPriority.STRONG && !s.executed) {
+              hasStrong = true;
+              break;
+            }
           }
+          if (!hasStrong) {
+            this._toExecute.push(script);
+          }
+          // WEAK is removed by STRONG, don't retain
           break;
+        }
       }
     }
 
-    // Update scripts list with retained scripts only
-    state.scripts = toRetain;
+    // Update scripts list with retained scripts only (reuse array)
+    state.scripts.length = 0;
+    for (let i = 0; i < this._toRetain.length; i++) {
+      state.scripts.push(this._toRetain[i]);
+    }
 
     // Execute scripts in order
-    for (const script of toExecute) {
-      this.executeScript(script);
+    for (let i = 0; i < this._toExecute.length; i++) {
+      this.executeScript(this._toExecute[i]);
     }
   }
 
@@ -559,6 +581,16 @@ export class NPCScriptQueue {
   // Script handler for NPC scripts
   private handler: ((npcId: string, data: unknown) => void) | null = null;
 
+  // ============================================================================
+  // PRE-ALLOCATED BUFFERS (Zero-allocation hot path support)
+  // ============================================================================
+
+  /** Pre-allocated array for scripts to execute during processNPCTick */
+  private readonly _toExecuteNPC: QueuedScript[] = [];
+
+  /** Pre-allocated array for scripts to retain during processNPCTick */
+  private readonly _toRetainNPC: QueuedScript[] = [];
+
   /**
    * Set the NPC script handler
    */
@@ -618,8 +650,9 @@ export class NPCScriptQueue {
     if (!scripts || scripts.length === 0) return;
 
     const now = getCachedTimestamp();
-    const toExecute: QueuedScript[] = [];
-    const toRetain: QueuedScript[] = [];
+    // Zero-allocation: Clear and reuse pre-allocated buffers
+    this._toExecuteNPC.length = 0;
+    this._toRetainNPC.length = 0;
 
     for (const script of scripts) {
       if (script.executed) continue;
@@ -629,19 +662,22 @@ export class NPCScriptQueue {
 
       // Check execute tick
       if (script.executeOnTick > tickNumber) {
-        toRetain.push(script);
+        this._toRetainNPC.push(script);
         continue;
       }
 
-      toExecute.push(script);
+      this._toExecuteNPC.push(script);
     }
 
-    // Update scripts
-    this.npcStates.set(npcId, toRetain);
+    // Update scripts - copy from buffer to avoid sharing reference
+    scripts.length = 0;
+    for (const script of this._toRetainNPC) {
+      scripts.push(script);
+    }
 
     // Execute scripts (FIFO - process first one only per tick like OSRS)
-    if (toExecute.length > 0 && this.handler) {
-      const script = toExecute[0];
+    if (this._toExecuteNPC.length > 0 && this.handler) {
+      const script = this._toExecuteNPC[0];
       script.executed = true;
       try {
         this.handler(script.entityId, script.data);
@@ -653,10 +689,9 @@ export class NPCScriptQueue {
       }
 
       // Put remaining scripts back in queue
-      for (let i = 1; i < toExecute.length; i++) {
-        toRetain.push(toExecute[i]);
+      for (let i = 1; i < this._toExecuteNPC.length; i++) {
+        scripts.push(this._toExecuteNPC[i]);
       }
-      this.npcStates.set(npcId, toRetain);
     }
   }
 

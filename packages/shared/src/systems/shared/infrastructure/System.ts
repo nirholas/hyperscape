@@ -72,7 +72,7 @@
  *
  * **Examples**:
  * - Physics: Collision detection, character controllers
- * - Graphics: WebGL rendering, post-processing
+ * - Graphics: WebGPU rendering, post-processing
  * - Entities: Entity lifecycle management
  * - Combat: Damage calculation, attack resolution
  * - Network: Client/server synchronization

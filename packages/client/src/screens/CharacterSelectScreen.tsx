@@ -281,7 +281,7 @@ export function CharacterSelectScreen({
         // (Plugin availability is verified during agent creation)
         setElizaOSAvailable(true);
         console.log("[CharacterSelect] ✅ ElizaOS detected and available");
-      } catch (error) {
+      } catch {
         console.log(
           "[CharacterSelect] ℹ️ ElizaOS not detected (AI agents disabled)",
         );

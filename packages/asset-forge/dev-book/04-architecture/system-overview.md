@@ -873,7 +873,7 @@ const performFitting = async () => {
 | Technology | Version | Purpose | Rationale |
 |-----------|---------|---------|-----------|
 | **React** | 19.2.0 | UI Framework | Industry standard, component reusability, hooks API |
-| **Three.js** | 0.178.0 | 3D Rendering | Most mature WebGL library, extensive community |
+| **Three.js** | 0.181.0 | 3D Rendering | Most mature 3D library, WebGPU support, extensive community |
 | **@react-three/fiber** | 9.0.0 | React-Three Bridge | Declarative Three.js in React, better integration |
 | **@react-three/drei** | 10.7.6 | Three.js Helpers | Pre-built components (OrbitControls, etc.) |
 | **Zustand** | 5.0.6 | State Management | Lightweight, simple API, middleware support |

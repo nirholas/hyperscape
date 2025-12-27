@@ -11,7 +11,7 @@ Before installing Hyperscape Shared, ensure you have:
 - **Node.js** 18.0+ or **Bun** 1.0+
 - **npm** or **yarn** or **pnpm**
 - **TypeScript** 5.3+ (for development)
-- Modern browser with WebGL 2.0+ support
+- Modern browser with WebGPU support (Chrome 113+, Safari 17+)
 
 ---
 

@@ -69,7 +69,7 @@ import type {
   World,
 } from "../../../types/index";
 import { EventType } from "../../../types/events";
-import { SystemBase } from "..";
+import { SystemBase } from "../infrastructure/SystemBase";
 import { MobEntity } from "../../../entities/npc/MobEntity";
 import { NPCEntity } from "../../../entities/npc/NPCEntity";
 import { ItemEntity } from "../../../entities/world/ItemEntity";
@@ -109,18 +109,22 @@ class GenericEntity extends Entity {
 /**
  * Entity type registry - maps type strings to entity constructors.
  * New entity types can be registered at runtime via registerEntityType().
+ *
+ * Note: Specialized entity classes have more specific constructor signatures,
+ * so we use type assertions to EntityConstructor. At runtime, the caller is
+ * responsible for passing the correct config type for each entity type.
  */
 const EntityTypes: Record<string, EntityConstructor> = {
-  entity: GenericEntity,
-  player: PlayerEntity, // Server-side player entity
-  playerLocal: PlayerLocal, // Client-side local player
-  playerRemote: PlayerRemote, // Client-side remote players
-  item: ItemEntity as unknown as EntityConstructor, // Ground items
-  mob: MobEntity as unknown as EntityConstructor, // Enemy entities
-  npc: NPCEntity as unknown as EntityConstructor, // NPC entities
-  resource: ResourceEntity as unknown as EntityConstructor, // Resource entities (trees, rocks, etc)
-  headstone: HeadstoneEntity as unknown as EntityConstructor, // Death markers
-  bank: BankEntity as unknown as EntityConstructor, // Bank booths
+  entity: GenericEntity as EntityConstructor,
+  player: PlayerEntity as EntityConstructor,
+  playerLocal: PlayerLocal as EntityConstructor,
+  playerRemote: PlayerRemote as EntityConstructor,
+  item: ItemEntity as unknown as EntityConstructor,
+  mob: MobEntity as unknown as EntityConstructor,
+  npc: NPCEntity as unknown as EntityConstructor,
+  resource: ResourceEntity as unknown as EntityConstructor,
+  headstone: HeadstoneEntity as unknown as EntityConstructor,
+  bank: BankEntity as unknown as EntityConstructor,
 };
 
 /**
@@ -845,8 +849,8 @@ export class Entities extends SystemBase implements IEntities {
             err,
           );
           console.error(`[Entities] Entity ${entity.id} init() failed:`, err);
+          // Error logged above
         });
-    } else {
     }
 
     return entity;
@@ -899,22 +903,22 @@ export class Entities extends SystemBase implements IEntities {
   }
 
   override fixedUpdate(delta: number): void {
-    const hotEntities = Array.from(this.hot);
-    for (const entity of hotEntities) {
+    // Iterate Set directly instead of Array.from to avoid allocation each frame
+    for (const entity of this.hot) {
       entity.fixedUpdate?.(delta);
     }
   }
 
   override update(delta: number): void {
-    const hotEntities = Array.from(this.hot);
-    for (const entity of hotEntities) {
+    // Iterate Set directly instead of Array.from to avoid allocation each frame
+    for (const entity of this.hot) {
       entity.update(delta);
     }
   }
 
   override lateUpdate(delta: number): void {
-    const hotEntities = Array.from(this.hot);
-    for (const entity of hotEntities) {
+    // Iterate Set directly instead of Array.from to avoid allocation each frame
+    for (const entity of this.hot) {
       entity.lateUpdate?.(delta);
     }
   }
@@ -973,8 +977,8 @@ export class Entities extends SystemBase implements IEntities {
   // Missing lifecycle methods
   postFixedUpdate(): void {
     // Add postLateUpdate calls for entities
-    const hotEntities = Array.from(this.hot);
-    for (const entity of hotEntities) {
+    // Iterate Set directly instead of Array.from to avoid allocation each frame
+    for (const entity of this.hot) {
       entity.postLateUpdate?.(0);
     }
   }

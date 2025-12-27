@@ -16,8 +16,8 @@
     <script type="importmap">
       {
         "imports": {
-          "three": "https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.module.js",
-          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.132.2/examples/jsm/",
+          "three": "https://cdn.jsdelivr.net/npm/three@0.181.0/build/three.webgpu.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.181.0/examples/jsm/",
           "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.3.3/lib/three-vrm.module.js"
         }
       }
@@ -27,7 +27,7 @@
     <script type="module">
       import * as THREE from "three";
       import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-      import { HDRLoader } from "three/addons/loaders/HDRLoader.js";
+      import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
       import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
       import { VRMLoaderPlugin } from "@pixiv/three-vrm";
       import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
@@ -39,7 +39,10 @@
         0.1,
         10000,
       );
-      const renderer = new THREE.WebGLRenderer({ alpha: true });
+
+      // Use WebGPURenderer
+      const renderer = new THREE.WebGPURenderer({ alpha: true });
+      await renderer.init();
       renderer.setSize(innerWidth, innerHeight);
       document.body.appendChild(renderer.domElement);
 
@@ -57,7 +60,7 @@
       window.MaterialLoader = THREE.MaterialLoader;
       window.TextureLoader = new THREE.TextureLoader();
       window.GLTFExporter = GLTFExporter;
-      window.HDRLoader = HDRLoader;
+      window.HDRLoader = RGBELoader;
       window.SkeletonUtils = SkeletonUtils;
     </script>
   </body>

@@ -1,13 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";
-import {
-  Send,
-  Bot,
-  User,
-  MoreVertical,
-  Paperclip,
-  Mic,
-  Monitor,
-} from "lucide-react";
+import React, { useState, useRef, useEffect } from "react";
+import { Send, Bot, User, MoreVertical, Paperclip, Mic } from "lucide-react";
 import { Agent } from "../../screens/DashboardScreen";
 
 interface Message {
@@ -15,6 +7,12 @@ interface Message {
   sender: "user" | "agent";
   text: string;
   timestamp: Date;
+}
+
+interface ElizaOSResponse {
+  text?: string;
+  content?: string;
+  [key: string]: unknown;
 }
 
 interface AgentChatProps {
@@ -50,11 +48,6 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agent }) => {
     setIsTyping(true);
 
     try {
-      // Generate UUIDs for the message
-      const messageId = crypto.randomUUID();
-      const userId = localStorage.getItem("privy_user_id") || "anonymous-user";
-      const channelId = `dashboard-chat-${agent.id}`; // Use agent-specific channel
-
       const response = await fetch(
         `http://localhost:5555/api/agents/${agent.id}/message`,
         {
@@ -64,7 +57,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agent }) => {
           },
           body: JSON.stringify({
             content: userMessage.text,
-            userId: userId,
+            userId: localStorage.getItem("privy_user_id") || "anonymous-user",
           }),
         },
       );
@@ -77,7 +70,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agent }) => {
       // ElizaOS returns an array of messages
       const responses = Array.isArray(data) ? data : [data];
 
-      responses.forEach((resp: any, index: number) => {
+      responses.forEach((resp: ElizaOSResponse, index: number) => {
         const agentMessage: Message = {
           id: (Date.now() + index).toString(),
           sender: "agent",

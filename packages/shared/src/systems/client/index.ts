@@ -14,7 +14,6 @@ export { ClientLoader } from "./ClientLoader";
 export { ClientNetwork } from "./ClientNetwork";
 export { ClientRuntime } from "./ClientRuntime";
 export { Nametags } from "./Nametags";
-export { XR } from "./XR";
 export { NodeClient } from "./NodeClient";
 export { ControlPriorities } from "./ControlPriorities";
 export { EquipmentVisualSystem } from "./EquipmentVisualSystem";

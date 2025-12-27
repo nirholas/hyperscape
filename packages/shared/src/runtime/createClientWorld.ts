@@ -9,22 +9,21 @@
  * - Client receives authoritative state from server
  * - No client-side prediction or interpolation (server is authoritative)
  * - Client handles rendering, input, audio, and UI
- * - Uses WebGL/WebGPU for graphics via three.js
+ * - Uses WebGPU for graphics via three.js
  * - PhysX physics runs locally for immediate feedback (validated by server)
  *
  * Systems Registered:
  * 1. Core Systems: ClientRuntime, Stage, ClientNetwork
  * 2. Media: ClientLiveKit (voice), ClientAudio, MusicSystem
  * 3. Rendering: ClientGraphics, Environment, ClientCameraSystem
- * 4. Input: ClientInput (keyboard, mouse, touch, XR)
+ * 4. Input: ClientInput (keyboard, mouse, touch)
  * 5. UI: ClientInterface (preferences, UI state)
  * 6. Loading: ClientLoader (asset management)
  * 7. Physics: Physics (PhysX via WASM)
  * 8. Terrain: TerrainSystem (heightmap rendering)
  * 9. Visual Effects: LODs, Nametags, Particles, Wind
- * 10. VR/AR: XR system
- * 11. Actions: ClientActions (executable actions from UI/keybinds)
- * 12. RPG Systems: All game logic systems (shared with server)
+ * 10. Actions: ClientActions (executable actions from UI/keybinds)
+ * 11. RPG Systems: All game logic systems (shared with server)
  *
  * Browser Integration:
  * - Exposes `window.world` for debugging and testing
@@ -82,7 +81,6 @@ import { HealthBars } from "../systems/client/HealthBars";
 import { EquipmentVisualSystem } from "../systems/client/EquipmentVisualSystem";
 import { Particles } from "../systems/shared";
 import { Wind } from "../systems/shared";
-import { XR } from "../systems/client/XR";
 
 /**
  * Window extension for browser testing and debugging.
@@ -142,7 +140,7 @@ export function createClientWorld() {
   world.register("loader", ClientLoader); // Asset loading and caching
 
   // Rendering systems
-  world.register("graphics", ClientGraphics); // WebGL/WebGPU renderer
+  world.register("graphics", ClientGraphics); // WebGPU renderer
   world.register("environment", Environment); // Lighting, shadows, CSM
 
   // Audio systems
@@ -150,7 +148,7 @@ export function createClientWorld() {
   world.register("music", MusicSystem); // Background music player
 
   // Input and interaction
-  world.register("controls", ClientInput); // Keyboard, mouse, touch, XR input
+  world.register("controls", ClientInput); // Keyboard, mouse, touch input
   world.register("actions", ClientActions); // Executable player actions
 
   // UI and preferences
@@ -180,7 +178,6 @@ export function createClientWorld() {
   world.register("equipment-visual", EquipmentVisualSystem); // Visual weapon/equipment attachment
   world.register("particles", Particles); // Particle effects system
   world.register("wind", Wind); // Environmental wind effects
-  world.register("xr", XR); // VR/AR support
 
   // ============================================================================
   // THREE.JS SETUP

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Agent } from "../../screens/DashboardScreen";
-import { Send, Bot, User, Paperclip, Mic } from "lucide-react";
+import { Send, Bot, Paperclip, Mic } from "lucide-react";
 import { usePrivy } from "@privy-io/react-auth";
 
 interface Message {
@@ -8,6 +8,12 @@ interface Message {
   sender: "user" | "agent";
   text: string;
   timestamp: Date;
+}
+
+interface ElizaOSResponse {
+  text?: string;
+  content?: string;
+  [key: string]: unknown;
 }
 
 interface AgentViewportChatProps {
@@ -218,7 +224,7 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
       const data = await response.json();
       const responses = Array.isArray(data) ? data : [data];
 
-      responses.forEach((resp: any, index: number) => {
+      responses.forEach((resp: ElizaOSResponse, index: number) => {
         const agentMessage: Message = {
           id: (Date.now() + index).toString(),
           sender: "agent",

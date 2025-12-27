@@ -1195,14 +1195,14 @@ private async exportModel(model: Object3D): Promise<ArrayBuffer> {
 
 ### GPU Acceleration
 
-TensorFlow.js automatically uses WebGL backend for GPU acceleration:
+TensorFlow.js automatically uses WebGPU backend for GPU acceleration:
 
 ```typescript
 // Verify GPU backend
-console.log('Backend:', tf.getBackend())  // Should be 'webgl'
+console.log('Backend:', tf.getBackend())  // Should be 'webgpu'
 
 // Force GPU if needed
-await tf.setBackend('webgl')
+await tf.setBackend('webgpu')
 ```
 
 ### Capture Resolution

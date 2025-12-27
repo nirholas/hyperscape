@@ -100,7 +100,6 @@ import {
 } from "../../types/index";
 import type {
   ActorHandle,
-  CameraSystem,
   PlayerStickState,
   PlayerTouch,
   PxCapsuleGeometry,
@@ -108,11 +107,12 @@ import type {
   PxRigidDynamic,
   PxShape,
   PxSphereGeometry,
+  PxVec3,
   QuaternionLike,
   Vector3Like,
   VRMHooks,
 } from "../../types/systems/physics";
-import type { HotReloadable, XRSystem } from "../../types";
+import type { HotReloadable } from "../../types";
 
 import { vector3ToPxVec3 } from "../../utils/physics/PhysicsUtils";
 import { getSystem } from "../../utils/SystemUtils";
@@ -152,13 +152,34 @@ interface AvatarNode {
   getHeadToHeight?: () => number;
   getBoneTransform?: (boneName: string) => THREE.Matrix4 | null;
   deactivate?: () => void;
+  height?: number;
 }
 
-// Camera system accessor with strong type assumption
+// NodeWithInstance is already defined above, no need to redefine
+
+interface PlayerLocalWithDying {
+  isDying?: boolean;
+  data: EntityData & { isDying?: boolean };
+  movementTarget?: unknown;
+  path?: unknown;
+  destination?: unknown;
+}
+
+interface PhysXGlobal {
+  PHYSX?: {
+    PxVec3: new (x: number, y: number, z: number) => unknown;
+    PxRigidBodyFlagEnum: { eKINEMATIC: number };
+  };
+}
+
+// Camera system accessor - use the proper utility function
+import {
+  getCameraSystem as getCameraSystemUtil,
+  type CameraSystem,
+} from "../../utils/SystemUtils";
+
 function getCameraSystem(world: World): CameraSystem | null {
-  // Get the client camera system
-  const sys = getSystem(world, "client-camera-system");
-  return (sys as unknown as CameraSystem) || null;
+  return getCameraSystemUtil(world);
 }
 
 // Hyperscape-specific object types using the imported interface
@@ -314,6 +335,12 @@ const _q4 = new THREE.Quaternion();
 const _m1 = new THREE.Matrix4();
 const _m2 = new THREE.Matrix4();
 const _m3 = new THREE.Matrix4();
+
+// Pre-allocated temps for update/lateUpdate to avoid per-frame allocations
+const _combatQuat = new THREE.Quaternion();
+const _combatAxis = new THREE.Vector3(0, 1, 0);
+const _nametagMatrix = new THREE.Matrix4();
+const _healthBarMatrix = new THREE.Matrix4();
 
 // Removed unused interface: PlayerState
 
@@ -868,7 +895,9 @@ export class PlayerLocal extends Entity implements HotReloadable {
 
       // CRITICAL: Block emote changes during death EXCEPT for death emote itself
       // This prevents clicks from interrupting the death animation
-      const isDyingState = (this as any).isDying || (this.data as any).isDying;
+      const playerWithDying = this as PlayerLocalWithDying;
+      const isDyingState =
+        playerWithDying.isDying || playerWithDying.data.isDying;
       const shouldBlockEmote = isDyingState && newEmote !== "death";
 
       if (shouldBlockEmote) {
@@ -907,7 +936,8 @@ export class PlayerLocal extends Entity implements HotReloadable {
       const pos = data.p as number[];
       if (pos.length === 3) {
         // CRITICAL: Block position updates during death animation
-        if ((this as any).isDying || (this.data as any).isDying) {
+        const playerWithDying = this as PlayerLocalWithDying;
+        if (playerWithDying.isDying || playerWithDying.data.isDying) {
           // Ignore position updates during death
         }
         // CRITICAL: Skip position updates when TileInterpolator is controlling position
@@ -977,7 +1007,8 @@ export class PlayerLocal extends Entity implements HotReloadable {
       if (vel.length === 3) {
         // CRITICAL: Block velocity updates during death
         // BUT continue processing other updates (like emote for death animation!)
-        if ((this as any).isDying || (this.data as any).isDying) {
+        const playerWithDying = this as PlayerLocalWithDying;
+        if (playerWithDying.isDying || playerWithDying.data.isDying) {
           // Ignore velocity updates during death
         } else {
           this.velocity.set(vel[0], vel[1], vel[2]);
@@ -1207,8 +1238,7 @@ export class PlayerLocal extends Entity implements HotReloadable {
       this.bubble.activate(this.world);
     }
     // Add bubble's THREE.js representation to aura
-    const bubbleInstance = (this.bubble as unknown as NodeWithInstance)
-      .instance;
+    const bubbleInstance = (this.bubble as NodeWithInstance).instance;
     if (bubbleInstance && bubbleInstance.isObject3D) {
       this.aura.add(bubbleInstance);
     }
@@ -1268,14 +1298,21 @@ export class PlayerLocal extends Entity implements HotReloadable {
       EventType.PLAYER_TELEPORT_REQUEST,
       this.handleTeleport.bind(this),
     );
-    this.world.on(
-      EventType.PLAYER_SET_DEAD,
-      this.handlePlayerSetDead.bind(this),
-    );
-    this.world.on(
-      EventType.PLAYER_RESPAWNED,
-      this.handlePlayerRespawned.bind(this),
-    );
+    this.world.on(EventType.PLAYER_SET_DEAD, (eventData) => {
+      this.handlePlayerSetDead(
+        eventData as { playerId: string; isDead: boolean },
+      );
+    });
+    this.world.on(EventType.PLAYER_RESPAWNED, (eventData) => {
+      this.handlePlayerRespawned(
+        eventData as {
+          playerId: string;
+          spawnPosition?:
+            | { x: number; y: number; z: number }
+            | [number, number, number];
+        },
+      );
+    });
     this.world.on(
       EventType.UI_AUTO_RETALIATE_CHANGED,
       this.handleAutoRetaliateChanged.bind(this),
@@ -1446,7 +1483,7 @@ export class PlayerLocal extends Entity implements HotReloadable {
     // Nametag is always active to show health bar in combat (set at initialization)
 
     // Set camera height
-    const avatarHeight = (this._avatar as unknown as { height: number }).height;
+    const avatarHeight = (this._avatar as AvatarNode).height ?? 1.5;
     this.camHeight = Math.max(1.2, avatarHeight * 0.9);
 
     // Make avatar visible and ensure proper positioning
@@ -1856,9 +1893,10 @@ export class PlayerLocal extends Entity implements HotReloadable {
     target: { x: number; y: number; z: number } | null,
   ): void {
     // CRITICAL: Block ALL movement during death
+    const playerWithDying = this as PlayerLocalWithDying;
     if (
-      (this as any).isDying ||
-      (this.data as any).isDying ||
+      playerWithDying.isDying ||
+      playerWithDying.data.isDying ||
       this.health <= 0
     ) {
       console.log("[PlayerLocal] Movement blocked - player is dying/dead");
@@ -1955,8 +1993,7 @@ export class PlayerLocal extends Entity implements HotReloadable {
     this.updateCallCount++;
 
     // ALWAYS log first 10 updates with high visibility
-    if (this.updateCallCount <= 10) {
-    }
+    // (logging removed but keeping structure for future use)
 
     // COMBAT ROTATION: Rotate to face target when in combat (RuneScape-style)
     // Phase 5: Client is display-only - server controls all combat facing
@@ -2027,17 +2064,16 @@ export class PlayerLocal extends Entity implements HotReloadable {
       // Otherwise entities face AWAY from each other instead of towards
       angle += Math.PI;
 
-      // Apply instant rotation (RuneScape doesn't lerp combat rotation)
+      // Apply instant rotation (RuneScape doesn't lerp combat rotation) using pre-allocated temps
       if (this.base) {
-        const tempQuat = new THREE.Quaternion();
-        tempQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle);
-        this.base.quaternion.copy(tempQuat);
+        _combatQuat.setFromAxisAngle(_combatAxis, angle);
+        this.base.quaternion.copy(_combatQuat);
 
         // Issue #322: Store this rotation to preserve facing after combat ends
         if (!this._lastCombatRotation) {
           this._lastCombatRotation = new THREE.Quaternion();
         }
-        this._lastCombatRotation.copy(tempQuat);
+        this._lastCombatRotation.copy(_combatQuat);
       }
     } else if (
       !combatTarget &&
@@ -2079,12 +2115,13 @@ export class PlayerLocal extends Entity implements HotReloadable {
         update?: (delta: number) => void;
       };
     };
-    const avatarNode = this._avatar as unknown as AvatarNodeWithInstance;
+    const avatarNode = this._avatar as AvatarNodeWithInstance;
     if (avatarNode?.instance) {
       const instance = avatarNode.instance;
 
       // Log when avatar instance is first detected
       if (this.updateCallCount === 11 || this.updateCallCount === 12) {
+        // Avatar instance detected
       }
 
       if (instance.move && this.base) {
@@ -2140,27 +2177,6 @@ export class PlayerLocal extends Entity implements HotReloadable {
   }
 
   lateUpdate(_delta: number): void {
-    const isXR = (this.world.xr as XRSystem)?.session;
-    const anchor = this.getAnchorMatrix();
-    // if we're anchored, force into that pose
-    if (anchor && this.capsule) {
-      // Only apply anchor in XR mode - in normal gameplay, anchor should not override rotation
-      if (isXR) {
-        console.warn(
-          "[PlayerLocal] XR Anchor is overriding rotation in lateUpdate!",
-        );
-        this.position.setFromMatrixPosition(anchor);
-        this.base!.quaternion.setFromRotationMatrix(anchor);
-        const pose = this.capsule.getGlobalPose();
-        if (pose && pose.p) {
-          // Manually set position to avoid type casting issues
-          pose.p.x = this.position.x;
-          pose.p.y = this.position.y;
-          pose.p.z = this.position.z;
-          this.capsuleHandle?.snap(pose);
-        }
-      }
-    }
     if (this._avatar) {
       if (this._avatar.getBoneTransform) {
         const matrix = this._avatar.getBoneTransform("head");
@@ -2168,21 +2184,19 @@ export class PlayerLocal extends Entity implements HotReloadable {
           this.aura.position.setFromMatrixPosition(matrix);
         }
       }
-      // Update nametag position above head
+      // Update nametag position above head using pre-allocated matrix
       if (this.nametag && this.nametag.handle && this.base) {
         // Position at fixed Y offset from player base
-        const nametagMatrix = new THREE.Matrix4();
-        nametagMatrix.copy(this.base.matrixWorld);
-        nametagMatrix.elements[13] += 2.2; // Nametag slightly higher (above health bar)
-        this.nametag.handle.move(nametagMatrix);
+        _nametagMatrix.copy(this.base.matrixWorld);
+        _nametagMatrix.elements[13] += 2.2; // Nametag slightly higher (above health bar)
+        this.nametag.handle.move(_nametagMatrix);
       }
 
-      // Update health bar position (separate from nametag, slightly lower)
+      // Update health bar position (separate from nametag, slightly lower) using pre-allocated matrix
       if (this._healthBarHandle && this.base) {
-        const healthBarMatrix = new THREE.Matrix4();
-        healthBarMatrix.copy(this.base.matrixWorld);
-        healthBarMatrix.elements[13] += 2.0; // Health bar at Y=2.0
-        this._healthBarHandle.move(healthBarMatrix);
+        _healthBarMatrix.copy(this.base.matrixWorld);
+        _healthBarMatrix.elements[13] += 2.0; // Health bar at Y=2.0
+        this._healthBarHandle.move(_healthBarMatrix);
       }
     }
   }
@@ -2374,7 +2388,7 @@ export class PlayerLocal extends Entity implements HotReloadable {
    * Handle PLAYER_SET_DEAD event from server
    * CRITICAL: This is the entry point to death flow - blocks all input and movement
    */
-  handlePlayerSetDead(event: any): void {
+  handlePlayerSetDead(event: { playerId: string; isDead: boolean }): void {
     if (event.playerId !== this.data.id) return;
 
     // CRITICAL: Check if player is being set to dead or alive
@@ -2383,12 +2397,14 @@ export class PlayerLocal extends Entity implements HotReloadable {
       // Player is being restored to alive (after respawn)
 
       // Clear isDying flag (same as handlePlayerRespawned)
-      (this as any).isDying = false;
-      (this.data as any).isDying = false;
+      const playerWithDying = this as PlayerLocalWithDying;
+      playerWithDying.isDying = false;
+      playerWithDying.data.isDying = false;
 
       // Unfreeze physics if needed
-      if (this.capsule && (globalThis as any).PHYSX) {
-        const PHYSX = (globalThis as any).PHYSX;
+      const physXGlobal = globalThis as PhysXGlobal;
+      if (this.capsule && physXGlobal.PHYSX) {
+        const PHYSX = physXGlobal.PHYSX;
         this.capsule.setRigidBodyFlag(
           PHYSX.PxRigidBodyFlagEnum.eKINEMATIC,
           false,
@@ -2400,8 +2416,9 @@ export class PlayerLocal extends Entity implements HotReloadable {
 
     // isDead:true = player is dying
     // Set isDying flag (blocks all input)
-    (this as any).isDying = true;
-    (this.data as any).isDying = true;
+    const playerWithDying = this as PlayerLocalWithDying;
+    playerWithDying.isDying = true;
+    playerWithDying.data.isDying = true;
 
     // CRITICAL: Clear ALL movement state immediately to stop camera following
     this.clickMoveTarget = null;
@@ -2413,17 +2430,19 @@ export class PlayerLocal extends Entity implements HotReloadable {
     }
 
     // Clear any queued movement (defensive - clear everything)
-    if ((this as any).movementTarget) (this as any).movementTarget = null;
-    if ((this as any).path) (this as any).path = null;
-    if ((this as any).destination) (this as any).destination = null;
+    // Reuse playerWithDying already defined above
+    if (playerWithDying.movementTarget) playerWithDying.movementTarget = null;
+    if (playerWithDying.path) playerWithDying.path = null;
+    if (playerWithDying.destination) playerWithDying.destination = null;
 
     // CRITICAL: Freeze physics capsule (make it KINEMATIC = frozen, no forces applied)
-    if (this.capsule && (globalThis as any).PHYSX) {
-      const PHYSX = (globalThis as any).PHYSX;
+    const physXGlobal = globalThis as PhysXGlobal;
+    if (this.capsule && physXGlobal.PHYSX) {
+      const PHYSX = physXGlobal.PHYSX;
       console.log("[PlayerLocal] Freezing physics capsule...");
 
       // Zero out all velocities
-      const zeroVec = new PHYSX.PxVec3(0, 0, 0);
+      const zeroVec = new PHYSX.PxVec3(0, 0, 0) as PxVec3;
       this.capsule.setLinearVelocity(zeroVec);
       this.capsule.setAngularVelocity(zeroVec);
 
@@ -2445,35 +2464,33 @@ export class PlayerLocal extends Entity implements HotReloadable {
    * Handle PLAYER_RESPAWNED event from server
    * Exits death state, teleports to spawn position, and allows normal gameplay
    */
-  handlePlayerRespawned(event: any): void {
+  handlePlayerRespawned(event: {
+    playerId: string;
+    spawnPosition?:
+      | { x: number; y: number; z: number }
+      | [number, number, number];
+  }): void {
     if (event.playerId !== this.data.id) return;
 
     // Clear isDying flag (allows input again)
-    (this as any).isDying = false;
-    (this.data as any).isDying = false;
+    const playerWithDying = this as PlayerLocalWithDying;
+    playerWithDying.isDying = false;
+    playerWithDying.data.isDying = false;
 
     // CRITICAL: Teleport player to spawn position
     // Without this, player stays at death location instead of respawning at spawn
     if (event.spawnPosition) {
       const spawnPos = event.spawnPosition;
-      const x =
-        typeof spawnPos.x === "number"
-          ? spawnPos.x
-          : Array.isArray(spawnPos)
-            ? spawnPos[0]
-            : 0;
-      const y =
-        typeof spawnPos.y === "number"
-          ? spawnPos.y
-          : Array.isArray(spawnPos)
-            ? spawnPos[1]
-            : 0;
-      const z =
-        typeof spawnPos.z === "number"
-          ? spawnPos.z
-          : Array.isArray(spawnPos)
-            ? spawnPos[2]
-            : 0;
+      const isArray = Array.isArray(spawnPos);
+      const x = isArray
+        ? spawnPos[0]
+        : (spawnPos as { x: number; y: number; z: number }).x;
+      const y = isArray
+        ? spawnPos[1]
+        : (spawnPos as { x: number; y: number; z: number }).y;
+      const z = isArray
+        ? spawnPos[2]
+        : (spawnPos as { x: number; y: number; z: number }).z;
 
       console.log(
         `[PlayerLocal] Teleporting to spawn position: (${x}, ${y}, ${z})`,
@@ -2489,8 +2506,9 @@ export class PlayerLocal extends Entity implements HotReloadable {
       }
 
       // Update physics capsule position if it exists
-      if (this.capsule && (globalThis as any).PHYSX) {
-        const PHYSX = (globalThis as any).PHYSX;
+      const physXGlobal = globalThis as PhysXGlobal;
+      if (this.capsule && physXGlobal.PHYSX) {
+        const _PHYSX = physXGlobal.PHYSX;
         const pose = this.capsule.getGlobalPose();
         pose.p.x = x;
         pose.p.y = y;
@@ -2504,15 +2522,24 @@ export class PlayerLocal extends Entity implements HotReloadable {
       this.data.tileMovementActive = false;
 
       // Try to sync tile interpolator through world's network system
-      const network = this.world.network as any;
+      interface NetworkWithTileInterpolator {
+        tileInterpolator?: {
+          syncPosition?: (
+            id: string,
+            pos: { x: number; y: number; z: number },
+          ) => void;
+        };
+      }
+      const network = this.world.network as NetworkWithTileInterpolator;
       if (network?.tileInterpolator?.syncPosition) {
         network.tileInterpolator.syncPosition(this.data.id, { x, y, z });
       }
     }
 
     // Unfreeze physics capsule (make it DYNAMIC again)
-    if (this.capsule && (globalThis as any).PHYSX) {
-      const PHYSX = (globalThis as any).PHYSX;
+    const physXGlobal = globalThis as PhysXGlobal;
+    if (this.capsule && physXGlobal.PHYSX) {
+      const PHYSX = physXGlobal.PHYSX;
 
       // Set back to DYNAMIC mode (normal physics)
       this.capsule.setRigidBodyFlag(
@@ -2521,7 +2548,7 @@ export class PlayerLocal extends Entity implements HotReloadable {
       );
 
       // Zero out velocities to prevent sudden movements
-      const zeroVec = new PHYSX.PxVec3(0, 0, 0);
+      const zeroVec = new PHYSX.PxVec3(0, 0, 0) as PxVec3;
       this.capsule.setLinearVelocity(zeroVec);
       this.capsule.setAngularVelocity(zeroVec);
 
@@ -2552,8 +2579,21 @@ export class PlayerLocal extends Entity implements HotReloadable {
     // Remove event listeners
     this.world.off(EventType.PLAYER_HEALTH_UPDATED, this.handleHealthChange);
     this.world.off(EventType.PLAYER_TELEPORT_REQUEST, this.handleTeleport);
-    this.world.off(EventType.PLAYER_SET_DEAD, this.handlePlayerSetDead);
-    this.world.off(EventType.PLAYER_RESPAWNED, this.handlePlayerRespawned);
+    this.world.off(EventType.PLAYER_SET_DEAD, (eventData) => {
+      this.handlePlayerSetDead(
+        eventData as { playerId: string; isDead: boolean },
+      );
+    });
+    this.world.off(EventType.PLAYER_RESPAWNED, (eventData) => {
+      this.handlePlayerRespawned(
+        eventData as {
+          playerId: string;
+          spawnPosition?:
+            | { x: number; y: number; z: number }
+            | [number, number, number];
+        },
+      );
+    });
     this.world.off(
       EventType.UI_AUTO_RETALIATE_CHANGED,
       this.handleAutoRetaliateChanged,

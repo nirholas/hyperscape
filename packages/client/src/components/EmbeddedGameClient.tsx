@@ -124,8 +124,11 @@ function setupSpectatorCamera(
     // CRITICAL: Pass the FULL ENTITY as target, not just { position: entity.position }
     // The camera system reads target.position every frame, and we need
     // TileInterpolator's position updates to be reflected automatically
+    const entityWithPosition = entity as {
+      position: { x: number; y: number; z: number };
+    };
     world.emit(EventType.CAMERA_SET_TARGET, {
-      target: entity,
+      target: entityWithPosition,
     });
 
     // Ensure controls are still disabled (belt and suspenders)
@@ -256,7 +259,7 @@ function setupSpectatorCamera(
 /**
  * Apply quality presets based on embedded config
  */
-function applyQualityPresets(world: World, config: EmbeddedViewportConfig) {
+function applyQualityPresets(world: World, _config: EmbeddedViewportConfig) {
   const quality = getQualityPreset();
 
   // Apply render scale

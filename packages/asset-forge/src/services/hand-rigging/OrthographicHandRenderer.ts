@@ -1,10 +1,16 @@
 /**
  * Orthographic Hand Renderer Service
  * Captures orthographic views of hands from 3D models for pose detection
+ * Uses WebGPU renderer for GPU-accelerated rendering.
  */
 
-import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+
+import {
+  THREE,
+  createWebGPURenderer,
+  type AssetForgeRenderer,
+} from "../../utils/webgpu-renderer";
 
 export interface CaptureOptions {
   resolution?: number;
@@ -35,10 +41,11 @@ export interface WristBoneInfo {
 }
 
 export class OrthographicHandRenderer {
-  private renderer: THREE.WebGLRenderer;
+  private renderer: AssetForgeRenderer | null = null;
   private scene: THREE.Scene;
   private camera: THREE.OrthographicCamera;
   private loader: GLTFLoader;
+  private isInitialized = false;
 
   // Default capture settings
   private readonly DEFAULT_RESOLUTION = 512;
@@ -46,15 +53,6 @@ export class OrthographicHandRenderer {
   private readonly CAPTURE_DISTANCE = 1.0;
 
   constructor() {
-    // Create WebGL renderer
-    this.renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      alpha: true,
-      preserveDrawingBuffer: true,
-    });
-    this.renderer.setSize(this.DEFAULT_RESOLUTION, this.DEFAULT_RESOLUTION);
-    this.renderer.shadowMap.enabled = false;
-
     // Create scene
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x000000);
@@ -90,6 +88,27 @@ export class OrthographicHandRenderer {
 
     // Create loader
     this.loader = new GLTFLoader();
+  }
+
+  /**
+   * Initialize the WebGPU renderer (must be called before capture)
+   */
+  async init(): Promise<void> {
+    if (this.isInitialized) return;
+
+    this.renderer = await createWebGPURenderer({
+      antialias: true,
+      alpha: true,
+    });
+    this.renderer.setSize(this.DEFAULT_RESOLUTION, this.DEFAULT_RESOLUTION);
+
+    this.isInitialized = true;
+  }
+
+  private async ensureInitialized(): Promise<void> {
+    if (!this.isInitialized) {
+      await this.init();
+    }
   }
 
   /**
@@ -182,6 +201,9 @@ export class OrthographicHandRenderer {
     wristInfo: WristBoneInfo,
     options: CaptureOptions = {},
   ): Promise<HandCaptureResult> {
+    await this.ensureInitialized();
+    if (!this.renderer) throw new Error("Renderer not initialized");
+
     const resolution = options.resolution || this.DEFAULT_RESOLUTION;
     const padding = options.padding || this.DEFAULT_PADDING;
     const backgroundColor = options.backgroundColor || "#000000";
@@ -271,17 +293,17 @@ export class OrthographicHandRenderer {
     }
 
     // Render
-    this.renderer.render(this.scene, this.camera);
+    await this.renderer.renderAsync(this.scene, this.camera);
 
     // Get canvas and create a 2D copy for image data extraction
-    const webglCanvas = this.renderer.domElement;
+    const gpuCanvas = this.renderer.domElement;
 
-    // Ensure the WebGL canvas has content
-    if (!webglCanvas || webglCanvas.width === 0 || webglCanvas.height === 0) {
-      throw new Error("WebGL canvas is not properly initialized");
+    // Ensure the GPU canvas has content
+    if (!gpuCanvas || gpuCanvas.width === 0 || gpuCanvas.height === 0) {
+      throw new Error("WebGPU canvas is not properly initialized");
     }
 
-    // Create result canvas and copy WebGL content
+    // Create result canvas and copy WebGPU content
     const resultCanvas = document.createElement("canvas");
     resultCanvas.width = resolution;
     resultCanvas.height = resolution;
@@ -291,8 +313,8 @@ export class OrthographicHandRenderer {
       throw new Error("Failed to get 2D context for result canvas");
     }
 
-    // Draw the WebGL canvas to the 2D canvas
-    resultCtx.drawImage(webglCanvas, 0, 0);
+    // Draw the GPU canvas to the 2D canvas
+    resultCtx.drawImage(gpuCanvas, 0, 0);
 
     // Now get the image data from the 2D canvas
     const imageData = resultCtx.getImageData(0, 0, resolution, resolution);
@@ -483,7 +505,11 @@ export class OrthographicHandRenderer {
    * Cleanup resources
    */
   dispose(): void {
-    this.renderer.dispose();
+    if (this.renderer) {
+      this.renderer.dispose();
+      this.renderer = null;
+    }
+    this.isInitialized = false;
     // Dispose of any geometries, materials, textures in the scene
     this.scene.traverse((child) => {
       if (child instanceof THREE.Mesh) {

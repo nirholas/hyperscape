@@ -218,14 +218,6 @@ export async function handleBankDeleteTab(
         throw new Error("TAB_NOT_FOUND");
       }
 
-      // Get all items in the tab being deleted
-      const itemsInTab = await tx.execute(
-        sql`SELECT id, slot FROM bank_storage
-            WHERE "playerId" = ${ctx.playerId} AND "tabIndex" = ${data.tabIndex}
-            ORDER BY slot
-            FOR UPDATE`,
-      );
-
       // Get max slot in main tab to append items
       const mainTabMax = await tx.execute(
         sql`SELECT COALESCE(MAX(slot), -1) as "maxSlot"

@@ -1,8 +1,14 @@
 // Math utilities for movement calculations
 import { THREE } from "@hyperscape/shared";
 
-const _tempVec3_1 = new THREE.Vector3();
-const _tempVec3_2 = new THREE.Vector3();
+// Pre-allocated temp objects for hot path optimizations (avoid GC pressure)
+// Each operation gets its own temp vector to allow safe chaining without overwrites
+const _subtractResult = new THREE.Vector3();
+const _normalizeResult = new THREE.Vector3();
+const _multiplyResult = new THREE.Vector3();
+const _addResult = new THREE.Vector3();
+const _lerpResult = new THREE.Vector3();
+const _zeroVelocity = { x: 0, y: 0, z: 0 } as const;
 
 const MathUtils = {
   distance2D: (a: { x: number; z: number }, b: { x: number; z: number }) =>
@@ -10,26 +16,26 @@ const MathUtils = {
   subtract: (
     a: { x: number; y: number; z: number },
     b: { x: number; y: number; z: number },
-  ) => _tempVec3_1.set(a.x - b.x, a.y - b.y, a.z - b.z),
+  ) => _subtractResult.set(a.x - b.x, a.y - b.y, a.z - b.z),
   normalize: (v: { x: number; y: number; z: number }) => {
-    _tempVec3_2.set(v.x, v.y, v.z);
-    const length = _tempVec3_2.length();
+    _normalizeResult.set(v.x, v.y, v.z);
+    const length = _normalizeResult.length();
     return length > 0
-      ? _tempVec3_2.divideScalar(length)
-      : _tempVec3_2.set(0, 0, 0);
+      ? _normalizeResult.divideScalar(length)
+      : _normalizeResult.set(0, 0, 0);
   },
   multiply: (v: { x: number; y: number; z: number }, scalar: number) =>
-    _tempVec3_1.set(v.x * scalar, v.y * scalar, v.z * scalar),
+    _multiplyResult.set(v.x * scalar, v.y * scalar, v.z * scalar),
   add: (
     a: { x: number; y: number; z: number },
     b: { x: number; y: number; z: number },
-  ) => _tempVec3_1.set(a.x + b.x, a.y + b.y, a.z + b.z),
+  ) => _addResult.set(a.x + b.x, a.y + b.y, a.z + b.z),
   lerp: (
     a: { x: number; y: number; z: number },
     b: { x: number; y: number; z: number },
     t: number,
   ) =>
-    _tempVec3_1.set(
+    _lerpResult.set(
       a.x + (b.x - a.x) * t,
       a.y + (b.y - a.y) * t,
       a.z + (b.z - a.z) * t,
@@ -146,15 +152,16 @@ export class PlayerMovementSystem extends EventEmitter {
     if (!player) return; // Stop player movement (simulate)
     const movablePlayer = player as MovablePlayer;
     movablePlayer.isMoving = false;
-    movablePlayer.velocity = { x: 0, y: 0, z: 0 } as Vector3;
+    // Reuse pre-allocated zero velocity reference (immutable, safe to share)
+    movablePlayer.velocity = _zeroVelocity as Vector3;
     this.movingPlayers.delete(playerId);
 
-    // Broadcast stop via network
+    // Broadcast stop via network - use pre-allocated zero velocity
     if (this.world.network.send) {
       this.world.network.send("player:moved", {
         playerId,
         position: player.node.position,
-        velocity: { x: 0, y: 0, z: 0 },
+        velocity: _zeroVelocity,
       });
     }
   }
@@ -402,26 +409,33 @@ export class PlayerMovementSystem extends EventEmitter {
     }
   }
 
+  // Pre-allocated perpendicular vectors for slide velocity calculation
+  private readonly _perpendicular1 = { x: 0, y: 0, z: 0 };
+  private readonly _perpendicular2 = { x: 0, y: 0, z: 0 };
+  // Pre-allocated array to avoid allocation in calculateSlideVelocity loop
+  private readonly _perps: Array<{ x: number; y: number; z: number }> = [
+    this._perpendicular1,
+    this._perpendicular2,
+  ];
+
   private calculateSlideVelocity(player: MovablePlayer): Vector3 | null {
     if (!player.velocity || !player.node.position || !player.speed) {
       return null;
     }
 
-    // Try perpendicular directions
+    // Try perpendicular directions - reuse pre-allocated objects
     const vel = player.velocity;
-    const perpendicular1 = {
-      x: -(vel.z as number),
-      y: 0,
-      z: vel.x as number,
-    };
-    const perpendicular2 = {
-      x: vel.z as number,
-      y: 0,
-      z: -(vel.x as number),
-    };
+    this._perpendicular1.x = -(vel.z as number);
+    this._perpendicular1.y = 0;
+    this._perpendicular1.z = vel.x as number;
 
-    // Test both directions
-    for (const perp of [perpendicular1, perpendicular2]) {
+    this._perpendicular2.x = vel.z as number;
+    this._perpendicular2.y = 0;
+    this._perpendicular2.z = -(vel.x as number);
+
+    // Test both directions - use pre-allocated array reference
+    for (let i = 0; i < this._perps.length; i++) {
+      const perp = this._perps[i];
       const testPos = MathUtils.add(
         player.node.position,
         MathUtils.multiply(MathUtils.normalize(perp), 0.5),
@@ -438,6 +452,17 @@ export class PlayerMovementSystem extends EventEmitter {
     return null;
   }
 
+  // Pre-allocated network update payload to avoid allocation per update
+  private readonly _networkUpdatePayload: {
+    playerId: string;
+    position: THREE.Vector3 | null;
+    velocity: Vector3 | null;
+  } = {
+    playerId: "",
+    position: null,
+    velocity: null,
+  };
+
   private sendNetworkUpdates(): void {
     // Send position updates for all moving players
     for (const [playerId, movement] of this.movingPlayers) {
@@ -448,13 +473,14 @@ export class PlayerMovementSystem extends EventEmitter {
           : null);
       if (!player) continue;
 
-      // Send via network
+      // Send via network - reuse pre-allocated payload object
       if (this.world.network.send) {
-        this.world.network.send("player:moved", {
-          playerId,
-          position: player.node.position,
-          velocity: (player as MovablePlayer).velocity,
-        });
+        this._networkUpdatePayload.playerId = playerId;
+        this._networkUpdatePayload.position = player.node.position;
+        this._networkUpdatePayload.velocity = (
+          player as MovablePlayer
+        ).velocity;
+        this.world.network.send("player:moved", this._networkUpdatePayload);
       }
     }
   }

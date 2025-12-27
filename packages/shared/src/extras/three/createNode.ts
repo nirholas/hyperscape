@@ -18,7 +18,7 @@
  * - 'particles': Particle emitter
  * - 'action': Executable player action
  * - 'lod': Level-of-detail container
- * - 'anchor': Spatial anchor for XR
+ * - 'anchor': Spatial anchor point
  *
  * Why Nodes Instead of THREE.Object3D:
  * - Lifecycle hooks (mount, unmount, commit)

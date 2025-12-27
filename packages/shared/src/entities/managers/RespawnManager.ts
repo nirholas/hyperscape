@@ -23,7 +23,6 @@
  */
 
 import type { Position3D } from "../../types";
-import { COMBAT_CONSTANTS } from "../../constants/CombatConstants";
 import { msToTicks, ticksToMs } from "../../utils/game/CombatCalculations";
 
 export interface RespawnConfig {
@@ -107,7 +106,7 @@ export class RespawnManager {
    * @param currentTick - Current server tick number
    * @param deathPosition - Where the mob died (for logging only - NOT used for respawn)
    */
-  startRespawnTimer(currentTick: number, deathPosition?: Position3D): void {
+  startRespawnTimer(currentTick: number, _deathPosition?: Position3D): void {
     // Generate random respawn duration between min and max (in ticks)
     const randomTickRange = this.respawnTicksMax - this.respawnTicksMin;
     this.respawnDurationTicks =

@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { WebGPURenderer } from "three/webgpu";
 
 import { GripBounds, GripCoordinates, GripDetectionData } from "../../types";
 
@@ -25,21 +26,14 @@ interface RedPixelBounds {
 }
 
 export class WeaponHandleDetector {
-  private renderer: THREE.WebGLRenderer;
+  private renderer: WebGPURenderer | null = null;
   private scene: THREE.Scene;
   private camera: THREE.OrthographicCamera;
   private loader: GLTFLoader;
+  private initialized: boolean = false;
 
   constructor() {
     // Initialize Three.js components
-    this.renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      alpha: true,
-      preserveDrawingBuffer: true,
-    });
-    this.renderer.setSize(512, 512);
-    this.renderer.setClearColor(0x1a1a1a, 1);
-
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x1a1a1a);
 
@@ -48,10 +42,36 @@ export class WeaponHandleDetector {
     this.loader = new GLTFLoader();
   }
 
+  /**
+   * Initialize the WebGPU renderer
+   */
+  async init(): Promise<void> {
+    if (this.initialized) return;
+
+    this.renderer = new WebGPURenderer({
+      antialias: true,
+    });
+    await this.renderer.init();
+
+    this.renderer.setSize(512, 512);
+    this.initialized = true;
+  }
+
+  /**
+   * Ensure the renderer is initialized
+   */
+  private async ensureInitialized(): Promise<void> {
+    if (!this.initialized) {
+      await this.init();
+    }
+  }
+
   async detectHandleArea(
     modelUrl: string,
     useConsensus: boolean = false,
   ): Promise<HandleDetectionResult> {
+    await this.ensureInitialized();
+
     console.log("🎯 Starting weapon handle detection for:", modelUrl);
     console.log("Using consensus mode:", useConsensus);
 
@@ -313,6 +333,8 @@ export class WeaponHandleDetector {
   private async setupOrthographicCamera(
     model: THREE.Object3D,
   ): Promise<boolean> {
+    await this.ensureInitialized();
+
     console.log("📐 Setting up orthographic camera for weapon");
 
     const box = new THREE.Box3().setFromObject(model);
@@ -394,14 +416,17 @@ export class WeaponHandleDetector {
     this.camera.updateMatrixWorld(true);
 
     // Render once to check orientation
-    this.renderer.clear();
-    this.renderer.render(this.scene, this.camera);
+    if (this.renderer) {
+      this.renderer.render(this.scene, this.camera);
+    }
 
     const canvas = document.createElement("canvas");
     canvas.width = 512;
     canvas.height = 512;
     const ctx = canvas.getContext("2d")!;
-    ctx.drawImage(this.renderer.domElement, 0, 0);
+    if (this.renderer) {
+      ctx.drawImage(this.renderer.domElement, 0, 0);
+    }
 
     // Use AI to check if weapon needs flipping
     const needsFlip = await this.detectWeaponOrientation(canvas);
@@ -432,15 +457,18 @@ export class WeaponHandleDetector {
     canvas.height = 512;
 
     // Set renderer to use the correct size
-    this.renderer.setSize(512, 512);
+    if (this.renderer) {
+      this.renderer.setSize(512, 512);
 
-    // Clear and render the scene
-    this.renderer.clear();
-    this.renderer.render(this.scene, this.camera);
+      // Clear and render the scene
+      this.renderer.render(this.scene, this.camera);
+    }
 
     // Copy to our canvas
     const ctx = canvas.getContext("2d")!;
-    ctx.drawImage(this.renderer.domElement, 0, 0);
+    if (this.renderer) {
+      ctx.drawImage(this.renderer.domElement, 0, 0);
+    }
 
     // Add debug grid lines to help visualize sections
     const SHOW_DEBUG_GRID = false;
@@ -1087,15 +1115,18 @@ export class WeaponHandleDetector {
       model.updateMatrixWorld(true);
 
       // Render
-      this.renderer.clear();
-      this.renderer.render(this.scene, this.camera);
+      if (this.renderer) {
+        this.renderer.render(this.scene, this.camera);
+      }
 
       // Create canvas
       const canvas = document.createElement("canvas");
       canvas.width = 512;
       canvas.height = 512;
       const ctx = canvas.getContext("2d")!;
-      ctx.drawImage(this.renderer.domElement, 0, 0);
+      if (this.renderer) {
+        ctx.drawImage(this.renderer.domElement, 0, 0);
+      }
 
       results.push({ angle: angle.name, canvas });
     }
@@ -1306,7 +1337,11 @@ export class WeaponHandleDetector {
       this.scene.remove(this.scene.children[0]);
     }
 
-    this.renderer.dispose();
+    if (this.renderer) {
+      this.renderer.dispose();
+      this.renderer = null;
+    }
+    this.initialized = false;
   }
 
   /**

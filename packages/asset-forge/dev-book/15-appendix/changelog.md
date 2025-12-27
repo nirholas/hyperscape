@@ -178,7 +178,7 @@ asset-forge/
 - Concurrent pipeline processing not supported in UI
 
 #### Browser Compatibility
-- Requires modern browser with WebGL 2.0 support
+- Requires modern browser with WebGPU support (Chrome 113+, Safari 17+, Firefox with flag)
 - Safari may have limited MediaPipe support
 - Mobile browsers have limited Three.js performance
 

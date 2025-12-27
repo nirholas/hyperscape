@@ -117,8 +117,6 @@ export class DockerManager {
       `docker inspect -f '{{.State.Running}}' ${this.config.containerName}`,
     );
     const isRunning = stdout.trim() === "true";
-    if (isRunning) {
-    }
     return isRunning;
   }
 

@@ -6,9 +6,12 @@
  * Caches results for performance.
  */
 
-import { SystemBase } from "..";
+import { SystemBase } from "../infrastructure/SystemBase";
 import type { World } from "../../../core/World";
-import { getZoneByPosition } from "../../../data/world-structure";
+import {
+  getZoneByPosition,
+  type ZoneData,
+} from "../../../data/world-structure";
 import { ALL_WORLD_AREAS } from "../../../data/world-areas";
 import type { ZoneType, ZoneProperties } from "../../../types/death";
 import { ZoneType as ZoneTypeEnum } from "../../../types/death";
@@ -106,7 +109,11 @@ export class ZoneDetectionSystem extends SystemBase {
         ) {
           // Found matching area
           const isSafe = area.safeZone === true;
-          const isPvP = (area as any).pvpEnabled === true;
+          interface AreaWithPvP extends WorldArea {
+            pvpEnabled?: boolean;
+          }
+          const areaWithPvP = area as AreaWithPvP;
+          const isPvP = areaWithPvP.pvpEnabled === true;
           const isWild = !isSafe || isPvP;
 
           let type: ZoneType;
@@ -133,8 +140,13 @@ export class ZoneDetectionSystem extends SystemBase {
     // Check zones (from data/world-structure.ts)
     const zone = getZoneByPosition(position);
     if (zone) {
-      const isSafe = (zone as any).safeZone === true || zone.isTown === true;
-      const isPvP = (zone as any).pvpEnabled === true;
+      interface ZoneWithProperties extends ZoneData {
+        safeZone?: boolean;
+        pvpEnabled?: boolean;
+      }
+      const zoneWithProps = zone as ZoneWithProperties;
+      const isSafe = zoneWithProps.safeZone === true || zone.isTown === true;
+      const isPvP = zoneWithProps.pvpEnabled === true;
       const isWild = !isSafe || isPvP;
 
       let type: ZoneType;

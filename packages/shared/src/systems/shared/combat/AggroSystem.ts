@@ -17,7 +17,7 @@ import {
   normalizeCombatSkills,
   shouldMobIgnorePlayer,
 } from "../../../utils/game/CombatLevelCalculator";
-import { SystemBase } from "..";
+import { SystemBase } from "../infrastructure/SystemBase";
 import {
   TICK_DURATION_MS,
   worldToTile,

@@ -43,8 +43,6 @@ const q1 = new THREE.Quaternion();
 const e1 = new THREE.Euler(0, 0, 0, "YXZ");
 const m1 = new THREE.Matrix4();
 
-const FORWARD = new THREE.Vector3(0, 0, 1);
-
 const isBrowser = typeof window !== "undefined";
 
 const spaces = ["world", "screen"];
@@ -504,33 +502,14 @@ export class UI extends Node implements HotReloadable {
         sca as THREE.Vector3,
       );
       if (this._billboard === "full") {
-        if (world.xr?.session) {
-          // full in XR means lookAt camera (excludes roll)
-          v5.subVectors(camPosition, pos).normalize();
-          qua.setFromUnitVectors(FORWARD, v5);
-          e1.setFromQuaternion(qua);
-          e1.z = 0;
-          qua.setFromEuler(e1);
-        } else {
-          // full in desktop/mobile means matching camera rotation
-          qua.copy(world.rig.quaternion);
-        }
+        // Full billboard matches camera rotation
+        qua.copy(world.rig.quaternion);
       } else if (this._billboard === "y") {
-        if (world.xr?.session) {
-          // full in XR means lookAt camera (only y)
-          v5.subVectors(camPosition, pos).normalize();
-          qua.setFromUnitVectors(FORWARD, v5);
-          e1.setFromQuaternion(qua);
-          e1.x = 0;
-          e1.z = 0;
-          qua.setFromEuler(e1);
-        } else {
-          // full in desktop/mobile means matching camera y rotation
-          e1.setFromQuaternion(world.rig.quaternion);
-          e1.x = 0;
-          e1.z = 0;
-          qua.setFromEuler(e1);
-        }
+        // Y-axis billboard matches camera y rotation only
+        e1.setFromQuaternion(world.rig.quaternion);
+        e1.x = 0;
+        e1.z = 0;
+        qua.setFromEuler(e1);
       }
       if (this._scaler) {
         const worldToScreenFactor = world.graphics?.worldToScreenFactor || 1;
@@ -541,7 +520,6 @@ export class UI extends Node implements HotReloadable {
         // When distance is at max, scale adjusts proportionally
         const scaleFactor =
           (baseScale * (worldToScreenFactor * clampedDistance)) / this._size;
-        // if (world.xr?.session) scaleFactor *= 0.3 // roughly matches desktop fov etc
         sca.setScalar(scaleFactor);
       }
       this.matrixWorld.compose(pos as THREE.Vector3, qua, sca as THREE.Vector3);

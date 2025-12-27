@@ -1,7 +1,18 @@
 /**
- * three.ts - Three.js Extensions
+ * three.ts - Three.js WebGPU Extensions
  *
- * Enhanced Three.js import with BVH raycasting and utility functions.
+ * Enhanced Three.js import with WebGPU renderer and BVH raycasting.
+ * Exports WebGPU build of Three.js with TSL (Three Shading Language) functions.
+ *
+ * TSL API Notes (three.js 0.180.0):
+ * - TSL functions are in THREE_NAMESPACE.TSL, not direct exports from three/webgpu
+ * - Node materials (MeshStandardNodeMaterial, etc.) ARE direct exports
+ * - Bloom effect is in three/examples/jsm/tsl/display/BloomNode.js
+ * - TSL requires WebGPU context - cannot run in Node.js or WebGL fallback
+ *
+ * Browser Requirements:
+ * - Chrome 113+, Edge 113+, Safari 17+ for WebGPU support
+ * - See RendererFactory.isWebGPUAvailable() for detection
  */
 
 import {
@@ -9,21 +20,132 @@ import {
   disposeBoundsTree,
   acceleratedRaycast,
 } from "three-mesh-bvh";
-import * as THREE_NAMESPACE from "three";
 
-// Multiple imports of Three.js are expected in this module architecture
-// The globalThis.THREE ensures we're using a singleton instance
+// Import WebGPU build of Three.js
+import * as THREE_NAMESPACE from "three/webgpu";
+
+// TSL functions are exported under the TSL namespace in three/webgpu
+// Re-export them at top level for convenience
+export const {
+  // Node building functions
+  Fn,
+  If,
+  // Shader nodes - inputs
+  uv,
+  positionLocal,
+  positionWorld,
+  positionView,
+  normalLocal,
+  normalWorld,
+  normalView,
+  cameraPosition,
+  cameraProjectionMatrix,
+  cameraViewMatrix,
+  cameraNear,
+  cameraFar,
+  modelViewMatrix,
+  modelWorldMatrix,
+  modelNormalMatrix,
+  instanceIndex,
+  // Uniform and attribute
+  uniform,
+  attribute,
+  instancedBufferAttribute,
+  vertexColor,
+  // Math nodes
+  float,
+  int,
+  uint,
+  vec2,
+  vec3,
+  vec4,
+  mat2,
+  mat3,
+  mat4,
+  // Operators
+  add,
+  sub,
+  mul,
+  div,
+  mod,
+  // Math functions
+  abs,
+  acos,
+  asin,
+  atan,
+  ceil,
+  clamp,
+  cos,
+  cross,
+  degrees,
+  distance,
+  dot,
+  exp,
+  exp2,
+  floor,
+  fract,
+  inversesqrt,
+  length,
+  log,
+  log2,
+  max,
+  min,
+  mix,
+  normalize,
+  pow,
+  radians,
+  reflect,
+  refract,
+  round,
+  saturate,
+  sign,
+  sin,
+  smoothstep,
+  sqrt,
+  step,
+  tan,
+  // Texture
+  texture,
+  // Discard
+  discard,
+  // Display
+  output,
+  // Post-processing
+  pass,
+  mrt,
+} = THREE_NAMESPACE.TSL;
+
+// Re-export Node Materials (these ARE directly on three/webgpu)
+export {
+  MeshStandardNodeMaterial,
+  MeshBasicNodeMaterial,
+  MeshPhysicalNodeMaterial,
+  SpriteNodeMaterial,
+  LineBasicNodeMaterial,
+} from "three/webgpu";
 
 // Export the THREE namespace object as the default export
 export default THREE_NAMESPACE;
 
 // Re-export the full three.js surface so `import THREE from '../extras/three'` works
-export * from "three";
+export * from "three/webgpu";
+
+// Pre-allocated temp objects for utility functions to avoid per-call allocations
+const _safeDecomposePos = new THREE_NAMESPACE.Vector3();
+const _safeDecomposeQuat = new THREE_NAMESPACE.Quaternion();
+const _safeDecomposeScale = new THREE_NAMESPACE.Vector3();
+const _safeComposePos = new THREE_NAMESPACE.Vector3();
+const _safeComposeQuat = new THREE_NAMESPACE.Quaternion();
+const _safeComposeScale = new THREE_NAMESPACE.Vector3();
 
 // Vector3 compatibility utilities
 export function toTHREEVector3(
   v: THREE_NAMESPACE.Vector3 | { x: number; y: number; z: number },
+  target?: THREE_NAMESPACE.Vector3,
 ): THREE_NAMESPACE.Vector3 {
+  if (target) {
+    return target.set(v.x, v.y, v.z);
+  }
   return new THREE_NAMESPACE.Vector3(v.x, v.y, v.z);
 }
 
@@ -34,15 +156,10 @@ export function safeMatrixDecompose(
   quaternion: THREE_NAMESPACE.Quaternion,
   scale: THREE_NAMESPACE.Vector3,
 ): void {
-  const tempPos = new THREE_NAMESPACE!.Vector3();
-  const tempQuat = new THREE_NAMESPACE!.Quaternion();
-  const tempScale = new THREE_NAMESPACE!.Vector3();
-
-  matrix.decompose(tempPos, tempQuat, tempScale);
-
-  position.copy(tempPos);
-  quaternion.copy(tempQuat);
-  scale.copy(tempScale);
+  matrix.decompose(_safeDecomposePos, _safeDecomposeQuat, _safeDecomposeScale);
+  position.copy(_safeDecomposePos);
+  quaternion.copy(_safeDecomposeQuat);
+  scale.copy(_safeDecomposeScale);
 }
 
 // Utility for Matrix compose operations
@@ -54,45 +171,31 @@ export function safeMatrixCompose(
     | { x: number; y: number; z: number; w: number },
   scale: THREE_NAMESPACE.Vector3 | { x: number; y: number; z: number },
 ): void {
-  const pos = toTHREEVector3(position);
-  const quat =
-    quaternion instanceof THREE_NAMESPACE!.Quaternion
-      ? quaternion
-      : new THREE_NAMESPACE!.Quaternion(
-          quaternion.x,
-          quaternion.y,
-          quaternion.z,
-          quaternion.w,
-        );
-  const scl = toTHREEVector3(scale);
-  matrix.compose(pos, quat, scl);
+  _safeComposePos.set(position.x, position.y, position.z);
+  _safeComposeQuat.set(quaternion.x, quaternion.y, quaternion.z, quaternion.w);
+  _safeComposeScale.set(scale.x, scale.y, scale.z);
+  matrix.compose(_safeComposePos, _safeComposeQuat, _safeComposeScale);
 }
 
-// Explicit exports are not needed since we already have export * from 'three'
-// The duplicate exports were causing TypeScript declaration generation to crash
-
-// PhysX Vector3 utilities are now in utils/PhysicsUtils.ts
-
-// install three-mesh-bvh
+// Install three-mesh-bvh for accelerated raycasting
 THREE_NAMESPACE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE_NAMESPACE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
 THREE_NAMESPACE.Mesh.prototype.raycast = acceleratedRaycast;
 
-// THREE is available globally, no need to export it separately
+// Interface for InstancedMesh with resize method
+interface InstancedMeshWithResize extends THREE_NAMESPACE.InstancedMesh {
+  resize?: (size: number) => void;
+  instanceMatrix: THREE_NAMESPACE.InstancedBufferAttribute;
+}
 
-// utility to resize instanced mesh buffers
-(
-  THREE_NAMESPACE.InstancedMesh.prototype as unknown as {
-    resize?: (size: number) => void;
-  }
-).resize = function (this: THREE_NAMESPACE.InstancedMesh, size: number) {
-  const prevSize = (this.instanceMatrix.array as Float32Array).length / 16;
-  if (size <= prevSize) return;
-  const array = new Float32Array(size * 16);
-  array.set(this.instanceMatrix.array as Float32Array);
-  // Preserve existing attribute if possible
-  const attrib = new THREE_NAMESPACE.InstancedBufferAttribute(array, 16);
-  // @ts-ignore - runtime supports assignment
-  this.instanceMatrix = attrib;
-  this.instanceMatrix.needsUpdate = true;
-};
+// Utility to resize instanced mesh buffers
+(THREE_NAMESPACE.InstancedMesh.prototype as InstancedMeshWithResize).resize =
+  function (this: InstancedMeshWithResize, size: number) {
+    const prevSize = (this.instanceMatrix.array as Float32Array).length / 16;
+    if (size <= prevSize) return;
+    const array = new Float32Array(size * 16);
+    array.set(this.instanceMatrix.array as Float32Array);
+    const attrib = new THREE_NAMESPACE.InstancedBufferAttribute(array, 16);
+    this.instanceMatrix = attrib;
+    this.instanceMatrix.needsUpdate = true;
+  };

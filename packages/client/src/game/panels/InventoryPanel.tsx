@@ -118,6 +118,7 @@ function DraggableInventorySlot({
   });
 
   // Combine refs for both draggable and droppable on same element
+  // eslint-disable-next-line no-undef
   const setNodeRef = (node: HTMLButtonElement | null) => {
     setDraggableRef(node);
     setDroppableRef(node);

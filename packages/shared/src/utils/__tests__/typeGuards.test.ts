@@ -44,7 +44,7 @@ describe("Type Guards", () => {
   describe("isTerrainSystem", () => {
     it("returns true for valid terrain system", () => {
       const system = {
-        isPositionWalkable: (x: number, z: number) => ({ walkable: true }),
+        isPositionWalkable: (_x: number, _z: number) => ({ walkable: true }),
       };
       expect(isTerrainSystem(system)).toBe(true);
     });
@@ -99,7 +99,7 @@ describe("Type Guards", () => {
   describe("isEquipmentSystem", () => {
     it("returns true for valid equipment system", () => {
       const system = {
-        getPlayerEquipment: (playerId: string) => ({
+        getPlayerEquipment: (_playerId: string) => ({
           weapon: { item: { weaponType: "SWORD", id: "bronze_sword" } },
         }),
       };
@@ -124,7 +124,7 @@ describe("Type Guards", () => {
       const mob = {
         getHealth: () => 100,
         isDead: () => false,
-        takeDamage: (damage: number) => false,
+        takeDamage: (_damage: number) => false,
       };
       expect(isMobLike(mob)).toBe(true);
     });
@@ -213,7 +213,7 @@ describe("Type Guards", () => {
   describe("hasServerEmote", () => {
     it("returns true for entity with setServerEmote function", () => {
       const entity = {
-        setServerEmote: (emote: string) => {},
+        setServerEmote: (_emote: string) => {},
       };
       expect(hasServerEmote(entity)).toBe(true);
     });
@@ -391,7 +391,7 @@ describe("Type Guards", () => {
     it("returns true for entity with AI damage handler", () => {
       const entity = {
         aiStateMachine: {
-          onReceiveDamage: (attackerId: string, damage: number) => {},
+          onReceiveDamage: (_attackerId: string, _damage: number) => {},
         },
       };
       expect(hasAIDamageHandler(entity)).toBe(true);
@@ -426,7 +426,7 @@ describe("Type Guards", () => {
     it("returns true for entity with full combat state manager", () => {
       const entity = {
         combatStateManager: {
-          onReceiveAttack: (attackerId: string, tick: number) => {},
+          onReceiveAttack: (_attackerId: string, _tick: number) => {},
           isAutoRetaliateEnabled: () => true,
           getTargetId: () => "target1",
         },
@@ -458,7 +458,7 @@ describe("Type Guards", () => {
       const entity = {
         deathStateManager: {
           isDead: () => false,
-          die: (killerId: string) => {},
+          die: (_killerId: string) => {},
         },
       };
       expect(hasDeathStateManager(entity)).toBe(true);
@@ -585,7 +585,7 @@ describe("Type Guards", () => {
     it("hasServerEmote narrows correctly in conditional", () => {
       let emoteCalled = false;
       const maybeEntity: unknown = {
-        setServerEmote: (emote: string) => {
+        setServerEmote: (_emote: string) => {
           emoteCalled = true;
         },
       };

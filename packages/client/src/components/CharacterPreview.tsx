@@ -1,8 +1,51 @@
 import React, { useEffect, useRef } from "react";
-import * as THREE from "three";
+import { THREE, createRenderer } from "@hyperscape/shared";
+import type { UniversalRenderer } from "@hyperscape/shared";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRM, VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
 import { retargetAnimationToVRM } from "../utils/vrmAnimationRetarget";
+
+// Extended types for VRM and AnimationMixer
+interface VRMHumanoidWithRestPose {
+  normalizedRestPose?: {
+    hips?: {
+      position: [number, number, number];
+    };
+  };
+  getRawBoneNode?: (name: string) => THREE.Object3D | null;
+}
+
+interface AnimationMixerWithState extends THREE.AnimationMixer {
+  animState?: {
+    waveAction: THREE.AnimationAction;
+    idleAction: THREE.AnimationAction;
+    updateIdleTimer: (delta: number) => void;
+  };
+}
+
+type VRMHumanBoneName =
+  | "hips"
+  | "spine"
+  | "chest"
+  | "upperChest"
+  | "neck"
+  | "head"
+  | "leftShoulder"
+  | "leftUpperArm"
+  | "leftLowerArm"
+  | "leftHand"
+  | "rightShoulder"
+  | "rightUpperArm"
+  | "rightLowerArm"
+  | "rightHand"
+  | "leftUpperLeg"
+  | "leftLowerLeg"
+  | "leftFoot"
+  | "leftToes"
+  | "rightUpperLeg"
+  | "rightLowerLeg"
+  | "rightFoot"
+  | "rightToes";
 
 interface CharacterPreviewProps {
   vrmUrl: string;
@@ -16,11 +59,12 @@ export const CharacterPreview: React.FC<CharacterPreviewProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const rendererRef = useRef<UniversalRenderer | null>(null);
   const vrmRef = useRef<VRM | null>(null);
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
   const clockRef = useRef<THREE.Clock>(new THREE.Clock());
   const frameIdRef = useRef<number>(0);
+  const rendererInitializedRef = useRef<boolean>(false);
 
   // Main Effect: Initialize Scene and Load VRM + Animations
   useEffect(() => {
@@ -48,15 +92,28 @@ export const CharacterPreview: React.FC<CharacterPreviewProps> = ({
     camera.position.set(0, 1.4, 3.0);
     cameraRef.current = camera;
 
-    // Renderer
-    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-    renderer.setSize(
-      containerRef.current.clientWidth,
-      containerRef.current.clientHeight,
-    );
-    renderer.setPixelRatio(window.devicePixelRatio);
-    containerRef.current.appendChild(renderer.domElement);
-    rendererRef.current = renderer;
+    // Create a canvas for the renderer
+    const canvas = document.createElement("canvas");
+    containerRef.current.appendChild(canvas);
+
+    // Renderer - async WebGPU initialization
+    createRenderer({ canvas, alpha: true, antialias: true })
+      .then((renderer) => {
+        if (!isMounted) {
+          renderer.dispose();
+          return;
+        }
+        renderer.setSize(
+          containerRef.current!.clientWidth,
+          containerRef.current!.clientHeight,
+        );
+        renderer.setPixelRatio(window.devicePixelRatio);
+        rendererRef.current = renderer;
+        rendererInitializedRef.current = true;
+      })
+      .catch((err) => {
+        console.error("[CharacterPreview] Failed to create renderer:", err);
+      });
 
     // Loaders
     const loader = new GLTFLoader();
@@ -117,11 +174,11 @@ export const CharacterPreview: React.FC<CharacterPreviewProps> = ({
         // --- Animation Setup ---
         // Calculate rootToHips
         let rootToHips = 1;
-        const humanoid = vrm.humanoid;
-        if (humanoid && (humanoid as any).normalizedRestPose?.hips) {
-          rootToHips = (humanoid as any).normalizedRestPose.hips.position[1];
+        const humanoid = vrm.humanoid as VRMHumanoidWithRestPose;
+        if (humanoid && humanoid.normalizedRestPose?.hips) {
+          rootToHips = humanoid.normalizedRestPose.hips.position[1];
         } else {
-          const hipsNode = humanoid?.getRawBoneNode("hips");
+          const hipsNode = humanoid?.getRawBoneNode?.("hips");
           if (hipsNode) {
             const v = new THREE.Vector3();
             hipsNode.getWorldPosition(v);
@@ -149,7 +206,7 @@ export const CharacterPreview: React.FC<CharacterPreviewProps> = ({
         // Retargeting
         const getBoneName = (vrmBoneName: string) => {
           const normalizedNode = vrm.humanoid.getNormalizedBoneNode(
-            vrmBoneName as any,
+            vrmBoneName as VRMHumanBoneName,
           );
           return normalizedNode?.name;
         };
@@ -203,7 +260,7 @@ export const CharacterPreview: React.FC<CharacterPreviewProps> = ({
         });
 
         // Animation State - manages the wave -> idle -> wave loop
-        (mixerRef.current as any).animState = {
+        (mixerRef.current as AnimationMixerWithState).animState = {
           waveAction,
           idleAction,
           updateIdleTimer: (delta: number) => {
@@ -233,6 +290,18 @@ export const CharacterPreview: React.FC<CharacterPreviewProps> = ({
     loadVRMAndAnimations();
 
     // --- Animation Loop ---
+    // Pre-define skeleton update callback to avoid creating a new function every frame
+    // This reduces GC pressure in the hot animation loop
+    const updateSkeletonCallback = (obj: THREE.Object3D) => {
+      if (obj instanceof THREE.SkinnedMesh) {
+        const bones = obj.skeleton.bones;
+        for (let i = 0; i < bones.length; i++) {
+          bones[i].updateMatrixWorld();
+        }
+        obj.skeleton.update();
+      }
+    };
+
     const animate = () => {
       frameIdRef.current = requestAnimationFrame(animate);
       const delta = clockRef.current.getDelta();
@@ -242,21 +311,15 @@ export const CharacterPreview: React.FC<CharacterPreviewProps> = ({
 
         if (mixerRef.current) {
           mixerRef.current.update(delta);
-          const animState = (mixerRef.current as any).animState;
+          const animState = (mixerRef.current as AnimationMixerWithState)
+            .animState;
           if (animState?.updateIdleTimer) {
             animState.updateIdleTimer(delta);
           }
         }
 
-        // Manual skeleton update
-        vrmRef.current.scene.traverse((obj: THREE.Object3D) => {
-          if (obj instanceof THREE.SkinnedMesh) {
-            obj.skeleton.bones.forEach((bone: THREE.Bone) =>
-              bone.updateMatrixWorld(),
-            );
-            obj.skeleton.update();
-          }
-        });
+        // Manual skeleton update - using pre-defined callback to avoid GC
+        vrmRef.current.scene.traverse(updateSkeletonCallback);
       }
 
       if (rendererRef.current && sceneRef.current && cameraRef.current) {
@@ -307,17 +370,19 @@ export const CharacterPreview: React.FC<CharacterPreviewProps> = ({
       isMounted = false;
       window.removeEventListener("resize", handleResize);
       resizeObserver.disconnect();
+      // eslint-disable-next-line no-undef
       cancelAnimationFrame(frameIdRef.current);
       if (rendererRef.current && containerRef.current) {
         containerRef.current.removeChild(rendererRef.current.domElement);
         rendererRef.current.dispose();
+        rendererRef.current = null;
+        rendererInitializedRef.current = false;
       }
       if (vrmRef.current) {
         VRMUtils.deepDispose(vrmRef.current.scene);
       }
       if (mixerRef.current) {
         mixerRef.current.stopAllAction();
-        // mixerRef.current.uncacheRoot(vrmRef.current.scene); // This might fail if vrmRef.current is already null
         mixerRef.current = null;
       }
     };

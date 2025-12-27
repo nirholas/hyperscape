@@ -5,7 +5,7 @@
  */
 
 import THREE from "../extras/three/three";
-import type { RigidBodyData } from "../types/rendering/nodes";
+import type { RigidBodyData, PhysXActor } from "../types/rendering/nodes";
 import type {
   ActorHandle as EngineActorHandle,
   PhysicsHandle,
@@ -22,6 +22,7 @@ import type {
 } from "../types/systems/physics";
 import type { EntityData } from "../types/core/base-types";
 import { Node } from "./Node";
+import { vector3ToPxVec3 } from "../utils/physics/PhysicsUtils";
 
 // Global PHYSX declaration with required methods
 declare const PHYSX: {
@@ -57,6 +58,14 @@ const _m1 = new THREE.Matrix4();
 const _m2 = new THREE.Matrix4();
 const _m3 = new THREE.Matrix4();
 const _defaultScale = new THREE.Vector3(1, 1, 1);
+
+// Pre-allocated temps for onInterpolate to avoid per-frame allocations
+const _interpComposePos = new THREE.Vector3();
+const _interpComposeQuat = new THREE.Quaternion();
+const _interpComposeScale = new THREE.Vector3();
+const _interpDecomposePos = new THREE.Vector3();
+const _interpDecomposeQuat = new THREE.Quaternion();
+const _interpDecomposeScale = new THREE.Vector3();
 
 const types = ["static", "kinematic", "dynamic"];
 
@@ -97,7 +106,9 @@ export class RigidBody extends Node {
   needsRebuild: boolean = false;
   transform: PxTransform | null = null;
   _type: string = defaults.type;
-  actor: PxRigidDynamic | PxRigidStatic | PxRigidBody | null = null;
+  actor:
+    | ((PxRigidDynamic | PxRigidStatic | PxRigidBody) & Partial<PhysXActor>)
+    | null = null;
   _centerOfMass: THREE.Vector3 | null = null;
   actorHandle: EngineActorHandle | null = null;
   _tag: string | null = null;
@@ -212,11 +223,10 @@ export class RigidBody extends Node {
           pose.p.y = this._centerOfMass.y;
           pose.p.z = this._centerOfMass.z;
         }
-        (
-          dynamicActor as unknown as {
-            setCMassLocalPose?: (pose: PxTransform) => void;
-          }
-        ).setCMassLocalPose?.(pose);
+        // PhysXActor interface includes setCMassLocalPose
+        if (dynamicActor && "setCMassLocalPose" in dynamicActor) {
+          (dynamicActor as PhysXActor).setCMassLocalPose?.(pose);
+        }
       }
       dynamicActor.setLinearDamping?.(this._linearDamping);
       dynamicActor.setAngularDamping?.(this._angularDamping);
@@ -226,9 +236,8 @@ export class RigidBody extends Node {
     const shapesArray = Array.from(this.shapes);
     for (const shape of shapesArray) {
       if (this.actor && "attachShape" in this.actor) {
-        (
-          this.actor as unknown as { attachShape: (s: PxShape) => void }
-        ).attachShape(shape as PxShape);
+        // PhysXActor interface includes attachShape
+        (this.actor as PhysXActor).attachShape?.(shape as PxShape);
       }
     }
 
@@ -252,16 +261,14 @@ export class RigidBody extends Node {
       contactedHandles: new Set(),
       triggeredHandles: new Set(),
       controller: false,
-    } as unknown as PhysicsHandle;
-    // Call addActor as a method to preserve correct 'this' binding
-    const physics = this.ctx!.physics as unknown as {
-      addActor: (
-        actor: PxActor | PxRigidDynamic,
-        handle: PhysicsHandle,
-      ) => EngineActorHandle | null;
-    };
-    const handle = physics.addActor(
-      this.actor as unknown as PxActor,
+    } as PhysicsHandle;
+    // Physics.addActor is properly typed now
+    if (!this.actor) {
+      this.actorHandle = null;
+      return;
+    }
+    const handle = this.ctx!.physics.addActor(
+      this.actor as PxActor,
       handleOptions,
     );
     this.actorHandle = handle ?? null;
@@ -280,19 +287,21 @@ export class RigidBody extends Node {
 
   onInterpolate = (position, quaternion) => {
     if (this.parent) {
-      const composePos = new THREE.Vector3().copy(position);
-      const composeQuat = new THREE.Quaternion().copy(quaternion);
-      const composeScale = new THREE.Vector3().copy(_defaultScale);
-      _m1.compose(composePos, composeQuat, composeScale);
+      // Use pre-allocated temps to avoid per-frame allocations
+      _interpComposePos.copy(position);
+      _interpComposeQuat.copy(quaternion);
+      _interpComposeScale.copy(_defaultScale);
+      _m1.compose(_interpComposePos, _interpComposeQuat, _interpComposeScale);
       _m2.copy(this.parent.matrixWorld).invert();
       _m3.multiplyMatrices(_m2, _m1);
-      const decomposePos = new THREE.Vector3();
-      const decomposeQuat = new THREE.Quaternion();
-      const decomposeScale = new THREE.Vector3();
-      _m3.decompose(decomposePos, decomposeQuat, decomposeScale);
-      this.position.copy(decomposePos);
-      this.quaternion.copy(decomposeQuat);
-      _v1.copy(decomposeScale);
+      _m3.decompose(
+        _interpDecomposePos,
+        _interpDecomposeQuat,
+        _interpDecomposeScale,
+      );
+      this.position.copy(_interpDecomposePos);
+      this.quaternion.copy(_interpDecomposeQuat);
+      _v1.copy(_interpDecomposeScale);
       // this.matrix.copy(_m3)
       // this.matrixWorld.copy(_m1)
     } else {
@@ -320,9 +329,8 @@ export class RigidBody extends Node {
     if (!shape) return;
     this.shapes.add(shape);
     if (this.actor && "attachShape" in this.actor) {
-      (
-        this.actor as unknown as { attachShape: (s: PxShape) => void }
-      ).attachShape(shape as PxShape);
+      // PhysXActor interface includes attachShape
+      (this.actor as PhysXActor).attachShape?.(shape as PxShape);
     }
   }
 
@@ -330,9 +338,8 @@ export class RigidBody extends Node {
     if (!shape) return;
     this.shapes.delete(shape);
     if (this.actor && "detachShape" in this.actor) {
-      (
-        this.actor as unknown as { detachShape: (s: PxShape) => void }
-      ).detachShape(shape as PxShape);
+      // PhysXActor interface includes detachShape
+      (this.actor as PhysXActor).detachShape?.(shape as PxShape);
     }
   }
 
@@ -431,18 +438,16 @@ export class RigidBody extends Node {
 
   get sleeping() {
     if (!this.actor) return false;
-    const dyn = this.actor as unknown as { isSleeping?: () => boolean };
-    return dyn.isSleeping ? dyn.isSleeping() : false;
+    // PhysXActor interface includes isSleeping
+    return (this.actor as PhysXActor).isSleeping?.() ?? false;
   }
 
   addForce(force: THREE.Vector3, mode: string | number) {
     if (!this.actor || !PHYSX) return;
-    const pxForce = _v1.set(force.x, force.y, force.z);
     const forceMode = getForceMode(mode) || 0;
-    const dyn = this.actor as unknown as {
-      addForce?: (f: PxVec3, mode?: number) => void;
-    };
-    dyn.addForce?.(pxForce as unknown as PxVec3, forceMode);
+    // PhysXActor interface includes addForce - convert THREE.Vector3 to PxVec3
+    const pxForce = vector3ToPxVec3(force);
+    (this.actor as PhysXActor).addForce?.(pxForce, forceMode);
   }
 
   addForceAtPos(
@@ -455,10 +460,13 @@ export class RigidBody extends Node {
     const pxPos = _v2.set(pos.x, pos.y, pos.z);
     const forceMode = getForceMode(mode) || 0;
     if (PHYSX?.PxRigidBodyExt?.addForceAtPos) {
+      // Create proper PxVec3 instances from THREE.Vector3
+      const pxForceVec = vector3ToPxVec3(pxForce);
+      const pxPosVec = vector3ToPxVec3(pxPos);
       PHYSX.PxRigidBodyExt.addForceAtPos(
         this.actor as PxRigidBody,
-        pxForce as unknown as PxVec3,
-        pxPos as unknown as PxVec3,
+        pxForceVec,
+        pxPosVec,
         forceMode,
         true,
       );
@@ -475,10 +483,13 @@ export class RigidBody extends Node {
     const pxPos = _v2.set(pos.x, pos.y, pos.z);
     const forceMode = getForceMode(mode) || 0;
     if (PHYSX?.PxRigidBodyExt?.addForceAtLocalPos) {
+      // Create proper PxVec3 instances from THREE.Vector3
+      const pxForceVec = vector3ToPxVec3(pxForce);
+      const pxPosVec = vector3ToPxVec3(pxPos);
       PHYSX.PxRigidBodyExt.addForceAtLocalPos(
         this.actor as PxRigidBody,
-        pxForce as unknown as PxVec3,
-        pxPos as unknown as PxVec3,
+        pxForceVec,
+        pxPosVec,
         forceMode,
         true,
       );
@@ -487,12 +498,10 @@ export class RigidBody extends Node {
 
   addTorque(torque: THREE.Vector3, mode: string | number) {
     if (!this.actor || !PHYSX) return;
-    const pxTorque = _v1.set(torque.x, torque.y, torque.z);
     const forceMode = getForceMode(mode) || 0;
-    const dyn = this.actor as unknown as {
-      addTorque?: (t: PxVec3, mode?: number) => void;
-    };
-    dyn.addTorque?.(pxTorque as unknown as PxVec3, forceMode);
+    // PhysXActor interface includes addTorque - convert THREE.Vector3 to PxVec3
+    const pxTorque = vector3ToPxVec3(torque);
+    (this.actor as PhysXActor).addTorque?.(pxTorque, forceMode);
   }
 
   getPosition(vec3?: THREE.Vector3) {
@@ -552,20 +561,10 @@ export class RigidBody extends Node {
   getLinearVelocity(vec3?: THREE.Vector3) {
     if (!vec3) vec3 = this.tempVec3;
     if (!this.actor) return vec3.set(0, 0, 0);
-    const canGet = (
-      this.actor as unknown as { getLinearVelocity?: () => PxVec3 }
-    ).getLinearVelocity;
-    const pxVelocity = canGet
-      ? canGet.call(
-          this.actor as unknown as { getLinearVelocity: () => PxVec3 },
-        )
-      : undefined;
+    // PhysXActor interface includes getLinearVelocity
+    const pxVelocity = (this.actor as PhysXActor).getLinearVelocity?.();
     if (pxVelocity) {
-      vec3.set(
-        (pxVelocity as PxVec3).x,
-        (pxVelocity as PxVec3).y,
-        (pxVelocity as PxVec3).z,
-      );
+      vec3.set(pxVelocity.x, pxVelocity.y, pxVelocity.z);
     } else {
       vec3.set(0, 0, 0);
     }
@@ -573,36 +572,19 @@ export class RigidBody extends Node {
   }
 
   setLinearVelocity(vec3: THREE.Vector3) {
-    if (!PHYSX) return;
-    const set = (
-      this.actor as unknown as { setLinearVelocity?: (v: PxVec3) => void }
-    ).setLinearVelocity;
-    if (set) {
-      const pxVec = _v1.set(vec3.x, vec3.y, vec3.z) as unknown as PxVec3;
-      set.call(
-        this.actor as unknown as { setLinearVelocity: (v: PxVec3) => void },
-        pxVec,
-      );
-    }
+    if (!this.actor || !PHYSX) return;
+    // PhysXActor interface includes setLinearVelocity - convert THREE.Vector3 to PxVec3
+    const pxVec = vector3ToPxVec3(vec3);
+    (this.actor as PhysXActor).setLinearVelocity?.(pxVec);
   }
 
   getAngularVelocity(vec3?: THREE.Vector3) {
     if (!vec3) vec3 = this.tempVec3;
     if (!this.actor) return vec3.set(0, 0, 0);
-    const canGet = (
-      this.actor as unknown as { getAngularVelocity?: () => PxVec3 }
-    ).getAngularVelocity;
-    const pxVelocity = canGet
-      ? canGet.call(
-          this.actor as unknown as { getAngularVelocity: () => PxVec3 },
-        )
-      : undefined;
+    // PhysXActor interface includes getAngularVelocity
+    const pxVelocity = (this.actor as PhysXActor).getAngularVelocity?.();
     if (pxVelocity) {
-      vec3.set(
-        (pxVelocity as PxVec3).x,
-        (pxVelocity as PxVec3).y,
-        (pxVelocity as PxVec3).z,
-      );
+      vec3.set(pxVelocity.x, pxVelocity.y, pxVelocity.z);
     } else {
       vec3.set(0, 0, 0);
     }
@@ -610,25 +592,18 @@ export class RigidBody extends Node {
   }
 
   setAngularVelocity(vec3: THREE.Vector3) {
-    if (!PHYSX) return;
-    const set = (
-      this.actor as unknown as { setAngularVelocity?: (v: PxVec3) => void }
-    ).setAngularVelocity;
-    if (set) {
-      const pxVec = _v1.set(vec3.x, vec3.y, vec3.z) as unknown as PxVec3;
-      set.call(
-        this.actor as unknown as { setAngularVelocity: (v: PxVec3) => void },
-        pxVec,
-      );
-    }
+    if (!this.actor || !PHYSX) return;
+    // PhysXActor interface includes setAngularVelocity - convert THREE.Vector3 to PxVec3
+    const pxVec = vector3ToPxVec3(vec3);
+    (this.actor as PhysXActor).setAngularVelocity?.(pxVec);
   }
 
   getVelocityAtPos(pos: THREE.Vector3, vec3: THREE.Vector3) {
     if (!this.actor || !PHYSX) return vec3.set(0, 0, 0);
-    const pxPos = _v1.set(pos.x, pos.y, pos.z);
+    const pxPos = vector3ToPxVec3(pos);
     const result = PHYSX?.PxRigidBodyExt?.getVelocityAtPos(
       this.actor as PxRigidBody,
-      pxPos as unknown as PxVec3,
+      pxPos,
     );
     if (result && typeof result === "object") {
       const vel = result as { x: number; y: number; z: number };
@@ -639,10 +614,10 @@ export class RigidBody extends Node {
 
   getLocalVelocityAtLocalPos(pos: THREE.Vector3, vec3: THREE.Vector3) {
     if (!this.actor || !PHYSX) return vec3.set(0, 0, 0);
-    const pxPos = _v1.set(pos.x, pos.y, pos.z);
+    const pxPos = vector3ToPxVec3(pos);
     const result = PHYSX?.PxRigidBodyExt?.getLocalVelocityAtLocalPos(
       this.actor as PxRigidBody,
-      pxPos as unknown as PxVec3,
+      pxPos,
     );
     if (result && typeof result === "object") {
       const vel = result as { x: number; y: number; z: number };
@@ -681,10 +656,8 @@ export class RigidBody extends Node {
         quaternion as { toPxTransform: (tm: PxTransform) => void }
       ).toPxTransform(this._tm);
     }
-    const dyn = this.actor as unknown as {
-      setKinematicTarget?: (tm: PxTransform) => void;
-    };
-    dyn.setKinematicTarget?.(this._tm!);
+    // PhysXActor interface includes setKinematicTarget
+    (this.actor as PhysXActor).setKinematicTarget?.(this._tm!);
   }
 
   getProxy(): Record<string, unknown> {

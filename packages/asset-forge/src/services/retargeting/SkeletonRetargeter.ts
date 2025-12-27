@@ -39,7 +39,7 @@ export class SkeletonRetargeter {
     sourceMesh: THREE.SkinnedMesh,
     targetSkeleton: THREE.Skeleton,
     solverType: SolverType = "distance",
-    useKeypointAlignment: boolean = true,
+    _useKeypointAlignment: boolean = true,
   ): THREE.SkinnedMesh {
     console.log(
       `🔄 Retargeting mesh "${sourceMesh.name}" to new skeleton with ${targetSkeleton.bones.length} bones`,

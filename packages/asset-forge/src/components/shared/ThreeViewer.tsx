@@ -23,9 +23,8 @@ import { TransformControls } from "three/examples/jsm/controls/TransformControls
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
-import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { SSAOPass } from "three/examples/jsm/postprocessing/SSAOPass.js";
-import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { WebGPURenderer } from "three/webgpu";
 
 import { getTierColor } from "../../constants/materials";
 import { ENVIRONMENTS } from "../../constants/three";
@@ -125,7 +124,7 @@ const ThreeViewer = forwardRef(
   ) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const sceneRef = useRef<THREE.Scene | null>(null);
-    const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+    const rendererRef = useRef<WebGPURenderer | null>(null);
     const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
     const controlsRef = useRef<OrbitControls | null>(null);
     const transformControlsRef = useRef<TransformControls | null>(null);
@@ -911,15 +910,6 @@ const ThreeViewer = forwardRef(
             canvas.width = captureSize;
             canvas.height = captureSize;
 
-            // Create a temporary renderer for hand capture
-            const tempRenderer = new THREE.WebGLRenderer({
-              canvas,
-              antialias: true,
-              alpha: true,
-            });
-            tempRenderer.setSize(captureSize, captureSize);
-            tempRenderer.setClearColor(0xffffff, 1);
-
             // Create temporary camera for close-up hand capture
             const tempCamera = new THREE.PerspectiveCamera(30, 1, 0.01, 10);
 
@@ -936,13 +926,23 @@ const ThreeViewer = forwardRef(
             tempCamera.lookAt(handPos);
             tempCamera.up.set(0, 0, side === "left" ? 1 : -1); // Orient based on hand side
 
-            // Render the scene
-            if (sceneRef.current) {
-              tempRenderer.render(sceneRef.current, tempCamera);
-            }
+            // Render the scene using main renderer and copy to canvas
+            if (sceneRef.current && renderer) {
+              // Store original size
+              const originalSize = new THREE.Vector2();
+              renderer.getSize(originalSize);
 
-            // Clean up temp renderer
-            tempRenderer.dispose();
+              // Resize for capture
+              renderer.setSize(captureSize, captureSize);
+              renderer.render(sceneRef.current, tempCamera);
+
+              // Copy to canvas
+              const ctx = canvas.getContext("2d")!;
+              ctx.drawImage(renderer.domElement, 0, 0);
+
+              // Restore original size
+              renderer.setSize(originalSize.x, originalSize.y);
+            }
 
             return canvas;
           };
@@ -3119,49 +3119,54 @@ const ThreeViewer = forwardRef(
       camera.position.set(10, 10, 10);
       cameraRef.current = camera;
 
-      // Renderer setup with high quality settings
-      const renderer = new THREE.WebGLRenderer({
+      // Create canvas for WebGPU renderer
+      const canvas = document.createElement("canvas");
+      canvas.style.width = "100%";
+      canvas.style.height = "100%";
+      containerRef.current.appendChild(canvas);
+
+      // Create WebGPU renderer with the canvas
+      const renderer = new WebGPURenderer({
+        canvas,
         antialias: true,
-        alpha: true,
-        preserveDrawingBuffer: true,
-        powerPreference: "high-performance",
       });
-      // Cap pixel ratio in light mode for perf
-      const maxPixelRatio = lightMode ? 1 : 2;
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxPixelRatio));
-      renderer.setSize(initialWidth, initialHeight);
-      renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-      renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1;
-      renderer.outputColorSpace = THREE.SRGBColorSpace;
-      containerRef.current.appendChild(renderer.domElement);
-      rendererRef.current = renderer;
 
-      // Post-processing setup (always create composer as in the working version)
-      const composer = new EffectComposer(renderer);
-      const renderPass = new RenderPass(scene, camera);
-      composer.addPass(renderPass);
+      // Store a flag to track initialization state
+      let rendererReady = false;
 
-      const ssaoPass = new SSAOPass(scene, camera, initialWidth, initialHeight);
-      // Balanced defaults
-      ssaoPass.kernelRadius = 12;
-      ssaoPass.minDistance = 0.001;
-      ssaoPass.maxDistance = 0.08;
-      composer.addPass(ssaoPass);
+      // Initialize renderer asynchronously
+      (async () => {
+        await renderer.init();
 
-      const bloomPass = new UnrealBloomPass(
-        new THREE.Vector2(initialWidth, initialHeight),
-        0.4,
-        0.35,
-        0.85,
-      );
-      composer.addPass(bloomPass);
+        if (!mountedRef.current) {
+          renderer.dispose();
+          return false;
+        }
 
-      composerRef.current = composer;
+        // Cap pixel ratio in light mode for perf
+        const maxPixelRatio = lightMode ? 1 : 2;
+        renderer.setPixelRatio(
+          Math.min(window.devicePixelRatio, maxPixelRatio),
+        );
+        renderer.setSize(initialWidth, initialHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1;
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-      // Controls setup with damping
-      const controls = new OrbitControls(camera, renderer.domElement);
+        rendererRef.current = renderer;
+        rendererReady = true;
+
+        // Note: For post-processing with WebGPU, use TSL-based effects.
+        // For now, we render directly without post-processing effects.
+        composerRef.current = null;
+
+        return true;
+      })();
+
+      // Controls setup with damping (uses canvas element directly)
+      const controls = new OrbitControls(camera, canvas);
       controls.enableDamping = true;
       controls.dampingFactor = 0.05;
       controls.screenSpacePanning = false;
@@ -3173,7 +3178,7 @@ const ThreeViewer = forwardRef(
       controlsRef.current = controls;
 
       // Transform controls for bone editing - create fresh each time
-      const tControls = new TransformControls(camera, renderer.domElement);
+      const tControls = new TransformControls(camera, canvas);
       tControls.enabled = false; // Start disabled, enable only when user clicks "Enable Bone Editing"
       tControls.size = 1.0; // Will be scaled based on model size when bone is selected
       (tControls as unknown as THREE.Object3D).frustumCulled = false;
@@ -3635,10 +3640,13 @@ const ThreeViewer = forwardRef(
         controls.update();
 
         // Render with composer if available, otherwise use raw renderer
-        if (composerRef.current) {
-          composerRef.current.render();
-        } else {
-          renderer.render(scene, camera);
+        // Only render if WebGPU renderer is ready
+        if (rendererReady) {
+          if (composerRef.current) {
+            composerRef.current.render();
+          } else {
+            renderer.render(scene, camera);
+          }
         }
       };
       animate();
@@ -3646,14 +3654,16 @@ const ThreeViewer = forwardRef(
       // Handle resize
       const handleResize = () => {
         if (!containerRef.current) return;
-        // Avoid zero-size which breaks WebGL framebuffers
+        // Avoid zero-size which breaks framebuffers
         const width = Math.max(1, containerRef.current.clientWidth || 0);
         const height = Math.max(1, containerRef.current.clientHeight || 0);
 
         camera.aspect = width / height;
         camera.updateProjectionMatrix();
 
-        renderer.setSize(width, height);
+        if (rendererReady) {
+          renderer.setSize(width, height);
+        }
         if (composerRef.current) {
           composerRef.current.setSize(width, height);
         }
@@ -3878,6 +3888,7 @@ const ThreeViewer = forwardRef(
 
       return () => {
         console.log("🧹 ThreeViewer unmounting...");
+        mountedRef.current = false;
         if (resizeTimeout) cancelAnimationFrame(resizeTimeout);
         window.removeEventListener("resize", debouncedResize);
         window.removeEventListener("keydown", handleKeydown);
@@ -3886,8 +3897,8 @@ const ThreeViewer = forwardRef(
         renderer.dispose();
         if (composerRef.current) composerRef.current.dispose();
         controls.dispose();
-        if (containerEl && renderer.domElement) {
-          containerEl.removeChild(renderer.domElement);
+        if (containerEl && canvas.parentElement) {
+          containerEl.removeChild(canvas);
         }
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps

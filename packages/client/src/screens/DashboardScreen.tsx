@@ -64,7 +64,7 @@ export const DashboardScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [userAccountId, setUserAccountId] = useState<string | null>(null);
   const [agentPanels, setAgentPanels] = useState<AgentPanel[]>([]);
-  const [loadingPanels, setLoadingPanels] = useState(false);
+  const [_loadingPanels, setLoadingPanels] = useState(false);
 
   // Viewport confirmation state
   const [showViewportModal, setShowViewportModal] = useState(false);
@@ -431,8 +431,15 @@ export const DashboardScreen: React.FC = () => {
       );
 
       // Transform panel data to our format
+      interface PanelData {
+        id?: string;
+        name: string;
+        url: string;
+        type?: string;
+        [key: string]: unknown;
+      }
       const panels: AgentPanel[] = (data.panels || []).map(
-        (panel: any, index: number) => ({
+        (panel: PanelData, index: number) => ({
           id: panel.id || `panel-${index}`,
           name: panel.name,
           url: panel.url,

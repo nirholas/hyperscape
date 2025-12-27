@@ -29,6 +29,16 @@ export class MovementManager {
   private _tempVec3Fwd = new THREE.Vector3(0, 0, -1);
   private _tempQuat = new THREE.Quaternion();
 
+  // ============================================================================
+  // PRE-ALLOCATED BUFFERS (Zero-allocation hot path support)
+  // ============================================================================
+
+  /** Pre-allocated array for collecting IDs to delete during update (avoids per-frame allocation) */
+  private readonly _toDeleteBuffer: string[] = [];
+
+  /** Pre-allocated Vector3 for move target position (avoids per-click allocation) */
+  private readonly _targetVec3 = new THREE.Vector3();
+
   constructor(
     private world: World,
     private sendFn: (
@@ -40,15 +50,18 @@ export class MovementManager {
 
   /**
    * Update all active movements (called every frame)
+   *
+   * Zero-allocation: Uses pre-allocated toDelete buffer.
    */
   update(dt: number): void {
     const now = Date.now();
-    const toDelete: string[] = [];
+    // Clear and reuse pre-allocated buffer (zero allocation)
+    this._toDeleteBuffer.length = 0;
 
     this.moveTargets.forEach((info, playerId) => {
       const entity = this.world.entities.get(playerId);
       if (!entity || !entity.position) {
-        toDelete.push(playerId);
+        this._toDeleteBuffer.push(playerId);
         return;
       }
 
@@ -73,7 +86,7 @@ export class MovementManager {
         entity.position.set(target.x, finalY, target.z);
         entity.data.position = [target.x, finalY, target.z];
         entity.data.velocity = [0, 0, 0];
-        toDelete.push(playerId);
+        this._toDeleteBuffer.push(playerId);
 
         // Broadcast final idle state
         this.sendFn("entityModified", {
@@ -150,7 +163,10 @@ export class MovementManager {
       }
     });
 
-    toDelete.forEach((id) => this.moveTargets.delete(id));
+    // Clean up using pre-allocated buffer
+    for (let i = 0; i < this._toDeleteBuffer.length; i++) {
+      this.moveTargets.delete(this._toDeleteBuffer[i]);
+    }
   }
 
   /**
@@ -205,16 +221,26 @@ export class MovementManager {
       return;
     }
 
-    // Simple target creation - no complex terrain anchoring
-    const target = new THREE.Vector3(t[0], t[1], t[2]);
+    // Simple target creation - use pre-allocated Vector3 then copy to MoveTarget
+    // Note: We need to create a new Vector3 per target since they're stored in the map
+    // and could have different destinations. However, we can reuse the parsing logic.
+    this._targetVec3.set(t[0], t[1], t[2]);
     const maxSpeed = payload?.runMode ? 8 : 4;
 
-    // Replace existing target completely (allows direction changes)
-    this.moveTargets.set(playerEntity.id, {
-      target,
-      maxSpeed,
-      lastUpdate: 0,
-    });
+    // Check if we already have a target for this player (reuse its Vector3)
+    const existing = this.moveTargets.get(playerEntity.id);
+    if (existing) {
+      existing.target.copy(this._targetVec3);
+      existing.maxSpeed = maxSpeed;
+      existing.lastUpdate = 0;
+    } else {
+      // Only create new Vector3 if this is a new entry
+      this.moveTargets.set(playerEntity.id, {
+        target: new THREE.Vector3().copy(this._targetVec3),
+        maxSpeed,
+        lastUpdate: 0,
+      });
+    }
 
     // OSRS-accurate: Player clicked to move = disengage from combat
     // In OSRS, clicking anywhere else cancels your current action including combat
@@ -225,8 +251,10 @@ export class MovementManager {
 
     // Immediately rotate the player to face the new target and broadcast state
     const curr = playerEntity.position;
-    const dx = target.x - curr.x;
-    const dz = target.z - curr.z;
+    const moveTarget = this.moveTargets.get(playerEntity.id);
+    if (!moveTarget) return;
+    const dx = moveTarget.target.x - curr.x;
+    const dz = moveTarget.target.z - curr.z;
     if (Math.abs(dx) + Math.abs(dz) > 1e-4) {
       const dir = this._tempVec3.set(dx, 0, dz).normalize();
       this._tempVec3Fwd.set(0, 0, -1);

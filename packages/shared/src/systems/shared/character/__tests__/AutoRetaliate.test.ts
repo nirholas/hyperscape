@@ -9,7 +9,7 @@
  * - Server handler input validation
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { EventType } from "../../../../types/events";
 
 /**

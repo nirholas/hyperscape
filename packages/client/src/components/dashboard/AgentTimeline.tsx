@@ -12,6 +12,18 @@ interface TimelineEvent {
   metadata?: Record<string, unknown>;
 }
 
+interface ElizaOSTimelineLog {
+  id?: string;
+  level?: string;
+  type?: string;
+  message?: string;
+  body?: string;
+  source?: string;
+  timestamp?: string;
+  createdAt?: string;
+  [key: string]: unknown;
+}
+
 interface AgentTimelineProps {
   agent: Agent;
 }
@@ -43,18 +55,25 @@ export const AgentTimeline: React.FC<AgentTimelineProps> = ({ agent }) => {
       console.log("[AgentTimeline] Fetched logs:", logs);
 
       // Transform logs to timeline events
-      const timelineEvents: TimelineEvent[] = (
-        Array.isArray(logs) ? logs : []
-      ).map((log: any) => ({
-        id: log.id || `${Date.now()}-${Math.random()}`,
-        type: log.level === "error" ? "error" : log.type || "system",
-        title: log.message || log.body || "Activity",
-        description: log.source || agent.name,
-        timestamp: new Date(
-          log.timestamp || log.createdAt || Date.now(),
-        ).getTime(),
-        metadata: log,
-      }));
+      const timelineEvents = (Array.isArray(logs) ? logs : []).map(
+        (log: ElizaOSTimelineLog): TimelineEvent => ({
+          id: log.id || `${Date.now()}-${Math.random()}`,
+          type: (log.level === "error"
+            ? "error"
+            : log.type === "message" ||
+                log.type === "action" ||
+                log.type === "error" ||
+                log.type === "system"
+              ? log.type
+              : "system") as TimelineEvent["type"],
+          title: log.message || log.body || "Activity",
+          description: log.source || agent.name,
+          timestamp: new Date(
+            log.timestamp || log.createdAt || Date.now(),
+          ).getTime(),
+          metadata: log,
+        }),
+      );
 
       setEvents(timelineEvents);
     } catch (error) {

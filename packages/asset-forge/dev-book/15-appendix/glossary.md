@@ -204,7 +204,7 @@ A definition of how a 3D surface should appear when rendered, including color, r
 An image applied to a 3D model's surface to provide color, detail, or material properties. Asset Forge loads textures from GLB files and applies them using Three.js's TextureLoader. Textures can be diffuse (color), normal (surface detail), or PBR maps (metalness/roughness).
 
 ### Renderer
-The component responsible for converting 3D scene data into 2D images displayed on screen. Asset Forge uses Three.js's WebGLRenderer, which leverages GPU acceleration for real-time rendering. The renderer is configured with antialiasing, shadow mapping, and appropriate pixel ratios for quality output.
+The component responsible for converting 3D scene data into 2D images displayed on screen. Asset Forge uses Three.js's WebGPURenderer, which leverages GPU acceleration for real-time rendering. The renderer is configured with antialiasing, shadow mapping, and appropriate pixel ratios for quality output.
 
 ### Frame Buffer
 A memory buffer storing rendered image data. Asset Forge uses render targets (framebuffers) during sprite generation to capture model renders from different angles without displaying them on screen. Framebuffer contents are read back and saved as PNG files.
@@ -213,10 +213,10 @@ A memory buffer storing rendered image data. Asset Forge uses render targets (fr
 GPU programs defining how vertices are positioned and pixels are colored. While Asset Forge doesn't implement custom shaders, Three.js materials compile to shaders. The PBR materials used throughout Asset Forge run sophisticated fragment shaders for realistic lighting calculations.
 
 ### Canvas
-The HTML5 canvas element where Three.js renders 3D content. Asset Forge creates canvas elements for the main 3D viewer and uses React Three Fiber's declarative canvas components. Canvases provide WebGL rendering contexts.
+The HTML5 canvas element where Three.js renders 3D content. Asset Forge creates canvas elements for the main 3D viewer and uses React Three Fiber's declarative canvas components. Canvases provide WebGPU rendering contexts.
 
-### WebGL
-A JavaScript API for rendering 3D graphics in web browsers using GPU acceleration. WebGL is the underlying technology powering Three.js. Asset Forge leverages WebGL for all 3D visualization, enabling real-time interaction with complex models.
+### WebGPU
+A modern JavaScript API for rendering 3D graphics in web browsers using GPU acceleration. WebGPU is the underlying technology powering Three.js in Asset Forge. It provides better performance and more advanced GPU features compared to WebGL. Asset Forge leverages WebGPU for all 3D visualization, enabling real-time interaction with complex models.
 
 ### Vector3
 A three-dimensional vector representing positions, directions, or scales in 3D space. Three.js's Vector3 class is used extensively in Asset Forge for calculations, transformations, and spatial operations. Common operations include distance measurement, normalization, and interpolation.

@@ -127,12 +127,6 @@ export interface ActionsSystem extends System {
   unregister(name: string): void;
 }
 
-export interface XRSystem extends System {
-  session?: unknown;
-  supportsVR: boolean;
-  enter(): void;
-}
-
 // ============================================================================
 // DATABASE SYSTEM INTERFACE
 // ============================================================================

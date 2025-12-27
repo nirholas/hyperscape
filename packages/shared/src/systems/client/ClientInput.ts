@@ -1,21 +1,20 @@
 /**
  * ClientInput.ts - Input Handling System
  *
- * Unified input system for keyboard, mouse, touch, and XR controllers.
+ * Unified input system for keyboard, mouse, and touch.
  * Provides a consistent API for all input devices with configurable bindings.
  *
  * Key Features:
- * - **Multi-Device Support**: Keyboard, mouse, touch, gamepad, XR controllers
+ * - **Multi-Device Support**: Keyboard, mouse, touch, gamepad
  * - **Flexible Bindings**: Map any input to any action
  * - **Action System**: High-level actions (move, jump, interact)
  * - **Raw Input Access**: Low-level button/axis states
  * - **Pointer Events**: Click, hover, drag with 3D raycasting
  * - **Mobile Touch**: Virtual joystick and touch gestures
- * - **XR Input**: Hand tracking and controller buttons
  * - **Configurable**: Save/load input preferences
  *
  * Input Flow:
- * 1. Raw input events (keyboard, mouse, touch, XR)
+ * 1. Raw input events (keyboard, mouse, touch)
  * 2. Control bindings map to actions
  * 3. Actions trigger commands (e.g., "move forward")
  * 4. Systems respond to commands
@@ -40,14 +39,6 @@
  * - Tap: Interact with objects
  * - Pinch: Zoom camera
  * - Two-finger drag: Pan camera
- *
- * XR Controller Mapping:
- * - Left Stick: Movement (strafe + forward/back)
- * - Right Stick: Camera rotation
- * - Triggers: Attack / Use
- * - Grip: Grab objects
- * - Face Buttons: Actions (A/B/X/Y)
- * - Menu Button: Open UI
  *
  * Pointer Raycasting:
  * - Casts ray from screen position into 3D world
@@ -91,7 +82,6 @@
  * - ClientCameraSystem: Uses input for camera control
  * - ClientActions: Executes actions from input
  * - ClientInterface: UI input handling
- * - XR: VR/AR controller integration
  *
  * Dependencies:
  * - Requires viewport element for mouse/touch events
@@ -103,7 +93,7 @@
  */
 
 import THREE from "../../extras/three/three";
-import { SystemBase } from "../shared";
+import { SystemBase } from "../shared/infrastructure/SystemBase";
 import { EventType } from "../../types/events";
 import { MovementConfig } from "../../utils/physics/MovementUtils";
 import { buttons, codeToProp } from "../../extras/ui/buttons";
@@ -120,7 +110,6 @@ import type {
   ControlAction,
   ControlsBinding,
   ControlBinding,
-  XRInputSource,
   InputCommand,
   PointerNode,
   CustomPointerEvent,
@@ -138,8 +127,6 @@ const LMB = 1;
 const RMB = 2;
 const MouseLeft = "mouseLeft";
 const MouseRight = "mouseRight";
-const HandednessLeft = "left";
-const HandednessRight = "right";
 
 const isBrowser = typeof window !== "undefined";
 let actionIds = 0;
@@ -152,31 +139,46 @@ const controlTypes = {
   scrollDelta: createValue,
   pointer: createPointer,
   screen: createScreen,
-  xrLeftStick: createVector,
-  xrLeftTrigger: createButton,
-  xrLeftBtn1: createButton,
-  xrLeftBtn2: createButton,
-  xrRightStick: createVector,
-  xrRightTrigger: createButton,
-  xrRightBtn1: createButton,
-  xrRightBtn2: createButton,
   touchA: createButton,
   touchB: createButton,
 };
 
-// Optimized pointer state
+// Optimized pointer state - pre-allocates objects to avoid GC pressure
 class PointerState {
   activePath = new Set<PointerNode>();
   cursor = "default";
   pressedNodes = new Set<PointerNode>();
   propagationStopped = false;
 
+  // Pre-allocated for update() to avoid GC pressure
+  private _newPath = new Set<PointerNode>();
+  private _orderedPath: PointerNode[] = [];
+  private _reusableEvent: CustomPointerEvent = {
+    type: null,
+    _propagationStopped: false,
+    set(type: string) {
+      this.type = type;
+    },
+    stopPropagation() {
+      this._propagationStopped = true;
+    },
+  };
+
+  // Reset and return the reusable event object
+  private _getEvent(): CustomPointerEvent {
+    this._reusableEvent.type = null;
+    this._reusableEvent._propagationStopped = false;
+    return this._reusableEvent;
+  }
+
   update(
     hit: { node?: PointerNode } | null,
     pressed: boolean,
     released: boolean,
   ) {
-    const newPath = new Set<PointerNode>();
+    // Reuse pre-allocated Set instead of creating new one
+    const newPath = this._newPath;
+    newPath.clear();
 
     if (hit?.node) {
       let current: PointerNode | undefined = hit.node;
@@ -186,36 +188,27 @@ class PointerState {
       }
     }
 
-    // Handle enter/leave efficiently
-    const createEvent = (): CustomPointerEvent => ({
-      type: null,
-      _propagationStopped: false,
-      set(type: string) {
-        this.type = type;
-      },
-      stopPropagation() {
-        this._propagationStopped = true;
-      },
-    });
-
+    // Handle enter/leave efficiently using reusable event
     for (const node of this.activePath) {
       if (!newPath.has(node)) {
-        node.onPointerLeave?.(createEvent());
+        node.onPointerLeave?.(this._getEvent());
       }
     }
 
     for (const node of newPath) {
       if (!this.activePath.has(node)) {
-        node.onPointerEnter?.(createEvent());
+        node.onPointerEnter?.(this._getEvent());
       }
     }
 
     // Handle press/release
     if (pressed && hit?.node) {
       this.propagationStopped = false;
-      for (const node of this.getOrderedPath(newPath)) {
+      const orderedPath = this._getOrderedPath(newPath);
+      for (let i = 0; i < orderedPath.length; i++) {
         if (this.propagationStopped) break;
-        node.onPointerDown?.(createEvent());
+        const node = orderedPath[i];
+        node.onPointerDown?.(this._getEvent());
         this.pressedNodes.add(node);
       }
     }
@@ -224,7 +217,7 @@ class PointerState {
       this.propagationStopped = false;
       for (const node of this.pressedNodes) {
         if (this.propagationStopped) break;
-        node.onPointerUp?.(createEvent());
+        node.onPointerUp?.(this._getEvent());
       }
       this.pressedNodes.clear();
     }
@@ -238,11 +231,22 @@ class PointerState {
       }
     }
 
-    this.activePath = newPath;
+    // Swap Sets instead of reassigning to avoid GC
+    // Copy newPath to activePath and clear newPath
+    this.activePath.clear();
+    for (const node of newPath) {
+      this.activePath.add(node);
+    }
   }
 
-  private getOrderedPath(pathSet: Set<PointerNode>): PointerNode[] {
-    return Array.from(pathSet).reverse();
+  // Reuse array for ordered path to avoid allocation
+  private _getOrderedPath(pathSet: Set<PointerNode>): PointerNode[] {
+    this._orderedPath.length = 0;
+    for (const node of pathSet) {
+      this._orderedPath.push(node);
+    }
+    this._orderedPath.reverse();
+    return this._orderedPath;
   }
 
   stopPropagation() {
@@ -253,7 +257,7 @@ class PointerState {
 /**
  * Client Input System
  *
- * Handles all client input: keyboard, mouse, touch, XR, and input networking.
+ * Handles all client input: keyboard, mouse, touch, and input networking.
  * Provides control bindings with priority system for layered input handling.
  */
 export class ClientInput extends SystemBase {
@@ -281,9 +285,6 @@ export class ClientInput extends SystemBase {
   // Screen state
   screen = { width: 0, height: 0 };
   scroll = { delta: 0 };
-
-  // XR state
-  xrSession: XRSession | null = null;
 
   // DOM elements
   viewport: HTMLElement | undefined;
@@ -356,10 +357,6 @@ export class ClientInput extends SystemBase {
   }
 
   start() {
-    this.subscribe(EventType.XR_SESSION, (session: XRSession | null) =>
-      this.onXRSession(session),
-    );
-
     // Listen for input acknowledgments
     this.world.on("inputAck", this.handleInputAck.bind(this));
 
@@ -376,9 +373,6 @@ export class ClientInput extends SystemBase {
         if ((scrollDelta as ValueEntry).capture) break;
       }
     }
-
-    // Process XR input
-    this.processXRInput();
   }
 
   update(delta: number) {
@@ -522,8 +516,12 @@ export class ClientInput extends SystemBase {
     if (!this._controlsEnabled) return;
 
     // CRITICAL: Block ALL input during death
-    const player = (this.world as any).player;
-    if (player && ((player as any).isDying || (player.data as any)?.isDying)) {
+    const player = this.world.getPlayer();
+    if (
+      player &&
+      ((player as { isDying?: boolean }).isDying ||
+        (player.data as { isDying?: boolean })?.isDying)
+    ) {
       console.log(
         "[ClientInput] Blocked keydown during death - player is dying",
       );
@@ -585,8 +583,12 @@ export class ClientInput extends SystemBase {
     if (!this._controlsEnabled) return;
 
     // CRITICAL: Block ALL pointer input during death
-    const player = (this.world as any).player;
-    if (player && ((player as any).isDying || (player.data as any)?.isDying)) {
+    const player = this.world.getPlayer();
+    if (
+      player &&
+      ((player as { isDying?: boolean }).isDying ||
+        (player.data as { isDying?: boolean })?.isDying)
+    ) {
       console.log(
         "[ClientInput] Blocked pointer click during death - player is dying",
       );
@@ -803,88 +805,6 @@ export class ClientInput extends SystemBase {
     // Pointer lock disabled for UI
   };
 
-  private onXRSession(session: XRSession | null) {
-    this.xrSession = session;
-  }
-
-  // XR input processing
-  private processXRInput() {
-    if (!this.xrSession) return;
-
-    this.xrSession.inputSources?.forEach((src: XRInputSource) => {
-      if (!src.gamepad) return;
-
-      const isLeft = src.handedness === HandednessLeft;
-      const isRight = src.handedness === HandednessRight;
-
-      if (isLeft) {
-        this.processXRController(
-          src,
-          "xrLeftStick",
-          "xrLeftTrigger",
-          "xrLeftBtn1",
-          "xrLeftBtn2",
-        );
-      } else if (isRight) {
-        this.processXRController(
-          src,
-          "xrRightStick",
-          "xrRightTrigger",
-          "xrRightBtn1",
-          "xrRightBtn2",
-        );
-      }
-    });
-  }
-
-  private processXRController(
-    src: XRInputSource,
-    stickKey: string,
-    triggerKey: string,
-    btn1Key: string,
-    btn2Key: string,
-  ) {
-    for (const control of this.controls) {
-      // Stick
-      const stick = control.entries[stickKey] as VectorEntry;
-      if (stick) {
-        stick.value.x = src.gamepad!.axes[2];
-        stick.value.z = src.gamepad!.axes[3];
-        if (stick.capture) break;
-      }
-
-      // Trigger
-      this.processXRButton(
-        control,
-        triggerKey,
-        src.gamepad!.buttons[0].pressed,
-      );
-
-      // Buttons
-      this.processXRButton(control, btn1Key, src.gamepad!.buttons[4].pressed);
-      this.processXRButton(control, btn2Key, src.gamepad!.buttons[5].pressed);
-    }
-  }
-
-  private processXRButton(
-    control: ControlsBinding,
-    key: string,
-    pressed: boolean,
-  ) {
-    const button = control.entries[key] as ButtonEntry;
-    if (!button) return;
-
-    if (pressed && !button.down) {
-      button.pressed = true;
-      button.onPress?.();
-    }
-    if (!pressed && button.down) {
-      button.released = true;
-      button.onRelease?.();
-    }
-    button.down = pressed;
-  }
-
   // Movement input handling
   private setupMovementInput() {
     if (this.world.rig) {
@@ -1011,11 +931,20 @@ export class ClientInput extends SystemBase {
 
   private cleanInputBuffer(): void {
     const now = performance.now();
-    this.inputBuffer = this.inputBuffer.filter((buffered) => {
-      if (!buffered.acknowledged) return true;
-      const age = now - buffered.timestamp;
-      return age < 100;
-    });
+    // In-place filter to avoid creating new array each frame
+    let writeIdx = 0;
+    for (let i = 0; i < this.inputBuffer.length; i++) {
+      const buffered = this.inputBuffer[i];
+      if (!buffered.acknowledged) {
+        this.inputBuffer[writeIdx++] = buffered;
+      } else {
+        const age = now - buffered.timestamp;
+        if (age < 100) {
+          this.inputBuffer[writeIdx++] = buffered;
+        }
+      }
+    }
+    this.inputBuffer.length = writeIdx;
   }
 
   private calculateChecksum(): number {

@@ -87,7 +87,7 @@ const setupScene = () => {
   camera.position.set(1.5, 1.2, 1.5)
 
   // Create renderer
-  const renderer = new THREE.WebGLRenderer({
+  const renderer = new WebGPURenderer({
     antialias: true,
     alpha: true,
     powerPreference: 'high-performance'
@@ -963,7 +963,7 @@ useEffect(() => {
 const setupPostProcessing = (
   scene: THREE.Scene,
   camera: THREE.Camera,
-  renderer: THREE.WebGLRenderer
+  renderer: WebGPURenderer
 ) => {
   const composer = new EffectComposer(renderer)
 

@@ -6,11 +6,6 @@ import { PlaywrightManager } from "../managers/playwright-manager";
 import { resolveUrl } from "../utils";
 import type { World } from "@hyperscape/shared";
 
-// Helper to check if renderer is WebGLRenderer
-function isWebGLRenderer(renderer: unknown): renderer is THREE.WebGLRenderer {
-  return renderer instanceof THREE.WebGLRenderer;
-}
-
 // Mock CSM interface since it's not available
 interface CSM {
   lightDirection: THREE.Vector3;
@@ -98,12 +93,9 @@ export class EnvironmentSystem extends System {
   private setSkyboxToBlack() {
     if (this.world.stage) {
       this.world.stage.environment = null;
-      // Set background via renderer if available (WebGL only)
-      if (
-        this.world.graphics?.renderer &&
-        isWebGLRenderer(this.world.graphics.renderer)
-      ) {
-        this.world.graphics.renderer.setClearColor(0x000000);
+      // Set background via scene.background for WebGPU
+      if (this.world.stage.scene) {
+        this.world.stage.scene.background = new THREE.Color(0x000000);
       }
       logger.info("[Environment] Skybox set to black.");
     }
@@ -161,12 +153,9 @@ export class EnvironmentSystem extends System {
   private applyTexture(texture: THREE.Texture) {
     texture.mapping = THREE.EquirectangularReflectionMapping;
     this.world.stage.environment = texture;
-    // Set background via renderer if available (WebGL only)
-    if (
-      this.world.graphics?.renderer &&
-      isWebGLRenderer(this.world.graphics.renderer)
-    ) {
-      this.world.graphics.renderer.setClearColor(0xffffff);
+    // Set background via scene.background for WebGPU
+    if (this.world.stage.scene) {
+      this.world.stage.scene.background = new THREE.Color(0xffffff);
     }
     logger.info("[Environment] Skybox texture applied successfully");
   }

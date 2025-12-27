@@ -458,7 +458,7 @@ graph TB
     end
 
     subgraph "3D Graphics Stack"
-        Three[Three.js 0.178<br/>WebGL Rendering]
+        Three[Three.js 0.181<br/>WebGPU Rendering]
         R3F[React Three Fiber 9.0<br/>React Integration]
         Drei[Drei 10.7<br/>Helper Components]
         BVH[three-mesh-bvh 0.9<br/>Optimization]

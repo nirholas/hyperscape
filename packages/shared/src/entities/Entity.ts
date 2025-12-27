@@ -1395,7 +1395,9 @@ export class Entity implements IEntity {
     // Players are managed by PlayerSystem, not EntityManager's update loop
     // So we must explicitly notify EntityManager when players are dirty
     if (this.world.isServer) {
-      const entityManager = this.world.getSystem("entity-manager") as any;
+      const entityManager = this.world.getSystem(
+        "entity-manager",
+      ) as unknown as { networkDirtyEntities?: Set<string> };
       if (entityManager?.networkDirtyEntities) {
         entityManager.networkDirtyEntities.add(this.id);
         // Disabled - too spammy

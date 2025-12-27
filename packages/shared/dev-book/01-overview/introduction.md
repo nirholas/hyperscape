@@ -137,7 +137,7 @@ if (world.isClient) {
 
 ### 4. Three.js Rendering
 
-Advanced 3D graphics with WebGL/WebGPU:
+Advanced 3D graphics with WebGPU:
 
 ```typescript
 // Node-based scene graph
@@ -239,7 +239,7 @@ world.depositItem(playerId, bankId, itemId, quantity);
 Hyperscape Shared supports three world types:
 
 ### Client World
-**Environment:** Browser (WebGL/WebGPU)
+**Environment:** Browser (WebGPU)
 **Purpose:** Player-facing game client
 **Features:**
 - Full 3D rendering

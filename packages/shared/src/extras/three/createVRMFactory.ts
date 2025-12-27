@@ -42,9 +42,7 @@ import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
 
 import type { GLBData } from "../../types";
 import type { VRMHooks } from "../../types/systems/physics";
-
-/** Degrees to radians conversion */
-const DEG2RAD = Math.PI / 180;
+import type { VRMHumanBoneName } from "@pixiv/three-vrm";
 
 import { getTextureBytesFromMaterial } from "./getTextureBytesFromMaterial";
 import { getTrianglesFromGeometry } from "./getTrianglesFromGeometry";
@@ -52,6 +50,13 @@ import THREE from "./three";
 
 const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
+
+// Pre-allocated matrices for VRM instance move() to avoid per-frame allocations
+// These are used by the create() closure for each instance
+const _rotationMatrix = new THREE.Matrix4();
+const _scaleMatrix = new THREE.Matrix4();
+const _tempMatrix1 = new THREE.Matrix4();
+const _tempMatrix2 = new THREE.Matrix4();
 
 /** How often to check avatar distance for LOD (seconds) */
 const DIST_CHECK_RATE = 1;
@@ -158,8 +163,6 @@ export function createVRMFactory(
     }
   });
 
-  const skeleton = skinnedMeshes[0].skeleton;
-
   // HYBRID APPROACH: Using Asset Forge's normalized bone system for automatic A-pose handling
   // By keeping VRMHumanoidRig and using getNormalizedBoneNode() for bone names,
   // the VRM library's normalized bone abstraction layer handles bind pose compensation automatically
@@ -189,10 +192,6 @@ export function createVRMFactory(
   // Calculate head to height for camera positioning
   const headPos = normBones.head?.node?.getWorldPosition(v1) || v1.set(0, 0, 0);
   const headToHeight = height - headPos.y;
-
-  const noop = () => {
-    // ...
-  };
 
   return {
     create,
@@ -259,7 +258,7 @@ export function createVRMFactory(
 
       // Get normalized bone node from CLONED humanoid - this handles A-pose automatically
       const normalizedNode = clonedHumanoid.getNormalizedBoneNode?.(
-        vrmBoneName as any,
+        vrmBoneName as VRMHumanBoneName,
       );
       if (!normalizedNode) {
         // Don't warn for finger bones - many VRMs don't have them
@@ -378,10 +377,8 @@ export function createVRMFactory(
     let rate = 0;
     let rateCheckedAt = 999;
     let rateCheck = true;
-    let updateCallCount = 0;
     const hasLoggedUpdatePipeline = false;
     const update = (delta) => {
-      updateCallCount++;
       elapsed += delta;
       let should = true;
       if (rateCheck) {
@@ -419,7 +416,11 @@ export function createVRMFactory(
         }
 
         // Step 3: Update skeleton matrices for skinning
-        skeleton.bones.forEach((bone) => bone.updateMatrixWorld());
+        // Use for-loop instead of forEach to avoid callback allocation
+        const bones = skeleton.bones;
+        for (let i = 0; i < bones.length; i++) {
+          bones[i].updateMatrixWorld();
+        }
         skeleton.update();
 
         elapsed = 0;
@@ -440,10 +441,7 @@ export function createVRMFactory(
       // }
     };
     let currentEmote: EmoteData | null;
-    let setEmoteCallCount = 0;
     const setEmote = (url) => {
-      setEmoteCallCount++;
-
       if (currentEmote?.url === url) {
         return;
       }
@@ -559,27 +557,23 @@ export function createVRMFactory(
         matrix.copy(_matrix);
         // CRITICAL: Also update the VRM scene's transform to follow the player
         // Apply 180-degree Y-axis rotation only for VRM 1.0+ models
+        // Using pre-allocated matrices to avoid per-frame allocations
         let finalMatrix = _matrix;
         if (isVRM1OrHigher) {
-          const rotationMatrix = new THREE.Matrix4().makeRotationY(Math.PI);
-          finalMatrix = new THREE.Matrix4().multiplyMatrices(
-            _matrix,
-            rotationMatrix,
-          );
+          _rotationMatrix.makeRotationY(Math.PI);
+          _tempMatrix1.multiplyMatrices(_matrix, _rotationMatrix);
+          finalMatrix = _tempMatrix1;
         }
         // CRITICAL: Compose scale into the matrix to preserve height normalization
-        const scaleMatrix = new THREE.Matrix4().makeScale(
+        _scaleMatrix.makeScale(
           vrm.scene.scale.x,
           vrm.scene.scale.y,
           vrm.scene.scale.z,
         );
-        finalMatrix = new THREE.Matrix4().multiplyMatrices(
-          finalMatrix,
-          scaleMatrix,
-        );
+        _tempMatrix2.multiplyMatrices(finalMatrix, _scaleMatrix);
 
-        vrm.scene.matrix.copy(finalMatrix);
-        vrm.scene.matrixWorld.copy(finalMatrix);
+        vrm.scene.matrix.copy(_tempMatrix2);
+        vrm.scene.matrixWorld.copy(_tempMatrix2);
         vrm.scene.updateMatrixWorld(true); // Force update all children
         if (hooks?.octree && hooks.octree.move) {
           hooks.octree.move(sItem);
@@ -663,7 +657,14 @@ function cloneGLB(glb: GLBData): GLBData {
  * This preserves the VRMHumanoidRig class methods (getBoneNode, update, etc.)
  */
 function remapHumanoidBonesToClonedScene(
-  humanoid: any,
+  humanoid: {
+    _rawHumanBones?: {
+      humanBones?: Record<string, { node?: THREE.Object3D }>;
+    };
+    _normalizedHumanBones?: {
+      humanBones?: Record<string, { node?: THREE.Object3D }>;
+    };
+  },
   clonedScene: THREE.Scene,
 ): void {
   // Build map of cloned bones by name
@@ -683,7 +684,7 @@ function remapHumanoidBonesToClonedScene(
   // Create NEW humanBones object for raw bones (don't mutate shared reference!)
   const rawRig = humanoid._rawHumanBones;
   if (rawRig?.humanBones) {
-    const newHumanBones: Record<string, unknown> = {};
+    const newHumanBones: Record<string, { node?: THREE.Object3D }> = {};
     for (const [boneName, boneData] of Object.entries(rawRig.humanBones)) {
       const typedBoneData = boneData as { node?: THREE.Object3D };
       if (typedBoneData?.node) {
@@ -707,7 +708,7 @@ function remapHumanoidBonesToClonedScene(
   // Create NEW humanBones object for normalized bones (don't mutate shared reference!)
   const normRig = humanoid._normalizedHumanBones;
   if (normRig?.humanBones) {
-    const newHumanBones: Record<string, unknown> = {};
+    const newHumanBones: Record<string, { node?: THREE.Object3D }> = {};
     for (const [boneName, boneData] of Object.entries(normRig.humanBones)) {
       const typedBoneData = boneData as { node?: THREE.Object3D };
       if (typedBoneData?.node) {

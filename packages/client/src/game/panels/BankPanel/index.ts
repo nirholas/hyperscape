@@ -13,7 +13,6 @@ export type {
   ContextMenuState,
   CoinModalState,
   ConfirmModalState,
-  DragState,
   RightPanelMode,
   BankPanelProps,
 } from "./types";

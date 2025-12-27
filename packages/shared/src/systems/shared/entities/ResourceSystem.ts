@@ -1,4 +1,5 @@
-import { SystemBase, TerrainSystem } from "..";
+import { SystemBase } from "../infrastructure/SystemBase";
+import { TerrainSystem } from "..";
 import { uuid } from "../../../utils";
 import type { World } from "../../../types";
 import { EventType } from "../../../types/events";
@@ -12,7 +13,6 @@ import {
 import type { TerrainResourceSpawnPoint } from "../../../types/world/terrain";
 import { TICK_DURATION_MS } from "../movement/TileSystem";
 import { getExternalResource } from "../../../utils/ExternalAssetUtils";
-import type { ExternalResourceData } from "../../../data/DataManager";
 import { ALL_WORLD_AREAS } from "../../../data/world-areas";
 
 /**
@@ -153,12 +153,9 @@ export class ResourceSystem extends SystemBase {
     ) as TerrainSystem | null;
   }
 
-  private sendChat(playerId: string, text: string): void {
-    const chat = (
-      this.world as unknown as {
-        chat: { add: (msg: unknown, broadcast?: boolean) => void };
-      }
-    ).chat;
+  private sendChat(playerId: string | PlayerID, text: string): void {
+    // World.chat is properly typed, no cast needed
+    const chat = this.world.chat;
     const msg = {
       id: uuid(),
       from: "System",
@@ -180,11 +177,16 @@ export class ResourceSystem extends SystemBase {
       console.log(`[ResourceSystem] 🪓 Setting ${emote} emote for ${playerId}`);
 
       // Set emote STRING KEY (players use emote strings which get mapped to URLs)
-      if ((playerEntity as any).emote !== undefined) {
-        (playerEntity as any).emote = emote;
+      const playerWithEmote = playerEntity as unknown as {
+        emote?: string;
+        data?: { e?: string };
+        markNetworkDirty?: () => void;
+      };
+      if (playerWithEmote.emote !== undefined) {
+        playerWithEmote.emote = emote;
       }
-      if ((playerEntity as any).data) {
-        (playerEntity as any).data.e = emote;
+      if (playerWithEmote.data) {
+        playerWithEmote.data.e = emote;
       }
 
       // Send immediate network update for emote (same pattern as CombatSystem)
@@ -196,7 +198,7 @@ export class ResourceSystem extends SystemBase {
         });
       }
 
-      (playerEntity as any).markNetworkDirty?.();
+      playerWithEmote.markNetworkDirty?.();
     }
   }
 
@@ -211,11 +213,16 @@ export class ResourceSystem extends SystemBase {
       );
 
       // Reset to idle
-      if ((playerEntity as any).emote !== undefined) {
-        (playerEntity as any).emote = "idle";
+      const playerWithEmote = playerEntity as unknown as {
+        emote?: string;
+        data?: { e?: string };
+        markNetworkDirty?: () => void;
+      };
+      if (playerWithEmote.emote !== undefined) {
+        playerWithEmote.emote = "idle";
       }
-      if ((playerEntity as any).data) {
-        (playerEntity as any).data.e = "idle";
+      if (playerWithEmote.data) {
+        playerWithEmote.data.e = "idle";
       }
 
       // Send immediate network update for emote reset (same pattern as CombatSystem)
@@ -226,7 +233,7 @@ export class ResourceSystem extends SystemBase {
         });
       }
 
-      (playerEntity as any).markNetworkDirty?.();
+      playerWithEmote.markNetworkDirty?.();
     }
   }
 
@@ -351,12 +358,10 @@ export class ResourceSystem extends SystemBase {
     }
 
     let spawned = 0;
-    let failed = 0;
 
     for (const spawnPoint of spawnPoints) {
       const resource = this.createResourceFromSpawnPoint(spawnPoint);
       if (!resource) {
-        failed++;
         continue;
       }
 
@@ -442,11 +447,8 @@ export class ResourceSystem extends SystemBase {
         )) as { id?: string } | null;
         if (spawnedEntity) {
           spawned++;
-        } else {
-          failed++;
         }
       } catch (err) {
-        failed++;
         console.error(
           `[ResourceSystem] Failed to spawn resource entity ${resource.id}:`,
           err,
@@ -455,6 +457,7 @@ export class ResourceSystem extends SystemBase {
     }
 
     if (spawned > 0) {
+      // Resources spawned successfully
     }
   }
 
@@ -888,6 +891,7 @@ export class ResourceSystem extends SystemBase {
 
           // Call entity respawn method if available
           const ent = this.world.entities.get(resourceId);
+          // ResourceEntity has a respawn method - check if entity is ResourceEntity
           if (
             ent &&
             typeof (ent as unknown as { respawn?: () => void }).respawn ===
@@ -939,14 +943,14 @@ export class ResourceSystem extends SystemBase {
       if (tickNumber < session.nextAttemptTick) continue;
 
       // Proximity check before attempt
-      const p = this.world.getPlayer?.(playerId as unknown as string);
+      const p = this.world.getPlayer?.(playerId);
       const playerPos =
         p && (p as { position?: { x: number; y: number; z: number } }).position
           ? (p as { position: { x: number; y: number; z: number } }).position
           : null;
       if (!playerPos || calculateDistance(playerPos, resource.position) > 4.0) {
         this.emitTypedEvent(EventType.RESOURCE_GATHERING_STOPPED, {
-          playerId: playerId as unknown as string,
+          playerId: playerId,
           resourceId: session.resourceId,
         });
         completedSessions.push(playerId);
@@ -961,17 +965,17 @@ export class ResourceSystem extends SystemBase {
         };
       } | null;
       if (inventorySystem?.getInventory) {
-        const inv = inventorySystem.getInventory(playerId as unknown as string);
+        const inv = inventorySystem.getInventory(playerId);
         const capacity = (inv?.capacity as number) ?? 28;
         const count = Array.isArray(inv?.items) ? inv!.items!.length : 0;
         if (count >= capacity) {
           this.emitTypedEvent(EventType.UI_MESSAGE, {
-            playerId: playerId as unknown as string,
+            playerId: playerId,
             message: "Your inventory is too full to hold any more logs.",
             type: "warning",
           });
           this.emitTypedEvent(EventType.RESOURCE_GATHERING_STOPPED, {
-            playerId: playerId as unknown as string,
+            playerId: playerId,
             resourceId: session.resourceId,
           });
           completedSessions.push(playerId);
@@ -999,7 +1003,7 @@ export class ResourceSystem extends SystemBase {
 
         // Add one log to inventory
         this.emitTypedEvent(EventType.INVENTORY_ITEM_ADDED, {
-          playerId: playerId as unknown as string,
+          playerId: playerId,
           item: {
             id: `inv_${playerId}_${Date.now()}_logs`,
             itemId: "logs",
@@ -1012,7 +1016,7 @@ export class ResourceSystem extends SystemBase {
         // Award XP per log immediately
         const xpPerLog = tuned.xpPerLog;
         this.emitTypedEvent(EventType.SKILLS_XP_GAINED, {
-          playerId: playerId as unknown as string,
+          playerId: playerId,
           skill: resource.skillRequired,
           amount: xpPerLog,
         });
@@ -1023,7 +1027,7 @@ export class ResourceSystem extends SystemBase {
           `You receive 1x ${"Logs"}.`,
         );
         this.emitTypedEvent(EventType.UI_MESSAGE, {
-          playerId: playerId as unknown as string,
+          playerId: playerId,
           message: `You get some logs. (+${xpPerLog} ${resource.skillRequired} XP)`,
           type: "success",
         });
@@ -1047,10 +1051,7 @@ export class ResourceSystem extends SystemBase {
             resourceId: session.resourceId,
             position: resource.position,
           });
-          this.sendChat(
-            playerId as unknown as string,
-            "The tree is chopped down.",
-          );
+          this.sendChat(playerId, "The tree is chopped down.");
           this.sendNetworkMessage("resourceDepleted", {
             resourceId: session.resourceId,
             position: resource.position,
@@ -1074,7 +1075,7 @@ export class ResourceSystem extends SystemBase {
       } else {
         // Failure feedback (optional gentle info)
         this.emitTypedEvent(EventType.UI_MESSAGE, {
-          playerId: playerId as unknown as string,
+          playerId: playerId,
           message: `You fail to chop the tree.`,
           type: "info",
         });
@@ -1085,7 +1086,7 @@ export class ResourceSystem extends SystemBase {
     for (const playerId of completedSessions) {
       this.activeGathering.delete(playerId);
       // Reset emote back to idle when gathering completes
-      this.resetGatheringEmote(playerId as unknown as string);
+      this.resetGatheringEmote(playerId);
     }
   }
 

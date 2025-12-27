@@ -109,6 +109,7 @@ export const CharacterEditorScreen: React.FC = () => {
       console.warn(
         "[CharacterEditor] No authentication found, redirecting to login",
       );
+      // eslint-disable-next-line no-undef
       alert(
         "You must be logged in to access the character editor. Please log in first.",
       );
@@ -130,12 +131,14 @@ export const CharacterEditorScreen: React.FC = () => {
     const avatar = params.get("avatar");
 
     if (!characterIdParam) {
+      // eslint-disable-next-line no-undef
       alert("No character ID provided");
       window.location.href = "/";
       return;
     }
 
     if (!name) {
+      // eslint-disable-next-line no-undef
       alert("No character name provided");
       window.location.href = "/";
       return;
@@ -230,7 +233,7 @@ export const CharacterEditorScreen: React.FC = () => {
               messageExamples: ensureArray(
                 existingAgent.messageExamples,
                 baseTemplate.messageExamples || [],
-              ) as any[],
+              ) as { name: string; content: { text: string } }[][],
               postExamples: ensureArray(
                 existingAgent.postExamples,
                 baseTemplate.postExamples || [],

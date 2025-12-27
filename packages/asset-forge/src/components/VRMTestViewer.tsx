@@ -10,8 +10,10 @@ import styled from "styled-components";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { WebGPURenderer } from "three/webgpu";
 
 import { retargetAnimation } from "../services/retargeting/AnimationRetargeting";
+import { createWebGPURenderer } from "../utils/webgpu-renderer";
 
 const Container = styled.div`
   width: 100%;
@@ -158,6 +160,7 @@ export const VRMTestViewer: React.FC<VRMTestViewerProps> = ({ vrmUrl }) => {
     if (!canvasRef.current) return;
 
     let animationId: number;
+    let mounted = true;
     const canvas = canvasRef.current;
 
     // Scene setup
@@ -173,18 +176,14 @@ export const VRMTestViewer: React.FC<VRMTestViewerProps> = ({ vrmUrl }) => {
     );
     camera.position.set(0, 1.6, 3);
 
-    // Renderer setup
-    const renderer = new THREE.WebGLRenderer({
-      canvas,
-      antialias: true,
-    });
-    renderer.setSize(canvas.clientWidth, canvas.clientHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
-
-    // Orbit controls
+    // Orbit controls (initialized with canvas, will be updated after renderer is ready)
     const controls = new OrbitControls(camera, canvas);
     controls.target.set(0, 1, 0);
     controls.update();
+
+    // WebGPU Renderer (initialized asynchronously)
+    let renderer: WebGPURenderer | null = null;
+    let rendererReady = false;
 
     // Lighting
     const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
@@ -197,6 +196,25 @@ export const VRMTestViewer: React.FC<VRMTestViewerProps> = ({ vrmUrl }) => {
     // Ground plane
     const gridHelper = new THREE.GridHelper(10, 10);
     scene.add(gridHelper);
+
+    // Initialize WebGPU renderer
+    const initRenderer = async () => {
+      renderer = await createWebGPURenderer({
+        canvas,
+        antialias: true,
+      });
+
+      if (!mounted) {
+        renderer.dispose();
+        return;
+      }
+
+      renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+      renderer.setPixelRatio(window.devicePixelRatio);
+      rendererReady = true;
+    };
+
+    initRenderer();
 
     // Load VRM
     const loader = new GLTFLoader();
@@ -629,7 +647,9 @@ export const VRMTestViewer: React.FC<VRMTestViewerProps> = ({ vrmUrl }) => {
       }
 
       controls.update();
-      renderer.render(scene, camera);
+      if (rendererReady && renderer) {
+        renderer.render(scene, camera);
+      }
     };
     animate();
 
@@ -637,15 +657,20 @@ export const VRMTestViewer: React.FC<VRMTestViewerProps> = ({ vrmUrl }) => {
     const handleResize = () => {
       camera.aspect = canvas.clientWidth / canvas.clientHeight;
       camera.updateProjectionMatrix();
-      renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+      if (renderer) {
+        renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+      }
     };
     window.addEventListener("resize", handleResize);
 
     // Cleanup
     return () => {
+      mounted = false;
       window.removeEventListener("resize", handleResize);
       cancelAnimationFrame(animationId);
-      renderer.dispose();
+      if (renderer) {
+        renderer.dispose();
+      }
       scene.traverse((obj) => {
         if (obj instanceof THREE.Mesh) {
           obj.geometry.dispose();
@@ -657,6 +682,7 @@ export const VRMTestViewer: React.FC<VRMTestViewerProps> = ({ vrmUrl }) => {
         }
       });
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentVrmUrl]);
 
   const handleAnimationChange = async (animName: string) => {

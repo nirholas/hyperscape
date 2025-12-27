@@ -16,6 +16,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { CombatSystem } from "../CombatSystem";
 import { COMBAT_CONSTANTS } from "../../../../constants/CombatConstants";
+import type { World } from "../../../../core/World";
 
 // Track health changes for damage verification
 interface HealthTracker {
@@ -174,9 +175,6 @@ function createTestMob(
     isDead: () => healthTracker.current <= 0,
     setServerEmote: vi.fn(),
     markNetworkDirty: vi.fn(),
-    // CombatSystem.applyDamage gets mobs from world.entities.get()
-    // and checks for existence with world.entities.get(targetId) as MobEntity
-    type: "mob" as const,
   };
 }
 
@@ -317,7 +315,7 @@ describe("CombatFlow Integration", () => {
 
   beforeEach(async () => {
     world = createTestWorld({ currentTick: 100 });
-    combatSystem = new CombatSystem(world as unknown as any);
+    combatSystem = new CombatSystem(world as unknown as World);
     // CRITICAL: Call init() to cache playerSystem for auto-retaliate checks
     await combatSystem.init();
   });
@@ -465,7 +463,7 @@ describe("CombatFlow Integration", () => {
       combatSystem.processCombatTick(startTick);
 
       // Count attacks over time
-      let attackCount = mob.takeDamage.mock.calls.length;
+      const attackCount = mob.takeDamage.mock.calls.length;
       const expectedAttacks: number[] = [attackCount];
 
       for (let i = 1; i <= 20; i++) {

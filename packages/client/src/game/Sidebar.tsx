@@ -170,21 +170,47 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
       if (update.component === "equipment") {
         // The backend sends PlayerEquipment (with slots containing items),
         // but the UI expects PlayerEquipmentItems (just the items).
-        const data = update.data as { equipment: any };
+        interface EquipmentSlot {
+          item?: InventoryItem | null;
+          [key: string]: unknown;
+        }
+        interface EquipmentUpdateData {
+          equipment: {
+            weapon?: EquipmentSlot | null;
+            shield?: EquipmentSlot | null;
+            helmet?: EquipmentSlot | null;
+            body?: EquipmentSlot | null;
+            legs?: EquipmentSlot | null;
+            boots?: EquipmentSlot | null;
+            gloves?: EquipmentSlot | null;
+            cape?: EquipmentSlot | null;
+            amulet?: EquipmentSlot | null;
+            ring?: EquipmentSlot | null;
+            arrows?: EquipmentSlot | null;
+            [key: string]: unknown;
+          };
+        }
+        const data = update.data as EquipmentUpdateData;
         const rawEq = data.equipment;
 
         const mappedEquipment: PlayerEquipmentItems = {
-          weapon: rawEq.weapon?.item || null,
-          shield: rawEq.shield?.item || null,
-          helmet: rawEq.helmet?.item || null,
-          body: rawEq.body?.item || null,
-          legs: rawEq.legs?.item || null,
-          boots: rawEq.boots?.item || null,
-          gloves: rawEq.gloves?.item || null,
-          cape: rawEq.cape?.item || null,
-          amulet: rawEq.amulet?.item || null,
-          ring: rawEq.ring?.item || null,
-          arrows: rawEq.arrows?.item || null,
+          weapon:
+            (rawEq.weapon?.item as PlayerEquipmentItems["weapon"]) || null,
+          shield:
+            (rawEq.shield?.item as PlayerEquipmentItems["shield"]) || null,
+          helmet:
+            (rawEq.helmet?.item as PlayerEquipmentItems["helmet"]) || null,
+          body: (rawEq.body?.item as PlayerEquipmentItems["body"]) || null,
+          legs: (rawEq.legs?.item as PlayerEquipmentItems["legs"]) || null,
+          boots: (rawEq.boots?.item as PlayerEquipmentItems["boots"]) || null,
+          gloves:
+            (rawEq.gloves?.item as PlayerEquipmentItems["gloves"]) || null,
+          cape: (rawEq.cape?.item as PlayerEquipmentItems["cape"]) || null,
+          amulet:
+            (rawEq.amulet?.item as PlayerEquipmentItems["amulet"]) || null,
+          ring: (rawEq.ring?.item as PlayerEquipmentItems["ring"]) || null,
+          arrows:
+            (rawEq.arrows?.item as PlayerEquipmentItems["arrows"]) || null,
         };
         setEquipment(mappedEquipment);
       }

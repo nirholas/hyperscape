@@ -189,11 +189,11 @@ World.stage
 ├── Camera (PerspectiveCamera)
 ├── Lights (Directional, Point, Spot)
 ├── CSM (Cascaded Shadow Maps)
-└── Renderer (WebGL/WebGPU)
+└── Renderer (WebGPU)
 ```
 
 **Features:**
-- WebGL 2.0 / WebGPU rendering
+- WebGPU rendering
 - Shadow mapping with CSM
 - Post-processing effects
 - LOD system

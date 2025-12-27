@@ -90,14 +90,33 @@ export function ActionProgressBar({ world }: { world: ClientWorld }) {
   }, [world]);
 
   // Update progress based on elapsed time
+  // Store a ref to avoid creating new action objects every interval
+  // Only progress changes during the update cycle, so we compute it from startTime/duration
   useEffect(() => {
     if (!currentAction) return;
 
-    const interval = setInterval(() => {
-      const elapsed = Date.now() - currentAction.startTime;
-      const progress = Math.min(elapsed / currentAction.duration, 1);
+    // Cache the values we need for progress calculation to avoid re-reads
+    const { startTime, duration } = currentAction;
 
-      setCurrentAction((prev) => (prev ? { ...prev, progress } : null));
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+
+      // Use functional update but only update if progress changed meaningfully
+      // This avoids unnecessary re-renders while still updating the UI
+      setCurrentAction((prev) => {
+        if (!prev) return null;
+        // Only create new object if progress is different (threshold for float comparison)
+        if (Math.abs(prev.progress - progress) < 0.001) return prev;
+        // Reuse all properties except progress to minimize object creation
+        return {
+          action: prev.action,
+          resourceName: prev.resourceName,
+          duration: prev.duration,
+          startTime: prev.startTime,
+          progress,
+        };
+      });
 
       if (progress >= 1) {
         clearInterval(interval);

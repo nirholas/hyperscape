@@ -18,8 +18,7 @@ import {
 import { createEntityID } from "../../../utils/IdentifierUtils";
 import { EntityManager } from "..";
 import { MobNPCSystem } from "..";
-import { SystemBase } from "..";
-import { getItem } from "../../../data/items";
+import { SystemBase } from "../infrastructure/SystemBase";
 import { tilesWithinMeleeRange } from "../movement/TileSystem";
 import { tilePool, PooledTile } from "../../../utils/pools/TilePool";
 import { CombatAnimationManager } from "./CombatAnimationManager";

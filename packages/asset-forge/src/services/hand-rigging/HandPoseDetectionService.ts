@@ -1,16 +1,19 @@
 /**
  * Hand Pose Detection Service
  * Uses TensorFlow.js and MediaPipe Hands to detect hand landmarks in 2D/3D
+ * Uses WebGPU backend for TensorFlow.js when available.
  */
 
 import * as tf from "@tensorflow/tfjs";
 import * as handPoseDetection from "@tensorflow-models/hand-pose-detection";
-import "@tensorflow/tfjs-backend-webgl";
+
+// @ts-expect-error - tfjs-backend-webgpu has no type declarations but is needed for side effects
+import "@tensorflow/tfjs-backend-webgpu";
 import "@mediapipe/hands";
-import * as THREE from "three";
 
 import { HAND_LANDMARKS, FINGER_JOINTS } from "../../constants";
 import { TensorFlowHand, TensorFlowKeypoint } from "../../types/service-types";
+import { THREE } from "../../utils/webgpu-renderer";
 
 export interface Point2D {
   x: number;
@@ -57,7 +60,8 @@ export class HandPoseDetectionService {
     console.log("🤖 Initializing hand pose detection...");
 
     try {
-      // Wait for TensorFlow.js to be ready
+      // Set WebGPU as preferred backend
+      await tf.setBackend("webgpu");
       await tf.ready();
       console.log("✅ TensorFlow.js ready, backend:", tf.getBackend());
 

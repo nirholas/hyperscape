@@ -15,6 +15,7 @@
 // Re-export Socket base class from shared
 export type { Socket } from "@hyperscape/shared";
 import { Socket } from "@hyperscape/shared";
+import type { PlayerEntity } from "./game.types.js";
 
 // ============================================================================
 // WEBSOCKET TYPES
@@ -30,6 +31,7 @@ export type NodeWebSocket = WebSocket & {
   on: (event: string, listener: Function) => void;
   ping: () => void;
   terminate: () => void;
+  __wsId?: string;
 };
 
 /**
@@ -43,7 +45,8 @@ export type NodeWebSocket = WebSocket & {
  * Handlers now query the session manager for targetEntityId instead of socket properties.
  */
 export interface ServerSocket extends Socket {
-  player: any;
+  // Override player type to use server's PlayerEntity (undefined when not connected)
+  player?: PlayerEntity;
   // Base Socket properties from Socket class
   ws: NodeWebSocket;
   network: NetworkWithSocket;
@@ -53,6 +56,8 @@ export interface ServerSocket extends Socket {
   selectedCharacterId?: string;
   characterId?: string; // Track active character immediately for duplicate detection
   createdAt?: number; // Timestamp when socket was created (for reconnection grace period)
+  isSpectator?: boolean;
+  spectatingCharacterId?: string;
 }
 
 // ============================================================================
@@ -80,16 +85,16 @@ export interface ConnectionParams {
  *
  * Defines the contract for server-side network systems that handle
  * WebSocket connections and message routing.
+ *
+ * Note: enqueue and onDisconnect accept Socket (the base class).
+ * Since ServerSocket extends Socket, ServerSocket instances are
+ * automatically assignable to the Socket parameter type.
  */
 export interface NetworkWithSocket {
   onConnection: (ws: NodeWebSocket, params: ConnectionParams) => Promise<void>;
   sockets: Map<string, ServerSocket>;
-  enqueue: (
-    socket: Socket | ServerSocket,
-    method: string,
-    data: unknown,
-  ) => void;
-  onDisconnect: (socket: Socket | ServerSocket, code?: number | string) => void;
+  enqueue: (socket: Socket, method: string, data: unknown) => void;
+  onDisconnect: (socket: Socket, code?: number | string) => void;
 }
 
 /**
@@ -105,7 +110,7 @@ export interface ServerNetworkWithSockets {
   sockets: Map<
     string,
     ServerSocket & {
-      player: any; // PlayerEntity from game.types.ts - avoid circular dependency
+      player: PlayerEntity | null;
     }
   >;
 }

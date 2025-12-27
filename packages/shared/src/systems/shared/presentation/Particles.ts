@@ -18,7 +18,6 @@
  * - World and local space
  * - Billboard and oriented particles
  * - Multiple blending modes
- * - XR orientation support
  *
  * **Performance:**
  * - Handles 10,000+ particles at 60 FPS
@@ -36,11 +35,10 @@
  * **Referenced by:** Particle nodes, visual effects
  */
 
-import { EventType } from "../../../types/events";
 import type { World } from "../../../core/World";
 import THREE from "../../../extras/three/three";
 import { uuid } from "../../../utils";
-import { SystemBase } from "..";
+import { SystemBase } from "../infrastructure/SystemBase";
 import type {
   ParticleEmitter,
   ParticleMessageData,
@@ -104,12 +102,6 @@ export class Particles extends SystemBase {
     this.uOrientationFull.value = this.world.rig.quaternion;
   }
 
-  start() {
-    this.subscribe(EventType.XR_SESSION, (session: XRSession | null) =>
-      this.onXRSession(session),
-    );
-  }
-
   register(node: EmitterNode) {
     return createEmitter(this.world, this, node);
   }
@@ -122,9 +114,10 @@ export class Particles extends SystemBase {
     e1.z = 0;
     this.uOrientationY.value.setFromEuler(e1);
 
-    this.emitters.forEach((emitter) => {
+    // Use for-of instead of forEach to avoid callback allocation each frame
+    for (const emitter of this.emitters.values()) {
       emitter.update(delta);
-    });
+    }
   }
 
   onMessage = (msg: MessageEvent) => {
@@ -137,14 +130,6 @@ export class Particles extends SystemBase {
 
   onError = (err: ErrorEvent) => {
     throw new Error(`[ParticleSystem] ${err.message}`);
-  };
-
-  onXRSession = (session: XRSession | null) => {
-    if (session && this.world.xr?.camera) {
-      this.uOrientationFull.value = this.world.xr.camera.quaternion;
-    } else {
-      this.uOrientationFull.value = this.world.rig.quaternion;
-    }
   };
 }
 

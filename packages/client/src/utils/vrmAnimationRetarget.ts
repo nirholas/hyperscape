@@ -70,7 +70,7 @@ const parentRestWorldRotation = new THREE.Quaternion();
 export function retargetAnimationToVRM(
   animationGLTF: { scene: THREE.Group; animations: THREE.AnimationClip[] },
   getBoneName: (vrmBoneName: string) => string | undefined,
-  rootToHips: number = 1,
+  _rootToHips: number = 1,
 ): THREE.AnimationClip | null {
   if (!animationGLTF.animations || animationGLTF.animations.length === 0) {
     return null;
@@ -129,8 +129,6 @@ export function retargetAnimationToVRM(
   clip.optimize();
 
   // Retarget tracks to VRM skeleton
-  const height = rootToHips;
-  const scaler = height * scale;
   const retargetedTracks: THREE.KeyframeTrack[] = [];
 
   clip.tracks.forEach((track) => {

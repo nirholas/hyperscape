@@ -7,7 +7,6 @@
 import { Entity } from "../../entities/Entity";
 import { PlayerLocal } from "../../entities/player/PlayerLocal";
 import { Skills, InventoryItem, Position3D } from "../core/core";
-import type { Resource } from "../core/core";
 import type { Item } from "../core/core";
 import type { EntitySpawnedEvent } from "../systems/system-interfaces";
 import { EventType } from "./event-types";
@@ -567,9 +566,6 @@ export interface EventMap {
   // Camera Events (continued)
   [EventType.CAMERA_TAP]: { x: number; y: number };
 
-  // XR Events
-  [EventType.XR_SESSION]: XRSession | null;
-
   // Avatar Events
   [EventType.AVATAR_LOAD_COMPLETE]: { playerId: string; success: boolean };
 
@@ -660,7 +656,9 @@ export interface EventMap {
   [EventType.STORE_OPEN_REQUEST]: {
     playerId: string;
     npcId: string;
-    inventory: unknown[];
+    storeId?: string;
+    npcEntityId?: string;
+    inventory?: unknown[];
   };
   [EventType.CORPSE_EMPTY]: { corpseId: string; playerId: string };
   [EventType.CHARACTER_LIST]: {

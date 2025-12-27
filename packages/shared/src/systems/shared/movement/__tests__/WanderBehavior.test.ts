@@ -13,8 +13,8 @@
  * @see MOB_AGGRO_IMPLEMENTATION_PLAN.md Phase 3.1
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { WanderBehavior, type WanderConfig } from "../WanderBehavior";
+import { describe, it, expect, beforeEach } from "vitest";
+import { WanderBehavior } from "../WanderBehavior";
 import type { TileCoord } from "../TileSystem";
 
 describe("WanderBehavior", () => {

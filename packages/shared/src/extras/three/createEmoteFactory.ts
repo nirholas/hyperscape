@@ -164,10 +164,10 @@ export function createEmoteFactory(glb: GLBData, _url: string) {
 
       const tracks: THREE.KeyframeTrack[] = [];
 
-      // Temp quaternions for A-pose compensation
-      const animQuat = new THREE.Quaternion();
-      const offsetQuat = new THREE.Quaternion();
-      const resultQuat = new THREE.Quaternion();
+      // Temp quaternions for A-pose compensation (reserved for future use)
+      const _animQuat = new THREE.Quaternion();
+      const _offsetQuat = new THREE.Quaternion();
+      const _resultQuat = new THREE.Quaternion();
 
       clip.tracks.forEach((track) => {
         const trackSplitted = track.name.split(".");
@@ -183,7 +183,7 @@ export function createEmoteFactory(glb: GLBData, _url: string) {
         // need to scale it by height too.
         // i found that feet-to-hips height scales animations almost perfectly
         // and ensures feet stay on the ground
-        const scaler = height * scale;
+        const _scaler = height * scale;
 
         if (vrmNodeName !== undefined) {
           const propertyName = trackSplitted[1];

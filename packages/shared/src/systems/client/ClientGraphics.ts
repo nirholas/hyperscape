@@ -1,14 +1,13 @@
 /**
  * ClientGraphics.ts - 3D Graphics Rendering System
  *
- * Manages WebGL/WebGPU rendering for the 3D game world.
+ * Manages WebGPU rendering for the 3D game world.
  * Handles viewport, shadows, post-processing, and frame rendering.
  *
  * Key Features:
- * - **WebGL/WebGPU Support**: Automatic fallback from WebGPU to WebGL2
+ * - **WebGPU Rendering**: Native WebGPU with TSL post-processing
  * - **Shadow Mapping**: Cascaded shadow maps (CSM) for dynamic shadows
- * - **Post-Processing**: Bloom, tone mapping, and other effects
- * - **XR Rendering**: WebXR support for VR/AR devices
+ * - **Post-Processing**: TSL-based bloom, tone mapping, and effects
  * - **Adaptive Quality**: Auto-adjusts shadow quality based on performance
  * - **Anisotropic Filtering**: Texture filtering for better quality
  * - **HDR Rendering**: High dynamic range for realistic lighting
@@ -16,15 +15,9 @@
  * Rendering Pipeline:
  * 1. Pre-render: Update matrices, frustum culling
  * 2. Shadow Pass: Render shadow maps for each light
- * 3. Main Pass: Render scene to screen or XR
+ * 3. Main Pass: Render scene to screen
  * 4. Post-Processing: Apply bloom, tone mapping, etc.
  * 5. UI Overlay: Render 2D UI on top
- *
- * WebGPU vs WebGL:
- * - Prefers WebGPU if available (better performance)
- * - Falls back to WebGL2 automatically
- * - Uses UniversalRenderer abstraction for compatibility
- * - Same API regardless of backend
  *
  * Shadow Configuration:
  * - Cascaded Shadow Maps (CSM) for large view distances
@@ -33,9 +26,8 @@
  * - Shadow bias to prevent acne artifacts
  *
  * Post-Processing Effects:
- * - **Bloom**: Glowing bright areas for magical effects
+ * - **Bloom**: Glowing bright areas for magical effects (TSL-based)
  * - **Tone Mapping**: HDR to LDR conversion
- * - **FXAA/SMAA**: Anti-aliasing post-process
  * - **Color Grading**: Adjust colors for atmosphere
  *
  * Performance Optimization:
@@ -44,12 +36,6 @@
  * - Instanced rendering: Batch identical objects
  * - Occlusion culling: Skip objects behind walls
  * - Adaptive shadow quality: Reduce resolution under load
- *
- * XR Integration:
- * - Stereo rendering for VR headsets
- * - Hand tracking and controller input
- * - Room-scale tracking
- * - AR pass-through mode
  *
  * Usage:
  * ```typescript
@@ -71,16 +57,15 @@
  * - Environment: Lighting and skybox
  * - LODs: Level-of-detail mesh swapping
  * - Stage: three.js scene graph
- * - XR: WebXR session management
  *
  * Dependencies:
- * - three.js: 3D rendering library
- * - postprocessing: Effects library
+ * - three.js WebGPU: 3D rendering library
+ * - TSL: Three Shading Language for post-processing
  * - Stage system: Scene graph
  * - Camera system: View/projection matrices
  *
- * @see RendererFactory.ts for WebGL/WebGPU creation
- * @see PostProcessingFactory.ts for effects setup
+ * @see RendererFactory.ts for WebGPU creation
+ * @see PostProcessingFactory.ts for TSL-based effects setup
  */
 
 import THREE from "../../extras/three/three";
@@ -92,68 +77,57 @@ import {
   createRenderer,
   configureRenderer,
   configureShadowMaps,
-  configureXR,
   getMaxAnisotropy,
-  isXRPresenting,
-  type UniversalRenderer,
-  isWebGLRenderer,
+  type WebGPURenderer,
   logWebGPUInfo,
   getWebGPUCapabilities,
 } from "../../utils/rendering/RendererFactory";
 import {
   createPostProcessing,
-  setBloomEnabled,
-  disposePostProcessing,
   type PostProcessingComposer,
 } from "../../utils/rendering/PostProcessingFactory";
 
-let renderer: UniversalRenderer | undefined;
+let renderer: WebGPURenderer | undefined;
 
-async function getRenderer(preferWebGPU = true): Promise<UniversalRenderer> {
+async function getRenderer(): Promise<WebGPURenderer> {
   if (!renderer) {
     renderer = await createRenderer({
       powerPreference: "high-performance",
       antialias: true,
-      preferWebGPU,
     });
   }
   return renderer;
 }
 
 /**
- * Get the shared WebGL/WebGPU renderer instance
+ * Get the shared WebGPU renderer instance
  * @returns The renderer or undefined if not initialized
  */
-export function getSharedRenderer(): UniversalRenderer | undefined {
+export function getSharedRenderer(): WebGPURenderer | undefined {
   return renderer;
 }
 
 /**
  * Client Graphics System
  *
- * Manages 3D rendering for the game world.
+ * Manages 3D rendering for the game world using WebGPU.
  * Runs only on client (browser).
  */
 export class ClientGraphics extends System {
   // Properties
-  renderer!: UniversalRenderer;
+  renderer!: WebGPURenderer;
   viewport!: HTMLElement;
   maxAnisotropy!: number;
   usePostprocessing!: boolean;
   composer!: PostProcessingComposer | null;
   resizer!: ResizeObserver;
-  xrWidth: number | null = null;
-  xrHeight: number | null = null;
-  xrDimensionsNeeded: boolean = false;
-  xrSession: XRSession | null = null;
   width: number = 0;
   height: number = 0;
   aspect: number = 0;
   worldToScreenFactor: number = 0;
-  isWebGPU: boolean = false;
+  isWebGPU: boolean = true; // Always true now
 
   constructor(world: World) {
-    // Reuse System since ClientGraphics doesn't use SystemBase helpers heavily; but keep name for logs
     super(world);
   }
 
@@ -170,19 +144,18 @@ export class ClientGraphics extends System {
     this.aspect = this.width / this.height;
 
     // Update camera aspect ratio immediately to match viewport
-    // Camera is created with hardcoded 16/9, so we need to fix it on init
-    if ("aspect" in this.world.camera) {
-      (this.world.camera as unknown as { aspect: number }).aspect = this.aspect;
-    }
-    if ("updateProjectionMatrix" in this.world.camera) {
-      (
-        this.world.camera as { updateProjectionMatrix: () => void }
-      ).updateProjectionMatrix();
-    }
+    // THREE.PerspectiveCamera has aspect and updateProjectionMatrix properties
+    this.world.camera.aspect = this.aspect;
+    this.world.camera.updateProjectionMatrix();
 
-    // Create renderer (WebGPU or WebGL) - auto-detect best available
-    this.renderer = await getRenderer(true);
-    this.isWebGPU = !isWebGLRenderer(this.renderer);
+    // Create WebGPU renderer
+    this.renderer = await getRenderer();
+    this.isWebGPU = true;
+
+    // Log WebGPU capabilities
+    logWebGPUInfo(this.renderer);
+    const caps = getWebGPUCapabilities(this.renderer);
+    console.log("[ClientGraphics] WebGPU features:", caps.features.length);
 
     // Configure renderer
     configureRenderer(this.renderer, {
@@ -196,31 +169,24 @@ export class ClientGraphics extends System {
       outputColorSpace: THREE.SRGBColorSpace,
     });
 
-    // Configure shadows (WebGL only)
+    // Configure shadows
     configureShadowMaps(this.renderer, {
       enabled: true,
       type: THREE.PCFSoftShadowMap,
-    });
-
-    // Configure XR (WebGL only for now)
-    configureXR(this.renderer, {
-      enabled: true,
-      referenceSpaceType: "local-floor",
-      foveation: 0,
     });
 
     // Get max anisotropy
     this.maxAnisotropy = getMaxAnisotropy(this.renderer);
     THREE.Texture.DEFAULT_ANISOTROPY = this.maxAnisotropy;
 
-    // Setup post-processing
+    // Setup post-processing with TSL
     this.usePostprocessing = this.world.prefs?.postprocessing ?? true;
 
     if (this.usePostprocessing) {
       this.composer = await createPostProcessing(
         this.renderer,
         this.world.stage.scene,
-        this.world.camera as unknown as THREE.Camera,
+        this.world.camera,
         {
           bloom: {
             enabled: this.world.prefs?.bloom ?? true,
@@ -228,22 +194,14 @@ export class ClientGraphics extends System {
             threshold: 1.0,
             radius: 0.5,
           },
-          multisampling: 8,
-          frameBufferType: THREE.HalfFloatType,
         },
       );
-
-      if (!this.composer) {
-        console.warn(
-          "[ClientGraphics] Post-processing not available, using direct rendering",
-        );
-        this.usePostprocessing = false;
-      }
     } else {
       this.composer = null;
     }
 
     this.world.prefs?.on("change", this.onPrefsChange);
+
     // Debounced resize with strict size change detection
     let resizePending = false;
     this.resizer = new ResizeObserver((entries) => {
@@ -264,6 +222,7 @@ export class ClientGraphics extends System {
         });
       }
     });
+
     // Set ID for Cypress tests
     this.renderer.domElement.id = "hyperscape-world-canvas";
 
@@ -282,14 +241,6 @@ export class ClientGraphics extends System {
       }
       this.viewport.appendChild(this.renderer.domElement);
     }
-    // Temporarily disable ResizeObserver to prevent camera matrix corruption
-    // this.resizer.observe(this.viewport)
-  }
-
-  override start() {
-    this.world.on(EventType.XR_SESSION, this.onXRSession);
-
-    // Damage splatters now handled by DamageSplatSystem (OSRS-style hit splats)
   }
 
   resize(width: number, height: number) {
@@ -311,20 +262,14 @@ export class ClientGraphics extends System {
       return;
     }
 
-    const oldAspect = this.aspect;
     this.width = width;
     this.height = height;
     this.aspect = this.width / this.height;
 
-    // Update camera aspect ratio for any aspect ratio support
-    if ("aspect" in this.world.camera) {
-      (this.world.camera as unknown as { aspect: number }).aspect = this.aspect;
-    }
-    if ("updateProjectionMatrix" in this.world.camera) {
-      (
-        this.world.camera as { updateProjectionMatrix: () => void }
-      ).updateProjectionMatrix();
-    }
+    // Update camera aspect ratio
+    // THREE.PerspectiveCamera has aspect and updateProjectionMatrix properties
+    this.world.camera.aspect = this.aspect;
+    this.world.camera.updateProjectionMatrix();
 
     // Update renderer size with current pixel ratio
     const dpr = this.world.prefs?.dpr || 1;
@@ -345,19 +290,12 @@ export class ClientGraphics extends System {
   }
 
   render() {
-    const isPresenting = isXRPresenting(this.renderer);
-
-    if (isPresenting || !this.usePostprocessing || !this.composer) {
-      this.renderer.render(
-        this.world.stage.scene,
-        this.world.camera as unknown as THREE.Camera,
-      );
+    if (!this.usePostprocessing || !this.composer) {
+      // Direct rendering without post-processing
+      this.renderer.render(this.world.stage.scene, this.world.camera);
     } else {
+      // Render with post-processing (bloom via TSL)
       this.composer.render();
-    }
-
-    if (this.xrDimensionsNeeded) {
-      this.updateXRDimensions();
     }
   }
 
@@ -368,8 +306,7 @@ export class ClientGraphics extends System {
   override preTick() {
     const fov = this.world.camera.fov;
     const fovRadians = THREE.MathUtils.degToRad(fov);
-    const rendererHeight = this.xrHeight || this.height;
-    this.worldToScreenFactor = (Math.tan(fovRadians / 2) * 2) / rendererHeight;
+    this.worldToScreenFactor = (Math.tan(fovRadians / 2) * 2) / this.height;
   }
 
   onPrefsChange = (changes: {
@@ -386,59 +323,7 @@ export class ClientGraphics extends System {
     if (changes.postprocessing) {
       this.usePostprocessing = changes.postprocessing.value;
     }
-    // bloom
-    if (changes.bloom && this.composer) {
-      setBloomEnabled(this.composer, changes.bloom.value);
-    }
   };
-
-  onXRSession = (session: XRSession | null) => {
-    if (session) {
-      this.xrSession = session;
-      this.xrWidth = null;
-      this.xrHeight = null;
-      this.xrDimensionsNeeded = true;
-    } else {
-      this.xrSession = null;
-      this.xrWidth = null;
-      this.xrHeight = null;
-      this.xrDimensionsNeeded = false;
-    }
-  };
-
-  updateXRDimensions() {
-    // WebGL-specific XR handling
-    if (!isWebGLRenderer(this.renderer)) return;
-
-    const referenceSpace = this.renderer.xr?.getReferenceSpace();
-    if (!referenceSpace) return;
-    const frame = this.renderer.xr?.getFrame();
-    const pose = frame.getViewerPose(referenceSpace);
-    if (pose && pose.views.length > 0) {
-      const view = pose.views[0];
-      if (view) {
-        const projectionMatrix = view.projectionMatrix;
-        if (projectionMatrix) {
-          // Extract FOV information from projection matrix
-          // const fovFactor = projectionMatrix[5] // Approximation of FOV scale
-          // Access render state for framebuffer dimensions
-          const renderState = this.xrSession?.renderState as
-            | { baseLayer?: unknown; layers?: unknown[] }
-            | undefined;
-          const baseLayer =
-            renderState?.baseLayer ||
-            (renderState?.layers && renderState.layers[0]);
-          this.xrWidth = (
-            baseLayer as { framebufferWidth: number }
-          ).framebufferWidth;
-          this.xrHeight = (
-            baseLayer as { framebufferHeight: number }
-          ).framebufferHeight;
-          this.xrDimensionsNeeded = false;
-        }
-      }
-    }
-  }
 
   override destroy() {
     // Guard against destruction before initialization
@@ -447,16 +332,12 @@ export class ClientGraphics extends System {
     }
     // Unsubscribe from prefs changes
     this.world.prefs?.off("change", this.onPrefsChange);
-    // Remove XR session listener
-    this.world.off(EventType.XR_SESSION, this.onXRSession);
-    // Damage splatters now handled by DamageSplatSystem
     // Ensure animation loop is stopped
     if (this.renderer) {
-      this.renderer.setAnimationLoop?.(null as unknown as () => void);
+      this.renderer.setAnimationLoop(null);
     }
-    // Dispose postprocessing
     if (this.composer) {
-      disposePostProcessing(this.composer);
+      this.composer.dispose();
       this.composer = null;
     }
     // Remove renderer from DOM if it was added
@@ -466,6 +347,5 @@ export class ClientGraphics extends System {
         this.viewport.removeChild(this.renderer.domElement);
       }
     }
-    // Do not dispose the shared renderer globally to avoid breaking other systems during hot reloads
   }
 }

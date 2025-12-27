@@ -63,7 +63,7 @@ export class SafeAreaDeathHandler {
     position: { x: number; y: number; z: number },
     items: InventoryItem[],
     killedBy: string,
-    tx?: any, // Transaction context for atomic death processing
+    tx?: unknown, // Transaction context for atomic death processing
   ): Promise<void> {
     // CRITICAL: Server authority check - prevent client from spawning fake gravestones
     if (!this.world.isServer) {

@@ -22,6 +22,12 @@ const defaults = {
 };
 
 const m1 = new THREE.Matrix4();
+// Pre-allocated defaults for getBone fallbacks to avoid allocations
+const _defaultBonePosition = new THREE.Vector3();
+const _defaultBoneQuaternion = new THREE.Quaternion();
+const _defaultBoneEuler = new THREE.Euler();
+const _defaultBoneScale = new THREE.Vector3(1, 1, 1);
+const _defaultBoneMatrix = new THREE.Matrix4();
 
 const defaultStopOpts = { fade: 0.15 };
 
@@ -241,20 +247,20 @@ export class SkinnedMesh extends Node implements HotReloadable {
       const self = this;
       handle = {
         get position() {
-          return self.readBone(name)?.position || new THREE.Vector3();
+          return self.readBone(name)?.position || _defaultBonePosition;
         },
         get quaternion() {
-          return self.readBone(name)?.quaternion || new THREE.Quaternion();
+          return self.readBone(name)?.quaternion || _defaultBoneQuaternion;
         },
         get rotation() {
-          return self.readBone(name)?.rotation || new THREE.Euler();
+          return self.readBone(name)?.rotation || _defaultBoneEuler;
         },
         get scale() {
-          return self.readBone(name)?.scale || new THREE.Vector3(1, 1, 1);
+          return self.readBone(name)?.scale || _defaultBoneScale;
         },
         get matrixWorld() {
           const bone = self.readBone(name);
-          if (!bone) return new THREE.Matrix4();
+          if (!bone) return _defaultBoneMatrix;
           if (self.isDirty) self.clean();
           bone.updateMatrixWorld(true);
           return bone.matrixWorld;

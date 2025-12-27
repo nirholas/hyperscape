@@ -143,15 +143,19 @@ export class HeadstoneEntity extends InteractableEntity {
   private checkInventorySpace(
     playerId: string,
     itemId: string,
-    quantity: number,
+    _quantity: number,
   ): boolean {
-    const inventorySystem = this.world.getSystem("inventory") as any;
+    const inventorySystem = this.world.getSystem("inventory") as unknown as {
+      getInventory?: (
+        playerId: string,
+      ) => { items: Array<{ itemId: string }> } | null;
+    };
     if (!inventorySystem) {
       console.error("[HeadstoneEntity] InventorySystem not available");
       return false;
     }
 
-    const inventory = inventorySystem.getInventory(playerId);
+    const inventory = inventorySystem.getInventory?.(playerId);
     if (!inventory) {
       console.error(`[HeadstoneEntity] No inventory for ${playerId}`);
       return false;
@@ -163,7 +167,7 @@ export class HeadstoneEntity extends InteractableEntity {
     if (isFull) {
       // Check if item is stackable and already exists
       const existingItem = inventory.items.find(
-        (item: any) => item.itemId === itemId,
+        (item: { itemId: string }) => item.itemId === itemId,
       );
 
       // If item exists and is stackable, we can add to existing stack
@@ -367,7 +371,9 @@ export class HeadstoneEntity extends InteractableEntity {
 
     // Send to specific client over network (opens loot UI immediately)
     if (this.world.isServer && this.world.network) {
-      const network = this.world.network as any;
+      const network = this.world.network as unknown as {
+        sendTo?: (playerId: string, type: string, data: unknown) => void;
+      };
       if (network.sendTo) {
         network.sendTo(data.playerId, "corpseLoot", lootData);
       }
@@ -408,8 +414,10 @@ export class HeadstoneEntity extends InteractableEntity {
       // Despawn almost immediately after all items taken (RuneScape-style)
       setTimeout(() => {
         // Use EntityManager to properly remove entity (sends entityRemoved packet to clients)
-        const entityManager = this.world.getSystem("entity-manager") as any;
-        if (entityManager) {
+        const entityManager = this.world.getSystem(
+          "entity-manager",
+        ) as unknown as { destroyEntity?: (id: string) => void };
+        if (entityManager?.destroyEntity) {
           entityManager.destroyEntity(this.id);
         } else {
           this.world.entities.remove(this.id);

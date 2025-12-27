@@ -77,6 +77,20 @@ function createMockContext(
     getTime: () => Date.now(),
     markNetworkDirty: () => {},
     emitEvent: () => {},
+    // Entity occupancy for OSRS-accurate collision
+    getEntityId: () => "test-mob-1",
+    getEntityOccupancy: () => ({
+      isBlocked: () => false,
+      isOccupied: () => false,
+      getOccupant: () => null,
+      setOccupied: () => {},
+      clearOccupant: () => {},
+      occupy: () => {},
+      vacate: () => {},
+      move: () => {},
+      countUnoccupied: () => 0,
+    }),
+    isWalkable: () => true,
   };
 }
 
@@ -236,33 +250,39 @@ describe("OSRS-Accurate Leash Behavior", () => {
   });
 
   describe("edge cases", () => {
-    it("handles NPC exactly at leash boundary (should NOT leash)", () => {
+    it("handles player exactly at aggression boundary (should NOT leash)", () => {
       const chaseState = new ChaseState();
 
-      // Exactly at leash range boundary
+      // Player at exactly aggression range (leashRange + combatRange = 11)
+      // OSRS-accurate: Leash is based on PLAYER distance from spawn, not mob distance
       const context = createMockContext({
         distanceFromSpawn: 10,
         leashRange: 10,
+        combatRange: 1,
         currentTarget: "player1",
-        targetPlayer: { id: "player1", position: { x: 12, y: 0, z: 0 } },
+        // Player at exactly 11 tiles from spawn (aggression boundary)
+        targetPlayer: { id: "player1", position: { x: 11, y: 0, z: 0 } },
       });
 
       chaseState.enter(context);
       const nextState = chaseState.update(context, 0.016);
 
-      // At boundary, should NOT leash (only > leashRange triggers leash)
+      // At boundary, should NOT leash (only > aggressionRange triggers leash)
       expect(nextState).not.toBe(MobAIState.IDLE);
       expect(nextState).not.toBe(MobAIState.RETURN);
     });
 
-    it("handles NPC just beyond leash boundary (should leash)", () => {
+    it("handles player just beyond aggression boundary (should leash)", () => {
       const chaseState = new ChaseState();
 
-      // Just beyond leash range
+      // Player just beyond aggression range
+      // OSRS-accurate: Leash is based on PLAYER distance from spawn
       const context = createMockContext({
-        distanceFromSpawn: 10.1,
+        distanceFromSpawn: 10,
         leashRange: 10,
+        combatRange: 1,
         currentTarget: "player1",
+        // Player at 12 tiles from spawn (beyond aggression boundary of 11)
         targetPlayer: { id: "player1", position: { x: 12, y: 0, z: 0 } },
       });
 
