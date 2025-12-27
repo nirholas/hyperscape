@@ -22,7 +22,8 @@ export interface ContextMenuState {
       | "npc"
       | "bank"
       | "store"
-      | "headstone";
+      | "headstone"
+      | "player";
     name: string;
   } | null;
   actions: ContextMenuAction[];
@@ -53,7 +54,9 @@ export function EntityContextMenu({ world: _world }: EntityContextMenuProps) {
             | "corpse"
             | "npc"
             | "bank"
-            | "store";
+            | "store"
+            | "headstone"
+            | "player";
           name: string;
           position?: { x: number; y: number; z: number };
           [key: string]: unknown;
