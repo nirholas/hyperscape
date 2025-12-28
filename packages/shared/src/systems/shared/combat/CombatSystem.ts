@@ -20,7 +20,7 @@ import { EntityManager } from "..";
 import { MobNPCSystem } from "..";
 import { SystemBase } from "..";
 import { getItem } from "../../../data/items";
-import { tilesWithinMeleeRange } from "../movement/TileSystem";
+import { tilesWithinMeleeRange, worldToTile } from "../movement/TileSystem";
 import { tilePool, PooledTile } from "../../../utils/pools/TilePool";
 import { CombatAnimationManager } from "./CombatAnimationManager";
 import { CombatRotationManager } from "./CombatRotationManager";
@@ -965,25 +965,44 @@ export class CombatSystem extends SystemBase {
         // The COMBAT_FOLLOW_TARGET event replaces any existing movement destination
         // Wiki: "the player's character walks/runs towards the monster attacking and fights back"
 
-        // NOTE: We do NOT call rotateTowardsTarget() here because:
-        // 1. COMBAT_FOLLOW_TARGET triggers movePlayerToward() which handles rotation
-        // 2. Having two rotation updates causes visual jank (quick turn-around-then-back)
-        // 3. Client's TileInterpolator will slerp smoothly to the new path direction
+        // ALWAYS rotate defender to face attacker immediately when retaliation starts
+        // This fixes PvP rotation bug where defender wouldn't face attacker
+        if (targetType === "player") {
+          this.rotationManager.rotateTowardsTarget(
+            String(targetId),
+            String(attackerId),
+            targetType,
+            attackerType,
+          );
+        }
 
-        // Always emit follow event - this REPLACES any existing movement
-        // Player was walking to tile A, now walks to attacker instead
-        if (targetType === "player" && attackerEntity) {
+        // If not in melee range, also emit follow event to trigger movement
+        // Movement will update rotation to face movement direction
+        if (targetType === "player" && attackerEntity && targetEntity) {
           const attackerPos = getEntityPosition(attackerEntity);
-          if (attackerPos) {
-            this.emitTypedEvent(EventType.COMBAT_FOLLOW_TARGET, {
-              playerId: String(targetId),
-              targetId: String(attackerId),
-              targetPosition: {
-                x: attackerPos.x,
-                y: attackerPos.y,
-                z: attackerPos.z,
-              },
-            });
+          const targetPos = getEntityPosition(targetEntity);
+
+          if (attackerPos && targetPos) {
+            const attackerTile = worldToTile(attackerPos.x, attackerPos.z);
+            const targetTile = worldToTile(targetPos.x, targetPos.z);
+            const inMeleeRange = tilesWithinMeleeRange(
+              targetTile,
+              attackerTile,
+              1,
+            );
+
+            if (!inMeleeRange) {
+              // Not in range - emit follow event to trigger movement
+              this.emitTypedEvent(EventType.COMBAT_FOLLOW_TARGET, {
+                playerId: String(targetId),
+                targetId: String(attackerId),
+                targetPosition: {
+                  x: attackerPos.x,
+                  y: attackerPos.y,
+                  z: attackerPos.z,
+                },
+              });
+            }
           }
         }
       } else {

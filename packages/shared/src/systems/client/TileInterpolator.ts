@@ -1028,6 +1028,52 @@ export class TileInterpolator {
   }
 
   /**
+   * Set combat rotation for an entity (AAA Single Source of Truth)
+   *
+   * When combat rotation arrives via entityModified, it should be routed here
+   * so TileInterpolator maintains ownership of all rotation. This prevents
+   * race conditions where multiple systems try to set rotation.
+   *
+   * Combat rotation is applied immediately when:
+   * 1. Entity has TileInterpolator state
+   * 2. Entity is NOT currently moving (standing still in combat)
+   *
+   * When moving, movement direction takes priority (OSRS-accurate behavior).
+   *
+   * @param entityId - Entity to update
+   * @param quaternion - Combat rotation from server [x, y, z, w]
+   * @returns true if rotation was applied, false if entity is moving or has no state
+   */
+  setCombatRotation(entityId: string, quaternion: number[]): boolean {
+    const state = this.entityStates.get(entityId);
+    if (!state) {
+      return false; // No state - caller should handle rotation directly
+    }
+
+    // Only apply combat rotation when NOT moving
+    // When moving, movement direction rotation takes priority (OSRS-accurate)
+    if (state.isMoving || state.fullPath.length > 0) {
+      return false; // Moving - ignore combat rotation, movement direction wins
+    }
+
+    // Apply combat rotation to state - TileInterpolator.update() will apply to entity.base
+    state.quaternion.set(
+      quaternion[0],
+      quaternion[1],
+      quaternion[2],
+      quaternion[3],
+    );
+    state.targetQuaternion.set(
+      quaternion[0],
+      quaternion[1],
+      quaternion[2],
+      quaternion[3],
+    );
+
+    return true; // Rotation accepted
+  }
+
+  /**
    * Sync entity position after teleport/respawn
    *
    * Resets the entity's movement state to a new position, clearing any pending

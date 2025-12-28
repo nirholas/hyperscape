@@ -1008,10 +1008,31 @@ export class ClientNetwork extends SystemBase {
         const { p, q, ...restChanges } = changes as Record<string, unknown>;
         entity.modify(restChanges);
       } else if (hasTileState && !isDead) {
-        // Still apply non-transform changes immediately
-        // But strip position AND rotation for tile-moving entities
-        // (let tile interpolator handle them smoothly - server values cause twitching)
-        const { p, q, ...restChanges } = changes as Record<string, unknown>;
+        // AAA ARCHITECTURE: TileInterpolator is Single Source of Truth for transform
+        // When TileInterpolator controls an entity:
+        // - Position: TileInterpolator handles (strip from entityModified)
+        // - Rotation: Route to TileInterpolator.setCombatRotation() for combat facing
+        //
+        // This prevents race conditions where multiple systems fight over rotation.
+        // TileInterpolator.setCombatRotation() will apply rotation when entity is standing still,
+        // and ignore it when moving (movement direction takes priority, OSRS-accurate).
+        const changesTyped = changes as Record<string, unknown>;
+        const { p, q, ...restChanges } = changesTyped;
+
+        // Route combat rotation to TileInterpolator (single source of truth)
+        if (q && Array.isArray(q) && q.length === 4) {
+          const applied = this.tileInterpolator.setCombatRotation(
+            id,
+            q as number[],
+          );
+          // If TileInterpolator didn't apply it (entity moving), that's intentional
+          // Movement direction wins over combat rotation while moving
+          if (!applied) {
+            // Entity is moving - combat rotation ignored (OSRS-accurate)
+          }
+        }
+
+        // Apply non-transform changes (emote, health, combat state, etc.)
         entity.modify(restChanges);
       } else {
         entity.modify(changes);
