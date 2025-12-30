@@ -123,6 +123,10 @@ export class PlayerRemote extends Entity implements HotReloadable {
   private _tempMatrix1 = new THREE.Matrix4();
   private _tempVector3_1 = new THREE.Vector3();
 
+  // Raycast proxy mesh - added directly to THREE.Scene for fast raycasting
+  // This bypasses the Node system and avoids expensive SkinnedMesh raycast
+  private raycastProxy: THREE.Mesh | null = null;
+
   // Combat state for RuneScape-style auto-retaliate
   combat = {
     inCombat: false,
@@ -178,12 +182,29 @@ export class PlayerRemote extends Entity implements HotReloadable {
     }) as Mesh;
     this.body.add(this.collider);
 
-    // this.caps = createNode('mesh', {
-    //   type: 'geometry',
-    //   geometry: capsuleGeometry,
-    //   material: new THREE.MeshStandardMaterial({ color: 'white' }),
-    // })
-    // this.base.add(this.caps)
+    // Create raycast proxy mesh for fast entity detection
+    // PERFORMANCE: VRM SkinnedMesh raycast is extremely slow (~700ms) because THREE.js
+    // must transform every vertex by bone weights. This simple capsule mesh is instant.
+    // The proxy is added directly to THREE.Scene, bypassing the Node system entirely.
+    this.raycastProxy = new THREE.Mesh(
+      capsuleGeometry,
+      new THREE.MeshBasicMaterial({
+        visible: false, // Invisible but still raycastable
+      }),
+    );
+    this.raycastProxy.userData = {
+      type: "player",
+      entityId: this.id,
+      name: this.data.name || "Player",
+      interactable: true,
+    };
+    // Add directly to THREE.Scene - bypasses Node.add() validation
+    const scene = this.world.stage?.scene;
+    if (scene) {
+      scene.add(this.raycastProxy);
+      // Sync initial position
+      this.raycastProxy.position.copy(this.position);
+    }
 
     this.aura = createNode("group") as Group;
 
@@ -385,26 +406,15 @@ export class PlayerRemote extends Entity implements HotReloadable {
       (this.avatar as unknown as { visible: boolean }).visible = true;
       nodeObj.position.set(0, 0, 0);
 
-      // CRITICAL: Set up userData on the VRM scene for raycast/interaction detection
-      // Without this, right-clicking on remote players won't work
+      // PERFORMANCE: Disable raycasting on VRM meshes - use raycastProxy instead
+      // SkinnedMesh raycast is extremely slow (~700ms) because THREE.js must
+      // transform every vertex by bone weights. The capsule proxy mesh is instant.
       const instanceWithRaw = avatarWithInstance.instance as unknown as {
         raw?: { scene?: THREE.Object3D };
       };
       if (instanceWithRaw?.raw?.scene) {
-        instanceWithRaw.raw.scene.userData = {
-          type: "player",
-          entityId: this.id,
-          name: this.data.name || "Player",
-          interactable: true,
-        };
-        // Also set on all children recursively for accurate hit detection
         instanceWithRaw.raw.scene.traverse((child: THREE.Object3D) => {
-          child.userData = {
-            type: "player",
-            entityId: this.id,
-            name: this.data.name || "Player",
-            interactable: true,
-          };
+          child.raycast = () => {}; // No-op raycast
         });
       }
 
@@ -623,6 +633,11 @@ export class PlayerRemote extends Entity implements HotReloadable {
       });
     }
 
+    // Sync raycast proxy position with player
+    if (this.raycastProxy) {
+      this.raycastProxy.position.copy(this.position);
+    }
+
     // Update prev position at end of frame
     this.prevPosition.copy(this.position);
   }
@@ -819,6 +834,17 @@ export class PlayerRemote extends Entity implements HotReloadable {
   override destroy(local?: boolean) {
     if (this.destroyed) return;
     this.destroyed = true;
+
+    // Remove raycast proxy from scene
+    if (this.raycastProxy) {
+      const scene = this.world.stage?.scene;
+      if (scene) {
+        scene.remove(this.raycastProxy);
+      }
+      this.raycastProxy.geometry.dispose();
+      (this.raycastProxy.material as THREE.Material).dispose();
+      this.raycastProxy = null;
+    }
 
     if (this.chatTimer) clearTimeout(this.chatTimer);
     this.base.deactivate();

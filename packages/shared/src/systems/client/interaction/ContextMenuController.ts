@@ -40,6 +40,8 @@ export class ContextMenuController {
     this.currentActions = actions;
 
     // Dispatch contextmenu event for React component
+    // NOTE: This is a CustomEvent named "contextmenu" - not the native MouseEvent
+    // EntityContextMenu.tsx listens for this on window
     const evt = new CustomEvent("contextmenu", {
       detail: {
         target: {

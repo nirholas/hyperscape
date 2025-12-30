@@ -71,6 +71,17 @@ export class InteractionRouter extends System {
     this.registerHandlers();
   }
 
+  /**
+   * Get the shared RaycastService instance
+   *
+   * Other systems (e.g., ClientCameraSystem) should use this
+   * instead of creating their own instance, to benefit from
+   * shared caching (16ms frame-based cache).
+   */
+  getRaycastService(): RaycastService {
+    return this.raycastService;
+  }
+
   private registerHandlers(): void {
     this.handlers.set(
       "item",
@@ -214,11 +225,16 @@ export class InteractionRouter extends System {
     if (!this.areControlsEnabled()) return;
     if (!this.canvas) return;
 
+    if (DEBUG_INTERACTIONS) console.time("[ContextMenu] Total");
+    if (DEBUG_INTERACTIONS) console.time("[ContextMenu] Raycast");
+
     const target = this.raycastService.getEntityAtPosition(
       event.clientX,
       event.clientY,
       this.canvas,
     );
+
+    if (DEBUG_INTERACTIONS) console.timeEnd("[ContextMenu] Raycast");
 
     if (target) {
       event.preventDefault();
@@ -227,47 +243,30 @@ export class InteractionRouter extends System {
 
       const handler = this.handlers.get(target.entityType);
       if (handler) {
+        if (DEBUG_INTERACTIONS) console.time("[ContextMenu] GetActions");
         const actions = handler.getContextMenuActions(target);
+        if (DEBUG_INTERACTIONS) console.timeEnd("[ContextMenu] GetActions");
+
+        if (DEBUG_INTERACTIONS) console.time("[ContextMenu] ShowMenu");
         this.contextMenu.showMenu(
           target,
           actions,
           event.clientX,
           event.clientY,
         );
+        if (DEBUG_INTERACTIONS) console.timeEnd("[ContextMenu] ShowMenu");
       }
     }
+
+    if (DEBUG_INTERACTIONS) console.timeEnd("[ContextMenu] Total");
   };
 
   private onMouseDown = (event: MouseEvent): void => {
     if (!this.areControlsEnabled()) return;
 
     if (event.button === 2) {
-      // Right-click - handled by onContextMenu
-      const target = this.canvas
-        ? this.raycastService.getEntityAtPosition(
-            event.clientX,
-            event.clientY,
-            this.canvas,
-          )
-        : null;
-
-      if (target) {
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-
-        const handler = this.handlers.get(target.entityType);
-        if (handler) {
-          const actions = handler.getContextMenuActions(target);
-          this.contextMenu.showMenu(
-            target,
-            actions,
-            event.clientX,
-            event.clientY,
-          );
-        }
-        return;
-      }
+      // Right-click - let onContextMenu handle the menu (avoid duplicate raycast)
+      // Just track the mouse state here
     } else {
       // Left-click - close menus
       this.contextMenu.closeMenu();

@@ -12,6 +12,7 @@ import { SystemBase } from "../shared";
 import type { CameraTarget, System, World } from "../../types";
 import { EventType } from "../../types/events";
 import { clamp } from "../../utils";
+import { RaycastService } from "./interaction/services/RaycastService";
 // CameraTarget interface moved to shared types
 
 // Define TerrainSystem interface for type checking
@@ -33,6 +34,7 @@ export class ClientCameraSystem extends SystemBase {
   private camera: THREE.PerspectiveCamera | null = null;
   private target: CameraTarget | null = null;
   private canvas: HTMLCanvasElement | null = null;
+  private raycastService: RaycastService | null = null;
 
   // Camera state for different modes
   private spherical = new THREE.Spherical(6, Math.PI * 0.42, 0); // current radius, phi, theta
@@ -195,6 +197,22 @@ export class ClientCameraSystem extends SystemBase {
     this.canvas = this.world.graphics?.renderer?.domElement ?? null;
 
     if (!this.camera || !this.canvas) {
+      setTimeout(() => this.tryInitialize(), 100);
+      return;
+    }
+
+    // Get shared RaycastService from InteractionRouter for cache sharing
+    // Both systems benefit from the same 16ms frame-based cache
+    const interaction = this.world.getSystem("interaction") as
+      | { getRaycastService?: () => RaycastService }
+      | undefined;
+    const sharedService = interaction?.getRaycastService?.();
+    if (sharedService) {
+      this.raycastService = sharedService;
+    } else {
+      // InteractionRouter not ready yet (registerSystems is async)
+      // Retry initialization in 100ms to get the shared service
+      console.log("[ClientCameraSystem] Waiting for InteractionRouter...");
       setTimeout(() => this.tryInitialize(), 100);
       return;
     }
@@ -444,30 +462,17 @@ export class ClientCameraSystem extends SystemBase {
 
   private onContextMenu(event: MouseEvent): void {
     // Check if clicking on an entity - if so, let InteractionSystem handle it
-    // Raycast to check if clicking on an entity
-    if (this.world.camera && this.canvas) {
-      const rect = this.canvas.getBoundingClientRect();
-      const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    // Use shared RaycastService for zero-allocation entity detection
+    if (this.raycastService && this.canvas) {
+      const hasEntity = this.raycastService.hasEntityAtPosition(
+        event.clientX,
+        event.clientY,
+        this.canvas,
+      );
 
-      const raycaster = new THREE.Raycaster();
-      raycaster.setFromCamera(new THREE.Vector2(x, y), this.world.camera);
-
-      const scene = this.world.stage?.scene;
-      if (scene) {
-        const intersects = raycaster.intersectObjects(scene.children, true);
-
-        // Check if any intersected object has entity userData
-        for (const intersect of intersects) {
-          let obj = intersect.object;
-          while (obj) {
-            if (obj.userData && obj.userData.entityId) {
-              // Clicking on entity - let InteractionSystem handle it
-              return;
-            }
-            obj = obj.parent as THREE.Object3D;
-          }
-        }
+      if (hasEntity) {
+        // Clicking on entity - let InteractionSystem handle it
+        return;
       }
     }
 
@@ -1089,6 +1094,7 @@ export class ClientCameraSystem extends SystemBase {
     this.camera = null;
     this.target = null;
     this.canvas = null;
+    this.raycastService = null;
   }
 
   // Required System lifecycle methods
