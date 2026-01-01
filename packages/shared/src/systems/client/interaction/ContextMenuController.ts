@@ -54,6 +54,7 @@ export class ContextMenuController {
         items: actions.map((action) => ({
           id: action.id,
           label: action.label,
+          icon: action.icon,
           enabled: action.enabled,
         })),
       },
