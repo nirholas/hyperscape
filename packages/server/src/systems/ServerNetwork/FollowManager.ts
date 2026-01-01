@@ -14,8 +14,12 @@
  * @see https://runescape.wiki/w/Follow
  */
 
-import type { World } from "@hyperscape/shared";
-import { worldToTile, tilesEqual, tileToWorld } from "@hyperscape/shared";
+import type { World, TileCoord } from "@hyperscape/shared";
+import {
+  tilesEqual,
+  tileToWorldInto,
+  worldToTileInto,
+} from "@hyperscape/shared";
 import type { TileMovementManager } from "./tile-movement";
 
 interface FollowState {
@@ -33,6 +37,14 @@ export class FollowManager {
 
   /** Current tick number, updated by processTick - instance member for proper encapsulation */
   private currentTickNumber = 0;
+
+  // Pre-allocated reusables for hot-path calculations (avoid GC pressure)
+  private readonly _tempFollowerTile: TileCoord = { x: 0, z: 0 };
+  private readonly _tempWorldPos: { x: number; y: number; z: number } = {
+    x: 0,
+    y: 0,
+    z: 0,
+  };
 
   constructor(
     private world: World,
@@ -159,7 +171,8 @@ export class FollowManager {
       }
 
       const followerPos = followerEntity.position;
-      const followerTile = worldToTile(followerPos.x, followerPos.z);
+      // Zero-allocation: write to pre-allocated tile object
+      worldToTileInto(followerPos.x, followerPos.z, this._tempFollowerTile);
 
       // OSRS-ACCURATE: Get target's PREVIOUS tile (last tile they stepped off)
       // This is always 1 tile behind their current position
@@ -169,7 +182,7 @@ export class FollowManager {
       );
 
       // If follower is already at target's previous tile, we're correctly trailing
-      if (tilesEqual(followerTile, previousTile)) {
+      if (tilesEqual(this._tempFollowerTile, previousTile)) {
         continue;
       }
 
@@ -180,13 +193,15 @@ export class FollowManager {
         state.lastTargetTile.z !== previousTile.z
       ) {
         // Target moved - re-path to their PREVIOUS tile (1 tile behind)
-        const previousWorld = tileToWorld(previousTile);
+        // Zero-allocation: write to pre-allocated world position object
+        tileToWorldInto(previousTile, this._tempWorldPos);
         this.tileMovementManager.movePlayerToward(
           followerId,
-          { x: previousWorld.x, y: targetPos.y, z: previousWorld.z },
+          { x: this._tempWorldPos.x, y: targetPos.y, z: this._tempWorldPos.z },
           true, // running
           0, // meleeRange=0 for non-combat
         );
+        // Must allocate here - stored in state, needs unique object per follow
         state.lastTargetTile = { x: previousTile.x, z: previousTile.z };
       }
     }

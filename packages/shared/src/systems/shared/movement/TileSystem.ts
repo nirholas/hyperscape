@@ -119,6 +119,22 @@ export function tileToWorld(tile: TileCoord): {
 }
 
 /**
+ * Convert tile coordinates to world coordinates (zero-allocation)
+ * Writes to an existing object to avoid GC pressure in hot paths.
+ *
+ * @param tile - Tile coordinates to convert
+ * @param out - Pre-allocated object to write to (must have x, y, z properties)
+ */
+export function tileToWorldInto(
+  tile: TileCoord,
+  out: { x: number; y: number; z: number },
+): void {
+  out.x = (tile.x + 0.5) * TILE_SIZE;
+  out.y = 0; // Y will be set from terrain height
+  out.z = (tile.z + 0.5) * TILE_SIZE;
+}
+
+/**
  * Calculate Manhattan distance between two tiles
  * Used for simple distance checks (not pathfinding)
  */

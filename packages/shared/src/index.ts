@@ -692,6 +692,7 @@ export {
   worldToTile,
   worldToTileInto,
   tileToWorld,
+  tileToWorldInto,
   tileManhattanDistance,
   tileChebyshevDistance,
   tilesEqual,
