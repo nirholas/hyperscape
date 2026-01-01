@@ -206,7 +206,9 @@ export class RaycastService {
 
         if (entityId) {
           const entity = this.world.entities.get(entityId);
-          if (entity) {
+          // Skip destroyed entities - they may still be in scene during async cleanup
+          // This is defense-in-depth for the dead mob / item drop overlap issue
+          if (entity && !entity.destroyed) {
             // Get entity world position using pre-allocated vector
             obj.getWorldPosition(_worldPos);
 

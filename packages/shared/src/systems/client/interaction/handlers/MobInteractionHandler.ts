@@ -53,16 +53,27 @@ export class MobInteractionHandler extends BaseInteractionHandler {
    * - Green: Mob is lower level than you
    * - Yellow: Mob is same level as you
    * - Red: Mob is higher level than you
+   *
+   * Returns empty array for dead mobs - this allows items dropped
+   * at the mob's position to be clickable instead.
    */
   getContextMenuActions(target: RaycastTarget): ContextMenuAction[] {
-    const actions: ContextMenuAction[] = [];
     const mobData = this.getMobData(target);
     const isAlive = (mobData?.health || 0) > 0;
+
+    // Dead mobs should not show context menu - let items underneath be clicked
+    // This fixes the bug where clicking on loot shows dead mob menu instead
+    if (!isAlive) {
+      return [];
+    }
+
+    const actions: ContextMenuAction[] = [];
     const mobLevel = mobData?.level || 1;
     const playerLevel = this.getLocalPlayerCombatLevel();
     const levelColor = getCombatLevelColor(mobLevel, playerLevel);
 
     // Attack action with colored level (format: "Level: X")
+    // Note: We already returned early if !isAlive, so enabled is always true
     actions.push({
       id: "attack",
       label: `Attack ${target.name} (Level: ${mobLevel})`,
@@ -73,13 +84,9 @@ export class MobInteractionHandler extends BaseInteractionHandler {
         { text: `${mobLevel}`, color: levelColor },
         { text: ")" },
       ],
-      enabled: isAlive,
+      enabled: true,
       priority: 1,
-      handler: () => {
-        if (isAlive) {
-          this.attackMob(target);
-        }
-      },
+      handler: () => this.attackMob(target),
     });
 
     // Walk here

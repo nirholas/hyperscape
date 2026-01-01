@@ -1504,6 +1504,13 @@ export class Entity implements IEntity {
     if (this.destroyed) return;
     this.destroyed = true;
 
+    // IMMEDIATELY hide mesh to prevent raycast hits during async cleanup
+    // This fixes the dead mob / item drop overlap issue where the mesh
+    // is still raycastable while the entity is being destroyed
+    if (this.node) {
+      this.node.visible = false;
+    }
+
     // Clean up UI elements first - from BaseEntity
     if (this.nameSprite) {
       // Remove from node (not scene since we added it to node)
