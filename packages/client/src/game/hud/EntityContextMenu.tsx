@@ -1,12 +1,44 @@
 import React, { useState, useEffect } from "react";
-import type { World } from "@hyperscape/shared";
+import type { World, LabelSegment } from "@hyperscape/shared";
 
 export interface ContextMenuAction {
   id: string;
   label: string;
+  /** Rich text label with colors/styles - takes precedence over label if present */
+  styledLabel?: LabelSegment[];
   icon?: string;
   enabled: boolean;
   onClick: () => void;
+}
+
+/**
+ * Render a styled label with colored segments.
+ * Falls back to plain label if no styledLabel provided.
+ */
+function renderStyledLabel(
+  styledLabel: LabelSegment[] | undefined,
+  fallbackLabel: string,
+): React.ReactNode {
+  if (!styledLabel || styledLabel.length === 0) {
+    return fallbackLabel;
+  }
+
+  return (
+    <>
+      {styledLabel.map((segment, index) => (
+        <span
+          key={index}
+          style={{
+            color: segment.color,
+            fontWeight: segment.bold ? "bold" : undefined,
+            fontStyle: segment.italic ? "italic" : undefined,
+          }}
+        >
+          {segment.text}
+        </span>
+      ))}
+    </>
+  );
 }
 
 export interface ContextMenuState {
@@ -62,7 +94,13 @@ export function EntityContextMenu({ world: _world }: EntityContextMenuProps) {
           [key: string]: unknown;
         };
         mousePosition: { x: number; y: number };
-        items: Array<{ id: string; label: string; enabled: boolean }>;
+        items: Array<{
+          id: string;
+          label: string;
+          icon?: string;
+          styledLabel?: LabelSegment[];
+          enabled: boolean;
+        }>;
       }>;
 
       if (!customEvent.detail) return;
@@ -181,7 +219,7 @@ export function EntityContextMenu({ world: _world }: EntityContextMenuProps) {
             }}
           >
             {action.icon && <span className="mr-2">{action.icon}</span>}
-            {action.label}
+            {renderStyledLabel(action.styledLabel, action.label)}
           </div>
         );
       })}
