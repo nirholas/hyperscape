@@ -58,6 +58,7 @@ import THREE, {
   mul,
   div,
   Fn,
+  type ShaderNode,
 } from "./three";
 import { World } from "../../core/World";
 import type { Node } from "../../nodes/Node";
@@ -382,7 +383,7 @@ function setupSplatmapTSL(mesh: THREE.Mesh) {
     const splat = splatTex ? texture(splatTex, uvCoord) : vec4(1, 0, 0, 0);
 
     // Initialize result color
-    let result = vec4(0, 0, 0, 1);
+    let result: ShaderNode = vec4(0, 0, 0, 1);
 
     // Red channel texture
     if (rTex) {

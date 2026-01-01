@@ -328,34 +328,37 @@ export class Stage extends SystemBase {
     }
     const textures: THREE.Texture[] = [];
 
+    // Cast to MaterialWithTexture for texture map access
+    const matWithTex = raw as MaterialWithTexture;
+
     const mapTexture = this.cloneMaterialTexture(raw, "map");
     if (mapTexture) {
-      raw.map = mapTexture;
+      matWithTex.map = mapTexture;
       textures.push(mapTexture);
     }
     const emissiveMapTexture = this.cloneMaterialTexture(raw, "emissiveMap");
     if (emissiveMapTexture) {
-      raw.emissiveMap = emissiveMapTexture;
+      matWithTex.emissiveMap = emissiveMapTexture;
       textures.push(emissiveMapTexture);
     }
     const normalMapTexture = this.cloneMaterialTexture(raw, "normalMap");
     if (normalMapTexture) {
-      raw.normalMap = normalMapTexture;
+      matWithTex.normalMap = normalMapTexture;
       textures.push(normalMapTexture);
     }
     const bumpMapTexture = this.cloneMaterialTexture(raw, "bumpMap");
     if (bumpMapTexture) {
-      raw.bumpMap = bumpMapTexture;
+      matWithTex.bumpMap = bumpMapTexture;
       textures.push(bumpMapTexture);
     }
     const roughnessMapTexture = this.cloneMaterialTexture(raw, "roughnessMap");
     if (roughnessMapTexture) {
-      raw.roughnessMap = roughnessMapTexture;
+      matWithTex.roughnessMap = roughnessMapTexture;
       textures.push(roughnessMapTexture);
     }
     const metalnessMapTexture = this.cloneMaterialTexture(raw, "metalnessMap");
     if (metalnessMapTexture) {
-      raw.metalnessMap = metalnessMapTexture;
+      matWithTex.metalnessMap = metalnessMapTexture;
       textures.push(metalnessMapTexture);
     }
 

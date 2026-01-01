@@ -108,7 +108,7 @@ export const {
   texture,
   texture3D,
   // Discard
-  discard,
+  Discard: discard,
   // Display
   output,
   renderOutput,
@@ -133,6 +133,27 @@ export default THREE_NAMESPACE;
 
 // Re-export the full three.js surface so `import THREE from '../extras/three'` works
 export * from "three/webgpu";
+
+/**
+ * Type for TSL shader node accumulators.
+ * Use this when a variable will be reassigned with results from add(), mul(), etc.
+ * These operations return different node types that aren't directly assignable to each other.
+ *
+ * ShaderNodeObject<Node> provides swizzle properties (.x, .y, .z, .w, .xy, .rgb, etc.)
+ * and is the return type of all TSL operations. All TSL functions accept ShaderNodeObject
+ * as parameters.
+ *
+ * For function parameters that accept any shader node, use ShaderNodeInput instead.
+ */
+import type { Node } from "three/webgpu";
+import type { ShaderNodeObject } from "three/tsl";
+export type ShaderNode = ShaderNodeObject<Node>;
+
+/**
+ * Type for TSL function parameters that accept any shader node.
+ * This is more permissive than ShaderNode and allows uniforms, attributes, etc.
+ */
+export type ShaderNodeInput = Node;
 
 // Pre-allocated temp objects for utility functions to avoid per-call allocations
 const _safeDecomposePos = new THREE_NAMESPACE.Vector3();

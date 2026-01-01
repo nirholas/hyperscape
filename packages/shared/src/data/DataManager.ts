@@ -250,24 +250,53 @@ export class DataManager {
 
   /**
    * Load manifests from filesystem (server-side only)
-   * Uses the workspace root /assets/manifests/ directory
+   * Uses packages/server/world/assets/manifests/ directory
    */
   private async loadManifestsFromFilesystem(): Promise<void> {
     // Dynamic import for Node.js modules (not available in browser)
     const fs = await import("fs/promises");
     const path = await import("path");
 
-    // Find workspace root - cwd is typically packages/server, so go up 2 levels
+    // Find manifests directory - assets are in packages/server/world/assets/
     let manifestsDir: string;
     if (process.env.ASSETS_DIR) {
       manifestsDir = path.join(process.env.ASSETS_DIR, "manifests");
     } else {
-      // cwd is packages/server - go up 2 levels to workspace root
+      // cwd is typically packages/server when running the server
       const cwd = process.cwd();
-      const workspaceRoot = cwd.includes("/packages/")
-        ? path.resolve(cwd, "../..") // packages/server -> workspace root
-        : cwd; // Already at workspace root
-      manifestsDir = path.join(workspaceRoot, "assets", "manifests");
+      if (
+        cwd.endsWith("/packages/server") ||
+        cwd.includes("/packages/server/")
+      ) {
+        // Running from packages/server - assets are in world/assets/
+        manifestsDir = path.join(
+          cwd.replace(/\/packages\/server.*$/, "/packages/server"),
+          "world",
+          "assets",
+          "manifests",
+        );
+      } else if (cwd.includes("/packages/")) {
+        // Running from another package - navigate to server assets
+        const workspaceRoot = path.resolve(cwd, "../..");
+        manifestsDir = path.join(
+          workspaceRoot,
+          "packages",
+          "server",
+          "world",
+          "assets",
+          "manifests",
+        );
+      } else {
+        // Already at workspace root
+        manifestsDir = path.join(
+          cwd,
+          "packages",
+          "server",
+          "world",
+          "assets",
+          "manifests",
+        );
+      }
     }
 
     console.log(

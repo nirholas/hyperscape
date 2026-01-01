@@ -457,6 +457,9 @@ function createBoard(
         2, 3, 0   // Second triangle
       ])
       geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+      // Compute normals for WebGPU TSL compatibility
+      // (TSL checks for normal attribute even on MeshBasicMaterial)
+      geometry.computeVertexNormals();
       const material = new THREE.MeshBasicMaterial({ map: texture });
       material.toneMapped = false;
       // create mesh

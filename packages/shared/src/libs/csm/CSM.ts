@@ -183,7 +183,9 @@ export class CSM {
       // Force shadow map regeneration
       if (light.shadow.map) {
         light.shadow.map.dispose();
-        light.shadow.map = null;
+        // NOTE: Don't set shadow.map = null - let Three.js handle it
+        // Setting it to null causes WebGPU texture cache corruption
+        // with dual-renderer setup (main + minimap share scene)
       }
     }
   }

@@ -884,12 +884,9 @@ export class PlayerEntity extends CombatantEntity {
     // Clean up player-specific stamina bar
     if (this.staminaBarUI && this.world.stage.scene) {
       this.world.stage.scene.remove(this.staminaBarUI);
-      // Strong type assumption - stamina bar material is SpriteMaterial
-      const spriteMaterial = this.staminaBarUI.material as THREE.SpriteMaterial;
-      if (spriteMaterial.map) {
-        spriteMaterial.map.dispose();
-      }
-      spriteMaterial.dispose();
+      // NOTE: Don't dispose sprite material or texture - they will be GC'd
+      // when the sprite is no longer referenced. Disposing synchronously
+      // causes WebGPU texture cache corruption with dual-renderer setup.
       this.staminaBarUI = null;
     }
 

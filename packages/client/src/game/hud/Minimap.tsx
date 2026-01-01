@@ -201,7 +201,8 @@ export function Minimap({
         }
       }
     };
-  }, [width, height, extent, world]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- extent changes handled via extentRef in render loop (lines 582-590)
+  }, [width, height, world]);
 
   // Use the actual world scene instead of creating a separate one
   useEffect(() => {

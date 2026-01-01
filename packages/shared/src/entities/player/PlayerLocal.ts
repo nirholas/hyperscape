@@ -1238,7 +1238,8 @@ export class PlayerLocal extends Entity implements HotReloadable {
       this.bubble.activate(this.world);
     }
     // Add bubble's THREE.js representation to aura
-    const bubbleInstance = (this.bubble as NodeWithInstance).instance;
+    const bubbleInstance = (this.bubble as unknown as NodeWithInstance)
+      .instance;
     if (bubbleInstance && bubbleInstance.isObject3D) {
       this.aura.add(bubbleInstance);
     }

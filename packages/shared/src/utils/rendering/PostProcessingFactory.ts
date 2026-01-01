@@ -19,11 +19,11 @@ import type { WebGPURenderer } from "./RendererFactory";
 // Dynamic imports for LUT loaders to handle ESM/CJS module resolution
 // These are loaded at runtime to avoid bundler issues
 type LUT3DFunction = (
-  input: ReturnType<typeof pass>,
+  input: unknown,
   lutTexture: unknown,
-  size: number,
-  intensity: ReturnType<typeof uniform>,
-) => ReturnType<typeof pass>;
+  size: unknown,
+  intensity: unknown,
+) => unknown;
 
 type LUTLoaderResult = {
   texture3D: THREE.Data3DTexture;
@@ -103,7 +103,7 @@ async function loadLUTModules(): Promise<void> {
   if (!lut3DModule) {
     lut3DModule = (await import(
       "three/examples/jsm/tsl/display/Lut3DNode.js"
-    )) as { lut3D: LUT3DFunction };
+    )) as unknown as { lut3D: LUT3DFunction };
   }
   if (!lutCubeLoaderModule) {
     lutCubeLoaderModule = (await import(
@@ -269,19 +269,20 @@ export async function createPostProcessing(
   const lutSizeUniform = uniform(neutralLUT.image.width);
 
   // Create the LUT pass node once - we'll update its uniforms
+  // Cast is needed because lut3D accepts uniform nodes but types are stricter
   const lutPassNode = lut3DFn(
     outputPass,
-    texture3D(lutTextureUniform) as Texture3DNode,
+    texture3D(lutTextureUniform as unknown as THREE.Data3DTexture),
     lutSizeUniform,
     intensityUniform,
-  ) as {
+  ) as unknown as {
     lutNode: { value: THREE.Data3DTexture };
     size: { value: number };
     intensityNode: { value: number };
-  } & ReturnType<typeof pass>;
+  };
 
-  // Set the output node to the LUT pass
-  postProcessing.outputNode = lutPassNode;
+  // Set the output node to the LUT pass (cast needed for dynamic node type)
+  postProcessing.outputNode = lutPassNode as unknown as ReturnType<typeof pass>;
 
   // Load initial LUT if color grading is enabled
   let currentLUTData: LUTData | null = null;

@@ -344,7 +344,9 @@ export function createGrassMaterial(
     heightMapCenter: uHeightMapCenter,
   };
 
-  const result = material as THREE.Material & { grassUniforms: GrassUniforms };
+  const result = material as unknown as THREE.Material & {
+    grassUniforms: GrassUniforms;
+  };
   result.grassUniforms = grassUniforms;
 
   return result;

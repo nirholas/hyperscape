@@ -171,18 +171,13 @@ export interface AnimationMixer
 // Material shader compilation types (legacy - TSL node materials are preferred)
 export interface ShaderMaterial
   extends Omit<THREE.ShaderMaterial, "onBeforeCompile"> {
-  onBeforeCompile?:
-    | ((shader: ShaderCompileParameters) => void)
-    | ((
-        shader: THREE.WebGLProgramParametersWithUniforms,
-        renderer: unknown,
-      ) => void);
+  onBeforeCompile?: (shader: ShaderCompileParameters) => void;
 }
 
 export interface ShaderCompileParameters {
   vertexShader: string;
   fragmentShader: string;
-  uniforms: { [key: string]: THREE.IUniform };
+  uniforms: { [key: string]: THREE.Uniform };
 }
 
 export {};

@@ -16,6 +16,22 @@ export type HyperscapeObject3D = THREE.Object3D & {
 
 declare module "three" {
   /**
+   * PhysX prototype extensions for Vector3, Quaternion, Matrix4
+   * These are added at runtime by PhysicsUtils.installThreeJSExtensions()
+   */
+  interface Vector3 {
+    toPxTransform?(transform: import("../systems/physics").PxTransform): void;
+  }
+
+  interface Quaternion {
+    toPxTransform?(transform: import("../systems/physics").PxTransform): void;
+  }
+
+  interface Matrix4 {
+    toPxTransform?(transform: import("../systems/physics").PxTransform): void;
+  }
+
+  /**
    * WebGPU Renderer interface
    */
   interface WebGPURenderer {

@@ -237,7 +237,7 @@ export function createGPUVegetationMaterial(
   material.metalness = 0.0;
 
   // Attach uniforms for external updates
-  const gpuMaterial = material as GPUVegetationMaterial;
+  const gpuMaterial = material as unknown as GPUVegetationMaterial;
   gpuMaterial.gpuUniforms = {
     time: uTime,
     playerPos: uPlayerPos,

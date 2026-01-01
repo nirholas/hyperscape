@@ -212,7 +212,7 @@ export class TerrainSystem extends System {
     const renderer = this.world.graphics?.renderer;
     if (renderer) {
       try {
-        await initKTX2Loader(renderer);
+        await initKTX2Loader(renderer as unknown as THREE.WebGPURenderer);
         console.log("[TerrainSystem] KTX2 loader initialized");
       } catch (err) {
         console.warn(
@@ -1674,7 +1674,7 @@ export class TerrainSystem extends System {
       key: `temp_${tileX}_${tileZ}`,
       x: tileX,
       z: tileZ,
-      mesh: null as THREE.Mesh,
+      mesh: null as unknown as THREE.Mesh,
       biome: this.getBiomeAt(tileX, tileZ) as TerrainTile["biome"],
       resources: [],
       roads: [],

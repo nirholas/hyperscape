@@ -26,6 +26,11 @@ export class ModelCache {
   private cache = new Map<string, CachedModel>();
   private loading = new Map<string, Promise<CachedModel>>();
   private gltfLoader: GLTFLoader;
+  /**
+   * Track all materials managed by the cache to prevent premature disposal.
+   * When entities are destroyed, they should NOT dispose materials in this set.
+   */
+  private managedMaterials = new WeakSet<THREE.Material>();
 
   private constructor() {
     // Use our own GLTFLoader to ensure we get pure THREE.Object3D (not Hyperscape Nodes)
@@ -39,6 +44,15 @@ export class ModelCache {
       ModelCache.instance = new ModelCache();
     }
     return ModelCache.instance;
+  }
+
+  /**
+   * Check if a material is managed by the cache.
+   * Managed materials should NOT be disposed when entities are destroyed,
+   * as they are shared across all instances of a model type.
+   */
+  isManagedMaterial(material: THREE.Material): boolean {
+    return this.managedMaterials.has(material);
   }
 
   /**
@@ -148,6 +162,7 @@ export class ModelCache {
   /**
    * Extract and store materials from a scene for sharing across clones.
    * Called once when a model is first loaded.
+   * Also registers materials in managedMaterials WeakSet to prevent premature disposal.
    */
   private extractSharedMaterials(
     scene: THREE.Object3D,
@@ -163,8 +178,12 @@ export class ModelCache {
         // Store the material(s) for this mesh index
         if (Array.isArray(node.material)) {
           sharedMaterials.set(meshIndex, [...node.material]);
+          // Track each material in the managed set
+          node.material.forEach((mat) => this.managedMaterials.add(mat));
         } else {
           sharedMaterials.set(meshIndex, node.material);
+          // Track the material in the managed set
+          this.managedMaterials.add(node.material);
         }
         meshIndex++;
       }
@@ -340,7 +359,7 @@ export class ModelCache {
 
     // Load for the first time
     // Use ClientLoader for file fetching to benefit from IndexedDB caching
-    const promise = (async (): Promise<CachedModel> => {
+    const promise = (async () => {
       let gltf: Awaited<ReturnType<typeof this.gltfLoader.parseAsync>>;
 
       // Try to use ClientLoader for caching benefits (IndexedDB, deduplication)

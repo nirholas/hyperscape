@@ -202,10 +202,8 @@ export class XPDropSystem extends System {
       // Mark for removal when done
       if (progress >= 1) {
         this.world.stage.scene.remove(drop.sprite);
-        drop.sprite.material.dispose();
-        if (drop.sprite.material.map) {
-          drop.sprite.material.map.dispose();
-        }
+        // NOTE: Don't dispose material/texture - let GC handle it
+        // to avoid WebGPU texture cache corruption with dual-renderer setup
         toRemove.push(i);
       }
     }
@@ -220,10 +218,8 @@ export class XPDropSystem extends System {
     // Clean up all active drops
     for (const drop of this.activeDrops) {
       this.world.stage.scene.remove(drop.sprite);
-      drop.sprite.material.dispose();
-      if (drop.sprite.material.map) {
-        drop.sprite.material.map.dispose();
-      }
+      // NOTE: Don't dispose material/texture - let GC handle it
+      // to avoid WebGPU texture cache corruption with dual-renderer setup
     }
     this.activeDrops = [];
   }

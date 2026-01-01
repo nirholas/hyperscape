@@ -214,10 +214,8 @@ export class DamageSplatSystem extends System {
       // Mark for removal when done
       if (progress >= 1) {
         this.world.stage.scene.remove(splat.sprite);
-        splat.sprite.material.dispose();
-        if (splat.sprite.material.map) {
-          splat.sprite.material.map.dispose();
-        }
+        // NOTE: Don't dispose material/texture - let GC handle it
+        // to avoid WebGPU texture cache corruption with dual-renderer setup
         toRemove.push(i);
       }
     }
@@ -232,10 +230,8 @@ export class DamageSplatSystem extends System {
     // Clean up all active splats
     for (const splat of this.activeSplats) {
       this.world.stage.scene.remove(splat.sprite);
-      splat.sprite.material.dispose();
-      if (splat.sprite.material.map) {
-        splat.sprite.material.map.dispose();
-      }
+      // NOTE: Don't dispose material/texture - let GC handle it
+      // to avoid WebGPU texture cache corruption with dual-renderer setup
     }
     this.activeSplats = [];
   }

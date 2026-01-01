@@ -21,10 +21,10 @@ const noKtx2Cache = new Set<string>();
 
 /**
  * Initialize the KTX2 loader with basis transcoder
- * Must be called once with a WebGL renderer before using loadTextureWithKTX2Fallback
+ * Must be called once with a renderer before using loadTextureWithKTX2Fallback
  */
 export function initKTX2Loader(
-  renderer: THREE.WebGLRenderer,
+  renderer: THREE.WebGPURenderer,
 ): Promise<KTX2Loader> {
   if (ktx2Loader) {
     return Promise.resolve(ktx2Loader);

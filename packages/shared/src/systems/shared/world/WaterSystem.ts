@@ -33,6 +33,8 @@ import THREE, {
   exp,
   length,
   reflector,
+  type ShaderNode,
+  type ShaderNodeInput,
 } from "../../../extras/three/three";
 import type { World } from "../../../types";
 import type { TerrainTile } from "../../../types/world/terrain";
@@ -334,18 +336,23 @@ export class WaterSystem {
     const worldUV = vec2(positionWorld.x, positionWorld.z);
     const normalOffset = texture(normalTex1, mul(worldUV, float(0.02))).xy;
     const normalDistortion = sub(mul(normalOffset, float(2)), float(1));
-    reflectionNode.uvNode = add(
+    (reflectionNode as { uvNode: ShaderNode }).uvNode = add(
       reflectionNode.uvNode,
       mul(normalDistortion, float(0.015)),
     );
 
     const wavePhase = (
-      wp: ReturnType<typeof positionWorld>,
-      t: ReturnType<typeof uniform>,
-      w: ReturnType<typeof uniform>,
+      wp: ShaderNodeInput,
+      t: ShaderNodeInput,
+      w: ShaderNodeInput,
       wave: WaveParams,
     ) => {
-      const dotDP = add(mul(wp.x, float(wave.Dx)), mul(wp.z, float(wave.Dz)));
+      // Cast to ShaderNode for swizzle access
+      const wpNode = wp as ShaderNode;
+      const dotDP = add(
+        mul(wpNode.x, float(wave.Dx)),
+        mul(wpNode.z, float(wave.Dz)),
+      );
       return add(mul(float(wave.w), dotDP), mul(mul(float(wave.phi), t), w));
     };
 
@@ -361,9 +368,9 @@ export class WaterSystem {
         attribute("shoreDistance", "float"),
       );
 
-      let dx = float(0),
-        dy = float(0),
-        dz = float(0);
+      let dx: ShaderNode = float(0),
+        dy: ShaderNode = float(0),
+        dz: ShaderNode = float(0);
       for (const wave of WAVES) {
         const phase = wavePhase(wp, uTime, uWind, wave);
         const c = cos(phase),
@@ -392,8 +399,8 @@ export class WaterSystem {
       const wUV = vec2(wp.x, wp.z);
 
       // Wave normals for specular
-      let nx = float(0),
-        nz = float(0);
+      let nx: ShaderNode = float(0),
+        nz: ShaderNode = float(0);
       for (const wave of WAVES) {
         const c = cos(wavePhase(wp, uTime, uWind, wave));
         nx = add(nx, mul(float(wave.wADx), c));
@@ -403,8 +410,8 @@ export class WaterSystem {
       nz = mul(nz, shoreMask);
 
       // Detail normals (2 layers for performance)
-      let detailX = float(0),
-        detailZ = float(0);
+      let detailX: ShaderNode = float(0),
+        detailZ: ShaderNode = float(0);
       const textures = [normalTex1, normalTex2];
       for (let i = 0; i < NORMAL_LAYERS.length; i++) {
         const [scale, sx, sy] = NORMAL_LAYERS[i];
@@ -499,7 +506,7 @@ export class WaterSystem {
       );
 
       // Composite base color (without reflection - that goes to emissive)
-      let color = waterColor;
+      let color: ShaderNode = waterColor;
       color = add(color, sunSpec);
       color = add(color, mul(vec3(0.1, 0.35, 0.3), sssIntensity));
       color = mix(

@@ -382,7 +382,9 @@ export class Environment extends System {
       };
       if (material && "map" in material && material.map) {
         material.map.dispose();
-        material.map = null;
+        // NOTE: Don't set material.map = null - let Three.js/GC handle it
+        // Setting it to null causes WebGPU texture cache corruption
+        // with dual-renderer setup (main + minimap share scene)
       }
       if (Array.isArray(this.sky.material)) {
         this.sky.material.forEach((m) => m.dispose());

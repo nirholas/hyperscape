@@ -320,7 +320,7 @@ export class VegetationSystem extends System {
 
     // Get the renderer from world graphics system
     const graphics = this.world.graphics as
-      | { renderer?: THREE.WebGLRenderer }
+      | { renderer?: THREE.WebGPURenderer }
       | undefined;
     const renderer = graphics?.renderer;
     if (
@@ -1623,10 +1623,14 @@ export class VegetationSystem extends System {
         return null;
       }
 
+      // Type assertions after null check (TypeScript can't track traverse callback)
+      const validGeometry = geometry as THREE.BufferGeometry;
+      const validMaterial = material as THREE.Material | THREE.Material[];
+
       // Compute bounding box to find model's base (minimum Y)
       // This fixes models that are centered rather than having origin at base
-      geometry.computeBoundingBox();
-      const boundingBox = geometry.boundingBox;
+      validGeometry.computeBoundingBox();
+      const boundingBox = validGeometry.boundingBox;
       let modelBaseOffset = 0;
       if (boundingBox) {
         // If model's min Y is negative, we need to lift it up by that amount
@@ -1637,7 +1641,7 @@ export class VegetationSystem extends System {
       }
 
       // Setup materials for proper lighting and CSM shadows
-      let finalMaterial = material;
+      let finalMaterial: THREE.Material | THREE.Material[] = validMaterial;
       if (Array.isArray(finalMaterial)) {
         finalMaterial = finalMaterial.map((mat) =>
           this.setupVegetationMaterial(mat, asset),
@@ -1648,7 +1652,7 @@ export class VegetationSystem extends System {
 
       // Create InstancedMesh
       const instancedMesh = new THREE.InstancedMesh(
-        geometry,
+        validGeometry,
         finalMaterial,
         this.config.maxInstancesPerAsset,
       );
@@ -1702,7 +1706,7 @@ export class VegetationSystem extends System {
       instancedMesh.geometry.setAttribute("instanceRotationY", rotationAttr);
 
       // Check if geometry has vertex colors
-      const hasVertexColors = geometry.attributes.color !== undefined;
+      const hasVertexColors = validGeometry.attributes.color !== undefined;
 
       // Create GPU material with shader-based LOD, wind, and distance fade
       const baseMat = Array.isArray(finalMaterial)
@@ -1730,8 +1734,8 @@ export class VegetationSystem extends System {
       instancedMesh.material = gpuMaterial;
 
       const assetData: InstancedAssetData = {
-        geometry,
-        material,
+        geometry: validGeometry,
+        material: validMaterial,
         instancedMesh,
         instanceMap: new Map(),
         instances: [],

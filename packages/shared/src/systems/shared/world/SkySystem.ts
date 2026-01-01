@@ -31,6 +31,7 @@ import THREE, {
   cos,
   abs,
   Fn,
+  type ShaderNode,
 } from "../../../extras/three/three";
 import { System } from "..";
 import type { World, WorldOptions } from "../../../types";
@@ -483,7 +484,7 @@ export class SkySystem extends System {
       const nightSkyColor = mix(nightZenith, nightHorizon, nightGradient);
 
       // Blend day/night sky
-      let skyColor = mix(nightSkyColor, daySkyColor, dayIntensity);
+      let skyColor: ShaderNode = mix(nightSkyColor, daySkyColor, dayIntensity);
 
       // =====================
       // SUNRISE/SUNSET GLOW
