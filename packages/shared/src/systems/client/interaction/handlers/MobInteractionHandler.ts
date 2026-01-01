@@ -17,6 +17,7 @@
 import { BaseInteractionHandler } from "./BaseInteractionHandler";
 import type { RaycastTarget, ContextMenuAction } from "../types";
 import { INTERACTION_RANGE, TIMING, MESSAGE_TYPES } from "../constants";
+import { getCombatLevelColor } from "../utils/combatLevelColor";
 import { getNPCById } from "../../../../data/npcs";
 import { getPlayerWeaponRange } from "../../../../utils/game/CombatUtils";
 import type { Player } from "../../../../types/core/core";
@@ -46,16 +47,31 @@ export class MobInteractionHandler extends BaseInteractionHandler {
 
   /**
    * Right-click: Show attack and other options
+   *
+   * Mob levels are colored based on relative level difference:
+   * - Green: Mob is lower level than you
+   * - Yellow: Mob is same level as you
+   * - Red: Mob is higher level than you
    */
   getContextMenuActions(target: RaycastTarget): ContextMenuAction[] {
     const actions: ContextMenuAction[] = [];
     const mobData = this.getMobData(target);
     const isAlive = (mobData?.health || 0) > 0;
+    const mobLevel = mobData?.level || 1;
+    const playerLevel = this.getLocalPlayerCombatLevel();
+    const levelColor = getCombatLevelColor(mobLevel, playerLevel);
 
-    // Attack action
+    // Attack action with colored level
     actions.push({
       id: "attack",
-      label: `Attack ${target.name} (Lv${mobData?.level || 1})`,
+      label: `Attack ${target.name} (Lv${mobLevel})`,
+      styledLabel: [
+        { text: "Attack " },
+        { text: target.name, color: "#ffff00" }, // Yellow for mob names (OSRS style)
+        { text: " (Lv" },
+        { text: `${mobLevel}`, color: levelColor },
+        { text: ")" },
+      ],
       icon: "⚔️",
       enabled: isAlive,
       priority: 1,
@@ -115,6 +131,23 @@ export class MobInteractionHandler extends BaseInteractionHandler {
   private getPlayerCombatRange(player: { id: string }): number {
     const playerData = player as unknown as Player;
     return getPlayerWeaponRange(playerData);
+  }
+
+  /**
+   * Get local player's combat level.
+   * Used for relative color calculation (green/yellow/red).
+   * Falls back to 3 (OSRS minimum) if unknown.
+   */
+  private getLocalPlayerCombatLevel(): number {
+    const player = this.getPlayer();
+    if (!player) return 3;
+
+    const entity = player as unknown as { combatLevel?: number };
+    if (typeof entity.combatLevel === "number") {
+      return entity.combatLevel;
+    }
+    // Fallback: OSRS minimum combat level
+    return 3;
   }
 
   private getExamineText(
