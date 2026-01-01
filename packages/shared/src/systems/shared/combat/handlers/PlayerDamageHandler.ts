@@ -77,6 +77,19 @@ export class PlayerDamageHandler implements DamageHandler {
       return { actualDamage: 0, targetDied: false, success: false };
     }
 
+    // Handle 0 damage as a valid combat outcome (OSRS miss/block)
+    // PlayerSystem.damagePlayer() returns false for amount <= 0, which would
+    // trigger a false positive "Failed to apply damage" error in CombatSystem
+    if (damage <= 0) {
+      const targetDied = !this.isAlive(targetId);
+      if (targetDied) {
+        // Target was already dead - signal for combat cleanup
+        return { actualDamage: 0, targetDied: true, success: false };
+      }
+      // Valid 0-hit (miss) on living target - not a failure
+      return { actualDamage: 0, targetDied: false, success: true };
+    }
+
     const healthBefore = player.health ?? 0;
 
     // Apply damage through PlayerSystem
