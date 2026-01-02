@@ -33,7 +33,13 @@ import { ALL_WORLD_AREAS } from "../../../data/world-areas";
  */
 export class ResourceSystem extends SystemBase {
   private resources = new Map<ResourceID, Resource>();
+
+  // ===== PERFORMANCE: Debug flag for hot-path logging =====
+  /** Enable verbose logging for debugging (disable in production) */
+  private static readonly DEBUG_GATHERING = false;
+
   // Tick-based gathering sessions (OSRS-accurate timing)
+  // Session includes cached data to avoid per-tick allocations
   private activeGathering = new Map<
     PlayerID,
     {
@@ -44,6 +50,16 @@ export class ResourceSystem extends SystemBase {
       cycleTickInterval: number; // Ticks between attempts
       attempts: number;
       successes: number;
+      // PERFORMANCE: Cached at session start to avoid per-tick allocations
+      cachedTuning: {
+        levelRequired: number;
+        xpPerLog: number;
+        depleteChance: number;
+        respawnTicks: number;
+      };
+      cachedSuccessRate: number;
+      cachedDrops: ResourceDrop[];
+      cachedResourceName: string; // For messages without lookup
     }
   >();
   // Tick-based respawn tracking (replaces setTimeout)
@@ -976,7 +992,10 @@ export class ResourceSystem extends SystemBase {
       toolMultiplier,
     );
 
-    // Schedule first attempt on next tick
+    // PERFORMANCE: Pre-compute success rate to avoid per-tick calculation
+    const successRate = this.computeSuccessRate(skillLevel, tuned);
+
+    // Schedule first attempt on next tick with CACHED data
     this.activeGathering.set(playerId, {
       playerId,
       resourceId: sessionResourceId,
@@ -985,6 +1004,11 @@ export class ResourceSystem extends SystemBase {
       cycleTickInterval,
       attempts: 0,
       successes: 0,
+      // PERFORMANCE: Cache everything needed during tick processing
+      cachedTuning: tuned,
+      cachedSuccessRate: successRate,
+      cachedDrops: resource.drops,
+      cachedResourceName: resourceName,
     });
 
     // Set gathering emote based on skill (generalized)
@@ -1140,9 +1164,9 @@ export class ResourceSystem extends SystemBase {
         const capacity = (inv?.capacity as number) ?? 28;
         const count = Array.isArray(inv?.items) ? inv!.items!.length : 0;
         if (count >= capacity) {
-          // Use first drop's name for the message (manifest-driven)
+          // PERFORMANCE: Use cached drops instead of resource.drops lookup
           const dropName =
-            resource.drops[0]?.itemName?.toLowerCase() || "items";
+            session.cachedDrops[0]?.itemName?.toLowerCase() || "items";
           this.emitTypedEvent(EventType.UI_MESSAGE, {
             playerId: playerId,
             message: `Your inventory is too full to hold any more ${dropName}.`,
@@ -1157,26 +1181,21 @@ export class ResourceSystem extends SystemBase {
         }
       }
 
-      // Get variant tuning for this resource
-      const variant =
-        this.resourceVariants.get(session.resourceId) || "tree_normal";
-      const tuned = this.getVariantTuning(variant);
+      // PERFORMANCE: Use cached tuning data (zero allocation per tick)
+      const tuned = session.cachedTuning;
 
       // Schedule next attempt (tick-based)
       session.nextAttemptTick = tickNumber + session.cycleTickInterval;
       session.attempts++;
 
-      // Attempt success roll
-      const cachedSkills = this.playerSkills.get(playerId);
-      const skillLevel = cachedSkills?.[resource.skillRequired]?.level ?? 1;
-      const successRate = this.computeSuccessRate(skillLevel, tuned);
-      const isSuccessful = Math.random() < successRate;
+      // PERFORMANCE: Use cached success rate (zero allocation per tick)
+      const isSuccessful = Math.random() < session.cachedSuccessRate;
 
       if (isSuccessful) {
         session.successes++;
 
-        // Roll against manifest drop table to determine what item drops
-        const drop = this.rollDrop(resource.drops);
+        // PERFORMANCE: Roll against cached drop table (avoids resource lookup)
+        const drop = this.rollDrop(session.cachedDrops);
 
         // Add item to inventory using manifest data
         this.emitTypedEvent(EventType.INVENTORY_ITEM_ADDED, {
@@ -1228,9 +1247,10 @@ export class ResourceSystem extends SystemBase {
             resourceId: session.resourceId,
             position: resource.position,
           });
+          // PERFORMANCE: Use cached resource name
           this.sendChat(
             playerId,
-            `The ${resource.name.toLowerCase()} is depleted.`,
+            `The ${session.cachedResourceName.toLowerCase()} is depleted.`,
           );
           this.sendNetworkMessage("resourceDepleted", {
             resourceId: session.resourceId,
@@ -1254,9 +1274,10 @@ export class ResourceSystem extends SystemBase {
         }
       } else {
         // Failure feedback (optional gentle info)
+        // PERFORMANCE: Use cached resource name
         this.emitTypedEvent(EventType.UI_MESSAGE, {
           playerId: playerId,
-          message: `You fail to gather from the ${resource.name.toLowerCase()}.`,
+          message: `You fail to gather from the ${session.cachedResourceName.toLowerCase()}.`,
           type: "info",
         });
       }
