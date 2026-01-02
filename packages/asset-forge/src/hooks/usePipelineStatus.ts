@@ -7,6 +7,7 @@ import {
   BaseAssetMetadata,
   GenerationAssetMetadata,
 } from "../types";
+import { getAssetModelUrl, getAssetConceptArtUrl } from "../utils/api";
 
 import { GenerationAPIClient } from "@/services/api/GenerationAPIClient";
 
@@ -119,9 +120,9 @@ export function usePipelineStatus({
               status: "completed",
               modelUrl:
                 results.image3D?.localPath || results.rigging?.localPath
-                  ? `/api/assets/${baseAssetId}/model`
+                  ? getAssetModelUrl(baseAssetId)
                   : undefined,
-              conceptArtUrl: `/api/assets/${baseAssetId}/concept-art.png`,
+              conceptArtUrl: getAssetConceptArtUrl(baseAssetId),
               variants: results.textureGeneration?.variants || [],
               hasSpriteMetadata:
                 results.spriteGeneration?.status === "metadata_created" ||

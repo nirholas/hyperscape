@@ -2,7 +2,8 @@
 import WebSocket from "ws";
 import { pack, unpack } from "msgpackr";
 
-const WS_URL = "ws://localhost:5555/ws";
+const WS_URL =
+  process.env.WS_URL || process.env.PUBLIC_WS_URL || "ws://localhost:5555/ws";
 
 const socket = new WebSocket(WS_URL);
 
@@ -15,7 +16,7 @@ socket.on("open", () => {
     "characterCreate",
     {
       name: "TestChar_" + Math.floor(Math.random() * 1000),
-      avatar: "http://localhost:8080/avatar.vrm",
+      avatar: `${process.env.PUBLIC_CDN_URL || "http://localhost:8080"}/avatar.vrm`,
       wallet: "0x1234567890123456789012345678901234567890",
     },
   ]);

@@ -4,6 +4,7 @@ import type { UniversalRenderer } from "@hyperscape/shared";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRM, VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
 import { retargetAnimationToVRM } from "../utils/vrmAnimationRetarget";
+import { CDN_URL } from "../lib/api-config";
 
 // Extended types for VRM and AnimationMixer
 interface VRMHumanoidWithRestPose {
@@ -186,10 +187,8 @@ export const CharacterPreview: React.FC<CharacterPreviewProps> = ({
           }
         }
 
-        const cdnUrl =
-          import.meta.env.PUBLIC_CDN_URL || "http://localhost:8080";
-        const waveUrl = `${cdnUrl}/emotes/emote-waving-both-hands.glb`;
-        const idleUrl = `${cdnUrl}/emotes/emote-idle.glb`;
+        const waveUrl = `${CDN_URL}/emotes/emote-waving-both-hands.glb`;
+        const idleUrl = `${CDN_URL}/emotes/emote-idle.glb`;
 
         console.log("[CharacterPreview] Loading animations...");
         const [waveGltf, idleGltf] = await Promise.all([

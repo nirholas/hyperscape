@@ -1,6 +1,5 @@
-import { GAME_API_URL, GAME_WS_URL } from "@/lib/api-config";
+import { GAME_API_URL, GAME_WS_URL, CDN_URL } from "@/lib/api-config";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { GAME_API_URL, GAME_WS_URL } from "@/lib/api-config";
 import {
   THREE,
   createClientWorld,
@@ -168,11 +167,10 @@ export function GameClient({ wsUrl, onSetup }: GameClientProps) {
       const finalWsUrl = wsUrl || import.meta.env.PUBLIC_WS_URL || GAME_WS_URL;
 
       // Always use absolute CDN URL for all assets
-      const cdnUrl = import.meta.env.PUBLIC_CDN_URL || "http://localhost:8080";
-      const assetsUrl = `${cdnUrl}/`;
+      const assetsUrl = `${CDN_URL}/`;
 
       // Make CDN URL available globally for PhysX loading
-      (window as Window & { __CDN_URL?: string }).__CDN_URL = cdnUrl;
+      (window as Window & { __CDN_URL?: string }).__CDN_URL = CDN_URL;
 
       const config = {
         viewport,

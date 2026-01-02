@@ -32,7 +32,12 @@ import {
 import React from "react";
 import { CharacterPreview } from "../components/CharacterPreview";
 import { usePrivy, useCreateWallet } from "@privy-io/react-auth";
-import { ELIZAOS_API, GAME_API_URL, GAME_WS_URL } from "@/lib/api-config";
+import {
+  ELIZAOS_API,
+  GAME_API_URL,
+  GAME_WS_URL,
+  CDN_URL,
+} from "@/lib/api-config";
 
 type Character = {
   id: string;
@@ -105,8 +110,7 @@ const useIntroMusic = (enabled: boolean) => {
       const track = Math.random() > 0.5 ? "1.mp3" : "2.mp3";
       setCurrentTrack(track);
 
-      const cdnUrl = import.meta.env.PUBLIC_CDN_URL || "http://localhost:8080";
-      const musicPath = `${cdnUrl}/audio/music/intro/${track}`;
+      const musicPath = `${CDN_URL}/audio/music/intro/${track}`;
 
       // Resume audio context if suspended (browser autoplay policy)
       if (ctx.state === "suspended") {
@@ -197,7 +201,7 @@ const MusicToggleButton = () => {
 const AgentDashboardButton = () => {
   return (
     <a
-          href={`${window.location.origin}/?page=dashboard`}
+      href={`${window.location.origin}/?page=dashboard`}
       target="_blank"
       rel="noopener noreferrer"
       className="fixed bottom-4 right-4 z-50 bg-black/60 hover:bg-black/80 text-[#f2d08a] rounded-lg px-4 py-2 border border-[#f2d08a]/30 hover:border-[#f2d08a]/60 transition-all flex items-center gap-2 backdrop-blur-sm shadow-lg"
@@ -1307,7 +1311,7 @@ export function CharacterSelectScreen({
                       {/* 3D Preview Section - Compact height */}
                       <div className="relative w-full h-48 bg-black/60 rounded-lg overflow-hidden border border-[#f2d08a]/30">
                         <CharacterPreview
-                          vrmUrl={`${import.meta.env.PUBLIC_CDN_URL || "http://localhost:8080"}${AVATAR_OPTIONS[selectedAvatarIndex].previewPath}`}
+                          vrmUrl={`${CDN_URL}${AVATAR_OPTIONS[selectedAvatarIndex].previewPath}`}
                           className="w-full h-full"
                         />
 

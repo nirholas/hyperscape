@@ -12,6 +12,7 @@ import React from "react";
 import type { HandleDetectionResult } from "../../services/processing/WeaponHandleDetector";
 import { Asset } from "../../types";
 import { hasAnimations } from "../../types/AssetMetadata";
+import { getAssetModelUrl, getAssetFileUrl } from "../../utils/api";
 import { Card, CardContent, Button, EmptyState } from "../common";
 
 import EquipmentViewer, { EquipmentViewerRef } from "./EquipmentViewer";
@@ -60,14 +61,14 @@ export const ViewportSection: React.FC<ViewportSectionProps> = ({
       : undefined;
 
     // Use animation files when available
-    let url = `/api/assets/${selectedAvatar.id}/model`; // Default to base model
+    let url = getAssetModelUrl(selectedAvatar.id); // Default to base model
 
     if (currentAnimation === "walking" && animations?.walking) {
-      url = `/api/assets/${selectedAvatar.id}/${animations.walking}`;
+      url = getAssetFileUrl(selectedAvatar.id, animations.walking);
     } else if (currentAnimation === "running" && animations?.running) {
-      url = `/api/assets/${selectedAvatar.id}/${animations.running}`;
+      url = getAssetFileUrl(selectedAvatar.id, animations.running);
     } else if (currentAnimation === "tpose" && animations?.tpose) {
-      url = `/api/assets/${selectedAvatar.id}/${animations.tpose}`;
+      url = getAssetFileUrl(selectedAvatar.id, animations.tpose);
     }
 
     console.log(`🎮 Avatar URL for animation '${currentAnimation}':`, url);
@@ -85,7 +86,7 @@ export const ViewportSection: React.FC<ViewportSectionProps> = ({
               avatarUrl={getAvatarUrl()}
               equipmentUrl={
                 selectedEquipment && selectedEquipment.hasModel
-                  ? `/api/assets/${selectedEquipment.id}/model`
+                  ? getAssetModelUrl(selectedEquipment.id)
                   : undefined
               }
               equipmentSlot={equipmentSlot}

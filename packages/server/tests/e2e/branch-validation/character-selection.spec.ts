@@ -18,8 +18,12 @@ import { Packr, Unpackr } from "msgpackr";
 import * as fs from "fs";
 import * as path from "path";
 
-const SERVER_URL = "http://localhost:5555";
-const WS_URL = "ws://localhost:5555/ws";
+const SERVER_URL =
+  process.env.PUBLIC_API_URL ||
+  process.env.SERVER_URL ||
+  "http://localhost:5555";
+const WS_URL =
+  process.env.PUBLIC_WS_URL || process.env.WS_URL || "ws://localhost:5555/ws";
 const LOG_DIR = path.resolve(
   process.env.HOME || "/Users/home",
   "logs/branch-validation",

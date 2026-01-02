@@ -3,6 +3,7 @@ import React, { useRef } from "react";
 
 import { useArmorFittingStore } from "../store/useArmorFittingStore";
 import { cn } from "../styles";
+import { getAssetModelUrl } from "../utils/api";
 
 import {
   ArmorFittingViewer,
@@ -169,17 +170,17 @@ export const ArmorFittingPage: React.FC = () => {
                 ref={viewerRef}
                 avatarUrl={
                   selectedAvatar?.hasModel
-                    ? `/api/assets/${selectedAvatar.id}/model`
+                    ? getAssetModelUrl(selectedAvatar.id)
                     : undefined
                 }
                 armorUrl={
                   selectedArmor?.hasModel
-                    ? `/api/assets/${selectedArmor.id}/model`
+                    ? getAssetModelUrl(selectedArmor.id)
                     : undefined
                 }
                 helmetUrl={
                   selectedHelmet?.hasModel
-                    ? `/api/assets/${selectedHelmet.id}/model`
+                    ? getAssetModelUrl(selectedHelmet.id)
                     : undefined
                 }
                 showWireframe={showWireframe}

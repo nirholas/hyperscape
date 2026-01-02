@@ -126,7 +126,6 @@ export class DataManager {
       if (windowWithCdn.__CDN_URL) {
         cdnUrl = windowWithCdn.__CDN_URL;
       } else if (
-        typeof import !== "undefined" &&
         typeof import.meta !== "undefined" &&
         import.meta.env?.PUBLIC_CDN_URL
       ) {

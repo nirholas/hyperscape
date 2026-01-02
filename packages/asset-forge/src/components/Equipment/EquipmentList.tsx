@@ -4,6 +4,7 @@ import React, { useState, useMemo } from "react";
 import { EQUIPMENT_SLOTS } from "../../constants";
 import { cn } from "../../styles";
 import { Asset } from "../../types";
+import { getAssetConceptArtUrl } from "../../utils/api";
 import { Card, CardContent, Badge, Input } from "../common";
 
 interface EquipmentListProps {
@@ -199,7 +200,7 @@ export const EquipmentList: React.FC<EquipmentListProps> = ({
                           <div className="w-12 h-12 bg-bg-tertiary rounded flex items-center justify-center overflow-hidden">
                             {asset.hasModel ? (
                               <img
-                                src={`/api/assets/${asset.id}/concept-art.png`}
+                                src={getAssetConceptArtUrl(asset.id)}
                                 alt={asset.name}
                                 className="w-full h-full object-cover"
                                 onError={(e) => {

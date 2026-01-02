@@ -215,41 +215,61 @@ export function createClientWorld() {
   // RPG GAME SYSTEMS (ASYNC)
   // ============================================================================
   // RPG systems are loaded asynchronously to avoid blocking world creation.
+  // CRITICAL: Create a promise that tracks when registerSystems() completes
+  // This ensures DataManager is initialized before world.init() is called
+
+  let systemsLoadedResolve: () => void;
+  const systemsLoadedPromise = new Promise<void>((resolve) => {
+    systemsLoadedResolve = resolve;
+  });
+
+  // Attach promise to world so GameClient can wait for it
+  (
+    world as World & { systemsLoadedPromise?: Promise<void> }
+  ).systemsLoadedPromise = systemsLoadedPromise;
 
   (async () => {
-    await registerSystems(world);
+    try {
+      await registerSystems(world);
 
-    // CRITICAL: Initialize newly registered systems
-    const worldOptions = {
-      storage: world.storage,
-      assetsUrl: world.assetsUrl,
-      assetsDir: world.assetsDir,
-    };
+      // CRITICAL: Initialize newly registered systems
+      const worldOptions = {
+        storage: world.storage,
+        assetsUrl: world.assetsUrl,
+        assetsDir: world.assetsDir,
+      };
 
-    const equipmentSystem = world.getSystem("equipment");
-    if (equipmentSystem && !equipmentSystem.isInitialized()) {
-      await equipmentSystem.init(worldOptions);
-    }
+      const equipmentSystem = world.getSystem("equipment");
+      if (equipmentSystem && !equipmentSystem.isInitialized()) {
+        await equipmentSystem.init(worldOptions);
+      }
 
-    const damageSplatSystem = world.getSystem("damage-splat");
-    if (damageSplatSystem && !damageSplatSystem.isInitialized()) {
-      await damageSplatSystem.init(worldOptions);
-    }
+      const damageSplatSystem = world.getSystem("damage-splat");
+      if (damageSplatSystem && !damageSplatSystem.isInitialized()) {
+        await damageSplatSystem.init(worldOptions);
+      }
 
-    // Re-expose utilities after RPG systems load (in case they were cleared)
-    const anyWin = window as unknown as {
-      Hyperscape?: Record<string, unknown>;
-    };
-    anyWin.Hyperscape = anyWin.Hyperscape || {};
-    anyWin.Hyperscape.CircularSpawnArea = CircularSpawnArea;
+      // Re-expose utilities after RPG systems load (in case they were cleared)
+      const anyWin = window as unknown as {
+        Hyperscape?: Record<string, unknown>;
+      };
+      anyWin.Hyperscape = anyWin.Hyperscape || {};
+      anyWin.Hyperscape.CircularSpawnArea = CircularSpawnArea;
 
-    // Update window.world and window.THREE references
-    if (typeof window !== "undefined") {
-      const windowWithWorld = window as WindowWithWorld;
-      windowWithWorld.world = world;
+      // Update window.world and window.THREE references
+      if (typeof window !== "undefined") {
+        const windowWithWorld = window as WindowWithWorld;
+        windowWithWorld.world = world;
 
-      const stageSystem = world.stage as StageSystem;
-      windowWithWorld.THREE = stageSystem.THREE;
+        const stageSystem = world.stage as StageSystem;
+        windowWithWorld.THREE = stageSystem.THREE;
+      }
+    } catch (error) {
+      console.error("[createClientWorld] Error loading RPG systems:", error);
+      throw error;
+    } finally {
+      // Always resolve the promise, even if there was an error
+      systemsLoadedResolve();
     }
   })();
 

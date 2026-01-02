@@ -5,8 +5,15 @@
 
 // Network Configuration
 export const NETWORK_CONFIG = {
-  DEFAULT_WS_URL: process.env.WS_URL || "wss://chill.hyperscape.xyz/ws",
-  DEFAULT_API_BASE: process.env.API_BASE || "http://localhost:5555",
+  DEFAULT_WS_URL:
+    process.env.HYPERSCAPE_SERVER_URL ||
+    process.env.WS_URL ||
+    process.env.PUBLIC_WS_URL ||
+    "wss://chill.hyperscape.xyz/ws",
+  DEFAULT_API_BASE:
+    process.env.PUBLIC_API_URL ||
+    process.env.API_BASE ||
+    "http://localhost:5555",
   RETRY_DELAY_MS: parseInt(process.env.RETRY_DELAY_MS || "5000"),
   CONNECTION_TIMEOUT_MS: parseInt(process.env.CONNECTION_TIMEOUT_MS || "10000"),
   UPLOAD_TIMEOUT_MS: parseInt(process.env.UPLOAD_TIMEOUT_MS || "30000"),

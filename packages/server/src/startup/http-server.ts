@@ -59,10 +59,16 @@ export async function createHttpServer(
   const fastify = Fastify({ logger: { level: "error" } });
 
   // Configure CORS for development and production
-  const elizaOSUrl = process.env.ELIZAOS_URL || process.env.ELIZAOS_API_URL || "http://localhost:4001";
-  const clientUrl = process.env.CLIENT_URL || process.env.PUBLIC_APP_URL || "http://localhost:3333";
+  const elizaOSUrl =
+    process.env.ELIZAOS_URL ||
+    process.env.ELIZAOS_API_URL ||
+    "http://localhost:4001";
+  const clientUrl =
+    process.env.CLIENT_URL ||
+    process.env.PUBLIC_APP_URL ||
+    "http://localhost:3333";
   const serverUrl = process.env.SERVER_URL || `http://localhost:${config.port}`;
-  
+
   const allowedOrigins = [
     // Production domains
     "https://hyperscape.lol",
@@ -78,7 +84,7 @@ export async function createHttpServer(
     /^https:\/\/.+\.privy\.io$/,
     /^https:\/\/.+\.hyperscape\.lol$/,
   ];
-  
+
   // Add custom domain from env if set
   if (process.env.PUBLIC_APP_URL) {
     allowedOrigins.push(process.env.PUBLIC_APP_URL);
@@ -310,7 +316,10 @@ function setAssetHeaders(
   filePath: string,
 ): void {
   // Set MIME types
-  if (filePath.endsWith(".mp3")) {
+  if (filePath.endsWith(".wasm")) {
+    res.setHeader("Content-Type", "application/wasm");
+    res.setHeader("Accept-Ranges", "bytes");
+  } else if (filePath.endsWith(".mp3")) {
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Accept-Ranges", "bytes");
   } else if (filePath.endsWith(".ogg")) {

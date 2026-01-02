@@ -44,6 +44,7 @@ import { PhysicsHandle } from "../../../types/systems/physics";
 import { getPhysX } from "../../../physics/PhysXManager";
 import { Layers } from "../../../physics/Layers";
 import { BIOMES } from "../../../data/world-structure";
+import { DataManager } from "../../../data/DataManager";
 import { WaterSystem } from "..";
 import { createTerrainMaterial, TerrainUniforms } from "./TerrainShader";
 
@@ -631,6 +632,34 @@ export class TerrainSystem extends System {
       this.noise = new NoiseGenerator(this.computeSeedFromWorldId());
       this.initializeBiomeCenters();
     }
+
+    // CRITICAL: Wait for DataManager to initialize BIOMES data before generating terrain
+    // DataManager is initialized in registerSystems() which happens asynchronously
+    // We need to wait for it to be ready AND for BIOMES data to be loaded before generating terrain tiles
+    const dataManager = DataManager.getInstance();
+    const maxWait = 10000; // 10 seconds
+    const startTime = Date.now();
+
+    // Wait for both DataManager to be ready AND BIOMES data to be loaded
+    while (
+      (!dataManager.isReady() || Object.keys(BIOMES).length === 0) &&
+      Date.now() - startTime < maxWait
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    // Final check - verify BIOMES data is actually loaded
+    if (Object.keys(BIOMES).length === 0) {
+      const errorMsg =
+        "[TerrainSystem] BIOMES data not loaded! DataManager must initialize before terrain generation. " +
+        `DataManager ready: ${dataManager.isReady()}, BIOMES count: ${Object.keys(BIOMES).length}`;
+      console.error(errorMsg);
+      throw new Error(errorMsg);
+    }
+
+    console.log(
+      `[TerrainSystem] DataManager initialized, ${Object.keys(BIOMES).length} biomes loaded, proceeding with terrain generation`,
+    );
 
     // Final environment detection - use world.isServer/isClient (which check network internally)
     const isServer = this.world.isServer;

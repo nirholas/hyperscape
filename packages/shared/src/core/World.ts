@@ -1031,7 +1031,7 @@ export class World extends EventEmitter {
     });
 
     // Start all systems (transitions from 'initialized' to 'started' state)
-    this.start();
+    await this.start();
   }
 
   /**
@@ -1040,10 +1040,18 @@ export class World extends EventEmitter {
    * Called after all systems are initialized.
    * Transitions systems from 'initialized' state to 'started' state.
    * Systems can begin their active operations (network connections, timers, etc.)
+   *
+   * Note: Some systems have async start() methods (e.g., TerrainSystem) that need
+   * to wait for data loading. This method awaits all system starts to ensure
+   * proper initialization order.
    */
-  start(): void {
+  async start(): Promise<void> {
     for (const system of this.systems) {
-      system.start();
+      const startResult = system.start();
+      // Await if start() returns a Promise (async systems)
+      if (startResult instanceof Promise) {
+        await startResult;
+      }
     }
   }
 

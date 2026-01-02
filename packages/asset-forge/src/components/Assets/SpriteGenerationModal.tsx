@@ -5,7 +5,7 @@ import { Asset } from '../../types'
 import { spriteGeneratorClient } from '../../utils/sprite-generator-client'
 import { Modal, ModalHeader, ModalBody, ModalFooter, ModalSection, Button, Select, Badge } from '../common'
 
-import { apiFetch } from '@/utils/api'
+import { apiFetch, getAssetFileUrl, getAssetSpritesUrl } from '@/utils/api'
 
 interface SpriteGenerationModalProps {
   asset: Asset
@@ -73,7 +73,7 @@ const SpriteGenerationModal: React.FC<SpriteGenerationModalProps> = ({
           // Load sprite images
           const loadedSprites: SpriteResult[] = []
           for (const angle of metadata.angles) {
-            const spriteUrl = `/api/assets/${asset.id}/sprites/${angle}deg.png?t=${Date.now()}`
+            const spriteUrl = getAssetFileUrl(asset.id, `sprites/${angle}deg.png`) + `?t=${Date.now()}`
             loadedSprites.push({
               angle,
               imageUrl: spriteUrl

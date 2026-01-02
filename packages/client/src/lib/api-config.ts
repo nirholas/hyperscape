@@ -2,22 +2,22 @@
  * API Configuration
  *
  * Centralized configuration for external service URLs.
- * All URLs have sensible defaults for local development.
+ * URLs are set via Vite's define feature in vite.config.ts.
  *
- * Usage:
- *   import { ELIZAOS_API, GAME_API_URL } from '@/lib/api-config';
- *   fetch(`${ELIZAOS_API}/agents`);
+ * In production builds (vite build):
+ *   - GAME_API_URL = https://api.hyperscape.lol
+ *   - GAME_WS_URL = wss://api.hyperscape.lol/ws
+ *   - CDN_URL = https://d20g7vd4m53hpb.cloudfront.net
  *
- * Override via environment variables in .env:
- *   PUBLIC_ELIZAOS_URL=http://localhost:4001
- *   PUBLIC_API_URL=http://localhost:5555
+ * In development (vite dev):
+ *   - GAME_API_URL = http://localhost:5555
+ *   - GAME_WS_URL = ws://localhost:5555/ws
+ *   - CDN_URL = http://localhost:8080
  */
 
 // =============================================================================
 // ElizaOS AI Agent Server
 // =============================================================================
-// API endpoints: ${ELIZAOS_URL}/api/...
-// Hyperscape routes: ${ELIZAOS_URL}/hyperscape/...
 
 export const ELIZAOS_URL =
   import.meta.env.PUBLIC_ELIZAOS_URL || "http://localhost:4001";
@@ -27,16 +27,14 @@ export const ELIZAOS_API = `${ELIZAOS_URL}/api`;
 // =============================================================================
 // Hyperscape Game Server
 // =============================================================================
+// These are replaced at build time by Vite's define feature
 
-export const GAME_API_URL =
-  import.meta.env.PUBLIC_API_URL || "http://localhost:5555";
+export const GAME_API_URL = import.meta.env.PUBLIC_API_URL;
 
-export const GAME_WS_URL =
-  import.meta.env.PUBLIC_WS_URL || "ws://localhost:5555/ws";
+export const GAME_WS_URL = import.meta.env.PUBLIC_WS_URL;
 
 // =============================================================================
 // CDN for Static Assets
 // =============================================================================
 
-export const CDN_URL =
-  import.meta.env.PUBLIC_CDN_URL || "http://localhost:8080";
+export const CDN_URL = import.meta.env.PUBLIC_CDN_URL;

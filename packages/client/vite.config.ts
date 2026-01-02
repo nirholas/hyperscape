@@ -16,14 +16,14 @@ export default defineConfig(({ mode }) => {
   const clientEnv = loadEnv(mode, clientDir, ["PUBLIC_", "VITE_"]);
   const env = { ...workspaceEnv, ...clientEnv };
 
-  console.log("[Vite Config] Loaded env from workspace:", workspaceRoot);
-  console.log("[Vite Config] Loaded env from client:", clientDir);
-  console.log(
-    "[Vite Config] PUBLIC_PRIVY_APP_ID:",
-    env.PUBLIC_PRIVY_APP_ID
-      ? `${env.PUBLIC_PRIVY_APP_ID.substring(0, 10)}...`
-      : "NOT SET",
-  );
+  console.log("[Vite Config] Build mode:", mode);
+  console.log("[Vite Config] Loaded env from:", clientDir);
+  if (env.PUBLIC_PRIVY_APP_ID) {
+    console.log(
+      "[Vite Config] PUBLIC_PRIVY_APP_ID:",
+      env.PUBLIC_PRIVY_APP_ID.substring(0, 10) + "...",
+    );
+  }
 
   return {
     plugins: [
@@ -184,7 +184,10 @@ export default defineConfig(({ mode }) => {
       "process.env.VITEST": "undefined", // Not in browser
 
       // Production API URLs - explicitly defined for production builds
-      // These override the defaults in code when building for production
+      // These ALWAYS use production URLs when mode is "production", ignoring .env files
+      // NOTE: mode is passed from Vite - "production" for `vite build`, "development" for `vite dev`
+      // Use environment variables if set, otherwise use defaults
+      // Deployment script sets these from Terraform outputs during build
       "import.meta.env.PUBLIC_API_URL": JSON.stringify(
         env.PUBLIC_API_URL ||
           (mode === "production"
@@ -209,6 +212,7 @@ export default defineConfig(({ mode }) => {
             ? "https://hyperscape.lol"
             : "http://localhost:3333"),
       ),
+      "import.meta.env.PROD": JSON.stringify(mode === "production"),
     },
     server: {
       port: Number(env.VITE_PORT) || 3333,

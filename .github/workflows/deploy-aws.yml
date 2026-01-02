@@ -1,0 +1,314 @@
+# ============================================================================
+# Hyperscape AWS Deployment Pipeline
+# ============================================================================
+# Deploys Hyperscape to AWS infrastructure:
+# - Server: ECS Fargate via Docker/ECR
+# - Frontend: S3 + CloudFront
+# - Assets: S3 + CloudFront CDN
+#
+# Triggers:
+# - Push to main branch
+# - Manual workflow dispatch
+# ============================================================================
+
+name: Deploy to AWS
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch:
+    inputs:
+      deploy_server:
+        description: 'Deploy Server'
+        required: false
+        type: boolean
+        default: true
+      deploy_frontend:
+        description: 'Deploy Frontend'
+        required: false
+        type: boolean
+        default: true
+      deploy_assets:
+        description: 'Deploy Assets'
+        required: false
+        type: boolean
+        default: false
+      environment:
+        description: 'Environment'
+        required: true
+        type: choice
+        options:
+          - prod
+          - staging
+        default: prod
+
+env:
+  AWS_REGION: us-east-1
+  PROJECT_NAME: hyperscape
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # ============================================================================
+  # Build and Test
+  # ============================================================================
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: 1.1.38
+
+      - name: Install Dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build Shared Package
+        run: bun run build:shared
+
+      - name: Run Type Check
+        run: bun run typecheck
+
+      - name: Run Tests
+        run: bun run test
+
+      - name: Build Server
+        run: bun run build:server
+
+      - name: Build Frontend
+        run: bun run build:client
+        env:
+          PUBLIC_SERVER_URL: ${{ secrets.PUBLIC_SERVER_URL }}
+          PUBLIC_CDN_URL: ${{ secrets.PUBLIC_CDN_URL }}
+
+      - name: Upload Server Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-build
+          path: |
+            packages/server/dist/
+            packages/server/world/
+            packages/shared/dist/
+            packages/shared/build/
+          retention-days: 1
+
+      - name: Upload Frontend Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: packages/client/dist/
+          retention-days: 1
+
+  # ============================================================================
+  # Deploy Server
+  # ============================================================================
+  deploy-server:
+    name: Deploy Server
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' || inputs.deploy_server
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Server Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: server-build
+          path: .
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image to ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+          ENVIRONMENT: ${{ inputs.environment || 'prod' }}
+        run: |
+          ECR_REPOSITORY="${PROJECT_NAME}-${ENVIRONMENT}-server"
+          
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f packages/server/Dockerfile .
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Deploy to ECS
+        env:
+          ENVIRONMENT: ${{ inputs.environment || 'prod' }}
+        run: |
+          CLUSTER_NAME="${PROJECT_NAME}-${ENVIRONMENT}-cluster"
+          SERVICE_NAME="${PROJECT_NAME}-${ENVIRONMENT}-server"
+          
+          aws ecs update-service \
+            --cluster $CLUSTER_NAME \
+            --service $SERVICE_NAME \
+            --force-new-deployment
+
+      - name: Wait for ECS Service Stability
+        env:
+          ENVIRONMENT: ${{ inputs.environment || 'prod' }}
+        run: |
+          CLUSTER_NAME="${PROJECT_NAME}-${ENVIRONMENT}-cluster"
+          SERVICE_NAME="${PROJECT_NAME}-${ENVIRONMENT}-server"
+          
+          echo "Waiting for ECS service to stabilize..."
+          aws ecs wait services-stable \
+            --cluster $CLUSTER_NAME \
+            --services $SERVICE_NAME \
+            --region $AWS_REGION
+          
+          echo "✓ ECS service is stable"
+
+  # ============================================================================
+  # Deploy Frontend
+  # ============================================================================
+  deploy-frontend:
+    name: Deploy Frontend
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' || inputs.deploy_frontend
+
+    steps:
+      - name: Download Frontend Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: dist/
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to S3
+        env:
+          ENVIRONMENT: ${{ inputs.environment || 'prod' }}
+        run: |
+          BUCKET_NAME="${PROJECT_NAME}-${ENVIRONMENT}-frontend"
+          
+          aws s3 sync dist/ s3://$BUCKET_NAME --delete
+          
+          # Set cache headers for HTML (no cache)
+          aws s3 cp s3://$BUCKET_NAME s3://$BUCKET_NAME \
+            --recursive \
+            --exclude "*" \
+            --include "*.html" \
+            --metadata-directive REPLACE \
+            --cache-control "no-cache, no-store, must-revalidate" \
+            --content-type "text/html"
+          
+          echo "✓ Uploaded to s3://$BUCKET_NAME"
+
+      - name: Invalidate CloudFront Cache
+        env:
+          ENVIRONMENT: ${{ inputs.environment || 'prod' }}
+        run: |
+          # Get CloudFront distribution ID from tags
+          DISTRIBUTION_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?Comment=='Hyperscape Frontend'].Id" --output text)
+          
+          if [ -n "$DISTRIBUTION_ID" ]; then
+            aws cloudfront create-invalidation \
+              --distribution-id $DISTRIBUTION_ID \
+              --paths "/*"
+            echo "✓ CloudFront cache invalidated"
+          else
+            echo "⚠ CloudFront distribution not found"
+          fi
+
+  # ============================================================================
+  # Deploy Assets
+  # ============================================================================
+  deploy-assets:
+    name: Deploy Assets
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy_assets
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy Assets to S3
+        env:
+          ENVIRONMENT: ${{ inputs.environment || 'prod' }}
+        run: |
+          BUCKET_NAME="${PROJECT_NAME}-${ENVIRONMENT}-assets"
+          
+          # Sync assets with long cache headers
+          aws s3 sync assets/ s3://$BUCKET_NAME/assets \
+            --delete \
+            --cache-control "public, max-age=31536000"
+          
+          echo "✓ Assets uploaded to s3://$BUCKET_NAME/assets"
+
+      - name: Invalidate CloudFront Cache
+        env:
+          ENVIRONMENT: ${{ inputs.environment || 'prod' }}
+        run: |
+          DISTRIBUTION_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?Comment=='Hyperscape Game Assets CDN'].Id" --output text)
+          
+          if [ -n "$DISTRIBUTION_ID" ]; then
+            aws cloudfront create-invalidation \
+              --distribution-id $DISTRIBUTION_ID \
+              --paths "/assets/*"
+            echo "✓ CloudFront cache invalidated"
+          else
+            echo "⚠ CloudFront distribution not found"
+          fi
+
+  # ============================================================================
+  # Notify
+  # ============================================================================
+  notify:
+    name: Notify
+    runs-on: ubuntu-latest
+    needs: [deploy-server, deploy-frontend]
+    if: always()
+
+    steps:
+      - name: Deployment Summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Server | ${{ needs.deploy-server.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend | ${{ needs.deploy-frontend.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
