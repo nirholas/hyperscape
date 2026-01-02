@@ -264,18 +264,15 @@ export class DataManager {
     } else {
       // cwd is typically packages/server when running the server
       const cwd = process.cwd();
+      // Normalize path separators for cross-platform compatibility (Windows uses \, Unix uses /)
+      const normalizedCwd = cwd.replace(/\\/g, "/");
       if (
-        cwd.endsWith("/packages/server") ||
-        cwd.includes("/packages/server/")
+        normalizedCwd.endsWith("/packages/server") ||
+        normalizedCwd.includes("/packages/server/")
       ) {
         // Running from packages/server - assets are in world/assets/
-        manifestsDir = path.join(
-          cwd.replace(/\/packages\/server.*$/, "/packages/server"),
-          "world",
-          "assets",
-          "manifests",
-        );
-      } else if (cwd.includes("/packages/")) {
+        manifestsDir = path.join(cwd, "world", "assets", "manifests");
+      } else if (normalizedCwd.includes("/packages/")) {
         // Running from another package - navigate to server assets
         const workspaceRoot = path.resolve(cwd, "../..");
         manifestsDir = path.join(
