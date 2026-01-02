@@ -64,6 +64,120 @@ export class ResourceSystem extends SystemBase {
   private gatherRateLimits = new Map<PlayerID, number>();
   private static readonly RATE_LIMIT_MS = 600; // 1 tick - minimum time between gather requests
 
+  // ===== TOOL TIER SYSTEM (generalized for all gathering skills) =====
+  /**
+   * Tool tier definitions by skill
+   * Defines speed multipliers for each tool tier (lower = faster)
+   * Order matters: best tools first (checked in order until match found)
+   */
+  private static readonly TOOL_TIERS: Record<
+    string,
+    Array<{
+      id: string;
+      pattern: RegExp;
+      levelRequired: number;
+      cycleMultiplier: number;
+    }>
+  > = {
+    woodcutting: [
+      {
+        id: "dragon_hatchet",
+        pattern: /dragon.*(hatchet|axe)/i,
+        levelRequired: 61,
+        cycleMultiplier: 0.7,
+      },
+      {
+        id: "rune_hatchet",
+        pattern: /rune.*(hatchet|axe)/i,
+        levelRequired: 41,
+        cycleMultiplier: 0.78,
+      },
+      {
+        id: "adamant_hatchet",
+        pattern: /adamant.*(hatchet|axe)/i,
+        levelRequired: 31,
+        cycleMultiplier: 0.84,
+      },
+      {
+        id: "mithril_hatchet",
+        pattern: /mithril.*(hatchet|axe)/i,
+        levelRequired: 21,
+        cycleMultiplier: 0.88,
+      },
+      {
+        id: "steel_hatchet",
+        pattern: /steel.*(hatchet|axe)/i,
+        levelRequired: 6,
+        cycleMultiplier: 0.92,
+      },
+      {
+        id: "iron_hatchet",
+        pattern: /iron.*(hatchet|axe)/i,
+        levelRequired: 1,
+        cycleMultiplier: 0.96,
+      },
+      {
+        id: "bronze_hatchet",
+        pattern: /bronze.*(hatchet|axe)/i,
+        levelRequired: 1,
+        cycleMultiplier: 1.0,
+      },
+    ],
+    mining: [
+      {
+        id: "dragon_pickaxe",
+        pattern: /dragon.*(pickaxe|pick)/i,
+        levelRequired: 61,
+        cycleMultiplier: 0.7,
+      },
+      {
+        id: "rune_pickaxe",
+        pattern: /rune.*(pickaxe|pick)/i,
+        levelRequired: 41,
+        cycleMultiplier: 0.78,
+      },
+      {
+        id: "adamant_pickaxe",
+        pattern: /adamant.*(pickaxe|pick)/i,
+        levelRequired: 31,
+        cycleMultiplier: 0.84,
+      },
+      {
+        id: "mithril_pickaxe",
+        pattern: /mithril.*(pickaxe|pick)/i,
+        levelRequired: 21,
+        cycleMultiplier: 0.88,
+      },
+      {
+        id: "steel_pickaxe",
+        pattern: /steel.*(pickaxe|pick)/i,
+        levelRequired: 6,
+        cycleMultiplier: 0.92,
+      },
+      {
+        id: "iron_pickaxe",
+        pattern: /iron.*(pickaxe|pick)/i,
+        levelRequired: 1,
+        cycleMultiplier: 0.96,
+      },
+      {
+        id: "bronze_pickaxe",
+        pattern: /bronze.*(pickaxe|pick)/i,
+        levelRequired: 1,
+        cycleMultiplier: 1.0,
+      },
+    ],
+    fishing: [
+      // Fishing tools don't have speed tiers in OSRS - all equipment is same speed
+      {
+        id: "fishing_equipment",
+        pattern: /(fishing|net|rod|harpoon)/i,
+        levelRequired: 1,
+        cycleMultiplier: 1.0,
+      },
+    ],
+  };
+
   constructor(world: World) {
     super(world, {
       name: "resource",
@@ -810,23 +924,19 @@ export class ResourceSystem extends SystemBase {
         return;
       }
 
-      // Enforce tool level requirement (for woodcutting/mining, get best tool tier)
-      if (toolCategory === "hatchet" || toolCategory === "pickaxe") {
-        const toolInfo =
-          toolCategory === "hatchet"
-            ? this.getBestAxeTier(data.playerId)
-            : this.getBestPickaxeTier(data.playerId);
-        if (toolInfo) {
-          const cached = this.playerSkills.get(data.playerId);
-          const skillLevel = cached?.[resource.skillRequired]?.level ?? 1;
-          if (skillLevel < toolInfo.levelRequired) {
-            this.emitTypedEvent(EventType.UI_MESSAGE, {
-              playerId: data.playerId,
-              message: `You need level ${toolInfo.levelRequired} ${resource.skillRequired} to use this ${toolCategory}.`,
-              type: "error",
-            });
-            return;
-          }
+      // Enforce tool level requirement using unified tool system
+      const bestTool = this.getBestTool(data.playerId, resource.skillRequired);
+      if (bestTool && bestTool.id !== "none") {
+        const cached = this.playerSkills.get(data.playerId);
+        const currentSkillLevel = cached?.[resource.skillRequired]?.level ?? 1;
+        if (currentSkillLevel < bestTool.levelRequired) {
+          const toolName = this.getToolDisplayName(toolCategory);
+          this.emitTypedEvent(EventType.UI_MESSAGE, {
+            playerId: data.playerId,
+            message: `You need level ${bestTool.levelRequired} ${resource.skillRequired} to use this ${toolName}.`,
+            type: "error",
+          });
+          return;
         }
       }
     }
@@ -856,16 +966,9 @@ export class ResourceSystem extends SystemBase {
       this.resourceVariants.get(sessionResourceId) || "tree_normal";
     const tuned = this.getVariantTuning(variant);
 
-    // Get best tool tier based on skill (generalized for all gathering skills)
-    let toolMultiplier = 1.0;
-    if (resource.skillRequired === "woodcutting") {
-      const axe = this.getBestAxeTier(data.playerId);
-      toolMultiplier = axe ? axe.cycleMultiplier : 1.0;
-    } else if (resource.skillRequired === "mining") {
-      const pick = this.getBestPickaxeTier(data.playerId);
-      toolMultiplier = pick ? pick.cycleMultiplier : 1.0;
-    }
-    // Fishing doesn't have tool tiers in OSRS - all equipment is same speed
+    // Get best tool tier using unified tool system
+    const toolInfo = this.getBestTool(data.playerId, resource.skillRequired);
+    const toolMultiplier = toolInfo ? toolInfo.cycleMultiplier : 1.0;
 
     const cycleTickInterval = this.computeCycleTicks(
       skillLevel,
@@ -1296,6 +1399,48 @@ export class ResourceSystem extends SystemBase {
   }
 
   /**
+   * Get best tool for a skill from player inventory (unified tool tier system)
+   * Returns tool info with level requirement and speed multiplier
+   * @param playerId - Player to check inventory for
+   * @param skill - Skill name (woodcutting, mining, fishing)
+   */
+  private getBestTool(
+    playerId: string,
+    skill: string,
+  ): { id: string; levelRequired: number; cycleMultiplier: number } | null {
+    const tiers = ResourceSystem.TOOL_TIERS[skill];
+    if (!tiers) {
+      // Unknown skill - no tool boost available
+      return { id: "none", levelRequired: 1, cycleMultiplier: 1.0 };
+    }
+
+    const inventorySystem = this.world.getSystem?.("inventory") as {
+      getInventory?: (playerId: string) => {
+        items?: Array<{ itemId?: string }>;
+      };
+    } | null;
+
+    const inv = inventorySystem?.getInventory?.(playerId);
+    const items = inv?.items || [];
+
+    // Check tiers in order (best tools first)
+    for (const tier of tiers) {
+      const hasTool = items.some(
+        (item) => item?.itemId && tier.pattern.test(item.itemId),
+      );
+      if (hasTool) {
+        return {
+          id: tier.id,
+          levelRequired: tier.levelRequired,
+          cycleMultiplier: tier.cycleMultiplier,
+        };
+      }
+    }
+
+    return null; // No tool found for this skill
+  }
+
+  /**
    * Extract tool category from toolRequired field
    * e.g., "bronze_hatchet" → "hatchet", "bronze_pickaxe" → "pickaxe"
    */
@@ -1372,208 +1517,6 @@ export class ResourceSystem extends SystemBase {
           return itemId.includes(category);
       }
     });
-  }
-
-  private getBestAxeTier(
-    playerId: string,
-  ): { id: string; levelRequired: number; cycleMultiplier: number } | null {
-    // Known axe tiers: bronze, iron, steel, mithril, adamant, rune, dragon
-    const tiers: Array<{
-      id: string;
-      levelRequired: number;
-      cycleMultiplier: number;
-      match: (id: string) => boolean;
-    }> = [
-      {
-        id: "dragon_hatchet",
-        levelRequired: 61,
-        cycleMultiplier: 0.7,
-        match: (id) =>
-          id.includes("dragon") &&
-          (id.includes("hatchet") || id.includes("axe")),
-      },
-      {
-        id: "rune_hatchet",
-        levelRequired: 41,
-        cycleMultiplier: 0.78,
-        match: (id) =>
-          id.includes("rune") && (id.includes("hatchet") || id.includes("axe")),
-      },
-      {
-        id: "adamant_hatchet",
-        levelRequired: 31,
-        cycleMultiplier: 0.84,
-        match: (id) =>
-          id.includes("adamant") &&
-          (id.includes("hatchet") || id.includes("axe")),
-      },
-      {
-        id: "mithril_hatchet",
-        levelRequired: 21,
-        cycleMultiplier: 0.88,
-        match: (id) =>
-          id.includes("mithril") &&
-          (id.includes("hatchet") || id.includes("axe")),
-      },
-      {
-        id: "steel_hatchet",
-        levelRequired: 6,
-        cycleMultiplier: 0.92,
-        match: (id) =>
-          id.includes("steel") &&
-          (id.includes("hatchet") || id.includes("axe")),
-      },
-      {
-        id: "iron_hatchet",
-        levelRequired: 1,
-        cycleMultiplier: 0.96,
-        match: (id) =>
-          id.includes("iron") && (id.includes("hatchet") || id.includes("axe")),
-      },
-      {
-        id: "bronze_hatchet",
-        levelRequired: 1,
-        cycleMultiplier: 1.0,
-        match: (id) =>
-          id.includes("bronze") &&
-          (id.includes("hatchet") || id.includes("axe")),
-      },
-    ];
-
-    const inventorySystem = this.world.getSystem?.("inventory") as {
-      getInventory?: (playerId: string) => {
-        items?: Array<{ itemId?: string }>;
-        capacity?: number;
-      };
-    } | null;
-    const inv = inventorySystem?.getInventory
-      ? inventorySystem.getInventory(playerId)
-      : undefined;
-    const items = (inv?.items as Array<{ itemId?: string }> | undefined) || [];
-    let best: {
-      id: string;
-      levelRequired: number;
-      cycleMultiplier: number;
-    } | null = null;
-    for (const t of tiers) {
-      const found = items.some(
-        (it) =>
-          typeof it?.itemId === "string" && t.match(it.itemId!.toLowerCase()),
-      );
-      if (found) {
-        best = {
-          id: t.id,
-          levelRequired: t.levelRequired,
-          cycleMultiplier: t.cycleMultiplier,
-        };
-        break;
-      }
-    }
-    return best;
-  }
-
-  /**
-   * Get best pickaxe tier from player inventory (for mining)
-   * Returns tool info with level requirement and speed multiplier
-   */
-  private getBestPickaxeTier(
-    playerId: string,
-  ): { id: string; levelRequired: number; cycleMultiplier: number } | null {
-    // Known pickaxe tiers: bronze, iron, steel, mithril, adamant, rune, dragon
-    const tiers: Array<{
-      id: string;
-      levelRequired: number;
-      cycleMultiplier: number;
-      match: (id: string) => boolean;
-    }> = [
-      {
-        id: "dragon_pickaxe",
-        levelRequired: 61,
-        cycleMultiplier: 0.7,
-        match: (id) =>
-          id.includes("dragon") &&
-          (id.includes("pickaxe") || id.includes("pick")),
-      },
-      {
-        id: "rune_pickaxe",
-        levelRequired: 41,
-        cycleMultiplier: 0.78,
-        match: (id) =>
-          id.includes("rune") &&
-          (id.includes("pickaxe") || id.includes("pick")),
-      },
-      {
-        id: "adamant_pickaxe",
-        levelRequired: 31,
-        cycleMultiplier: 0.84,
-        match: (id) =>
-          id.includes("adamant") &&
-          (id.includes("pickaxe") || id.includes("pick")),
-      },
-      {
-        id: "mithril_pickaxe",
-        levelRequired: 21,
-        cycleMultiplier: 0.88,
-        match: (id) =>
-          id.includes("mithril") &&
-          (id.includes("pickaxe") || id.includes("pick")),
-      },
-      {
-        id: "steel_pickaxe",
-        levelRequired: 6,
-        cycleMultiplier: 0.92,
-        match: (id) =>
-          id.includes("steel") &&
-          (id.includes("pickaxe") || id.includes("pick")),
-      },
-      {
-        id: "iron_pickaxe",
-        levelRequired: 1,
-        cycleMultiplier: 0.96,
-        match: (id) =>
-          id.includes("iron") &&
-          (id.includes("pickaxe") || id.includes("pick")),
-      },
-      {
-        id: "bronze_pickaxe",
-        levelRequired: 1,
-        cycleMultiplier: 1.0,
-        match: (id) =>
-          id.includes("bronze") &&
-          (id.includes("pickaxe") || id.includes("pick")),
-      },
-    ];
-
-    const inventorySystem = this.world.getSystem?.("inventory") as {
-      getInventory?: (playerId: string) => {
-        items?: Array<{ itemId?: string }>;
-        capacity?: number;
-      };
-    } | null;
-    const inv = inventorySystem?.getInventory
-      ? inventorySystem.getInventory(playerId)
-      : undefined;
-    const items = (inv?.items as Array<{ itemId?: string }> | undefined) || [];
-    let best: {
-      id: string;
-      levelRequired: number;
-      cycleMultiplier: number;
-    } | null = null;
-    for (const t of tiers) {
-      const found = items.some(
-        (it) =>
-          typeof it?.itemId === "string" && t.match(it.itemId!.toLowerCase()),
-      );
-      if (found) {
-        best = {
-          id: t.id,
-          levelRequired: t.levelRequired,
-          cycleMultiplier: t.cycleMultiplier,
-        };
-        break;
-      }
-    }
-    return best;
   }
 
   /**
