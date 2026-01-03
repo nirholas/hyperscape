@@ -17,20 +17,44 @@ import { ALL_WORLD_AREAS } from "../../../data/world-areas";
 import { GATHERING_CONSTANTS } from "../../../constants/GatheringConstants";
 
 /**
- * Resource System
- * Manages resource gathering per GDD specifications:
+ * ResourceSystem - Manages resource gathering for all skills (woodcutting, mining, fishing)
  *
- * Woodcutting:
- * - Click tree with hatchet equipped
- * - Success rates based on skill level
- * - Produces logs
+ * ## Architecture
  *
- * Fishing:
- * - Click water edge with fishing rod equipped
- * - Success rates based on skill level
- * - Produces raw fish
+ * ### Data Flow
+ * 1. Client clicks resource → ResourceInteractionHandler
+ * 2. Handler sends network message → resources.ts handler
+ * 3. Handler emits RESOURCE_GATHER event with server-authoritative position
+ * 4. ResourceSystem.startGathering() validates and creates session
+ * 5. TickSystem calls processGatheringTick() every 600ms (OSRS tick rate)
+ * 6. On success: drops item via manifest data, awards XP, may deplete resource
  *
- * Resource respawning and depletion mechanics
+ * ### Manifest Integration
+ * All resource data comes from resources.json manifest:
+ * - harvestSkill, levelRequired: Skill validation
+ * - toolRequired: Tool validation (via unified TOOL_TIERS system)
+ * - baseCycleTicks, depleteChance, respawnTicks: Timing configuration
+ * - harvestYield: Drop table with itemId, itemName, quantity, chance, xpAmount, stackable
+ *
+ * ### Session Management
+ * Active gathering sessions stored in activeGathering Map (keyed by PlayerID).
+ * Sessions cache tuning data at start to avoid per-tick allocations (performance).
+ * Sessions end on: resource depletion, player movement, inventory full, or disconnect.
+ *
+ * ### Security Features
+ * - Rate limiting: 600ms minimum between gather requests (1 tick)
+ * - Server-authoritative position: Client position ignored, uses world state
+ * - Resource ID validation: Alphanumeric with length limit to prevent injection
+ * - Proximity checks: Uses server-side player position for range validation
+ *
+ * ### Tool Tier System
+ * Unified TOOL_TIERS structure supports all gathering skills:
+ * - Woodcutting: Bronze → Dragon hatchet (0.7x - 1.0x cycle multiplier)
+ * - Mining: Bronze → Dragon pickaxe (0.7x - 1.0x cycle multiplier)
+ * - Fishing: Any equipment (1.0x - no speed tiers in OSRS)
+ *
+ * @see GATHERING_CONSTANTS for tunable values
+ * @see resources.json for resource definitions
  */
 export class ResourceSystem extends SystemBase {
   private resources = new Map<ResourceID, Resource>();
@@ -63,10 +87,8 @@ export class ResourceSystem extends SystemBase {
       cachedResourceName: string; // For messages without lookup
     }
   >();
-  // Tick-based respawn tracking (replaces setTimeout)
+  // Tick-based respawn tracking (replaces legacy setTimeout approach)
   private respawnAtTick = new Map<ResourceID, number>();
-  // Legacy respawn timers (for backwards compatibility during transition)
-  private respawnTimers = new Map<ResourceID, NodeJS.Timeout>();
   private playerSkills = new Map<
     string,
     Record<string, { level: number; xp: number }>
@@ -802,13 +824,40 @@ export class ResourceSystem extends SystemBase {
             this.activeGathering.delete(playerId);
           }
         }
-
-        // Clean up respawn timer (now managed by SystemBase auto-cleanup)
-        this.respawnTimers.delete(resourceId);
       }
     }
   }
 
+  /**
+   * Start a gathering session for a player on a resource
+   *
+   * Validates:
+   * - Rate limit not exceeded (600ms between requests)
+   * - Resource ID format is valid (security)
+   * - Resource exists and is available
+   * - Player has required skill level (from manifest levelRequired)
+   * - Player has required tool category (from manifest toolRequired)
+   * - Tool level requirement met (from TOOL_TIERS)
+   *
+   * Creates tick-based gathering session processed by processGatheringTick().
+   * Session data is cached at start to avoid per-tick allocations.
+   *
+   * @param data.playerId - Player attempting to gather
+   * @param data.resourceId - Target resource entity ID
+   * @param data.playerPosition - Player position (used for proximity fallback)
+   *
+   * @emits RESOURCE_GATHERING_STARTED on successful session start
+   * @emits UI_MESSAGE on validation failure with error details
+   *
+   * @example
+   * ```typescript
+   * world.emit(EventType.RESOURCE_GATHER, {
+   *   playerId: 'player_123',
+   *   resourceId: 'tree_50_100',
+   *   playerPosition: { x: 50, y: 0, z: 100 },
+   * });
+   * ```
+   */
   private startGathering(data: {
     playerId: string;
     resourceId: string;
@@ -1116,8 +1165,26 @@ export class ResourceSystem extends SystemBase {
   }
 
   /**
-   * Process gathering on each server tick (OSRS-accurate)
-   * Called by TickSystem at RESOURCES priority
+   * Process all active gathering sessions on each server tick (OSRS-accurate 600ms)
+   *
+   * Called by TickSystem at RESOURCES priority. Handles:
+   * 1. Resource respawn checks (tick-based, not setTimeout)
+   * 2. Proximity validation (server-authoritative position)
+   * 3. Inventory capacity checks
+   * 4. Success/failure rolls using cached success rate
+   * 5. Drop rolling from manifest harvestYield
+   * 6. XP awards and inventory updates
+   * 7. Resource depletion with tick-based respawn scheduling
+   *
+   * Uses cached session data to avoid per-tick allocations (performance).
+   * Sessions are cleaned up immediately when conditions fail.
+   *
+   * @param tickNumber - Current server tick number for timing calculations
+   *
+   * @emits INVENTORY_ITEM_ADDED on successful gather
+   * @emits SKILLS_XP_GAINED on successful gather
+   * @emits RESOURCE_GATHERING_STOPPED when session ends
+   * @emits RESOURCE_DEPLETED when resource is exhausted
    */
   public processGatheringTick(tickNumber: number): void {
     // Process respawns first (tick-based)
@@ -1577,13 +1644,14 @@ export class ResourceSystem extends SystemBase {
 
   /**
    * Cleanup when system is destroyed
+   * Clears all active sessions, resources, and rate limits
    */
   destroy(): void {
     // Clear all active gathering sessions
     this.activeGathering.clear();
 
-    // Clear respawn timers map (timers are auto-cleaned by SystemBase)
-    this.respawnTimers.clear();
+    // Clear tick-based respawn tracking
+    this.respawnAtTick.clear();
 
     // Clear all resource data
     this.resources.clear();
