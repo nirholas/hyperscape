@@ -184,6 +184,19 @@ export class TileMovementManager {
 
     const payload = validation.payload!;
 
+    // OSRS-ACCURACY: Emit click-to-move event for weak queue cancellation
+    // This MUST happen before any early returns (same-tile, cancel, etc.)
+    // ResourceSystem subscribes to this to cancel gathering when player clicks ground
+    // In OSRS, ANY click cancels weak queue actions like gathering
+    this.world.emit(EventType.MOVEMENT_CLICK_TO_MOVE, {
+      playerId: playerId,
+      targetPosition: {
+        x: payload.targetTile.x,
+        y: 0,
+        z: payload.targetTile.z,
+      },
+    });
+
     // Handle cancellation
     if (payload.cancel) {
       state.path.length = 0; // Zero-allocation clear

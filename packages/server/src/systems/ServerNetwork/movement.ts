@@ -245,6 +245,7 @@ export class MovementManager {
     // OSRS-accurate: Player clicked to move = disengage from combat
     // In OSRS, clicking anywhere else cancels your current action including combat
     // This allows players to walk away from fights by clicking on the ground
+    // NOTE: MOVEMENT_CLICK_TO_MOVE is emitted in tile-movement.ts handleMoveRequest instead
     this.world.emit(EventType.COMBAT_PLAYER_DISENGAGE, {
       playerId: playerEntity.id,
     });

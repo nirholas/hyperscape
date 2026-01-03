@@ -85,6 +85,8 @@ export class ResourceSystem extends SystemBase {
       cachedSuccessRate: number;
       cachedDrops: ResourceDrop[];
       cachedResourceName: string; // For messages without lookup
+      // OSRS-ACCURACY: Store start position to detect movement (cancels gathering)
+      cachedStartPosition: { x: number; y: number; z: number };
     }
   >();
   // Tick-based respawn tracking (replaces legacy setTimeout approach)
@@ -289,6 +291,102 @@ export class ResourceSystem extends SystemBase {
     this.subscribe<{ id: string }>(EventType.PLAYER_UNREGISTERED, (data) =>
       this.cleanupPlayerGathering(data.id),
     );
+
+    // OSRS-ACCURACY: Cancel gathering when player clicks to move anywhere
+    // In OSRS, gathering uses "weak queue" which is cancelled by ANY click (even same tile)
+    // This ensures clicking ground under yourself cancels gathering, matching OSRS behavior
+    this.subscribe<{
+      playerId: string;
+      targetPosition: { x: number; y: number; z: number };
+    }>(EventType.MOVEMENT_CLICK_TO_MOVE, (data) => {
+      const playerId = createPlayerID(data.playerId);
+      const session = this.activeGathering.get(playerId);
+      if (session) {
+        // Cancel gathering - player clicked to move (weak queue behavior)
+        this.emitTypedEvent(EventType.RESOURCE_GATHERING_STOPPED, {
+          playerId: data.playerId,
+          resourceId: session.resourceId,
+        });
+        this.resetGatheringEmote(data.playerId);
+        this.activeGathering.delete(playerId);
+      }
+    });
+
+    // OSRS-ACCURACY: Cancel gathering when player dies
+    // Critical: Dead players cannot continue gathering
+    this.subscribe<{ playerId: string }>(EventType.PLAYER_DIED, (data) => {
+      this.cancelGatheringForPlayer(data.playerId, "died");
+    });
+
+    // OSRS-ACCURACY: Cancel gathering when player teleports
+    // Cannot gather from a resource across the map
+    this.subscribe<{
+      playerId: string;
+      position: { x: number; y: number; z: number };
+    }>(EventType.PLAYER_TELEPORT_REQUEST, (data) => {
+      this.cancelGatheringForPlayer(data.playerId, "teleported");
+    });
+
+    // OSRS-ACCURACY: Cancel gathering when player initiates combat
+    // Attacking a mob/player is a new action that replaces gathering
+    this.subscribe<{
+      attackerId?: string;
+      playerId?: string;
+      targetId: string;
+      attackerType: string;
+      targetType: string;
+    }>(EventType.COMBAT_ATTACK_REQUEST, (data) => {
+      const playerId = data.attackerId || data.playerId;
+      if (playerId) {
+        this.cancelGatheringForPlayer(playerId, "combat");
+      }
+    });
+
+    // OSRS-ACCURACY: Cancel gathering when player opens bank
+    // Opening interface = new action
+    this.subscribe<{ playerId: string; bankId?: string }>(
+      EventType.BANK_OPEN,
+      (data) => {
+        this.cancelGatheringForPlayer(data.playerId, "bank_open");
+      },
+    );
+
+    // OSRS-ACCURACY: Cancel gathering when player opens store
+    // Opening interface = new action
+    this.subscribe<{ playerId: string; storeId?: string }>(
+      EventType.STORE_OPEN,
+      (data) => {
+        this.cancelGatheringForPlayer(data.playerId, "store_open");
+      },
+    );
+
+    // OSRS-ACCURACY: Cancel gathering when player interacts with any entity
+    // Clicking on an entity (NPC, player, object) = new action
+    // Exception: Don't cancel if interacting with the same resource we're gathering
+    this.subscribe<{
+      playerId: string;
+      entityId: string;
+      interactionType: string;
+    }>(EventType.ENTITY_INTERACT_REQUEST, (data) => {
+      const playerId = createPlayerID(data.playerId);
+      const session = this.activeGathering.get(playerId);
+      // Only cancel if interacting with a DIFFERENT entity than what we're gathering
+      if (session && session.resourceId !== data.entityId) {
+        this.cancelGatheringForPlayer(data.playerId, "entity_interact");
+      }
+    });
+
+    // OSRS-ACCURACY: Cancel gathering when player drops an item
+    // Dropping is an action that should cancel gathering
+    // Also prevents database deadlocks between inventory insert (gathering) and delete (drop)
+    this.subscribe<{
+      playerId: string;
+      itemId: string;
+      quantity?: number;
+      slot?: number;
+    }>(EventType.ITEM_DROP, (data) => {
+      this.cancelGatheringForPlayer(data.playerId, "item_drop");
+    });
 
     // Terrain resources now flow through RESOURCE_SPAWN_POINTS_REGISTERED only
     this.subscribe<{ tileId: string }>("terrain:tile:unloaded", (data) =>
@@ -1046,6 +1144,16 @@ export class ResourceSystem extends SystemBase {
     // PERFORMANCE: Pre-compute success rate to avoid per-tick calculation
     const successRate = this.computeSuccessRate(skillLevel, tuned);
 
+    // OSRS-ACCURACY: Get server-authoritative player position for movement detection
+    const player = this.world.getPlayer?.(data.playerId);
+    const startPosition = player?.position
+      ? { x: player.position.x, y: player.position.y, z: player.position.z }
+      : {
+          x: data.playerPosition.x,
+          y: data.playerPosition.y,
+          z: data.playerPosition.z,
+        };
+
     // Schedule first attempt on next tick with CACHED data
     this.activeGathering.set(playerId, {
       playerId,
@@ -1060,6 +1168,8 @@ export class ResourceSystem extends SystemBase {
       cachedSuccessRate: successRate,
       cachedDrops: resource.drops,
       cachedResourceName: resourceName,
+      // OSRS-ACCURACY: Store position to detect movement (any movement cancels gathering)
+      cachedStartPosition: startPosition,
     });
 
     // Set gathering emote based on skill (generalized)
@@ -1117,6 +1227,31 @@ export class ResourceSystem extends SystemBase {
     this.activeGathering.delete(pid);
     // SECURITY: Clean up rate limit tracking on disconnect
     this.gatherRateLimits.delete(pid);
+  }
+
+  /**
+   * Cancel gathering for a player due to an action/event (OSRS weak queue behavior)
+   * Used by event subscriptions to cancel gathering when player performs another action.
+   *
+   * @param playerId - The player whose gathering should be cancelled
+   * @param reason - Debug reason for logging (e.g., "died", "teleported", "combat")
+   */
+  private cancelGatheringForPlayer(playerId: string, reason: string): void {
+    const pid = createPlayerID(playerId);
+    const session = this.activeGathering.get(pid);
+    if (session) {
+      if (ResourceSystem.DEBUG_GATHERING) {
+        console.log(
+          `[ResourceSystem] Cancelling gather for ${playerId} - reason: ${reason}`,
+        );
+      }
+      this.emitTypedEvent(EventType.RESOURCE_GATHERING_STOPPED, {
+        playerId: playerId,
+        resourceId: session.resourceId,
+      });
+      this.resetGatheringEmote(playerId);
+      this.activeGathering.delete(pid);
+    }
   }
 
   /**
@@ -1204,23 +1339,57 @@ export class ResourceSystem extends SystemBase {
       // Only process when it's time for the next attempt (tick-based)
       if (tickNumber < session.nextAttemptTick) continue;
 
-      // SECURITY: Server-authoritative proximity check
+      // OSRS-ACCURACY: Server-authoritative movement detection
+      // In OSRS, ANY movement cancels gathering (weak queue action)
       // Position is fetched from world state, never from client payload
       const p = this.world.getPlayer?.(playerId);
       const playerPos =
         p && (p as { position?: { x: number; y: number; z: number } }).position
           ? (p as { position: { x: number; y: number; z: number } }).position
           : null;
-      if (
-        !playerPos ||
-        calculateDistance(playerPos, resource.position) >
-          GATHERING_CONSTANTS.DEFAULT_INTERACTION_RANGE
-      ) {
-        // Player moved away from resource - cancel gathering session
+
+      if (!playerPos) {
+        // Player not found - cancel session
         this.emitTypedEvent(EventType.RESOURCE_GATHERING_STOPPED, {
           playerId: playerId,
           resourceId: session.resourceId,
         });
+        completedSessions.push(playerId);
+        continue;
+      }
+
+      // Check if player moved from their starting position (OSRS: any movement cancels)
+      const startPos = session.cachedStartPosition;
+      const epsilon = GATHERING_CONSTANTS.POSITION_EPSILON;
+      const movedX = Math.abs(playerPos.x - startPos.x) > epsilon;
+      const movedZ = Math.abs(playerPos.z - startPos.z) > epsilon;
+
+      if (movedX || movedZ) {
+        // Player moved - cancel gathering (OSRS: weak queue cancelled on any movement)
+        if (ResourceSystem.DEBUG_GATHERING) {
+          console.log(
+            `[ResourceSystem] Cancelling gather for ${playerId} - player moved from (${startPos.x.toFixed(2)}, ${startPos.z.toFixed(2)}) to (${playerPos.x.toFixed(2)}, ${playerPos.z.toFixed(2)})`,
+          );
+        }
+        this.emitTypedEvent(EventType.RESOURCE_GATHERING_STOPPED, {
+          playerId: playerId,
+          resourceId: session.resourceId,
+        });
+        this.resetGatheringEmote(playerId);
+        completedSessions.push(playerId);
+        continue;
+      }
+
+      // Secondary check: still within interaction range (safety net)
+      if (
+        calculateDistance(playerPos, resource.position) >
+        GATHERING_CONSTANTS.DEFAULT_INTERACTION_RANGE
+      ) {
+        this.emitTypedEvent(EventType.RESOURCE_GATHERING_STOPPED, {
+          playerId: playerId,
+          resourceId: session.resourceId,
+        });
+        this.resetGatheringEmote(playerId);
         completedSessions.push(playerId);
         continue;
       }

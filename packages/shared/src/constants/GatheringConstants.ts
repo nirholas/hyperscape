@@ -15,6 +15,8 @@ export const GATHERING_CONSTANTS = {
   PROXIMITY_SEARCH_RADIUS: 15,
   /** Default interaction range for gathering */
   DEFAULT_INTERACTION_RANGE: 4.0,
+  /** Floating point tolerance for position comparison (OSRS: any movement cancels) */
+  POSITION_EPSILON: 0.01,
 
   // === Timing (ticks/ms) ===
   /** Minimum ticks between gather attempts (prevents instant gathering) */
