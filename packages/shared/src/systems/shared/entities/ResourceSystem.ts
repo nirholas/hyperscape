@@ -11,7 +11,16 @@ import {
   createResourceID,
 } from "../../../utils/IdentifierUtils";
 import type { TerrainResourceSpawnPoint } from "../../../types/world/terrain";
-import { TICK_DURATION_MS, snapToTileCenter } from "../movement/TileSystem";
+import {
+  TICK_DURATION_MS,
+  snapToTileCenter,
+  worldToTile,
+  type TileCoord,
+} from "../movement/TileSystem";
+import {
+  FOOTPRINT_SIZES,
+  type ResourceFootprint,
+} from "../../../types/game/resource-processing-types";
 import { getExternalResource } from "../../../utils/ExternalAssetUtils";
 import { ALL_WORLD_AREAS } from "../../../data/world-areas";
 import { GATHERING_CONSTANTS } from "../../../constants/GatheringConstants";
@@ -240,6 +249,36 @@ export class ResourceSystem extends SystemBase {
     if (network?.send) {
       network.send(method, data);
     }
+  }
+
+  /**
+   * Calculate all tiles occupied by a resource based on its anchor tile and footprint
+   *
+   * OSRS-ACCURACY: Multi-tile resources (like large trees) occupy multiple tiles.
+   * The anchor tile is the SW corner, and this function returns all tiles
+   * in the rectangular footprint.
+   *
+   * @param anchorTile - SW corner tile of the resource
+   * @param footprint - Footprint type (standard=1×1, large=2×2, massive=3×3)
+   * @returns Array of all occupied tile coordinates
+   */
+  private getOccupiedTiles(
+    anchorTile: TileCoord,
+    footprint: ResourceFootprint,
+  ): TileCoord[] {
+    const size = FOOTPRINT_SIZES[footprint];
+    const tiles: TileCoord[] = [];
+
+    for (let dx = 0; dx < size.x; dx++) {
+      for (let dz = 0; dz < size.z; dz++) {
+        tiles.push({
+          x: anchorTile.x + dx,
+          z: anchorTile.z + dz,
+        });
+      }
+    }
+
+    return tiles;
   }
 
   async init(): Promise<void> {
@@ -662,6 +701,11 @@ export class ResourceSystem extends SystemBase {
         w: Math.cos(randomYRotation / 2),
       };
 
+      // OSRS-ACCURACY: Calculate tile footprint data for proper interaction positioning
+      const footprint: ResourceFootprint = resource.footprint || "standard";
+      const anchorTile = worldToTile(resource.position.x, resource.position.z);
+      const occupiedTiles = this.getOccupiedTiles(anchorTile, footprint);
+
       const resourceConfig = {
         id: resource.id,
         type: "resource" as const,
@@ -705,6 +749,10 @@ export class ResourceSystem extends SystemBase {
           resource.type,
           spawnPoint.subType,
         ),
+        // OSRS-ACCURACY: Tile-based positioning for face direction and interaction
+        footprint,
+        anchorTile,
+        occupiedTiles,
       };
 
       try {
