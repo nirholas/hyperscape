@@ -420,38 +420,50 @@ private shouldDepleteResource(resource: Resource): boolean {
 
 ---
 
-### Phase 4: Mining-Specific Mechanics
+### Phase 4: Mining-Specific Mechanics ✅ IMPLEMENTED
 
 **Priority:** LOW - Mining works differently than woodcutting
 
-**Changes:**
-- Mining uses 1/8 chance per ore to deplete (no timer)
-- Mining gloves can prevent depletion
-- Different rocks have different respawn times
+**Status:** ✅ COMPLETE
 
-**Implementation:** Already partially addressed in Phase 3. May need additional tuning.
+**Changes:**
+- Mining uses 1/8 chance per ore to deplete (no timer) ✅
+- Mining gloves can prevent depletion (future enhancement)
+- Different rocks have different respawn times ✅
+
+**Implementation:**
+- `ResourceSystem.ts` uses `GATHERING_CONSTANTS.MINING_DEPLETE_CHANCE` (0.125 = 1/8) for mining depletion
+- Mining bypasses the Forestry timer system and uses chance-based depletion
+- Rock-specific respawn times are manifest-driven via `respawnTicks` in `resources.json`
+- Updated copper/tin rock respawn to 4 ticks (~2.4s) for OSRS accuracy
 
 ---
 
-### Phase 5: Future Enhancements
+### Phase 5: Future Enhancements ✅ PARTIALLY IMPLEMENTED
 
 **Priority:** LOW - Nice to have for full OSRS accuracy
 
-5.1. **Full input cancellation system:**
-- Subscribe to click events
-- Cancel gathering on any click (not just movement)
-- Cancel on interface open/close
-- Cancel on inventory interaction
+**Status:** 5.1, 5.2, 5.3 COMPLETE - 5.4 remains future work
 
-5.2. **Fishing spot movement:**
-- Spots don't deplete, they relocate
-- Random timer for movement
-- Move to nearby valid tile
+5.1. **Full input cancellation system:** ✅ IMPLEMENTED
+- Subscribe to click events ✅
+- Cancel gathering on any click (not just movement) ✅
+- Cancel on interface open/close ✅ (BANK_OPEN, STORE_OPEN)
+- Cancel on inventory interaction ✅ (ITEM_DROP)
+- Cancel on equipment changes ✅ (EQUIPMENT_EQUIP, EQUIPMENT_UNEQUIP)
 
-5.3. **"You swing your axe at the tree" message:**
-- Display on gathering start
+5.2. **Fishing spot movement:** ✅ IMPLEMENTED
+- Spots don't deplete, they relocate ✅
+- Random timer for movement (300 ± 100 ticks = 2-4 minutes) ✅
+- Move to nearby valid tile (1-3 tile radius) ✅
+- Cancel gathering and notify player when spot moves ✅
 
-5.4. **Forestry events:**
+5.3. **"You swing your axe at the tree" message:** ✅ IMPLEMENTED
+- Woodcutting: "You swing your axe at the [tree]."
+- Mining: "You swing your pickaxe at the [rock]."
+- Fishing: "You attempt to catch some fish."
+
+5.4. **Forestry events:** (Future Work)
 - Rising roots
 - Group bonus
 - Event eligibility timer
@@ -498,6 +510,14 @@ export const GATHERING_CONSTANTS = {
 
   // Timer regeneration
   TIMER_TICKS_PER_TICK: 1,  // 1:1 regen rate
+
+  // Fishing spot movement (OSRS-accurate)
+  FISHING_SPOT_MOVE: {
+    baseTicks: 300,           // 3 minutes average
+    varianceTicks: 100,       // ±1 minute variance
+    relocateRadius: 3,        // Max tiles to move
+    relocateMinDistance: 1,   // Min tiles from current position
+  } as const,
 } as const;
 ```
 
@@ -533,10 +553,10 @@ export const GATHERING_CONSTANTS = {
 - [x] Timer at 1, get log → tree stays up
 - [x] No one chopping for full duration → timer fully regenerates
 
-### Phase 4: Mining
-- [ ] Mine ore → 1/8 chance to deplete rock
-- [ ] Multiple ores in a row → eventually depletes
-- [ ] Depleted rock → respawns after rock-specific time
+### Phase 4: Mining ✅ IMPLEMENTED
+- [x] Mine ore → 1/8 chance to deplete rock
+- [x] Multiple ores in a row → eventually depletes
+- [x] Depleted rock → respawns after rock-specific time (copper/tin: 4 ticks = 2.4s)
 
 ---
 

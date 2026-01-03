@@ -149,6 +149,21 @@ export class ResourceSystem extends SystemBase {
   // ===== SECURITY: Rate limiting to prevent gather request spam =====
   private gatherRateLimits = new Map<PlayerID, number>();
 
+  // ===== OSRS-ACCURACY: Fishing spot movement timers =====
+  /**
+   * Fishing spots don't deplete - they periodically move to nearby tiles.
+   * Each spot has a random timer that triggers relocation.
+   *
+   * @see https://oldschool.runescape.wiki/w/Fishing
+   */
+  private fishingSpotMoveTimers = new Map<
+    ResourceID,
+    {
+      moveAtTick: number; // Tick when spot will move
+      originalPosition: { x: number; y: number; z: number }; // For reference
+    }
+  >();
+
   // =============================================================================
   // TOOL DATA - Now loaded from tools.json manifest
   // =============================================================================
@@ -363,6 +378,24 @@ export class ResourceSystem extends SystemBase {
       slot?: number;
     }>(EventType.ITEM_DROP, (data) => {
       this.cancelGatheringForPlayer(data.playerId, "item_drop");
+    });
+
+    // OSRS-ACCURACY: Cancel gathering when equipping/unequipping items
+    // In OSRS, equipment changes are distinct actions that interrupt gathering
+    this.subscribe<{
+      playerId: string;
+      itemId: string;
+      slot?: string;
+    }>(EventType.EQUIPMENT_EQUIP, (data) => {
+      this.cancelGatheringForPlayer(data.playerId, "equip_item");
+    });
+
+    this.subscribe<{
+      playerId: string;
+      itemId: string;
+      slot?: string;
+    }>(EventType.EQUIPMENT_UNEQUIP, (data) => {
+      this.cancelGatheringForPlayer(data.playerId, "unequip_item");
     });
 
     // Terrain resources now flow through RESOURCE_SPAWN_POINTS_REGISTERED only
@@ -626,6 +659,14 @@ export class ResourceSystem extends SystemBase {
           ? `tree_${spawnPoint.subType}`
           : "tree_normal";
         this.resourceVariants.set(rid, variant);
+      }
+
+      // OSRS-ACCURACY: Initialize fishing spot movement timer
+      if (
+        resource.type === "fishing_spot" ||
+        resource.skillRequired === "fishing"
+      ) {
+        this.initializeFishingSpotTimer(rid, resource.position);
       }
 
       // Spawn actual ResourceEntity instance
@@ -1161,14 +1202,25 @@ export class ResourceSystem extends SystemBase {
       this.activeGathering.delete(playerId);
     }
 
-    // Start RS-like timed gathering session
-    const actionName =
-      resource.skillRequired === "woodcutting"
-        ? "chopping"
-        : resource.skillRequired === "fishing"
-          ? "fishing"
-          : "gathering";
+    // Start RS-like timed gathering session with OSRS-accurate messages
     const resourceName = resource.name || resource.type.replace("_", " ");
+
+    // OSRS-ACCURACY: Skill-specific gathering start messages
+    // @see https://oldschool.runescape.wiki/w/Woodcutting
+    // @see https://oldschool.runescape.wiki/w/Mining
+    // @see https://oldschool.runescape.wiki/w/Fishing
+    const gatheringStartMessage = (() => {
+      switch (resource.skillRequired) {
+        case "woodcutting":
+          return `You swing your axe at the ${resourceName.toLowerCase()}.`;
+        case "mining":
+          return `You swing your pickaxe at the ${resourceName.toLowerCase()}.`;
+        case "fishing":
+          return "You attempt to catch some fish.";
+        default:
+          return `You start gathering from the ${resourceName.toLowerCase()}.`;
+      }
+    })();
 
     // Create tick-based session
     const sessionResourceId = createResourceID(resource.id);
@@ -1315,18 +1367,18 @@ export class ResourceSystem extends SystemBase {
       tickDurationMs: TICK_DURATION_MS,
     });
 
-    // Send feedback to player via chat and UI
-    this.sendChat(data.playerId, `You start ${actionName}...`);
+    // OSRS-ACCURACY: Send OSRS-style gathering start message via chat and UI
+    this.sendChat(data.playerId, gatheringStartMessage);
     this.emitTypedEvent(EventType.UI_MESSAGE, {
       playerId: data.playerId,
-      message: `You start ${actionName} the ${resourceName.toLowerCase()}...`,
+      message: gatheringStartMessage,
       type: "info",
     });
 
     // Broadcast toast to client via network
     this.sendNetworkMessage("showToast", {
       playerId: data.playerId,
-      message: `You start ${actionName} the ${resourceName.toLowerCase()}...`,
+      message: gatheringStartMessage,
       type: "info",
     });
   }
@@ -1687,6 +1739,143 @@ export class ResourceSystem extends SystemBase {
   }
 
   /**
+   * Initialize a fishing spot movement timer with random delay.
+   * OSRS-ACCURACY: Fishing spots move periodically instead of depleting.
+   */
+  private initializeFishingSpotTimer(
+    resourceId: ResourceID,
+    position: { x: number; y: number; z: number },
+  ): void {
+    const currentTick = this.world.currentTick || 0;
+    const { baseTicks, varianceTicks } = GATHERING_CONSTANTS.FISHING_SPOT_MOVE;
+
+    // Random delay: baseTicks ± varianceTicks
+    const randomVariance =
+      Math.floor(Math.random() * varianceTicks * 2) - varianceTicks;
+    const moveAtTick = currentTick + baseTicks + randomVariance;
+
+    this.fishingSpotMoveTimers.set(resourceId, {
+      moveAtTick,
+      originalPosition: { ...position },
+    });
+
+    console.log(
+      `[Fishing] Initialized spot ${resourceId} move timer: will move at tick ${moveAtTick} (${((moveAtTick - currentTick) * 0.6).toFixed(0)}s)`,
+    );
+  }
+
+  /**
+   * Process fishing spot movement on each tick.
+   * OSRS-ACCURACY: Fishing spots don't deplete - they move to nearby tiles periodically.
+   *
+   * @see https://oldschool.runescape.wiki/w/Fishing
+   */
+  private processFishingSpotMovement(tickNumber: number): void {
+    const spotsToMove: ResourceID[] = [];
+
+    for (const [resourceId, timer] of this.fishingSpotMoveTimers.entries()) {
+      if (tickNumber >= timer.moveAtTick) {
+        spotsToMove.push(resourceId);
+      }
+    }
+
+    for (const resourceId of spotsToMove) {
+      this.relocateFishingSpot(resourceId, tickNumber);
+    }
+  }
+
+  /**
+   * Relocate a fishing spot to a nearby valid tile.
+   * Cancels gathering for any players fishing at the old location.
+   */
+  private relocateFishingSpot(
+    resourceId: ResourceID,
+    currentTick: number,
+  ): void {
+    const resource = this.resources.get(resourceId);
+    if (!resource) {
+      this.fishingSpotMoveTimers.delete(resourceId);
+      return;
+    }
+
+    const timer = this.fishingSpotMoveTimers.get(resourceId);
+    if (!timer) return;
+
+    const { relocateRadius, relocateMinDistance } =
+      GATHERING_CONSTANTS.FISHING_SPOT_MOVE;
+
+    // Find a new position nearby
+    const oldPos = resource.position;
+    let newX = oldPos.x;
+    let newZ = oldPos.z;
+
+    // Try to find a valid new position (simple random offset within radius)
+    // In a full implementation, this would check for water tiles, walkability, etc.
+    for (let attempts = 0; attempts < 10; attempts++) {
+      const angle = Math.random() * Math.PI * 2;
+      const distance =
+        relocateMinDistance +
+        Math.random() * (relocateRadius - relocateMinDistance);
+      const candidateX = oldPos.x + Math.cos(angle) * distance * 2; // 2 = tile size
+      const candidateZ = oldPos.z + Math.sin(angle) * distance * 2;
+
+      // Check distance from original
+      const dx = candidateX - oldPos.x;
+      const dz = candidateZ - oldPos.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+
+      if (dist >= relocateMinDistance * 2) {
+        newX = candidateX;
+        newZ = candidateZ;
+        break;
+      }
+    }
+
+    // Cancel gathering for any players fishing at this spot
+    for (const [playerId, session] of this.activeGathering.entries()) {
+      if (session.resourceId === resourceId) {
+        // Send message to player
+        this.sendChat(
+          playerId as unknown as string,
+          "The fishing spot has moved!",
+        );
+        this.emitTypedEvent(EventType.UI_MESSAGE, {
+          playerId: playerId as unknown as string,
+          message: "The fishing spot has moved!",
+          type: "info",
+        });
+
+        // Stop gathering
+        this.stopGathering({ playerId: playerId as unknown as string });
+      }
+    }
+
+    // Update resource position
+    resource.position = { x: newX, y: oldPos.y, z: newZ };
+
+    // Update entity position if it exists
+    const entity = this.world.entities.get(resourceId);
+    if (entity?.position) {
+      entity.position.x = newX;
+      entity.position.z = newZ;
+    }
+
+    // Broadcast position update to clients
+    this.sendNetworkMessage("fishingSpotMoved", {
+      resourceId: resourceId,
+      oldPosition: oldPos,
+      newPosition: resource.position,
+    });
+
+    console.log(
+      `[Fishing] Spot ${resourceId} moved from (${oldPos.x.toFixed(1)}, ${oldPos.z.toFixed(1)}) to (${newX.toFixed(1)}, ${newZ.toFixed(1)})`,
+    );
+
+    // Reset timer for next movement
+    this.initializeFishingSpotTimer(resourceId, resource.position);
+  }
+
+  /**
    * Process all active gathering sessions on each server tick (OSRS-accurate 600ms)
    *
    * Called by TickSystem at RESOURCES priority. Handles:
@@ -1711,6 +1900,9 @@ export class ResourceSystem extends SystemBase {
   public processGatheringTick(tickNumber: number): void {
     // Process respawns first (tick-based)
     this.processRespawns(tickNumber);
+
+    // OSRS-ACCURACY: Process fishing spot movement
+    this.processFishingSpotMovement(tickNumber);
 
     // FORESTRY: Process resource timers (depletion/regeneration)
     this.processResourceTimers(tickNumber);
@@ -2443,6 +2635,9 @@ export class ResourceSystem extends SystemBase {
 
     // FORESTRY: Clear resource timer tracking
     this.resourceTimers.clear();
+
+    // OSRS-ACCURACY: Clear fishing spot movement timers
+    this.fishingSpotMoveTimers.clear();
 
     // Clear all resource data
     this.resources.clear();

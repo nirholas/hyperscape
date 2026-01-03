@@ -242,6 +242,25 @@ export const GATHERING_CONSTANTS = {
    * OSRS: 1 tick of regeneration per 1 tick of not being gathered.
    */
   TIMER_REGEN_PER_TICK: 1,
+
+  // === Fishing Spot Movement (OSRS-accurate) ===
+  /**
+   * Fishing spots don't deplete - they periodically move to a nearby tile.
+   * In OSRS, spots move randomly every ~4-12 minutes.
+   * Using 300 ticks (3 minutes) as base with ±100 tick variance for gameplay.
+   *
+   * @see https://oldschool.runescape.wiki/w/Fishing
+   */
+  FISHING_SPOT_MOVE: {
+    /** Base ticks before spot moves (300 ticks = 3 minutes) */
+    baseTicks: 300,
+    /** Random variance in ticks (±100 ticks = ±1 minute) */
+    varianceTicks: 100,
+    /** Maximum distance to search for new spot position (tiles) */
+    relocateRadius: 3,
+    /** Minimum distance from current position (tiles) */
+    relocateMinDistance: 1,
+  } as const,
 } as const;
 
 export type GatheringConstants = typeof GATHERING_CONSTANTS;
