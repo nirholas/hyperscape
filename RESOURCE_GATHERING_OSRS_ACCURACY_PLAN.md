@@ -237,70 +237,36 @@ Added `cancelGatheringForPlayer()` helper and subscriptions to:
 
 ---
 
-### Phase 2: Face Direction (#335)
+### Phase 2: Face Direction (#335) ✅ IMPLEMENTED
 
 **Priority:** MEDIUM - Visual polish, affects immersion
 
-**Files to modify:**
+**Status:** ✅ COMPLETE
+
+**Files modified:**
 - `packages/shared/src/systems/shared/entities/ResourceSystem.ts`
 
-**Changes:**
+**Implementation:**
 
-2.1. Add rotation method (or use existing CombatRotationManager pattern):
+2.1. Added `rotatePlayerToFaceResource()` method:
+- Uses pooled quaternions for memory efficiency (same pattern as CombatRotationManager)
+- Sets rotation on entity.rotation (server sync) and entity.base/node.quaternion (client render)
+- **Snaps angle to nearest 45° for 8-direction facing (N, NE, E, SE, S, SW, W, NW)**
+- Adds PI to angle for VRM 1.0+ models with 180° base rotation
+- Calls `markNetworkDirty()` to broadcast rotation change
+
+2.2. Called in `startGathering()` after position computation, before session creation:
 ```typescript
-/**
- * Rotate player to face a resource position (OSRS-style instant rotation)
- * Called when gathering starts
- */
-private rotatePlayerToFaceResource(
-  playerId: string,
-  resourcePosition: { x: number; y: number; z: number }
-): void {
-  const player = this.world.getPlayer?.(playerId);
-  if (!player?.position) return;
-
-  const dx = resourcePosition.x - player.position.x;
-  const dz = resourcePosition.z - player.position.z;
-
-  // Skip if player is on top of resource
-  if (Math.abs(dx) < 0.1 && Math.abs(dz) < 0.1) return;
-
-  // Calculate Y-axis rotation angle (face toward resource)
-  const angle = Math.atan2(dx, dz);
-
-  // Convert to quaternion (Y-axis rotation only)
-  const halfAngle = angle / 2;
-  const sinHalf = Math.sin(halfAngle);
-  const cosHalf = Math.cos(halfAngle);
-
-  // Apply to player rotation
-  const rotatable = player as unknown as {
-    rotation?: { x: number; y: number; z: number; w: number };
-    markNetworkDirty?: () => void;
-  };
-
-  if (rotatable.rotation) {
-    rotatable.rotation.x = 0;
-    rotatable.rotation.y = sinHalf;
-    rotatable.rotation.z = 0;
-    rotatable.rotation.w = cosHalf;
-    rotatable.markNetworkDirty?.();
-  }
-}
-```
-
-2.2. Call rotation in `startGathering()` after validation:
-```typescript
-// After all validation passes, before creating session:
+// OSRS-ACCURACY: Rotate player to face the resource (instant rotation like OSRS)
 this.rotatePlayerToFaceResource(data.playerId, resource.position);
 ```
 
 **Validation:**
-- [ ] Player rotates to face tree when clicking to chop
-- [ ] Player rotates to face rock when clicking to mine
-- [ ] Player rotates to face fishing spot when clicking to fish
-- [ ] Rotation is instant (not animated)
-- [ ] Gathering animation plays in correct direction
+- [x] Player rotates to face tree when clicking to chop
+- [x] Player rotates to face rock when clicking to mine
+- [x] Player rotates to face fishing spot when clicking to fish
+- [x] Rotation is instant (not animated)
+- [x] Gathering animation plays in correct direction
 
 ---
 

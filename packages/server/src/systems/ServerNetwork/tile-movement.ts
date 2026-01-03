@@ -429,6 +429,16 @@ export class TileMovementManager {
       entity.position.set(worldPos.x, worldPos.y, worldPos.z);
       entity.data.position = [worldPos.x, worldPos.y, worldPos.z];
 
+      // OSRS-ACCURATE: Mark player as having moved this tick
+      // Face direction system will skip rotation update if player moved
+      // @see https://osrs-docs.com/docs/packets/outgoing/updating/masks/face-direction/
+      const faceManager = (
+        this.world as {
+          faceDirectionManager?: { markPlayerMoved: (id: string) => void };
+        }
+      ).faceDirectionManager;
+      faceManager?.markPlayerMoved(playerId);
+
       // Calculate rotation based on movement direction (from previous to current tile)
       const prevWorld = tileToWorld(this._prevTile);
       const dx = worldPos.x - prevWorld.x;
@@ -561,6 +571,15 @@ export class TileMovementManager {
     // Update entity position on server
     entity.position.set(worldPos.x, worldPos.y, worldPos.z);
     entity.data.position = [worldPos.x, worldPos.y, worldPos.z];
+
+    // OSRS-ACCURATE: Mark player as having moved this tick
+    // Face direction system will skip rotation update if player moved
+    const faceManager = (
+      this.world as {
+        faceDirectionManager?: { markPlayerMoved: (id: string) => void };
+      }
+    ).faceDirectionManager;
+    faceManager?.markPlayerMoved(playerId);
 
     // Calculate rotation based on movement direction (zero allocation - use pre-allocated tile)
     const prevWorld = tileToWorld(this._prevTile);

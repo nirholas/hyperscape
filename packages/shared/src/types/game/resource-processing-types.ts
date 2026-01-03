@@ -9,6 +9,34 @@ import type { Position3D } from "../core/base-types";
 // ============== RESOURCE TYPES ==============
 
 /**
+ * Resource footprint - how many tiles a resource occupies
+ * Used for OSRS-accurate tile-based positioning and interaction
+ *
+ * - standard: 1×1 tile (normal trees, rocks, fishing spots)
+ * - large: 2×2 tiles (ancient trees, large ore veins)
+ * - massive: 3×3 tiles (world trees, raid objects)
+ *
+ * Multi-tile resources use the SW (south-west) tile as their anchor,
+ * matching OSRS behavior for large objects.
+ *
+ * @see https://oldschool.runescape.wiki/w/Pathfinding
+ */
+export type ResourceFootprint = "standard" | "large" | "massive";
+
+/**
+ * Tile dimensions for each footprint type
+ * Used to calculate occupied tiles and interaction positions
+ */
+export const FOOTPRINT_SIZES: Record<
+  ResourceFootprint,
+  { x: number; z: number }
+> = {
+  standard: { x: 1, z: 1 },
+  large: { x: 2, z: 2 },
+  massive: { x: 3, z: 3 },
+};
+
+/**
  * Resource - a gatherable resource in the world
  */
 export interface Resource {
@@ -23,6 +51,8 @@ export interface Resource {
   isAvailable: boolean;
   lastDepleted: number;
   drops: ResourceDrop[];
+  /** Tile footprint - defaults to "standard" (1×1) if not specified */
+  footprint?: ResourceFootprint;
 }
 
 /**

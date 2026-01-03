@@ -48,7 +48,7 @@ export const GATHERING_CONSTANTS = {
   /** Maximum allowed length for resource IDs */
   MAX_RESOURCE_ID_LENGTH: 100,
   /** Pattern for valid resource IDs (alphanumeric, underscore, hyphen, dot) */
-  VALID_RESOURCE_ID_PATTERN: /^[a-zA-Z0-9_.\-]+$/,
+  VALID_RESOURCE_ID_PATTERN: /^[a-zA-Z0-9_.-]+$/,
 } as const;
 
 export type GatheringConstants = typeof GATHERING_CONSTANTS;

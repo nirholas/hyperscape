@@ -128,6 +128,17 @@ export interface Player {
 
   // Auto-retaliate initialization - top-level for entity creation, used to initialize combat.autoRetaliate
   autoRetaliate?: boolean;
+
+  // === OSRS-Accurate Face Direction System ===
+  // Face target is set when interacting with objects/NPCs, processed at end of tick
+  // @see https://osrs-docs.com/docs/packets/outgoing/updating/masks/face-direction/
+  faceTarget?: {
+    /** Target coordinates to face (tile position) */
+    x: number;
+    z: number;
+  };
+  /** Flag set when player moves during a tick - prevents face direction update */
+  movedThisTick?: boolean;
 }
 
 /**

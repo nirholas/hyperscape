@@ -15,6 +15,7 @@ import { TICK_DURATION_MS } from "../movement/TileSystem";
 import { getExternalResource } from "../../../utils/ExternalAssetUtils";
 import { ALL_WORLD_AREAS } from "../../../data/world-areas";
 import { GATHERING_CONSTANTS } from "../../../constants/GatheringConstants";
+// Note: quaternionPool no longer used here - face rotation is deferred to FaceDirectionManager
 
 /**
  * ResourceSystem - Manages resource gathering for all skills (woodcutting, mining, fishing)
@@ -1154,6 +1155,10 @@ export class ResourceSystem extends SystemBase {
           z: data.playerPosition.z,
         };
 
+    // OSRS-ACCURACY: Rotate player to face the resource (instant rotation like OSRS)
+    // This happens before session starts so animation plays in correct direction
+    this.rotatePlayerToFaceResource(data.playerId, resource.position);
+
     // Schedule first attempt on next tick with CACHED data
     this.activeGathering.set(playerId, {
       playerId,
@@ -1251,6 +1256,43 @@ export class ResourceSystem extends SystemBase {
       });
       this.resetGatheringEmote(playerId);
       this.activeGathering.delete(pid);
+    }
+  }
+
+  /**
+   * Set face target for player to face a resource (OSRS-accurate deferred rotation)
+   *
+   * OSRS-ACCURACY: Face direction is NOT applied immediately. Instead:
+   * 1. A faceTarget is set on the player
+   * 2. At END of the server tick, if player did NOT move, rotation is applied
+   * 3. If player moved, rotation is skipped but faceTarget persists
+   * 4. Player will face the resource when they eventually stop moving
+   *
+   * @see https://osrs-docs.com/docs/packets/outgoing/updating/masks/face-direction/
+   *
+   * @param playerId - The player to set face target for
+   * @param resourcePosition - The position of the resource to face
+   */
+  private rotatePlayerToFaceResource(
+    playerId: string,
+    resourcePosition: { x: number; y: number; z: number },
+  ): void {
+    // OSRS-ACCURACY: Use FaceDirectionManager for deferred tick-end processing
+    // The manager will apply rotation at end of tick only if player didn't move
+    const faceManager = (
+      this.world as {
+        faceDirectionManager?: {
+          setFaceTarget: (playerId: string, x: number, z: number) => void;
+        };
+      }
+    ).faceDirectionManager;
+
+    if (faceManager) {
+      faceManager.setFaceTarget(
+        playerId,
+        resourcePosition.x,
+        resourcePosition.z,
+      );
     }
   }
 

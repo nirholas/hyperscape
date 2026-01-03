@@ -137,6 +137,7 @@ import {
 } from "./handlers/dialogue";
 import { PendingAttackManager } from "./PendingAttackManager";
 import { FollowManager } from "./FollowManager";
+import { FaceDirectionManager } from "./FaceDirectionManager";
 import { handleFollowPlayer } from "./handlers/player";
 
 const defaultSpawn = '{ "position": [0, 50, 0], "quaternion": [0, 0, 0, 1] }';
@@ -214,6 +215,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   private initializationManager!: InitializationManager;
   private connectionHandler!: ConnectionHandler;
   private interactionSessionManager!: InteractionSessionManager;
+  private faceDirectionManager!: FaceDirectionManager;
 
   constructor(world: World) {
     super(world);
@@ -353,6 +355,37 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.tickSystem.onTick((tickNumber) => {
       this.followManager.processTick(tickNumber);
     }, TickPriority.MOVEMENT);
+
+    // OSRS-accurate face direction manager
+    // Defers rotation until end of tick, only applies if player didn't move
+    // @see https://osrs-docs.com/docs/packets/outgoing/updating/masks/face-direction/
+    this.faceDirectionManager = new FaceDirectionManager(this.world);
+
+    // Register face direction processing - runs AFTER all movement at COMBAT priority
+    // OSRS: Face direction mask is processed at end of tick if entity didn't move
+    this.tickSystem.onTick(() => {
+      // Reset movement flags at start of tick processing
+      // (This actually should run at start, but we'll handle it in the processFaceDirection)
+      // Get all player IDs for processing
+      const playerIds: string[] = [];
+      for (const entity of this.world.entities.values()) {
+        const player = entity as { data?: { type?: string }; id: string };
+        if (player.data?.type === "player") {
+          playerIds.push(player.id);
+        }
+      }
+      this.faceDirectionManager.processFaceDirection(playerIds);
+    }, TickPriority.COMBAT);
+
+    // Reset movement flags at the START of each tick (INPUT priority)
+    this.tickSystem.onTick(() => {
+      this.faceDirectionManager.resetMovementFlags();
+    }, TickPriority.INPUT);
+
+    // Store face direction manager on world so ResourceSystem can access it
+    (
+      this.world as { faceDirectionManager?: FaceDirectionManager }
+    ).faceDirectionManager = this.faceDirectionManager;
 
     // Register combat system to process on each tick (after movement, before AI)
     // This is OSRS-accurate: combat runs on the game tick, not per-frame

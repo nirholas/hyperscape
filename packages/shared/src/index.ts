@@ -258,6 +258,11 @@ export { CombatSystem } from "./systems/shared/combat";
 export { LootSystem } from "./systems/shared/economy/LootSystem";
 export { StoreSystem } from "./systems/shared/economy/StoreSystem";
 export { ResourceSystem } from "./systems/shared/entities/ResourceSystem";
+export { FOOTPRINT_SIZES } from "./types/game/resource-processing-types";
+export type {
+  ResourceFootprint,
+  Resource,
+} from "./types/game/resource-processing-types";
 
 // Export node client components
 export { ServerLoader } from "./systems/server/ServerLoader";
@@ -585,6 +590,8 @@ export type {
   SkyNode,
 } from "./types/index";
 export { LooseOctree } from "./utils/physics/LooseOctree";
+export { quaternionPool } from "./utils/pools/QuaternionPool";
+export type { PooledQuaternion } from "./utils/pools/QuaternionPool";
 export type {
   MaterialWrapper,
   InsertOptions,
