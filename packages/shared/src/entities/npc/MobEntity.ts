@@ -652,6 +652,7 @@ export class MobEntity extends CombatantEntity {
       ranged: { level: 1, xp: 0 }, // Most mobs don't use ranged
       // Non-combat skills not applicable to mobs
       woodcutting: { level: 1, xp: 0 },
+      mining: { level: 1, xp: 0 },
       fishing: { level: 1, xp: 0 },
       firemaking: { level: 1, xp: 0 },
       cooking: { level: 1, xp: 0 },

@@ -618,6 +618,10 @@ export async function handleEnterWorld(
               level: savedData.woodcuttingLevel || 1,
               xp: savedData.woodcuttingXp || 0,
             },
+            mining: {
+              level: savedData.miningLevel || 1,
+              xp: savedData.miningXp || 0,
+            },
             fishing: {
               level: savedData.fishingLevel || 1,
               xp: savedData.fishingXp || 0,

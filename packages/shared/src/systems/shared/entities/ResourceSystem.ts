@@ -880,13 +880,11 @@ export class ResourceSystem extends SystemBase {
             : "tree";
 
     // Build variant key for manifest lookup
-    // e.g., "tree_normal", "tree_oak", "fishing_spot_normal"
-    const variantKey =
-      resourceType === "tree"
-        ? spawnPoint.subType
-          ? `tree_${spawnPoint.subType}`
-          : "tree_normal"
-        : `${resourceType}_normal`;
+    // e.g., "tree_normal", "tree_oak", "ore_copper", "fishing_spot_normal"
+    // Uses subType if available, otherwise defaults to "_normal"
+    const variantKey = spawnPoint.subType
+      ? `${resourceType}_${spawnPoint.subType}`
+      : `${resourceType}_normal`;
 
     // Get manifest data - fail fast if not found
     const manifestData = getExternalResource(variantKey);

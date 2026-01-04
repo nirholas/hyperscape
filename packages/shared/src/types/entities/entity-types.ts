@@ -21,6 +21,7 @@ export interface Skills {
   constitution: SkillData;
   ranged: SkillData;
   woodcutting: SkillData;
+  mining: SkillData;
   fishing: SkillData;
   firemaking: SkillData;
   cooking: SkillData;
@@ -111,6 +112,7 @@ export interface StatsComponent {
   magic: SkillData;
   prayer: { level: number; points: number };
   woodcutting: SkillData;
+  mining: SkillData;
   fishing: SkillData;
   firemaking: SkillData;
   cooking: SkillData;

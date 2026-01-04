@@ -406,12 +406,16 @@ export class ResourceEntity extends InteractableEntity {
       geometry = new THREE.CylinderGeometry(0.3, 0.5, 3, 8);
       material = new THREE.MeshStandardMaterial({ color: 0x8b4513 }); // Brown for tree
     } else if (this.config.resourceType === "fishing_spot") {
-      geometry = new THREE.SphereGeometry(0.5, 8, 6);
+      // Create a flat tile that floats above the water - highly visible
+      geometry = new THREE.PlaneGeometry(2.5, 2.5);
       material = new THREE.MeshStandardMaterial({
-        color: 0x4169e1,
+        color: 0x00bfff, // Bright cyan/blue
         transparent: true,
-        opacity: 0.7,
-      }); // Blue for water
+        opacity: 0.75,
+        emissive: 0x0066ff,
+        emissiveIntensity: 0.4,
+        side: THREE.DoubleSide,
+      }); // Bright blue glowing tile for fishing spot
     } else {
       geometry = new THREE.BoxGeometry(1, 1, 1);
       material = new THREE.MeshStandardMaterial({ color: 0x808080 }); // Gray default
@@ -433,12 +437,14 @@ export class ResourceEntity extends InteractableEntity {
       depleted: this.config.depleted,
     };
 
-    // Scale based on resource type
+    // Scale and position based on resource type
     if (this.config.resourceType === "tree") {
       this.mesh.scale.set(2, 3, 2);
     } else if (this.config.resourceType === "fishing_spot") {
-      this.mesh.scale.set(1, 0.1, 1);
-      this.mesh.position.y = -0.4;
+      // Rotate plane to be horizontal (facing up)
+      this.mesh.rotation.x = -Math.PI / 2;
+      // Float above ground level for visibility
+      this.mesh.position.y = 0.5;
     }
 
     this.node.add(this.mesh);

@@ -1435,6 +1435,37 @@ export class ClientNetwork extends SystemBase {
     this.world.emit(EventType.RESOURCE_RESPAWNED, data);
   };
 
+  onFishingSpotMoved = (data: {
+    resourceId: string;
+    oldPosition: { x: number; y: number; z: number };
+    newPosition: { x: number; y: number; z: number };
+  }) => {
+    // Update the fishing spot entity position
+    const entity = this.world.entities.get(data.resourceId);
+    if (entity) {
+      // Update entity position
+      if (entity.position) {
+        entity.position.x = data.newPosition.x;
+        entity.position.y = data.newPosition.y;
+        entity.position.z = data.newPosition.z;
+      }
+      if (entity.node?.position) {
+        entity.node.position.set(
+          data.newPosition.x,
+          data.newPosition.y,
+          data.newPosition.z,
+        );
+      }
+    }
+
+    // Emit event for other systems that might need to react
+    this.world.emit(EventType.RESOURCE_SPAWNED, {
+      id: data.resourceId,
+      type: "fishing_spot",
+      position: data.newPosition,
+    });
+  };
+
   onInventoryUpdated = (data: {
     playerId: string;
     items: Array<{ slot: number; itemId: string; quantity: number }>;

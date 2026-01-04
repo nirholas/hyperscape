@@ -174,6 +174,7 @@ export class PlayerMigration {
           level: old.woodcuttingLevel || 1,
           xp: old.woodcuttingXp || 0,
         },
+        mining: { level: old.miningLevel || 1, xp: old.miningXp || 0 },
         fishing: { level: old.fishingLevel || 1, xp: old.fishingXp || 0 },
         firemaking: {
           level: old.firemakingLevel || 1,
@@ -279,6 +280,7 @@ export class PlayerMigration {
       constitution: { level: 10, xp: 1154 }, // Constitution starts at level 10
       ranged: defaultSkill,
       woodcutting: defaultSkill,
+      mining: defaultSkill,
       fishing: defaultSkill,
       firemaking: defaultSkill,
       cooking: defaultSkill,
