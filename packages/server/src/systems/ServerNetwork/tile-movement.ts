@@ -124,6 +124,63 @@ export class TileMovementManager {
   }
 
   /**
+   * Find the closest walkable tile to a target position using BFS.
+   * Used for fishing where the target (fishing spot) is in water
+   * and we need to find the nearest shore tile.
+   *
+   * @param targetPos - Target position in world coordinates
+   * @param maxSearchRadius - Maximum tiles to search outward (default: 10)
+   * @returns The closest walkable tile, or null if none found within radius
+   */
+  findClosestWalkableTile(
+    targetPos: { x: number; z: number },
+    maxSearchRadius: number = 10,
+  ): TileCoord | null {
+    const targetTile = worldToTile(targetPos.x, targetPos.z);
+
+    // If target tile is already walkable, return it
+    if (this.isTileWalkable(targetTile)) {
+      return targetTile;
+    }
+
+    // BFS outward from target tile to find closest walkable tile
+    // Search in expanding rings (distance 1, 2, 3, etc.)
+    for (let radius = 1; radius <= maxSearchRadius; radius++) {
+      // Check all tiles at this radius (ring around target)
+      // Use a simple approach: check all tiles in a square, filter by distance
+      const candidates: Array<{ tile: TileCoord; dist: number }> = [];
+
+      for (let dx = -radius; dx <= radius; dx++) {
+        for (let dz = -radius; dz <= radius; dz++) {
+          // Only check tiles at exactly this radius (Chebyshev distance)
+          const chebyshev = Math.max(Math.abs(dx), Math.abs(dz));
+          if (chebyshev !== radius) continue;
+
+          const tile: TileCoord = {
+            x: targetTile.x + dx,
+            z: targetTile.z + dz,
+          };
+
+          if (this.isTileWalkable(tile)) {
+            // Use Euclidean distance for sorting (more accurate than Chebyshev)
+            const euclidean = Math.sqrt(dx * dx + dz * dz);
+            candidates.push({ tile, dist: euclidean });
+          }
+        }
+      }
+
+      // If we found walkable tiles at this radius, return the closest one
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => a.dist - b.dist);
+        return candidates[0].tile;
+      }
+    }
+
+    // No walkable tile found within search radius
+    return null;
+  }
+
+  /**
    * Get or create movement state for a player
    */
   private getOrCreateState(playerId: string): TileMovementState {

@@ -52,6 +52,10 @@ interface PendingGather {
   lastPlayerTile: TileCoord;
   /** When this pending gather was created (for timeout) */
   createdTick: number;
+  /** Whether this is a fishing spot (uses distance check instead of tile adjacency) */
+  isFishing: boolean;
+  /** Resource world position (for distance calculations) */
+  resourcePosition: { x: number; y: number; z: number };
 }
 
 /**
@@ -84,7 +88,12 @@ interface ResourceData {
   position: { x: number; y: number; z: number };
   footprint?: ResourceFootprint;
   isAvailable?: boolean;
+  skillRequired?: string;
+  type?: string;
 }
+
+/** Fishing interaction range in world units (meters) */
+const FISHING_INTERACTION_RANGE = 4.0;
 
 /** Timeout for pending gathers (in ticks) - 20 ticks = 12 seconds at 600ms/tick */
 const PENDING_GATHER_TIMEOUT_TICKS = 20;
@@ -157,6 +166,10 @@ export class PendingGatherManager {
     const footprint: ResourceFootprint = resource.footprint || "standard";
     const size = FOOTPRINT_SIZES[footprint];
 
+    // Detect if this is a fishing spot (uses distance check instead of tile adjacency)
+    const isFishing =
+      resource.skillRequired === "fishing" || resource.type === "fishing_spot";
+
     // Calculate tiles
     worldToTileInto(player.position.x, player.position.z, this._playerTile);
     worldToTileInto(
@@ -166,7 +179,7 @@ export class PendingGatherManager {
     );
 
     console.log(
-      `[PendingGather] SERVER-AUTHORITATIVE: Player ${playerId} wants to gather ${resourceId}`,
+      `[PendingGather] SERVER-AUTHORITATIVE: Player ${playerId} wants to gather ${resourceId}${isFishing ? " (FISHING)" : ""}`,
     );
     console.log(
       `[PendingGather]   Resource at anchor (${this._resourceTile.x}, ${this._resourceTile.z}), footprint ${size.x}x${size.z}`,
@@ -175,21 +188,42 @@ export class PendingGatherManager {
       `[PendingGather]   Player at tile (${this._playerTile.x}, ${this._playerTile.z})`,
     );
 
-    // Check if already on a cardinal tile adjacent to resource
-    if (
-      this.isOnCardinalTile(
-        this._playerTile,
-        this._resourceTile,
-        size.x,
-        size.z,
-      )
-    ) {
+    // FISHING: Use world-distance check (shore/water boundary doesn't align with tiles)
+    if (isFishing) {
+      const dx = player.position.x - resource.position.x;
+      const dz = player.position.z - resource.position.z;
+      const worldDistance = Math.sqrt(dx * dx + dz * dz);
+
       console.log(
-        `[PendingGather]   Already on cardinal tile - starting gather immediately`,
+        `[PendingGather]   🎣 Fishing: player is ${worldDistance.toFixed(1)}m from spot (max ${FISHING_INTERACTION_RANGE}m)`,
       );
-      this.rotateToFaceResource(playerId, this._resourceTile, size.x, size.z);
-      this.startGathering(playerId, resourceId);
-      return;
+
+      // Already in range - start immediately
+      if (worldDistance <= FISHING_INTERACTION_RANGE) {
+        console.log(
+          `[PendingGather]   🎣 Already in fishing range - starting gather immediately`,
+        );
+        this.rotateToFaceResource(playerId, this._resourceTile, size.x, size.z);
+        this.startGathering(playerId, resourceId);
+        return;
+      }
+    } else {
+      // NON-FISHING: Check if already on a cardinal tile adjacent to resource
+      if (
+        this.isOnCardinalTile(
+          this._playerTile,
+          this._resourceTile,
+          size.x,
+          size.z,
+        )
+      ) {
+        console.log(
+          `[PendingGather]   Already on cardinal tile - starting gather immediately`,
+        );
+        this.rotateToFaceResource(playerId, this._resourceTile, size.x, size.z);
+        this.startGathering(playerId, resourceId);
+        return;
+      }
     }
 
     // Get player's run mode from TileMovementManager
@@ -199,14 +233,40 @@ export class PendingGatherManager {
       `[PendingGather]   Movement mode: ${isRunning ? "running" : "walking"}`,
     );
 
-    // Use movePlayerToward with GATHERING_RANGE for cardinal-only positioning
-    // This is the SAME approach as combat uses (MELEE_RANGE_STANDARD = 1)
-    this.tileMovementManager.movePlayerToward(
-      playerId,
-      resource.position,
-      isRunning,
-      GATHERING_CONSTANTS.GATHERING_RANGE, // Cardinal-only tiles (same as standard melee)
-    );
+    if (isFishing) {
+      // FISHING: Find closest walkable shore tile and path directly to it
+      // Fishing spots are in water, so we can't use melee-range-based pathfinding
+      const shoreTile = this.tileMovementManager.findClosestWalkableTile(
+        resource.position,
+        10, // Search up to 10 tiles away from fishing spot
+      );
+
+      if (shoreTile) {
+        const shoreWorld = tileToWorld(shoreTile);
+        console.log(
+          `[PendingGather]   🎣 Found shore tile at (${shoreTile.x}, ${shoreTile.z}) - pathing there`,
+        );
+        // Use meleeRange=0 for non-combat direct movement to the shore tile
+        this.tileMovementManager.movePlayerToward(
+          playerId,
+          { x: shoreWorld.x, y: 0, z: shoreWorld.z },
+          isRunning,
+          0, // Non-combat movement - go directly to tile
+        );
+      } else {
+        console.warn(
+          `[PendingGather]   🎣 No walkable shore tile found near fishing spot!`,
+        );
+      }
+    } else {
+      // NON-FISHING: Use GATHERING_RANGE (1) for cardinal-only positioning
+      this.tileMovementManager.movePlayerToward(
+        playerId,
+        resource.position,
+        isRunning,
+        GATHERING_CONSTANTS.GATHERING_RANGE,
+      );
+    }
 
     // Store pending gather
     this.pendingGathers.set(playerId, {
@@ -217,6 +277,8 @@ export class PendingGatherManager {
       footprintZ: size.z,
       lastPlayerTile: { x: this._playerTile.x, z: this._playerTile.z },
       createdTick: currentTick,
+      isFishing,
+      resourcePosition: { ...resource.position },
     });
 
     console.log(
@@ -271,19 +333,39 @@ export class PendingGatherManager {
       // Get current player tile
       worldToTileInto(player.position.x, player.position.z, this._playerTile);
 
-      // Check if on cardinal tile
-      if (
-        this.isOnCardinalTile(
+      // FISHING: Use world-distance check
+      // NON-FISHING: Use tile-based cardinal adjacency
+      let hasArrived = false;
+
+      if (pending.isFishing) {
+        // Distance check for fishing
+        const dx = player.position.x - pending.resourcePosition.x;
+        const dz = player.position.z - pending.resourcePosition.z;
+        const worldDistance = Math.sqrt(dx * dx + dz * dz);
+        hasArrived = worldDistance <= FISHING_INTERACTION_RANGE;
+
+        if (hasArrived) {
+          console.log(
+            `[PendingGather] 🎣 Player ${playerId} arrived within fishing range (${worldDistance.toFixed(1)}m) - starting gather`,
+          );
+        }
+      } else {
+        // Tile check for non-fishing
+        hasArrived = this.isOnCardinalTile(
           this._playerTile,
           pending.resourceAnchorTile,
           pending.footprintX,
           pending.footprintZ,
-        )
-      ) {
-        console.log(
-          `[PendingGather] Player ${playerId} arrived at cardinal tile - starting gather`,
         );
 
+        if (hasArrived) {
+          console.log(
+            `[PendingGather] Player ${playerId} arrived at cardinal tile - starting gather`,
+          );
+        }
+      }
+
+      if (hasArrived) {
         // Rotate player to face resource center
         this.rotateToFaceResource(
           playerId,

@@ -672,10 +672,12 @@ export class ResourceSystem extends SystemBase {
     const fishing = area.fishing!;
 
     // Find water edge points (IN the water, adjacent to walkable land)
+    // sampleInterval=1 matches tile size for tile-accurate adjacency checks
     const waterEdgePoints = findWaterEdgePoints(
       area.bounds,
       this.terrainSystem.getHeightAt.bind(this.terrainSystem),
       {
+        sampleInterval: 1, // 1m = 1 tile for tile-accurate detection
         waterThreshold: 5.4, // TerrainSystem.CONFIG.WATER_THRESHOLD
         shoreMaxHeight: 8.0,
         minSpacing: 8, // Increased spacing to spread spots out more
@@ -1228,51 +1230,84 @@ export class ResourceSystem extends SystemBase {
       data.playerPosition.z,
     );
 
-    // Check if player is standing ON the resource
-    const isOnResource =
-      playerTile.x >= resourceAnchorTile.x &&
-      playerTile.x < resourceAnchorTile.x + size.x &&
-      playerTile.z >= resourceAnchorTile.z &&
-      playerTile.z < resourceAnchorTile.z + size.z;
+    // FISHING: Use simple world-distance check (shore/water boundary doesn't align with tiles)
+    // OTHER SKILLS: Use strict tile-based cardinal adjacency
+    const isFishing = resource.skillRequired === "fishing";
 
-    if (isOnResource) {
-      console.warn(
-        `[ResourceSystem] Player ${data.playerId} at tile (${playerTile.x}, ${playerTile.z}) is ON resource ` +
-          `at anchor (${resourceAnchorTile.x}, ${resourceAnchorTile.z}) with footprint ${size.x}x${size.z}. Rejecting gather.`,
+    if (isFishing) {
+      // Fishing uses world-distance check - player can be up to 4m away from the fishing spot
+      // This is more forgiving since the player stands on shore and casts into water
+      const FISHING_INTERACTION_RANGE = 4.0; // meters
+      const worldDistance = calculateDistance(
+        data.playerPosition,
+        resource.position,
       );
-      this.emitTypedEvent(EventType.UI_MESSAGE, {
-        playerId: data.playerId,
-        message: `You can't gather while standing on the resource. Move to an adjacent tile.`,
-        type: "error",
-      });
-      return;
-    }
 
-    // Check if player is on a cardinal adjacent tile (not diagonal)
-    const isOnCardinal = isCardinallyAdjacentToResource(
-      playerTile,
-      resourceAnchorTile,
-      size.x,
-      size.z,
-    );
+      if (worldDistance > FISHING_INTERACTION_RANGE) {
+        console.warn(
+          `[ResourceSystem] Player ${data.playerId} at (${data.playerPosition.x.toFixed(1)}, ${data.playerPosition.z.toFixed(1)}) ` +
+            `is ${worldDistance.toFixed(1)}m from fishing spot at (${resource.position.x.toFixed(1)}, ${resource.position.z.toFixed(1)}). ` +
+            `Max range: ${FISHING_INTERACTION_RANGE}m. Rejecting gather.`,
+        );
+        this.emitTypedEvent(EventType.UI_MESSAGE, {
+          playerId: data.playerId,
+          message: `Move closer to the fishing spot.`,
+          type: "info",
+        });
+        return;
+      }
 
-    if (!isOnCardinal) {
-      console.warn(
-        `[ResourceSystem] Player ${data.playerId} at tile (${playerTile.x}, ${playerTile.z}) is NOT on cardinal tile ` +
-          `adjacent to resource at (${resourceAnchorTile.x}, ${resourceAnchorTile.z}). Rejecting gather.`,
+      console.log(
+        `[ResourceSystem] ✅ Player ${data.playerId} is ${worldDistance.toFixed(1)}m from fishing spot (max ${FISHING_INTERACTION_RANGE}m). Proceeding with fishing.`,
       );
-      this.emitTypedEvent(EventType.UI_MESSAGE, {
-        playerId: data.playerId,
-        message: `Move closer to the resource.`,
-        type: "info",
-      });
-      return;
-    }
+    } else {
+      // Non-fishing resources use strict tile-based cardinal adjacency
+      // Check if player is standing ON the resource
+      const isOnResource =
+        playerTile.x >= resourceAnchorTile.x &&
+        playerTile.x < resourceAnchorTile.x + size.x &&
+        playerTile.z >= resourceAnchorTile.z &&
+        playerTile.z < resourceAnchorTile.z + size.z;
 
-    console.log(
-      `[ResourceSystem] ✅ Player ${data.playerId} at tile (${playerTile.x}, ${playerTile.z}) is on CARDINAL tile ` +
-        `adjacent to resource at anchor (${resourceAnchorTile.x}, ${resourceAnchorTile.z}). Proceeding with gather.`,
-    );
+      if (isOnResource) {
+        console.warn(
+          `[ResourceSystem] Player ${data.playerId} at tile (${playerTile.x}, ${playerTile.z}) is ON resource ` +
+            `at anchor (${resourceAnchorTile.x}, ${resourceAnchorTile.z}) with footprint ${size.x}x${size.z}. Rejecting gather.`,
+        );
+        this.emitTypedEvent(EventType.UI_MESSAGE, {
+          playerId: data.playerId,
+          message: `You can't gather while standing on the resource. Move to an adjacent tile.`,
+          type: "error",
+        });
+        return;
+      }
+
+      // Check if player is on a cardinal adjacent tile (not diagonal)
+      const isOnCardinal = isCardinallyAdjacentToResource(
+        playerTile,
+        resourceAnchorTile,
+        size.x,
+        size.z,
+      );
+
+      if (!isOnCardinal) {
+        console.warn(
+          `[ResourceSystem] Player ${data.playerId} at tile (${playerTile.x}, ${playerTile.z}) is NOT on cardinal tile ` +
+            `adjacent to resource at (${resourceAnchorTile.x}, ${resourceAnchorTile.z}). Rejecting gather.`,
+        );
+        this.emitTypedEvent(EventType.UI_MESSAGE, {
+          playerId: data.playerId,
+          message: `Move closer to the ${resource.name.toLowerCase()}.`,
+          type: "info",
+        });
+        return;
+      }
+
+      console.log(
+        `[ResourceSystem] ✅ Player ${data.playerId} at tile (${playerTile.x}, ${playerTile.z}) is on CARDINAL tile ` +
+          `adjacent to resource at anchor (${resourceAnchorTile.x}, ${resourceAnchorTile.z}). Proceeding with gather.`,
+      );
+    }
 
     // Check player skill level (reactive pattern)
     const cachedSkills = this.playerSkills.get(data.playerId);

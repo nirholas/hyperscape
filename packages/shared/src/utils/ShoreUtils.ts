@@ -23,7 +23,7 @@ export interface ShorePoint {
 }
 
 export interface FindShorePointsOptions {
-  /** Grid sampling distance in meters (default: 2m) */
+  /** Grid sampling distance in meters (default: 1m to match tile size) */
   sampleInterval?: number;
   /** Height below which is considered water (default: 5.4m from TerrainSystem) */
   waterThreshold?: number;
@@ -34,18 +34,20 @@ export interface FindShorePointsOptions {
 }
 
 /**
- * Direction offsets for checking adjacent water
- * Uses 2m offset to sample neighboring terrain
+ * Direction offsets for checking adjacent tiles.
+ * Uses 1m offset (1 tile) for tile-accurate adjacency checks.
+ * This ensures fishing spots are exactly 1 tile from walkable land,
+ * matching the cardinal adjacency requirement for interaction.
  */
 const DIRECTIONS = [
-  { dx: 0, dz: -2, name: "N" as const },
-  { dx: 0, dz: 2, name: "S" as const },
-  { dx: 2, dz: 0, name: "E" as const },
-  { dx: -2, dz: 0, name: "W" as const },
-  { dx: 2, dz: -2, name: "NE" as const },
-  { dx: -2, dz: -2, name: "NW" as const },
-  { dx: 2, dz: 2, name: "SE" as const },
-  { dx: -2, dz: 2, name: "SW" as const },
+  { dx: 0, dz: -1, name: "N" as const },
+  { dx: 0, dz: 1, name: "S" as const },
+  { dx: 1, dz: 0, name: "E" as const },
+  { dx: -1, dz: 0, name: "W" as const },
+  { dx: 1, dz: -1, name: "NE" as const },
+  { dx: -1, dz: -1, name: "NW" as const },
+  { dx: 1, dz: 1, name: "SE" as const },
+  { dx: -1, dz: 1, name: "SW" as const },
 ];
 
 /**
@@ -69,7 +71,7 @@ export function findShorePoints(
   options: FindShorePointsOptions = {},
 ): ShorePoint[] {
   const {
-    sampleInterval = 2,
+    sampleInterval = 1, // 1m = 1 tile for tile-accurate sampling
     waterThreshold = 5.4,
     shoreMaxHeight = 8.0,
     minSpacing = 6,
@@ -98,17 +100,21 @@ export function findShorePoints(
       }
       if (!waterDir) continue;
 
-      // Check minimum spacing from existing points
+      // Snap to tile center for proper tile alignment (tile center = floor + 0.5)
+      const tileX = Math.floor(x) + 0.5;
+      const tileZ = Math.floor(z) + 0.5;
+
+      // Check minimum spacing from existing points (using snapped positions)
       const tooClose = results.some((p) => {
-        const dist = Math.sqrt((p.x - x) ** 2 + (p.z - z) ** 2);
+        const dist = Math.sqrt((p.x - tileX) ** 2 + (p.z - tileZ) ** 2);
         return dist < minSpacing;
       });
       if (tooClose) continue;
 
       results.push({
-        x,
+        x: tileX,
         y: height,
-        z,
+        z: tileZ,
         waterDirection: waterDir,
       });
     }
@@ -133,7 +139,7 @@ export function findWaterEdgePoints(
   options: FindShorePointsOptions = {},
 ): ShorePoint[] {
   const {
-    sampleInterval = 2,
+    sampleInterval = 1, // 1m = 1 tile for tile-accurate sampling
     waterThreshold = 5.4,
     shoreMaxHeight = 8.0,
     minSpacing = 6,
@@ -166,18 +172,22 @@ export function findWaterEdgePoints(
       }
       if (!landDir) continue;
 
-      // Check minimum spacing from existing points
+      // Snap to tile center for proper tile alignment (tile center = floor + 0.5)
+      // Use water threshold as the Y position (water surface level)
+      const tileX = Math.floor(x) + 0.5;
+      const tileZ = Math.floor(z) + 0.5;
+
+      // Check minimum spacing from existing points (using snapped positions)
       const tooClose = results.some((p) => {
-        const dist = Math.sqrt((p.x - x) ** 2 + (p.z - z) ** 2);
+        const dist = Math.sqrt((p.x - tileX) ** 2 + (p.z - tileZ) ** 2);
         return dist < minSpacing;
       });
       if (tooClose) continue;
 
-      // Use water threshold as the Y position (water surface level)
       results.push({
-        x,
+        x: tileX,
         y: waterThreshold,
-        z,
+        z: tileZ,
         waterDirection: landDir,
       });
     }
