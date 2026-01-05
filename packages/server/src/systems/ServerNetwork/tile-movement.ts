@@ -60,14 +60,6 @@ export class TileMovementManager {
   private arrivalEmotes: Map<string, string> = new Map();
 
   /**
-   * Arrival rotations: When a player arrives at destination, apply this rotation
-   * Used by gathering systems to face the resource, bundled with tileMovementEnd
-   * to prevent client from ignoring server rotation during tile interpolator state.
-   */
-  private arrivalRotations: Map<string, [number, number, number, number]> =
-    new Map();
-
-  /**
    * OSRS-ACCURATE: Tick-start positions for all players
    * Captured at the VERY START of onTick(), BEFORE any movement processing.
    * Used by FollowManager to create the 1-tick delay effect.
@@ -553,19 +545,15 @@ export class TileMovementManager {
         const arrivalEmote = this.arrivalEmotes.get(playerId) || "idle";
         this.arrivalEmotes.delete(playerId);
 
-        // Get any pending arrival rotation (e.g., facing a fishing spot)
-        const arrivalRotation = this.arrivalRotations.get(playerId);
-        this.arrivalRotations.delete(playerId);
-
-        // Broadcast movement end with emote and rotation (atomic delivery)
+        // Broadcast movement end with emote (atomic delivery)
         // Include moveSeq so client can ignore stale end packets
+        // Note: Rotation is handled by FaceDirectionManager at end of tick
         this.sendFn("tileMovementEnd", {
           id: playerId,
           tile: state.currentTile,
           worldPos: [worldPos.x, worldPos.y, worldPos.z],
           moveSeq: state.moveSeq,
           emote: arrivalEmote,
-          quaternion: arrivalRotation,
         });
 
         // Clear path
@@ -575,15 +563,12 @@ export class TileMovementManager {
         // RS3-style: Clear movement flag so combat can resume
         entity.data.tileMovementActive = false;
 
-        // Broadcast entity state with arrival emote and rotation
+        // Broadcast entity state with arrival emote
         const entityModifiedChanges: Record<string, unknown> = {
           p: [worldPos.x, worldPos.y, worldPos.z],
           v: [0, 0, 0],
           e: arrivalEmote,
         };
-        if (arrivalRotation) {
-          entityModifiedChanges.q = arrivalRotation;
-        }
         this.sendFn("entityModified", {
           id: playerId,
           changes: entityModifiedChanges,
@@ -706,18 +691,14 @@ export class TileMovementManager {
       const arrivalEmote = this.arrivalEmotes.get(playerId) || "idle";
       this.arrivalEmotes.delete(playerId);
 
-      // Get any pending arrival rotation (e.g., facing a fishing spot)
-      const arrivalRotation = this.arrivalRotations.get(playerId);
-      this.arrivalRotations.delete(playerId);
-
-      // Broadcast movement end with emote and rotation (atomic delivery)
+      // Broadcast movement end with emote (atomic delivery)
+      // Note: Rotation is handled by FaceDirectionManager at end of tick
       this.sendFn("tileMovementEnd", {
         id: playerId,
         tile: state.currentTile,
         worldPos: [worldPos.x, worldPos.y, worldPos.z],
         moveSeq: state.moveSeq,
         emote: arrivalEmote,
-        quaternion: arrivalRotation,
       });
 
       // Clear path
@@ -727,15 +708,12 @@ export class TileMovementManager {
       // RS3-style: Clear movement flag so combat can resume
       entity.data.tileMovementActive = false;
 
-      // Broadcast entity state with arrival emote and rotation
+      // Broadcast entity state with arrival emote
       const entityModifiedChanges: Record<string, unknown> = {
         p: [worldPos.x, worldPos.y, worldPos.z],
         v: [0, 0, 0],
         e: arrivalEmote,
       };
-      if (arrivalRotation) {
-        entityModifiedChanges.q = arrivalRotation;
-      }
       this.sendFn("entityModified", {
         id: playerId,
         changes: entityModifiedChanges,
@@ -757,7 +735,6 @@ export class TileMovementManager {
   cleanup(playerId: string): void {
     this.playerStates.delete(playerId);
     this.arrivalEmotes.delete(playerId);
-    this.arrivalRotations.delete(playerId);
     this.antiCheat.cleanup(playerId);
     this.movementRateLimiter.reset(playerId);
     this.pathfindRateLimiter.reset(playerId);
@@ -782,28 +759,6 @@ export class TileMovementManager {
    */
   clearArrivalEmote(playerId: string): void {
     this.arrivalEmotes.delete(playerId);
-  }
-
-  /**
-   * Set a rotation to be used when the player arrives at their destination.
-   * This rotation is included in the tileMovementEnd packet, ensuring atomic delivery.
-   * Prevents race conditions where client ignores server rotation during TileInterpolator state.
-   *
-   * @param playerId - The player ID
-   * @param quaternion - The rotation as [x, y, z, w]
-   */
-  setArrivalRotation(
-    playerId: string,
-    quaternion: [number, number, number, number],
-  ): void {
-    this.arrivalRotations.set(playerId, quaternion);
-  }
-
-  /**
-   * Clear any pending arrival rotation for a player.
-   */
-  clearArrivalRotation(playerId: string): void {
-    this.arrivalRotations.delete(playerId);
   }
 
   /**
