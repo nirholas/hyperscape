@@ -195,6 +195,7 @@ export class PlayerEntity extends CombatantEntity {
           constitution: playerData.skills.constitution,
           prayer: { level: 1, points: 0 },
           woodcutting: playerData.skills.woodcutting,
+          mining: playerData.skills.mining,
           fishing: playerData.skills.fishing,
           firemaking: playerData.skills.firemaking,
           cooking: playerData.skills.cooking,
@@ -500,6 +501,7 @@ export class PlayerEntity extends CombatantEntity {
       ranged: playerData.skills.ranged,
       // Non-combat skills
       woodcutting: playerData.skills.woodcutting,
+      mining: playerData.skills.mining,
       fishing: playerData.skills.fishing,
       firemaking: playerData.skills.firemaking,
       cooking: playerData.skills.cooking,
