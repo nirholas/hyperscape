@@ -369,6 +369,19 @@ export class PendingGatherManager {
   }
 
   /**
+   * Clean up when a player disconnects.
+   * Prevents memory leak from orphaned pending gather entries.
+   */
+  onPlayerDisconnect(playerId: string): void {
+    if (this.pendingGathers.has(playerId)) {
+      this.pendingGathers.delete(playerId);
+      console.log(
+        `[PendingGather] Cleaned up pending gather for disconnected player ${playerId}`,
+      );
+    }
+  }
+
+  /**
    * Process all pending gathers - called every tick
    * Checks if players have arrived at cardinal tiles and starts gathering
    */
