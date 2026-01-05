@@ -89,6 +89,7 @@ interface ResourceData {
   footprint?: ResourceFootprint;
   isAvailable?: boolean;
   skillRequired?: string;
+  levelRequired?: number;
   type?: string;
 }
 
@@ -118,6 +119,62 @@ export class PendingGatherManager {
     this.world = world;
     this.tileMovementManager = tileMovementManager;
     this.sendFn = sendFn;
+  }
+
+  /**
+   * Get a player's skill level for a given skill.
+   * Used to check level requirements before setting arrival emote.
+   *
+   * @param playerId - The player ID
+   * @param skillName - The skill name (e.g., "fishing", "woodcutting", "mining")
+   * @returns The player's level in that skill, or 1 if not found
+   */
+  private getPlayerSkillLevel(playerId: string, skillName: string): number {
+    const player = this.world.getPlayer?.(playerId) as {
+      skills?: Record<string, { level: number; xp: number }>;
+      getComponent?: (type: string) => {
+        [key: string]: { level: number; xp: number } | unknown;
+      } | null;
+    } | null;
+    if (!player) return 1;
+
+    // Try player.skills first (common pattern)
+    if (player.skills?.[skillName]) {
+      return player.skills[skillName].level ?? 1;
+    }
+
+    // Try stats component
+    const stats = player.getComponent?.("stats");
+    if (stats) {
+      const skill = stats[skillName] as
+        | { level: number; xp: number }
+        | undefined;
+      return skill?.level ?? 1;
+    }
+
+    return 1;
+  }
+
+  /**
+   * Check if a player meets the level requirement for a resource.
+   *
+   * @param playerId - The player ID
+   * @param resource - The resource to check
+   * @returns true if player meets requirements, false otherwise
+   */
+  private playerMeetsLevelRequirement(
+    playerId: string,
+    resource: ResourceData,
+  ): boolean {
+    if (!resource.skillRequired || resource.levelRequired === undefined) {
+      return true; // No requirement specified
+    }
+
+    const playerLevel = this.getPlayerSkillLevel(
+      playerId,
+      resource.skillRequired,
+    );
+    return playerLevel >= resource.levelRequired;
   }
 
   /**
@@ -246,6 +303,21 @@ export class PendingGatherManager {
         console.log(
           `[PendingGather]   🎣 Found shore tile at (${shoreTile.x}, ${shoreTile.z}) - pathing there`,
         );
+
+        // CRITICAL: Only set arrival emote if player meets level requirement
+        // If level is too low, player will walk to shore but stand idle
+        // ResourceSystem will show "You need level X fishing" message when gather is attempted
+        if (this.playerMeetsLevelRequirement(playerId, resource)) {
+          // Set arrival emote BEFORE starting movement
+          // This gets bundled with tileMovementEnd packet for atomic delivery
+          // Prevents race condition where client sets "idle" before emote arrives
+          this.tileMovementManager.setArrivalEmote(playerId, "fishing");
+        } else {
+          console.log(
+            `[PendingGather]   🎣 Player ${playerId} doesn't meet level ${resource.levelRequired} ${resource.skillRequired} - no fishing emote`,
+          );
+        }
+
         // Use meleeRange=0 for non-combat direct movement to the shore tile
         this.tileMovementManager.movePlayerToward(
           playerId,
@@ -366,6 +438,10 @@ export class PendingGatherManager {
       }
 
       if (hasArrived) {
+        // NOTE: Fishing emote is set via setArrivalEmote() in queuePendingGather()
+        // and bundled with tileMovementEnd packet for atomic delivery to client.
+        // This prevents race condition where client sets "idle" before emote arrives.
+
         // Rotate player to face resource center
         this.rotateToFaceResource(
           playerId,

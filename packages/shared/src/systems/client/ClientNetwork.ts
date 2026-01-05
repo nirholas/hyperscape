@@ -2483,17 +2483,20 @@ export class ClientNetwork extends SystemBase {
     tile: TileCoord;
     worldPos: [number, number, number];
     moveSeq?: number;
+    emote?: string;
   }) => {
     // Use pre-allocated Vector3 to avoid allocation per network message
     _v3_1.set(data.worldPos[0], data.worldPos[1], data.worldPos[2]);
     // Let TileInterpolator handle the arrival smoothly
     // It will snap only if already at destination, otherwise let interpolation finish
     // moveSeq ensures stale end packets are ignored
+    // Pass emote so it's applied atomically with movement end (prevents race condition)
     this.tileInterpolator.onMovementEnd(
       data.id,
       data.tile,
       _v3_1,
       data.moveSeq,
+      data.emote,
     );
 
     // Get entity for flag and emote updates
@@ -2505,9 +2508,13 @@ export class ClientNetwork extends SystemBase {
       entity.data.tileInterpolatorControlled = true;
     }
 
-    // DON'T snap entity position here - TileInterpolator handles smooth arrival
-    // Only update emote if interpolator says we're not moving
-    if (!this.tileInterpolator.isInterpolating(data.id)) {
+    // Apply emote from server if provided (atomic delivery with movement end)
+    // This prevents race condition where client sets "idle" before server's emote arrives
+    if (data.emote && entity) {
+      entity.data.emote = data.emote;
+      entity.modify({ e: data.emote });
+    } else if (!this.tileInterpolator.isInterpolating(data.id)) {
+      // No emote from server and not interpolating - default to idle
       if (entity) {
         entity.data.emote = "idle";
       }

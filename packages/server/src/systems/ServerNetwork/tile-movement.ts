@@ -53,6 +53,13 @@ export class TileMovementManager {
   private _tempQuat = new THREE.Quaternion();
 
   /**
+   * Arrival emotes: When a player arrives at destination, use this emote instead of "idle"
+   * Used by gathering systems (fishing, mining, etc.) to set the action emote atomically
+   * with the movement end packet, preventing race conditions on the client.
+   */
+  private arrivalEmotes: Map<string, string> = new Map();
+
+  /**
    * OSRS-ACCURATE: Tick-start positions for all players
    * Captured at the VERY START of onTick(), BEFORE any movement processing.
    * Used by FollowManager to create the 1-tick delay effect.
@@ -533,13 +540,19 @@ export class TileMovementManager {
 
       // Check if arrived at destination
       if (state.pathIndex >= state.path.length) {
-        // Broadcast movement end
+        // Get any pending arrival emote (e.g., "fishing" for gathering actions)
+        // This is bundled with tileMovementEnd to prevent race conditions
+        const arrivalEmote = this.arrivalEmotes.get(playerId) || "idle";
+        this.arrivalEmotes.delete(playerId);
+
+        // Broadcast movement end with emote (atomic delivery)
         // Include moveSeq so client can ignore stale end packets
         this.sendFn("tileMovementEnd", {
           id: playerId,
           tile: state.currentTile,
           worldPos: [worldPos.x, worldPos.y, worldPos.z],
           moveSeq: state.moveSeq,
+          emote: arrivalEmote,
         });
 
         // Clear path
@@ -549,13 +562,13 @@ export class TileMovementManager {
         // RS3-style: Clear movement flag so combat can resume
         entity.data.tileMovementActive = false;
 
-        // Broadcast idle state
+        // Broadcast entity state with arrival emote
         this.sendFn("entityModified", {
           id: playerId,
           changes: {
             p: [worldPos.x, worldPos.y, worldPos.z],
             v: [0, 0, 0],
-            e: "idle",
+            e: arrivalEmote,
           },
         });
       }
@@ -671,12 +684,18 @@ export class TileMovementManager {
 
     // Check if arrived at destination
     if (state.pathIndex >= state.path.length) {
-      // Broadcast movement end
+      // Get any pending arrival emote (e.g., "fishing" for gathering actions)
+      // This is bundled with tileMovementEnd to prevent race conditions
+      const arrivalEmote = this.arrivalEmotes.get(playerId) || "idle";
+      this.arrivalEmotes.delete(playerId);
+
+      // Broadcast movement end with emote (atomic delivery)
       this.sendFn("tileMovementEnd", {
         id: playerId,
         tile: state.currentTile,
         worldPos: [worldPos.x, worldPos.y, worldPos.z],
         moveSeq: state.moveSeq,
+        emote: arrivalEmote,
       });
 
       // Clear path
@@ -686,13 +705,13 @@ export class TileMovementManager {
       // RS3-style: Clear movement flag so combat can resume
       entity.data.tileMovementActive = false;
 
-      // Broadcast idle state
+      // Broadcast entity state with arrival emote
       this.sendFn("entityModified", {
         id: playerId,
         changes: {
           p: [worldPos.x, worldPos.y, worldPos.z],
           v: [0, 0, 0],
-          e: "idle",
+          e: arrivalEmote,
         },
       });
     }
@@ -711,9 +730,31 @@ export class TileMovementManager {
    */
   cleanup(playerId: string): void {
     this.playerStates.delete(playerId);
+    this.arrivalEmotes.delete(playerId);
     this.antiCheat.cleanup(playerId);
     this.movementRateLimiter.reset(playerId);
     this.pathfindRateLimiter.reset(playerId);
+  }
+
+  /**
+   * Set an emote to be used when the player arrives at their destination.
+   * This emote is included in the tileMovementEnd packet, ensuring atomic delivery
+   * with the arrival notification. Prevents race conditions where the client
+   * sets "idle" before receiving a separate emote packet.
+   *
+   * @param playerId - The player ID
+   * @param emote - The emote to use on arrival (e.g., "fishing", "chopping")
+   */
+  setArrivalEmote(playerId: string, emote: string): void {
+    this.arrivalEmotes.set(playerId, emote);
+  }
+
+  /**
+   * Clear any pending arrival emote for a player.
+   * Called when gathering is cancelled or player moves to a different destination.
+   */
+  clearArrivalEmote(playerId: string): void {
+    this.arrivalEmotes.delete(playerId);
   }
 
   /**
