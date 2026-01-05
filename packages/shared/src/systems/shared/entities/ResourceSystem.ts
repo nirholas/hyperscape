@@ -41,6 +41,25 @@ import type { WorldArea } from "../../../types/world/world-types";
 // Note: quaternionPool no longer used here - face rotation is deferred to FaceDirectionManager
 
 /**
+ * Player entity interface for emote operations.
+ * Used for type-safe access to player emote properties.
+ */
+interface PlayerWithEmote {
+  emote?: string;
+  data?: { e?: string };
+  markNetworkDirty?: () => void;
+}
+
+/**
+ * Resource entity interface for respawn/deplete operations.
+ * Used for type-safe access to resource entity methods.
+ */
+interface ResourceEntityMethods {
+  respawn?: () => void;
+  deplete?: () => void;
+}
+
+/**
  * ResourceSystem - Manages resource gathering for all skills (woodcutting, mining, fishing)
  *
  * ## Architecture
@@ -458,11 +477,7 @@ export class ResourceSystem extends SystemBase {
       console.log(`[ResourceSystem] 🪓 Setting ${emote} emote for ${playerId}`);
 
       // Set emote STRING KEY (players use emote strings which get mapped to URLs)
-      const playerWithEmote = playerEntity as unknown as {
-        emote?: string;
-        data?: { e?: string };
-        markNetworkDirty?: () => void;
-      };
+      const playerWithEmote = playerEntity as PlayerWithEmote;
       if (playerWithEmote.emote !== undefined) {
         playerWithEmote.emote = emote;
       }
@@ -494,11 +509,7 @@ export class ResourceSystem extends SystemBase {
       );
 
       // Reset to idle
-      const playerWithEmote = playerEntity as unknown as {
-        emote?: string;
-        data?: { e?: string };
-        markNetworkDirty?: () => void;
-      };
+      const playerWithEmote = playerEntity as PlayerWithEmote;
       if (playerWithEmote.emote !== undefined) {
         playerWithEmote.emote = "idle";
       }
@@ -1583,7 +1594,7 @@ export class ResourceSystem extends SystemBase {
     });
   }
 
-  private stopGathering(data: { playerId: string }): void {
+  private stopGathering(data: { playerId: string | PlayerID }): void {
     const playerId = createPlayerID(data.playerId);
     const session = this.activeGathering.get(playerId);
     if (session) {
@@ -1912,12 +1923,9 @@ export class ResourceSystem extends SystemBase {
           // Call entity respawn method if available
           const ent = this.world.entities.get(resourceId);
           // ResourceEntity has a respawn method - check if entity is ResourceEntity
-          if (
-            ent &&
-            typeof (ent as unknown as { respawn?: () => void }).respawn ===
-              "function"
-          ) {
-            (ent as unknown as { respawn: () => void }).respawn();
+          const resourceEntity = ent as ResourceEntityMethods | undefined;
+          if (resourceEntity?.respawn) {
+            resourceEntity.respawn();
           }
 
           this.emitTypedEvent(EventType.RESOURCE_RESPAWNED, {
@@ -2055,18 +2063,15 @@ export class ResourceSystem extends SystemBase {
     for (const [playerId, session] of this.activeGathering.entries()) {
       if (session.resourceId === resourceId) {
         // Send message to player
-        this.sendChat(
-          playerId as unknown as string,
-          "The fishing spot has moved!",
-        );
+        this.sendChat(playerId, "The fishing spot has moved!");
         this.emitTypedEvent(EventType.UI_MESSAGE, {
-          playerId: playerId as unknown as string,
+          playerId,
           message: "The fishing spot has moved!",
           type: "info",
         });
 
         // Stop gathering
-        this.stopGathering({ playerId: playerId as unknown as string });
+        this.stopGathering({ playerId });
       }
     }
 
@@ -2318,7 +2323,7 @@ export class ResourceSystem extends SystemBase {
 
         // Feedback using manifest data
         this.sendChat(
-          playerId as unknown as string,
+          playerId,
           `You receive ${drop.quantity}x ${drop.itemName}.`,
         );
         this.emitTypedEvent(EventType.UI_MESSAGE, {
@@ -2374,13 +2379,11 @@ export class ResourceSystem extends SystemBase {
           resource.isAvailable = false;
           resource.lastDepleted = Date.now();
 
-          const resourceEntity = this.world.entities.get(session.resourceId);
-          if (
-            resourceEntity &&
-            typeof (resourceEntity as unknown as { deplete?: () => void })
-              .deplete === "function"
-          ) {
-            (resourceEntity as unknown as { deplete: () => void }).deplete();
+          const resourceEntity = this.world.entities.get(session.resourceId) as
+            | ResourceEntityMethods
+            | undefined;
+          if (resourceEntity?.deplete) {
+            resourceEntity.deplete();
           }
 
           this.emitTypedEvent(EventType.RESOURCE_DEPLETED, {

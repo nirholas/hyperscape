@@ -247,7 +247,7 @@ export class FaceDirectionManager {
     if (!entitiesSystem?.players) return;
 
     for (const [, player] of entitiesSystem.players) {
-      const faceable = player as unknown as FaceableEntity;
+      const faceable = player as FaceableEntity;
       if (faceable.movedThisTick !== undefined) {
         faceable.movedThisTick = false;
       }
