@@ -2,7 +2,7 @@
 
 **Goal:** Achieve 9/10 production quality rating
 
-**Current Rating:** 8.5/10 (after Phase 1-4 + fishing fixes)
+**Current Rating:** 8.7/10 (after Phase 1-4 + Phase 7 unit tests)
 
 ---
 
@@ -10,12 +10,12 @@
 
 | Criteria | Current | Target | Gap | Notes |
 |----------|---------|--------|-----|-------|
-| Production Quality | 8.5 | 9.0 | -0.5 | Improved (error handling, debug flags, types) |
-| Best Practices | 8.5 | 9.0 | -0.5 | Improved (type safety, interfaces) |
+| Production Quality | 8.7 | 9.0 | -0.3 | **Improved** (30 unit tests, all passing) |
+| Best Practices | 8.7 | 9.0 | -0.3 | **Improved** (unit tests validate OSRS mechanics) |
 | OWASP Security | 8.0 | 9.0 | -1.0 | Unchanged |
-| Memory Hygiene | 8.5 | 9.0 | -0.5 | **Improved** (3 hot path allocations fixed) |
+| Memory Hygiene | 8.5 | 9.0 | -0.5 | Improved (3 hot path allocations fixed) |
 | SOLID Principles | 6.0 | 8.5 | -2.5 | Improved (interfaces, method extraction) |
-| OSRS Likeness | 9.0 | 9.0 | 0 | Unchanged |
+| OSRS Likeness | 9.0 | 9.0 | 0 | **Tested** (lerpSuccessRate, rollFishDrop) |
 
 ---
 
@@ -305,15 +305,23 @@ packages/shared/src/systems/shared/entities/
 
 ---
 
-## Phase 7: Testing
+## Phase 7: Testing ✅ PARTIAL (Unit Tests Complete)
 
-### 7.1 Unit Tests
-- [ ] `ResourceSystem.test.ts` - Core gathering logic
-- [ ] `PendingGatherManager.test.ts` - Movement-to-gather flow
-- [ ] `DropRoller.test.ts` - Drop calculations
-- [ ] `ToolValidator.test.ts` - Tool/level validation
+### 7.1 Unit Tests ✅ DONE
+- [x] `ResourceSystem.test.ts` - Core gathering logic (30 tests, all passing)
+  - [x] `rollDrop` - Drop probability distribution (4 tests)
+  - [x] `isValidResourceId` - Security validation (4 tests)
+  - [x] `getToolCategory` - Tool extraction incl. OSRS-accurate fishing (4 tests)
+  - [x] `getToolDisplayName` - Tool display names (2 tests)
+  - [x] `computeSuccessRate` - OSRS success rate integration (4 tests)
+  - [x] `computeCycleTicks` - Cycle time per skill type (3 tests)
+  - [x] `lerpSuccessRate` - OSRS catch rate formula (5 tests)
+  - [x] `rollFishDrop` - Priority-based fish rolling (4 tests)
+- [ ] `PendingGatherManager.test.ts` - Movement-to-gather flow (deferred)
+- [~] `DropRoller.test.ts` - Covered by ResourceSystem.test.ts
+- [~] `ToolValidator.test.ts` - Covered by ResourceSystem.test.ts
 
-### 7.2 Integration Tests
+### 7.2 Integration Tests (Future)
 - [ ] Full fishing flow (click → walk → fish → catch)
 - [ ] Disconnect during gathering cleanup
 - [ ] Inventory full handling
@@ -329,7 +337,7 @@ packages/shared/src/systems/shared/entities/
 | Phase 2: Memory Hygiene | **CRITICAL** | 2-3 hrs | Fixes GC pressure, 60fps stability | ✅ DONE |
 | Phase 3: Code Quality | **CRITICAL** | 1-2 hrs | Error handling, debug flags | ✅ DONE |
 | Phase 4: Type Safety | MEDIUM | 2-3 hrs | Reduces future bugs | ✅ DONE |
-| Phase 7: Testing | MEDIUM | 4-6 hrs | Confidence in changes | ⏳ NEXT |
+| Phase 7: Testing | MEDIUM | 4-6 hrs | Confidence in changes | ✅ PARTIAL (unit tests) |
 | Phase 5: SOLID | LOW | 4-6 hrs | Architecture improvement | Pending |
 | Phase 6: Security | LOW | 2-3 hrs | Already reasonably secure | Pending |
 
@@ -359,4 +367,4 @@ packages/shared/src/systems/shared/entities/
 | `tile-movement.ts` | ~850 | Dead code (arrivalRotations infrastructure) |
 | `handlers/resources.ts` | ~55 | Used by ElizaOS AI agents - DO NOT DELETE |
 | `GatheringConstants.ts` | ~270 | Good, well-documented |
-| `ResourceSystem.test.ts` | ~380 | Partial coverage (utility methods only) |
+| `ResourceSystem.test.ts` | ~510 | 30 tests covering utility + OSRS mechanics |

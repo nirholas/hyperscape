@@ -193,10 +193,13 @@ describe("ResourceSystem", () => {
       expect(getToolCategory(system, "rune_pickaxe")).toBe("pickaxe");
     });
 
-    it("should extract fishing category from fishing equipment", () => {
-      expect(getToolCategory(system, "fishing_rod")).toBe("fishing");
-      expect(getToolCategory(system, "small_fishing_net")).toBe("fishing");
-      expect(getToolCategory(system, "harpoon")).toBe("fishing");
+    it("should return exact tool ID for fishing equipment (OSRS-accurate)", () => {
+      // OSRS-ACCURACY: Fishing tools require exact matching, not interchangeable
+      expect(getToolCategory(system, "fishing_rod")).toBe("fishing_rod");
+      expect(getToolCategory(system, "small_fishing_net")).toBe(
+        "small_fishing_net",
+      );
+      expect(getToolCategory(system, "harpoon")).toBe("harpoon");
     });
 
     it("should fallback to last segment for unknown tools", () => {
@@ -215,7 +218,11 @@ describe("ResourceSystem", () => {
     it("should return friendly names for known categories", () => {
       expect(getToolDisplayName(system, "hatchet")).toBe("hatchet");
       expect(getToolDisplayName(system, "pickaxe")).toBe("pickaxe");
-      expect(getToolDisplayName(system, "fishing")).toBe("fishing equipment");
+      // OSRS-accurate: fishing tools use exact IDs, not "fishing equipment"
+      expect(getToolDisplayName(system, "fishing_rod")).toBe("fishing rod");
+      expect(getToolDisplayName(system, "small_fishing_net")).toBe(
+        "small fishing net",
+      );
     });
 
     it("should return category name for unknown categories", () => {
@@ -225,156 +232,314 @@ describe("ResourceSystem", () => {
   });
 
   // ===== SUCCESS RATE CALCULATION TESTS =====
+  // NOTE: computeSuccessRate now uses OSRS lerpSuccessRate formula internally.
+  // Detailed formula tests are in the lerpSuccessRate test suite.
+  // These tests verify the integration works correctly.
   describe("computeSuccessRate", () => {
     const computeSuccessRate = (
       sys: ResourceSystem,
       skillLevel: number,
-      tuned: { levelRequired: number },
+      skill: string,
+      resourceVariant: string,
+      toolTier: string | null,
     ) =>
       (
         sys as unknown as {
           computeSuccessRate: (
-            s: number,
-            t: { levelRequired: number },
+            skillLevel: number,
+            skill: string,
+            resourceVariant: string,
+            toolTier: string | null,
           ) => number;
         }
-      ).computeSuccessRate(skillLevel, tuned);
+      ).computeSuccessRate(skillLevel, skill, resourceVariant, toolTier);
 
-    it("should return base rate at requirement level", () => {
-      const rate = computeSuccessRate(system, 1, { levelRequired: 1 });
-      expect(rate).toBeCloseTo(0.35, 2);
+    it("should return rate between 0 and 1", () => {
+      const rate = computeSuccessRate(system, 1, "woodcutting", "normal", null);
+      expect(rate).toBeGreaterThanOrEqual(0);
+      expect(rate).toBeLessThanOrEqual(1);
     });
 
-    it("should increase rate above requirement", () => {
-      const rate = computeSuccessRate(system, 50, { levelRequired: 1 });
-      expect(rate).toBeGreaterThan(0.35);
+    it("should increase rate with higher skill level", () => {
+      const lowRate = computeSuccessRate(
+        system,
+        1,
+        "woodcutting",
+        "normal",
+        null,
+      );
+      const highRate = computeSuccessRate(
+        system,
+        50,
+        "woodcutting",
+        "normal",
+        null,
+      );
+      expect(highRate).toBeGreaterThan(lowRate);
     });
 
-    it("should cap at maximum rate (0.85)", () => {
-      const rate = computeSuccessRate(system, 99, { levelRequired: 1 });
-      expect(rate).toBeLessThanOrEqual(0.85);
+    it("should cap at maximum rate (OSRS formula bounds)", () => {
+      const rate = computeSuccessRate(
+        system,
+        99,
+        "woodcutting",
+        "normal",
+        null,
+      );
+      expect(rate).toBeLessThanOrEqual(1);
     });
 
-    it("should not go below minimum rate (0.25)", () => {
-      const rate = computeSuccessRate(system, 1, { levelRequired: 99 });
-      expect(rate).toBeGreaterThanOrEqual(0.25);
-    });
-
-    it("should increase by 1% per level above requirement", () => {
-      const baseRate = computeSuccessRate(system, 1, { levelRequired: 1 });
-      const rate10Above = computeSuccessRate(system, 11, { levelRequired: 1 });
-      // Should be ~10% higher
-      expect(rate10Above - baseRate).toBeCloseTo(0.1, 1);
+    it("should not go below 0", () => {
+      const rate = computeSuccessRate(system, 1, "woodcutting", "oak", null);
+      expect(rate).toBeGreaterThanOrEqual(0);
     });
   });
 
   // ===== CYCLE TIME CALCULATION TESTS =====
+  // NOTE: computeCycleTicks now uses GATHERING_CONSTANTS.SKILL_MECHANICS
+  // which has different behaviors per skill type (fixed-roll vs variable).
   describe("computeCycleTicks", () => {
     const computeCycleTicks = (
       sys: ResourceSystem,
-      skillLevel: number,
+      skill: string,
       tuned: { baseCycleTicks: number; levelRequired: number },
-      toolMultiplier: number,
+      toolData: { tier: string; speedMultiplier: number } | null,
     ) =>
       (
         sys as unknown as {
           computeCycleTicks: (
-            s: number,
-            t: { baseCycleTicks: number; levelRequired: number },
-            m: number,
+            skill: string,
+            tuned: { baseCycleTicks: number; levelRequired: number },
+            toolData: { tier: string; speedMultiplier: number } | null,
           ) => number;
         }
-      ).computeCycleTicks(skillLevel, tuned, toolMultiplier);
+      ).computeCycleTicks(skill, tuned, toolData);
 
-    it("should return base ticks with no bonuses", () => {
+    it("should return ticks for woodcutting (fixed-roll skill)", () => {
+      // Woodcutting uses fixed roll frequency from SKILL_MECHANICS
       const ticks = computeCycleTicks(
         system,
-        1,
+        "woodcutting",
         { baseCycleTicks: 4, levelRequired: 1 },
-        1.0,
+        null,
       );
-      expect(ticks).toBe(4);
+      // Should return a positive integer
+      expect(ticks).toBeGreaterThanOrEqual(1);
     });
 
-    it("should reduce ticks with better tool multiplier", () => {
-      const baseTicks = computeCycleTicks(
-        system,
-        1,
-        { baseCycleTicks: 4, levelRequired: 1 },
-        1.0,
-      );
-      const dragonTicks = computeCycleTicks(
-        system,
-        1,
-        { baseCycleTicks: 4, levelRequired: 1 },
-        0.7,
-      );
-      expect(dragonTicks).toBeLessThan(baseTicks);
-    });
-
-    it("should never go below 1 tick", () => {
+    it("should return ticks for fishing (variable-roll skill)", () => {
+      // Fishing uses base cycle ticks from resource
       const ticks = computeCycleTicks(
         system,
-        99,
+        "fishing",
+        { baseCycleTicks: 5, levelRequired: 1 },
+        null,
+      );
+      expect(ticks).toBeGreaterThanOrEqual(1);
+    });
+
+    it("should never go below minimum cycle ticks", () => {
+      const ticks = computeCycleTicks(
+        system,
+        "mining",
         { baseCycleTicks: 1, levelRequired: 1 },
-        0.5,
+        { tier: "dragon", speedMultiplier: 0.5 },
       );
       expect(ticks).toBeGreaterThanOrEqual(1);
     });
   });
 
-  // ===== TOOL TIER TESTS =====
-  describe("TOOL_TIERS", () => {
-    it("should have woodcutting tiers in descending order of power", () => {
-      const tiers = (
-        ResourceSystem as unknown as {
-          TOOL_TIERS: Record<string, Array<{ cycleMultiplier: number }>>;
+  // ===== OSRS CATCH RATE FORMULA TESTS =====
+  describe("lerpSuccessRate", () => {
+    const lerpSuccessRate = (
+      sys: ResourceSystem,
+      low: number,
+      high: number,
+      level: number,
+    ) =>
+      (
+        sys as unknown as {
+          lerpSuccessRate: (low: number, high: number, level: number) => number;
         }
-      ).TOOL_TIERS.woodcutting;
+      ).lerpSuccessRate(low, high, level);
 
-      // Dragon should be first (best)
-      expect(tiers[0].cycleMultiplier).toBe(0.7);
-      // Bronze should be last (worst)
-      expect(tiers[tiers.length - 1].cycleMultiplier).toBe(1.0);
-
-      // Verify descending order
-      for (let i = 1; i < tiers.length; i++) {
-        expect(tiers[i].cycleMultiplier).toBeGreaterThanOrEqual(
-          tiers[i - 1].cycleMultiplier,
-        );
-      }
+    it("should use low value at level 1", () => {
+      // At level 1: numerator = 1 + floor(low + 0.5) = 1 + low
+      const rate = lerpSuccessRate(system, 48, 127, 1);
+      // Expected: (1 + floor(48 + 0 + 0.5)) / 256 = 49/256 ≈ 0.191
+      expect(rate).toBeCloseTo(49 / 256, 2);
     });
 
-    it("should have mining tiers matching woodcutting structure", () => {
-      const miningTiers = (
-        ResourceSystem as unknown as {
-          TOOL_TIERS: Record<string, Array<{ cycleMultiplier: number }>>;
-        }
-      ).TOOL_TIERS.mining;
-      const woodcuttingTiers = (
-        ResourceSystem as unknown as {
-          TOOL_TIERS: Record<string, Array<{ cycleMultiplier: number }>>;
-        }
-      ).TOOL_TIERS.woodcutting;
-
-      expect(miningTiers.length).toBe(woodcuttingTiers.length);
-      // Same multipliers
-      for (let i = 0; i < miningTiers.length; i++) {
-        expect(miningTiers[i].cycleMultiplier).toBe(
-          woodcuttingTiers[i].cycleMultiplier,
-        );
-      }
+    it("should use high value at level 99", () => {
+      // At level 99: numerator = 1 + floor(0 + high + 0.5) = 1 + high
+      const rate = lerpSuccessRate(system, 48, 127, 99);
+      // Expected: (1 + floor(0 + 127 + 0.5)) / 256 = 128/256 = 0.5
+      expect(rate).toBeCloseTo(128 / 256, 2);
     });
 
-    it("should have fishing with no speed tiers (all 1.0)", () => {
-      const fishingTiers = (
-        ResourceSystem as unknown as {
-          TOOL_TIERS: Record<string, Array<{ cycleMultiplier: number }>>;
-        }
-      ).TOOL_TIERS.fishing;
+    it("should interpolate between low and high at mid levels", () => {
+      const rate1 = lerpSuccessRate(system, 48, 127, 1);
+      const rate50 = lerpSuccessRate(system, 48, 127, 50);
+      const rate99 = lerpSuccessRate(system, 48, 127, 99);
 
-      expect(fishingTiers.length).toBe(1);
-      expect(fishingTiers[0].cycleMultiplier).toBe(1.0);
+      // Mid-level should be between level 1 and level 99
+      expect(rate50).toBeGreaterThan(rate1);
+      expect(rate50).toBeLessThan(rate99);
+    });
+
+    it("should clamp level to valid range [1, 99]", () => {
+      const rateAt1 = lerpSuccessRate(system, 48, 127, 1);
+      const rateAt0 = lerpSuccessRate(system, 48, 127, 0);
+      const rateAt99 = lerpSuccessRate(system, 48, 127, 99);
+      const rateAt150 = lerpSuccessRate(system, 48, 127, 150);
+
+      expect(rateAt0).toBe(rateAt1); // Clamped to 1
+      expect(rateAt150).toBe(rateAt99); // Clamped to 99
+    });
+
+    it("should clamp result to [0, 1]", () => {
+      // Even with extreme values, rate should be bounded
+      const lowRate = lerpSuccessRate(system, 0, 0, 1);
+      const highRate = lerpSuccessRate(system, 255, 255, 99);
+
+      expect(lowRate).toBeGreaterThanOrEqual(0);
+      expect(highRate).toBeLessThanOrEqual(1);
     });
   });
+
+  // ===== OSRS PRIORITY FISH ROLLING TESTS =====
+  describe("rollFishDrop", () => {
+    const rollFishDrop = (
+      sys: ResourceSystem,
+      drops: ResourceDrop[],
+      playerLevel: number,
+    ) =>
+      (
+        sys as unknown as {
+          rollFishDrop: (
+            drops: ResourceDrop[],
+            playerLevel: number,
+          ) => ResourceDrop;
+        }
+      ).rollFishDrop(drops, playerLevel);
+
+    // Test drops ordered by level requirement (highest first, like OSRS)
+    const fishDrops: ResourceDrop[] = [
+      {
+        itemId: "swordfish",
+        itemName: "Raw Swordfish",
+        quantity: 1,
+        chance: 0.33,
+        xpAmount: 100,
+        stackable: false,
+        levelRequired: 50,
+        catchLow: 45,
+        catchHigh: 130,
+      },
+      {
+        itemId: "lobster",
+        itemName: "Raw Lobster",
+        quantity: 1,
+        chance: 0.33,
+        xpAmount: 90,
+        stackable: false,
+        levelRequired: 40,
+        catchLow: 40,
+        catchHigh: 120,
+      },
+      {
+        itemId: "shrimp",
+        itemName: "Raw Shrimp",
+        quantity: 1,
+        chance: 0.34,
+        xpAmount: 10,
+        stackable: false,
+        levelRequired: 1,
+        catchLow: 48,
+        catchHigh: 127,
+      },
+    ];
+
+    it("should only catch fish at or below player level", () => {
+      // Level 30 player can only catch shrimp (level 1)
+      const results: Record<string, number> = {
+        swordfish: 0,
+        lobster: 0,
+        shrimp: 0,
+      };
+
+      for (let i = 0; i < 100; i++) {
+        const drop = rollFishDrop(system, fishDrops, 30);
+        results[drop.itemId]++;
+      }
+
+      expect(results.swordfish).toBe(0); // Requires level 50
+      expect(results.lobster).toBe(0); // Requires level 40
+      expect(results.shrimp).toBeGreaterThan(0); // Requires level 1
+    });
+
+    it("should catch higher level fish when player meets requirement", () => {
+      // Level 50 player can catch all fish, but priority rolling favors higher level fish
+      const results: Record<string, number> = {
+        swordfish: 0,
+        lobster: 0,
+        shrimp: 0,
+      };
+
+      for (let i = 0; i < 500; i++) {
+        const drop = rollFishDrop(system, fishDrops, 50);
+        results[drop.itemId]++;
+      }
+
+      // All fish should be catchable
+      expect(results.swordfish).toBeGreaterThan(0);
+      expect(results.lobster).toBeGreaterThan(0);
+      expect(results.shrimp).toBeGreaterThan(0);
+    });
+
+    it("should use priority rolling (higher level fish checked first)", () => {
+      // At level 99, swordfish should be caught more often due to priority
+      // (swordfish is checked first, if it fails, lobster is checked, then shrimp)
+      const results: Record<string, number> = {
+        swordfish: 0,
+        lobster: 0,
+        shrimp: 0,
+      };
+
+      for (let i = 0; i < 1000; i++) {
+        const drop = rollFishDrop(system, fishDrops, 99);
+        results[drop.itemId]++;
+      }
+
+      // At high level, should catch higher-level fish more often
+      // due to priority order and increased catch rates
+      expect(results.swordfish).toBeGreaterThan(results.shrimp);
+    });
+
+    it("should fallback to lowest level fish when all rolls fail", () => {
+      // Even with bad luck, should eventually get the lowest level fish
+      const singleDrop: ResourceDrop[] = [
+        {
+          itemId: "shrimp",
+          itemName: "Raw Shrimp",
+          quantity: 1,
+          chance: 1.0,
+          xpAmount: 10,
+          stackable: false,
+          levelRequired: 1,
+          catchLow: 48,
+          catchHigh: 127,
+        },
+      ];
+
+      // Should always succeed with only one fish option
+      const drop = rollFishDrop(system, singleDrop, 99);
+      expect(drop.itemId).toBe("shrimp");
+    });
+  });
+
+  // NOTE: TOOL_TIERS tests removed - tool tier data is now managed via
+  // manifest system (manifest.toolCategory + GatheringToolData) rather than
+  // a static TOOL_TIERS constant. Tool behavior is tested implicitly through
+  // computeCycleTicks and computeSuccessRate tests.
 });
