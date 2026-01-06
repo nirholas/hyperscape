@@ -292,6 +292,8 @@ export class Environment extends System {
       this.sky.matrixAutoUpdate = false;
       this.sky.matrixWorldAutoUpdate = false;
       this.sky.visible = false;
+      // PERFORMANCE: Set legacy sky to layer 1 (main camera only, not minimap)
+      this.sky.layers.set(1);
       this.world.stage.scene.add(this.sky);
     }
 
@@ -304,8 +306,9 @@ export class Environment extends System {
     const sunIntensity = node?._sunIntensity ?? base.sunIntensity;
     const sunColor = node?._sunColor ?? base.sunColor;
     // Default fog for atmosphere - warm fog affecting terrain and models
-    const fogNear = node?._fogNear ?? base.fogNear ?? 500;
-    const fogFar = node?._fogFar ?? base.fogFar ?? 2000;
+    // Closer fog distances create more atmospheric depth and hide distant terrain pop-in
+    const fogNear = node?._fogNear ?? base.fogNear ?? 350;
+    const fogFar = node?._fogFar ?? base.fogFar ?? 600;
     const fogColor = node?._fogColor ?? base.fogColor ?? "#d4c8b8";
 
     const n = ++this.skyN;
@@ -439,34 +442,83 @@ export class Environment extends System {
     if (this.skySystem) {
       this.skySystem.update(_delta);
 
-      // Sync CSM directional light with sun position
+      // Sync CSM directional light with sun/moon position
       if (this.csm) {
-        // Light direction is opposite of sun direction (light comes FROM the sun)
-        this.csm.lightDirection.copy(this.skySystem.sunDirection).negate();
-
-        // Adjust directional light intensity based on day/night
         const dayIntensity = this.skySystem.dayIntensity;
+        const isDay = this.skySystem.isDay;
+        const dayPhase = this.skySystem.dayPhase;
+
+        // ===================
+        // LIGHT DIRECTION - Track sun during day, moon during night
+        // ===================
+        // Sun position = sunDirection (points TO sun)
+        // Moon position = -sunDirection (opposite side of sky)
+        // CSM lightDirection = vector FROM light source TOWARD scene
+
+        if (isDay) {
+          // Daytime: light comes FROM the sun
+          // sunDirection points TO the sun, so negate for light direction
+          this.csm.lightDirection.copy(this.skySystem.sunDirection).negate();
+        } else {
+          // Nighttime: light comes FROM the moon
+          // Moon is at -sunDirection position
+          // Light direction should point FROM moon TOWARD scene
+          // So we use sunDirection (which points toward sun = away from moon)
+          // But wait - we want light FROM moon, so negate the moon position
+          // Moon at -sunDir means light dir = -(-sunDir) = sunDir? No...
+          //
+          // Let's think: moon position = -sunDirection
+          // Light direction = normalize(scene - moon) = normalize(0 - (-sunDir)) = sunDir
+          // So light direction = sunDirection (pointing from moon toward origin)
+          this.csm.lightDirection.copy(this.skySystem.sunDirection);
+        }
+
+        // ===================
+        // LIGHT INTENSITY & COLOR
+        // ===================
         if (this.csm.lights) {
           for (const light of this.csm.lights) {
-            // Sun light fades to 0 at night, max 1.2 at noon
-            light.intensity = dayIntensity * 1.2;
-            // Warm color at sunrise/sunset, white at noon
-            const sunsetFactor =
-              Math.abs(this.skySystem.dayPhase - 0.25) < 0.1 ||
-              Math.abs(this.skySystem.dayPhase - 0.75) < 0.1
-                ? 0.5
-                : 0;
-            light.color.setRGB(
-              1.0,
-              1.0 - sunsetFactor * 0.2,
-              1.0 - sunsetFactor * 0.4,
-            );
+            if (isDay) {
+              // ===== SUNLIGHT =====
+              // Warm golden light, bright
+              const sunIntensity = dayIntensity * 1.8; // Bright sun
+              light.intensity = sunIntensity;
+
+              // Check if near sunrise/sunset for warmer color
+              const nearHorizon =
+                (dayPhase >= 0.22 && dayPhase < 0.32) || // Sunrise zone
+                (dayPhase >= 0.68 && dayPhase < 0.78); // Sunset zone
+
+              if (nearHorizon) {
+                // Golden hour - warm orange tint
+                light.color.setRGB(1.0, 0.85, 0.6); // Warm orange
+              } else {
+                // Midday - warm white
+                light.color.setRGB(1.0, 0.98, 0.92); // Slightly warm white
+              }
+            } else {
+              // ===== MOONLIGHT =====
+              // Cool blue light - bright enough to cast visible shadows
+              const nightIntensity = 1 - dayIntensity;
+              // Moonlight is dimmer than sun but should cast shadows
+              const moonIntensity = nightIntensity * 0.4; // Increased from 0.12
+              light.intensity = moonIntensity;
+
+              // Cool blue-silver moonlight color
+              light.color.setRGB(0.6, 0.7, 0.9); // Cool blue
+
+              // Ensure shadow casting is enabled for moonlight
+              light.castShadow = true;
+            }
           }
         }
       }
 
       // Update ambient lighting based on day/night
       this.updateAmbientLighting(this.skySystem.dayIntensity);
+
+      // Update fog color based on day/night cycle
+      this.updateFogColor(this.skySystem.dayIntensity);
     }
 
     if (this.csm) {
@@ -488,36 +540,71 @@ export class Environment extends System {
     const nightIntensity = 1 - dayIntensity;
 
     if (this.hemisphereLight) {
-      // Hemisphere light: brighter during day, dimmer at night
-      // Higher base intensity since we removed environment map
-      this.hemisphereLight.intensity = 0.5 + dayIntensity * 0.5;
+      // Hemisphere light: brighter during day, dim but visible at night
+      // Day: 0.9, Night: 0.25 (enough to see terrain/objects clearly)
+      this.hemisphereLight.intensity = 0.25 + dayIntensity * 0.65;
 
-      // Shift sky color from blue (day) to dark blue (night)
+      // Shift sky color from bright blue (day) to dark blue (night)
       this.hemisphereLight.color.setRGB(
-        0.53 * dayIntensity + 0.15 * nightIntensity, // R
-        0.81 * dayIntensity + 0.2 * nightIntensity, // G
-        0.92 * dayIntensity + 0.35 * nightIntensity, // B
+        0.53 * dayIntensity + 0.1 * nightIntensity, // R: slight visibility at night
+        0.81 * dayIntensity + 0.15 * nightIntensity, // G: slight visibility at night
+        0.92 * dayIntensity + 0.25 * nightIntensity, // B: blue tint at night
       );
 
-      // Ground color stays brownish but darker at night
+      // Ground color: warm brown during day, dark blue-brown at night
       this.hemisphereLight.groundColor.setRGB(
-        0.36 * dayIntensity + 0.12 * nightIntensity,
-        0.27 * dayIntensity + 0.1 * nightIntensity,
-        0.18 * dayIntensity + 0.12 * nightIntensity,
+        0.36 * dayIntensity + 0.06 * nightIntensity,
+        0.27 * dayIntensity + 0.05 * nightIntensity,
+        0.18 * dayIntensity + 0.08 * nightIntensity,
       );
     }
 
     if (this.ambientLight) {
-      // Ambient fill: higher base since we removed env map
-      // Night needs more ambient to see without harsh directional light
-      this.ambientLight.intensity = 0.4 + nightIntensity * 0.3;
+      // Ambient fill: provides base visibility
+      // Day: 0.4, Night: 0.18 (can see things clearly in moonlight)
+      this.ambientLight.intensity = 0.18 + dayIntensity * 0.22;
 
-      // Warmer neutral during day, cool blue tint at night
+      // Day: warm neutral white, Night: cool blue moonlight tint
       this.ambientLight.color.setRGB(
-        0.5 + dayIntensity * 0.5,
-        0.5 + dayIntensity * 0.45,
-        0.55 + dayIntensity * 0.4,
+        0.35 + dayIntensity * 0.65, // R: 0.35 at night, 1.0 at day
+        0.4 + dayIntensity * 0.55, // G: 0.4 at night, 0.95 at day
+        0.55 + dayIntensity * 0.4, // B: 0.55 at night, 0.95 at day (bluer at night)
       );
+    }
+  }
+
+  // Day fog color: warm beige
+  private readonly dayFogColor = new THREE.Color(0xd4c8b8);
+  // Night fog color: dark blue to blend with night sky (slightly lighter for visibility)
+  private readonly nightFogColor = new THREE.Color(0x12203a);
+  // Blended fog color (updated each frame)
+  private readonly blendedFogColor = new THREE.Color();
+
+  /**
+   * Update fog color based on day/night cycle
+   * Day: warm beige fog
+   * Night: dark blue fog that blends with the night sky/horizon
+   * @param dayIntensity 0-1 (0 = night, 1 = day)
+   */
+  private updateFogColor(dayIntensity: number): void {
+    if (!this.world.stage?.scene) return;
+
+    // Lerp between night fog (dark blue) and day fog (warm beige)
+    this.blendedFogColor.lerpColors(
+      this.nightFogColor,
+      this.dayFogColor,
+      dayIntensity,
+    );
+
+    // Update scene fog color
+    const sceneFog = this.world.stage.scene.fog as THREE.Fog | null;
+    if (sceneFog) {
+      sceneFog.color.copy(this.blendedFogColor);
+    }
+
+    // Update skyInfo so terrain shader can sync the fog color
+    if (this.skyInfo) {
+      this.skyInfo.fogColor = `#${this.blendedFogColor.getHexString()}`;
     }
   }
 
@@ -575,12 +662,11 @@ export class Environment extends System {
       this.csm.updateShadowMapSize(options.shadowMapSize);
       if (this.skyInfo) {
         this.csm.lightDirection = this.skyInfo.sunDirection;
-        if (this.csm.lights) {
-          for (const light of this.csm.lights) {
-            light.intensity = this.skyInfo.sunIntensity;
-            light.color.set(this.skyInfo.sunColor);
-            light.castShadow = options.castShadow;
-          }
+        // Update the main directional light (sun)
+        if (this.csm.mainLight) {
+          this.csm.mainLight.intensity = this.skyInfo.sunIntensity;
+          this.csm.mainLight.color.set(this.skyInfo.sunColor);
+          this.csm.mainLight.castShadow = options.castShadow;
         }
       }
     } else {
@@ -617,19 +703,15 @@ export class Environment extends System {
       });
 
       console.log(
-        `[Environment] CSM created with ${this.csm.lights.length} lights`,
+        `[Environment] CSM created with ${options.cascades} cascades`,
       );
-      for (let i = 0; i < this.csm.lights.length; i++) {
-        const light = this.csm.lights[i];
-        console.log(
-          `[Environment] Light ${i}: castShadow=${light.castShadow}, intensity=${light.intensity}, shadow bias=${light.shadow.bias}`,
-        );
-      }
+      const mainLight = this.csm.mainLight;
+      console.log(
+        `[Environment] Main light: castShadow=${mainLight.castShadow}, intensity=${mainLight.intensity}, shadow bias=${mainLight.shadow.bias}`,
+      );
 
       if (!options.castShadow) {
-        for (const light of this.csm.lights) {
-          light.castShadow = false;
-        }
+        mainLight.castShadow = false;
       }
     }
   }

@@ -96,7 +96,7 @@ export function getPlayer(world: World, playerId: string) {
  *
  * @param world - The game world
  * @param position - Position to ground (x, z are used, y is replaced with terrain height)
- * @param yOffset - Optional offset above terrain (default 0.2m)
+ * @param yOffset - Optional offset above terrain (default 0 - feet at ground level)
  * @param maxHeightDifference - Maximum allowed difference from terrain (default 2m)
  * @returns Position grounded to terrain
  * @throws Error if terrain system not available or position too far from terrain
@@ -104,7 +104,7 @@ export function getPlayer(world: World, playerId: string) {
 export function groundToTerrain(
   world: World,
   position: Position3D,
-  yOffset: number = 0.2,
+  yOffset: number = 0,
   maxHeightDifference: number = 2.0,
 ): Position3D {
   // Get terrain system

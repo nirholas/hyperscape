@@ -570,11 +570,11 @@ export class VegetationSystem extends System {
     this.grassGroup.frustumCulled = false;
     this.vegetationGroup.add(this.grassGroup);
 
-    // Grass disabled - using OSRS vertex color terrain style
-    // if (this.world.camera) {
-    //   this.world.camera.layers.enable(1);
-    // }
-    // await this.initializeGrass();
+    // PERFORMANCE: Enable layer 1 for main camera so it can see vegetation
+    // Minimap camera only sees layer 0, so vegetation won't render in minimap
+    if (this.world.camera) {
+      this.world.camera.layers.enable(1);
+    }
 
     // Listen for terrain tile events
     this.world.on(
@@ -1674,6 +1674,10 @@ export class VegetationSystem extends System {
         instancedMesh.receiveShadow = true;
       }
       instancedMesh.name = `Vegetation_${asset.id}`;
+
+      // PERFORMANCE: Layer 1 = main camera only (not minimap which uses layer 0)
+      // This prevents vegetation from being rendered in the minimap, improving performance
+      instancedMesh.layers.set(1);
 
       // Add to scene
       if (this.vegetationGroup) {

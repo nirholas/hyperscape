@@ -126,6 +126,12 @@ export class ItemEntity extends InteractableEntity {
           this.mesh.receiveShadow = false;
           this.mesh.scale.set(0.3, 0.3, 0.3); // Scale down items
 
+          // PERFORMANCE: Set item mesh to layer 1 (main camera only, not minimap)
+          this.mesh.layers.set(1);
+          this.mesh.traverse((child) => {
+            child.layers.set(1);
+          });
+
           // Set up userData for interaction detection
           this.mesh.userData = {
             type: "item",
@@ -213,6 +219,9 @@ export class ItemEntity extends InteractableEntity {
       this.mesh.castShadow = false; // Don't cast shadows for small items
       this.mesh.receiveShadow = false;
     }
+
+    // PERFORMANCE: Set placeholder mesh to layer 1 (main camera only, not minimap)
+    this.mesh.layers.set(1);
 
     // Set up node userData for interaction system
     this.node.userData.type = "item";

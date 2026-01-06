@@ -46,6 +46,8 @@
     "dev:reset": "bun run clean && rm -rf packages/*/node_modules/.vite && bun run build:shared && bun run dev",
     "dev:forge": "bun run --cwd packages/asset-forge dev",
     "cdn:up": "bun scripts/cdn.mjs",
+    "cdn:watch": "bun scripts/cdn.mjs --watch",
+    "cdn:restart": "bun scripts/cdn.mjs --force",
     "cdn:down": "cd packages/server && docker-compose down cdn",
     "start": "cd packages/server && bun run start",
     "test": "turbo run test --filter='!3d-asset-forge'",

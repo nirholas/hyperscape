@@ -215,6 +215,10 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   private connectionHandler!: ConnectionHandler;
   private interactionSessionManager!: InteractionSessionManager;
 
+  /** Time sync state - broadcast world time every 5 seconds for day/night sync */
+  private worldTimeSyncAccumulator = 0;
+  private readonly WORLD_TIME_SYNC_INTERVAL = 5; // seconds
+
   constructor(world: World) {
     super(world);
     this.id = 0;
@@ -1212,6 +1216,15 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
     // Delegate movement updates to MovementManager
     this.movementManager.update(dt);
+
+    // Broadcast world time periodically for day/night cycle sync
+    this.worldTimeSyncAccumulator += dt;
+    if (this.worldTimeSyncAccumulator >= this.WORLD_TIME_SYNC_INTERVAL) {
+      this.worldTimeSyncAccumulator = 0;
+      this.broadcastManager.sendToAll("worldTimeSync", {
+        worldTime: this.world.getTime(),
+      });
+    }
   }
 
   /**

@@ -347,8 +347,13 @@ export class NPCEntity extends Entity {
         services: this.config.services,
       };
       instanceWithRaw.raw.scene.userData = userData;
+
+      // PERFORMANCE: Set VRM mesh to layer 1 (main camera only, not minimap)
+      // Minimap only renders terrain and uses 2D dots for entities
+      instanceWithRaw.raw.scene.layers.set(1);
       instanceWithRaw.raw.scene.traverse((child) => {
         child.userData = { ...userData };
+        child.layers.set(1);
       });
     }
   }
@@ -405,8 +410,12 @@ export class NPCEntity extends Entity {
         this.mesh.updateMatrix();
         this.mesh.updateMatrixWorld(true);
 
-        // NOW bind the skeleton at the scaled size
+        // NOW bind the skeleton at the scaled size and set layer for minimap exclusion
+        this.mesh.layers.set(1); // Main camera only, not minimap
         this.mesh.traverse((child) => {
+          // PERFORMANCE: Set all children to layer 1 (minimap only sees layer 0)
+          child.layers.set(1);
+
           if (child instanceof THREE.SkinnedMesh && child.skeleton) {
             // Ensure mesh matrix is updated
             child.updateMatrix();
@@ -468,6 +477,9 @@ export class NPCEntity extends Entity {
     this.mesh.castShadow = true;
     this.mesh.receiveShadow = true;
     this.mesh.name = `NPC_${this.config.npcType}_${this.id}`;
+
+    // PERFORMANCE: Set placeholder to layer 1 (main camera only, not minimap)
+    this.mesh.layers.set(1);
 
     // CRITICAL: Set userData for interaction detection (raycasting)
     // npcId is the manifest ID (e.g., "bank_clerk"), entityId is the instance ID

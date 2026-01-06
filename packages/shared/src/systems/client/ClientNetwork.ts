@@ -158,6 +158,8 @@ export class ClientNetwork extends SystemBase {
   connected: boolean;
   queue: Array<[string, unknown]>;
   serverTimeOffset: number;
+  /** Offset to sync world time with server for day/night cycle */
+  worldTimeOffset: number;
   maxUploadSize: number;
   pendingModifications: Map<string, Array<Record<string, unknown>>> = new Map();
   pendingModificationTimestamps: Map<string, number> = new Map(); // Track when modifications were first queued
@@ -239,6 +241,7 @@ export class ClientNetwork extends SystemBase {
     this.connected = false;
     this.queue = [];
     this.serverTimeOffset = 0;
+    this.worldTimeOffset = 0;
     this.maxUploadSize = 0;
   }
 
@@ -587,6 +590,12 @@ export class ClientNetwork extends SystemBase {
     // Already set above
     this.serverTimeOffset = data.serverTime - performance.now();
     this.apiUrl = data.apiUrl || null;
+
+    // Sync world time for day/night cycle (all clients see same time)
+    const worldTime = (data as { worldTime?: number }).worldTime;
+    if (worldTime !== undefined) {
+      this.worldTimeOffset = worldTime - this.world.getTime();
+    }
     this.maxUploadSize = data.maxUploadSize || 10 * 1024 * 1024; // Default 10MB
 
     // Use assetsUrl from server (always absolute URL to CDN)
@@ -1547,6 +1556,22 @@ export class ClientNetwork extends SystemBase {
     // Re-emit with typed event so UI updates
     this.world.emit(EventType.SKILLS_UPDATED, data);
   };
+
+  /**
+   * Handle world time sync from server - keeps day/night cycle in sync across all clients
+   */
+  onWorldTimeSync = (data: { worldTime: number }) => {
+    // Calculate offset between server's world time and our local world time
+    this.worldTimeOffset = data.worldTime - this.world.getTime();
+  };
+
+  /**
+   * Get the synced world time (adjusted for server offset)
+   * Use this for day/night cycle instead of world.getTime()
+   */
+  getSyncedWorldTime(): number {
+    return this.world.getTime() + this.worldTimeOffset;
+  }
 
   // --- Bank state handler ---
   onBankState = (data: {

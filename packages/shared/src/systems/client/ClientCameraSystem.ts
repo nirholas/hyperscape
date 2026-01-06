@@ -55,8 +55,8 @@ export class ClientCameraSystem extends SystemBase {
     // RS3-like zoom bounds (further min to avoid getting too close)
     minDistance: 2.0,
     maxDistance: 15.0,
-    // Over-the-shoulder pitch limits: more horizontal for better forward view
-    minPolarAngle: Math.PI * 0.35,
+    // Pitch limits: allow higher arc for more overhead viewing
+    minPolarAngle: Math.PI * 0.15,
     maxPolarAngle: Math.PI * 0.48,
     // RS3-like feel
     rotateSpeed: 0.9,

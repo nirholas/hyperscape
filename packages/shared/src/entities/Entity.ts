@@ -1200,6 +1200,13 @@ export class Entity implements IEntity {
     };
     this.mesh.userData = userData;
 
+    // PERFORMANCE: Set entity mesh to layer 1 (main camera only, not minimap)
+    // Minimap only renders terrain (layer 0) and uses 2D dots for entities
+    this.mesh.layers.set(1);
+    this.mesh.traverse((child) => {
+      child.layers.set(1);
+    });
+
     // Collect all child nodes
     this.collectNodes(this.mesh);
 

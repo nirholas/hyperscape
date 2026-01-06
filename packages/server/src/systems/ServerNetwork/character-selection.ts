@@ -650,7 +650,7 @@ export async function handleEnterWorld(
   if (terrain && terrain.isReady && terrain.isReady()) {
     const th = terrain.getHeightAt(position[0], position[2]);
     if (Number.isFinite(th)) {
-      position = [position[0], (th as number) + 0.1, position[2]];
+      position = [position[0], th, position[2]];
     } else {
       position = [position[0], 10, position[2]];
     }

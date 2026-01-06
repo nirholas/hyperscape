@@ -530,7 +530,7 @@ export class MobNPCSpawnerSystem extends SystemBase {
           // Ground mob spawn to terrain height
           let mobY = spawnPoint.position.y;
           const th = this.terrainSystem.getHeightAt(mobX, mobZ);
-          if (Number.isFinite(th)) mobY = (th as number) + 0.1;
+          if (Number.isFinite(th)) mobY = th;
 
           this.spawnMobFromData(mobData, { x: mobX, y: mobY, z: mobZ });
         }

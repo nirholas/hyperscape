@@ -338,7 +338,7 @@ export class ConnectionHandler {
         terrainHeight > -100 &&
         terrainHeight < 1000
       ) {
-        spawnPosition[1] = terrainHeight + 0.1;
+        spawnPosition[1] = terrainHeight;
       } else {
         spawnPosition[1] = 10;
       }
@@ -373,6 +373,7 @@ export class ConnectionHandler {
     const baseSnapshot = {
       id: socket.id,
       serverTime: performance.now(),
+      worldTime: this.world.getTime(), // Synced world time for day/night cycle
       assetsUrl: this.world.assetsUrl,
       apiUrl: process.env.PUBLIC_API_URL,
       maxUploadSize: process.env.PUBLIC_MAX_UPLOAD_SIZE,

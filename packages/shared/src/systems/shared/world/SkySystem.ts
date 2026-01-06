@@ -29,6 +29,7 @@ import THREE, {
   normalize,
   length,
   cos,
+  sin,
   abs,
   Fn,
   type ShaderNode,
@@ -96,6 +97,7 @@ type SkyMaterialUniforms = {
   uTime: TSLUniformFloat;
   uSunPosition: TSLUniformVec3;
   uDayCycleProgress: TSLUniformFloat;
+  uDayIntensity: TSLUniformFloat; // Pre-calculated sharp transition value
 };
 
 type CloudMaterialUniforms = {
@@ -142,6 +144,10 @@ export class SkySystem extends System {
   private sunMaterialUniforms: SunMaterialUniforms | null = null;
   private moonMaterialUniforms: MoonMaterialUniforms | null = null;
   private skyTSLUniforms: SkyMaterialUniforms | null = null;
+  private cloudMaterialUniforms: CloudMaterialUniforms | null = null;
+
+  // Texture uniform for stars - must be stored at class level for proper updates
+  private galaxyTextureUniform: { value: THREE.Texture | null } | null = null;
 
   private elapsed = 0;
   private dayDurationSec = 240; // full day cycle in seconds
@@ -180,7 +186,8 @@ export class SkySystem extends System {
 
   /** Whether it's currently daytime (sun above horizon) */
   get isDay(): boolean {
-    return this._dayPhase < 0.5;
+    // Sun is above horizon from dayPhase 0.25 (sunrise) to 0.75 (sunset)
+    return this._dayPhase >= 0.25 && this._dayPhase < 0.75;
   }
 
   /** Moon direction vector (opposite of sun) */
@@ -262,6 +269,11 @@ export class SkySystem extends System {
     // Root group
     this.group = new THREE.Group();
     this.group.name = "SkySystemGroup";
+
+    // PERFORMANCE: Set sky group to layer 1 (main camera only, not minimap)
+    // Minimap only renders terrain - sky dome, sun, moon, clouds are excluded
+    this.group.layers.set(1);
+
     this.scene.add(this.group);
 
     // Create sky dome with TSL Node Material
@@ -279,20 +291,38 @@ export class SkySystem extends System {
 
   /**
    * Create sun mesh with TSL Node Material (WebGPU-compatible)
+   * HDR-style intense sun with multi-layer glow for bloom-like effect
    */
   private createSun(): void {
     if (!this.group) return;
 
-    // Sun disc geometry
-    const sunGeom = new THREE.CircleGeometry(150, 32);
+    // Sun disc geometry - bright core (scaled for 600 far plane)
+    // Sun disc sized to fit within 600 far plane
+    const sunGeom = new THREE.CircleGeometry(15, 32);
 
     // TSL uniform for opacity control
-    const uOpacity = uniform(float(0.9));
+    const uOpacity = uniform(float(1.0));
 
-    // TSL sun color node - warm sun color with opacity
+    // TSL sun color node - HDR bright sun (values > 1 for bloom effect)
     const sunColorNode = Fn(() => {
-      const sunColor = vec3(0.95, 0.78, 0.54); // Warm sun color
-      return vec4(sunColor, uOpacity);
+      const uvCoord = uv();
+      // Distance from center for gradient
+      const center = vec3(0.5, 0.5, 0.0);
+      const uvPos = vec3(uvCoord.x, uvCoord.y, float(0.0));
+      const dist = length(sub(uvPos, center));
+      const normalizedDist = mul(dist, float(2.0));
+
+      // Bright core with soft edge
+      const coreFalloff = clamp(
+        sub(float(1.0), normalizedDist),
+        float(0.0),
+        float(1.0),
+      );
+      const coreStrength = pow(coreFalloff, float(0.3)); // Very soft falloff
+
+      // HDR sun color - values > 1 for bloom
+      const sunColor = vec3(3.0, 2.4, 1.8); // HDR bright warm white
+      return vec4(mul(sunColor, coreStrength), mul(coreStrength, uOpacity));
     })();
 
     // Create Node Material for sun
@@ -300,6 +330,7 @@ export class SkySystem extends System {
     sunMat.colorNode = sunColorNode;
     sunMat.blending = THREE.AdditiveBlending;
     sunMat.depthWrite = false;
+    sunMat.depthTest = true; // Terrain occludes sun (renders behind terrain)
     sunMat.transparent = true;
     sunMat.fog = false;
 
@@ -308,48 +339,88 @@ export class SkySystem extends System {
 
     this.sun = new THREE.Mesh(sunGeom, sunMat);
     this.sun.name = "SkySun";
-    this.sun.renderOrder = 2;
+    this.sun.frustumCulled = false;
+    this.sun.renderOrder = 1000; // Render AFTER terrain so depth test works
+    this.sun.layers.set(1); // Main camera only, not minimap
     this.group.add(this.sun);
 
-    // Sun glow effect (larger, softer circle behind sun) - replaces Lensflare
-    // Size 800 creates a prominent halo visible at distance 4000
-    const glowGeom = new THREE.CircleGeometry(800, 32);
-
-    // TSL glow color with gradual radial falloff - large soft halo around sun
-    const glowColorNode = Fn(() => {
+    // Inner glow - medium sized, intense (scaled for 600 far plane)
+    // Inner glow sized to fit within 600 far plane
+    const innerGlowGeom = new THREE.CircleGeometry(50, 32);
+    const innerGlowColorNode = Fn(() => {
       const uvCoord = uv();
-      // Distance from center (0.5, 0.5)
       const center = vec3(0.5, 0.5, 0.0);
       const uvPos = vec3(uvCoord.x, uvCoord.y, float(0.0));
       const dist = length(sub(uvPos, center));
-      // Gradual falloff - inverse square for natural light falloff
-      const normalizedDist = mul(dist, float(2.0)); // 0 at center, 1 at edge
+      const normalizedDist = mul(dist, float(2.0));
       const falloff = clamp(
         sub(float(1.0), normalizedDist),
         float(0.0),
         float(1.0),
       );
-      // Lower power = softer, wider falloff for visible halo
-      const glowStrength = pow(falloff, float(1.5));
-      // Warm glow color
-      const glowColor = vec3(1.0, 0.85, 0.6);
+      const glowStrength = pow(falloff, float(2.5)); // Tighter falloff
+      // HDR warm glow
+      const glowColor = vec3(2.0, 1.5, 0.8);
+      return vec4(mul(glowColor, glowStrength), mul(glowStrength, uOpacity));
+    })();
+
+    const innerGlowMat = new MeshBasicNodeMaterial();
+    innerGlowMat.colorNode = innerGlowColorNode;
+    innerGlowMat.blending = THREE.AdditiveBlending;
+    innerGlowMat.depthWrite = false;
+    innerGlowMat.depthTest = true; // Terrain occludes glow
+    innerGlowMat.transparent = true;
+    innerGlowMat.side = THREE.DoubleSide;
+    innerGlowMat.fog = false;
+
+    const innerGlow = new THREE.Mesh(innerGlowGeom, innerGlowMat);
+    innerGlow.name = "SkySunInnerGlow";
+    innerGlow.frustumCulled = false;
+    innerGlow.renderOrder = 999; // Render after terrain, before sun
+    innerGlow.layers.set(1); // Main camera only, not minimap
+    this.group.add(innerGlow);
+    // Store for position updates
+    (this.group as THREE.Group & { sunInnerGlow?: THREE.Mesh }).sunInnerGlow =
+      innerGlow;
+
+    // Outer glow - large, soft halo for atmosphere effect (scaled for 600 far plane)
+    // Outer glow sized to fit within 600 far plane
+    const outerGlowGeom = new THREE.CircleGeometry(100, 32);
+    const outerGlowColorNode = Fn(() => {
+      const uvCoord = uv();
+      const center = vec3(0.5, 0.5, 0.0);
+      const uvPos = vec3(uvCoord.x, uvCoord.y, float(0.0));
+      const dist = length(sub(uvPos, center));
+      const normalizedDist = mul(dist, float(2.0));
+      const falloff = clamp(
+        sub(float(1.0), normalizedDist),
+        float(0.0),
+        float(1.0),
+      );
+      // Very soft outer glow
+      const glowStrength = pow(falloff, float(1.2));
+      // Warm orange tint for atmospheric scattering
+      const glowColor = vec3(1.0, 0.7, 0.4);
       return vec4(
         mul(glowColor, glowStrength),
-        mul(glowStrength, uOpacity), // Full opacity, no 0.3 damping
+        mul(mul(glowStrength, uOpacity), float(0.6)),
       );
     })();
 
-    const glowMat = new MeshBasicNodeMaterial();
-    glowMat.colorNode = glowColorNode;
-    glowMat.blending = THREE.AdditiveBlending;
-    glowMat.depthWrite = false;
-    glowMat.transparent = true;
-    glowMat.side = THREE.DoubleSide;
-    glowMat.fog = false;
+    const outerGlowMat = new MeshBasicNodeMaterial();
+    outerGlowMat.colorNode = outerGlowColorNode;
+    outerGlowMat.blending = THREE.AdditiveBlending;
+    outerGlowMat.depthWrite = false;
+    outerGlowMat.depthTest = true; // Terrain occludes glow
+    outerGlowMat.transparent = true;
+    outerGlowMat.side = THREE.DoubleSide;
+    outerGlowMat.fog = false;
 
-    this.sunGlow = new THREE.Mesh(glowGeom, glowMat);
+    this.sunGlow = new THREE.Mesh(outerGlowGeom, outerGlowMat);
     this.sunGlow.name = "SkySunGlow";
-    this.sunGlow.renderOrder = 1;
+    this.sunGlow.frustumCulled = false;
+    this.sunGlow.renderOrder = 998; // Render after terrain, before inner glow
+    this.sunGlow.layers.set(1); // Main camera only, not minimap
     this.group.add(this.sunGlow);
   }
 
@@ -359,7 +430,8 @@ export class SkySystem extends System {
   private createMoon(): void {
     if (!this.group) return;
 
-    const moonGeom = new THREE.PlaneGeometry(420, 420);
+    // Moon sized for 600 far plane
+    const moonGeom = new THREE.PlaneGeometry(35, 35);
 
     // TSL uniform for opacity control
     const uOpacity = uniform(float(1.0));
@@ -378,6 +450,7 @@ export class SkySystem extends System {
     moonMat.colorNode = moonColorNode;
     moonMat.blending = THREE.AdditiveBlending;
     moonMat.depthWrite = false;
+    moonMat.depthTest = true; // Terrain occludes moon
     moonMat.transparent = true;
     moonMat.side = THREE.DoubleSide;
     moonMat.fog = false;
@@ -387,11 +460,13 @@ export class SkySystem extends System {
 
     this.moon = new THREE.Mesh(moonGeom, moonMat);
     this.moon.name = "SkyMoon";
-    this.moon.renderOrder = 2;
+    this.moon.frustumCulled = false;
+    this.moon.renderOrder = 1000; // Render AFTER terrain so depth test works
+    this.moon.layers.set(1); // Main camera only, not minimap
     this.group.add(this.moon);
 
-    // Moon glow effect - soft halo around moon
-    const moonGlowGeom = new THREE.CircleGeometry(600, 32);
+    // Moon glow effect - soft halo around moon (scaled for 600 far plane)
+    const moonGlowGeom = new THREE.CircleGeometry(50, 32);
 
     const moonGlowColorNode = Fn(() => {
       const uvCoord = uv();
@@ -415,13 +490,16 @@ export class SkySystem extends System {
     moonGlowMat.colorNode = moonGlowColorNode;
     moonGlowMat.blending = THREE.AdditiveBlending;
     moonGlowMat.depthWrite = false;
+    moonGlowMat.depthTest = true; // Terrain occludes glow
     moonGlowMat.transparent = true;
     moonGlowMat.side = THREE.DoubleSide;
     moonGlowMat.fog = false;
 
     this.moonGlow = new THREE.Mesh(moonGlowGeom, moonGlowMat);
     this.moonGlow.name = "SkyMoonGlow";
-    this.moonGlow.renderOrder = 1;
+    this.moonGlow.frustumCulled = false;
+    this.moonGlow.renderOrder = 999; // Render after terrain, before moon
+    this.moonGlow.layers.set(1); // Main camera only, not minimap
     this.group.add(this.moonGlow);
   }
 
@@ -433,15 +511,21 @@ export class SkySystem extends System {
     if (!this.group) return;
 
     // Use high segment count to prevent color banding
-    const skyGeom = new THREE.SphereGeometry(8000, 128, 64);
+    // Sky sphere sized to fit within camera far plane (600)
+    // Sky follows camera so this creates infinite sky illusion
+    // Sky sphere must fit inside camera far plane (600) - use 500
+    const skyGeom = new THREE.SphereGeometry(500, 128, 64);
 
     // Create TSL uniforms
     const uTime = uniform(float(0));
     const uSunPosition = uniform(vec3(0, 1, 0));
     const uDayCycleProgress = uniform(float(0));
+    const uDayIntensity = uniform(float(0)); // Sharp transition day intensity from update()
 
-    // Reference to galaxy texture for star rendering
-    const galaxyTexRef = this.galaxyTex;
+    // Create texture uniform for galaxy/stars - this allows runtime texture updates
+    // Must be a uniform so it can be updated after async texture load
+    this.galaxyTextureUniform = { value: this.galaxyTex };
+    const uGalaxyTex = this.galaxyTex ? texture(this.galaxyTex) : null;
 
     // Create the sky color node - comprehensive day/night with stars
     const skyColorNode = Fn(() => {
@@ -453,23 +537,17 @@ export class SkySystem extends System {
       const elevation = abs(localPos.y);
 
       // =====================
-      // DAY/NIGHT CYCLE
+      // DAY/NIGHT CYCLE - Uses pre-calculated sharp transition
       // =====================
-      // Progress: 0 = midnight, 0.25 = sunrise, 0.5 = noon, 0.75 = sunset, 1.0 = midnight
-      // Use cosine for smooth day intensity: peaks at 0.5 (noon), lowest at 0/1 (midnight)
-      const dayAngle = mul(uDayCycleProgress, float(6.2832)); // 2*PI
-      // Shift so noon (0.5) = peak: cos(2π * 0.5 - π) = cos(0) = 1
-      const dayIntensity = clamp(
-        mul(add(cos(sub(dayAngle, float(3.14159))), float(1.0)), float(0.5)),
-        float(0.0),
-        float(1.0),
-      );
+      // dayIntensity comes from uniform - sharp transitions at sunrise/sunset
+      // Night stays dark until sunrise, then rapid transition
+      const dayIntensity = uDayIntensity;
 
       // Night intensity is inverse of day
       const nightIntensity = sub(float(1.0), dayIntensity);
 
       // =====================
-      // SKY COLORS
+      // SKY COLORS - Darker night sky
       // =====================
       // Day sky gradient: deep blue at zenith, lighter at horizon
       const dayZenith = vec3(0.25, 0.55, 0.95); // Rich blue
@@ -477,9 +555,9 @@ export class SkySystem extends System {
       const dayGradient = pow(sub(float(1.0), elevation), float(1.5));
       const daySkyColor = mix(dayZenith, dayHorizon, dayGradient);
 
-      // Night sky gradient: deep dark blue at zenith, slightly lighter at horizon
-      const nightZenith = vec3(0.02, 0.03, 0.08); // Very dark blue
-      const nightHorizon = vec3(0.08, 0.1, 0.18); // Dark blue-gray
+      // Night sky gradient: MUCH darker for proper night feel
+      const nightZenith = vec3(0.005, 0.008, 0.025); // Almost black with blue tint
+      const nightHorizon = vec3(0.02, 0.03, 0.06); // Very dark blue-gray
       const nightGradient = pow(sub(float(1.0), elevation), float(2.0));
       const nightSkyColor = mix(nightZenith, nightHorizon, nightGradient);
 
@@ -529,32 +607,93 @@ export class SkySystem extends System {
       skyColor = add(skyColor, mul(glowColor, glowIntensity));
 
       // =====================
-      // STARS (Night only) - Simple equirectangular mapping
+      // STARS (Night only) - Procedural starfield with stable noise
       // =====================
-      // Stars visible at night, above horizon
+      // Stars visible at night - stronger visibility curve for more stars
       const starVisibility = mul(
-        nightIntensity,
-        smoothstep(float(0.1), float(0.4), elevation),
+        pow(nightIntensity, float(0.5)), // Square root for earlier star visibility
+        smoothstep(float(0.05), float(0.3), elevation),
       );
 
-      // Simple equirectangular UV from sphere position
-      // U = atan2(x, z) / 2π + 0.5, V = y * 0.5 + 0.5
-      // Simplified approximation that avoids atan2
-      const starU = mul(
-        add(localPos.x, mul(localPos.z, float(0.7))),
-        float(0.3),
-      );
-      const starV = mul(add(localPos.y, float(1.0)), float(0.5));
+      // Use UV coordinates from the sphere geometry - these are stable
+      // and don't change with camera rotation (sphere doesn't rotate)
+      const sphereUV = uv();
 
-      // Sample galaxy texture for stars (has nice star distribution)
-      const starSample = galaxyTexRef
-        ? texture(galaxyTexRef, vec3(starU, starV, float(0.0)).xy)
+      // Scale UVs for star density - lower frequencies = more stable
+      const starScale1 = float(120.0); // Reduced from 150
+      const starScale2 = float(160.0); // Reduced from 300
+      const starScale3 = float(200.0); // Reduced from 600
+
+      // Use UV-based coordinates for stability
+      const starCoord1 = mul(sphereUV, starScale1);
+      const starCoord2 = mul(sphereUV, starScale2);
+      const starCoord3 = mul(sphereUV, starScale3);
+
+      // Stable pseudo-random using UV coordinates
+      // Lower frequency coefficients for less precision sensitivity
+      const starNoise1 = mul(
+        mul(
+          add(float(1.0), cos(mul(starCoord1.x, float(6.28)))),
+          add(float(1.0), cos(mul(starCoord1.y, float(7.35)))),
+        ),
+        add(float(1.0), cos(mul(add(starCoord1.x, starCoord1.y), float(4.12)))),
+      );
+      const starNoise2 = mul(
+        mul(
+          add(float(1.0), cos(mul(starCoord2.x, float(5.89)))),
+          add(float(1.0), cos(mul(starCoord2.y, float(8.12)))),
+        ),
+        add(float(1.0), cos(mul(add(starCoord2.x, starCoord2.y), float(3.78)))),
+      );
+      const starNoise3 = mul(
+        mul(
+          add(float(1.0), cos(mul(starCoord3.x, float(7.23)))),
+          add(float(1.0), cos(mul(starCoord3.y, float(6.54)))),
+        ),
+        add(float(1.0), cos(mul(add(starCoord3.x, starCoord3.y), float(5.01)))),
+      );
+
+      // Threshold noise to create sparse bright stars
+      const starThreshold1 = pow(
+        smoothstep(float(7.8), float(8.0), starNoise1),
+        float(2.0),
+      );
+      const starThreshold2 = mul(
+        pow(smoothstep(float(7.9), float(8.0), starNoise2), float(2.0)),
+        float(0.7),
+      );
+      const starThreshold3 = mul(
+        pow(smoothstep(float(7.95), float(8.0), starNoise3), float(2.0)),
+        float(0.4),
+      );
+
+      // Combine star layers
+      const proceduralStars = clamp(
+        add(add(starThreshold1, starThreshold2), starThreshold3),
+        float(0.0),
+        float(1.0),
+      );
+
+      // Galaxy texture for additional nebula glow
+      const galaxyUV = mul(sphereUV, float(2.0));
+      const galaxySample = uGalaxyTex
+        ? texture(this.galaxyTex!, galaxyUV)
         : vec4(0.0, 0.0, 0.0, 0.0);
 
-      // Use texture brightness as star intensity
-      const starIntensity = mul(starSample.r, float(0.3));
+      // Combine procedural stars with galaxy nebula glow
+      const starIntensity = add(
+        mul(proceduralStars, float(1.5)), // Bright procedural stars
+        mul(galaxySample.r, float(0.12)), // Subtle galaxy glow
+      );
+
+      // Star colors vary slightly - warmer for some, cooler for others
+      const starColorVar = mix(
+        vec3(1.0, 0.95, 0.85), // Warm white
+        vec3(0.85, 0.92, 1.0), // Cool blue-white
+        proceduralStars,
+      );
       const finalStarColor = mul(
-        vec3(0.9, 0.92, 1.0), // Slight blue-white tint
+        starColorVar,
         mul(starIntensity, starVisibility),
       );
       skyColor = add(skyColor, finalStarColor);
@@ -566,11 +705,11 @@ export class SkySystem extends System {
       const angleToMoon = dot(localPos, moonPos);
       // Use power function for gradual falloff instead of smoothstep
       const moonGlowRaw = clamp(angleToMoon, float(0.0), float(1.0));
-      const moonGlowAngle = pow(moonGlowRaw, float(8.0)); // Higher power = tighter, more gradual
-      const moonGlowColor = vec3(0.4, 0.5, 0.7); // Cool blue glow
+      const moonGlowAngle = pow(moonGlowRaw, float(6.0)); // Softer glow
+      const moonGlowColor = vec3(0.5, 0.6, 0.8); // Cool blue glow
       const moonGlowIntensity = mul(
         mul(moonGlowAngle, nightIntensity),
-        float(0.25),
+        float(0.4), // Stronger moon glow
       );
       skyColor = add(skyColor, mul(moonGlowColor, moonGlowIntensity));
 
@@ -581,10 +720,10 @@ export class SkySystem extends System {
       // Haze strongest near horizon (low elevation), fades as you go higher
       // Use elevation (which is now abs(localPos.y)) for symmetric reflections
       const hazeStrength = smoothstep(float(0.15), float(0.0), elevation);
-      // Haze stronger during day, subtle at night
+      // Haze stronger during day, minimal at night
       const hazeAmount = mul(
         hazeStrength,
-        mul(float(0.4), add(float(0.3), mul(dayIntensity, float(0.7)))),
+        mul(float(0.3), mul(dayIntensity, float(0.9))), // Much less haze at night
       );
       skyColor = mix(skyColor, hazeColor, hazeAmount);
 
@@ -596,6 +735,7 @@ export class SkySystem extends System {
     skyMat.colorNode = skyColorNode;
     skyMat.side = THREE.BackSide;
     skyMat.depthWrite = false;
+    skyMat.depthTest = false; // Ignore camera far plane - sky always renders
     skyMat.transparent = false;
     skyMat.toneMapped = true;
     skyMat.fog = false; // Sky should never be affected by scene fog
@@ -606,11 +746,14 @@ export class SkySystem extends System {
       uTime: uTime,
       uSunPosition: uSunPosition as unknown as TSLUniformVec3,
       uDayCycleProgress: uDayCycleProgress,
+      uDayIntensity: uDayIntensity,
     } as SkyMaterialUniforms;
 
     this.skyMesh = new THREE.Mesh(skyGeom, skyMat);
     this.skyMesh.frustumCulled = false;
+    this.skyMesh.renderOrder = -1000; // Render first, behind everything
     this.skyMesh.name = "AdvancedSkydome";
+    this.skyMesh.layers.set(1); // Main camera only, not minimap
     this.group.add(this.skyMesh);
   }
 
@@ -620,24 +763,38 @@ export class SkySystem extends System {
   /**
    * Create cloud billboards using cloud textures
    * Each cloud samples from a sprite atlas (2 columns x 4 rows = 8 sprites per texture)
+   * Clouds dissolve at night using noise-based alpha erosion
    */
   private createClouds(): void {
     if (!this.group) return;
 
-    const SKY_RADIUS = 5500;
-    const BASE_SIZE = 1800;
+    // Cloud distances scaled for 600 far plane
+    // Sky must fit inside camera far plane (600) - use 500 to leave some margin
+    const SKY_RADIUS = 500;
+    const BASE_SIZE = 160;
 
     // Create a group to hold all cloud meshes (for rotation)
     this.cloudGroup = new THREE.Group();
     this.cloudGroup.name = "CloudGroup";
+    this.cloudGroup.layers.set(1); // Main camera only, not minimap
 
     // Get textures array for easy lookup
     const textures = [this.cloud1, this.cloud2, this.cloud3, this.cloud4];
 
+    // Reference noise texture for dissolve effect
+    const noiseRef = this.noiseA;
+
     // Shared uniforms for all clouds
     const uTime = uniform(float(0));
     const uSunDir = uniform(vec3(0, 1, 0));
-    const uDayIntensity = uniform(float(1.0)); // For darkening clouds at night
+    const uDayIntensity = uniform(float(1.0)); // For dissolve effect at night
+
+    // Store uniforms at class level for updates
+    this.cloudMaterialUniforms = {
+      uTime,
+      uSunPosition: uSunDir,
+      uDayIntensity,
+    } as CloudMaterialUniforms;
 
     for (let i = 0; i < CLOUD_DEFS.length; i++) {
       const def = CLOUD_DEFS[i];
@@ -661,20 +818,90 @@ export class SkySystem extends System {
       }
       uvAttr.needsUpdate = true;
 
-      // Create material with this cloud's texture - simple soft clouds
+      // Create material with perlin noise dissolve fade in/out
+      // Each cloud gets a unique phase offset based on its index
+      const cloudIndex = float(i);
+
       const cloudColorNode = Fn(() => {
         const uvCoord = uv();
         const cloudTex = texture(tex, uvCoord);
 
-        // Day/night color - clouds darken significantly at night
-        // uDayIntensity: 1 = full day, 0 = full night
+        // Day/night color - clouds are bright during day
         const dayColor = vec3(1.0, 1.0, 1.0); // day: pure white
-        const nightColor = vec3(0.15, 0.18, 0.25); // night: dark blue-gray
+        const nightColor = vec3(0.3, 0.35, 0.45); // night: dark blue-gray
         const cloudColor = mix(nightColor, dayColor, uDayIntensity);
 
-        // Alpha also fades at night (clouds less visible)
-        const nightAlpha = add(float(0.3), mul(uDayIntensity, float(0.7))); // 30%-100%
-        const finalAlpha = mul(cloudTex.a, nightAlpha);
+        // =====================
+        // ANIMATED NOISE UVs - swirl and drift for organic movement
+        // =====================
+        const centerUV = sub(uvCoord, vec3(0.5, 0.5, 0.0).xy);
+        const swirlAngle = mul(uTime, float(0.12)); // Slow swirl rotation
+        const cosA = cos(swirlAngle);
+        const sinA = sin(swirlAngle);
+        // Rotate UVs around center for swirl effect
+        const rotatedUV = vec3(
+          add(mul(centerUV.x, cosA), mul(centerUV.y, sinA)),
+          sub(mul(centerUV.y, cosA), mul(centerUV.x, sinA)),
+          float(0.0),
+        );
+        const swirlUV = add(rotatedUV.xy, vec3(0.5, 0.5, 0.0).xy);
+
+        // Sample noise with swirling + drifting UVs
+        const noiseUV = add(
+          mul(swirlUV, float(2.0)), // Scale noise
+          mul(vec3(uTime, mul(uTime, float(0.6)), float(0.0)).xy, float(0.05)), // Drift
+        );
+        const noiseSample = noiseRef
+          ? texture(noiseRef, noiseUV)
+          : vec4(0.5, 0.5, 0.5, 1.0);
+        const noiseValue = noiseSample.r;
+
+        // =====================
+        // PERLIN DISSOLVE FADE - noise-driven appearance/disappearance
+        // =====================
+        // Each cloud fades in/out over ~60 seconds using perlin threshold
+        const fadeSpeed = float(0.03); // ~30 sec half-cycle
+        const cloudPhase = mul(cloudIndex, float(2.5)); // Unique phase per cloud
+        const fadeCycle = add(mul(uTime, fadeSpeed), cloudPhase);
+
+        // fadeProgress goes 0 -> 1 -> 0 (fully visible at 1, dissolved at 0)
+        const fadeProgress = mul(add(cos(fadeCycle), float(1.0)), float(0.5));
+
+        // Dissolve threshold based on fadeProgress
+        // At fadeProgress=1 (fully visible): threshold = -0.1 (all noise passes)
+        // At fadeProgress=0 (dissolved): threshold = 1.1 (no noise passes)
+        // Pixels with noise ABOVE threshold are visible
+        const dissolveThreshold = sub(
+          float(1.1),
+          mul(fadeProgress, float(1.2)),
+        );
+
+        // Perlin dissolve mask - pixels appear/disappear based on noise vs threshold
+        // High noise areas appear first when fading in, disappear last when fading out
+        const dissolveMask = smoothstep(
+          dissolveThreshold,
+          add(dissolveThreshold, float(0.15)), // Soft feathered edge
+          noiseValue,
+        );
+
+        // =====================
+        // NIGHT FADE - additional dissolve at night
+        // =====================
+        const nightAmount = sub(float(1.0), uDayIntensity); // 0 at day, 1 at night
+        // Push dissolve threshold higher at night
+        const nightThreshold = mul(nightAmount, float(0.8));
+        const nightMask = smoothstep(
+          nightThreshold,
+          add(nightThreshold, float(0.2)),
+          noiseValue,
+        );
+
+        // =====================
+        // FINAL ALPHA - perlin noise drives everything
+        // =====================
+        const baseAlpha = cloudTex.a;
+        // Both dissolve effects are noise-based, creating organic edges
+        const finalAlpha = mul(mul(baseAlpha, dissolveMask), nightMask);
 
         return vec4(cloudColor, finalAlpha);
       })();
@@ -684,24 +911,14 @@ export class SkySystem extends System {
       mat.side = THREE.DoubleSide;
       mat.transparent = true;
       mat.depthWrite = false;
+      mat.depthTest = false; // Ignore camera far plane
       mat.toneMapped = false;
       mat.fog = false; // Don't let scene fog affect clouds
-
-      // Store uniform reference on first material (for updates)
-      if (i === 0) {
-        (
-          mat as THREE.Material & { cloudUniforms?: CloudMaterialUniforms }
-        ).cloudUniforms = {
-          uTime,
-          uSunPosition: uSunDir,
-          uDayIntensity,
-        } as CloudMaterialUniforms;
-      }
 
       // Create mesh
       const mesh = new THREE.Mesh(geom, mat);
       mesh.frustumCulled = false;
-      mesh.renderOrder = 1;
+      mesh.renderOrder = -995; // Render after sky dome but before scene objects
 
       // Position on sky dome
       const azRad = (def.az * Math.PI) / 180;
@@ -724,6 +941,9 @@ export class SkySystem extends System {
       // Store base scale for animation
       mesh.userData.baseScale = new THREE.Vector3(w, h, 1);
 
+      // Main camera only, not minimap
+      mesh.layers.set(1);
+
       this.cloudGroup.add(mesh);
     }
 
@@ -736,37 +956,87 @@ export class SkySystem extends System {
     if (!this.group || !this.skyMesh) return;
     this.elapsed += delta;
 
-    // Time-of-day (0..1)
-    const worldTime = this.world.getTime();
+    // Time-of-day (0..1) - use synced world time from server for multiplayer sync
+    // On client: use network.getSyncedWorldTime() if available, otherwise local time
+    // On server: use local world time (server is authoritative)
+    const network = this.world.network as
+      | { getSyncedWorldTime?: () => number }
+      | undefined;
+    const worldTime = network?.getSyncedWorldTime
+      ? network.getSyncedWorldTime()
+      : this.world.getTime();
     const dayPhase = (worldTime % this.dayDurationSec) / this.dayDurationSec;
-    const isDay = dayPhase < 0.5;
 
     // Store for public getters
     this._dayPhase = dayPhase;
-    // Calculate smooth day intensity using cosine (peaks at noon, lowest at midnight)
-    // dayPhase 0.5 = noon = max intensity, dayPhase 0/1 = midnight = min intensity
-    this._dayIntensity = Math.max(
-      0,
-      Math.cos((dayPhase - 0.5) * Math.PI * 2) * 0.5 + 0.5,
-    );
 
-    // Sun direction on unit circle around scene using pre-allocated vector
-    const inc = 0.01;
-    const theta = Math.PI * (inc - 0.5);
-    const phi = 2 * Math.PI * (dayPhase - 0.5);
-    this._sunDir.set(
-      Math.cos(phi),
-      Math.sin(phi) * Math.sin(theta),
-      Math.sin(phi) * Math.cos(theta),
-    );
+    // Sun is above horizon from dayPhase 0.25 (sunrise) to 0.75 (sunset)
+    const isDay = this.isDay;
+
+    // Calculate day intensity with SHARP transitions at sunrise/sunset
+    // Night stays truly dark until sunrise, then rapid transition
+    // This creates the feeling of "darkest before dawn" then sudden light
+    const DAWN_START = 0.22; // Start brightening just before sunrise
+    const DAWN_END = 0.28; // Full brightness shortly after sunrise
+    const DUSK_START = 0.72; // Start darkening just before sunset
+    const DUSK_END = 0.78; // Full darkness shortly after sunset
+
+    // Smoothstep helper for smooth but sharp transitions
+    const smoothstep = (edge0: number, edge1: number, x: number) => {
+      const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+      return t * t * (3 - 2 * t);
+    };
+
+    let dayIntensity: number;
+    if (dayPhase < DAWN_START || dayPhase >= DUSK_END) {
+      // Deep night - completely dark
+      dayIntensity = 0;
+    } else if (dayPhase < DAWN_END) {
+      // Dawn transition - rapid brightening
+      dayIntensity = smoothstep(DAWN_START, DAWN_END, dayPhase);
+    } else if (dayPhase < DUSK_START) {
+      // Full day - slight variation with noon being brightest
+      const noonFactor = 1 - Math.abs(dayPhase - 0.5) * 2; // 0 at edges, 1 at noon
+      dayIntensity = 0.85 + noonFactor * 0.15; // 0.85 to 1.0
+    } else {
+      // Dusk transition - rapid darkening
+      dayIntensity = 1 - smoothstep(DUSK_START, DUSK_END, dayPhase);
+    }
+
+    this._dayIntensity = dayIntensity;
+
+    // Sun direction - traces arc across sky from east to west
+    // dayPhase: 0 = midnight, 0.25 = sunrise, 0.5 = noon, 0.75 = sunset, 1 = midnight
+    //
+    // The sun arc angle: -π/2 at midnight, 0 at sunrise, π/2 at noon, π at sunset
+    const sunArcAngle = (dayPhase - 0.25) * Math.PI * 2;
+
+    // Sun position in sky:
+    // - X: East-West position (positive = east, negative = west)
+    // - Y: Height above horizon (positive = above, negative = below)
+    // - Z: North-South offset (slight tilt for more natural path)
+    const sunElevation = Math.sin(sunArcAngle); // -1 to 1, peaks at noon
+    const sunAzimuth = Math.cos(sunArcAngle); // 1 at sunrise, -1 at sunset
+
+    // Add slight Z offset for sun path tilt (makes shadows more interesting)
+    const sunTilt = 0.3; // 30% tilt toward/away from camera
+
+    this._sunDir
+      .set(
+        sunAzimuth * Math.max(0.1, 1 - Math.abs(sunElevation)), // X: E-W, compressed when high
+        sunElevation, // Y: height
+        sunTilt * sunAzimuth, // Z: slight tilt
+      )
+      .normalize();
 
     // Update uniforms
     this.skyUniforms.time.value = this.elapsed;
     this.skyUniforms.sunPosition.value.copy(this._sunDir);
     this.skyUniforms.dayCycleProgress.value = dayPhase;
 
-    // Position sun/moon
-    const radius = 4000;
+    // Position sun/moon (scaled for 600 far plane)
+    // Position celestial bodies inside sky dome (must fit in camera far plane)
+    const radius = 450;
     if (this.sun) {
       this.sun.position.set(
         this._sunDir.x * radius,
@@ -782,7 +1052,7 @@ export class SkySystem extends System {
       }
     }
 
-    // Position sun glow (WebGPU-compatible lensflare replacement)
+    // Position sun glow layers (WebGPU-compatible lensflare replacement)
     if (this.sunGlow) {
       this.sunGlow.position.set(
         this._sunDir.x * radius,
@@ -791,6 +1061,20 @@ export class SkySystem extends System {
       );
       this.sunGlow.visible = isDay;
       this.sunGlow.quaternion.copy(this.world.camera.quaternion);
+    }
+
+    // Position inner sun glow
+    const groupWithGlow = this.group as THREE.Group & {
+      sunInnerGlow?: THREE.Mesh;
+    };
+    if (groupWithGlow.sunInnerGlow) {
+      groupWithGlow.sunInnerGlow.position.set(
+        this._sunDir.x * radius,
+        this._sunDir.y * radius,
+        this._sunDir.z * radius,
+      );
+      groupWithGlow.sunInnerGlow.visible = isDay;
+      groupWithGlow.sunInnerGlow.quaternion.copy(this.world.camera.quaternion);
     }
 
     if (this.moon) {
@@ -824,27 +1108,24 @@ export class SkySystem extends System {
       this.skyTSLUniforms.uTime.value = this.elapsed;
       this.skyTSLUniforms.uSunPosition.value.copy(this._sunDir);
       this.skyTSLUniforms.uDayCycleProgress.value = dayPhase;
+      this.skyTSLUniforms.uDayIntensity.value = this._dayIntensity; // Sharp transition value
     }
 
-    // Update cloud material uniforms
-    if (this.clouds) {
-      const cloudMat = this.clouds.material as THREE.Material & {
-        cloudUniforms?: CloudMaterialUniforms;
-      };
-      if (cloudMat.cloudUniforms) {
-        cloudMat.cloudUniforms.uTime.value = this.elapsed;
-        cloudMat.cloudUniforms.uSunPosition.value.copy(this._sunDir);
-        cloudMat.cloudUniforms.uDayIntensity.value = this._dayIntensity;
-      }
-
-      if (this.sun) this.sun.renderOrder = 2;
-      if (this.moon) this.moon.renderOrder = 2;
+    // Update cloud material uniforms via class-level reference
+    if (this.cloudMaterialUniforms) {
+      this.cloudMaterialUniforms.uTime.value = this.elapsed;
+      this.cloudMaterialUniforms.uSunPosition.value.copy(this._sunDir);
+      this.cloudMaterialUniforms.uDayIntensity.value = this._dayIntensity;
     }
 
-    // Very slowly rotate cloud cover and animate scale
+    // Ensure render order - render AFTER terrain so depth test works (terrain occludes celestials)
+    if (this.sun) this.sun.renderOrder = 1000;
+    if (this.moon) this.moon.renderOrder = 1000;
+
+    // Gently rotate cloud cover and animate scale
     if (this.cloudGroup) {
-      // ~1 full rotation per 40 minutes (0.0025 radians/sec)
-      this.cloudGroup.rotation.y += delta * 0.0025;
+      // ~1 full rotation per 20 minutes (0.005 radians/sec) - subtle movement
+      this.cloudGroup.rotation.y += delta * 0.005;
 
       // Animate each cloud's scale for gentle breathing effect
       this.cloudGroup.children.forEach((mesh, i) => {
@@ -899,6 +1180,15 @@ export class SkySystem extends System {
       (this.sunGlow.material as THREE.Material).dispose();
       this.sunGlow = null;
     }
+    // Clean up inner sun glow
+    const groupWithGlow = this.group as
+      | (THREE.Group & { sunInnerGlow?: THREE.Mesh })
+      | null;
+    if (groupWithGlow?.sunInnerGlow) {
+      groupWithGlow.sunInnerGlow.geometry.dispose();
+      (groupWithGlow.sunInnerGlow.material as THREE.Material).dispose();
+      groupWithGlow.sunInnerGlow = undefined;
+    }
     if (this.moon) {
       this.moon.geometry.dispose();
       (this.moon.material as THREE.Material).dispose();
@@ -911,6 +1201,8 @@ export class SkySystem extends System {
     }
     this.sunMaterialUniforms = null;
     this.moonMaterialUniforms = null;
+    this.cloudMaterialUniforms = null;
+    this.galaxyTextureUniform = null;
     this.group = null;
   }
 }
