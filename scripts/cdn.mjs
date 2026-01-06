@@ -32,6 +32,22 @@ function isDockerAvailable() {
   }
 }
 
+function getDockerComposeCommand() {
+  // Try docker compose (newer Docker versions) first
+  try {
+    execSync('docker compose version', { stdio: 'ignore' })
+    return 'docker compose'
+  } catch {
+    // Fall back to docker-compose (older versions or standalone)
+    try {
+      execSync('docker-compose version', { stdio: 'ignore' })
+      return 'docker-compose'
+    } catch {
+      throw new Error('Neither "docker compose" nor "docker-compose" is available')
+    }
+  }
+}
+
 async function ensureCDNRunning() {
   if (!isDockerAvailable()) {
     console.log(`${colors.yellow}⚠️  Docker not available - CDN will not start${colors.reset}`)
@@ -67,7 +83,8 @@ async function ensureCDNRunning() {
 
     // Start CDN
     console.log(`${colors.blue}Starting CDN container...${colors.reset}`)
-    execSync('docker-compose up -d cdn', { 
+    const dockerComposeCmd = getDockerComposeCommand()
+    execSync(`${dockerComposeCmd} up -d cdn`, { 
       stdio: 'inherit',
       cwd: serverDir
     })
