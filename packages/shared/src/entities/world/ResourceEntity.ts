@@ -268,6 +268,9 @@ export class ResourceEntity extends InteractableEntity {
       respawnTime: this.config.respawnTime,
       interactionDistance: this.config.interactionDistance || 3,
       description: this.config.description,
+      modelScale: this.config.modelScale,
+      depletedModelScale: this.config.depletedModelScale,
+      depletedModelPath: this.config.depletedModelPath,
     } as EntityData;
   }
 
@@ -284,6 +287,9 @@ export class ResourceEntity extends InteractableEntity {
       harvestTime: this.config.harvestTime,
       harvestYield: this.config.harvestYield,
       respawnTime: this.config.respawnTime,
+      modelScale: this.config.modelScale,
+      depletedModelScale: this.config.depletedModelScale,
+      depletedModelPath: this.config.depletedModelPath,
     };
   }
 
@@ -334,24 +340,19 @@ export class ResourceEntity extends InteractableEntity {
         // Some systems might try to apply non-uniform scale - prevent this
         this.node.scale.set(1, 1, 1);
 
-        // CRITICAL: Scale and orient based on resource type
-        // Different Meshy models have different base scales and orientations
+        // Use scale from manifest config, with fallback defaults per resource type
         // ALWAYS use uniform scaling to preserve model proportions
-        let modelScale = 1.0;
-        const needsXRotation = false; // Some models are exported lying flat
+        let modelScale = this.config.modelScale ?? 1.0;
 
-        if (this.config.resourceType === "tree") {
-          modelScale = 3.0; // Scale up from base size (uniform scaling only)
-          // Trees from Meshy are typically exported standing upright, no rotation needed
+        // Fallback defaults if manifest doesn't specify scale
+        if (this.config.modelScale === undefined) {
+          if (this.config.resourceType === "tree") {
+            modelScale = 3.0;
+          }
         }
 
         // Apply UNIFORM scale only (x=y=z to prevent stretching)
         this.mesh.scale.set(modelScale, modelScale, modelScale);
-
-        // Apply base rotation if model is exported lying flat
-        if (needsXRotation) {
-          this.mesh.rotation.x = Math.PI / 2; // 90 degrees to stand upright
-        }
 
         this.mesh.updateMatrix();
         this.mesh.updateMatrixWorld(true);
