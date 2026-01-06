@@ -22,6 +22,7 @@ import { EventType } from "../../../types/events";
  */
 import { SystemBase } from "../infrastructure/SystemBase";
 import type { World } from "../../../types/index";
+import { getTargetValidator } from "./TargetValidator";
 
 export class ProcessingSystem extends SystemBase {
   private activeFires = new Map<string, Fire>();
@@ -130,6 +131,12 @@ export class ProcessingSystem extends SystemBase {
         this.playerSkills.set(data.playerId, data.skills);
       },
     );
+
+    // Register as FireRegistry so TargetValidator knows about active fires
+    const validator = getTargetValidator();
+    validator.setFireRegistry({
+      getActiveFireIds: () => this.getActiveFireIds(),
+    });
 
     // CLIENT ONLY: Listen for fire created events from server to create visuals
     if (this.world.isClient) {
@@ -677,6 +684,16 @@ export class ProcessingSystem extends SystemBase {
   }
 
   // Public API
+
+  /**
+   * Get IDs of all active fires (for TargetValidator FireRegistry)
+   */
+  getActiveFireIds(): string[] {
+    return Array.from(this.activeFires.entries())
+      .filter(([_, fire]) => fire.isActive)
+      .map(([id]) => id);
+  }
+
   getActiveFires(): Map<string, Fire> {
     return new Map(this.activeFires);
   }
