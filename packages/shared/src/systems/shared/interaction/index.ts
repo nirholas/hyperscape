@@ -9,3 +9,7 @@ export * from "./InventoryInteractionSystem";
 export * from "./ProcessingSystem";
 export * from "./Physics";
 export * from "./DialogueSystem";
+
+// Item Targeting System (for "Use X on Y" interactions)
+export * from "./ItemTargetingSystem";
+export * from "./TargetValidator";

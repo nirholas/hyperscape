@@ -369,6 +369,26 @@ export enum EventType {
   // Processing System
   PROCESSING_FIREMAKING_REQUEST = "processing:firemaking:request",
   PROCESSING_COOKING_REQUEST = "processing:cooking:request",
+  PROCESSING_CANCEL = "processing:cancel",
+
+  // Item Targeting System
+  TARGETING_START = "targeting:start",
+  TARGETING_COMPLETE = "targeting:complete",
+  TARGETING_CANCEL = "targeting:cancel",
+
+  // Firemaking Events
+  FIREMAKING_REQUEST = "firemaking:request",
+  FIREMAKING_START = "firemaking:start",
+  FIREMAKING_SUCCESS = "firemaking:success",
+  FIREMAKING_FAILURE = "firemaking:failure",
+
+  // Cooking Events
+  COOKING_REQUEST = "cooking:request",
+  COOKING_START = "cooking:start",
+  COOKING_SUCCESS = "cooking:success",
+  COOKING_BURN = "cooking:burn",
+  COOKING_COMPLETE = "cooking:complete",
+  COOKING_INTERACT = "cooking:interact",
 
   // Death System
   DEATH_LOOT_COLLECT = "death:loot:collect",

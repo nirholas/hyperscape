@@ -30,6 +30,8 @@ export enum EntityType {
   HEADSTONE = "headstone",
   STATIC = "static",
   BANK = "bank",
+  FIRE = "fire",
+  RANGE = "range",
 }
 
 export enum InteractionType {
@@ -43,6 +45,8 @@ export enum InteractionType {
   TRADE = "trade",
   TRAIN = "train",
   QUEST = "quest",
+  COOKING = "cooking",
+  FIREMAKING = "firemaking",
 }
 
 export enum PlayerCombatStyle {
