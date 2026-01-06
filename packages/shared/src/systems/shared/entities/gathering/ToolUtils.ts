@@ -1,0 +1,124 @@
+/**
+ * ToolUtils - Pure utility functions for tool validation and categorization
+ *
+ * Extracted from ResourceSystem.ts for SOLID compliance (Single Responsibility).
+ * These are pure functions with no system dependencies.
+ */
+
+/**
+ * OSRS fishing tools that require exact matching (not interchangeable)
+ */
+export const EXACT_FISHING_TOOLS = [
+  "small_fishing_net",
+  "fishing_rod",
+  "fly_fishing_rod",
+  "harpoon",
+  "lobster_pot",
+  "big_fishing_net",
+] as const;
+
+export type FishingToolId = (typeof EXACT_FISHING_TOOLS)[number];
+
+/**
+ * Extract tool category from toolRequired field
+ *
+ * e.g., "bronze_hatchet" -> "hatchet", "bronze_pickaxe" -> "pickaxe"
+ *
+ * OSRS-ACCURACY: Fishing tools use EXACT matching because:
+ * - small_fishing_net catches shrimp/anchovies (level 1)
+ * - fishing_rod + bait catches sardine/herring/pike (level 5+)
+ * - fly_fishing_rod + feathers catches trout/salmon (level 20+)
+ * These are NOT interchangeable like pickaxe tiers.
+ *
+ * @param toolRequired - The tool ID from resource manifest
+ * @returns The tool category or exact ID for fishing tools
+ */
+export function getToolCategory(toolRequired: string): string {
+  const lowerTool = toolRequired.toLowerCase();
+
+  // OSRS-ACCURACY: Fishing tools require EXACT matching (not interchangeable)
+  // Return the exact tool ID for fishing equipment
+  if (EXACT_FISHING_TOOLS.includes(lowerTool as FishingToolId)) {
+    return lowerTool; // Return exact ID, not category
+  }
+
+  // Handle common patterns (check pickaxe before axe since "pickaxe" contains "axe")
+  if (lowerTool.includes("pickaxe") || lowerTool.includes("pick")) {
+    return "pickaxe";
+  }
+  if (lowerTool.includes("hatchet") || lowerTool.includes("axe")) {
+    return "hatchet";
+  }
+
+  // Fallback: take last segment after underscore
+  const parts = toolRequired.split("_");
+  return parts[parts.length - 1];
+}
+
+/**
+ * Tool display name mapping
+ */
+const TOOL_DISPLAY_NAMES: Record<string, string> = {
+  hatchet: "hatchet",
+  pickaxe: "pickaxe",
+  // OSRS-accurate fishing tool names
+  small_fishing_net: "small fishing net",
+  fishing_rod: "fishing rod",
+  fly_fishing_rod: "fly fishing rod",
+  harpoon: "harpoon",
+  lobster_pot: "lobster pot",
+  big_fishing_net: "big fishing net",
+};
+
+/**
+ * Get human-readable display name for tool category
+ *
+ * @param category - Tool category or exact fishing tool ID
+ * @returns Human-readable tool name
+ */
+export function getToolDisplayName(category: string): string {
+  return TOOL_DISPLAY_NAMES[category] || category.replace(/_/g, " ");
+}
+
+/**
+ * Check if a tool category is a fishing tool that requires exact matching
+ *
+ * @param category - Tool category to check
+ * @returns True if this is a fishing tool requiring exact match
+ */
+export function isExactMatchFishingTool(category: string): boolean {
+  return EXACT_FISHING_TOOLS.includes(category as FishingToolId);
+}
+
+/**
+ * Check if an item ID matches the required tool category
+ *
+ * OSRS-ACCURACY: Fishing tools require EXACT matching.
+ * Other tools (pickaxe, hatchet) use category matching (any tier works).
+ *
+ * @param itemId - The item ID from player inventory
+ * @param category - The required tool category
+ * @returns True if the item satisfies the tool requirement
+ */
+export function itemMatchesToolCategory(
+  itemId: string,
+  category: string,
+): boolean {
+  const lowerItemId = itemId.toLowerCase();
+
+  // If category is an exact fishing tool, require exact match
+  if (isExactMatchFishingTool(category)) {
+    return lowerItemId === category;
+  }
+
+  // For hatchet/pickaxe categories, check if item contains the category
+  if (category === "hatchet") {
+    return lowerItemId.includes("hatchet") || lowerItemId.includes("axe");
+  }
+  if (category === "pickaxe") {
+    return lowerItemId.includes("pickaxe") || lowerItemId.includes("pick");
+  }
+
+  // Fallback: check if item ID contains the category
+  return lowerItemId.includes(category);
+}

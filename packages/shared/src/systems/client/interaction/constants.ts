@@ -154,7 +154,9 @@ export const MESSAGE_TYPES = {
   ATTACK_MOB: "attackMob",
   /** Attack player (PvP) */
   ATTACK_PLAYER: "attackPlayer",
-  /** Gather from resource (tree, rock, fishing spot) */
+  /** SERVER-AUTHORITATIVE: Request to interact with resource - server calculates path */
+  RESOURCE_INTERACT: "resourceInteract",
+  /** Legacy: Gather from resource (used after server paths player) */
   RESOURCE_GATHER: "resourceGather",
   /** Open bank interface via NPC */
   BANK_OPEN: "bankOpen",

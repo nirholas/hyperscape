@@ -1,0 +1,623 @@
+/**
+ * PendingGatherManager - Server-Authoritative Resource Gathering
+ *
+ * Modeled after PendingAttackManager for combat.
+ * Handles the movement-to-gather flow when a player clicks a resource.
+ *
+ * SERVER-AUTHORITATIVE FLOW:
+ * 1. Player clicks resource → client sends resourceInteract with resourceId
+ * 2. Server looks up resource's TRUE position from ResourceSystem
+ * 3. Server calculates best cardinal tile using GATHERING_CONSTANTS.GATHERING_RANGE
+ * 4. Server paths player to that tile via movePlayerToward()
+ * 5. Every tick, server checks if player arrived at cardinal tile
+ * 6. When arrived, server sets face target via FaceDirectionManager and starts gathering
+ * 7. At end of tick, FaceDirectionManager applies rotation (OSRS-accurate deferred facing)
+ *
+ * KEY DIFFERENCES FROM OLD APPROACH:
+ * - Uses movePlayerToward() with GATHERING_RANGE (like combat's MELEE_RANGE_STANDARD)
+ * - Tick-based processing (like PendingAttackManager) instead of setInterval
+ * - Uses FaceDirectionManager for rotation (OSRS-accurate deferred face direction)
+ * - No client-side position calculations
+ *
+ * @see PendingAttackManager - combat equivalent
+ * @see FaceDirectionManager - handles OSRS-accurate rotation
+ */
+
+import type { World } from "@hyperscape/shared";
+import {
+  EventType,
+  worldToTile,
+  worldToTileInto,
+  tileToWorld,
+  tilesWithinMeleeRange,
+  type TileCoord,
+  type ResourceFootprint,
+  FOOTPRINT_SIZES,
+  GATHERING_CONSTANTS,
+} from "@hyperscape/shared";
+import type { TileMovementManager } from "./tile-movement";
+
+/**
+ * Pending gather request data
+ */
+interface PendingGather {
+  playerId: string;
+  resourceId: string;
+  /** Resource anchor tile (SW corner for multi-tile resources) */
+  resourceAnchorTile: TileCoord;
+  /** Resource footprint size */
+  footprintX: number;
+  footprintZ: number;
+  /** Last known player tile (for detecting arrival) */
+  lastPlayerTile: TileCoord;
+  /** When this pending gather was created (for timeout) */
+  createdTick: number;
+  /** Whether this is a fishing spot (uses tile-based shore arrival) */
+  isFishing: boolean;
+  /** Resource world position (for face direction) */
+  resourcePosition: { x: number; y: number; z: number };
+  /** Target shore tile for fishing (player must arrive at this exact tile) */
+  targetShoreTile?: TileCoord;
+}
+
+/**
+ * Resource data from ResourceSystem
+ */
+interface ResourceData {
+  id: string;
+  position: { x: number; y: number; z: number };
+  footprint?: ResourceFootprint;
+  isAvailable?: boolean;
+  skillRequired?: string;
+  levelRequired?: number;
+  type?: string;
+}
+
+/** Timeout for pending gathers (in ticks) - 20 ticks = 12 seconds at 600ms/tick */
+const PENDING_GATHER_TIMEOUT_TICKS = 20;
+
+export class PendingGatherManager {
+  private world: World;
+  private tileMovementManager: TileMovementManager;
+  private sendFn: (name: string, data: unknown) => void;
+
+  /** Map of playerId → pending gather data */
+  private pendingGathers: Map<string, PendingGather> = new Map();
+
+  /** Pre-allocated tile buffers (zero-allocation hot path) */
+  private readonly _playerTile: TileCoord = { x: 0, z: 0 };
+  private readonly _resourceTile: TileCoord = { x: 0, z: 0 };
+
+  constructor(
+    world: World,
+    tileMovementManager: TileMovementManager,
+    sendFn: (name: string, data: unknown) => void,
+  ) {
+    this.world = world;
+    this.tileMovementManager = tileMovementManager;
+    this.sendFn = sendFn;
+  }
+
+  /**
+   * Get a player's skill level for a given skill.
+   * Used to check level requirements before setting arrival emote.
+   *
+   * @param playerId - The player ID
+   * @param skillName - The skill name (e.g., "fishing", "woodcutting", "mining")
+   * @returns The player's level in that skill, or 1 if not found
+   */
+  private getPlayerSkillLevel(playerId: string, skillName: string): number {
+    const player = this.world.getPlayer?.(playerId) as {
+      skills?: Record<string, { level: number; xp: number }>;
+      getComponent?: (type: string) => {
+        [key: string]: { level: number; xp: number } | unknown;
+      } | null;
+    } | null;
+    if (!player) return 1;
+
+    // Try player.skills first (common pattern)
+    if (player.skills?.[skillName]) {
+      return player.skills[skillName].level ?? 1;
+    }
+
+    // Try stats component
+    const stats = player.getComponent?.("stats");
+    if (stats) {
+      const skill = stats[skillName] as
+        | { level: number; xp: number }
+        | undefined;
+      return skill?.level ?? 1;
+    }
+
+    return 1;
+  }
+
+  /**
+   * Check if a player meets the level requirement for a resource.
+   *
+   * @param playerId - The player ID
+   * @param resource - The resource to check
+   * @returns true if player meets requirements, false otherwise
+   */
+  private playerMeetsLevelRequirement(
+    playerId: string,
+    resource: ResourceData,
+  ): boolean {
+    if (!resource.skillRequired || resource.levelRequired === undefined) {
+      return true; // No requirement specified
+    }
+
+    const playerLevel = this.getPlayerSkillLevel(
+      playerId,
+      resource.skillRequired,
+    );
+    return playerLevel >= resource.levelRequired;
+  }
+
+  /**
+   * Queue a pending gather for a player.
+   * Called when player clicks a resource.
+   *
+   * SERVER-AUTHORITATIVE: Server looks up resource position and paths player.
+   *
+   * @param playerId - The player ID
+   * @param resourceId - The resource to gather
+   * @param currentTick - Current game tick
+   * @param runMode - Player's run mode preference from client (true = run, false = walk)
+   */
+  queuePendingGather(
+    playerId: string,
+    resourceId: string,
+    currentTick: number,
+    runMode?: boolean,
+  ): void {
+    // Cancel any existing pending gather
+    this.cancelPendingGather(playerId);
+
+    // Look up resource using SERVER's authoritative data
+    const resourceSystem = this.world.getSystem("resource") as {
+      getResource?: (id: string) => ResourceData | null;
+    } | null;
+
+    if (!resourceSystem?.getResource) {
+      console.warn("[PendingGather] No resource system available");
+      return;
+    }
+
+    const resource = resourceSystem.getResource(resourceId);
+    if (!resource) {
+      console.warn(`[PendingGather] Resource ${resourceId} not found`);
+      return;
+    }
+
+    if (!resource.isAvailable) {
+      // Resource is depleted - silently ignore
+      return;
+    }
+
+    // Get player entity
+    const player = this.world.getPlayer?.(playerId);
+    if (!player?.position) {
+      console.warn(`[PendingGather] Player ${playerId} not found`);
+      return;
+    }
+
+    // Get resource footprint
+    const footprint: ResourceFootprint = resource.footprint || "standard";
+    const size = FOOTPRINT_SIZES[footprint];
+
+    // Detect if this is a fishing spot (uses distance check instead of tile adjacency)
+    const isFishing =
+      resource.skillRequired === "fishing" || resource.type === "fishing_spot";
+
+    // Calculate tiles
+    worldToTileInto(player.position.x, player.position.z, this._playerTile);
+    worldToTileInto(
+      resource.position.x,
+      resource.position.z,
+      this._resourceTile,
+    );
+
+    console.log(
+      `[PendingGather] SERVER-AUTHORITATIVE: Player ${playerId} wants to gather ${resourceId}${isFishing ? " (FISHING)" : ""}`,
+    );
+    console.log(
+      `[PendingGather]   Resource at anchor (${this._resourceTile.x}, ${this._resourceTile.z}), footprint ${size.x}x${size.z}`,
+    );
+    console.log(
+      `[PendingGather]   Player at tile (${this._playerTile.x}, ${this._playerTile.z})`,
+    );
+
+    // FISHING: Find shore tile FIRST, then check if player is already there
+    // OSRS behavior: Player ALWAYS walks to shore before fishing (not just "in range")
+    if (isFishing) {
+      // Find the closest walkable shore tile to the fishing spot
+      const shoreTile = this.tileMovementManager.findClosestWalkableTile(
+        resource.position,
+        10, // Search up to 10 tiles away from fishing spot
+      );
+
+      if (!shoreTile) {
+        console.warn(
+          `[PendingGather]   🎣 No walkable shore tile found near fishing spot!`,
+        );
+        return;
+      }
+
+      console.log(
+        `[PendingGather]   🎣 Shore tile at (${shoreTile.x}, ${shoreTile.z}), player at (${this._playerTile.x}, ${this._playerTile.z})`,
+      );
+
+      // Check if player is ALREADY on the shore tile (exact match, not distance)
+      if (
+        this._playerTile.x === shoreTile.x &&
+        this._playerTile.z === shoreTile.z
+      ) {
+        console.log(
+          `[PendingGather]   🎣 Already on shore tile - starting gather immediately`,
+        );
+        this.setFaceTargetViaManager(
+          playerId,
+          this._resourceTile,
+          size.x,
+          size.z,
+        );
+        this.startGathering(playerId, resourceId);
+        return;
+      }
+
+      // Player not on shore tile - walk there
+      console.log(
+        `[PendingGather]   🎣 Walking to shore tile (${shoreTile.x}, ${shoreTile.z})`,
+      );
+
+      // Use run mode from client if provided, otherwise fall back to server state
+      const isRunning =
+        runMode ?? this.tileMovementManager.getIsRunning(playerId);
+
+      // CRITICAL: Only set arrival emote if player meets level requirement
+      if (this.playerMeetsLevelRequirement(playerId, resource)) {
+        this.tileMovementManager.setArrivalEmote(playerId, "fishing");
+      } else {
+        console.log(
+          `[PendingGather]   🎣 Player ${playerId} doesn't meet level ${resource.levelRequired} ${resource.skillRequired} - no fishing emote`,
+        );
+      }
+
+      const shoreWorld = tileToWorld(shoreTile);
+      this.tileMovementManager.movePlayerToward(
+        playerId,
+        { x: shoreWorld.x, y: 0, z: shoreWorld.z },
+        isRunning,
+        0, // Non-combat movement - go directly to tile
+      );
+
+      // Store pending gather WITH target shore tile
+      this.pendingGathers.set(playerId, {
+        playerId,
+        resourceId,
+        resourceAnchorTile: {
+          x: this._resourceTile.x,
+          z: this._resourceTile.z,
+        },
+        footprintX: size.x,
+        footprintZ: size.z,
+        lastPlayerTile: { x: this._playerTile.x, z: this._playerTile.z },
+        createdTick: currentTick,
+        isFishing: true,
+        resourcePosition: { ...resource.position },
+        targetShoreTile: { x: shoreTile.x, z: shoreTile.z },
+      });
+
+      console.log(
+        `[PendingGather]   Queued fishing gather, waiting for player to arrive at shore`,
+      );
+      return;
+    } else {
+      // NON-FISHING: Check if already on a cardinal tile adjacent to resource
+      if (
+        this.isOnCardinalTile(
+          this._playerTile,
+          this._resourceTile,
+          size.x,
+          size.z,
+        )
+      ) {
+        console.log(
+          `[PendingGather]   Already on cardinal tile - starting gather immediately`,
+        );
+        this.setFaceTargetViaManager(
+          playerId,
+          this._resourceTile,
+          size.x,
+          size.z,
+        );
+        this.startGathering(playerId, resourceId);
+        return;
+      }
+    }
+
+    // NON-FISHING: Walk to cardinal tile adjacent to resource
+    // (Fishing is handled above and returns early)
+
+    // Use run mode from client if provided, otherwise fall back to server state
+    const isRunning =
+      runMode ?? this.tileMovementManager.getIsRunning(playerId);
+
+    console.log(
+      `[PendingGather]   Movement mode: ${isRunning ? "running" : "walking"} (from ${runMode !== undefined ? "client" : "server"})`,
+    );
+
+    // CRITICAL: Set arrival emote BEFORE pathing (like fishing)
+    // This bundles the emote with tileMovementEnd packet for atomic delivery
+    if (this.playerMeetsLevelRequirement(playerId, resource)) {
+      // Map skill to emote name
+      const skillToEmote: Record<string, string> = {
+        woodcutting: "chopping",
+        mining: "mining",
+      };
+      const emote = skillToEmote[resource.skillRequired ?? ""] ?? null;
+      if (emote) {
+        this.tileMovementManager.setArrivalEmote(playerId, emote);
+        console.log(
+          `[PendingGather]   🎬 Set arrival emote "${emote}" for ${resource.skillRequired}`,
+        );
+      }
+    } else {
+      console.log(
+        `[PendingGather]   Player ${playerId} doesn't meet level ${resource.levelRequired} ${resource.skillRequired} - no gathering emote`,
+      );
+    }
+
+    // Use GATHERING_RANGE (1) for cardinal-only positioning
+    this.tileMovementManager.movePlayerToward(
+      playerId,
+      resource.position,
+      isRunning,
+      GATHERING_CONSTANTS.GATHERING_RANGE,
+    );
+
+    // Store pending gather (non-fishing only, fishing returns early)
+    this.pendingGathers.set(playerId, {
+      playerId,
+      resourceId,
+      resourceAnchorTile: { x: this._resourceTile.x, z: this._resourceTile.z },
+      footprintX: size.x,
+      footprintZ: size.z,
+      lastPlayerTile: { x: this._playerTile.x, z: this._playerTile.z },
+      createdTick: currentTick,
+      isFishing: false,
+      resourcePosition: { ...resource.position },
+    });
+
+    console.log(
+      `[PendingGather]   Queued pending gather, waiting for player to arrive`,
+    );
+  }
+
+  /**
+   * Cancel pending gather for a player
+   */
+  cancelPendingGather(playerId: string): void {
+    if (this.pendingGathers.has(playerId)) {
+      this.pendingGathers.delete(playerId);
+      console.log(`[PendingGather] Cancelled pending gather for ${playerId}`);
+    }
+  }
+
+  /**
+   * Clean up when a player disconnects.
+   * Prevents memory leak from orphaned pending gather entries.
+   */
+  onPlayerDisconnect(playerId: string): void {
+    if (this.pendingGathers.has(playerId)) {
+      this.pendingGathers.delete(playerId);
+      console.log(
+        `[PendingGather] Cleaned up pending gather for disconnected player ${playerId}`,
+      );
+    }
+  }
+
+  /**
+   * Process all pending gathers - called every tick
+   * Checks if players have arrived at cardinal tiles and starts gathering
+   *
+   * ROBUSTNESS: Each player is processed independently with try/catch.
+   * If one player's processing fails, others continue normally.
+   */
+  processTick(currentTick: number): void {
+    for (const [playerId, pending] of this.pendingGathers) {
+      try {
+        this.processPlayerPendingGather(playerId, pending, currentTick);
+      } catch (error) {
+        // Log error with context for debugging
+        console.error(
+          `[PendingGather] Error processing player ${playerId} for resource ${pending.resourceId}:`,
+          error,
+        );
+        // Fail-safe cleanup: remove from pending to prevent infinite error loops
+        this.pendingGathers.delete(playerId);
+      }
+    }
+  }
+
+  /**
+   * Process a single player's pending gather check
+   * Extracted for error isolation - errors here won't break other players' tick processing
+   */
+  private processPlayerPendingGather(
+    playerId: string,
+    pending: PendingGather,
+    currentTick: number,
+  ): void {
+    // Check timeout
+    if (currentTick - pending.createdTick > PENDING_GATHER_TIMEOUT_TICKS) {
+      console.log(`[PendingGather] Timeout for ${playerId}`);
+      this.pendingGathers.delete(playerId);
+      return;
+    }
+
+    // Get player entity
+    const player = this.world.getPlayer?.(playerId);
+    if (!player?.position) {
+      this.pendingGathers.delete(playerId);
+      return;
+    }
+
+    // Check if resource still exists and is available
+    const resourceSystem = this.world.getSystem("resource") as {
+      getResource?: (id: string) => ResourceData | null;
+    } | null;
+
+    const resource = resourceSystem?.getResource?.(pending.resourceId);
+    if (!resource || !resource.isAvailable) {
+      console.log(
+        `[PendingGather] Resource ${pending.resourceId} no longer available`,
+      );
+      this.pendingGathers.delete(playerId);
+      return;
+    }
+
+    // Get current player tile
+    worldToTileInto(player.position.x, player.position.z, this._playerTile);
+
+    // Check arrival at target tile
+    let hasArrived = false;
+
+    if (pending.isFishing && pending.targetShoreTile) {
+      // FISHING: Exact tile match on shore tile
+      // Player must be standing on the specific shore tile we pathed them to
+      hasArrived =
+        this._playerTile.x === pending.targetShoreTile.x &&
+        this._playerTile.z === pending.targetShoreTile.z;
+
+      if (hasArrived) {
+        console.log(
+          `[PendingGather] 🎣 Player ${playerId} arrived at shore tile (${pending.targetShoreTile.x}, ${pending.targetShoreTile.z}) - starting gather`,
+        );
+      }
+    } else {
+      // NON-FISHING: Tile-based cardinal adjacency to resource
+      hasArrived = this.isOnCardinalTile(
+        this._playerTile,
+        pending.resourceAnchorTile,
+        pending.footprintX,
+        pending.footprintZ,
+      );
+
+      if (hasArrived) {
+        console.log(
+          `[PendingGather] Player ${playerId} arrived at cardinal tile - starting gather`,
+        );
+      }
+    }
+
+    if (hasArrived) {
+      // NOTE: Fishing emote is set via setArrivalEmote() in queuePendingGather()
+      // and bundled with tileMovementEnd packet for atomic delivery to client.
+      // This prevents race condition where client sets "idle" before emote arrives.
+
+      // Use FaceDirectionManager for OSRS-accurate rotation (like other resources)
+      this.setFaceTargetViaManager(
+        playerId,
+        pending.resourceAnchorTile,
+        pending.footprintX,
+        pending.footprintZ,
+      );
+
+      // Start gathering
+      this.startGathering(playerId, pending.resourceId);
+
+      // Remove from pending
+      this.pendingGathers.delete(playerId);
+    }
+  }
+
+  /**
+   * Check if player tile is on a cardinal adjacent tile to resource
+   * Uses tilesWithinMeleeRange with GATHERING_RANGE (cardinal-only, like standard melee)
+   */
+  private isOnCardinalTile(
+    playerTile: TileCoord,
+    resourceAnchor: TileCoord,
+    footprintX: number,
+    footprintZ: number,
+  ): boolean {
+    // For multi-tile resources, we need to check all tiles the resource occupies
+    // Player must be cardinally adjacent to ANY tile of the resource
+    for (let ox = 0; ox < footprintX; ox++) {
+      for (let oz = 0; oz < footprintZ; oz++) {
+        const resourceTile = {
+          x: resourceAnchor.x + ox,
+          z: resourceAnchor.z + oz,
+        };
+        // tilesWithinMeleeRange with GATHERING_RANGE checks cardinal-only
+        if (
+          tilesWithinMeleeRange(
+            playerTile,
+            resourceTile,
+            GATHERING_CONSTANTS.GATHERING_RANGE,
+          )
+        ) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Helper to set face target via FaceDirectionManager.
+   * Avoids code duplication for the multiple places we need to set rotation.
+   */
+  private setFaceTargetViaManager(
+    playerId: string,
+    resourceAnchor: TileCoord,
+    footprintX: number,
+    footprintZ: number,
+  ): void {
+    const faceManager = (
+      this.world as {
+        faceDirectionManager?: {
+          setCardinalFaceTarget: (
+            playerId: string,
+            anchorTile: TileCoord,
+            footprintX: number,
+            footprintZ: number,
+          ) => void;
+        };
+      }
+    ).faceDirectionManager;
+
+    if (faceManager) {
+      faceManager.setCardinalFaceTarget(
+        playerId,
+        resourceAnchor,
+        footprintX,
+        footprintZ,
+      );
+      console.log(
+        `[PendingGather] 🧭 Set cardinal face target for ${playerId} via FaceDirectionManager`,
+      );
+    }
+  }
+
+  /**
+   * Start the gathering process
+   */
+  private startGathering(playerId: string, resourceId: string): void {
+    const player = this.world.getPlayer?.(playerId);
+    if (!player?.position) return;
+
+    // Emit RESOURCE_GATHER event - ResourceSystem will handle the actual gathering
+    this.world.emit(EventType.RESOURCE_GATHER, {
+      playerId,
+      resourceId,
+      playerPosition: {
+        x: player.position.x,
+        y: player.position.y,
+        z: player.position.z,
+      },
+    });
+  }
+}

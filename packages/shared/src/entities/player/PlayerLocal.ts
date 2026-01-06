@@ -373,6 +373,7 @@ export class PlayerLocal extends Entity implements HotReloadable {
     constitution: { level: 1, xp: 0 },
     ranged: { level: 1, xp: 0 },
     woodcutting: { level: 1, xp: 0 },
+    mining: { level: 1, xp: 0 },
     fishing: { level: 1, xp: 0 },
     firemaking: { level: 1, xp: 0 },
     cooking: { level: 1, xp: 0 },
@@ -926,6 +927,8 @@ export class PlayerLocal extends Entity implements HotReloadable {
             combat: Emotes.COMBAT,
             sword_swing: Emotes.SWORD_SWING,
             chopping: Emotes.CHOPPING,
+            mining: Emotes.CHOPPING, // Use chopping animation for mining (temporary)
+            fishing: Emotes.FISHING,
             death: Emotes.DEATH,
           };
           const emoteUrl = emoteMap[this.emote] || Emotes.IDLE;

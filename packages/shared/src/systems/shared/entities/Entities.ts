@@ -663,6 +663,11 @@ export class Entities extends SystemBase implements IEntities {
         respawnTime: (data as { respawnTime?: number }).respawnTime || 60000,
         depleted: (data as { depleted?: boolean }).depleted || false,
         lastHarvestTime: 0,
+        modelScale: (data as { modelScale?: number }).modelScale,
+        depletedModelScale: (data as { depletedModelScale?: number })
+          .depletedModelScale,
+        depletedModelPath: (data as { depletedModelPath?: string })
+          .depletedModelPath,
       };
 
       const entity = new ResourceEntity(this.world, resourceConfig);

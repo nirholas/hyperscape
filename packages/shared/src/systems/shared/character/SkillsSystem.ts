@@ -819,6 +819,7 @@ export class SkillsSystem extends SystemBase {
       constitution: stats.constitution ?? { level: 1, xp: 0 },
       ranged: stats.ranged ?? { level: 1, xp: 0 },
       woodcutting: stats.woodcutting ?? { level: 1, xp: 0 },
+      mining: stats.mining ?? { level: 1, xp: 0 },
       fishing: stats.fishing ?? { level: 1, xp: 0 },
       firemaking: stats.firemaking ?? { level: 1, xp: 0 },
       cooking: stats.cooking ?? { level: 1, xp: 0 },

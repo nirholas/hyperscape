@@ -9,6 +9,34 @@ import type { Position3D } from "../core/base-types";
 // ============== RESOURCE TYPES ==============
 
 /**
+ * Resource footprint - how many tiles a resource occupies
+ * Used for OSRS-accurate tile-based positioning and interaction
+ *
+ * - standard: 1×1 tile (normal trees, rocks, fishing spots)
+ * - large: 2×2 tiles (ancient trees, large ore veins)
+ * - massive: 3×3 tiles (world trees, raid objects)
+ *
+ * Multi-tile resources use the SW (south-west) tile as their anchor,
+ * matching OSRS behavior for large objects.
+ *
+ * @see https://oldschool.runescape.wiki/w/Pathfinding
+ */
+export type ResourceFootprint = "standard" | "large" | "massive";
+
+/**
+ * Tile dimensions for each footprint type
+ * Used to calculate occupied tiles and interaction positions
+ */
+export const FOOTPRINT_SIZES: Record<
+  ResourceFootprint,
+  { x: number; z: number }
+> = {
+  standard: { x: 1, z: 1 },
+  large: { x: 2, z: 2 },
+  massive: { x: 3, z: 3 },
+};
+
+/**
  * Resource - a gatherable resource in the world
  */
 export interface Resource {
@@ -19,26 +47,40 @@ export interface Resource {
   skillRequired: string;
   levelRequired: number;
   toolRequired: string; // Tool item ID
+  /** Secondary consumable required (e.g., "fishing_bait" for rod fishing, "feathers" for fly fishing) */
+  secondaryRequired?: string;
   respawnTime: number; // Milliseconds
   isAvailable: boolean;
   lastDepleted: number;
-  drops: Array<{
-    itemId: string;
-    quantity: number;
-    chance: number; // 0-1
-  }>;
+  drops: ResourceDrop[];
+  /** Tile footprint - defaults to "standard" (1×1) if not specified */
+  footprint?: ResourceFootprint;
 }
 
 /**
  * Resource drop - what a resource can drop when gathered
+ *
+ * For fishing with OSRS priority rolling:
+ * - `levelRequired`: Minimum skill level to catch this fish
+ * - `catchLow`: Catch rate at level 1 (x/256 numerator)
+ * - `catchHigh`: Catch rate at level 99 (x/256 numerator)
+ *
+ * Fish are rolled in priority order (highest level first).
+ * @see https://oldschool.runescape.wiki/w/Catch_rate
  */
 export interface ResourceDrop {
   itemId: string;
   itemName: string;
   quantity: number;
-  chance: number; // 0-1
+  chance: number; // 0-1 (for weighted random) or 1.0 (for priority rolling)
   xpAmount: number;
   stackable: boolean;
+  /** Skill level required to catch this specific item */
+  levelRequired?: number;
+  /** OSRS catch rate numerator at level 1 (x/256) */
+  catchLow?: number;
+  /** OSRS catch rate numerator at level 99 (x/256) */
+  catchHigh?: number;
 }
 
 // ============== FIRE TYPES ==============

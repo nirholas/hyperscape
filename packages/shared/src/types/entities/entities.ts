@@ -17,6 +17,8 @@ import type {
   PrayerComponent,
   StatsComponent,
 } from "../core";
+import type { ResourceFootprint } from "../game/resource-processing-types";
+import type { TileCoord } from "../../systems/shared/movement/TileSystem";
 
 // Enums for better type safety instead of string literals
 export enum EntityType {
@@ -266,6 +268,22 @@ export interface ResourceEntityConfig
   depletedModelPath?: string | null;
   modelScale?: number;
   depletedModelScale?: number;
+  /**
+   * Tile footprint - how many tiles this resource occupies
+   * Defaults to "standard" (1×1) if not specified
+   * @see ResourceFootprint
+   */
+  footprint?: ResourceFootprint;
+  /**
+   * Anchor tile (SW corner) for this resource
+   * Calculated from position when spawned
+   */
+  anchorTile?: TileCoord;
+  /**
+   * All tiles this resource occupies
+   * Calculated from anchorTile and footprint when spawned
+   */
+  occupiedTiles?: TileCoord[];
 }
 
 // Component interfaces

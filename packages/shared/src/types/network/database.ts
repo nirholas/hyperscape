@@ -59,6 +59,8 @@ export interface PlayerRow {
   createdAt: number;
   woodcuttingLevel: number;
   woodcuttingXp: number;
+  miningLevel: number;
+  miningXp: number;
   fishingLevel: number;
   fishingXp: number;
   firemakingLevel: number;

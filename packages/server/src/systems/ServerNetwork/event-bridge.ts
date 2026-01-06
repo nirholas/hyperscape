@@ -273,6 +273,23 @@ export class EventBridge {
           newLevel,
           position: { x: position.x, y: position.y, z: position.z },
         });
+
+        // Persist skill XP to database
+        const dbSystem = this.world.getSystem("database") as {
+          savePlayer?: (
+            playerId: string,
+            data: Record<string, unknown>,
+          ) => void;
+        };
+        if (dbSystem?.savePlayer) {
+          // Map skill name to database column names
+          const skillLevelKey = `${data.skill}Level`;
+          const skillXpKey = `${data.skill}Xp`;
+          dbSystem.savePlayer(data.playerId, {
+            [skillLevelKey]: newLevel,
+            [skillXpKey]: newXp,
+          });
+        }
       });
     } catch (_err) {
       console.error("[EventBridge] Error setting up skill events:", _err);

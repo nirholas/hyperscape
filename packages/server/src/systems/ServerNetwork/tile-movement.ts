@@ -53,6 +53,13 @@ export class TileMovementManager {
   private _tempQuat = new THREE.Quaternion();
 
   /**
+   * Arrival emotes: When a player arrives at destination, use this emote instead of "idle"
+   * Used by gathering systems (fishing, mining, etc.) to set the action emote atomically
+   * with the movement end packet, preventing race conditions on the client.
+   */
+  private arrivalEmotes: Map<string, string> = new Map();
+
+  /**
    * OSRS-ACCURATE: Tick-start positions for all players
    * Captured at the VERY START of onTick(), BEFORE any movement processing.
    * Used by FollowManager to create the 1-tick delay effect.
@@ -124,6 +131,63 @@ export class TileMovementManager {
   }
 
   /**
+   * Find the closest walkable tile to a target position using BFS.
+   * Used for fishing where the target (fishing spot) is in water
+   * and we need to find the nearest shore tile.
+   *
+   * @param targetPos - Target position in world coordinates
+   * @param maxSearchRadius - Maximum tiles to search outward (default: 10)
+   * @returns The closest walkable tile, or null if none found within radius
+   */
+  findClosestWalkableTile(
+    targetPos: { x: number; z: number },
+    maxSearchRadius: number = 10,
+  ): TileCoord | null {
+    const targetTile = worldToTile(targetPos.x, targetPos.z);
+
+    // If target tile is already walkable, return it
+    if (this.isTileWalkable(targetTile)) {
+      return targetTile;
+    }
+
+    // BFS outward from target tile to find closest walkable tile
+    // Search in expanding rings (distance 1, 2, 3, etc.)
+    for (let radius = 1; radius <= maxSearchRadius; radius++) {
+      // Check all tiles at this radius (ring around target)
+      // Use a simple approach: check all tiles in a square, filter by distance
+      const candidates: Array<{ tile: TileCoord; dist: number }> = [];
+
+      for (let dx = -radius; dx <= radius; dx++) {
+        for (let dz = -radius; dz <= radius; dz++) {
+          // Only check tiles at exactly this radius (Chebyshev distance)
+          const chebyshev = Math.max(Math.abs(dx), Math.abs(dz));
+          if (chebyshev !== radius) continue;
+
+          const tile: TileCoord = {
+            x: targetTile.x + dx,
+            z: targetTile.z + dz,
+          };
+
+          if (this.isTileWalkable(tile)) {
+            // Use Euclidean distance for sorting (more accurate than Chebyshev)
+            const euclidean = Math.sqrt(dx * dx + dz * dz);
+            candidates.push({ tile, dist: euclidean });
+          }
+        }
+      }
+
+      // If we found walkable tiles at this radius, return the closest one
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => a.dist - b.dist);
+        return candidates[0].tile;
+      }
+    }
+
+    // No walkable tile found within search radius
+    return null;
+  }
+
+  /**
    * Get or create movement state for a player
    */
   private getOrCreateState(playerId: string): TileMovementState {
@@ -183,6 +247,19 @@ export class TileMovementManager {
     }
 
     const payload = validation.payload!;
+
+    // OSRS-ACCURACY: Emit click-to-move event for weak queue cancellation
+    // This MUST happen before any early returns (same-tile, cancel, etc.)
+    // ResourceSystem subscribes to this to cancel gathering when player clicks ground
+    // In OSRS, ANY click cancels weak queue actions like gathering
+    this.world.emit(EventType.MOVEMENT_CLICK_TO_MOVE, {
+      playerId: playerId,
+      targetPosition: {
+        x: payload.targetTile.x,
+        y: 0,
+        z: payload.targetTile.z,
+      },
+    });
 
     // Handle cancellation
     if (payload.cancel) {
@@ -416,6 +493,16 @@ export class TileMovementManager {
       entity.position.set(worldPos.x, worldPos.y, worldPos.z);
       entity.data.position = [worldPos.x, worldPos.y, worldPos.z];
 
+      // OSRS-ACCURATE: Mark player as having moved this tick
+      // Face direction system will skip rotation update if player moved
+      // @see https://osrs-docs.com/docs/packets/outgoing/updating/masks/face-direction/
+      const faceManager = (
+        this.world as {
+          faceDirectionManager?: { markPlayerMoved: (id: string) => void };
+        }
+      ).faceDirectionManager;
+      faceManager?.markPlayerMoved(playerId);
+
       // Calculate rotation based on movement direction (from previous to current tile)
       const prevWorld = tileToWorld(this._prevTile);
       const dx = worldPos.x - prevWorld.x;
@@ -453,13 +540,20 @@ export class TileMovementManager {
 
       // Check if arrived at destination
       if (state.pathIndex >= state.path.length) {
-        // Broadcast movement end
+        // Get any pending arrival emote (e.g., "fishing" for gathering actions)
+        // This is bundled with tileMovementEnd to prevent race conditions
+        const arrivalEmote = this.arrivalEmotes.get(playerId) || "idle";
+        this.arrivalEmotes.delete(playerId);
+
+        // Broadcast movement end with emote (atomic delivery)
         // Include moveSeq so client can ignore stale end packets
+        // Note: Rotation is handled by FaceDirectionManager at end of tick
         this.sendFn("tileMovementEnd", {
           id: playerId,
           tile: state.currentTile,
           worldPos: [worldPos.x, worldPos.y, worldPos.z],
           moveSeq: state.moveSeq,
+          emote: arrivalEmote,
         });
 
         // Clear path
@@ -469,14 +563,15 @@ export class TileMovementManager {
         // RS3-style: Clear movement flag so combat can resume
         entity.data.tileMovementActive = false;
 
-        // Broadcast idle state
+        // Broadcast entity state with arrival emote
+        const entityModifiedChanges: Record<string, unknown> = {
+          p: [worldPos.x, worldPos.y, worldPos.z],
+          v: [0, 0, 0],
+          e: arrivalEmote,
+        };
         this.sendFn("entityModified", {
           id: playerId,
-          changes: {
-            p: [worldPos.x, worldPos.y, worldPos.z],
-            v: [0, 0, 0],
-            e: "idle",
-          },
+          changes: entityModifiedChanges,
         });
       }
     }
@@ -549,6 +644,15 @@ export class TileMovementManager {
     entity.position.set(worldPos.x, worldPos.y, worldPos.z);
     entity.data.position = [worldPos.x, worldPos.y, worldPos.z];
 
+    // OSRS-ACCURATE: Mark player as having moved this tick
+    // Face direction system will skip rotation update if player moved
+    const faceManager = (
+      this.world as {
+        faceDirectionManager?: { markPlayerMoved: (id: string) => void };
+      }
+    ).faceDirectionManager;
+    faceManager?.markPlayerMoved(playerId);
+
     // Calculate rotation based on movement direction (zero allocation - use pre-allocated tile)
     const prevWorld = tileToWorld(this._prevTile);
     const dx = worldPos.x - prevWorld.x;
@@ -582,12 +686,19 @@ export class TileMovementManager {
 
     // Check if arrived at destination
     if (state.pathIndex >= state.path.length) {
-      // Broadcast movement end
+      // Get any pending arrival emote (e.g., "fishing" for gathering actions)
+      // This is bundled with tileMovementEnd to prevent race conditions
+      const arrivalEmote = this.arrivalEmotes.get(playerId) || "idle";
+      this.arrivalEmotes.delete(playerId);
+
+      // Broadcast movement end with emote (atomic delivery)
+      // Note: Rotation is handled by FaceDirectionManager at end of tick
       this.sendFn("tileMovementEnd", {
         id: playerId,
         tile: state.currentTile,
         worldPos: [worldPos.x, worldPos.y, worldPos.z],
         moveSeq: state.moveSeq,
+        emote: arrivalEmote,
       });
 
       // Clear path
@@ -597,14 +708,15 @@ export class TileMovementManager {
       // RS3-style: Clear movement flag so combat can resume
       entity.data.tileMovementActive = false;
 
-      // Broadcast idle state
+      // Broadcast entity state with arrival emote
+      const entityModifiedChanges: Record<string, unknown> = {
+        p: [worldPos.x, worldPos.y, worldPos.z],
+        v: [0, 0, 0],
+        e: arrivalEmote,
+      };
       this.sendFn("entityModified", {
         id: playerId,
-        changes: {
-          p: [worldPos.x, worldPos.y, worldPos.z],
-          v: [0, 0, 0],
-          e: "idle",
-        },
+        changes: entityModifiedChanges,
       });
     }
   }
@@ -622,9 +734,31 @@ export class TileMovementManager {
    */
   cleanup(playerId: string): void {
     this.playerStates.delete(playerId);
+    this.arrivalEmotes.delete(playerId);
     this.antiCheat.cleanup(playerId);
     this.movementRateLimiter.reset(playerId);
     this.pathfindRateLimiter.reset(playerId);
+  }
+
+  /**
+   * Set an emote to be used when the player arrives at their destination.
+   * This emote is included in the tileMovementEnd packet, ensuring atomic delivery
+   * with the arrival notification. Prevents race conditions where the client
+   * sets "idle" before receiving a separate emote packet.
+   *
+   * @param playerId - The player ID
+   * @param emote - The emote to use on arrival (e.g., "fishing", "chopping")
+   */
+  setArrivalEmote(playerId: string, emote: string): void {
+    this.arrivalEmotes.set(playerId, emote);
+  }
+
+  /**
+   * Clear any pending arrival emote for a player.
+   * Called when gathering is cancelled or player moves to a different destination.
+   */
+  clearArrivalEmote(playerId: string): void {
+    this.arrivalEmotes.delete(playerId);
   }
 
   /**
@@ -748,6 +882,15 @@ export class TileMovementManager {
     return state
       ? state.path.length > 0 && state.pathIndex < state.path.length
       : false;
+  }
+
+  /**
+   * Check if a player has run mode enabled
+   * Used by resource/combat handlers to determine movement speed
+   */
+  getIsRunning(playerId: string): boolean {
+    const state = this.playerStates.get(playerId);
+    return state?.isRunning ?? false;
   }
 
   /**

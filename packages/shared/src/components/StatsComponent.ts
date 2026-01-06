@@ -26,6 +26,7 @@ export class StatsComponent extends Component {
   public magic: SkillData;
   public prayer: { level: number; points: number };
   public woodcutting: SkillData;
+  public mining: SkillData;
   public fishing: SkillData;
   public firemaking: SkillData;
   public cooking: SkillData;
@@ -114,6 +115,7 @@ export class StatsComponent extends Component {
     this.magic = initialData.magic || { ...defaultSkill };
     this.prayer = initialData.prayer || { ...defaultPrayer };
     this.woodcutting = initialData.woodcutting || { ...defaultSkill };
+    this.mining = initialData.mining || { ...defaultSkill };
     this.fishing = initialData.fishing || { ...defaultSkill };
     this.firemaking = initialData.firemaking || { ...defaultSkill };
     this.cooking = initialData.cooking || { ...defaultSkill };
@@ -140,6 +142,7 @@ export class StatsComponent extends Component {
       magic: this.magic,
       prayer: this.prayer,
       woodcutting: this.woodcutting,
+      mining: this.mining,
       fishing: this.fishing,
       firemaking: this.firemaking,
       cooking: this.cooking,

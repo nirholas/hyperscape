@@ -131,6 +131,12 @@ export async function initializeDatabase(connectionString: string) {
       const journalPath = path.join(testPath, "meta/_journal.json");
       if (fs.existsSync(journalPath)) {
         migrationsFolder = testPath;
+        console.log(`[DB] ✓ Found migrations folder: ${testPath}`);
+        // Log journal contents
+        const journal = JSON.parse(fs.readFileSync(journalPath, "utf-8"));
+        console.log(
+          `[DB] Journal has ${journal.entries?.length || 0} migrations`,
+        );
         break;
       }
     }
@@ -143,7 +149,9 @@ export async function initializeDatabase(connectionString: string) {
       );
     }
 
+    console.log("[DB] Running migrations...");
     await migrate(db, { migrationsFolder });
+    console.log("[DB] ✓ Migrations complete");
   } catch (error) {
     // If tables already exist (42P07), that's fine - the database is already set up
     const hasCode =
@@ -169,6 +177,8 @@ export async function initializeDatabase(connectionString: string) {
       console.log(
         "[DB] ⚠️  Migration skipped - objects already exist (safe to ignore)",
       );
+      // Log the actual error for debugging
+      console.log("[DB] Migration error details:", errorWithCause.message);
     } else {
       console.error("[DB] ❌ Migration failed:", error);
       throw error;

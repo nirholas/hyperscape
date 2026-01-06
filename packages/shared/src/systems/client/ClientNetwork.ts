@@ -1435,6 +1435,37 @@ export class ClientNetwork extends SystemBase {
     this.world.emit(EventType.RESOURCE_RESPAWNED, data);
   };
 
+  onFishingSpotMoved = (data: {
+    resourceId: string;
+    oldPosition: { x: number; y: number; z: number };
+    newPosition: { x: number; y: number; z: number };
+  }) => {
+    // Update the fishing spot entity position
+    const entity = this.world.entities.get(data.resourceId);
+    if (entity) {
+      // Update entity position
+      if (entity.position) {
+        entity.position.x = data.newPosition.x;
+        entity.position.y = data.newPosition.y;
+        entity.position.z = data.newPosition.z;
+      }
+      if (entity.node?.position) {
+        entity.node.position.set(
+          data.newPosition.x,
+          data.newPosition.y,
+          data.newPosition.z,
+        );
+      }
+    }
+
+    // Emit event for other systems that might need to react
+    this.world.emit(EventType.RESOURCE_SPAWNED, {
+      id: data.resourceId,
+      type: "fishing_spot",
+      position: data.newPosition,
+    });
+  };
+
   onInventoryUpdated = (data: {
     playerId: string;
     items: Array<{ slot: number; itemId: string; quantity: number }>;
@@ -2452,17 +2483,21 @@ export class ClientNetwork extends SystemBase {
     tile: TileCoord;
     worldPos: [number, number, number];
     moveSeq?: number;
+    emote?: string;
+    quaternion?: [number, number, number, number];
   }) => {
     // Use pre-allocated Vector3 to avoid allocation per network message
     _v3_1.set(data.worldPos[0], data.worldPos[1], data.worldPos[2]);
     // Let TileInterpolator handle the arrival smoothly
     // It will snap only if already at destination, otherwise let interpolation finish
     // moveSeq ensures stale end packets are ignored
+    // Pass emote so it's applied atomically with movement end (prevents race condition)
     this.tileInterpolator.onMovementEnd(
       data.id,
       data.tile,
       _v3_1,
       data.moveSeq,
+      data.emote,
     );
 
     // Get entity for flag and emote updates
@@ -2474,9 +2509,31 @@ export class ClientNetwork extends SystemBase {
       entity.data.tileInterpolatorControlled = true;
     }
 
-    // DON'T snap entity position here - TileInterpolator handles smooth arrival
-    // Only update emote if interpolator says we're not moving
-    if (!this.tileInterpolator.isInterpolating(data.id)) {
+    // Apply rotation from server if provided (atomic delivery with movement end)
+    // This is bundled with tileMovementEnd to ensure client applies it immediately
+    // even when TileInterpolator has state (which normally filters out server rotation)
+    if (data.quaternion && entity) {
+      _quat_1.set(
+        data.quaternion[0],
+        data.quaternion[1],
+        data.quaternion[2],
+        data.quaternion[3],
+      );
+      entity.data.quaternion = data.quaternion;
+      // Apply ONLY to node quaternion (not base) - matches movement code pattern
+      // Setting both node AND base causes double rotation due to parent-child hierarchy
+      if (entity.node) {
+        entity.node.quaternion.copy(_quat_1);
+      }
+    }
+
+    // Apply emote from server if provided (atomic delivery with movement end)
+    // This prevents race condition where client sets "idle" before server's emote arrives
+    if (data.emote && entity) {
+      entity.data.emote = data.emote;
+      entity.modify({ e: data.emote });
+    } else if (!this.tileInterpolator.isInterpolating(data.id)) {
+      // No emote from server and not interpolating - default to idle
       if (entity) {
         entity.data.emote = "idle";
       }

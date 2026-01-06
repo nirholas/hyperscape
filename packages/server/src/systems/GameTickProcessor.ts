@@ -28,6 +28,7 @@ import type {
   PlayerScriptQueue,
   NPCScriptQueue,
 } from "./ServerNetwork/ScriptQueue";
+import type { FaceDirectionManager } from "./ServerNetwork/FaceDirectionManager";
 
 /**
  * Combat system interface for tick processing
@@ -155,6 +156,11 @@ export class GameTickProcessor {
   private playerScriptQueue: PlayerScriptQueue | null = null;
   private npcScriptQueue: NPCScriptQueue | null = null;
 
+  // OSRS-accurate face direction manager
+  // Handles deferred face direction processing at end of tick
+  // @see https://osrs-docs.com/docs/packets/outgoing/updating/masks/face-direction/
+  private faceDirectionManager: FaceDirectionManager | null = null;
+
   // Feature flag to enable/disable new tick processing
   // When false, falls back to legacy per-system tick processing
   private enabled = true;
@@ -207,6 +213,7 @@ export class GameTickProcessor {
     broadcastManager: BroadcastManager;
     playerScriptQueue?: PlayerScriptQueue;
     npcScriptQueue?: NPCScriptQueue;
+    faceDirectionManager?: FaceDirectionManager;
   }) {
     this.world = deps.world;
     this.actionQueue = deps.actionQueue;
@@ -221,6 +228,11 @@ export class GameTickProcessor {
     }
     if (deps.npcScriptQueue) {
       this.npcScriptQueue = deps.npcScriptQueue;
+    }
+
+    // Face direction manager (OSRS-accurate deferred facing)
+    if (deps.faceDirectionManager) {
+      this.faceDirectionManager = deps.faceDirectionManager;
     }
 
     // Listen for entity changes to invalidate processing order cache
@@ -308,6 +320,13 @@ export class GameTickProcessor {
   }
 
   /**
+   * Get the face direction manager (for external use by ResourceSystem, etc.)
+   */
+  getFaceDirectionManager(): FaceDirectionManager | null {
+    return this.faceDirectionManager;
+  }
+
+  /**
    * Process a single game tick - OSRS accurate order
    *
    * This is the main entry point called by TickSystem.
@@ -321,6 +340,10 @@ export class GameTickProcessor {
     // Update processing order if entities changed
     this.updateProcessingOrder();
 
+    // PHASE 0: Reset per-tick flags (OSRS face direction system)
+    // Must happen BEFORE any movement processing
+    this.faceDirectionManager?.resetMovementFlags();
+
     // PHASE 1: Process player inputs (from previous tick's clicks)
     this.processInputs(tickNumber);
 
@@ -330,6 +353,11 @@ export class GameTickProcessor {
 
     // PHASE 3: Process all Players (in PID/connection order)
     this.processPlayers(tickNumber);
+
+    // PHASE 3.5: Process face direction (OSRS-accurate)
+    // Only applies rotation if player has faceTarget AND did NOT move this tick
+    // @see https://osrs-docs.com/docs/packets/outgoing/updating/masks/face-direction/
+    this.faceDirectionManager?.processFaceDirection(this.playerProcessingOrder);
 
     // PHASE 4: Apply queued damage from previous tick
     // This is where Player→NPC damage actually applies (next tick)

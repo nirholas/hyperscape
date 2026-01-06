@@ -113,7 +113,9 @@ const names = [
   'resourceSpawned',
   'resourceDepleted',
   'resourceRespawned',
-  'resourceGather',
+  'fishingSpotMoved',  // Fishing spot relocated to new position
+  'resourceInteract',  // Server-authoritative: client sends resourceId, server calculates path
+  'resourceGather',    // Legacy: used after server paths player to cardinal tile
   'gatheringComplete',
   // Combat packets
   'attackMob',

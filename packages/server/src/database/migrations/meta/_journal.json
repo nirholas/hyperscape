@@ -99,6 +99,13 @@
       "when": 1766000000000,
       "tag": "0013_add_auto_retaliate",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1767539824034,
+      "tag": "0014_add_mining_skill",
+      "breakpoints": true
     }
   ]
 }

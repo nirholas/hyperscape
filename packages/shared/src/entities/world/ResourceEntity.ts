@@ -69,6 +69,12 @@ export type { ResourceEntityConfig } from "../../types/entities";
 export class ResourceEntity extends InteractableEntity {
   public config: ResourceEntityConfig;
   private respawnTimer?: NodeJS.Timeout;
+  /** Glow indicator mesh for fishing spot visibility from distance (client-only) */
+  private glowMesh?: THREE.Mesh;
+  /** Ripple rings for animated fishing spot effect (client-only) */
+  private rippleRings?: THREE.Mesh[];
+  /** Animation frame ID for cleanup */
+  private animationFrameId?: number;
 
   constructor(world: World, config: ResourceEntityConfig) {
     // Convert ResourceEntityConfig to InteractableConfig format
@@ -262,6 +268,9 @@ export class ResourceEntity extends InteractableEntity {
       respawnTime: this.config.respawnTime,
       interactionDistance: this.config.interactionDistance || 3,
       description: this.config.description,
+      modelScale: this.config.modelScale,
+      depletedModelScale: this.config.depletedModelScale,
+      depletedModelPath: this.config.depletedModelPath,
     } as EntityData;
   }
 
@@ -278,6 +287,9 @@ export class ResourceEntity extends InteractableEntity {
       harvestTime: this.config.harvestTime,
       harvestYield: this.config.harvestYield,
       respawnTime: this.config.respawnTime,
+      modelScale: this.config.modelScale,
+      depletedModelScale: this.config.depletedModelScale,
+      depletedModelPath: this.config.depletedModelPath,
     };
   }
 
@@ -328,24 +340,19 @@ export class ResourceEntity extends InteractableEntity {
         // Some systems might try to apply non-uniform scale - prevent this
         this.node.scale.set(1, 1, 1);
 
-        // CRITICAL: Scale and orient based on resource type
-        // Different Meshy models have different base scales and orientations
+        // Use scale from manifest config, with fallback defaults per resource type
         // ALWAYS use uniform scaling to preserve model proportions
-        let modelScale = 1.0;
-        const needsXRotation = false; // Some models are exported lying flat
+        let modelScale = this.config.modelScale ?? 1.0;
 
-        if (this.config.resourceType === "tree") {
-          modelScale = 3.0; // Scale up from base size (uniform scaling only)
-          // Trees from Meshy are typically exported standing upright, no rotation needed
+        // Fallback defaults if manifest doesn't specify scale
+        if (this.config.modelScale === undefined) {
+          if (this.config.resourceType === "tree") {
+            modelScale = 3.0;
+          }
         }
 
         // Apply UNIFORM scale only (x=y=z to prevent stretching)
         this.mesh.scale.set(modelScale, modelScale, modelScale);
-
-        // Apply base rotation if model is exported lying flat
-        if (needsXRotation) {
-          this.mesh.rotation.x = Math.PI / 2; // 90 degrees to stand upright
-        }
 
         this.mesh.updateMatrix();
         this.mesh.updateMatrixWorld(true);
@@ -398,6 +405,12 @@ export class ResourceEntity extends InteractableEntity {
       }
     }
 
+    // For fishing spots, create particle-based visual instead of placeholder
+    if (this.config.resourceType === "fishing_spot") {
+      this.createFishingSpotVisual();
+      return;
+    }
+
     // Create visible placeholder based on resource type
     let geometry: THREE.BufferGeometry;
     let material: THREE.Material;
@@ -405,13 +418,6 @@ export class ResourceEntity extends InteractableEntity {
     if (this.config.resourceType === "tree") {
       geometry = new THREE.CylinderGeometry(0.3, 0.5, 3, 8);
       material = new THREE.MeshStandardMaterial({ color: 0x8b4513 }); // Brown for tree
-    } else if (this.config.resourceType === "fishing_spot") {
-      geometry = new THREE.SphereGeometry(0.5, 8, 6);
-      material = new THREE.MeshStandardMaterial({
-        color: 0x4169e1,
-        transparent: true,
-        opacity: 0.7,
-      }); // Blue for water
     } else {
       geometry = new THREE.BoxGeometry(1, 1, 1);
       material = new THREE.MeshStandardMaterial({ color: 0x808080 }); // Gray default
@@ -433,15 +439,153 @@ export class ResourceEntity extends InteractableEntity {
       depleted: this.config.depleted,
     };
 
-    // Scale based on resource type
+    // Scale for tree
     if (this.config.resourceType === "tree") {
       this.mesh.scale.set(2, 3, 2);
-    } else if (this.config.resourceType === "fishing_spot") {
-      this.mesh.scale.set(1, 0.1, 1);
-      this.mesh.position.y = -0.4;
     }
 
     this.node.add(this.mesh);
+  }
+
+  /**
+   * Create animated visual for fishing spots.
+   * Uses expanding ripple rings and a glowing indicator.
+   * Different fishing methods have distinct visual variations.
+   */
+  private createFishingSpotVisual(): void {
+    // Get variant-specific settings based on fishing type
+    const variant = this.getFishingSpotVariant();
+
+    // Create the glow indicator (main visual)
+    this.createGlowIndicator();
+
+    // Create animated ripple rings
+    this.createRippleRings(variant);
+
+    // Start animation loop
+    this.startRippleAnimation(variant);
+  }
+
+  /**
+   * Get visual variant settings based on fishing spot type.
+   * Net = calm/gentle, Bait = medium, Fly = more active.
+   */
+  private getFishingSpotVariant(): {
+    color: number;
+    rippleSpeed: number;
+    rippleCount: number;
+  } {
+    const resourceId = this.config.resourceId || "";
+
+    if (resourceId.includes("net")) {
+      // Calm, gentle ripples (shallow water fishing)
+      return { color: 0x88ccff, rippleSpeed: 0.8, rippleCount: 2 };
+    } else if (resourceId.includes("fly")) {
+      // More active (river/moving water)
+      return { color: 0xaaddff, rippleSpeed: 1.5, rippleCount: 4 };
+    }
+    // Default: bait (medium activity)
+    return { color: 0x66bbff, rippleSpeed: 1.0, rippleCount: 3 };
+  }
+
+  /**
+   * Create expanding ripple ring meshes for water effect.
+   */
+  private createRippleRings(variant: {
+    color: number;
+    rippleCount: number;
+  }): void {
+    this.rippleRings = [];
+
+    for (let i = 0; i < variant.rippleCount; i++) {
+      const geometry = new THREE.RingGeometry(0.3, 0.4, 32);
+      const material = new THREE.MeshBasicMaterial({
+        color: variant.color,
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+      });
+
+      const ring = new THREE.Mesh(geometry, material);
+      ring.rotation.x = -Math.PI / 2; // Horizontal
+      ring.position.y = 0.1; // Just above water surface
+      ring.name = `FishingSpotRipple_${i}`;
+
+      this.node.add(ring);
+      this.rippleRings.push(ring);
+    }
+  }
+
+  /**
+   * Animate ripple rings expanding outward.
+   */
+  private startRippleAnimation(variant: {
+    rippleSpeed: number;
+    rippleCount: number;
+  }): void {
+    const startTime = Date.now();
+    const cycleDuration = 2000 / variant.rippleSpeed; // ms per cycle
+
+    const animate = () => {
+      if (!this.rippleRings || this.rippleRings.length === 0) return;
+
+      const elapsed = Date.now() - startTime;
+
+      for (let i = 0; i < this.rippleRings.length; i++) {
+        const ring = this.rippleRings[i];
+        if (!ring) continue;
+
+        // Stagger each ring's phase
+        const phase = (elapsed / cycleDuration + i / variant.rippleCount) % 1;
+
+        // Scale from 0.5 to 2.0 over the cycle
+        const scale = 0.5 + phase * 1.5;
+        ring.scale.set(scale, scale, 1);
+
+        // Fade in then out (peak at 0.3, fade out by 1.0)
+        let opacity: number;
+        if (phase < 0.3) {
+          opacity = (phase / 0.3) * 0.6; // Fade in to 0.6
+        } else {
+          opacity = 0.6 * (1 - (phase - 0.3) / 0.7); // Fade out
+        }
+        (ring.material as THREE.MeshBasicMaterial).opacity = opacity;
+      }
+
+      this.animationFrameId = requestAnimationFrame(animate);
+    };
+
+    animate();
+  }
+
+  /**
+   * Create subtle glow indicator visible from distance when particles aren't.
+   */
+  private createGlowIndicator(): void {
+    const geometry = new THREE.CircleGeometry(0.6, 16);
+    const material = new THREE.MeshBasicMaterial({
+      color: 0x4488ff,
+      transparent: true,
+      opacity: 0.3,
+      side: THREE.DoubleSide,
+    });
+
+    this.glowMesh = new THREE.Mesh(geometry, material);
+    this.glowMesh.rotation.x = -Math.PI / 2; // Horizontal
+    this.glowMesh.position.y = 0.05; // Just above water
+    this.glowMesh.name = "FishingSpotGlow";
+
+    // Set up userData for interaction detection
+    this.glowMesh.userData = {
+      type: "resource",
+      entityId: this.id,
+      name: this.config.name,
+      interactable: true,
+      resourceType: this.config.resourceType,
+      depleted: this.config.depleted,
+    };
+
+    this.node.add(this.glowMesh);
   }
 
   destroy(local?: boolean): void {
@@ -449,6 +593,30 @@ export class ResourceEntity extends InteractableEntity {
     if (this.respawnTimer) {
       clearTimeout(this.respawnTimer);
       this.respawnTimer = undefined;
+    }
+
+    // Stop ripple animation
+    if (this.animationFrameId !== undefined) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = undefined;
+    }
+
+    // Clean up ripple rings (fishing spots)
+    if (this.rippleRings) {
+      for (const ring of this.rippleRings) {
+        ring.geometry.dispose();
+        (ring.material as THREE.Material).dispose();
+        this.node.remove(ring);
+      }
+      this.rippleRings = undefined;
+    }
+
+    // Clean up glow mesh (fishing spots)
+    if (this.glowMesh) {
+      this.glowMesh.geometry.dispose();
+      (this.glowMesh.material as THREE.Material).dispose();
+      this.node.remove(this.glowMesh);
+      this.glowMesh = undefined;
     }
 
     // Call parent destroy

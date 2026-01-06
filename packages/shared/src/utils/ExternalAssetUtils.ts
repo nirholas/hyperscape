@@ -5,7 +5,10 @@
 
 import { ALL_NPCS } from "../data/npcs";
 import type { NPCData } from "../types/core/core";
-import type { ExternalResourceData } from "../data/DataManager";
+import type {
+  ExternalResourceData,
+  GatheringToolData,
+} from "../data/DataManager";
 
 interface ExternalBuilding {
   id: string;
@@ -96,6 +99,36 @@ export function getExternalAvatar(id: string): ExternalAvatar | null {
 }
 
 /**
+ * Get all external gathering tools loaded from manifests
+ */
+export function getExternalTools(): Map<string, GatheringToolData> {
+  const tools = (
+    globalThis as { EXTERNAL_TOOLS?: Map<string, GatheringToolData> }
+  ).EXTERNAL_TOOLS;
+  return tools || new Map();
+}
+
+/**
+ * Get external tool by item ID
+ */
+export function getExternalTool(itemId: string): GatheringToolData | null {
+  const tools = getExternalTools();
+  return tools.get(itemId) || null;
+}
+
+/**
+ * Get all tools for a specific skill, sorted by priority (best first)
+ */
+export function getExternalToolsForSkill(
+  skill: "woodcutting" | "mining" | "fishing",
+): GatheringToolData[] {
+  const tools = getExternalTools();
+  return Array.from(tools.values())
+    .filter((t) => t.skill === skill)
+    .sort((a, b) => a.priority - b.priority);
+}
+
+/**
  * Check if external assets are loaded
  */
 export function hasExternalAssets(): boolean {
@@ -103,7 +136,8 @@ export function hasExternalAssets(): boolean {
     getExternalNPCs().size > 0 ||
     getExternalResources().size > 0 ||
     getExternalBuildings().size > 0 ||
-    getExternalAvatars().size > 0
+    getExternalAvatars().size > 0 ||
+    getExternalTools().size > 0
   );
 }
 
@@ -115,6 +149,7 @@ export function getExternalAssetsSummary(): {
   resources: number;
   buildings: number;
   avatars: number;
+  tools: number;
   total: number;
 } {
   return {
@@ -122,10 +157,12 @@ export function getExternalAssetsSummary(): {
     resources: getExternalResources().size,
     buildings: getExternalBuildings().size,
     avatars: getExternalAvatars().size,
+    tools: getExternalTools().size,
     total:
       getExternalNPCs().size +
       getExternalResources().size +
       getExternalBuildings().size +
-      getExternalAvatars().size,
+      getExternalAvatars().size +
+      getExternalTools().size,
   };
 }

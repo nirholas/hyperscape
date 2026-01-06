@@ -57,14 +57,10 @@ export const WORLD_CONSTANTS = {
 } as const;
 
 // === RESOURCE GATHERING ===
-export const GATHERING_CONSTANTS = {
-  WOODCUTTING_BASE_TIME: 3000, // 3 seconds
-  FISHING_BASE_TIME: 4000, // 4 seconds
-  GATHER_RANGE: 2.0,
-  RESOURCE_RESPAWN_TIME: 60000, // 1 minute
-  SUCCESS_RATE_BASE: 0.8,
-  LEVEL_SUCCESS_BONUS: 0.01, // 1% per level
-} as const;
+// Re-export from dedicated file for backwards compatibility
+// Also import for use in GAME_CONSTANTS object below
+import { GATHERING_CONSTANTS } from "./GatheringConstants";
+export { GATHERING_CONSTANTS };
 
 // === MOB SYSTEM ===
 // Mob stats (HP, damage, etc.) are loaded from world/assets/manifests/mobs.json

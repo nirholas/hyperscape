@@ -573,16 +573,18 @@ export class TileInterpolator {
    * IMPORTANT: Don't snap immediately - let interpolation finish naturally
    *
    * @param moveSeq Movement sequence number for packet ordering
+   * @param emote Optional emote to use on arrival (bundled from server for atomic delivery)
    */
   onMovementEnd(
     entityId: string,
     tile: TileCoord,
     worldPos: THREE.Vector3,
     moveSeq?: number,
+    emote?: string,
   ): void {
     if (this.debugMode) {
       console.log(
-        `[TileInterpolator] onMovementEnd: ${entityId} at (${tile.x},${tile.z}), moveSeq=${moveSeq}`,
+        `[TileInterpolator] onMovementEnd: ${entityId} at (${tile.x},${tile.z}), moveSeq=${moveSeq}, emote=${emote}`,
       );
     }
 
@@ -597,6 +599,12 @@ export class TileInterpolator {
         );
       }
       return;
+    }
+
+    // If server sent an emote with movement end, use it immediately
+    // This prevents race condition where we set "idle" before server's emote arrives
+    if (emote) {
+      state.emote = emote;
     }
 
     // Update server confirmed position
@@ -624,8 +632,12 @@ export class TileInterpolator {
       state.fullPath = [];
       state.targetTileIndex = 0;
       state.isMoving = false;
-      // Only track idle state if current emote is movement-related
-      if (MOVEMENT_EMOTES.has(state.emote as string | undefined | null)) {
+      // Only track idle state if current emote is movement-related AND no server emote provided
+      // Server emote (e.g., "fishing") takes precedence
+      if (
+        !emote &&
+        MOVEMENT_EMOTES.has(state.emote as string | undefined | null)
+      ) {
         state.emote = "idle";
       }
       state.catchUpMultiplier = 1.0;

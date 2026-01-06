@@ -89,7 +89,19 @@ export class ResourceInteractionHandler extends BaseInteractionHandler {
 
   // === Private Methods ===
 
-  private gatherResource(target: RaycastTarget, action: string): void {
+  /**
+   * Gather a resource using SERVER-AUTHORITATIVE pathing.
+   *
+   * Like combat, we just send the resource ID to the server and let the server:
+   * 1. Look up the resource's TRUE position from its authoritative data
+   * 2. Calculate the correct cardinal tile
+   * 3. Path the player to that tile
+   * 4. Start gathering when player arrives
+   *
+   * This eliminates client-side position calculation issues that caused players
+   * to end up standing ON the resource tile.
+   */
+  private gatherResource(target: RaycastTarget, _action: string): void {
     const player = this.getPlayer();
     if (!player) return;
 
@@ -101,24 +113,18 @@ export class ResourceInteractionHandler extends BaseInteractionHandler {
       return;
     }
 
-    this.queueInteraction({
-      target,
-      actionId: action,
-      range: INTERACTION_RANGE.RESOURCE,
-      onExecute: () => {
-        // Get CURRENT player position at execute time, not queue time
-        const currentPlayer = this.getPlayer();
-        if (!currentPlayer) return;
+    console.log(
+      `[ResourceInteraction] SERVER-AUTHORITATIVE: Sending resourceInteract for ${target.entityId}`,
+    );
 
-        this.send(MESSAGE_TYPES.RESOURCE_GATHER, {
-          resourceId: target.entityId,
-          playerPosition: {
-            x: currentPlayer.position.x,
-            y: currentPlayer.position.y,
-            z: currentPlayer.position.z,
-          },
-        });
-      },
+    // Get player's run mode preference
+    const runMode = (player as { runMode?: boolean }).runMode ?? true;
+
+    // SERVER-AUTHORITATIVE: Send resource ID and run mode
+    // Server will calculate the correct cardinal tile using its authoritative position data
+    this.send(MESSAGE_TYPES.RESOURCE_INTERACT, {
+      resourceId: target.entityId,
+      runMode,
     });
   }
 

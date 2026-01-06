@@ -274,6 +274,19 @@ export interface WorldArea {
   npcs: NPCLocation[];
   resources: BiomeResource[];
   mobSpawns: MobSpawnPoint[];
+  /**
+   * Dynamic fishing spot configuration.
+   * When enabled, fishing spots are spawned at detected shore positions
+   * instead of using static coordinates from resources array.
+   */
+  fishing?: {
+    /** Enable dynamic fishing spot spawning for this area */
+    enabled: boolean;
+    /** Number of fishing spots to spawn in this area */
+    spotCount: number;
+    /** Resource IDs to spawn (e.g., "fishing_spot_net", "fishing_spot_bait") */
+    spotTypes: string[];
+  };
 }
 
 // ============== ZONE SPAWN POINTS ==============

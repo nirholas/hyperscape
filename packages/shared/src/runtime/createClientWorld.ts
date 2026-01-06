@@ -82,6 +82,7 @@ import { Nametags } from "../systems/client/Nametags";
 import { HealthBars } from "../systems/client/HealthBars";
 import { EquipmentVisualSystem } from "../systems/client/EquipmentVisualSystem";
 import { ZoneVisualsSystem } from "../systems/client/ZoneVisualsSystem";
+import { ResourceTileDebugSystem } from "../systems/client/ResourceTileDebugSystem";
 import { ZoneDetectionSystem } from "../systems/shared/death/ZoneDetectionSystem";
 import { Particles } from "../systems/shared";
 import { Wind } from "../systems/shared";
@@ -193,6 +194,7 @@ export function createClientWorld() {
   world.register("equipment-visual", EquipmentVisualSystem); // Visual weapon/equipment attachment
   world.register("zone-detection", ZoneDetectionSystem); // Zone type detection (safe/pvp/wilderness)
   world.register("zone-visuals", ZoneVisualsSystem); // PvP zone ground overlays and warnings
+  world.register("resource-tile-debug", ResourceTileDebugSystem); // Debug: shows resource tile occupancy
   world.register("particles", Particles); // Particle effects system
   world.register("wind", Wind); // Environmental wind effects
 

@@ -35,6 +35,8 @@ export class ClientCameraSystem extends SystemBase {
   private target: CameraTarget | null = null;
   private canvas: HTMLCanvasElement | null = null;
   private raycastService: RaycastService | null = null;
+  private initRetryCount = 0;
+  private static readonly MAX_INIT_RETRIES = 30; // 3 seconds max wait
 
   // Camera state for different modes
   private spherical = new THREE.Spherical(6, Math.PI * 0.42, 0); // current radius, phi, theta
@@ -197,7 +199,14 @@ export class ClientCameraSystem extends SystemBase {
     this.canvas = this.world.graphics?.renderer?.domElement ?? null;
 
     if (!this.camera || !this.canvas) {
-      setTimeout(() => this.tryInitialize(), 100);
+      this.initRetryCount++;
+      if (this.initRetryCount < ClientCameraSystem.MAX_INIT_RETRIES) {
+        setTimeout(() => this.tryInitialize(), 100);
+      } else {
+        console.error(
+          "[ClientCameraSystem] Failed to initialize: camera or canvas not available after max retries",
+        );
+      }
       return;
     }
 
@@ -209,12 +218,22 @@ export class ClientCameraSystem extends SystemBase {
     const sharedService = interaction?.getRaycastService?.();
     if (sharedService) {
       this.raycastService = sharedService;
-    } else {
+    } else if (this.initRetryCount < ClientCameraSystem.MAX_INIT_RETRIES) {
       // InteractionRouter not ready yet (registerSystems is async)
       // Retry initialization in 100ms to get the shared service
-      console.log("[ClientCameraSystem] Waiting for InteractionRouter...");
+      this.initRetryCount++;
+      if (this.initRetryCount === 1) {
+        // Only log once on first retry
+        console.log("[ClientCameraSystem] Waiting for InteractionRouter...");
+      }
       setTimeout(() => this.tryInitialize(), 100);
       return;
+    } else {
+      // Max retries reached - create our own RaycastService as fallback
+      console.warn(
+        "[ClientCameraSystem] InteractionRouter not available after max retries, creating standalone RaycastService",
+      );
+      this.raycastService = new RaycastService(this.world);
     }
 
     // Ensure camera is detached from rig once it's available

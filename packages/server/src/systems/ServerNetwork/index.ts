@@ -136,7 +136,9 @@ import {
   handleDialogueClose,
 } from "./handlers/dialogue";
 import { PendingAttackManager } from "./PendingAttackManager";
+import { PendingGatherManager } from "./PendingGatherManager";
 import { FollowManager } from "./FollowManager";
+import { FaceDirectionManager } from "./FaceDirectionManager";
 import { handleFollowPlayer } from "./handlers/player";
 
 const defaultSpawn = '{ "position": [0, 50, 0], "quaternion": [0, 0, 0, 1] }';
@@ -203,6 +205,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   private tileMovementManager!: TileMovementManager;
   private mobTileMovementManager!: MobTileMovementManager;
   private pendingAttackManager!: PendingAttackManager;
+  private pendingGatherManager!: PendingGatherManager;
   private followManager!: FollowManager;
   private actionQueue!: ActionQueue;
   private tickSystem!: TickSystem;
@@ -214,6 +217,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   private initializationManager!: InitializationManager;
   private connectionHandler!: ConnectionHandler;
   private interactionSessionManager!: InteractionSessionManager;
+  private faceDirectionManager!: FaceDirectionManager;
 
   constructor(world: World) {
     super(world);
@@ -341,6 +345,19 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.pendingAttackManager.processTick(tickNumber);
     }, TickPriority.MOVEMENT); // Same priority as movement, runs after player moves
 
+    // Pending gather manager - server-authoritative tracking of "walk to resource and gather" actions
+    // Uses same approach as PendingAttackManager: movePlayerToward with meleeRange=1 for cardinal-only
+    this.pendingGatherManager = new PendingGatherManager(
+      this.world,
+      this.tileMovementManager,
+      (name, data) => this.broadcastManager.sendToAll(name, data),
+    );
+
+    // Register pending gather processing (same priority as movement)
+    this.tickSystem.onTick((tickNumber) => {
+      this.pendingGatherManager.processTick(tickNumber);
+    }, TickPriority.MOVEMENT);
+
     // Follow manager - server-authoritative tracking of players following other players
     // OSRS-style: follower walks behind leader, re-paths when leader moves
     this.followManager = new FollowManager(
@@ -353,6 +370,48 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.tickSystem.onTick((tickNumber) => {
       this.followManager.processTick(tickNumber);
     }, TickPriority.MOVEMENT);
+
+    // OSRS-accurate face direction manager
+    // Defers rotation until end of tick, only applies if player didn't move
+    // @see https://osrs-docs.com/docs/packets/outgoing/updating/masks/face-direction/
+    this.faceDirectionManager = new FaceDirectionManager(this.world);
+
+    // Wire up the send function so FaceDirectionManager can broadcast rotation changes
+    this.faceDirectionManager.setSendFunction((name, data) =>
+      this.broadcastManager.sendToAll(name, data),
+    );
+
+    // Register face direction processing - runs AFTER all movement at COMBAT priority
+    // OSRS: Face direction mask is processed at end of tick if entity didn't move
+    this.tickSystem.onTick(() => {
+      // Get all player IDs from the players map (not items)
+      const entitiesSystem = this.world.entities as {
+        players?: Map<string, { id: string }>;
+      } | null;
+
+      if (!entitiesSystem?.players) {
+        return;
+      }
+
+      const playerIds: string[] = [];
+      for (const [playerId] of entitiesSystem.players) {
+        playerIds.push(playerId);
+      }
+
+      if (playerIds.length > 0) {
+        this.faceDirectionManager.processFaceDirection(playerIds);
+      }
+    }, TickPriority.COMBAT);
+
+    // Reset movement flags at the START of each tick (INPUT priority)
+    this.tickSystem.onTick(() => {
+      this.faceDirectionManager.resetMovementFlags();
+    }, TickPriority.INPUT);
+
+    // Store face direction manager on world so ResourceSystem can access it
+    (
+      this.world as { faceDirectionManager?: FaceDirectionManager }
+    ).faceDirectionManager = this.faceDirectionManager;
 
     // Register combat system to process on each tick (after movement, before AI)
     // This is OSRS-accurate: combat runs on the game tick, not per-frame
@@ -550,11 +609,12 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.world as { interactionSessionManager?: InteractionSessionManager }
     ).interactionSessionManager = this.interactionSessionManager;
 
-    // Clean up interaction sessions, pending attacks, and follows when player disconnects
+    // Clean up interaction sessions, pending attacks, follows, and gathers when player disconnects
     this.world.on(EventType.PLAYER_LEFT, (event: { playerId: string }) => {
       this.interactionSessionManager.onPlayerDisconnect(event.playerId);
       this.pendingAttackManager.onPlayerDisconnect(event.playerId);
       this.followManager.onPlayerDisconnect(event.playerId);
+      this.pendingGatherManager.onPlayerDisconnect(event.playerId);
     });
 
     // Initialization manager
@@ -632,6 +692,26 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.handlers["onSettingsModified"] = (socket, data) =>
       handleSettings(socket, data);
 
+    // SERVER-AUTHORITATIVE: Resource interaction - uses PendingGatherManager
+    // Same approach as combat: movePlayerToward() with meleeRange=1 for cardinal-only positioning
+    this.handlers["onResourceInteract"] = (socket, data) => {
+      const player = socket.player;
+      if (!player) return;
+
+      const payload = data as { resourceId?: string; runMode?: boolean };
+      if (!payload.resourceId) return;
+
+      // Use PendingGatherManager (like PendingAttackManager for combat)
+      // Pass runMode from client to ensure player runs/walks based on their preference
+      this.pendingGatherManager.queuePendingGather(
+        player.id,
+        payload.resourceId,
+        this.tickSystem.getCurrentTick(),
+        payload.runMode,
+      );
+    };
+
+    // Legacy: Direct gather (used after server has pathed player)
     this.handlers["onResourceGather"] = (socket, data) =>
       handleResourceGather(socket, data, this.world);
 

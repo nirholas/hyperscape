@@ -54,6 +54,9 @@ export const Emotes = {
   /** Chopping/woodcutting animation (used when cutting trees) */
   CHOPPING: "asset://emotes/emote_chopping.glb",
 
+  /** Fishing animation (used when fishing) */
+  FISHING: "asset://emotes/emote-fishing.glb",
+
   /** Death animation */
   DEATH: "asset://emotes/emote-death.glb",
 };
@@ -70,5 +73,6 @@ export const emoteUrls = [
   Emotes.COMBAT,
   Emotes.SWORD_SWING,
   Emotes.CHOPPING,
+  Emotes.FISHING,
   Emotes.DEATH,
 ];
