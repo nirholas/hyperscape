@@ -20,7 +20,9 @@ export type InteractableEntityType =
   | "bank"
   | "player"
   | "corpse"
-  | "headstone";
+  | "headstone"
+  | "fire"
+  | "range";
 
 /**
  * Result of raycasting to find entity at screen position

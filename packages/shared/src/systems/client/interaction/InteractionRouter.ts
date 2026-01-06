@@ -38,6 +38,7 @@ import { ResourceInteractionHandler } from "./handlers/ResourceInteractionHandle
 import { BankInteractionHandler } from "./handlers/BankInteractionHandler";
 import { CorpseInteractionHandler } from "./handlers/CorpseInteractionHandler";
 import { PlayerInteractionHandler } from "./handlers/PlayerInteractionHandler";
+import { CookingSourceInteractionHandler } from "./handlers/CookingSourceInteractionHandler";
 
 export class InteractionRouter extends System {
   private canvas: HTMLCanvasElement | null = null;
@@ -115,6 +116,13 @@ export class InteractionRouter extends System {
       "player",
       new PlayerInteractionHandler(this.world, this.actionQueue),
     );
+    // Cooking sources (fires and ranges)
+    const cookingHandler = new CookingSourceInteractionHandler(
+      this.world,
+      this.actionQueue,
+    );
+    this.handlers.set("fire", cookingHandler);
+    this.handlers.set("range", cookingHandler);
   }
 
   override start(): void {
