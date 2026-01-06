@@ -483,4 +483,64 @@ describe("ResourceSystem Integration", () => {
       expect(gatherRateLimits.has("player1" as never)).toBe(false);
     });
   });
+
+  // ===== PHASE 2: Security Hardening Tests =====
+
+  describe("Suspicious Pattern Tracking", () => {
+    it("should track rapid disconnects during active gather", () => {
+      const player = createTestPlayer("player1", { woodcutting: 50 });
+      mockWorld.addPlayer(player);
+
+      // Access internal maps
+      const activeGathering = (
+        system as unknown as {
+          activeGathering: Map<string, { playerId: string }>;
+        }
+      ).activeGathering;
+
+      const suspiciousPatterns = (
+        system as unknown as {
+          suspiciousPatterns: Map<
+            string,
+            {
+              rapidDisconnects: number;
+              lastDisconnect: number;
+              rapidGatherAttempts: number;
+              lastAttempt: number;
+            }
+          >;
+        }
+      ).suspiciousPatterns;
+
+      const cleanupPlayerGathering = (
+        system as unknown as {
+          cleanupPlayerGathering: (playerId: string) => void;
+        }
+      ).cleanupPlayerGathering.bind(system);
+
+      // Simulate active gathering session
+      activeGathering.set(
+        "player1" as never,
+        {
+          playerId: "player1",
+        } as never,
+      );
+
+      // First disconnect
+      cleanupPlayerGathering("player1");
+      let patterns = suspiciousPatterns.get("player1" as never);
+      expect(patterns?.rapidDisconnects).toBe(1);
+
+      // Simulate another active session and rapid disconnect
+      activeGathering.set(
+        "player1" as never,
+        {
+          playerId: "player1",
+        } as never,
+      );
+      cleanupPlayerGathering("player1");
+      patterns = suspiciousPatterns.get("player1" as never);
+      expect(patterns?.rapidDisconnects).toBe(2);
+    });
+  });
 });

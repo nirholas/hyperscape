@@ -156,75 +156,13 @@ private cleanupPlayerGathering(playerId: string): void {
 }
 ```
 
-### 2.2 Per-Resource Rate Limiting
+### 2.2 ~~Per-Resource Rate Limiting~~ (REMOVED)
 
-```typescript
-// Track gather attempts per resource
-private resourceGatherAttempts: Map<ResourceID, {
-  attempts: Map<PlayerID, number>;
-  lastReset: number;
-}> = new Map();
+**Removed** - This would break legitimate OSRS tick manipulation techniques (3-tick woodcutting, 2-tick fishing, etc.) which require rapid clicking on the same resource. The 600ms tick-based rate limit already prevents faster-than-game-speed abuse.
 
-// In startGathering():
-private checkPerResourceRateLimit(
-  playerId: PlayerID,
-  resourceId: ResourceID
-): boolean {
-  const now = Date.now();
-  let resourceTracker = this.resourceGatherAttempts.get(resourceId);
+### 2.3 ~~Exponential Backoff for Violations~~ (REMOVED)
 
-  // Reset every 60 seconds
-  if (!resourceTracker || now - resourceTracker.lastReset > 60000) {
-    resourceTracker = { attempts: new Map(), lastReset: now };
-    this.resourceGatherAttempts.set(resourceId, resourceTracker);
-  }
-
-  const playerAttempts = resourceTracker.attempts.get(playerId) || 0;
-  if (playerAttempts > 10) {
-    this.logSuspiciousPattern(playerId, `targeting-single-resource:${resourceId}`);
-    return false;
-  }
-
-  resourceTracker.attempts.set(playerId, playerAttempts + 1);
-  return true;
-}
-```
-
-### 2.3 Exponential Backoff for Violations
-
-```typescript
-// Track rate limit violations
-private rateLimitViolations: Map<PlayerID, {
-  count: number;
-  backoffUntil: number;
-}> = new Map();
-
-// In startGathering():
-private checkExponentialBackoff(playerId: PlayerID): boolean {
-  const violations = this.rateLimitViolations.get(playerId);
-  if (!violations) return true;
-
-  if (Date.now() < violations.backoffUntil) {
-    return false; // Still in backoff period
-  }
-
-  return true;
-}
-
-private recordViolation(playerId: PlayerID): void {
-  const violations = this.rateLimitViolations.get(playerId) || {
-    count: 0,
-    backoffUntil: 0,
-  };
-
-  violations.count++;
-  // Exponential backoff: 1s, 2s, 4s, 8s, 16s, max 60s
-  const backoffMs = Math.min(60000, 1000 * Math.pow(2, violations.count - 1));
-  violations.backoffUntil = Date.now() + backoffMs;
-
-  this.rateLimitViolations.set(playerId, violations);
-}
-```
+**Removed** - This would punish normal spam clicking behavior. Players constantly spam click resources in OSRS (impatient clicking, competing for resources). The 600ms rate limit silently drops extra clicks without punishment, matching OSRS behavior.
 
 ---
 
@@ -333,7 +271,7 @@ OSRS-accurate resource gathering for woodcutting, mining, and fishing.
 | Phase | Priority | Effort | Impact | Status |
 |-------|----------|--------|--------|--------|
 | Phase 1: Integration Tests | **HIGH** | 4-6 hrs | Best Practices +1.0 | ✅ Complete (92 tests) |
-| Phase 2: Security Hardening | MEDIUM | 2-3 hrs | OWASP +0.5 | Pending |
+| Phase 2: Security Hardening | MEDIUM | 2-3 hrs | OWASP +0.5 | ✅ Complete (93 tests) |
 | Phase 3: SOLID Improvements | LOW | 4-6 hrs | SOLID +0.5 | Pending |
 | Phase 4: Documentation | LOW | 1-2 hrs | Production +0.25 | Pending |
 

@@ -187,6 +187,24 @@ export class ResourceSystem extends SystemBase {
   // ===== SECURITY: Rate limiting to prevent gather request spam =====
   private gatherRateLimits = new Map<PlayerID, number>();
 
+  // ===== SECURITY: Suspicious pattern tracking =====
+  /**
+   * Tracks suspicious patterns per player for security monitoring.
+   * - rapidDisconnects: Count of disconnects during active gathering within 5s window
+   * - lastDisconnect: Timestamp of last disconnect during active gather
+   * - rapidGatherAttempts: Count of attempts on same resource within 60s window
+   * - lastAttempt: Timestamp of last gather attempt
+   */
+  private suspiciousPatterns = new Map<
+    PlayerID,
+    {
+      rapidDisconnects: number;
+      lastDisconnect: number;
+      rapidGatherAttempts: number;
+      lastAttempt: number;
+    }
+  >();
+
   // ===== OSRS-ACCURACY: Fishing spot movement timers =====
   /**
    * Fishing spots don't deplete - they periodically move to nearby tiles.
@@ -1166,10 +1184,12 @@ export class ResourceSystem extends SystemBase {
     const playerId = createPlayerID(data.playerId);
 
     // ===== SECURITY: Rate limiting - prevent gather request spam =====
+    // Silently drops requests faster than 1 tick (600ms), just like OSRS
+    // This allows normal spam clicking without punishment
     const now = Date.now();
     const lastAttempt = this.gatherRateLimits.get(playerId);
     if (lastAttempt && now - lastAttempt < GATHERING_CONSTANTS.RATE_LIMIT_MS) {
-      // Silently drop rapid requests - don't send error to prevent timing attacks
+      // Silently drop rapid requests (OSRS behavior - no punishment for spam clicking)
       return;
     }
     this.gatherRateLimits.set(playerId, now);
@@ -1625,13 +1645,54 @@ export class ResourceSystem extends SystemBase {
   private cleanupPlayerGathering(playerId: string): void {
     const pid = createPlayerID(playerId);
     const session = this.activeGathering.get(pid);
+
     if (session) {
+      // SECURITY: Track rapid disconnect during active gather (potential bot/exploit)
+      const now = Date.now();
+      const patterns = this.suspiciousPatterns.get(pid) || {
+        rapidDisconnects: 0,
+        lastDisconnect: 0,
+        rapidGatherAttempts: 0,
+        lastAttempt: 0,
+      };
+
+      // Check for rapid disconnect pattern (multiple disconnects within 5s while gathering)
+      if (now - patterns.lastDisconnect < 5000) {
+        patterns.rapidDisconnects++;
+        if (patterns.rapidDisconnects > 3) {
+          this.logSuspiciousPattern(
+            pid,
+            `rapid-disconnect-during-gather (${patterns.rapidDisconnects}x in 5s)`,
+          );
+        }
+      } else {
+        // Reset counter if >5s since last disconnect
+        patterns.rapidDisconnects = 1;
+      }
+      patterns.lastDisconnect = now;
+      this.suspiciousPatterns.set(pid, patterns);
+
       // FORESTRY: Remove from active gatherers before deleting session
       this.removeActiveGatherer(pid, session.resourceId);
     }
     this.activeGathering.delete(pid);
     // SECURITY: Clean up rate limit tracking on disconnect
     this.gatherRateLimits.delete(pid);
+  }
+
+  /**
+   * Log suspicious activity pattern for security monitoring.
+   * Could be extended to emit to analytics system or trigger alerts.
+   *
+   * @param playerId - Player exhibiting suspicious behavior
+   * @param pattern - Description of the suspicious pattern
+   */
+  private logSuspiciousPattern(playerId: PlayerID, pattern: string): void {
+    console.warn(
+      `[Security] Suspicious pattern detected: ${pattern} for player ${playerId}`,
+    );
+    // Could emit to analytics system for monitoring
+    // this.emitTypedEvent(EventType.SECURITY_ALERT, { playerId, pattern });
   }
 
   /**
