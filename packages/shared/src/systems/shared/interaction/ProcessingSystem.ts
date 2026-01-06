@@ -330,6 +330,12 @@ export class ProcessingSystem extends SystemBase {
       type: "info",
     });
 
+    // OSRS: Player squats/crouches while lighting fire
+    this.emitTypedEvent(EventType.PLAYER_SET_EMOTE, {
+      playerId,
+      emote: "squat",
+    });
+
     // Complete after duration
     setTimeout(() => {
       this.completeFiremaking(playerId, processingAction, {
@@ -420,6 +426,12 @@ export class ProcessingSystem extends SystemBase {
     }, this.FIRE_DURATION);
 
     this.fireCleanupTimers.set(fireId, cleanupTimer);
+
+    // OSRS: Reset emote when fire is lit (before moving)
+    this.emitTypedEvent(EventType.PLAYER_SET_EMOTE, {
+      playerId,
+      emote: "idle",
+    });
 
     // OSRS: Move player to adjacent tile after lighting fire
     // Priority: West → East → South → North
@@ -515,6 +527,12 @@ export class ProcessingSystem extends SystemBase {
       });
     }
 
+    // OSRS: Player squats/crouches for each cook attempt
+    this.emitTypedEvent(EventType.PLAYER_SET_EMOTE, {
+      playerId,
+      emote: "squat",
+    });
+
     // Complete after duration
     setTimeout(() => {
       this.completeCooking(playerId, processingAction);
@@ -532,6 +550,11 @@ export class ProcessingSystem extends SystemBase {
         playerId,
         message: "The fire goes out.",
         type: "error",
+      });
+      // Reset emote when fire goes out
+      this.emitTypedEvent(EventType.PLAYER_SET_EMOTE, {
+        playerId,
+        emote: "idle",
       });
       return;
     }
@@ -551,13 +574,22 @@ export class ProcessingSystem extends SystemBase {
     // Check if fire still active
     const fire = this.activeFires.get(fireId);
     if (!fire || !fire.isActive) {
+      // Reset emote when fire goes out
+      this.emitTypedEvent(EventType.PLAYER_SET_EMOTE, {
+        playerId,
+        emote: "idle",
+      });
       return; // Fire went out, stop cooking
     }
 
     // Check if player has more raw_shrimp
     const nextSlot = this.findRawShrimpSlot(playerId);
     if (nextSlot === -1) {
-      // No more raw shrimp - cooking complete
+      // No more raw shrimp - cooking complete, reset emote
+      this.emitTypedEvent(EventType.PLAYER_SET_EMOTE, {
+        playerId,
+        emote: "idle",
+      });
       return;
     }
 

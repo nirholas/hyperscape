@@ -59,6 +59,9 @@ export const Emotes = {
 
   /** Death animation */
   DEATH: "asset://emotes/emote-death.glb",
+
+  /** Squat/crouch animation (used for firemaking and cooking) */
+  SQUAT: "asset://emotes/emote-squat.glb",
 };
 
 /** Array of all emote URLs (for preloading) */
@@ -75,4 +78,5 @@ export const emoteUrls = [
   Emotes.CHOPPING,
   Emotes.FISHING,
   Emotes.DEATH,
+  Emotes.SQUAT,
 ];

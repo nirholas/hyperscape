@@ -635,6 +635,22 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       );
     });
 
+    // Handle player emote changes from ProcessingSystem (firemaking, cooking)
+    this.world.on(EventType.PLAYER_SET_EMOTE, (event) => {
+      const { playerId, emote } = event as {
+        playerId: string;
+        emote: string;
+      };
+
+      // Broadcast emote change to all clients
+      this.broadcastManager.sendToAll("entityModified", {
+        id: playerId,
+        changes: {
+          e: emote,
+        },
+      });
+    });
+
     // Save manager
     this.saveManager = new SaveManager(this.world, this.db);
 

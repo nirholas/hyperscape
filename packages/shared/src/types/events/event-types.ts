@@ -40,6 +40,7 @@ export enum EventType {
   PLAYER_CREATE = "player:create",
   PLAYER_SPAWN_COMPLETE = "player:spawn_complete",
   PLAYER_ANIMATION = "player:animation",
+  PLAYER_SET_EMOTE = "player:set_emote",
 
   // Entity Management
   ENTITY_CREATED = "entity:created",
