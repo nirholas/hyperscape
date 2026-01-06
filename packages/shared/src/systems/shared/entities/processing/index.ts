@@ -80,3 +80,10 @@ export type {
   CookingSessionComplete,
   CookingCallbacks,
 } from "./CookingSessionManager";
+
+// Pending managers (server-side entry points)
+export { PendingFiremakingManager } from "./PendingFiremakingManager";
+export type { PendingFiremakingCallbacks } from "./PendingFiremakingManager";
+
+export { PendingCookingManager } from "./PendingCookingManager";
+export type { PendingCookingCallbacks } from "./PendingCookingManager";
