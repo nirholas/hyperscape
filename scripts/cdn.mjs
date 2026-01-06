@@ -43,6 +43,22 @@ function isDockerAvailable() {
   }
 }
 
+function getDockerComposeCommand() {
+  // Try docker compose (newer Docker versions) first
+  try {
+    execSync('docker compose version', { stdio: 'ignore' })
+    return 'docker compose'
+  } catch {
+    // Fall back to docker-compose (older versions or standalone)
+    try {
+      execSync('docker-compose version', { stdio: 'ignore' })
+      return 'docker-compose'
+    } catch {
+      throw new Error('Neither "docker compose" nor "docker-compose" is available')
+    }
+  }
+}
+
 function isCDNRunning() {
   try {
     const status = execSync('docker ps --filter "name=hyperscape-cdn" --format "{{.Status}}"', { 
@@ -57,7 +73,8 @@ function isCDNRunning() {
 
 function restartCDN() {
   console.log(`${colors.blue}Restarting CDN container...${colors.reset}`)
-  execSync('docker-compose restart cdn', { 
+  const dockerComposeCmd = getDockerComposeCommand()
+  execSync(`${dockerComposeCmd} restart cdn`, {
     stdio: 'inherit',
     cwd: serverDir
   })
@@ -134,7 +151,8 @@ async function ensureCDNRunning() {
     // Start CDN
     console.log(`${colors.blue}Starting CDN container...${colors.reset}`)
     console.log(`${colors.dim}Serving assets from: ${assetsDir}${colors.reset}`)
-    execSync('docker-compose up -d cdn', { 
+    const dockerComposeCmd = getDockerComposeCommand()
+    execSync(`${dockerComposeCmd} up -d cdn`, {
       stdio: 'inherit',
       cwd: serverDir
     })
