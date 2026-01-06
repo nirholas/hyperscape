@@ -279,14 +279,14 @@ export class ItemSpawnerSystem extends SystemBase {
       { itemId: "oak_logs", x: 3, y: 0, z: 2 },
       { itemId: "willow_logs", x: 4, y: 0, z: 2 },
 
-      // Fish near origin
-      { itemId: "raw_shrimps", x: -2, y: 0, z: 2 },
+      // Fish near origin (singular: raw_shrimp, not raw_shrimps)
+      { itemId: "raw_shrimp", x: -2, y: 0, z: 2 },
       { itemId: "raw_sardine", x: -3, y: 0, z: 2 },
       { itemId: "raw_trout", x: -4, y: 0, z: 2 },
       { itemId: "raw_salmon", x: -5, y: 0, z: 2 },
 
-      // Cooked food samples
-      { itemId: "cooked_shrimps", x: 2, y: 0, z: -2 },
+      // Cooked food samples (cooked shrimp is just "shrimp")
+      { itemId: "shrimp", x: 2, y: 0, z: -2 },
       { itemId: "cooked_trout", x: 3, y: 0, z: -2 },
     ];
 

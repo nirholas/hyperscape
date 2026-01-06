@@ -45,21 +45,18 @@ export class ProcessingSystem extends SystemBase {
       normal_logs: 40,
     },
     cooking: {
-      raw_shrimps: 30,
+      raw_shrimp: 30, // XP for cooking shrimp
       burnt_fish: 0, // No XP for burning food
     },
   };
 
-  // Burn chances by cooking level (RuneScape-style)
-  private readonly BURN_CHANCES = new Map<number, number>([
-    [1, 0.8],
-    [5, 0.6],
-    [10, 0.4],
-    [15, 0.2],
-    [20, 0.1],
-    [25, 0.05],
-    [30, 0.0],
-  ]);
+  // Shrimp cooking parameters (OSRS-accurate)
+  // In OSRS, shrimp requires level 1 and stops burning at level 34
+  private readonly SHRIMP_COOKING = {
+    requiredLevel: 1,
+    stopBurnLevel: 34,
+    maxBurnChance: 0.5, // 50% at level 1
+  };
 
   constructor(world: World) {
     super(world, {
@@ -460,34 +457,41 @@ export class ProcessingSystem extends SystemBase {
 
     // Start the cooking process directly
     // (targeting system already validated that player has raw food)
-    this.startCookingProcess(playerId, fishSlot, fireId);
+    this.startCookingProcess(playerId, fishSlot, fireId, true);
   }
 
+  /**
+   * Start cooking a single shrimp.
+   * @param isFirstCook - If true, show "You begin cooking" message. If false, cooking silently continues.
+   */
   private startCookingProcess(
     playerId: string,
     fishSlot: number,
     fireId: string,
+    isFirstCook: boolean = false,
   ): void {
-    // Start cooking process
+    // Start cooking process - use string item IDs (singular: raw_shrimp, not raw_shrimps)
     const processingAction: ProcessingAction = {
       playerId,
       actionType: "cooking",
-      primaryItem: { id: 500, slot: fishSlot },
+      primaryItem: { id: "raw_shrimp", slot: fishSlot },
       targetFire: fireId,
       startTime: Date.now(),
       duration: this.COOKING_TIME,
-      xpReward: this.XP_REWARDS.cooking.raw_shrimps,
+      xpReward: this.XP_REWARDS.cooking.raw_shrimp,
       skillRequired: "cooking",
     };
 
     this.activeProcessing.set(playerId, processingAction);
 
-    // Show processing message
-    this.emitTypedEvent(EventType.UI_MESSAGE, {
-      playerId,
-      message: "You cook the fish on the fire...",
-      type: "info",
-    });
+    // Show processing message only on first cook (OSRS style)
+    if (isFirstCook) {
+      this.emitTypedEvent(EventType.UI_MESSAGE, {
+        playerId,
+        message: "You begin cooking...",
+        type: "info",
+      });
+    }
 
     // Complete after duration
     setTimeout(() => {
@@ -500,62 +504,117 @@ export class ProcessingSystem extends SystemBase {
     this.activeProcessing.delete(playerId);
 
     // Check if fire still exists
-    const fire = this.activeFires.get(action.targetFire!)!;
-    if (!fire.isActive) {
+    const fire = this.activeFires.get(action.targetFire!);
+    if (!fire || !fire.isActive) {
       this.emitTypedEvent(EventType.UI_MESSAGE, {
         playerId,
-        message: "The fire went out while you were cooking.",
+        message: "The fire goes out.",
         type: "error",
       });
       return;
     }
 
-    // Request inventory check via event system
-    this.emitTypedEvent(EventType.INVENTORY_CHECK, {
-      playerId,
-      slot: action.primaryItem.slot,
-      itemId: 500, // raw fish
-      callback: (hasItem: boolean) => {
-        if (!hasItem) {
-          this.emitTypedEvent(EventType.UI_MESSAGE, {
-            playerId,
-            message: "You no longer have the raw fish.",
-            type: "error",
-          });
-          return;
-        }
+    // Complete this cook
+    this.completeCookingProcess(playerId, action);
 
-        // Use cached skills for burn chance (reactive pattern)
-        const cachedSkills = this.playerSkills.get(playerId);
-        const cookingLevel = cachedSkills?.cooking?.level ?? 1;
-        const burnChance = this.getBurnChance(cookingLevel);
-        const didBurn = Math.random() < burnChance;
-        this.completeCookingWithResult(playerId, action, didBurn);
-      },
-    });
+    // OSRS Auto-cooking: Check if player has more raw_shrimp and continue
+    this.tryAutoCookNext(playerId, action.targetFire!);
   }
 
-  private completeCookingWithResult(
+  /**
+   * Check if player has more raw_shrimp and automatically continue cooking.
+   * This implements OSRS-style auto-cooking where you cook all items until done.
+   */
+  private tryAutoCookNext(playerId: string, fireId: string): void {
+    // Check if fire still active
+    const fire = this.activeFires.get(fireId);
+    if (!fire || !fire.isActive) {
+      return; // Fire went out, stop cooking
+    }
+
+    // Check if player has more raw_shrimp
+    const nextSlot = this.findRawShrimpSlot(playerId);
+    if (nextSlot === -1) {
+      // No more raw shrimp - cooking complete
+      return;
+    }
+
+    // Continue cooking the next one (not first cook, so no message)
+    this.startCookingProcess(playerId, nextSlot, fireId, false);
+  }
+
+  /**
+   * Find the first slot containing raw_shrimp in player's inventory.
+   * Returns -1 if no raw_shrimp found.
+   */
+  private findRawShrimpSlot(playerId: string): number {
+    // Use world.getInventory to get player inventory (returns array directly)
+    const inventory = this.world.getInventory?.(playerId);
+    if (!inventory || !Array.isArray(inventory)) {
+      return -1;
+    }
+
+    // Find first slot with raw_shrimp
+    for (let i = 0; i < inventory.length; i++) {
+      const item = inventory[i] as { itemId?: string; slot?: number };
+      if (item && item.itemId === "raw_shrimp") {
+        return item.slot ?? i;
+      }
+    }
+
+    return -1;
+  }
+
+  private completeCookingProcess(
     playerId: string,
     action: ProcessingAction,
-    didBurn: boolean,
   ): void {
-    // Remove raw fish
+    // Get cooking level - try cache first, then fall back to player entity
+    let cookingLevel = 1;
+    const cachedSkills = this.playerSkills.get(playerId);
+    if (cachedSkills?.cooking?.level) {
+      cookingLevel = cachedSkills.cooking.level;
+    } else {
+      // Fallback: try to get from player entity directly
+      const player = this.world.getPlayer(playerId);
+      const playerSkills = (
+        player as { skills?: Record<string, { level: number }> }
+      )?.skills;
+      if (playerSkills?.cooking?.level) {
+        cookingLevel = playerSkills.cooking.level;
+      }
+    }
+
+    const burnChance = this.getBurnChance(cookingLevel);
+    const roll = Math.random();
+    const didBurn = roll < burnChance;
+
+    console.log("[ProcessingSystem] 🍳 completeCookingProcess:", {
+      playerId,
+      cookingLevel,
+      burnChance: `${(burnChance * 100).toFixed(1)}%`,
+      roll: roll.toFixed(3),
+      didBurn,
+      rawFishSlot: action.primaryItem.slot,
+    });
+
+    // Remove raw fish using string item ID (singular: raw_shrimp)
     this.emitTypedEvent(EventType.INVENTORY_ITEM_REMOVED, {
       playerId,
-      itemId: 500,
+      itemId: "raw_shrimp",
       quantity: 1,
       slot: action.primaryItem.slot,
     });
 
-    // Add result item
-    const resultItemId = didBurn ? 502 : 501; // Burnt fish or cooked fish
+    // Add result item using string item ID
+    // Cooked shrimp is just "shrimp", burnt is "burnt_shrimp"
+    const resultItemId = didBurn ? "burnt_shrimp" : "shrimp";
 
     this.emitTypedEvent(EventType.INVENTORY_ITEM_ADDED, {
       playerId,
       item: {
         id: `inv_${playerId}_${Date.now()}`,
-        itemId: resultItemId.toString(), // Convert item ID to string for itemId reference
+        itemId: resultItemId,
         quantity: 1,
         slot: -1, // Let system find empty slot
         metadata: null,
@@ -571,10 +630,10 @@ export class ProcessingSystem extends SystemBase {
       });
     }
 
-    // Success/failure message
+    // Success/failure message (OSRS style)
     const message = didBurn
-      ? "You accidentally burn the fish."
-      : "You successfully cook the fish.";
+      ? "You accidentally burn the shrimp."
+      : "You roast a shrimp.";
     const messageType = didBurn ? "warning" : "success";
 
     this.emitTypedEvent(EventType.UI_MESSAGE, {
@@ -592,20 +651,46 @@ export class ProcessingSystem extends SystemBase {
     });
   }
 
+  /**
+   * Calculate burn chance for shrimp based on cooking level.
+   * Uses OSRS-accurate linear interpolation:
+   * - At level 1: 50% burn chance
+   * - At level 34+: 0% burn chance (stop burning)
+   * - Linear decrease between those levels
+   */
   private getBurnChance(cookingLevel: number): number {
-    // Find the appropriate burn chance for the level
-    for (const [level, _chance] of this.BURN_CHANCES.entries()) {
-      if (cookingLevel >= level) {
-        continue;
-      }
-      return this.BURN_CHANCES.get(level - 5) ?? 0.8; // Return previous level's chance
+    const { requiredLevel, stopBurnLevel, maxBurnChance } = this.SHRIMP_COOKING;
+
+    // At or above stop level: never burn
+    if (cookingLevel >= stopBurnLevel) {
+      return 0;
     }
-    return 0.0; // Level 30+ never burns
+
+    // Below required level shouldn't happen, but treat as max burn chance
+    if (cookingLevel < requiredLevel) {
+      return maxBurnChance;
+    }
+
+    // Linear interpolation: burn chance decreases as level increases
+    // At level 1: (34-1)/(34-1) * 0.5 = 0.5 (50%)
+    // At level 17: (34-17)/(34-1) * 0.5 = 0.257 (25.7%)
+    // At level 34: (34-34)/(34-1) * 0.5 = 0 (0%)
+    const levelRange = stopBurnLevel - requiredLevel;
+    const levelsUntilStopBurn = stopBurnLevel - cookingLevel;
+    const burnChance = (levelsUntilStopBurn / levelRange) * maxBurnChance;
+
+    return Math.max(0, Math.min(maxBurnChance, burnChance));
   }
 
   private createFireVisual(fire: Fire): void {
     // Only create visuals on client
     if (!this.world.isClient) return;
+
+    console.log("[ProcessingSystem] 🔥 createFireVisual called for:", fire.id);
+    console.log(
+      "[ProcessingSystem] 🔥 Scene available:",
+      !!this.world.stage?.scene,
+    );
 
     // Create fire mesh - orange glowing cube for now
     const fireGeometry = new THREE.BoxGeometry(0.5, 0.8, 0.5);
@@ -615,10 +700,8 @@ export class ProcessingSystem extends SystemBase {
       opacity: 0.8,
     });
 
-    const fireMesh: THREE.Object3D = new THREE.Mesh(
-      fireGeometry,
-      fireMaterial,
-    ) as unknown as THREE.Object3D;
+    const fireMesh = new THREE.Mesh(fireGeometry, fireMaterial);
+    fireMesh.name = `Fire_${fire.id}`;
     fireMesh.position.set(
       fire.position.x,
       fire.position.y + 0.4,
@@ -626,25 +709,35 @@ export class ProcessingSystem extends SystemBase {
     );
     fireMesh.userData = {
       type: "fire",
-      fireId: fire.id,
+      entityId: fire.id, // RaycastService looks for entityId
+      fireId: fire.id, // Keep for backwards compatibility
       playerId: fire.playerId,
+      name: "Fire",
     };
+    // Set layer 1 for raycasting (entities are on layer 1, matching other entities)
+    fireMesh.layers.set(1);
 
     // Add flickering animation
     const animate = () => {
       if (fire.isActive) {
-        (
-          fireMesh as unknown as { material: THREE.MeshBasicMaterial }
-        ).material.opacity = 0.6 + Math.sin(Date.now() * 0.01) * 0.2;
+        fireMaterial.opacity = 0.6 + Math.sin(Date.now() * 0.01) * 0.2;
         requestAnimationFrame(animate);
       }
     };
     animate();
 
-    fire.mesh = fireMesh;
+    fire.mesh = fireMesh as THREE.Object3D;
 
     // Add to scene - on client, scene MUST exist
     this.world.stage.scene.add(fireMesh);
+
+    console.log("[ProcessingSystem] 🔥 Fire mesh added to scene:", {
+      fireId: fire.id,
+      position: fireMesh.position.toArray(),
+      layers: fireMesh.layers.mask,
+      userData: fireMesh.userData,
+      inScene: this.world.stage.scene.children.includes(fireMesh),
+    });
   }
 
   private extinguishFire(fireId: string): void {

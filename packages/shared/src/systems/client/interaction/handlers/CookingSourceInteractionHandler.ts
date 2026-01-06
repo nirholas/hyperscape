@@ -36,8 +36,12 @@ export class CookingSourceInteractionHandler extends BaseInteractionHandler {
     if (!player) return;
 
     // Check if fire is still active (fires expire)
-    const entity = target.entity as unknown as CookingSourceEntity;
-    if (entity.entityType === "fire" && entity.isActive === false) {
+    // For ProcessingSystem fires, target.entity is null, so use entityType from target
+    const isFire = target.entityType === "fire";
+    const entity = target.entity as unknown as CookingSourceEntity | null;
+    const isActive = entity?.isActive !== false; // Default to true for ProcessingSystem fires
+
+    if (isFire && !isActive) {
       this.showExamineMessage("The fire has gone out.");
       return;
     }
@@ -56,9 +60,10 @@ export class CookingSourceInteractionHandler extends BaseInteractionHandler {
    */
   getContextMenuActions(target: RaycastTarget): ContextMenuAction[] {
     const actions: ContextMenuAction[] = [];
-    const entity = target.entity as unknown as CookingSourceEntity;
-    const sourceType = entity.entityType === "range" ? "range" : "fire";
-    const isActive = entity.isActive !== false;
+    // For ProcessingSystem fires, target.entity is null - use target.entityType instead
+    const entity = target.entity as unknown as CookingSourceEntity | null;
+    const sourceType = target.entityType === "range" ? "range" : "fire";
+    const isActive = entity?.isActive !== false; // Default to true for ProcessingSystem fires
 
     // Cook action (primary)
     actions.push({
@@ -102,9 +107,10 @@ export class CookingSourceInteractionHandler extends BaseInteractionHandler {
     const player = this.getPlayer();
     if (!player) return;
 
-    const entity = target.entity as unknown as CookingSourceEntity;
-    const sourceType = entity.entityType === "range" ? "range" : "fire";
-    const burnReduction = entity.burnReduction ?? 0;
+    // For ProcessingSystem fires, target.entity is null - use target.entityType instead
+    const entity = target.entity as unknown as CookingSourceEntity | null;
+    const sourceType = target.entityType === "range" ? "range" : "fire";
+    const burnReduction = entity?.burnReduction ?? 0;
 
     console.log(
       `[CookingSourceInteraction] Player clicked ${sourceType} at ${target.position.x}, ${target.position.z}`,
@@ -133,7 +139,7 @@ export class CookingSourceInteractionHandler extends BaseInteractionHandler {
    * Get examine text for the cooking source.
    */
   private getExamineText(
-    entity: CookingSourceEntity,
+    entity: CookingSourceEntity | null,
     sourceType: "fire" | "range",
     isActive: boolean,
   ): string {
@@ -145,7 +151,7 @@ export class CookingSourceInteractionHandler extends BaseInteractionHandler {
     }
 
     // Range
-    const burnReduction = entity.burnReduction ?? 0;
+    const burnReduction = entity?.burnReduction ?? 0;
     if (burnReduction > 0) {
       return `A well-maintained range. Cooking here reduces burn chance by ${(burnReduction * 100).toFixed(0)}%.`;
     }
