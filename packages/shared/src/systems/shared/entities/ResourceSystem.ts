@@ -49,6 +49,7 @@ import {
   getSuccessRateValues as getSuccessRateValuesUtil,
   ticksToMs as ticksToMsUtil,
 } from "./gathering/SuccessRateCalculator";
+import { DEBUG_GATHERING } from "./gathering/debug";
 
 /**
  * Player entity interface for emote operations.
@@ -112,10 +113,6 @@ interface ResourceEntityMethods {
  */
 export class ResourceSystem extends SystemBase {
   private resources = new Map<ResourceID, Resource>();
-
-  // ===== PERFORMANCE: Debug flag for hot-path logging =====
-  /** Enable verbose logging for debugging (disable in production) */
-  private static readonly DEBUG_GATHERING = false;
 
   // Tick-based gathering sessions (OSRS-accurate timing)
   // Session includes cached data to avoid per-tick allocations
@@ -1546,7 +1543,7 @@ export class ResourceSystem extends SystemBase {
       // OSRS-ACCURACY: Store position to detect movement (any movement cancels gathering)
       cachedStartPosition: startPosition,
       // DEBUG: Store for logging (only used when DEBUG_GATHERING=true)
-      debugInfo: ResourceSystem.DEBUG_GATHERING
+      debugInfo: DEBUG_GATHERING
         ? {
             skill: resource.skillRequired,
             variant,
@@ -1557,7 +1554,7 @@ export class ResourceSystem extends SystemBase {
     });
 
     // DEBUG: Log session start with OSRS mechanics details
-    if (ResourceSystem.DEBUG_GATHERING) {
+    if (DEBUG_GATHERING) {
       const mechanics =
         GATHERING_CONSTANTS.SKILL_MECHANICS[
           resource.skillRequired as keyof typeof GATHERING_CONSTANTS.SKILL_MECHANICS
@@ -1706,7 +1703,7 @@ export class ResourceSystem extends SystemBase {
     const pid = createPlayerID(playerId);
     const session = this.activeGathering.get(pid);
     if (session) {
-      if (ResourceSystem.DEBUG_GATHERING) {
+      if (DEBUG_GATHERING) {
         console.log(
           `[ResourceSystem] Cancelling gather for ${playerId} - reason: ${reason}`,
         );
@@ -2248,7 +2245,7 @@ export class ResourceSystem extends SystemBase {
 
       if (movedX || movedZ) {
         // Player moved - cancel gathering (OSRS: weak queue cancelled on any movement)
-        if (ResourceSystem.DEBUG_GATHERING) {
+        if (DEBUG_GATHERING) {
           console.log(
             `[ResourceSystem] Cancelling gather for ${playerId} - player moved from (${startPos.x.toFixed(2)}, ${startPos.z.toFixed(2)}) to (${playerPos.x.toFixed(2)}, ${playerPos.z.toFixed(2)})`,
           );
@@ -2341,7 +2338,7 @@ export class ResourceSystem extends SystemBase {
       const isSuccessful = roll < session.cachedSuccessRate;
 
       // DEBUG: Log each roll result
-      if (ResourceSystem.DEBUG_GATHERING) {
+      if (DEBUG_GATHERING) {
         const debug = session.debugInfo;
         console.log(
           `[Gathering DEBUG] Roll #${session.attempts}: ${(roll * 100).toFixed(1)}% vs ${(session.cachedSuccessRate * 100).toFixed(1)}% → ${isSuccessful ? "SUCCESS" : "FAIL"} ` +
@@ -2594,7 +2591,7 @@ export class ResourceSystem extends SystemBase {
    * @see gathering/DropRoller.ts for implementation
    */
   private rollDrop(drops: ResourceDrop[], playerLevel?: number): ResourceDrop {
-    return rollDropUtil(drops, playerLevel, ResourceSystem.DEBUG_GATHERING);
+    return rollDropUtil(drops, playerLevel, DEBUG_GATHERING);
   }
 
   /**

@@ -36,3 +36,6 @@ export type {
   SuccessRateValues,
   VariantTuning,
 } from "./types";
+
+// Debug configuration
+export { DEBUG_GATHERING } from "./debug";

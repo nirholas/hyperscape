@@ -170,43 +170,11 @@ private cleanupPlayerGathering(playerId: string): void {
 
 **Impact:** SOLID Principles +0.5, Production Quality +0.5
 
-### 3.1 Extract GatheringSessionManager
+### 3.1 ~~Extract GatheringSessionManager~~ (SKIPPED)
 
-Create `packages/shared/src/systems/shared/entities/gathering/GatheringSessionManager.ts`:
+**Skipped** - The existing modularization (DropRoller, ToolUtils, SuccessRateCalculator) already provides good separation of concerns. Session management is tightly coupled with resource timers, respawn tracking, and event handling. Extracting it would add coordination complexity without clear benefit. The current architecture is maintainable and well-tested.
 
-```typescript
-/**
- * GatheringSessionManager - Manages active gathering sessions
- *
- * Extracted from ResourceSystem.ts for Single Responsibility.
- * Handles session lifecycle: create, process tick, cancel, cleanup.
- */
-export class GatheringSessionManager {
-  private activeGathering: Map<PlayerID, GatheringSession> = new Map();
-  private readonly _completedSessionsBuffer: PlayerID[] = [];
-
-  constructor(
-    private world: World,
-    private resourceLookup: (id: ResourceID) => Resource | undefined,
-    private emitEvent: (type: EventType, data: unknown) => void,
-  ) {}
-
-  createSession(playerId: PlayerID, session: GatheringSession): void;
-  getSession(playerId: PlayerID): GatheringSession | undefined;
-  cancelSession(playerId: PlayerID, reason: string): void;
-  processSessionTick(playerId: PlayerID, tickNumber: number): SessionTickResult;
-  cleanupPlayer(playerId: PlayerID): void;
-}
-```
-
-**Migration Steps:**
-1. Create interface for dependencies (resourceLookup, emitEvent)
-2. Move `activeGathering` Map and `_completedSessionsBuffer`
-3. Extract `processGatheringTick` loop body to `processSessionTick`
-4. Update ResourceSystem to use GatheringSessionManager
-5. Update tests
-
-### 3.2 Compile Out Debug Logs
+### 3.2 Compile Out Debug Logs (IMPLEMENTED)
 
 Add build-time stripping for debug logs:
 
@@ -272,7 +240,7 @@ OSRS-accurate resource gathering for woodcutting, mining, and fishing.
 |-------|----------|--------|--------|--------|
 | Phase 1: Integration Tests | **HIGH** | 4-6 hrs | Best Practices +1.0 | ✅ Complete (92 tests) |
 | Phase 2: Security Hardening | MEDIUM | 2-3 hrs | OWASP +0.5 | ✅ Complete (93 tests) |
-| Phase 3: SOLID Improvements | LOW | 4-6 hrs | SOLID +0.5 | Pending |
+| Phase 3: SOLID Improvements | LOW | 4-6 hrs | SOLID +0.5 | ✅ Complete (debug flags) |
 | Phase 4: Documentation | LOW | 1-2 hrs | Production +0.25 | Pending |
 
 ---

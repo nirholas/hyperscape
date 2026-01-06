@@ -22,6 +22,7 @@ import {
   type TileCoord,
   type CardinalDirection,
 } from "@hyperscape/shared";
+import { DEBUG_FACE_DIRECTION } from "./debug";
 
 /**
  * Entity interface for face direction operations
@@ -66,9 +67,6 @@ const DIRECTION_STEP = (Math.PI * 2) / DIRECTION_COUNT; // 45 degrees = PI/4
  * FaceDirectionManager handles OSRS-accurate deferred face direction
  */
 export class FaceDirectionManager {
-  /** Debug logging flag - set to true to enable verbose face direction logs */
-  static DEBUG = false;
-
   private world: World;
   private sendFn: ((name: string, data: unknown) => void) | null = null;
 
@@ -110,7 +108,7 @@ export class FaceDirectionManager {
     // This is important when gathering starts - the player has stopped moving
     player.movedThisTick = false;
 
-    if (FaceDirectionManager.DEBUG) {
+    if (DEBUG_FACE_DIRECTION) {
       console.log(
         `[FaceDirection] 🎯 Set face target for ${playerId}: target=(${targetX.toFixed(1)}, ${targetZ.toFixed(1)}), ` +
           `player=(${player.position?.x.toFixed(1) ?? "?"}, ${player.position?.z.toFixed(1) ?? "?"}), ` +
@@ -163,7 +161,7 @@ export class FaceDirectionManager {
       footprintZ,
     );
 
-    if (FaceDirectionManager.DEBUG) {
+    if (DEBUG_FACE_DIRECTION) {
       console.log(
         `[FaceDirection] getCardinalFaceDirection result: direction=${direction || "null"}, ` +
           `playerTile=(${playerTile.x}, ${playerTile.z}), anchorTile=(${anchorTile.x}, ${anchorTile.z}), ` +
@@ -173,7 +171,7 @@ export class FaceDirectionManager {
 
     if (!direction) {
       // Player is not on a cardinal tile - fall back to target-based facing
-      if (FaceDirectionManager.DEBUG) {
+      if (DEBUG_FACE_DIRECTION) {
         console.warn(
           `[FaceDirection] Player ${playerId} not on cardinal tile relative to resource at (${anchorTile.x}, ${anchorTile.z}). ` +
             `Player tile: (${playerTile.x}, ${playerTile.z}). Falling back to center-based facing.`,
@@ -195,7 +193,7 @@ export class FaceDirectionManager {
     // Reset movedThisTick so rotation applies this tick
     player.movedThisTick = false;
 
-    if (FaceDirectionManager.DEBUG) {
+    if (DEBUG_FACE_DIRECTION) {
       console.log(
         `[FaceDirection] 🧭 Set CARDINAL face direction for ${playerId}: ${direction} ` +
           `(player tile=${playerTile.x},${playerTile.z}, anchor=${anchorTile.x},${anchorTile.z}, ` +
@@ -275,7 +273,7 @@ export class FaceDirectionManager {
 
       // Debug: Log state at start of processing
       if (
-        FaceDirectionManager.DEBUG &&
+        DEBUG_FACE_DIRECTION &&
         (player.cardinalFaceDirection || player.faceTarget)
       ) {
         console.log(
@@ -287,7 +285,7 @@ export class FaceDirectionManager {
 
       // OSRS: Skip if player moved this tick (but keep targets for later)
       if (player.movedThisTick) {
-        if (FaceDirectionManager.DEBUG) {
+        if (DEBUG_FACE_DIRECTION) {
           if (player.cardinalFaceDirection) {
             console.log(
               `[FaceDirection] Skipping ${playerId}: movedThisTick=true, cardinalFaceDirection=${player.cardinalFaceDirection} persists`,
@@ -304,7 +302,7 @@ export class FaceDirectionManager {
       // PRIORITY 1: Cardinal direction (deterministic for resources)
       if (player.cardinalFaceDirection) {
         const angle = getCardinalFaceAngle(player.cardinalFaceDirection);
-        if (FaceDirectionManager.DEBUG) {
+        if (DEBUG_FACE_DIRECTION) {
           console.log(
             `[FaceDirection] 🧭 Applying CARDINAL rotation for ${playerId}: ` +
               `direction=${player.cardinalFaceDirection}, angle=${((angle * 180) / Math.PI).toFixed(1)}° (${angle.toFixed(4)} rad)`,
@@ -313,7 +311,7 @@ export class FaceDirectionManager {
 
         this.applyRotation(player, angle);
 
-        if (FaceDirectionManager.DEBUG) {
+        if (DEBUG_FACE_DIRECTION) {
           console.log(
             `[FaceDirection] ✅ CARDINAL rotation applied for ${playerId}`,
           );
@@ -331,7 +329,7 @@ export class FaceDirectionManager {
 
       // Skip if player has no position
       if (!player.position) {
-        if (FaceDirectionManager.DEBUG) {
+        if (DEBUG_FACE_DIRECTION) {
           console.log(`[FaceDirection] Skipping ${playerId}: no position`);
         }
         continue;
@@ -343,7 +341,7 @@ export class FaceDirectionManager {
 
       // Skip if already at target (avoid divide by zero / weird angles)
       if (Math.abs(dx) < 0.01 && Math.abs(dz) < 0.01) {
-        if (FaceDirectionManager.DEBUG) {
+        if (DEBUG_FACE_DIRECTION) {
           console.log(
             `[FaceDirection] Skipping ${playerId}: already at target`,
           );
@@ -372,7 +370,7 @@ export class FaceDirectionManager {
       );
       const compassDir = directions[dirIndex] || "?";
 
-      if (FaceDirectionManager.DEBUG) {
+      if (DEBUG_FACE_DIRECTION) {
         console.log(
           `[FaceDirection] ✅ Applied rotation for ${playerId}: ` +
             `angle=${((snappedAngle * 180) / Math.PI).toFixed(0)}° (${compassDir}), ` +
@@ -401,7 +399,7 @@ export class FaceDirectionManager {
     const qz = tempQuat.z;
     const qw = tempQuat.w;
 
-    if (FaceDirectionManager.DEBUG) {
+    if (DEBUG_FACE_DIRECTION) {
       console.log(
         `[FaceDirection] applyRotation: angle=${((angle * 180) / Math.PI).toFixed(1)}°, ` +
           `quat=(${qx.toFixed(4)}, ${qy.toFixed(4)}, ${qz.toFixed(4)}, ${qw.toFixed(4)})`,
@@ -440,7 +438,7 @@ export class FaceDirectionManager {
             `node=${!!player.node}, node.quaternion=${!!player.node?.quaternion}, ` +
             `rotation=${!!player.rotation}, base=${!!player.base}`,
         );
-      } else if (FaceDirectionManager.DEBUG) {
+      } else if (DEBUG_FACE_DIRECTION) {
         console.log(`[FaceDirection] Applied rotation to: ${appliedTo.trim()}`);
       }
     } finally {
@@ -450,7 +448,7 @@ export class FaceDirectionManager {
     // CRITICAL: Mark for network broadcast so clients see the rotation change
     if (player.markNetworkDirty) {
       player.markNetworkDirty();
-      if (FaceDirectionManager.DEBUG) {
+      if (DEBUG_FACE_DIRECTION) {
         console.log(`[FaceDirection] Marked ${player.id} as network dirty`);
       }
     } else {
@@ -470,7 +468,7 @@ export class FaceDirectionManager {
           q: [qx, qy, qz, qw],
         },
       });
-      if (FaceDirectionManager.DEBUG) {
+      if (DEBUG_FACE_DIRECTION) {
         console.log(
           `[FaceDirection] 📡 Broadcast rotation for ${player.id}: q=[${qx.toFixed(4)}, ${qy.toFixed(4)}, ${qz.toFixed(4)}, ${qw.toFixed(4)}]`,
         );
