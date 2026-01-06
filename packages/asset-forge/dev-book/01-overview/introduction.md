@@ -179,7 +179,7 @@ Asset Forge supports three quality tiers:
 
 ```mermaid
 graph LR
-    A[Text Description] --> B[GPT-4 Enhancement]
+    A[Text Description] --> B[Prompt Enhancement]
     B --> C[Image Generation]
     C --> D[Image-to-3D]
     D --> E[Normalization]

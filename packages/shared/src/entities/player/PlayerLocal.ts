@@ -810,16 +810,16 @@ export class PlayerLocal extends Entity implements HotReloadable {
     }
 
     const terrainHeight = terrain.getHeightAt(this.position.x, this.position.z);
-    const targetY = terrainHeight + 0.1; // Small offset above terrain
+    const targetY = terrainHeight; // Character feet at ground level
     const diff = targetY - this.position.y;
 
-    // Snap up if below terrain, lerp down if above
-    if (diff > 0.1) {
-      // Below terrain - snap up
+    // Keep character at terrain level
+    if (diff > 0.01) {
+      // Below terrain - snap up immediately
       this.position.y = targetY;
-    } else if (diff < -0.5) {
-      // Above terrain - interpolate down
-      this.position.y += diff * 0.15;
+    } else if (diff < -0.01) {
+      // Above terrain - snap down immediately (no floating)
+      this.position.y = targetY;
     }
   }
 
@@ -1853,7 +1853,7 @@ export class PlayerLocal extends Entity implements HotReloadable {
       if (terrain?.getHeightAt) {
         const terrainHeight = terrain.getHeightAt(x, z);
         if (Number.isFinite(terrainHeight)) {
-          const safeY = (terrainHeight as number) + 0.1;
+          const safeY = terrainHeight as number;
           console.warn(
             `[PlayerLocal] Correcting to safe height: Y=${safeY} (terrain=${terrainHeight})`,
           );

@@ -13,6 +13,7 @@
 
 import React from "react";
 import { usePrivy } from "@privy-io/react-auth";
+import { GAME_API_URL } from "@/lib/api-config";
 
 interface UsernameSelectionScreenProps {
   onUsernameSelected: (username: string) => void;
@@ -73,7 +74,7 @@ export function UsernameSelectionScreen({
       );
 
       // Create user account with username and main wallet
-      const response = await fetch("http://localhost:5555/api/users/create", {
+      const response = await fetch(`${GAME_API_URL}/api/users/create`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

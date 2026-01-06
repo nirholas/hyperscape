@@ -1,22 +1,32 @@
+// API base URL - uses environment variable in production, empty for dev (proxy handles it)
+export const API_BASE_URL = import.meta.env.VITE_API_URL || "";
+
+// Helper to construct full API URL
+const apiUrl = (path: string) => `${API_BASE_URL}${path}`;
+
 // API endpoints
 export const API_ENDPOINTS = {
   // Assets
-  ASSETS: "/api/assets",
-  ASSET_BY_ID: (id: string) => `/api/assets/${id}`,
-  ASSET_MODEL: (id: string) => `/api/assets/${id}/model`,
-  ASSET_FILE: (id: string, filename: string) => `/api/assets/${id}/${filename}`,
-  ASSET_SPRITES: (id: string) => `/api/assets/${id}/sprites`,
+  ASSETS: apiUrl("/api/assets"),
+  ASSET_BY_ID: (id: string) => apiUrl(`/api/assets/${id}`),
+  ASSET_MODEL: (id: string) => apiUrl(`/api/assets/${id}/model`),
+  ASSET_FILE: (id: string, filename: string) =>
+    apiUrl(`/api/assets/${id}/${filename}`),
+  ASSET_SPRITES: (id: string) => apiUrl(`/api/assets/${id}/sprites`),
 
   // Generation
-  GENERATION: "/api/generation",
-  GENERATION_STATUS: "/api/generation/status",
+  GENERATION: apiUrl("/api/generation"),
+  GENERATION_STATUS: apiUrl("/api/generation/status"),
 
   // Materials
-  MATERIAL_PRESETS: "/api/material-presets",
+  MATERIAL_PRESETS: apiUrl("/api/material-presets"),
 
   // Equipment
-  EQUIPMENT_CONFIG: "/api/equipment/config",
+  EQUIPMENT_CONFIG: apiUrl("/api/equipment/config"),
 } as const;
+
+// Export the helper for use in components
+export { apiUrl };
 
 // API response status codes
 export const API_STATUS = {

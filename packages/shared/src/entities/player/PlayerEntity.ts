@@ -620,6 +620,10 @@ export class PlayerEntity extends CombatantEntity {
     mesh.receiveShadow = true;
     mesh.position.y = 0.8; // Position at feet level
 
+    // PERFORMANCE: Set player mesh to layer 1 (main camera only, not minimap)
+    // Minimap only renders terrain and uses 2D dots for entities
+    mesh.layers.set(1);
+
     // Set userData for interaction detection
     mesh.userData = {
       type: "player",

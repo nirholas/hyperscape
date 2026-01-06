@@ -620,7 +620,7 @@ gdd-assets/
 
 4. BACKEND PROCESSING
    GenerationService.startPipeline(config)
-   ├── Stage 1: GPT-4 Enhancement
+   ├── Stage 1: Prompt Enhancement
    │   └── "A sturdy bronze sword..." → Enhanced prompt
    ├── Stage 2: DALL-E Image Generation
    │   └── Enhanced prompt → concept-art.png

@@ -85,7 +85,7 @@ Asset Forge supports two primary generation modes, each optimized for different 
 
 **Pipeline Stages:**
 ```
-Description → GPT-4 Enhancement → Concept Art →
+Description → Prompt Enhancement → Concept Art →
 3D Generation → Normalization → Done
 ```
 
@@ -107,7 +107,7 @@ Description → GPT-4 Enhancement → Concept Art →
 
 **Pipeline Stages:**
 ```
-Description → GPT-4 Enhancement → T-pose Art →
+Description → Prompt Enhancement → T-pose Art →
 3D Generation → Height Normalization → Auto-Rigging →
 Animation Generation → T-pose Extraction → Done
 ```
@@ -340,7 +340,7 @@ Each quality level uses Meshy.ai credits:
 - High: ~400 credits
 - Ultra: ~600 credits
 
-#### 7. GPT-4 Enhancement
+#### 7. Prompt Enhancement
 ```
 Field: enableGPT4
 Type: Checkbox (optional)
@@ -1017,7 +1017,7 @@ console.log(metadata.type, metadata.subtype)
 **OpenAI API (GPT-4 + DALL-E):**
 ```
 Per Asset:
-├─ GPT-4 Enhancement: ~$0.01-0.03
+├─ Prompt Enhancement: ~$0.01-0.03
 └─ DALL-E 3 Image: ~$0.04
 
 Cost-Saving Tips:
@@ -1323,7 +1323,7 @@ Now that you understand asset generation, explore related features:
 - Quality (high recommended)
 
 **Recommended Settings:**
-- GPT-4 Enhancement: Enabled
+- Prompt Enhancement: Enabled
 - Quality: High (production)
 - Variants: Only if needed for tier system
 - Sprites: Only if using in 2D

@@ -840,9 +840,15 @@ export class World extends EventEmitter {
 
     // Create perspective camera with carefully tuned near/far planes:
     // - near (0.2): Slightly smaller than spherecast to prevent clipping
-    // - far (10000): Large enough to render 8000-unit sky sphere
+    // - far (2000): Optimized draw distance for performance
+    // Sky geometry is scaled to fit within this range (follows camera)
     // This prevents z-fighting without needing expensive logarithmic depth buffers
-    this.camera = new THREE.PerspectiveCamera(70, 16 / 9, 0.2, 10000);
+    this.camera = new THREE.PerspectiveCamera(70, 16 / 9, 0.2, 800);
+
+    // Enable layer 1 for main camera (vegetation, water, grass are on layer 1)
+    // Minimap camera only sees layer 0 for performance
+    this.camera.layers.enable(1);
+
     this.rig.add(this.camera);
 
     // Register core systems in dependency order
@@ -1031,7 +1037,7 @@ export class World extends EventEmitter {
     });
 
     // Start all systems (transitions from 'initialized' to 'started' state)
-    this.start();
+    await this.start();
   }
 
   /**
@@ -1040,10 +1046,18 @@ export class World extends EventEmitter {
    * Called after all systems are initialized.
    * Transitions systems from 'initialized' state to 'started' state.
    * Systems can begin their active operations (network connections, timers, etc.)
+   *
+   * Note: Some systems have async start() methods (e.g., TerrainSystem) that need
+   * to wait for data loading. This method awaits all system starts to ensure
+   * proper initialization order.
    */
-  start(): void {
+  async start(): Promise<void> {
     for (const system of this.systems) {
-      system.start();
+      const startResult = system.start();
+      // Await if start() returns a Promise (async systems)
+      if (startResult instanceof Promise) {
+        await startResult;
+      }
     }
   }
 
@@ -1641,7 +1655,9 @@ export class World extends EventEmitter {
     return this.$eventBus;
   }
 
-  systemsLoadedPromise(): Promise<void> {
-    return Promise.resolve();
-  }
+  /**
+   * Promise that resolves when all systems are loaded.
+   * Can be overridden by createClientWorld to track async system loading.
+   */
+  systemsLoadedPromise: Promise<void> = Promise.resolve();
 }

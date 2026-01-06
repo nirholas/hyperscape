@@ -1,9 +1,12 @@
 /**
  * Asset Database Service
  * Syncs file-based assets with PostgreSQL database
+ *
+ * NOTE: Database is optional - all operations gracefully no-op when database is unavailable.
+ * This allows the asset system to work in file-based mode for local development.
  */
 
-import { db } from "../db/db";
+import { db, isDatabaseEnabled } from "../db/db";
 import { assets, type Asset, type NewAsset } from "../db/schema";
 import { eq } from "drizzle-orm";
 import type { AssetMetadataType } from "../models";
@@ -11,13 +14,21 @@ import type { AssetMetadataType } from "../models";
 export class AssetDatabaseService {
   /**
    * Create asset record from file metadata
+   * Returns null if database is not available
    */
   async createAssetRecord(
     assetId: string,
     metadata: AssetMetadataType,
     ownerId: string,
     filePath: string,
-  ): Promise<Asset> {
+  ): Promise<Asset | null> {
+    if (!isDatabaseEnabled || !db) {
+      console.log(
+        `[AssetDatabaseService] Database not available - skipping record creation for: ${assetId}`,
+      );
+      return null;
+    }
+
     try {
       const [asset] = await db
         .insert(assets)
@@ -59,11 +70,19 @@ export class AssetDatabaseService {
 
   /**
    * Update asset record in database
+   * Returns null if database is not available
    */
   async updateAssetRecord(
     assetId: string,
     updates: Partial<NewAsset>,
   ): Promise<Asset | null> {
+    if (!isDatabaseEnabled || !db) {
+      console.log(
+        `[AssetDatabaseService] Database not available - skipping record update for: ${assetId}`,
+      );
+      return null;
+    }
+
     try {
       // Find asset by filePath pattern (contains assetId)
       const existingAssets = await db
@@ -105,6 +124,13 @@ export class AssetDatabaseService {
    * Delete asset from database
    */
   async deleteAssetRecord(assetId: string): Promise<void> {
+    if (!isDatabaseEnabled || !db) {
+      console.log(
+        `[AssetDatabaseService] Database not available - skipping record deletion for: ${assetId}`,
+      );
+      return;
+    }
+
     try {
       // Find and delete by filePath pattern
       await db
@@ -127,6 +153,10 @@ export class AssetDatabaseService {
    * Get asset with owner info
    */
   async getAssetWithOwner(assetId: string): Promise<Asset | null> {
+    if (!isDatabaseEnabled || !db) {
+      return null;
+    }
+
     try {
       const result = await db
         .select()

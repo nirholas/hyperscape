@@ -81,3 +81,11 @@ clear-users.sql
 .kluster
 
 logs/
+
+# Terraform
+infrastructure/.terraform/
+infrastructure/*.tfstate
+infrastructure/*.tfstate.*
+infrastructure/terraform.tfvars
+infrastructure/*.tfplan
+infrastructure/crash.log

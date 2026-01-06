@@ -154,9 +154,7 @@ export class PositionValidator {
   ): void {
     if (!player) return;
 
-    const correctedY = Number.isFinite(terrainHeight)
-      ? terrainHeight + 0.1
-      : 10;
+    const correctedY = Number.isFinite(terrainHeight) ? terrainHeight : 10;
 
     // Update player position
     player.position.y = correctedY;

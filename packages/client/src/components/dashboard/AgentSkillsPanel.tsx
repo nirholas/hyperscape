@@ -1,3 +1,4 @@
+import { GAME_API_URL, GAME_WS_URL } from "@/lib/api-config";
 import React, { useState, useEffect } from "react";
 import { Agent } from "../../screens/DashboardScreen";
 import { ChevronDown, ChevronUp, Swords } from "lucide-react";
@@ -156,7 +157,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({
       setError(null);
 
       const mappingResponse = await fetch(
-        `http://localhost:5555/api/agents/mapping/${agent.id}`,
+        `${GAME_API_URL}/api/agents/mapping/${agent.id}`,
       );
 
       if (!mappingResponse.ok) {
@@ -189,7 +190,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({
 
     try {
       const skillsResponse = await fetch(
-        `http://localhost:5555/api/characters/${characterId}/skills`,
+        `${GAME_API_URL}/api/characters/${characterId}/skills`,
       );
 
       if (!skillsResponse.ok) {

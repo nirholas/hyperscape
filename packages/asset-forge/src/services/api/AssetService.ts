@@ -5,7 +5,7 @@
 
 import { MaterialPreset, AssetMetadata } from "../../types";
 
-import { apiFetch } from "@/utils/api";
+import { apiFetch, getAssetFileUrl } from "@/utils/api";
 
 export type { MaterialPreset };
 
@@ -116,7 +116,7 @@ class AssetServiceClass {
     }
 
     // Try to load t-pose.glb from user assets
-    const tPoseUrl = `/api/assets/${assetId}/t-pose`;
+    const tPoseUrl = getAssetFileUrl(assetId, "t-pose");
     try {
       const response = await fetch(tPoseUrl, { method: "HEAD" });
       if (response.ok) {

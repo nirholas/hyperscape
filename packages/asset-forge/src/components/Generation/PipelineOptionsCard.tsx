@@ -50,7 +50,7 @@ export const PipelineOptionsCard: React.FC<PipelineOptionsCardProps> = ({
   const options: PipelineOption[] = [
     {
       id: "gpt4",
-      label: "GPT-4 Enhancement",
+      label: "Prompt Enhancement",
       description: "Improve prompts with AI",
       checked: useGPT4Enhancement,
       onChange: onUseGPT4EnhancementChange,

@@ -26,6 +26,7 @@ import { CharacterSelectScreen } from "./screens/CharacterSelectScreen";
 import { UsernameSelectionScreen } from "./screens/UsernameSelectionScreen";
 import { EmbeddedGameClient } from "./components/EmbeddedGameClient";
 import { isEmbeddedMode } from "./types/embeddedConfig";
+import { GAME_API_URL, GAME_WS_URL } from "./lib/api-config";
 
 import type {
   EmbeddedViewportConfig,
@@ -72,7 +73,7 @@ if (isEmbedded) {
     agentId: urlParams.get("agentId") || "",
     authToken: urlParams.get("authToken") || "",
     characterId: urlParams.get("characterId") || undefined,
-    wsUrl: urlParams.get("wsUrl") || "ws://localhost:5555/ws",
+    wsUrl: urlParams.get("wsUrl") || GAME_WS_URL,
     mode: (modeParam === "spectator" || modeParam === "free"
       ? modeParam
       : "spectator") as ViewportMode,
@@ -251,8 +252,7 @@ function App() {
       setIsCheckingUsername(true);
 
       // Retry logic for API call - server may not be ready on fresh start
-      const apiBaseUrl =
-        import.meta.env.PUBLIC_API_URL || "http://localhost:5555";
+      const apiBaseUrl = GAME_API_URL;
       const maxRetries = 3;
       const retryDelayMs = 500;
 
@@ -318,7 +318,7 @@ function App() {
     };
   }, []);
 
-  const wsUrl = import.meta.env.PUBLIC_WS_URL || "ws://localhost:5555/ws";
+  const wsUrl = GAME_WS_URL;
   const appRef = React.useRef<HTMLDivElement>(null);
 
   const handleAuthenticated = React.useCallback(() => {

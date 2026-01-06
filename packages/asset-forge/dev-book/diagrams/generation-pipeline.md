@@ -750,7 +750,7 @@ sequenceDiagram
 | Stage | Min Time | Typical Time | Max Time | Failure Rate |
 |-------|----------|--------------|----------|--------------|
 | Text Input | 1s | 5s | 15s | < 1% |
-| GPT-4 Enhancement | 2s | 8s | 20s | ~2% |
+| Prompt Enhancement | 2s | 8s | 20s | ~2% |
 | Image Generation | 10s | 15s | 45s | ~3% |
 | 3D Generation (Standard) | 2min | 4min | 8min | ~5% |
 | 3D Generation (High) | 5min | 8min | 15min | ~5% |

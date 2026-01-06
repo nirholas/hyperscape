@@ -5,6 +5,8 @@
  * It handles JavaScript errors and unhandled promise rejections.
  */
 
+import { GAME_API_URL } from "./api-config";
+
 interface ErrorReport {
   message: string;
   stack: string;
@@ -150,8 +152,8 @@ class ErrorReportingService {
    * @public
    */
   public async reportError(errorData: ErrorReport) {
-    // Construct URL - use PUBLIC_API_URL if set, otherwise default to localhost:5555 in dev
-    const baseUrl = import.meta.env.PUBLIC_API_URL || "http://localhost:5555";
+    // Construct URL from centralized config
+    const baseUrl = GAME_API_URL;
     const endpoint = `${baseUrl}/api${this.endpoint}`;
 
     const response = await fetch(endpoint, {

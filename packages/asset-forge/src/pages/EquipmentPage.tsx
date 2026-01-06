@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 
 import { Asset } from "../types";
+import { getAssetModelUrl, getFullUrl } from "../utils/api";
 import { notify } from "../utils/notify";
 
 import {
@@ -80,7 +81,7 @@ export const EquipmentPage: React.FC = () => {
     setIsDetectingHandle(true);
 
     try {
-      const modelUrl = `/api/assets/${selectedEquipment.id}/model`;
+      const modelUrl = getAssetModelUrl(selectedEquipment.id);
       const result = await handleDetector.current.detectHandleArea(
         modelUrl,
         true,
@@ -140,11 +141,14 @@ export const EquipmentPage: React.FC = () => {
 
     try {
       // Save attachment config to equipment metadata
-      const response = await fetch(`/api/assets/${selectedEquipment.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ metadata: config }),
-      });
+      const response = await fetch(
+        getFullUrl(`/api/assets/${selectedEquipment.id}`),
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ metadata: config }),
+        },
+      );
 
       if (!response.ok) throw new Error("Failed to save configuration");
 

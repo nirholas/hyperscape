@@ -25,6 +25,9 @@ import { INPUT } from "../constants";
 
 // === PRE-ALLOCATED OBJECTS (zero allocations in hot paths) ===
 const _raycaster = new THREE.Raycaster();
+// Enable layer 1 for raycaster (entities like mobs, NPCs, items, resources, players are on layer 1)
+// Layer 0 is for terrain/minimap-only objects, layer 1 is for main camera objects
+_raycaster.layers.enable(1);
 const _mouse = new THREE.Vector2();
 const _worldPos = new THREE.Vector3();
 const _terrainResult = new THREE.Vector3();

@@ -86,7 +86,7 @@ Quality options:
 #### Advanced Options
 
 **Enable these options:**
-- ✅ **Use GPT-4 Enhancement** - Improves description quality
+- ✅ **Use Prompt Enhancement** - Improves description quality
 - ✅ **Enable Material Variants** - Generate bronze, steel, mithril versions
 - ❌ **Enable Sprites** - Skip for now (adds time)
 - ❌ **Enable Rigging** - N/A for weapons
@@ -118,7 +118,7 @@ The pipeline goes through several stages:
 #### Stage 1: Text Input ✅
 *Instant - Your description is validated*
 
-#### Stage 2: GPT-4 Enhancement ⏳
+#### Stage 2: Prompt Enhancement ⏳
 *5-10 seconds - AI improves your description*
 
 **Enhanced Description Example:**
@@ -250,7 +250,7 @@ Try generating a rigged character:
    - Subtype: `creature`
    - Description: `Goblin warrior in T-pose wearing torn leather armor`
 4. Enable:
-   - ✅ GPT-4 Enhancement
+   - ✅ Prompt Enhancement
    - ✅ Enable Rigging
    - ❌ Material Variants (characters don't use material variants)
 5. Start Generation
@@ -315,7 +315,7 @@ See [Armor Fitting Guide](../03-user-guides/armor-fitting.md) for details.
 **Problem**: Model looks different from description
 
 **Solutions:**
-- Enable GPT-4 Enhancement
+- Enable Prompt Enhancement
 - Be more specific in description
 - Add style keywords ("low-poly", "game-ready")
 - Include pose requirements for characters ("T-pose", "arms stretched")
@@ -384,7 +384,7 @@ low-poly game-ready style"
 
 **Minimize costs:**
 - Use Standard quality for testing
-- Disable GPT-4 Enhancement for simple assets
+- Disable Prompt Enhancement for simple assets
 - Generate fewer material variants initially
 - Batch generate assets in one session
 - Review concept art before 3D conversion (cancel if needed)

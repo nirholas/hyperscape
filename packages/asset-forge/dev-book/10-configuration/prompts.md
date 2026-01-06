@@ -11,7 +11,7 @@ This comprehensive guide covers all AI prompt templates, prompt files, loading s
 5. [Game Style Prompts](#game-style-prompts)
 6. [Weapon Detection Prompts](#weapon-detection-prompts)
 7. [Material Prompts](#material-prompts)
-8. [GPT-4 Enhancement Prompts](#gpt-4-enhancement-prompts)
+8. [Prompt Enhancement Prompts](#gpt-4-enhancement-prompts)
 9. [Prompt Loading System](#prompt-loading-system)
 10. [Template Syntax](#template-syntax)
 11. [Custom Prompt Creation](#custom-prompt-creation)
@@ -33,7 +33,7 @@ Game Style Prompts (RuneScape, generic, custom)
     ↓
 Generation Prompts (base image generation)
     ↓
-GPT-4 Enhancement (prompt optimization)
+Prompt Enhancement (prompt optimization)
     ↓
 AI Model (DALL-E/Meshy)
     ↓
@@ -774,7 +774,7 @@ Material-specific prompt overrides:
 
 ---
 
-## GPT-4 Enhancement Prompts
+## Prompt Enhancement Prompts
 
 GPT-4 enhancement prompts guide prompt optimization before image generation.
 
@@ -1173,7 +1173,7 @@ Edit `/public/prompts/material-prompts.json`
 
 When "obsidian" material is selected, override prompt is used.
 
-### Custom GPT-4 Enhancement Rules
+### Custom Prompt Enhancement Rules
 
 **Step 1: Open File**
 

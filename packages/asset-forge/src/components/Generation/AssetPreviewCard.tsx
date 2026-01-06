@@ -2,6 +2,7 @@ import { Box, Download } from "lucide-react";
 import React from "react";
 
 import { GeneratedAsset, hasAnimations } from "../../types";
+import { getAssetModelUrl } from "../../utils/api";
 import {
   Card,
   CardHeader,
@@ -28,8 +29,7 @@ export const AssetPreviewCard: React.FC<AssetPreviewCardProps> = ({
     selectedAsset.hasModel ||
     selectedAsset.modelUrl ||
     selectedAsset.metadata?.hasModel;
-  const modelUrl =
-    selectedAsset.modelUrl || `/api/assets/${selectedAsset.id}/model`;
+  const modelUrl = selectedAsset.modelUrl || getAssetModelUrl(selectedAsset.id);
 
   const isRiggedAvatar =
     generationType === "avatar" &&

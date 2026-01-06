@@ -823,6 +823,13 @@ export class MobEntity extends CombatantEntity {
       this.mesh = instanceWithRaw.raw.scene;
       this.mesh.name = `Mob_VRM_${this.config.mobType}_${this.id}`;
 
+      // PERFORMANCE: Set VRM mesh to layer 1 (main camera only, not minimap)
+      // Minimap only renders terrain and uses 2D dots for entities
+      this.mesh.layers.set(1);
+      this.mesh.traverse((child) => {
+        child.layers.set(1);
+      });
+
       // Apply manifest scale on top of VRM's height normalization
       // VRM is auto-normalized to 1.6m, so scale 2.0 = 3.2m tall
       const configScale = this.config.scale;
@@ -1081,8 +1088,12 @@ export class MobEntity extends CombatantEntity {
         this.mesh.updateMatrix();
         this.mesh.updateMatrixWorld(true);
 
-        // NOW bind the skeleton at the scaled size
+        // NOW bind the skeleton at the scaled size and set layer for minimap exclusion
+        this.mesh.layers.set(1); // Main camera only, not minimap
         this.mesh.traverse((child) => {
+          // PERFORMANCE: Set all children to layer 1 (minimap only sees layer 0)
+          child.layers.set(1);
+
           if (child instanceof THREE.SkinnedMesh && child.skeleton) {
             // Ensure mesh matrix is updated
             child.updateMatrix();
@@ -1160,8 +1171,12 @@ export class MobEntity extends CombatantEntity {
       8,
     );
     // Use MeshStandardMaterial for proper lighting (responds to sun, moon, and environment maps)
+    // Add subtle emissive so mobs pop at night (matches player rendering)
+    const emissiveColor = color.clone();
     const material = new THREE.MeshStandardMaterial({
       color: color.getHex(),
+      emissive: emissiveColor,
+      emissiveIntensity: 0.3, // Subtle glow - matches PlayerEntity and VRM avatars
       roughness: 0.8,
       metalness: 0.0,
     });
@@ -1847,8 +1862,8 @@ export class MobEntity extends CombatantEntity {
               ).getHeightAt(this.node.position.x, this.node.position.z);
               if (Number.isFinite(terrainHeight)) {
                 this._hasValidTerrainHeight = true;
-                this.node.position.y = terrainHeight + 0.1;
-                this.position.y = terrainHeight + 0.1;
+                this.node.position.y = terrainHeight;
+                this.position.y = terrainHeight;
               }
             } catch (_err) {
               // Terrain tile not generated yet - keep current Y and retry next frame
@@ -1923,8 +1938,8 @@ export class MobEntity extends CombatantEntity {
               terrain as { getHeightAt: (x: number, z: number) => number }
             ).getHeightAt(this.node.position.x, this.node.position.z);
             if (Number.isFinite(terrainHeight)) {
-              this.node.position.y = terrainHeight + 0.1;
-              this.position.y = terrainHeight + 0.1;
+              this.node.position.y = terrainHeight;
+              this.position.y = terrainHeight;
 
               // CRITICAL: Update matrices and call move() again to apply corrected Y position to VRM
               this.node.updateMatrix();
@@ -1951,8 +1966,8 @@ export class MobEntity extends CombatantEntity {
             terrain as { getHeightAt: (x: number, z: number) => number }
           ).getHeightAt(this.node.position.x, this.node.position.z);
           if (Number.isFinite(terrainHeight)) {
-            this.node.position.y = terrainHeight + 0.1;
-            this.position.y = terrainHeight + 0.1;
+            this.node.position.y = terrainHeight;
+            this.position.y = terrainHeight;
           }
         } catch {
           // Terrain tile not generated yet
@@ -2264,7 +2279,7 @@ export class MobEntity extends CombatantEntity {
             terrain as { getHeightAt: (x: number, z: number) => number }
           ).getHeightAt(newPos.x, newPos.z);
           if (Number.isFinite(terrainHeight)) {
-            newPos.y = terrainHeight + 0.1;
+            newPos.y = terrainHeight;
           } else if (!this._terrainWarningLogged) {
             console.warn(
               `[MobEntity] Server terrain height not finite at (${newPos.x.toFixed(1)}, ${newPos.z.toFixed(1)})`,

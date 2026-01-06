@@ -231,7 +231,7 @@ const stages: PipelineStage[] = [
   },
   {
     id: 'gpt4-enhancement',
-    name: 'GPT-4 Enhancement',
+    name: 'Prompt Enhancement',
     status: useGPT4Enhancement ? 'idle' : 'skipped'
   },
   {

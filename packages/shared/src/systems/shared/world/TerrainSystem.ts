@@ -6,14 +6,6 @@ import {
 } from "../../../extras/three/geometryToPxMesh";
 import THREE, {
   MeshStandardNodeMaterial,
-  positionWorld,
-  cameraPosition,
-  float,
-  vec3,
-  sub,
-  mix,
-  smoothstep,
-  length,
   vertexColor,
   Fn,
 } from "../../../extras/three/three";
@@ -44,7 +36,8 @@ import { PhysicsHandle } from "../../../types/systems/physics";
 import { getPhysX } from "../../../physics/PhysXManager";
 import { Layers } from "../../../physics/Layers";
 import { BIOMES } from "../../../data/world-structure";
-import { WaterSystem } from "..";
+import { DataManager } from "../../../data/DataManager";
+import { WaterSystem, Environment } from "..";
 import { createTerrainMaterial, TerrainUniforms } from "./TerrainShader";
 
 interface BiomeCenter {
@@ -167,29 +160,14 @@ export class TerrainSystem extends System {
   }
 
   /**
-   * Create terrain tile material using TSL Node Material
-   * Features vertex colors with distance fog for atmosphere
+   * Create fallback terrain tile material using TSL Node Material
+   * Simple vertex colors without custom fog - uses scene fog instead
+   * This is only used as a fallback when the main terrain material hasn't loaded yet
    */
   private createTerrainTileMaterial(): THREE.Material {
-    // Use TSL Node Material with vertex colors and custom fog
-    const FOG_NEAR = 150.0;
-    const FOG_FAR = 350.0;
-
-    // Create color node that uses vertex colors with fog
+    // Simple vertex color material - let scene fog handle distance fading
     const colorNode = Fn(() => {
-      // Get vertex color
-      const baseColor = vertexColor();
-
-      // Calculate distance fog
-      const worldPos = positionWorld;
-      const dist = length(sub(worldPos, cameraPosition));
-      const fogFactor = smoothstep(float(FOG_NEAR), float(FOG_FAR), dist);
-      const fogColor = vec3(0.83, 0.78, 0.72); // Warm beige matches Environment fog
-
-      // Apply fog
-      const foggedColor = mix(baseColor.rgb, fogColor, fogFactor);
-
-      return foggedColor;
+      return vertexColor();
     })();
 
     const material = new MeshStandardNodeMaterial();
@@ -198,7 +176,7 @@ export class TerrainSystem extends System {
     material.metalness = 0.0;
     material.side = THREE.FrontSide;
     material.flatShading = false;
-    material.fog = false; // We handle fog in the shader
+    material.fog = true; // Use scene fog for fallback
 
     return material;
   }
@@ -347,6 +325,17 @@ export class TerrainSystem extends System {
     }
     // Fallback to simple vertex color material
     return this.createTerrainTileMaterial();
+  }
+
+  /**
+   * Get the terrain material with uniforms for external access (e.g., minimap fog control)
+   */
+  public getTerrainMaterialWithUniforms():
+    | (THREE.Material & {
+        terrainUniforms: TerrainUniforms;
+      })
+    | null {
+    return this.terrainMaterial ?? null;
   }
 
   /**
@@ -631,6 +620,34 @@ export class TerrainSystem extends System {
       this.noise = new NoiseGenerator(this.computeSeedFromWorldId());
       this.initializeBiomeCenters();
     }
+
+    // CRITICAL: Wait for DataManager to initialize BIOMES data before generating terrain
+    // DataManager is initialized in registerSystems() which happens asynchronously
+    // We need to wait for it to be ready AND for BIOMES data to be loaded before generating terrain tiles
+    const dataManager = DataManager.getInstance();
+    const maxWait = 10000; // 10 seconds
+    const startTime = Date.now();
+
+    // Wait for both DataManager to be ready AND BIOMES data to be loaded
+    while (
+      (!dataManager.isReady() || Object.keys(BIOMES).length === 0) &&
+      Date.now() - startTime < maxWait
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    // Final check - verify BIOMES data is actually loaded
+    if (Object.keys(BIOMES).length === 0) {
+      const errorMsg =
+        "[TerrainSystem] BIOMES data not loaded! DataManager must initialize before terrain generation. " +
+        `DataManager ready: ${dataManager.isReady()}, BIOMES count: ${Object.keys(BIOMES).length}`;
+      console.error(errorMsg);
+      throw new Error(errorMsg);
+    }
+
+    console.log(
+      `[TerrainSystem] DataManager initialized, ${Object.keys(BIOMES).length} biomes loaded, proceeding with terrain generation`,
+    );
 
     // Final environment detection - use world.isServer/isClient (which check network internally)
     const isServer = this.world.isServer;
@@ -1848,12 +1865,46 @@ export class TerrainSystem extends System {
       this.terrainTime += dt;
       if (this.terrainMaterial?.terrainUniforms) {
         this.terrainMaterial.terrainUniforms.time.value = this.terrainTime;
+
+        // Sync fog values from Environment system
+        this.syncFogFromEnvironment();
       }
 
       // Update water system
       if (this.waterSystem) {
         this.waterSystem.update(dt);
       }
+    }
+  }
+
+  /**
+   * Sync fog values from Environment system to terrain shader
+   * Ensures terrain fog matches the global scene fog
+   */
+  private syncFogFromEnvironment(): void {
+    if (!this.terrainMaterial?.terrainUniforms) return;
+
+    const environment = this.world.getSystem("environment") as
+      | Environment
+      | undefined;
+    if (!environment?.skyInfo) return;
+
+    const { fogNear, fogFar, fogColor } = environment.skyInfo;
+
+    // Update fog uniforms
+    if (fogNear !== undefined) {
+      this.terrainMaterial.terrainUniforms.fogNear.value = fogNear;
+    }
+    if (fogFar !== undefined) {
+      this.terrainMaterial.terrainUniforms.fogFar.value = fogFar;
+    }
+    if (fogColor) {
+      const color = new THREE.Color(fogColor);
+      this.terrainMaterial.terrainUniforms.fogColor.value.set(
+        color.r,
+        color.g,
+        color.b,
+      );
     }
   }
 

@@ -142,6 +142,14 @@ export function Minimap({
     camera.up.copy(initialForward);
     camera.position.set(0, 500, 0); // Much higher for better overview
     camera.lookAt(0, 0, 0);
+
+    // PERFORMANCE: Only see layer 0 (excludes grass on layer 1, vegetation on layer 2)
+    // By default cameras only see layer 0, but ensure we don't enable other layers
+    camera.layers.set(0);
+
+    // Mark camera as minimap for systems that need to check (e.g., water system)
+    camera.userData.isMinimap = true;
+
     cameraRef.current = camera;
 
     // Track if component is still mounted for async renderer creation
@@ -478,7 +486,11 @@ export function Minimap({
     if (!overlayCanvas || !isVisible) return;
 
     let rafId: number | null = null;
-    let _frameCount = 0;
+    let frameCount = 0;
+
+    // PERFORMANCE: Throttle 3D rendering to ~15fps (render every 4th frame)
+    // 2D overlay (pips) still updates every frame for smooth interaction
+    const RENDER_EVERY_N_FRAMES = 4;
 
     // Note: We use module-level pre-allocated vectors (_tempForwardVec, _tempProjectVec, etc.)
     // to avoid allocations in this hot render loop
@@ -490,7 +502,7 @@ export function Minimap({
         return;
       }
 
-      _frameCount++;
+      frameCount++;
       const cam = cameraRef.current;
 
       // --- Camera Position Update (follow player or spectated entity) ---
@@ -591,9 +603,48 @@ export function Minimap({
         }
       }
 
-      // --- Render ---
-      if (rendererRef.current && sceneRef.current && cam) {
+      // --- Render 3D scene (throttled for performance) ---
+      // Only render 3D every N frames to reduce GPU load
+      const shouldRender3D = frameCount % RENDER_EVERY_N_FRAMES === 0;
+      if (shouldRender3D && rendererRef.current && sceneRef.current && cam) {
+        // PERFORMANCE: Disable fog for minimap rendering (top-down view doesn't need it)
+        const savedFog = sceneRef.current.fog;
+        sceneRef.current.fog = null;
+
+        // Also disable terrain shader fog (it uses custom uniforms, not scene.fog)
+        // Access terrain material uniforms directly - TerrainSystem exposes getTerrainMaterialWithUniforms()
+        type TerrainMaterialUniforms = {
+          fogEnabled: { value: number };
+        };
+        type TerrainMaterial = { terrainUniforms: TerrainMaterialUniforms };
+        type TerrainSystemWithMaterial = {
+          getTerrainMaterialWithUniforms: () => TerrainMaterial | null;
+        };
+
+        let terrainMat: TerrainMaterial | null = null;
+
+        try {
+          const terrainSystem = world.getSystem("terrain") as
+            | TerrainSystemWithMaterial
+            | undefined;
+          if (terrainSystem?.getTerrainMaterialWithUniforms) {
+            terrainMat = terrainSystem.getTerrainMaterialWithUniforms();
+            if (terrainMat?.terrainUniforms) {
+              // Disable fog completely for minimap (fogEnabled = 0.0)
+              terrainMat.terrainUniforms.fogEnabled.value = 0.0;
+            }
+          }
+        } catch {
+          // If terrain system isn't ready yet, fog will remain - that's okay
+        }
+
         rendererRef.current.render(sceneRef.current, cam);
+
+        // Restore fog for main camera
+        sceneRef.current.fog = savedFog;
+        if (terrainMat?.terrainUniforms) {
+          terrainMat.terrainUniforms.fogEnabled.value = 1.0;
+        }
       }
 
       // Always draw 2D pips on overlay canvas

@@ -813,8 +813,8 @@ export class PlayerDeathSystem extends SystemBase {
         spawnPosition.z,
       );
       if (Number.isFinite(terrainHeight)) {
-        // Use +0.1 offset like initial spawn (not +2.0)
-        groundedY = terrainHeight + 0.1;
+        // Player feet at ground level (no offset)
+        groundedY = terrainHeight;
       } else {
         groundedY = 10; // Fallback safe height
       }

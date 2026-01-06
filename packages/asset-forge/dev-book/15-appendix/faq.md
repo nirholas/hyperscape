@@ -77,7 +77,7 @@ Generation time varies significantly based on quality settings and current API l
 
 **Pipeline Stage Timings**
 
-1. **Text Input & GPT-4 Enhancement**: 5-15 seconds
+1. **Text Input & Prompt Enhancement**: 5-15 seconds
    - GPT-4 processes descriptions quickly
    - Usually the fastest stage
 
@@ -321,7 +321,7 @@ sword
 
 **Advanced Techniques**
 
-**Use GPT-4 Enhancement**
+**Use Prompt Enhancement**
 - Enable GPT-4 enhancement in settings
 - Provide a basic description
 - GPT-4 expands it with technical details
@@ -383,7 +383,7 @@ sword
 
 Generation failures can occur at various stages. Here's how to diagnose and fix common issues:
 
-**Stage 1: GPT-4 Enhancement Failures**
+**Stage 1: Prompt Enhancement Failures**
 
 **Symptoms**
 - Error during prompt processing

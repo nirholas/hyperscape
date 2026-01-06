@@ -31,7 +31,7 @@ Asset Forge uses a sophisticated prompt engineering system to generate high-qual
 └──────────────┬──────────────────────┘
                ↓
 ┌─────────────────────────────────────┐
-│   GPT-4 Enhancement                 │
+│   Prompt Enhancement                 │
 │   + Visual details, materials       │
 └──────────────┬──────────────────────┘
                ↓
@@ -479,7 +479,7 @@ Override specific material prompts:
 
 ---
 
-## GPT-4 Enhancement Prompts
+## Prompt Enhancement Prompts
 
 ### Purpose
 

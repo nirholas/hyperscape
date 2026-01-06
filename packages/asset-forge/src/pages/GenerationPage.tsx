@@ -14,6 +14,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { useGenerationStore } from "../store";
 import type { PipelineStage } from "../store";
 import { MaterialPreset } from "../types";
+import { getAssetModelUrl, getAssetConceptArtUrl } from "../utils/api";
 import { buildGenerationConfig } from "../utils/generationConfigBuilder";
 import { notify } from "../utils/notify";
 import { spriteGeneratorClient } from "../utils/sprite-generator-client";
@@ -418,10 +419,8 @@ export const GenerationPage: React.FC<GenerationPageProps> = ({
             type: asset.type,
             status: "completed",
             hasModel: asset.hasModel,
-            modelUrl: asset.hasModel
-              ? `/api/assets/${asset.id}/model`
-              : undefined,
-            conceptArtUrl: `/api/assets/${asset.id}/concept-art.png`,
+            modelUrl: asset.hasModel ? getAssetModelUrl(asset.id) : undefined,
+            conceptArtUrl: getAssetConceptArtUrl(asset.id),
             variants: Array.isArray((asset as any).metadata?.variants)
               ? ((asset.metadata as any).variants as {
                   name: string;

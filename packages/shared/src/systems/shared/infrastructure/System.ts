@@ -185,7 +185,7 @@ export abstract class System extends EventEmitter {
    *
    * @public
    */
-  start(): void {
+  start(): void | Promise<void> {
     // Override in subclasses if needed
     this.started = true;
   }

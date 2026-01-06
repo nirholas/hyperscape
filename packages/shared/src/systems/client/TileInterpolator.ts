@@ -728,7 +728,7 @@ export class TileInterpolator {
             state.visualPosition.z,
           );
           if (height !== null && Number.isFinite(height)) {
-            state.visualPosition.y = height + 0.1; // Small offset above ground
+            state.visualPosition.y = height; // Feet at ground level
           }
         }
         entity.position.copy(state.visualPosition);
@@ -949,7 +949,7 @@ export class TileInterpolator {
           state.visualPosition.z,
         );
         if (height !== null && Number.isFinite(height)) {
-          state.visualPosition.y = height + 0.1; // Small offset above ground
+          state.visualPosition.y = height; // Feet at ground level
         }
       }
 

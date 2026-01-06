@@ -150,7 +150,7 @@ export function generateCharacterTemplate(
         // These will be filled in by the CharacterEditorScreen after generating permanent credentials
         HYPERSCAPE_AUTH_TOKEN: undefined,
         HYPERSCAPE_CHARACTER_ID: undefined,
-        HYPERSCAPE_SERVER_URL: "ws://localhost:5555/ws",
+        HYPERSCAPE_SERVER_URL: GAME_WS_URL,
         wallet,
         // LLM Provider API Keys (users can add these in the Secrets tab)
         OPENAI_API_KEY: "",

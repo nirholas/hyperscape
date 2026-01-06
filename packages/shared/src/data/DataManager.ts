@@ -152,10 +152,23 @@ export class DataManager {
 
     // Client: Load from CDN (localhost:8080 in dev, R2/S3 in prod)
     let cdnUrl = "http://localhost:8080";
+    // Check for CDN URL in multiple places (browser env vars, window global, process.env)
+    if (typeof window !== "undefined") {
+      const windowWithCdn = window as Window & { __CDN_URL?: string };
+      if (windowWithCdn.__CDN_URL) {
+        cdnUrl = windowWithCdn.__CDN_URL;
+      } else if (
+        typeof import.meta !== "undefined" &&
+        import.meta.env?.PUBLIC_CDN_URL
+      ) {
+        cdnUrl = import.meta.env.PUBLIC_CDN_URL;
+      }
+    }
     if (
       typeof process !== "undefined" &&
       typeof process.env !== "undefined" &&
-      process.env.PUBLIC_CDN_URL
+      process.env.PUBLIC_CDN_URL &&
+      !cdnUrl.includes("localhost")
     ) {
       cdnUrl = process.env.PUBLIC_CDN_URL;
     }

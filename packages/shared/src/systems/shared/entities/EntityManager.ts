@@ -676,7 +676,7 @@ export class EntityManager extends SystemBase {
     if (terrain) {
       const th = terrain.getHeightAt(position.x, position.z);
       if (Number.isFinite(th)) {
-        position = { x: position.x, y: (th as number) + 0.1, z: position.z };
+        position = { x: position.x, y: th, z: position.z };
       }
     }
 

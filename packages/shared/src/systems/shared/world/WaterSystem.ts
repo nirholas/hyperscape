@@ -139,6 +139,11 @@ export class WaterSystem {
   private waterLevel = 5;
   private waterMeshes: THREE.Mesh[] = [];
 
+  // Frustum culling for reflection optimization
+  private frustum = new THREE.Frustum();
+  private projScreenMatrix = new THREE.Matrix4();
+  private tempSphere = new THREE.Sphere();
+
   constructor(world: World) {
     this.world = world;
   }
@@ -320,6 +325,7 @@ export class WaterSystem {
     material.side = THREE.DoubleSide;
     material.roughness = WATER_ROUGHNESS;
     material.metalness = 0.0;
+    material.fog = false; // Water should not be affected by scene fog
     // Disable environment map completely - use planar reflection only
     material.envMapIntensity = 0;
     material.envMap = null;
@@ -825,6 +831,11 @@ export class WaterSystem {
     mesh.name = `Water_${tile.key}`;
     mesh.renderOrder = 100;
     mesh.userData = { type: "water", walkable: false, clickable: false };
+
+    // PERFORMANCE: Put water on layer 1 (main camera only, not minimap)
+    // This prevents expensive water shader from rendering in minimap
+    mesh.layers.set(1);
+
     return mesh;
   }
 
@@ -850,6 +861,59 @@ export class WaterSystem {
       this.uniforms.windStrength.value =
         0.9 + Math.sin(this.waterTime * 0.1) * 0.1;
     }
+
+    // Frustum culling: disable reflection camera when no water is visible
+    this.updateReflectionVisibility();
+  }
+
+  /**
+   * Check if any water meshes are in the camera frustum and enable/disable
+   * the reflection render pass accordingly. This saves a full scene render
+   * when no water is visible.
+   */
+  private updateReflectionVisibility(): void {
+    if (!this.reflection?.target) return;
+
+    const camera = this.world.camera;
+    if (!camera) {
+      // No camera, assume water might be visible
+      this.reflection.target.visible = true;
+      return;
+    }
+
+    // Build frustum from camera
+    this.projScreenMatrix.multiplyMatrices(
+      camera.projectionMatrix,
+      camera.matrixWorldInverse,
+    );
+    this.frustum.setFromProjectionMatrix(this.projScreenMatrix);
+
+    // Check if any water mesh is in the frustum
+    let anyWaterVisible = false;
+    for (const mesh of this.waterMeshes) {
+      // Skip meshes that have been removed from scene
+      if (!mesh.parent) continue;
+
+      // Ensure bounding sphere exists
+      if (!mesh.geometry.boundingSphere) {
+        mesh.geometry.computeBoundingSphere();
+      }
+
+      const boundingSphere = mesh.geometry.boundingSphere;
+      if (!boundingSphere) continue;
+
+      // Transform bounding sphere to world space
+      this.tempSphere.copy(boundingSphere);
+      this.tempSphere.applyMatrix4(mesh.matrixWorld);
+
+      if (this.frustum.intersectsSphere(this.tempSphere)) {
+        anyWaterVisible = true;
+        break;
+      }
+    }
+
+    // Enable/disable reflector based on water visibility
+    this.reflection.target.visible = anyWaterVisible;
   }
 
   destroy(): void {

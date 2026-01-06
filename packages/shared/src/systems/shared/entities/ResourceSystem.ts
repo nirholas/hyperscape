@@ -634,7 +634,7 @@ export class ResourceSystem extends SystemBase {
             r.position.z,
           );
           if (Number.isFinite(terrainHeight)) {
-            groundedY = terrainHeight + 0.1; // Slight offset above ground
+            groundedY = terrainHeight; // Feet at ground level
           }
         }
 

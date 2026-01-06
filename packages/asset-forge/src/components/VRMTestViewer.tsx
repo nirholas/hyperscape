@@ -149,11 +149,12 @@ export const VRMTestViewer: React.FC<VRMTestViewerProps> = ({ vrmUrl }) => {
   };
 
   // Animation URLs (using Hyperscape CDN)
+  const cdnUrl = import.meta.env.VITE_CDN_URL || import.meta.env.PUBLIC_CDN_URL || "http://localhost:8080";
   const animations = {
-    idle: "http://localhost:8080/emotes/emote-idle.glb",
-    walk: "http://localhost:8080/emotes/emote-walk.glb",
-    run: "http://localhost:8080/emotes/emote-run.glb",
-    jump: "http://localhost:8080/emotes/emote-jump.glb",
+    idle: `${cdnUrl}/emotes/emote-idle.glb`,
+    walk: `${cdnUrl}/emotes/emote-walk.glb`,
+    run: `${cdnUrl}/emotes/emote-run.glb`,
+    jump: `${cdnUrl}/emotes/emote-jump.glb`,
   };
 
   useEffect(() => {

@@ -8,6 +8,7 @@ import THREE, {
   texture,
   positionWorld,
   normalWorld,
+  cameraPosition,
   uniform,
   float,
   vec2,
@@ -20,19 +21,22 @@ import THREE, {
   smoothstep,
   sin,
   abs,
+  length,
 } from "../../../extras/three/three";
 
 export const TERRAIN_CONSTANTS = {
   TRIPLANAR_SCALE: 0.5, // Unused in OSRS style but kept for compatibility
   SNOW_HEIGHT: 50.0,
-  FOG_NEAR: 150.0,
-  FOG_FAR: 350.0,
+  FOG_NEAR: 150.0, // Default fog near distance
+  FOG_FAR: 350.0, // Default fog far distance
   NOISE_SCALE: 0.0008, // For dirt patch variation
   DIRT_THRESHOLD: 0.5,
   LOD_FULL_DETAIL: 100.0,
   LOD_MEDIUM_DETAIL: 200.0,
   // OSRS style water level
   WATER_LEVEL: 5.0,
+  // Default fog color (warm beige)
+  FOG_COLOR: new THREE.Color(0xd4c8b8),
 };
 
 // ============================================================================
@@ -265,6 +269,10 @@ export function sampleNoiseAtPosition(
 export type TerrainUniforms = {
   sunPosition: { value: THREE.Vector3 };
   time: { value: number };
+  fogNear: { value: number };
+  fogFar: { value: number };
+  fogColor: { value: THREE.Vector3 };
+  fogEnabled: { value: number }; // 1.0 = fog enabled, 0.0 = fog disabled (for minimap)
 };
 
 /**
@@ -280,6 +288,19 @@ export function createTerrainMaterial(
   const sunPositionUniform = uniform(vec3(100, 100, 100));
   const timeUniform = uniform(float(0));
   const noiseScale = uniform(float(TERRAIN_CONSTANTS.NOISE_SCALE));
+
+  // Fog uniforms - sync with Environment system
+  const fogNearUniform = uniform(float(TERRAIN_CONSTANTS.FOG_NEAR));
+  const fogFarUniform = uniform(float(TERRAIN_CONSTANTS.FOG_FAR));
+  const fogColorUniform = uniform(
+    vec3(
+      TERRAIN_CONSTANTS.FOG_COLOR.r,
+      TERRAIN_CONSTANTS.FOG_COLOR.g,
+      TERRAIN_CONSTANTS.FOG_COLOR.b,
+    ),
+  );
+  // Fog enabled: 1.0 = normal fog, 0.0 = no fog (for minimap rendering)
+  const fogEnabledUniform = uniform(float(1.0));
 
   const worldPos = positionWorld;
   const worldNormal = normalWorld;
@@ -443,7 +464,24 @@ export function createTerrainMaterial(
     ),
   );
 
-  const finalColor = add(variedColor, causticLight);
+  const unfoggedColor = add(variedColor, causticLight);
+
+  // === DISTANCE FOG ===
+  // Calculate distance from camera to fragment in world space
+  const toCamera = sub(worldPos, cameraPosition);
+  const distanceToCamera = length(toCamera);
+
+  // Smoothstep fog factor: 0 at fogNear, 1 at fogFar
+  // Multiply by fogEnabled to allow complete fog disable (for minimap rendering)
+  const baseFogFactor = smoothstep(
+    fogNearUniform,
+    fogFarUniform,
+    distanceToCamera,
+  );
+  const fogFactor = mul(baseFogFactor, fogEnabledUniform);
+
+  // Mix terrain color with fog color based on distance
+  const finalColor = mix(unfoggedColor, fogColorUniform, fogFactor);
 
   // === CREATE MATERIAL ===
   const material = new MeshStandardNodeMaterial();
@@ -451,11 +489,16 @@ export function createTerrainMaterial(
   material.roughness = 1.0; // Fully matte - no specular
   material.metalness = 0.0;
   material.side = THREE.FrontSide;
+  material.fog = false; // We handle fog in the shader
   // Smooth shading (default) - no flat shading
 
   const terrainUniforms: TerrainUniforms = {
     sunPosition: sunPositionUniform,
     time: timeUniform,
+    fogNear: fogNearUniform,
+    fogFar: fogFarUniform,
+    fogColor: fogColorUniform,
+    fogEnabled: fogEnabledUniform,
   };
   const result = material as typeof material & {
     terrainUniforms: TerrainUniforms;

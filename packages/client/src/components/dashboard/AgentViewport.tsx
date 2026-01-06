@@ -1,3 +1,4 @@
+import { GAME_API_URL, GAME_WS_URL } from "@/lib/api-config";
 import React, { useState, useEffect, useRef } from "react";
 import { Agent } from "../../screens/DashboardScreen";
 import { usePrivy } from "@privy-io/react-auth";
@@ -39,19 +40,16 @@ export const AgentViewport: React.FC<AgentViewportProps> = ({ agent }) => {
 
       // Exchange Privy token for permanent spectator JWT
       // This solves the token expiration issue - spectator JWT never expires
-      const tokenResponse = await fetch(
-        `http://localhost:5555/api/spectator/token`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            agentId: agent.id,
-            privyToken: privyToken,
-          }),
+      const tokenResponse = await fetch(`${GAME_API_URL}/api/spectator/token`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
-      );
+        body: JSON.stringify({
+          agentId: agent.id,
+          privyToken: privyToken,
+        }),
+      });
 
       if (tokenResponse.ok) {
         const tokenData = await tokenResponse.json();
@@ -78,7 +76,7 @@ export const AgentViewport: React.FC<AgentViewportProps> = ({ agent }) => {
           "[AgentViewport] Spectator token endpoint failed, falling back to mapping",
         );
         const mappingResponse = await fetch(
-          `http://localhost:5555/api/agents/mapping/${agent.id}`,
+          `${GAME_API_URL}/api/agents/mapping/${agent.id}`,
         );
         if (mappingResponse.ok) {
           const mappingData = await mappingResponse.json();

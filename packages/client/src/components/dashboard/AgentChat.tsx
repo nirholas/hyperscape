@@ -1,3 +1,4 @@
+import { GAME_API_URL, GAME_WS_URL } from "@/lib/api-config";
 import React, { useState, useRef, useEffect } from "react";
 import { Send, Bot, User, MoreVertical, Paperclip, Mic } from "lucide-react";
 import { Agent } from "../../screens/DashboardScreen";
@@ -49,7 +50,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agent }) => {
 
     try {
       const response = await fetch(
-        `http://localhost:5555/api/agents/${agent.id}/message`,
+        `${GAME_API_URL}/api/agents/${agent.id}/message`,
         {
           method: "POST",
           headers: {

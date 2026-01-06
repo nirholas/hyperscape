@@ -608,7 +608,7 @@ Prompt templates control how AI generates images and enhances descriptions. They
 }
 ```
 
-### GPT-4 Enhancement Prompts
+### Prompt Enhancement Prompts
 
 **File:** `/public/prompts/gpt4-enhancement-prompts.json`
 

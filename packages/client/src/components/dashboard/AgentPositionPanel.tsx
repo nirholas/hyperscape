@@ -1,3 +1,4 @@
+import { GAME_API_URL, GAME_WS_URL } from "@/lib/api-config";
 import React, { useState, useEffect } from "react";
 import { Agent } from "../../screens/DashboardScreen";
 import { ChevronDown, ChevronUp, MapPin } from "lucide-react";
@@ -52,7 +53,7 @@ export const AgentPositionPanel: React.FC<AgentPositionPanelProps> = ({
       setError(null);
 
       const mappingResponse = await fetch(
-        `http://localhost:5555/api/agents/mapping/${agent.id}`,
+        `${GAME_API_URL}/api/agents/mapping/${agent.id}`,
       );
 
       if (!mappingResponse.ok) {
@@ -85,7 +86,7 @@ export const AgentPositionPanel: React.FC<AgentPositionPanelProps> = ({
 
     try {
       const positionResponse = await fetch(
-        `http://localhost:5555/api/characters/${characterId}/position`,
+        `${GAME_API_URL}/api/characters/${characterId}/position`,
       );
 
       if (!positionResponse.ok) {

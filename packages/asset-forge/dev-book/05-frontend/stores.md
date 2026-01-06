@@ -295,7 +295,7 @@ initializePipelineStages: () => {
     },
     {
       id: 'gpt4-enhancement',
-      name: 'GPT-4 Enhancement',
+      name: 'Prompt Enhancement',
       description: 'Enhance prompt with AI',
       status: useGPT4Enhancement ? 'idle' : 'skipped'
     },

@@ -146,7 +146,7 @@ Transform user descriptions into optimized prompts that produce better AI-genera
 3. **Apply GPT-4 enhancement** with type-specific instructions
 4. **Add critical requirements** (T-pose for characters, armor shape rules)
 
-### GPT-4 Enhancement
+### Prompt Enhancement
 
 **Model**: `gpt-4`
 **Temperature**: 0.7 (creative but controlled)

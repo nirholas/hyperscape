@@ -357,8 +357,12 @@ export class ResourceEntity extends InteractableEntity {
         this.mesh.updateMatrix();
         this.mesh.updateMatrixWorld(true);
 
-        // Handle skeletal meshes if present (most trees won't have these, but future resources might)
+        // Handle skeletal meshes and set layer for minimap exclusion
+        this.mesh.layers.set(1); // Main camera only, not minimap
         this.mesh.traverse((child) => {
+          // PERFORMANCE: Set all children to layer 1 (minimap only sees layer 0)
+          child.layers.set(1);
+
           if (child instanceof THREE.SkinnedMesh && child.skeleton) {
             child.updateMatrix();
             child.updateMatrixWorld(true);
@@ -428,6 +432,9 @@ export class ResourceEntity extends InteractableEntity {
     this.mesh.castShadow = true;
     this.mesh.receiveShadow = true;
     this.mesh.visible = !this.config.depleted;
+
+    // PERFORMANCE: Set placeholder to layer 1 (main camera only, not minimap)
+    this.mesh.layers.set(1);
 
     // Set up userData for interaction detection (placeholder)
     this.mesh.userData = {

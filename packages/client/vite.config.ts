@@ -16,14 +16,14 @@ export default defineConfig(({ mode }) => {
   const clientEnv = loadEnv(mode, clientDir, ["PUBLIC_", "VITE_"]);
   const env = { ...workspaceEnv, ...clientEnv };
 
-  console.log("[Vite Config] Loaded env from workspace:", workspaceRoot);
-  console.log("[Vite Config] Loaded env from client:", clientDir);
-  console.log(
-    "[Vite Config] PUBLIC_PRIVY_APP_ID:",
-    env.PUBLIC_PRIVY_APP_ID
-      ? `${env.PUBLIC_PRIVY_APP_ID.substring(0, 10)}...`
-      : "NOT SET",
-  );
+  console.log("[Vite Config] Build mode:", mode);
+  console.log("[Vite Config] Loaded env from:", clientDir);
+  if (env.PUBLIC_PRIVY_APP_ID) {
+    console.log(
+      "[Vite Config] PUBLIC_PRIVY_APP_ID:",
+      env.PUBLIC_PRIVY_APP_ID.substring(0, 10) + "...",
+    );
+  }
 
   return {
     plugins: [
@@ -183,8 +183,42 @@ export default defineConfig(({ mode }) => {
       "process.env.TERRAIN_SEED": JSON.stringify(env.TERRAIN_SEED || "0"),
       "process.env.VITEST": "undefined", // Not in browser
 
-      // Note: import.meta.env.PUBLIC_* variables are auto-exposed by Vite (via envPrefix above)
-      // We don't need to manually define them here - Vite handles it automatically
+      // Production API URLs - explicitly defined for production builds
+      // These ALWAYS use production URLs when mode is "production", ignoring .env files
+      // NOTE: mode is passed from Vite - "production" for `vite build`, "development" for `vite dev`
+      // Use environment variables if set, otherwise use defaults
+      // Deployment script sets these from Terraform outputs during build
+      "import.meta.env.PUBLIC_API_URL": JSON.stringify(
+        env.PUBLIC_API_URL ||
+          (mode === "production"
+            ? "https://api.hyperscape.lol"
+            : "http://localhost:5555"),
+      ),
+      "import.meta.env.PUBLIC_WS_URL": JSON.stringify(
+        env.PUBLIC_WS_URL ||
+          (mode === "production"
+            ? "wss://api.hyperscape.lol/ws"
+            : "ws://localhost:5555/ws"),
+      ),
+      "import.meta.env.PUBLIC_CDN_URL": JSON.stringify(
+        env.PUBLIC_CDN_URL ||
+          (mode === "production"
+            ? "https://d20g7vd4m53hpb.cloudfront.net"
+            : "http://localhost:8080"),
+      ),
+      "import.meta.env.PUBLIC_APP_URL": JSON.stringify(
+        env.PUBLIC_APP_URL ||
+          (mode === "production"
+            ? "https://hyperscape.lol"
+            : "http://localhost:3333"),
+      ),
+      "import.meta.env.PUBLIC_ELIZAOS_URL": JSON.stringify(
+        env.PUBLIC_ELIZAOS_URL ||
+          (mode === "production"
+            ? "https://api.hyperscape.lol"
+            : "http://localhost:4001"),
+      ),
+      "import.meta.env.PROD": mode === "production",
     },
     server: {
       port: Number(env.VITE_PORT) || 3333,

@@ -90,6 +90,11 @@ export async function initializeDatabase(connectionString: string) {
     return { db: dbInstance, pool: poolInstance! };
   }
 
+  // Detect SSL requirement from connection string or RDS hostname
+  const needsSSL =
+    connectionString.includes("sslmode=") ||
+    connectionString.includes(".rds.amazonaws.com");
+
   const pool = new Pool({
     connectionString,
     max: 20,
@@ -97,6 +102,8 @@ export async function initializeDatabase(connectionString: string) {
     idleTimeoutMillis: 10000,
     connectionTimeoutMillis: 30000,
     allowExitOnIdle: true,
+    // Enable SSL for RDS and when sslmode is specified
+    ssl: needsSSL ? { rejectUnauthorized: false } : undefined,
   });
 
   // Test connection

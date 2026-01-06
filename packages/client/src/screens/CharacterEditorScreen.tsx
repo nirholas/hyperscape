@@ -5,6 +5,7 @@
  * Similar to the native ElizaOS character creation UI
  */
 
+import { GAME_API_URL, GAME_WS_URL } from "@/lib/api-config";
 import React from "react";
 import { Save, X, ArrowLeft } from "lucide-react";
 import { ArrayInput } from "../components/character/ArrayInput";
@@ -41,7 +42,7 @@ async function generateJWTWithRetry(
       );
 
       const credResponse = await fetch(
-        "http://localhost:5555/api/agents/credentials",
+        `${GAME_API_URL}/api/agents/credentials`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -364,7 +365,7 @@ export const CharacterEditorScreen: React.FC = () => {
             ...character.settings.secrets,
             HYPERSCAPE_CHARACTER_ID: characterId,
             HYPERSCAPE_ACCOUNT_ID: accountId,
-            HYPERSCAPE_SERVER_URL: "ws://localhost:5555/ws",
+            HYPERSCAPE_SERVER_URL: GAME_WS_URL,
           },
         },
       };
@@ -420,7 +421,7 @@ export const CharacterEditorScreen: React.FC = () => {
           // Save agent mapping to Hyperscape database (CRITICAL - rollback if fails)
           try {
             const mappingResponse = await fetch(
-              "http://localhost:5555/api/agents/mappings",
+              `${GAME_API_URL}/api/agents/mappings`,
               {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -515,7 +516,7 @@ export const CharacterEditorScreen: React.FC = () => {
 
         try {
           const mappingResponse = await fetch(
-            "http://localhost:5555/api/agents/mappings",
+            `${GAME_API_URL}/api/agents/mappings`,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -599,7 +600,7 @@ export const CharacterEditorScreen: React.FC = () => {
 
     try {
       const response = await fetch(
-        `http://localhost:5555/api/characters/${characterId}`,
+        `${GAME_API_URL}/api/characters/${characterId}`,
         {
           method: "DELETE",
         },
@@ -632,7 +633,7 @@ export const CharacterEditorScreen: React.FC = () => {
 
     try {
       const response = await fetch(
-        `http://localhost:5555/api/characters/${characterId}`,
+        `${GAME_API_URL}/api/characters/${characterId}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },

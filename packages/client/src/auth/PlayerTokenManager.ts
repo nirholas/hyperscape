@@ -33,6 +33,7 @@
  */
 
 import EventEmitter from "eventemitter3";
+import { GAME_API_URL } from "../lib/api-config";
 
 interface ClientPlayerToken {
   playerId: string;
@@ -337,7 +338,7 @@ export class PlayerTokenManager extends EventEmitter {
       };
 
       // Use sendBeacon for reliable delivery during page unload
-      const baseUrl = import.meta.env.PUBLIC_API_URL || "http://localhost:5555";
+      const baseUrl = GAME_API_URL;
       const endpoint = `${baseUrl}/api/player/disconnect`;
       navigator.sendBeacon(endpoint, JSON.stringify(data));
     });

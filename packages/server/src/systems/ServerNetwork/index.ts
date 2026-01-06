@@ -219,6 +219,10 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   private interactionSessionManager!: InteractionSessionManager;
   private faceDirectionManager!: FaceDirectionManager;
 
+  /** Time sync state - broadcast world time every 5 seconds for day/night sync */
+  private worldTimeSyncAccumulator = 0;
+  private readonly WORLD_TIME_SYNC_INTERVAL = 5; // seconds
+
   constructor(world: World) {
     super(world);
     this.id = 0;
@@ -926,10 +930,20 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     };
 
     // Character selection handlers
+    // Support both with and without "on" prefix for client compatibility
     this.handlers["onCharacterListRequest"] = (socket) =>
+      handleCharacterListRequest(socket, this.world);
+    this.handlers["characterListRequest"] = (socket) =>
       handleCharacterListRequest(socket, this.world);
 
     this.handlers["onCharacterCreate"] = (socket, data) =>
+      handleCharacterCreate(
+        socket,
+        data,
+        this.world,
+        this.broadcastManager.sendToSocket.bind(this.broadcastManager),
+      );
+    this.handlers["characterCreate"] = (socket, data) =>
       handleCharacterCreate(
         socket,
         data,
@@ -943,8 +957,23 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         data,
         this.broadcastManager.sendToSocket.bind(this.broadcastManager),
       );
+    this.handlers["characterSelected"] = (socket, data) =>
+      handleCharacterSelected(
+        socket,
+        data,
+        this.broadcastManager.sendToSocket.bind(this.broadcastManager),
+      );
 
     this.handlers["onEnterWorld"] = (socket, data) =>
+      handleEnterWorld(
+        socket,
+        data,
+        this.world,
+        this.spawn,
+        this.broadcastManager.sendToAll.bind(this.broadcastManager),
+        this.broadcastManager.sendToSocket.bind(this.broadcastManager),
+      );
+    this.handlers["enterWorld"] = (socket, data) =>
       handleEnterWorld(
         socket,
         data,
@@ -1267,6 +1296,15 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
     // Delegate movement updates to MovementManager
     this.movementManager.update(dt);
+
+    // Broadcast world time periodically for day/night cycle sync
+    this.worldTimeSyncAccumulator += dt;
+    if (this.worldTimeSyncAccumulator >= this.WORLD_TIME_SYNC_INTERVAL) {
+      this.worldTimeSyncAccumulator = 0;
+      this.broadcastManager.sendToAll("worldTimeSync", {
+        worldTime: this.world.getTime(),
+      });
+    }
   }
 
   /**

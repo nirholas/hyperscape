@@ -104,13 +104,20 @@ if (!globalWithPolyfills.URL) {
 globalWithPolyfills.window = globalWithPolyfills;
 
 // Add location object needed by PhysX loader
+// Use env vars for server URL, fallback to localhost for local dev
+const serverPort = process.env.PORT || "5555";
+const serverHost = process.env.SERVER_HOST || "localhost";
+const serverProtocol = process.env.SERVER_PROTOCOL || "http:";
+const serverOrigin =
+  process.env.SERVER_URL || `http://${serverHost}:${serverPort}`;
+
 globalWithPolyfills.window.location = {
-  origin: "http://localhost:5555",
-  href: "http://localhost:5555",
-  protocol: "http:",
-  host: "localhost:5555",
-  hostname: "localhost",
-  port: "5555",
+  origin: serverOrigin,
+  href: serverOrigin,
+  protocol: serverProtocol,
+  host: `${serverHost}:${serverPort}`,
+  hostname: serverHost,
+  port: serverPort,
   pathname: "/",
   search: "",
   hash: "",
@@ -237,7 +244,7 @@ globalWithPolyfills.document = {
   },
   // Add URL for document base URL resolution
   URL: URL,
-  baseURI: "http://localhost:5555",
+  baseURI: serverOrigin,
 };
 
 // Add performance API if not available

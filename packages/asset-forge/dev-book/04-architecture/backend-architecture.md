@@ -454,7 +454,7 @@ export class AssetService {
 
 **Pipeline Stages**:
 1. **Text Input** - User description
-2. **GPT-4 Enhancement** - Optimize prompt (optional)
+2. **Prompt Enhancement** - Optimize prompt (optional)
 3. **Image Generation** - DALL-E concept art (or user-provided)
 4. **Image-to-3D** - Meshy AI conversion
 5. **Material Variants** - Retexturing (optional)
@@ -523,7 +523,7 @@ export class GenerationService extends EventEmitter {
     try {
       pipeline.status = 'processing'
 
-      // Stage 1: GPT-4 Enhancement (optional)
+      // Stage 1: Prompt Enhancement (optional)
       let enhancedPrompt = pipeline.config.description
       if (pipeline.config.metadata?.useGPT4Enhancement !== false) {
         enhancedPrompt = await this.enhancePrompt(pipeline)
@@ -1082,7 +1082,7 @@ Response: { variantId, modelUrl }
 initializing
     ↓
 processing
-    ├── Stage 1: GPT-4 Enhancement
+    ├── Stage 1: Prompt Enhancement
     ├── Stage 2: Image Generation
     ├── Stage 3: Image-to-3D
     ├── Stage 4: Material Variants

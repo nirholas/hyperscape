@@ -229,7 +229,7 @@ processing → failed (error occurred)
 - Other stage failures halt pipeline
 - Errors stored in `pipeline.error` and `stage.error`
 
-### GPT-4 Enhancement
+### Prompt Enhancement
 
 ```javascript
 async enhancePromptWithGPT4(config)

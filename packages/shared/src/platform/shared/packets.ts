@@ -216,6 +216,8 @@ const names = [
   'systemMessage',       // Server -> Client: system/game messages for chat
   // Player loading state packets (Issue #356)
   'clientReady',         // Client -> Server: client finished loading, player now targetable
+  // World time sync packets (day/night cycle)
+  'worldTimeSync',       // Server -> Client: periodic world time sync for day/night
 ]
 
 const byName: Record<string, PacketInfo> = {};

@@ -74,15 +74,27 @@ export interface LoreData {
 }
 
 export class ContentGenerationService {
+  public readonly isEnabled: boolean;
+
   constructor() {
-    // Verify AI Gateway API key is configured
-    if (!process.env.AI_GATEWAY_API_KEY) {
+    // Check if AI Gateway API key is configured
+    this.isEnabled = !!process.env.AI_GATEWAY_API_KEY;
+
+    if (this.isEnabled) {
+      console.log("[ContentGenerationService] Initialized with AI Gateway");
+    } else {
+      console.log(
+        "[ContentGenerationService] No API key found - content generation disabled",
+      );
+    }
+  }
+
+  private checkEnabled(): void {
+    if (!this.isEnabled) {
       throw new Error(
         "AI_GATEWAY_API_KEY required for Content Generation Service",
       );
     }
-
-    console.log("[ContentGenerationService] Initialized with AI Gateway");
   }
 
   /**
@@ -112,6 +124,8 @@ export class ContentGenerationService {
     nodes: DialogueNode[];
     rawResponse: string;
   }> {
+    this.checkEnabled();
+
     const {
       npcName,
       npcPersonality,
@@ -159,6 +173,8 @@ export class ContentGenerationService {
     npc: NPCData & { id: string; metadata: Record<string, unknown> };
     rawResponse: string;
   }> {
+    this.checkEnabled();
+
     const {
       archetype,
       prompt: userPrompt,
@@ -219,6 +235,8 @@ export class ContentGenerationService {
     };
     rawResponse: string;
   }> {
+    this.checkEnabled();
+
     const {
       questType,
       difficulty,
@@ -280,6 +298,8 @@ export class ContentGenerationService {
     lore: LoreData & { id: string; metadata: Record<string, unknown> };
     rawResponse: string;
   }> {
+    this.checkEnabled();
+
     const { category, topic, context, quality = "balanced" } = params;
 
     const model = this.getModel(quality);

@@ -350,7 +350,7 @@ export class PlayerSystem extends SystemBase {
 
     // Strong type assumption - getHeightAt always returns number
     if (isFinite(height)) {
-      finalPosition.y = height + 2.0;
+      finalPosition.y = height;
     } else {
       console.error(
         `[PlayerSystem] Invalid terrain height: ${height} - using safe default Y=50`,
@@ -364,7 +364,7 @@ export class PlayerSystem extends SystemBase {
     );
     // Strong type assumption - terrainHeight is number
     const groundedY = Number.isFinite(terrainHeight)
-      ? terrainHeight + 2.0
+      ? terrainHeight
       : finalPosition.y;
     player.position = { x: finalPosition.x, y: groundedY, z: finalPosition.z };
 
@@ -539,7 +539,7 @@ export class PlayerSystem extends SystemBase {
         const pz = playerData.position.z;
         const h = terrain.getHeightAt(px, pz);
         if (Number.isFinite(h)) {
-          playerData.position.y = h + 0.1;
+          playerData.position.y = h;
         }
       }
 

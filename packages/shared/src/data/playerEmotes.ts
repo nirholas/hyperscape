@@ -28,10 +28,10 @@ export const Emotes = {
   IDLE: "asset://emotes/emote-idle.glb",
 
   /** Walking animation (1.5x speed for responsiveness) */
-  WALK: "asset://emotes/emote-walk.glb?s=1.5",
+  WALK: "asset://emotes/emote-walk.glb?s=1.3",
 
-  /** Running animation (1.5x speed) */
-  RUN: "asset://emotes/emote-run.glb?s=1.5",
+  /** Running animation (1.65x speed - 10% faster to match movement) */
+  RUN: "asset://emotes/emote-run.glb?s=1.4",
 
   /** Floating/swimming animation */
   FLOAT: "asset://emotes/emote-float.glb",

@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from "react";
-import { Agent } from "../../screens/DashboardScreen";
-import { Send, Bot, Paperclip, Mic } from "lucide-react";
+import { GAME_API_URL } from "@/lib/api-config";
 import { usePrivy } from "@privy-io/react-auth";
+import { Bot, Mic, Paperclip, Send } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import { Agent } from "../../screens/DashboardScreen";
 
 interface Message {
   id: string;
@@ -67,7 +68,7 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
 
         // Exchange Privy token for permanent spectator JWT
         const tokenResponse = await fetch(
-          `http://localhost:5555/api/spectator/token`,
+          `${GAME_API_URL}/api/spectator/token`,
           {
             method: "POST",
             headers: {
@@ -133,7 +134,7 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
             "[AgentViewportChat] Spectator token endpoint failed, falling back to mapping",
           );
           const mappingResponse = await fetch(
-            `http://localhost:5555/api/agents/mapping/${agent.id}`,
+            `${GAME_API_URL}/api/agents/mapping/${agent.id}`,
           );
           if (mappingResponse.ok) {
             const mappingData = await mappingResponse.json();
@@ -203,7 +204,7 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
     try {
       // SECURITY: Include auth token in Authorization header
       const response = await fetch(
-        `http://localhost:5555/api/agents/${agent.id}/message`,
+        `${GAME_API_URL}/api/agents/${agent.id}/message`,
         {
           method: "POST",
           headers: {

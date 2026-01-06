@@ -82,29 +82,34 @@ try {
 // 4. Start CDN (non-blocking with timeout)
 console.log(`${colors.blue}Checking CDN...${colors.reset}`)
 try {
-  // Quick Docker check with timeout - if Docker isn't running, skip CDN
+  // Quick Docker check - test if daemon is actually reachable
+  const { execSync: execSyncWithSignal } = await import('child_process')
+  let dockerAvailable = false
+  
   try {
-    execSync('docker info', { 
+    // Use docker ps which fails fast if daemon isn't running
+    execSyncWithSignal('docker ps', { 
       stdio: 'ignore', 
       cwd: rootDir,
-      timeout: 5000 // 5 second timeout
+      timeout: 3000 // 3 second timeout - fail fast
     })
+    dockerAvailable = true
   } catch {
-    console.log(`${colors.yellow}⚠️  Docker not available - skipping CDN${colors.reset}`)
-    throw new Error('Docker not available')
+    console.log(`${colors.yellow}⚠️  Docker daemon not running - skipping CDN${colors.reset}`)
+    console.log(`${colors.dim}   Start Docker Desktop to enable local CDN${colors.reset}`)
   }
   
-  // Run CDN setup with a timeout
-  execSync('bun scripts/cdn.mjs', {
-    stdio: 'inherit',
-    cwd: rootDir,
-    timeout: 30000 // 30 second timeout
-  })
-  console.log(`${colors.green}✓ CDN started${colors.reset}`)
+  if (dockerAvailable) {
+    // Run CDN setup with a timeout
+    execSync('bun scripts/cdn.mjs', {
+      stdio: 'inherit',
+      cwd: rootDir,
+      timeout: 30000 // 30 second timeout
+    })
+    console.log(`${colors.green}✓ CDN started${colors.reset}`)
+  }
 } catch (e) {
-  if (e.message?.includes('Docker not available')) {
-    // Already logged
-  } else if (e.killed) {
+  if (e.killed) {
     console.log(`${colors.yellow}⚠️  CDN startup timed out (non-fatal)${colors.reset}`)
   } else {
     console.log(`${colors.yellow}⚠️  CDN setup failed (non-fatal)${colors.reset}`)

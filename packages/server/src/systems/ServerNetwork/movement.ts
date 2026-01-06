@@ -81,7 +81,7 @@ export class MovementManager {
         > | null;
         if (terrainFinal) {
           const th = terrainFinal.getHeightAt(target.x, target.z);
-          if (Number.isFinite(th)) finalY = (th as number) + 0.1;
+          if (Number.isFinite(th)) finalY = th as number;
         }
         entity.position.set(target.x, finalY, target.z);
         entity.data.position = [target.x, finalY, target.z];
@@ -117,7 +117,7 @@ export class MovementManager {
       > | null;
       if (terrain) {
         const th = terrain.getHeightAt(nx, nz);
-        if (Number.isFinite(th)) ny = (th as number) + 0.1;
+        if (Number.isFinite(th)) ny = th;
       }
 
       // Update position

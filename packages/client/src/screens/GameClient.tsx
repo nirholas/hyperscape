@@ -1,3 +1,4 @@
+import { GAME_API_URL, GAME_WS_URL, CDN_URL } from "@/lib/api-config";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   THREE,
@@ -163,15 +164,13 @@ export function GameClient({ wsUrl, onSetup }: GameClientProps) {
 
       // Direct connection - no Vite proxy
       // Default to game server on 5555, CDN on 8080
-      const finalWsUrl =
-        wsUrl || import.meta.env.PUBLIC_WS_URL || "ws://localhost:5555/ws";
+      const finalWsUrl = wsUrl || import.meta.env.PUBLIC_WS_URL || GAME_WS_URL;
 
       // Always use absolute CDN URL for all assets
-      const cdnUrl = import.meta.env.PUBLIC_CDN_URL || "http://localhost:8080";
-      const assetsUrl = `${cdnUrl}/`;
+      const assetsUrl = `${CDN_URL}/`;
 
       // Make CDN URL available globally for PhysX loading
-      (window as Window & { __CDN_URL?: string }).__CDN_URL = cdnUrl;
+      (window as Window & { __CDN_URL?: string }).__CDN_URL = CDN_URL;
 
       const config = {
         viewport,
@@ -187,14 +186,7 @@ export function GameClient({ wsUrl, onSetup }: GameClientProps) {
       }
 
       // Ensure RPG systems are registered before initializing the world
-      const systemsPromise = (
-        world as InstanceType<typeof World> & {
-          systemsLoadedPromise?: Promise<void>;
-        }
-      ).systemsLoadedPromise;
-      if (systemsPromise) {
-        await systemsPromise;
-      }
+      await world.systemsLoadedPromise;
 
       await world.init(config);
     };

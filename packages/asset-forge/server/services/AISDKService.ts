@@ -2,6 +2,8 @@
  * AI SDK Service
  * Provides configured language models from Vercel AI SDK
  * Supports Cloudflare AI Gateway routing
+ *
+ * NOTE: Service is OPTIONAL for local development. Set AI_GATEWAY_API_KEY or OPENAI_API_KEY to enable.
  */
 
 import { createOpenAI } from "@ai-sdk/openai";
@@ -19,28 +21,18 @@ interface ModelConfig {
  * AI SDK Service for providing configured language models
  */
 class AISDKService {
-  private openai: ReturnType<typeof createOpenAI>;
+  private openai: ReturnType<typeof createOpenAI> | null = null;
   private modelConfigs: Record<ModelQuality, ModelConfig>;
+  public readonly isEnabled: boolean;
 
   constructor() {
     // Initialize OpenAI client with AI Gateway if available
     const useAIGateway = !!process.env.AI_GATEWAY_API_KEY;
     const apiKey = useAIGateway
-      ? process.env.AI_GATEWAY_API_KEY!
-      : process.env.OPENAI_API_KEY!;
+      ? process.env.AI_GATEWAY_API_KEY
+      : process.env.OPENAI_API_KEY;
 
-    if (!apiKey) {
-      throw new Error(
-        "AI_GATEWAY_API_KEY or OPENAI_API_KEY required for AI SDK Service",
-      );
-    }
-
-    this.openai = createOpenAI({
-      apiKey,
-      baseURL: useAIGateway
-        ? "https://ai-gateway.vercel.sh/v1"
-        : "https://api.openai.com/v1",
-    });
+    this.isEnabled = !!apiKey;
 
     // Model configurations for different quality levels
     this.modelConfigs = {
@@ -61,6 +53,18 @@ class AISDKService {
       },
     };
 
+    if (!apiKey) {
+      console.log("[AISDKService] No API key found - AI features disabled");
+      return;
+    }
+
+    this.openai = createOpenAI({
+      apiKey,
+      baseURL: useAIGateway
+        ? "https://ai-gateway.vercel.sh/v1"
+        : "https://api.openai.com/v1",
+    });
+
     console.log(
       `[AISDKService] Initialized with ${useAIGateway ? "AI Gateway" : "direct OpenAI"}`,
     );
@@ -68,10 +72,17 @@ class AISDKService {
 
   /**
    * Get a configured language model
+   * Throws if service is not enabled
    */
   async getConfiguredModel(
     quality: ModelQuality = "balanced",
   ): Promise<LanguageModel> {
+    if (!this.isEnabled || !this.openai) {
+      throw new Error(
+        "AI SDK Service not available - set AI_GATEWAY_API_KEY or OPENAI_API_KEY",
+      );
+    }
+
     const config = this.modelConfigs[quality];
 
     if (!config) {

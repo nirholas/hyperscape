@@ -127,18 +127,26 @@ export function createVRMFactory(
           matcapTexture?: THREE.Texture | null;
         };
 
+        // Use base color for emissive so avatars pop at night (subtle self-illumination)
+        // If original has emissive, use it; otherwise derive from diffuse color
+        const baseColor =
+          originalMat.color?.clone() || new THREE.Color(0xffffff);
+        const emissiveColor =
+          originalMat.emissive?.clone() ||
+          baseColor.clone().multiplyScalar(0.15);
+
         const newMat = new THREE.MeshStandardMaterial({
           map: originalMat.map || null,
           normalMap: originalMat.normalMap || null,
           emissiveMap: originalMat.emissiveMap || null,
-          color: originalMat.color?.clone() || new THREE.Color(0xffffff),
-          emissive: originalMat.emissive?.clone() || new THREE.Color(0x000000),
-          emissiveIntensity: originalMat.emissiveIntensity ?? 0,
+          color: baseColor,
+          emissive: emissiveColor,
+          emissiveIntensity: 0.3, // Subtle glow - matches PlayerEntity placeholder
           opacity: originalMat.opacity ?? 1,
           transparent: originalMat.transparent ?? false,
           alphaTest: originalMat.alphaTest ?? 0,
           side: originalMat.side ?? THREE.FrontSide,
-          roughness: 0.7,
+          roughness: 1.0,
           metalness: 0.0,
           envMapIntensity: 1.0, // Respond to environment map
         });
@@ -365,6 +373,13 @@ export function createVRMFactory(
     // A-pose compensation is handled automatically by VRM normalized bones
     // Cloned instances have their own normalized bones for independent animation
 
+    // PERFORMANCE: Set VRM scene to layer 1 (main camera only, not minimap)
+    // Minimap only renders terrain (layer 0) and uses 2D dots for entities
+    vrm.scene.layers.set(1);
+    vrm.scene.traverse((child) => {
+      child.layers.set(1);
+    });
+
     if (hooks?.scene) {
       hooks.scene.add(vrm.scene);
     } else if (alternateScene) {
@@ -528,7 +543,7 @@ export function createVRMFactory(
           action.stop(); // Stop any current playback
           action.enabled = true; // Ensure action is enabled (disabled after stop in some cases)
           action.setEffectiveWeight(1); // Reset weight in case it was faded out
-          action.setEffectiveTimeScale(1); // Reset time scale
+          action.setEffectiveTimeScale(speed); // Use speed from URL param (e.g. ?s=2.0)
           action.clampWhenFinished = !loop;
           action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
           action.reset().fadeIn(0.15).play();
