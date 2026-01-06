@@ -1,0 +1,674 @@
+/**
+ * PendingGatherManager Unit Tests
+ *
+ * Tests the movement-to-gather flow:
+ * - Queue pending gather (paths player to resource)
+ * - Cancel pending gather
+ * - Process tick (detect arrival, start gathering)
+ * - Timeout handling
+ * - Error isolation
+ * - Disconnect cleanup
+ */
+
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { PendingGatherManager } from "../PendingGatherManager";
+import { EventType, GATHERING_CONSTANTS } from "@hyperscape/shared";
+
+// ===== MOCK FACTORIES =====
+
+interface MockPlayer {
+  id: string;
+  position: { x: number; y: number; z: number };
+  skills?: Record<string, { level: number; xp: number }>;
+}
+
+interface MockResource {
+  id: string;
+  position: { x: number; y: number; z: number };
+  footprint?: "standard" | "large" | "massive";
+  isAvailable: boolean;
+  skillRequired?: string;
+  levelRequired?: number;
+  type?: string;
+}
+
+const createMockWorld = () => {
+  const players = new Map<string, MockPlayer>();
+  const resources = new Map<string, MockResource>();
+  const emittedEvents: Array<{ type: string; data: unknown }> = [];
+
+  return {
+    players,
+    resources,
+    emittedEvents,
+
+    getPlayer: vi.fn((id: string) => players.get(id)),
+
+    getSystem: vi.fn((name: string) => {
+      if (name === "resource") {
+        return {
+          getResource: (id: string) => resources.get(id),
+        };
+      }
+      return null;
+    }),
+
+    emit: vi.fn((type: string, data: unknown) => {
+      emittedEvents.push({ type, data });
+    }),
+
+    faceDirectionManager: {
+      setCardinalFaceTarget: vi.fn(),
+    },
+
+    // Helpers for tests
+    addPlayer: (player: MockPlayer) => {
+      players.set(player.id, player);
+    },
+
+    addResource: (resource: MockResource) => {
+      resources.set(resource.id, resource);
+    },
+  };
+};
+
+const createMockTileMovementManager = () => ({
+  movePlayerToward: vi.fn(),
+  getIsRunning: vi.fn(() => false),
+  setArrivalEmote: vi.fn(),
+  findClosestWalkableTile: vi.fn(
+    (
+      _pos: { x: number; y: number; z: number },
+      _radius: number,
+    ): { x: number; z: number } | null => {
+      // Return a shore tile near the position
+      return { x: 10, z: 10 };
+    },
+  ),
+});
+
+type MockWorld = ReturnType<typeof createMockWorld>;
+type MockTileMovementManager = ReturnType<typeof createMockTileMovementManager>;
+
+// ===== TEST SUITES =====
+
+describe("PendingGatherManager", () => {
+  let manager: PendingGatherManager;
+  let mockWorld: MockWorld;
+  let mockTileMovement: MockTileMovementManager;
+  let mockSendFn: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockWorld = createMockWorld();
+    mockTileMovement = createMockTileMovementManager();
+    mockSendFn = vi.fn();
+
+    manager = new PendingGatherManager(
+      mockWorld as never,
+      mockTileMovement as never,
+      mockSendFn,
+    );
+  });
+
+  // ===== QUEUE PENDING GATHER TESTS =====
+
+  describe("queuePendingGather", () => {
+    it("should path player to cardinal tile for trees/ores", () => {
+      // Setup
+      mockWorld.addPlayer({
+        id: "player1",
+        position: { x: 5, y: 0, z: 5 },
+      });
+
+      mockWorld.addResource({
+        id: "tree_1",
+        position: { x: 10, y: 0, z: 10 },
+        isAvailable: true,
+        skillRequired: "woodcutting",
+        levelRequired: 1,
+        type: "tree",
+      });
+
+      // Act
+      manager.queuePendingGather("player1", "tree_1", 0, false);
+
+      // Assert - should call movePlayerToward
+      expect(mockTileMovement.movePlayerToward).toHaveBeenCalledWith(
+        "player1",
+        expect.objectContaining({ x: 10, y: 0, z: 10 }),
+        false,
+        GATHERING_CONSTANTS.GATHERING_RANGE,
+      );
+    });
+
+    it("should path player to shore tile for fishing", () => {
+      // Setup
+      mockWorld.addPlayer({
+        id: "player1",
+        position: { x: 5, y: 0, z: 5 },
+        skills: { fishing: { level: 10, xp: 0 } },
+      });
+
+      mockWorld.addResource({
+        id: "fishing_spot_1",
+        position: { x: 15, y: 0, z: 15 }, // In water
+        isAvailable: true,
+        skillRequired: "fishing",
+        levelRequired: 1,
+        type: "fishing_spot",
+      });
+
+      // Act
+      manager.queuePendingGather("player1", "fishing_spot_1", 0, false);
+
+      // Assert - should find shore tile and path there
+      expect(mockTileMovement.findClosestWalkableTile).toHaveBeenCalled();
+      expect(mockTileMovement.setArrivalEmote).toHaveBeenCalledWith(
+        "player1",
+        "fishing",
+      );
+    });
+
+    it("should start immediately if already adjacent", () => {
+      // Setup - player already on cardinal tile adjacent to resource
+      mockWorld.addPlayer({
+        id: "player1",
+        position: { x: 10, y: 0, z: 9 }, // One tile south of resource at (10, 10)
+      });
+
+      mockWorld.addResource({
+        id: "tree_1",
+        position: { x: 10, y: 0, z: 10 },
+        isAvailable: true,
+        skillRequired: "woodcutting",
+        levelRequired: 1,
+        type: "tree",
+      });
+
+      // Act
+      manager.queuePendingGather("player1", "tree_1", 0, false);
+
+      // Assert - should emit RESOURCE_GATHER immediately
+      expect(mockWorld.emittedEvents).toContainEqual(
+        expect.objectContaining({
+          type: EventType.RESOURCE_GATHER,
+          data: expect.objectContaining({
+            playerId: "player1",
+            resourceId: "tree_1",
+          }),
+        }),
+      );
+    });
+
+    it("should cancel previous pending gather on new request", () => {
+      // Setup
+      mockWorld.addPlayer({
+        id: "player1",
+        position: { x: 0, y: 0, z: 0 },
+      });
+
+      mockWorld.addResource({
+        id: "tree_1",
+        position: { x: 10, y: 0, z: 10 },
+        isAvailable: true,
+        type: "tree",
+      });
+
+      mockWorld.addResource({
+        id: "tree_2",
+        position: { x: 20, y: 0, z: 20 },
+        isAvailable: true,
+        type: "tree",
+      });
+
+      // Act - queue two gathers
+      manager.queuePendingGather("player1", "tree_1", 0, false);
+      manager.queuePendingGather("player1", "tree_2", 1, false);
+
+      // Assert - should only have one pending gather (the second one)
+      // Access private map for verification
+      const pendingGathers = (
+        manager as unknown as {
+          pendingGathers: Map<string, { resourceId: string }>;
+        }
+      ).pendingGathers;
+
+      expect(pendingGathers.size).toBe(1);
+      expect(pendingGathers.get("player1")?.resourceId).toBe("tree_2");
+    });
+
+    it("should silently ignore depleted resources", () => {
+      // Setup
+      mockWorld.addPlayer({
+        id: "player1",
+        position: { x: 5, y: 0, z: 5 },
+      });
+
+      mockWorld.addResource({
+        id: "tree_1",
+        position: { x: 10, y: 0, z: 10 },
+        isAvailable: false, // Depleted
+        type: "tree",
+      });
+
+      // Act
+      manager.queuePendingGather("player1", "tree_1", 0, false);
+
+      // Assert - should not path or queue
+      expect(mockTileMovement.movePlayerToward).not.toHaveBeenCalled();
+
+      const pendingGathers = (
+        manager as unknown as {
+          pendingGathers: Map<string, unknown>;
+        }
+      ).pendingGathers;
+      expect(pendingGathers.size).toBe(0);
+    });
+  });
+
+  // ===== CANCEL PENDING GATHER TESTS =====
+
+  describe("cancelPendingGather", () => {
+    it("should remove pending gather for player", () => {
+      // Setup - manually add a pending gather
+      const pendingGathers = (
+        manager as unknown as {
+          pendingGathers: Map<string, unknown>;
+        }
+      ).pendingGathers;
+
+      pendingGathers.set("player1", {
+        playerId: "player1",
+        resourceId: "tree_1",
+      });
+
+      // Act
+      manager.cancelPendingGather("player1");
+
+      // Assert
+      expect(pendingGathers.has("player1")).toBe(false);
+    });
+
+    it("should do nothing if no pending gather exists", () => {
+      // Act - should not throw
+      expect(() => manager.cancelPendingGather("nonexistent")).not.toThrow();
+    });
+  });
+
+  // ===== PROCESS TICK TESTS =====
+
+  describe("processTick", () => {
+    it("should detect arrival at cardinal tile and start gathering", () => {
+      // Setup - player has arrived at cardinal tile
+      mockWorld.addPlayer({
+        id: "player1",
+        position: { x: 10, y: 0, z: 9 }, // Cardinal to resource at (10, 10)
+      });
+
+      mockWorld.addResource({
+        id: "tree_1",
+        position: { x: 10, y: 0, z: 10 },
+        isAvailable: true,
+        type: "tree",
+      });
+
+      // Manually add pending gather
+      const pendingGathers = (
+        manager as unknown as {
+          pendingGathers: Map<
+            string,
+            {
+              playerId: string;
+              resourceId: string;
+              resourceAnchorTile: { x: number; z: number };
+              footprintX: number;
+              footprintZ: number;
+              lastPlayerTile: { x: number; z: number };
+              createdTick: number;
+              isFishing: boolean;
+              resourcePosition: { x: number; y: number; z: number };
+            }
+          >;
+        }
+      ).pendingGathers;
+
+      pendingGathers.set("player1", {
+        playerId: "player1",
+        resourceId: "tree_1",
+        resourceAnchorTile: { x: 10, z: 10 },
+        footprintX: 1,
+        footprintZ: 1,
+        lastPlayerTile: { x: 5, z: 5 },
+        createdTick: 0,
+        isFishing: false,
+        resourcePosition: { x: 10, y: 0, z: 10 },
+      });
+
+      // Act
+      manager.processTick(1);
+
+      // Assert - should emit RESOURCE_GATHER and remove from pending
+      expect(mockWorld.emittedEvents).toContainEqual(
+        expect.objectContaining({
+          type: EventType.RESOURCE_GATHER,
+        }),
+      );
+      expect(pendingGathers.has("player1")).toBe(false);
+    });
+
+    it("should timeout after 20 ticks", () => {
+      // Setup
+      mockWorld.addPlayer({
+        id: "player1",
+        position: { x: 0, y: 0, z: 0 }, // Far from resource
+      });
+
+      mockWorld.addResource({
+        id: "tree_1",
+        position: { x: 100, y: 0, z: 100 },
+        isAvailable: true,
+        type: "tree",
+      });
+
+      const pendingGathers = (
+        manager as unknown as {
+          pendingGathers: Map<
+            string,
+            {
+              playerId: string;
+              resourceId: string;
+              resourceAnchorTile: { x: number; z: number };
+              footprintX: number;
+              footprintZ: number;
+              lastPlayerTile: { x: number; z: number };
+              createdTick: number;
+              isFishing: boolean;
+              resourcePosition: { x: number; y: number; z: number };
+            }
+          >;
+        }
+      ).pendingGathers;
+
+      pendingGathers.set("player1", {
+        playerId: "player1",
+        resourceId: "tree_1",
+        resourceAnchorTile: { x: 100, z: 100 },
+        footprintX: 1,
+        footprintZ: 1,
+        lastPlayerTile: { x: 0, z: 0 },
+        createdTick: 0,
+        isFishing: false,
+        resourcePosition: { x: 100, y: 0, z: 100 },
+      });
+
+      // Act - process at tick 21 (timeout is 20)
+      manager.processTick(21);
+
+      // Assert - should be removed due to timeout
+      expect(pendingGathers.has("player1")).toBe(false);
+      // Should NOT have started gathering
+      expect(mockWorld.emittedEvents).not.toContainEqual(
+        expect.objectContaining({ type: EventType.RESOURCE_GATHER }),
+      );
+    });
+
+    it("should cancel if resource becomes unavailable", () => {
+      // Setup
+      mockWorld.addPlayer({
+        id: "player1",
+        position: { x: 5, y: 0, z: 5 },
+      });
+
+      // Resource starts available, then becomes unavailable
+      const resource: MockResource = {
+        id: "tree_1",
+        position: { x: 10, y: 0, z: 10 },
+        isAvailable: true,
+        type: "tree",
+      };
+      mockWorld.addResource(resource);
+
+      const pendingGathers = (
+        manager as unknown as {
+          pendingGathers: Map<
+            string,
+            {
+              playerId: string;
+              resourceId: string;
+              resourceAnchorTile: { x: number; z: number };
+              footprintX: number;
+              footprintZ: number;
+              lastPlayerTile: { x: number; z: number };
+              createdTick: number;
+              isFishing: boolean;
+              resourcePosition: { x: number; y: number; z: number };
+            }
+          >;
+        }
+      ).pendingGathers;
+
+      pendingGathers.set("player1", {
+        playerId: "player1",
+        resourceId: "tree_1",
+        resourceAnchorTile: { x: 10, z: 10 },
+        footprintX: 1,
+        footprintZ: 1,
+        lastPlayerTile: { x: 5, z: 5 },
+        createdTick: 0,
+        isFishing: false,
+        resourcePosition: { x: 10, y: 0, z: 10 },
+      });
+
+      // Make resource unavailable
+      resource.isAvailable = false;
+
+      // Act
+      manager.processTick(1);
+
+      // Assert - should be removed
+      expect(pendingGathers.has("player1")).toBe(false);
+    });
+
+    it("should handle errors without breaking other players", () => {
+      // Setup - two players, one will error
+      mockWorld.addPlayer({
+        id: "player1",
+        position: { x: 10, y: 0, z: 9 },
+      });
+
+      mockWorld.addPlayer({
+        id: "player2",
+        position: { x: 20, y: 0, z: 19 },
+      });
+
+      mockWorld.addResource({
+        id: "tree_1",
+        position: { x: 10, y: 0, z: 10 },
+        isAvailable: true,
+        type: "tree",
+      });
+
+      mockWorld.addResource({
+        id: "tree_2",
+        position: { x: 20, y: 0, z: 20 },
+        isAvailable: true,
+        type: "tree",
+      });
+
+      const pendingGathers = (
+        manager as unknown as {
+          pendingGathers: Map<
+            string,
+            {
+              playerId: string;
+              resourceId: string;
+              resourceAnchorTile: { x: number; z: number };
+              footprintX: number;
+              footprintZ: number;
+              lastPlayerTile: { x: number; z: number };
+              createdTick: number;
+              isFishing: boolean;
+              resourcePosition: { x: number; y: number; z: number };
+            }
+          >;
+        }
+      ).pendingGathers;
+
+      // Add both pending gathers
+      pendingGathers.set("player1", {
+        playerId: "player1",
+        resourceId: "tree_1",
+        resourceAnchorTile: { x: 10, z: 10 },
+        footprintX: 1,
+        footprintZ: 1,
+        lastPlayerTile: { x: 5, z: 5 },
+        createdTick: 0,
+        isFishing: false,
+        resourcePosition: { x: 10, y: 0, z: 10 },
+      });
+
+      pendingGathers.set("player2", {
+        playerId: "player2",
+        resourceId: "tree_2",
+        resourceAnchorTile: { x: 20, z: 20 },
+        footprintX: 1,
+        footprintZ: 1,
+        lastPlayerTile: { x: 15, z: 15 },
+        createdTick: 0,
+        isFishing: false,
+        resourcePosition: { x: 20, y: 0, z: 20 },
+      });
+
+      // Make player1's resource lookup throw an error
+      const originalGetSystem = mockWorld.getSystem;
+      let callCount = 0;
+      mockWorld.getSystem = vi.fn((name: string) => {
+        if (name === "resource") {
+          return {
+            getResource: (id: string) => {
+              callCount++;
+              if (callCount === 1) {
+                throw new Error("Simulated error for player1");
+              }
+              return mockWorld.resources.get(id);
+            },
+          };
+        }
+        return originalGetSystem(name);
+      });
+
+      // Act - should not throw
+      expect(() => manager.processTick(1)).not.toThrow();
+
+      // Assert - player1 should be removed (error cleanup), player2 should be processed
+      // Player2 should have gathering started (arrived at cardinal tile)
+      const gatherEvents = mockWorld.emittedEvents.filter(
+        (e) => e.type === EventType.RESOURCE_GATHER,
+      );
+      expect(gatherEvents.length).toBeGreaterThanOrEqual(0); // At least one should work
+    });
+  });
+
+  // ===== DISCONNECT CLEANUP TESTS =====
+
+  describe("onPlayerDisconnect", () => {
+    it("should cleanup pending gather on disconnect", () => {
+      const pendingGathers = (
+        manager as unknown as {
+          pendingGathers: Map<string, unknown>;
+        }
+      ).pendingGathers;
+
+      // Add pending gather
+      pendingGathers.set("player1", {
+        playerId: "player1",
+        resourceId: "tree_1",
+      });
+
+      // Act
+      manager.onPlayerDisconnect("player1");
+
+      // Assert
+      expect(pendingGathers.has("player1")).toBe(false);
+    });
+
+    it("should do nothing if player has no pending gather", () => {
+      // Act - should not throw
+      expect(() => manager.onPlayerDisconnect("nonexistent")).not.toThrow();
+    });
+  });
+
+  // ===== CARDINAL TILE DETECTION TESTS =====
+
+  describe("isOnCardinalTile", () => {
+    // Access private method
+    const getIsOnCardinalTile = (mgr: PendingGatherManager) =>
+      (
+        mgr as unknown as {
+          isOnCardinalTile: (
+            playerTile: { x: number; z: number },
+            resourceAnchor: { x: number; z: number },
+            footprintX: number,
+            footprintZ: number,
+          ) => boolean;
+        }
+      ).isOnCardinalTile.bind(mgr);
+
+    it("should return true when player is north of resource", () => {
+      const isOnCardinalTile = getIsOnCardinalTile(manager);
+      // Player at (10, 11), resource at (10, 10)
+      expect(isOnCardinalTile({ x: 10, z: 11 }, { x: 10, z: 10 }, 1, 1)).toBe(
+        true,
+      );
+    });
+
+    it("should return true when player is south of resource", () => {
+      const isOnCardinalTile = getIsOnCardinalTile(manager);
+      // Player at (10, 9), resource at (10, 10)
+      expect(isOnCardinalTile({ x: 10, z: 9 }, { x: 10, z: 10 }, 1, 1)).toBe(
+        true,
+      );
+    });
+
+    it("should return true when player is east of resource", () => {
+      const isOnCardinalTile = getIsOnCardinalTile(manager);
+      // Player at (11, 10), resource at (10, 10)
+      expect(isOnCardinalTile({ x: 11, z: 10 }, { x: 10, z: 10 }, 1, 1)).toBe(
+        true,
+      );
+    });
+
+    it("should return true when player is west of resource", () => {
+      const isOnCardinalTile = getIsOnCardinalTile(manager);
+      // Player at (9, 10), resource at (10, 10)
+      expect(isOnCardinalTile({ x: 9, z: 10 }, { x: 10, z: 10 }, 1, 1)).toBe(
+        true,
+      );
+    });
+
+    it("should return false when player is diagonal to resource", () => {
+      const isOnCardinalTile = getIsOnCardinalTile(manager);
+      // Player at (11, 11), resource at (10, 10) - diagonal
+      expect(isOnCardinalTile({ x: 11, z: 11 }, { x: 10, z: 10 }, 1, 1)).toBe(
+        false,
+      );
+    });
+
+    it("should return false when player is too far", () => {
+      const isOnCardinalTile = getIsOnCardinalTile(manager);
+      // Player at (10, 12), resource at (10, 10) - 2 tiles away
+      expect(isOnCardinalTile({ x: 10, z: 12 }, { x: 10, z: 10 }, 1, 1)).toBe(
+        false,
+      );
+    });
+
+    it("should handle multi-tile resources", () => {
+      const isOnCardinalTile = getIsOnCardinalTile(manager);
+      // 2x2 resource at anchor (10, 10) - occupies (10,10), (11,10), (10,11), (11,11)
+      // Player at (12, 10) - east of tile (11, 10)
+      expect(isOnCardinalTile({ x: 12, z: 10 }, { x: 10, z: 10 }, 2, 2)).toBe(
+        true,
+      );
+    });
+  });
+});

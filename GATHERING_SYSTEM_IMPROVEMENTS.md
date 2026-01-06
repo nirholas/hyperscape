@@ -369,7 +369,7 @@ OSRS-accurate resource gathering for woodcutting, mining, and fishing.
 | `gathering/index.ts` | 38 | Complete |
 | `ResourceSystem.test.ts` | 526 | 30 tests passing |
 | `ResourceSystem.integration.test.ts` | 484 | ✅ 8 tests passing |
-| `PendingGatherManager.test.ts` | - | **TODO** |
+| `PendingGatherManager.test.ts` | 567 | ✅ 20 tests passing |
 | `FaceDirectionManager.test.ts` | - | **TODO** |
 
 ---
