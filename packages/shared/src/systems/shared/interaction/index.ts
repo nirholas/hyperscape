@@ -19,3 +19,7 @@ export * from "./TargetValidator";
 export * from "./ProcessingSystemBase";
 export * from "./FiremakingSystem";
 export * from "./CookingSystem";
+
+// Smithing skill systems (furnace smelting, anvil smithing)
+export * from "./SmeltingSystem";
+export * from "./SmithingSystem";

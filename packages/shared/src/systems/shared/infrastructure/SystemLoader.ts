@@ -128,6 +128,8 @@ import { ZoneDetectionSystem } from "../death/ZoneDetectionSystem";
 import type { CameraSystem as CameraSystemInterface } from "../../../types/systems/physics";
 import { ActionRegistry } from "..";
 import { SkillsSystem } from "..";
+import { SmeltingSystem } from "..";
+import { SmithingSystem } from "..";
 import { HealthRegenSystem } from "..";
 
 // Interface for the systems collection
@@ -316,6 +318,12 @@ export async function registerSystems(world: World): Promise<void> {
 
   // 18. Processing system - Crafting and item processing (depends on inventory system)
   world.register("processing", ProcessingSystem);
+
+  // 18a. Smelting system - Furnace smelting (depends on inventory, skills)
+  world.register("smelting", SmeltingSystem);
+
+  // 18b. Smithing system - Anvil smithing (depends on inventory, skills)
+  world.register("smithing", SmithingSystem);
 
   // === GAMEPLAY SYSTEMS ===
   // These systems provide advanced gameplay mechanics
