@@ -35,7 +35,7 @@ The Asset Forge backend is a **Node.js/Express server** that orchestrates AI-pow
 # Development mode runs 2 servers
 npm run dev
 ├── API Server (PORT 3004)      # Main API endpoints
-└── Image Server (PORT 8080)    # Static image hosting
+└── Image Server (PORT 8088)    # Static image hosting
 ```
 
 ### Architecture Principles
@@ -87,7 +87,7 @@ app.use('/assets', express.static(path.join(ROOT_DIR, 'public/assets')))
 const assetService = new AssetService(path.join(ROOT_DIR, 'gdd-assets'))
 const retextureService = new RetextureService({
   meshyApiKey: process.env.MESHY_API_KEY,
-  imageServerBaseUrl: process.env.IMAGE_SERVER_URL || 'http://localhost:8080'
+  imageServerBaseUrl: process.env.IMAGE_SERVER_URL || 'http://localhost:8088'
 })
 const generationService = new GenerationService()
 

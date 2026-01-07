@@ -576,7 +576,7 @@ export class Environment extends System {
   // Day fog color: warm beige
   private readonly dayFogColor = new THREE.Color(0xd4c8b8);
   // Night fog color: dark blue to blend with night sky (slightly lighter for visibility)
-  private readonly nightFogColor = new THREE.Color(0x12203a);
+  private readonly nightFogColor = new THREE.Color(0x5980c9);
   // Blended fog color (updated each frame)
   private readonly blendedFogColor = new THREE.Color();
 
@@ -662,11 +662,11 @@ export class Environment extends System {
       this.csm.updateShadowMapSize(options.shadowMapSize);
       if (this.skyInfo) {
         this.csm.lightDirection = this.skyInfo.sunDirection;
-        // Update the main directional light (sun)
-        if (this.csm.mainLight) {
-          this.csm.mainLight.intensity = this.skyInfo.sunIntensity;
-          this.csm.mainLight.color.set(this.skyInfo.sunColor);
-          this.csm.mainLight.castShadow = options.castShadow;
+        // Update all cascade lights (sun)
+        for (const light of this.csm.lights) {
+          light.intensity = this.skyInfo.sunIntensity;
+          light.color.set(this.skyInfo.sunColor);
+          light.castShadow = options.castShadow;
         }
       }
     } else {
@@ -689,9 +689,9 @@ export class Environment extends System {
 
       this.csm = new CSM({
         mode: "practical",
-        maxCascades: options.cascades,
+        cascades: options.cascades,
         maxFar: options.maxFar || 100,
-        lightDirection: _sunDirection.normalize(),
+        lightDirection: _sunDirection.clone().normalize(),
         fade: true,
         parent: scene,
         camera: camera,
@@ -703,15 +703,19 @@ export class Environment extends System {
       });
 
       console.log(
-        `[Environment] CSM created with ${options.cascades} cascades`,
+        `[Environment] CSM created with ${options.cascades} cascades, ${this.csm.lights.length} lights`,
       );
-      const mainLight = this.csm.mainLight;
-      console.log(
-        `[Environment] Main light: castShadow=${mainLight.castShadow}, intensity=${mainLight.intensity}, shadow bias=${mainLight.shadow.bias}`,
-      );
+      if (this.csm.lights.length > 0) {
+        const firstLight = this.csm.lights[0];
+        console.log(
+          `[Environment] First cascade light: castShadow=${firstLight.castShadow}, intensity=${firstLight.intensity}, shadow bias=${firstLight.shadow.bias}`,
+        );
+      }
 
       if (!options.castShadow) {
-        mainLight.castShadow = false;
+        for (const light of this.csm.lights) {
+          light.castShadow = false;
+        }
       }
     }
   }

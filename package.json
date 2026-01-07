@@ -121,16 +121,16 @@
   "dependencies": {
     "@hyperscape/plugin-hyperscape": "workspace:*",
     "@rollup/rollup-darwin-x64": "^4.52.4",
-    "sharp": "^0.33.5",
-    "meshoptimizer": "^0.22.0",
     "@types/pg": "^8.15.5",
     "better-sqlite3": "^12.2.0",
     "canvas": "^3.1.2",
     "drizzle-kit": "^0.31.5",
     "drizzle-orm": "^0.44.6",
+    "meshoptimizer": "^0.22.0",
     "pg": "^8.16.3",
     "playwright": "^1.54.2",
     "pngjs": "^7.0.0",
+    "sharp": "^0.33.5",
     "ws": "^8.18.3"
   }
 }

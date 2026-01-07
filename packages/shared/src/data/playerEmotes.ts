@@ -54,8 +54,8 @@ export const Emotes = {
   /** Chopping/woodcutting animation (used when cutting trees) */
   CHOPPING: "asset://emotes/emote_chopping.glb",
 
-  /** Fishing animation (used when fishing) */
-  FISHING: "asset://emotes/emote-fishing.glb",
+  /** Fishing animation (used when fishing) - uses idle animation as placeholder */
+  FISHING: "asset://emotes/emote-idle.glb",
 
   /** Death animation */
   DEATH: "asset://emotes/emote-death.glb",

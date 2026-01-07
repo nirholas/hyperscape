@@ -1138,8 +1138,8 @@ const variants = await Promise.all(
 ```javascript
 // ❌ Won't work with Meshy
 'data:image/png;base64,iVBORw0KGgo...'
-'http://localhost:8080/image.png'
-'http://127.0.0.1:8080/image.png'
+'http://localhost:8088/image.png'
+'http://127.0.0.1:8088/image.png'
 
 // ✅ Will work with Meshy
 'https://i.imgur.com/abc123.png'

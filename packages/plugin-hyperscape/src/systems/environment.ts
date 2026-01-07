@@ -250,13 +250,21 @@ export class EnvironmentSystem extends System {
       (node as SkyNode & { _sunDirection?: THREE.Vector3 })?._sunDirection ||
       base.sunDirection ||
       new THREE.Vector3(-1, -2, -2).normalize();
-    const sunIntensity = isNumber(node?._sunIntensity)
-      ? node._sunIntensity
+    const sunIntensity: number | undefined = isNumber(node?._sunIntensity)
+      ? (node._sunIntensity as number)
       : base.sunIntensity;
-    const sunColor = isString(node?._sunColor) ? node._sunColor : base.sunColor;
-    const fogNear = isNumber(node?._fogNear) ? node._fogNear : base.fogNear;
-    const fogFar = isNumber(node?._fogFar) ? node._fogFar : base.fogFar;
-    const fogColor = isString(node?._fogColor) ? node._fogColor : base.fogColor;
+    const sunColor: string | number | undefined = isString(node?._sunColor)
+      ? (node._sunColor as string)
+      : base.sunColor;
+    const fogNear: number | undefined = isNumber(node?._fogNear)
+      ? (node._fogNear as number)
+      : base.fogNear;
+    const fogFar: number | undefined = isNumber(node?._fogFar)
+      ? (node._fogFar as number)
+      : base.fogFar;
+    const fogColor: string | undefined = isString(node?._fogColor)
+      ? (node._fogColor as string)
+      : base.fogColor;
     const playwrightManager = PlaywrightManager.getInstance();
     const n = ++this.skyN;
     let bgUUID;

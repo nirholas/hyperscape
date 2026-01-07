@@ -1196,7 +1196,7 @@ app.use(express.json({ limit: '25mb' }))
 # .env file (never committed)
 OPENAI_API_KEY=sk-...
 MESHY_API_KEY=meshy_...
-IMAGE_SERVER_URL=http://localhost:8080
+IMAGE_SERVER_URL=http://localhost:8088
 API_PORT=3004
 NODE_ENV=development
 ```

@@ -374,7 +374,7 @@ The image server provides:
 - Health check endpoint
 
 **Port Selection**:
-- Default `8081` avoids conflict with Hyperscape (8080)
+- Default `8081` avoids conflict with Hyperscape (8088)
 - Must be different from API_PORT
 - Requires CORS configuration for frontend access
 

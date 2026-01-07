@@ -16,6 +16,8 @@
 import type { World } from "../../core/World";
 import type { WorldOptions } from "../../types";
 import { System } from "../shared";
+import { BIOMES } from "../../data/world-structure";
+import type { TerrainSystem } from "../shared/world/TerrainSystem";
 
 /** Performance sample for rolling averages */
 type FrameSample = {
@@ -57,6 +59,7 @@ export class DevStats extends System {
   private sceneElement: HTMLDivElement | null = null;
   private systemsElement: HTMLDivElement | null = null;
   private playerElement: HTMLDivElement | null = null;
+  private biomeElement: HTMLDivElement | null = null;
   private timingElement: HTMLDivElement | null = null;
 
   // State
@@ -239,6 +242,15 @@ export class DevStats extends System {
       font-size: 10px;
     `;
     this.container.appendChild(this.playerElement);
+
+    // Biome section
+    this.biomeElement = document.createElement("div");
+    this.biomeElement.style.cssText = `
+      margin-bottom: 6px;
+      color: #94a3b8;
+      font-size: 10px;
+    `;
+    this.container.appendChild(this.biomeElement);
 
     // CPU/GPU timing section
     this.timingElement = document.createElement("div");
@@ -597,8 +609,27 @@ export class DevStats extends System {
           </div>
         `;
         this.playerElement.style.display = "block";
+
+        // Update biome based on player position
+        if (this.biomeElement) {
+          const biomeInfo = this.getBiomeInfo(pos.x, pos.z);
+          if (biomeInfo) {
+            this.biomeElement.innerHTML = `
+              <div style="display: flex; justify-content: space-between;">
+                <span>Biome:</span>
+                <span style="color: ${biomeInfo.color};">${biomeInfo.name}</span>
+              </div>
+            `;
+            this.biomeElement.style.display = "block";
+          } else {
+            this.biomeElement.style.display = "none";
+          }
+        }
       } else {
         this.playerElement.style.display = "none";
+        if (this.biomeElement) {
+          this.biomeElement.style.display = "none";
+        }
       }
     }
 
@@ -704,6 +735,29 @@ export class DevStats extends System {
       triangles: this.frameTriangles,
       textures: info.memory.textures,
       geometries: info.memory.geometries,
+    };
+  }
+
+  /**
+   * Get biome information at world position
+   */
+  private getBiomeInfo(
+    x: number,
+    z: number,
+  ): { name: string; color: string } | null {
+    const terrainSystem = this.world.getSystem<TerrainSystem>("terrain");
+    if (!terrainSystem) return null;
+
+    const biomeId = terrainSystem.getBiomeAtPosition(x, z);
+    const biomeData = BIOMES[biomeId];
+
+    if (!biomeData) {
+      return { name: biomeId, color: "#94a3b8" };
+    }
+
+    return {
+      name: biomeData.name,
+      color: biomeData.colorScheme.primary,
     };
   }
 
@@ -841,6 +895,9 @@ export class DevStats extends System {
     this.rendererElement = null;
     this.sceneElement = null;
     this.systemsElement = null;
+    this.playerElement = null;
+    this.biomeElement = null;
+    this.timingElement = null;
     this.systemTimings.clear();
     super.destroy();
   }

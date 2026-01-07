@@ -1151,9 +1151,15 @@ export class SkySystem extends System {
 
   override lateUpdate(_delta: number): void {
     if (!this.group) return;
+
     // Keep sky centered on camera for infinite effect - follow all 3 axes
-    // This ensures you can never "hit the edge" of the sky regardless of direction
-    this.group.position.copy(this.world.rig.position);
+    // This ensures sky never clips against draw distance regardless of camera position
+    // Use camera position directly (most reliable) with rig fallback
+    if (this.world.camera) {
+      this.group.position.copy(this.world.camera.position);
+    } else if (this.world.rig) {
+      this.group.position.copy(this.world.rig.position);
+    }
   }
 
   override destroy(): void {

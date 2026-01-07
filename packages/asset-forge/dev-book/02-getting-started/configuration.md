@@ -159,7 +159,7 @@ IMAGE_SERVER_PORT=8081
 **Default**: 8081
 
 **Why 8081?**
-- Port 8080 is used by Hyperscape core
+- Port 8088 is used by Hyperscape core
 - Port 8081 avoids conflicts
 
 **Custom Port:**

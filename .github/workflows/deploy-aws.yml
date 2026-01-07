@@ -186,53 +186,123 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Set Environment
+        id: set-env
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            ENVIRONMENT="${{ github.event.inputs.environment }}"
+          else
+            ENVIRONMENT="prod"
+          fi
+          echo "environment=${ENVIRONMENT}" >> $GITHUB_OUTPUT
+          echo "Using environment: ${ENVIRONMENT}"
+
+      - name: Verify Infrastructure Exists
+        env:
+          ENVIRONMENT: ${{ steps.set-env.outputs.environment }}
+        run: |
+          CLUSTER_NAME="${PROJECT_NAME}-${ENVIRONMENT}-cluster"
+          SERVICE_NAME="${PROJECT_NAME}-${ENVIRONMENT}-server"
+          
+          echo "Verifying infrastructure exists..."
+          echo "Checking cluster: $CLUSTER_NAME"
+          
+          if ! aws ecs describe-clusters --clusters $CLUSTER_NAME --region $AWS_REGION --query 'clusters[0].clusterName' --output text 2>/dev/null | grep -q "$CLUSTER_NAME"; then
+            echo "❌ Error: ECS cluster '$CLUSTER_NAME' does not exist!"
+            echo "Please deploy infrastructure first using Terraform:"
+            echo "  cd infrastructure && terraform apply"
+            exit 1
+          fi
+          
+          echo "✓ Cluster exists: $CLUSTER_NAME"
+          
+          if ! aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME --region $AWS_REGION --query 'services[0].serviceName' --output text 2>/dev/null | grep -q "$SERVICE_NAME"; then
+            echo "❌ Error: ECS service '$SERVICE_NAME' does not exist!"
+            echo "Please deploy infrastructure first using Terraform:"
+            echo "  cd infrastructure && terraform apply"
+            exit 1
+          fi
+          
+          echo "✓ Service exists: $SERVICE_NAME"
+
       - name: Build, tag, and push image to ECR
         id: build-image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
-          ENVIRONMENT: ${{ inputs.environment || 'prod' }}
+          ENVIRONMENT: ${{ steps.set-env.outputs.environment }}
         run: |
           ECR_REPOSITORY="${PROJECT_NAME}-${ENVIRONMENT}-server"
+          
+          echo "Building Docker image..."
+          echo "Repository: $ECR_REGISTRY/$ECR_REPOSITORY"
+          echo "Tag: $IMAGE_TAG"
           
           docker build \
             --platform linux/amd64 \
             -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
-            -f packages/server/Dockerfile .
+            -f packages/server/Dockerfile . || {
+              echo "❌ Docker build failed!"
+              exit 1
+            }
           
+          echo "Tagging image as latest..."
           docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
           
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "Pushing image to ECR..."
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG || {
+            echo "❌ Failed to push image tag $IMAGE_TAG"
+            exit 1
+          }
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest || {
+            echo "❌ Failed to push image tag latest"
+            exit 1
+          }
           
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "✓ Image pushed successfully"
 
       - name: Deploy to ECS
         env:
-          ENVIRONMENT: ${{ inputs.environment || 'prod' }}
+          ENVIRONMENT: ${{ steps.set-env.outputs.environment }}
         run: |
           CLUSTER_NAME="${PROJECT_NAME}-${ENVIRONMENT}-cluster"
           SERVICE_NAME="${PROJECT_NAME}-${ENVIRONMENT}-server"
           
+          echo "Deploying to ECS..."
+          echo "Cluster: $CLUSTER_NAME"
+          echo "Service: $SERVICE_NAME"
+          
           aws ecs update-service \
             --cluster $CLUSTER_NAME \
             --service $SERVICE_NAME \
-            --force-new-deployment
+            --force-new-deployment \
+            --region $AWS_REGION || {
+              echo "❌ Failed to update ECS service"
+              exit 1
+            }
+          
+          echo "✓ ECS service update initiated"
 
       - name: Wait for ECS Service Stability
         env:
-          ENVIRONMENT: ${{ inputs.environment || 'prod' }}
+          ENVIRONMENT: ${{ steps.set-env.outputs.environment }}
         run: |
           CLUSTER_NAME="${PROJECT_NAME}-${ENVIRONMENT}-cluster"
           SERVICE_NAME="${PROJECT_NAME}-${ENVIRONMENT}-server"
           
           echo "Waiting for ECS service to stabilize..."
+          echo "This may take several minutes..."
+          
           aws ecs wait services-stable \
             --cluster $CLUSTER_NAME \
             --services $SERVICE_NAME \
-            --region $AWS_REGION || true
+            --region $AWS_REGION || {
+              echo "⚠️  Service did not stabilize within timeout, but deployment was initiated"
+              echo "Check ECS console for service status"
+            }
           
-          echo "✓ ECS deployment initiated"
+          echo "✓ ECS deployment completed"
 
   # ============================================================================
   # Deploy Asset Forge API
@@ -264,30 +334,58 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Set Environment
+        id: set-env
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            ENVIRONMENT="${{ github.event.inputs.environment }}"
+          else
+            ENVIRONMENT="prod"
+          fi
+          echo "environment=${ENVIRONMENT}" >> $GITHUB_OUTPUT
+          echo "Using environment: ${ENVIRONMENT}"
+
+      - name: Verify Infrastructure Exists
+        env:
+          ENVIRONMENT: ${{ steps.set-env.outputs.environment }}
+        run: |
+          CLUSTER_NAME="${PROJECT_NAME}-${ENVIRONMENT}-cluster"
+          SERVICE_NAME="${PROJECT_NAME}-${ENVIRONMENT}-asset-forge-api"
+          
+          echo "Verifying infrastructure exists..."
+          if ! aws ecs describe-clusters --clusters $CLUSTER_NAME --region $AWS_REGION --query 'clusters[0].clusterName' --output text 2>/dev/null | grep -q "$CLUSTER_NAME"; then
+            echo "❌ Error: ECS cluster '$CLUSTER_NAME' does not exist!"
+            exit 1
+          fi
+          echo "✓ Cluster exists"
+
       - name: Build, tag, and push image to ECR
         id: build-image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
-          ENVIRONMENT: ${{ inputs.environment || 'prod' }}
+          ENVIRONMENT: ${{ steps.set-env.outputs.environment }}
         run: |
           ECR_REPOSITORY="${PROJECT_NAME}-${ENVIRONMENT}-asset-forge-api"
           
           docker build \
             --platform linux/amd64 \
             -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
-            -f packages/asset-forge/Dockerfile .
+            -f packages/asset-forge/Dockerfile . || {
+              echo "❌ Docker build failed!"
+              exit 1
+            }
           
           docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
           
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG || exit 1
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest || exit 1
           
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
       - name: Deploy to ECS
         env:
-          ENVIRONMENT: ${{ inputs.environment || 'prod' }}
+          ENVIRONMENT: ${{ steps.set-env.outputs.environment }}
         run: |
           CLUSTER_NAME="${PROJECT_NAME}-${ENVIRONMENT}-cluster"
           SERVICE_NAME="${PROJECT_NAME}-${ENVIRONMENT}-asset-forge-api"
@@ -295,11 +393,12 @@ jobs:
           aws ecs update-service \
             --cluster $CLUSTER_NAME \
             --service $SERVICE_NAME \
-            --force-new-deployment
+            --force-new-deployment \
+            --region $AWS_REGION || exit 1
 
       - name: Wait for ECS Service Stability
         env:
-          ENVIRONMENT: ${{ inputs.environment || 'prod' }}
+          ENVIRONMENT: ${{ steps.set-env.outputs.environment }}
         run: |
           CLUSTER_NAME="${PROJECT_NAME}-${ENVIRONMENT}-cluster"
           SERVICE_NAME="${PROJECT_NAME}-${ENVIRONMENT}-asset-forge-api"
@@ -308,9 +407,11 @@ jobs:
           aws ecs wait services-stable \
             --cluster $CLUSTER_NAME \
             --services $SERVICE_NAME \
-            --region $AWS_REGION || true
+            --region $AWS_REGION || {
+              echo "⚠️  Service did not stabilize within timeout"
+            }
           
-          echo "✓ Asset Forge API deployment initiated"
+          echo "✓ Asset Forge API deployment completed"
 
   # ============================================================================
   # Deploy Frontend
@@ -335,9 +436,19 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Set Environment
+        id: set-env
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            ENVIRONMENT="${{ github.event.inputs.environment }}"
+          else
+            ENVIRONMENT="prod"
+          fi
+          echo "environment=${ENVIRONMENT}" >> $GITHUB_OUTPUT
+
       - name: Deploy to S3
         env:
-          ENVIRONMENT: ${{ inputs.environment || 'prod' }}
+          ENVIRONMENT: ${{ steps.set-env.outputs.environment }}
         run: |
           BUCKET_NAME="${PROJECT_NAME}-${ENVIRONMENT}-frontend"
           
@@ -393,9 +504,19 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Set Environment
+        id: set-env
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            ENVIRONMENT="${{ github.event.inputs.environment }}"
+          else
+            ENVIRONMENT="prod"
+          fi
+          echo "environment=${ENVIRONMENT}" >> $GITHUB_OUTPUT
+
       - name: Deploy to S3
         env:
-          ENVIRONMENT: ${{ inputs.environment || 'prod' }}
+          ENVIRONMENT: ${{ steps.set-env.outputs.environment }}
         run: |
           BUCKET_NAME="${PROJECT_NAME}-${ENVIRONMENT}-asset-forge"
           
@@ -449,9 +570,19 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Set Environment
+        id: set-env
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            ENVIRONMENT="${{ github.event.inputs.environment }}"
+          else
+            ENVIRONMENT="prod"
+          fi
+          echo "environment=${ENVIRONMENT}" >> $GITHUB_OUTPUT
+
       - name: Deploy Assets to S3
         env:
-          ENVIRONMENT: ${{ inputs.environment || 'prod' }}
+          ENVIRONMENT: ${{ steps.set-env.outputs.environment }}
         run: |
           BUCKET_NAME="${PROJECT_NAME}-${ENVIRONMENT}-assets"
           

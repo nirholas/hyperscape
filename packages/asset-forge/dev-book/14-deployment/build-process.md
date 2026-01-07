@@ -151,7 +151,7 @@ npm run dev
 
 # Frontend: http://localhost:3000
 # Backend API: http://localhost:3004
-# Image server: http://localhost:8080
+# Image server: http://localhost:8088
 ```
 
 #### 2. Production Build
@@ -382,7 +382,7 @@ export default defineConfig({
 # .env.development
 VITE_API_URL=http://localhost:3004
 VITE_GENERATION_API_URL=http://localhost:3001/api
-VITE_IMAGE_SERVER_URL=http://localhost:8080
+VITE_IMAGE_SERVER_URL=http://localhost:8088
 VITE_ENABLE_DEBUG=true
 
 # .env.production

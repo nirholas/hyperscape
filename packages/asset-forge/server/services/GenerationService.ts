@@ -238,7 +238,7 @@ export class GenerationService extends EventEmitter {
         apiKey: process.env.OPENAI_API_KEY || "",
         model: "gpt-image-1",
         imageServerBaseUrl:
-          process.env.IMAGE_SERVER_URL || "http://localhost:8080",
+          process.env.IMAGE_SERVER_URL || "http://localhost:8088",
       },
       meshy: {
         apiKey: process.env.MESHY_API_KEY || "",

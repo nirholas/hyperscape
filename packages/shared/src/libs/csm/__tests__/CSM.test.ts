@@ -180,18 +180,28 @@ describe("CSM", () => {
       csm.dispose();
     });
 
-    it("light targets follow camera", () => {
+    it("light targets offset from light position by light direction", () => {
       const scene = new THREE.Scene();
       const camera = new THREE.PerspectiveCamera(75, 16 / 9, 0.1, 1000);
       camera.position.set(100, 50, 100);
       camera.updateMatrixWorld(true);
 
-      const csm = new CSM({ parent: scene, camera, cascades: 2, maxFar: 100 });
+      const lightDirection = new THREE.Vector3(1, -1, 1).normalize();
+      const csm = new CSM({
+        parent: scene,
+        camera,
+        cascades: 2,
+        maxFar: 100,
+        lightDirection,
+      });
       csm.update();
 
+      // In three.js CSM, light.target.position = light.position + lightDirection
       for (const l of csm.lights) {
-        expect(l.target.position.x).toBeCloseTo(100, 1);
-        expect(l.target.position.z).toBeCloseTo(100, 1);
+        const expectedTarget = l.position.clone().add(lightDirection);
+        expect(l.target.position.x).toBeCloseTo(expectedTarget.x, 5);
+        expect(l.target.position.y).toBeCloseTo(expectedTarget.y, 5);
+        expect(l.target.position.z).toBeCloseTo(expectedTarget.z, 5);
       }
       csm.dispose();
     });

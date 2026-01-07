@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GLB Vertex Color Baker</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            color: #e8e8e8;
+        }
+        
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+        
+        .sidebar {
+            width: 320px;
+            background: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(10px);
+            padding: 24px;
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            overflow-y: auto;
+        }
+        
+        .viewport {
+            flex: 1;
+            position: relative;
+        }
+        
+        #canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        
+        h1 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #00d9ff;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #00d9ff;
+        }
+        
+        .section {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .section-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: #888;
+            margin-bottom: 12px;
+        }
+        
+        .file-input-wrapper {
+            position: relative;
+        }
+        
+        .file-input-wrapper input[type="file"] {
+            display: none;
+        }
+        
+        .file-label {
+            display: block;
+            padding: 14px 20px;
+            background: linear-gradient(135deg, #00d9ff 0%, #0099cc 100%);
+            color: #000;
+            text-align: center;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            transition: all 0.2s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .file-label:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(0, 217, 255, 0.4);
+        }
+        
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 14px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            font-family: inherit;
+            transition: all 0.2s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%);
+            color: #000;
+        }
+        
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(255, 107, 53, 0.4);
+        }
+        
+        .btn-secondary {
+            background: linear-gradient(135deg, #6c5ce7 0%, #a55eea 100%);
+            color: #fff;
+        }
+        
+        .btn-secondary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(108, 92, 231, 0.4);
+        }
+        
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .info-box {
+            background: rgba(0, 217, 255, 0.1);
+            border: 1px solid rgba(0, 217, 255, 0.3);
+            border-radius: 6px;
+            padding: 12px;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+        
+        .info-box strong {
+            color: #00d9ff;
+        }
+        
+        .status {
+            padding: 10px 14px;
+            border-radius: 6px;
+            font-size: 12px;
+            text-align: center;
+        }
+        
+        .status.loading {
+            background: rgba(255, 193, 7, 0.2);
+            border: 1px solid rgba(255, 193, 7, 0.4);
+            color: #ffc107;
+        }
+        
+        .status.success {
+            background: rgba(0, 255, 136, 0.2);
+            border: 1px solid rgba(0, 255, 136, 0.4);
+            color: #00ff88;
+        }
+        
+        .status.error {
+            background: rgba(255, 71, 87, 0.2);
+            border: 1px solid rgba(255, 71, 87, 0.4);
+            color: #ff4757;
+        }
+        
+        .model-info {
+            font-size: 11px;
+            color: #888;
+            line-height: 1.8;
+        }
+        
+        .model-info span {
+            color: #00d9ff;
+            font-weight: 600;
+        }
+        
+        .drop-zone {
+            border: 2px dashed rgba(0, 217, 255, 0.4);
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            transition: all 0.2s ease;
+        }
+        
+        .drop-zone.drag-over {
+            border-color: #00d9ff;
+            background: rgba(0, 217, 255, 0.1);
+        }
+        
+        .drop-zone-text {
+            font-size: 12px;
+            color: #666;
+            margin-top: 10px;
+        }
+        
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        
+        .checkbox-group input {
+            width: 16px;
+            height: 16px;
+            accent-color: #00d9ff;
+        }
+        
+        .progress-bar {
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            margin-top: 8px;
+            overflow: hidden;
+        }
+        
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            transition: width 0.1s ease;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <h1>Vertex Color Baker</h1>
+            
+            <div class="section">
+                <div class="section-title">Load Model</div>
+                <div class="file-input-wrapper drop-zone" id="dropZone">
+                    <label class="file-label" for="glbInput">Choose GLB File</label>
+                    <input type="file" id="glbInput" accept=".glb,.gltf">
+                    <div class="drop-zone-text">or drag & drop here</div>
+                </div>
+            </div>
+            
+            <div id="statusContainer"></div>
+            
+            <div class="section" id="modelInfoSection" style="display: none;">
+                <div class="section-title">Model Info</div>
+                <div class="model-info" id="modelInfo"></div>
+            </div>
+            
+            <div class="section">
+                <div class="section-title">Options</div>
+                <label class="checkbox-group" style="margin-bottom: 12px;">
+                    <input type="checkbox" id="flipV">
+                    Flip V coordinate
+                </label>
+            </div>
+            
+            <div class="section">
+                <div class="section-title">Actions</div>
+                <button class="btn btn-primary" id="bakeBtn" disabled>Bake to Vertex Colors</button>
+                <div style="height: 10px;"></div>
+                <button class="btn btn-secondary" id="exportBtn" disabled>Export GLB</button>
+            </div>
+            
+            <div class="info-box">
+                <strong>How it works:</strong><br>
+                1. Load a GLB with textures<br>
+                2. Click "Bake" to sample textures at each vertex using GPU<br>
+                3. Export the model with vertex colors
+            </div>
+        </div>
+        
+        <div class="viewport">
+            <canvas id="canvas"></canvas>
+        </div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.162.0/examples/jsm/"
+        }
+    }
+    </script>
+    
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+        
+        // Scene setup
+        const canvas = document.getElementById('canvas');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a2e);
+        
+        const camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
+        camera.position.set(3, 2, 3);
+        
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+        renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        
+        const controls = new OrbitControls(camera, canvas);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(5, 10, 7);
+        scene.add(directionalLight);
+        
+        // Grid
+        const grid = new THREE.GridHelper(10, 20, 0x00d9ff, 0x333355);
+        scene.add(grid);
+        
+        // Loader setup
+        const loader = new GLTFLoader();
+        const dracoLoader = new DRACOLoader();
+        dracoLoader.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.162.0/examples/jsm/libs/draco/');
+        loader.setDRACOLoader(dracoLoader);
+        
+        // State
+        let currentModel = null;
+        let originalScale = new THREE.Vector3(1, 1, 1);
+        let originalCenter = new THREE.Vector3();
+        
+        // UI Elements
+        const glbInput = document.getElementById('glbInput');
+        const dropZone = document.getElementById('dropZone');
+        const bakeBtn = document.getElementById('bakeBtn');
+        const exportBtn = document.getElementById('exportBtn');
+        const statusContainer = document.getElementById('statusContainer');
+        const modelInfoSection = document.getElementById('modelInfoSection');
+        const modelInfo = document.getElementById('modelInfo');
+        
+        function showStatus(message, type, progress = null) {
+            let html = `<div class="status ${type}">${message}`;
+            if (progress !== null) {
+                html += `<div class="progress-bar"><div class="progress-bar-fill" style="width: ${progress}%"></div></div>`;
+            }
+            html += '</div>';
+            statusContainer.innerHTML = html;
+        }
+        
+        function clearStatus() {
+            statusContainer.innerHTML = '';
+        }
+        
+        // File handling
+        function handleFile(file) {
+            if (!file) return;
+            
+            const extension = file.name.split('.').pop().toLowerCase();
+            if (extension !== 'glb' && extension !== 'gltf') {
+                showStatus('Please select a GLB or GLTF file', 'error');
+                return;
+            }
+            
+            showStatus('Loading model...', 'loading');
+            
+            const url = URL.createObjectURL(file);
+            
+            loader.load(
+                url,
+                (gltf) => {
+                    URL.revokeObjectURL(url);
+                    
+                    // Remove previous model
+                    if (currentModel) {
+                        scene.remove(currentModel);
+                        currentModel.traverse((child) => {
+                            if (child.geometry) child.geometry.dispose();
+                            if (child.material) {
+                                const mats = Array.isArray(child.material) ? child.material : [child.material];
+                                mats.forEach(m => {
+                                    if (m.map) m.map.dispose();
+                                    m.dispose();
+                                });
+                            }
+                        });
+                    }
+                    
+                    currentModel = gltf.scene;
+                    scene.add(currentModel);
+                    
+                    // Center and scale model for viewing
+                    const box = new THREE.Box3().setFromObject(currentModel);
+                    originalCenter = box.getCenter(new THREE.Vector3());
+                    const size = box.getSize(new THREE.Vector3());
+                    const maxDim = Math.max(size.x, size.y, size.z);
+                    const viewScale = 2 / maxDim;
+                    
+                    currentModel.scale.setScalar(viewScale);
+                    currentModel.position.sub(originalCenter.clone().multiplyScalar(viewScale));
+                    currentModel.position.y += size.y * viewScale / 2;
+                    
+                    // Update camera
+                    camera.position.set(3, 2, 3);
+                    controls.target.set(0, size.y * viewScale / 2, 0);
+                    controls.update();
+                    
+                    // Count meshes and vertices
+                    let meshCount = 0;
+                    let vertexCount = 0;
+                    let textureCount = 0;
+                    
+                    currentModel.traverse((child) => {
+                        if (child.isMesh) {
+                            meshCount++;
+                            if (child.geometry.attributes.position) {
+                                vertexCount += child.geometry.attributes.position.count;
+                            }
+                            const mats = Array.isArray(child.material) ? child.material : [child.material];
+                            mats.forEach(mat => {
+                                if (mat.map) textureCount++;
+                            });
+                        }
+                    });
+                    
+                    modelInfo.innerHTML = `
+                        File: <span>${file.name}</span><br>
+                        Meshes: <span>${meshCount}</span><br>
+                        Vertices: <span>${vertexCount.toLocaleString()}</span><br>
+                        Textures: <span>${textureCount}</span>
+                    `;
+                    modelInfoSection.style.display = 'block';
+                    
+                    bakeBtn.disabled = false;
+                    exportBtn.disabled = false;
+                    
+                    showStatus('Model loaded!', 'success');
+                    setTimeout(clearStatus, 2000);
+                },
+                (progress) => {
+                    if (progress.total) {
+                        const percent = Math.round((progress.loaded / progress.total) * 100);
+                        showStatus(`Loading... ${percent}%`, 'loading', percent);
+                    }
+                },
+                (error) => {
+                    URL.revokeObjectURL(url);
+                    console.error('Load error:', error);
+                    showStatus('Failed to load: ' + error.message, 'error');
+                }
+            );
+        }
+        
+        glbInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
+        
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+        
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+        
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            handleFile(e.dataTransfer.files[0]);
+        });
+        
+        // GPU-based texture sampling using WebGL
+        function createGPUTextureSampler() {
+            const samplerCanvas = document.createElement('canvas');
+            const gl = samplerCanvas.getContext('webgl2') || samplerCanvas.getContext('webgl');
+            if (!gl) {
+                console.warn('WebGL not available, falling back to CPU sampling');
+                return null;
+            }
+            
+            // Vertex shader - uses pixel position for placement, UV for texture lookup
+            const vsSource = `
+                attribute vec2 a_position;
+                attribute vec2 a_uv;
+                varying vec2 v_uv;
+                void main() {
+                    v_uv = a_uv;
+                    // a_position is already in [0,1], map to clip space [-1,1]
+                    gl_Position = vec4(a_position * 2.0 - 1.0, 0.0, 1.0);
+                    gl_PointSize = 1.0;
+                }
+            `;
+            
+            // Fragment shader - samples texture at UV, converts sRGB to linear
+            const fsSource = `
+                precision highp float;
+                uniform sampler2D u_texture;
+                uniform vec3 u_baseColor;
+                uniform float u_flipV;
+                varying vec2 v_uv;
+                
+                // sRGB to linear conversion
+                vec3 sRGBToLinear(vec3 srgb) {
+                    return pow(srgb, vec3(2.2));
+                }
+                
+                void main() {
+                    vec2 uv = fract(v_uv);
+                    if (u_flipV > 0.5) uv.y = 1.0 - uv.y;
+                    vec4 texColor = texture2D(u_texture, uv);
+                    vec3 linearColor = sRGBToLinear(texColor.rgb) * u_baseColor;
+                    gl_FragColor = vec4(linearColor, 1.0);
+                }
+            `;
+            
+            function compileShader(source, type) {
+                const shader = gl.createShader(type);
+                gl.shaderSource(shader, source);
+                gl.compileShader(shader);
+                if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                    console.error('Shader compile error:', gl.getShaderInfoLog(shader));
+                    return null;
+                }
+                return shader;
+            }
+            
+            const vs = compileShader(vsSource, gl.VERTEX_SHADER);
+            const fs = compileShader(fsSource, gl.FRAGMENT_SHADER);
+            
+            const program = gl.createProgram();
+            gl.attachShader(program, vs);
+            gl.attachShader(program, fs);
+            gl.linkProgram(program);
+            
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                console.error('Program link error:', gl.getProgramInfoLog(program));
+                return null;
+            }
+            
+            const aPosition = gl.getAttribLocation(program, 'a_position');
+            const aUV = gl.getAttribLocation(program, 'a_uv');
+            const uTexture = gl.getUniformLocation(program, 'u_texture');
+            const uBaseColor = gl.getUniformLocation(program, 'u_baseColor');
+            const uFlipV = gl.getUniformLocation(program, 'u_flipV');
+            
+            return {
+                gl,
+                canvas: samplerCanvas,
+                program,
+                aPosition,
+                aUV,
+                uTexture,
+                uBaseColor,
+                
+                sampleTexture(uvArray, textureImage, baseColor, vertexCount, flipV) {
+                    // Set canvas size to fit all vertices (1 pixel per vertex, arranged in rows)
+                    const width = Math.min(vertexCount, 4096);
+                    const height = Math.ceil(vertexCount / width);
+                    samplerCanvas.width = width;
+                    samplerCanvas.height = height;
+                    gl.viewport(0, 0, width, height);
+                    
+                    gl.clearColor(baseColor.r, baseColor.g, baseColor.b, 1);
+                    gl.clear(gl.COLOR_BUFFER_BIT);
+                    
+                    // Create position buffer - where each point is rendered in the framebuffer
+                    const positions = new Float32Array(vertexCount * 2);
+                    for (let i = 0; i < vertexCount; i++) {
+                        const px = i % width;
+                        const py = Math.floor(i / width);
+                        // Map pixel center to [0,1]
+                        positions[i * 2] = (px + 0.5) / width;
+                        positions[i * 2 + 1] = (py + 0.5) / height;
+                    }
+                    
+                    gl.useProgram(program);
+                    
+                    // Upload texture
+                    const texture = gl.createTexture();
+                    gl.bindTexture(gl.TEXTURE_2D, texture);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                    
+                    if (textureImage) {
+                        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, textureImage);
+                    } else {
+                        // White texture
+                        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]));
+                    }
+                    
+                    gl.uniform1i(uTexture, 0);
+                    gl.uniform3f(uBaseColor, baseColor.r, baseColor.g, baseColor.b);
+                    gl.uniform1f(uFlipV, flipV ? 1.0 : 0.0);
+                    
+                    // Create position buffer
+                    const posBuffer = gl.createBuffer();
+                    gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
+                    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+                    
+                    // Create UV buffer
+                    const uvBuffer = gl.createBuffer();
+                    gl.bindBuffer(gl.ARRAY_BUFFER, uvBuffer);
+                    gl.bufferData(gl.ARRAY_BUFFER, uvArray, gl.STATIC_DRAW);
+                    
+                    // Bind position attribute
+                    gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
+                    gl.enableVertexAttribArray(aPosition);
+                    gl.vertexAttribPointer(aPosition, 2, gl.FLOAT, false, 0, 0);
+                    
+                    // Bind UV attribute
+                    gl.bindBuffer(gl.ARRAY_BUFFER, uvBuffer);
+                    gl.enableVertexAttribArray(aUV);
+                    gl.vertexAttribPointer(aUV, 2, gl.FLOAT, false, 0, 0);
+                    
+                    // Draw points
+                    gl.drawArrays(gl.POINTS, 0, vertexCount);
+                    
+                    // Read back pixels
+                    const pixels = new Uint8Array(width * height * 4);
+                    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+                    
+                    // Convert to vertex colors
+                    const colors = new Float32Array(vertexCount * 3);
+                    for (let i = 0; i < vertexCount; i++) {
+                        const px = i % width;
+                        const py = Math.floor(i / width);
+                        const pixelIdx = (py * width + px) * 4;
+                        colors[i * 3] = pixels[pixelIdx] / 255;
+                        colors[i * 3 + 1] = pixels[pixelIdx + 1] / 255;
+                        colors[i * 3 + 2] = pixels[pixelIdx + 2] / 255;
+                    }
+                    
+                    // Cleanup
+                    gl.deleteTexture(texture);
+                    gl.deleteBuffer(posBuffer);
+                    gl.deleteBuffer(uvBuffer);
+                    
+                    return colors;
+                }
+            };
+        }
+        
+        // sRGB to linear conversion
+        function sRGBToLinear(value) {
+            return Math.pow(value, 2.2);
+        }
+        
+        // CPU fallback sampler
+        function cpuSampleTexture(uvArray, textureImage, baseColor, vertexCount, flipV) {
+            const colors = new Float32Array(vertexCount * 3);
+            
+            let imageData = null;
+            let imgWidth = 1, imgHeight = 1;
+            
+            if (textureImage) {
+                const canvas = document.createElement('canvas');
+                imgWidth = textureImage.width || textureImage.naturalWidth || 256;
+                imgHeight = textureImage.height || textureImage.naturalHeight || 256;
+                canvas.width = imgWidth;
+                canvas.height = imgHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(textureImage, 0, 0, imgWidth, imgHeight);
+                imageData = ctx.getImageData(0, 0, imgWidth, imgHeight).data;
+            }
+            
+            for (let i = 0; i < vertexCount; i++) {
+                let r = baseColor.r, g = baseColor.g, b = baseColor.b;
+                
+                if (imageData) {
+                    let u = uvArray[i * 2];
+                    let v = uvArray[i * 2 + 1];
+                    
+                    // Wrap UVs to [0,1]
+                    u = u - Math.floor(u);
+                    v = v - Math.floor(v);
+                    
+                    // Optionally flip V
+                    if (flipV) v = 1 - v;
+                    
+                    const x = Math.floor(u * imgWidth);
+                    const y = Math.floor(v * imgHeight);
+                    
+                    // Clamp to valid range
+                    const cx = Math.max(0, Math.min(x, imgWidth - 1));
+                    const cy = Math.max(0, Math.min(y, imgHeight - 1));
+                    const idx = (cy * imgWidth + cx) * 4;
+                    
+                    // Convert sRGB to linear and multiply by base color
+                    r = sRGBToLinear(imageData[idx] / 255) * baseColor.r;
+                    g = sRGBToLinear(imageData[idx + 1] / 255) * baseColor.g;
+                    b = sRGBToLinear(imageData[idx + 2] / 255) * baseColor.b;
+                }
+                
+                colors[i * 3] = r;
+                colors[i * 3 + 1] = g;
+                colors[i * 3 + 2] = b;
+            }
+            
+            return colors;
+        }
+        
+        // Bake textures to vertex colors
+        async function bakeToVertexColors() {
+            if (!currentModel) return;
+            
+            bakeBtn.disabled = true;
+            exportBtn.disabled = true;
+            
+            const flipV = document.getElementById('flipV').checked;
+            const gpuSampler = createGPUTextureSampler();
+            const meshes = [];
+            
+            currentModel.traverse((child) => {
+                if (child.isMesh) meshes.push(child);
+            });
+            
+            const totalMeshes = meshes.length;
+            let processed = 0;
+            
+            for (const mesh of meshes) {
+                processed++;
+                showStatus(`Baking mesh ${processed}/${totalMeshes}...`, 'loading', (processed / totalMeshes) * 100);
+                
+                // Give UI a chance to update
+                await new Promise(r => setTimeout(r, 10));
+                
+                const geometry = mesh.geometry;
+                const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+                
+                const positions = geometry.attributes.position;
+                const uvs = geometry.attributes.uv;
+                
+                if (!positions) continue;
+                
+                const vertexCount = positions.count;
+                const baseColor = material && material.color ? material.color : new THREE.Color(1, 1, 1);
+                
+                // Get UV data
+                let uvArray;
+                if (uvs) {
+                    uvArray = new Float32Array(vertexCount * 2);
+                    for (let i = 0; i < vertexCount; i++) {
+                        uvArray[i * 2] = uvs.getX(i);
+                        uvArray[i * 2 + 1] = uvs.getY(i);
+                    }
+                } else {
+                    // No UVs - create zeros
+                    uvArray = new Float32Array(vertexCount * 2);
+                }
+                
+                // Get texture image
+                let textureImage = null;
+                if (material && material.map && material.map.image) {
+                    textureImage = material.map.image;
+                }
+                
+                // Sample colors
+                let colors;
+                if (gpuSampler && textureImage) {
+                    colors = gpuSampler.sampleTexture(uvArray, textureImage, baseColor, vertexCount, flipV);
+                } else {
+                    colors = cpuSampleTexture(uvArray, textureImage, baseColor, vertexCount, flipV);
+                }
+                
+                // Set vertex colors
+                geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+                
+                // Replace material with vertex color material
+                const newMaterial = new THREE.MeshBasicMaterial({
+                    vertexColors: true,
+                    side: material ? material.side : THREE.FrontSide,
+                    transparent: material ? material.transparent : false,
+                    opacity: material ? material.opacity : 1,
+                });
+                
+                // Dispose old material
+                if (material) {
+                    if (material.map) material.map.dispose();
+                    if (material.normalMap) material.normalMap.dispose();
+                    if (material.roughnessMap) material.roughnessMap.dispose();
+                    if (material.metalnessMap) material.metalnessMap.dispose();
+                    material.dispose();
+                }
+                
+                mesh.material = newMaterial;
+            }
+            
+            bakeBtn.disabled = false;
+            exportBtn.disabled = false;
+            showStatus(`Baked ${totalMeshes} mesh(es)!`, 'success');
+        }
+        
+        bakeBtn.addEventListener('click', bakeToVertexColors);
+        
+        // Export GLB
+        function exportGLB() {
+            if (!currentModel) return;
+            
+            showStatus('Exporting GLB...', 'loading');
+            
+            const exporter = new GLTFExporter();
+            
+            // Clone model for export
+            const exportModel = currentModel.clone(true);
+            
+            // Deep clone geometries and materials
+            exportModel.traverse((child) => {
+                if (child.isMesh) {
+                    child.geometry = child.geometry.clone();
+                    if (Array.isArray(child.material)) {
+                        child.material = child.material.map(m => m.clone());
+                    } else {
+                        child.material = child.material.clone();
+                    }
+                }
+            });
+            
+            // Reset transforms
+            exportModel.position.set(0, 0, 0);
+            exportModel.scale.set(1, 1, 1);
+            
+            exporter.parse(
+                exportModel,
+                (result) => {
+                    const blob = new Blob([result], { type: 'application/octet-stream' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = 'model_vertex_colors.glb';
+                    link.click();
+                    URL.revokeObjectURL(url);
+                    showStatus('Export complete!', 'success');
+                },
+                (error) => {
+                    console.error('Export error:', error);
+                    showStatus('Export failed: ' + error.message, 'error');
+                },
+                { binary: true }
+            );
+        }
+        
+        exportBtn.addEventListener('click', exportGLB);
+        
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        
+        function onResize() {
+            const width = canvas.clientWidth;
+            const height = canvas.clientHeight;
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height);
+        }
+        
+        window.addEventListener('resize', onResize);
+        animate();
+    </script>
+</body>
+</html>

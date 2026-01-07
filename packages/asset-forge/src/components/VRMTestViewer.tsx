@@ -149,7 +149,10 @@ export const VRMTestViewer: React.FC<VRMTestViewerProps> = ({ vrmUrl }) => {
   };
 
   // Animation URLs (using Hyperscape CDN)
-  const cdnUrl = import.meta.env.VITE_CDN_URL || import.meta.env.PUBLIC_CDN_URL || "http://localhost:8080";
+  const cdnUrl =
+    import.meta.env.VITE_CDN_URL ||
+    import.meta.env.PUBLIC_CDN_URL ||
+    "http://localhost:8088";
   const animations = {
     idle: `${cdnUrl}/emotes/emote-idle.glb`,
     walk: `${cdnUrl}/emotes/emote-walk.glb`,

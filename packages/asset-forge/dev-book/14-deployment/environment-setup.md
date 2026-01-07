@@ -127,7 +127,7 @@ module.exports = {
       exec_mode: 'fork',
       env: {
         NODE_ENV: 'production',
-        IMAGE_PORT: 8080
+        IMAGE_PORT: 8088
       },
       error_file: './logs/images-error.log',
       out_file: './logs/images-out.log',
@@ -225,7 +225,7 @@ upstream api_backend {
 }
 
 upstream image_backend {
-    server localhost:8080;
+    server localhost:8088;
     keepalive 32;
 }
 
@@ -413,7 +413,7 @@ ssl_certificate_key /etc/ssl/private/assetforge-privkey.pem;
 ```bash
 NODE_ENV=production
 API_PORT=3004
-IMAGE_PORT=8080
+IMAGE_PORT=8088
 ```
 
 ### Application Environment Variables
@@ -512,7 +512,7 @@ sudo ufw allow 443/tcp
 # Deny direct access to application ports
 sudo ufw deny 3000/tcp
 sudo ufw deny 3004/tcp
-sudo ufw deny 8080/tcp
+sudo ufw deny 8088/tcp
 
 # Check status
 sudo ufw status verbose

@@ -41,7 +41,7 @@ http://localhost:3000
 http://localhost:3004
 
 # Image hosting service
-http://localhost:8080
+http://localhost:8088
 ```
 
 ### Production Environment
@@ -64,7 +64,7 @@ OPENAI_API_KEY=your_openai_api_key        # For AI-powered features
 API_PORT=3004                              # API server port (default: 3004)
 NODE_ENV=production                        # Environment (development/production)
 FRONTEND_URL=https://your-domain.com       # Frontend URL for CORS
-IMAGE_SERVER_URL=http://localhost:8080     # Image hosting service URL
+IMAGE_SERVER_URL=http://localhost:8088     # Image hosting service URL
 VITE_GENERATION_API_URL=http://localhost:3001/api  # Generation service URL
 ```
 

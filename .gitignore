@@ -83,6 +83,8 @@ clear-users.sql
 logs/
 
 # Terraform
+terraform.tfstate
+terraform.tfstate.*
 infrastructure/.terraform/
 infrastructure/*.tfstate
 infrastructure/*.tfstate.*
