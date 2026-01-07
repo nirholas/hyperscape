@@ -1,0 +1,248 @@
+/**
+ * AnvilEntity - Permanent smithing station
+ *
+ * Represents an anvil that players can use to smith bars into items.
+ * Anvils are permanent fixtures in the world, typically found near furnaces.
+ *
+ * **Extends**: InteractableEntity (players can interact to smith)
+ *
+ * **Interaction**:
+ * - Left-click: Opens smithing interface (if player has bars + hammer)
+ * - Right-click: Context menu with "Smith" and "Examine" options
+ *
+ * **Visual Representation**:
+ * - Classic iron anvil shape
+ *
+ * **Requirements**:
+ * - Player must have a hammer in inventory to smith
+ * - Player must have appropriate bars for recipes
+ *
+ * **Runs on**: Server (authoritative), Client (visual)
+ *
+ * @see SmithingSystem for smithing logic
+ * @see ProcessingDataProvider for smithing recipes
+ */
+
+import THREE from "../../extras/three/three";
+import type { World } from "../../core/World";
+import { EntityType, InteractionType } from "../../types/entities";
+import type { EntityInteractionData } from "../../types/entities";
+import {
+  InteractableEntity,
+  type InteractableConfig,
+} from "../InteractableEntity";
+import { EventType } from "../../types/events";
+
+/** Default interaction range for anvils (in tiles) */
+const ANVIL_INTERACTION_RANGE = 2;
+
+/**
+ * Configuration for creating an AnvilEntity.
+ */
+export interface AnvilEntityConfig {
+  id: string;
+  name?: string;
+  position: { x: number; y: number; z: number };
+  rotation?: { x: number; y: number; z: number };
+}
+
+export class AnvilEntity extends InteractableEntity {
+  public readonly entityType = "anvil";
+  public readonly isInteractable = true;
+  public readonly isPermanent = true;
+
+  /** Display name */
+  public displayName: string;
+
+  constructor(world: World, config: AnvilEntityConfig) {
+    // Convert to InteractableConfig format
+    const interactableConfig: InteractableConfig = {
+      id: config.id,
+      name: config.name || "Anvil",
+      type: EntityType.ANVIL,
+      position: config.position,
+      rotation: config.rotation
+        ? { ...config.rotation, w: 1 }
+        : { x: 0, y: 0, z: 0, w: 1 },
+      scale: { x: 1, y: 1, z: 1 },
+      visible: true,
+      interactable: true,
+      interactionType: InteractionType.SMITHING,
+      interactionDistance: ANVIL_INTERACTION_RANGE,
+      description: "An anvil for smithing metal bars into items.",
+      model: null,
+      interaction: {
+        prompt: "Smith",
+        description: "Smith bars into items",
+        range: ANVIL_INTERACTION_RANGE,
+        cooldown: 0,
+        usesRemaining: -1,
+        maxUses: -1,
+        effect: "smithing",
+      },
+      properties: {
+        movementComponent: null,
+        combatComponent: null,
+        healthComponent: null,
+        visualComponent: null,
+        health: { current: 1, max: 1 },
+        level: 1,
+      },
+    };
+
+    super(world, interactableConfig);
+
+    this.displayName = config.name || "Anvil";
+  }
+
+  protected async createMesh(): Promise<void> {
+    // Don't create mesh on server
+    if (this.world.isServer) {
+      return;
+    }
+
+    // Create anvil visual (classic iron anvil shape)
+    const group = new THREE.Group();
+    group.name = `Anvil_${this.id}`;
+
+    // Base (wider bottom)
+    const baseGeometry = new THREE.BoxGeometry(0.8, 0.2, 0.5);
+    const anvilMaterial = new THREE.MeshStandardMaterial({
+      color: 0x3a3a3a, // Dark iron gray
+      roughness: 0.6,
+      metalness: 0.8,
+    });
+    const baseMesh = new THREE.Mesh(baseGeometry, anvilMaterial);
+    baseMesh.name = "AnvilBase";
+    baseMesh.position.y = 0.1;
+    baseMesh.castShadow = true;
+    baseMesh.receiveShadow = true;
+    group.add(baseMesh);
+
+    // Middle column
+    const columnGeometry = new THREE.BoxGeometry(0.5, 0.3, 0.35);
+    const columnMesh = new THREE.Mesh(columnGeometry, anvilMaterial);
+    columnMesh.name = "AnvilColumn";
+    columnMesh.position.y = 0.35;
+    columnMesh.castShadow = true;
+    group.add(columnMesh);
+
+    // Main working surface (top)
+    const topGeometry = new THREE.BoxGeometry(1.0, 0.15, 0.45);
+    const topMesh = new THREE.Mesh(topGeometry, anvilMaterial);
+    topMesh.name = "AnvilTop";
+    topMesh.position.y = 0.575;
+    topMesh.castShadow = true;
+    group.add(topMesh);
+
+    // Horn (tapered end) - simplified as smaller box
+    const hornGeometry = new THREE.BoxGeometry(0.25, 0.1, 0.2);
+    const hornMesh = new THREE.Mesh(hornGeometry, anvilMaterial);
+    hornMesh.name = "AnvilHorn";
+    hornMesh.position.set(0.55, 0.55, 0);
+    hornMesh.castShadow = true;
+    group.add(hornMesh);
+
+    // Store mesh
+    this.mesh = group;
+
+    // Set up userData for interaction detection
+    group.userData = {
+      type: "anvil",
+      entityId: this.id,
+      name: this.displayName,
+      interactable: true,
+    };
+
+    // Also set on child meshes for raycast detection
+    baseMesh.userData = { ...group.userData };
+    columnMesh.userData = { ...group.userData };
+    topMesh.userData = { ...group.userData };
+    hornMesh.userData = { ...group.userData };
+
+    // Add to node
+    if (this.node) {
+      this.node.add(group);
+      this.node.userData.type = "anvil";
+      this.node.userData.entityId = this.id;
+      this.node.userData.interactable = true;
+    }
+  }
+
+  /**
+   * Handle anvil interaction - opens smithing interface.
+   */
+  public async handleInteraction(data: EntityInteractionData): Promise<void> {
+    // Emit event to start smithing interaction
+    this.world.emit(EventType.SMITHING_INTERACT, {
+      playerId: data.playerId,
+      anvilId: this.id,
+      position: this.position,
+    });
+  }
+
+  /**
+   * Get context menu actions for this anvil.
+   */
+  public getContextMenuActions(playerId: string): Array<{
+    id: string;
+    label: string;
+    priority: number;
+    handler: () => void;
+  }> {
+    const actions: Array<{
+      id: string;
+      label: string;
+      priority: number;
+      handler: () => void;
+    }> = [];
+
+    // Add "Smith" action
+    actions.push({
+      id: "smith",
+      label: "Smith",
+      priority: 1,
+      handler: () => {
+        this.world.emit(EventType.SMITHING_INTERACT, {
+          playerId,
+          anvilId: this.id,
+          position: this.position,
+        });
+      },
+    });
+
+    // Add "Examine" action
+    actions.push({
+      id: "examine",
+      label: "Examine",
+      priority: 100,
+      handler: () => {
+        this.world.emit(EventType.UI_MESSAGE, {
+          playerId,
+          message: "An anvil for smithing metal bars into weapons and tools.",
+        });
+      },
+    });
+
+    return actions;
+  }
+
+  /**
+   * Network data for syncing to clients.
+   */
+  getNetworkData(): Record<string, unknown> {
+    const baseData = super.getNetworkData();
+    return {
+      ...baseData,
+      displayName: this.displayName,
+      isPermanent: this.isPermanent,
+    };
+  }
+
+  /**
+   * Client update - anvils are static.
+   */
+  protected clientUpdate(_deltaTime: number): void {
+    // Anvil is static, no animation needed
+  }
+}

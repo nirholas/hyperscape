@@ -13,6 +13,14 @@ import { Entity, EntityConfig } from "../../../entities/Entity";
 import { ItemEntity } from "../../../entities/world/ItemEntity";
 import { HeadstoneEntity } from "../../../entities/world/HeadstoneEntity";
 import { BankEntity } from "../../../entities/world/BankEntity";
+import {
+  FurnaceEntity,
+  type FurnaceEntityConfig,
+} from "../../../entities/world/FurnaceEntity";
+import {
+  AnvilEntity,
+  type AnvilEntityConfig,
+} from "../../../entities/world/AnvilEntity";
 import { MobEntity } from "../../../entities/npc/MobEntity";
 import { NPCEntity } from "../../../entities/npc/NPCEntity";
 import { ResourceEntity } from "../../../entities/world/ResourceEntity";
@@ -388,6 +396,14 @@ export class EntityManager extends SystemBase {
         break;
       case "npc":
         entity = new NPCEntity(this.world, config as NPCEntityConfig);
+        break;
+      case EntityType.FURNACE:
+      case "furnace":
+        entity = new FurnaceEntity(this.world, config as FurnaceEntityConfig);
+        break;
+      case EntityType.ANVIL:
+      case "anvil":
+        entity = new AnvilEntity(this.world, config as AnvilEntityConfig);
         break;
       default:
         throw new Error(`[EntityManager] Unknown entity type: ${config.type}`);

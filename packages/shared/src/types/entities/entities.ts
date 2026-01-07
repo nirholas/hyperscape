@@ -32,6 +32,8 @@ export enum EntityType {
   BANK = "bank",
   FIRE = "fire",
   RANGE = "range",
+  FURNACE = "furnace",
+  ANVIL = "anvil",
 }
 
 export enum InteractionType {
@@ -47,6 +49,8 @@ export enum InteractionType {
   QUEST = "quest",
   COOKING = "cooking",
   FIREMAKING = "firemaking",
+  SMELTING = "smelting",
+  SMITHING = "smithing",
 }
 
 export enum PlayerCombatStyle {
