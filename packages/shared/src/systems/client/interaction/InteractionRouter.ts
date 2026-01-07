@@ -39,6 +39,8 @@ import { BankInteractionHandler } from "./handlers/BankInteractionHandler";
 import { CorpseInteractionHandler } from "./handlers/CorpseInteractionHandler";
 import { PlayerInteractionHandler } from "./handlers/PlayerInteractionHandler";
 import { CookingSourceInteractionHandler } from "./handlers/CookingSourceInteractionHandler";
+import { SmeltingSourceInteractionHandler } from "./handlers/SmeltingSourceInteractionHandler";
+import { SmithingSourceInteractionHandler } from "./handlers/SmithingSourceInteractionHandler";
 
 /**
  * Targeting mode state for "Use X on Y" interactions
@@ -141,6 +143,18 @@ export class InteractionRouter extends System {
     );
     this.handlers.set("fire", cookingHandler);
     this.handlers.set("range", cookingHandler);
+
+    // Smelting source (furnaces)
+    this.handlers.set(
+      "furnace",
+      new SmeltingSourceInteractionHandler(this.world, this.actionQueue),
+    );
+
+    // Smithing source (anvils)
+    this.handlers.set(
+      "anvil",
+      new SmithingSourceInteractionHandler(this.world, this.actionQueue),
+    );
   }
 
   override start(): void {

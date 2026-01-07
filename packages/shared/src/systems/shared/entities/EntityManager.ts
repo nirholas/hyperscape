@@ -301,6 +301,58 @@ export class EntityManager extends SystemBase {
     } catch (err) {
       console.error("[EntityManager] Error spawning bank:", err);
     }
+
+    // Spawn furnace near mining area (where ores are)
+    let furnaceY = 40;
+    if (terrain?.getHeightAt) {
+      const height = terrain.getHeightAt(-15, 15);
+      if (height !== null && height !== undefined && Number.isFinite(height)) {
+        furnaceY = (height as number) + 0.1;
+      }
+    }
+
+    const furnaceConfig: FurnaceEntityConfig = {
+      id: "furnace_spawn_1",
+      name: "Furnace",
+      position: { x: -15, y: furnaceY, z: 15 },
+    };
+
+    try {
+      // Cast since FurnaceEntity handles its own config format
+      await this.spawnEntity({
+        ...furnaceConfig,
+        type: EntityType.FURNACE,
+      } as unknown as EntityConfig);
+      console.log(`[EntityManager] Spawned furnace at (-15, ${furnaceY}, 15)`);
+    } catch (err) {
+      console.error("[EntityManager] Error spawning furnace:", err);
+    }
+
+    // Spawn anvil near furnace
+    let anvilY = 40;
+    if (terrain?.getHeightAt) {
+      const height = terrain.getHeightAt(-12, 15);
+      if (height !== null && height !== undefined && Number.isFinite(height)) {
+        anvilY = (height as number) + 0.1;
+      }
+    }
+
+    const anvilConfig: AnvilEntityConfig = {
+      id: "anvil_spawn_1",
+      name: "Anvil",
+      position: { x: -12, y: anvilY, z: 15 },
+    };
+
+    try {
+      // Cast since AnvilEntity handles its own config format
+      await this.spawnEntity({
+        ...anvilConfig,
+        type: EntityType.ANVIL,
+      } as unknown as EntityConfig);
+      console.log(`[EntityManager] Spawned anvil at (-12, ${anvilY}, 15)`);
+    } catch (err) {
+      console.error("[EntityManager] Error spawning anvil:", err);
+    }
   }
 
   update(deltaTime: number): void {
