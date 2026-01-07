@@ -2,15 +2,13 @@
  * Firemaking Calculator
  *
  * OSRS-accurate firemaking success rate calculations.
- * Extracted for modularity and testability.
+ * Uses data from items.json manifest via ProcessingDataProvider.
  *
  * @see https://oldschool.runescape.wiki/w/Firemaking
  */
 
-import {
-  PROCESSING_CONSTANTS,
-  type LogId,
-} from "../../../../constants/ProcessingConstants";
+import { PROCESSING_CONSTANTS } from "../../../../constants/ProcessingConstants";
+import { processingDataProvider } from "../../../../data/ProcessingDataProvider";
 
 /**
  * Calculate firemaking success rate using OSRS LERP formula.
@@ -38,11 +36,7 @@ export function calculateFiremakingSuccess(level: number): number {
  * @returns XP amount, or 0 if invalid log
  */
 export function getFiremakingXP(logId: string): number {
-  const xp =
-    PROCESSING_CONSTANTS.FIREMAKING_XP[
-      logId as keyof typeof PROCESSING_CONSTANTS.FIREMAKING_XP
-    ];
-  return xp ?? 0;
+  return processingDataProvider.getFiremakingXP(logId);
 }
 
 /**
@@ -52,11 +46,7 @@ export function getFiremakingXP(logId: string): number {
  * @returns Required level, or 1 if invalid log
  */
 export function getFiremakingLevelRequired(logId: string): number {
-  const level =
-    PROCESSING_CONSTANTS.FIREMAKING_LEVELS[
-      logId as keyof typeof PROCESSING_CONSTANTS.FIREMAKING_LEVELS
-    ];
-  return level ?? 1;
+  return processingDataProvider.getFiremakingLevel(logId);
 }
 
 /**
@@ -80,8 +70,8 @@ export function meetsFiremakingLevel(
  * @param itemId - Item ID to check
  * @returns True if valid log
  */
-export function isValidLog(itemId: string): itemId is LogId {
-  return PROCESSING_CONSTANTS.VALID_LOG_IDS.has(itemId);
+export function isValidLog(itemId: string): boolean {
+  return processingDataProvider.isBurnableLog(itemId);
 }
 
 /**
@@ -105,6 +95,6 @@ export function getRandomFireDuration(): number {
  *
  * @returns Set of valid log item IDs
  */
-export function getValidLogIds(): ReadonlySet<string> {
-  return PROCESSING_CONSTANTS.VALID_LOG_IDS;
+export function getValidLogIds(): Set<string> {
+  return processingDataProvider.getBurnableLogIds();
 }

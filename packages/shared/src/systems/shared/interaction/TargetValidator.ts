@@ -6,7 +6,7 @@
  * and cooking (raw food → fire/range).
  */
 
-import { PROCESSING_CONSTANTS } from "../../../constants/ProcessingConstants";
+import { processingDataProvider } from "../../../data/ProcessingDataProvider";
 import type { TargetType, SourceItem } from "./ItemTargetingSystem";
 
 /**
@@ -101,12 +101,12 @@ export class TargetValidator {
     }
 
     // Check if raw food - targets fire/range in world
-    if (PROCESSING_CONSTANTS.VALID_RAW_FOOD_IDS.has(itemId)) {
+    if (processingDataProvider.isCookable(itemId)) {
       return this.validateRawFoodUse(itemId);
     }
 
     // Check if logs - can use tinderbox on logs too (reverse direction)
-    if (PROCESSING_CONSTANTS.VALID_LOG_IDS.has(itemId)) {
+    if (processingDataProvider.isBurnableLog(itemId)) {
       return this.validateLogUse(playerId);
     }
 
@@ -130,13 +130,13 @@ export class TargetValidator {
     if (this.inventoryChecker) {
       const inventoryItems = this.inventoryChecker.getItemIds(playerId);
       for (const itemId of inventoryItems) {
-        if (PROCESSING_CONSTANTS.VALID_LOG_IDS.has(itemId)) {
+        if (processingDataProvider.isBurnableLog(itemId)) {
           validIds.add(itemId);
         }
       }
     } else {
       // Fallback: all log types are potentially valid
-      for (const logId of PROCESSING_CONSTANTS.VALID_LOG_IDS) {
+      for (const logId of processingDataProvider.getBurnableLogIds()) {
         validIds.add(logId);
       }
     }
@@ -243,16 +243,16 @@ export class TargetValidator {
   isValidTarget(sourceItemId: string, targetId: string): boolean {
     // Tinderbox → logs
     if (sourceItemId === "tinderbox") {
-      return PROCESSING_CONSTANTS.VALID_LOG_IDS.has(targetId);
+      return processingDataProvider.isBurnableLog(targetId);
     }
 
     // Logs → tinderbox
-    if (PROCESSING_CONSTANTS.VALID_LOG_IDS.has(sourceItemId)) {
+    if (processingDataProvider.isBurnableLog(sourceItemId)) {
       return targetId === "tinderbox";
     }
 
     // Raw food → fire/range
-    if (PROCESSING_CONSTANTS.VALID_RAW_FOOD_IDS.has(sourceItemId)) {
+    if (processingDataProvider.isCookable(sourceItemId)) {
       // Check if it's a fire or range ID
       // Fire IDs start with "fire_", range IDs vary
       return (
@@ -298,11 +298,11 @@ export class TargetValidator {
       return "firemaking";
     }
 
-    if (PROCESSING_CONSTANTS.VALID_LOG_IDS.has(sourceItemId)) {
+    if (processingDataProvider.isBurnableLog(sourceItemId)) {
       return "firemaking";
     }
 
-    if (PROCESSING_CONSTANTS.VALID_RAW_FOOD_IDS.has(sourceItemId)) {
+    if (processingDataProvider.isCookable(sourceItemId)) {
       return "cooking";
     }
 

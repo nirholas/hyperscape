@@ -2,13 +2,10 @@
  * Log Utilities
  *
  * Validation and lookup utilities for log items.
- * Used by firemaking system for item validation.
+ * Uses data from items.json manifest via ProcessingDataProvider.
  */
 
-import {
-  PROCESSING_CONSTANTS,
-  type LogId,
-} from "../../../../constants/ProcessingConstants";
+import { processingDataProvider } from "../../../../data/ProcessingDataProvider";
 
 /**
  * Check if an item ID is a valid log type for firemaking.
@@ -16,8 +13,8 @@ import {
  * @param itemId - Item ID to check
  * @returns True if valid log
  */
-export function isValidLog(itemId: string): itemId is LogId {
-  return PROCESSING_CONSTANTS.VALID_LOG_IDS.has(itemId);
+export function isValidLog(itemId: string): boolean {
+  return processingDataProvider.isBurnableLog(itemId);
 }
 
 /**
@@ -25,8 +22,8 @@ export function isValidLog(itemId: string): itemId is LogId {
  *
  * @returns Set of valid log item IDs
  */
-export function getValidLogIds(): ReadonlySet<string> {
-  return PROCESSING_CONSTANTS.VALID_LOG_IDS;
+export function getValidLogIds(): Set<string> {
+  return processingDataProvider.getBurnableLogIds();
 }
 
 /**
@@ -45,19 +42,16 @@ export interface LogDisplayData {
  * @returns Log display data, or null if invalid
  */
 export function getLogDisplayData(logId: string): LogDisplayData | null {
-  if (!isValidLog(logId)) {
+  const firemakingData = processingDataProvider.getFiremakingData(logId);
+
+  if (!firemakingData) {
     return null;
   }
 
   return {
     id: logId,
-    levelRequired:
-      PROCESSING_CONSTANTS.FIREMAKING_LEVELS[
-        logId as keyof typeof PROCESSING_CONSTANTS.FIREMAKING_LEVELS
-      ],
-    xp: PROCESSING_CONSTANTS.FIREMAKING_XP[
-      logId as keyof typeof PROCESSING_CONSTANTS.FIREMAKING_XP
-    ],
+    levelRequired: firemakingData.levelRequired,
+    xp: firemakingData.xp,
   };
 }
 
@@ -69,7 +63,7 @@ export function getLogDisplayData(logId: string): LogDisplayData | null {
 export function getAllLogsSortedByLevel(): LogDisplayData[] {
   const logs: LogDisplayData[] = [];
 
-  for (const logId of PROCESSING_CONSTANTS.VALID_LOG_IDS) {
+  for (const logId of processingDataProvider.getBurnableLogIds()) {
     const data = getLogDisplayData(logId);
     if (data) {
       logs.push(data);

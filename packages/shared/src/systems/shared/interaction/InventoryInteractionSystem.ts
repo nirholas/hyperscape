@@ -26,7 +26,7 @@ import { EventType } from "../../../types/events";
 import type { World } from "../../../types/index";
 import { SystemBase } from "../infrastructure/SystemBase";
 import { Logger } from "../../../utils/Logger";
-import { PROCESSING_CONSTANTS } from "../../../constants/ProcessingConstants";
+import { processingDataProvider } from "../../../data/ProcessingDataProvider";
 import { getTargetValidator } from "./TargetValidator";
 import { MESSAGE_TYPES } from "../../client/interaction/constants";
 
@@ -1110,8 +1110,7 @@ export class InventoryInteractionSystem extends SystemBase {
       id: "use",
       label: "Use",
       priority: 1,
-      condition: (item: Item) =>
-        PROCESSING_CONSTANTS.VALID_LOG_IDS.has(item.id),
+      condition: (item: Item) => processingDataProvider.isBurnableLog(item.id),
       callback: (playerId: string, itemId: string, slot: number | null) => {
         this.startTargetingMode(playerId, itemId, slot ?? 0);
       },
@@ -1122,8 +1121,7 @@ export class InventoryInteractionSystem extends SystemBase {
       id: "use",
       label: "Use",
       priority: 1,
-      condition: (item: Item) =>
-        PROCESSING_CONSTANTS.VALID_RAW_FOOD_IDS.has(item.id),
+      condition: (item: Item) => processingDataProvider.isCookable(item.id),
       callback: (playerId: string, itemId: string, slot: number | null) => {
         this.startTargetingMode(playerId, itemId, slot ?? 0);
       },
@@ -1495,7 +1493,7 @@ export class InventoryInteractionSystem extends SystemBase {
     if (actionType === "firemaking") {
       // Firemaking: tinderbox + logs or logs + tinderbox
       // Determine which is logs and which is tinderbox
-      const isSourceLogs = PROCESSING_CONSTANTS.VALID_LOG_IDS.has(sourceItemId);
+      const isSourceLogs = processingDataProvider.isBurnableLog(sourceItemId);
       const logsId = isSourceLogs ? sourceItemId : targetId;
       const logsSlot = isSourceLogs ? sourceSlot : (targetSlot ?? 0);
       const tinderboxSlot = isSourceLogs ? (targetSlot ?? 0) : sourceSlot;

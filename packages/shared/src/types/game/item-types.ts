@@ -193,6 +193,39 @@ export interface Item {
    * Noted items are always stackable and cannot be equipped/consumed.
    */
   isNoted?: boolean;
+
+  // === COOKING DATA (from manifest) ===
+  /**
+   * Cooking properties for raw foods (shrimp, lobster, etc.)
+   * Present only on items that can be cooked.
+   */
+  cooking?: {
+    /** Item ID of the cooked result (e.g., "shrimp") */
+    cookedItemId: string;
+    /** Item ID of the burnt result (e.g., "burnt_shrimp") */
+    burntItemId: string;
+    /** Cooking level required */
+    levelRequired: number;
+    /** XP granted on successful cook */
+    xp: number;
+    /** Level at which burning stops (per cooking source) */
+    stopBurnLevel: {
+      fire: number;
+      range: number;
+    };
+  };
+
+  // === FIREMAKING DATA (from manifest) ===
+  /**
+   * Firemaking properties for logs.
+   * Present only on items that can be used for firemaking.
+   */
+  firemaking?: {
+    /** Firemaking level required */
+    levelRequired: number;
+    /** XP granted on successful fire */
+    xp: number;
+  };
 }
 
 export interface EquipmentSlot {

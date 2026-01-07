@@ -2,16 +2,11 @@
  * Food Utilities
  *
  * Validation and lookup utilities for cookable food items.
- * Used by cooking system for item validation.
+ * Uses data from items.json manifest via ProcessingDataProvider.
  */
 
-import {
-  PROCESSING_CONSTANTS,
-  type RawFoodId,
-  type CookedFoodId,
-  type BurntFoodId,
-  type CookingSourceType,
-} from "../../../../constants/ProcessingConstants";
+import { processingDataProvider } from "../../../../data/ProcessingDataProvider";
+import type { CookingSourceType } from "../../../../constants/ProcessingConstants";
 
 /**
  * Check if an item ID is a valid raw food type.
@@ -19,8 +14,8 @@ import {
  * @param itemId - Item ID to check
  * @returns True if valid raw food
  */
-export function isValidRawFood(itemId: string): itemId is RawFoodId {
-  return PROCESSING_CONSTANTS.VALID_RAW_FOOD_IDS.has(itemId);
+export function isValidRawFood(itemId: string): boolean {
+  return processingDataProvider.isCookable(itemId);
 }
 
 /**
@@ -28,8 +23,8 @@ export function isValidRawFood(itemId: string): itemId is RawFoodId {
  *
  * @returns Set of valid raw food item IDs
  */
-export function getValidRawFoodIds(): ReadonlySet<string> {
-  return PROCESSING_CONSTANTS.VALID_RAW_FOOD_IDS;
+export function getValidRawFoodIds(): Set<string> {
+  return processingDataProvider.getCookableItemIds();
 }
 
 /**
@@ -38,11 +33,8 @@ export function getValidRawFoodIds(): ReadonlySet<string> {
  * @param rawFoodId - Raw food item ID
  * @returns Cooked item ID, or null if invalid
  */
-export function getCookedItemId(rawFoodId: string): CookedFoodId | null {
-  if (!isValidRawFood(rawFoodId)) {
-    return null;
-  }
-  return PROCESSING_CONSTANTS.RAW_TO_COOKED[rawFoodId];
+export function getCookedItemId(rawFoodId: string): string | null {
+  return processingDataProvider.getCookedItemId(rawFoodId);
 }
 
 /**
@@ -51,11 +43,8 @@ export function getCookedItemId(rawFoodId: string): CookedFoodId | null {
  * @param rawFoodId - Raw food item ID
  * @returns Burnt item ID, or null if invalid
  */
-export function getBurntItemId(rawFoodId: string): BurntFoodId | null {
-  if (!isValidRawFood(rawFoodId)) {
-    return null;
-  }
-  return PROCESSING_CONSTANTS.RAW_TO_BURNT[rawFoodId];
+export function getBurntItemId(rawFoodId: string): string | null {
+  return processingDataProvider.getBurntItemId(rawFoodId);
 }
 
 /**
@@ -78,28 +67,20 @@ export interface FoodDisplayData {
  * @returns Food display data, or null if invalid
  */
 export function getFoodDisplayData(rawFoodId: string): FoodDisplayData | null {
-  if (!isValidRawFood(rawFoodId)) {
+  const cookingData = processingDataProvider.getCookingData(rawFoodId);
+
+  if (!cookingData) {
     return null;
   }
 
-  const burnLevels =
-    PROCESSING_CONSTANTS.COOKING_BURN_LEVELS[
-      rawFoodId as keyof typeof PROCESSING_CONSTANTS.COOKING_BURN_LEVELS
-    ];
-
   return {
     rawId: rawFoodId,
-    cookedId: PROCESSING_CONSTANTS.RAW_TO_COOKED[rawFoodId],
-    burntId: PROCESSING_CONSTANTS.RAW_TO_BURNT[rawFoodId],
-    levelRequired:
-      PROCESSING_CONSTANTS.COOKING_LEVELS[
-        rawFoodId as keyof typeof PROCESSING_CONSTANTS.COOKING_LEVELS
-      ],
-    xp: PROCESSING_CONSTANTS.COOKING_XP[
-      rawFoodId as keyof typeof PROCESSING_CONSTANTS.COOKING_XP
-    ],
-    stopBurnFire: burnLevels.fire,
-    stopBurnRange: burnLevels.range,
+    cookedId: cookingData.cookedItemId,
+    burntId: cookingData.burntItemId,
+    levelRequired: cookingData.levelRequired,
+    xp: cookingData.xp,
+    stopBurnFire: cookingData.stopBurnLevel.fire,
+    stopBurnRange: cookingData.stopBurnLevel.range,
   };
 }
 
@@ -111,7 +92,7 @@ export function getFoodDisplayData(rawFoodId: string): FoodDisplayData | null {
 export function getAllFoodsSortedByLevel(): FoodDisplayData[] {
   const foods: FoodDisplayData[] = [];
 
-  for (const rawId of PROCESSING_CONSTANTS.VALID_RAW_FOOD_IDS) {
+  for (const rawId of processingDataProvider.getCookableItemIds()) {
     const data = getFoodDisplayData(rawId);
     if (data) {
       foods.push(data);
@@ -128,16 +109,13 @@ export function getAllFoodsSortedByLevel(): FoodDisplayData[] {
  * @returns True if range has lower stop-burn level
  */
 export function isRangeBetter(rawFoodId: string): boolean {
-  const burnLevels =
-    PROCESSING_CONSTANTS.COOKING_BURN_LEVELS[
-      rawFoodId as keyof typeof PROCESSING_CONSTANTS.COOKING_BURN_LEVELS
-    ];
+  const cookingData = processingDataProvider.getCookingData(rawFoodId);
 
-  if (!burnLevels) {
+  if (!cookingData) {
     return false;
   }
 
-  return burnLevels.range < burnLevels.fire;
+  return cookingData.stopBurnLevel.range < cookingData.stopBurnLevel.fire;
 }
 
 /**
@@ -151,22 +129,21 @@ export function getRecommendedCookingSource(
   playerLevel: number,
   rawFoodId: string,
 ): CookingSourceType {
-  const burnLevels =
-    PROCESSING_CONSTANTS.COOKING_BURN_LEVELS[
-      rawFoodId as keyof typeof PROCESSING_CONSTANTS.COOKING_BURN_LEVELS
-    ];
+  const cookingData = processingDataProvider.getCookingData(rawFoodId);
 
-  if (!burnLevels) {
+  if (!cookingData) {
     return "fire"; // Default
   }
 
+  const { stopBurnLevel } = cookingData;
+
   // If player can't burn on fire, doesn't matter
-  if (playerLevel >= burnLevels.fire) {
+  if (playerLevel >= stopBurnLevel.fire) {
     return "fire";
   }
 
   // If range has lower stop-burn, recommend range
-  if (burnLevels.range < burnLevels.fire) {
+  if (stopBurnLevel.range < stopBurnLevel.fire) {
     return "range";
   }
 

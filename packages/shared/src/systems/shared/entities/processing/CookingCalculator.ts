@@ -2,17 +2,14 @@
  * Cooking Calculator
  *
  * OSRS-accurate cooking burn rate calculations.
- * Uses lookup tables for stop-burn levels per food type.
+ * Uses data from items.json manifest via ProcessingDataProvider.
  *
  * @see https://oldschool.runescape.wiki/w/Cooking
  * @see https://oldschool.runescape.wiki/w/Cooking/Burn_level
  */
 
-import {
-  PROCESSING_CONSTANTS,
-  type RawFoodId,
-  type CookingSourceType,
-} from "../../../../constants/ProcessingConstants";
+import { processingDataProvider } from "../../../../data/ProcessingDataProvider";
+import type { CookingSourceType } from "../../../../constants/ProcessingConstants";
 
 /**
  * Get stop-burn level for a food type and cooking source.
@@ -25,16 +22,7 @@ export function getStopBurnLevel(
   rawFoodId: string,
   sourceType: CookingSourceType,
 ): number {
-  const burnLevels =
-    PROCESSING_CONSTANTS.COOKING_BURN_LEVELS[
-      rawFoodId as keyof typeof PROCESSING_CONSTANTS.COOKING_BURN_LEVELS
-    ];
-
-  if (!burnLevels) {
-    return 99; // Unknown food - assume never stops burning
-  }
-
-  return burnLevels[sourceType];
+  return processingDataProvider.getStopBurnLevel(rawFoodId, sourceType);
 }
 
 /**
@@ -101,11 +89,7 @@ export function rollBurn(
  * @returns XP amount, or 0 if invalid food
  */
 export function getCookingXP(rawFoodId: string): number {
-  const xp =
-    PROCESSING_CONSTANTS.COOKING_XP[
-      rawFoodId as keyof typeof PROCESSING_CONSTANTS.COOKING_XP
-    ];
-  return xp ?? 0;
+  return processingDataProvider.getCookingXP(rawFoodId);
 }
 
 /**
@@ -115,11 +99,7 @@ export function getCookingXP(rawFoodId: string): number {
  * @returns Required level, or 1 if invalid food
  */
 export function getCookingLevelRequired(rawFoodId: string): number {
-  const level =
-    PROCESSING_CONSTANTS.COOKING_LEVELS[
-      rawFoodId as keyof typeof PROCESSING_CONSTANTS.COOKING_LEVELS
-    ];
-  return level ?? 1;
+  return processingDataProvider.getCookingLevel(rawFoodId);
 }
 
 /**
@@ -143,8 +123,8 @@ export function meetsCookingLevel(
  * @param itemId - Item ID to check
  * @returns True if valid raw food
  */
-export function isValidRawFood(itemId: string): itemId is RawFoodId {
-  return PROCESSING_CONSTANTS.VALID_RAW_FOOD_IDS.has(itemId);
+export function isValidRawFood(itemId: string): boolean {
+  return processingDataProvider.isCookable(itemId);
 }
 
 /**
@@ -154,11 +134,7 @@ export function isValidRawFood(itemId: string): itemId is RawFoodId {
  * @returns Cooked item ID, or null if invalid
  */
 export function getCookedItemId(rawFoodId: string): string | null {
-  const cooked =
-    PROCESSING_CONSTANTS.RAW_TO_COOKED[
-      rawFoodId as keyof typeof PROCESSING_CONSTANTS.RAW_TO_COOKED
-    ];
-  return cooked ?? null;
+  return processingDataProvider.getCookedItemId(rawFoodId);
 }
 
 /**
@@ -168,11 +144,7 @@ export function getCookedItemId(rawFoodId: string): string | null {
  * @returns Burnt item ID, or null if invalid
  */
 export function getBurntItemId(rawFoodId: string): string | null {
-  const burnt =
-    PROCESSING_CONSTANTS.RAW_TO_BURNT[
-      rawFoodId as keyof typeof PROCESSING_CONSTANTS.RAW_TO_BURNT
-    ];
-  return burnt ?? null;
+  return processingDataProvider.getBurntItemId(rawFoodId);
 }
 
 /**
@@ -180,6 +152,6 @@ export function getBurntItemId(rawFoodId: string): string | null {
  *
  * @returns Set of valid raw food item IDs
  */
-export function getValidRawFoodIds(): ReadonlySet<string> {
-  return PROCESSING_CONSTANTS.VALID_RAW_FOOD_IDS;
+export function getValidRawFoodIds(): Set<string> {
+  return processingDataProvider.getCookableItemIds();
 }
