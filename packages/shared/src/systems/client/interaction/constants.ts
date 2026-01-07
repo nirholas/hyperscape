@@ -170,4 +170,8 @@ export const MESSAGE_TYPES = {
   MOVE_REQUEST: "moveRequest",
   /** Follow another player */
   FOLLOW_PLAYER: "followPlayer",
+  /** Request to light fire (tinderbox + logs) */
+  FIREMAKING_REQUEST: "firemakingRequest",
+  /** Request to cook food on fire/range */
+  COOKING_REQUEST: "cookingRequest",
 } as const;

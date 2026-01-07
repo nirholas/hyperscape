@@ -23,6 +23,7 @@ import THREE from "../../extras/three/three";
 import { System } from "../shared/infrastructure/System";
 import { EventType } from "../../types/events";
 import type { World } from "../../core/World";
+import type { WorldOptions } from "../../types/index";
 
 interface DamageSplat {
   sprite: THREE.Sprite;
@@ -43,22 +44,32 @@ export class DamageSplatSystem extends System {
   // Pre-allocated array for removal indices to avoid per-frame allocation
   private readonly _toRemove: number[] = [];
 
+  // Bound handler reference for proper cleanup
+  private boundDamageHandler: ((data: unknown) => void) | null = null;
+
   constructor(world: World) {
     super(world);
   }
 
-  async init(): Promise<void> {
+  async init(options?: WorldOptions): Promise<void> {
+    // CRITICAL: Call super.init() to set initialized flag and prevent duplicate init calls
+    await super.init(options as WorldOptions);
+
     // Only run on client
     if (!this.world.isClient) {
       return;
     }
 
+    // Prevent duplicate subscriptions if init is called multiple times
+    if (this.boundDamageHandler) {
+      return;
+    }
+
+    // Create bound handler for proper cleanup in destroy()
+    this.boundDamageHandler = this.onDamageDealt.bind(this);
+
     // Listen for combat damage events
-    this.world.on(
-      EventType.COMBAT_DAMAGE_DEALT,
-      this.onDamageDealt.bind(this),
-      this,
-    );
+    this.world.on(EventType.COMBAT_DAMAGE_DEALT, this.boundDamageHandler, this);
   }
 
   private onDamageDealt = (data: unknown): void => {
@@ -227,6 +238,12 @@ export class DamageSplatSystem extends System {
   }
 
   destroy(): void {
+    // Remove event listener to prevent duplicate subscriptions on re-init
+    if (this.boundDamageHandler) {
+      this.world.off(EventType.COMBAT_DAMAGE_DEALT, this.boundDamageHandler);
+      this.boundDamageHandler = null;
+    }
+
     // Clean up all active splats
     for (const splat of this.activeSplats) {
       this.world.stage.scene.remove(splat.sprite);
@@ -234,5 +251,8 @@ export class DamageSplatSystem extends System {
       // to avoid WebGPU texture cache corruption with dual-renderer setup
     }
     this.activeSplats = [];
+
+    // Call parent destroy to reset initialized flag
+    super.destroy();
   }
 }

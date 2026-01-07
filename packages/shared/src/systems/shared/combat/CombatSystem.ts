@@ -203,6 +203,7 @@ export class CombatSystem extends SystemBase {
     );
 
     // Set up event listeners - required for combat to function
+    // SERVER-ONLY: Combat processing should only happen on server to avoid duplicate damage events
     this.subscribe(
       EventType.COMBAT_ATTACK_REQUEST,
       (data: {
@@ -212,6 +213,7 @@ export class CombatSystem extends SystemBase {
         targetType?: "player" | "mob";
         attackType?: AttackType;
       }) => {
+        if (!this.world.isServer) return; // Combat is server-authoritative
         this.handleAttack({
           attackerId: data.playerId,
           targetId: data.targetId,
@@ -227,12 +229,14 @@ export class CombatSystem extends SystemBase {
       attackerType: "player" | "mob";
       targetType: "player" | "mob";
     }>(EventType.COMBAT_MELEE_ATTACK, (data) => {
+      if (!this.world.isServer) return; // Combat is server-authoritative
       this.handleMeleeAttack(data);
     });
     // MVP: Ranged combat subscription removed - melee only
     this.subscribe(
       EventType.COMBAT_MOB_NPC_ATTACK,
       (data: { mobId: string; targetId: string }) => {
+        if (!this.world.isServer) return; // Combat is server-authoritative
         this.handleMobAttack(data);
       },
     );
@@ -1900,24 +1904,19 @@ export class CombatSystem extends SystemBase {
   }
 
   /**
-   * Emit combat events for visual feedback and UI
+   * Emit combat events for UI feedback
+   * NOTE: COMBAT_MELEE_ATTACK is NOT emitted here to avoid duplicate processing.
+   * Damage splats are handled by COMBAT_DAMAGE_DEALT which is already emitted
+   * by executeAttackDamage() and bridged to clients via EventBridge.
    */
   private emitCombatEvents(
     attackerId: string,
-    targetId: string,
+    _targetId: string,
     target: Entity | MobEntity,
     damage: number,
     combatState: CombatData,
   ): void {
-    // MVP: Emit melee attack event for visual feedback
-    this.emitTypedEvent(EventType.COMBAT_MELEE_ATTACK, {
-      attackerId,
-      targetId,
-      attackerType: combatState.attackerType,
-      targetType: combatState.targetType,
-    });
-
-    // Emit UI message for player attacks
+    // Emit UI message for player attacks (chat feedback)
     if (combatState.attackerType === "player") {
       this.emitTypedEvent(EventType.UI_MESSAGE, {
         playerId: attackerId,

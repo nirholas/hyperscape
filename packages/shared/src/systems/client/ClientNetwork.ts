@@ -1444,6 +1444,28 @@ export class ClientNetwork extends SystemBase {
     this.world.emit(EventType.RESOURCE_RESPAWNED, data);
   };
 
+  /**
+   * Handle fire created packet from server
+   * Creates the fire visual on the client
+   */
+  onFireCreated = (data: {
+    fireId: string;
+    playerId: string;
+    position: { x: number; y: number; z: number };
+  }) => {
+    console.log("[ClientNetwork] 🔥 Fire created packet received:", data);
+    this.world.emit(EventType.FIRE_CREATED, data);
+  };
+
+  /**
+   * Handle fire extinguished packet from server
+   * Removes the fire visual on the client
+   */
+  onFireExtinguished = (data: { fireId: string }) => {
+    console.log("[ClientNetwork] 💨 Fire extinguished packet received:", data);
+    this.world.emit(EventType.FIRE_EXTINGUISHED, data);
+  };
+
   onFishingSpotMoved = (data: {
     resourceId: string;
     oldPosition: { x: number; y: number; z: number };

@@ -989,11 +989,13 @@ function setupAPI(world: World, systems: Systems): void {
 
       startFiremaking: (
         playerId: string,
+        logsId: string,
         logsSlot: number,
         tinderboxSlot: number,
       ) => {
         world.emit(EventType.PROCESSING_FIREMAKING_REQUEST, {
           playerId,
+          logsId,
           logsSlot,
           tinderboxSlot,
         });

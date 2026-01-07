@@ -176,7 +176,8 @@ export const ITEM_IDS = {
   LOGS: 40,
   RAW_FISH: 41,
   COOKED_FISH: 42,
-  ARROWS: 43,
+  BURNT_FISH: 43,
+  ARROWS: 44,
 
   // Currency
   COINS: 100,
@@ -214,6 +215,7 @@ export const ITEM_ID_TO_KEY: Record<number, string> = {
   [ITEM_IDS.LOGS]: "logs",
   [ITEM_IDS.RAW_FISH]: "raw_fish",
   [ITEM_IDS.COOKED_FISH]: "cooked_fish",
+  [ITEM_IDS.BURNT_FISH]: "burnt_fish",
   [ITEM_IDS.ARROWS]: "arrows",
 
   // Currency

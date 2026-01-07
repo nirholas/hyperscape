@@ -20,7 +20,9 @@ export type InteractableEntityType =
   | "bank"
   | "player"
   | "corpse"
-  | "headstone";
+  | "headstone"
+  | "fire"
+  | "range";
 
 /**
  * Result of raycasting to find entity at screen position
@@ -30,8 +32,8 @@ export interface RaycastTarget {
   entityId: string;
   /** Type of entity for handler routing */
   entityType: InteractableEntityType;
-  /** Reference to the entity */
-  entity: Entity;
+  /** Reference to the entity (null for special entities like fires managed by ProcessingSystem) */
+  entity: Entity | null;
   /** Display name */
   name: string;
   /** Entity center position (world coordinates) */

@@ -6,3 +6,5 @@
 export * from "./ItemEntity";
 export * from "./ResourceEntity";
 export * from "./HeadstoneEntity";
+export * from "./FireEntity";
+export * from "./RangeEntity";

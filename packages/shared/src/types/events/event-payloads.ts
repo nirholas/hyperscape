@@ -424,6 +424,73 @@ export interface EventSubscription {
   readonly active: boolean;
 }
 
+// ============================================================================
+// PROCESSING EVENT PAYLOADS (Firemaking & Cooking)
+// ============================================================================
+
+/**
+ * Player emote change payload
+ */
+export interface PlayerSetEmotePayload {
+  playerId: string;
+  emote: string | null;
+}
+
+/**
+ * Fire created payload
+ */
+export interface FireCreatedPayload {
+  fireId: string;
+  playerId: string;
+  position: Position3D;
+}
+
+/**
+ * Fire extinguished payload
+ */
+export interface FireExtinguishedPayload {
+  fireId: string;
+}
+
+/**
+ * Cooking completed payload
+ */
+export interface CookingCompletedPayload {
+  playerId: string;
+  rawItemId: string;
+  resultItemId: string;
+  wasBurnt: boolean;
+  xpGained: number;
+}
+
+/**
+ * Firemaking request payload (item-on-item: tinderbox on logs)
+ */
+export interface ProcessingFiremakingRequestPayload {
+  playerId: string;
+  logsId: string;
+  logsSlot: number;
+  tinderboxSlot: number;
+}
+
+/**
+ * Cooking request payload (use raw food on fire/range)
+ */
+export interface ProcessingCookingRequestPayload {
+  playerId: string;
+  fishSlot: number;
+  fireId: string;
+}
+
+/**
+ * Firemaking move request (player should move after lighting fire)
+ */
+export interface FiremakingMoveRequestPayload {
+  playerId: string;
+  fromPosition: Position3D;
+  toPosition: Position3D;
+}
+
 // =========================================================================
 // TYPE-SAFE EVENT MAPPING
 // =========================================================================
@@ -737,6 +804,15 @@ export interface EventMap {
   [EventType.UI_AUTO_RETALIATE_GET]: AutoRetaliateGetEvent;
   [EventType.UI_AUTO_RETALIATE_UPDATE]: AutoRetaliateUpdateEvent;
   [EventType.UI_AUTO_RETALIATE_CHANGED]: AutoRetaliateChangedEvent;
+
+  // Processing Events (Firemaking & Cooking)
+  [EventType.PLAYER_SET_EMOTE]: PlayerSetEmotePayload;
+  [EventType.FIRE_CREATED]: FireCreatedPayload;
+  [EventType.FIRE_EXTINGUISHED]: FireExtinguishedPayload;
+  [EventType.COOKING_COMPLETED]: CookingCompletedPayload;
+  [EventType.PROCESSING_FIREMAKING_REQUEST]: ProcessingFiremakingRequestPayload;
+  [EventType.PROCESSING_COOKING_REQUEST]: ProcessingCookingRequestPayload;
+  [EventType.FIREMAKING_MOVE_REQUEST]: FiremakingMoveRequestPayload;
 }
 
 /**

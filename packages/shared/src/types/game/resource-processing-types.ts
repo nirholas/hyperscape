@@ -102,12 +102,15 @@ export interface Fire {
 
 /**
  * Processing action - firemaking and cooking actions
+ *
+ * Note: Item IDs are always strings. The manifest uses string IDs
+ * (e.g., "raw_shrimp", "logs") as the source of truth.
  */
 export interface ProcessingAction {
   playerId: string;
   actionType: "firemaking" | "cooking";
-  primaryItem: { id: number; slot: number }; // Item being used (tinderbox/raw fish)
-  targetItem?: { id: number; slot: number }; // Target item (logs/fire)
+  primaryItem: { id: string; slot: number }; // Item being used (tinderbox/raw fish)
+  targetItem?: { id: string; slot: number }; // Target item (logs/fire)
   targetFire?: string; // Fire ID for cooking
   startTime: number;
   duration: number;

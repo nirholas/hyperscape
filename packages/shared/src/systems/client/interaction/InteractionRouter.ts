@@ -38,6 +38,17 @@ import { ResourceInteractionHandler } from "./handlers/ResourceInteractionHandle
 import { BankInteractionHandler } from "./handlers/BankInteractionHandler";
 import { CorpseInteractionHandler } from "./handlers/CorpseInteractionHandler";
 import { PlayerInteractionHandler } from "./handlers/PlayerInteractionHandler";
+import { CookingSourceInteractionHandler } from "./handlers/CookingSourceInteractionHandler";
+
+/**
+ * Targeting mode state for "Use X on Y" interactions
+ */
+interface TargetingModeState {
+  active: boolean;
+  sourceItem: { id: string; slot: number; name?: string } | null;
+  validTargetIds: Set<string>;
+  actionType: "firemaking" | "cooking" | "none";
+}
 
 export class InteractionRouter extends System {
   private canvas: HTMLCanvasElement | null = null;
@@ -57,6 +68,14 @@ export class InteractionRouter extends System {
   private mouseDownClientPos: { x: number; y: number } | null = null;
   private touchStart: { x: number; y: number; time: number } | null = null;
   private longPressTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Targeting mode state (OSRS "Use X on Y")
+  private targetingMode: TargetingModeState = {
+    active: false,
+    sourceItem: null,
+    validTargetIds: new Set(),
+    actionType: "none",
+  };
 
   constructor(world: World) {
     super(world);
@@ -115,6 +134,13 @@ export class InteractionRouter extends System {
       "player",
       new PlayerInteractionHandler(this.world, this.actionQueue),
     );
+    // Cooking sources (fires and ranges)
+    const cookingHandler = new CookingSourceInteractionHandler(
+      this.world,
+      this.actionQueue,
+    );
+    this.handlers.set("fire", cookingHandler);
+    this.handlers.set("range", cookingHandler);
   }
 
   override start(): void {
@@ -151,6 +177,11 @@ export class InteractionRouter extends System {
     // Listen for entity modification events to detect movement completion
     // This is critical for accurate item pickup (range 0 actions)
     this.world.on(EventType.ENTITY_MODIFIED, this.onEntityModified);
+
+    // Listen for targeting mode events (OSRS "Use X on Y")
+    this.world.on(EventType.TARGETING_START, this.onTargetingStart);
+    this.world.on(EventType.TARGETING_COMPLETE, this.onTargetingComplete);
+    this.world.on(EventType.TARGETING_CANCEL, this.onTargetingCancel);
   }
 
   override update(): void {
@@ -174,6 +205,9 @@ export class InteractionRouter extends System {
 
     this.world.off(EventType.CAMERA_TAP, this.onCameraTap);
     this.world.off(EventType.ENTITY_MODIFIED, this.onEntityModified);
+    this.world.off(EventType.TARGETING_START, this.onTargetingStart);
+    this.world.off(EventType.TARGETING_COMPLETE, this.onTargetingComplete);
+    this.world.off(EventType.TARGETING_CANCEL, this.onTargetingCancel);
 
     this.actionQueue.destroy();
     this.visualFeedback.destroy();
@@ -202,6 +236,41 @@ export class InteractionRouter extends System {
       event.clientY,
       this.canvas,
     );
+
+    // OSRS-style targeting mode: handle world entity clicks for cooking
+    if (this.targetingMode.active) {
+      event.preventDefault();
+
+      if (target && this.isValidWorldTarget(target.entityId)) {
+        // Valid target clicked - emit TARGETING_SELECT
+        const player = this.world.getPlayer();
+        if (player && this.targetingMode.sourceItem) {
+          console.log("[InteractionRouter] 🎯 World target clicked:", {
+            entityId: target.entityId,
+            entityType: target.entityType,
+            actionType: this.targetingMode.actionType,
+          });
+
+          this.world.emit(EventType.TARGETING_SELECT, {
+            playerId: player.id,
+            sourceItemId: this.targetingMode.sourceItem.id,
+            sourceSlot: this.targetingMode.sourceItem.slot,
+            targetId: target.entityId,
+            targetType: "world_entity" as const,
+          });
+        }
+      } else {
+        // Clicked empty space or invalid target - cancel targeting mode
+        console.log(
+          "[InteractionRouter] ❌ Invalid target or empty space - cancelling targeting",
+        );
+        const player = this.world.getPlayer();
+        if (player) {
+          this.world.emit(EventType.TARGETING_CANCEL, { playerId: player.id });
+        }
+      }
+      return;
+    }
 
     if (target) {
       // Show red X click indicator
@@ -511,5 +580,91 @@ export class InteractionRouter extends System {
     }
 
     return true;
+  }
+
+  // === Targeting Mode (OSRS "Use X on Y") ===
+
+  /**
+   * Enter targeting mode when player uses an item.
+   */
+  private onTargetingStart = (payload: unknown): void => {
+    const data = payload as {
+      sourceItem: { id: string; slot: number; name?: string };
+      validTargetTypes: string[];
+      validTargetIds: string[];
+      actionType: "firemaking" | "cooking" | "none";
+    };
+
+    console.log("[InteractionRouter] 🎯 Targeting mode started:", {
+      sourceItem: data.sourceItem,
+      validTargetIds: data.validTargetIds.length,
+      actionType: data.actionType,
+    });
+
+    this.targetingMode = {
+      active: true,
+      sourceItem: data.sourceItem,
+      validTargetIds: new Set(data.validTargetIds),
+      actionType: data.actionType,
+    };
+
+    // Change cursor during targeting mode
+    if (this.canvas) {
+      this.canvas.style.cursor = "crosshair";
+    }
+  };
+
+  /**
+   * Exit targeting mode after successful action.
+   */
+  private onTargetingComplete = (): void => {
+    console.log("[InteractionRouter] ✅ Targeting mode completed");
+    this.exitTargetingMode();
+  };
+
+  /**
+   * Exit targeting mode when cancelled.
+   */
+  private onTargetingCancel = (): void => {
+    console.log("[InteractionRouter] ❌ Targeting mode cancelled");
+    this.exitTargetingMode();
+  };
+
+  /**
+   * Reset targeting mode state.
+   */
+  private exitTargetingMode(): void {
+    this.targetingMode = {
+      active: false,
+      sourceItem: null,
+      validTargetIds: new Set(),
+      actionType: "none",
+    };
+
+    // Restore default cursor
+    if (this.canvas) {
+      this.canvas.style.cursor = "";
+    }
+  }
+
+  /**
+   * Check if an entity ID is a valid target in current targeting mode.
+   */
+  private isValidWorldTarget(entityId: string): boolean {
+    if (!this.targetingMode.active) return false;
+
+    // Check if entity ID is in valid targets
+    if (this.targetingMode.validTargetIds.has(entityId)) {
+      return true;
+    }
+
+    // For cooking, check if entity is a fire or range by ID pattern
+    if (this.targetingMode.actionType === "cooking") {
+      if (entityId.startsWith("fire_") || entityId.includes("range")) {
+        return true;
+      }
+    }
+
+    return false;
   }
 }

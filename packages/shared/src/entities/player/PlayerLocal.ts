@@ -930,6 +930,7 @@ export class PlayerLocal extends Entity implements HotReloadable {
             mining: Emotes.CHOPPING, // Use chopping animation for mining (temporary)
             fishing: Emotes.FISHING,
             death: Emotes.DEATH,
+            squat: Emotes.SQUAT, // Used for firemaking and cooking
           };
           const emoteUrl = emoteMap[this.emote] || Emotes.IDLE;
 

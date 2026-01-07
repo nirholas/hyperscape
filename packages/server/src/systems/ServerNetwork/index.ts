@@ -137,6 +137,7 @@ import {
 } from "./handlers/dialogue";
 import { PendingAttackManager } from "./PendingAttackManager";
 import { PendingGatherManager } from "./PendingGatherManager";
+import { PendingCookManager } from "./PendingCookManager";
 import { FollowManager } from "./FollowManager";
 import { FaceDirectionManager } from "./FaceDirectionManager";
 import { handleFollowPlayer } from "./handlers/player";
@@ -206,6 +207,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   private mobTileMovementManager!: MobTileMovementManager;
   private pendingAttackManager!: PendingAttackManager;
   private pendingGatherManager!: PendingGatherManager;
+  private pendingCookManager!: PendingCookManager;
   private followManager!: FollowManager;
   private actionQueue!: ActionQueue;
   private tickSystem!: TickSystem;
@@ -223,6 +225,12 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   private worldTimeSyncAccumulator = 0;
   private readonly WORLD_TIME_SYNC_INTERVAL = 5; // seconds
 
+  // === Phase 5.1: Rate Limiting for Processing Requests ===
+  /** Rate limiter for processing requests (playerId -> lastRequestTime) */
+  private readonly processingRateLimiter = new Map<string, number>();
+  /** Minimum time between processing requests (500ms) */
+  private readonly PROCESSING_COOLDOWN_MS = 500;
+
   constructor(world: World) {
     super(world);
     this.id = 0;
@@ -235,6 +243,30 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.maxUploadSize = 50; // Default 50MB upload limit
 
     // Initialize managers will happen in init() after world.db is set
+  }
+
+  // === Phase 5.1: Rate Limiting Helper ===
+
+  /**
+   * Check if a player can make a processing request (rate limiting).
+   * Prevents spam by requiring PROCESSING_COOLDOWN_MS between requests.
+   *
+   * @param playerId - The player ID to check
+   * @returns true if request is allowed, false if rate limited
+   */
+  private canProcessRequest(playerId: string): boolean {
+    const now = Date.now();
+    const lastRequest = this.processingRateLimiter.get(playerId) ?? 0;
+
+    if (now - lastRequest < this.PROCESSING_COOLDOWN_MS) {
+      console.warn(
+        `[ServerNetwork] Rate limited processing request from ${playerId}`,
+      );
+      return false;
+    }
+
+    this.processingRateLimiter.set(playerId, now);
+    return true;
   }
 
   /**
@@ -360,6 +392,31 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Register pending gather processing (same priority as movement)
     this.tickSystem.onTick((tickNumber) => {
       this.pendingGatherManager.processTick(tickNumber);
+    }, TickPriority.MOVEMENT);
+
+    // Pending cook manager - server-authoritative tracking of "walk to fire and cook" actions
+    // Uses same approach as PendingGatherManager: movePlayerToward with meleeRange=1 for cardinal-only
+    // Phase 4.2: FireRegistry is now injected via constructor (DIP)
+    const processingSystem = this.world.getSystem("processing") as {
+      getActiveFires: () => Map<
+        string,
+        {
+          id: string;
+          position: { x: number; y: number; z: number };
+          isActive: boolean;
+          playerId: string;
+        }
+      >;
+    };
+    this.pendingCookManager = new PendingCookManager(
+      this.world,
+      this.tileMovementManager,
+      processingSystem,
+    );
+
+    // Register pending cook processing (same priority as movement)
+    this.tickSystem.onTick((tickNumber) => {
+      this.pendingCookManager.processTick(tickNumber);
     }, TickPriority.MOVEMENT);
 
     // Follow manager - server-authoritative tracking of players following other players
@@ -587,6 +644,56 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.pendingAttackManager.cancelPendingAttack(playerId);
     });
 
+    // OSRS-accurate: Move player to adjacent tile after lighting fire
+    // Priority: West → East → South → North (handled by ProcessingSystem)
+    // Uses proper tile movement for smooth walking animation (not teleport)
+    this.world.on(EventType.FIREMAKING_MOVE_REQUEST, (event) => {
+      const { playerId, position } = event as {
+        playerId: string;
+        position: { x: number; y: number; z: number };
+      };
+
+      console.log(
+        `[ServerNetwork] 🔥 Firemaking move request for ${playerId} to (${position.x.toFixed(1)}, ${position.z.toFixed(1)})`,
+      );
+
+      // Get player entity
+      const socket = this.broadcastManager.getPlayerSocket(playerId);
+      const player = socket?.player;
+      if (!player) {
+        console.warn(
+          `[ServerNetwork] Cannot find player for firemaking move: ${playerId}`,
+        );
+        return;
+      }
+
+      // OSRS-accurate: Use tile movement system for smooth walking animation
+      // Walking (not running) to adjacent tile, meleeRange=0 means go directly to tile
+      // This sends tileMovementStart packet for smooth client interpolation
+      this.tileMovementManager.movePlayerToward(
+        playerId,
+        position,
+        false, // OSRS firemaking step is a walk, not a run
+        0, // meleeRange=0 = non-combat, go directly to the tile
+      );
+    });
+
+    // Handle player emote changes from ProcessingSystem (firemaking, cooking)
+    this.world.on(EventType.PLAYER_SET_EMOTE, (event) => {
+      const { playerId, emote } = event as {
+        playerId: string;
+        emote: string;
+      };
+
+      // Broadcast emote change to all clients
+      this.broadcastManager.sendToAll("entityModified", {
+        id: playerId,
+        changes: {
+          e: emote,
+        },
+      });
+    });
+
     // Save manager
     this.saveManager = new SaveManager(this.world, this.db);
 
@@ -613,12 +720,13 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.world as { interactionSessionManager?: InteractionSessionManager }
     ).interactionSessionManager = this.interactionSessionManager;
 
-    // Clean up interaction sessions, pending attacks, follows, and gathers when player disconnects
+    // Clean up interaction sessions, pending attacks, follows, gathers, and cooks when player disconnects
     this.world.on(EventType.PLAYER_LEFT, (event: { playerId: string }) => {
       this.interactionSessionManager.onPlayerDisconnect(event.playerId);
       this.pendingAttackManager.onPlayerDisconnect(event.playerId);
       this.followManager.onPlayerDisconnect(event.playerId);
       this.pendingGatherManager.onPlayerDisconnect(event.playerId);
+      this.pendingCookManager.onPlayerDisconnect(event.playerId);
     });
 
     // Initialization manager
@@ -718,6 +826,142 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Legacy: Direct gather (used after server has pathed player)
     this.handlers["onResourceGather"] = (socket, data) =>
       handleResourceGather(socket, data, this.world);
+
+    // SERVER-AUTHORITATIVE: Cooking source interaction - uses PendingCookManager
+    // Same approach as resource gathering: movePlayerToward() with meleeRange=1 for cardinal-only positioning
+    this.handlers["onCookingSourceInteract"] = (socket, data) => {
+      const player = socket.player;
+      if (!player) return;
+
+      const payload = data as {
+        sourceId?: string;
+        sourceType?: string;
+        position?: [number, number, number];
+        runMode?: boolean;
+      };
+      if (!payload.sourceId || !payload.position) return;
+
+      // Use PendingCookManager (like PendingGatherManager for resources)
+      // Pass runMode from client to ensure player runs/walks based on their preference
+      this.pendingCookManager.queuePendingCook(
+        player.id,
+        payload.sourceId,
+        {
+          x: payload.position[0],
+          y: payload.position[1],
+          z: payload.position[2],
+        },
+        this.tickSystem.getCurrentTick(),
+        payload.runMode,
+      );
+    };
+
+    // Firemaking - use tinderbox on logs to create fire
+    this.handlers["onFiremakingRequest"] = (socket, data) => {
+      const player = socket.player;
+      if (!player) return;
+
+      // Phase 5.1: Rate limiting
+      if (!this.canProcessRequest(player.id)) {
+        return;
+      }
+
+      const payload = data as {
+        logsId?: string;
+        logsSlot?: number;
+        tinderboxSlot?: number;
+      };
+
+      if (
+        !payload.logsId ||
+        payload.logsSlot === undefined ||
+        payload.tinderboxSlot === undefined
+      ) {
+        console.log("[ServerNetwork] Invalid firemaking request:", payload);
+        return;
+      }
+
+      // Phase 5.2: Validate inventory slot bounds (OSRS inventory is 28 slots: 0-27)
+      if (
+        payload.logsSlot < 0 ||
+        payload.logsSlot > 27 ||
+        payload.tinderboxSlot < 0 ||
+        payload.tinderboxSlot > 27
+      ) {
+        console.warn(
+          `[ServerNetwork] Invalid slot bounds in firemaking request from ${player.id}`,
+        );
+        return;
+      }
+
+      console.log(
+        "[ServerNetwork] 🔥 Firemaking request from",
+        player.id,
+        ":",
+        payload,
+      );
+
+      // Emit event for ProcessingSystem to handle
+      this.world.emit(EventType.PROCESSING_FIREMAKING_REQUEST, {
+        playerId: player.id,
+        logsId: payload.logsId,
+        logsSlot: payload.logsSlot,
+        tinderboxSlot: payload.tinderboxSlot,
+      });
+    };
+
+    // Cooking - use raw food on fire/range
+    // SERVER-AUTHORITATIVE: Uses PendingCookManager for distance checking (like woodcutting)
+    this.handlers["onCookingRequest"] = (socket, data) => {
+      const player = socket.player;
+      if (!player) return;
+
+      // Phase 5.1: Rate limiting
+      if (!this.canProcessRequest(player.id)) {
+        return;
+      }
+
+      const payload = data as {
+        rawFoodId?: string;
+        rawFoodSlot?: number;
+        fireId?: string;
+      };
+
+      if (
+        !payload.rawFoodId ||
+        payload.rawFoodSlot === undefined ||
+        !payload.fireId
+      ) {
+        console.log("[ServerNetwork] Invalid cooking request:", payload);
+        return;
+      }
+
+      // Phase 5.2: Validate inventory slot bounds (OSRS inventory is 28 slots: 0-27)
+      // Note: -1 is allowed as it means "find first cookable item"
+      if (payload.rawFoodSlot < -1 || payload.rawFoodSlot > 27) {
+        console.warn(
+          `[ServerNetwork] Invalid slot bounds in cooking request from ${player.id}`,
+        );
+        return;
+      }
+
+      console.log(
+        "[ServerNetwork] 🍳 Cooking request from",
+        player.id,
+        "- routing through PendingCookManager for distance check",
+      );
+
+      // Use PendingCookManager for distance checking (like PendingGatherManager for woodcutting)
+      // Fire position will be looked up server-side from ProcessingSystem
+      this.pendingCookManager.queuePendingCook(
+        player.id,
+        payload.fireId,
+        { x: 0, y: 0, z: 0 }, // Position ignored - server looks up from ProcessingSystem
+        this.tickSystem.getCurrentTick(),
+        undefined, // runMode - use server default
+        payload.rawFoodSlot, // Pass specific slot to cook
+      );
+    };
 
     // Route movement and combat through action queue for OSRS-style tick processing
     // Actions are queued and processed on tick boundaries, not immediately

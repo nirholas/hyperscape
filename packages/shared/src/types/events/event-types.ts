@@ -40,6 +40,7 @@ export enum EventType {
   PLAYER_CREATE = "player:create",
   PLAYER_SPAWN_COMPLETE = "player:spawn_complete",
   PLAYER_ANIMATION = "player:animation",
+  PLAYER_SET_EMOTE = "player:set_emote",
 
   // Entity Management
   ENTITY_CREATED = "entity:created",
@@ -369,6 +370,28 @@ export enum EventType {
   // Processing System
   PROCESSING_FIREMAKING_REQUEST = "processing:firemaking:request",
   PROCESSING_COOKING_REQUEST = "processing:cooking:request",
+  PROCESSING_CANCEL = "processing:cancel",
+
+  // Item Targeting System
+  TARGETING_START = "targeting:start",
+  TARGETING_SELECT = "targeting:select",
+  TARGETING_COMPLETE = "targeting:complete",
+  TARGETING_CANCEL = "targeting:cancel",
+
+  // Firemaking Events
+  FIREMAKING_REQUEST = "firemaking:request",
+  FIREMAKING_START = "firemaking:start",
+  FIREMAKING_SUCCESS = "firemaking:success",
+  FIREMAKING_FAILURE = "firemaking:failure",
+  FIREMAKING_MOVE_REQUEST = "firemaking:move:request", // Player should move to adjacent tile after lighting fire
+
+  // Cooking Events
+  COOKING_REQUEST = "cooking:request",
+  COOKING_START = "cooking:start",
+  COOKING_SUCCESS = "cooking:success",
+  COOKING_BURN = "cooking:burn",
+  COOKING_COMPLETE = "cooking:complete",
+  COOKING_INTERACT = "cooking:interact",
 
   // Death System
   DEATH_LOOT_COLLECT = "death:loot:collect",
