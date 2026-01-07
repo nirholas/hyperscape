@@ -1,10 +1,16 @@
 /**
- * Smithing Recipes - OSRS-accurate smithing data
+ * Smithing Types - Type definitions and reference constants
  *
- * Defines what items can be smithed from each bar type at an anvil.
- * Currently limited to: swords, hatchets, pickaxes (bronze through mithril)
+ * This file provides type definitions for the smithing system.
+ * Actual recipe data lives in items.json (smithing property on items).
+ * ProcessingDataProvider builds runtime lookup tables from the manifest.
  *
- * @see https://oldschool.runescape.wiki/w/Smithing
+ * Categories: sword, hatchet, pickaxe (bronze through mithril)
+ * Note: Pickaxes CAN be smithed (intentional deviation from OSRS)
+ *
+ * @see packages/server/world/assets/manifests/items.json for recipe data
+ * @see ProcessingDataProvider for runtime accessors
+ * @see https://oldschool.runescape.wiki/w/Smithing for OSRS reference
  */
 
 /**
@@ -18,27 +24,8 @@ export type SmithingCategory = "sword" | "hatchet" | "pickaxe";
 export type BarTier = "bronze" | "iron" | "steel" | "mithril";
 
 /**
- * A single smithing recipe definition
- */
-export interface SmithingRecipe {
-  /** Output item ID */
-  itemId: string;
-  /** Display name for the item */
-  name: string;
-  /** Bar type required (e.g., "bronze_bar") */
-  barType: string;
-  /** Number of bars needed */
-  barsRequired: number;
-  /** Smithing level required */
-  levelRequired: number;
-  /** XP granted per item made */
-  xp: number;
-  /** Category for UI grouping */
-  category: SmithingCategory;
-}
-
-/**
- * Base smithing levels for each bar tier
+ * Reference: Base smithing levels for each bar tier
+ * Used for documentation and validation.
  */
 export const BAR_TIER_BASE_LEVELS: Record<BarTier, number> = {
   bronze: 1,
@@ -48,7 +35,9 @@ export const BAR_TIER_BASE_LEVELS: Record<BarTier, number> = {
 };
 
 /**
- * Level offsets from base level for each category
+ * Reference: Level offsets from base level for each category
+ * Sword/Pickaxe: +4 from base level
+ * Hatchet: +1 from base level
  */
 export const CATEGORY_LEVEL_OFFSETS: Record<SmithingCategory, number> = {
   hatchet: 1,
@@ -57,7 +46,8 @@ export const CATEGORY_LEVEL_OFFSETS: Record<SmithingCategory, number> = {
 };
 
 /**
- * Bars required for each category
+ * Reference: Bars required for each category
+ * Pickaxes require 2 bars, others require 1
  */
 export const CATEGORY_BARS_REQUIRED: Record<SmithingCategory, number> = {
   sword: 1,
@@ -66,7 +56,7 @@ export const CATEGORY_BARS_REQUIRED: Record<SmithingCategory, number> = {
 };
 
 /**
- * XP per bar by metal tier (OSRS-accurate)
+ * Reference: XP per bar by metal tier (OSRS-accurate)
  *
  * Each metal tier grants different XP per bar used:
  * - Bronze: 12.5 XP/bar
@@ -84,102 +74,20 @@ export const XP_PER_BAR_BY_TIER: Record<BarTier, number> = {
 };
 
 /**
- * Generate a recipe for a specific bar tier and category
+ * All available bar tiers
  */
-function generateRecipe(
-  tier: BarTier,
-  category: SmithingCategory,
-): SmithingRecipe {
-  const baseLevel = BAR_TIER_BASE_LEVELS[tier];
-  const levelOffset = CATEGORY_LEVEL_OFFSETS[category];
-  const barsRequired = CATEGORY_BARS_REQUIRED[category];
-
-  // Build item ID (e.g., "bronze_sword", "steel_pickaxe")
-  const itemId = `${tier}_${category}`;
-
-  // Build display name (e.g., "Bronze Sword", "Steel Pickaxe")
-  const tierName = tier.charAt(0).toUpperCase() + tier.slice(1);
-  const categoryName = category.charAt(0).toUpperCase() + category.slice(1);
-  const name = `${tierName} ${categoryName}`;
-
-  return {
-    itemId,
-    name,
-    barType: `${tier}_bar`,
-    barsRequired,
-    levelRequired: baseLevel + levelOffset,
-    xp: barsRequired * XP_PER_BAR_BY_TIER[tier],
-    category,
-  };
-}
+export const BAR_TIERS: readonly BarTier[] = [
+  "bronze",
+  "iron",
+  "steel",
+  "mithril",
+];
 
 /**
- * Categories available for smithing
+ * All available smithing categories
  */
-const SMITHING_CATEGORIES: SmithingCategory[] = ["sword", "hatchet", "pickaxe"];
-
-/**
- * Bar tiers available for smithing
- */
-const BAR_TIERS: BarTier[] = ["bronze", "iron", "steel", "mithril"];
-
-/**
- * Generate all smithing recipes
- */
-function generateAllRecipes(): SmithingRecipe[] {
-  const recipes: SmithingRecipe[] = [];
-
-  for (const tier of BAR_TIERS) {
-    for (const category of SMITHING_CATEGORIES) {
-      recipes.push(generateRecipe(tier, category));
-    }
-  }
-
-  return recipes;
-}
-
-/**
- * All smithing recipes (generated at module load)
- */
-export const SMITHING_RECIPES: readonly SmithingRecipe[] = generateAllRecipes();
-
-/**
- * Get recipes for a specific bar type
- */
-export function getRecipesForBar(barType: string): SmithingRecipe[] {
-  return SMITHING_RECIPES.filter((recipe) => recipe.barType === barType);
-}
-
-/**
- * Get a specific recipe by item ID
- */
-export function getRecipeByItemId(itemId: string): SmithingRecipe | undefined {
-  return SMITHING_RECIPES.find((recipe) => recipe.itemId === itemId);
-}
-
-/**
- * Get all recipes the player can make with their smithing level
- */
-export function getAvailableRecipes(smithingLevel: number): SmithingRecipe[] {
-  return SMITHING_RECIPES.filter(
-    (recipe) => recipe.levelRequired <= smithingLevel,
-  );
-}
-
-/**
- * Get recipes grouped by category for UI display
- */
-export function getRecipesByCategory(
-  barType: string,
-): Map<SmithingCategory, SmithingRecipe[]> {
-  const recipes = getRecipesForBar(barType);
-  const grouped = new Map<SmithingCategory, SmithingRecipe[]>();
-
-  for (const recipe of recipes) {
-    const existing = grouped.get(recipe.category) || [];
-    existing.push(recipe);
-    grouped.set(recipe.category, existing);
-  }
-
-  return grouped;
-}
+export const SMITHING_CATEGORIES: readonly SmithingCategory[] = [
+  "sword",
+  "hatchet",
+  "pickaxe",
+];

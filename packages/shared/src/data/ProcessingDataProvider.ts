@@ -15,12 +15,28 @@
 
 import { ITEMS } from "./items";
 import type { Item } from "../types/game/item-types";
-import {
-  SMITHING_RECIPES,
-  getRecipesForBar,
-  getRecipeByItemId,
-  type SmithingRecipe,
-} from "./smithing-recipes";
+import type { SmithingCategory } from "./smithing-recipes";
+
+/**
+ * Smithing recipe data extracted from item manifest
+ * Note: This replaces the hardcoded SMITHING_RECIPES from smithing-recipes.ts
+ */
+export interface SmithingRecipeData {
+  /** Output item ID */
+  itemId: string;
+  /** Display name for the item */
+  name: string;
+  /** Bar type required (e.g., "bronze_bar") */
+  barType: string;
+  /** Number of bars needed */
+  barsRequired: number;
+  /** Smithing level required */
+  levelRequired: number;
+  /** XP granted per item made */
+  xp: number;
+  /** Category for UI grouping */
+  category: SmithingCategory;
+}
 
 /**
  * Cooking data extracted from item manifest
@@ -79,6 +95,11 @@ export class ProcessingDataProvider {
   private smeltingDataMap = new Map<string, SmeltingItemData>();
   private smeltableBarIds = new Set<string>();
 
+  // Smithing lookup tables (built from manifest)
+  private smithingRecipeMap = new Map<string, SmithingRecipeData>();
+  private smithableItemIds = new Set<string>();
+  private smithingRecipesByBar = new Map<string, SmithingRecipeData[]>();
+
   private constructor() {
     // Singleton
   }
@@ -102,10 +123,11 @@ export class ProcessingDataProvider {
     this.buildCookingData();
     this.buildFiremakingData();
     this.buildSmeltingData();
+    this.buildSmithingData();
     this.isInitialized = true;
 
     console.log(
-      `[ProcessingDataProvider] Initialized: ${this.cookableItemIds.size} cookable items, ${this.burneableLogIds.size} burnable logs, ${this.smeltableBarIds.size} smeltable bars`,
+      `[ProcessingDataProvider] Initialized: ${this.cookableItemIds.size} cookable items, ${this.burneableLogIds.size} burnable logs, ${this.smeltableBarIds.size} smeltable bars, ${this.smithableItemIds.size} smithable items`,
     );
   }
 
@@ -119,6 +141,9 @@ export class ProcessingDataProvider {
     this.burneableLogIds.clear();
     this.smeltingDataMap.clear();
     this.smeltableBarIds.clear();
+    this.smithingRecipeMap.clear();
+    this.smithableItemIds.clear();
+    this.smithingRecipesByBar.clear();
     this.isInitialized = false;
     this.initialize();
   }
@@ -180,6 +205,35 @@ export class ProcessingDataProvider {
         };
         this.smeltingDataMap.set(itemId, smeltingData);
         this.smeltableBarIds.add(itemId);
+      }
+    }
+  }
+
+  /**
+   * Scan ITEMS for items with `smithing` property (output items define their recipes)
+   */
+  private buildSmithingData(): void {
+    for (const [itemId, item] of ITEMS) {
+      if (item.smithing) {
+        const recipeData: SmithingRecipeData = {
+          itemId,
+          name: item.name,
+          barType: item.smithing.barType,
+          barsRequired: item.smithing.barsRequired,
+          levelRequired: item.smithing.levelRequired,
+          xp: item.smithing.xp,
+          category: item.smithing.category as SmithingCategory,
+        };
+
+        // Add to main map (keyed by output item ID)
+        this.smithingRecipeMap.set(itemId, recipeData);
+        this.smithableItemIds.add(itemId);
+
+        // Add to bar-grouped map for UI lookups
+        const barRecipes =
+          this.smithingRecipesByBar.get(item.smithing.barType) || [];
+        barRecipes.push(recipeData);
+        this.smithingRecipesByBar.set(item.smithing.barType, barRecipes);
       }
     }
   }
@@ -397,28 +451,144 @@ export class ProcessingDataProvider {
   }
 
   // ==========================================================================
-  // SMITHING ACCESSORS (recipes from smithing-recipes.ts)
+  // SMITHING ACCESSORS (built from manifest)
   // ==========================================================================
+
+  /**
+   * Check if an item is smithable (can be made at an anvil)
+   */
+  public isSmithableItem(itemId: string): boolean {
+    this.ensureInitialized();
+    return this.smithableItemIds.has(itemId);
+  }
+
+  /**
+   * Get smithing recipe data for an output item
+   */
+  public getSmithingRecipe(itemId: string): SmithingRecipeData | null {
+    this.ensureInitialized();
+    return this.smithingRecipeMap.get(itemId) || null;
+  }
+
+  /**
+   * Get all smithable item IDs
+   */
+  public getSmithableItemIds(): Set<string> {
+    this.ensureInitialized();
+    return this.smithableItemIds;
+  }
 
   /**
    * Get smithing recipes for a specific bar type
    */
-  public getSmithingRecipesForBar(barType: string): SmithingRecipe[] {
-    return getRecipesForBar(barType);
+  public getSmithingRecipesForBar(barType: string): SmithingRecipeData[] {
+    this.ensureInitialized();
+    return this.smithingRecipesByBar.get(barType) || [];
   }
 
   /**
    * Get a specific smithing recipe by output item ID
+   * @deprecated Use getSmithingRecipe instead
    */
-  public getSmithingRecipeByItemId(itemId: string): SmithingRecipe | undefined {
-    return getRecipeByItemId(itemId);
+  public getSmithingRecipeByItemId(
+    itemId: string,
+  ): SmithingRecipeData | undefined {
+    this.ensureInitialized();
+    return this.smithingRecipeMap.get(itemId);
   }
 
   /**
    * Get all smithing recipes
    */
-  public getAllSmithingRecipes(): readonly SmithingRecipe[] {
-    return SMITHING_RECIPES;
+  public getAllSmithingRecipes(): SmithingRecipeData[] {
+    this.ensureInitialized();
+    return Array.from(this.smithingRecipeMap.values());
+  }
+
+  /**
+   * Get smithing level requirement for an item
+   */
+  public getSmithingLevel(itemId: string): number {
+    const recipe = this.getSmithingRecipe(itemId);
+    return recipe?.levelRequired ?? 1;
+  }
+
+  /**
+   * Get smithing XP for an item
+   */
+  public getSmithingXP(itemId: string): number {
+    const recipe = this.getSmithingRecipe(itemId);
+    return recipe?.xp ?? 0;
+  }
+
+  /**
+   * Get all recipes the player can make with their smithing level
+   */
+  public getAvailableSmithingRecipes(
+    smithingLevel: number,
+  ): SmithingRecipeData[] {
+    this.ensureInitialized();
+    return Array.from(this.smithingRecipeMap.values()).filter(
+      (recipe) => recipe.levelRequired <= smithingLevel,
+    );
+  }
+
+  /**
+   * Get recipes grouped by category for a specific bar type (for UI display)
+   */
+  public getSmithingRecipesByCategory(
+    barType: string,
+  ): Map<SmithingCategory, SmithingRecipeData[]> {
+    const recipes = this.getSmithingRecipesForBar(barType);
+    const grouped = new Map<SmithingCategory, SmithingRecipeData[]>();
+
+    for (const recipe of recipes) {
+      const existing = grouped.get(recipe.category) || [];
+      existing.push(recipe);
+      grouped.set(recipe.category, existing);
+    }
+
+    return grouped;
+  }
+
+  /**
+   * Get all items that can be smithed from the given inventory items.
+   * Returns recipes where player has required bars.
+   *
+   * @param inventory - Array of items with itemId and quantity
+   * @param smithingLevel - Player's smithing level
+   */
+  public getSmithableItemsFromInventory(
+    inventory: Array<{ itemId: string; quantity?: number }>,
+    smithingLevel: number,
+  ): SmithingRecipeData[] {
+    this.ensureInitialized();
+
+    // Build inventory counts
+    const itemCounts = new Map<string, number>();
+    for (const item of inventory) {
+      const current = itemCounts.get(item.itemId) || 0;
+      itemCounts.set(item.itemId, current + (item.quantity || 1));
+    }
+
+    const result: SmithingRecipeData[] = [];
+
+    for (const recipe of this.smithingRecipeMap.values()) {
+      // Check level requirement
+      if (recipe.levelRequired > smithingLevel) {
+        continue;
+      }
+
+      // Check bar requirement
+      const barCount = itemCounts.get(recipe.barType) || 0;
+      if (barCount < recipe.barsRequired) {
+        continue;
+      }
+
+      result.push(recipe);
+    }
+
+    return result;
   }
 
   // ==========================================================================
@@ -452,11 +622,12 @@ export class ProcessingDataProvider {
     smithingRecipes: number;
     isInitialized: boolean;
   } {
+    this.ensureInitialized();
     return {
       cookableItems: this.cookableItemIds.size,
       burnableLogs: this.burneableLogIds.size,
       smeltableBars: this.smeltableBarIds.size,
-      smithingRecipes: SMITHING_RECIPES.length,
+      smithingRecipes: this.smithingRecipeMap.size,
       isInitialized: this.isInitialized,
     };
   }

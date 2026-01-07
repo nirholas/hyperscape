@@ -247,6 +247,25 @@ export interface Item {
     /** Success rate (0.5 = 50% for iron, 1.0 = always for others) */
     successRate: number;
   };
+
+  // === SMITHING DATA (from manifest) ===
+  /**
+   * Smithing properties for items that can be smithed at an anvil.
+   * Present on output items (swords, hatchets, pickaxes, etc.)
+   * Note: Smithing data is on OUTPUT items - they define what bars they need.
+   */
+  smithing?: {
+    /** Bar type required (e.g., "bronze_bar", "iron_bar") */
+    barType: string;
+    /** Number of bars required */
+    barsRequired: number;
+    /** Smithing level required */
+    levelRequired: number;
+    /** XP granted per item smithed */
+    xp: number;
+    /** Category for UI grouping ("sword", "hatchet", "pickaxe") */
+    category: string;
+  };
 }
 
 export interface EquipmentSlot {
