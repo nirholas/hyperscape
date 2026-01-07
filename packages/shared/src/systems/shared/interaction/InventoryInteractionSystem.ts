@@ -1127,6 +1127,17 @@ export class InventoryInteractionSystem extends SystemBase {
       },
     });
 
+    // Ore: Use on furnace to smelt
+    this.registerAction("processing", {
+      id: "use",
+      label: "Use",
+      priority: 1,
+      condition: (item: Item) => processingDataProvider.isSmeltableOre(item.id),
+      callback: (playerId: string, itemId: string, slot: number | null) => {
+        this.startTargetingMode(playerId, itemId, slot ?? 0);
+      },
+    });
+
     // Universal actions
     this.registerAction("universal", {
       id: "examine",

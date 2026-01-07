@@ -123,6 +123,9 @@ const names = [
   'cookingSourceInteract', // Client -> Server: server-authoritative cooking (walk to fire first)
   'fireCreated',       // Server -> Client: fire entity created
   'fireExtinguished',  // Server -> Client: fire entity expired/removed
+  // Smelting/Smithing packets
+  'smeltingSourceInteract', // Client -> Server: player clicked furnace to smelt
+  'smithingSourceInteract', // Client -> Server: player clicked anvil to smith
   // Combat packets
   'attackMob',
   'attackPlayer',  // PvP attack

@@ -143,7 +143,8 @@ export class SmeltingSystem extends SystemBase {
     }
 
     // Emit event with available bars for UI to display
-    this.emitTypedEvent(EventType.SMELTING_INTERACT, {
+    // Use SMELTING_INTERFACE_OPEN (not SMELTING_INTERACT) to avoid infinite recursion
+    this.emitTypedEvent(EventType.SMELTING_INTERFACE_OPEN, {
       playerId,
       furnaceId,
       availableBars: availableBars.map((bar) => ({

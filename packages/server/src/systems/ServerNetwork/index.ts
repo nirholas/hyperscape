@@ -963,6 +963,62 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       );
     };
 
+    // Smelting - player clicked furnace
+    // SERVER-AUTHORITATIVE: Emit SMELTING_INTERACT event for SmeltingSystem to handle
+    this.handlers["onSmeltingSourceInteract"] = (socket, data) => {
+      const player = socket.player;
+      if (!player) return;
+
+      const payload = data as {
+        furnaceId?: string;
+        position?: [number, number, number];
+      };
+      if (!payload.furnaceId || !payload.position) return;
+
+      console.log(
+        `[ServerNetwork] 🔥 Smelting source interact from ${player.id} at furnace ${payload.furnaceId}`,
+      );
+
+      // Emit event for SmeltingSystem to handle
+      this.world.emit(EventType.SMELTING_INTERACT, {
+        playerId: player.id,
+        furnaceId: payload.furnaceId,
+        position: {
+          x: payload.position[0],
+          y: payload.position[1],
+          z: payload.position[2],
+        },
+      });
+    };
+
+    // Smithing - player clicked anvil
+    // SERVER-AUTHORITATIVE: Emit SMITHING_INTERACT event for SmithingSystem to handle
+    this.handlers["onSmithingSourceInteract"] = (socket, data) => {
+      const player = socket.player;
+      if (!player) return;
+
+      const payload = data as {
+        anvilId?: string;
+        position?: [number, number, number];
+      };
+      if (!payload.anvilId || !payload.position) return;
+
+      console.log(
+        `[ServerNetwork] 🔨 Smithing source interact from ${player.id} at anvil ${payload.anvilId}`,
+      );
+
+      // Emit event for SmithingSystem to handle
+      this.world.emit(EventType.SMITHING_INTERACT, {
+        playerId: player.id,
+        anvilId: payload.anvilId,
+        position: {
+          x: payload.position[0],
+          y: payload.position[1],
+          z: payload.position[2],
+        },
+      });
+    };
+
     // Route movement and combat through action queue for OSRS-style tick processing
     // Actions are queued and processed on tick boundaries, not immediately
     this.handlers["onMoveRequest"] = (socket, data) => {

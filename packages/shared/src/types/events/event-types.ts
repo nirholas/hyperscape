@@ -395,6 +395,7 @@ export enum EventType {
 
   // Smelting Events (furnace: ore → bars)
   SMELTING_INTERACT = "smelting:interact",
+  SMELTING_INTERFACE_OPEN = "smelting:interface:open", // UI: show available bars to smelt
   SMELTING_REQUEST = "smelting:request",
   SMELTING_START = "smelting:start",
   SMELTING_SUCCESS = "smelting:success",
@@ -404,6 +405,7 @@ export enum EventType {
 
   // Smithing Events (anvil: bars → items)
   SMITHING_INTERACT = "smithing:interact",
+  SMITHING_INTERFACE_OPEN = "smithing:interface:open", // UI: show available items to smith
   SMITHING_REQUEST = "smithing:request",
   SMITHING_START = "smithing:start",
   SMITHING_COMPLETE = "smithing:complete",

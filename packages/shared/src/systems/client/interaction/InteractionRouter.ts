@@ -49,7 +49,7 @@ interface TargetingModeState {
   active: boolean;
   sourceItem: { id: string; slot: number; name?: string } | null;
   validTargetIds: Set<string>;
-  actionType: "firemaking" | "cooking" | "none";
+  actionType: "firemaking" | "cooking" | "smelting" | "none";
 }
 
 export class InteractionRouter extends System {
@@ -606,7 +606,7 @@ export class InteractionRouter extends System {
       sourceItem: { id: string; slot: number; name?: string };
       validTargetTypes: string[];
       validTargetIds: string[];
-      actionType: "firemaking" | "cooking" | "none";
+      actionType: "firemaking" | "cooking" | "smelting" | "none";
     };
 
     console.log("[InteractionRouter] 🎯 Targeting mode started:", {
@@ -675,6 +675,13 @@ export class InteractionRouter extends System {
     // For cooking, check if entity is a fire or range by ID pattern
     if (this.targetingMode.actionType === "cooking") {
       if (entityId.startsWith("fire_") || entityId.includes("range")) {
+        return true;
+      }
+    }
+
+    // For smelting, check if entity is a furnace by ID pattern
+    if (this.targetingMode.actionType === "smelting") {
+      if (entityId.startsWith("furnace_") || entityId.includes("furnace")) {
         return true;
       }
     }

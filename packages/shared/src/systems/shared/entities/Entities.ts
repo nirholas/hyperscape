@@ -76,6 +76,14 @@ import { ItemEntity } from "../../../entities/world/ItemEntity";
 import { ResourceEntity } from "../../../entities/world/ResourceEntity";
 import { HeadstoneEntity } from "../../../entities/world/HeadstoneEntity";
 import { BankEntity } from "../../../entities/world/BankEntity";
+import {
+  FurnaceEntity,
+  type FurnaceEntityConfig,
+} from "../../../entities/world/FurnaceEntity";
+import {
+  AnvilEntity,
+  type AnvilEntityConfig,
+} from "../../../entities/world/AnvilEntity";
 import type {
   MobEntityConfig,
   NPCEntityConfig,
@@ -807,6 +815,66 @@ export class Entities extends SystemBase implements IEntities {
       };
 
       const entity = new BankEntity(this.world, bankConfig);
+      this.items.set(entity.id, entity);
+
+      // Initialize entity if it has an init method
+      if (entity.init) {
+        (entity.init() as Promise<void>)?.catch((err) =>
+          this.logger.error(`Entity ${entity.id} async init failed`, err),
+        );
+      }
+
+      return entity;
+    } else if (data.type === "furnace") {
+      // Build FurnaceEntity from network data
+      const positionArray = (data.position || [0, 40, 15]) as [
+        number,
+        number,
+        number,
+      ];
+      const name = data.name || "Furnace";
+
+      const furnaceConfig: FurnaceEntityConfig = {
+        id: data.id,
+        name: name,
+        position: {
+          x: positionArray[0],
+          y: positionArray[1],
+          z: positionArray[2],
+        },
+      };
+
+      const entity = new FurnaceEntity(this.world, furnaceConfig);
+      this.items.set(entity.id, entity);
+
+      // Initialize entity if it has an init method
+      if (entity.init) {
+        (entity.init() as Promise<void>)?.catch((err) =>
+          this.logger.error(`Entity ${entity.id} async init failed`, err),
+        );
+      }
+
+      return entity;
+    } else if (data.type === "anvil") {
+      // Build AnvilEntity from network data
+      const positionArray = (data.position || [0, 40, 15]) as [
+        number,
+        number,
+        number,
+      ];
+      const name = data.name || "Anvil";
+
+      const anvilConfig: AnvilEntityConfig = {
+        id: data.id,
+        name: name,
+        position: {
+          x: positionArray[0],
+          y: positionArray[1],
+          z: positionArray[2],
+        },
+      };
+
+      const entity = new AnvilEntity(this.world, anvilConfig);
       this.items.set(entity.id, entity);
 
       // Initialize entity if it has an init method

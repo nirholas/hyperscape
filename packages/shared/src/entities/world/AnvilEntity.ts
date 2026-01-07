@@ -101,68 +101,33 @@ export class AnvilEntity extends InteractableEntity {
       return;
     }
 
-    // Create anvil visual (classic iron anvil shape)
-    const group = new THREE.Group();
-    group.name = `Anvil_${this.id}`;
-
-    // Base (wider bottom)
-    const baseGeometry = new THREE.BoxGeometry(0.8, 0.2, 0.5);
-    const anvilMaterial = new THREE.MeshStandardMaterial({
-      color: 0x3a3a3a, // Dark iron gray
-      roughness: 0.6,
-      metalness: 0.8,
+    // Create anvil visual (blue box proxy, slightly smaller than furnace)
+    const geometry = new THREE.BoxGeometry(1.0, 0.8, 0.6);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x0066ff, // Blue for anvil (same as furnace)
+      roughness: 0.5,
+      metalness: 0.3,
     });
-    const baseMesh = new THREE.Mesh(baseGeometry, anvilMaterial);
-    baseMesh.name = "AnvilBase";
-    baseMesh.position.y = 0.1;
-    baseMesh.castShadow = true;
-    baseMesh.receiveShadow = true;
-    group.add(baseMesh);
-
-    // Middle column
-    const columnGeometry = new THREE.BoxGeometry(0.5, 0.3, 0.35);
-    const columnMesh = new THREE.Mesh(columnGeometry, anvilMaterial);
-    columnMesh.name = "AnvilColumn";
-    columnMesh.position.y = 0.35;
-    columnMesh.castShadow = true;
-    group.add(columnMesh);
-
-    // Main working surface (top)
-    const topGeometry = new THREE.BoxGeometry(1.0, 0.15, 0.45);
-    const topMesh = new THREE.Mesh(topGeometry, anvilMaterial);
-    topMesh.name = "AnvilTop";
-    topMesh.position.y = 0.575;
-    topMesh.castShadow = true;
-    group.add(topMesh);
-
-    // Horn (tapered end) - simplified as smaller box
-    const hornGeometry = new THREE.BoxGeometry(0.25, 0.1, 0.2);
-    const hornMesh = new THREE.Mesh(hornGeometry, anvilMaterial);
-    hornMesh.name = "AnvilHorn";
-    hornMesh.position.set(0.55, 0.55, 0);
-    hornMesh.castShadow = true;
-    group.add(hornMesh);
-
-    // Store mesh
-    this.mesh = group;
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = `Anvil_${this.id}`;
+    mesh.position.y = 0.4; // Raise so bottom is at ground level
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
 
     // Set up userData for interaction detection
-    group.userData = {
+    mesh.userData = {
       type: "anvil",
       entityId: this.id,
       name: this.displayName,
       interactable: true,
     };
 
-    // Also set on child meshes for raycast detection
-    baseMesh.userData = { ...group.userData };
-    columnMesh.userData = { ...group.userData };
-    topMesh.userData = { ...group.userData };
-    hornMesh.userData = { ...group.userData };
+    // Store mesh
+    this.mesh = mesh;
 
     // Add to node
     if (this.node) {
-      this.node.add(group);
+      this.node.add(mesh);
       this.node.userData.type = "anvil";
       this.node.userData.entityId = this.id;
       this.node.userData.interactable = true;

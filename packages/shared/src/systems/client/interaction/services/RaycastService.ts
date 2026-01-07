@@ -449,6 +449,14 @@ export class RaycastService {
         return "corpse";
       case "headstone":
         return "headstone";
+      case "fire":
+        return "fire";
+      case "range":
+        return "range";
+      case "furnace":
+        return "furnace";
+      case "anvil":
+        return "anvil";
       default:
         // Default to npc for unknown interactive entities
         return "npc";

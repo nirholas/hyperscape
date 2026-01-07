@@ -395,6 +395,48 @@ export class ProcessingDataProvider {
   }
 
   /**
+   * Check if an item is an ore that can be used for smelting.
+   * Returns true for primary ores (copper, tin, iron, mithril) and coal.
+   */
+  public isSmeltableOre(itemId: string): boolean {
+    this.ensureInitialized();
+
+    // Check if this ore is used in any smelting recipe
+    for (const smeltingData of this.smeltingDataMap.values()) {
+      if (smeltingData.primaryOre === itemId) {
+        return true;
+      }
+      if (smeltingData.secondaryOre === itemId) {
+        return true;
+      }
+      // Coal is always smeltable if any recipe uses it
+      if (smeltingData.coalRequired > 0 && itemId === "coal") {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Get all ore IDs that can be used for smelting.
+   */
+  public getSmeltableOreIds(): Set<string> {
+    this.ensureInitialized();
+    const oreIds = new Set<string>();
+
+    for (const smeltingData of this.smeltingDataMap.values()) {
+      oreIds.add(smeltingData.primaryOre);
+      if (smeltingData.secondaryOre) {
+        oreIds.add(smeltingData.secondaryOre);
+      }
+      if (smeltingData.coalRequired > 0) {
+        oreIds.add("coal");
+      }
+    }
+    return oreIds;
+  }
+
+  /**
    * Get all bars that can be smelted from the given inventory items.
    * Returns bars where player has all required ores and coal.
    *

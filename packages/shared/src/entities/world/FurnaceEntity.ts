@@ -97,80 +97,33 @@ export class FurnaceEntity extends InteractableEntity {
       return;
     }
 
-    // Create furnace visual (stone/brick furnace with glow)
-    const group = new THREE.Group();
-    group.name = `Furnace_${this.id}`;
-
-    // Main body (stone/brick)
-    const bodyGeometry = new THREE.BoxGeometry(1.2, 1.4, 1.2);
-    const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: 0x5c5c5c, // Gray stone
-      roughness: 0.9,
-      metalness: 0.1,
+    // Create furnace visual (blue box proxy)
+    const geometry = new THREE.BoxGeometry(1.2, 1.4, 1.2);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x0066ff, // Blue for furnace
+      roughness: 0.5,
+      metalness: 0.3,
     });
-    const bodyMesh = new THREE.Mesh(bodyGeometry, bodyMaterial);
-    bodyMesh.name = "FurnaceBody";
-    bodyMesh.position.y = 0.7;
-    bodyMesh.castShadow = true;
-    bodyMesh.receiveShadow = true;
-    group.add(bodyMesh);
-
-    // Opening (dark cavity)
-    const openingGeometry = new THREE.BoxGeometry(0.5, 0.5, 0.3);
-    const openingMaterial = new THREE.MeshStandardMaterial({
-      color: 0x1a1a1a, // Dark opening
-      roughness: 1.0,
-      metalness: 0.0,
-    });
-    const openingMesh = new THREE.Mesh(openingGeometry, openingMaterial);
-    openingMesh.name = "FurnaceOpening";
-    openingMesh.position.set(0, 0.5, 0.5);
-    group.add(openingMesh);
-
-    // Fire glow inside opening
-    const glowGeometry = new THREE.BoxGeometry(0.4, 0.4, 0.1);
-    const glowMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff4400,
-      transparent: true,
-      opacity: 0.6,
-    });
-    const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
-    glowMesh.name = "FurnaceGlow";
-    glowMesh.position.set(0, 0.5, 0.45);
-    group.add(glowMesh);
-
-    // Chimney
-    const chimneyGeometry = new THREE.BoxGeometry(0.4, 0.5, 0.4);
-    const chimneyMaterial = new THREE.MeshStandardMaterial({
-      color: 0x4a4a4a, // Darker stone
-      roughness: 0.9,
-      metalness: 0.1,
-    });
-    const chimneyMesh = new THREE.Mesh(chimneyGeometry, chimneyMaterial);
-    chimneyMesh.name = "FurnaceChimney";
-    chimneyMesh.position.set(0, 1.65, 0);
-    chimneyMesh.castShadow = true;
-    group.add(chimneyMesh);
-
-    // Store mesh
-    this.mesh = group;
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = `Furnace_${this.id}`;
+    mesh.position.y = 0.7; // Raise so bottom is at ground level
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
 
     // Set up userData for interaction detection
-    group.userData = {
+    mesh.userData = {
       type: "furnace",
       entityId: this.id,
       name: this.displayName,
       interactable: true,
     };
 
-    // Also set on child meshes for raycast detection
-    bodyMesh.userData = { ...group.userData };
-    openingMesh.userData = { ...group.userData };
-    chimneyMesh.userData = { ...group.userData };
+    // Store mesh
+    this.mesh = mesh;
 
     // Add to node
     if (this.node) {
-      this.node.add(group);
+      this.node.add(mesh);
       this.node.userData.type = "furnace";
       this.node.userData.entityId = this.id;
       this.node.userData.interactable = true;

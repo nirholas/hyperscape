@@ -157,7 +157,8 @@ export class SmithingSystem extends SystemBase {
     }
 
     // Emit event with available recipes for UI to display
-    this.emitTypedEvent(EventType.SMITHING_INTERACT, {
+    // Use SMITHING_INTERFACE_OPEN (not SMITHING_INTERACT) to avoid infinite recursion
+    this.emitTypedEvent(EventType.SMITHING_INTERFACE_OPEN, {
       playerId,
       anvilId,
       availableRecipes: availableRecipes.map((recipe) => ({
