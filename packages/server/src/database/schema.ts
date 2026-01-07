@@ -198,6 +198,7 @@ export const characters = pgTable(
     fishingLevel: integer("fishingLevel").default(1),
     firemakingLevel: integer("firemakingLevel").default(1),
     cookingLevel: integer("cookingLevel").default(1),
+    smithingLevel: integer("smithingLevel").default(1),
 
     // Experience points
     attackXp: integer("attackXp").default(0),
@@ -210,6 +211,7 @@ export const characters = pgTable(
     fishingXp: integer("fishingXp").default(0),
     firemakingXp: integer("firemakingXp").default(0),
     cookingXp: integer("cookingXp").default(0),
+    smithingXp: integer("smithingXp").default(0),
 
     // Status
     health: integer("health").default(100),

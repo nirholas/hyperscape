@@ -181,6 +181,7 @@ export class PlayerMigration {
           xp: old.firemakingXp || 0,
         },
         cooking: { level: old.cookingLevel || 1, xp: old.cookingXp || 0 },
+        smithing: { level: old.smithingLevel || 1, xp: old.smithingXp || 0 },
       },
       equipment: {
         weapon: null,
@@ -284,6 +285,7 @@ export class PlayerMigration {
       fishing: defaultSkill,
       firemaking: defaultSkill,
       cooking: defaultSkill,
+      smithing: defaultSkill,
     };
   }
 

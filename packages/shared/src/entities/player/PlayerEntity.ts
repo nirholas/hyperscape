@@ -120,6 +120,7 @@ export class PlayerEntity extends CombatantEntity {
         fishing: { level: 1, xp: 0 },
         firemaking: { level: 1, xp: 0 },
         cooking: { level: 1, xp: 0 },
+        smithing: { level: 1, xp: 0 },
       };
     }
 
@@ -199,6 +200,7 @@ export class PlayerEntity extends CombatantEntity {
           fishing: playerData.skills.fishing,
           firemaking: playerData.skills.firemaking,
           cooking: playerData.skills.cooking,
+          smithing: playerData.skills.smithing || { level: 1, xp: 0 },
           // Placeholder for complex fields - will be initialized by systems
           activePrayers: {} as PrayerComponent,
           equipment: {} as EquipmentComponent,
@@ -359,6 +361,7 @@ export class PlayerEntity extends CombatantEntity {
         fishing: defaultSkill,
         firemaking: defaultSkill,
         cooking: defaultSkill,
+        smithing: defaultSkill,
       },
 
       // Equipment - initially empty
@@ -505,6 +508,7 @@ export class PlayerEntity extends CombatantEntity {
       fishing: playerData.skills.fishing,
       firemaking: playerData.skills.firemaking,
       cooking: playerData.skills.cooking,
+      smithing: playerData.skills.smithing || { level: 1, xp: 0 },
       // Additional stats from StatsComponent interface
       combatLevel: 3, // Will be calculated by skills system
       totalLevel: 9, // Sum of all skill levels

@@ -51,9 +51,11 @@ const Skill = {
   RANGE: "ranged" as keyof Skills,
   CONSTITUTION: "constitution" as keyof Skills,
   WOODCUTTING: "woodcutting" as keyof Skills,
+  MINING: "mining" as keyof Skills,
   FISHING: "fishing" as keyof Skills,
   FIREMAKING: "firemaking" as keyof Skills,
   COOKING: "cooking" as keyof Skills,
+  SMITHING: "smithing" as keyof Skills,
 };
 
 import type {
@@ -348,9 +350,11 @@ export class SkillsSystem extends SystemBase {
       Skill.RANGE,
       Skill.CONSTITUTION,
       Skill.WOODCUTTING,
+      Skill.MINING,
       Skill.FISHING,
       Skill.FIREMAKING,
       Skill.COOKING,
+      Skill.SMITHING,
     ];
 
     for (const skill of skills) {
@@ -374,9 +378,11 @@ export class SkillsSystem extends SystemBase {
       Skill.RANGE,
       Skill.CONSTITUTION,
       Skill.WOODCUTTING,
+      Skill.MINING,
       Skill.FISHING,
       Skill.FIREMAKING,
       Skill.COOKING,
+      Skill.SMITHING,
     ];
 
     for (const skill of skills) {
@@ -513,9 +519,11 @@ export class SkillsSystem extends SystemBase {
       Skill.RANGE,
       Skill.CONSTITUTION,
       Skill.WOODCUTTING,
+      Skill.MINING,
       Skill.FISHING,
       Skill.FIREMAKING,
       Skill.COOKING,
+      Skill.SMITHING,
     ];
 
     for (const skill of skills) {
@@ -823,6 +831,7 @@ export class SkillsSystem extends SystemBase {
       fishing: stats.fishing ?? { level: 1, xp: 0 },
       firemaking: stats.firemaking ?? { level: 1, xp: 0 },
       cooking: stats.cooking ?? { level: 1, xp: 0 },
+      smithing: stats.smithing ?? { level: 1, xp: 0 },
     };
 
     return skills;

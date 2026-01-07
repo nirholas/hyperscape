@@ -1019,6 +1019,56 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       });
     };
 
+    // Processing smelting - player selected bar to smelt from UI
+    this.handlers["onProcessingSmelting"] = (socket, data) => {
+      const player = socket.player;
+      if (!player) return;
+
+      const payload = data as {
+        barItemId?: string;
+        furnaceId?: string;
+        quantity?: number;
+      };
+      if (!payload.barItemId || !payload.furnaceId) return;
+
+      console.log(
+        `[ServerNetwork] 🔥 Smelting request from ${player.id}: ${payload.quantity}x ${payload.barItemId}`,
+      );
+
+      // Emit event for SmeltingSystem to handle
+      this.world.emit(EventType.PROCESSING_SMELTING_REQUEST, {
+        playerId: player.id,
+        barItemId: payload.barItemId,
+        furnaceId: payload.furnaceId,
+        quantity: payload.quantity || 1,
+      });
+    };
+
+    // Processing smithing - player selected item to smith from UI
+    this.handlers["onProcessingSmithing"] = (socket, data) => {
+      const player = socket.player;
+      if (!player) return;
+
+      const payload = data as {
+        recipeId?: string;
+        anvilId?: string;
+        quantity?: number;
+      };
+      if (!payload.recipeId || !payload.anvilId) return;
+
+      console.log(
+        `[ServerNetwork] 🔨 Smithing request from ${player.id}: ${payload.quantity}x ${payload.recipeId}`,
+      );
+
+      // Emit event for SmithingSystem to handle
+      this.world.emit(EventType.PROCESSING_SMITHING_REQUEST, {
+        playerId: player.id,
+        recipeId: payload.recipeId,
+        anvilId: payload.anvilId,
+        quantity: payload.quantity || 1,
+      });
+    };
+
     // Route movement and combat through action queue for OSRS-style tick processing
     // Actions are queued and processed on tick boundaries, not immediately
     this.handlers["onMoveRequest"] = (socket, data) => {

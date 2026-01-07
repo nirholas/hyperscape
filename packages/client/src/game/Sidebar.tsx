@@ -24,6 +24,8 @@ import { LootWindow } from "./panels/LootWindow";
 import { BankPanel } from "./panels/BankPanel";
 import { StorePanel } from "./panels/StorePanel";
 import { DialoguePanel } from "./panels/DialoguePanel";
+import { SmeltingPanel } from "./panels/SmeltingPanel";
+import { SmithingPanel } from "./panels/SmithingPanel";
 
 type InventorySlotViewItem = Pick<
   InventorySlotItem,
@@ -106,6 +108,34 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
     text: string;
     responses: Array<{ text: string; nextNodeId: string; effect?: string }>;
     npcEntityId?: string;
+  } | null>(null);
+
+  // Smelting panel state
+  const [smeltingData, setSmeltingData] = useState<{
+    visible: boolean;
+    furnaceId: string;
+    availableBars: Array<{
+      barItemId: string;
+      levelRequired: number;
+      primaryOre: string;
+      secondaryOre: string | null;
+      coalRequired: number;
+    }>;
+  } | null>(null);
+
+  // Smithing panel state
+  const [smithingData, setSmithingData] = useState<{
+    visible: boolean;
+    anvilId: string;
+    availableRecipes: Array<{
+      itemId: string;
+      name: string;
+      barType: string;
+      barsRequired: number;
+      levelRequired: number;
+      xp: number;
+      category: string;
+    }>;
   } | null>(null);
 
   // Update chat context whenever windows open/close
@@ -314,6 +344,54 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
       // Handle dialogue end
       if (update.component === "dialogueEnd") {
         setDialogueData(null);
+      }
+      // Handle smelting interface updates
+      if (update.component === "smelting") {
+        const data = update.data as {
+          isOpen: boolean;
+          furnaceId?: string;
+          availableBars?: Array<{
+            barItemId: string;
+            levelRequired: number;
+            primaryOre: string;
+            secondaryOre: string | null;
+            coalRequired: number;
+          }>;
+        };
+        if (data.isOpen && data.furnaceId && data.availableBars) {
+          setSmeltingData({
+            visible: true,
+            furnaceId: data.furnaceId,
+            availableBars: data.availableBars,
+          });
+        } else {
+          setSmeltingData(null);
+        }
+      }
+      // Handle smithing interface updates
+      if (update.component === "smithing") {
+        const data = update.data as {
+          isOpen: boolean;
+          anvilId?: string;
+          availableRecipes?: Array<{
+            itemId: string;
+            name: string;
+            barType: string;
+            barsRequired: number;
+            levelRequired: number;
+            xp: number;
+            category: string;
+          }>;
+        };
+        if (data.isOpen && data.anvilId && data.availableRecipes) {
+          setSmithingData({
+            visible: true,
+            anvilId: data.anvilId,
+            availableRecipes: data.availableRecipes,
+          });
+        } else {
+          setSmithingData(null);
+        }
       }
     };
     const onInventory = (raw: unknown) => {
@@ -773,6 +851,26 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
                 });
               }
             }}
+          />
+        )}
+
+        {/* Smelting Panel */}
+        {smeltingData?.visible && (
+          <SmeltingPanel
+            furnaceId={smeltingData.furnaceId}
+            availableBars={smeltingData.availableBars}
+            world={world}
+            onClose={() => setSmeltingData(null)}
+          />
+        )}
+
+        {/* Smithing Panel */}
+        {smithingData?.visible && (
+          <SmithingPanel
+            anvilId={smithingData.anvilId}
+            availableRecipes={smithingData.availableRecipes}
+            world={world}
+            onClose={() => setSmithingData(null)}
           />
         )}
       </div>

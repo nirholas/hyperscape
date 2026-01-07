@@ -67,6 +67,8 @@ export interface PlayerRow {
   firemakingXp: number;
   cookingLevel: number;
   cookingXp: number;
+  smithingLevel: number;
+  smithingXp: number;
 }
 
 // Item definition row

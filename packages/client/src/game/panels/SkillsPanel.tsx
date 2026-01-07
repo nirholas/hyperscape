@@ -337,6 +337,13 @@ export function SkillsPanel({ world: _world, stats }: SkillsPanelProps) {
       level: s?.cooking?.level || 1,
       xp: s?.cooking?.xp || 0,
     },
+    {
+      key: "smithing",
+      label: "Smithing",
+      icon: "🔨",
+      level: s?.smithing?.level || 1,
+      xp: s?.smithing?.xp || 0,
+    },
   ];
 
   const prayers: Prayer[] = [

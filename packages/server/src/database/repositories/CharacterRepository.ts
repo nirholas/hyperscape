@@ -211,6 +211,7 @@ export class CharacterRepository extends BaseRepository {
     fishing: { level: number; xp: number };
     firemaking: { level: number; xp: number };
     cooking: { level: number; xp: number };
+    smithing: { level: number; xp: number };
   } | null> {
     this.ensureDatabase();
 
@@ -226,6 +227,7 @@ export class CharacterRepository extends BaseRepository {
         fishingLevel: schema.characters.fishingLevel,
         firemakingLevel: schema.characters.firemakingLevel,
         cookingLevel: schema.characters.cookingLevel,
+        smithingLevel: schema.characters.smithingLevel,
         attackXp: schema.characters.attackXp,
         strengthXp: schema.characters.strengthXp,
         defenseXp: schema.characters.defenseXp,
@@ -236,6 +238,7 @@ export class CharacterRepository extends BaseRepository {
         fishingXp: schema.characters.fishingXp,
         firemakingXp: schema.characters.firemakingXp,
         cookingXp: schema.characters.cookingXp,
+        smithingXp: schema.characters.smithingXp,
       })
       .from(schema.characters)
       .where(eq(schema.characters.id, characterId))
@@ -267,6 +270,7 @@ export class CharacterRepository extends BaseRepository {
         xp: row.firemakingXp || 0,
       },
       cooking: { level: row.cookingLevel || 1, xp: row.cookingXp || 0 },
+      smithing: { level: row.smithingLevel || 1, xp: row.smithingXp || 0 },
     };
   }
 

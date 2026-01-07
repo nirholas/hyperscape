@@ -126,6 +126,10 @@ const names = [
   // Smelting/Smithing packets
   'smeltingSourceInteract', // Client -> Server: player clicked furnace to smelt
   'smithingSourceInteract', // Client -> Server: player clicked anvil to smith
+  'processingSmelting', // Client -> Server: player selected bar to smelt from UI
+  'processingSmithing', // Client -> Server: player selected item to smith from UI
+  'smeltingInterfaceOpen', // Server -> Client: show smelting interface with available bars
+  'smithingInterfaceOpen', // Server -> Client: show smithing interface with available recipes
   // Combat packets
   'attackMob',
   'attackPlayer',  // PvP attack

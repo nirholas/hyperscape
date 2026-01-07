@@ -30,6 +30,7 @@ export class StatsComponent extends Component {
   public fishing: SkillData;
   public firemaking: SkillData;
   public cooking: SkillData;
+  public smithing: SkillData;
   public activePrayers: PrayerComponent;
   public equipment: EquipmentComponent;
   public equippedSpell: string | null;
@@ -119,6 +120,7 @@ export class StatsComponent extends Component {
     this.fishing = initialData.fishing || { ...defaultSkill };
     this.firemaking = initialData.firemaking || { ...defaultSkill };
     this.cooking = initialData.cooking || { ...defaultSkill };
+    this.smithing = initialData.smithing || { ...defaultSkill };
     this.activePrayers = initialData.activePrayers || { ...defaultPrayers };
     this.equipment = initialData.equipment || { ...defaultEquipment };
     this.equippedSpell = initialData.equippedSpell || null;
@@ -146,6 +148,7 @@ export class StatsComponent extends Component {
       fishing: this.fishing,
       firemaking: this.firemaking,
       cooking: this.cooking,
+      smithing: this.smithing,
       activePrayers: this.activePrayers,
       equipment: this.equipment,
       equippedSpell: this.equippedSpell,

@@ -1713,6 +1713,51 @@ export class ClientNetwork extends SystemBase {
     });
   };
 
+  // --- Smelting/Smithing interface handlers ---
+  onSmeltingInterfaceOpen = (data: {
+    furnaceId: string;
+    availableBars: Array<{
+      barItemId: string;
+      levelRequired: number;
+      primaryOre: string;
+      secondaryOre: string | null;
+      coalRequired: number;
+    }>;
+  }) => {
+    // Emit as UI update for SmeltingPanel to handle
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "smelting",
+      data: {
+        isOpen: true,
+        furnaceId: data.furnaceId,
+        availableBars: data.availableBars,
+      },
+    });
+  };
+
+  onSmithingInterfaceOpen = (data: {
+    anvilId: string;
+    availableRecipes: Array<{
+      itemId: string;
+      name: string;
+      barType: string;
+      barsRequired: number;
+      levelRequired: number;
+      xp: number;
+      category: string;
+    }>;
+  }) => {
+    // Emit as UI update for SmithingPanel to handle
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "smithing",
+      data: {
+        isOpen: true,
+        anvilId: data.anvilId,
+        availableRecipes: data.availableRecipes,
+      },
+    });
+  };
+
   // --- Dialogue handlers ---
   onDialogueStart = (data: {
     npcId: string;

@@ -121,6 +121,9 @@ export class PlayerRepository extends BaseRepository {
     if (data.cookingLevel !== undefined) {
       updateData.cookingLevel = data.cookingLevel;
     }
+    if (data.smithingLevel !== undefined) {
+      updateData.smithingLevel = data.smithingLevel;
+    }
     // XP fields
     if (data.attackXp !== undefined) {
       updateData.attackXp = data.attackXp;
@@ -151,6 +154,9 @@ export class PlayerRepository extends BaseRepository {
     }
     if (data.cookingXp !== undefined) {
       updateData.cookingXp = data.cookingXp;
+    }
+    if (data.smithingXp !== undefined) {
+      updateData.smithingXp = data.smithingXp;
     }
     if (data.health !== undefined) {
       updateData.health = data.health;
