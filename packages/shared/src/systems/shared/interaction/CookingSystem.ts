@@ -55,7 +55,8 @@ export class CookingSystem extends ProcessingSystemBase {
     fishSlot: number;
     fireId: string;
   }): void {
-    let { playerId, fishSlot, fireId } = data;
+    const { playerId, fireId } = data;
+    let { fishSlot } = data;
 
     // Handle fishSlot=-1: find first cookable item slot automatically
     if (fishSlot === -1) {

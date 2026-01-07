@@ -13,7 +13,6 @@
  */
 
 import { ITEMS } from "./items";
-import type { Item } from "../types/game/item-types";
 
 /**
  * Cooking data extracted from item manifest

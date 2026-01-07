@@ -96,12 +96,12 @@ describe("PendingGatherManager", () => {
   let manager: PendingGatherManager;
   let mockWorld: MockWorld;
   let mockTileMovement: MockTileMovementManager;
-  let mockSendFn: ReturnType<typeof vi.fn>;
+  let mockSendFn: (name: string, data: unknown) => void;
 
   beforeEach(() => {
     mockWorld = createMockWorld();
     mockTileMovement = createMockTileMovementManager();
-    mockSendFn = vi.fn();
+    mockSendFn = vi.fn() as (name: string, data: unknown) => void;
 
     manager = new PendingGatherManager(
       mockWorld as never,

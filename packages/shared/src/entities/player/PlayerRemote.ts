@@ -873,7 +873,7 @@ export class PlayerRemote extends Entity implements HotReloadable {
     }, 5000);
   }
 
-  override destroy(local?: boolean) {
+  override destroy(_local?: boolean) {
     // Guard uses inherited Entity.destroyed flag
     if (this.destroyed) return;
     // NOTE: Do NOT set this.destroyed = true here!

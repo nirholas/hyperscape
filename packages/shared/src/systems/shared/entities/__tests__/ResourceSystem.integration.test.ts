@@ -283,7 +283,7 @@ describe("ResourceSystem Integration", () => {
       });
 
       // Should emit UI message about tool requirement
-      const uiMessages = mockWorld.emittedEvents.filter(
+      const _uiMessages = mockWorld.emittedEvents.filter(
         (e) => e.type === EventType.UI_MESSAGE,
       );
       // Verify no gathering started event

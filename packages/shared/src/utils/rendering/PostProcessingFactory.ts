@@ -209,8 +209,8 @@ export async function createPostProcessing(
     dispose: () => void;
   };
 
-  // Type for texture3D node
-  type Texture3DNode = ReturnType<typeof uniform>;
+  // Type for texture3D node (unused but kept for future use)
+  // type Texture3DNode = ReturnType<typeof uniform>;
 
   // Create PostProcessing instance from three/webgpu
   const PostProcessingClass = (

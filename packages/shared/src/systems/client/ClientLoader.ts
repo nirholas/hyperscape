@@ -61,23 +61,26 @@ const ASSET_STORE_NAME = "files";
 const ASSET_DB_VERSION = 1;
 
 /** Promise for IndexedDB initialization */
-let dbPromise: Promise<IDBDatabase | null> | null = null;
+let dbPromise: Promise<globalThis.IDBDatabase | null> | null = null;
 
 /**
  * Initialize IndexedDB for persistent asset caching
  */
-function initAssetDB(): Promise<IDBDatabase | null> {
+function initAssetDB(): Promise<globalThis.IDBDatabase | null> {
   if (dbPromise) return dbPromise;
 
   dbPromise = new Promise((resolve) => {
     // IndexedDB not available in some environments
-    if (typeof indexedDB === "undefined") {
+    if (typeof globalThis.indexedDB === "undefined") {
       resolve(null);
       return;
     }
 
     try {
-      const request = indexedDB.open(ASSET_DB_NAME, ASSET_DB_VERSION);
+      const request = globalThis.indexedDB.open(
+        ASSET_DB_NAME,
+        ASSET_DB_VERSION,
+      );
 
       request.onerror = () => {
         console.warn(
@@ -91,7 +94,7 @@ function initAssetDB(): Promise<IDBDatabase | null> {
       };
 
       request.onupgradeneeded = (event) => {
-        const db = (event.target as IDBOpenDBRequest).result;
+        const db = (event.target as globalThis.IDBOpenDBRequest).result;
         if (!db.objectStoreNames.contains(ASSET_STORE_NAME)) {
           db.createObjectStore(ASSET_STORE_NAME);
         }
@@ -486,6 +489,7 @@ export class ClientLoader extends SystemBase {
     >;
   } {
     // Import dynamically to avoid circular dependency
+    // eslint-disable-next-line no-undef
     const { modelCache } = require("../../utils/rendering/ModelCache") as {
       modelCache: {
         getStats: () => {

@@ -444,10 +444,10 @@ export function createVRMFactory(
     let rate = 0;
     let rateCheckedAt = 999;
     let rateCheck = true;
-    let updateCallCount = 0;
     let hasLoggedUpdatePipeline = false;
-    let deathAnimationActive = false;
-    let deathUpdateLogCount = 0;
+    // Track death animation state for future debugging/logging
+    let _deathAnimationActive = false;
+    let _deathUpdateLogCount = 0;
     const update = (delta) => {
       elapsed += delta;
       let should = true;
@@ -520,13 +520,13 @@ export function createVRMFactory(
         currentEmote.action?.fadeOut(0.15);
         // Reset death animation tracking when switching to a different emote
         if (currentEmote.url?.includes("death") && !url?.includes("death")) {
-          deathAnimationActive = false;
-          deathUpdateLogCount = 0;
+          _deathAnimationActive = false;
+          _deathUpdateLogCount = 0;
         }
         currentEmote = null;
       }
       if (!url) {
-        deathAnimationActive = false; // Also reset if emote is cleared
+        _deathAnimationActive = false; // Also reset if emote is cleared
         return;
       }
       const opts = getQueryParams(url);
@@ -549,8 +549,8 @@ export function createVRMFactory(
           action.reset().fadeIn(0.15).play();
           // Track death animation state for update timing
           if (url?.includes("death")) {
-            deathAnimationActive = true;
-            deathUpdateLogCount = 0;
+            _deathAnimationActive = true;
+            _deathUpdateLogCount = 0;
           }
         }
       } else {
@@ -591,8 +591,8 @@ export function createVRMFactory(
               action.reset().fadeIn(0.15).play();
               // Track death animation state for update timing
               if (url?.includes("death")) {
-                deathAnimationActive = true;
-                deathUpdateLogCount = 0;
+                _deathAnimationActive = true;
+                _deathUpdateLogCount = 0;
               }
             }
           })

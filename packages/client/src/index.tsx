@@ -73,7 +73,7 @@ if (isEmbedded) {
     agentId: urlParams.get("agentId") || "",
     authToken: urlParams.get("authToken") || "",
     characterId: urlParams.get("characterId") || undefined,
-    wsUrl: urlParams.get("wsUrl") || GAME_WS_URL,
+    wsUrl: (urlParams.get("wsUrl") ?? GAME_WS_URL) || "ws://localhost:5555/ws",
     mode: (modeParam === "spectator" || modeParam === "free"
       ? modeParam
       : "spectator") as ViewportMode,
@@ -318,7 +318,7 @@ function App() {
     };
   }, []);
 
-  const wsUrl = GAME_WS_URL;
+  const wsUrl: string = GAME_WS_URL || "ws://localhost:5555/ws";
   const appRef = React.useRef<HTMLDivElement>(null);
 
   const handleAuthenticated = React.useCallback(() => {

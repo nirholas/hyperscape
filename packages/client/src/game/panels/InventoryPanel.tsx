@@ -151,7 +151,7 @@ function DraggableInventorySlot({
     isTargetingActive &&
     item &&
     !isSourceItem && // Source item is not a valid target
-    targetingState.validTargetIds.has(item.itemId);
+    (targetingState?.validTargetIds.has(item.itemId) ?? false);
 
   // BANK NOTE SYSTEM: Check if item is a bank note (ends with "_noted")
   // Used for visual styling (parchment background) and context menu filtering
@@ -643,15 +643,33 @@ export function InventoryPanel({
       }
     };
 
-    world.on(EventType.TARGETING_START, onTargetingStart);
-    world.on(EventType.TARGETING_COMPLETE, onTargetingComplete);
-    world.on(EventType.TARGETING_CANCEL, onTargetingCancel);
+    world.on(
+      EventType.TARGETING_START,
+      onTargetingStart as (...args: unknown[]) => void,
+    );
+    world.on(
+      EventType.TARGETING_COMPLETE,
+      onTargetingComplete as (...args: unknown[]) => void,
+    );
+    world.on(
+      EventType.TARGETING_CANCEL,
+      onTargetingCancel as (...args: unknown[]) => void,
+    );
     window.addEventListener("keydown", onKeyDown);
 
     return () => {
-      world.off(EventType.TARGETING_START, onTargetingStart);
-      world.off(EventType.TARGETING_COMPLETE, onTargetingComplete);
-      world.off(EventType.TARGETING_CANCEL, onTargetingCancel);
+      world.off(
+        EventType.TARGETING_START,
+        onTargetingStart as (...args: unknown[]) => void,
+      );
+      world.off(
+        EventType.TARGETING_COMPLETE,
+        onTargetingComplete as (...args: unknown[]) => void,
+      );
+      world.off(
+        EventType.TARGETING_CANCEL,
+        onTargetingCancel as (...args: unknown[]) => void,
+      );
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [world, targetingState.active]);

@@ -85,7 +85,6 @@ import { ConnectionHandler } from "./connection-handler";
 import { InteractionSessionManager } from "./InteractionSessionManager";
 import { handleChatAdded } from "./handlers/chat";
 import {
-  handleAttackMob,
   handleAttackPlayer,
   handleChangeAttackStyle,
   handleSetAutoRetaliate,
@@ -397,7 +396,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Pending cook manager - server-authoritative tracking of "walk to fire and cook" actions
     // Uses same approach as PendingGatherManager: movePlayerToward with meleeRange=1 for cardinal-only
     // Phase 4.2: FireRegistry is now injected via constructor (DIP)
-    const processingSystem = this.world.getSystem("processing") as {
+    const processingSystem = this.world.getSystem("processing") as unknown as {
       getActiveFires: () => Map<
         string,
         {
@@ -405,6 +404,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           position: { x: number; y: number; z: number };
           isActive: boolean;
           playerId: string;
+          createdAt: number;
+          duration: number;
+          mesh?: unknown;
         }
       >;
     };
@@ -648,10 +650,12 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Priority: West → East → South → North (handled by ProcessingSystem)
     // Uses proper tile movement for smooth walking animation (not teleport)
     this.world.on(EventType.FIREMAKING_MOVE_REQUEST, (event) => {
-      const { playerId, position } = event as {
+      const payload = event as {
         playerId: string;
-        position: { x: number; y: number; z: number };
+        fromPosition: { x: number; y: number; z: number };
+        toPosition: { x: number; y: number; z: number };
       };
+      const { playerId, toPosition: position } = payload;
 
       console.log(
         `[ServerNetwork] 🔥 Firemaking move request for ${playerId} to (${position.x.toFixed(1)}, ${position.z.toFixed(1)})`,

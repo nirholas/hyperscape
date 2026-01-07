@@ -255,7 +255,7 @@ describe("SafeAreaDeathHandler", () => {
       await handler.handleDeath("player1", TEST_POSITION, items, "goblin");
 
       // Gravestone should expire at currentTick + GRAVESTONE_TICKS
-      const expectedExpirationTick = 5000 + COMBAT_CONSTANTS.GRAVESTONE_TICKS;
+      const _expectedExpirationTick = 5000 + COMBAT_CONSTANTS.GRAVESTONE_TICKS;
       const ticksUntilExpiration = handler.getTicksUntilExpiration(
         entityManager.spawnEntity.mock.calls[0][0].id,
         5000,
@@ -275,7 +275,7 @@ describe("SafeAreaDeathHandler", () => {
         "goblin",
       );
 
-      const gravestoneId = entityManager.spawnEntity.mock.calls[0][0].id;
+      const _gravestoneId = entityManager.spawnEntity.mock.calls[0][0].id;
 
       // Process tick before expiration
       handler.processTick(1000 + COMBAT_CONSTANTS.GRAVESTONE_TICKS - 1);

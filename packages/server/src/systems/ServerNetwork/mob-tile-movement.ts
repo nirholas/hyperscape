@@ -71,6 +71,7 @@ function createMobTileState(
 ): MobTileState {
   return {
     currentTile: { ...currentTile },
+    previousTile: null,
     path: [],
     pathIndex: 0,
     isRunning: false,

@@ -52,8 +52,8 @@ type RenderInfo = {
 export class DevStats extends System {
   // UI Elements
   private container: HTMLDivElement | null = null;
-  private fpsElement: HTMLSpanElement | null = null;
-  private frameTimeElement: HTMLSpanElement | null = null;
+  private fpsElement: HTMLElement | null = null;
+  private frameTimeElement: HTMLElement | null = null;
   private memoryElement: HTMLDivElement | null = null;
   private rendererElement: HTMLDivElement | null = null;
   private sceneElement: HTMLDivElement | null = null;
@@ -693,7 +693,7 @@ export class DevStats extends System {
    */
   private getMemoryInfo(): { usedMB: number; totalMB: number } | null {
     // Check for performance.memory (Chrome only)
-    const perf = performance as Performance & {
+    const perf = globalThis.performance as globalThis.Performance & {
       memory?: {
         usedJSHeapSize: number;
         totalJSHeapSize: number;

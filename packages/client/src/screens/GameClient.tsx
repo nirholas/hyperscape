@@ -1,4 +1,4 @@
-import { GAME_API_URL, GAME_WS_URL, CDN_URL } from "@/lib/api-config";
+import { GAME_WS_URL, CDN_URL } from "@/lib/api-config";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   THREE,

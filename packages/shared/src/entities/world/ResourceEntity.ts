@@ -604,7 +604,7 @@ export class ResourceEntity extends InteractableEntity {
 
     // Stop ripple animation
     if (this.animationFrameId !== undefined) {
-      cancelAnimationFrame(this.animationFrameId);
+      window.cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = undefined;
     }
 

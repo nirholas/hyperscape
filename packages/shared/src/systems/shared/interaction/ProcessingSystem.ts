@@ -386,8 +386,7 @@ export class ProcessingSystem extends SystemBase {
       return;
     }
 
-    // Get player position
-    const player = this.world.getPlayer(playerId)!;
+    // Get player position (validated above)
 
     // Start firemaking process - use pooled action object (Phase 2 optimization)
     const processingAction = this.acquireAction();
@@ -582,7 +581,8 @@ export class ProcessingSystem extends SystemBase {
     fishSlot: number;
     fireId: string;
   }): void {
-    let { playerId, fishSlot, fireId } = data;
+    const { playerId, fireId } = data;
+    let { fishSlot } = data;
 
     // Handle fishSlot=-1: find first cookable item slot automatically
     if (fishSlot === -1) {
@@ -1001,7 +1001,7 @@ export class ProcessingSystem extends SystemBase {
     // Store cancel function on fire object for cleanup in extinguishFire()
     (fire as { cancelAnimation?: () => void }).cancelAnimation = () => {
       if (animationFrameId !== null) {
-        cancelAnimationFrame(animationFrameId);
+        window.cancelAnimationFrame(animationFrameId);
         animationFrameId = null;
       }
     };

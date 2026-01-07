@@ -4,6 +4,8 @@
  * Generates default ElizaOS character JSON templates for AI agents
  */
 
+import { GAME_WS_URL } from "@/lib/api-config";
+
 export interface CharacterTemplate {
   id?: string; // Optional - ElizaOS generates UUID on agent creation
   name: string;

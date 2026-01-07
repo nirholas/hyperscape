@@ -26,7 +26,6 @@
 import type { World } from "@hyperscape/shared";
 import {
   EventType,
-  worldToTile,
   worldToTileInto,
   tileToWorld,
   tilesWithinMeleeRange,

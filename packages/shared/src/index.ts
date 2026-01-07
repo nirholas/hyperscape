@@ -262,6 +262,7 @@ export { FOOTPRINT_SIZES } from "./types/game/resource-processing-types";
 export type {
   ResourceFootprint,
   Resource,
+  Fire,
 } from "./types/game/resource-processing-types";
 
 // Export node client components

@@ -1,4 +1,4 @@
-import { GAME_API_URL, GAME_WS_URL } from "@/lib/api-config";
+import { GAME_API_URL } from "@/lib/api-config";
 import React, { useState, useRef, useEffect } from "react";
 import { Send, Bot, User, MoreVertical, Paperclip, Mic } from "lucide-react";
 import { Agent } from "../../screens/DashboardScreen";

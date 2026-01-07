@@ -5,7 +5,7 @@ import { Asset } from '../../types'
 import { spriteGeneratorClient } from '../../utils/sprite-generator-client'
 import { Modal, ModalHeader, ModalBody, ModalFooter, ModalSection, Button, Select, Badge } from '../common'
 
-import { apiFetch, getAssetFileUrl, getAssetSpritesUrl } from '@/utils/api'
+import { apiFetch, getAssetFileUrl } from '@/utils/api'
 
 interface SpriteGenerationModalProps {
   asset: Asset

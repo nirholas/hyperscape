@@ -25,7 +25,6 @@ import {
   getValidRawFoodIds,
   rollBurn,
 } from "../CookingCalculator";
-import { PROCESSING_CONSTANTS } from "../../../../../constants/ProcessingConstants";
 
 describe("CookingCalculator", () => {
   describe("getStopBurnLevel", () => {

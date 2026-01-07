@@ -386,7 +386,7 @@ describe("DeathStateManager", () => {
       await manager.clearDeathLock("player1");
 
       // Memory should still be cleared
-      const hasLock = await manager.hasActiveDeathLock("player1");
+      const _hasLock = await manager.hasActiveDeathLock("player1");
       // Note: hasActiveDeathLock checks database too, but we cleared memory
       expect(databaseSystem.deleteDeathLockAsync).toHaveBeenCalled();
 

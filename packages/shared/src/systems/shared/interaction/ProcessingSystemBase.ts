@@ -281,7 +281,7 @@ export abstract class ProcessingSystemBase
     // Store cancel function on fire object for cleanup
     (fire as { cancelAnimation?: () => void }).cancelAnimation = () => {
       if (animationFrameId !== null) {
-        cancelAnimationFrame(animationFrameId);
+        window.cancelAnimationFrame(animationFrameId);
         animationFrameId = null;
       }
     };

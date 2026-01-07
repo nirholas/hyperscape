@@ -163,7 +163,7 @@ jobs:
     name: Deploy Server
     runs-on: ubuntu-latest
     needs: build
-    if: github.event_name == 'push' || inputs.deploy_server
+    if: github.event_name == 'push' || github.event.inputs.deploy_server == true
 
     steps:
       - name: Checkout
@@ -311,7 +311,7 @@ jobs:
     name: Deploy Asset Forge API
     runs-on: ubuntu-latest
     needs: build
-    if: github.event_name == 'push' || inputs.deploy_asset_forge_api
+    if: github.event_name == 'push' || github.event.inputs.deploy_asset_forge_api == true
 
     steps:
       - name: Checkout
@@ -420,7 +420,7 @@ jobs:
     name: Deploy Frontend
     runs-on: ubuntu-latest
     needs: build
-    if: github.event_name == 'push' || inputs.deploy_frontend
+    if: github.event_name == 'push' || github.event.inputs.deploy_frontend == true
 
     steps:
       - name: Download Frontend Artifact
@@ -488,7 +488,7 @@ jobs:
     name: Deploy Asset Forge Frontend
     runs-on: ubuntu-latest
     needs: build
-    if: github.event_name == 'push' || inputs.deploy_asset_forge_frontend
+    if: github.event_name == 'push' || github.event.inputs.deploy_asset_forge_frontend == true
 
     steps:
       - name: Download Asset Forge Frontend Artifact
@@ -555,7 +555,7 @@ jobs:
   deploy-assets:
     name: Deploy Assets
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && inputs.deploy_assets
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_assets == true
 
     steps:
       - name: Checkout

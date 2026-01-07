@@ -21,7 +21,7 @@
  * @see Phase 4.2 of COOKING_FIREMAKING_HARDENING_PLAN.md
  */
 
-import type { World, Fire } from "@hyperscape/shared";
+import type { World } from "@hyperscape/shared";
 import {
   EventType,
   worldToTileInto,
@@ -30,6 +30,19 @@ import {
   GATHERING_CONSTANTS,
 } from "@hyperscape/shared";
 import type { TileMovementManager } from "./tile-movement";
+
+/**
+ * Fire type - matches the Fire interface from resource-processing-types
+ */
+type Fire = {
+  id: string;
+  position: { x: number; y: number; z: number };
+  playerId: string;
+  createdAt: number;
+  duration: number;
+  isActive: boolean;
+  mesh?: unknown;
+};
 
 /**
  * FireRegistry interface for dependency injection.

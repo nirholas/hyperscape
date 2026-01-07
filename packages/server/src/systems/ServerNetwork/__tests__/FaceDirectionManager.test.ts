@@ -76,12 +76,12 @@ type MockWorld = ReturnType<typeof createMockWorld>;
 describe("FaceDirectionManager", () => {
   let manager: FaceDirectionManager;
   let mockWorld: MockWorld;
-  let mockSendFn: ReturnType<typeof vi.fn>;
+  let mockSendFn: (name: string, data: unknown) => void;
 
   beforeEach(() => {
     mockWorld = createMockWorld();
     manager = new FaceDirectionManager(mockWorld as never);
-    mockSendFn = vi.fn();
+    mockSendFn = vi.fn() as (name: string, data: unknown) => void;
     manager.setSendFunction(mockSendFn);
   });
 

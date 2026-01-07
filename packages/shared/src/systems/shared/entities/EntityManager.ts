@@ -850,7 +850,7 @@ export class EntityManager extends SystemBase {
 
       if (entity) {
         // Get current position from entity
-        let pos = entity.position;
+        const pos = entity.position;
         // Get rotation: prefer node.quaternion (client) but fallback to entity.rotation (server)
         const rot = entity.node?.quaternion ?? entity.rotation;
 
@@ -861,7 +861,6 @@ export class EntityManager extends SystemBase {
         // During death animation, we lock the player's broadcast position to their death location
         // This prevents any position updates from reaching clients until respawn
         let skipPositionBroadcast = false;
-        let deathPos: [number, number, number] | null = null;
         if (entity.type === "player" && entity.data) {
           const entityData = entity.data as {
             deathState?: DeathState;
@@ -873,9 +872,6 @@ export class EntityManager extends SystemBase {
             entityData.deathState === DeathState.DEAD
           ) {
             // Player is dead - freeze position to death location
-            if (entityData.deathPosition) {
-              deathPos = entityData.deathPosition;
-            }
             skipPositionBroadcast = true;
           }
         }
