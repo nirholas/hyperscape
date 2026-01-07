@@ -443,7 +443,6 @@ export interface FireCreatedPayload {
   fireId: string;
   playerId: string;
   position: Position3D;
-  duration: number;
 }
 
 /**
@@ -451,8 +450,6 @@ export interface FireCreatedPayload {
  */
 export interface FireExtinguishedPayload {
   fireId: string;
-  playerId: string;
-  position: Position3D;
 }
 
 /**
@@ -471,8 +468,9 @@ export interface CookingCompletedPayload {
  */
 export interface ProcessingFiremakingRequestPayload {
   playerId: string;
-  logItemId: string;
-  logSlot: number;
+  logsId: string;
+  logsSlot: number;
+  tinderboxSlot: number;
 }
 
 /**
@@ -480,8 +478,7 @@ export interface ProcessingFiremakingRequestPayload {
  */
 export interface ProcessingCookingRequestPayload {
   playerId: string;
-  rawItemId: string;
-  rawItemSlot: number;
+  fishSlot: number;
   fireId: string;
 }
 
