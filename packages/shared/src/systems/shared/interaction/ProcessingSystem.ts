@@ -121,6 +121,28 @@ export class ProcessingSystem extends SystemBase {
     }
   }
 
+  // === Phase 3: DRY Emote Helpers ===
+
+  /**
+   * Set player emote during processing (squat for cooking/firemaking)
+   */
+  private setProcessingEmote(playerId: string): void {
+    this.emitTypedEvent(EventType.PLAYER_SET_EMOTE, {
+      playerId,
+      emote: "squat",
+    });
+  }
+
+  /**
+   * Reset player emote to idle (after processing completes or cancels)
+   */
+  private resetPlayerEmote(playerId: string): void {
+    this.emitTypedEvent(EventType.PLAYER_SET_EMOTE, {
+      playerId,
+      emote: "idle",
+    });
+  }
+
   async init(): Promise<void> {
     // Listen for processing events via event bus
     this.subscribe(
@@ -375,10 +397,7 @@ export class ProcessingSystem extends SystemBase {
     });
 
     // OSRS: Player squats/crouches while lighting fire
-    this.emitTypedEvent(EventType.PLAYER_SET_EMOTE, {
-      playerId,
-      emote: "squat",
-    });
+    this.setProcessingEmote(playerId);
 
     // Complete after duration
     setTimeout(() => {
@@ -495,10 +514,7 @@ export class ProcessingSystem extends SystemBase {
     this.fireCleanupTimers.set(fireId, cleanupTimer);
 
     // OSRS: Reset emote when fire is lit (before moving)
-    this.emitTypedEvent(EventType.PLAYER_SET_EMOTE, {
-      playerId,
-      emote: "idle",
-    });
+    this.resetPlayerEmote(playerId);
 
     // OSRS: Move player to adjacent tile after lighting fire
     // Priority: West → East → South → North
@@ -632,10 +648,7 @@ export class ProcessingSystem extends SystemBase {
     }
 
     // OSRS: Player squats/crouches for each cook attempt
-    this.emitTypedEvent(EventType.PLAYER_SET_EMOTE, {
-      playerId,
-      emote: "squat",
-    });
+    this.setProcessingEmote(playerId);
 
     // Complete after duration
     setTimeout(() => {
@@ -662,10 +675,7 @@ export class ProcessingSystem extends SystemBase {
         type: "error",
       });
       // Reset emote when fire goes out
-      this.emitTypedEvent(EventType.PLAYER_SET_EMOTE, {
-        playerId,
-        emote: "idle",
-      });
+      this.resetPlayerEmote(playerId);
       // Release action back to pool (Phase 2: object pooling)
       this.releaseAction(action);
       return;
@@ -693,10 +703,7 @@ export class ProcessingSystem extends SystemBase {
     const fire = this.activeFires.get(fireId);
     if (!fire || !fire.isActive) {
       // Reset emote when fire goes out
-      this.emitTypedEvent(EventType.PLAYER_SET_EMOTE, {
-        playerId,
-        emote: "idle",
-      });
+      this.resetPlayerEmote(playerId);
       return; // Fire went out, stop cooking
     }
 
@@ -704,10 +711,7 @@ export class ProcessingSystem extends SystemBase {
     const nextSlot = this.findCookableSlot(playerId);
     if (nextSlot === -1) {
       // No more cookable items - cooking complete, reset emote
-      this.emitTypedEvent(EventType.PLAYER_SET_EMOTE, {
-        playerId,
-        emote: "idle",
-      });
+      this.resetPlayerEmote(playerId);
       return;
     }
 
