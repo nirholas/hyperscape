@@ -33,6 +33,17 @@ import type * as schema from "../../database/schema";
  */
 export class EventBridge {
   /**
+   * Deduplication cache for combat damage events.
+   * Prevents duplicate damage splats when the same attack is processed twice
+   * (e.g., by both initial attack and auto-attack processing within the same tick).
+   *
+   * Key format: "attackerId-targetId-tick"
+   * Value: Set of damage amounts already processed for that attacker-target-tick combo
+   */
+  private recentDamageEvents = new Map<string, Set<number>>();
+  private lastCleanupTick = 0;
+
+  /**
    * Create an EventBridge
    *
    * @param world - Game world instance that emits events
@@ -460,6 +471,38 @@ export class EventBridge {
           targetType: "player" | "mob";
           position: { x: number; y: number; z: number };
         };
+
+        // Deduplicate damage events to prevent duplicate splats
+        // This can happen when both initial attack and auto-attack processing
+        // fire for the same attack within the same tick
+        const currentTick = this.world.currentTick;
+        const dedupeKey = `${data.attackerId}-${data.targetId}-${currentTick}`;
+
+        // Cleanup old entries (older than 2 ticks)
+        if (currentTick > this.lastCleanupTick + 1) {
+          for (const [key] of this.recentDamageEvents) {
+            const keyTick = parseInt(key.split("-").pop() || "0", 10);
+            if (keyTick < currentTick - 1) {
+              this.recentDamageEvents.delete(key);
+            }
+          }
+          this.lastCleanupTick = currentTick;
+        }
+
+        // Check if we've already processed this exact damage event
+        let damageSet = this.recentDamageEvents.get(dedupeKey);
+        if (!damageSet) {
+          damageSet = new Set<number>();
+          this.recentDamageEvents.set(dedupeKey, damageSet);
+        }
+
+        if (damageSet.has(data.damage)) {
+          // Duplicate event - skip broadcasting
+          return;
+        }
+
+        // Mark this damage as processed
+        damageSet.add(data.damage);
 
         // Broadcast to all clients so everyone sees the damage splat
         this.broadcast.sendToAll("combatDamageDealt", data);
