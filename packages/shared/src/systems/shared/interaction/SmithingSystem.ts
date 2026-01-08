@@ -54,6 +54,11 @@ export class SmithingSystem extends SystemBase {
   }
 
   async init(): Promise<void> {
+    // Server-only system - client doesn't need these event handlers
+    if (!this.world.isServer) {
+      return;
+    }
+
     // Listen for smithing interaction (player clicked anvil)
     this.subscribe(
       EventType.SMITHING_INTERACT,

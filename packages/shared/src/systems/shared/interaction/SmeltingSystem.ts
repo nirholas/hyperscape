@@ -51,6 +51,11 @@ export class SmeltingSystem extends SystemBase {
   }
 
   async init(): Promise<void> {
+    // Server-only system - client doesn't need these event handlers
+    if (!this.world.isServer) {
+      return;
+    }
+
     // Listen for smelting interaction (player clicked furnace)
     this.subscribe(
       EventType.SMELTING_INTERACT,
