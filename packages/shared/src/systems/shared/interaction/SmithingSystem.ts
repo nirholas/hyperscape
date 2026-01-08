@@ -17,6 +17,7 @@ import {
   SMITHING_CONSTANTS,
   isLooseInventoryItem,
   getItemQuantity,
+  ticksToMs,
 } from "../../../constants/SmithingConstants";
 import { processingDataProvider } from "../../../data/ProcessingDataProvider";
 import { EventType } from "../../../types/events";
@@ -33,9 +34,6 @@ interface SmithingSession {
   smithed: number;
   timeoutId: ReturnType<typeof setTimeout> | null;
 }
-
-/** Smithing timing constant (from centralized constants) */
-const SMITHING_TIME = SMITHING_CONSTANTS.SMITHING_TIME_MS;
 
 /** Hammer item ID required for smithing (from centralized constants) */
 const HAMMER_ITEM_ID = SMITHING_CONSTANTS.HAMMER_ITEM_ID;
@@ -299,10 +297,11 @@ export class SmithingSystem extends SystemBase {
       return;
     }
 
-    // Schedule smith completion and store reference for cleanup
+    // Schedule smith completion using tick-based timing from manifest
+    const smithTimeMs = ticksToMs(recipe.ticks);
     session.timeoutId = setTimeout(() => {
       this.completeSmith(playerId);
-    }, SMITHING_TIME);
+    }, smithTimeMs);
   }
 
   /**

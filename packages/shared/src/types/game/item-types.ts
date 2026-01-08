@@ -246,6 +246,8 @@ export interface Item {
     xp: number;
     /** Success rate (0.5 = 50% for iron, 1.0 = always for others) */
     successRate: number;
+    /** Time in game ticks (600ms per tick). Default: 4 ticks */
+    ticks?: number;
   };
 
   // === SMITHING DATA (from manifest) ===
@@ -265,6 +267,8 @@ export interface Item {
     xp: number;
     /** Category for UI grouping ("sword", "hatchet", "pickaxe") */
     category: string;
+    /** Time in game ticks (600ms per tick). Default: 4 ticks */
+    ticks?: number;
   };
 }
 

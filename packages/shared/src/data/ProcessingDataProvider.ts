@@ -16,6 +16,7 @@
 import { ITEMS } from "./items";
 import type { Item } from "../types/game/item-types";
 import type { SmithingCategory } from "./smithing-recipes";
+import { SMITHING_CONSTANTS } from "../constants/SmithingConstants";
 
 /**
  * Smithing recipe data extracted from item manifest
@@ -36,6 +37,8 @@ export interface SmithingRecipeData {
   xp: number;
   /** Category for UI grouping */
   category: SmithingCategory;
+  /** Time in game ticks (600ms per tick). Default: 4 */
+  ticks: number;
 }
 
 /**
@@ -73,6 +76,8 @@ export interface SmeltingItemData {
   levelRequired: number;
   xp: number;
   successRate: number;
+  /** Time in game ticks (600ms per tick). Default: 4 */
+  ticks: number;
 }
 
 /**
@@ -202,6 +207,8 @@ export class ProcessingDataProvider {
           levelRequired: item.smelting.levelRequired,
           xp: item.smelting.xp,
           successRate: item.smelting.successRate,
+          ticks:
+            item.smelting.ticks ?? SMITHING_CONSTANTS.DEFAULT_SMELTING_TICKS,
         };
         this.smeltingDataMap.set(itemId, smeltingData);
         this.smeltableBarIds.add(itemId);
@@ -223,6 +230,8 @@ export class ProcessingDataProvider {
           levelRequired: item.smithing.levelRequired,
           xp: item.smithing.xp,
           category: item.smithing.category as SmithingCategory,
+          ticks:
+            item.smithing.ticks ?? SMITHING_CONSTANTS.DEFAULT_SMITHING_TICKS,
         };
 
         // Add to main map (keyed by output item ID)
@@ -395,6 +404,14 @@ export class ProcessingDataProvider {
   }
 
   /**
+   * Get smelting ticks for a bar (time in game ticks)
+   */
+  public getSmeltingTicks(barItemId: string): number {
+    const data = this.getSmeltingData(barItemId);
+    return data?.ticks ?? SMITHING_CONSTANTS.DEFAULT_SMELTING_TICKS;
+  }
+
+  /**
    * Check if an item is an ore that can be used for smelting.
    * Returns true for primary ores (copper, tin, iron, mithril) and coal.
    */
@@ -561,6 +578,14 @@ export class ProcessingDataProvider {
   public getSmithingXP(itemId: string): number {
     const recipe = this.getSmithingRecipe(itemId);
     return recipe?.xp ?? 0;
+  }
+
+  /**
+   * Get smithing ticks for an item (time in game ticks)
+   */
+  public getSmithingTicks(itemId: string): number {
+    const recipe = this.getSmithingRecipe(itemId);
+    return recipe?.ticks ?? SMITHING_CONSTANTS.DEFAULT_SMITHING_TICKS;
   }
 
   /**

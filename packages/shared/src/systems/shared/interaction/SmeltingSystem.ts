@@ -16,6 +16,7 @@ import {
   SMITHING_CONSTANTS,
   isLooseInventoryItem,
   getItemQuantity,
+  ticksToMs,
 } from "../../../constants/SmithingConstants";
 import { processingDataProvider } from "../../../data/ProcessingDataProvider";
 import { EventType } from "../../../types/events";
@@ -33,9 +34,6 @@ interface SmeltingSession {
   failed: number;
   timeoutId: ReturnType<typeof setTimeout> | null;
 }
-
-/** Smelting timing constant (from centralized constants) */
-const SMELTING_TIME = SMITHING_CONSTANTS.SMELTING_TIME_MS;
 
 export class SmeltingSystem extends SystemBase {
   private activeSessions = new Map<string, SmeltingSession>();
@@ -258,6 +256,15 @@ export class SmeltingSystem extends SystemBase {
       return;
     }
 
+    // Get smelting data for tick timing
+    const smeltingData = processingDataProvider.getSmeltingData(
+      session.barItemId,
+    );
+    if (!smeltingData) {
+      this.completeSmelting(playerId);
+      return;
+    }
+
     // Check materials
     if (!this.hasRequiredMaterials(playerId, session.barItemId)) {
       this.emitTypedEvent(EventType.UI_MESSAGE, {
@@ -269,10 +276,11 @@ export class SmeltingSystem extends SystemBase {
       return;
     }
 
-    // Schedule smelt completion and store reference for cleanup
+    // Schedule smelt completion using tick-based timing from manifest
+    const smeltTimeMs = ticksToMs(smeltingData.ticks);
     session.timeoutId = setTimeout(() => {
       this.completeSmelt(playerId);
-    }, SMELTING_TIME);
+    }, smeltTimeMs);
   }
 
   /**

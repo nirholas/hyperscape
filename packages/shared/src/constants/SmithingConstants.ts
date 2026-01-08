@@ -3,16 +3,24 @@
  *
  * This file contains all hardcoded values used across the smithing feature,
  * making it easier to maintain consistency and adjust values.
+ *
+ * @see https://oldschool.runescape.wiki/w/Game_tick for tick timing
  */
+
+import { COMBAT_CONSTANTS } from "./CombatConstants";
 
 export const SMITHING_CONSTANTS = {
   // Item IDs
   HAMMER_ITEM_ID: "hammer",
   COAL_ITEM_ID: "coal",
 
-  // Timing (milliseconds) - ~4 game ticks
-  SMELTING_TIME_MS: 2400,
-  SMITHING_TIME_MS: 2400,
+  // Tick-based timing defaults (used when manifest doesn't specify)
+  // OSRS: smelting and smithing both take 4 ticks
+  DEFAULT_SMELTING_TICKS: 4,
+  DEFAULT_SMITHING_TICKS: 4,
+
+  // Tick duration (from CombatConstants for consistency)
+  TICK_DURATION_MS: COMBAT_CONSTANTS.TICK_DURATION_MS,
 
   // Input validation limits
   MAX_QUANTITY: 10000,
@@ -127,4 +135,12 @@ export function isLooseInventoryItem(
  */
 export function getItemQuantity(item: LooseInventoryItem): number {
   return item.quantity ?? 1;
+}
+
+/**
+ * Convert ticks to milliseconds for setTimeout scheduling
+ * @param ticks - Number of game ticks (1 tick = 600ms in OSRS)
+ */
+export function ticksToMs(ticks: number): number {
+  return ticks * SMITHING_CONSTANTS.TICK_DURATION_MS;
 }
