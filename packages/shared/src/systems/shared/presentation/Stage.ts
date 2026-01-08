@@ -100,6 +100,7 @@ export class Stage extends SystemBase {
   scene: THREE.Scene;
   environment: unknown;
   private models: Map<string, Model>;
+  private dirtyModels: Set<string> = new Set(); // Track dirty models for efficient update
   octree: LooseOctree; // Made public for Model access
   private defaultMaterial: MaterialWrapper | null = null;
   private raycaster: THREE.Raycaster;
@@ -149,14 +150,13 @@ export class Stage extends SystemBase {
 
   start(): void {
     // Add a grid for visual reference
-    const gridHelper = new THREE.GridHelper(1000, 100, 0x444444, 0x222222);
-    gridHelper.position.y = 0.01; // Slightly above ground
-    // Ensure helper is ignored by click-to-move raycasts
-    gridHelper.name = "stage-grid-helper";
-    gridHelper.userData.ignoreClickMove = true;
-    this.scene.add(gridHelper);
-
-    this.logger.info("Created visible ground plane");
+    // const gridHelper = new THREE.GridHelper(1000, 100, 0x444444, 0x222222);
+    // gridHelper.position.y = 0.01; // Slightly above ground
+    // // Ensure helper is ignored by click-to-move raycasts
+    // gridHelper.name = "stage-grid-helper";
+    // gridHelper.userData.ignoreClickMove = true;
+    // this.scene.add(gridHelper);
+    // this.logger.info("Created visible ground plane");
   }
 
   private cloneMaterialTexture(
@@ -195,10 +195,22 @@ export class Stage extends SystemBase {
   }
 
   override update(_delta: number): void {
-    // Use for-of instead of forEach to avoid callback allocation each frame
-    for (const model of this.models.values()) {
-      model.clean();
+    // OPTIMIZATION: Only clean dirty models instead of iterating all models
+    // This avoids O(n) iteration every frame when most models are unchanged
+    if (this.dirtyModels.size > 0) {
+      for (const modelId of this.dirtyModels) {
+        const model = this.models.get(modelId);
+        if (model) {
+          model.clean();
+        }
+      }
+      this.dirtyModels.clear();
     }
+  }
+
+  /** Mark a model as dirty (needs clean() called). Used internally by Model class. */
+  markModelDirty(modelId: string): void {
+    this.dirtyModels.add(modelId);
   }
 
   override postUpdate(): void {
@@ -600,6 +612,7 @@ export class Stage extends SystemBase {
 // Internal Model class for instanced rendering
 class Model {
   private stage: Stage;
+  private modelId: string; // Unique ID for dirty tracking
   private geometry: THREE.BufferGeometry;
   private material: MaterialWrapper;
   private castShadow: boolean;
@@ -617,10 +630,13 @@ class Model {
     receiveShadow: boolean,
   ) {
     this.stage = stage;
+    this.modelId = `${geometry.uuid}/${material.uuid}/${castShadow}/${receiveShadow}`;
     this.geometry = geometry;
     this.material = stage.createMaterial({ raw: material });
     this.castShadow = castShadow;
     this.receiveShadow = receiveShadow;
+    // Mark initial dirty state for cleaning
+    this.stage.markModelDirty(this.modelId);
 
     // Check for boundsTree extension (three-mesh-bvh)
     const geometryWithBounds = this.geometry as THREE.BufferGeometry & {
@@ -647,6 +663,14 @@ class Model {
     meshWithEntity.getEntity = this.getEntity.bind(this);
   }
 
+  /** Mark this model as dirty and register with Stage for efficient per-frame cleanup */
+  private markDirty(): void {
+    if (!this.dirty) {
+      this.dirty = true;
+      this.stage.markModelDirty(this.modelId);
+    }
+  }
+
   create(node: unknown, matrix: THREE.Matrix4): StageHandle {
     const item = {
       idx: this.items.length,
@@ -656,7 +680,7 @@ class Model {
 
     this.items.push(item);
     this.iMesh.setMatrixAt(item.idx, item.matrix);
-    this.dirty = true;
+    this.markDirty();
 
     const sItem: StageItem = {
       matrix,
@@ -692,7 +716,7 @@ class Model {
   ): void {
     item.matrix.copy(matrix);
     this.iMesh.setMatrixAt(item.idx, matrix);
-    this.dirty = true;
+    this.markDirty();
   }
 
   private destroy(item: {
@@ -706,16 +730,16 @@ class Model {
 
     if (isOnly) {
       this.items = [];
-      this.dirty = true;
+      this.markDirty();
     } else if (isLast) {
       this.items.pop();
-      this.dirty = true;
+      this.markDirty();
     } else if (last) {
       this.iMesh.setMatrixAt(item.idx, last.matrix);
       last.idx = item.idx;
       this.items[item.idx] = last;
       this.items.pop();
-      this.dirty = true;
+      this.markDirty();
     }
   }
 

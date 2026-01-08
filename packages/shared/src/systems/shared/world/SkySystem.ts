@@ -9,32 +9,32 @@
  * No WebGL-specific extensions or shaders are used.
  */
 
+import { System } from "..";
 import THREE, {
-  MeshBasicNodeMaterial,
-  texture,
-  uv,
-  positionLocal,
-  uniform,
+  abs,
+  add,
+  clamp,
+  cos,
+  dot,
   float,
+  Fn,
+  length,
+  MeshBasicNodeMaterial,
+  mix,
+  mul,
+  normalize,
+  positionLocal,
+  pow,
+  smoothstep,
+  sub,
+  texture,
+  uniform,
+  uv,
+  vec2,
   vec3,
   vec4,
-  pow,
-  add,
-  sub,
-  mul,
-  mix,
-  clamp,
-  smoothstep,
-  dot,
-  normalize,
-  length,
-  cos,
-  sin,
-  abs,
-  Fn,
   type ShaderNode,
 } from "../../../extras/three/three";
-import { System } from "..";
 import type { World, WorldOptions } from "../../../types";
 
 // -----------------------------
@@ -61,6 +61,7 @@ function createNoiseTexture(size = 128): THREE.DataTexture {
 // Cloud configuration with texture atlas sampling
 // The cloud textures are 2x4 sprite sheets (8 clouds per texture)
 // UV offset selects which cloud sprite to use
+// PERFORMANCE: Reduced from 6 to 4 clouds (barely noticeable, saves draw calls + GPU)
 // -----------------------------
 type CloudDef = {
   az: number; // azimuth in degrees
@@ -71,12 +72,10 @@ type CloudDef = {
 };
 
 const CLOUD_DEFS: CloudDef[] = [
-  { az: 25, el: 22, tex: 1, sprite: 0, scale: 1.2 },
-  { az: 85, el: 35, tex: 2, sprite: 2, scale: 1.0 },
-  { az: 145, el: 18, tex: 1, sprite: 4, scale: 1.4 },
-  { az: 205, el: 30, tex: 3, sprite: 1, scale: 1.1 },
-  { az: 265, el: 42, tex: 2, sprite: 5, scale: 0.9 },
-  { az: 325, el: 25, tex: 1, sprite: 3, scale: 1.3 },
+  { az: 30, el: 25, tex: 1, sprite: 0, scale: 1.3 },
+  { az: 120, el: 32, tex: 2, sprite: 2, scale: 1.1 },
+  { az: 210, el: 28, tex: 1, sprite: 4, scale: 1.4 },
+  { az: 300, el: 35, tex: 2, sprite: 5, scale: 1.0 },
 ];
 
 // -----------------------------
@@ -822,87 +821,43 @@ export class SkySystem extends System {
       // Each cloud gets a unique phase offset based on its index
       const cloudIndex = float(i);
 
+      // PERFORMANCE: Simplified cloud shader - removed UV swirl animation
+      // Keeps day/night fade and simple dissolve, removes expensive per-fragment cos/sin
       const cloudColorNode = Fn(() => {
         const uvCoord = uv();
         const cloudTex = texture(tex, uvCoord);
 
         // Day/night color - clouds are bright during day
-        const dayColor = vec3(1.0, 1.0, 1.0); // day: pure white
-        const nightColor = vec3(0.3, 0.35, 0.45); // night: dark blue-gray
+        const dayColor = vec3(1.0, 1.0, 1.0);
+        const nightColor = vec3(0.3, 0.35, 0.45);
         const cloudColor = mix(nightColor, dayColor, uDayIntensity);
 
-        // =====================
-        // ANIMATED NOISE UVs - swirl and drift for organic movement
-        // =====================
-        const centerUV = sub(uvCoord, vec3(0.5, 0.5, 0.0).xy);
-        const swirlAngle = mul(uTime, float(0.12)); // Slow swirl rotation
-        const cosA = cos(swirlAngle);
-        const sinA = sin(swirlAngle);
-        // Rotate UVs around center for swirl effect
-        const rotatedUV = vec3(
-          add(mul(centerUV.x, cosA), mul(centerUV.y, sinA)),
-          sub(mul(centerUV.y, cosA), mul(centerUV.x, sinA)),
-          float(0.0),
-        );
-        const swirlUV = add(rotatedUV.xy, vec3(0.5, 0.5, 0.0).xy);
-
-        // Sample noise with swirling + drifting UVs
+        // Simple drifting noise UVs (no swirl rotation)
         const noiseUV = add(
-          mul(swirlUV, float(2.0)), // Scale noise
-          mul(vec3(uTime, mul(uTime, float(0.6)), float(0.0)).xy, float(0.05)), // Drift
+          mul(uvCoord, float(2.0)),
+          mul(vec2(uTime, mul(uTime, float(0.6))), float(0.03)),
         );
         const noiseSample = noiseRef
           ? texture(noiseRef, noiseUV)
           : vec4(0.5, 0.5, 0.5, 1.0);
         const noiseValue = noiseSample.r;
 
-        // =====================
-        // PERLIN DISSOLVE FADE - noise-driven appearance/disappearance
-        // =====================
-        // Each cloud fades in/out over ~60 seconds using perlin threshold
-        const fadeSpeed = float(0.03); // ~30 sec half-cycle
-        const cloudPhase = mul(cloudIndex, float(2.5)); // Unique phase per cloud
+        // Simple fade cycle (uses cos but only once per cloud, not per-pixel)
+        const fadeSpeed = float(0.025);
+        const cloudPhase = mul(cloudIndex, float(2.5));
         const fadeCycle = add(mul(uTime, fadeSpeed), cloudPhase);
-
-        // fadeProgress goes 0 -> 1 -> 0 (fully visible at 1, dissolved at 0)
         const fadeProgress = mul(add(cos(fadeCycle), float(1.0)), float(0.5));
 
-        // Dissolve threshold based on fadeProgress
-        // At fadeProgress=1 (fully visible): threshold = -0.1 (all noise passes)
-        // At fadeProgress=0 (dissolved): threshold = 1.1 (no noise passes)
-        // Pixels with noise ABOVE threshold are visible
-        const dissolveThreshold = sub(
-          float(1.1),
-          mul(fadeProgress, float(1.2)),
-        );
-
-        // Perlin dissolve mask - pixels appear/disappear based on noise vs threshold
-        // High noise areas appear first when fading in, disappear last when fading out
+        // Combined dissolve (day/night and cycle in one pass)
+        const nightFade = mul(sub(float(1.0), uDayIntensity), float(0.7));
+        const dissolveThreshold = add(sub(float(1.0), fadeProgress), nightFade);
         const dissolveMask = smoothstep(
           dissolveThreshold,
-          add(dissolveThreshold, float(0.15)), // Soft feathered edge
+          add(dissolveThreshold, float(0.2)),
           noiseValue,
         );
 
-        // =====================
-        // NIGHT FADE - additional dissolve at night
-        // =====================
-        const nightAmount = sub(float(1.0), uDayIntensity); // 0 at day, 1 at night
-        // Push dissolve threshold higher at night
-        const nightThreshold = mul(nightAmount, float(0.8));
-        const nightMask = smoothstep(
-          nightThreshold,
-          add(nightThreshold, float(0.2)),
-          noiseValue,
-        );
-
-        // =====================
-        // FINAL ALPHA - perlin noise drives everything
-        // =====================
-        const baseAlpha = cloudTex.a;
-        // Both dissolve effects are noise-based, creating organic edges
-        const finalAlpha = mul(mul(baseAlpha, dissolveMask), nightMask);
-
+        const finalAlpha = mul(cloudTex.a, dissolveMask);
         return vec4(cloudColor, finalAlpha);
       })();
 

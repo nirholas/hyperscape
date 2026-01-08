@@ -264,11 +264,23 @@ export function writePacket(name: string, data: unknown): ArrayBuffer {
 export function readPacket(
   packet: ArrayBuffer | Uint8Array,
 ): [string, unknown] | [] {
-  // Convert ArrayBuffer to Uint8Array if needed
-  const buffer =
-    packet instanceof ArrayBuffer ? new Uint8Array(packet) : packet;
-  const [id, data] = packr.unpack(buffer);
-  const info = byId[id];
-  if (!info) throw new Error(`readPacket failed: ${id} (id not found)`);
-  return [info.method, data];
+  try {
+    // Convert ArrayBuffer to Uint8Array if needed
+    const buffer =
+      packet instanceof ArrayBuffer ? new Uint8Array(packet) : packet;
+    const [id, data] = packr.unpack(buffer);
+    const info = byId[id];
+    if (!info) {
+      // Log warning but don't crash - return empty array so handler can gracefully ignore
+      console.warn(
+        `[readPacket] Unknown packet ID ${id} - this may indicate a version mismatch between client and server`,
+      );
+      return [];
+    }
+    return [info.method, data];
+  } catch (error) {
+    // Handle any deserialization errors gracefully
+    console.error("[readPacket] Failed to deserialize packet:", error);
+    return [];
+  }
 }

@@ -32,22 +32,61 @@ export function registerPlayerRoutes(
 ): void {
   // Minimal player disconnect endpoint for client beacons
   fastify.post("/api/player/disconnect", async (req, reply) => {
-    const body = req.body as {
-      playerId: string;
-      sessionId?: string;
-      reason?: string;
-    };
+    try {
+      const body = req.body as {
+        playerId?: string;
+        sessionId?: string;
+        reason?: string;
+      };
 
-    fastify.log.info({ body }, "[API] player/disconnect");
+      fastify.log.info({ body }, "[API] player/disconnect");
 
-    const network =
-      world.network as unknown as import("../../shared/types/index.js").ServerNetworkWithSockets;
-    const socket = network.sockets.get(body.playerId);
+      // Validate world and network exist
+      if (!world?.network) {
+        fastify.log.warn(
+          "[API] player/disconnect - world.network not available",
+        );
+        return reply.send({ ok: true }); // Still return success to avoid client retries
+      }
 
-    if (socket) {
-      socket.close?.();
+      const network =
+        world.network as unknown as import("../../shared/types/index.js").ServerNetworkWithSockets;
+
+      // Validate network has sockets map
+      if (!network?.sockets || !body?.playerId) {
+        fastify.log.warn(
+          { hasSockets: !!network?.sockets, hasPlayerId: !!body?.playerId },
+          "[API] player/disconnect - missing network.sockets or playerId",
+        );
+        return reply.send({ ok: true });
+      }
+
+      const socket = network.sockets.get(body.playerId);
+
+      if (socket) {
+        try {
+          socket.close?.();
+        } catch (error) {
+          fastify.log.error(
+            { error, playerId: body.playerId },
+            "[API] player/disconnect - error closing socket",
+          );
+        }
+      } else {
+        fastify.log.debug(
+          { playerId: body.playerId },
+          "[API] player/disconnect - socket not found (may have already disconnected)",
+        );
+      }
+
+      return reply.send({ ok: true });
+    } catch (error) {
+      fastify.log.error(
+        { error, body: req.body },
+        "[API] player/disconnect - unexpected error",
+      );
+      // Still return success to prevent client retries
+      return reply.send({ ok: true });
     }
-
-    return reply.send({ ok: true });
   });
 }

@@ -100,13 +100,15 @@ jobs:
         run: bun run build:server
 
       - name: Build Frontend
+        env:
+          PUBLIC_CDN_URL: "https://d20g7vd4m53hpb.cloudfront.net"
+          PUBLIC_API_URL: "https://api.hyperscape.lol"
+          PUBLIC_WS_URL: "wss://api.hyperscape.lol/ws"
+          PUBLIC_APP_URL: "https://hyperscape.lol"
+          PUBLIC_ELIZAOS_URL: "https://api.hyperscape.lol"
+          PUBLIC_PRIVY_APP_ID: ${{ secrets.PRIVY_APP_ID }}
         run: |
           cd packages/client
-          PUBLIC_CDN_URL="https://d20g7vd4m53hpb.cloudfront.net" \
-          PUBLIC_API_URL="https://api.hyperscape.lol" \
-          PUBLIC_WS_URL="wss://api.hyperscape.lol/ws" \
-          PUBLIC_APP_URL="https://hyperscape.lol" \
-          PUBLIC_ELIZAOS_URL="https://api.hyperscape.lol" \
           bun run build
 
       - name: Build Asset Forge Frontend

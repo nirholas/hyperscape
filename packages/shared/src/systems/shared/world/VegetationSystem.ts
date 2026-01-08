@@ -42,9 +42,73 @@ import {
   createGPUVegetationMaterial,
   type GPUVegetationMaterial,
 } from "./GPUVegetation";
+import { csmLevels } from "./Environment";
+
+/**
+ * Vegetation rendering configuration.
+ *
+ * CULLING HIERARCHY (most to least aggressive):
+ * 1. CPU Tile Loading: Only generate vegetation for tiles within MAX_VEGETATION_TILE_RADIUS
+ * 2. CPU Chunk Visibility: Hide chunks beyond CHUNK_RENDER_DISTANCE or outside camera frustum
+ * 3. GPU Shader Fade: Dissolve individual instances between FADE_START and FADE_END
+ *
+ * IMPORTANT: Vegetation fade must happen BEFORE shadow cutoff to avoid unshadowed trees!
+ * Fade distances are dynamically set based on shadow quality in start()
+ */
+const VEGETATION_CHUNK_SIZE = 64; // meters per chunk
+const MAX_INSTANCES_PER_CHUNK = 256;
+
+// Default fade distances - will be overridden by shadow quality settings
+// These are used if shadow quality can't be determined
+let FADE_START = 180; // Shader fade begins (fully opaque inside)
+let FADE_END = 200; // Shader fully culls (invisible beyond)
+let CHUNK_RENDER_DISTANCE = 300; // CPU hides chunks (buffer zone for loading)
+let CHUNK_RENDER_DISTANCE_SQ = CHUNK_RENDER_DISTANCE * CHUNK_RENDER_DISTANCE;
+
+// Bounding sphere buffer to account for model heights and scale variations
+// Trees can be 15-20m tall with 1.0-1.5x scale, so need generous buffer
+const BOUNDING_SPHERE_BUFFER = 40;
+
+/**
+ * Chunked instanced mesh - one per spatial chunk per asset type
+ */
+interface ChunkedInstancedMesh {
+  /** The InstancedMesh for this chunk */
+  mesh: THREE.InstancedMesh;
+  /** Current instance count */
+  count: number;
+  /** Instance attributes */
+  positionAttr: THREE.InstancedBufferAttribute;
+  scaleAttr: THREE.InstancedBufferAttribute;
+  rotationAttr: THREE.InstancedBufferAttribute;
+  /** Chunk world bounds (for bounding sphere) */
+  minX: number;
+  minY: number;
+  minZ: number;
+  maxX: number;
+  maxY: number;
+  maxZ: number;
+}
+
+/**
+ * Asset data - tracks geometry/material for a loaded GLB (shared across chunks)
+ */
+interface AssetData {
+  /** The GLB geometry */
+  geometry: THREE.BufferGeometry;
+  /** Material(s) from the model */
+  material: THREE.Material | THREE.Material[];
+  /** Asset definition */
+  asset: VegetationAsset;
+  /** Y offset to lift model so its base sits on terrain */
+  modelBaseOffset: number;
+  /** GPU material (shared across all chunks) */
+  gpuMaterial: GPUVegetationMaterial;
+}
 
 /**
  * Instanced asset data - tracks one InstancedMesh per loaded GLB
+ * @deprecated Use chunked system instead
  */
 interface InstancedAssetData {
   /** The GLB model scene (cloned for instancing) */
@@ -111,58 +175,26 @@ const DEFAULT_CONFIG: VegetationConfig = {
   movementThreshold: 2, // Not used in GPU mode
 };
 
-// LOD distances per category
+// LOD distances per category - PERFORMANCE: Simplified, shader handles fade
 // fadeStart = fully opaque, fadeEnd = fully invisible
-// Tile spawn radius is 3 tiles = 300m, so fadeStart must be > 300m to prevent pop-in
 const LOD_CONFIG = {
-  tree: { fadeStart: 180, fadeEnd: 250, imposterStart: 120 },
-  bush: { fadeStart: 140, fadeEnd: 200, imposterStart: 90 },
-  flower: { fadeStart: 100, fadeEnd: 150, imposterStart: 60 },
-  fern: { fadeStart: 100, fadeEnd: 150, imposterStart: 60 },
-  rock: { fadeStart: 180, fadeEnd: 250, imposterStart: 120 },
-  fallen_tree: { fadeStart: 160, fadeEnd: 220, imposterStart: 100 },
+  tree: { fadeStart: 100, fadeEnd: 150, imposterStart: 80 },
+  bush: { fadeStart: 80, fadeEnd: 120, imposterStart: 60 },
+  flower: { fadeStart: 60, fadeEnd: 100, imposterStart: 40 },
+  fern: { fadeStart: 60, fadeEnd: 100, imposterStart: 40 },
+  rock: { fadeStart: 100, fadeEnd: 150, imposterStart: 80 },
+  fallen_tree: { fadeStart: 90, fadeEnd: 130, imposterStart: 70 },
 } as const;
 
 /** Max tile distance from player to generate vegetation (in tiles, not world units) */
-// 3 tiles = 300m diagonal (~212m per axis), must be > fadeEnd to load before visible
-const MAX_VEGETATION_TILE_RADIUS = 3;
+// PERFORMANCE: Reduced from 3 to 2 tiles - vegetation fades before this distance anyway
+const MAX_VEGETATION_TILE_RADIUS = 2;
 
 /** Water level in world units - MUST match TerrainSystem.CONFIG.WATER_THRESHOLD */
 const WATER_LEVEL = 5.4;
 
 /** Buffer distance from water edge where vegetation shouldn't spawn - generous buffer */
 const WATER_EDGE_BUFFER = 6.0; // Min spawn height = 11.4 - well above any shoreline
-
-/** Grass only spawns on terrain above this height (relative, for grass texture) */
-const _GRASS_MIN_TERRAIN_HEIGHT = 0.2; // Normalized height - grass areas are higher
-
-// ============================================================================
-// TSL GRASS - WebGPU compatible using MeshStandardNodeMaterial
-// ============================================================================
-
-import {
-  createGrassBladeGeometry,
-  createGrassMaterial,
-  GRASS_CONFIG,
-  type GrassUniforms,
-} from "./GrassShader";
-import { getNoiseTexture, generateNoiseTexture } from "./TerrainShader";
-
-/** GPU Grass - total instances = GRID_SIZE^2 * BLADES_PER_CELL */
-const GPU_GRASS_INSTANCES =
-  GRASS_CONFIG.GRID_SIZE *
-  GRASS_CONFIG.GRID_SIZE *
-  GRASS_CONFIG.BLADES_PER_CELL;
-
-/**
- * Data structure for a grass chunk - holds geometry for one area of grass (legacy, unused)
- */
-interface _GrassChunkData {
-  key: string;
-  mesh: THREE.Mesh;
-  tileX: number;
-  tileZ: number;
-}
 
 /**
  * Imposter data for billboard rendering of distant vegetation
@@ -188,6 +220,12 @@ export class VegetationSystem extends System {
   private loadedAssets = new Map<string, InstancedAssetData>();
   private pendingAssetLoads = new Set<string>();
 
+  // CHUNKED VEGETATION - Spatial chunking for proper frustum culling
+  // Key format: "chunkX_chunkZ_assetId"
+  private chunkedMeshes = new Map<string, ChunkedInstancedMesh>();
+  // Loaded asset data (geometry/material) shared across chunks
+  private assetData = new Map<string, AssetData>();
+
   // Imposter (billboard) management
   private imposters = new Map<string, ImposterData>();
   private billboardGeometry: THREE.PlaneGeometry | null = null;
@@ -207,18 +245,13 @@ export class VegetationSystem extends System {
     { tileX: number; tileZ: number; biome: string }
   >();
 
-  // TSL GRASS - Single InstancedMesh follows player
-  private grassBladeGeometry: THREE.BufferGeometry | null = null;
-  private grassMaterial:
-    | (THREE.Material & { grassUniforms: GrassUniforms })
-    | null = null;
-  private grassMesh: THREE.InstancedMesh | null = null;
-  private grassGroup: THREE.Group | null = null;
-  // GPU grass - no CPU matrix buffer needed
-  private grassTime = 0;
-
   // Configuration
   private config: VegetationConfig = DEFAULT_CONFIG;
+
+  // SHARED MATERIAL - All vegetation uses ONE material for minimal draw call overhead
+  // Even though we have separate InstancedMeshes per asset (can't merge without MultiDrawIndirect),
+  // sharing the material eliminates shader program switches between draw calls
+  private sharedVegetationMaterial: GPUVegetationMaterial | null = null;
 
   // Noise generator for procedural placement
   private noise: NoiseGenerator | null = null;
@@ -235,10 +268,10 @@ export class VegetationSystem extends System {
   private _yAxis = new THREE.Vector3(0, 1, 0);
   private _origin = new THREE.Vector3(0, 0, 0);
   private _lookAtMatrix = new THREE.Matrix4();
-  private _lastGrassLog = 0;
-  // Spatial hash for O(1) nearby instance lookup
-  private _spatialHash = new Map<string, number[]>();
-  private readonly SPATIAL_CELL_SIZE = 50; // 50 unit cells
+
+  // Frustum culling - view-dependent culling using camera frustum
+  private _frustum = new THREE.Frustum();
+  private _projScreenMatrix = new THREE.Matrix4();
 
   constructor(world: World) {
     super(world);
@@ -260,13 +293,6 @@ export class VegetationSystem extends System {
 
     // Create shared billboard geometry for imposters (1x1 plane)
     this.billboardGeometry = new THREE.PlaneGeometry(1, 1);
-
-    // Create grass blade geometry using the shader module
-    this.grassBladeGeometry = createGrassBladeGeometry();
-
-    // Grass material will be created in start() after terrain textures are loaded
-
-    // Note: Asset definitions are loaded in start() after world.assetsUrl is set
   }
 
   /**
@@ -444,11 +470,7 @@ export class VegetationSystem extends System {
 
       // Adjust color based on asset category
       const mat = billboardMaterial as THREE.MeshBasicMaterial;
-      if (
-        asset.category === "bush" ||
-        asset.category === "grass" ||
-        asset.category === "fern"
-      ) {
+      if (asset.category === "bush" || asset.category === "fern") {
         mat.color.setHex(0x1a3a1a);
         mat.opacity = 0.25;
       } else if (asset.category === "rock") {
@@ -555,6 +577,30 @@ export class VegetationSystem extends System {
 
     this.scene = this.world.stage.scene as THREE.Scene;
 
+    // Sync vegetation fade distances with shadow quality
+    // Vegetation must dissolve BEFORE shadow cutoff to avoid unshadowed trees
+    //
+    // DISTANCE HIERARCHY (must be in this order):
+    // 1. FADE_START - vegetation starts dissolving (dithering begins)
+    // 2. FADE_END - vegetation fully dissolved (invisible)
+    // 3. Shadow maxFar - shadows end (must be >= FADE_END to avoid unshadowed trees!)
+    // 4. CHUNK_RENDER_DISTANCE - chunks become visible (must be > FADE_END for dissolve to work)
+    const shadowsLevel = (this.world.prefs?.shadows as string) || "med";
+    const csmConfig =
+      csmLevels[shadowsLevel as keyof typeof csmLevels] || csmLevels.med;
+    const shadowMaxFar = csmConfig.maxFar;
+
+    // Sync fade distances with shadow range
+    // Vegetation fully dissolves AT shadow maxFar so we never see unshadowed trees
+    FADE_END = shadowMaxFar; // Fully dissolved at shadow cutoff
+    FADE_START = shadowMaxFar * 0.9; // Start dissolving at 90% of shadow range
+    CHUNK_RENDER_DISTANCE = shadowMaxFar * 1.2; // Chunks visible 20% beyond shadow range
+    CHUNK_RENDER_DISTANCE_SQ = CHUNK_RENDER_DISTANCE * CHUNK_RENDER_DISTANCE;
+
+    console.log(
+      `[VegetationSystem] Synced with shadows "${shadowsLevel}": fade ${FADE_START.toFixed(0)}-${FADE_END.toFixed(0)}m, chunks ${CHUNK_RENDER_DISTANCE.toFixed(0)}m`,
+    );
+
     // Load vegetation asset definitions now that world.assetsUrl is set
     await this.loadAssetDefinitions();
 
@@ -564,11 +610,18 @@ export class VegetationSystem extends System {
     this.vegetationGroup.frustumCulled = false; // Disable culling on group
     this.scene.add(this.vegetationGroup);
 
-    // Create separate group for procedural grass
-    this.grassGroup = new THREE.Group();
-    this.grassGroup.name = "ProceduralGrass";
-    this.grassGroup.frustumCulled = false;
-    this.vegetationGroup.add(this.grassGroup);
+    // Create SHARED material for all vegetation (reduces shader switches)
+    // All vegetation uses vertex colors, so one material works for everything
+    // Simple distance culling - no expensive LOD scaling
+    this.sharedVegetationMaterial = createGPUVegetationMaterial({
+      vertexColors: true,
+      alphaTest: 0.5,
+      fadeStart: FADE_START,
+      fadeEnd: FADE_END,
+    });
+    console.log(
+      `[VegetationSystem] Created shared material (fade: ${FADE_START.toFixed(0)}-${FADE_END.toFixed(0)}m, chunks: ${CHUNK_RENDER_DISTANCE.toFixed(0)}m)`,
+    );
 
     // PERFORMANCE: Enable layer 1 for main camera so it can see vegetation
     // Minimap camera only sees layer 0, so vegetation won't render in minimap
@@ -717,8 +770,6 @@ export class VegetationSystem extends System {
       return;
     }
 
-    // NOTE: Grass is handled globally via updateGrassAroundPlayer(), not per-tile
-
     // Get biome vegetation configuration for trees/bushes/etc
     const biomeConfig = await this.getBiomeVegetationConfig(data.biome);
 
@@ -763,8 +814,6 @@ export class VegetationSystem extends System {
       }
       this.tileVegetation.delete(key);
     }
-
-    // NOTE: Grass is handled globally, not per-tile
   }
 
   /**
@@ -840,6 +889,9 @@ export class VegetationSystem extends System {
         terrainSystem,
       );
     }
+
+    // Finalize all chunks - update bounding spheres for proper frustum culling
+    this.finalizeAllChunks();
   }
 
   /**
@@ -858,11 +910,6 @@ export class VegetationSystem extends System {
   ): Promise<void> {
     const tileData = this.tileVegetation.get(tileKey);
     if (!tileData) return;
-
-    // SHADER-DRIVEN GRASS: Skip tile-based grass - it's handled globally via createShaderGrass()
-    if (layer.category === "grass") {
-      return; // Grass is rendered as a single mesh that follows the player
-    }
 
     // Compute number of instances to generate based on density
     const targetCount = Math.floor(layer.density * (tileSize / 100) ** 2);
@@ -1086,217 +1133,10 @@ export class VegetationSystem extends System {
     return Math.sqrt(dhdx * dhdx + dhdz * dhdz);
   }
 
-  // ============================================================================
-  // GPU-ONLY GRASS - All computation in shader
-  // ============================================================================
-
-  private heightMapTexture: THREE.DataTexture | null = null;
-  private heightMapSize = 128; // 128x128 = ~0.27m per pixel at 35m area
-  private lastHeightMapCenter = new THREE.Vector2(Infinity, Infinity);
-
-  /**
-   * Initialize 100% GPU grass
-   * Shader computes all positions from instanceIndex
-   */
-  private async initializeGrass(): Promise<void> {
-    if (!this.grassBladeGeometry || !this.grassGroup) return;
-
-    console.log(
-      `[VegetationSystem] 🌿 Initializing GPU grass (${GPU_GRASS_INSTANCES} instances)...`,
-    );
-
-    // Create height map texture (required for GPU grass)
-    this.heightMapTexture = this.createHeightMapTexture();
-
-    // Get the terrain noise texture (same one used by TerrainShader for grass/dirt blending)
-    // This ensures grass placement matches terrain appearance exactly!
-    let noiseTexture = getNoiseTexture();
-    if (!noiseTexture) {
-      console.log(
-        `[VegetationSystem] 🌿 Generating noise texture for grass...`,
-      );
-      noiseTexture = generateNoiseTexture();
-    }
-
-    // Create grass material (100% GPU procedural) with height map + noise texture
-    this.grassMaterial = createGrassMaterial(
-      this.heightMapTexture,
-      noiseTexture,
-    );
-
-    // Initialize height map with current player position
-    const playerPos = this.getPlayerPosition();
-    if (playerPos) {
-      this.updateHeightMap(playerPos.x, playerPos.z);
-    }
-
-    // Create InstancedMesh with identity matrices
-    // Shader will compute actual positions from instanceIndex
-    this.grassMesh = new THREE.InstancedMesh(
-      this.grassBladeGeometry,
-      this.grassMaterial,
-      GPU_GRASS_INSTANCES,
-    );
-
-    // Set identity matrices once (shader overrides position)
-    const identity = new THREE.Matrix4();
-    for (let i = 0; i < GPU_GRASS_INSTANCES; i++) {
-      this.grassMesh.setMatrixAt(i, identity);
-    }
-    this.grassMesh.instanceMatrix.needsUpdate = true;
-
-    this.grassMesh.frustumCulled = false;
-    this.grassMesh.castShadow = false;
-    this.grassMesh.receiveShadow = false;
-    this.grassMesh.name = "GPU_Grass";
-    this.grassMesh.count = GPU_GRASS_INSTANCES;
-
-    // Layer 1 = main camera only (not minimap/reflection which use layer 0)
-    this.grassMesh.layers.set(1);
-
-    // Ensure main camera can see layer 1
-    if (this.world.camera) {
-      this.world.camera.layers.enable(1);
-    }
-
-    this.grassGroup.add(this.grassMesh);
-
-    console.log(
-      `[VegetationSystem] 🌿 GPU grass ready: ${GPU_GRASS_INSTANCES} instances`,
-    );
-  }
-
-  /**
-   * Create a height map texture for GPU grass
-   * Uses Float32 for full height precision
-   */
-  private createHeightMapTexture(): THREE.DataTexture {
-    const size = this.heightMapSize;
-    const data = new Float32Array(size * size);
-
-    const tex = new THREE.DataTexture(
-      data,
-      size,
-      size,
-      THREE.RedFormat,
-      THREE.FloatType,
-    );
-    tex.wrapS = THREE.ClampToEdgeWrapping;
-    tex.wrapT = THREE.ClampToEdgeWrapping;
-    tex.magFilter = THREE.LinearFilter;
-    tex.minFilter = THREE.LinearFilter;
-    tex.needsUpdate = true;
-
-    return tex;
-  }
-
-  /**
-   * Update height map texture around player
-   */
-  private updateHeightMap(playerX: number, playerZ: number): void {
-    if (!this.heightMapTexture || !this.grassMaterial) return;
-
-    // Check if we need to regenerate height data
-    const dx = playerX - this.lastHeightMapCenter.x;
-    const dz = playerZ - this.lastHeightMapCenter.y;
-    const needsRegenerate = dx * dx + dz * dz > 1; // 1m threshold - keep data fresh
-
-    if (!needsRegenerate) return;
-
-    // Update center to new position - data and uniform must match!
-    this.lastHeightMapCenter.set(playerX, playerZ);
-    this.grassMaterial.grassUniforms.heightMapCenter.value.set(
-      playerX,
-      playerZ,
-    );
-    this.grassMaterial.grassUniforms.heightMapSize.value =
-      GRASS_CONFIG.AREA_SIZE;
-
-    // Get terrain system
-    const terrainSystemRaw = this.world.getSystem("terrain");
-    if (!terrainSystemRaw) return;
-    const terrainSystem = terrainSystemRaw as unknown as {
-      getHeightAt: (x: number, z: number) => number;
-    };
-    if (!terrainSystem.getHeightAt) return;
-
-    const size = this.heightMapSize;
-    const areaSize = GRASS_CONFIG.AREA_SIZE;
-    const data = this.heightMapTexture.image.data as Float32Array;
-
-    // Sample terrain heights into texture - store RAW height values
-    let minH = 999,
-      maxH = -999,
-      sumH = 0;
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        const u = (x / size - 0.5) * areaSize + playerX;
-        const v = (y / size - 0.5) * areaSize + playerZ;
-        const height = terrainSystem.getHeightAt(u, v);
-        // Store raw height value (float precision)
-        data[y * size + x] = height;
-
-        minH = Math.min(minH, height);
-        maxH = Math.max(maxH, height);
-        sumH += height;
-      }
-    }
-
-    console.log(
-      `[Grass HeightMap] Regenerated at (${playerX.toFixed(1)}, ${playerZ.toFixed(1)}): height range ${minH.toFixed(1)}-${maxH.toFixed(1)}, avg=${(sumH / (size * size)).toFixed(1)}`,
-    );
-
-    this.heightMapTexture.needsUpdate = true;
-  }
-
-  /**
-   * Update grass uniforms and height map
-   * Shader does all position computation
-   */
-  private updateGrass(): void {
-    if (!this.grassMaterial) return;
-
-    const playerPos = this.getPlayerPosition();
-    if (playerPos) {
-      this.grassMaterial.grassUniforms.playerPosition.value.copy(playerPos);
-      // Update height map if player moved
-      this.updateHeightMap(playerPos.x, playerPos.z);
-
-      // Debug log once per second
-      if (!this._lastGrassDebug || Date.now() - this._lastGrassDebug > 2000) {
-        this._lastGrassDebug = Date.now();
-        const uniforms = this.grassMaterial.grassUniforms;
-        console.log(
-          `[Grass Debug] player=(${playerPos.x.toFixed(1)}, ${playerPos.y.toFixed(1)}, ${playerPos.z.toFixed(1)}) heightMapCenter=(${uniforms.heightMapCenter.value.x.toFixed(1)}, ${uniforms.heightMapCenter.value.y.toFixed(1)}) heightMapSize=${uniforms.heightMapSize.value}`,
-        );
-      }
-    }
-
-    this.grassMaterial.grassUniforms.time.value = this.grassTime;
-
-    const skySystem = this.world.getSystem("sky") as unknown as {
-      sunDirection?: THREE.Vector3;
-    } | null;
-    if (skySystem?.sunDirection) {
-      this.grassMaterial.grassUniforms.sunDirection.value.copy(
-        skySystem.sunDirection,
-      );
-    }
-  }
-
-  private _lastGrassDebug = 0;
-
-  /**
-   * Simple hash function for deterministic randomness
-   */
-  private hashPosition(x: number, z: number): number {
-    const n = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
-    return n - Math.floor(n);
-  }
-
   /**
    * Setup a vegetation material for proper lighting
    * Converts to MeshStandardMaterial and configures for CSM shadows
+   * OPTIMIZATION: Prefers vertex colors over textures when available
    */
   private setupVegetationMaterial(
     material: THREE.Material,
@@ -1304,18 +1144,23 @@ export class VegetationSystem extends System {
   ): THREE.Material {
     // Extract properties from any material type
     const matAny = material as THREE.MeshStandardMaterial;
-    const map = matAny.map || null;
+    const hasVertexColors = matAny.vertexColors || false;
+
+    // OPTIMIZATION: Only use textures if vertex colors are not available
+    // Vertex colors are faster (no texture sampling) and use less GPU memory
+    const map = hasVertexColors ? null : matAny.map || null;
     const color = matAny.color || new THREE.Color(0xffffff);
-    const alphaMap = matAny.alphaMap || null;
+    const alphaMap = hasVertexColors ? null : matAny.alphaMap || null;
 
     // Create fresh MeshStandardMaterial for vegetation
     const stdMat = new THREE.MeshStandardMaterial({
       color: color,
       map: map,
       alphaMap: alphaMap,
+      vertexColors: hasVertexColors,
       // Alpha handling - use alphaTest for hard edges (faster than blending)
       transparent: false,
-      alphaTest: 0.5, // Standard alpha cutoff
+      alphaTest: hasVertexColors ? 0.1 : 0.5, // Lower alpha test for vertex color models
       // Double-sided for foliage
       side: THREE.DoubleSide,
       // Matte surface - no specular, no reflections
@@ -1327,7 +1172,7 @@ export class VegetationSystem extends System {
       fog: true,
     });
 
-    // Ensure texture colorspace is correct
+    // Ensure texture colorspace is correct (only if using texture)
     if (stdMat.map) {
       stdMat.map.colorSpace = THREE.SRGBColorSpace;
     }
@@ -1378,62 +1223,166 @@ export class VegetationSystem extends System {
     };
   }
 
+  // ============================================================================
+  // CHUNKED VEGETATION SYSTEM
+  // ============================================================================
+
   /**
-   * Add a vegetation instance to the scene
+   * Get chunk coordinates from world position
    */
-  private async addInstance(instance: VegetationInstance): Promise<void> {
-    const asset = this.assetDefinitions.get(instance.assetId);
-    if (!asset) return;
+  private getChunkCoords(
+    x: number,
+    z: number,
+  ): { chunkX: number; chunkZ: number } {
+    return {
+      chunkX: Math.floor(x / VEGETATION_CHUNK_SIZE),
+      chunkZ: Math.floor(z / VEGETATION_CHUNK_SIZE),
+    };
+  }
 
-    // Ensure asset is loaded
-    let assetData: InstancedAssetData | undefined = this.loadedAssets.get(
-      instance.assetId,
+  /**
+   * Get chunk key from world position and asset ID
+   */
+  private getChunkKey(x: number, z: number, assetId: string): string {
+    const { chunkX, chunkZ } = this.getChunkCoords(x, z);
+    return `${chunkX}_${chunkZ}_${assetId}`;
+  }
+
+  /**
+   * Get or create a chunked mesh for a position and asset
+   */
+  private getOrCreateChunkedMesh(
+    x: number,
+    z: number,
+    assetId: string,
+    assetDataRef: AssetData,
+  ): ChunkedInstancedMesh | null {
+    const chunkKey = this.getChunkKey(x, z, assetId);
+
+    // Return existing chunk mesh
+    let chunked = this.chunkedMeshes.get(chunkKey);
+    if (chunked) return chunked;
+
+    // Create new chunk mesh
+    const geometry = assetDataRef.geometry.clone();
+
+    // Create instance attributes
+    const positionAttr = new THREE.InstancedBufferAttribute(
+      new Float32Array(MAX_INSTANCES_PER_CHUNK * 3),
+      3,
     );
-    if (!assetData) {
-      const loadedAsset = await this.loadAsset(asset);
-      if (!loadedAsset) return;
-      assetData = loadedAsset;
+    const scaleAttr = new THREE.InstancedBufferAttribute(
+      new Float32Array(MAX_INSTANCES_PER_CHUNK),
+      1,
+    );
+    const rotationAttr = new THREE.InstancedBufferAttribute(
+      new Float32Array(MAX_INSTANCES_PER_CHUNK),
+      1,
+    );
+
+    positionAttr.setUsage(THREE.DynamicDrawUsage);
+    scaleAttr.setUsage(THREE.DynamicDrawUsage);
+    rotationAttr.setUsage(THREE.DynamicDrawUsage);
+
+    geometry.setAttribute("instancePosition", positionAttr);
+    geometry.setAttribute("instanceScale", scaleAttr);
+    geometry.setAttribute("instanceRotationY", rotationAttr);
+
+    // Create instanced mesh with shared material
+    const mesh = new THREE.InstancedMesh(
+      geometry,
+      assetDataRef.gpuMaterial,
+      MAX_INSTANCES_PER_CHUNK,
+    );
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.count = 0;
+    // DISABLE Three.js frustum culling - we do manual frustum culling in updateChunkVisibility()
+    // which sets mesh.visible = false. Manual culling is more efficient because:
+    // 1. We batch all checks in one loop before render
+    // 2. Setting visible=false skips the entire render pipeline for that mesh
+    // 3. Avoids redundant frustum checks (we'd be checking twice otherwise)
+    mesh.frustumCulled = false;
+    // Vegetation casts shadows but does NOT receive them
+    // Receiving shadows on thin/double-sided geometry (leaves) causes severe banding artifacts
+    // The visual difference is minimal - trees look fine without self-shadowing
+    mesh.castShadow = true;
+    mesh.receiveShadow = false;
+    mesh.name = `VegChunk_${chunkKey}`;
+    mesh.layers.set(1);
+
+    // Add to scene
+    if (this.vegetationGroup) {
+      this.vegetationGroup.add(mesh);
     }
 
-    // Check if we have room for more instances
-    if (assetData.activeCount >= assetData.maxInstances) {
-      return;
-    }
+    // Track chunk bounds
+    const { chunkX, chunkZ } = this.getChunkCoords(x, z);
+    const chunkWorldX = chunkX * VEGETATION_CHUNK_SIZE;
+    const chunkWorldZ = chunkZ * VEGETATION_CHUNK_SIZE;
 
-    const matrixIndex = assetData.activeCount;
+    chunked = {
+      mesh,
+      count: 0,
+      positionAttr,
+      scaleAttr,
+      rotationAttr,
+      // Track ACTUAL instance bounds (not chunk bounds)
+      minX: Infinity,
+      minY: Infinity,
+      minZ: Infinity,
+      maxX: -Infinity,
+      maxY: -Infinity,
+      maxZ: -Infinity,
+    };
+
+    this.chunkedMeshes.set(chunkKey, chunked);
+    return chunked;
+  }
+
+  /**
+   * Add instance to chunked mesh
+   */
+  private addInstanceToChunk(
+    instance: VegetationInstance,
+    assetDataRef: AssetData,
+  ): boolean {
+    const { x, z } = instance.position;
     const worldY =
-      instance.position.y + assetData.modelBaseOffset * instance.scale;
+      instance.position.y + assetDataRef.modelBaseOffset * instance.scale;
 
-    // WATER CHECK: Reject any instance below water level
+    // Water check
     const waterCutoff = WATER_LEVEL + WATER_EDGE_BUFFER;
-    if (worldY < waterCutoff) {
-      console.warn(
-        `[VegetationSystem] ⛔ REJECTED tree at Y=${worldY.toFixed(2)} (water cutoff=${waterCutoff.toFixed(2)}), pos=(${instance.position.x.toFixed(1)}, ${instance.position.z.toFixed(1)})`,
-      );
-      return; // Do not add this instance
-    }
+    if (worldY < waterCutoff) return false;
 
-    // Write instance attributes for GPU shader (used for distance fade calculations)
-    if (
-      assetData.positionAttr &&
-      assetData.scaleAttr &&
-      assetData.rotationAttr
-    ) {
-      const i3 = matrixIndex * 3;
-      assetData.positionAttr.array[i3] = instance.position.x;
-      assetData.positionAttr.array[i3 + 1] = worldY;
-      assetData.positionAttr.array[i3 + 2] = instance.position.z;
-      assetData.positionAttr.needsUpdate = true;
+    // Get or create chunk mesh
+    const chunked = this.getOrCreateChunkedMesh(
+      x,
+      z,
+      instance.assetId,
+      assetDataRef,
+    );
+    if (!chunked || chunked.count >= MAX_INSTANCES_PER_CHUNK) return false;
 
-      assetData.scaleAttr.array[matrixIndex] = instance.scale;
-      assetData.scaleAttr.needsUpdate = true;
+    const idx = chunked.count;
+    const i3 = idx * 3;
 
-      assetData.rotationAttr.array[matrixIndex] = instance.rotation.y;
-      assetData.rotationAttr.needsUpdate = true;
-    }
+    // Write instance attributes
+    chunked.positionAttr.array[i3] = x;
+    chunked.positionAttr.array[i3 + 1] = worldY;
+    chunked.positionAttr.array[i3 + 2] = z;
+    chunked.scaleAttr.array[idx] = instance.scale;
+    chunked.rotationAttr.array[idx] = instance.rotation.y;
 
-    // Compose proper transform matrix for Three.js InstancedMesh
-    this._tempPosition.set(instance.position.x, worldY, instance.position.z);
+    // Update bounds for bounding sphere (track ALL axes)
+    chunked.minX = Math.min(chunked.minX, x);
+    chunked.maxX = Math.max(chunked.maxX, x);
+    chunked.minY = Math.min(chunked.minY, worldY);
+    chunked.maxY = Math.max(chunked.maxY, worldY);
+    chunked.minZ = Math.min(chunked.minZ, z);
+    chunked.maxZ = Math.max(chunked.maxZ, z);
+
+    // Write instance matrix
+    this._tempPosition.set(x, worldY, z);
     this._tempEuler.set(0, instance.rotation.y, 0);
     this._tempQuaternion.setFromEuler(this._tempEuler);
     this._tempScale.setScalar(instance.scale);
@@ -1442,32 +1391,195 @@ export class VegetationSystem extends System {
       this._tempQuaternion,
       this._tempScale,
     );
-    assetData.instancedMesh.setMatrixAt(matrixIndex, this._tempMatrix);
-    assetData.instancedMesh.instanceMatrix.needsUpdate = true;
+    chunked.mesh.setMatrixAt(idx, this._tempMatrix);
 
-    // Track instance
-    assetData.instanceMap.set(instance.id, matrixIndex);
-    assetData.instances[matrixIndex] = instance;
-    instance.matrixIndex = matrixIndex;
-    assetData.activeCount++;
+    chunked.count++;
+    return true;
+  }
 
-    // Update instance count
-    assetData.instancedMesh.count = assetData.activeCount;
+  /**
+   * Finalize chunk - update bounding sphere and GPU buffers
+   *
+   * IMPORTANT: The bounding sphere is stored in geometry.boundingSphere but with
+   * WORLD coordinates (not local). This works because chunk meshes are always at
+   * the origin with identity transforms. The frustum test in updateChunkVisibility()
+   * passes this sphere directly to Frustum.intersectsSphere() which expects world space.
+   */
+  private finalizeChunk(chunkKey: string): void {
+    const chunked = this.chunkedMeshes.get(chunkKey);
+    if (!chunked || chunked.count === 0) return;
 
-    // Debug: Log tree placements near water
-    if (instance.category === "tree" && worldY < 15) {
-      console.log(
-        `[VegetationSystem] 🌲 Tree placed at Y=${worldY.toFixed(2)}, pos=(${instance.position.x.toFixed(1)}, ${instance.position.z.toFixed(1)})`,
-      );
+    // Update mesh count
+    chunked.mesh.count = chunked.count;
+
+    // Mark attributes for upload
+    chunked.positionAttr.needsUpdate = true;
+    chunked.scaleAttr.needsUpdate = true;
+    chunked.rotationAttr.needsUpdate = true;
+    chunked.mesh.instanceMatrix.needsUpdate = true;
+
+    // Compute bounding sphere for frustum culling (in WORLD space)
+    // Note: We store world coords in geometry.boundingSphere which is normally local space.
+    // This works because chunk meshes have identity transforms (position=0, no rotation/scale).
+    const geometry = chunked.mesh.geometry;
+    const centerX = (chunked.minX + chunked.maxX) / 2;
+    const centerY = (chunked.minY + chunked.maxY) / 2;
+    const centerZ = (chunked.minZ + chunked.maxZ) / 2;
+
+    // Radius calculation:
+    // - Half diagonal of instance positions (where bases are placed)
+    // - Plus BOUNDING_SPHERE_BUFFER for model heights and scale variations
+    // The buffer accounts for: tree height (~15-20m), scale variations (0.8-1.5x),
+    // and ensures the sphere fully contains all visible geometry
+    const dx = chunked.maxX - chunked.minX;
+    const dy = chunked.maxY - chunked.minY;
+    const dz = chunked.maxZ - chunked.minZ;
+    const diagonal = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    const radius = diagonal / 2 + BOUNDING_SPHERE_BUFFER;
+
+    if (!geometry.boundingSphere) {
+      geometry.boundingSphere = new THREE.Sphere();
+    }
+    geometry.boundingSphere.center.set(centerX, centerY, centerZ);
+    geometry.boundingSphere.radius = radius;
+  }
+
+  /**
+   * Finalize all chunks after population
+   */
+  private finalizeAllChunks(): void {
+    let totalChunks = 0;
+    let totalInstances = 0;
+
+    for (const [chunkKey, chunked] of this.chunkedMeshes) {
+      if (chunked.count > 0) {
+        this.finalizeChunk(chunkKey);
+        totalChunks++;
+        totalInstances += chunked.count;
+      }
+    }
+
+    console.log(
+      `[VegetationSystem] 📦 Finalized ${totalChunks} chunks with ${totalInstances} total instances`,
+    );
+  }
+
+  /**
+   * Add a vegetation instance to the scene using chunked system
+   */
+  private async addInstance(instance: VegetationInstance): Promise<void> {
+    const asset = this.assetDefinitions.get(instance.assetId);
+    if (!asset) return;
+
+    // Ensure asset data is loaded
+    let assetDataRef = this.assetData.get(instance.assetId);
+    if (!assetDataRef) {
+      // Load the asset
+      const loaded = await this.loadAssetData(asset);
+      if (!loaded) return;
+      assetDataRef = loaded;
+    }
+
+    // Add to chunked mesh
+    this.addInstanceToChunk(instance, assetDataRef);
+  }
+
+  /**
+   * Load asset geometry/material for chunked system
+   */
+  private async loadAssetData(
+    asset: VegetationAsset,
+  ): Promise<AssetData | null> {
+    // Check if already loaded
+    const existing = this.assetData.get(asset.id);
+    if (existing) return existing;
+
+    // Check if currently loading
+    if (this.pendingAssetLoads.has(asset.id)) {
+      // Wait for load to complete
+      while (this.pendingAssetLoads.has(asset.id)) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      return this.assetData.get(asset.id) ?? null;
+    }
+
+    this.pendingAssetLoads.add(asset.id);
+
+    try {
+      const baseUrl = (this.world.assetsUrl || "").replace(/\/$/, "");
+      const modelPath = `${baseUrl}/${asset.model}`;
+
+      // Use modelCache which has proper meshopt decoder setup
+      const { scene } = await modelCache.loadModel(modelPath, this.world);
+
+      // Extract geometry and material from loaded scene
+      let geometry: THREE.BufferGeometry | null = null;
+      let material: THREE.Material | THREE.Material[] =
+        new THREE.MeshStandardMaterial();
+
+      scene.traverse((child) => {
+        if (child instanceof THREE.Mesh && !geometry) {
+          geometry = child.geometry;
+          material = child.material;
+        }
+      });
+
+      if (!geometry) {
+        console.warn(`[VegetationSystem] No geometry found in ${asset.id}`);
+        return null;
+      }
+
+      // Type assertion after null check
+      const validGeometry = geometry as THREE.BufferGeometry;
+
+      // Compute model base offset
+      validGeometry.computeBoundingBox();
+      const modelBaseOffset = validGeometry.boundingBox
+        ? -validGeometry.boundingBox.min.y
+        : 0;
+
+      // Create asset data
+      const data: AssetData = {
+        geometry: validGeometry,
+        material,
+        asset,
+        modelBaseOffset,
+        gpuMaterial: this.sharedVegetationMaterial!,
+      };
+
+      this.assetData.set(asset.id, data);
+      console.log(`[VegetationSystem] ✅ Loaded asset data for ${asset.id}`);
+
+      return data;
+    } catch (err) {
+      console.error(`[VegetationSystem] Failed to load ${asset.id}:`, err);
+      return null;
+    } finally {
+      this.pendingAssetLoads.delete(asset.id);
     }
   }
 
   /**
-   * Remove a vegetation instance from the scene
+   * Remove a vegetation instance from the scene.
+   *
+   * WARNING: This method operates on the DEPRECATED loadedAssets system.
+   * The current chunked system (chunkedMeshes) does not support per-instance removal.
+   * For chunked vegetation, instances are permanent once created.
+   *
+   * In practice, tiles are rarely unloaded (terrain keeps tiles loaded within radius),
+   * so this limitation has minimal impact. If tile unloading becomes important,
+   * we'd need to implement chunk rebuilding or disposal.
+   *
+   * @deprecated Use chunked system which doesn't support removal
    */
   private removeInstance(instance: VegetationInstance): void {
+    // This only works for the deprecated loadedAssets system
     const assetData = this.loadedAssets.get(instance.assetId);
-    if (!assetData) return;
+    if (!assetData) {
+      // Instance is in chunked system - removal not supported
+      // Chunked instances persist until the chunk is disposed
+      return;
+    }
 
     const matrixIndex = assetData.instanceMap.get(instance.id);
     if (matrixIndex === undefined) return;
@@ -1496,90 +1608,6 @@ export class VegetationSystem extends System {
     // Update instance count
     assetData.instancedMesh.count = assetData.activeCount;
     assetData.instancedMesh.instanceMatrix.needsUpdate = true;
-  }
-
-  /**
-   * Create a grass-specific material with distance fade and terrain blending
-   */
-  private createGrassMaterial(
-    baseMaterial: THREE.Material | THREE.Material[],
-  ): THREE.Material | THREE.Material[] {
-    // Handle material arrays
-    const processOneMaterial = (mat: THREE.Material): THREE.Material => {
-      // Clone the material to avoid modifying the original
-      const grassMat = mat.clone();
-
-      // Enable transparency and alpha testing for grass cards
-      grassMat.transparent = true;
-      grassMat.alphaTest = 0.3; // Lower threshold for softer edges
-      grassMat.side = THREE.DoubleSide; // Render both sides of grass blades
-      grassMat.depthWrite = true;
-
-      // If it's a MeshStandardMaterial, adjust for grass with distance fade
-      if (grassMat instanceof THREE.MeshStandardMaterial) {
-        // Reduce metalness and roughness for grass
-        grassMat.metalness = 0;
-        grassMat.roughness = 0.9;
-        // Tint towards terrain green
-        grassMat.color.lerp(new THREE.Color(0x5a8a5f), 0.3);
-
-        // Add custom shader for distance fade
-        grassMat.onBeforeCompile = (shader) => {
-          // Add uniforms for camera position and fade distance
-          shader.uniforms.grassFadeNear = { value: GRASS_CONFIG.FADE_START };
-          shader.uniforms.grassFadeFar = { value: GRASS_CONFIG.FADE_END };
-
-          // Inject distance fade into fragment shader
-          shader.fragmentShader = shader.fragmentShader.replace(
-            "#include <common>",
-            `#include <common>
-            uniform float grassFadeNear;
-            uniform float grassFadeFar;`,
-          );
-
-          shader.fragmentShader = shader.fragmentShader.replace(
-            "#include <dithering_fragment>",
-            `#include <dithering_fragment>
-            // Distance-based fade for grass
-            float dist = length(vViewPosition);
-            float fadeFactor = 1.0 - smoothstep(grassFadeNear, grassFadeFar, dist);
-            gl_FragColor.a *= fadeFactor;
-            if (gl_FragColor.a < 0.01) discard;`,
-          );
-
-          // Update uniforms each frame
-          const originalOnBeforeRender = grassMat.onBeforeRender;
-          grassMat.onBeforeRender = (
-            renderer,
-            scene,
-            camera,
-            geometry,
-            object,
-            group,
-          ) => {
-            if (originalOnBeforeRender) {
-              originalOnBeforeRender.call(
-                grassMat,
-                renderer,
-                scene,
-                camera,
-                geometry,
-                object,
-                group,
-              );
-            }
-            // Update camera-relative uniforms if needed
-          };
-        };
-      }
-
-      return grassMat;
-    };
-
-    if (Array.isArray(baseMaterial)) {
-      return baseMaterial.map(processOneMaterial);
-    }
-    return processOneMaterial(baseMaterial);
   }
 
   /**
@@ -1659,20 +1687,15 @@ export class VegetationSystem extends System {
       instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       instancedMesh.count = 0;
 
-      // DISABLE Three.js frustum culling on the whole mesh!
-      // We do per-instance frustum culling manually in updateLOD.
-      // If we leave this true, Three.js might cull the entire instanced mesh
-      // based on an outdated bounding sphere, causing all vegetation to vanish.
+      // DISABLE frustum culling - InstancedMesh can't frustum cull scattered instances correctly
+      // because it uses ONE bounding sphere for ALL instances. When instances are spread
+      // across the terrain, turning the camera causes them all to disappear at once.
+      // GPU shader handles distance culling via opacity instead.
       instancedMesh.frustumCulled = false;
 
-      // Configure shadows based on category
-      if (asset.category === "tree") {
-        instancedMesh.castShadow = true;
-        instancedMesh.receiveShadow = true;
-      } else {
-        instancedMesh.castShadow = false;
-        instancedMesh.receiveShadow = true;
-      }
+      // Vegetation casts shadows but does NOT receive them (prevents self-shadow banding)
+      instancedMesh.castShadow = true;
+      instancedMesh.receiveShadow = false;
       instancedMesh.name = `Vegetation_${asset.id}`;
 
       // PERFORMANCE: Layer 1 = main camera only (not minimap which uses layer 0)
@@ -1712,28 +1735,11 @@ export class VegetationSystem extends System {
       // Check if geometry has vertex colors
       const hasVertexColors = validGeometry.attributes.color !== undefined;
 
-      // Create GPU material with shader-based LOD, wind, and distance fade
-      const baseMat = Array.isArray(finalMaterial)
-        ? finalMaterial[0]
-        : finalMaterial;
-      const stdMat = baseMat as THREE.MeshStandardMaterial;
-      const gpuMaterial = createGPUVegetationMaterial({
-        color: stdMat.color,
-        map: stdMat.map,
-        alphaTest: hasVertexColors ? 0.1 : 0.5, // Lower alpha test for vertex color models
-        fadeStart:
-          LOD_CONFIG[asset.category as keyof typeof LOD_CONFIG]?.fadeStart ??
-          60,
-        fadeEnd:
-          LOD_CONFIG[asset.category as keyof typeof LOD_CONFIG]?.fadeEnd ?? 100,
-        vertexColors: hasVertexColors,
-      }) as GPUVegetationMaterial;
-
-      if (hasVertexColors) {
-        console.log(
-          `[VegetationSystem] 🎨 Vertex colors enabled for ${asset.id}`,
-        );
-      }
+      // Use shared material for all vegetation (no textures)
+      const gpuMaterial = this.sharedVegetationMaterial!;
+      console.log(
+        `[VegetationSystem] ✅ Using SHARED material for ${asset.id} (vertexColors: ${hasVertexColors})`,
+      );
 
       instancedMesh.material = gpuMaterial;
 
@@ -1784,9 +1790,22 @@ export class VegetationSystem extends System {
   // We don't need to constantly re-sort and update matrices - that caused stuttering
 
   /**
-   * Get current player position
+   * Get the reference position for distance-based culling and fade.
+   *
+   * Uses camera position (not player) because:
+   * 1. In third-person view, fade should be relative to what the player SEES
+   * 2. Camera position gives intuitive "fog of war" effect
+   * 3. Frustum culling already uses camera, so distances should match
+   *
+   * NOTE: Returns a reused temp vector - do not store the result!
    */
   private getPlayerPosition(): THREE.Vector3 | null {
+    // Use camera position for view-relative culling
+    if (this.world.camera?.position) {
+      return this._tempPosition.copy(this.world.camera.position);
+    }
+
+    // Fallback to player position if no camera available
     const players = this.world.getPlayers();
     if (!players || players.length === 0) return null;
 
@@ -1810,31 +1829,42 @@ export class VegetationSystem extends System {
   // Camera layer setup
   private cameraLayerSet = false;
 
+  /**
+   * Per-frame update for vegetation culling.
+   *
+   * CULLING PIPELINE (each frame):
+   * 1. updateGPUUniforms() - Pass camera position to shader for GPU fade
+   * 2. updateChunkVisibility() - CPU distance + frustum culling (sets mesh.visible)
+   * 3. GPU shader - Per-fragment dithered dissolve based on distance
+   *
+   * This hybrid approach is optimal because:
+   * - CPU culling skips entire draw calls (mesh.visible = false)
+   * - GPU fade provides smooth transitions without CPU overhead
+   * - Frustum culling prevents rendering behind the camera
+   */
   override update(delta: number): void {
     if (!this.world.isClient) return;
 
-    // Ensure camera can see grass layer (one-time setup)
+    // Ensure camera can see vegetation layer (one-time setup)
+    // Layer 1 = main camera only (minimap uses layer 0)
     if (!this.cameraLayerSet && this.world.camera) {
       this.world.camera.layers.enable(1);
       this.cameraLayerSet = true;
     }
 
     const now = Date.now();
-    const playerPos = this.getPlayerPosition();
+    // Get camera position (used for distance-based culling and shader fade)
+    // We use camera position (not player position) for proper third-person view fade
+    const cameraPos = this.getPlayerPosition();
 
-    // Update grass (uniforms + regenerate if player moved)
-    this.grassTime += delta;
-    this.updateGrass();
+    // Update GPU uniforms and perform CPU-side culling
+    if (cameraPos) {
+      // GPU uniforms: playerPos used by shader for distance fade calculation
+      this.updateGPUUniforms(cameraPos.x, cameraPos.y, cameraPos.z);
 
-    // Update GPU uniforms - this is ALL the CPU work per frame!
-    // The shader handles LOD, culling, transforms, and wind animation.
-    if (playerPos) {
-      this.updateGPUUniforms(
-        playerPos.x,
-        playerPos.y,
-        playerPos.z,
-        this.grassTime,
-      );
+      // CPU culling: hide chunks outside camera frustum or beyond render distance
+      // This is more efficient than GPU culling because we skip entire draw calls
+      this.updateChunkVisibility(cameraPos.x, cameraPos.z);
     }
 
     // Lazy load pending tiles as player moves
@@ -1846,35 +1876,96 @@ export class VegetationSystem extends System {
     // Periodic stats logging (debug only)
     if (now - this.lastStatsLog > 30000) {
       this.lastStatsLog = now;
-      const stats = this.getStats();
-      if (stats.loadedAssets > 0 || stats.tilesWithVegetation > 0) {
-        const grassCount = this.grassMesh?.count ?? 0;
-        console.log(
-          `[VegetationSystem] 📊 ${stats.totalInstances} vegetation, ${grassCount} grass`,
-        );
-      }
     }
   }
 
   /**
    * Update GPU material uniforms. This is the ONLY CPU work per frame (~16 bytes).
-   * All LOD, culling, transforms, and wind happen in the shader.
+   * All distance fade, water culling, and transforms happen in the shader.
    */
   private updateGPUUniforms(
     playerX: number,
     playerY: number,
     playerZ: number,
-    time: number,
   ): void {
+    // OPTIMIZATION: Update shared material ONCE (used by all vertex-color vegetation)
+    if (this.sharedVegetationMaterial) {
+      this.sharedVegetationMaterial.gpuUniforms.playerPos.value.set(
+        playerX,
+        playerY,
+        playerZ,
+      );
+    }
+
+    // Update any per-asset materials (fallback for textured models)
     for (const [, assetData] of this.loadedAssets) {
+      // Skip if using shared material (already updated above)
+      if (assetData.gpuMaterial === this.sharedVegetationMaterial) continue;
+
       if (assetData.gpuMaterial) {
         assetData.gpuMaterial.gpuUniforms.playerPos.value.set(
           playerX,
           playerY,
           playerZ,
         );
-        assetData.gpuMaterial.gpuUniforms.time.value = time;
       }
+    }
+  }
+
+  /**
+   * Show/hide chunks based on camera view frustum and distance.
+   *
+   * This is the primary CPU-side culling for vegetation, running every frame.
+   * It's more efficient than Three.js built-in frustum culling because:
+   * 1. We batch all checks in one loop before render starts
+   * 2. Setting visible=false skips the entire render pipeline
+   * 3. We combine distance + frustum checks to minimize work
+   *
+   * @param cameraX - Camera X position (used for distance culling)
+   * @param cameraZ - Camera Z position (used for distance culling)
+   */
+  private updateChunkVisibility(cameraX: number, cameraZ: number): void {
+    const camera = this.world.camera;
+    if (!camera) return;
+
+    // Update frustum from camera's projection and view matrices
+    // matrixWorldInverse is the view matrix (world->camera transform)
+    // projectionMatrix * matrixWorldInverse = clip space transform
+    //
+    // IMPORTANT: updateMatrixWorld() updates matrixWorld but NOT matrixWorldInverse
+    // We must explicitly compute matrixWorldInverse from matrixWorld
+    camera.updateMatrixWorld();
+    camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+    this._projScreenMatrix.multiplyMatrices(
+      camera.projectionMatrix,
+      camera.matrixWorldInverse,
+    );
+    this._frustum.setFromProjectionMatrix(this._projScreenMatrix);
+
+    for (const [, chunked] of this.chunkedMeshes) {
+      // Get bounding sphere (stored in world coordinates, see finalizeChunk)
+      const bs = chunked.mesh.geometry.boundingSphere;
+      if (!bs) {
+        chunked.mesh.visible = false;
+        continue;
+      }
+
+      // STAGE 1: Fast distance pre-filter (horizontal distance only)
+      // Chunks beyond CHUNK_RENDER_DISTANCE are hidden regardless of view direction
+      // This is cheaper than frustum test and catches most distant chunks
+      const dx = bs.center.x - cameraX;
+      const dz = bs.center.z - cameraZ;
+      const distSq = dx * dx + dz * dz;
+
+      if (distSq >= CHUNK_RENDER_DISTANCE_SQ) {
+        chunked.mesh.visible = false;
+        continue;
+      }
+
+      // STAGE 2: Camera frustum culling
+      // Hide chunks outside the camera's view (behind camera, off-screen)
+      // Uses the world-space bounding sphere we computed in finalizeChunk
+      chunked.mesh.visible = this._frustum.intersectsSphere(bs);
     }
   }
 
@@ -1967,6 +2058,68 @@ export class VegetationSystem extends System {
     };
   }
 
+  /**
+   * Get detailed render statistics for debugging performance issues
+   * Call this from console: world.getSystem('vegetation').getDetailedStats()
+   */
+  getDetailedStats(): void {
+    console.log("=== VEGETATION SYSTEM DETAILED STATS ===");
+    console.log(`Asset definitions: ${this.assetDefinitions.size}`);
+    console.log(`Loaded assets (draw calls): ${this.loadedAssets.size}`);
+    console.log(`Tiles with vegetation: ${this.tileVegetation.size}`);
+    console.log("");
+
+    let totalTriangles = 0;
+    let totalVertices = 0;
+    let totalInstances = 0;
+    let totalVisibleInstances = 0;
+    let uniqueMaterials = new Set<THREE.Material>();
+    let uniqueTextures = new Set<THREE.Texture>();
+
+    console.log("--- Per-Asset Breakdown ---");
+    for (const [assetId, assetData] of this.loadedAssets) {
+      const mesh = assetData.instancedMesh;
+      const geo = mesh.geometry;
+      const vertCount = geo.attributes.position?.count ?? 0;
+      const indexCount = geo.index?.count ?? vertCount;
+      const triCount = Math.floor(indexCount / 3);
+      const instanceCount = assetData.activeCount;
+      const visibleCount = mesh.count;
+
+      totalTriangles += triCount * visibleCount;
+      totalVertices += vertCount * visibleCount;
+      totalInstances += instanceCount;
+      totalVisibleInstances += visibleCount;
+
+      // Track materials
+      const mats = Array.isArray(mesh.material)
+        ? mesh.material
+        : [mesh.material];
+      for (const mat of mats) {
+        uniqueMaterials.add(mat);
+        const stdMat = mat as THREE.MeshStandardMaterial;
+        if (stdMat.map) uniqueTextures.add(stdMat.map);
+        if (stdMat.normalMap) uniqueTextures.add(stdMat.normalMap);
+        if (stdMat.alphaMap) uniqueTextures.add(stdMat.alphaMap);
+      }
+
+      console.log(
+        `  ${assetId}: ${vertCount} verts, ${triCount} tris/inst, ${instanceCount} instances (${visibleCount} visible) = ${triCount * visibleCount} tris rendered`,
+      );
+    }
+
+    console.log("");
+    console.log("--- Totals ---");
+    console.log(`Draw calls: ${this.loadedAssets.size}`);
+    console.log(`Unique materials: ${uniqueMaterials.size}`);
+    console.log(`Unique textures: ${uniqueTextures.size}`);
+    console.log(`Total instances: ${totalInstances}`);
+    console.log(`Visible instances: ${totalVisibleInstances}`);
+    console.log(`Total triangles rendered: ${totalTriangles.toLocaleString()}`);
+    console.log(`Total vertices: ${totalVertices.toLocaleString()}`);
+    console.log("============================================");
+  }
+
   override destroy(): void {
     // Remove from scene
     if (this.vegetationGroup && this.vegetationGroup.parent) {
@@ -1984,29 +2137,10 @@ export class VegetationSystem extends System {
     }
     this.imposters.clear();
 
-    // Dispose grass mesh
-    if (this.grassMesh) {
-      this.grassMesh.dispose();
-      this.grassMesh = null;
-    }
-
-    // Dispose grass blade geometry
-    if (this.grassBladeGeometry) {
-      this.grassBladeGeometry.dispose();
-      this.grassBladeGeometry = null;
-    }
-
-    // Dispose grass material
-    if (this.grassMaterial) {
-      this.grassMaterial.dispose();
-      this.grassMaterial = null;
-    }
-
     this.loadedAssets.clear();
     this.tileVegetation.clear();
     this.assetDefinitions.clear();
     this.vegetationGroup = null;
-    this.grassGroup = null;
     this.scene = null;
   }
 }

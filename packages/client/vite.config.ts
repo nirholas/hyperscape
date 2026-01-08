@@ -218,6 +218,9 @@ export default defineConfig(({ mode }) => {
             ? "https://api.hyperscape.lol"
             : "http://localhost:4001"),
       ),
+      "import.meta.env.PUBLIC_PRIVY_APP_ID": JSON.stringify(
+        env.PUBLIC_PRIVY_APP_ID || "",
+      ),
       "import.meta.env.PROD": mode === "production",
     },
     server: {

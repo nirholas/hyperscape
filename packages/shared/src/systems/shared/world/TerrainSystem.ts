@@ -13,10 +13,6 @@ import { System } from "..";
 import { EventType } from "../../../types/events";
 import { NoiseGenerator } from "../../../utils/NoiseGenerator";
 import { InstancedMeshManager } from "../../../utils/rendering/InstancedMeshManager";
-import {
-  initKTX2Loader,
-  loadTextureWithKTX2Fallback,
-} from "../../../extras/three/ktx2TextureLoader";
 
 /**
  * Terrain System
@@ -66,7 +62,6 @@ export class TerrainSystem extends System {
   private terrainMaterial?: THREE.Material & {
     terrainUniforms: TerrainUniforms;
   };
-  private terrainTextures = new Map<string, THREE.Texture>();
   private chunkSaveInterval?: NodeJS.Timeout;
   private terrainUpdateIntervalId?: NodeJS.Timeout;
   private serializationIntervalId?: NodeJS.Timeout;
@@ -94,6 +89,12 @@ export class TerrainSystem extends System {
   private _tempVec2_2 = new THREE.Vector2();
   private _tempBox3 = new THREE.Box3();
   private waterSystem?: WaterSystem;
+
+  // PERFORMANCE: Template geometry and pre-allocated buffers for tile creation
+  private templateGeometry: THREE.PlaneGeometry | null = null;
+  private templateColors: Float32Array | null = null;
+  private templateBiomeIds: Float32Array | null = null;
+  private _tempColor = new THREE.Color();
 
   // Serialization system
   private lastSerializationTime = 0;
@@ -185,135 +186,16 @@ export class TerrainSystem extends System {
    * Load terrain textures and create the shared terrain material
    * Automatically uses KTX2 GPU-compressed textures when available
    */
-  private async loadTerrainTextures(): Promise<void> {
-    // Initialize KTX2 loader if we have a renderer (client-side)
-    const renderer = this.world.graphics?.renderer;
-    if (renderer) {
-      try {
-        await initKTX2Loader(renderer as unknown as THREE.WebGPURenderer);
-        console.log("[TerrainSystem] KTX2 loader initialized");
-      } catch (err) {
-        console.warn(
-          "[TerrainSystem] KTX2 loader init failed, will use PNG fallback:",
-          err,
-        );
-      }
-    }
-
-    // Helper to load textures with KTX2 fallback
-    const loadTexture = async (path: string): Promise<THREE.Texture> => {
-      try {
-        const tex = await loadTextureWithKTX2Fallback(path, {
-          wrapS: THREE.RepeatWrapping,
-          wrapT: THREE.RepeatWrapping,
-          colorSpace: THREE.SRGBColorSpace,
-        });
-        tex.magFilter = THREE.LinearFilter;
-        tex.minFilter = THREE.LinearMipmapLinearFilter;
-        tex.generateMipmaps = true;
-        return tex;
-      } catch (err) {
-        // On error, create a placeholder
-        console.warn(`[TerrainSystem] Failed to load texture: ${path}`, err);
-        const placeholder = new THREE.DataTexture(
-          new Uint8Array([128, 128, 128, 255]),
-          1,
-          1,
-          THREE.RGBAFormat,
-        );
-        placeholder.wrapS = placeholder.wrapT = THREE.RepeatWrapping;
-        placeholder.needsUpdate = true;
-        return placeholder;
-      }
-    };
-
-    // Helper to load PNG directly (for normal maps that don't have KTX2 versions)
-    const loadPNG = (path: string): Promise<THREE.Texture> => {
-      return new Promise((resolve) => {
-        const loader = new THREE.TextureLoader();
-        loader.load(
-          path,
-          (tex) => {
-            tex.wrapS = THREE.RepeatWrapping;
-            tex.wrapT = THREE.RepeatWrapping;
-            tex.colorSpace = THREE.SRGBColorSpace;
-            tex.magFilter = THREE.LinearFilter;
-            tex.minFilter = THREE.LinearMipmapLinearFilter;
-            tex.generateMipmaps = true;
-            tex.needsUpdate = true;
-            resolve(tex);
-          },
-          undefined,
-          () => {
-            // On error, create a placeholder
-            const placeholder = new THREE.DataTexture(
-              new Uint8Array([128, 128, 255, 255]), // Blue-ish for normal map placeholder
-              1,
-              1,
-              THREE.RGBAFormat,
-            );
-            placeholder.wrapS = placeholder.wrapT = THREE.RepeatWrapping;
-            placeholder.needsUpdate = true;
-            resolve(placeholder);
-          },
-        );
-      });
-    };
-
-    // Load terrain textures from CDN assets folder
-    // KTX2 for diffuse/roughness, PNG directly for normal maps (no KTX2 versions exist)
-    // Reduced set to stay under WebGPU 16 texture limit:
-    // 5 diffuse + 2 normal + 2 roughness + 1 noise = 10 textures
-    const baseUrl = (this.world.assetsUrl || "").replace(/\/$/, ""); // Remove trailing slash
-    const [
-      grassTex,
-      grassNormal,
-      grassRoughness,
-      dirtTex,
-      dirtNormal,
-      dirtRoughness,
-      rockTex,
-      _snowTex, // Loaded but unused - snow uses grass texture (tinted white in shader)
-    ] = await Promise.all([
-      loadTexture(
-        `${baseUrl}/terrain/textures/stylized_grass/stylized_grass_d.png`,
-      ),
-      loadPNG(
-        `${baseUrl}/terrain/textures/stylized_grass/stylized_grass_n.png`,
-      ), // Normal maps only exist as PNG
-      loadTexture(
-        `${baseUrl}/terrain/textures/stylized_grass/stylized_grass_r.png`,
-      ),
-      loadTexture(`${baseUrl}/terrain/textures/dirt/dirt_d.png`),
-      loadPNG(`${baseUrl}/terrain/textures/dirt/dirt_n.png`), // Normal maps only exist as PNG
-      loadTexture(`${baseUrl}/terrain/textures/dirt/dirt_r.png`),
-      loadTexture(
-        `${baseUrl}/terrain/textures/stylized_stone/stylized_stone_d.png`,
-      ),
-      loadTexture(
-        `${baseUrl}/terrain/textures/stylized_snow/stylized_snow_d.png`,
-      ),
-    ]);
-
-    // Only store unique textures to minimize bindings
-    this.terrainTextures.set("grass", grassTex);
-    this.terrainTextures.set("grass_n", grassNormal);
-    this.terrainTextures.set("grass_r", grassRoughness);
-    this.terrainTextures.set("dirt", dirtTex);
-    this.terrainTextures.set("dirt_n", dirtNormal);
-    this.terrainTextures.set("dirt_r", dirtRoughness);
-    this.terrainTextures.set("rock", rockTex);
-    // Rock/snow/sand reuse grass/dirt normal and roughness (handled in shader)
-
-    // Create the shared terrain material
-    this.terrainMaterial = createTerrainMaterial(this.terrainTextures);
+  private initTerrainMaterial(): void {
+    // Create the shared terrain material (uses procedural OSRS-style colors, no textures needed)
+    this.terrainMaterial = createTerrainMaterial();
 
     // Setup for CSM shadows
     if (this.world.setupMaterial) {
       this.world.setupMaterial(this.terrainMaterial);
     }
 
-    console.log("[TerrainSystem] Terrain textures loaded and material created");
+    console.log("[TerrainSystem] Terrain material created");
   }
 
   /**
@@ -571,9 +453,9 @@ export class TerrainSystem extends System {
     // Initialize biome centers using deterministic random placement
     this.initializeBiomeCenters();
 
-    // Load terrain textures (client-side only)
+    // Initialize terrain material (client-side only)
     if (this.world.isClient) {
-      await this.loadTerrainTextures();
+      this.initTerrainMaterial();
     }
 
     // Initialize water system
@@ -1133,21 +1015,38 @@ export class TerrainSystem extends System {
     return tile;
   }
 
+  /**
+   * Get or create the template geometry (shared structure, cloned per tile)
+   * PERFORMANCE: Creating PlaneGeometry from scratch is expensive - clone template instead
+   */
+  private getOrCreateTemplateGeometry(): THREE.PlaneGeometry {
+    if (!this.templateGeometry) {
+      this.templateGeometry = new THREE.PlaneGeometry(
+        this.CONFIG.TILE_SIZE,
+        this.CONFIG.TILE_SIZE,
+        this.CONFIG.TILE_RESOLUTION - 1,
+        this.CONFIG.TILE_RESOLUTION - 1,
+      );
+      this.templateGeometry.rotateX(-Math.PI / 2);
+
+      // Pre-allocate reusable buffers
+      const vertexCount = this.templateGeometry.attributes.position.count;
+      this.templateColors = new Float32Array(vertexCount * 3);
+      this.templateBiomeIds = new Float32Array(vertexCount);
+    }
+    return this.templateGeometry;
+  }
+
   private createTileGeometry(
     tileX: number,
     tileZ: number,
   ): THREE.PlaneGeometry {
-    const geometry = new THREE.PlaneGeometry(
-      this.CONFIG.TILE_SIZE,
-      this.CONFIG.TILE_SIZE,
-      this.CONFIG.TILE_RESOLUTION - 1,
-      this.CONFIG.TILE_RESOLUTION - 1,
-    );
-
-    // Rotate to be horizontal
-    geometry.rotateX(-Math.PI / 2);
+    // PERFORMANCE: Clone template geometry instead of creating new PlaneGeometry
+    const template = this.getOrCreateTemplateGeometry();
+    const geometry = template.clone();
 
     const positions = geometry.attributes.position;
+    // Reuse pre-allocated buffers (create new for final attribute, but fill from template)
     const colors = new Float32Array(positions.count * 3);
     const heightData: number[] = [];
     const biomeIds = new Float32Array(positions.count);
@@ -1199,8 +1098,11 @@ export class TerrainSystem extends System {
       const dominantBiome = biomeInfluences[0].type;
       biomeIds[i] = this.getBiomeId(dominantBiome);
 
+      // PERFORMANCE: Reuse _tempColor to avoid GC pressure (no new THREE.Color per vertex)
       // Blend up to 3 biome colors based on influence weights
-      const color = new THREE.Color(0, 0, 0);
+      let colorR = 0,
+        colorG = 0,
+        colorB = 0;
 
       for (const influence of biomeInfluences) {
         const biomeData = BIOMES[influence.type];
@@ -1209,12 +1111,13 @@ export class TerrainSystem extends System {
             `[TerrainSystem] Biome "${influence.type}" not found in BIOMES data!`,
           );
         }
-        const biomeColor = new THREE.Color(biomeData.color);
+        // Use _tempColor to parse hex once, then extract RGB (no allocation)
+        this._tempColor.set(biomeData.color);
 
-        // Accumulate weighted colors
-        color.r += biomeColor.r * influence.weight;
-        color.g += biomeColor.g * influence.weight;
-        color.b += biomeColor.b * influence.weight;
+        // Accumulate weighted colors directly to numbers
+        colorR += this._tempColor.r * influence.weight;
+        colorG += this._tempColor.g * influence.weight;
+        colorB += this._tempColor.b * influence.weight;
       }
 
       // Apply brownish shoreline tint near water level
@@ -1224,20 +1127,21 @@ export class TerrainSystem extends System {
         normalizedHeight > waterLevel &&
         normalizedHeight < shorelineThreshold
       ) {
-        const shorelineColor = new THREE.Color(0x8b7355); // Sandy brown
+        // Sandy brown (0x8b7355) pre-computed: r=0.545, g=0.451, b=0.333
         const shoreFactor =
-          1.0 -
-          (normalizedHeight - waterLevel) / (shorelineThreshold - waterLevel);
-        color.lerp(
-          shorelineColor,
-          shoreFactor * this.CONFIG.SHORELINE_STRENGTH,
-        );
+          (1.0 -
+            (normalizedHeight - waterLevel) /
+              (shorelineThreshold - waterLevel)) *
+          this.CONFIG.SHORELINE_STRENGTH;
+        colorR = colorR + (0.545 - colorR) * shoreFactor;
+        colorG = colorG + (0.451 - colorG) * shoreFactor;
+        colorB = colorB + (0.333 - colorB) * shoreFactor;
       }
 
       // Store blended color
-      colors[i * 3] = color.r;
-      colors[i * 3 + 1] = color.g;
-      colors[i * 3 + 2] = color.b;
+      colors[i * 3] = colorR;
+      colors[i * 3 + 1] = colorG;
+      colors[i * 3 + 2] = colorB;
     }
 
     geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
@@ -1891,12 +1795,14 @@ export class TerrainSystem extends System {
 
     const { fogNear, fogFar, fogColor } = environment.skyInfo;
 
-    // Update fog uniforms
+    // Update fog uniforms (including pre-computed squared values for GPU optimization)
     if (fogNear !== undefined) {
       this.terrainMaterial.terrainUniforms.fogNear.value = fogNear;
+      this.terrainMaterial.terrainUniforms.fogNearSq.value = fogNear * fogNear;
     }
     if (fogFar !== undefined) {
       this.terrainMaterial.terrainUniforms.fogFar.value = fogFar;
+      this.terrainMaterial.terrainUniforms.fogFarSq.value = fogFar * fogFar;
     }
     if (fogColor) {
       const color = new THREE.Color(fogColor);

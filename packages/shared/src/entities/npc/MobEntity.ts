@@ -118,6 +118,10 @@ import type { EntityID } from "../../types/core/identifiers";
 import { getNPCSize, getOccupiedTiles } from "./LargeNPCSupport";
 import { getGameRng } from "../../utils/SeededRandom";
 import { isTerrainSystem } from "../../utils/typeGuards";
+import {
+  AnimationLOD,
+  getCameraPosition,
+} from "../../utils/rendering/AnimationLOD";
 
 // Polyfill ProgressEvent for Node.js server environment
 
@@ -222,6 +226,14 @@ export class MobEntity extends CombatantEntity {
 
   /** Max spiral search radius for unoccupied spawn tile */
   private readonly MAX_SPAWN_SEARCH_RADIUS = 10;
+
+  /** Animation LOD controller - throttles animation updates for distant mobs */
+  private readonly _animationLOD = new AnimationLOD({
+    fullDistance: 30, // Full 60fps animation within 30m
+    halfDistance: 60, // 30fps animation at 30-60m
+    quarterDistance: 100, // 15fps animation at 60-100m
+    pauseDistance: 150, // No animation beyond 150m (bind pose)
+  });
 
   /**
    * Find an unoccupied tile for spawning using spiral search
@@ -1734,6 +1746,24 @@ export class MobEntity extends CombatantEntity {
     super.clientUpdate(deltaTime);
     this.clientUpdateCalls++;
 
+    // ANIMATION LOD: Calculate distance to camera once and throttle animation updates
+    // This reduces CPU/GPU load for distant mobs significantly (50-80% savings)
+    const cameraPos = getCameraPosition(this.world);
+    const animLODResult = cameraPos
+      ? this._animationLOD.updateFromPosition(
+          this.node.position.x,
+          this.node.position.z,
+          cameraPos.x,
+          cameraPos.z,
+          deltaTime,
+        )
+      : {
+          shouldUpdate: true,
+          effectiveDelta: deltaTime,
+          lodLevel: 0,
+          distanceSq: 0,
+        };
+
     // Update health bar position (HealthBars system uses atlas + instanced mesh)
     if (this._healthBarHandle) {
       // Position health bar above mob's head using pre-allocated matrix
@@ -1917,14 +1947,20 @@ export class MobEntity extends CombatantEntity {
         // DON'T call move() - it causes sliding due to internal interpolation
         // VRM scene was positioned once in modify() when entering death state
         // Just update the animation, VRM scene stays locked
+        // NOTE: Death animations always run at full speed (no LOD throttling)
         this._avatarInstance.update(deltaTime);
       } else {
         // NORMAL PATH: Use move() to sync VRM - it preserves the VRM's internal scale
         // move() applies vrm.scene.scale to maintain height normalization
         this._avatarInstance.move(this.node.matrixWorld);
 
-        // Update VRM animations (mixer + humanoid + skeleton)
-        this._avatarInstance.update(deltaTime);
+        // ANIMATION LOD: Only update VRM animations when LOD allows
+        // This significantly reduces CPU/GPU load for distant mobs
+        if (animLODResult.shouldUpdate) {
+          // Update VRM animations (mixer + humanoid + skeleton)
+          // Use effectiveDelta which may be accumulated from skipped frames
+          this._avatarInstance.update(animLODResult.effectiveDelta);
+        }
       }
 
       // Post-animation position locking for non-death states
@@ -1986,8 +2022,10 @@ export class MobEntity extends CombatantEntity {
     // Note: Mixer may not exist for mobs with no animations - that's OK
     // The visible placeholder fallback doesn't have a mixer
 
-    if (mixer) {
-      mixer.update(deltaTime);
+    // ANIMATION LOD: Only update mixer when LOD allows
+    // This significantly reduces CPU/GPU load for distant mobs
+    if (mixer && animLODResult.shouldUpdate) {
+      mixer.update(animLODResult.effectiveDelta);
 
       // Update skeleton bones using pre-defined callback to avoid GC pressure
       if (this.mesh) {

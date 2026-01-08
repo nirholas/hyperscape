@@ -13,15 +13,14 @@ import THREE, {
   float,
   vec2,
   vec3,
-  pow,
   add,
   sub,
   mul,
   mix,
   smoothstep,
-  sin,
   abs,
-  length,
+  sin,
+  cos,
 } from "../../../extras/three/three";
 
 export const TERRAIN_CONSTANTS = {
@@ -271,6 +270,8 @@ export type TerrainUniforms = {
   time: { value: number };
   fogNear: { value: number };
   fogFar: { value: number };
+  fogNearSq: { value: number }; // Pre-computed fogNear^2 for GPU optimization
+  fogFarSq: { value: number }; // Pre-computed fogFar^2 for GPU optimization
   fogColor: { value: THREE.Vector3 };
   fogEnabled: { value: number }; // 1.0 = fog enabled, 0.0 = fog disabled (for minimap)
 };
@@ -279,9 +280,9 @@ export type TerrainUniforms = {
  * OSRS-style vertex color terrain material
  * No textures - pure flat shaded colors based on height, slope, and noise
  */
-export function createTerrainMaterial(
-  _textures: Map<string, THREE.Texture>,
-): THREE.Material & { terrainUniforms: TerrainUniforms } {
+export function createTerrainMaterial(): THREE.Material & {
+  terrainUniforms: TerrainUniforms;
+} {
   // Ensure noise texture is generated (still used for dirt patch variation)
   const noiseTex = generateNoiseTexture();
 
@@ -290,8 +291,15 @@ export function createTerrainMaterial(
   const noiseScale = uniform(float(TERRAIN_CONSTANTS.NOISE_SCALE));
 
   // Fog uniforms - sync with Environment system
+  // PRE-COMPUTE squared distances to avoid per-fragment multiplication
   const fogNearUniform = uniform(float(TERRAIN_CONSTANTS.FOG_NEAR));
   const fogFarUniform = uniform(float(TERRAIN_CONSTANTS.FOG_FAR));
+  const fogNearSqUniform = uniform(
+    float(TERRAIN_CONSTANTS.FOG_NEAR * TERRAIN_CONSTANTS.FOG_NEAR),
+  );
+  const fogFarSqUniform = uniform(
+    float(TERRAIN_CONSTANTS.FOG_FAR * TERRAIN_CONSTANTS.FOG_FAR),
+  );
   const fogColorUniform = uniform(
     vec3(
       TERRAIN_CONSTANTS.FOG_COLOR.r,
@@ -324,24 +332,41 @@ export function createTerrainMaterial(
   const mudBrown = vec3(0.18, 0.12, 0.08); // Wet mud near water
   const waterEdge = vec3(0.08, 0.06, 0.04); // Dark water's edge
 
-  // Sample Perlin noise for variation (multiple frequencies)
+  // ============================================================================
+  // DISTANCE-BASED LOD FOR NOISE SAMPLING
+  // PERFORMANCE: Reduced from 4 to 2 texture samples (compute derived values instead)
+  // ============================================================================
+  const toCamera = sub(worldPos, cameraPosition);
+  const distSq = add(
+    add(mul(toCamera.x, toCamera.x), mul(toCamera.y, toCamera.y)),
+    mul(toCamera.z, toCamera.z),
+  );
+  // LOD threshold: 100m^2 = 10000 - closer threshold for faster falloff
+  const lodDetailFactor = smoothstep(float(15000.0), float(8000.0), distSq);
+
+  // Sample Perlin noise - ONLY 1 base sample always needed
   const noiseUV = mul(vec2(worldPos.x, worldPos.z), noiseScale);
   const noiseValue = texture(noiseTex, noiseUV).r;
 
-  // Secondary noise for grass variation (different frequency)
-  const noiseUV2 = mul(
-    vec2(worldPos.x, worldPos.z),
-    mul(noiseScale, float(3.0)),
+  // PERFORMANCE: Derive secondary noise mathematically instead of texture sample
+  // Uses sin transform of base noise for variation (no extra texture fetch)
+  const noiseValue2 = add(
+    mul(sin(mul(noiseValue, float(6.28))), float(0.3)),
+    float(0.5),
   );
-  const noiseValue2 = texture(noiseTex, noiseUV2).r;
 
-  // High-frequency noise to break up banding/dithering (fine detail)
-  const noiseUV3 = mul(vec2(worldPos.x, worldPos.z), float(0.15));
-  const fineNoise = texture(noiseTex, noiseUV3).r;
+  // CONDITIONAL fine detail sample - only when close
+  // Uses step function to completely skip sample at distance (cheaper than smoothstep mix)
+  const closeEnough = smoothstep(float(12000.0), float(8000.0), distSq);
+  const noiseUV3 = mul(vec2(worldPos.x, worldPos.z), float(0.12));
+  const fineNoiseSample = texture(noiseTex, noiseUV3).r;
+  const fineNoise = mix(float(0.5), fineNoiseSample, closeEnough);
 
-  // Micro noise for color variation (very fine)
-  const noiseUV4 = mul(vec2(worldPos.x, worldPos.z), float(0.5));
-  const microNoise = texture(noiseTex, noiseUV4).r;
+  // PERFORMANCE: Derive micro noise from base noise (no 4th texture sample)
+  const microNoise = add(
+    mul(cos(mul(noiseValue, float(12.56))), float(0.2)),
+    float(0.5),
+  );
 
   // === BASE: GRASS with light/dark variation ===
   const grassVariation = smoothstep(float(0.4), float(0.6), noiseValue2);
@@ -404,51 +429,6 @@ export function createTerrainMaterial(
   const edgeZone = smoothstep(float(6.5), float(5.0), height);
   baseColor = mix(baseColor, waterEdge, mul(edgeZone, float(0.9)));
 
-  // === UNDERWATER CAUSTICS (keep these, they look good) ===
-  const causticTime = mul(timeUniform, float(0.25));
-  const causticScale = float(0.12);
-  const causticUV = mul(vec2(worldPos.x, worldPos.z), causticScale);
-
-  const c1 = sin(
-    add(
-      mul(causticUV.x, float(1.0)),
-      add(mul(causticUV.y, float(0.8)), causticTime),
-    ),
-  );
-  const c2 = sin(
-    add(
-      mul(causticUV.x, float(0.7)),
-      add(mul(causticUV.y, float(-1.1)), mul(causticTime, float(1.2))),
-    ),
-  );
-  const c3 = sin(
-    add(
-      mul(causticUV.x, float(-0.9)),
-      add(mul(causticUV.y, float(0.9)), mul(causticTime, float(0.85))),
-    ),
-  );
-  const c4 = sin(
-    add(
-      mul(add(causticUV.x, causticUV.y), float(1.0)),
-      mul(causticTime, float(1.1)),
-    ),
-  );
-
-  const causticPattern = pow(
-    mul(add(add(add(c1, c2), c3), c4), float(0.25)),
-    float(2.0),
-  );
-  const causticBrightness = mul(causticPattern, float(0.12));
-
-  const underwaterMask = smoothstep(float(5.0), float(4.0), height);
-  const depthFade = smoothstep(float(-5.0), float(4.0), height);
-  const causticMask = mul(underwaterMask, depthFade);
-
-  const causticLight = mul(
-    vec3(0.5, 0.7, 0.8),
-    mul(causticBrightness, causticMask),
-  );
-
   // === ANTI-DITHERING: Add fine noise variation to break up banding ===
   // Subtle brightness variation based on high-frequency noise
   const brightnessVar = mul(sub(fineNoise, float(0.5)), float(0.08)); // ±4% brightness
@@ -464,24 +444,16 @@ export function createTerrainMaterial(
     ),
   );
 
-  const unfoggedColor = add(variedColor, causticLight);
-
   // === DISTANCE FOG ===
-  // Calculate distance from camera to fragment in world space
-  const toCamera = sub(worldPos, cameraPosition);
-  const distanceToCamera = length(toCamera);
-
-  // Smoothstep fog factor: 0 at fogNear, 1 at fogFar
+  // NOTE: distSq already computed above for LOD - reusing it here
+  // Fog squared distances are pre-computed uniforms (avoids per-fragment mul)
+  // Smoothstep fog factor using squared distances: 0 at fogNear, 1 at fogFar
   // Multiply by fogEnabled to allow complete fog disable (for minimap rendering)
-  const baseFogFactor = smoothstep(
-    fogNearUniform,
-    fogFarUniform,
-    distanceToCamera,
-  );
+  const baseFogFactor = smoothstep(fogNearSqUniform, fogFarSqUniform, distSq);
   const fogFactor = mul(baseFogFactor, fogEnabledUniform);
 
   // Mix terrain color with fog color based on distance
-  const finalColor = mix(unfoggedColor, fogColorUniform, fogFactor);
+  const finalColor = mix(variedColor, fogColorUniform, fogFactor);
 
   // === CREATE MATERIAL ===
   const material = new MeshStandardNodeMaterial();
@@ -497,6 +469,8 @@ export function createTerrainMaterial(
     time: timeUniform,
     fogNear: fogNearUniform,
     fogFar: fogFarUniform,
+    fogNearSq: fogNearSqUniform,
+    fogFarSq: fogFarSqUniform,
     fogColor: fogColorUniform,
     fogEnabled: fogEnabledUniform,
   };

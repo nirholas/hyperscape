@@ -1,8 +1,9 @@
 /**
  * Rendering utilities
- * Mesh management, model cache, post-processing, renderers
+ * Mesh management, model cache, post-processing, renderers, animation LOD
  */
 
+export * from "./AnimationLOD";
 export * from "./InstancedMeshManager";
 export * from "./ModelCache";
 export * from "./PostProcessingFactory";

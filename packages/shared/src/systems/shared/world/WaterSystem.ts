@@ -79,6 +79,8 @@ const WAVES: WaveParams[] = [
   { A: 0.035, wavelength: 8, Q: 0.22, Dx: 0.9, Dz: -0.44 },
   { A: 0.025, wavelength: 5, Q: 0.2, Dx: 0.26, Dz: 0.97 },
   { A: 0.015, wavelength: 2.5, Q: 0.15, Dx: -0.8, Dz: 0.6 },
+  { A: 0.025, wavelength: 5, Q: 0.2, Dx: 0.26, Dz: 0.97 },
+  { A: 0.015, wavelength: 2.5, Q: 0.15, Dx: -0.8, Dz: 0.6 },
 ].map(({ A, wavelength, Q, Dx, Dz }) => {
   const w = TWO_PI / wavelength;
   const phi = Math.sqrt(GRAVITY * w);
@@ -144,12 +146,50 @@ export class WaterSystem {
   private projScreenMatrix = new THREE.Matrix4();
   private tempSphere = new THREE.Sphere();
 
+  // Reflection state tracking for DevStats
+  private reflectionActive = false;
+
   constructor(world: World) {
     this.world = world;
   }
 
   get waterUniforms(): WaterUniforms | null {
     return this.uniforms;
+  }
+
+  /**
+   * Returns true if the reflection camera is currently rendering
+   * (i.e., at least one water mesh is visible in the frustum)
+   */
+  get isReflectionActive(): boolean {
+    return this.reflectionActive;
+  }
+
+  /**
+   * Returns the count of active reflection cameras (0 or 1)
+   */
+  get activeReflectionCameraCount(): number {
+    return this.reflectionActive ? 1 : 0;
+  }
+
+  /**
+   * Returns the total number of water meshes being tracked
+   */
+  get waterMeshCount(): number {
+    return this.waterMeshes.length;
+  }
+
+  /**
+   * Returns the number of currently visible water meshes
+   */
+  get visibleWaterMeshCount(): number {
+    let count = 0;
+    for (const mesh of this.waterMeshes) {
+      if (mesh.parent && mesh.visible) {
+        count++;
+      }
+    }
+    return count;
   }
 
   async init(): Promise<void> {
@@ -872,27 +912,42 @@ export class WaterSystem {
    * when no water is visible.
    */
   private updateReflectionVisibility(): void {
-    if (!this.reflection?.target) return;
+    if (!this.reflection?.target) {
+      this.reflectionActive = false;
+      return;
+    }
 
     const camera = this.world.camera;
     if (!camera) {
       // No camera, assume water might be visible
       this.reflection.target.visible = true;
+      this.reflectionActive = true;
+      return;
+    }
+
+    // If no water meshes exist, disable reflection
+    if (this.waterMeshes.length === 0) {
+      this.reflection.target.visible = false;
+      this.reflectionActive = false;
       return;
     }
 
     // Build frustum from camera
+    // IMPORTANT: updateMatrixWorld() updates matrixWorld but NOT matrixWorldInverse
+    // We must explicitly compute matrixWorldInverse from matrixWorld
+    camera.updateMatrixWorld();
+    camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
     this.projScreenMatrix.multiplyMatrices(
       camera.projectionMatrix,
       camera.matrixWorldInverse,
     );
     this.frustum.setFromProjectionMatrix(this.projScreenMatrix);
 
-    // Check if any water mesh is in the frustum
+    // Check if any water mesh is visible and in the frustum
     let anyWaterVisible = false;
     for (const mesh of this.waterMeshes) {
-      // Skip meshes that have been removed from scene
-      if (!mesh.parent) continue;
+      // Skip meshes that have been removed from scene or are hidden
+      if (!mesh.parent || !mesh.visible) continue;
 
       // Ensure bounding sphere exists
       if (!mesh.geometry.boundingSphere) {
@@ -914,6 +969,7 @@ export class WaterSystem {
 
     // Enable/disable reflector based on water visibility
     this.reflection.target.visible = anyWaterVisible;
+    this.reflectionActive = anyWaterVisible;
   }
 
   destroy(): void {

@@ -72,6 +72,10 @@ import type {
 import { modelCache } from "../../utils/rendering/ModelCache";
 import { EventType } from "../../types/events";
 import { Emotes } from "../../data/playerEmotes";
+import {
+  AnimationLOD,
+  getCameraPosition,
+} from "../../utils/rendering/AnimationLOD";
 
 // Re-export types for external use
 export type { NPCEntityConfig } from "../../types/entities";
@@ -82,6 +86,14 @@ export class NPCEntity extends Entity {
   // VRM avatar instance (for VRM models with emote support)
   private _avatarInstance: VRMAvatarInstance | null = null;
   private _currentEmote: string | null = null;
+
+  /** Animation LOD controller - throttles animation updates for distant NPCs */
+  private readonly _animationLOD = new AnimationLOD({
+    fullDistance: 25, // Full 60fps animation within 25m (NPCs need close-up detail)
+    halfDistance: 50, // 30fps animation at 25-50m
+    quarterDistance: 80, // 15fps animation at 50-80m
+    pauseDistance: 120, // No animation beyond 120m (bind pose)
+  });
 
   async init(): Promise<void> {
     await super.init();
@@ -359,25 +371,10 @@ export class NPCEntity extends Entity {
   }
 
   /**
-   * Update animation mixer each frame
+   * Update animation mixer each frame (legacy - use updateAnimationsWithDelta for LOD)
    */
   private updateAnimations(deltaTime: number): void {
-    const mixer = (this as { mixer?: THREE.AnimationMixer }).mixer;
-    if (mixer) {
-      // Update the mixer (advances animation time)
-      mixer.update(deltaTime);
-
-      // CRITICAL: Update skeleton (exactly like VRM does!)
-      // This actually moves the bones to match the animation
-      if (this.mesh) {
-        this.mesh.traverse((child) => {
-          if (child instanceof THREE.SkinnedMesh && child.skeleton) {
-            // Update each bone matrix WITHOUT forcing parent recalc
-            child.skeleton.bones.forEach((bone) => bone.updateMatrixWorld());
-          }
-        });
-      }
-    }
+    this.updateAnimationsWithDelta(deltaTime);
   }
 
   protected async createMesh(): Promise<void> {
@@ -529,17 +526,59 @@ export class NPCEntity extends Entity {
   protected clientUpdate(deltaTime: number): void {
     super.clientUpdate(deltaTime);
 
+    // ANIMATION LOD: Calculate distance to camera once and throttle animation updates
+    // This reduces CPU/GPU load for distant NPCs significantly
+    const cameraPos = getCameraPosition(this.world);
+    const animLODResult = cameraPos
+      ? this._animationLOD.updateFromPosition(
+          this.node.position.x,
+          this.node.position.z,
+          cameraPos.x,
+          cameraPos.z,
+          deltaTime,
+        )
+      : {
+          shouldUpdate: true,
+          effectiveDelta: deltaTime,
+          lodLevel: 0,
+          distanceSq: 0,
+        };
+
     // VRM avatar path: Update avatar instance
     if (this._avatarInstance) {
-      // Update avatar position to follow node
+      // Update avatar position to follow node (always, for proper positioning)
       this._avatarInstance.move(this.node.matrixWorld);
-      // Update VRM avatar animation
-      this._avatarInstance.update(deltaTime);
+
+      // ANIMATION LOD: Only update VRM animation when LOD allows
+      if (animLODResult.shouldUpdate) {
+        this._avatarInstance.update(animLODResult.effectiveDelta);
+      }
       return;
     }
 
-    // GLB mesh path: Update animation mixer
-    this.updateAnimations(deltaTime);
+    // GLB mesh path: Update animation mixer (only when LOD allows)
+    if (animLODResult.shouldUpdate) {
+      this.updateAnimationsWithDelta(animLODResult.effectiveDelta);
+    }
+  }
+
+  /**
+   * Update animations with specified delta time (for LOD-throttled updates)
+   */
+  private updateAnimationsWithDelta(deltaTime: number): void {
+    const mixer = (this as { mixer?: THREE.AnimationMixer }).mixer;
+    if (mixer) {
+      mixer.update(deltaTime);
+
+      // CRITICAL: Update skeleton (exactly like VRM does!)
+      if (this.mesh) {
+        this.mesh.traverse((child) => {
+          if (child instanceof THREE.SkinnedMesh && child.skeleton) {
+            child.skeleton.bones.forEach((bone) => bone.updateMatrixWorld());
+          }
+        });
+      }
+    }
   }
 
   public getNetworkData(): Record<string, unknown> {

@@ -68,6 +68,7 @@ interface InstanceData {
       matrix: THREE.Matrix4;
       visible: boolean;
       distance: number;
+      distanceSq?: number; // Squared distance for faster sorting
     }
   >;
 }
@@ -275,7 +276,9 @@ export class InstancedMeshManager {
     const playerPos = this.getPlayerPosition();
     if (!playerPos) return;
 
-    // Calculate distances for all instances and filter by cull distance
+    // OPTIMIZATION: Use squared distance to avoid sqrt (faster)
+    // Calculate squared distances for all instances and filter by squared cull distance
+    const cullDistanceSq = this.cullDistance * this.cullDistance;
     const instancesWithDistance: Array<
       [
         number,
@@ -287,19 +290,32 @@ export class InstancedMeshManager {
           matrix: THREE.Matrix4;
           visible: boolean;
           distance: number;
+          distanceSq?: number; // Squared distance for sorting (optional in storage)
         },
       ]
     > = [];
     for (const [id, instance] of data.allInstances) {
-      instance.distance = instance.position.distanceTo(playerPos);
-      // Only consider instances within the cull distance
-      if (instance.distance <= this.cullDistance) {
+      // Use squared distance (no sqrt needed)
+      const dx = instance.position.x - playerPos.x;
+      const dy = instance.position.y - playerPos.y;
+      const dz = instance.position.z - playerPos.z;
+      const distSq = dx * dx + dy * dy + dz * dz;
+
+      // Only consider instances within the squared cull distance
+      if (distSq <= cullDistanceSq) {
+        // Store squared distance for sorting (faster than computing actual distance)
+        instance.distanceSq = distSq;
+        // Store actual distance for compatibility (only compute sqrt for visible instances)
+        instance.distance = Math.sqrt(distSq);
         instancesWithDistance.push([id, instance]);
       }
     }
 
-    // Sort by distance
-    instancesWithDistance.sort((a, b) => a[1].distance - b[1].distance);
+    // Sort by squared distance (equivalent to sorting by distance, but faster)
+    // Use nullish coalescing since distanceSq is always set in the loop above
+    instancesWithDistance.sort(
+      (a, b) => (a[1].distanceSq ?? 0) - (b[1].distanceSq ?? 0),
+    );
 
     // Clear current mappings
     data.instanceMap.clear();
@@ -364,8 +380,15 @@ export class InstancedMeshManager {
       return;
     }
 
+    // OPTIMIZATION: Use squared distance check (avoid sqrt)
     // Only update if player has moved significantly or forced
-    if (force || playerPos.distanceTo(this.lastPlayerPosition) > 10) {
+    const dx = playerPos.x - this.lastPlayerPosition.x;
+    const dy = playerPos.y - this.lastPlayerPosition.y;
+    const dz = playerPos.z - this.lastPlayerPosition.z;
+    const moveDistSq = dx * dx + dy * dy + dz * dz;
+    const moveThresholdSq = 10 * 10; // 10m threshold squared
+
+    if (force || moveDistSq > moveThresholdSq) {
       this.lastPlayerPosition.copy(playerPos);
 
       // Update visibility for all types

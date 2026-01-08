@@ -122,10 +122,8 @@ export class Socket {
       const [method, data] = result;
       this.network.enqueue(this, method, data);
     } else {
-      console.error(
-        "[Socket.onMessage] ❌ readPacket failed or returned invalid result!",
-        result,
-      );
+      // Unknown packet or deserialization error - already logged in readPacket
+      // Silently ignore to prevent spam, but the warning was already logged
     }
   };
 

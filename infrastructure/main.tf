@@ -571,6 +571,10 @@ resource "aws_lb" "main" {
   subnets            = local.subnet_list
 
   enable_deletion_protection = var.environment == "prod"
+  
+  # Increase idle timeout for WebSocket connections (default 60s, max 4000s)
+  # WebSocket connections can be long-lived, so we set a higher timeout
+  idle_timeout = 3600  # 1 hour
 
   tags = {
     Name = "${local.name_prefix}-alb"
@@ -1356,6 +1360,19 @@ resource "aws_ecs_service" "asset_forge_api" {
 resource "aws_route53_record" "asset_forge_api" {
   zone_id = local.route53_zone_id
   name    = "forge-api.${var.domain_name}"
+  type    = "A"
+
+  alias {
+    name                   = aws_lb.main.dns_name
+    zone_id                = aws_lb.main.zone_id
+    evaluate_target_health = true
+  }
+}
+
+# Route53 DNS Record for API (api.hyperscape.lol)
+resource "aws_route53_record" "api" {
+  zone_id = local.route53_zone_id
+  name    = "api.${var.domain_name}"
   type    = "A"
 
   alias {

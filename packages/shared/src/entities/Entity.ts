@@ -96,6 +96,14 @@ import { EntityType } from "../types/entities";
 import { toPosition3D } from "../types/core/utilities";
 import { UIRenderer } from "../utils/rendering/UIRenderer";
 import { modelCache } from "../utils/rendering/ModelCache";
+import type {
+  HealthBars as HealthBarsSystem,
+  HealthBarHandle,
+} from "../systems/client/HealthBars";
+import type {
+  Nametags as NametagsSystem,
+  NametagHandle,
+} from "../systems/client/Nametags";
 
 // Re-export types for external use
 export type { EntityConfig };
@@ -151,7 +159,17 @@ export class Entity implements IEntity {
   protected maxHealth: number = 100;
   protected level: number = 1;
 
-  // UI elements
+  // UI elements - Atlas-based (Nametags/HealthBars systems use instanced mesh)
+  // NOTE: These are private to Entity - subclasses that need atlas systems
+  // (MobEntity, PlayerRemote, PlayerLocal) implement their own handles
+  // to avoid TypeScript private member conflicts
+  private _entityNametagHandle: NametagHandle | null = null;
+  private _entityHealthBarHandle: HealthBarHandle | null = null;
+
+  // Pre-allocated matrix for health bar/nametag position updates
+  private readonly _uiPositionMatrix = new THREE.Matrix4();
+
+  // Legacy sprite properties (kept for backwards compatibility with subclasses)
   protected nameSprite: THREE.Sprite | null = null;
   protected healthSprite: THREE.Sprite | null = null;
 
@@ -827,11 +845,31 @@ export class Entity implements IEntity {
   }
 
   /**
-   * Create name tag sprite using UIRenderer - from BaseEntity
+   * Create name tag using atlas-based Nametags system (instanced mesh)
+   * PERFORMANCE: Uses texture atlas + instanced mesh for O(1) draw calls
+   * Falls back to legacy sprite creation if Nametags system unavailable
    */
   protected createNameTag(): void {
     if (!this.name) return;
 
+    // Try to use atlas-based Nametags system (much more efficient)
+    const nametags = this.world.systems?.find(
+      (s) =>
+        (s as { systemName?: string }).systemName === "nametags" ||
+        s.constructor.name === "Nametags",
+    ) as NametagsSystem | undefined;
+
+    if (nametags) {
+      // Atlas-based: Register with Nametags system
+      this._entityNametagHandle = nametags.add({
+        name: this.name,
+        level: null, // Non-combat entities don't show level
+      });
+      // Position update happens in clientUpdate() via handle.move()
+      return;
+    }
+
+    // Fallback: Legacy sprite creation (less efficient but works without system)
     const nameCanvas = UIRenderer.createNameTag(this.name, {
       width: GAME_CONSTANTS.UI.NAME_TAG_WIDTH,
       height: GAME_CONSTANTS.UI.NAME_TAG_HEIGHT,
@@ -842,8 +880,7 @@ export class Entity implements IEntity {
       GAME_CONSTANTS.UI.SPRITE_SCALE,
     );
     if (this.nameSprite) {
-      this.nameSprite.position.set(0, 2.15, 0); // Position above the entity
-      // Add to entity node so it follows the entity
+      this.nameSprite.position.set(0, 2.15, 0);
       if (this.node) {
         this.node.add(this.nameSprite);
       }
@@ -851,9 +888,31 @@ export class Entity implements IEntity {
   }
 
   /**
-   * Create health bar sprite using UIRenderer - from BaseEntity
+   * Create health bar using atlas-based HealthBars system (instanced mesh)
+   * PERFORMANCE: Uses texture atlas + instanced mesh for O(1) draw calls
+   * Falls back to legacy sprite creation if HealthBars system unavailable
    */
   protected createHealthBar(): void {
+    // Try to use atlas-based HealthBars system (much more efficient)
+    const healthbars = this.world.systems?.find(
+      (s) =>
+        (s as { systemName?: string }).systemName === "healthbars" ||
+        s.constructor.name === "HealthBars",
+    ) as HealthBarsSystem | undefined;
+
+    if (healthbars) {
+      // Atlas-based: Register with HealthBars system
+      this._entityHealthBarHandle = healthbars.add(
+        this.id,
+        this.health,
+        this.maxHealth,
+      );
+      // Health bar starts hidden (RuneScape pattern: show during combat)
+      // Position update happens in clientUpdate() via handle.move()
+      return;
+    }
+
+    // Fallback: Legacy sprite creation (less efficient but works without system)
     const healthCanvas = UIRenderer.createHealthBar(
       this.health,
       this.maxHealth,
@@ -869,8 +928,7 @@ export class Entity implements IEntity {
       GAME_CONSTANTS.UI.HEALTH_SPRITE_SCALE,
     );
     if (this.healthSprite) {
-      this.healthSprite.position.set(0, 2.0, 0); // Position above the entity, below name tag
-      // Add to entity node so it follows the entity
+      this.healthSprite.position.set(0, 2.0, 0);
       if (this.node) {
         this.node.add(this.healthSprite);
       }
@@ -878,9 +936,16 @@ export class Entity implements IEntity {
   }
 
   /**
-   * Update health bar sprite - from BaseEntity
+   * Update health bar - supports both atlas and legacy sprite systems
    */
   protected updateHealthBar(): void {
+    // Atlas-based system (preferred)
+    if (this._entityHealthBarHandle) {
+      this._entityHealthBarHandle.setHealth(this.health, this.maxHealth);
+      return;
+    }
+
+    // Legacy sprite system (fallback)
     if (!this.healthSprite) {
       return;
     }
@@ -1371,7 +1436,28 @@ export class Entity implements IEntity {
 
   // Client-side update logic
   protected clientUpdate(_deltaTime: number): void {
-    // Override in subclasses for client-specific logic
+    // Update atlas-based UI element positions (nametag and health bar)
+    // These use instanced mesh, so we just need to update the position matrix
+    if (this._entityNametagHandle || this._entityHealthBarHandle) {
+      // Position UI elements above the entity
+      this._uiPositionMatrix.copyPosition(this.node.matrixWorld);
+
+      if (this._entityNametagHandle) {
+        // Nametag at Y=2.15
+        this._uiPositionMatrix.elements[13] =
+          this.node.matrixWorld.elements[13] + 2.15;
+        this._entityNametagHandle.move(this._uiPositionMatrix);
+      }
+
+      if (this._entityHealthBarHandle) {
+        // Health bar at Y=2.0
+        this._uiPositionMatrix.elements[13] =
+          this.node.matrixWorld.elements[13] + 2.0;
+        this._entityHealthBarHandle.move(this._uiPositionMatrix);
+      }
+    }
+
+    // Subclasses can override for additional client-specific logic
   }
 
   // Fixed timestep update (for physics, etc.)
@@ -1520,7 +1606,18 @@ export class Entity implements IEntity {
       this.node.visible = false;
     }
 
-    // Clean up UI elements first - from BaseEntity
+    // Clean up atlas-based UI elements (Nametags/HealthBars systems)
+    if (this._entityNametagHandle) {
+      this._entityNametagHandle.destroy();
+      this._entityNametagHandle = null;
+    }
+
+    if (this._entityHealthBarHandle) {
+      this._entityHealthBarHandle.destroy();
+      this._entityHealthBarHandle = null;
+    }
+
+    // Clean up legacy sprite UI elements (fallback when atlas systems unavailable)
     if (this.nameSprite) {
       // Remove from node (not scene since we added it to node)
       if (this.node) {

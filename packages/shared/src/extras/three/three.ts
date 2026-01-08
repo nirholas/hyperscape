@@ -108,7 +108,7 @@ export const {
   texture,
   texture3D,
   // Discard
-  Discard: discard,
+  Discard,
   // Display
   output,
   renderOutput,
@@ -127,6 +127,10 @@ export {
   SpriteNodeMaterial,
   LineBasicNodeMaterial,
 } from "three/webgpu";
+
+// CSM (Cascaded Shadow Maps) for WebGPU
+export { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
+export { CSMHelper } from "three/addons/csm/CSMHelper.js";
 
 // Export the THREE namespace object as the default export
 export default THREE_NAMESPACE;

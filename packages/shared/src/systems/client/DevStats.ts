@@ -8,7 +8,7 @@
  * - Per-system timing breakdown
  *
  * Displays as a stylish overlay in the top-left corner.
- * Toggle with ` (backtick) key or world.devStats.toggle()
+ * Toggle with \ (backslash) key or world.devStats.toggle()
  *
  * @client-only
  */
@@ -18,6 +18,7 @@ import type { WorldOptions } from "../../types";
 import { System } from "../shared";
 import { BIOMES } from "../../data/world-structure";
 import type { TerrainSystem } from "../shared/world/TerrainSystem";
+import type { WaterSystem } from "../shared/world/WaterSystem";
 import THREE from "../../extras/three/three";
 
 /** Performance sample for rolling averages */
@@ -62,6 +63,7 @@ export class DevStats extends System {
   private playerElement: HTMLDivElement | null = null;
   private biomeElement: HTMLDivElement | null = null;
   private timingElement: HTMLDivElement | null = null;
+  private waterElement: HTMLDivElement | null = null;
 
   // State
   private enabled = false;
@@ -85,9 +87,7 @@ export class DevStats extends System {
   private updateInterval = 100; // ms
   private lastUIUpdate = 0;
 
-  // Per-frame render stats (delta tracking)
-  private lastRenderCalls = 0;
-  private lastRenderTriangles = 0;
+  // Per-frame render stats (reset each frame for accurate counts)
   private frameDrawCalls = 0;
   private frameTriangles = 0;
 
@@ -264,6 +264,17 @@ export class DevStats extends System {
     `;
     this.container.appendChild(this.timingElement);
 
+    // Water/Reflection section
+    this.waterElement = document.createElement("div");
+    this.waterElement.style.cssText = `
+      margin-bottom: 6px;
+      padding-top: 6px;
+      border-top: 1px solid rgba(100, 200, 255, 0.1);
+      color: #94a3b8;
+      font-size: 10px;
+    `;
+    this.container.appendChild(this.waterElement);
+
     // Systems section (initially hidden)
     this.systemsElement = document.createElement("div");
     this.systemsElement.style.cssText = `
@@ -280,12 +291,12 @@ export class DevStats extends System {
   }
 
   /**
-   * Setup keyboard toggle (backtick key)
+   * Setup keyboard toggle (backslash key)
    */
   private setupKeyboardToggle(): void {
     document.addEventListener("keydown", (e) => {
-      if (e.key === "`" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        // Prevent typing backtick in inputs
+      if (e.key === "\\" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        // Prevent typing backslash in inputs
         if (
           e.target instanceof HTMLInputElement ||
           e.target instanceof HTMLTextAreaElement
@@ -448,7 +459,7 @@ export class DevStats extends System {
       this.lastFpsUpdate = now;
     }
 
-    // Calculate per-frame render stats (delta from cumulative values)
+    // Capture per-frame render stats and reset for next frame
     this.updatePerFrameRenderStats();
 
     // Store frame sample
@@ -474,7 +485,8 @@ export class DevStats extends System {
   }
 
   /**
-   * Calculate per-frame render statistics by tracking deltas
+   * Capture per-frame render statistics and reset for next frame
+   * Three.js renderer.info accumulates until reset() is called
    */
   private updatePerFrameRenderStats(): void {
     const graphics = this.world.graphics;
@@ -484,26 +496,22 @@ export class DevStats extends System {
       info: {
         render: { triangles: number; calls: number };
         memory: { geometries: number; textures: number };
+        reset?: () => void;
       };
     };
 
     const info = renderer.info;
     if (!info) return;
 
-    // Calculate delta (this frame's contribution)
-    const currentCalls = info.render.calls;
-    const currentTriangles = info.render.triangles;
+    // Capture this frame's stats (accumulated since last reset)
+    this.frameDrawCalls = info.render.calls;
+    this.frameTriangles = info.render.triangles;
 
-    this.frameDrawCalls = currentCalls - this.lastRenderCalls;
-    this.frameTriangles = currentTriangles - this.lastRenderTriangles;
-
-    // Handle reset (when values go down, renderer was reset)
-    if (this.frameDrawCalls < 0) this.frameDrawCalls = currentCalls;
-    if (this.frameTriangles < 0) this.frameTriangles = currentTriangles;
-
-    // Store for next frame
-    this.lastRenderCalls = currentCalls;
-    this.lastRenderTriangles = currentTriangles;
+    // Reset for next frame so values don't accumulate forever
+    // Both WebGLRenderer and WebGPURenderer support info.reset()
+    if (info.reset) {
+      info.reset();
+    }
   }
 
   /**
@@ -659,6 +667,34 @@ export class DevStats extends System {
       `;
     }
 
+    // Water/Reflection info
+    if (this.waterElement) {
+      const waterInfo = this.getWaterInfo();
+      if (waterInfo) {
+        const reflectionColor = waterInfo.reflectionActive
+          ? "#4ade80"
+          : "#ef4444";
+        const reflectionStatus = waterInfo.reflectionActive ? "ON" : "OFF";
+        this.waterElement.innerHTML = `
+          <div style="display: flex; justify-content: space-between;">
+            <span>Reflection Cameras:</span>
+            <span style="color: ${reflectionColor};">${waterInfo.activeReflectionCameras}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span>Reflection:</span>
+            <span style="color: ${reflectionColor};">${reflectionStatus}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span>Water Meshes:</span>
+            <span style="color: #e0e0e0;">${waterInfo.visibleWaterMeshes} / ${waterInfo.totalWaterMeshes}</span>
+          </div>
+        `;
+        this.waterElement.style.display = "block";
+      } else {
+        this.waterElement.style.display = "none";
+      }
+    }
+
     // System timings (if enabled)
     if (this.measureSystems && this.systemsElement) {
       this.updateSystemTimings();
@@ -716,14 +752,14 @@ export class DevStats extends System {
   }
 
   /**
-   * Get renderer statistics from WebGPU renderer
-   * Returns per-frame values (not cumulative)
+   * Get renderer statistics
+   * Draw calls and triangles are per-frame (reset each frame)
+   * Textures and geometries are current allocations in GPU memory
    */
   private getRendererInfo(): RenderInfo | null {
     const graphics = this.world.graphics;
     if (!graphics?.renderer) return null;
 
-    // WebGPU renderer info structure from RendererFactory
     const renderer = graphics.renderer as {
       info: {
         render: { triangles: number; calls: number };
@@ -734,7 +770,8 @@ export class DevStats extends System {
     const info = renderer.info;
     if (!info) return null;
 
-    // Return per-frame values (calculated in updatePerFrameRenderStats)
+    // frameDrawCalls and frameTriangles are captured before reset in updatePerFrameRenderStats
+    // memory.textures and memory.geometries are current GPU allocations
     return {
       drawCalls: this.frameDrawCalls,
       triangles: this.frameTriangles,
@@ -797,6 +834,26 @@ export class DevStats extends System {
       entityCount,
       systemCount,
       lightCount,
+    };
+  }
+
+  /**
+   * Get water system and reflection camera statistics
+   */
+  private getWaterInfo(): {
+    activeReflectionCameras: number;
+    reflectionActive: boolean;
+    totalWaterMeshes: number;
+    visibleWaterMeshes: number;
+  } | null {
+    const waterSystem = this.world.getSystem<WaterSystem>("water");
+    if (!waterSystem) return null;
+
+    return {
+      activeReflectionCameras: waterSystem.activeReflectionCameraCount,
+      reflectionActive: waterSystem.isReflectionActive,
+      totalWaterMeshes: waterSystem.waterMeshCount,
+      visibleWaterMeshes: waterSystem.visibleWaterMeshCount,
     };
   }
 
@@ -909,6 +966,7 @@ export class DevStats extends System {
     this.playerElement = null;
     this.biomeElement = null;
     this.timingElement = null;
+    this.waterElement = null;
     this.systemTimings.clear();
     super.destroy();
   }

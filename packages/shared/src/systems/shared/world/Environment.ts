@@ -1,4 +1,4 @@
-import THREE from "../../../extras/three/three";
+import THREE, { CSMShadowNode } from "../../../extras/three/three";
 
 import { Node as NodeClass } from "../../../nodes/Node";
 import { System } from "..";
@@ -23,40 +23,56 @@ function asString(value: unknown): string {
   return value as string;
 }
 
-// Shadow quality settings for single DirectionalLight
-// WebGPU works best with a single shadow-casting light
-const shadowLevels = {
+// CSM Shadow configuration per quality level
+//
+// RESOLUTION MATH:
+// Each cascade covers (maxFar / cascades) meters with shadowMapSize pixels
+// Example: maxFar=100, cascades=2, size=2048 → first cascade covers ~30m with 2048px = ~15px/meter
+// A 0.5m character needs ~7-8 pixels to cast a visible shadow
+//
+// SHADOW STABILITY NOTES:
+// - lightMargin: Padding around frustum (50-100 is usually enough)
+// - shadowBias: Small positive value prevents self-shadowing (0.0001-0.001)
+// - shadowNormalBias: Offsets along normal for curved surfaces (0.005-0.02)
+// - More cascades = better near/far resolution but more draw calls
+//
+// IMPORTANT: Vegetation fade distances should be <= maxFar so trees don't appear unshadowed
+export const csmLevels = {
   none: {
-    shadowMapSize: 512,
-    castShadow: false,
-    shadowBias: -0.0001,
-    shadowNormalBias: 0.02,
-    shadowRadius: 1,
-    shadowFrustumSize: 50, // Orthographic camera size
+    enabled: false,
+    shadowMapSize: 0,
+    cascades: 1,
+    maxFar: 50,
+    shadowBias: 0.0003,
+    shadowNormalBias: 0.01,
+    lightMargin: 50,
   },
   low: {
-    shadowMapSize: 1024,
-    castShadow: true,
-    shadowBias: -0.0001,
-    shadowNormalBias: 0.02,
-    shadowRadius: 2,
-    shadowFrustumSize: 80,
+    enabled: true,
+    shadowMapSize: 2048,
+    cascades: 2, // 2 cascades: near (~25m high-res) + far (~75m)
+    maxFar: 200, // Reduced from 150 for better resolution
+    shadowBias: 0.0002, // Lower bias so small object shadows appear
+    shadowNormalBias: 0.01,
+    lightMargin: 50,
   },
   med: {
+    enabled: true,
     shadowMapSize: 2048,
-    castShadow: true,
-    shadowBias: -0.00005,
-    shadowNormalBias: 0.01,
-    shadowRadius: 3,
-    shadowFrustumSize: 100,
+    cascades: 3, // 3 cascades for better distribution
+    maxFar: 350, // Reasonable distance
+    shadowBias: 0.00015,
+    shadowNormalBias: 0.008,
+    lightMargin: 60,
   },
   high: {
-    shadowMapSize: 4096,
-    castShadow: true,
-    shadowBias: -0.00005,
+    enabled: true,
+    shadowMapSize: 2048, // Higher resolution for sharp shadows
+    cascades: 4, // 4 cascades for excellent near/far balance
+    maxFar: 1000, // Don't need shadows beyond 200m
+    shadowBias: 0.0001,
     shadowNormalBias: 0.005,
-    shadowRadius: 4,
-    shadowFrustumSize: 120,
+    lightMargin: 80,
   },
 };
 
@@ -104,9 +120,23 @@ export class Environment extends System {
   skyInfo!: SkyInfo;
   private skySystem?: SkySystem;
 
-  // Main directional light (sun/moon) - single shadow-casting light
+  // Main directional light (sun/moon) with CSM shadow support
   public sunLight: THREE.DirectionalLight | null = null;
   public lightDirection: THREE.Vector3 = new THREE.Vector3(0, -1, 0);
+
+  // Shadow stabilization - prevents flickering/swimming
+  private targetLightDirection: THREE.Vector3 = new THREE.Vector3(0, -1, 0);
+  private lastLightAnchor: THREE.Vector3 = new THREE.Vector3(); // Snapped position
+  private shadowTexelSize: number = 0; // For texel snapping calculation
+  private readonly LIGHT_DISTANCE = 400; // Distance from target to light
+
+  // CSMShadowNode for WebGPU cascaded shadows
+  private csmShadowNode: InstanceType<typeof CSMShadowNode> | null = null;
+
+  // CSM frustum update optimization - only recalculate when needed
+  // Set to true on: viewport resize, camera near/far change, CSM config change
+  private needsFrustumUpdate: boolean = true;
+  private csmNeedsAttach: boolean = false; // True until CSM shadowNode is attached to light
 
   // Ambient lighting for day/night cycle (non-shadow casting)
   private hemisphereLight: THREE.HemisphereLight | null = null;
@@ -328,8 +358,9 @@ export class Environment extends System {
     this.world.stage.scene.environment = null;
     this.world.stage.scene.background = null;
 
+    // Set initial light direction and apply to sun light
+    this.lightDirection.copy(sunDirection || _sunDirection);
     if (this.sunLight) {
-      this.lightDirection.copy(sunDirection || _sunDirection);
       this.sunLight.intensity = sunIntensity || 1;
       this.sunLight.color.set(sunColor || "#ffffff");
     }
@@ -400,7 +431,11 @@ export class Environment extends System {
       this.world.stage.scene.environment = null;
     }
 
-    // Dispose sun light
+    // Dispose sun light and CSM
+    if (this.csmShadowNode) {
+      this.csmShadowNode.dispose();
+      this.csmShadowNode = null;
+    }
     if (this.sunLight) {
       if (this.sunLight.shadow.map) {
         this.sunLight.shadow.map.dispose();
@@ -474,14 +509,19 @@ export class Environment extends System {
 
         // ===================
         // LIGHT DIRECTION - Track sun during day, moon during night
+        // Use target direction + interpolation to prevent sudden jumps
         // ===================
         if (isDay) {
           // Daytime: light comes FROM the sun (negate sunDirection which points TO sun)
-          this.lightDirection.copy(this.skySystem.sunDirection).negate();
+          this.targetLightDirection.copy(this.skySystem.sunDirection).negate();
         } else {
           // Nighttime: light comes FROM the moon (at -sunDirection position)
-          this.lightDirection.copy(this.skySystem.sunDirection);
+          this.targetLightDirection.copy(this.skySystem.sunDirection);
         }
+
+        // Smooth interpolation to prevent sudden direction changes causing flicker
+        // Lerp factor of 0.02 = ~50 frames to reach target (smooth over ~1 second at 60fps)
+        this.lightDirection.lerp(this.targetLightDirection, 0.02);
 
         // ===================
         // LIGHT INTENSITY & COLOR - Single light, simple and correct
@@ -529,7 +569,16 @@ export class Environment extends System {
   }
 
   /**
-   * Update sun light position to follow camera for consistent shadow coverage
+   * Update sun light position to follow camera for consistent shadow coverage.
+   *
+   * SHADOW STABILIZATION:
+   * Shadow flickering/swimming is caused by the shadow map being rendered from
+   * slightly different positions each frame. To fix this:
+   *
+   * 1. TEXEL SNAPPING: Snap light position to shadow map texel boundaries
+   *    This ensures the shadow map samples the same world positions each frame
+   *
+   * 2. SMOOTH DIRECTION: Light direction is interpolated (in update()), not instant
    */
   private updateSunLightPosition(): void {
     if (!this.sunLight) return;
@@ -537,18 +586,67 @@ export class Environment extends System {
     // Get camera position (where shadows should be centered)
     const cameraPos = this.world.camera.position;
 
-    // Position light high above and behind the camera relative to light direction
-    // This ensures shadows are cast in the correct direction
-    const lightDistance = 200; // Distance from target
+    // Calculate shadow texel size for snapping (based on shadow map coverage / resolution)
+    // This needs to match the shadow camera frustum size
+    const shadowMapSize = this.sunLight.shadow.mapSize.x || 2048;
+    const shadowCam = this.sunLight.shadow.camera;
+    const frustumWidth = shadowCam.right - shadowCam.left;
+    this.shadowTexelSize = frustumWidth / shadowMapSize;
+
+    // TEXEL SNAPPING: Round to shadow texel grid to prevent sub-texel swimming
+    // This ensures shadows sample the same world positions regardless of tiny camera movements
+    const texelSize = Math.max(this.shadowTexelSize, 0.1);
+    this.lastLightAnchor.x = Math.round(cameraPos.x / texelSize) * texelSize;
+    this.lastLightAnchor.y = cameraPos.y;
+    this.lastLightAnchor.z = Math.round(cameraPos.z / texelSize) * texelSize;
+
+    // Position light using stabilized anchor, not raw camera position
+    // Light is positioned OPPOSITE to light direction (light comes FROM this position)
     this.sunLight.position.set(
-      cameraPos.x - this.lightDirection.x * lightDistance,
-      cameraPos.y - this.lightDirection.y * lightDistance + 50, // Extra height
-      cameraPos.z - this.lightDirection.z * lightDistance,
+      this.lastLightAnchor.x - this.lightDirection.x * this.LIGHT_DISTANCE,
+      this.lastLightAnchor.y -
+        this.lightDirection.y * this.LIGHT_DISTANCE +
+        100,
+      this.lastLightAnchor.z - this.lightDirection.z * this.LIGHT_DISTANCE,
     );
 
-    // Target looks at camera position
-    this.sunLight.target.position.copy(cameraPos);
+    // Target is the stabilized anchor point
+    this.sunLight.target.position.copy(this.lastLightAnchor);
     this.sunLight.target.updateMatrixWorld();
+
+    // Update CSM frustums only when needed (expensive operation)
+    // Frustum recalculation is needed on: viewport resize, camera near/far change
+    // Light position updates do NOT require frustum recalculation
+    if (
+      this.csmShadowNode &&
+      this.needsFrustumUpdate &&
+      this.csmShadowNode.camera
+    ) {
+      // Ensure camera projection is up to date before frustum calculation
+      this.world.camera.updateProjectionMatrix();
+      try {
+        this.csmShadowNode.updateFrustums();
+        this.needsFrustumUpdate = false;
+
+        // After successful frustum init, attach shadowNode to light
+        // We defer this because CSM shader will crash if frustums aren't initialized
+        if (this.csmNeedsAttach && this.sunLight) {
+          (
+            this.sunLight.shadow as THREE.DirectionalLightShadow & {
+              shadowNode?: InstanceType<typeof CSMShadowNode>;
+            }
+          ).shadowNode = this.csmShadowNode;
+          this.csmNeedsAttach = false;
+          console.log("[Environment] CSM shadowNode attached to light");
+        }
+      } catch (err) {
+        // CSMShadowNode.updateFrustums() can fail if camera projection isn't ready yet
+        // Will retry on next update() - this is expected during startup
+        console.debug(
+          "[Environment] CSM frustum update deferred - camera not ready",
+        );
+      }
+    }
   }
 
   /**
@@ -595,7 +693,7 @@ export class Environment extends System {
   // Day fog color: warm beige
   private readonly dayFogColor = new THREE.Color(0xd4c8b8);
   // Night fog color: dark blue to blend with night sky (slightly lighter for visibility)
-  private readonly nightFogColor = new THREE.Color(0x5980c9);
+  private readonly nightFogColor = new THREE.Color(0x2b3445);
   // Blended fog color (updated each frame)
   private readonly blendedFogColor = new THREE.Color();
 
@@ -654,7 +752,7 @@ export class Environment extends System {
     this.hemisphereLight = new THREE.HemisphereLight(
       0x87ceeb, // Sky color (light blue)
       0x5d4837, // Ground color (warm brown)
-      0.8, // Higher intensity for better ambient
+      0.5, // Higher intensity for better ambient
     );
     this.hemisphereLight.name = "EnvironmentHemisphereLight";
     scene.add(this.hemisphereLight);
@@ -670,16 +768,15 @@ export class Environment extends System {
   }
 
   /**
-   * Build single directional light (sun/moon) with shadow support
-   * WebGPU works best with a single shadow-casting directional light
+   * Build directional light (sun/moon) with CSMShadowNode for WebGPU cascaded shadows
+   * CSMShadowNode handles cascade splitting internally - we just configure it
    */
   buildSunLight(): void {
     if (!this.isClientWithGraphics) return;
 
     const shadowsLevel = this.world.prefs?.shadows || "med";
-    const options =
-      shadowLevels[shadowsLevel as keyof typeof shadowLevels] ||
-      shadowLevels.med;
+    const csmConfig =
+      csmLevels[shadowsLevel as keyof typeof csmLevels] || csmLevels.med;
 
     if (!this.world.stage?.scene) {
       console.warn(
@@ -690,70 +787,89 @@ export class Environment extends System {
 
     const scene = this.world.stage.scene;
 
-    // Update existing light or create new one
+    // Dispose existing light and CSM
+    if (this.csmShadowNode) {
+      this.csmShadowNode.dispose();
+      this.csmShadowNode = null;
+    }
     if (this.sunLight) {
-      // Update shadow settings
-      this.sunLight.shadow.mapSize.setScalar(options.shadowMapSize);
-      this.sunLight.shadow.bias = options.shadowBias;
-      this.sunLight.shadow.normalBias = options.shadowNormalBias;
-      this.sunLight.shadow.radius = options.shadowRadius;
-      this.sunLight.castShadow = options.castShadow;
-
-      // Update shadow camera frustum
-      const shadowCam = this.sunLight.shadow.camera;
-      const frustumSize = options.shadowFrustumSize;
-      shadowCam.left = -frustumSize;
-      shadowCam.right = frustumSize;
-      shadowCam.top = frustumSize;
-      shadowCam.bottom = -frustumSize;
-      shadowCam.near = 0.5;
-      shadowCam.far = 500;
-      shadowCam.updateProjectionMatrix();
-
-      // Dispose old shadow map to recreate with new size
       if (this.sunLight.shadow.map) {
         this.sunLight.shadow.map.dispose();
-        (this.sunLight.shadow.map as THREE.WebGLRenderTarget | null) = null;
       }
-
-      console.log(
-        `[Environment] Sun light updated: mapSize=${options.shadowMapSize}, frustum=${frustumSize}`,
-      );
-    } else {
-      // Create new directional light
-      this.sunLight = new THREE.DirectionalLight(0xffffff, 1.8);
-      this.sunLight.name = "SunLight";
-      this.sunLight.castShadow = options.castShadow;
-
-      // Shadow map settings
-      this.sunLight.shadow.mapSize.setScalar(options.shadowMapSize);
-      this.sunLight.shadow.bias = options.shadowBias;
-      this.sunLight.shadow.normalBias = options.shadowNormalBias;
-      this.sunLight.shadow.radius = options.shadowRadius;
-
-      // Shadow camera (orthographic) - covers area around camera
-      const shadowCam = this.sunLight.shadow.camera;
-      const frustumSize = options.shadowFrustumSize;
-      shadowCam.left = -frustumSize;
-      shadowCam.right = frustumSize;
-      shadowCam.top = frustumSize;
-      shadowCam.bottom = -frustumSize;
-      shadowCam.near = 0.5;
-      shadowCam.far = 500;
-      shadowCam.updateProjectionMatrix();
-
-      // Initial position (will be updated in updateSunLightPosition)
-      this.sunLight.position.set(100, 200, 100);
-      this.sunLight.target.position.set(0, 0, 0);
-
-      // Add to scene
-      scene.add(this.sunLight);
-      scene.add(this.sunLight.target);
-
-      console.log(
-        `[Environment] Sun light created: castShadow=${options.castShadow}, mapSize=${options.shadowMapSize}, frustum=${frustumSize}`,
-      );
+      if (this.sunLight.parent) {
+        this.sunLight.parent.remove(this.sunLight.target);
+        this.sunLight.parent.remove(this.sunLight);
+      }
+      this.sunLight.dispose();
+      this.sunLight = null;
     }
+
+    if (!csmConfig.enabled) {
+      console.log("[Environment] Shadows disabled for level:", shadowsLevel);
+      return;
+    }
+
+    // Create directional light for CSM
+    this.sunLight = new THREE.DirectionalLight(0xffffff, 1.8);
+    this.sunLight.name = "SunLight_CSM";
+    this.sunLight.castShadow = true;
+
+    // Shadow map settings (CSMShadowNode will use this as base resolution per cascade)
+    this.sunLight.shadow.mapSize.width = csmConfig.shadowMapSize;
+    this.sunLight.shadow.mapSize.height = csmConfig.shadowMapSize;
+    this.sunLight.shadow.bias = csmConfig.shadowBias;
+    this.sunLight.shadow.normalBias = csmConfig.shadowNormalBias;
+
+    // Shadow camera settings
+    // CSMShadowNode overrides these per-cascade, but we set reasonable defaults
+    // The frustum size here is for a single cascade - CSM will adjust for each cascade
+    const shadowCam = this.sunLight.shadow.camera;
+    shadowCam.near = 0.5;
+    shadowCam.far = this.LIGHT_DISTANCE + 200; // Light distance + scene depth
+    // Base frustum - CSMShadowNode will manage actual cascade frustums
+    // Keep this reasonable so non-CSM fallback works
+    const baseFrustumSize = 100;
+    shadowCam.left = -baseFrustumSize;
+    shadowCam.right = baseFrustumSize;
+    shadowCam.top = baseFrustumSize;
+    shadowCam.bottom = -baseFrustumSize;
+    shadowCam.updateProjectionMatrix();
+
+    // Initial position
+    this.sunLight.position.set(100, 200, 100);
+    this.sunLight.target.position.set(0, 0, 0);
+
+    // Create CSMShadowNode for WebGPU cascaded shadows
+    // Light direction is derived from sunLight.position and sunLight.target.position
+    this.csmShadowNode = new CSMShadowNode(this.sunLight, {
+      cascades: csmConfig.cascades,
+      maxFar: csmConfig.maxFar,
+      mode: "practical", // Practical split gives good near/far balance
+      lightMargin: csmConfig.lightMargin, // Prevents shadow "swimming" artifacts
+    });
+
+    // CRITICAL: Assign camera for frustum calculations
+    // Without this, CSM cannot properly calculate cascade splits
+    this.csmShadowNode.camera = this.world.camera;
+
+    // Enable smooth cascade transitions (prevents hard seams between cascades)
+    this.csmShadowNode.fade = true;
+
+    // Defer frustum initialization AND shadowNode assignment to first update() call
+    // CSMShadowNode.updateFrustums() requires the camera's projection matrix to be valid,
+    // but at start() time the camera may not be fully configured yet.
+    // We MUST NOT assign shadowNode until frustums are initialized, otherwise the
+    // renderer will try to use an uninitialized CSM and crash.
+    this.needsFrustumUpdate = true;
+    this.csmNeedsAttach = true;
+
+    // Add light to scene (but without shadowNode - will be attached after frustum init)
+    scene.add(this.sunLight);
+    scene.add(this.sunLight.target);
+
+    console.log(
+      `[Environment] CSM created: ${csmConfig.cascades} cascades, maxFar=${csmConfig.maxFar}, mapSize=${csmConfig.shadowMapSize} (pending frustum init)`,
+    );
   }
 
   onSettingsChange = (changes: { model?: string | { url?: string } }) => {
@@ -770,6 +886,7 @@ export class Environment extends System {
   };
 
   onViewportResize = () => {
-    // No-op for single light (shadow frustum doesn't need recalculating on resize)
+    // CSM frustums need recalculation when viewport/camera changes
+    this.needsFrustumUpdate = true;
   };
 }

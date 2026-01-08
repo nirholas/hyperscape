@@ -22,6 +22,8 @@
  *   --in-place      Overwrite original files (DANGEROUS!)
  *   --skip-ktx2     Skip KTX2 conversion (just resize and copy)
  *   --atlas         Merge materials via texture atlasing (max 2 materials: opaque + transparent)
+ *   --simplify      Apply mesh simplification (decimation)
+ *   --simplify-ratio <n>  Simplification ratio (default: 0.5 = 50% of original)
  * 
  * Requirements:
  *   - Node.js 18+ or Bun 1.0+
@@ -89,6 +91,10 @@ const options = {
   inPlace: args.includes('--in-place'),
   skipKtx2: args.includes('--skip-ktx2'),
   atlas: args.includes('--atlas'), // Enable material atlasing (merge to 2 materials max)
+  simplify: args.includes('--simplify'), // Aggressive mesh simplification
+  simplifyRatio: args.includes('--simplify-ratio') 
+    ? parseFloat(args[args.indexOf('--simplify-ratio') + 1]) 
+    : 0.5, // Default 50% reduction
 };
 
 // If in-place, output to same as input
@@ -511,6 +517,17 @@ async function optimizeModel(inputPath) {
     // Groups similar materials to reduce draw calls
     if (options.atlas) {
       steps.push({ cmd: 'palette', desc: 'Merging similar materials (palette)' });
+    }
+    
+    // Mesh simplification (when --simplify enabled)
+    // Reduces polygon count using meshoptimizer's simplify algorithm
+    if (options.simplify) {
+      const ratio = options.simplifyRatio;
+      const error = CONFIG.models.simplifyError;
+      steps.push({ 
+        cmd: `simplify --ratio ${ratio} --error ${error}`, 
+        desc: `Simplifying meshes to ${(ratio * 100).toFixed(0)}%` 
+      });
     }
     
     // Mesh optimization with meshopt

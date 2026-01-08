@@ -71,6 +71,10 @@ import type {
 } from "../../systems/client/HealthBars";
 import { COMBAT_CONSTANTS } from "../../constants/CombatConstants";
 import { ticksToMs } from "../../utils/game/CombatCalculations";
+import {
+  AnimationLOD,
+  getCameraPosition,
+} from "../../utils/rendering/AnimationLOD";
 
 interface AvatarWithInstance {
   instance: {
@@ -148,6 +152,14 @@ export class PlayerRemote extends Entity implements HotReloadable {
 
   // Guard to prevent double initialization
   private _initialized: boolean = false;
+
+  /** Animation LOD controller - throttles animation updates for distant players */
+  private readonly _animationLOD = new AnimationLOD({
+    fullDistance: 40, // Full 60fps animation within 40m (players need more detail than mobs)
+    halfDistance: 70, // 30fps animation at 40-70m
+    quarterDistance: 120, // 15fps animation at 70-120m
+    pauseDistance: 180, // No animation beyond 180m (bind pose)
+  });
 
   constructor(world: World, data: EntityData, local?: boolean) {
     super(world, data, local);
@@ -490,6 +502,24 @@ export class PlayerRemote extends Entity implements HotReloadable {
   }
 
   update(delta: number): void {
+    // ANIMATION LOD: Calculate distance to camera once for animation throttling
+    // This reduces CPU/GPU load for distant players significantly
+    const cameraPos = getCameraPosition(this.world);
+    const animLODResult = cameraPos
+      ? this._animationLOD.updateFromPosition(
+          this.node.position.x,
+          this.node.position.z,
+          cameraPos.x,
+          cameraPos.z,
+          delta,
+        )
+      : {
+          shouldUpdate: true,
+          effectiveDelta: delta,
+          lodLevel: 0,
+          distanceSq: 0,
+        };
+
     const anchor = this.getAnchorMatrix();
     if (!anchor) {
       // Check if TileInterpolator is controlling this entity's position
@@ -591,9 +621,10 @@ export class PlayerRemote extends Entity implements HotReloadable {
         instance.move(this.base.matrixWorld);
       }
 
-      // Update avatar animations
-      if (instance && instance.update) {
-        instance.update(delta);
+      // ANIMATION LOD: Only update avatar animations when LOD allows
+      // This significantly reduces CPU/GPU load for distant players
+      if (instance && instance.update && animLODResult.shouldUpdate) {
+        instance.update(animLODResult.effectiveDelta);
       }
     }
 
