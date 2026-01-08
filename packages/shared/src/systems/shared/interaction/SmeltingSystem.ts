@@ -26,6 +26,7 @@ interface SmeltingSession {
   quantity: number;
   smelted: number;
   failed: number;
+  timeoutId: ReturnType<typeof setTimeout> | null;
 }
 
 /** Smelting timing constants (in milliseconds) */
@@ -210,6 +211,7 @@ export class SmeltingSystem extends SystemBase {
       quantity: Math.max(1, quantity),
       smelted: 0,
       failed: 0,
+      timeoutId: null,
     };
 
     this.activeSessions.set(playerId, session);
@@ -257,8 +259,8 @@ export class SmeltingSystem extends SystemBase {
       return;
     }
 
-    // Schedule smelt completion
-    setTimeout(() => {
+    // Schedule smelt completion and store reference for cleanup
+    session.timeoutId = setTimeout(() => {
       this.completeSmelt(playerId);
     }, SMELTING_TIME);
   }
@@ -347,6 +349,12 @@ export class SmeltingSystem extends SystemBase {
   private completeSmelting(playerId: string): void {
     const session = this.activeSessions.get(playerId);
     if (!session) return;
+
+    // Clear any pending timeout to prevent orphaned callbacks
+    if (session.timeoutId) {
+      clearTimeout(session.timeoutId);
+      session.timeoutId = null;
+    }
 
     this.activeSessions.delete(playerId);
 

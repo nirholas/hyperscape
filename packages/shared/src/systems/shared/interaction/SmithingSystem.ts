@@ -26,6 +26,7 @@ interface SmithingSession {
   startTime: number;
   quantity: number;
   smithed: number;
+  timeoutId: ReturnType<typeof setTimeout> | null;
 }
 
 /** Smithing timing constants (in milliseconds) */
@@ -235,6 +236,7 @@ export class SmithingSystem extends SystemBase {
       startTime: Date.now(),
       quantity: Math.max(1, quantity),
       smithed: 0,
+      timeoutId: null,
     };
 
     this.activeSessions.set(playerId, session);
@@ -287,8 +289,8 @@ export class SmithingSystem extends SystemBase {
       return;
     }
 
-    // Schedule smith completion
-    setTimeout(() => {
+    // Schedule smith completion and store reference for cleanup
+    session.timeoutId = setTimeout(() => {
       this.completeSmith(playerId);
     }, SMITHING_TIME);
   }
@@ -351,6 +353,12 @@ export class SmithingSystem extends SystemBase {
   private completeSmithing(playerId: string): void {
     const session = this.activeSessions.get(playerId);
     if (!session) return;
+
+    // Clear any pending timeout to prevent orphaned callbacks
+    if (session.timeoutId) {
+      clearTimeout(session.timeoutId);
+      session.timeoutId = null;
+    }
 
     this.activeSessions.delete(playerId);
 
