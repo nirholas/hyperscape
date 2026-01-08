@@ -13,7 +13,11 @@
  * @see ProcessingDataProvider for smithing recipes from manifest
  */
 
-import { SMITHING_CONSTANTS } from "../../../constants/SmithingConstants";
+import {
+  SMITHING_CONSTANTS,
+  isLooseInventoryItem,
+  getItemQuantity,
+} from "../../../constants/SmithingConstants";
 import { processingDataProvider } from "../../../data/ProcessingDataProvider";
 import { EventType } from "../../../types/events";
 import { SystemBase } from "../infrastructure/SystemBase";
@@ -397,7 +401,7 @@ export class SmithingSystem extends SystemBase {
     if (!inventory || !Array.isArray(inventory)) return false;
 
     return inventory.some(
-      (item: { itemId: string }) => item.itemId === HAMMER_ITEM_ID,
+      (item) => isLooseInventoryItem(item) && item.itemId === HAMMER_ITEM_ID,
     );
   }
 
@@ -414,8 +418,9 @@ export class SmithingSystem extends SystemBase {
 
     let totalBars = 0;
     for (const item of inventory) {
-      if ((item as { itemId: string }).itemId === barType) {
-        totalBars += (item as { quantity?: number }).quantity || 1;
+      if (!isLooseInventoryItem(item)) continue;
+      if (item.itemId === barType) {
+        totalBars += getItemQuantity(item);
       }
     }
 

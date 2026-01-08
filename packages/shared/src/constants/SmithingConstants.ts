@@ -92,3 +92,39 @@ export function isValidItemId(id: unknown): id is string {
     id.length <= SMITHING_CONSTANTS.MAX_ITEM_ID_LENGTH
   );
 }
+
+/**
+ * Loose inventory item type - matches items from inventory lookups
+ * where quantity may be undefined (defaults to 1)
+ */
+export interface LooseInventoryItem {
+  itemId: string;
+  quantity?: number;
+  slot?: number;
+  metadata?: Record<string, unknown> | null;
+}
+
+/**
+ * Type guard to validate an object is a valid inventory item
+ * Validates structure, allows missing quantity (defaults to 1)
+ */
+export function isLooseInventoryItem(
+  item: unknown,
+): item is LooseInventoryItem {
+  if (typeof item !== "object" || item === null) return false;
+  if (!("itemId" in item)) return false;
+  if (typeof (item as LooseInventoryItem).itemId !== "string") return false;
+
+  // quantity is optional, but if present must be a number
+  const qty = (item as LooseInventoryItem).quantity;
+  if (qty !== undefined && typeof qty !== "number") return false;
+
+  return true;
+}
+
+/**
+ * Get quantity from an inventory item, defaulting to 1 if not present
+ */
+export function getItemQuantity(item: LooseInventoryItem): number {
+  return item.quantity ?? 1;
+}

@@ -12,7 +12,11 @@
  * @see ProcessingDataProvider for smelting recipes from manifest
  */
 
-import { SMITHING_CONSTANTS } from "../../../constants/SmithingConstants";
+import {
+  SMITHING_CONSTANTS,
+  isLooseInventoryItem,
+  getItemQuantity,
+} from "../../../constants/SmithingConstants";
 import { processingDataProvider } from "../../../data/ProcessingDataProvider";
 import { EventType } from "../../../types/events";
 import { SystemBase } from "../infrastructure/SystemBase";
@@ -396,12 +400,14 @@ export class SmeltingSystem extends SystemBase {
     const inventory = this.world.getInventory?.(playerId);
     if (!inventory || !Array.isArray(inventory)) return false;
 
-    // Build item counts
+    // Build item counts using type-safe guard
     const itemCounts = new Map<string, number>();
     for (const item of inventory) {
-      const itemId = (item as { itemId: string }).itemId;
-      const qty = (item as { quantity?: number }).quantity || 1;
-      itemCounts.set(itemId, (itemCounts.get(itemId) || 0) + qty);
+      if (!isLooseInventoryItem(item)) continue;
+      itemCounts.set(
+        item.itemId,
+        (itemCounts.get(item.itemId) || 0) + getItemQuantity(item),
+      );
     }
 
     // Check primary ore
