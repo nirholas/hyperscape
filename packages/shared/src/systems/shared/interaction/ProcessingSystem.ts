@@ -401,16 +401,6 @@ export class ProcessingSystem extends SystemBase {
       }
     }
 
-    // DEBUG: Log level check values
-    console.log("[ProcessingSystem] 🔥 Level check:", {
-      playerId,
-      logsId,
-      firemakingLevel,
-      levelRequired: firemakingData.levelRequired,
-      hasCachedSkills: !!cachedSkills,
-      cachedFiremaking: cachedSkills?.firemaking,
-    });
-
     if (firemakingLevel < firemakingData.levelRequired) {
       this.emitTypedEvent(EventType.UI_MESSAGE, {
         playerId,
