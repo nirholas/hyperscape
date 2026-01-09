@@ -16,7 +16,6 @@ import {
   SMITHING_CONSTANTS,
   isLooseInventoryItem,
   getItemQuantity,
-  ticksToMs,
 } from "../../../constants/SmithingConstants";
 import { processingDataProvider } from "../../../data/ProcessingDataProvider";
 import { EventType } from "../../../types/events";
@@ -32,15 +31,19 @@ interface SmeltingSession {
   quantity: number;
   smelted: number;
   failed: number;
-  timeoutId: ReturnType<typeof setTimeout> | null;
+  /** Tick when current smelt action completes (tick-based timing) */
+  completionTick: number;
 }
 
 export class SmeltingSystem extends SystemBase {
-  private activeSessions = new Map<string, SmeltingSession>();
-  private playerSkills = new Map<
+  private readonly activeSessions = new Map<string, SmeltingSession>();
+  private readonly playerSkills = new Map<
     string,
     Record<string, { level: number; xp: number }>
   >();
+
+  /** Track last processed tick to ensure once-per-tick processing */
+  private lastProcessedTick = -1;
 
   constructor(world: World) {
     super(world, {
@@ -210,7 +213,10 @@ export class SmeltingSystem extends SystemBase {
       return;
     }
 
-    // Create session
+    // Get current tick for tick-based timing
+    const currentTick = this.world.currentTick ?? 0;
+
+    // Create session with tick-based completion
     const session: SmeltingSession = {
       playerId,
       barItemId,
@@ -219,7 +225,7 @@ export class SmeltingSystem extends SystemBase {
       quantity: Math.max(1, quantity),
       smelted: 0,
       failed: 0,
-      timeoutId: null,
+      completionTick: currentTick + smeltingData.ticks, // First smelt completes after smeltingData.ticks
     };
 
     this.activeSessions.set(playerId, session);
@@ -238,15 +244,13 @@ export class SmeltingSystem extends SystemBase {
       barItemId,
       furnaceId,
     });
-
-    // Start first smelt
-    this.processNextSmelt(playerId);
   }
 
   /**
-   * Process the next smelt in the session
+   * Schedule the next smelt action for a session.
+   * Called after each smelt (success or failure) to queue the next one.
    */
-  private processNextSmelt(playerId: string): void {
+  private scheduleNextSmelt(playerId: string): void {
     const session = this.activeSessions.get(playerId);
     if (!session) return;
 
@@ -276,11 +280,9 @@ export class SmeltingSystem extends SystemBase {
       return;
     }
 
-    // Schedule smelt completion using tick-based timing from manifest
-    const smeltTimeMs = ticksToMs(smeltingData.ticks);
-    session.timeoutId = setTimeout(() => {
-      this.completeSmelt(playerId);
-    }, smeltTimeMs);
+    // Set completion tick for next smelt action (tick-based timing)
+    const currentTick = this.world.currentTick ?? 0;
+    session.completionTick = currentTick + smeltingData.ticks;
   }
 
   /**
@@ -364,8 +366,8 @@ export class SmeltingSystem extends SystemBase {
       });
     }
 
-    // Continue to next smelt
-    this.processNextSmelt(playerId);
+    // Schedule next smelt action
+    this.scheduleNextSmelt(playerId);
   }
 
   /**
@@ -374,12 +376,6 @@ export class SmeltingSystem extends SystemBase {
   private completeSmelting(playerId: string): void {
     const session = this.activeSessions.get(playerId);
     if (!session) return;
-
-    // Clear any pending timeout to prevent orphaned callbacks
-    if (session.timeoutId) {
-      clearTimeout(session.timeoutId);
-      session.timeoutId = null;
-    }
 
     this.activeSessions.delete(playerId);
 
@@ -509,8 +505,29 @@ export class SmeltingSystem extends SystemBase {
     return this.activeSessions.has(playerId);
   }
 
+  /**
+   * Update method - processes tick-based smelting sessions.
+   * Called each frame, but only processes once per game tick.
+   */
   update(_dt: number): void {
-    // Session timeouts handled via setTimeout
+    // Server-only processing
+    if (!this.world.isServer) return;
+
+    const currentTick = this.world.currentTick ?? 0;
+
+    // Only process once per tick (avoid duplicate processing)
+    if (currentTick === this.lastProcessedTick) {
+      return;
+    }
+    this.lastProcessedTick = currentTick;
+
+    // Process all active sessions that have reached their completion tick
+    // Use Array.from to safely iterate while potentially modifying the map
+    for (const [playerId, session] of Array.from(this.activeSessions)) {
+      if (currentTick >= session.completionTick) {
+        this.completeSmelt(playerId);
+      }
+    }
   }
 
   destroy(): void {
