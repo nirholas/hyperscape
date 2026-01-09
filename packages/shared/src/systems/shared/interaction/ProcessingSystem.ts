@@ -386,6 +386,40 @@ export class ProcessingSystem extends SystemBase {
       return;
     }
 
+    // Check level requirement
+    let firemakingLevel = 1;
+    const cachedSkills = this.playerSkills.get(playerId);
+    if (cachedSkills?.firemaking?.level) {
+      firemakingLevel = cachedSkills.firemaking.level;
+    } else {
+      const player = this.world.getPlayer(playerId);
+      const playerSkills = (
+        player as { skills?: Record<string, { level: number }> }
+      )?.skills;
+      if (playerSkills?.firemaking?.level) {
+        firemakingLevel = playerSkills.firemaking.level;
+      }
+    }
+
+    // DEBUG: Log level check values
+    console.log("[ProcessingSystem] 🔥 Level check:", {
+      playerId,
+      logsId,
+      firemakingLevel,
+      levelRequired: firemakingData.levelRequired,
+      hasCachedSkills: !!cachedSkills,
+      cachedFiremaking: cachedSkills?.firemaking,
+    });
+
+    if (firemakingLevel < firemakingData.levelRequired) {
+      this.emitTypedEvent(EventType.UI_MESSAGE, {
+        playerId,
+        message: `You need level ${firemakingData.levelRequired} Firemaking to light those logs.`,
+        type: "error",
+      });
+      return;
+    }
+
     // Get player position (validated above)
 
     // Start firemaking process - use pooled action object (Phase 2 optimization)

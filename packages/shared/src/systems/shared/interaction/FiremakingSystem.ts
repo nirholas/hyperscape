@@ -122,6 +122,17 @@ export class FiremakingSystem extends ProcessingSystemBase {
       return;
     }
 
+    // Check level requirement
+    const firemakingLevel = this.getFiremakingLevel(playerId);
+    if (firemakingLevel < firemakingData.levelRequired) {
+      this.emitTypedEvent(EventType.UI_MESSAGE, {
+        playerId,
+        message: `You need level ${firemakingData.levelRequired} Firemaking to light those logs.`,
+        type: "error",
+      });
+      return;
+    }
+
     // Create processing action from pool
     const processingAction = this.acquireAction();
     processingAction.playerId = playerId;
@@ -308,6 +319,33 @@ export class FiremakingSystem extends ProcessingSystemBase {
       playerId,
       position: { x: target.x, y: target.y, z: target.z },
     });
+  }
+
+  // =========================================================================
+  // SKILL LEVEL ACCESS
+  // =========================================================================
+
+  /**
+   * Get player's firemaking level from cached skills or player entity
+   */
+  private getFiremakingLevel(playerId: string): number {
+    // Check cached skills first (from SKILLS_UPDATED events)
+    const cachedSkills = this.playerSkills.get(playerId);
+    if (cachedSkills?.firemaking?.level) {
+      return cachedSkills.firemaking.level;
+    }
+
+    // Fall back to player entity
+    const player = this.world.getPlayer(playerId);
+    const playerSkills = (
+      player as { skills?: Record<string, { level: number }> }
+    )?.skills;
+    if (playerSkills?.firemaking?.level) {
+      return playerSkills.firemaking.level;
+    }
+
+    // Default to level 1
+    return 1;
   }
 
   // =========================================================================
