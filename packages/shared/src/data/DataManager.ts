@@ -30,10 +30,34 @@ import {
   getNPCsInArea,
 } from "./world-areas";
 import { BIOMES } from "./world-structure";
+import { loadSkillUnlocks, type SkillUnlocksManifest } from "./skill-unlocks";
+import {
+  TierDataProvider,
+  loadTierRequirements,
+  type TierRequirementsManifest,
+  type TierableItem,
+} from "./TierDataProvider";
+import {
+  processingDataProvider,
+  type CookingManifest,
+  type FiremakingManifest,
+  type SmeltingManifest,
+  type SmithingManifest,
+} from "./ProcessingDataProvider";
 
 // Define constants from JSON data
 const STARTING_ITEMS: Array<{ id: string }> = []; // Stub - data removed
 const TREASURE_LOCATIONS: TreasureLocation[] = []; // Stub - data removed
+
+// Required item category files - must ALL exist for directory loading
+// Used by both filesystem and CDN loading for atomic validation
+const REQUIRED_ITEM_FILES = [
+  "weapons",
+  "tools",
+  "resources",
+  "food",
+  "misc",
+] as const;
 const getAllTreasureLocations = () => TREASURE_LOCATIONS;
 const getTreasureLocationsByDifficulty = (_difficulty: number) =>
   TREASURE_LOCATIONS;
@@ -52,7 +76,7 @@ import type { MobSpawnPoint, NPCLocation, WorldArea } from "./world-areas";
 import { WeaponType, EquipmentSlotName, AttackType } from "../types/core/core";
 
 /**
- * Gathering Tool Data - loaded from tools.json manifest
+ * Gathering Tool Data - derived from items.json where item.tool is defined
  * Defines tool properties for gathering skills (woodcutting, mining, fishing)
  *
  * OSRS Mechanics:
@@ -67,7 +91,7 @@ export interface GatheringToolData {
   skill: "woodcutting" | "mining" | "fishing";
   /** Metal tier for success rate lookup (e.g., "bronze", "dragon") */
   tier: string;
-  /** Skill level required to use this tool */
+  /** Skill level required to use this tool (derived from tier or explicit) */
   levelRequired: number;
   /** For mining: ticks between roll attempts (OSRS-accurate) */
   rollTicks?: number;
@@ -76,7 +100,17 @@ export interface GatheringToolData {
 }
 
 /**
- * External Resource Data - loaded from resources.json manifest
+ * Tool data embedded in items.json
+ */
+export interface ItemToolData {
+  skill: "woodcutting" | "mining" | "fishing";
+  priority: number;
+  rollTicks?: number;
+}
+
+/**
+ * External Resource Data - loaded from gathering/*.json manifests
+ * Used by ResourceSystem for trees, ores, and fishing spots.
  */
 export interface ExternalResourceData {
   id: string;
@@ -109,6 +143,27 @@ export interface ExternalResourceData {
     /** OSRS catch rate at level 99 (x/256) - for priority rolling */
     catchHigh?: number;
   }>;
+}
+
+/**
+ * Woodcutting manifest structure - gathering/woodcutting.json
+ */
+export interface WoodcuttingManifest {
+  trees: ExternalResourceData[];
+}
+
+/**
+ * Mining manifest structure - gathering/mining.json
+ */
+export interface MiningManifest {
+  rocks: ExternalResourceData[];
+}
+
+/**
+ * Fishing manifest structure - gathering/fishing.json
+ */
+export interface FishingManifest {
+  spots: ExternalResourceData[];
 }
 
 /**
@@ -181,12 +236,66 @@ export class DataManager {
       process.env.NODE_ENV === "test";
 
     try {
-      // Load items
-      const itemsRes = await fetch(`${baseUrl}/items.json`);
-      const list = (await itemsRes.json()) as Array<Item>;
-      for (const it of list) {
-        const normalized = this.normalizeItem(it);
-        (ITEMS as Map<string, Item>).set(normalized.id, normalized);
+      // Load tier requirements FIRST - needed for normalizeItem to derive requirements from tier
+      try {
+        const tierReqRes = await fetch(`${baseUrl}/tier-requirements.json`);
+        const tierReqManifest =
+          (await tierReqRes.json()) as TierRequirementsManifest;
+        loadTierRequirements(tierReqManifest);
+      } catch {
+        console.warn(
+          "[DataManager] tier-requirements.json not found, tier-based requirements unavailable",
+        );
+      }
+
+      // Load items - try directory first (atomic), fall back to single file
+      let loadedFromDirectory = false;
+      try {
+        // ATOMIC: Fetch all files in parallel, only process if ALL succeed
+        const responses = await Promise.all(
+          REQUIRED_ITEM_FILES.map((file) =>
+            fetch(`${baseUrl}/items/${file}.json`),
+          ),
+        );
+
+        // Check ALL responses are OK before processing any
+        if (responses.every((res) => res.ok)) {
+          // All files exist - parse and load
+          const allItemArrays = await Promise.all(
+            responses.map((res) => res.json()),
+          );
+
+          const seenIds = new Set<string>();
+          for (let i = 0; i < REQUIRED_ITEM_FILES.length; i++) {
+            const items = allItemArrays[i] as Item[];
+            for (const item of items) {
+              if (seenIds.has(item.id)) {
+                throw new Error(
+                  `[DataManager] Duplicate item ID "${item.id}" in items/${REQUIRED_ITEM_FILES[i]}.json`,
+                );
+              }
+              seenIds.add(item.id);
+              const normalized = this.normalizeItem(item);
+              (ITEMS as Map<string, Item>).set(normalized.id, normalized);
+            }
+          }
+          console.log(
+            `[DataManager] Loaded ${seenIds.size} items from items/ directory`,
+          );
+          loadedFromDirectory = true;
+        }
+      } catch {
+        // Directory loading failed - will fall back below
+      }
+
+      if (!loadedFromDirectory) {
+        // Fallback: Load from single items.json (backwards compatibility)
+        const itemsRes = await fetch(`${baseUrl}/items.json`);
+        const list = (await itemsRes.json()) as Array<Item>;
+        for (const it of list) {
+          const normalized = this.normalizeItem(it);
+          (ITEMS as Map<string, Item>).set(normalized.id, normalized);
+        }
       }
 
       // Generate noted variants for all eligible items
@@ -209,31 +318,9 @@ export class DataManager {
         (ALL_NPCS as Map<string, NPCData>).set(normalized.id, normalized);
       }
 
-      // Load resources
-      const resourcesRes = await fetch(`${baseUrl}/resources.json`);
-      const resourceList =
-        (await resourcesRes.json()) as Array<ExternalResourceData>;
-
-      if (
-        !(
-          globalThis as {
-            EXTERNAL_RESOURCES?: Map<string, ExternalResourceData>;
-          }
-        ).EXTERNAL_RESOURCES
-      ) {
-        (
-          globalThis as {
-            EXTERNAL_RESOURCES?: Map<string, ExternalResourceData>;
-          }
-        ).EXTERNAL_RESOURCES = new Map();
-      }
-      for (const resource of resourceList) {
-        (
-          globalThis as unknown as {
-            EXTERNAL_RESOURCES: Map<string, ExternalResourceData>;
-          }
-        ).EXTERNAL_RESOURCES.set(resource.id, resource);
-      }
+      // Load gathering resources from separate per-skill manifests
+      // This matches the recipes/ pattern for organizational consistency
+      await this.loadGatheringManifestsFromCDN(baseUrl);
 
       // Load world areas
       const worldAreasRes = await fetch(`${baseUrl}/world-areas.json`);
@@ -274,30 +361,12 @@ export class DataManager {
         GENERAL_STORES[store.id] = store;
       }
 
-      // Load gathering tools
-      const toolsRes = await fetch(`${baseUrl}/tools.json`);
-      const toolList = (await toolsRes.json()) as Array<GatheringToolData>;
+      // Load recipe manifests for ProcessingDataProvider
+      await this.loadRecipeManifestsFromCDN(baseUrl);
 
-      if (
-        !(
-          globalThis as {
-            EXTERNAL_TOOLS?: Map<string, GatheringToolData>;
-          }
-        ).EXTERNAL_TOOLS
-      ) {
-        (
-          globalThis as {
-            EXTERNAL_TOOLS?: Map<string, GatheringToolData>;
-          }
-        ).EXTERNAL_TOOLS = new Map();
-      }
-      for (const tool of toolList) {
-        (
-          globalThis as unknown as {
-            EXTERNAL_TOOLS: Map<string, GatheringToolData>;
-          }
-        ).EXTERNAL_TOOLS.set(tool.itemId, tool);
-      }
+      // Build EXTERNAL_TOOLS from items where item.tool is defined
+      // This replaces the old tools.json loading
+      this.buildToolsFromItems();
     } catch (error) {
       // In test/CI environments, CDN might not be available - this is non-fatal
       if (isTestEnv) {
@@ -371,13 +440,45 @@ export class DataManager {
     );
 
     try {
-      // Load items
-      const itemsPath = path.join(manifestsDir, "items.json");
-      const itemsData = await fs.readFile(itemsPath, "utf-8");
-      const list = JSON.parse(itemsData) as Array<Item>;
-      for (const it of list) {
-        const normalized = this.normalizeItem(it);
-        (ITEMS as Map<string, Item>).set(normalized.id, normalized);
+      // Load tier requirements FIRST - needed for normalizeItem to derive requirements from tier
+      const tierReqPath = path.join(manifestsDir, "tier-requirements.json");
+      try {
+        const tierReqData = await fs.readFile(tierReqPath, "utf-8");
+        const tierReqManifest = JSON.parse(
+          tierReqData,
+        ) as TierRequirementsManifest;
+        loadTierRequirements(tierReqManifest);
+      } catch {
+        console.warn(
+          "[DataManager] tier-requirements.json not found, tier-based requirements unavailable",
+        );
+      }
+
+      // Load items - try directory first, fall back to single file
+      const itemsDir = path.join(manifestsDir, "items");
+      let loadedFromDirectory = false;
+
+      try {
+        await fs.access(itemsDir);
+        // Directory exists - try to load from it (validates all required files)
+        loadedFromDirectory = await this.loadItemsFromDirectory(
+          fs,
+          path,
+          itemsDir,
+        );
+      } catch {
+        // Directory doesn't exist - will fall back below
+      }
+
+      if (!loadedFromDirectory) {
+        // Fallback: Load from single items.json (backwards compatibility)
+        const itemsPath = path.join(manifestsDir, "items.json");
+        const itemsData = await fs.readFile(itemsPath, "utf-8");
+        const list = JSON.parse(itemsData) as Array<Item>;
+        for (const it of list) {
+          const normalized = this.normalizeItem(it);
+          (ITEMS as Map<string, Item>).set(normalized.id, normalized);
+        }
       }
 
       // Generate noted variants
@@ -396,33 +497,9 @@ export class DataManager {
         (ALL_NPCS as Map<string, NPCData>).set(normalized.id, normalized);
       }
 
-      // Load resources
-      const resourcesPath = path.join(manifestsDir, "resources.json");
-      const resourcesData = await fs.readFile(resourcesPath, "utf-8");
-      const resourceList = JSON.parse(
-        resourcesData,
-      ) as Array<ExternalResourceData>;
-
-      if (
-        !(
-          globalThis as {
-            EXTERNAL_RESOURCES?: Map<string, ExternalResourceData>;
-          }
-        ).EXTERNAL_RESOURCES
-      ) {
-        (
-          globalThis as {
-            EXTERNAL_RESOURCES?: Map<string, ExternalResourceData>;
-          }
-        ).EXTERNAL_RESOURCES = new Map();
-      }
-      for (const resource of resourceList) {
-        (
-          globalThis as unknown as {
-            EXTERNAL_RESOURCES: Map<string, ExternalResourceData>;
-          }
-        ).EXTERNAL_RESOURCES.set(resource.id, resource);
-      }
+      // Load gathering resources from separate per-skill manifests
+      // This matches the recipes/ pattern for organizational consistency
+      await this.loadGatheringManifestsFromFilesystem(fs, path, manifestsDir);
 
       // Load world areas
       const worldAreasPath = path.join(manifestsDir, "world-areas.json");
@@ -458,34 +535,34 @@ export class DataManager {
         (GENERAL_STORES as Record<string, StoreData>)[store.id] = store;
       }
 
-      // Load gathering tools
-      const toolsPath = path.join(manifestsDir, "tools.json");
-      const toolsData = await fs.readFile(toolsPath, "utf-8");
-      const toolList = JSON.parse(toolsData) as Array<GatheringToolData>;
+      // Load skill unlocks
+      const skillUnlocksPath = path.join(manifestsDir, "skill-unlocks.json");
+      try {
+        const skillUnlocksData = await fs.readFile(skillUnlocksPath, "utf-8");
+        const skillUnlocksManifest = JSON.parse(
+          skillUnlocksData,
+        ) as SkillUnlocksManifest;
+        loadSkillUnlocks(skillUnlocksManifest);
+      } catch {
+        console.warn(
+          "[DataManager] skill-unlocks.json not found, skill unlocks will be empty until loaded",
+        );
+      }
 
-      if (
-        !(
-          globalThis as {
-            EXTERNAL_TOOLS?: Map<string, GatheringToolData>;
-          }
-        ).EXTERNAL_TOOLS
-      ) {
-        (
-          globalThis as {
-            EXTERNAL_TOOLS?: Map<string, GatheringToolData>;
-          }
-        ).EXTERNAL_TOOLS = new Map();
-      }
-      for (const tool of toolList) {
-        (
-          globalThis as unknown as {
-            EXTERNAL_TOOLS: Map<string, GatheringToolData>;
-          }
-        ).EXTERNAL_TOOLS.set(tool.itemId, tool);
-      }
+      // Load recipe manifests for ProcessingDataProvider
+      await this.loadRecipeManifestsFromFilesystem(fs, path, manifestsDir);
+
+      // Build EXTERNAL_TOOLS from items where item.tool is defined
+      // This replaces the old tools.json loading
+      this.buildToolsFromItems();
+
+      // Count tools for logging
+      const toolCount =
+        (globalThis as { EXTERNAL_TOOLS?: Map<string, GatheringToolData> })
+          .EXTERNAL_TOOLS?.size ?? 0;
 
       console.log(
-        `[DataManager] ✅ Loaded manifests from filesystem (${(ITEMS as Map<string, Item>).size} items, ${(ALL_NPCS as Map<string, NPCData>).size} NPCs, ${Object.keys(BIOMES).length} biomes, ${toolList.length} tools)`,
+        `[DataManager] ✅ Loaded manifests from filesystem (${(ITEMS as Map<string, Item>).size} items, ${(ALL_NPCS as Map<string, NPCData>).size} NPCs, ${Object.keys(BIOMES).length} biomes, ${toolCount} tools)`,
       );
     } catch (error) {
       console.error(
@@ -504,6 +581,59 @@ export class DataManager {
     await this.loadManifestsFromCDN();
   }
 
+  /**
+   * Load items from items/ directory (multiple JSON files) - Filesystem version
+   * Returns true if successful, false if should fall back to single file
+   *
+   * CRITICAL: Validates ALL required files exist before loading any.
+   * This prevents partial loads if a file is missing.
+   */
+  private async loadItemsFromDirectory(
+    fs: typeof import("fs/promises"),
+    path: typeof import("path"),
+    itemsDir: string,
+  ): Promise<boolean> {
+    // Validate ALL required files exist before loading any
+    for (const file of REQUIRED_ITEM_FILES) {
+      const filePath = path.join(itemsDir, `${file}.json`);
+      try {
+        await fs.access(filePath);
+      } catch {
+        console.warn(
+          `[DataManager] items/${file}.json not found, falling back to items.json`,
+        );
+        return false;
+      }
+    }
+
+    // All files exist - safe to load
+    const seenIds = new Set<string>();
+
+    for (const file of REQUIRED_ITEM_FILES) {
+      const filePath = path.join(itemsDir, `${file}.json`);
+      const data = await fs.readFile(filePath, "utf-8");
+      const items = JSON.parse(data) as Array<Item>;
+
+      for (const item of items) {
+        // Duplicate ID check
+        if (seenIds.has(item.id)) {
+          throw new Error(
+            `[DataManager] Duplicate item ID "${item.id}" found in items/${file}.json`,
+          );
+        }
+        seenIds.add(item.id);
+
+        const normalized = this.normalizeItem(item);
+        (ITEMS as Map<string, Item>).set(normalized.id, normalized);
+      }
+    }
+
+    console.log(
+      `[DataManager] Loaded ${seenIds.size} items from items/ directory`,
+    );
+    return true;
+  }
+
   private normalizeItem(item: Item): Item {
     // Ensure required fields have sane defaults and enums
     const safeWeaponType = item.weaponType ?? WeaponType.NONE;
@@ -515,6 +645,34 @@ export class DataManager {
       console.warn(
         `[DataManager] Weapon "${item.id}" missing equippedModelPath - will use convention fallback`,
       );
+    }
+
+    // Derive requirements from tier if not explicitly set
+    // This implements the tier-based requirements system
+    let requirements = item.requirements;
+    if (!requirements && item.tier && TierDataProvider.isLoaded()) {
+      const tierableItem: TierableItem = {
+        id: item.id,
+        type: item.type,
+        tier: item.tier,
+        equipSlot: equipSlot || undefined,
+        attackType: attackType || undefined,
+        tool: item.tool,
+      };
+      const derived = TierDataProvider.getRequirements(tierableItem);
+      if (derived) {
+        // Calculate level as max of all skill requirements
+        const level = Math.max(
+          1,
+          ...Object.values(derived).filter(
+            (v): v is number => typeof v === "number",
+          ),
+        );
+        requirements = {
+          level,
+          skills: derived,
+        };
+      }
     }
 
     // Apply defaults only for missing fields (use ?? to preserve falsy values like 0)
@@ -546,9 +704,386 @@ export class DataManager {
           : undefined),
       equippedModelPath: item.equippedModelPath,
       bonuses: item.bonuses,
-      requirements: item.requirements,
+      requirements: requirements,
     };
     return normalized;
+  }
+
+  /**
+   * Build EXTERNAL_TOOLS map from items where item.tool is defined
+   * This replaces loading from tools.json
+   */
+  private buildToolsFromItems(): void {
+    if (
+      !(
+        globalThis as {
+          EXTERNAL_TOOLS?: Map<string, GatheringToolData>;
+        }
+      ).EXTERNAL_TOOLS
+    ) {
+      (
+        globalThis as {
+          EXTERNAL_TOOLS?: Map<string, GatheringToolData>;
+        }
+      ).EXTERNAL_TOOLS = new Map();
+    }
+
+    const toolsMap = (
+      globalThis as unknown as {
+        EXTERNAL_TOOLS: Map<string, GatheringToolData>;
+      }
+    ).EXTERNAL_TOOLS;
+
+    // Clear existing tools
+    toolsMap.clear();
+
+    // Build tools from items
+    for (const [itemId, item] of ITEMS) {
+      if (item.tool) {
+        // Determine level required from tier or explicit requirements
+        let levelRequired = 1;
+        if (item.requirements?.skills) {
+          // Use the skill level from requirements that matches the tool skill
+          const skillLevel = item.requirements.skills[item.tool.skill];
+          if (skillLevel) {
+            levelRequired = skillLevel;
+          }
+        } else if (item.tier && TierDataProvider.isLoaded()) {
+          // Derive from tier
+          const tierableItem: TierableItem = {
+            id: item.id,
+            type: item.type,
+            tier: item.tier,
+            tool: item.tool,
+          };
+          const derived = TierDataProvider.getRequirements(tierableItem);
+          if (derived) {
+            const skillLevel = derived[item.tool.skill as keyof typeof derived];
+            if (skillLevel) {
+              levelRequired = skillLevel;
+            }
+          }
+        }
+
+        const toolData: GatheringToolData = {
+          itemId,
+          skill: item.tool.skill,
+          tier: item.tier || "unknown",
+          levelRequired,
+          rollTicks: item.tool.rollTicks,
+          priority: item.tool.priority,
+        };
+
+        toolsMap.set(itemId, toolData);
+      }
+    }
+  }
+
+  /**
+   * Load recipe manifests from CDN
+   */
+  private async loadRecipeManifestsFromCDN(baseUrl: string): Promise<void> {
+    // Load cooking recipes
+    try {
+      const cookingRes = await fetch(`${baseUrl}/recipes/cooking.json`);
+      const cookingManifest = (await cookingRes.json()) as CookingManifest;
+      processingDataProvider.loadCookingRecipes(cookingManifest);
+    } catch {
+      console.warn(
+        "[DataManager] recipes/cooking.json not found, falling back to embedded item data",
+      );
+    }
+
+    // Load firemaking recipes
+    try {
+      const firemakingRes = await fetch(`${baseUrl}/recipes/firemaking.json`);
+      const firemakingManifest =
+        (await firemakingRes.json()) as FiremakingManifest;
+      processingDataProvider.loadFiremakingRecipes(firemakingManifest);
+    } catch {
+      console.warn(
+        "[DataManager] recipes/firemaking.json not found, falling back to embedded item data",
+      );
+    }
+
+    // Load smelting recipes
+    try {
+      const smeltingRes = await fetch(`${baseUrl}/recipes/smelting.json`);
+      const smeltingManifest = (await smeltingRes.json()) as SmeltingManifest;
+      processingDataProvider.loadSmeltingRecipes(smeltingManifest);
+    } catch {
+      console.warn(
+        "[DataManager] recipes/smelting.json not found, falling back to embedded item data",
+      );
+    }
+
+    // Load smithing recipes
+    try {
+      const smithingRes = await fetch(`${baseUrl}/recipes/smithing.json`);
+      const smithingManifest = (await smithingRes.json()) as SmithingManifest;
+      processingDataProvider.loadSmithingRecipes(smithingManifest);
+    } catch {
+      console.warn(
+        "[DataManager] recipes/smithing.json not found, falling back to embedded item data",
+      );
+    }
+
+    // Rebuild ProcessingDataProvider to use the loaded manifests
+    // This is necessary in case it was already lazy-initialized before manifests loaded
+    processingDataProvider.rebuild();
+  }
+
+  /**
+   * Load recipe manifests from filesystem (server-side)
+   */
+  private async loadRecipeManifestsFromFilesystem(
+    fs: typeof import("fs/promises"),
+    path: typeof import("path"),
+    manifestsDir: string,
+  ): Promise<void> {
+    const recipesDir = path.join(manifestsDir, "recipes");
+
+    // Load cooking recipes
+    try {
+      const cookingPath = path.join(recipesDir, "cooking.json");
+      const cookingData = await fs.readFile(cookingPath, "utf-8");
+      const cookingManifest = JSON.parse(cookingData) as CookingManifest;
+      processingDataProvider.loadCookingRecipes(cookingManifest);
+    } catch {
+      console.warn(
+        "[DataManager] recipes/cooking.json not found, falling back to embedded item data",
+      );
+    }
+
+    // Load firemaking recipes
+    try {
+      const firemakingPath = path.join(recipesDir, "firemaking.json");
+      const firemakingData = await fs.readFile(firemakingPath, "utf-8");
+      const firemakingManifest = JSON.parse(
+        firemakingData,
+      ) as FiremakingManifest;
+      processingDataProvider.loadFiremakingRecipes(firemakingManifest);
+    } catch {
+      console.warn(
+        "[DataManager] recipes/firemaking.json not found, falling back to embedded item data",
+      );
+    }
+
+    // Load smelting recipes
+    try {
+      const smeltingPath = path.join(recipesDir, "smelting.json");
+      const smeltingData = await fs.readFile(smeltingPath, "utf-8");
+      const smeltingManifest = JSON.parse(smeltingData) as SmeltingManifest;
+      processingDataProvider.loadSmeltingRecipes(smeltingManifest);
+    } catch {
+      console.warn(
+        "[DataManager] recipes/smelting.json not found, falling back to embedded item data",
+      );
+    }
+
+    // Load smithing recipes
+    try {
+      const smithingPath = path.join(recipesDir, "smithing.json");
+      const smithingData = await fs.readFile(smithingPath, "utf-8");
+      const smithingManifest = JSON.parse(smithingData) as SmithingManifest;
+      processingDataProvider.loadSmithingRecipes(smithingManifest);
+    } catch {
+      console.warn(
+        "[DataManager] recipes/smithing.json not found, falling back to embedded item data",
+      );
+    }
+
+    // Rebuild ProcessingDataProvider to use the loaded manifests
+    // This is necessary in case it was already lazy-initialized before manifests loaded
+    processingDataProvider.rebuild();
+  }
+
+  /**
+   * Load gathering manifests from CDN
+   * Loads woodcutting, mining, and fishing data from gathering/*.json
+   * and populates EXTERNAL_RESOURCES for ResourceSystem
+   */
+  private async loadGatheringManifestsFromCDN(baseUrl: string): Promise<void> {
+    // Initialize EXTERNAL_RESOURCES map if needed
+    if (
+      !(
+        globalThis as {
+          EXTERNAL_RESOURCES?: Map<string, ExternalResourceData>;
+        }
+      ).EXTERNAL_RESOURCES
+    ) {
+      (
+        globalThis as {
+          EXTERNAL_RESOURCES?: Map<string, ExternalResourceData>;
+        }
+      ).EXTERNAL_RESOURCES = new Map();
+    }
+
+    const resourcesMap = (
+      globalThis as unknown as {
+        EXTERNAL_RESOURCES: Map<string, ExternalResourceData>;
+      }
+    ).EXTERNAL_RESOURCES;
+
+    // Load woodcutting (trees)
+    try {
+      const woodcuttingRes = await fetch(
+        `${baseUrl}/gathering/woodcutting.json`,
+      );
+      const woodcuttingManifest =
+        (await woodcuttingRes.json()) as WoodcuttingManifest;
+      for (const tree of woodcuttingManifest.trees) {
+        resourcesMap.set(tree.id, tree);
+      }
+    } catch {
+      console.warn(
+        "[DataManager] gathering/woodcutting.json not found, trying legacy resources.json",
+      );
+    }
+
+    // Load mining (rocks/ores)
+    try {
+      const miningRes = await fetch(`${baseUrl}/gathering/mining.json`);
+      const miningManifest = (await miningRes.json()) as MiningManifest;
+      for (const rock of miningManifest.rocks) {
+        resourcesMap.set(rock.id, rock);
+      }
+    } catch {
+      console.warn(
+        "[DataManager] gathering/mining.json not found, trying legacy resources.json",
+      );
+    }
+
+    // Load fishing (spots)
+    try {
+      const fishingRes = await fetch(`${baseUrl}/gathering/fishing.json`);
+      const fishingManifest = (await fishingRes.json()) as FishingManifest;
+      for (const spot of fishingManifest.spots) {
+        resourcesMap.set(spot.id, spot);
+      }
+    } catch {
+      console.warn(
+        "[DataManager] gathering/fishing.json not found, trying legacy resources.json",
+      );
+    }
+
+    // Fallback to legacy resources.json if no resources loaded
+    if (resourcesMap.size === 0) {
+      console.warn(
+        "[DataManager] No gathering manifests found, falling back to resources.json",
+      );
+      try {
+        const resourcesRes = await fetch(`${baseUrl}/resources.json`);
+        const resourceList =
+          (await resourcesRes.json()) as Array<ExternalResourceData>;
+        for (const resource of resourceList) {
+          resourcesMap.set(resource.id, resource);
+        }
+      } catch {
+        console.error(
+          "[DataManager] Failed to load resources - gathering skills will not work",
+        );
+      }
+    }
+  }
+
+  /**
+   * Load gathering manifests from filesystem (server-side)
+   * Loads woodcutting, mining, and fishing data from gathering/*.json
+   * and populates EXTERNAL_RESOURCES for ResourceSystem
+   */
+  private async loadGatheringManifestsFromFilesystem(
+    fs: typeof import("fs/promises"),
+    path: typeof import("path"),
+    manifestsDir: string,
+  ): Promise<void> {
+    // Initialize EXTERNAL_RESOURCES map if needed
+    if (
+      !(
+        globalThis as {
+          EXTERNAL_RESOURCES?: Map<string, ExternalResourceData>;
+        }
+      ).EXTERNAL_RESOURCES
+    ) {
+      (
+        globalThis as {
+          EXTERNAL_RESOURCES?: Map<string, ExternalResourceData>;
+        }
+      ).EXTERNAL_RESOURCES = new Map();
+    }
+
+    const resourcesMap = (
+      globalThis as unknown as {
+        EXTERNAL_RESOURCES: Map<string, ExternalResourceData>;
+      }
+    ).EXTERNAL_RESOURCES;
+
+    const gatheringDir = path.join(manifestsDir, "gathering");
+
+    // Load woodcutting (trees)
+    try {
+      const woodcuttingPath = path.join(gatheringDir, "woodcutting.json");
+      const woodcuttingData = await fs.readFile(woodcuttingPath, "utf-8");
+      const woodcuttingManifest = JSON.parse(
+        woodcuttingData,
+      ) as WoodcuttingManifest;
+      for (const tree of woodcuttingManifest.trees) {
+        resourcesMap.set(tree.id, tree);
+      }
+    } catch {
+      console.warn(
+        "[DataManager] gathering/woodcutting.json not found, trying legacy resources.json",
+      );
+    }
+
+    // Load mining (rocks/ores)
+    try {
+      const miningPath = path.join(gatheringDir, "mining.json");
+      const miningData = await fs.readFile(miningPath, "utf-8");
+      const miningManifest = JSON.parse(miningData) as MiningManifest;
+      for (const rock of miningManifest.rocks) {
+        resourcesMap.set(rock.id, rock);
+      }
+    } catch {
+      console.warn(
+        "[DataManager] gathering/mining.json not found, trying legacy resources.json",
+      );
+    }
+
+    // Load fishing (spots)
+    try {
+      const fishingPath = path.join(gatheringDir, "fishing.json");
+      const fishingData = await fs.readFile(fishingPath, "utf-8");
+      const fishingManifest = JSON.parse(fishingData) as FishingManifest;
+      for (const spot of fishingManifest.spots) {
+        resourcesMap.set(spot.id, spot);
+      }
+    } catch {
+      console.warn(
+        "[DataManager] gathering/fishing.json not found, trying legacy resources.json",
+      );
+    }
+
+    // Fallback to legacy resources.json if no resources loaded
+    if (resourcesMap.size === 0) {
+      console.warn(
+        "[DataManager] No gathering manifests found, falling back to resources.json",
+      );
+      try {
+        const resourcesPath = path.join(manifestsDir, "resources.json");
+        const resourcesData = await fs.readFile(resourcesPath, "utf-8");
+        const resourceList = JSON.parse(
+          resourcesData,
+        ) as Array<ExternalResourceData>;
+        for (const resource of resourceList) {
+          resourcesMap.set(resource.id, resource);
+        }
+      } catch {
+        console.error(
+          "[DataManager] Failed to load resources - gathering skills will not work",
+        );
+      }
+    }
   }
 
   private normalizeNPC(npc: NPCDataInput): NPCData {

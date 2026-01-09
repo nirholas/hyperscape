@@ -228,8 +228,17 @@ export {
   SKILL_UNLOCKS,
   getUnlocksAtLevel,
   getUnlocksUpToLevel,
+  getAllSkillUnlocks,
+  clearSkillUnlocksCache,
+  loadSkillUnlocks,
+  isSkillUnlocksLoaded,
+  resetSkillUnlocks,
 } from "./data/skill-unlocks";
-export type { SkillUnlock, UnlockType } from "./data/skill-unlocks";
+export type {
+  SkillUnlock,
+  UnlockType,
+  SkillUnlocksManifest,
+} from "./data/skill-unlocks";
 
 // Export world area data for server use
 export { ALL_WORLD_AREAS } from "./data/world-areas";

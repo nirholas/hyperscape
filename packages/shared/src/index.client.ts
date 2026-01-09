@@ -110,8 +110,17 @@ export {
   SKILL_UNLOCKS,
   getUnlocksAtLevel,
   getUnlocksUpToLevel,
+  getAllSkillUnlocks,
+  clearSkillUnlocksCache,
+  loadSkillUnlocks,
+  isSkillUnlocksLoaded,
+  resetSkillUnlocks,
 } from "./data/skill-unlocks";
-export type { SkillUnlock, UnlockType } from "./data/skill-unlocks";
+export type {
+  SkillUnlock,
+  UnlockType,
+  SkillUnlocksManifest,
+} from "./data/skill-unlocks";
 
 // Export CLIENT system classes only (NO SERVER SYSTEMS)
 export { Entities } from "./systems/shared";

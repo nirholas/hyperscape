@@ -909,6 +909,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         tinderboxSlot: payload.tinderboxSlot,
       });
     };
+    // Also register without "on" prefix for client compatibility
+    this.handlers["firemakingRequest"] = this.handlers["onFiremakingRequest"];
 
     // Cooking - use raw food on fire/range
     // SERVER-AUTHORITATIVE: Uses PendingCookManager for distance checking (like woodcutting)
@@ -962,6 +964,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         payload.rawFoodSlot, // Pass specific slot to cook
       );
     };
+    // Also register without "on" prefix for client compatibility
+    this.handlers["cookingRequest"] = this.handlers["onCookingRequest"];
 
     // Smelting - player clicked furnace
     // SERVER-AUTHORITATIVE: Emit SMELTING_INTERACT event for SmeltingSystem to handle

@@ -270,6 +270,28 @@ export interface Item {
     /** Time in game ticks (600ms per tick). Default: 4 ticks */
     ticks?: number;
   };
+
+  // === TIER-BASED EQUIPMENT SYSTEM ===
+  /**
+   * Equipment tier for deriving level requirements.
+   * E.g., "bronze", "iron", "steel", "mithril", "adamant", "rune", "dragon"
+   * Requirements are derived from tier-requirements.json at runtime.
+   */
+  tier?: string;
+
+  // === GATHERING TOOL DATA ===
+  /**
+   * Tool-specific properties for gathering tools (hatchets, pickaxes, fishing rods)
+   * Replaces the old tools.json - now embedded directly in items.
+   */
+  tool?: {
+    /** Gathering skill this tool is for (woodcutting, mining, fishing) */
+    skill: "woodcutting" | "mining" | "fishing";
+    /** Priority for best tool selection (lower = better, 1 = best) */
+    priority: number;
+    /** For mining: ticks between roll attempts (OSRS-accurate) */
+    rollTicks?: number;
+  };
 }
 
 export interface EquipmentSlot {

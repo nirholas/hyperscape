@@ -8,9 +8,8 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      # Mount root assets directory - changes are live-updated
-      # Use root /assets folder for primary assets (default)
-      - ${HYPERSCAPE_ASSETS_DIR:-../../assets}:/usr/share/nginx/html/assets:ro
+      # Mount server world assets directory - changes are live-updated
+      - ${HYPERSCAPE_ASSETS_DIR:-./world/assets}:/usr/share/nginx/html/assets:ro
     environment:
       - NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx/conf.d
     restart: unless-stopped

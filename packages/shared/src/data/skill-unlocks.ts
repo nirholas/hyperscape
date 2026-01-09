@@ -4,7 +4,11 @@
  * Defines what content is unlocked at each level for display in
  * the level-up notification popup.
  *
- * Data sourced from OSRS Wiki level requirements.
+ * ARCHITECTURE:
+ * - All skill unlocks are loaded from skill-unlocks.json manifest
+ * - Single source of truth - no auto-generation
+ *
+ * @see packages/server/world/assets/manifests/skill-unlocks.json
  */
 
 /** Type of unlock */
@@ -17,199 +21,76 @@ export interface SkillUnlock {
   type: UnlockType;
 }
 
+/** Manifest format for skill-unlocks.json */
+export interface SkillUnlocksManifest {
+  skills: Record<string, SkillUnlock[]>;
+}
+
+/** Loaded skill unlocks from manifest */
+let loadedUnlocks: Record<string, SkillUnlock[]> | null = null;
+
 /**
- * Skill unlocks organized by skill name (lowercase)
- * Only includes notable unlocks, not every single item
+ * Load skill unlocks from manifest data
+ * Called by DataManager after loading skill-unlocks.json
  */
-export const SKILL_UNLOCKS: Readonly<Record<string, readonly SkillUnlock[]>> = {
-  // === COMBAT SKILLS ===
-  attack: [
-    { level: 1, description: "Bronze weapons", type: "item" },
-    { level: 5, description: "Steel weapons", type: "item" },
-    { level: 10, description: "Black weapons", type: "item" },
-    { level: 20, description: "Mithril weapons", type: "item" },
-    { level: 30, description: "Adamant weapons", type: "item" },
-    { level: 40, description: "Rune weapons", type: "item" },
-    { level: 50, description: "Granite maul", type: "item" },
-    { level: 60, description: "Dragon weapons", type: "item" },
-    { level: 70, description: "Abyssal whip", type: "item" },
-    { level: 75, description: "Godswords", type: "item" },
-  ],
-  strength: [
-    { level: 1, description: "Increased max hit", type: "ability" },
-    { level: 10, description: "Black equipment bonuses", type: "item" },
-    { level: 20, description: "Mithril equipment bonuses", type: "item" },
-    { level: 30, description: "Adamant equipment bonuses", type: "item" },
-    { level: 40, description: "Rune equipment bonuses", type: "item" },
-    { level: 50, description: "Granite maul spec", type: "ability" },
-    { level: 60, description: "Dragon equipment bonuses", type: "item" },
-    { level: 70, description: "Obsidian equipment", type: "item" },
-    { level: 99, description: "Strength cape", type: "item" },
-  ],
-  defence: [
-    { level: 1, description: "Bronze armour", type: "item" },
-    { level: 5, description: "Steel armour", type: "item" },
-    { level: 10, description: "Black armour", type: "item" },
-    { level: 20, description: "Mithril armour", type: "item" },
-    { level: 30, description: "Adamant armour", type: "item" },
-    { level: 40, description: "Rune armour", type: "item" },
-    { level: 45, description: "Berserker helm", type: "item" },
-    { level: 60, description: "Dragon armour", type: "item" },
-    { level: 65, description: "Bandos armour", type: "item" },
-    { level: 70, description: "Barrows armour", type: "item" },
-  ],
-  ranged: [
-    { level: 1, description: "Shortbow", type: "item" },
-    { level: 5, description: "Oak shortbow", type: "item" },
-    { level: 20, description: "Studded leather", type: "item" },
-    { level: 30, description: "Snakeskin armour", type: "item" },
-    { level: 40, description: "Green d'hide", type: "item" },
-    { level: 50, description: "Magic shortbow", type: "item" },
-    { level: 60, description: "Red d'hide", type: "item" },
-    { level: 70, description: "Black d'hide", type: "item" },
-    { level: 75, description: "Armadyl armour", type: "item" },
-  ],
-  magic: [
-    { level: 1, description: "Wind Strike", type: "ability" },
-    { level: 5, description: "Water Strike", type: "ability" },
-    { level: 9, description: "Earth Strike", type: "ability" },
-    { level: 13, description: "Fire Strike", type: "ability" },
-    { level: 17, description: "Wind Bolt", type: "ability" },
-    { level: 25, description: "Varrock Teleport", type: "ability" },
-    { level: 31, description: "Lumbridge Teleport", type: "ability" },
-    { level: 37, description: "Falador Teleport", type: "ability" },
-    { level: 45, description: "Camelot Teleport", type: "ability" },
-    { level: 55, description: "High Level Alchemy", type: "ability" },
-  ],
-  prayer: [
-    { level: 1, description: "Thick Skin", type: "ability" },
-    { level: 4, description: "Burst of Strength", type: "ability" },
-    { level: 7, description: "Clarity of Thought", type: "ability" },
-    { level: 10, description: "Rock Skin", type: "ability" },
-    { level: 13, description: "Superhuman Strength", type: "ability" },
-    { level: 25, description: "Protect Item", type: "ability" },
-    { level: 37, description: "Protect from Magic", type: "ability" },
-    { level: 40, description: "Protect from Missiles", type: "ability" },
-    { level: 43, description: "Protect from Melee", type: "ability" },
-    { level: 70, description: "Piety", type: "ability" },
-  ],
-  constitution: [
-    { level: 10, description: "100 HP", type: "ability" },
-    { level: 20, description: "200 HP", type: "ability" },
-    { level: 30, description: "300 HP", type: "ability" },
-    { level: 40, description: "400 HP", type: "ability" },
-    { level: 50, description: "500 HP", type: "ability" },
-    { level: 60, description: "600 HP", type: "ability" },
-    { level: 70, description: "700 HP", type: "ability" },
-    { level: 80, description: "800 HP", type: "ability" },
-    { level: 90, description: "900 HP", type: "ability" },
-    { level: 99, description: "990 HP", type: "ability" },
-  ],
+export function loadSkillUnlocks(manifest: SkillUnlocksManifest): void {
+  if (!manifest?.skills) {
+    console.warn(
+      "[SkillUnlocks] Invalid manifest format, expected { skills: {...} }",
+    );
+    return;
+  }
 
-  // === GATHERING SKILLS ===
-  woodcutting: [
-    { level: 1, description: "Normal trees", type: "item" },
-    { level: 15, description: "Oak trees", type: "item" },
-    { level: 30, description: "Willow trees", type: "item" },
-    { level: 35, description: "Teak trees", type: "item" },
-    { level: 45, description: "Maple trees", type: "item" },
-    { level: 50, description: "Mahogany trees", type: "item" },
-    { level: 60, description: "Yew trees", type: "item" },
-    { level: 75, description: "Magic trees", type: "item" },
-    { level: 90, description: "Redwood trees", type: "item" },
-  ],
-  mining: [
-    { level: 1, description: "Copper & Tin ore", type: "item" },
-    { level: 15, description: "Iron ore", type: "item" },
-    { level: 20, description: "Silver ore", type: "item" },
-    { level: 30, description: "Coal", type: "item" },
-    { level: 40, description: "Gold ore", type: "item" },
-    { level: 55, description: "Mithril ore", type: "item" },
-    { level: 70, description: "Adamantite ore", type: "item" },
-    { level: 85, description: "Runite ore", type: "item" },
-  ],
-  fishing: [
-    { level: 1, description: "Shrimp", type: "item" },
-    { level: 5, description: "Sardine", type: "item" },
-    { level: 10, description: "Herring", type: "item" },
-    { level: 20, description: "Trout", type: "item" },
-    { level: 25, description: "Pike", type: "item" },
-    { level: 30, description: "Salmon", type: "item" },
-    { level: 35, description: "Tuna", type: "item" },
-    { level: 40, description: "Lobster", type: "item" },
-    { level: 50, description: "Swordfish", type: "item" },
-    { level: 76, description: "Sharks", type: "item" },
-  ],
+  loadedUnlocks = {};
 
-  // === ARTISAN SKILLS ===
-  cooking: [
-    { level: 1, description: "Shrimp", type: "item" },
-    { level: 15, description: "Trout", type: "item" },
-    { level: 25, description: "Salmon", type: "item" },
-    { level: 30, description: "Tuna", type: "item" },
-    { level: 40, description: "Lobster", type: "item" },
-    { level: 45, description: "Swordfish", type: "item" },
-    { level: 80, description: "Sharks", type: "item" },
-    { level: 91, description: "Anglerfish", type: "item" },
-  ],
-  smithing: [
-    { level: 1, description: "Bronze bars and equipment", type: "item" },
-    { level: 15, description: "Iron bars and equipment", type: "item" },
-    { level: 20, description: "Silver bars", type: "item" },
-    { level: 30, description: "Steel bars and equipment", type: "item" },
-    { level: 40, description: "Gold bars", type: "item" },
-    { level: 50, description: "Mithril bars and equipment", type: "item" },
-  ],
-  firemaking: [
-    { level: 1, description: "Normal logs", type: "item" },
-    { level: 15, description: "Oak logs", type: "item" },
-    { level: 30, description: "Willow logs", type: "item" },
-    { level: 45, description: "Maple logs", type: "item" },
-    { level: 60, description: "Yew logs", type: "item" },
-    { level: 75, description: "Magic logs", type: "item" },
-    { level: 90, description: "Redwood logs", type: "item" },
-  ],
+  for (const [skill, unlocks] of Object.entries(manifest.skills)) {
+    if (!Array.isArray(unlocks)) continue;
 
-  // === SUPPORT SKILLS ===
-  agility: [
-    { level: 1, description: "Gnome Stronghold Course", type: "activity" },
-    { level: 10, description: "Draynor Village Course", type: "activity" },
-    { level: 20, description: "Al Kharid Course", type: "activity" },
-    { level: 30, description: "Varrock Course", type: "activity" },
-    { level: 40, description: "Canifis Course", type: "activity" },
-    { level: 52, description: "Wilderness Course", type: "activity" },
-    { level: 60, description: "Seers' Village Course", type: "activity" },
-    { level: 70, description: "Pollnivneach Course", type: "activity" },
-    { level: 80, description: "Rellekka Course", type: "activity" },
-    { level: 90, description: "Ardougne Course", type: "activity" },
-  ],
-  thieving: [
-    { level: 1, description: "Man/Woman pickpocket", type: "activity" },
-    { level: 5, description: "Cake stalls", type: "activity" },
-    { level: 25, description: "Fruit stalls", type: "activity" },
-    { level: 32, description: "Rogues' Den", type: "area" },
-    { level: 38, description: "Master Farmer", type: "activity" },
-    { level: 55, description: "Ardougne knights", type: "activity" },
-    { level: 65, description: "Menaphite thugs", type: "activity" },
-    { level: 82, description: "TzHaar-Hur", type: "activity" },
-  ],
-  slayer: [
-    { level: 1, description: "Crawling hands", type: "activity" },
-    { level: 15, description: "Banshees", type: "activity" },
-    { level: 45, description: "Bloodveld", type: "activity" },
-    { level: 52, description: "Dust devils", type: "activity" },
-    { level: 55, description: "Turoth", type: "activity" },
-    { level: 58, description: "Cave horrors", type: "activity" },
-    { level: 65, description: "Aberrant spectres", type: "activity" },
-    { level: 72, description: "Wyverns", type: "activity" },
-    { level: 75, description: "Gargoyles", type: "activity" },
-    { level: 85, description: "Abyssal demons", type: "activity" },
-    { level: 87, description: "Kraken", type: "activity" },
-    { level: 91, description: "Cerberus", type: "activity" },
-    { level: 93, description: "Thermonuclear smoke devil", type: "activity" },
-    { level: 95, description: "Hydra", type: "activity" },
-  ],
-} as const;
+    // Validate and normalize each unlock
+    loadedUnlocks[skill.toLowerCase()] = unlocks
+      .filter(
+        (u) =>
+          typeof u.level === "number" &&
+          typeof u.description === "string" &&
+          typeof u.type === "string",
+      )
+      .map((u) => ({
+        level: u.level,
+        description: u.description,
+        type: u.type as UnlockType,
+      }))
+      .sort((a, b) => a.level - b.level);
+  }
+
+  const skillCount = Object.keys(loadedUnlocks).length;
+  const unlockCount = Object.values(loadedUnlocks).reduce(
+    (sum, arr) => sum + arr.length,
+    0,
+  );
+  console.log(
+    `[SkillUnlocks] Loaded ${unlockCount} unlocks across ${skillCount} skills from manifest`,
+  );
+}
+
+/**
+ * Check if skill unlocks have been loaded from manifest
+ */
+export function isSkillUnlocksLoaded(): boolean {
+  return loadedUnlocks !== null;
+}
+
+/**
+ * Get the unlocks for a skill
+ */
+function getSkillUnlocks(skill: string): readonly SkillUnlock[] {
+  const skillKey = skill.toLowerCase();
+
+  if (loadedUnlocks && skillKey in loadedUnlocks) {
+    return loadedUnlocks[skillKey];
+  }
+
+  return [];
+}
 
 /**
  * Get unlocks for a specific skill at a specific level
@@ -219,9 +100,7 @@ export const SKILL_UNLOCKS: Readonly<Record<string, readonly SkillUnlock[]>> = {
  * @returns Array of unlocks at exactly this level (empty if none)
  */
 export function getUnlocksAtLevel(skill: string, level: number): SkillUnlock[] {
-  const skillKey = skill.toLowerCase();
-  const unlocks = SKILL_UNLOCKS[skillKey];
-  if (!unlocks) return [];
+  const unlocks = getSkillUnlocks(skill);
   return unlocks.filter((unlock) => unlock.level === level);
 }
 
@@ -236,8 +115,63 @@ export function getUnlocksUpToLevel(
   skill: string,
   level: number,
 ): SkillUnlock[] {
-  const skillKey = skill.toLowerCase();
-  const unlocks = SKILL_UNLOCKS[skillKey];
-  if (!unlocks) return [];
+  const unlocks = getSkillUnlocks(skill);
   return unlocks.filter((unlock) => unlock.level <= level);
 }
+
+/**
+ * Get all loaded skill unlocks
+ */
+export function getAllSkillUnlocks(): Readonly<
+  Record<string, readonly SkillUnlock[]>
+> {
+  if (!loadedUnlocks) {
+    return {};
+  }
+  return loadedUnlocks;
+}
+
+/**
+ * Clear skill unlocks cache (for testing)
+ */
+export function clearSkillUnlocksCache(): void {
+  // No-op since we no longer have auto-generation caches
+  // Kept for API compatibility
+}
+
+/**
+ * Reset all skill unlock data (for testing)
+ */
+export function resetSkillUnlocks(): void {
+  loadedUnlocks = null;
+}
+
+/**
+ * Legacy export for backward compatibility
+ * @deprecated Use getUnlocksAtLevel, getUnlocksUpToLevel, or getAllSkillUnlocks instead
+ */
+export const SKILL_UNLOCKS: Readonly<Record<string, readonly SkillUnlock[]>> =
+  new Proxy({} as Record<string, readonly SkillUnlock[]>, {
+    get(_, prop: string) {
+      if (loadedUnlocks && prop in loadedUnlocks) {
+        return loadedUnlocks[prop];
+      }
+      return undefined;
+    },
+    has(_, prop: string) {
+      return loadedUnlocks ? prop in loadedUnlocks : false;
+    },
+    ownKeys() {
+      return loadedUnlocks ? Object.keys(loadedUnlocks) : [];
+    },
+    getOwnPropertyDescriptor(_, prop: string) {
+      if (loadedUnlocks && prop in loadedUnlocks) {
+        return {
+          enumerable: true,
+          configurable: true,
+          value: loadedUnlocks[prop],
+        };
+      }
+      return undefined;
+    },
+  });

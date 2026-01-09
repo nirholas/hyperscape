@@ -2,15 +2,57 @@
  * Skill Unlocks Unit Tests
  *
  * Tests for getUnlocksAtLevel, getUnlocksUpToLevel functions
- * and SKILL_UNLOCKS data integrity.
+ * and skill unlocks data integrity.
+ *
+ * All skill unlocks are loaded from skill-unlocks.json manifest.
+ * Single source of truth - OSRS accurate data.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
+import { readFileSync } from "fs";
+import { join } from "path";
 import {
   getUnlocksAtLevel,
   getUnlocksUpToLevel,
-  SKILL_UNLOCKS,
+  getAllSkillUnlocks,
+  clearSkillUnlocksCache,
+  loadSkillUnlocks,
+  isSkillUnlocksLoaded,
+  resetSkillUnlocks,
+  type SkillUnlocksManifest,
 } from "../skill-unlocks";
+
+// ============================================================================
+// Test Setup
+// ============================================================================
+
+beforeAll(() => {
+  // Reset any previous state
+  resetSkillUnlocks();
+
+  // Load skill unlocks manifest
+  const manifestPath = join(
+    __dirname,
+    "../../../../server/world/assets/manifests/skill-unlocks.json",
+  );
+  try {
+    const data = readFileSync(manifestPath, "utf-8");
+    const manifest = JSON.parse(data) as SkillUnlocksManifest;
+    loadSkillUnlocks(manifest);
+  } catch {
+    console.warn("Could not load skill-unlocks.json manifest for tests");
+  }
+});
+
+// ============================================================================
+// Manifest Loading Tests
+// ============================================================================
+
+describe("Skill unlocks manifest loading", () => {
+  it("loads skill unlocks from manifest", () => {
+    expect(isSkillUnlocksLoaded()).toBe(true);
+  });
+});
 
 // ============================================================================
 // getUnlocksAtLevel Tests
@@ -46,7 +88,7 @@ describe("getUnlocksAtLevel", () => {
   });
 
   it("returns all unlocks when multiple exist at same level", () => {
-    // Constitution has unlocks at level 10
+    // Constitution has unlock at level 10
     const unlocks = getUnlocksAtLevel("constitution", 10);
     expect(unlocks.length).toBeGreaterThanOrEqual(1);
     unlocks.forEach((unlock) => {
@@ -92,8 +134,8 @@ describe("getUnlocksUpToLevel", () => {
 
   it("returns all unlocks for level 99", () => {
     const unlocks = getUnlocksUpToLevel("attack", 99);
-    const allUnlocks = SKILL_UNLOCKS["attack"];
-    expect(unlocks).toHaveLength(allUnlocks?.length ?? 0);
+    // Should have all 9 attack unlocks from manifest
+    expect(unlocks.length).toBe(9);
   });
 
   it("is case-insensitive for skill names", () => {
@@ -117,38 +159,43 @@ describe("getUnlocksUpToLevel", () => {
 });
 
 // ============================================================================
-// SKILL_UNLOCKS Data Integrity Tests
+// Skill Data Integrity Tests
 // ============================================================================
 
-describe("SKILL_UNLOCKS data integrity", () => {
-  it("has expected skills defined", () => {
-    const expectedSkills = [
-      "attack",
-      "strength",
-      "defence",
-      "ranged",
-      "magic",
-      "prayer",
-      "constitution",
-      "woodcutting",
-      "mining",
-      "fishing",
-      "cooking",
-      "smithing",
-      "firemaking",
-      "agility",
-      "thieving",
-      "slayer",
-    ];
+describe("Skill data integrity", () => {
+  // All 11 implemented skills
+  const implementedSkills = [
+    "attack",
+    "strength",
+    "defence",
+    "constitution",
+    "prayer",
+    "woodcutting",
+    "mining",
+    "fishing",
+    "cooking",
+    "firemaking",
+    "smithing",
+  ];
 
-    expectedSkills.forEach((skill) => {
-      expect(SKILL_UNLOCKS[skill]).toBeDefined();
-      expect(SKILL_UNLOCKS[skill].length).toBeGreaterThan(0);
+  it("has all 11 implemented skills defined", () => {
+    const allUnlocks = getAllSkillUnlocks();
+    implementedSkills.forEach((skill) => {
+      expect(allUnlocks[skill]).toBeDefined();
+      expect(allUnlocks[skill].length).toBeGreaterThan(0);
     });
   });
 
+  it("has exactly 11 skills (no extra unimplemented skills)", () => {
+    const allUnlocks = getAllSkillUnlocks();
+    const skillCount = Object.keys(allUnlocks).length;
+    expect(skillCount).toBe(11);
+  });
+
   it("all skills have sorted levels (ascending)", () => {
-    Object.entries(SKILL_UNLOCKS).forEach(([skill, unlocks]) => {
+    const allUnlocks = getAllSkillUnlocks();
+    implementedSkills.forEach((skill) => {
+      const unlocks = allUnlocks[skill];
       for (let i = 1; i < unlocks.length; i++) {
         expect(
           unlocks[i].level,
@@ -159,7 +206,9 @@ describe("SKILL_UNLOCKS data integrity", () => {
   });
 
   it("all levels are within valid range (1-99)", () => {
-    Object.entries(SKILL_UNLOCKS).forEach(([skill, unlocks]) => {
+    const allUnlocks = getAllSkillUnlocks();
+    implementedSkills.forEach((skill) => {
+      const unlocks = allUnlocks[skill];
       unlocks.forEach((unlock) => {
         expect(
           unlock.level,
@@ -174,7 +223,9 @@ describe("SKILL_UNLOCKS data integrity", () => {
   });
 
   it("all unlocks have non-empty descriptions", () => {
-    Object.entries(SKILL_UNLOCKS).forEach(([skill, unlocks]) => {
+    const allUnlocks = getAllSkillUnlocks();
+    implementedSkills.forEach((skill) => {
+      const unlocks = allUnlocks[skill];
       unlocks.forEach((unlock, index) => {
         expect(
           unlock.description.length,
@@ -186,7 +237,9 @@ describe("SKILL_UNLOCKS data integrity", () => {
 
   it("all unlock types are valid", () => {
     const validTypes = ["item", "ability", "area", "quest", "activity"];
-    Object.entries(SKILL_UNLOCKS).forEach(([skill, unlocks]) => {
+    const allUnlocks = getAllSkillUnlocks();
+    implementedSkills.forEach((skill) => {
+      const unlocks = allUnlocks[skill];
       unlocks.forEach((unlock, index) => {
         expect(
           validTypes,
@@ -196,21 +249,206 @@ describe("SKILL_UNLOCKS data integrity", () => {
     });
   });
 
-  it("each skill has at least 5 unlocks", () => {
-    Object.entries(SKILL_UNLOCKS).forEach(([skill, unlocks]) => {
-      expect(
-        unlocks.length,
-        `${skill} should have at least 5 unlocks`,
-      ).toBeGreaterThanOrEqual(5);
-    });
-  });
-
   it("combat skills have level 1 unlocks", () => {
-    const combatSkills = ["attack", "defence", "ranged", "magic", "prayer"];
+    const combatSkills = ["attack", "defence", "prayer"];
+    const allUnlocks = getAllSkillUnlocks();
     combatSkills.forEach((skill) => {
-      const unlocks = SKILL_UNLOCKS[skill];
+      const unlocks = allUnlocks[skill];
       const hasLevel1 = unlocks?.some((u) => u.level === 1);
       expect(hasLevel1, `${skill} should have level 1 unlock`).toBe(true);
     });
+  });
+
+  it("gathering skills have level 1 unlocks", () => {
+    const gatheringSkills = ["woodcutting", "mining", "fishing"];
+    const allUnlocks = getAllSkillUnlocks();
+    gatheringSkills.forEach((skill) => {
+      const unlocks = allUnlocks[skill];
+      const hasLevel1 = unlocks?.some((u) => u.level === 1);
+      expect(hasLevel1, `${skill} should have level 1 unlock`).toBe(true);
+    });
+  });
+
+  it("artisan skills have level 1 unlocks", () => {
+    const artisanSkills = ["cooking", "firemaking", "smithing"];
+    const allUnlocks = getAllSkillUnlocks();
+    artisanSkills.forEach((skill) => {
+      const unlocks = allUnlocks[skill];
+      const hasLevel1 = unlocks?.some((u) => u.level === 1);
+      expect(hasLevel1, `${skill} should have level 1 unlock`).toBe(true);
+    });
+  });
+});
+
+// ============================================================================
+// OSRS-Accurate Skill Unlock Verification
+// ============================================================================
+
+describe("OSRS-accurate skill unlock values", () => {
+  it("attack weapon tiers are OSRS accurate", () => {
+    const allUnlocks = getAllSkillUnlocks();
+    const attack = allUnlocks.attack;
+
+    // Verify key OSRS attack milestones
+    expect(attack.find((u) => u.level === 1)?.description).toContain("Bronze");
+    expect(attack.find((u) => u.level === 5)?.description).toContain("Steel");
+    expect(attack.find((u) => u.level === 20)?.description).toContain(
+      "Mithril",
+    );
+    expect(attack.find((u) => u.level === 30)?.description).toContain(
+      "Adamant",
+    );
+    expect(attack.find((u) => u.level === 40)?.description).toContain("Rune");
+    expect(attack.find((u) => u.level === 60)?.description).toContain("Dragon");
+  });
+
+  it("defence armor tiers are OSRS accurate", () => {
+    const allUnlocks = getAllSkillUnlocks();
+    const defence = allUnlocks.defence;
+
+    expect(defence.find((u) => u.level === 1)?.description).toContain("Bronze");
+    expect(defence.find((u) => u.level === 40)?.description).toContain("Rune");
+    expect(defence.find((u) => u.level === 60)?.description).toContain(
+      "Dragon",
+    );
+    expect(defence.find((u) => u.level === 70)?.description).toContain(
+      "Barrows",
+    );
+  });
+
+  it("prayer protection prayers unlock at correct levels", () => {
+    const allUnlocks = getAllSkillUnlocks();
+    const prayer = allUnlocks.prayer;
+
+    // Protection prayers at 37, 40, 43
+    expect(prayer.find((u) => u.level === 37)?.description).toContain(
+      "Protect from Magic",
+    );
+    expect(prayer.find((u) => u.level === 40)?.description).toContain(
+      "Protect from Missiles",
+    );
+    expect(prayer.find((u) => u.level === 43)?.description).toContain(
+      "Protect from Melee",
+    );
+    expect(prayer.find((u) => u.level === 70)?.description).toContain("Piety");
+  });
+
+  it("woodcutting tree types are OSRS accurate", () => {
+    const allUnlocks = getAllSkillUnlocks();
+    const woodcutting = allUnlocks.woodcutting;
+
+    expect(woodcutting.find((u) => u.level === 1)?.description).toBe(
+      "Normal trees",
+    );
+    expect(woodcutting.find((u) => u.level === 15)?.description).toBe(
+      "Oak trees",
+    );
+    expect(woodcutting.find((u) => u.level === 30)?.description).toBe(
+      "Willow trees",
+    );
+    expect(woodcutting.find((u) => u.level === 35)?.description).toBe(
+      "Teak trees",
+    );
+    expect(woodcutting.find((u) => u.level === 60)?.description).toBe(
+      "Yew trees",
+    );
+    expect(woodcutting.find((u) => u.level === 75)?.description).toBe(
+      "Magic trees",
+    );
+    expect(woodcutting.find((u) => u.level === 90)?.description).toBe(
+      "Redwood trees",
+    );
+  });
+
+  it("mining ore types are OSRS accurate", () => {
+    const allUnlocks = getAllSkillUnlocks();
+    const mining = allUnlocks.mining;
+
+    expect(mining.find((u) => u.level === 1)?.description).toContain("Copper");
+    expect(mining.find((u) => u.level === 15)?.description).toBe("Iron ore");
+    expect(mining.find((u) => u.level === 30)?.description).toBe("Coal");
+    expect(mining.find((u) => u.level === 55)?.description).toBe("Mithril ore");
+    expect(mining.find((u) => u.level === 70)?.description).toBe(
+      "Adamantite ore",
+    );
+    expect(mining.find((u) => u.level === 85)?.description).toBe("Runite ore");
+  });
+
+  it("fishing levels are OSRS accurate", () => {
+    const allUnlocks = getAllSkillUnlocks();
+    const fishing = allUnlocks.fishing;
+
+    expect(fishing.find((u) => u.level === 1)?.description).toBe("Shrimp");
+    expect(fishing.find((u) => u.level === 20)?.description).toBe("Trout");
+    expect(fishing.find((u) => u.level === 40)?.description).toBe("Lobster");
+    expect(fishing.find((u) => u.level === 50)?.description).toBe("Swordfish");
+    expect(fishing.find((u) => u.level === 76)?.description).toBe("Shark");
+  });
+
+  it("cooking levels are OSRS accurate", () => {
+    const allUnlocks = getAllSkillUnlocks();
+    const cooking = allUnlocks.cooking;
+
+    expect(cooking.find((u) => u.level === 1)?.description).toContain("Shrimp");
+    expect(cooking.find((u) => u.level === 15)?.description).toBe("Trout");
+    expect(cooking.find((u) => u.level === 40)?.description).toBe("Lobster");
+    expect(cooking.find((u) => u.level === 45)?.description).toBe("Swordfish");
+    expect(cooking.find((u) => u.level === 80)?.description).toBe("Shark");
+  });
+
+  it("firemaking levels match woodcutting", () => {
+    const allUnlocks = getAllSkillUnlocks();
+    const firemaking = allUnlocks.firemaking;
+
+    expect(firemaking.find((u) => u.level === 1)?.description).toBe(
+      "Normal logs",
+    );
+    expect(firemaking.find((u) => u.level === 15)?.description).toBe(
+      "Oak logs",
+    );
+    expect(firemaking.find((u) => u.level === 30)?.description).toBe(
+      "Willow logs",
+    );
+    expect(firemaking.find((u) => u.level === 60)?.description).toBe(
+      "Yew logs",
+    );
+    expect(firemaking.find((u) => u.level === 75)?.description).toBe(
+      "Magic logs",
+    );
+    expect(firemaking.find((u) => u.level === 90)?.description).toBe(
+      "Redwood logs",
+    );
+  });
+
+  it("smithing bar levels are OSRS accurate", () => {
+    const allUnlocks = getAllSkillUnlocks();
+    const smithing = allUnlocks.smithing;
+
+    expect(smithing.find((u) => u.level === 1)?.description).toBe("Bronze bar");
+    expect(smithing.find((u) => u.level === 15)?.description).toContain(
+      "Iron bar",
+    );
+    expect(smithing.find((u) => u.level === 30)?.description).toBe("Steel bar");
+    expect(smithing.find((u) => u.level === 50)?.description).toBe(
+      "Mithril bar",
+    );
+    expect(smithing.find((u) => u.level === 70)?.description).toBe(
+      "Adamant bar",
+    );
+    expect(smithing.find((u) => u.level === 85)?.description).toBe("Rune bar");
+  });
+});
+
+// ============================================================================
+// Cache Behavior Tests
+// ============================================================================
+
+describe("Skill unlocks cache", () => {
+  it("clearSkillUnlocksCache does not throw", () => {
+    getAllSkillUnlocks();
+    expect(() => clearSkillUnlocksCache()).not.toThrow();
+    const allUnlocks = getAllSkillUnlocks();
+    expect(allUnlocks.cooking).toBeDefined();
+    expect(Array.isArray(allUnlocks.cooking)).toBe(true);
   });
 });

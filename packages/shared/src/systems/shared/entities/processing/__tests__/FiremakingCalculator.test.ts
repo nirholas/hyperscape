@@ -252,10 +252,10 @@ describe("FiremakingCalculator", () => {
       expect(validIds.has("redwood_logs")).toBe(true);
     });
 
-    it("returns a read-only set", () => {
+    it("returns a set", () => {
       const validIds = getValidLogIds();
-      // The returned set should be the same reference as PROCESSING_CONSTANTS.VALID_LOG_IDS
-      expect(validIds).toBe(PROCESSING_CONSTANTS.VALID_LOG_IDS);
+      // Returns the ProcessingDataProvider's burnable log set
+      expect(validIds).toBeInstanceOf(Set);
     });
   });
 

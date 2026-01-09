@@ -155,10 +155,12 @@ export const GATHERING_CONSTANTS = {
     ore_copper: { low: 64, high: 220 },
     // Tin ore (level 1)
     ore_tin: { low: 64, high: 220 },
-    // Iron ore (level 15) - would be added when we have iron rocks
+    // Iron ore (level 15)
     ore_iron: { low: 48, high: 180 },
     // Coal (level 30)
     ore_coal: { low: 32, high: 140 },
+    // Mithril ore (level 55)
+    ore_mithril: { low: 24, high: 120 },
   } as const,
 
   /**

@@ -1,8 +1,14 @@
 /**
- * ProcessingDataProvider - Runtime Data from Item Manifest
+ * ProcessingDataProvider - Runtime Data from Recipe Manifests
  *
- * Builds cooking, firemaking, and smelting lookup tables dynamically from the ITEMS map.
- * This is the proper data-driven approach where items.json is the source of truth.
+ * Builds cooking, firemaking, smelting, and smithing lookup tables from
+ * dedicated recipe manifest files. This is the data-driven approach where
+ * each skill's recipes are in separate JSON files:
+ *
+ *   - recipes/cooking.json
+ *   - recipes/firemaking.json
+ *   - recipes/smelting.json
+ *   - recipes/smithing.json
  *
  * Usage:
  *   const provider = ProcessingDataProvider.getInstance();
@@ -10,13 +16,92 @@
  *   const cookingData = provider.getCookingData("raw_shrimp");
  *   const smeltingData = provider.getSmeltingData("bronze_bar");
  *
- * @see packages/server/world/assets/manifests/items.json for source data
+ * @see packages/server/world/assets/manifests/recipes/ for source data
  */
 
 import { ITEMS } from "./items";
-import type { Item } from "../types/game/item-types";
 import type { SmithingCategory } from "./smithing-recipes";
 import { SMITHING_CONSTANTS } from "../constants/SmithingConstants";
+
+// ============================================================================
+// RECIPE MANIFEST TYPES - Structures matching the JSON files
+// ============================================================================
+
+/**
+ * Cooking recipe from recipes/cooking.json
+ */
+export interface CookingRecipeManifest {
+  raw: string;
+  cooked: string;
+  burnt: string;
+  level: number;
+  xp: number;
+  ticks: number;
+  stopBurnLevel: { fire: number; range: number };
+}
+
+/**
+ * Firemaking recipe from recipes/firemaking.json
+ */
+export interface FiremakingRecipeManifest {
+  log: string;
+  level: number;
+  xp: number;
+  ticks: number;
+}
+
+/**
+ * Smelting recipe from recipes/smelting.json
+ */
+export interface SmeltingRecipeManifest {
+  output: string;
+  inputs: Array<{ item: string; amount: number }>;
+  level: number;
+  xp: number;
+  ticks: number;
+  successRate: number;
+}
+
+/**
+ * Smithing recipe from recipes/smithing.json
+ */
+export interface SmithingRecipeManifest {
+  output: string;
+  bar: string;
+  barsRequired: number;
+  level: number;
+  xp: number;
+  ticks: number;
+  category: string;
+}
+
+/**
+ * Full manifest structure for recipes/cooking.json
+ */
+export interface CookingManifest {
+  recipes: CookingRecipeManifest[];
+}
+
+/**
+ * Full manifest structure for recipes/firemaking.json
+ */
+export interface FiremakingManifest {
+  recipes: FiremakingRecipeManifest[];
+}
+
+/**
+ * Full manifest structure for recipes/smelting.json
+ */
+export interface SmeltingManifest {
+  recipes: SmeltingRecipeManifest[];
+}
+
+/**
+ * Full manifest structure for recipes/smithing.json
+ */
+export interface SmithingManifest {
+  recipes: SmithingRecipeManifest[];
+}
 
 /**
  * Smithing recipe data extracted from item manifest
@@ -81,29 +166,35 @@ export interface SmeltingItemData {
 }
 
 /**
- * Runtime data provider for cooking, firemaking, and smelting systems.
- * Builds lookup tables from the ITEMS manifest after DataManager loads.
+ * Runtime data provider for cooking, firemaking, smelting, and smithing systems.
+ * Builds lookup tables from recipe manifest files loaded by DataManager.
  */
 export class ProcessingDataProvider {
   private static instance: ProcessingDataProvider;
   private isInitialized = false;
 
-  // Cooking lookup tables (built from manifest)
+  // Cooking lookup tables (built from recipes/cooking.json)
   private cookingDataMap = new Map<string, CookingItemData>();
   private cookableItemIds = new Set<string>();
 
-  // Firemaking lookup tables (built from manifest)
+  // Firemaking lookup tables (built from recipes/firemaking.json)
   private firemakingDataMap = new Map<string, FiremakingItemData>();
   private burneableLogIds = new Set<string>();
 
-  // Smelting lookup tables (built from manifest)
+  // Smelting lookup tables (built from recipes/smelting.json)
   private smeltingDataMap = new Map<string, SmeltingItemData>();
   private smeltableBarIds = new Set<string>();
 
-  // Smithing lookup tables (built from manifest)
+  // Smithing lookup tables (built from recipes/smithing.json)
   private smithingRecipeMap = new Map<string, SmithingRecipeData>();
   private smithableItemIds = new Set<string>();
   private smithingRecipesByBar = new Map<string, SmithingRecipeData[]>();
+
+  // Loaded recipe manifests (set by DataManager)
+  private cookingManifest: CookingManifest | null = null;
+  private firemakingManifest: FiremakingManifest | null = null;
+  private smeltingManifest: SmeltingManifest | null = null;
+  private smithingManifest: SmithingManifest | null = null;
 
   private constructor() {
     // Singleton
@@ -116,19 +207,85 @@ export class ProcessingDataProvider {
     return ProcessingDataProvider.instance;
   }
 
+  // ==========================================================================
+  // RECIPE MANIFEST LOADING (called by DataManager)
+  // ==========================================================================
+
   /**
-   * Initialize the data provider by scanning ITEMS for cooking/firemaking/smelting data.
-   * Must be called AFTER DataManager.initialize() has loaded the manifest.
+   * Load cooking recipes from manifest
+   */
+  public loadCookingRecipes(manifest: CookingManifest): void {
+    this.cookingManifest = manifest;
+  }
+
+  /**
+   * Load firemaking recipes from manifest
+   */
+  public loadFiremakingRecipes(manifest: FiremakingManifest): void {
+    this.firemakingManifest = manifest;
+  }
+
+  /**
+   * Load smelting recipes from manifest
+   */
+  public loadSmeltingRecipes(manifest: SmeltingManifest): void {
+    this.smeltingManifest = manifest;
+  }
+
+  /**
+   * Load smithing recipes from manifest
+   */
+  public loadSmithingRecipes(manifest: SmithingManifest): void {
+    this.smithingManifest = manifest;
+  }
+
+  /**
+   * Check if recipe manifests are loaded
+   */
+  public hasRecipeManifests(): boolean {
+    return !!(
+      this.cookingManifest ||
+      this.firemakingManifest ||
+      this.smeltingManifest ||
+      this.smithingManifest
+    );
+  }
+
+  /**
+   * Initialize the data provider by building lookup tables.
+   * Uses recipe manifests if loaded, otherwise falls back to embedded item data.
+   * Must be called AFTER DataManager.initialize() has loaded the manifests.
    */
   public initialize(): void {
     if (this.isInitialized) {
       return;
     }
 
-    this.buildCookingData();
-    this.buildFiremakingData();
-    this.buildSmeltingData();
-    this.buildSmithingData();
+    // Build from recipe manifests if available, else fall back to items
+    if (this.cookingManifest) {
+      this.buildCookingDataFromManifest();
+    } else {
+      this.buildCookingDataFromItems();
+    }
+
+    if (this.firemakingManifest) {
+      this.buildFiremakingDataFromManifest();
+    } else {
+      this.buildFiremakingDataFromItems();
+    }
+
+    if (this.smeltingManifest) {
+      this.buildSmeltingDataFromManifest();
+    } else {
+      this.buildSmeltingDataFromItems();
+    }
+
+    if (this.smithingManifest) {
+      this.buildSmithingDataFromManifest();
+    } else {
+      this.buildSmithingDataFromItems();
+    }
+
     this.isInitialized = true;
 
     console.log(
@@ -153,10 +310,128 @@ export class ProcessingDataProvider {
     this.initialize();
   }
 
+  // ==========================================================================
+  // BUILD FROM RECIPE MANIFESTS (Primary - uses recipe JSON files)
+  // ==========================================================================
+
   /**
-   * Scan ITEMS for items with `cooking` property
+   * Build cooking lookup tables from recipes/cooking.json
    */
-  private buildCookingData(): void {
+  private buildCookingDataFromManifest(): void {
+    if (!this.cookingManifest) return;
+
+    for (const recipe of this.cookingManifest.recipes) {
+      const cookingData: CookingItemData = {
+        rawItemId: recipe.raw,
+        cookedItemId: recipe.cooked,
+        burntItemId: recipe.burnt,
+        levelRequired: recipe.level,
+        xp: recipe.xp,
+        stopBurnLevel: {
+          fire: recipe.stopBurnLevel.fire,
+          range: recipe.stopBurnLevel.range,
+        },
+      };
+      this.cookingDataMap.set(recipe.raw, cookingData);
+      this.cookableItemIds.add(recipe.raw);
+    }
+  }
+
+  /**
+   * Build firemaking lookup tables from recipes/firemaking.json
+   */
+  private buildFiremakingDataFromManifest(): void {
+    if (!this.firemakingManifest) return;
+
+    for (const recipe of this.firemakingManifest.recipes) {
+      const firemakingData: FiremakingItemData = {
+        logId: recipe.log,
+        levelRequired: recipe.level,
+        xp: recipe.xp,
+      };
+      this.firemakingDataMap.set(recipe.log, firemakingData);
+      this.burneableLogIds.add(recipe.log);
+    }
+  }
+
+  /**
+   * Build smelting lookup tables from recipes/smelting.json
+   */
+  private buildSmeltingDataFromManifest(): void {
+    if (!this.smeltingManifest) return;
+
+    for (const recipe of this.smeltingManifest.recipes) {
+      // Parse inputs to extract primary ore, secondary ore, and coal count
+      let primaryOre = "";
+      let secondaryOre: string | null = null;
+      let coalRequired = 0;
+
+      for (const input of recipe.inputs) {
+        if (input.item === "coal") {
+          coalRequired = input.amount;
+        } else if (!primaryOre) {
+          primaryOre = input.item;
+        } else {
+          secondaryOre = input.item;
+        }
+      }
+
+      const smeltingData: SmeltingItemData = {
+        barItemId: recipe.output,
+        primaryOre,
+        secondaryOre,
+        coalRequired,
+        levelRequired: recipe.level,
+        xp: recipe.xp,
+        successRate: recipe.successRate,
+        ticks: recipe.ticks ?? SMITHING_CONSTANTS.DEFAULT_SMELTING_TICKS,
+      };
+      this.smeltingDataMap.set(recipe.output, smeltingData);
+      this.smeltableBarIds.add(recipe.output);
+    }
+  }
+
+  /**
+   * Build smithing lookup tables from recipes/smithing.json
+   */
+  private buildSmithingDataFromManifest(): void {
+    if (!this.smithingManifest) return;
+
+    for (const recipe of this.smithingManifest.recipes) {
+      // Get item name from ITEMS map
+      const item = ITEMS.get(recipe.output);
+      const name = item?.name || recipe.output;
+
+      const recipeData: SmithingRecipeData = {
+        itemId: recipe.output,
+        name,
+        barType: recipe.bar,
+        barsRequired: recipe.barsRequired,
+        levelRequired: recipe.level,
+        xp: recipe.xp,
+        category: recipe.category as SmithingCategory,
+        ticks: recipe.ticks ?? SMITHING_CONSTANTS.DEFAULT_SMITHING_TICKS,
+      };
+
+      // Add to main map (keyed by output item ID)
+      this.smithingRecipeMap.set(recipe.output, recipeData);
+      this.smithableItemIds.add(recipe.output);
+
+      // Add to bar-grouped map for UI lookups
+      const barRecipes = this.smithingRecipesByBar.get(recipe.bar) || [];
+      barRecipes.push(recipeData);
+      this.smithingRecipesByBar.set(recipe.bar, barRecipes);
+    }
+  }
+
+  // ==========================================================================
+  // BUILD FROM EMBEDDED ITEM DATA (Fallback - for backwards compatibility)
+  // ==========================================================================
+
+  /**
+   * Scan ITEMS for items with `cooking` property (fallback)
+   */
+  private buildCookingDataFromItems(): void {
     for (const [itemId, item] of ITEMS) {
       if (item.cooking) {
         const cookingData: CookingItemData = {
@@ -177,9 +452,9 @@ export class ProcessingDataProvider {
   }
 
   /**
-   * Scan ITEMS for items with `firemaking` property
+   * Scan ITEMS for items with `firemaking` property (fallback)
    */
-  private buildFiremakingData(): void {
+  private buildFiremakingDataFromItems(): void {
     for (const [itemId, item] of ITEMS) {
       if (item.firemaking) {
         const firemakingData: FiremakingItemData = {
@@ -194,9 +469,9 @@ export class ProcessingDataProvider {
   }
 
   /**
-   * Scan ITEMS for items with `smelting` property (bars define their recipes)
+   * Scan ITEMS for items with `smelting` property (fallback)
    */
-  private buildSmeltingData(): void {
+  private buildSmeltingDataFromItems(): void {
     for (const [itemId, item] of ITEMS) {
       if (item.smelting) {
         const smeltingData: SmeltingItemData = {
@@ -217,9 +492,9 @@ export class ProcessingDataProvider {
   }
 
   /**
-   * Scan ITEMS for items with `smithing` property (output items define their recipes)
+   * Scan ITEMS for items with `smithing` property (fallback)
    */
-  private buildSmithingData(): void {
+  private buildSmithingDataFromItems(): void {
     for (const [itemId, item] of ITEMS) {
       if (item.smithing) {
         const recipeData: SmithingRecipeData = {

@@ -704,7 +704,9 @@ ${colors.reset}`)
       }
     }
 
-    const hasManifests = fs.existsSync(path.join(manifestsDir, 'items.json')) ||
+    const hasManifests = fs.existsSync(path.join(manifestsDir, 'items')) ||      // items/ directory (new)
+                         fs.existsSync(path.join(manifestsDir, 'items.json')) || // items.json (legacy fallback)
+                         fs.existsSync(path.join(manifestsDir, 'npcs.json')) ||  // npcs.json exists
                          fs.existsSync(path.join(manifestsDir, 'mobs.json')) ||
                          fs.existsSync(path.join(manifestsDir, 'avatars.json'))
 
