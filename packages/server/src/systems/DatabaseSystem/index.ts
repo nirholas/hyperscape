@@ -342,6 +342,7 @@ export class DatabaseSystem extends SystemBase {
     fishing: { level: number; xp: number };
     firemaking: { level: number; xp: number };
     cooking: { level: number; xp: number };
+    smithing: { level: number; xp: number };
   } | null> {
     return this.characterRepository.getCharacterSkills(characterId);
   }

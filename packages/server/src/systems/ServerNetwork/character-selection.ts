@@ -637,6 +637,10 @@ export async function handleEnterWorld(
               level: savedData.cookingLevel || 1,
               xp: savedData.cookingXp || 0,
             },
+            smithing: {
+              level: savedData.smithingLevel || 1,
+              xp: savedData.smithingXp || 0,
+            },
           };
           // Load auto-retaliate preference (1=ON, 0=OFF, default ON)
           savedAutoRetaliate =
