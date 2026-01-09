@@ -543,4 +543,70 @@ describe("ResourceSystem Integration", () => {
       expect(patterns?.rapidDisconnects).toBe(2);
     });
   });
+
+  it("REGRESSION: should ignore duplicate gather requests (spam click exploit)", () => {
+    // Setup: Create player and add to world
+    const player = createTestPlayer("spam_clicker", { woodcutting: 99 });
+    player.position = { x: 100, y: 0, z: 100 };
+    mockWorld.addPlayer(player);
+    mockWorld.setInventory(
+      "spam_clicker",
+      createTestInventory([{ itemId: "bronze_hatchet", quantity: 1 }]),
+    );
+
+    const resourceId = "tree_normal_100_100";
+    const playerId = "spam_clicker";
+    const initialTick = 1000;
+
+    // Directly inject a session to test the guard clause in isolation
+    // This bypasses resource registration/validation - we only test the duplicate check
+    const activeGathering = (system as any).activeGathering;
+    activeGathering.set(playerId, {
+      playerId,
+      resourceId,
+      startTick: initialTick,
+      nextAttemptTick: initialTick + 4,
+      cycleTickInterval: 4,
+      attempts: 0,
+      successes: 0,
+      cachedTuning: {
+        levelRequired: 1,
+        xpPerLog: 25,
+        depleteChance: 0.125,
+        respawnTicks: 100,
+      },
+      cachedSuccessRate: 0.5,
+      cachedDrops: [
+        {
+          itemId: "logs",
+          itemName: "Logs",
+          quantity: 1,
+          chance: 1,
+          xpAmount: 25,
+        },
+      ],
+      cachedResourceName: "Tree",
+      cachedStartPosition: { ...player.position },
+    });
+
+    // Verify session exists with our injected startTick
+    expect(activeGathering.get(playerId)).toBeDefined();
+    expect(activeGathering.get(playerId).startTick).toBe(initialTick);
+
+    // Advance world tick
+    (mockWorld as any).currentTick = initialTick + 5;
+
+    // Emit duplicate gather request - guard clause should ignore this
+    mockWorld.emit(EventType.RESOURCE_GATHER, {
+      playerId: "spam_clicker",
+      resourceId: resourceId,
+      playerPosition: player.position,
+    });
+
+    // Session should NOT have been replaced (startTick unchanged)
+    const session = activeGathering.get(playerId);
+    expect(session).toBeDefined();
+    expect(session.startTick).toBe(initialTick);
+    expect(session.resourceId).toBe(resourceId);
+  });
 });

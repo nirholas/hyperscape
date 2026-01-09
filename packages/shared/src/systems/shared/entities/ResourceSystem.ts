@@ -1254,6 +1254,18 @@ export class ResourceSystem extends SystemBase {
       }
     }
 
+    // ===== FIX #488: Prevent duplicate sessions on spam click =====
+    // Check AFTER resource resolution so we compare the exact resolved resource ID
+    const existingSession = this.activeGathering.get(playerId);
+    if (existingSession) {
+      // If already gathering this EXACT resource, silently ignore (prevents duplicate rewards)
+      if (existingSession.resourceId === resource.id) {
+        return;
+      }
+      // If switching to a DIFFERENT resource, cancel the old session first
+      this.cancelGatheringForPlayer(playerId, "switch_resource");
+    }
+
     // Check if resource is available
     if (!resource.isAvailable) {
       this.emitTypedEvent(EventType.UI_MESSAGE, {
