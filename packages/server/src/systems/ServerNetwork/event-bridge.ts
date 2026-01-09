@@ -871,8 +871,6 @@ export class EventBridge {
           position: { x: number; y: number; z: number };
         };
 
-        console.log("[EventBridge] 🔥 Broadcasting fire created:", data);
-
         // Send to all clients so they can render the fire visual
         this.broadcast.sendToAll("fireCreated", data);
       });
@@ -880,8 +878,6 @@ export class EventBridge {
       // Broadcast fire extinguish to all clients
       this.world.on(EventType.FIRE_EXTINGUISHED, (payload: unknown) => {
         const data = payload as { fireId: string };
-
-        console.log("[EventBridge] 💨 Broadcasting fire extinguished:", data);
 
         // Send to all clients so they can remove the fire visual
         this.broadcast.sendToAll("fireExtinguished", data);

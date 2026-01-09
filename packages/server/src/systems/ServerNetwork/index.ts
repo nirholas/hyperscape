@@ -653,10 +653,6 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         position: { x: number; y: number; z: number };
       };
 
-      console.log(
-        `[ServerNetwork] 🔥 Firemaking move request for ${playerId} to (${position.x.toFixed(1)}, ${position.z.toFixed(1)})`,
-      );
-
       // Get player entity
       const socket = this.broadcastManager.getPlayerSocket(playerId);
       const player = socket?.player;
@@ -894,13 +890,6 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         return;
       }
 
-      console.log(
-        "[ServerNetwork] 🔥 Firemaking request from",
-        player.id,
-        ":",
-        payload,
-      );
-
       // Emit event for ProcessingSystem to handle
       this.world.emit(EventType.PROCESSING_FIREMAKING_REQUEST, {
         playerId: player.id,
@@ -979,10 +968,6 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       };
       if (!payload.furnaceId || !payload.position) return;
 
-      console.log(
-        `[ServerNetwork] 🔥 Smelting source interact from ${player.id} at furnace ${payload.furnaceId}`,
-      );
-
       // Emit event for SmeltingSystem to handle
       this.world.emit(EventType.SMELTING_INTERACT, {
         playerId: player.id,
@@ -1006,10 +991,6 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         position?: [number, number, number];
       };
       if (!payload.anvilId || !payload.position) return;
-
-      console.log(
-        `[ServerNetwork] 🔨 Smithing source interact from ${player.id} at anvil ${payload.anvilId}`,
-      );
 
       // Emit event for SmithingSystem to handle
       this.world.emit(EventType.SMITHING_INTERACT, {
@@ -1059,12 +1040,6 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           ? Math.floor(Math.max(1, Math.min(payload.quantity, 10000)))
           : 1;
 
-      // Sanitize for logging (prevent log injection)
-      const safeBarId = payload.barItemId.replace(/[^\w_-]/g, "");
-      console.log(
-        `[ServerNetwork] 🔥 Smelting request from ${player.id}: ${quantity}x ${safeBarId}`,
-      );
-
       // Emit event for SmeltingSystem to handle
       this.world.emit(EventType.PROCESSING_SMELTING_REQUEST, {
         playerId: player.id,
@@ -1109,12 +1084,6 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         Number.isFinite(payload.quantity)
           ? Math.floor(Math.max(1, Math.min(payload.quantity, 10000)))
           : 1;
-
-      // Sanitize for logging (prevent log injection)
-      const safeRecipeId = payload.recipeId.replace(/[^\w_-]/g, "");
-      console.log(
-        `[ServerNetwork] 🔨 Smithing request from ${player.id}: ${quantity}x ${safeRecipeId}`,
-      );
 
       // Emit event for SmithingSystem to handle
       this.world.emit(EventType.PROCESSING_SMITHING_REQUEST, {

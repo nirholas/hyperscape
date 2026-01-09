@@ -97,12 +97,7 @@ export class InventorySystem extends SystemBase {
       this.cleanupInventory({ id: data.playerId });
     });
     this.subscribe(EventType.INVENTORY_ITEM_REMOVED, (data) => {
-      console.log(
-        "[InventorySystem] 📦 INVENTORY_ITEM_REMOVED received:",
-        data,
-      );
-      const result = this.removeItem(data);
-      console.log("[InventorySystem] 📦 removeItem result:", result);
+      this.removeItem(data);
     });
     // Handle remove item requests (e.g., from store sell)
     this.subscribe<{ playerId: string; itemId: string; quantity: number }>(
@@ -544,8 +539,6 @@ export class InventorySystem extends SystemBase {
     quantity: number;
     slot?: number;
   }): boolean {
-    console.log("[InventorySystem] 📦 removeItem called with:", data);
-
     if (!data.playerId) {
       Logger.systemError(
         "InventorySystem",
@@ -569,12 +562,6 @@ export class InventorySystem extends SystemBase {
       !isValidPlayerID(data.playerId) ||
       !isValidItemID(String(data.itemId))
     ) {
-      console.log("[InventorySystem] ❌ Invalid ID format:", {
-        playerId: data.playerId,
-        itemId: data.itemId,
-        isValidPlayer: isValidPlayerID(data.playerId),
-        isValidItem: isValidItemID(String(data.itemId)),
-      });
       Logger.systemError(
         "InventorySystem",
         "Cannot remove item: invalid ID format",
@@ -587,16 +574,6 @@ export class InventorySystem extends SystemBase {
     const itemId = String(data.itemId);
 
     const inventory = this.getOrCreateInventory(playerId);
-    console.log("[InventorySystem] 📦 Found inventory:", {
-      playerId,
-      itemId,
-      slot: data.slot,
-      inventoryItems: inventory.items.map((i) => ({
-        itemId: i.itemId,
-        slot: i.slot,
-        quantity: i.quantity,
-      })),
-    });
 
     // Handle coins - delegate to CoinPouchSystem
     if (itemId === "coins") {
