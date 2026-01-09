@@ -17,6 +17,7 @@ import {
   SMITHING_CONSTANTS,
   isLooseInventoryItem,
   getItemQuantity,
+  getSmithingLevelSafe,
 } from "../../../constants/SmithingConstants";
 import { processingDataProvider } from "../../../data/ProcessingDataProvider";
 import { EventType } from "../../../types/events";
@@ -430,7 +431,7 @@ export class SmithingSystem extends SystemBase {
   }
 
   /**
-   * Get player's smithing level
+   * Get player's smithing level using type-safe access
    */
   private getSmithingLevel(playerId: string): number {
     // Check cached skills first
@@ -439,12 +440,9 @@ export class SmithingSystem extends SystemBase {
       return cachedSkills.smithing.level;
     }
 
-    // Fall back to player entity
+    // Fall back to player entity using type-safe getter
     const player = this.world.getPlayer(playerId);
-    const playerSkills = (
-      player as { skills?: Record<string, { level: number }> }
-    )?.skills;
-    return playerSkills?.smithing?.level || 1;
+    return getSmithingLevelSafe(player, 1);
   }
 
   /**

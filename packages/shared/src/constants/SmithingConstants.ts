@@ -144,3 +144,61 @@ export function getItemQuantity(item: LooseInventoryItem): number {
 export function ticksToMs(ticks: number): number {
   return ticks * SMITHING_CONSTANTS.TICK_DURATION_MS;
 }
+
+// ============================================================================
+// PLAYER SKILLS TYPE GUARDS
+// ============================================================================
+
+/**
+ * Skill data structure with level and XP
+ */
+export interface SkillLevelData {
+  level: number;
+  xp?: number;
+}
+
+/**
+ * Entity that has skills (player or NPC with skill levels)
+ */
+export interface EntityWithSkills {
+  id: string;
+  skills?: {
+    smithing?: SkillLevelData;
+    [key: string]: SkillLevelData | undefined;
+  };
+}
+
+/**
+ * Type guard to check if an entity has a valid skills object.
+ * Use this instead of loose type assertions like `player as { skills?: ... }`.
+ *
+ * @param entity - The entity to check
+ * @returns true if entity has a valid skills structure
+ */
+export function hasSkills(entity: unknown): entity is EntityWithSkills {
+  if (!entity || typeof entity !== "object") return false;
+  if (!("id" in entity) || typeof (entity as EntityWithSkills).id !== "string")
+    return false;
+
+  const skills = (entity as EntityWithSkills).skills;
+  if (skills === undefined) return true; // skills is optional
+  if (typeof skills !== "object" || skills === null) return false;
+
+  return true;
+}
+
+/**
+ * Get smithing level from an entity safely.
+ * Returns the smithing level if available, or the default (1) if not.
+ *
+ * @param entity - The entity to get smithing level from
+ * @param defaultLevel - Default level to return if not found (default: 1)
+ * @returns The entity's smithing level
+ */
+export function getSmithingLevelSafe(
+  entity: unknown,
+  defaultLevel = 1,
+): number {
+  if (!hasSkills(entity)) return defaultLevel;
+  return entity.skills?.smithing?.level ?? defaultLevel;
+}
