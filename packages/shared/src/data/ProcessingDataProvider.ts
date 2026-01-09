@@ -196,6 +196,17 @@ export class ProcessingDataProvider {
   private smeltingManifest: SmeltingManifest | null = null;
   private smithingManifest: SmithingManifest | null = null;
 
+  // ============================================================================
+  // PRE-ALLOCATED BUFFERS (Memory optimization - avoid allocation in hot paths)
+  // ============================================================================
+
+  /**
+   * Pre-allocated Map for inventory counting operations.
+   * Reused across getSmithableItemsFromInventory and getSmeltableBarsFromInventory
+   * to avoid creating new Map instances on every call.
+   */
+  private readonly inventoryCountBuffer = new Map<string, number>();
+
   private constructor() {
     // Singleton
   }
@@ -729,6 +740,30 @@ export class ProcessingDataProvider {
   }
 
   /**
+   * Build inventory item counts using pre-allocated buffer.
+   * Clears and reuses the buffer to avoid allocations.
+   *
+   * @param inventory - Array of items with itemId and quantity
+   * @returns Reference to the internal count buffer (do not store long-term)
+   */
+  private buildInventoryCounts(
+    inventory: Array<{ itemId: string; quantity?: number }>,
+  ): Map<string, number> {
+    // Clear and reuse pre-allocated buffer
+    this.inventoryCountBuffer.clear();
+
+    for (const item of inventory) {
+      const current = this.inventoryCountBuffer.get(item.itemId) || 0;
+      this.inventoryCountBuffer.set(
+        item.itemId,
+        current + (item.quantity || 1),
+      );
+    }
+
+    return this.inventoryCountBuffer;
+  }
+
+  /**
    * Get all bars that can be smelted from the given inventory items.
    * Returns bars where player has all required ores and coal.
    *
@@ -741,12 +776,8 @@ export class ProcessingDataProvider {
   ): SmeltingItemData[] {
     this.ensureInitialized();
 
-    // Build inventory counts
-    const itemCounts = new Map<string, number>();
-    for (const item of inventory) {
-      const current = itemCounts.get(item.itemId) || 0;
-      itemCounts.set(item.itemId, current + (item.quantity || 1));
-    }
+    // Build inventory counts using pre-allocated buffer
+    const itemCounts = this.buildInventoryCounts(inventory);
 
     const result: SmeltingItemData[] = [];
 
@@ -906,12 +937,8 @@ export class ProcessingDataProvider {
   ): SmithingRecipeData[] {
     this.ensureInitialized();
 
-    // Build inventory counts
-    const itemCounts = new Map<string, number>();
-    for (const item of inventory) {
-      const current = itemCounts.get(item.itemId) || 0;
-      itemCounts.set(item.itemId, current + (item.quantity || 1));
-    }
+    // Build inventory counts using pre-allocated buffer
+    const itemCounts = this.buildInventoryCounts(inventory);
 
     const result: SmithingRecipeData[] = [];
 
