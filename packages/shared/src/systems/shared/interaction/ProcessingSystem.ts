@@ -690,6 +690,30 @@ export class ProcessingSystem extends SystemBase {
       return;
     }
 
+    // Check level requirement
+    let cookingLevel = 1;
+    const cachedSkills = this.playerSkills.get(playerId);
+    if (cachedSkills?.cooking?.level) {
+      cookingLevel = cachedSkills.cooking.level;
+    } else {
+      const player = this.world.getPlayer(playerId);
+      const playerSkills = (
+        player as { skills?: Record<string, { level: number }> }
+      )?.skills;
+      if (playerSkills?.cooking?.level) {
+        cookingLevel = playerSkills.cooking.level;
+      }
+    }
+
+    if (cookingLevel < cookingData.levelRequired) {
+      this.emitTypedEvent(EventType.UI_MESSAGE, {
+        playerId,
+        message: `You need level ${cookingData.levelRequired} Cooking to cook that.`,
+        type: "error",
+      });
+      return;
+    }
+
     // Start cooking process - use pooled action object (Phase 2 optimization)
     const processingAction = this.acquireAction();
     processingAction.playerId = playerId;
