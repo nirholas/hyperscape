@@ -6,6 +6,7 @@ import {
   EventType,
   getItem,
   uuid,
+  CONTEXT_MENU_COLORS,
 } from "@hyperscape/shared";
 import type {
   PlayerEquipmentItems,
@@ -53,9 +54,8 @@ function DroppableEquipmentSlot({
         e.stopPropagation();
         if (!slot.item) return;
 
-        // OSRS uses orange (#ff9040) for item names in context menus
+        // OSRS uses orange for item names in context menus
         const itemName = slot.item.name;
-        const ITEM_COLOR = "#ff9040";
 
         const items = [
           {
@@ -63,7 +63,7 @@ function DroppableEquipmentSlot({
             label: `Remove ${itemName}`,
             styledLabel: [
               { text: "Remove " },
-              { text: itemName, color: ITEM_COLOR },
+              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
             ],
             enabled: true,
           },
@@ -72,7 +72,7 @@ function DroppableEquipmentSlot({
             label: `Examine ${itemName}`,
             styledLabel: [
               { text: "Examine " },
-              { text: itemName, color: ITEM_COLOR },
+              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
             ],
             enabled: true,
           },
