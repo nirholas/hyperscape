@@ -21,7 +21,22 @@ import {
   pointerWithin,
   type Modifier,
 } from "@dnd-kit/core";
-import { EventType, getItem, uuid, type Item } from "@hyperscape/shared";
+import {
+  EventType,
+  getItem,
+  uuid,
+  type Item,
+  // OSRS-accurate item helpers (extracted to shared)
+  isFood,
+  isPotion,
+  isBone,
+  usesWield,
+  usesWear,
+  isNotedItem,
+  getPrimaryAction,
+  CONTEXT_MENU_COLORS,
+  type PrimaryActionType,
+} from "@hyperscape/shared";
 import type { ClientWorld, InventorySlotItem } from "../../types";
 
 /**
@@ -43,9 +58,6 @@ interface InventoryPanelProps {
   onItemUse?: (item: InventorySlotViewItem, index: number) => void;
   onItemEquip?: (item: InventorySlotViewItem) => void;
 }
-
-/** Primary action types for left-click */
-type PrimaryActionType = "eat" | "drink" | "bury" | "wield" | "wear" | "use";
 
 interface DraggableItemProps {
   item: InventorySlotViewItem | null;
@@ -84,132 +96,6 @@ function formatQuantity(qty: number): { text: string; color: string } {
     const m = Math.floor(qty / 1000000);
     return { text: `${m}M`, color: "rgba(0, 255, 128, 0.95)" };
   }
-}
-
-// =============================================================================
-// OSRS-ACCURATE ITEM TYPE DETECTION HELPERS
-// Used for context menu ordering and left-click default actions
-// =============================================================================
-
-/** OSRS item color for context menus */
-const ITEM_COLOR = "#ff9040";
-
-/** Food items - have healAmount and are consumable (excludes potions) */
-function isFood(item: Item | null): boolean {
-  if (!item) return false;
-  return (
-    item.type === "consumable" &&
-    typeof item.healAmount === "number" &&
-    item.healAmount > 0 &&
-    !item.id.includes("potion")
-  );
-}
-
-/** Potions - consumable items with "potion" in ID */
-function isPotion(item: Item | null): boolean {
-  if (!item) return false;
-  return item.type === "consumable" && item.id.includes("potion");
-}
-
-/** Bones - items that can be buried for Prayer XP */
-function isBone(item: Item | null): boolean {
-  if (!item) return false;
-  return item.id === "bones" || item.id.endsWith("_bones");
-}
-
-/** Weapons - equipSlot is weapon or 2h, or has weaponType */
-function isWeapon(item: Item | null): boolean {
-  if (!item) return false;
-  return (
-    item.equipSlot === "weapon" ||
-    item.equipSlot === "2h" ||
-    item.is2h === true ||
-    item.weaponType != null
-  );
-}
-
-/** Shields/Defenders - equipSlot is shield */
-function isShield(item: Item | null): boolean {
-  if (!item) return false;
-  return item.equipSlot === "shield";
-}
-
-/** Equipment that uses "Wield" (weapons + shields) */
-function usesWield(item: Item | null): boolean {
-  return isWeapon(item) || isShield(item);
-}
-
-/** Equipment that uses "Wear" (all other equipment: head, body, legs, etc.) */
-function usesWear(item: Item | null): boolean {
-  if (!item) return false;
-  if (!item.equipable && !item.equipSlot) return false;
-  return !usesWield(item);
-}
-
-/** Bank notes - cannot be eaten/equipped, only Use/Drop/Examine */
-function isNotedItem(item: Item | null): boolean {
-  if (!item) return false;
-  return item.isNoted === true || item.id.endsWith("_noted");
-}
-
-/**
- * Get primary action from manifest's inventoryActions (OSRS-accurate approach).
- * Returns the first action in the array, or null if no actions defined.
- *
- * OSRS stores explicit inventory options per item in the manifest.
- * First option is always the left-click default.
- */
-function getPrimaryActionFromManifest(
-  item: Item | null,
-): PrimaryActionType | null {
-  if (!item?.inventoryActions || item.inventoryActions.length === 0) {
-    return null;
-  }
-  const firstAction = item.inventoryActions[0].toLowerCase();
-  switch (firstAction) {
-    case "eat":
-      return "eat";
-    case "drink":
-      return "drink";
-    case "bury":
-      return "bury";
-    case "wield":
-      return "wield";
-    case "wear":
-      return "wear";
-    case "use":
-    default:
-      return "use";
-  }
-}
-
-/**
- * Get primary action using manifest-first approach with heuristic fallback.
- * OSRS-accurate: reads from inventoryActions if available.
- */
-function getPrimaryAction(
-  item: Item | null,
-  isNoted: boolean,
-): PrimaryActionType {
-  // Noted items always default to "Use"
-  if (isNoted) {
-    return "use";
-  }
-
-  // OSRS-accurate: Check manifest's inventoryActions first
-  const manifestAction = getPrimaryActionFromManifest(item);
-  if (manifestAction) {
-    return manifestAction;
-  }
-
-  // Fallback to heuristic detection for items without inventoryActions
-  if (isFood(item)) return "eat";
-  if (isPotion(item)) return "drink";
-  if (isBone(item)) return "bury";
-  if (usesWield(item)) return "wield";
-  if (usesWear(item)) return "wear";
-
-  return "use";
 }
 
 /**
@@ -438,7 +324,7 @@ function DraggableInventorySlot({
               label: `${action} ${itemName}`,
               styledLabel: [
                 { text: `${action} ` },
-                { text: itemName, color: ITEM_COLOR },
+                { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
               ],
               enabled: true,
             });
@@ -451,7 +337,7 @@ function DraggableInventorySlot({
               label: `Eat ${itemName}`,
               styledLabel: [
                 { text: "Eat " },
-                { text: itemName, color: ITEM_COLOR },
+                { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
               ],
               enabled: true,
             });
@@ -461,7 +347,7 @@ function DraggableInventorySlot({
               label: `Drink ${itemName}`,
               styledLabel: [
                 { text: "Drink " },
-                { text: itemName, color: ITEM_COLOR },
+                { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
               ],
               enabled: true,
             });
@@ -471,7 +357,7 @@ function DraggableInventorySlot({
               label: `Bury ${itemName}`,
               styledLabel: [
                 { text: "Bury " },
-                { text: itemName, color: ITEM_COLOR },
+                { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
               ],
               enabled: true,
             });
@@ -481,7 +367,7 @@ function DraggableInventorySlot({
               label: `Wield ${itemName}`,
               styledLabel: [
                 { text: "Wield " },
-                { text: itemName, color: ITEM_COLOR },
+                { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
               ],
               enabled: true,
             });
@@ -491,7 +377,7 @@ function DraggableInventorySlot({
               label: `Wear ${itemName}`,
               styledLabel: [
                 { text: "Wear " },
-                { text: itemName, color: ITEM_COLOR },
+                { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
               ],
               enabled: true,
             });
@@ -503,7 +389,7 @@ function DraggableInventorySlot({
             label: `Use ${itemName}`,
             styledLabel: [
               { text: "Use " },
-              { text: itemName, color: ITEM_COLOR },
+              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
             ],
             enabled: true,
           });
@@ -512,7 +398,7 @@ function DraggableInventorySlot({
             label: `Drop ${itemName}`,
             styledLabel: [
               { text: "Drop " },
-              { text: itemName, color: ITEM_COLOR },
+              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
             ],
             enabled: true,
           });
@@ -521,7 +407,7 @@ function DraggableInventorySlot({
             label: `Examine ${itemName}`,
             styledLabel: [
               { text: "Examine " },
-              { text: itemName, color: ITEM_COLOR },
+              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
             ],
             enabled: true,
           });
@@ -532,7 +418,7 @@ function DraggableInventorySlot({
             label: `Use ${itemName}`,
             styledLabel: [
               { text: "Use " },
-              { text: itemName, color: ITEM_COLOR },
+              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
             ],
             enabled: true,
           });
@@ -541,7 +427,7 @@ function DraggableInventorySlot({
             label: `Drop ${itemName}`,
             styledLabel: [
               { text: "Drop " },
-              { text: itemName, color: ITEM_COLOR },
+              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
             ],
             enabled: true,
           });
@@ -550,7 +436,7 @@ function DraggableInventorySlot({
             label: `Examine ${itemName}`,
             styledLabel: [
               { text: "Examine " },
-              { text: itemName, color: ITEM_COLOR },
+              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
             ],
             enabled: true,
           });
