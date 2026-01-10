@@ -44,6 +44,10 @@ import {
   type SmeltingManifest,
   type SmithingManifest,
 } from "./ProcessingDataProvider";
+import {
+  stationDataProvider,
+  type StationsManifest,
+} from "./StationDataProvider";
 
 // Define constants from JSON data
 const STARTING_ITEMS: Array<{ id: string }> = []; // Stub - data removed
@@ -831,6 +835,17 @@ export class DataManager {
     // Rebuild ProcessingDataProvider to use the loaded manifests
     // This is necessary in case it was already lazy-initialized before manifests loaded
     processingDataProvider.rebuild();
+
+    // Load stations manifest
+    try {
+      const stationsRes = await fetch(`${baseUrl}/stations.json`);
+      const stationsManifest = (await stationsRes.json()) as StationsManifest;
+      stationDataProvider.loadStations(stationsManifest);
+    } catch {
+      console.warn(
+        "[DataManager] stations.json not found, using default station data",
+      );
+    }
   }
 
   /**
@@ -896,6 +911,18 @@ export class DataManager {
     // Rebuild ProcessingDataProvider to use the loaded manifests
     // This is necessary in case it was already lazy-initialized before manifests loaded
     processingDataProvider.rebuild();
+
+    // Load stations manifest
+    try {
+      const stationsPath = path.join(manifestsDir, "stations.json");
+      const stationsData = await fs.readFile(stationsPath, "utf-8");
+      const stationsManifest = JSON.parse(stationsData) as StationsManifest;
+      stationDataProvider.loadStations(stationsManifest);
+    } catch {
+      console.warn(
+        "[DataManager] stations.json not found, using default station data",
+      );
+    }
   }
 
   /**

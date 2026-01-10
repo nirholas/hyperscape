@@ -32,6 +32,8 @@ import {
   type InteractableConfig,
 } from "../InteractableEntity";
 import { EventType } from "../../types/events";
+import { modelCache } from "../../utils/rendering/ModelCache";
+import { stationDataProvider } from "../../data/StationDataProvider";
 
 /** Default interaction range for anvils (in tiles) */
 const ANVIL_INTERACTION_RANGE = 2;
@@ -101,10 +103,65 @@ export class AnvilEntity extends InteractableEntity {
       return;
     }
 
-    // Create anvil visual (blue box proxy, slightly smaller than furnace)
+    // Get station data from manifest
+    const stationData = stationDataProvider.getStationData("anvil");
+    const modelPath = stationData?.model ?? null;
+    const modelScale = stationData?.modelScale ?? 0.5;
+    const modelYOffset = stationData?.modelYOffset ?? 0.4;
+
+    // Try to load 3D model first
+    if (modelPath && this.world.loader) {
+      try {
+        const { scene } = await modelCache.loadModel(modelPath, this.world);
+
+        this.mesh = scene;
+        this.mesh.name = `Anvil_${this.id}`;
+
+        // Scale the model from manifest
+        this.mesh.scale.set(modelScale, modelScale, modelScale);
+
+        // Offset Y position so model base sits on ground
+        this.mesh.position.y = modelYOffset;
+
+        // Enable shadows and set layer for raycasting
+        this.mesh.layers.set(1);
+        this.mesh.traverse((child) => {
+          child.layers.set(1);
+          if (child instanceof THREE.Mesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+          }
+        });
+
+        // Set up userData for interaction detection
+        this.mesh.userData = {
+          type: "anvil",
+          entityId: this.id,
+          name: this.displayName,
+          interactable: true,
+        };
+
+        // Add to node
+        if (this.node) {
+          this.node.add(this.mesh);
+          this.node.userData.type = "anvil";
+          this.node.userData.entityId = this.id;
+          this.node.userData.interactable = true;
+        }
+
+        return;
+      } catch (error) {
+        console.warn(
+          `[AnvilEntity] Failed to load anvil model, using placeholder:`,
+          error,
+        );
+      }
+    }
+
+    // FALLBACK: Create anvil visual (blue box proxy)
     const geometry = new THREE.BoxGeometry(1.0, 0.8, 0.6);
     const material = new THREE.MeshStandardMaterial({
-      color: 0x0066ff, // Blue for anvil (same as furnace)
+      color: 0x0066ff, // Blue for anvil
       roughness: 0.5,
       metalness: 0.3,
     });
