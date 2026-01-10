@@ -292,6 +292,23 @@ export interface Item {
     /** For mining: ticks between roll attempts (OSRS-accurate) */
     rollTicks?: number;
   };
+
+  // === OSRS-ACCURATE INVENTORY ACTIONS ===
+  /**
+   * Explicit inventory context menu actions (OSRS-accurate).
+   * First action is the left-click default.
+   *
+   * OSRS stores this per-item, NOT derived from properties.
+   * Common actions: "Eat", "Drink", "Wield", "Wear", "Bury", "Use", "Drop", "Examine"
+   *
+   * If not specified, falls back to type-based detection for compatibility.
+   *
+   * @example Food: ["Eat", "Use", "Drop", "Examine"]
+   * @example Weapon: ["Wield", "Use", "Drop", "Examine"]
+   * @example Potion: ["Drink", "Use", "Drop", "Examine"]
+   * @example Generic: ["Use", "Drop", "Examine"]
+   */
+  inventoryActions?: string[];
 }
 
 export interface EquipmentSlot {

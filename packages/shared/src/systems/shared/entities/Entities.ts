@@ -642,6 +642,9 @@ export class Entities extends SystemBase implements IEntities {
           skillRequired: "none",
           xpReward: 10,
         },
+        // Map resourceType string to ResourceType enum
+        // Manifest uses: "tree", "ore", "fishing_spot"
+        // Enum expects: "tree", "mining_rock", "fishing_spot"
         resourceType:
           (data as { resourceType?: string }).resourceType === "tree"
             ? ResourceType.TREE
@@ -649,7 +652,8 @@ export class Entities extends SystemBase implements IEntities {
                 "fishing_spot"
               ? ResourceType.FISHING_SPOT
               : (data as { resourceType?: string }).resourceType ===
-                  "mining_rock"
+                    "mining_rock" ||
+                  (data as { resourceType?: string }).resourceType === "ore"
                 ? ResourceType.MINING_ROCK
                 : ResourceType.TREE,
         resourceId:

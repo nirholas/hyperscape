@@ -881,7 +881,10 @@ export class ResourceSystem extends SystemBase {
         model: this.getModelPathForResource(resource.type, spawnPoint.subType),
         properties: {},
         // ResourceEntity specific
-        resourceType: resource.type,
+        // Map manifest type to ResourceType enum value
+        // Manifest uses: "tree", "ore", "fishing_spot"
+        // Enum expects: "tree", "mining_rock", "fishing_spot"
+        resourceType: resource.type === "ore" ? "mining_rock" : resource.type,
         resourceId: spawnPoint.subType
           ? `${resource.type}_${spawnPoint.subType}`
           : `${resource.type}_normal`,

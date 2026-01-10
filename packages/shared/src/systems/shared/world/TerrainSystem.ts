@@ -929,11 +929,15 @@ export class TerrainSystem extends System {
 
               // Emit resource created event for InteractionSystem registration
               // For instanced resources, we pass the instanceId instead of a mesh
+              // Map manifest type to ResourceType enum value
+              // Manifest uses: "tree", "ore", "fishing_spot"
+              // Enum expects: "tree", "mining_rock", "fishing_spot"
               this.world.emit(EventType.RESOURCE_MESH_CREATED, {
                 mesh: undefined,
                 instanceId: instanceId,
                 resourceId: resource.id,
-                resourceType: resource.type,
+                resourceType:
+                  resource.type === "ore" ? "mining_rock" : resource.type,
                 worldPosition: {
                   x: this._tempVec3.x,
                   y: this._tempVec3.y,

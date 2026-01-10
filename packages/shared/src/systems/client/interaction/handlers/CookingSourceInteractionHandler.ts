@@ -3,19 +3,24 @@
  *
  * Handles interactions with cooking sources (fires and ranges).
  *
- * Actions:
- * - Cook (left-click primary, context menu) - opens cooking interface
- * - Walk here
- * - Examine
+ * OSRS Context Menu Format: "<Action> <TargetName>" with cyan target (scenery color)
+ * - "Cook Fire" / "Cook Range" (cyan #00ffff for target)
+ * - "Walk here"
+ * - "Examine Fire" / "Examine Range" (cyan #00ffff for target)
  *
  * When player is in targeting mode with raw food, clicking a fire/range
  * will trigger the cooking request.
+ *
+ * @see https://oldschool.runescape.wiki/w/Choose_Option for OSRS menu format
  */
 
 import { BaseInteractionHandler } from "./BaseInteractionHandler";
 import type { RaycastTarget, ContextMenuAction } from "../types";
 import { INTERACTION_RANGE } from "../constants";
 import { EventType } from "../../../../types/events/event-types";
+
+/** OSRS scenery/object color (cyan) for context menu target names */
+const SCENERY_COLOR = "#00ffff";
 
 /**
  * Cooking source entity interface for type safety
@@ -57,6 +62,11 @@ export class CookingSourceInteractionHandler extends BaseInteractionHandler {
 
   /**
    * Right-click: Show Cook action and other options
+   *
+   * OSRS-accurate format:
+   * - "Cook Fire" / "Cook Range" (action white, target cyan)
+   * - "Walk here"
+   * - "Examine Fire" / "Examine Range" (action white, target cyan)
    */
   getContextMenuActions(target: RaycastTarget): ContextMenuAction[] {
     const actions: ContextMenuAction[] = [];
@@ -64,11 +74,17 @@ export class CookingSourceInteractionHandler extends BaseInteractionHandler {
     const entity = target.entity as unknown as CookingSourceEntity | null;
     const sourceType = target.entityType === "range" ? "range" : "fire";
     const isActive = entity?.isActive !== false; // Default to true for ProcessingSystem fires
+    const targetName =
+      target.name || (sourceType === "range" ? "Range" : "Fire");
 
-    // Cook action (primary)
+    // Cook action (primary) - OSRS: "Cook Fire" or "Cook Range"
     actions.push({
       id: "cook",
-      label: "Cook",
+      label: `Cook ${targetName}`,
+      styledLabel: [
+        { text: "Cook " },
+        { text: targetName, color: SCENERY_COLOR },
+      ],
       enabled: isActive,
       priority: 1,
       handler: () => {
@@ -84,9 +100,21 @@ export class CookingSourceInteractionHandler extends BaseInteractionHandler {
     // Walk here
     actions.push(this.createWalkHereAction(target));
 
-    // Examine
+    // Examine - OSRS: "Examine Fire" or "Examine Range"
     const examineText = this.getExamineText(entity, sourceType, isActive);
-    actions.push(this.createExamineAction(target, examineText));
+    actions.push({
+      id: "examine",
+      label: `Examine ${targetName}`,
+      styledLabel: [
+        { text: "Examine " },
+        { text: targetName, color: SCENERY_COLOR },
+      ],
+      enabled: true,
+      priority: 100,
+      handler: () => {
+        this.showExamineMessage(examineText);
+      },
+    });
 
     return actions.sort((a, b) => a.priority - b.priority);
   }

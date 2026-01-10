@@ -3,16 +3,22 @@
  *
  * Handles interactions with furnaces for smelting ores into bars.
  *
- * Actions:
- * - Smelt (left-click primary, context menu) - opens smelting interface
- * - Walk here
- * - Examine
+ * OSRS Context Menu Format: "<Action> <TargetName>" with cyan target (scenery color)
+ * - "Smelt Furnace" (cyan #00ffff for "Furnace")
+ * - "Walk here"
+ * - "Examine Furnace" (cyan #00ffff for "Furnace")
+ *
+ * @see https://oldschool.runescape.wiki/w/Choose_Option for OSRS menu format
+ * @see https://oldschool.runescape.wiki/w/Furnace for furnace info
  */
 
 import { BaseInteractionHandler } from "./BaseInteractionHandler";
 import type { RaycastTarget, ContextMenuAction } from "../types";
 import { INTERACTION_RANGE } from "../constants";
 import { EventType } from "../../../../types/events/event-types";
+
+/** OSRS scenery/object color (cyan) for context menu target names */
+const SCENERY_COLOR = "#00ffff";
 
 /**
  * Furnace entity interface for type safety
@@ -41,14 +47,24 @@ export class SmeltingSourceInteractionHandler extends BaseInteractionHandler {
 
   /**
    * Right-click: Show Smelt action and other options
+   *
+   * OSRS-accurate format:
+   * - "Smelt Furnace" (action white, target cyan)
+   * - "Walk here"
+   * - "Examine Furnace" (action white, target cyan)
    */
   getContextMenuActions(target: RaycastTarget): ContextMenuAction[] {
     const actions: ContextMenuAction[] = [];
+    const targetName = target.name || "Furnace";
 
-    // Smelt action (primary)
+    // Smelt action (primary) - OSRS: "Smelt Furnace"
     actions.push({
       id: "smelt",
-      label: "Smelt",
+      label: `Smelt ${targetName}`,
+      styledLabel: [
+        { text: "Smelt " },
+        { text: targetName, color: SCENERY_COLOR },
+      ],
       enabled: true,
       priority: 1,
       handler: () => {
@@ -64,13 +80,20 @@ export class SmeltingSourceInteractionHandler extends BaseInteractionHandler {
     // Walk here
     actions.push(this.createWalkHereAction(target));
 
-    // Examine
-    actions.push(
-      this.createExamineAction(
-        target,
-        "A furnace for smelting ores into metal bars.",
-      ),
-    );
+    // Examine - OSRS: "Examine Furnace"
+    actions.push({
+      id: "examine",
+      label: `Examine ${targetName}`,
+      styledLabel: [
+        { text: "Examine " },
+        { text: targetName, color: SCENERY_COLOR },
+      ],
+      enabled: true,
+      priority: 100,
+      handler: () => {
+        this.showExamineMessage("A very hot furnace.");
+      },
+    });
 
     return actions.sort((a, b) => a.priority - b.priority);
   }

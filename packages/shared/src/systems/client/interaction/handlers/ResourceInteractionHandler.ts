@@ -1,23 +1,38 @@
 /**
  * ResourceInteractionHandler
  *
- * Handles interactions with gathering resources.
+ * Handles interactions with gathering resources using OSRS-accurate context menus.
  *
- * Resource types:
- * - Trees → Chop (Woodcutting)
- * - Rocks/Ore → Mine (Mining)
- * - Fishing spots → Fish (Fishing)
+ * OSRS Context Menu Format: "<Action> <TargetName>" with colored target
+ *
+ * Resource types and their context menu formats:
+ * - Trees → "Chop down Oak" (strips "Tree" suffix, cyan target - object color)
+ * - Rocks/Ore → "Mine Copper rocks" (lowercase plural, cyan target - object color)
+ * - Fishing spots → Multiple actions: "Net Fishing spot", "Bait Fishing spot"
  *
  * Actions:
- * - Chop/Mine/Fish (left-click primary, context menu)
+ * - Chop down / Mine / Net/Bait/Lure/Cage/Harpoon (left-click primary, context menu)
  * - Walk here
  * - Examine
+ *
+ * @see https://oldschool.runescape.wiki/w/Choose_Option for OSRS menu format
  */
 
 import { BaseInteractionHandler } from "./BaseInteractionHandler";
-import type { RaycastTarget, ContextMenuAction } from "../types";
+import type { RaycastTarget, ContextMenuAction, LabelSegment } from "../types";
 import { INTERACTION_RANGE, TIMING, MESSAGE_TYPES } from "../constants";
 import { getExternalResource } from "../../../../utils/ExternalAssetUtils";
+import { CONTEXT_MENU_COLORS } from "../../../../constants/GameConstants";
+
+/**
+ * Fishing method definition for multi-action fishing spots.
+ */
+interface FishingMethod {
+  /** Method ID sent to server (e.g., "net", "bait", "lure") */
+  id: string;
+  /** Display action name (e.g., "Net", "Bait", "Lure") */
+  action: string;
+}
 
 /**
  * Resource entity interface for type safety
@@ -41,35 +56,71 @@ export class ResourceInteractionHandler extends BaseInteractionHandler {
 
   /**
    * Right-click: Show gather action and other options
+   *
+   * OSRS-accurate context menu format:
+   * - Trees: "Chop down <TreeName>" (e.g., "Chop down Oak")
+   * - Rocks: "Mine <RockName>" (e.g., "Mine Copper rocks")
+   * - Fishing: Multiple actions per spot (e.g., "Net Fishing spot", "Bait Fishing spot")
    */
   getContextMenuActions(target: RaycastTarget): ContextMenuAction[] {
     const actions: ContextMenuAction[] = [];
     const resourceType = this.getResourceType(target);
+    const entity = target.entity as unknown as ResourceEntity;
 
     // Primary gather action based on resource type
-    if (resourceType.includes("tree")) {
-      actions.push({
-        id: "chop",
-        label: "Chop",
-        enabled: true,
-        priority: 1,
-        handler: () => this.gatherResource(target, "chop"),
-      });
-    } else if (resourceType.includes("rock") || resourceType.includes("ore")) {
+    // Note: resourceType can be "tree", "mining_rock", or "fishing_spot" (from ResourceType enum)
+    // We check mining rocks FIRST since "mining_rock" should not match "tree"
+    if (
+      resourceType === "mining_rock" ||
+      resourceType.includes("rock") ||
+      resourceType.includes("ore") ||
+      resourceType.includes("mining")
+    ) {
+      // OSRS: "Mine Copper rocks" with cyan target name (object color)
+      const rockName = this.getRockDisplayName(target);
       actions.push({
         id: "mine",
-        label: "Mine",
+        label: `Mine ${rockName}`,
+        styledLabel: [
+          { text: "Mine " },
+          { text: rockName, color: CONTEXT_MENU_COLORS.OBJECT },
+        ],
         enabled: true,
         priority: 1,
         handler: () => this.gatherResource(target, "mine"),
       });
-    } else if (resourceType.includes("fish")) {
+    } else if (
+      resourceType === "fishing_spot" ||
+      resourceType.includes("fish")
+    ) {
+      // OSRS: Multiple actions - "Net Fishing spot", "Bait Fishing spot"
+      const methods = this.getFishingMethods(entity);
+      for (const method of methods) {
+        actions.push({
+          id: `fish_${method.id}`,
+          label: `${method.action} Fishing spot`,
+          styledLabel: [
+            { text: `${method.action} ` },
+            { text: "Fishing spot", color: CONTEXT_MENU_COLORS.OBJECT },
+          ],
+          enabled: true,
+          priority: 1,
+          handler: () => this.gatherResource(target, method.id),
+        });
+      }
+    } else {
+      // Default: Trees - OSRS: "Chop down Oak" with cyan target name (object color)
+      const treeName = this.getTreeDisplayName(target);
       actions.push({
-        id: "fish",
-        label: "Fish",
+        id: "chop",
+        label: `Chop down ${treeName}`,
+        styledLabel: [
+          { text: "Chop down " },
+          { text: treeName, color: CONTEXT_MENU_COLORS.OBJECT },
+        ],
         enabled: true,
         priority: 1,
-        handler: () => this.gatherResource(target, "fish"),
+        handler: () => this.gatherResource(target, "chop"),
       });
     }
 
@@ -100,8 +151,11 @@ export class ResourceInteractionHandler extends BaseInteractionHandler {
    *
    * This eliminates client-side position calculation issues that caused players
    * to end up standing ON the resource tile.
+   *
+   * @param target - The raycast target for the resource
+   * @param method - The gathering method (e.g., "chop", "mine", "net", "bait", "lure")
    */
-  private gatherResource(target: RaycastTarget, _action: string): void {
+  private gatherResource(target: RaycastTarget, method: string): void {
     const player = this.getPlayer();
     if (!player) return;
 
@@ -114,29 +168,79 @@ export class ResourceInteractionHandler extends BaseInteractionHandler {
     }
 
     console.log(
-      `[ResourceInteraction] SERVER-AUTHORITATIVE: Sending resourceInteract for ${target.entityId}`,
+      `[ResourceInteraction] SERVER-AUTHORITATIVE: Sending resourceInteract for ${target.entityId} (method: ${method})`,
     );
 
     // Get player's run mode preference
     const runMode = (player as { runMode?: boolean }).runMode ?? true;
 
-    // SERVER-AUTHORITATIVE: Send resource ID and run mode
+    // SERVER-AUTHORITATIVE: Send resource ID, run mode, and gathering method
     // Server will calculate the correct cardinal tile using its authoritative position data
+    // For fishing, the method indicates which tool to use (net, bait, lure, cage, harpoon)
     this.send(MESSAGE_TYPES.RESOURCE_INTERACT, {
       resourceId: target.entityId,
       runMode,
+      method, // Fishing method or gathering action
     });
   }
 
+  /**
+   * Get the resource type for a target.
+   *
+   * Checks entity.config.resourceType first, then falls back to name-based detection.
+   * This handles cases where the config might not be properly synced.
+   *
+   * Resource types (from ResourceType enum):
+   * - "tree" - Trees (woodcutting)
+   * - "mining_rock" - Ore rocks (mining)
+   * - "fishing_spot" - Fishing spots (fishing)
+   */
   private getResourceType(target: RaycastTarget): string {
     const entity = target.entity as unknown as ResourceEntity;
-    return entity.config?.resourceType || "tree";
+    const configType = entity.config?.resourceType;
+
+    // If config has a valid resourceType, use it
+    if (configType) {
+      return configType;
+    }
+
+    // Fallback: detect from target name (handles cases where config isn't set)
+    const nameLower = target.name.toLowerCase();
+
+    // Check for mining rocks (ore, rock patterns)
+    if (
+      nameLower.includes("rock") ||
+      nameLower.includes("ore") ||
+      nameLower.includes("coal") ||
+      nameLower.includes("mithril") ||
+      nameLower.includes("adamant") ||
+      nameLower.includes("rune")
+    ) {
+      return "mining_rock";
+    }
+
+    // Check for fishing spots
+    if (nameLower.includes("fishing") || nameLower.includes("spot")) {
+      return "fishing_spot";
+    }
+
+    // Default to tree
+    return "tree";
   }
 
   private getActionForResourceType(resourceType: string): string {
-    if (resourceType.includes("rock") || resourceType.includes("ore")) {
+    // Check mining rocks first
+    if (
+      resourceType === "mining_rock" ||
+      resourceType.includes("rock") ||
+      resourceType.includes("ore") ||
+      resourceType.includes("mining")
+    ) {
       return "mine";
-    } else if (resourceType.includes("fish")) {
+    } else if (
+      resourceType === "fishing_spot" ||
+      resourceType.includes("fish")
+    ) {
       return "fish";
     }
     return "chop"; // Default for trees
@@ -164,5 +268,100 @@ export class ResourceInteractionHandler extends BaseInteractionHandler {
     }
 
     return `It's ${target.name.toLowerCase()}.`;
+  }
+
+  // ==========================================================================
+  // OSRS-ACCURATE DISPLAY NAME HELPERS
+  // ==========================================================================
+
+  /**
+   * Get OSRS-style tree display name.
+   * Strips "Tree" suffix for named trees (Oak, Willow) but keeps it for basic trees.
+   *
+   * OSRS Wiki object names:
+   * - "Tree" (basic tree)
+   * - "Oak" (not "Oak Tree")
+   * - "Yew" (not "Yew Tree")
+   * - "Magic tree" (lowercase 't' - special case!)
+   */
+  private getTreeDisplayName(target: RaycastTarget): string {
+    const name = target.name;
+
+    // "Tree" stays as "Tree"
+    if (name.toLowerCase() === "tree") {
+      return "Tree";
+    }
+
+    // "Magic Tree" -> "Magic tree" (OSRS uses lowercase 't')
+    if (name.toLowerCase() === "magic tree") {
+      return "Magic tree";
+    }
+
+    // "Oak Tree" -> "Oak", "Willow Tree" -> "Willow"
+    if (name.toLowerCase().endsWith(" tree")) {
+      return name.slice(0, -5); // Remove " Tree"
+    }
+
+    return name;
+  }
+
+  /**
+   * Get OSRS-style rock display name.
+   * Converts "Copper Rock" -> "Copper rocks" (lowercase, plural).
+   *
+   * OSRS Wiki object names:
+   * - "Copper rocks" (not "Copper Rock")
+   * - "Iron rocks" (not "Iron Rock")
+   * - "Coal rocks" (not "Coal Rock")
+   */
+  private getRockDisplayName(target: RaycastTarget): string {
+    const name = target.name;
+
+    // "Copper Rock" -> "Copper rocks"
+    // "Iron Rock" -> "Iron rocks"
+    if (name.toLowerCase().endsWith(" rock")) {
+      const oreName = name.slice(0, -5); // Remove " Rock"
+      return `${oreName} rocks`;
+    }
+
+    // Already plural or different format - just ensure lowercase "rocks"
+    if (name.toLowerCase().endsWith(" rocks")) {
+      return name;
+    }
+
+    // Fallback: just add "rocks" suffix
+    return `${name} rocks`;
+  }
+
+  /**
+   * Get the fishing method for this spot.
+   *
+   * Each fishing spot is a distinct resource type in the manifest:
+   * - fishing_spot_net → "Net" action (small fishing net)
+   * - fishing_spot_bait → "Bait" action (fishing rod + bait)
+   * - fishing_spot_fly → "Lure" action (fly fishing rod + feathers)
+   * - fishing_spot_cage → "Cage" action (lobster pot)
+   * - fishing_spot_harpoon → "Harpoon" action (harpoon)
+   *
+   * Returns a single method since each spot type only supports one action.
+   */
+  private getFishingMethods(entity: ResourceEntity): FishingMethod[] {
+    const resourceId = entity.config?.resourceId || "";
+
+    // Each spot type has ONE fishing method
+    if (resourceId.includes("net")) {
+      return [{ id: "net", action: "Net" }];
+    } else if (resourceId.includes("fly") || resourceId.includes("lure")) {
+      return [{ id: "lure", action: "Lure" }];
+    } else if (resourceId.includes("cage")) {
+      return [{ id: "cage", action: "Cage" }];
+    } else if (resourceId.includes("harpoon")) {
+      return [{ id: "harpoon", action: "Harpoon" }];
+    } else if (resourceId.includes("bait")) {
+      return [{ id: "bait", action: "Bait" }];
+    }
+
+    // Fallback for unrecognized fishing spots
+    return [{ id: "fish", action: "Fish" }];
   }
 }

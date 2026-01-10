@@ -3,23 +3,33 @@
  *
  * Handles interactions with NPCs (non-hostile characters).
  *
+ * OSRS Context Menu Format: "<Action> <NPCName>" with yellow target (NPC color)
+ *
+ * Banker NPC:
+ * - "Talk-to Banker" (yellow #ffff00 for "Banker")
+ * - "Bank Banker" (yellow)
+ * - "Collect Banker" (yellow) - for Grand Exchange
+ * - "Examine Banker" (yellow)
+ *
+ * Shop Keeper NPC:
+ * - "Talk-to Shop keeper" (yellow)
+ * - "Trade Shop keeper" (yellow)
+ * - "Examine Shop keeper" (yellow)
+ *
  * Supported NPC services:
  * - "bank" → Opens bank interface
  * - "store"/"shop" → Opens store interface
  * - (default) → Opens dialogue
  *
- * Actions:
- * - Use Bank (if bank service)
- * - Trade (if store service)
- * - Talk-to (always available)
- * - Walk here
- * - Examine
+ * @see https://oldschool.runescape.wiki/w/Choose_Option for OSRS menu format
+ * @see https://oldschool.runescape.wiki/w/Banker for banker info
  */
 
 import { BaseInteractionHandler } from "./BaseInteractionHandler";
 import type { RaycastTarget, ContextMenuAction } from "../types";
 import { INTERACTION_RANGE, MESSAGE_TYPES } from "../constants";
 import { getNPCById } from "../../../../data/npcs";
+import { CONTEXT_MENU_COLORS } from "../../../../constants/GameConstants";
 
 /**
  * NPC entity config interface for type safety
@@ -50,49 +60,92 @@ export class NPCInteractionHandler extends BaseInteractionHandler {
 
   /**
    * Right-click: Show all available actions
+   *
+   * OSRS-accurate format with yellow NPC names:
+   * - Banker: "Talk-to Banker", "Bank Banker", "Collect Banker"
+   * - Shop: "Talk-to Shop keeper", "Trade Shop keeper"
    */
   getContextMenuActions(target: RaycastTarget): ContextMenuAction[] {
     const actions: ContextMenuAction[] = [];
     const services = this.getNPCServices(target);
     const config = this.getNPCConfig(target);
+    const npcName = target.name || "NPC";
 
-    // Bank service
+    // Talk-to (always available, primary for most NPCs)
+    // OSRS: "Talk-to Banker" / "Talk-to Shop keeper"
+    actions.push({
+      id: "talk",
+      label: `Talk-to ${npcName}`,
+      styledLabel: [
+        { text: "Talk-to " },
+        { text: npcName, color: CONTEXT_MENU_COLORS.NPC },
+      ],
+      enabled: true,
+      priority: 1,
+      handler: () => this.startDialogue(target),
+    });
+
+    // Bank service - OSRS: "Bank Banker"
     if (services.includes("bank")) {
       actions.push({
-        id: "use-bank",
-        label: "Use Bank",
+        id: "bank",
+        label: `Bank ${npcName}`,
+        styledLabel: [
+          { text: "Bank " },
+          { text: npcName, color: CONTEXT_MENU_COLORS.NPC },
+        ],
         enabled: true,
-        priority: 1,
+        priority: 2,
         handler: () => this.openBank(target),
+      });
+
+      // Collect (Grand Exchange) - OSRS: "Collect Banker"
+      actions.push({
+        id: "collect",
+        label: `Collect ${npcName}`,
+        styledLabel: [
+          { text: "Collect " },
+          { text: npcName, color: CONTEXT_MENU_COLORS.NPC },
+        ],
+        enabled: true,
+        priority: 3,
+        handler: () => this.collectFromGE(target),
       });
     }
 
-    // Store service
+    // Store service - OSRS: "Trade Shop keeper"
     if (services.includes("store") || services.includes("shop")) {
       actions.push({
         id: "trade",
-        label: "Trade",
+        label: `Trade ${npcName}`,
+        styledLabel: [
+          { text: "Trade " },
+          { text: npcName, color: CONTEXT_MENU_COLORS.NPC },
+        ],
         enabled: true,
         priority: 2,
         handler: () => this.openStore(target),
       });
     }
 
-    // Talk (always available)
-    actions.push({
-      id: "talk",
-      label: "Talk-to",
-      enabled: true,
-      priority: 3,
-      handler: () => this.startDialogue(target),
-    });
-
     // Walk here
     actions.push(this.createWalkHereAction(target));
 
-    // Examine
+    // Examine - OSRS: "Examine Banker" / "Examine Shop keeper"
     const examineText = this.getExamineText(target, config);
-    actions.push(this.createExamineAction(target, examineText));
+    actions.push({
+      id: "examine",
+      label: `Examine ${npcName}`,
+      styledLabel: [
+        { text: "Examine " },
+        { text: npcName, color: CONTEXT_MENU_COLORS.NPC },
+      ],
+      enabled: true,
+      priority: 100,
+      handler: () => {
+        this.showExamineMessage(examineText);
+      },
+    });
 
     return actions.sort((a, b) => a.priority - b.priority);
   }
@@ -106,10 +159,28 @@ export class NPCInteractionHandler extends BaseInteractionHandler {
   private openBank(target: RaycastTarget): void {
     this.queueInteraction({
       target,
-      actionId: "use-bank",
+      actionId: "bank",
       range: INTERACTION_RANGE.NPC,
       onExecute: () => {
         this.send(MESSAGE_TYPES.BANK_OPEN, { bankId: target.entityId });
+      },
+    });
+  }
+
+  /**
+   * Collect items from Grand Exchange.
+   * In OSRS, bankers can access GE collection box.
+   */
+  private collectFromGE(target: RaycastTarget): void {
+    this.queueInteraction({
+      target,
+      actionId: "collect",
+      range: INTERACTION_RANGE.NPC,
+      onExecute: () => {
+        // TODO: Implement GE collection when Grand Exchange is added
+        this.showExamineMessage(
+          "Grand Exchange collection is not yet available.",
+        );
       },
     });
   }

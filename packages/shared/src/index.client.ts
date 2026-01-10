@@ -99,6 +99,25 @@ export {
 // Export item helpers used by server network snapshot
 export { getItem } from "./data/items";
 
+// Item type detection helpers (OSRS-accurate inventory actions)
+export {
+  isFood,
+  isPotion,
+  isBone,
+  isWeapon,
+  isShield,
+  usesWield,
+  usesWear,
+  isNotedItem,
+  getPrimaryAction,
+  getPrimaryActionFromManifest,
+  HANDLED_INVENTORY_ACTIONS,
+} from "./utils/item-helpers";
+export type { PrimaryActionType } from "./utils/item-helpers";
+
+// Context menu colors (OSRS-accurate styling)
+export { CONTEXT_MENU_COLORS } from "./constants/GameConstants";
+
 // Export avatar options for character creation
 export { AVATAR_OPTIONS } from "./data/avatars";
 
