@@ -170,6 +170,66 @@ function isNotedItem(item: Item | null): boolean {
 }
 
 /**
+ * Get primary action from manifest's inventoryActions (OSRS-accurate approach).
+ * Returns the first action in the array, or null if no actions defined.
+ *
+ * OSRS stores explicit inventory options per item in the manifest.
+ * First option is always the left-click default.
+ */
+function getPrimaryActionFromManifest(
+  item: Item | null,
+): PrimaryActionType | null {
+  if (!item?.inventoryActions || item.inventoryActions.length === 0) {
+    return null;
+  }
+  const firstAction = item.inventoryActions[0].toLowerCase();
+  switch (firstAction) {
+    case "eat":
+      return "eat";
+    case "drink":
+      return "drink";
+    case "bury":
+      return "bury";
+    case "wield":
+      return "wield";
+    case "wear":
+      return "wear";
+    case "use":
+    default:
+      return "use";
+  }
+}
+
+/**
+ * Get primary action using manifest-first approach with heuristic fallback.
+ * OSRS-accurate: reads from inventoryActions if available.
+ */
+function getPrimaryAction(
+  item: Item | null,
+  isNoted: boolean,
+): PrimaryActionType {
+  // Noted items always default to "Use"
+  if (isNoted) {
+    return "use";
+  }
+
+  // OSRS-accurate: Check manifest's inventoryActions first
+  const manifestAction = getPrimaryActionFromManifest(item);
+  if (manifestAction) {
+    return manifestAction;
+  }
+
+  // Fallback to heuristic detection for items without inventoryActions
+  if (isFood(item)) return "eat";
+  if (isPotion(item)) return "drink";
+  if (isBone(item)) return "bury";
+  if (usesWield(item)) return "wield";
+  if (usesWear(item)) return "wear";
+
+  return "use";
+}
+
+/**
  * Custom modifier to center the DragOverlay on the cursor.
  * Without this, the overlay appears offset from where user is dragging.
  */
@@ -334,32 +394,14 @@ function DraggableInventorySlot({
         }
 
         // Left-click: execute primary action (OSRS-style)
-        // Same logic as context menu ordering - first option is the default
+        // Uses manifest-first approach with heuristic fallback
         if (item && onPrimaryAction) {
           e.preventDefault();
           e.stopPropagation();
 
           const itemData = getItem(item.itemId);
           const isNoted = isNotedItem(itemData);
-
-          // Determine primary action based on item type
-          // Noted items can only use "Use" as primary action
-          let actionType: PrimaryActionType = "use";
-
-          if (!isNoted) {
-            if (isFood(itemData)) {
-              actionType = "eat";
-            } else if (isPotion(itemData)) {
-              actionType = "drink";
-            } else if (isBone(itemData)) {
-              actionType = "bury";
-            } else if (usesWield(itemData)) {
-              actionType = "wield";
-            } else if (usesWear(itemData)) {
-              actionType = "wear";
-            }
-            // else: default is "use" for generic items, logs, tinderbox, etc.
-          }
+          const actionType = getPrimaryAction(itemData, isNoted);
 
           onPrimaryAction(item, index, actionType);
         }
@@ -386,12 +428,12 @@ function DraggableInventorySlot({
         e.stopPropagation();
         if (!item) return;
 
-        // Get item data for type detection
+        // Get item data for context menu generation
         const itemData = getItem(item.itemId);
         const itemName = itemData?.name || item.itemId;
         const isNoted = isNotedItem(itemData);
 
-        // Build menu items in OSRS order
+        // Build menu items - OSRS-accurate: use inventoryActions from manifest if available
         const menuItems: Array<{
           id: string;
           label: string;
@@ -399,10 +441,28 @@ function DraggableInventorySlot({
           enabled: boolean;
         }> = [];
 
-        // 1. Primary action (type-specific) - NOT for noted items
-        if (!isNoted) {
+        // OSRS-accurate: Check manifest's inventoryActions first
+        if (
+          itemData?.inventoryActions &&
+          itemData.inventoryActions.length > 0 &&
+          !isNoted
+        ) {
+          // Use explicit actions from manifest
+          for (const action of itemData.inventoryActions) {
+            const actionLower = action.toLowerCase();
+            menuItems.push({
+              id: actionLower,
+              label: `${action} ${itemName}`,
+              styledLabel: [
+                { text: `${action} ` },
+                { text: itemName, color: ITEM_COLOR },
+              ],
+              enabled: true,
+            });
+          }
+        } else if (!isNoted) {
+          // Fallback to heuristic detection for items without inventoryActions
           if (isFood(itemData)) {
-            // Food: "Eat Lobster"
             menuItems.push({
               id: "eat",
               label: `Eat ${itemName}`,
@@ -413,7 +473,6 @@ function DraggableInventorySlot({
               enabled: true,
             });
           } else if (isPotion(itemData)) {
-            // Potion: "Drink Strength potion"
             menuItems.push({
               id: "drink",
               label: `Drink ${itemName}`,
@@ -424,7 +483,6 @@ function DraggableInventorySlot({
               enabled: true,
             });
           } else if (isBone(itemData)) {
-            // Bones: "Bury Bones"
             menuItems.push({
               id: "bury",
               label: `Bury ${itemName}`,
@@ -435,7 +493,6 @@ function DraggableInventorySlot({
               enabled: true,
             });
           } else if (usesWield(itemData)) {
-            // Weapons & Shields: "Wield Bronze sword"
             menuItems.push({
               id: "wield",
               label: `Wield ${itemName}`,
@@ -446,7 +503,6 @@ function DraggableInventorySlot({
               enabled: true,
             });
           } else if (usesWear(itemData)) {
-            // Other equipment: "Wear Bronze chainbody"
             menuItems.push({
               id: "wear",
               label: `Wear ${itemName}`,
@@ -457,40 +513,65 @@ function DraggableInventorySlot({
               enabled: true,
             });
           }
+
+          // Fallback adds Use/Drop/Examine if not in manifest
+          menuItems.push({
+            id: "use",
+            label: `Use ${itemName}`,
+            styledLabel: [
+              { text: "Use " },
+              { text: itemName, color: ITEM_COLOR },
+            ],
+            enabled: true,
+          });
+          menuItems.push({
+            id: "drop",
+            label: `Drop ${itemName}`,
+            styledLabel: [
+              { text: "Drop " },
+              { text: itemName, color: ITEM_COLOR },
+            ],
+            enabled: true,
+          });
+          menuItems.push({
+            id: "examine",
+            label: `Examine ${itemName}`,
+            styledLabel: [
+              { text: "Examine " },
+              { text: itemName, color: ITEM_COLOR },
+            ],
+            enabled: true,
+          });
+        } else {
+          // Noted items: Use/Drop/Examine only
+          menuItems.push({
+            id: "use",
+            label: `Use ${itemName}`,
+            styledLabel: [
+              { text: "Use " },
+              { text: itemName, color: ITEM_COLOR },
+            ],
+            enabled: true,
+          });
+          menuItems.push({
+            id: "drop",
+            label: `Drop ${itemName}`,
+            styledLabel: [
+              { text: "Drop " },
+              { text: itemName, color: ITEM_COLOR },
+            ],
+            enabled: true,
+          });
+          menuItems.push({
+            id: "examine",
+            label: `Examine ${itemName}`,
+            styledLabel: [
+              { text: "Examine " },
+              { text: itemName, color: ITEM_COLOR },
+            ],
+            enabled: true,
+          });
         }
-
-        // 2. Use (ALWAYS present for ALL items - OSRS rule)
-        menuItems.push({
-          id: "use",
-          label: `Use ${itemName}`,
-          styledLabel: [
-            { text: "Use " },
-            { text: itemName, color: ITEM_COLOR },
-          ],
-          enabled: true,
-        });
-
-        // 3. Drop
-        menuItems.push({
-          id: "drop",
-          label: `Drop ${itemName}`,
-          styledLabel: [
-            { text: "Drop " },
-            { text: itemName, color: ITEM_COLOR },
-          ],
-          enabled: true,
-        });
-
-        // 4. Examine (always last before Cancel)
-        menuItems.push({
-          id: "examine",
-          label: `Examine ${itemName}`,
-          styledLabel: [
-            { text: "Examine " },
-            { text: itemName, color: ITEM_COLOR },
-          ],
-          enabled: true,
-        });
 
         // Dispatch context menu event
         const evt = new CustomEvent("contextmenu", {
