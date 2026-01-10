@@ -3,7 +3,7 @@
  * Modern MMORPG-style inventory interface with drag-and-drop functionality
  */
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { COLORS } from "../../constants";
 import {
@@ -179,9 +179,14 @@ function DraggableInventorySlot({
 
   // BANK NOTE SYSTEM: Check if item is a bank note
   // Used for visual styling (parchment background) and context menu filtering
-  // Uses isNotedItem() helper for consistency with context menu logic
-  const itemDataForNoteCheck = item ? getItem(item.itemId) : null;
-  const isItemNoted = isNotedItem(itemDataForNoteCheck);
+  // Memoized to avoid re-computation on every render
+  const itemData = useMemo(() => {
+    return item ? getItem(item.itemId) : null;
+  }, [item?.itemId]);
+
+  const isItemNoted = useMemo(() => {
+    return isNotedItem(itemData);
+  }, [itemData]);
 
   // Get icon for item
   const getItemIcon = (itemId: string) => {
@@ -265,14 +270,12 @@ function DraggableInventorySlot({
 
         // Left-click: execute primary action (OSRS-style)
         // Uses manifest-first approach with heuristic fallback
+        // Uses memoized itemData and isItemNoted for efficiency
         if (item && onPrimaryAction) {
           e.preventDefault();
           e.stopPropagation();
 
-          const itemData = getItem(item.itemId);
-          const isNoted = isNotedItem(itemData);
-          const actionType = getPrimaryAction(itemData, isNoted);
-
+          const actionType = getPrimaryAction(itemData, isItemNoted);
           onPrimaryAction(item, index, actionType);
         }
       }}
@@ -298,10 +301,9 @@ function DraggableInventorySlot({
         e.stopPropagation();
         if (!item) return;
 
-        // Get item data for context menu generation
-        const itemData = getItem(item.itemId);
+        // Use memoized itemData and isItemNoted for efficiency
         const itemName = itemData?.name || item.itemId;
-        const isNoted = isNotedItem(itemData);
+        const isNoted = isItemNoted;
 
         // Build menu items - OSRS-accurate: use inventoryActions from manifest if available
         const menuItems: Array<{
@@ -912,6 +914,110 @@ export function InventoryPanel({
     }, 2000);
   };
 
+  // Memoized handlers to prevent unnecessary re-renders of child components
+  const handleTargetClick = useCallback(
+    (clickedItem: InventorySlotViewItem, slotIndex: number) => {
+      // Handle targeting mode click - emit TARGETING_SELECT event
+      if (targetingState.active && targetingState.sourceItem) {
+        const localPlayer = world?.getPlayer();
+        if (localPlayer) {
+          console.log("[InventoryPanel] 🎯 Emitting TARGETING_SELECT:", {
+            sourceItem: targetingState.sourceItem,
+            targetItem: clickedItem.itemId,
+            targetSlot: slotIndex,
+          });
+          // Clear hover tooltip before action
+          setTargetHover(null);
+          world?.emit(EventType.TARGETING_SELECT, {
+            playerId: localPlayer.id,
+            sourceItemId: targetingState.sourceItem.id,
+            sourceSlot: targetingState.sourceItem.slot,
+            targetId: clickedItem.itemId,
+            targetType: "inventory_item",
+            targetSlot: slotIndex,
+          });
+        }
+      }
+    },
+    [world, targetingState.active, targetingState.sourceItem],
+  );
+
+  const handleTargetHover = useCallback(
+    (
+      hoveredItem: InventorySlotViewItem,
+      position: { x: number; y: number },
+    ) => {
+      // OSRS-style "Use X → Y" tooltip
+      setTargetHover({
+        targetName: hoveredItem.itemId,
+        position,
+      });
+    },
+    [],
+  );
+
+  const handleTargetHoverEnd = useCallback(() => {
+    setTargetHover(null);
+  }, []);
+
+  const handleInvalidTargetClick = useCallback(() => {
+    // OSRS: "Nothing interesting happens." when using item on invalid target
+    const message = "Nothing interesting happens.";
+
+    // Show in chat (OSRS-style game message)
+    if (world?.chat?.add) {
+      world.chat.add({
+        id: uuid(),
+        from: "",
+        body: message,
+        createdAt: new Date().toISOString(),
+        timestamp: Date.now(),
+      });
+    }
+
+    // Cancel targeting mode
+    setTargetingState(initialTargetingState);
+    setTargetHover(null);
+  }, [world]);
+
+  const handlePrimaryAction = useCallback(
+    (
+      clickedItem: InventorySlotViewItem,
+      slotIndex: number,
+      actionType: PrimaryActionType,
+    ) => {
+      if (!world) return;
+
+      // Dispatch through centralized handler
+      dispatchInventoryAction(actionType, {
+        world,
+        itemId: clickedItem.itemId,
+        slot: slotIndex,
+        quantity: clickedItem.quantity || 1,
+      });
+    },
+    [world],
+  );
+
+  const handleShiftClick = useCallback(
+    (clickedItem: InventorySlotViewItem, slotIndex: number) => {
+      if (world?.network?.dropItem) {
+        world.network.dropItem(
+          clickedItem.itemId,
+          slotIndex,
+          clickedItem.quantity || 1,
+        );
+      } else if (world?.network?.send) {
+        world.network.send("dropItem", {
+          itemId: clickedItem.itemId,
+          slot: slotIndex,
+          quantity: clickedItem.quantity || 1,
+        });
+      }
+    },
+    [world],
+  );
+
   const activeItem = activeId
     ? slotItems[parseInt(activeId.split("-")[1])]
     : null;
@@ -972,87 +1078,12 @@ export function InventoryPanel({
                 item={item}
                 index={index}
                 targetingState={targetingState}
-                onTargetClick={(clickedItem, slotIndex) => {
-                  // Handle targeting mode click - emit TARGETING_SELECT event
-                  if (targetingState.active && targetingState.sourceItem) {
-                    const localPlayer = world?.getPlayer();
-                    if (localPlayer) {
-                      console.log(
-                        "[InventoryPanel] 🎯 Emitting TARGETING_SELECT:",
-                        {
-                          sourceItem: targetingState.sourceItem,
-                          targetItem: clickedItem.itemId,
-                          targetSlot: slotIndex,
-                        },
-                      );
-                      // Clear hover tooltip before action
-                      setTargetHover(null);
-                      world?.emit(EventType.TARGETING_SELECT, {
-                        playerId: localPlayer.id,
-                        sourceItemId: targetingState.sourceItem.id,
-                        sourceSlot: targetingState.sourceItem.slot,
-                        targetId: clickedItem.itemId,
-                        targetType: "inventory_item",
-                        targetSlot: slotIndex,
-                      });
-                    }
-                  }
-                }}
-                onTargetHover={(hoveredItem, position) => {
-                  // OSRS-style "Use X → Y" tooltip
-                  setTargetHover({
-                    targetName: hoveredItem.itemId,
-                    position,
-                  });
-                }}
-                onTargetHoverEnd={() => {
-                  setTargetHover(null);
-                }}
-                onInvalidTargetClick={() => {
-                  // OSRS: "Nothing interesting happens." when using item on invalid target
-                  const message = "Nothing interesting happens.";
-
-                  // Show in chat (OSRS-style game message)
-                  if (world?.chat?.add) {
-                    world.chat.add({
-                      id: uuid(),
-                      from: "",
-                      body: message,
-                      createdAt: new Date().toISOString(),
-                      timestamp: Date.now(),
-                    });
-                  }
-
-                  // Cancel targeting mode
-                  setTargetingState(initialTargetingState);
-                  setTargetHover(null);
-                }}
-                onPrimaryAction={(clickedItem, slotIndex, actionType) => {
-                  if (!world) return;
-
-                  // Dispatch through centralized handler
-                  dispatchInventoryAction(actionType, {
-                    world,
-                    itemId: clickedItem.itemId,
-                    slot: slotIndex,
-                    quantity: clickedItem.quantity || 1,
-                  });
-                }}
-                onShiftClick={(clickedItem, slotIndex) => {
-                  if (world?.network?.dropItem) {
-                    world.network.dropItem(
-                      clickedItem.itemId,
-                      slotIndex,
-                      clickedItem.quantity || 1,
-                    );
-                  } else if (world?.network?.send) {
-                    world.network.send("dropItem", {
-                      itemId: clickedItem.itemId,
-                      slot: slotIndex,
-                      quantity: clickedItem.quantity || 1,
-                    });
-                  }
-                }}
+                onTargetClick={handleTargetClick}
+                onTargetHover={handleTargetHover}
+                onTargetHoverEnd={handleTargetHoverEnd}
+                onInvalidTargetClick={handleInvalidTargetClick}
+                onPrimaryAction={handlePrimaryAction}
+                onShiftClick={handleShiftClick}
               />
             ))}
           </div>
