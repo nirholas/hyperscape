@@ -62,8 +62,9 @@ function isTree(e: Entity): boolean {
   const name = e.name?.toLowerCase() || "";
   const id = (e.id || "").toLowerCase();
 
-  // Exclude ground items (names starting with "Item:" or IDs containing item names)
-  if (name.startsWith("item:") || /bow|sword|shield|axe|armor|helm/i.test(id)) {
+  // Exclude ground items (by type or ID patterns)
+  const entityType = (entityAny.type as string)?.toLowerCase() || "";
+  if (entityType === "item" || /bow|sword|shield|axe|armor|helm/i.test(id)) {
     return false;
   }
 

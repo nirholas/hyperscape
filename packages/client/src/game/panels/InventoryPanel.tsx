@@ -3,7 +3,7 @@
  * Modern MMORPG-style inventory interface with drag-and-drop functionality
  */
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { COLORS } from "../../constants";
 import {
@@ -21,7 +21,23 @@ import {
   pointerWithin,
   type Modifier,
 } from "@dnd-kit/core";
-import { EventType, getItem, uuid } from "@hyperscape/shared";
+import {
+  EventType,
+  getItem,
+  uuid,
+  type Item,
+  // OSRS-accurate item helpers (extracted to shared)
+  isFood,
+  isPotion,
+  isBone,
+  usesWield,
+  usesWear,
+  isNotedItem,
+  getPrimaryAction,
+  CONTEXT_MENU_COLORS,
+  type PrimaryActionType,
+} from "@hyperscape/shared";
+import { dispatchInventoryAction } from "../systems/InventoryActionDispatcher";
 import type { ClientWorld, InventorySlotItem } from "../../types";
 
 /**
@@ -48,8 +64,14 @@ interface DraggableItemProps {
   item: InventorySlotViewItem | null;
   index: number;
   onShiftClick?: (item: InventorySlotViewItem, index: number) => void;
+  onPrimaryAction?: (
+    item: InventorySlotViewItem,
+    index: number,
+    actionType: PrimaryActionType,
+  ) => void;
   targetingState?: TargetingState;
   onTargetClick?: (item: InventorySlotViewItem, index: number) => void;
+  onInvalidTargetClick?: () => void;
   onTargetHover?: (
     item: InventorySlotViewItem,
     position: { x: number; y: number },
@@ -107,8 +129,10 @@ function DraggableInventorySlot({
   item,
   index,
   onShiftClick,
+  onPrimaryAction,
   targetingState,
   onTargetClick,
+  onInvalidTargetClick,
   onTargetHover,
   onTargetHoverEnd,
 }: DraggableItemProps) {
@@ -153,11 +177,16 @@ function DraggableInventorySlot({
     !isSourceItem && // Source item is not a valid target
     (targetingState?.validTargetIds.has(item.itemId) ?? false);
 
-  // BANK NOTE SYSTEM: Check if item is a bank note (ends with "_noted")
+  // BANK NOTE SYSTEM: Check if item is a bank note
   // Used for visual styling (parchment background) and context menu filtering
-  // Mirrors: @hyperscape/shared isNotedItemId() from NoteGenerator.ts
-  // Keep in sync with NOTE_SUFFIX = "_noted" constant
-  const isNotedItem = item?.itemId?.endsWith("_noted") ?? false;
+  // Memoized to avoid re-computation on every render
+  const itemData = useMemo(() => {
+    return item ? getItem(item.itemId) : null;
+  }, [item?.itemId]);
+
+  const isItemNoted = useMemo(() => {
+    return isNotedItem(itemData);
+  }, [itemData]);
 
   // Get icon for item
   const getItemIcon = (itemId: string) => {
@@ -209,24 +238,45 @@ function DraggableInventorySlot({
       className="relative border rounded-sm transition-all duration-100 group aspect-square"
       onClick={(e) => {
         // Handle targeting mode clicks (Use X on Y)
-        if (isTargetingActive && onTargetClick) {
+        if (isTargetingActive) {
           e.preventDefault();
           e.stopPropagation();
-          if (isValidTarget && item) {
+          if (isValidTarget && item && onTargetClick) {
             console.log("[InventorySlot] 🎯 Target clicked:", {
               itemId: item.itemId,
               slot: index,
             });
             onTargetClick(item, index);
+          } else if (item && !isValidTarget && onInvalidTargetClick) {
+            // OSRS: Clicking an invalid item shows "Nothing interesting happens."
+            // (Empty slots don't trigger this - only actual items)
+            console.log("[InventorySlot] ❌ Invalid target clicked:", {
+              itemId: item.itemId,
+              slot: index,
+            });
+            onInvalidTargetClick();
           }
-          // Clicking invalid target or empty slot does nothing (OSRS behavior)
+          // Clicking empty slot does nothing (OSRS behavior)
           return;
         }
+
         // Shift-click to drop instantly (OSRS-style)
         if (e.shiftKey && item && onShiftClick) {
           e.preventDefault();
           e.stopPropagation();
           onShiftClick(item, index);
+          return;
+        }
+
+        // Left-click: execute primary action (OSRS-style)
+        // Uses manifest-first approach with heuristic fallback
+        // Uses memoized itemData and isItemNoted for efficiency
+        if (item && onPrimaryAction) {
+          e.preventDefault();
+          e.stopPropagation();
+
+          const actionType = getPrimaryAction(itemData, isItemNoted);
+          onPrimaryAction(item, index, actionType);
         }
       }}
       onMouseEnter={(e) => {
@@ -251,58 +301,168 @@ function DraggableInventorySlot({
         e.stopPropagation();
         if (!item) return;
 
-        // Determine if item is equippable based on itemId
-        // BANK NOTE SYSTEM: Noted items are NEVER equippable (must be un-noted first)
-        const isEquippable =
-          !isNotedItem &&
-          (item.itemId.includes("sword") ||
-            item.itemId.includes("bow") ||
-            item.itemId.includes("shield") ||
-            item.itemId.includes("helmet") ||
-            item.itemId.includes("body") ||
-            item.itemId.includes("legs") ||
-            item.itemId.includes("arrows") ||
-            item.itemId.includes("chainbody") ||
-            item.itemId.includes("platebody"));
+        // Use memoized itemData and isItemNoted for efficiency
+        const itemName = itemData?.name || item.itemId;
+        const isNoted = isItemNoted;
 
-        // OSRS-style "Use" for firemaking/cooking items
-        // Tinderbox, logs, and raw food can be used on targets
-        const isUsable =
-          item.itemId === "tinderbox" ||
-          item.itemId.includes("_logs") ||
-          item.itemId === "logs" ||
-          item.itemId.startsWith("raw_");
+        // Build menu items - OSRS-accurate: use inventoryActions from manifest if available
+        const menuItems: Array<{
+          id: string;
+          label: string;
+          styledLabel: Array<{ text: string; color?: string }>;
+          enabled: boolean;
+        }> = [];
 
-        // Check if item is edible (has healAmount > 0)
-        // Uses getItem from @hyperscape/shared to get full item data
-        const itemData = getItem(item.itemId);
-        const isEdible =
-          itemData?.type === "consumable" &&
-          itemData?.healAmount !== undefined &&
-          itemData.healAmount > 0;
+        // OSRS-accurate: Check manifest's inventoryActions first
+        if (
+          itemData?.inventoryActions &&
+          itemData.inventoryActions.length > 0 &&
+          !isNoted
+        ) {
+          // Use explicit actions from manifest
+          for (const action of itemData.inventoryActions) {
+            const actionLower = action.toLowerCase();
+            menuItems.push({
+              id: actionLower,
+              label: `${action} ${itemName}`,
+              styledLabel: [
+                { text: `${action} ` },
+                { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+              ],
+              enabled: true,
+            });
+          }
+        } else if (!isNoted) {
+          // Fallback to heuristic detection for items without inventoryActions
+          if (isFood(itemData)) {
+            menuItems.push({
+              id: "eat",
+              label: `Eat ${itemName}`,
+              styledLabel: [
+                { text: "Eat " },
+                { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+              ],
+              enabled: true,
+            });
+          } else if (isPotion(itemData)) {
+            menuItems.push({
+              id: "drink",
+              label: `Drink ${itemName}`,
+              styledLabel: [
+                { text: "Drink " },
+                { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+              ],
+              enabled: true,
+            });
+          } else if (isBone(itemData)) {
+            menuItems.push({
+              id: "bury",
+              label: `Bury ${itemName}`,
+              styledLabel: [
+                { text: "Bury " },
+                { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+              ],
+              enabled: true,
+            });
+          } else if (usesWield(itemData)) {
+            menuItems.push({
+              id: "wield",
+              label: `Wield ${itemName}`,
+              styledLabel: [
+                { text: "Wield " },
+                { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+              ],
+              enabled: true,
+            });
+          } else if (usesWear(itemData)) {
+            menuItems.push({
+              id: "wear",
+              label: `Wear ${itemName}`,
+              styledLabel: [
+                { text: "Wear " },
+                { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+              ],
+              enabled: true,
+            });
+          }
 
-        const items = [
-          // "Eat" appears first for food items (OSRS-style: Eat is always primary action)
-          ...(isEdible ? [{ id: "eat", label: "Eat", enabled: true }] : []),
-          // "Use" appears first for usable items (OSRS-style)
-          ...(isUsable
-            ? [{ id: "use", label: `Use ${item.itemId}`, enabled: true }]
-            : []),
-          ...(isEquippable
-            ? [{ id: "equip", label: `Equip ${item.itemId}`, enabled: true }]
-            : []),
-          { id: "drop", label: `Drop ${item.itemId}`, enabled: true },
-          { id: "examine", label: "Examine", enabled: true },
-        ];
+          // Fallback adds Use/Drop/Examine if not in manifest
+          menuItems.push({
+            id: "use",
+            label: `Use ${itemName}`,
+            styledLabel: [
+              { text: "Use " },
+              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+            ],
+            enabled: true,
+          });
+          menuItems.push({
+            id: "drop",
+            label: `Drop ${itemName}`,
+            styledLabel: [
+              { text: "Drop " },
+              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+            ],
+            enabled: true,
+          });
+          menuItems.push({
+            id: "examine",
+            label: `Examine ${itemName}`,
+            styledLabel: [
+              { text: "Examine " },
+              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+            ],
+            enabled: true,
+          });
+        } else {
+          // Noted items: Use/Drop/Examine only
+          menuItems.push({
+            id: "use",
+            label: `Use ${itemName}`,
+            styledLabel: [
+              { text: "Use " },
+              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+            ],
+            enabled: true,
+          });
+          menuItems.push({
+            id: "drop",
+            label: `Drop ${itemName}`,
+            styledLabel: [
+              { text: "Drop " },
+              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+            ],
+            enabled: true,
+          });
+          menuItems.push({
+            id: "examine",
+            label: `Examine ${itemName}`,
+            styledLabel: [
+              { text: "Examine " },
+              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+            ],
+            enabled: true,
+          });
+        }
+
+        // OSRS-style: Cancel is always the last option
+        menuItems.push({
+          id: "cancel",
+          label: "Cancel",
+          styledLabel: [{ text: "Cancel" }],
+          enabled: true,
+        });
+
+        // Dispatch context menu event
         const evt = new CustomEvent("contextmenu", {
           detail: {
             target: {
               id: `inventory_slot_${index}`,
               type: "inventory",
-              name: item.itemId,
+              name: itemName,
             },
             mousePosition: { x: e.clientX, y: e.clientY },
-            items,
+            items: menuItems,
           },
         });
         window.dispatchEvent(evt);
@@ -320,7 +480,7 @@ function DraggableInventorySlot({
             ? "rgba(180, 160, 100, 0.9)" // Gold highlight when dragging over
             : isEmpty
               ? "rgba(50, 45, 40, 0.6)"
-              : isNotedItem
+              : isItemNoted
                 ? "rgba(180, 160, 120, 0.7)" // Tan border for notes
                 : "rgba(70, 60, 50, 0.7)",
         borderWidth: isSourceItem ? "2px" : "1px",
@@ -329,7 +489,7 @@ function DraggableInventorySlot({
           ? "rgba(180, 160, 100, 0.25)" // Gold tint when dragging over
           : isEmpty
             ? "rgba(25, 22, 20, 0.85)" // Very dark for empty
-            : isNotedItem
+            : isItemNoted
               ? "linear-gradient(135deg, rgba(245, 235, 210, 0.95) 0%, rgba(225, 210, 175, 0.95) 100%)" // Parchment/paper for notes
               : "linear-gradient(180deg, rgba(55, 48, 42, 0.95) 0%, rgba(40, 35, 30, 0.95) 100%)", // Subtle gradient for items
         boxShadow: isSourceItem
@@ -338,7 +498,7 @@ function DraggableInventorySlot({
             ? "inset 0 0 8px rgba(180, 160, 100, 0.4), 0 0 4px rgba(180, 160, 100, 0.3)"
             : isEmpty
               ? "inset 0 1px 2px rgba(0, 0, 0, 0.4)"
-              : isNotedItem
+              : isItemNoted
                 ? "inset 0 1px 0 rgba(255, 255, 255, 0.5), inset 0 -1px 0 rgba(0, 0, 0, 0.1), 1px 1px 2px rgba(0, 0, 0, 0.2)" // Paper shadow
                 : "inset 0 1px 0 rgba(80, 70, 55, 0.3), inset 0 -1px 0 rgba(0, 0, 0, 0.2)",
         // OSRS-style cursor changes during targeting mode
@@ -361,10 +521,10 @@ function DraggableInventorySlot({
         <div
           className="flex items-center justify-center h-full transition-transform duration-150 group-hover:scale-105 text-sm md:text-base"
           style={{
-            color: isNotedItem
+            color: isItemNoted
               ? "rgba(80, 60, 40, 0.95)" // Dark brown for notes (on parchment)
               : "rgba(220, 200, 160, 0.95)", // Light gold for normal items
-            filter: isNotedItem
+            filter: isItemNoted
               ? "drop-shadow(0 1px 1px rgba(255, 255, 255, 0.3))"
               : "drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5))",
           }}
@@ -383,9 +543,9 @@ function DraggableInventorySlot({
             <div
               className="absolute top-0 left-0.5 font-bold leading-none"
               style={{
-                color: isNotedItem ? "#4a3520" : color, // Dark brown for notes
+                color: isItemNoted ? "#4a3520" : color, // Dark brown for notes
                 fontSize: "clamp(0.5rem, 1.2vw, 0.625rem)",
-                textShadow: isNotedItem
+                textShadow: isItemNoted
                   ? "0 0 2px rgba(255, 255, 255, 0.8), 1px 1px 1px rgba(255, 255, 255, 0.5)"
                   : "1px 1px 1px rgba(0, 0, 0, 0.9), -1px -1px 1px rgba(0, 0, 0, 0.5)",
               }}
@@ -512,96 +672,15 @@ export function InventoryPanel({
       const slotIndex = parseInt(target.replace("inventory_slot_", ""), 10);
       if (Number.isNaN(slotIndex)) return;
       const it = slotItems[slotIndex];
-      if (!it) return;
-      if (ce.detail.actionId === "equip") {
-        // Send equip request to server - EquipmentSystem listens to this
-        const localPlayer = world?.getPlayer();
-        console.log("[InventoryPanel] ⚡ Equip clicked:", {
-          itemId: it.itemId,
-          slot: slotIndex,
-          hasPlayer: !!localPlayer,
-        });
-        if (localPlayer && world?.network?.send) {
-          console.log("[InventoryPanel] 📤 Sending equipItem to server:", {
-            playerId: localPlayer.id,
-            itemId: it.itemId,
-            slot: slotIndex,
-          });
-          world.network.send("equipItem", {
-            playerId: localPlayer.id,
-            itemId: it.itemId,
-            inventorySlot: slotIndex,
-          });
-        } else {
-          console.error("[InventoryPanel] ❌ No local player or network.send!");
-        }
-      }
-      if (ce.detail.actionId === "drop") {
-        if (world?.network?.dropItem) {
-          world.network.dropItem(it.itemId, slotIndex, it.quantity || 1);
-        } else if (world?.network?.send) {
-          world.network.send("dropItem", {
-            itemId: it.itemId,
-            slot: slotIndex,
-            quantity: it.quantity || 1,
-          });
-        }
-      }
-      if (ce.detail.actionId === "examine") {
-        const itemData = getItem(it.itemId);
-        const examineText = itemData?.examine || `It's a ${it.itemId}.`;
-        world?.emit(EventType.UI_TOAST, {
-          message: examineText,
-          type: "info",
-        });
-        // Also add to chat (OSRS-style game message)
-        if (world?.chat?.add) {
-          world.chat.add({
-            id: uuid(),
-            from: "",
-            body: examineText,
-            createdAt: new Date().toISOString(),
-            timestamp: Date.now(),
-          });
-        }
-      }
-      // OSRS-style "Use" action - enters targeting mode (client-side first)
-      // Actual network request is sent after target selection
-      if (ce.detail.actionId === "use") {
-        const localPlayer = world?.getPlayer();
-        if (localPlayer) {
-          console.log(
-            "[InventoryPanel] 🎯 Use clicked - entering targeting mode:",
-            {
-              itemId: it.itemId,
-              slot: slotIndex,
-            },
-          );
-          // Emit ITEM_ACTION_SELECTED to trigger InventoryInteractionSystem
-          // which calls the registered "use" action callback → startTargetingMode()
-          world?.emit(EventType.ITEM_ACTION_SELECTED, {
-            playerId: localPlayer.id,
-            actionId: "use",
-            itemId: it.itemId,
-            slot: slotIndex,
-          });
-        }
-      }
-      // OSRS-style "Eat" action - consume food for healing
-      // Routes through ITEM_ACTION_SELECTED → InventoryInteractionSystem → INVENTORY_USE → healing
-      if (ce.detail.actionId === "eat") {
-        const localPlayer = world?.getPlayer();
-        if (localPlayer) {
-          // Emit ITEM_ACTION_SELECTED to trigger InventoryInteractionSystem
-          // which calls the registered "eat" action callback → INVENTORY_USE → healing
-          world?.emit(EventType.ITEM_ACTION_SELECTED, {
-            playerId: localPlayer.id,
-            actionId: "eat",
-            itemId: it.itemId,
-            slot: slotIndex,
-          });
-        }
-      }
+      if (!it || !world) return;
+
+      // Dispatch action through centralized handler
+      dispatchInventoryAction(ce.detail.actionId, {
+        world,
+        itemId: it.itemId,
+        slot: slotIndex,
+        quantity: it.quantity || 1,
+      });
     };
     window.addEventListener("contextmenu:select", onCtxSelect as EventListener);
     return () =>
@@ -835,6 +914,110 @@ export function InventoryPanel({
     }, 2000);
   };
 
+  // Memoized handlers to prevent unnecessary re-renders of child components
+  const handleTargetClick = useCallback(
+    (clickedItem: InventorySlotViewItem, slotIndex: number) => {
+      // Handle targeting mode click - emit TARGETING_SELECT event
+      if (targetingState.active && targetingState.sourceItem) {
+        const localPlayer = world?.getPlayer();
+        if (localPlayer) {
+          console.log("[InventoryPanel] 🎯 Emitting TARGETING_SELECT:", {
+            sourceItem: targetingState.sourceItem,
+            targetItem: clickedItem.itemId,
+            targetSlot: slotIndex,
+          });
+          // Clear hover tooltip before action
+          setTargetHover(null);
+          world?.emit(EventType.TARGETING_SELECT, {
+            playerId: localPlayer.id,
+            sourceItemId: targetingState.sourceItem.id,
+            sourceSlot: targetingState.sourceItem.slot,
+            targetId: clickedItem.itemId,
+            targetType: "inventory_item",
+            targetSlot: slotIndex,
+          });
+        }
+      }
+    },
+    [world, targetingState.active, targetingState.sourceItem],
+  );
+
+  const handleTargetHover = useCallback(
+    (
+      hoveredItem: InventorySlotViewItem,
+      position: { x: number; y: number },
+    ) => {
+      // OSRS-style "Use X → Y" tooltip
+      setTargetHover({
+        targetName: hoveredItem.itemId,
+        position,
+      });
+    },
+    [],
+  );
+
+  const handleTargetHoverEnd = useCallback(() => {
+    setTargetHover(null);
+  }, []);
+
+  const handleInvalidTargetClick = useCallback(() => {
+    // OSRS: "Nothing interesting happens." when using item on invalid target
+    const message = "Nothing interesting happens.";
+
+    // Show in chat (OSRS-style game message)
+    if (world?.chat?.add) {
+      world.chat.add({
+        id: uuid(),
+        from: "",
+        body: message,
+        createdAt: new Date().toISOString(),
+        timestamp: Date.now(),
+      });
+    }
+
+    // Cancel targeting mode
+    setTargetingState(initialTargetingState);
+    setTargetHover(null);
+  }, [world]);
+
+  const handlePrimaryAction = useCallback(
+    (
+      clickedItem: InventorySlotViewItem,
+      slotIndex: number,
+      actionType: PrimaryActionType,
+    ) => {
+      if (!world) return;
+
+      // Dispatch through centralized handler
+      dispatchInventoryAction(actionType, {
+        world,
+        itemId: clickedItem.itemId,
+        slot: slotIndex,
+        quantity: clickedItem.quantity || 1,
+      });
+    },
+    [world],
+  );
+
+  const handleShiftClick = useCallback(
+    (clickedItem: InventorySlotViewItem, slotIndex: number) => {
+      if (world?.network?.dropItem) {
+        world.network.dropItem(
+          clickedItem.itemId,
+          slotIndex,
+          clickedItem.quantity || 1,
+        );
+      } else if (world?.network?.send) {
+        world.network.send("dropItem", {
+          itemId: clickedItem.itemId,
+          slot: slotIndex,
+          quantity: clickedItem.quantity || 1,
+        });
+      }
+    },
+    [world],
+  );
+
   const activeItem = activeId
     ? slotItems[parseInt(activeId.split("-")[1])]
     : null;
@@ -895,57 +1078,12 @@ export function InventoryPanel({
                 item={item}
                 index={index}
                 targetingState={targetingState}
-                onTargetClick={(clickedItem, slotIndex) => {
-                  // Handle targeting mode click - emit TARGETING_SELECT event
-                  if (targetingState.active && targetingState.sourceItem) {
-                    const localPlayer = world?.getPlayer();
-                    if (localPlayer) {
-                      console.log(
-                        "[InventoryPanel] 🎯 Emitting TARGETING_SELECT:",
-                        {
-                          sourceItem: targetingState.sourceItem,
-                          targetItem: clickedItem.itemId,
-                          targetSlot: slotIndex,
-                        },
-                      );
-                      // Clear hover tooltip before action
-                      setTargetHover(null);
-                      world?.emit(EventType.TARGETING_SELECT, {
-                        playerId: localPlayer.id,
-                        sourceItemId: targetingState.sourceItem.id,
-                        sourceSlot: targetingState.sourceItem.slot,
-                        targetId: clickedItem.itemId,
-                        targetType: "inventory_item",
-                        targetSlot: slotIndex,
-                      });
-                    }
-                  }
-                }}
-                onTargetHover={(hoveredItem, position) => {
-                  // OSRS-style "Use X → Y" tooltip
-                  setTargetHover({
-                    targetName: hoveredItem.itemId,
-                    position,
-                  });
-                }}
-                onTargetHoverEnd={() => {
-                  setTargetHover(null);
-                }}
-                onShiftClick={(clickedItem, slotIndex) => {
-                  if (world?.network?.dropItem) {
-                    world.network.dropItem(
-                      clickedItem.itemId,
-                      slotIndex,
-                      clickedItem.quantity || 1,
-                    );
-                  } else if (world?.network?.send) {
-                    world.network.send("dropItem", {
-                      itemId: clickedItem.itemId,
-                      slot: slotIndex,
-                      quantity: clickedItem.quantity || 1,
-                    });
-                  }
-                }}
+                onTargetClick={handleTargetClick}
+                onTargetHover={handleTargetHover}
+                onTargetHoverEnd={handleTargetHoverEnd}
+                onInvalidTargetClick={handleInvalidTargetClick}
+                onPrimaryAction={handlePrimaryAction}
+                onShiftClick={handleShiftClick}
               />
             ))}
           </div>

@@ -3,17 +3,22 @@
  *
  * Handles interactions with bank objects (booths, chests, etc.).
  *
- * Actions:
- * - Use Bank (left-click primary, context menu)
- * - Examine
+ * OSRS Context Menu Format: "<Action> <TargetName>" with cyan target (scenery color)
+ * - "Bank Bank booth" / "Bank Bank chest" (cyan #00ffff for target)
+ * - "Examine Bank booth" (cyan #00ffff for target)
  *
  * Note: Bank NPCs (clerks) are handled by NPCInteractionHandler.
  * This handler is for bank objects/furniture only.
+ *
+ * @see https://oldschool.runescape.wiki/w/Choose_Option for OSRS menu format
  */
 
 import { BaseInteractionHandler } from "./BaseInteractionHandler";
 import type { RaycastTarget, ContextMenuAction } from "../types";
 import { INTERACTION_RANGE, MESSAGE_TYPES } from "../constants";
+
+/** OSRS scenery/object color (cyan) for context menu target names */
+const SCENERY_COLOR = "#00ffff";
 
 export class BankInteractionHandler extends BaseInteractionHandler {
   /**
@@ -25,23 +30,42 @@ export class BankInteractionHandler extends BaseInteractionHandler {
 
   /**
    * Right-click: Show bank options
+   *
+   * OSRS-accurate format:
+   * - "Bank Bank booth" (action white, target cyan)
+   * - "Examine Bank booth" (action white, target cyan)
    */
   getContextMenuActions(target: RaycastTarget): ContextMenuAction[] {
     const actions: ContextMenuAction[] = [];
+    const targetName = target.name || "Bank booth";
 
-    // Use Bank
+    // Bank action (primary) - OSRS: "Bank Bank booth"
     actions.push({
       id: "use-bank",
-      label: "Use Bank",
+      label: `Bank ${targetName}`,
+      styledLabel: [
+        { text: "Bank " },
+        { text: targetName, color: SCENERY_COLOR },
+      ],
       enabled: true,
       priority: 1,
       handler: () => this.openBank(target),
     });
 
-    // Examine
-    actions.push(
-      this.createExamineAction(target, "A secure place to store your items."),
-    );
+    // Examine - OSRS: "Examine Bank booth"
+    actions.push({
+      id: "examine",
+      label: `Examine ${targetName}`,
+      styledLabel: [
+        { text: "Examine " },
+        { text: targetName, color: SCENERY_COLOR },
+      ],
+      enabled: true,
+      priority: 100,
+      handler: () => {
+        this.showExamineMessage("A secure place to store your items.");
+      },
+    });
 
     return actions.sort((a, b) => a.priority - b.priority);
   }

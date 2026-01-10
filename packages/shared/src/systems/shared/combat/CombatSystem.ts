@@ -1327,6 +1327,53 @@ export class CombatSystem extends SystemBase {
     return this.stateService.getCombatData(entityId);
   }
 
+  /**
+   * Check if player is on attack cooldown
+   * Used by eating system to determine if eat should add attack delay
+   *
+   * OSRS Rule: Foods only add to EXISTING attack delay.
+   * If weapon is ready to attack (cooldown expired), eating does NOT add delay.
+   *
+   * @param playerId - Player to check
+   * @param currentTick - Current game tick
+   * @returns true if player has pending attack cooldown
+   */
+  public isPlayerOnAttackCooldown(
+    playerId: string,
+    currentTick: number,
+  ): boolean {
+    const typedPlayerId = createEntityID(playerId);
+    const nextAllowedTick = this.nextAttackTicks.get(typedPlayerId) ?? 0;
+    return currentTick < nextAllowedTick;
+  }
+
+  /**
+   * Add delay ticks to player's next attack
+   * Used by eating system (OSRS: eating during combat adds 3 tick delay)
+   *
+   * OSRS-Accurate: Only called when player is ALREADY on cooldown.
+   * If weapon is ready, eating does not add delay.
+   *
+   * @param playerId - Player to modify
+   * @param delayTicks - Ticks to add to attack cooldown
+   */
+  public addAttackDelay(playerId: string, delayTicks: number): void {
+    const typedPlayerId = createEntityID(playerId);
+    const currentNext = this.nextAttackTicks.get(typedPlayerId);
+
+    if (currentNext !== undefined) {
+      // Add delay to existing cooldown (mutate in place, no allocation)
+      this.nextAttackTicks.set(typedPlayerId, currentNext + delayTicks);
+
+      // Also update CombatData if active (keeps state consistent)
+      const combatData = this.stateService.getCombatData(typedPlayerId);
+      if (combatData) {
+        combatData.nextAttackTick += delayTicks;
+      }
+    }
+    // If no current cooldown, do nothing (OSRS-accurate: no delay if weapon ready)
+  }
+
   public forceEndCombat(
     entityId: string,
     options?: {

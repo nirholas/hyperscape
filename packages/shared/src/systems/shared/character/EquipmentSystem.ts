@@ -962,12 +962,16 @@ export class EquipmentSystem extends SystemBase {
       return "weapon";
     }
 
+    // OSRS-accurate: Check explicit equipSlot first (handles tools like hatchets/pickaxes)
+    // Tools have type: "tool" but equipSlot: "weapon" - they should be equipable
+    if (itemData.equipSlot && itemData.equipSlot !== "2h") {
+      return itemData.equipSlot;
+    }
+
+    // Fall back to type-based detection for items without explicit equipSlot
     switch (itemData.type) {
       case ItemType.WEAPON:
-        return itemData.weaponType === WeaponType.BOW ||
-          itemData.weaponType === WeaponType.CROSSBOW
-          ? "weapon"
-          : "weapon";
+        return "weapon";
       case ItemType.ARMOR:
         return itemData.equipSlot || null;
       case ItemType.AMMUNITION:

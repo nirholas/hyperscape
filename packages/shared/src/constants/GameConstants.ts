@@ -94,6 +94,18 @@ export const UI_CONSTANTS = {
   CHAT_MESSAGE_TIMEOUT: 5000, // 5 seconds
 } as const;
 
+// === OSRS-STYLE CONTEXT MENU COLORS ===
+export const CONTEXT_MENU_COLORS = {
+  /** Item name color in context menus (OSRS orange) */
+  ITEM: "#ff9040",
+  /** NPC name color in context menus (OSRS yellow) */
+  NPC: "#ffff00",
+  /** Object name color in context menus (OSRS cyan) */
+  OBJECT: "#00ffff",
+  /** Player name color in context menus */
+  PLAYER: "#ffffff",
+} as const;
+
 // === PHYSICS AND MOVEMENT ===
 export const PHYSICS_CONSTANTS = {
   GRAVITY: -9.81,

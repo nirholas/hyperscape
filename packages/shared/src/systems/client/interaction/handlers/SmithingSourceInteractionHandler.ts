@@ -3,18 +3,24 @@
  *
  * Handles interactions with anvils for smithing bars into items.
  *
- * Actions:
- * - Smith (left-click primary, context menu) - opens smithing interface
- * - Walk here
- * - Examine
+ * OSRS Context Menu Format: "<Action> <TargetName>" with cyan target (scenery color)
+ * - "Smith Anvil" (cyan #00ffff for "Anvil")
+ * - "Walk here"
+ * - "Examine Anvil" (cyan #00ffff for "Anvil")
  *
  * Note: Player needs a hammer in inventory to smith.
+ *
+ * @see https://oldschool.runescape.wiki/w/Choose_Option for OSRS menu format
+ * @see https://oldschool.runescape.wiki/w/Anvil for anvil info
  */
 
 import { BaseInteractionHandler } from "./BaseInteractionHandler";
 import type { RaycastTarget, ContextMenuAction } from "../types";
 import { INTERACTION_RANGE } from "../constants";
 import { EventType } from "../../../../types/events/event-types";
+
+/** OSRS scenery/object color (cyan) for context menu target names */
+const SCENERY_COLOR = "#00ffff";
 
 /**
  * Anvil entity interface for type safety
@@ -43,14 +49,24 @@ export class SmithingSourceInteractionHandler extends BaseInteractionHandler {
 
   /**
    * Right-click: Show Smith action and other options
+   *
+   * OSRS-accurate format:
+   * - "Smith Anvil" (action white, target cyan)
+   * - "Walk here"
+   * - "Examine Anvil" (action white, target cyan)
    */
   getContextMenuActions(target: RaycastTarget): ContextMenuAction[] {
     const actions: ContextMenuAction[] = [];
+    const targetName = target.name || "Anvil";
 
-    // Smith action (primary)
+    // Smith action (primary) - OSRS: "Smith Anvil"
     actions.push({
       id: "smith",
-      label: "Smith",
+      label: `Smith ${targetName}`,
+      styledLabel: [
+        { text: "Smith " },
+        { text: targetName, color: SCENERY_COLOR },
+      ],
       enabled: true,
       priority: 1,
       handler: () => {
@@ -66,13 +82,20 @@ export class SmithingSourceInteractionHandler extends BaseInteractionHandler {
     // Walk here
     actions.push(this.createWalkHereAction(target));
 
-    // Examine
-    actions.push(
-      this.createExamineAction(
-        target,
-        "An anvil for smithing metal bars into weapons and tools.",
-      ),
-    );
+    // Examine - OSRS: "Examine Anvil"
+    actions.push({
+      id: "examine",
+      label: `Examine ${targetName}`,
+      styledLabel: [
+        { text: "Examine " },
+        { text: targetName, color: SCENERY_COLOR },
+      ],
+      enabled: true,
+      priority: 100,
+      handler: () => {
+        this.showExamineMessage("An anvil. Used to make things out of metal.");
+      },
+    });
 
     return actions.sort((a, b) => a.priority - b.priority);
   }

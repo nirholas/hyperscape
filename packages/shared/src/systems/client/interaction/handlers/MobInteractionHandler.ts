@@ -22,6 +22,7 @@ import { getNPCById } from "../../../../data/npcs";
 import { getPlayerWeaponRange } from "../../../../utils/game/CombatUtils";
 import { calculateCombatLevel } from "../../../../utils/game/CombatLevelCalculator";
 import type { Player } from "../../../../types/core/core";
+import { CONTEXT_MENU_COLORS } from "../../../../constants/GameConstants";
 
 /**
  * Mob entity interface for type safety
@@ -79,7 +80,7 @@ export class MobInteractionHandler extends BaseInteractionHandler {
       label: `Attack ${target.name} (Level: ${mobLevel})`,
       styledLabel: [
         { text: "Attack " },
-        { text: target.name, color: "#ffff00" }, // Yellow for mob names (OSRS style)
+        { text: target.name, color: CONTEXT_MENU_COLORS.NPC }, // Yellow for mob names (OSRS style)
         { text: " (Level: " },
         { text: `${mobLevel}`, color: levelColor },
         { text: ")" },
@@ -92,9 +93,21 @@ export class MobInteractionHandler extends BaseInteractionHandler {
     // Walk here
     actions.push(this.createWalkHereAction(target));
 
-    // Examine
+    // Examine - OSRS: "Examine Goblin"
     const examineText = this.getExamineText(target, mobData);
-    actions.push(this.createExamineAction(target, examineText));
+    actions.push({
+      id: "examine",
+      label: `Examine ${target.name}`,
+      styledLabel: [
+        { text: "Examine " },
+        { text: target.name, color: CONTEXT_MENU_COLORS.NPC }, // Yellow for NPC/mob names
+      ],
+      enabled: true,
+      priority: 100,
+      handler: () => {
+        this.showExamineMessage(examineText);
+      },
+    });
 
     return actions.sort((a, b) => a.priority - b.priority);
   }

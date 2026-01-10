@@ -353,6 +353,23 @@ export { Emotes } from "./data/playerEmotes";
 export { ControlPriorities } from "./systems/client/ControlPriorities";
 export { downloadFile } from "./utils/downloadFile";
 export * from "./utils/typeGuards";
+
+// Item type detection helpers (OSRS-accurate inventory actions)
+export {
+  isFood,
+  isPotion,
+  isBone,
+  isWeapon,
+  isShield,
+  usesWield,
+  usesWear,
+  isNotedItem,
+  getPrimaryAction,
+  getPrimaryActionFromManifest,
+  HANDLED_INVENTORY_ACTIONS,
+} from "./utils/item-helpers";
+export type { PrimaryActionType } from "./utils/item-helpers";
+
 export { Curve } from "./extras/animation/Curve";
 export { buttons, propToLabel } from "./extras/ui/buttons";
 // GLTFLoader export disabled due to TypeScript declaration generation issues
@@ -832,6 +849,9 @@ export { COMBAT_CONSTANTS } from "./constants/CombatConstants";
 
 // Gathering constants (tick-based timing, ranges, etc.)
 export { GATHERING_CONSTANTS } from "./constants/GatheringConstants";
+
+// Context menu colors (OSRS-accurate styling)
+export { CONTEXT_MENU_COLORS } from "./constants/GameConstants";
 
 // Weapon style configuration (OSRS-accurate style restrictions per weapon)
 export {
