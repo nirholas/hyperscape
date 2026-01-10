@@ -58,6 +58,7 @@ interface DraggableItemProps {
   ) => void;
   targetingState?: TargetingState;
   onTargetClick?: (item: InventorySlotViewItem, index: number) => void;
+  onInvalidTargetClick?: () => void;
   onTargetHover?: (
     item: InventorySlotViewItem,
     position: { x: number; y: number },
@@ -201,6 +202,7 @@ function DraggableInventorySlot({
   onPrimaryAction,
   targetingState,
   onTargetClick,
+  onInvalidTargetClick,
   onTargetHover,
   onTargetHoverEnd,
 }: DraggableItemProps) {
@@ -301,17 +303,25 @@ function DraggableInventorySlot({
       className="relative border rounded-sm transition-all duration-100 group aspect-square"
       onClick={(e) => {
         // Handle targeting mode clicks (Use X on Y)
-        if (isTargetingActive && onTargetClick) {
+        if (isTargetingActive) {
           e.preventDefault();
           e.stopPropagation();
-          if (isValidTarget && item) {
+          if (isValidTarget && item && onTargetClick) {
             console.log("[InventorySlot] 🎯 Target clicked:", {
               itemId: item.itemId,
               slot: index,
             });
             onTargetClick(item, index);
+          } else if (item && !isValidTarget && onInvalidTargetClick) {
+            // OSRS: Clicking an invalid item shows "Nothing interesting happens."
+            // (Empty slots don't trigger this - only actual items)
+            console.log("[InventorySlot] ❌ Invalid target clicked:", {
+              itemId: item.itemId,
+              slot: index,
+            });
+            onInvalidTargetClick();
           }
-          // Clicking invalid target or empty slot does nothing (OSRS behavior)
+          // Clicking empty slot does nothing (OSRS behavior)
           return;
         }
 
@@ -1139,6 +1149,25 @@ export function InventoryPanel({
                   });
                 }}
                 onTargetHoverEnd={() => {
+                  setTargetHover(null);
+                }}
+                onInvalidTargetClick={() => {
+                  // OSRS: "Nothing interesting happens." when using item on invalid target
+                  const message = "Nothing interesting happens.";
+
+                  // Show in chat (OSRS-style game message)
+                  if (world?.chat?.add) {
+                    world.chat.add({
+                      id: uuid(),
+                      from: "",
+                      body: message,
+                      createdAt: new Date().toISOString(),
+                      timestamp: Date.now(),
+                    });
+                  }
+
+                  // Cancel targeting mode
+                  setTargetingState(initialTargetingState);
                   setTargetHover(null);
                 }}
                 onPrimaryAction={(clickedItem, slotIndex, actionType) => {
