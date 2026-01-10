@@ -764,6 +764,22 @@ export class InventorySystem extends SystemBase {
     itemId: string;
     slot: number;
   }): void {
+    // SERVER-SIDE ONLY: Prevent duplication by ensuring only server processes item use
+    // Client sends the request via event, server validates and processes
+    if (!this.world.isServer) {
+      return;
+    }
+
+    // === SECURITY: Bounds validation (OWASP) ===
+    if (data.slot < 0 || data.slot >= this.MAX_INVENTORY_SLOTS) {
+      Logger.systemError(
+        "InventorySystem",
+        `Invalid slot ${data.slot} (must be 0-${this.MAX_INVENTORY_SLOTS - 1})`,
+        new Error("Invalid slot index"),
+      );
+      return;
+    }
+
     const playerID = data.playerId;
     const inventory = this.getOrCreateInventory(playerID);
 
