@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
+import { EventType } from "@hyperscape/shared";
 import { COLORS } from "../../constants";
 import type { ClientWorld } from "../../types";
 
@@ -27,6 +28,10 @@ export function StatusBars({ world }: StatusBarsProps) {
   });
   const [runMode, setRunMode] = useState<boolean>(true);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+
+  // Health is initialized once on mount, then ONLY updated via events (server-authoritative)
+  // This prevents race conditions from polling stale cached data
+  const healthInitialized = useRef<boolean>(false);
 
   useEffect(() => {
     const handleResize = () => {
@@ -77,26 +82,26 @@ export function StatusBars({ world }: StatusBarsProps) {
       }
 
       if (player) {
-        // Get health - try playerData.health first (PlayerLocal), then data.health (PlayerRemote)
-        // Use functional updates to avoid creating new objects when values haven't changed
-        if (player.playerData?.health) {
-          const newCurrent = player.playerData.health.current;
-          const newMax = player.playerData.health.max;
-          setHealth((prev) =>
-            prev.current === newCurrent && prev.max === newMax
-              ? prev
-              : { current: newCurrent, max: newMax },
-          );
-        } else if (player.data?.health !== undefined) {
-          // PlayerRemote stores health in data.health and data.maxHealth
-          const newCurrent = player.data.health;
-          const newMax = player.data.maxHealth ?? 100;
-          setHealth((prev) =>
-            prev.current === newCurrent && prev.max === newMax
-              ? prev
-              : { current: newCurrent, max: newMax },
-          );
+        // HEALTH: Initialize ONCE on mount, then rely purely on events (server-authoritative)
+        // This eliminates race conditions where polling could read stale cached data
+        // and overwrite the correct event-driven value
+        if (!healthInitialized.current) {
+          if (player.playerData?.health) {
+            setHealth({
+              current: player.playerData.health.current,
+              max: player.playerData.health.max,
+            });
+            healthInitialized.current = true;
+          } else if (player.data?.health !== undefined) {
+            setHealth({
+              current: player.data.health,
+              max: player.data.maxHealth ?? 100,
+            });
+            healthInitialized.current = true;
+          }
         }
+        // After initialization, health is ONLY updated via PLAYER_HEALTH_UPDATED events
+        // This is the AAA/OSRS approach: server-authoritative, event-driven UI
 
         // Get stamina from player - only update if changed
         const newStamina = player.stamina || 100;
@@ -122,6 +127,26 @@ export function StatusBars({ world }: StatusBarsProps) {
     const id = setInterval(update, 200);
     update();
     return () => clearInterval(id);
+  }, [world]);
+
+  // HEALTH UPDATES: Event-driven ONLY (server-authoritative, OSRS-style)
+  // After initial load, health is ONLY updated when server sends PLAYER_HEALTH_UPDATED
+  // This eliminates ALL race conditions from polling stale cached data
+  useEffect(() => {
+    const handleHealthUpdate = (event: unknown) => {
+      const data = event as { health: number; maxHealth: number };
+      if (data.health !== undefined && data.maxHealth !== undefined) {
+        // Server says health is X, UI shows X. No questions asked.
+        setHealth({ current: data.health, max: data.maxHealth });
+        // Also mark as initialized in case event arrives before first poll
+        healthInitialized.current = true;
+      }
+    };
+
+    world.on(EventType.PLAYER_HEALTH_UPDATED, handleHealthUpdate);
+    return () => {
+      world.off(EventType.PLAYER_HEALTH_UPDATED, handleHealthUpdate);
+    };
   }, [world]);
 
   const toggleRunMode = () => {

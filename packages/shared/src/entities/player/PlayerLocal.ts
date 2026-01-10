@@ -1030,16 +1030,16 @@ export class PlayerLocal extends Entity implements HotReloadable {
     }
 
     // Handle health updates from server
+    // NOTE: We update internal state here, but the VISUAL health bar is ONLY
+    // updated via handleHealthChange() when PLAYER_HEALTH_UPDATED events arrive.
+    // This prevents race conditions where stale snapshot data would overwrite
+    // the correct event-driven value (same fix applied to HUD StatusBars).
     if ("health" in data && data.health !== undefined) {
       const newHealth = data.health as number;
       this.setHealth(newHealth);
       // Update _playerHealth for getPlayerData() which the UI reads
       this._playerHealth.current = newHealth;
-      // Update health bar (HealthBars system)
-      if (this._healthBarHandle) {
-        const maxHealth = this.maxHealth || 100;
-        this._healthBarHandle.setHealth(newHealth, maxHealth);
-      }
+      // Health bar is NOT updated here - see handleHealthChange() for event-driven updates
     }
     if ("maxHealth" in data && data.maxHealth !== undefined) {
       this.maxHealth = data.maxHealth as number;
@@ -2333,12 +2333,8 @@ export class PlayerLocal extends Entity implements HotReloadable {
     if (data.name && this.nametag) {
       this.nametag.label = (data.name as string) || "";
     }
-
-    if (data.health !== undefined && this._healthBarHandle) {
-      const currentHealth = data.health as number;
-      const maxHealth = this.maxHealth || 100;
-      this._healthBarHandle.setHealth(currentHealth, maxHealth);
-    }
+    // Health bar is NOT updated here - visual updates ONLY via handleHealthChange()
+    // to prevent stale snapshot data from overwriting event-driven values
   }
 
   // Handle system integration
