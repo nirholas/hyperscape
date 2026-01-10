@@ -29,6 +29,7 @@ import { Logger } from "../../../utils/Logger";
 import { processingDataProvider } from "../../../data/ProcessingDataProvider";
 import { getTargetValidator } from "./TargetValidator";
 import { MESSAGE_TYPES } from "../../client/interaction/constants";
+import { INPUT_LIMITS } from "../../../constants/interaction";
 
 /**
  * Create a minimal Item with all required properties
@@ -1062,17 +1063,30 @@ export class InventoryInteractionSystem extends SystemBase {
       },
     });
 
-    // Consumption actions
+    // Consumption actions (eating food)
+    // Uses INVENTORY_USE instead of INVENTORY_CONSUME_ITEM because:
+    // - INVENTORY_USE → InventorySystem.useItem() → ITEM_USED → PlayerSystem.handleItemUsed() → healing
+    // - INVENTORY_CONSUME_ITEM has no subscriber (was broken)
     this.registerAction("food", {
       id: "eat",
       label: "Eat",
       priority: 1,
       condition: (item: Item) => item.type === ItemType.CONSUMABLE,
       callback: (playerId: string, itemId: string, slot: number | null) => {
-        this.emitTypedEvent(EventType.INVENTORY_CONSUME_ITEM, {
-          playerId: playerId,
-          itemId: itemId,
-          slot: slot,
+        // Validate slot is within bounds (OWASP: Input Validation)
+        const validSlot =
+          slot !== null && slot >= 0 && slot < INPUT_LIMITS.MAX_INVENTORY_SLOTS
+            ? slot
+            : 0;
+
+        // Route through existing INVENTORY_USE pipeline which handles:
+        // - Item verification at slot
+        // - Item consumption
+        // - ITEM_USED event emission
+        this.emitTypedEvent(EventType.INVENTORY_USE, {
+          playerId,
+          itemId,
+          slot: validSlot,
         });
       },
     });
