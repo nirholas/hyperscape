@@ -44,6 +44,7 @@ jobs:
               '2. If you cannot access the repository, report the error and exit immediately',
               '3. Be COMPREHENSIVE - update ALL relevant documentation, not just minimal changes',
               '4. Analyze ALL code changes in the recent commits to identify every documentation impact',
+              '5. When editing files, REPLACE old content with new content - do not add new content alongside old content, as this creates merge conflicts',
               '',
               '## Documentation Update Checklist (complete ALL applicable items):',
               '',
