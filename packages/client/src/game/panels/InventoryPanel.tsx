@@ -44,10 +44,18 @@ interface InventoryPanelProps {
   onItemEquip?: (item: InventorySlotViewItem) => void;
 }
 
+/** Primary action types for left-click */
+type PrimaryActionType = "eat" | "drink" | "bury" | "wield" | "wear" | "use";
+
 interface DraggableItemProps {
   item: InventorySlotViewItem | null;
   index: number;
   onShiftClick?: (item: InventorySlotViewItem, index: number) => void;
+  onPrimaryAction?: (
+    item: InventorySlotViewItem,
+    index: number,
+    actionType: PrimaryActionType,
+  ) => void;
   targetingState?: TargetingState;
   onTargetClick?: (item: InventorySlotViewItem, index: number) => void;
   onTargetHover?: (
@@ -190,6 +198,7 @@ function DraggableInventorySlot({
   item,
   index,
   onShiftClick,
+  onPrimaryAction,
   targetingState,
   onTargetClick,
   onTargetHover,
@@ -305,11 +314,44 @@ function DraggableInventorySlot({
           // Clicking invalid target or empty slot does nothing (OSRS behavior)
           return;
         }
+
         // Shift-click to drop instantly (OSRS-style)
         if (e.shiftKey && item && onShiftClick) {
           e.preventDefault();
           e.stopPropagation();
           onShiftClick(item, index);
+          return;
+        }
+
+        // Left-click: execute primary action (OSRS-style)
+        // Same logic as context menu ordering - first option is the default
+        if (item && onPrimaryAction) {
+          e.preventDefault();
+          e.stopPropagation();
+
+          const itemData = getItem(item.itemId);
+          const isNoted = isNotedItem(itemData);
+
+          // Determine primary action based on item type
+          // Noted items can only use "Use" as primary action
+          let actionType: PrimaryActionType = "use";
+
+          if (!isNoted) {
+            if (isFood(itemData)) {
+              actionType = "eat";
+            } else if (isPotion(itemData)) {
+              actionType = "drink";
+            } else if (isBone(itemData)) {
+              actionType = "bury";
+            } else if (usesWield(itemData)) {
+              actionType = "wield";
+            } else if (usesWear(itemData)) {
+              actionType = "wear";
+            }
+            // else: default is "use" for generic items, logs, tinderbox, etc.
+          }
+
+          onPrimaryAction(item, index, actionType);
         }
       }}
       onMouseEnter={(e) => {
@@ -1062,6 +1104,64 @@ export function InventoryPanel({
                 }}
                 onTargetHoverEnd={() => {
                   setTargetHover(null);
+                }}
+                onPrimaryAction={(clickedItem, slotIndex, actionType) => {
+                  // Handle left-click primary action based on item type
+                  const localPlayer = world?.getPlayer();
+                  if (!localPlayer) return;
+
+                  switch (actionType) {
+                    case "eat":
+                      // Eat food - emit event for consumption system
+                      world?.emit(EventType.ITEM_ACTION_SELECTED, {
+                        playerId: localPlayer.id,
+                        actionId: "eat",
+                        itemId: clickedItem.itemId,
+                        slot: slotIndex,
+                      });
+                      break;
+
+                    case "drink":
+                      // Drink potion - emit event for consumption system
+                      world?.emit(EventType.ITEM_ACTION_SELECTED, {
+                        playerId: localPlayer.id,
+                        actionId: "drink",
+                        itemId: clickedItem.itemId,
+                        slot: slotIndex,
+                      });
+                      break;
+
+                    case "bury":
+                      // Bury bones - send to server for Prayer XP
+                      world?.network?.send("buryBones", {
+                        itemId: clickedItem.itemId,
+                        slot: slotIndex,
+                      });
+                      break;
+
+                    case "wield":
+                    case "wear":
+                      // Equip item - send to server
+                      if (world?.network?.send) {
+                        world.network.send("equipItem", {
+                          playerId: localPlayer.id,
+                          itemId: clickedItem.itemId,
+                          inventorySlot: slotIndex,
+                        });
+                      }
+                      break;
+
+                    case "use":
+                    default:
+                      // Enter Use targeting mode
+                      world?.emit(EventType.ITEM_ACTION_SELECTED, {
+                        playerId: localPlayer.id,
+                        actionId: "use",
+                        itemId: clickedItem.itemId,
+                        slot: slotIndex,
+                      });
+                      break;
+                  }
                 }}
                 onShiftClick={(clickedItem, slotIndex) => {
                   if (world?.network?.dropItem) {
