@@ -32,6 +32,7 @@ import {
   compactBankSlots,
   sendBankStateWithTabs,
   MAX_INVENTORY_SLOTS,
+  SLOT_OFFSET_TEMP,
 } from "./utils";
 
 /**
@@ -317,8 +318,20 @@ export async function handleBankReleaseAllPlaceholders(
       );
 
       // Batch compact each affected tab - renumber all slots sequentially
-      // Uses window function to assign new slot numbers in one query per tab
+      // Uses TWO-PHASE approach to avoid unique constraint violations:
+      // PostgreSQL doesn't guarantee UPDATE order, so if row A (slot 10→6) is
+      // processed before row B (slot 6→3), they collide on slot 6.
+      // Solution: First offset all slots to 1000+ range, then renumber to 0-N.
       for (const tabIndex of affectedTabs) {
+        // Phase 1: Add large offset to move all slots far from target range
+        await tx.execute(
+          sql`UPDATE bank_storage
+              SET slot = slot + ${SLOT_OFFSET_TEMP}
+              WHERE "playerId" = ${ctx.playerId} AND "tabIndex" = ${tabIndex}`,
+        );
+
+        // Phase 2: Renumber slots sequentially using ROW_NUMBER
+        // Source slots are now ≥1000, target slots are 0-N, no overlap possible
         await tx.execute(
           sql`UPDATE bank_storage
               SET slot = subq.new_slot
@@ -327,7 +340,9 @@ export async function handleBankReleaseAllPlaceholders(
                 FROM bank_storage
                 WHERE "playerId" = ${ctx.playerId} AND "tabIndex" = ${tabIndex}
               ) as subq
-              WHERE bank_storage.id = subq.id`,
+              WHERE bank_storage.id = subq.id
+                AND bank_storage."playerId" = ${ctx.playerId}
+                AND bank_storage."tabIndex" = ${tabIndex}`,
         );
       }
 
