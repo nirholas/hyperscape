@@ -106,35 +106,64 @@ export class ModelCache {
   }
 
   /**
-   * Normalize non-uniform scales in a GLTF model hierarchy.
+   * Bake all transforms into geometry.
    *
-   * Some 3D modeling tools (Blender, etc.) export models with non-uniform scales
-   * baked into internal nodes (e.g., a child with scale (2, 0.5, 1)).
-   * This causes models to appear "squished" or "stretched".
+   * Uses the same approach as AssetNormalizationService in asset-forge.
+   * This applies world transforms to geometry using Three.js's built-in
+   * applyMatrix4 method, then resets all node transforms to identity.
    *
-   * This method traverses all nodes and resets non-uniform scales to (1, 1, 1).
+   * This handles all GLTF export variations:
+   * - Transforms in position/rotation/scale
+   * - Transforms baked into matrix
+   * - Non-decomposable transforms (shear)
+   *
    * Called ONCE when a model is first loaded, before caching.
-   *
-   * Note: We only reset NON-UNIFORM scales. Uniform scales (x === y === z) are
-   * intentional sizing and should be preserved.
    */
-  private normalizeScales(scene: THREE.Object3D): void {
-    scene.traverse((node) => {
-      const s = node.scale;
-      // Check if scale is non-uniform (causes distortion)
-      const isNonUniform =
-        Math.abs(s.x - s.y) > 0.001 ||
-        Math.abs(s.y - s.z) > 0.001 ||
-        Math.abs(s.x - s.z) > 0.001;
+  private bakeTransformsToGeometry(scene: THREE.Object3D): void {
+    // Ensure all matrices are up to date
+    scene.updateMatrixWorld(true);
 
-      if (isNonUniform) {
-        // Reset to identity scale to prevent distortion
-        node.scale.set(1, 1, 1);
-        node.updateMatrix();
+    // Apply transforms to each mesh's geometry
+    scene.traverse((child) => {
+      if (
+        child instanceof THREE.Mesh &&
+        !(child instanceof THREE.SkinnedMesh) &&
+        child.geometry
+      ) {
+        // Clone geometry to avoid modifying shared geometry
+        child.geometry = child.geometry.clone();
+
+        // Apply world matrix to geometry (Three.js built-in method)
+        // This handles positions, normals, and other attributes correctly
+        child.geometry.applyMatrix4(child.matrixWorld);
+
+        // Reset transform to identity
+        child.position.set(0, 0, 0);
+        child.rotation.set(0, 0, 0);
+        child.scale.set(1, 1, 1);
+        child.updateMatrix();
       }
     });
 
-    // Propagate matrix updates through the hierarchy
+    // CRITICAL: Reset ALL node transforms to identity, not just meshes and root.
+    // Intermediate Group/Object3D nodes can have transforms that would be
+    // applied during rendering, causing double-transform issues (squishing).
+    scene.traverse((child) => {
+      if (child !== scene) {
+        // Skip meshes - already handled above
+        if (!(child instanceof THREE.Mesh)) {
+          child.position.set(0, 0, 0);
+          child.rotation.set(0, 0, 0);
+          child.scale.set(1, 1, 1);
+          child.updateMatrix();
+        }
+      }
+    });
+
+    // Reset root transform
+    scene.position.set(0, 0, 0);
+    scene.rotation.set(0, 0, 0);
+    scene.scale.set(1, 1, 1);
     scene.updateMatrixWorld(true);
   }
 
@@ -348,6 +377,19 @@ export class ModelCache {
         return this.loadModel(path, world);
       }
 
+      // Check if cached scene was mutated and needs reload
+      let cachedHasMutation = false;
+      cached.scene.traverse((child) => {
+        const s = child.scale;
+        if (s.x !== 1 || s.y !== 1 || s.z !== 1) {
+          cachedHasMutation = true;
+        }
+      });
+      if (cachedHasMutation) {
+        this.cache.delete(resolvedPath);
+        return this.loadModel(path, world);
+      }
+
       cached.cloneCount++;
 
       // Clone the scene for this instance
@@ -427,11 +469,11 @@ export class ModelCache {
           );
         }
 
-        // CRITICAL: Normalize non-uniform scales in the GLTF hierarchy BEFORE caching.
-        // Some 3D modeling tools export models with non-uniform scales on internal nodes
-        // (e.g., scale (2, 0.5, 1)) which causes "squished" appearance.
-        // By normalizing here, all clones will have correct proportions.
-        this.normalizeScales(gltf.scene);
+        // CRITICAL: Bake all transforms into geometry BEFORE caching.
+        // GLTF files can have transforms stored in matrices (not just scale property),
+        // especially when exported without "Apply Transforms" in Blender.
+        // This bakes ALL transforms into vertex positions, guaranteeing correct rendering.
+        this.bakeTransformsToGeometry(gltf.scene);
 
         // CRITICAL: Setup materials on the original scene for WebGPU/CSM
         // This ensures all clones will have properly configured materials

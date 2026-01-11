@@ -214,7 +214,12 @@ export class Entity implements IEntity {
         type: config.type,
         position: [validX, validY, validZ],
         quaternion: config.rotation
-          ? [config.rotation.x, config.rotation.y, config.rotation.z, 1]
+          ? [
+              config.rotation.x,
+              config.rotation.y,
+              config.rotation.z,
+              config.rotation.w,
+            ]
           : undefined,
         scale: config.scale
           ? [config.scale.x, config.scale.y, config.scale.z]
