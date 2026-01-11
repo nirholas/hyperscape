@@ -178,18 +178,11 @@ export class ResourceEntity extends InteractableEntity {
 
     // If no depleted model path, just hide the current mesh
     if (!depletedModelPath) {
-      console.log(
-        `[ResourceEntity] No depleted model for ${this.config.resourceType}, hiding mesh`,
-      );
       if (this.mesh) {
         this.mesh.visible = false;
       }
       return;
     }
-
-    console.log(
-      `[ResourceEntity] 🔄 Swapping to depleted model: ${depletedModelPath}`,
-    );
 
     // Remove current mesh
     if (this.mesh) {
@@ -231,9 +224,7 @@ export class ResourceEntity extends InteractableEntity {
       };
 
       this.node.add(this.mesh);
-      console.log("[ResourceEntity] ✅ Depleted model loaded");
     } catch (error) {
-      console.error("[ResourceEntity] Failed to load depleted model:", error);
       // Fallback: just hide the original mesh
       if (this.mesh) {
         this.mesh.visible = false;
@@ -243,8 +234,6 @@ export class ResourceEntity extends InteractableEntity {
 
   private async swapToFullModel(): Promise<void> {
     if (this.world.isServer || !this.node) return;
-
-    console.log("[ResourceEntity] 🔄 Swapping back to full model (respawned)");
 
     // Remove current depleted mesh
     if (this.mesh) {
@@ -319,8 +308,6 @@ export class ResourceEntity extends InteractableEntity {
     }
 
     // Try to load 3D model if available
-    // SIMPLIFIED APPROACH: Match FurnaceEntity's simpler model loading that works correctly
-    // Previous approach had complex scale normalization that caused "smooshed" appearance
     if (this.config.model && this.world.loader) {
       try {
         const { scene } = await modelCache.loadModel(
@@ -378,11 +365,11 @@ export class ResourceEntity extends InteractableEntity {
         this.node.add(this.mesh);
         return;
       } catch (error) {
+        // Log failure and fall through to placeholder
         console.warn(
-          `[ResourceEntity] Failed to load model for ${this.config.resourceType}, using placeholder:`,
+          `Failed to load model for ${this.config.resourceType}:`,
           error,
         );
-        // Fall through to placeholder
       }
     }
 
@@ -423,9 +410,9 @@ export class ResourceEntity extends InteractableEntity {
       depleted: this.config.depleted,
     };
 
-    // Scale for tree
+    // Scale for tree - use UNIFORM scale to prevent squishing
     if (this.config.resourceType === "tree") {
-      this.mesh.scale.set(2, 3, 2);
+      this.mesh.scale.set(3, 3, 3);
     }
 
     this.node.add(this.mesh);
