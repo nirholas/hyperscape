@@ -364,8 +364,12 @@ export class ResourceEntity extends InteractableEntity {
 
         this.node.add(this.mesh);
         return;
-      } catch {
-        // Fall through to placeholder
+      } catch (error) {
+        // Log failure and fall through to placeholder
+        console.warn(
+          `Failed to load model for ${this.config.resourceType}:`,
+          error,
+        );
       }
     }
 
