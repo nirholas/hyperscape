@@ -106,12 +106,17 @@ export function computeSuccessRate(
  * OSRS MECHANICS:
  * - Woodcutting: Fixed 4 ticks, tool doesn't affect frequency
  * - Mining: Tool determines tick interval (8 bronze → 3 rune/dragon)
+ *   - Dragon pickaxe: 3 ticks default, 1/6 chance for 2 ticks (avg 2.83)
+ *   - Crystal pickaxe: 3 ticks default, 1/4 chance for 2 ticks (avg 2.75)
  * - Fishing: Fixed 5 ticks, equipment doesn't affect frequency
  *
  * @param skill - The gathering skill (woodcutting, mining, fishing)
  * @param baseCycleTicks - Base cycle ticks from resource manifest
  * @param toolData - Tool data from tools.json manifest (may have rollTicks for mining)
  * @returns Number of ticks between gathering attempts
+ *
+ * @see https://oldschool.runescape.wiki/w/Mining
+ * @see https://oldschool.runescape.wiki/w/Dragon_pickaxe
  */
 export function computeCycleTicks(
   skill: string,
@@ -136,7 +141,20 @@ export function computeCycleTicks(
     if (mechanics.type === "variable-roll-fixed-success") {
       // MINING: Tool tier determines roll frequency
       // Use rollTicks from tool data, or fall back to base (bronze = 8)
-      const rollTicks = toolData?.rollTicks ?? mechanics.baseRollTicks;
+      let rollTicks = toolData?.rollTicks ?? mechanics.baseRollTicks;
+
+      // OSRS: Dragon/Crystal pickaxe have a chance for bonus speed
+      // Dragon: 1/6 chance for 2 ticks (vs 3), avg 2.83
+      // Crystal: 1/4 chance for 2 ticks (vs 3), avg 2.75
+      if (
+        toolData?.bonusTickChance !== undefined &&
+        toolData?.bonusRollTicks !== undefined
+      ) {
+        if (Math.random() < toolData.bonusTickChance) {
+          rollTicks = toolData.bonusRollTicks;
+        }
+      }
+
       return Math.max(GATHERING_CONSTANTS.MINIMUM_CYCLE_TICKS, rollTicks);
     }
 

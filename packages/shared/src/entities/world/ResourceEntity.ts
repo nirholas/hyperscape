@@ -172,27 +172,30 @@ export class ResourceEntity extends InteractableEntity {
   private async swapToStump(): Promise<void> {
     if (this.world.isServer || !this.node) return;
 
-    // Only trees have stumps
-    if (this.config.resourceType !== "tree") {
-      // For other resources, just hide the mesh
+    // Check if this resource has a depleted model configured
+    // Trees have stumps, rocks have depleted rock models, etc.
+    const depletedModelPath = this.config.depletedModelPath;
+
+    // If no depleted model path, just hide the current mesh
+    if (!depletedModelPath) {
+      console.log(
+        `[ResourceEntity] No depleted model for ${this.config.resourceType}, hiding mesh`,
+      );
       if (this.mesh) {
         this.mesh.visible = false;
       }
       return;
     }
 
-    console.log("[ResourceEntity] 🪵 Swapping to stump model");
+    console.log(
+      `[ResourceEntity] 🔄 Swapping to depleted model: ${depletedModelPath}`,
+    );
 
-    // Remove current tree mesh
+    // Remove current mesh
     if (this.mesh) {
       this.node.remove(this.mesh);
       this.mesh = null;
     }
-
-    // Load depleted model from config (set by manifest) or fallback to hardcoded
-    const depletedModelPath =
-      this.config.depletedModelPath ||
-      "asset://models/basic-reg-tree-stump/basic-tree-stump.glb";
     try {
       const { scene } = await modelCache.loadModel(
         depletedModelPath,
@@ -203,13 +206,14 @@ export class ResourceEntity extends InteractableEntity {
       this.mesh.name = `ResourceDepleted_${this.config.resourceType}`;
 
       // Use scale from config (set by manifest) or fallback to default
+      // Apply uniform scale directly (simplified approach matching FurnaceEntity)
       const modelScale = this.config.depletedModelScale ?? 0.3;
       this.mesh.scale.set(modelScale, modelScale, modelScale);
-      this.mesh.updateMatrix();
-      this.mesh.updateMatrixWorld(true);
 
-      // Enable shadows
+      // Set layers and enable shadows (simple traverse, no scale manipulation)
+      this.mesh.layers.set(1);
       this.mesh.traverse((child) => {
+        child.layers.set(1);
         if (child instanceof THREE.Mesh) {
           child.castShadow = true;
           child.receiveShadow = true;
@@ -220,16 +224,16 @@ export class ResourceEntity extends InteractableEntity {
       this.mesh.userData = {
         type: "resource",
         entityId: this.id,
-        name: "Tree Stump",
+        name: `${this.config.name} (Depleted)`,
         interactable: false,
         resourceType: this.config.resourceType,
         depleted: true,
       };
 
       this.node.add(this.mesh);
-      console.log("[ResourceEntity] ✅ Stump model loaded");
+      console.log("[ResourceEntity] ✅ Depleted model loaded");
     } catch (error) {
-      console.error("[ResourceEntity] Failed to load stump model:", error);
+      console.error("[ResourceEntity] Failed to load depleted model:", error);
       // Fallback: just hide the original mesh
       if (this.mesh) {
         this.mesh.visible = false;
@@ -240,9 +244,9 @@ export class ResourceEntity extends InteractableEntity {
   private async swapToFullModel(): Promise<void> {
     if (this.world.isServer || !this.node) return;
 
-    console.log("[ResourceEntity] 🌳 Swapping to full tree model");
+    console.log("[ResourceEntity] 🔄 Swapping back to full model (respawned)");
 
-    // Remove current stump mesh
+    // Remove current depleted mesh
     if (this.mesh) {
       this.node.remove(this.mesh);
       this.mesh = null;
@@ -298,25 +302,14 @@ export class ResourceEntity extends InteractableEntity {
       const wasDepleted = this.config.depleted;
       this.config.depleted = Boolean(data.depleted);
 
-      // Update visual state based on depletion - swap to stump for trees
+      // Update visual state based on depletion - swap to depleted model
       if (this.config.depleted && !wasDepleted) {
-        // Just became depleted - swap to stump
+        // Just became depleted - swap to depleted model
         this.swapToStump();
       } else if (!this.config.depleted && wasDepleted) {
-        // Just respawned - swap back to full tree
+        // Just respawned - swap back to full model
         this.swapToFullModel();
       }
-    }
-
-    // CRITICAL: Enforce uniform node scale to prevent stretching
-    // Some network updates might try to apply non-uniform scale
-    if (
-      this.node &&
-      (this.node.scale.x !== 1 ||
-        this.node.scale.y !== 1 ||
-        this.node.scale.z !== 1)
-    ) {
-      this.node.scale.set(1, 1, 1);
     }
   }
 
@@ -325,7 +318,9 @@ export class ResourceEntity extends InteractableEntity {
       return;
     }
 
-    // Try to load 3D model if available (same approach as MobEntity for Meshy models)
+    // Try to load 3D model if available
+    // SIMPLIFIED APPROACH: Match FurnaceEntity's simpler model loading that works correctly
+    // Previous approach had complex scale normalization that caused "smooshed" appearance
     if (this.config.model && this.world.loader) {
       try {
         const { scene } = await modelCache.loadModel(
@@ -336,12 +331,7 @@ export class ResourceEntity extends InteractableEntity {
         this.mesh = scene;
         this.mesh.name = `Resource_${this.config.resourceType}`;
 
-        // CRITICAL: Force node scale to be uniform (prevent stretching)
-        // Some systems might try to apply non-uniform scale - prevent this
-        this.node.scale.set(1, 1, 1);
-
         // Use scale from manifest config, with fallback defaults per resource type
-        // ALWAYS use uniform scaling to preserve model proportions
         let modelScale = this.config.modelScale ?? 1.0;
 
         // Fallback defaults if manifest doesn't specify scale
@@ -351,27 +341,15 @@ export class ResourceEntity extends InteractableEntity {
           }
         }
 
-        // Apply UNIFORM scale only (x=y=z to prevent stretching)
+        // Apply uniform scale directly to mesh (same as FurnaceEntity)
+        // Do NOT manipulate internal node scales - this causes issues
         this.mesh.scale.set(modelScale, modelScale, modelScale);
 
-        this.mesh.updateMatrix();
-        this.mesh.updateMatrixWorld(true);
-
-        // Handle skeletal meshes and set layer for minimap exclusion
-        this.mesh.layers.set(1); // Main camera only, not minimap
+        // Set layer for minimap exclusion and enable shadows
+        // (Same simple traverse as FurnaceEntity - only for layers/shadows, no scale manipulation)
+        this.mesh.layers.set(1);
         this.mesh.traverse((child) => {
-          // PERFORMANCE: Set all children to layer 1 (minimap only sees layer 0)
           child.layers.set(1);
-
-          if (child instanceof THREE.SkinnedMesh && child.skeleton) {
-            child.updateMatrix();
-            child.updateMatrixWorld(true);
-            child.bindMode = THREE.DetachedBindMode;
-            child.bindMatrix.copy(child.matrixWorld);
-            child.bindMatrixInverse.copy(child.bindMatrix).invert();
-          }
-
-          // Enable shadows on all meshes
           if (child instanceof THREE.Mesh) {
             child.castShadow = true;
             child.receiveShadow = true;
@@ -396,7 +374,6 @@ export class ResourceEntity extends InteractableEntity {
         // Offset mesh so the bottom (minY) is at Y=0 (ground level)
         // Node position is already at terrain height, so mesh Y is relative to that
         this.mesh.position.set(0, -minY, 0);
-        // Note: Don't reset quaternion if we applied base rotation above
 
         this.node.add(this.mesh);
         return;

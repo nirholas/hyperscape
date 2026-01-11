@@ -99,6 +99,16 @@ export interface GatheringToolData {
   levelRequired: number;
   /** For mining: ticks between roll attempts (OSRS-accurate) */
   rollTicks?: number;
+  /**
+   * For mining (dragon/crystal pickaxe): Chance for bonus speed roll.
+   * OSRS: Dragon has 1/6 (0.167), Crystal has 1/4 (0.25) chance for 2-tick roll.
+   */
+  bonusTickChance?: number;
+  /**
+   * For mining (dragon/crystal pickaxe): Tick count when bonus triggers.
+   * OSRS: Both use 2 ticks when bonus triggers (vs normal 3).
+   */
+  bonusRollTicks?: number;
   /** Priority for best tool selection (lower = better, 1 = best) */
   priority: number;
 }

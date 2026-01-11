@@ -106,6 +106,39 @@ export class ModelCache {
   }
 
   /**
+   * Normalize non-uniform scales in a GLTF model hierarchy.
+   *
+   * Some 3D modeling tools (Blender, etc.) export models with non-uniform scales
+   * baked into internal nodes (e.g., a child with scale (2, 0.5, 1)).
+   * This causes models to appear "squished" or "stretched".
+   *
+   * This method traverses all nodes and resets non-uniform scales to (1, 1, 1).
+   * Called ONCE when a model is first loaded, before caching.
+   *
+   * Note: We only reset NON-UNIFORM scales. Uniform scales (x === y === z) are
+   * intentional sizing and should be preserved.
+   */
+  private normalizeScales(scene: THREE.Object3D): void {
+    scene.traverse((node) => {
+      const s = node.scale;
+      // Check if scale is non-uniform (causes distortion)
+      const isNonUniform =
+        Math.abs(s.x - s.y) > 0.001 ||
+        Math.abs(s.y - s.z) > 0.001 ||
+        Math.abs(s.x - s.z) > 0.001;
+
+      if (isNonUniform) {
+        // Reset to identity scale to prevent distortion
+        node.scale.set(1, 1, 1);
+        node.updateMatrix();
+      }
+    });
+
+    // Propagate matrix updates through the hierarchy
+    scene.updateMatrixWorld(true);
+  }
+
+  /**
    * Setup materials for WebGPU/CSM compatibility
    * This ensures proper shadows and rendering
    * Also converts non-PBR materials to MeshStandardMaterial for proper lighting
@@ -393,6 +426,12 @@ export class ModelCache {
             "ModelCache received Hyperscape Node - this indicates a loader system conflict",
           );
         }
+
+        // CRITICAL: Normalize non-uniform scales in the GLTF hierarchy BEFORE caching.
+        // Some 3D modeling tools export models with non-uniform scales on internal nodes
+        // (e.g., scale (2, 0.5, 1)) which causes "squished" appearance.
+        // By normalizing here, all clones will have correct proportions.
+        this.normalizeScales(gltf.scene);
 
         // CRITICAL: Setup materials on the original scene for WebGPU/CSM
         // This ensures all clones will have properly configured materials

@@ -142,25 +142,41 @@ export const GATHERING_CONSTANTS = {
   } as const,
 
   /**
-   * Mining success rates by ore type.
-   * Values are x/256 (success numerator).
+   * Mining success rates by ore type (OSRS-accurate).
+   * Values are x/256 (success numerator) for the LERP formula.
    *
    * OSRS: Pickaxe tier does NOT affect success rate, only roll frequency.
    * Success rate depends only on Mining level.
    *
+   * Formula: P(Level) = (1 + floor(low × (99 - L) / 98 + high × (L - 1) / 98 + 0.5)) / 256
+   *
+   * OSRS Wiki Data:
+   * - Copper/Tin: ~39.5% at L1, 100% at L62
+   * - Iron: ~52% at L15, 100% at L63
+   * - Coal: ~16.4% at L30, ~39.5% at L99
+   * - Mithril: ~11.7% at L55, ~19.9% at L99
+   * - Adamantite: ~7.4% at L70, ~10.2% at L99
+   * - Runite: 17/256 (~6.64%) at L85, 19/256 (~7.42%) at L97+ (confirmed by Mod Ash)
+   *
    * @see https://oldschool.runescape.wiki/w/Mining
+   * @see https://oldschool.runescape.wiki/w/Skilling_success_rate
    */
   MINING_SUCCESS_RATES: {
-    // Copper ore (level 1)
-    ore_copper: { low: 64, high: 220 },
-    // Tin ore (level 1)
-    ore_tin: { low: 64, high: 220 },
-    // Iron ore (level 15)
-    ore_iron: { low: 48, high: 180 },
-    // Coal (level 30)
-    ore_coal: { low: 32, high: 140 },
-    // Mithril ore (level 55)
-    ore_mithril: { low: 24, high: 120 },
+    // Copper ore (level 1) - 39.5% at L1, 100% at L62
+    ore_copper: { low: 100, high: 256 },
+    // Tin ore (level 1) - same as copper
+    ore_tin: { low: 100, high: 256 },
+    // Iron ore (level 15) - 52% at L15, 100% at L63
+    ore_iron: { low: 133, high: 256 },
+    // Coal (level 30) - 16.4% at L30, 39.5% at L99
+    ore_coal: { low: 42, high: 101 },
+    // Mithril ore (level 55) - 11.7% at L55, 19.9% at L99
+    ore_mithril: { low: 30, high: 51 },
+    // Adamantite ore (level 70) - 7.4% at L70, 10.2% at L99
+    ore_adamant: { low: 19, high: 26 },
+    // Runite ore (level 85) - 6.64% at L85, 7.42% at L97+
+    // Confirmed by Mod Ash: 17/256 at L85, 19/256 at L97+
+    ore_runite: { low: 17, high: 19 },
   } as const,
 
   /**
@@ -232,15 +248,23 @@ export const GATHERING_CONSTANTS = {
     redwood: 199, // ~119.4 seconds
   } as const,
 
-  // === Mining Depletion (chance-based, NOT timer) ===
+  // === Mining Depletion (OSRS: always depletes) ===
   /**
-   * Mining uses chance-based depletion, not timer-based like Forestry trees.
-   * Each ore mined has a chance to deplete the rock.
+   * Mining rocks ALWAYS deplete after yielding one ore in OSRS.
+   * There is NO random chance - depletion is guaranteed (100%).
    *
+   * The only exception is Mining gloves which can prevent depletion:
+   * - Mining gloves: 1 extra ore before depletion (silver, coal, gold)
+   * - Superior mining gloves: 1-2 extra ores (iron, silver, coal, gold, mithril)
+   * - Expert mining gloves: 1-3 extra ores (all ores)
+   * (Mining gloves not currently implemented)
+   *
+   * @see https://oldschool.runescape.wiki/w/Copper_rocks
+   * @see https://oldschool.runescape.wiki/w/Iron_rocks
    * @see https://oldschool.runescape.wiki/w/Mining
    */
-  MINING_DEPLETE_CHANCE: 0.125, // 1/8 for most rocks
-  MINING_REDWOOD_DEPLETE_CHANCE: 0.091, // 1/11 for redwood stumps
+  MINING_DEPLETE_CHANCE: 1.0, // OSRS: Always depletes after one ore
+  MINING_REDWOOD_DEPLETE_CHANCE: 0.091, // 1/11 for redwood stumps (woodcutting)
 
   // === Timer Regeneration ===
   /**
