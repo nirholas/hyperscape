@@ -291,12 +291,17 @@ export class DevStats extends System {
   }
 
   /**
-   * Setup keyboard toggle (backslash key)
+   * Setup keyboard toggle (F5 or backslash key)
+   * F5 matches Minecraft's debug screen keybind
    */
   private setupKeyboardToggle(): void {
     document.addEventListener("keydown", (e) => {
-      if (e.key === "\\" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        // Prevent typing backslash in inputs
+      const isToggleKey =
+        e.key === "F5" ||
+        (e.key === "\\" && !e.ctrlKey && !e.metaKey && !e.altKey);
+
+      if (isToggleKey) {
+        // Prevent typing in inputs
         if (
           e.target instanceof HTMLInputElement ||
           e.target instanceof HTMLTextAreaElement
