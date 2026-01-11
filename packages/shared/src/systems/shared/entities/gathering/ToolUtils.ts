@@ -5,6 +5,8 @@
  * These are pure functions with no system dependencies.
  */
 
+import { isNotedItemId } from "../../../../data/NoteGenerator";
+
 /**
  * OSRS fishing tools that require exact matching (not interchangeable)
  */
@@ -104,6 +106,11 @@ export function itemMatchesToolCategory(
   itemId: string,
   category: string,
 ): boolean {
+  // Noted items are bank notes - cannot be used as tools
+  if (isNotedItemId(itemId)) {
+    return false;
+  }
+
   const lowerItemId = itemId.toLowerCase();
 
   // If category is an exact fishing tool, require exact match
