@@ -196,6 +196,25 @@ export class InteractionSessionManager implements ISessionReader {
     // NOTE: We intentionally do NOT listen for DIALOGUE_END events here.
     // Same reasoning as STORE_CLOSE above - user-initiated closes should not
     // clear the server session to avoid race conditions with new UI opens.
+
+    // OSRS-accurate: Close bank/store/dialogue if player is attacked
+    // In OSRS, being attacked (even a splash/miss) interrupts banking
+    const combatDamageHandler = (event: unknown) => {
+      const data = event as {
+        targetId: string;
+        targetType: "player" | "mob";
+        damage: number;
+      };
+      // OSRS-accurate: Close session when player is ATTACKED, not just when taking damage
+      // In OSRS, even a splash/miss (damage=0) interrupts banking - being in combat matters
+      if (data.targetType === "player" && this.sessions.has(data.targetId)) {
+        this.closeSession(data.targetId, "combat");
+      }
+    };
+    this.world.on(EventType.COMBAT_DAMAGE_DEALT, combatDamageHandler);
+    this.eventUnsubscribers.push(() =>
+      this.world.off(EventType.COMBAT_DAMAGE_DEALT, combatDamageHandler),
+    );
   }
 
   /**
@@ -261,7 +280,8 @@ export class InteractionSessionManager implements ISessionReader {
       | "distance"
       | "disconnect"
       | "new_session"
-      | "target_gone" = "user_action",
+      | "target_gone"
+      | "combat" = "user_action",
     sendPacket = true,
   ): void {
     const session = this.sessions.get(playerId);
