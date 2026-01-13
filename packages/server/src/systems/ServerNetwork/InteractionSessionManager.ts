@@ -201,13 +201,16 @@ export class InteractionSessionManager implements ISessionReader {
     // In OSRS, being attacked (even a splash/miss) interrupts banking
     const combatDamageHandler = (event: unknown) => {
       const data = event as {
-        targetId: string;
-        targetType: "player" | "mob";
-        damage: number;
+        targetId?: string;
+        targetType?: "player" | "mob";
       };
+      // Guard: ensure required fields exist (defensive against malformed events)
+      if (!data.targetId || data.targetType !== "player") {
+        return;
+      }
       // OSRS-accurate: Close session when player is ATTACKED, not just when taking damage
-      // In OSRS, even a splash/miss (damage=0) interrupts banking - being in combat matters
-      if (data.targetType === "player" && this.sessions.has(data.targetId)) {
+      // Even a splash/miss (damage=0) interrupts banking - being in combat matters
+      if (this.sessions.has(data.targetId)) {
         this.closeSession(data.targetId, "combat");
       }
     };
