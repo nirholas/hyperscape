@@ -191,22 +191,6 @@ export class RaycastService {
     // Raycast against all scene objects
     const intersects = _raycaster.intersectObjects(scene.children, true);
 
-    // Debug: Log first few intersections to trace fire detection issues
-    if (intersects.length > 0) {
-      console.log(
-        "[RaycastService] 🔍 Raycast hit",
-        intersects.length,
-        "objects. First 3:",
-        intersects.slice(0, 3).map((i) => ({
-          name: i.object.name,
-          type: i.object.type,
-          userData: i.object.userData,
-          layers: i.object.layers?.mask,
-          distance: i.distance.toFixed(2),
-        })),
-      );
-    }
-
     for (const intersect of intersects) {
       // Skip objects beyond max raycast distance
       if (intersect.distance > INPUT.MAX_RAYCAST_DISTANCE) continue;
@@ -224,18 +208,7 @@ export class RaycastService {
           userData?.itemId;
 
         if (entityId) {
-          console.log(
-            "[RaycastService] 🔍 Found entityId:",
-            entityId,
-            "userData.type:",
-            userData?.type,
-          );
           const entity = this.world.entities.get(entityId);
-          console.log(
-            "[RaycastService] 🔍 Entity in world.entities:",
-            !!entity,
-            entity?.destroyed ? "(destroyed)" : "",
-          );
           // Skip destroyed entities - they may still be in scene during async cleanup
           // This is defense-in-depth for the dead mob / item drop overlap issue
           if (entity && !entity.destroyed) {
@@ -270,16 +243,7 @@ export class RaycastService {
           }
 
           // Special handling for fire entities (not in world.entities, managed by ProcessingSystem)
-          console.log("[RaycastService] 🔥 Checking fire condition:", {
-            userDataType: userData.type,
-            entityIdStartsWithFire: entityId.startsWith("fire_"),
-            shouldMatchFire:
-              userData.type === "fire" && entityId.startsWith("fire_"),
-          });
           if (userData.type === "fire" && entityId.startsWith("fire_")) {
-            console.log(
-              "[RaycastService] 🔥 Fire entity matched! Returning result.",
-            );
             obj.getWorldPosition(_worldPos);
 
             const result: RaycastTarget = {

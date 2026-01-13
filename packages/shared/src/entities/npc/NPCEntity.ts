@@ -87,6 +87,11 @@ export class NPCEntity extends Entity {
   private _avatarInstance: VRMAvatarInstance | null = null;
   private _currentEmote: string | null = null;
 
+  // PERFORMANCE: Raycast proxy mesh for fast entity detection
+  // VRM SkinnedMesh raycast is extremely slow (~700-1800ms) because THREE.js
+  // must transform every vertex by bone weights. This simple capsule is instant.
+  private _raycastProxy: THREE.Mesh | null = null;
+
   /** Animation LOD controller - throttles animation updates for distant NPCs */
   private readonly _animationLOD = new AnimationLOD({
     fullDistance: 25, // Full 60fps animation within 25m (NPCs need close-up detail)
@@ -366,6 +371,10 @@ export class NPCEntity extends Entity {
       instanceWithRaw.raw.scene.traverse((child) => {
         child.userData = { ...userData };
         child.layers.set(1);
+        // PERFORMANCE: Disable raycasting on VRM meshes - use _raycastProxy instead
+        // SkinnedMesh raycast is extremely slow (~700-1800ms) because THREE.js
+        // must transform every vertex by bone weights. The capsule proxy is instant.
+        child.raycast = () => {};
       });
     }
   }
@@ -377,10 +386,58 @@ export class NPCEntity extends Entity {
     this.updateAnimationsWithDelta(deltaTime);
   }
 
+  /**
+   * Create invisible raycast proxy for fast click detection
+   *
+   * PERFORMANCE: VRM SkinnedMesh raycast is extremely slow (~700-1800ms) because
+   * THREE.js must transform every vertex by bone weights. This simple capsule
+   * mesh is added directly to THREE.Scene and provides instant raycast response.
+   */
+  private createRaycastProxy(): void {
+    if (this._raycastProxy) return; // Already created
+
+    const scene = this.world.stage?.scene;
+    if (!scene) return;
+
+    // Create capsule geometry sized for humanoid NPC (same as MobEntity/PlayerRemote)
+    const geometry = new THREE.CapsuleGeometry(0.4, 1.2, 4, 8);
+    const material = new THREE.MeshBasicMaterial({
+      visible: false, // Invisible but raycastable
+    });
+
+    this._raycastProxy = new THREE.Mesh(geometry, material);
+    this._raycastProxy.name = `NPC_RaycastProxy_${this.config.npcType}_${this.id}`;
+
+    // CRITICAL: Set userData for click detection (matches VRM/GLB userData)
+    this._raycastProxy.userData = {
+      type: "npc",
+      entityId: this.id,
+      npcId: this.config.npcId,
+      name: this.config.name,
+      interactable: true,
+      npcType: this.config.npcType,
+      services: this.config.services,
+    };
+
+    // Set to layer 1 (main camera only, not minimap)
+    this._raycastProxy.layers.set(1);
+
+    // Add directly to THREE.Scene (bypasses Node system for performance)
+    scene.add(this._raycastProxy);
+
+    // Sync initial position
+    this._raycastProxy.position.copy(this.node.position);
+    this._raycastProxy.position.y += 0.8; // Center on NPC body
+  }
+
   protected async createMesh(): Promise<void> {
     if (this.world.isServer) {
       return;
     }
+
+    // PERFORMANCE: Create invisible raycast proxy FIRST for instant click detection
+    // This bypasses expensive VRM SkinnedMesh raycast (~700-1800ms per click)
+    this.createRaycastProxy();
 
     // Try to load 3D model if available
     if (this.config.model && this.world.loader) {
@@ -440,6 +497,8 @@ export class NPCEntity extends Entity {
         this.mesh.userData = userData;
         this.mesh.traverse((child) => {
           child.userData = { ...userData };
+          // PERFORMANCE: Disable raycasting on GLB meshes - use _raycastProxy instead
+          child.raycast = () => {};
         });
 
         // Add as child of node (standard approach with correct scale)
@@ -525,6 +584,12 @@ export class NPCEntity extends Entity {
    */
   protected clientUpdate(deltaTime: number): void {
     super.clientUpdate(deltaTime);
+
+    // PERFORMANCE: Sync raycast proxy position with NPC
+    if (this._raycastProxy) {
+      this._raycastProxy.position.copy(this.node.position);
+      this._raycastProxy.position.y += 0.8; // Center on NPC body
+    }
 
     // ANIMATION LOD: Calculate distance to camera once and throttle animation updates
     // This reduces CPU/GPU load for distant NPCs significantly
@@ -630,9 +695,20 @@ export class NPCEntity extends Entity {
   }
 
   /**
-   * Override destroy to clean up animations and avatar
+   * Override destroy to clean up animations, avatar, and raycast proxy
    */
   override destroy(): void {
+    // Clean up raycast proxy (added directly to scene)
+    if (this._raycastProxy) {
+      const scene = this.world.stage?.scene;
+      if (scene) {
+        scene.remove(this._raycastProxy);
+      }
+      this._raycastProxy.geometry.dispose();
+      (this._raycastProxy.material as THREE.Material).dispose();
+      this._raycastProxy = null;
+    }
+
     // Clean up VRM avatar instance
     if (this._avatarInstance) {
       this._avatarInstance.destroy();
