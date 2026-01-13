@@ -29,6 +29,7 @@ import {
   chebyshevDistance,
   type ISessionReader,
   type InteractionSession as SharedInteractionSession,
+  type SessionCloseReason,
 } from "@hyperscape/shared";
 import type { BroadcastManager } from "./broadcast";
 import type { TickSystem } from "../TickSystem";
@@ -278,13 +279,7 @@ export class InteractionSessionManager implements ISessionReader {
    */
   closeSession(
     playerId: string,
-    reason:
-      | "user_action"
-      | "distance"
-      | "disconnect"
-      | "new_session"
-      | "target_gone"
-      | "combat" = "user_action",
+    reason: SessionCloseReason = "user_action",
     sendPacket = true,
   ): void {
     const session = this.sessions.get(playerId);
@@ -372,7 +367,7 @@ export class InteractionSessionManager implements ISessionReader {
    */
   private validateSession(session: InternalSession): {
     valid: boolean;
-    reason: "distance" | "target_gone";
+    reason: Extract<SessionCloseReason, "distance" | "target_gone">;
   } {
     // Get player entity
     const playerSocket = this.broadcast.getPlayerSocket(session.playerId);

@@ -122,6 +122,7 @@ import {
   AnimationLOD,
   getCameraPosition,
 } from "../../utils/rendering/AnimationLOD";
+import { RAYCAST_PROXY } from "../../systems/client/interaction/constants";
 
 // Polyfill ProgressEvent for Node.js server environment
 
@@ -1002,10 +1003,15 @@ export class MobEntity extends CombatantEntity {
     // Create invisible capsule geometry matching mob's expected size
     // Use manifest scale to size placeholder appropriately
     const configScale = this.config.scale;
-    const baseRadius = 0.4 * configScale.x;
-    const baseHeight = 1.6 * configScale.y;
+    const baseRadius = RAYCAST_PROXY.BASE_RADIUS * configScale.x;
+    const baseHeight = RAYCAST_PROXY.TALL_HEIGHT * configScale.y;
 
-    const geometry = new THREE.CapsuleGeometry(baseRadius, baseHeight, 4, 8);
+    const geometry = new THREE.CapsuleGeometry(
+      baseRadius,
+      baseHeight,
+      RAYCAST_PROXY.CAP_SEGMENTS,
+      RAYCAST_PROXY.HEIGHT_SEGMENTS,
+    );
     const material = new THREE.MeshBasicMaterial({
       visible: false, // Invisible - only for click detection
       transparent: true,

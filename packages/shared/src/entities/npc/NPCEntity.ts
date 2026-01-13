@@ -76,6 +76,7 @@ import {
   AnimationLOD,
   getCameraPosition,
 } from "../../utils/rendering/AnimationLOD";
+import { RAYCAST_PROXY } from "../../systems/client/interaction/constants";
 
 // Re-export types for external use
 export type { NPCEntityConfig } from "../../types/entities";
@@ -399,8 +400,13 @@ export class NPCEntity extends Entity {
     const scene = this.world.stage?.scene;
     if (!scene) return;
 
-    // Create capsule geometry sized for humanoid NPC (same as MobEntity/PlayerRemote)
-    const geometry = new THREE.CapsuleGeometry(0.4, 1.2, 4, 8);
+    // Create capsule geometry sized for humanoid NPC
+    const geometry = new THREE.CapsuleGeometry(
+      RAYCAST_PROXY.BASE_RADIUS,
+      RAYCAST_PROXY.BASE_HEIGHT,
+      RAYCAST_PROXY.CAP_SEGMENTS,
+      RAYCAST_PROXY.HEIGHT_SEGMENTS,
+    );
     const material = new THREE.MeshBasicMaterial({
       visible: false, // Invisible but raycastable
     });
@@ -427,7 +433,7 @@ export class NPCEntity extends Entity {
 
     // Sync initial position
     this._raycastProxy.position.copy(this.node.position);
-    this._raycastProxy.position.y += 0.8; // Center on NPC body
+    this._raycastProxy.position.y += RAYCAST_PROXY.Y_OFFSET;
   }
 
   protected async createMesh(): Promise<void> {
@@ -588,7 +594,7 @@ export class NPCEntity extends Entity {
     // PERFORMANCE: Sync raycast proxy position with NPC
     if (this._raycastProxy) {
       this._raycastProxy.position.copy(this.node.position);
-      this._raycastProxy.position.y += 0.8; // Center on NPC body
+      this._raycastProxy.position.y += RAYCAST_PROXY.Y_OFFSET;
     }
 
     // ANIMATION LOD: Calculate distance to camera once and throttle animation updates

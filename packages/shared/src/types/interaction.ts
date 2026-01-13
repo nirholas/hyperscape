@@ -90,9 +90,14 @@ export interface IRateLimiter {
 // ENUMS AND CONSTANTS
 // ============================================================================
 
+/**
+ * Reason for closing an interaction session.
+ * Used by server-authoritative session management.
+ */
 export type SessionCloseReason =
-  | "user_closed"
-  | "distance"
-  | "disconnect"
-  | "new_session"
-  | "target_removed";
+  | "user_action" // Player explicitly closed UI
+  | "distance" // Player moved too far from target
+  | "disconnect" // Player disconnected
+  | "new_session" // Replaced by new session (opening another UI)
+  | "target_gone" // Target entity no longer exists
+  | "combat"; // Player was attacked (OSRS-style: interrupts banking)

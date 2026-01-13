@@ -100,6 +100,28 @@ export const INPUT = {
 } as const;
 
 /**
+ * Raycast proxy constants for entity click detection.
+ *
+ * PERFORMANCE: VRM SkinnedMesh raycast is extremely slow (~700-1800ms) because
+ * THREE.js must transform every vertex by bone weights. Invisible capsule
+ * proxies provide instant click detection.
+ */
+export const RAYCAST_PROXY = {
+  /** Base radius for humanoid proxies (meters) */
+  BASE_RADIUS: 0.4,
+  /** Base height for humanoid proxies (meters) */
+  BASE_HEIGHT: 1.2,
+  /** Y-offset to center proxy on entity body (meters) */
+  Y_OFFSET: 0.8,
+  /** Height for taller mob proxies (meters) */
+  TALL_HEIGHT: 1.6,
+  /** Capsule geometry segments (radial) */
+  CAP_SEGMENTS: 4,
+  /** Capsule geometry segments (height) */
+  HEIGHT_SEGMENTS: 8,
+} as const;
+
+/**
  * Frame-based action queue constants
  */
 export const ACTION_QUEUE = {
