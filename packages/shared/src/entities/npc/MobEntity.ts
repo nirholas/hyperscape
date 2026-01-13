@@ -176,8 +176,10 @@ export class MobEntity extends CombatantEntity {
   // Track if death position has been terrain-snapped (Issue #244 fix)
   // Ensures death animation plays at ground level, not floating
   private _deathPositionTerrainSnapped = false;
-  // Placeholder hitbox for click detection before VRM loads (RuneScape-style: entity is functional immediately)
-  private _placeholderHitbox: THREE.Mesh | null = null;
+  // PERFORMANCE: Raycast proxy for fast click detection
+  // VRM SkinnedMesh raycast is extremely slow (~700-1800ms) because THREE.js
+  // must transform every vertex by bone weights. This simple capsule is instant.
+  private _raycastProxy: THREE.Mesh | null = null;
   // Track if visibility needs to be restored after respawn position update
   private _pendingRespawnRestore = false;
 
@@ -840,6 +842,10 @@ export class MobEntity extends CombatantEntity {
       this.mesh.layers.set(1);
       this.mesh.traverse((child) => {
         child.layers.set(1);
+        // PERFORMANCE: Disable raycasting on VRM meshes - use _raycastProxy instead
+        // SkinnedMesh raycast is extremely slow (~700-1800ms) because THREE.js
+        // must transform every vertex by bone weights. The capsule proxy is instant.
+        child.raycast = () => {};
       });
 
       // Apply manifest scale on top of VRM's height normalization
@@ -880,18 +886,14 @@ export class MobEntity extends CombatantEntity {
 
   /**
    * Load VRM model asynchronously (background loading).
-   * Replaces placeholder hitbox when complete.
+   * PERFORMANCE: Keeps raycast proxy for fast click detection after VRM loads.
    * This is the non-blocking wrapper for loadVRMModel() used by createMesh().
    */
   private async loadVRMModelAsync(): Promise<void> {
     try {
       await this.loadVRMModel();
-
-      // On success, remove placeholder (VRM scene is now the mesh)
-      // Only remove if VRM actually loaded (this.mesh was updated)
-      if (this.mesh && this.mesh !== this._placeholderHitbox) {
-        this.removePlaceholderHitbox();
-      }
+      // PERFORMANCE: Keep raycast proxy - don't remove it
+      // VRM meshes have raycast disabled in loadVRMModel()
     } catch (err) {
       // Log and re-throw so caller's catch block fires
       console.error(`[MobEntity] VRM load error for ${this.id}:`, err);
@@ -984,14 +986,16 @@ export class MobEntity extends CombatantEntity {
   }
 
   /**
-   * Create an invisible but clickable placeholder hitbox for the mob.
-   * This ensures the mob is interactive BEFORE VRM model loads.
-   * RuneScape-style: entity is functional immediately, visuals are secondary.
+   * Create an invisible raycast proxy for fast click detection.
    *
-   * The placeholder is an invisible capsule that matches the mob's expected size.
-   * It has full userData setup so click detection works immediately.
+   * PERFORMANCE: VRM SkinnedMesh raycast is extremely slow (~700-1800ms) because
+   * THREE.js must transform every vertex by bone weights. This simple capsule
+   * is instant and stays for the entity's lifetime.
+   *
+   * IMMEDIATE INTERACTION: Also ensures the mob is interactive BEFORE VRM loads.
+   * RuneScape-style: entity is functional immediately, visuals are secondary.
    */
-  private createPlaceholderHitbox(): void {
+  private createRaycastProxy(): void {
     // Skip on server - no visuals needed
     if (this.world.isServer) return;
 
@@ -1028,8 +1032,8 @@ export class MobEntity extends CombatantEntity {
     };
     hitbox.userData = { ...userData };
 
-    // Store reference for later removal when VRM loads
-    this._placeholderHitbox = hitbox;
+    // Store reference for cleanup in destroy()
+    this._raycastProxy = hitbox;
 
     // Add to node so it's in the scene and raycastable
     this.node.add(hitbox);
@@ -1040,15 +1044,16 @@ export class MobEntity extends CombatantEntity {
   }
 
   /**
-   * Remove placeholder hitbox after VRM model loads successfully.
-   * Cleans up geometry and material to prevent memory leaks.
+   * Destroy the raycast proxy during entity cleanup.
+   * PERFORMANCE: The proxy is kept for the entity's lifetime to provide fast
+   * click detection (VRM/GLB raycast is disabled). Only called in destroy().
    */
-  private removePlaceholderHitbox(): void {
-    if (this._placeholderHitbox) {
-      this.node.remove(this._placeholderHitbox);
-      this._placeholderHitbox.geometry.dispose();
-      (this._placeholderHitbox.material as THREE.Material).dispose();
-      this._placeholderHitbox = null;
+  private destroyRaycastProxy(): void {
+    if (this._raycastProxy) {
+      this.node.remove(this._raycastProxy);
+      this._raycastProxy.geometry.dispose();
+      (this._raycastProxy.material as THREE.Material).dispose();
+      this._raycastProxy = null;
     }
   }
 
@@ -1058,7 +1063,7 @@ export class MobEntity extends CombatantEntity {
     }
 
     // Create placeholder hitbox for immediate click detection before VRM loads
-    this.createPlaceholderHitbox();
+    this.createRaycastProxy();
 
     // Load 3D model in background (non-blocking)
     if (this.config.model && this.world.loader) {
@@ -1084,8 +1089,7 @@ export class MobEntity extends CombatantEntity {
           this.world,
         );
 
-        // GLB loaded successfully - remove placeholder and use GLB scene
-        this.removePlaceholderHitbox();
+        // GLB loaded successfully - keep raycast proxy for performance
         this.mesh = scene;
         this.mesh.name = `Mob_${this.config.mobType}_${this.id}`;
 
@@ -1105,6 +1109,8 @@ export class MobEntity extends CombatantEntity {
         this.mesh.traverse((child) => {
           // PERFORMANCE: Set all children to layer 1 (minimap only sees layer 0)
           child.layers.set(1);
+          // PERFORMANCE: Disable raycasting on GLB meshes - use _raycastProxy instead
+          child.raycast = () => {};
 
           if (child instanceof THREE.SkinnedMesh && child.skeleton) {
             // Ensure mesh matrix is updated
@@ -1164,8 +1170,8 @@ export class MobEntity extends CombatantEntity {
 
     // No model available - create visible placeholder capsule
     // Remove invisible placeholder (if it's still the current mesh)
-    if (this.mesh === this._placeholderHitbox) {
-      this.removePlaceholderHitbox();
+    if (this.mesh === this._raycastProxy) {
+      this.destroyRaycastProxy();
     }
 
     const mobName = String(this.config.mobType).toLowerCase();
@@ -1993,7 +1999,7 @@ export class MobEntity extends CombatantEntity {
     }
 
     // If mesh is the placeholder hitbox, skip animation (VRM still loading)
-    if (this.mesh === this._placeholderHitbox) {
+    if (this.mesh === this._raycastProxy) {
       // Just update position from terrain while waiting for VRM to load
       const terrain = this.world.getSystem("terrain");
       if (terrain && "getHeightAt" in terrain) {
@@ -2875,7 +2881,7 @@ export class MobEntity extends CombatantEntity {
     this.world.setHot(this, false);
 
     // Clean up placeholder hitbox (if VRM never loaded)
-    this.removePlaceholderHitbox();
+    this.destroyRaycastProxy();
 
     // Clean up health bar handle (HealthBars system)
     if (this._healthBarHandle) {
