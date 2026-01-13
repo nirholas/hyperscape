@@ -239,6 +239,15 @@ export class MobEntity extends CombatantEntity {
     pauseDistance: 150, // No animation beyond 150m (bind pose)
   });
 
+  /** Emote name to URL mapping - pre-allocated to avoid allocation in hot path */
+  private readonly _emoteMap: Record<string, string> = {
+    idle: Emotes.IDLE,
+    walk: Emotes.WALK,
+    run: Emotes.RUN,
+    combat: Emotes.COMBAT,
+    death: Emotes.DEATH,
+  };
+
   /**
    * Find an unoccupied tile for spawning using spiral search
    *
@@ -1690,19 +1699,10 @@ export class MobEntity extends CombatantEntity {
     }
 
     // Map symbolic emote names to asset URLs (same as PlayerRemote)
-    let emoteUrl: string;
-    if (serverEmote.startsWith("asset://")) {
-      emoteUrl = serverEmote;
-    } else {
-      const emoteMap: Record<string, string> = {
-        idle: Emotes.IDLE,
-        walk: Emotes.WALK,
-        run: Emotes.RUN,
-        combat: Emotes.COMBAT,
-        death: Emotes.DEATH,
-      };
-      emoteUrl = emoteMap[serverEmote] || Emotes.IDLE;
-    }
+    // Uses pre-allocated _emoteMap to avoid allocation in hot path
+    const emoteUrl = serverEmote.startsWith("asset://")
+      ? serverEmote
+      : this._emoteMap[serverEmote] || Emotes.IDLE;
 
     // Check if this is a "priority" emote (combat, death) that should override protection
     const isPriorityEmote =
