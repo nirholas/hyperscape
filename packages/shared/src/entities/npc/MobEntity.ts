@@ -248,6 +248,9 @@ export class MobEntity extends CombatantEntity {
     death: Emotes.DEATH,
   };
 
+  /** Duration of death animation in milliseconds (4.5 seconds) */
+  private readonly DEATH_ANIMATION_DURATION_MS = 4500;
+
   /**
    * Find an unoccupied tile for spawning using spiral search
    *
@@ -1732,7 +1735,8 @@ export class MobEntity extends CombatantEntity {
         const protectionMs = protectionTicks * TICK_DURATION_MS;
         this._manualEmoteOverrideUntil = Date.now() + protectionMs;
       } else if (emoteUrl.includes("death")) {
-        this._manualEmoteOverrideUntil = Date.now() + 4500; // 4500ms for full death animation (4.5 seconds)
+        this._manualEmoteOverrideUntil =
+          Date.now() + this.DEATH_ANIMATION_DURATION_MS;
       } else if (emoteUrl.includes("idle")) {
         this._manualEmoteOverrideUntil = 0; // Clear override when reset to idle
       }
