@@ -176,8 +176,16 @@ export class CombatAnimationManager {
     // Client returns to AI-state-based animation after
     const mobEntity = this.world.entities.get(entityId);
 
+    // Debug: Log mob combat emote attempt
+    console.log(
+      `[CombatAnimationManager] setMobCombatEmote: entityId=${entityId}, hasEntity=${!!mobEntity}, hasServerEmote=${hasServerEmote(mobEntity)}`,
+    );
+
     if (hasServerEmote(mobEntity)) {
       mobEntity.setServerEmote(Emotes.COMBAT);
+      console.log(
+        `[CombatAnimationManager] Called setServerEmote with: ${Emotes.COMBAT}`,
+      );
     }
   }
 

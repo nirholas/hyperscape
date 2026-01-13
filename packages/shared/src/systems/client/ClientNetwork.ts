@@ -921,6 +921,13 @@ export class ClientNetwork extends SystemBase {
     >,
   ) => {
     const { id } = data;
+    // Debug: Log raw packet data for mob emotes
+    const rawEmote = data.changes?.e ?? (data as Record<string, unknown>).e;
+    if (rawEmote && id.includes("goblin")) {
+      console.log(
+        `[ClientNetwork] onEntityModified for ${id}: raw emote="${rawEmote}"`,
+      );
+    }
     const entity = this.world.entities.get(id);
     if (!entity) {
       // Limit queued modifications per entity to avoid unbounded growth
