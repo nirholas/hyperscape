@@ -12,3 +12,4 @@ export * from "./PathPersistenceManager";
 export * from "./WanderBehavior";
 export * from "./EntityOccupancyMap";
 export * from "./CollisionFlags";
+export * from "./CollisionMatrix";
