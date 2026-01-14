@@ -114,6 +114,7 @@ import {
   getBestStepOutTile,
   type TileCoord,
 } from "../../systems/shared/movement/TileSystem";
+import { CollisionMask } from "../../systems/shared/movement/CollisionFlags";
 import type { EntityID } from "../../types/core/identifiers";
 import { getNPCSize, getOccupiedTiles } from "./LargeNPCSupport";
 import { getGameRng } from "../../utils/SeededRandom";
@@ -1399,6 +1400,17 @@ export class MobEntity extends CombatantEntity {
       getEntityId: () => this.id as EntityID,
       getEntityOccupancy: () => this.world.entityOccupancy,
       isWalkable: (tile) => {
+        // Check CollisionMatrix for static objects (trees, rocks, stations)
+        if (
+          this.world.collision.hasFlags(
+            tile.x,
+            tile.z,
+            CollisionMask.BLOCKS_WALK,
+          )
+        ) {
+          return false;
+        }
+
         // Check terrain walkability using TerrainSystem if available
         const terrain = this.world.getSystem("terrain");
         if (isTerrainSystem(terrain)) {
@@ -1429,6 +1441,17 @@ export class MobEntity extends CombatantEntity {
           this.world.entityOccupancy,
           this.id as EntityID,
           (tile) => {
+            // Check CollisionMatrix for static objects (trees, rocks, stations)
+            if (
+              this.world.collision.hasFlags(
+                tile.x,
+                tile.z,
+                CollisionMask.BLOCKS_WALK,
+              )
+            ) {
+              return false;
+            }
+
             // Check terrain walkability using type guard
             const terrain = this.world.getSystem?.("terrain");
             if (isTerrainSystem(terrain)) {
