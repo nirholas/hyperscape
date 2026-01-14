@@ -318,4 +318,124 @@ export class CollisionMatrix implements ICollisionMatrix {
     }
     return result;
   }
+
+  // ============================================================================
+  // NETWORK SERIALIZATION
+  // ============================================================================
+
+  /**
+   * Serialize a zone to base64 for network transport
+   * Zone data is 64 int32s = 256 bytes -> ~344 chars base64
+   *
+   * @param zoneX - Zone X coordinate
+   * @param zoneZ - Zone Z coordinate
+   * @returns Base64 encoded zone data, or null if zone not allocated
+   */
+  serializeZone(zoneX: number, zoneZ: number): string | null {
+    const data = this.getZoneData(zoneX, zoneZ);
+    if (!data) return null;
+
+    // Convert Int32Array to base64
+    const bytes = new Uint8Array(data.buffer);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+  }
+
+  /**
+   * Deserialize and apply zone data from base64
+   *
+   * @param zoneX - Zone X coordinate
+   * @param zoneZ - Zone Z coordinate
+   * @param base64Data - Base64 encoded zone data
+   * @returns True if successfully applied
+   */
+  deserializeZone(zoneX: number, zoneZ: number, base64Data: string): boolean {
+    try {
+      const binary = atob(base64Data);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+
+      const data = new Int32Array(bytes.buffer);
+      if (data.length !== TILES_PER_ZONE) {
+        console.error(
+          `CollisionMatrix: Invalid deserialized zone length ${data.length}`,
+        );
+        return false;
+      }
+
+      this.setZoneData(zoneX, zoneZ, data);
+      return true;
+    } catch (error) {
+      console.error("CollisionMatrix: Failed to deserialize zone:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Get all allocated zones within a tile radius
+   * Useful for sending relevant collision data to players
+   *
+   * @param centerTileX - Center tile X
+   * @param centerTileZ - Center tile Z
+   * @param radiusTiles - Radius in tiles
+   * @returns Array of zone coordinates with data
+   */
+  getZonesInRadius(
+    centerTileX: number,
+    centerTileZ: number,
+    radiusTiles: number,
+  ): Array<{ zoneX: number; zoneZ: number; data: Int32Array }> {
+    const centerZoneX = Math.floor(centerTileX / ZONE_SIZE);
+    const centerZoneZ = Math.floor(centerTileZ / ZONE_SIZE);
+    const zoneRadius = Math.ceil(radiusTiles / ZONE_SIZE);
+
+    const result: Array<{ zoneX: number; zoneZ: number; data: Int32Array }> =
+      [];
+
+    for (let dx = -zoneRadius; dx <= zoneRadius; dx++) {
+      for (let dz = -zoneRadius; dz <= zoneRadius; dz++) {
+        const zoneX = centerZoneX + dx;
+        const zoneZ = centerZoneZ + dz;
+        const data = this.getZoneData(zoneX, zoneZ);
+        if (data) {
+          result.push({ zoneX, zoneZ, data });
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Apply multiple zones from network data
+   * Used when receiving bulk collision data from server
+   *
+   * @param zones - Array of zone data to apply
+   */
+  applyNetworkZones(
+    zones: Array<{ zoneX: number; zoneZ: number; base64Data: string }>,
+  ): void {
+    for (const zone of zones) {
+      this.deserializeZone(zone.zoneX, zone.zoneZ, zone.base64Data);
+    }
+  }
+}
+
+/**
+ * Network packet type for zone collision sync
+ * Server sends this when player enters new area
+ */
+export interface ZoneCollisionPacket {
+  /** Zones to sync (only allocated zones with collision data) */
+  zones: Array<{
+    zoneX: number;
+    zoneZ: number;
+    /** Base64 encoded Int32Array[64] = 256 bytes */
+    data: string;
+  }>;
 }
