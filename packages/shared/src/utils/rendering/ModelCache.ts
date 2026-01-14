@@ -12,6 +12,22 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import type { World } from "../../core/World";
 
+/**
+ * Collision data embedded in GLB extras by inject-model-collision.ts
+ * This is the AAA approach - collision travels with the asset.
+ */
+export interface ModelCollisionData {
+  /** Footprint in tiles at scale 1.0 */
+  footprint: { width: number; depth: number };
+  /** Bounding box in model space */
+  bounds: {
+    min: { x: number; y: number; z: number };
+    max: { x: number; y: number; z: number };
+  };
+  /** Model dimensions (max - min) */
+  dimensions: { x: number; y: number; z: number };
+}
+
 interface CachedModel {
   scene: THREE.Object3D;
   animations: THREE.AnimationClip[];
@@ -19,6 +35,8 @@ interface CachedModel {
   cloneCount: number;
   /** Shared materials for this model type (one material per mesh index) */
   sharedMaterials: Map<number, THREE.Material | THREE.Material[]>;
+  /** Collision data from GLB extras (if present) */
+  collision?: ModelCollisionData;
 }
 
 export class ModelCache {
@@ -347,6 +365,8 @@ export class ModelCache {
     scene: THREE.Object3D;
     animations: THREE.AnimationClip[];
     fromCache: boolean;
+    /** Collision data from GLB extras (if present) */
+    collision?: ModelCollisionData;
   }> {
     const shareMaterials = options?.shareMaterials ?? true; // Default to sharing
     // Resolve asset:// URLs to actual URLs
@@ -407,6 +427,7 @@ export class ModelCache {
         scene: clonedScene,
         animations: cached.animations,
         fromCache: true,
+        collision: cached.collision,
       };
     }
 
@@ -429,6 +450,7 @@ export class ModelCache {
         scene: clonedScene,
         animations: result.animations,
         fromCache: true,
+        collision: result.collision,
       };
     }
 
@@ -482,12 +504,28 @@ export class ModelCache {
         // Extract materials for sharing across clones
         const sharedMaterials = this.extractSharedMaterials(gltf.scene);
 
+        // Extract collision data from GLB extras (AAA approach - collision travels with asset)
+        let collision: ModelCollisionData | undefined;
+        try {
+          const extras = (
+            gltf.parser?.json as {
+              extras?: { hyperscape?: { collision?: ModelCollisionData } };
+            }
+          )?.extras;
+          if (extras?.hyperscape?.collision) {
+            collision = extras.hyperscape.collision;
+          }
+        } catch {
+          // No collision data in this model - that's fine
+        }
+
         const cachedModel: CachedModel = {
           scene: gltf.scene,
           animations: gltf.animations,
           loadedAt: Date.now(),
           cloneCount: 0,
           sharedMaterials,
+          collision,
         };
 
         this.cache.set(resolvedPath, cachedModel);
@@ -532,6 +570,7 @@ export class ModelCache {
       scene: clonedScene,
       animations: result.animations,
       fromCache: false,
+      collision: result.collision,
     };
   }
 

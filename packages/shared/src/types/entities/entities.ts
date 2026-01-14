@@ -17,7 +17,10 @@ import type {
   PrayerComponent,
   StatsComponent,
 } from "../core";
-import type { ResourceFootprint } from "../game/resource-processing-types";
+import type {
+  ResourceFootprint,
+  FootprintSpec,
+} from "../game/resource-processing-types";
 import type { TileCoord } from "../../systems/shared/movement/TileSystem";
 
 // Enums for better type safety instead of string literals
@@ -431,6 +434,8 @@ export interface BankEntityConfig extends EntityConfig<BaseEntityProperties> {
   properties: BaseEntityProperties & {
     bankId: string;
   };
+  /** Collision footprint - predefined ("standard", "large") or custom { width, depth } */
+  footprint?: FootprintSpec;
 }
 
 // Spawn data interfaces for entity creation

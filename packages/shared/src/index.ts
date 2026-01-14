@@ -267,9 +267,14 @@ export { CombatSystem } from "./systems/shared/combat";
 export { LootSystem } from "./systems/shared/economy/LootSystem";
 export { StoreSystem } from "./systems/shared/economy/StoreSystem";
 export { ResourceSystem } from "./systems/shared/entities/ResourceSystem";
-export { FOOTPRINT_SIZES } from "./types/game/resource-processing-types";
+export {
+  FOOTPRINT_SIZES,
+  resolveFootprint,
+} from "./types/game/resource-processing-types";
 export type {
   ResourceFootprint,
+  FootprintDimensions,
+  FootprintSpec,
   Resource,
   Fire,
 } from "./types/game/resource-processing-types";
@@ -827,6 +832,15 @@ export {
   getCachedTimestamp,
   updateCachedTimestamp,
 } from "./systems/shared/movement/ObjectPools";
+export {
+  CollisionFlag,
+  CollisionMask,
+} from "./systems/shared/movement/CollisionFlags";
+export {
+  CollisionMatrix,
+  ZONE_SIZE,
+} from "./systems/shared/movement/CollisionMatrix";
+export type { ICollisionMatrix } from "./systems/shared/movement/CollisionMatrix";
 
 // ============================================================================
 // Interaction System (Store, Bank, Dialogue)

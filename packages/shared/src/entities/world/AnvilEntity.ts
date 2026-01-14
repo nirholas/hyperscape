@@ -39,6 +39,10 @@ import {
   worldToTile,
   type TileCoord,
 } from "../../systems/shared/movement/TileSystem";
+import {
+  resolveFootprint,
+  type FootprintSpec,
+} from "../../types/game/resource-processing-types";
 
 /** Default interaction range for anvils (in tiles) */
 const ANVIL_INTERACTION_RANGE = 2;
@@ -51,6 +55,8 @@ export interface AnvilEntityConfig {
   name?: string;
   position: { x: number; y: number; z: number };
   rotation?: { x: number; y: number; z: number };
+  /** Collision footprint - predefined ("standard", "large") or custom { width, depth } */
+  footprint?: FootprintSpec;
 }
 
 export class AnvilEntity extends InteractableEntity {
@@ -61,8 +67,11 @@ export class AnvilEntity extends InteractableEntity {
   /** Display name */
   public displayName: string;
 
-  /** Tile this station occupies for collision */
-  private collisionTile: TileCoord | null = null;
+  /** Tiles this station occupies for collision (supports multi-tile footprints) */
+  private collisionTiles: TileCoord[] = [];
+
+  /** Footprint specification for this station */
+  private footprint: FootprintSpec;
 
   constructor(world: World, config: AnvilEntityConfig) {
     // Convert to InteractableConfig format
@@ -103,15 +112,32 @@ export class AnvilEntity extends InteractableEntity {
     super(world, interactableConfig);
 
     this.displayName = config.name || "Anvil";
+    // Get footprint from manifest (data-driven), allow per-instance override via config
+    this.footprint =
+      config.footprint ?? stationDataProvider.getFootprint("anvil");
 
     // Register collision for this station (server-side only)
+    // Supports multi-tile footprints (e.g., "large" = 2x2 or { width: 2, depth: 1 })
+    // Collision is CENTERED on the model position, not starting from it
     if (this.world.isServer) {
-      this.collisionTile = worldToTile(config.position.x, config.position.z);
-      this.world.collision.addFlags(
-        this.collisionTile.x,
-        this.collisionTile.z,
-        CollisionFlag.BLOCKED,
-      );
+      const centerTile = worldToTile(config.position.x, config.position.z);
+      const size = resolveFootprint(this.footprint);
+
+      // Offset to center the footprint on the model
+      const offsetX = Math.floor(size.x / 2);
+      const offsetZ = Math.floor(size.z / 2);
+
+      // Calculate all tiles this station occupies (centered on position)
+      for (let dx = 0; dx < size.x; dx++) {
+        for (let dz = 0; dz < size.z; dz++) {
+          const tile = {
+            x: centerTile.x + dx - offsetX,
+            z: centerTile.z + dz - offsetZ,
+          };
+          this.collisionTiles.push(tile);
+          this.world.collision.addFlags(tile.x, tile.z, CollisionFlag.BLOCKED);
+        }
+      }
     }
   }
 
@@ -119,14 +145,12 @@ export class AnvilEntity extends InteractableEntity {
    * Clean up collision and resources when destroyed.
    */
   destroy(local?: boolean): void {
-    // Unregister collision tile (server-side only)
-    if (this.world.isServer && this.collisionTile) {
-      this.world.collision.removeFlags(
-        this.collisionTile.x,
-        this.collisionTile.z,
-        CollisionFlag.BLOCKED,
-      );
-      this.collisionTile = null;
+    // Unregister all collision tiles (server-side only)
+    if (this.world.isServer && this.collisionTiles.length > 0) {
+      for (const tile of this.collisionTiles) {
+        this.world.collision.removeFlags(tile.x, tile.z, CollisionFlag.BLOCKED);
+      }
+      this.collisionTiles = [];
     }
 
     super.destroy(local);

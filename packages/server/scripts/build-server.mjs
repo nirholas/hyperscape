@@ -1,11 +1,35 @@
 import * as esbuild from 'esbuild'
 import { fileURLToPath } from 'url'
 import path from 'path'
+import { spawn } from 'child_process'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const rootDir = path.join(__dirname, '../')
 
+// Step 1: Extract model bounds for automatic collision footprint calculation
+// This generates model-bounds.json from GLB files before server build
+console.log('Extracting model bounds...')
+const extractBounds = spawn('bun', ['run', path.join(__dirname, 'extract-model-bounds.ts')], {
+  cwd: rootDir,
+  stdio: 'pipe',
+})
+
+// Wait for bounds extraction to complete (suppress verbose output)
+await new Promise((resolve, reject) => {
+  extractBounds.on('close', (code) => {
+    if (code === 0) {
+      console.log('✓ Model bounds extracted to manifests/model-bounds.json')
+      resolve()
+    } else {
+      console.warn('⚠ Model bounds extraction had warnings (continuing build)')
+      resolve() // Don't fail build, just warn
+    }
+  })
+  extractBounds.on('error', reject)
+})
+
+// Step 2: Build the server
 const serverCtx = await esbuild.context({
   entryPoints: ['src/index.ts'],
   outfile: 'dist/index.js',

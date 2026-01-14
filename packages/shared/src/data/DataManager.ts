@@ -47,6 +47,7 @@ import {
 import {
   stationDataProvider,
   type StationsManifest,
+  type ModelBoundsManifest,
 } from "./StationDataProvider";
 
 // Define constants from JSON data
@@ -846,6 +847,18 @@ export class DataManager {
     // This is necessary in case it was already lazy-initialized before manifests loaded
     processingDataProvider.rebuild();
 
+    // Load model bounds manifest (for automatic footprint calculation)
+    // Must load BEFORE stations.json so footprints can be auto-calculated
+    try {
+      const boundsRes = await fetch(`${baseUrl}/model-bounds.json`);
+      const boundsManifest = (await boundsRes.json()) as ModelBoundsManifest;
+      stationDataProvider.loadModelBounds(boundsManifest);
+    } catch {
+      console.warn(
+        "[DataManager] model-bounds.json not found, using default footprints",
+      );
+    }
+
     // Load stations manifest
     try {
       const stationsRes = await fetch(`${baseUrl}/stations.json`);
@@ -921,6 +934,19 @@ export class DataManager {
     // Rebuild ProcessingDataProvider to use the loaded manifests
     // This is necessary in case it was already lazy-initialized before manifests loaded
     processingDataProvider.rebuild();
+
+    // Load model bounds manifest (for automatic footprint calculation)
+    // Must load BEFORE stations.json so footprints can be auto-calculated
+    try {
+      const boundsPath = path.join(manifestsDir, "model-bounds.json");
+      const boundsData = await fs.readFile(boundsPath, "utf-8");
+      const boundsManifest = JSON.parse(boundsData) as ModelBoundsManifest;
+      stationDataProvider.loadModelBounds(boundsManifest);
+    } catch {
+      console.warn(
+        "[DataManager] model-bounds.json not found, using default footprints",
+      );
+    }
 
     // Load stations manifest
     try {
