@@ -155,7 +155,7 @@ export class Entity implements IEntity {
   protected level: number = 1;
 
   // UI elements - Atlas-based (HealthBars system uses instanced mesh)
-  // NOTE: Nametags disabled - OSRS pattern: names shown in right-click menu only
+  // Names shown in right-click context menu only (OSRS pattern)
   private _entityHealthBarHandle: HealthBarHandle | null = null;
 
   // Pre-allocated matrix for health bar position updates
@@ -812,13 +812,12 @@ export class Entity implements IEntity {
   }
 
   /**
-   * Initialize visual elements (mesh, name tag, health bar) - from BaseEntity
+   * Initialize visual elements (mesh, health bar) - from BaseEntity
+   * Names shown in right-click context menu only (OSRS pattern)
    */
   protected initializeVisuals(): void {
     // Create main mesh - implemented by subclasses
     // Note: createMesh is async in Entity, so this will be called from init()
-
-    // Nametags disabled - OSRS pattern: names shown in right-click menu only
 
     // Only create health bars for combat entities (players and mobs)
     // Items, NPCs, and other entities should not have health bars

@@ -9,17 +9,6 @@ import type { ReactNode, CSSProperties } from "react";
 import type { World } from "../../index";
 import type { Curve } from "../../extras/animation/Curve";
 
-// Nametag interfaces (UI handle for manipulation)
-// Note: Health bars are now handled separately by HealthBars system
-export interface NametagHandle {
-  idx: number;
-  name: string;
-  matrix: THREE.Matrix4;
-  move: (newMatrix: THREE.Matrix4) => void;
-  setName: (name: string) => void;
-  destroy: () => void;
-}
-
 // Equipment UI interfaces
 export interface PlayerWithEquipmentSupport {
   position: THREE.Vector3;

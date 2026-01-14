@@ -3,7 +3,7 @@
  *
  * Provides core drawing functions for health bars used by:
  * - UIRenderer (sprite-based health bars for mobs/entities)
- * - Nametags (atlas-based health bars for players)
+ * - HealthBars system (atlas-based health bars for players)
  *
  * Single source of truth for health bar appearance (colors, dimensions, style).
  */
@@ -24,7 +24,7 @@ export const HEALTH_BAR_COLORS = {
 
 /**
  * Health bar dimensions - SINGLE SOURCE OF TRUTH
- * Used by both player nametags and mob sprites for consistent appearance
+ * Used by HealthBars system and mob sprites for consistent appearance
  */
 export const HEALTH_BAR_DIMENSIONS = {
   /** Canvas width in pixels (2x resolution for sharpness) */

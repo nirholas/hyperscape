@@ -4,12 +4,8 @@
  * Renders health bars for all entities (players and mobs) using a single
  * instanced mesh for optimal performance with TSL Node Materials.
  *
- * Similar architecture to Nametags but ONLY handles health bars.
- * This separation ensures clean responsibility:
- * - Nametags: names only
- * - HealthBars: health bars only
+ * Names are shown in right-click context menus only (OSRS pattern).
  *
- * @see Nametags for the name rendering system
  * @see HealthBarRenderer for the drawing logic
  */
 
@@ -134,7 +130,7 @@ export class HealthBars extends SystemBase {
       this.material,
       MAX_INSTANCES,
     );
-    this.mesh.renderOrder = 9998; // Just below nametags (9999)
+    this.mesh.renderOrder = 9998; // High render order for visibility
     this.mesh.matrixAutoUpdate = false;
     this.mesh.matrixWorldAutoUpdate = false;
     this.mesh.frustumCulled = false;

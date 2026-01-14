@@ -35,7 +35,7 @@
  * - Session data
  *
  * **UI Elements**:
- * - Nametag with player name
+ * - Name shown in right-click menu (OSRS pattern)
  * - Health bar (when damaged)
  * - Stamina bar (when depleted)
  * - Combat indicators
@@ -93,7 +93,7 @@ export class PlayerEntity extends CombatantEntity {
   private combatStyle: string;
   private isRunning: boolean = false;
 
-  // Player-specific UI elements (nameTag, healthBar now in Entity)
+  // Player-specific UI elements (healthBar now in Entity)
   private staminaBarUI: THREE.Sprite | null = null;
 
   // Chat animation - override in subclasses if needed
@@ -728,8 +728,8 @@ export class PlayerEntity extends CombatantEntity {
     context.strokeRect(0, 0, canvas.width, canvas.height);
   }
 
-  // Note: UI creation methods (createNameTag, createHealthBar) removed
-  // These are now handled by Entity.initializeVisuals() using UIRenderer
+  // Note: Health bar handled by HealthBars system
+  // Names shown in right-click context menu only (OSRS pattern)
 
   // Player-specific methods that can be called by Systems
 

@@ -14,10 +14,6 @@ interface NodeContext {
   [key: string]: unknown;
 }
 
-interface Nametag extends THREE.Object3D {
-  text: string;
-}
-
 interface PlayerEffect {
   emote?: string | null;
 }
@@ -78,7 +74,6 @@ export class AgentAvatar extends Node {
   // Player and model properties
   player: Player | null = null;
   model: THREE.Object3D | null = null;
-  nametag: Nametag | null = null;
   mixer: THREE.AnimationMixer | null = null;
   idleClip: THREE.AnimationClip | null = null;
   walkClip: THREE.AnimationClip | null = null;
@@ -152,14 +147,8 @@ export class AgentAvatar extends Node {
     );
     // --- End Model Update ---
 
-    // --- Name Tag Update (Partial) ---
-    if (this.nametag && player.data.name) {
-      this.nametag.text = player.data.name;
-    } else {
-      logger.info("[AgentAvatar] Nametag not available, skipping update.");
-    }
+    // Names shown in right-click context menu only (OSRS pattern)
     this.setDirty();
-    // --- End Name Tag Update ---
   }
 
   // --- Placeholder Methods ---

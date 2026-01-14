@@ -41,7 +41,7 @@
  *
  * **Visual Representation**:
  * - 3D model or humanoid mesh
- * - Nametag with NPC name and role
+ * - Name shown in right-click menu (OSRS pattern)
  * - NO health bar (cannot be damaged)
  * - Idle animations
  * - Interaction highlight when in range

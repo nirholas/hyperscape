@@ -34,7 +34,6 @@ import type { User } from "../network/networking";
 import type {
   PlayerTarget as PlayerTargetType,
   RendererWithDomElement as RendererWithDomElementType,
-  NametagData as NametagDataType,
   PhysXController as PhysXControllerType,
 } from "../rendering/nodes";
 import type {
@@ -292,9 +291,6 @@ export interface GroundCheckEntity {
   position: THREE.Vector3;
   lastGroundCheck?: GroundCheckResult;
 }
-
-// Nametag system interfaces - re-export from canonical location
-export type { NametagDataType as NametagData };
 
 // Spatial index interfaces (ID-based variant)
 export interface SpatialCellById {

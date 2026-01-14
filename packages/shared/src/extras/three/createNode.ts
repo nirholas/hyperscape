@@ -11,7 +11,7 @@
  * - 'rigidbody': Physics-enabled object
  * - 'collider': Collision shape
  * - 'avatar': VRM character model
- * - 'nametag': Player/NPC name label
+ * - 'healthbar': Entity health bar display
  * - 'ui': 2D UI overlay in 3D space
  * - 'uiview': UI container element
  * - 'uitext': Text label element

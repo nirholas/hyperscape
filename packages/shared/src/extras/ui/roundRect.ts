@@ -19,7 +19,7 @@
  * fillRoundRect(ctx, 10, 10, 100, 50, 8, '#4169e1');
  * ```
  *
- * Referenced by: UI nodes (UIView, UIText), UIRenderer, nametag system
+ * Referenced by: UI nodes (UIView, UIText), UIRenderer, HealthBars system
  */
 
 /**

@@ -824,10 +824,10 @@ export class PlayerLocal extends Entity implements HotReloadable {
 
   /**
    * Override initializeVisuals to skip UIRenderer-based UI elements
-   * PlayerLocal uses its own Nametag node system instead
+   * PlayerLocal uses HealthBars system for health bars
    */
   protected initializeVisuals(): void {
-    // Skip UIRenderer - we use Nametag nodes instead
+    // Skip UIRenderer - we use HealthBars system
     // Do not call super.initializeVisuals()
   }
 
@@ -1242,7 +1242,7 @@ export class PlayerLocal extends Entity implements HotReloadable {
       this.aura.add(bubbleInstance);
     }
 
-    // Add aura to base for nametag/bubble positioning
+    // Add aura to base for bubble positioning
     if (this.base) {
       this.base.add(this.aura);
     }
@@ -1473,13 +1473,11 @@ export class PlayerLocal extends Entity implements HotReloadable {
       instance.disableRateCheck();
     }
 
-    // Set up nametag and bubble positioning
+    // Set up bubble positioning
     const headHeight = this._avatar!.getHeadToHeight!()!;
     const safeHeadHeight = headHeight ?? 1.8;
-    // Position nametag at Y=2.0 like mob health bars (not at head height!)
-    // Bubble still goes at head height for chat
+    // Bubble goes at head height for chat
     this.bubble!.position.y = safeHeadHeight + 0.2;
-    // Nametag is always active to show health bar in combat (set at initialization)
 
     // Set camera height
     const avatarHeight = (this._avatar as AvatarNode).height ?? 1.5;
@@ -2292,8 +2290,6 @@ export class PlayerLocal extends Entity implements HotReloadable {
   }
 
   chat(msg: string): void {
-    // Keep nametag active to show health bar in combat (RuneScape pattern)
-    // Nametag has empty label, so only health bar shows (no overlap with chat bubble)
     this.bubbleText!.value = msg;
     this.bubble!.active = true;
     setTimeout(() => {

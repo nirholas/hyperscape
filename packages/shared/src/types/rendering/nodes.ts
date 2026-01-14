@@ -118,20 +118,6 @@ export interface ImageSceneItem {
   node: Node;
 }
 
-// Nametag interfaces
-export interface NametagHandle {
-  text: string;
-  subtext?: string;
-  subtextColor?: string;
-  visible: boolean;
-  offset: number;
-  move: (newMatrix: THREE.Matrix4) => void;
-  setName: (name: string) => void;
-  setHealth: (health: number) => void;
-  setInCombat: (inCombat: boolean) => void;
-  destroy: () => void;
-}
-
 // Joint interfaces
 export interface PxSpring {
   stiffness: number;
@@ -583,14 +569,6 @@ export interface ImageData extends NodeData {
   opacity?: number;
   transparent?: boolean;
   alphaTest?: number;
-}
-
-// Enhanced Nametag interfaces
-export interface NametagData extends NodeData {
-  label?: string | number;
-  health?: number;
-  /** Combat level for OSRS-style display: "Name (level-XX)" */
-  level?: number | null;
 }
 
 // Particles interfaces (minimal emitter handle)

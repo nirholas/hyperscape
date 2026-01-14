@@ -2,7 +2,7 @@
  * HealthBar.ts - Entity Health Bar Node
  *
  * Frontend handle to the HealthBars system for rendering health bars above entities.
- * Similar architecture to Nametag node but ONLY handles health bars.
+ * Names are shown in right-click context menus only (OSRS pattern).
  *
  * Usage:
  * ```typescript

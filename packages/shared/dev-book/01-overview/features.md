@@ -660,20 +660,20 @@ world.ui.appendChild(healthBar);
 
 ---
 
-### Nametag System
+### Health Bar System
 
-**Description:** Entity name tags
+**Description:** Entity health bar display
 
 **Features:**
-- Canvas-based sprites
-- Always face camera
+- Instanced mesh rendering for performance
+- Always face camera (billboarding)
 - Distance scaling
-- Health bars
+- Shown during combat (RuneScape pattern)
 
 **Usage:**
 ```typescript
-// Automatically added to entities
-entity.createNameTag();  // Created from entity.name
+// Health bars managed by HealthBars system
+// Names shown in right-click context menu only (OSRS pattern)
 entity.createHealthBar();  // Shows current/max health
 ```
 

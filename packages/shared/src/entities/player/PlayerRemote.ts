@@ -1,8 +1,8 @@
 /**
  * PlayerRemote - Remote Player Entity
  *
- * Represents other players in the multiplayer world. Displays their avatars,
- * nametags, and animations based on network state updates from the server.
+ * Represents other players in the multiplayer world. Displays their avatars
+ * and animations based on network state updates from the server.
  *
  * **Key Features**:
  *
@@ -14,7 +14,7 @@
  *
  * **Visual Representation**:
  * - VRM avatar rendering
- * - Nametag with player name
+ * - Name shown in right-click menu (OSRS pattern)
  * - Chat bubbles for messages
  * - Health bar (if in combat)
  * - Capsule collider visualization (debug mode)
@@ -169,10 +169,10 @@ export class PlayerRemote extends Entity implements HotReloadable {
 
   /**
    * Override initializeVisuals to skip UIRenderer-based UI elements
-   * PlayerRemote uses its own Nametag node system instead
+   * PlayerRemote uses HealthBars system for health bars
    */
   protected initializeVisuals(): void {
-    // Skip UIRenderer - we use Nametag nodes instead
+    // Skip UIRenderer - we use HealthBars system
     // Do not call super.initializeVisuals()
   }
 
@@ -273,7 +273,7 @@ export class PlayerRemote extends Entity implements HotReloadable {
     // Note: Group nodes don't have Three.js representations - their children handle their own scene addition
     // The base node is activated separately and manages its own scene presence
 
-    // Base node is used for UI elements (nametag, bubble)
+    // Base node is used for UI elements (chat bubble)
 
     // Start avatar loading but don't await it - let it complete asynchronously
     this.applyAvatar();
@@ -808,7 +808,7 @@ export class PlayerRemote extends Entity implements HotReloadable {
 
       this.data.health = currentHealth;
 
-      // Update health bar via HealthBars system (separate from nametag)
+      // Update health bar via HealthBars system
       if (this._healthBarHandle) {
         this._healthBarHandle.setHealth(currentHealth, maxHealth);
       }
