@@ -37,6 +37,10 @@ import {
   EntityOccupancyMap,
   type IEntityOccupancy,
 } from "../systems/shared/movement/EntityOccupancyMap";
+import {
+  CollisionMatrix,
+  type ICollisionMatrix,
+} from "../systems/shared/movement/CollisionMatrix";
 import { LODs } from "../systems/shared";
 import { Particles } from "../systems/shared";
 import { Physics, Physics as PhysicsSystem } from "../systems/shared";
@@ -480,13 +484,29 @@ export class World extends EventEmitter {
   // ============================================================================
 
   /**
+   * Unified collision matrix for tile-based collision.
+   * Stores OSRS-accurate bitmask flags per tile in zone-based chunks.
+   *
+   * Key features:
+   * - Static objects (trees, rocks, furnaces) set BLOCKED flag
+   * - Entities set OCCUPIED_PLAYER or OCCUPIED_NPC flags
+   * - Zone-based storage (8x8 tiles) for cache efficiency
+   * - Directional wall support for complex obstacles
+   *
+   * @see CollisionFlags for flag definitions
+   * @see CollisionMatrix for implementation
+   */
+  collision: ICollisionMatrix = new CollisionMatrix();
+
+  /**
    * Entity occupancy tracking for tile-based collision.
-   * Prevents NPCs from stacking on same tile (OSRS-accurate).
+   * Facade over CollisionMatrix for entity-specific queries.
    *
    * Key features:
    * - NPCs set collision flags when occupying tiles
    * - Collision is checked at movement execution time
    * - Bosses can ignore collision via `ignoresEntityCollision` flag
+   * - Delegates blocking checks to CollisionMatrix
    *
    * @see NPC_ENTITY_COLLISION_PLAN.md
    * @see https://osrs-docs.com/docs/mechanics/entity-collision/
@@ -863,6 +883,12 @@ export class World extends EventEmitter {
     this.register("physics", PhysicsSystem);
 
     this.register("stage", StageSystem);
+
+    // Wire CollisionMatrix to EntityOccupancyMap for unified collision storage
+    // EntityOccupancyMap will delegate entity collision flags to CollisionMatrix
+    if (this.entityOccupancy instanceof EntityOccupancyMap) {
+      this.entityOccupancy.setCollisionMatrix(this.collision);
+    }
 
     // Network system is registered separately by createClientWorld() or createServerWorld()
     // This allows World to be environment-agnostic
@@ -1490,6 +1516,11 @@ export class World extends EventEmitter {
     // Destroy all systems
     for (const system of this.systems) {
       system.destroy();
+    }
+
+    // Clear collision data
+    if (this.collision instanceof CollisionMatrix) {
+      this.collision.clear();
     }
 
     // Clear entity occupancy data
