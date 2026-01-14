@@ -16,7 +16,6 @@
  * - Avatar: VRM character model
  * - Action: Executable player action
  * - Anchor: Spatial anchor point
- * - Nametag: Player/NPC name label
  * - Particles: Particle effect emitter
  * - UI, UIView, UIText: 3D UI elements
  * - RigidBody: Physics-enabled object
@@ -38,7 +37,6 @@ export { LOD } from "./LOD";
 export { Avatar } from "./Avatar";
 export { Action } from "./Action";
 export { Anchor } from "./Anchor";
-export { Nametag } from "./Nametag";
 export { HealthBar } from "./HealthBar";
 export { Particles } from "./Particles";
 export { UI } from "./UI";
@@ -55,7 +53,6 @@ export { LOD as lod } from "./LOD";
 export { Avatar as avatar } from "./Avatar";
 export { Action as action } from "./Action";
 export { Anchor as anchor } from "./Anchor";
-export { Nametag as nametag } from "./Nametag";
 export { HealthBar as healthbar } from "./HealthBar";
 export { Particles as particles } from "./Particles";
 export { UI as ui } from "./UI";

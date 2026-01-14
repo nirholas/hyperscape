@@ -346,8 +346,8 @@ export class HeadstoneEntity extends InteractableEntity {
   private createNameLabel(): void {
     if (!this.mesh || this.world.isServer) return;
 
-    // Text will be handled by a nametag system
-    // For now, just ensure userData has the name
+    // Name stored in userData for right-click menu display (OSRS pattern)
+    // Overhead nametags removed for accuracy
     if (this.mesh.userData) {
       this.mesh.userData.showLabel = true;
       this.mesh.userData.labelText = this.config.headstoneData.playerName

@@ -281,7 +281,6 @@ export { Node } from "./nodes/Node";
 // Re-export commonly used node classes to satisfy API extractor
 export { UI } from "./nodes/UI";
 export { UIView } from "./nodes/UIView";
-export { Nametag } from "./nodes/Nametag";
 export { UIText } from "./nodes/UIText";
 export { Group } from "./nodes/Group";
 export { Mesh } from "./nodes/Mesh";
@@ -512,7 +511,6 @@ export type {
   UIImageData,
   UIPointerEvent,
   UIWheelEvent,
-  NametagData,
   RigidBodyData,
   MeshData,
   SkinnedMeshData,

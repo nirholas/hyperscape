@@ -51,9 +51,9 @@
  * **Visual Representation**:
  * - 3D model (GLB) or procedural mesh
  * - Health bar when damaged
- * - Nametag with mob name and level
  * - Death animation
  * - Attack animations
+ * - Name shown in right-click menu (OSRS pattern)
  *
  * **Network Sync**:
  * - Position broadcast to clients
