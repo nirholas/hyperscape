@@ -62,7 +62,7 @@ import { LerpQuaternion } from "../../extras/animation/LerpQuaternion";
 import { LerpVector3 } from "../../extras/animation/LerpVector3";
 import THREE from "../../extras/three/three";
 import { Entity } from "../Entity";
-import { Avatar, Nametag, Group, Mesh, UI, UIView, UIText } from "../../nodes";
+import { Avatar, Group, Mesh, UI, UIView, UIText } from "../../nodes";
 import { EventType } from "../../types/events";
 import type { PlayerEffect, VRMHooks } from "../../types/systems/physics";
 import type {
@@ -107,7 +107,6 @@ export class PlayerRemote extends Entity implements HotReloadable {
   body!: Mesh;
   collider!: Mesh;
   aura!: Group;
-  nametag!: Nametag;
   private _healthBarHandle: HealthBarHandle | null = null; // Separate health bar (HealthBars system)
   private _healthBarVisibleUntil: number = 0; // Timestamp when health bar should hide (fallback timer)
   bubble!: UI;
@@ -132,7 +131,6 @@ export class PlayerRemote extends Entity implements HotReloadable {
   // Pre-allocated temps for update/lateUpdate to avoid per-frame allocations
   private _combatQuat = new THREE.Quaternion();
   private _combatAxis = new THREE.Vector3(0, 1, 0);
-  private _nametagMatrix = new THREE.Matrix4();
   private _healthBarMatrix = new THREE.Matrix4();
 
   // Raycast proxy mesh - added directly to THREE.Scene for fast raycasting
@@ -228,20 +226,9 @@ export class PlayerRemote extends Entity implements HotReloadable {
 
     this.aura = createNode("group") as Group;
 
-    // Create nametag with name and combat level (OSRS format: "Name (level-XX)")
-    this.nametag = createNode("nametag", {
-      label: this.data.name || "",
-      level: (this.data.combatLevel as number) || 3, // Default to OSRS minimum
-      active: true,
-    }) as Nametag;
-    // Set world context for nametag (needed for mounting to Nametags system)
-    this.nametag.ctx = this.world;
-    // Mount nametag directly (PlayerRemote.lateUpdate() handles positioning via handle.move())
-    if (this.nametag.mount) {
-      this.nametag.mount();
-    }
+    // Nametags disabled - OSRS pattern: names shown in right-click menu only
 
-    // Register with HealthBars system (separate from nametags)
+    // Register with HealthBars system
     const healthbars = this.world.systems.find(
       (s) =>
         (s as { systemName?: string }).systemName === "healthbars" ||
@@ -418,14 +405,8 @@ export class PlayerRemote extends Entity implements HotReloadable {
 
       // Set up positioning
       const headHeight = this.avatar.getHeadToHeight()!;
-      // Position nametag at fixed Y=2.0 like mob health bars
-      this.nametag.position.y = 2.0;
-      // Bubble still goes at head height for chat
+      // Bubble goes at head height for chat
       this.bubble.position.y = headHeight + 0.2;
-
-      if (!this.bubble.active) {
-        this.nametag.active = true;
-      }
 
       // CRITICAL: Make avatar visible and ensure proper positioning (matches PlayerLocal)
       // Avatar visibility is controlled through the instance's raw scene object
@@ -716,16 +697,7 @@ export class PlayerRemote extends Entity implements HotReloadable {
       if (matrix) this.aura.position.setFromMatrixPosition(matrix);
     }
 
-    // Update nametag position in Nametags system (name only - no health)
-    // This matches PlayerLocal behavior - without this, the nametag renders at origin
-    if (this.nametag && this.nametag.handle && this.base) {
-      // Position nametag slightly higher than health bar using pre-allocated matrix
-      this._nametagMatrix.copy(this.base.matrixWorld);
-      this._nametagMatrix.elements[13] += 2.2; // Name slightly higher
-      this.nametag.handle.move(this._nametagMatrix);
-    }
-
-    // Update health bar position in HealthBars system (separate from nametag)
+    // Update health bar position in HealthBars system
     if (this._healthBarHandle && this.base) {
       // Use pre-allocated matrix to avoid per-frame allocations
       this._healthBarMatrix.copy(this.base.matrixWorld);
@@ -765,8 +737,7 @@ export class PlayerRemote extends Entity implements HotReloadable {
   setSpeaking(speaking: boolean) {
     if (this.speaking === speaking) return;
     this.speaking = speaking;
-    const name = this.data.name || "";
-    this.nametag.label = speaking ? `» ${name} «` : name;
+    // Speaking state tracked - visual indicator could be added to avatar/aura if needed
   }
 
   override modify(data: Partial<NetworkData>) {
@@ -825,12 +796,11 @@ export class PlayerRemote extends Entity implements HotReloadable {
     }
     if (data.name !== undefined) {
       this.data.name = data.name as string;
-      this.nametag.label = (data.name as string) || "";
+      // Name stored in data - shown in right-click menu (OSRS pattern)
     }
-    // Update combat level on nametag (OSRS format: "Name (level-XX)")
     if (data.combatLevel !== undefined) {
       this.data.combatLevel = data.combatLevel as number;
-      this.nametag.level = data.combatLevel as number;
+      // Combat level stored in data - shown in right-click menu (OSRS pattern)
     }
     if (data.health !== undefined) {
       const currentHealth = data.health as number;
@@ -894,13 +864,11 @@ export class PlayerRemote extends Entity implements HotReloadable {
   }
 
   chat(msg: string) {
-    this.nametag.active = false;
     this.bubbleText.value = msg;
     this.bubble.active = true;
     if (this.chatTimer) clearTimeout(this.chatTimer);
     this.chatTimer = setTimeout(() => {
       this.bubble.active = false;
-      this.nametag.active = true;
     }, 5000);
   }
 
@@ -937,25 +905,20 @@ export class PlayerRemote extends Entity implements HotReloadable {
       this.avatar = undefined;
     }
 
-    // 4. Unmount nametag (registered with Nametags system)
-    if (this.nametag && this.nametag.unmount) {
-      this.nametag.unmount();
-    }
-
-    // 5. Deactivate visual components
+    // 4. Deactivate visual components
     this.base.deactivate();
     this.aura.deactivate();
 
-    // 6. Unregister from hot updates
+    // 5. Unregister from hot updates
     this.world.setHot(this, false);
 
-    // 7. Clean up health bar from HealthBars system
+    // 6. Clean up health bar from HealthBars system
     if (this._healthBarHandle) {
       this._healthBarHandle.destroy();
       this._healthBarHandle = null;
     }
 
-    // 8. Call parent destroy to:
+    // 7. Call parent destroy to:
     //    - Set destroyed = true
     //    - Remove node from scene
     //    - Dispose mesh/materials

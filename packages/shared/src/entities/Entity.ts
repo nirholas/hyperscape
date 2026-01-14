@@ -100,11 +100,6 @@ import type {
   HealthBars as HealthBarsSystem,
   HealthBarHandle,
 } from "../systems/client/HealthBars";
-import type {
-  Nametags as NametagsSystem,
-  NametagHandle,
-} from "../systems/client/Nametags";
-
 // Re-export types for external use
 export type { EntityConfig };
 
@@ -159,14 +154,11 @@ export class Entity implements IEntity {
   protected maxHealth: number = 100;
   protected level: number = 1;
 
-  // UI elements - Atlas-based (Nametags/HealthBars systems use instanced mesh)
-  // NOTE: These are private to Entity - subclasses that need atlas systems
-  // (MobEntity, PlayerRemote, PlayerLocal) implement their own handles
-  // to avoid TypeScript private member conflicts
-  private _entityNametagHandle: NametagHandle | null = null;
+  // UI elements - Atlas-based (HealthBars system uses instanced mesh)
+  // NOTE: Nametags disabled - OSRS pattern: names shown in right-click menu only
   private _entityHealthBarHandle: HealthBarHandle | null = null;
 
-  // Pre-allocated matrix for health bar/nametag position updates
+  // Pre-allocated matrix for health bar position updates
   private readonly _uiPositionMatrix = new THREE.Matrix4();
 
   // Legacy sprite properties (kept for backwards compatibility with subclasses)
@@ -826,12 +818,7 @@ export class Entity implements IEntity {
     // Create main mesh - implemented by subclasses
     // Note: createMesh is async in Entity, so this will be called from init()
 
-    // Create name tag if entity has a name
-    // Skip mobs and items - RuneScape pattern: names shown in right-click menu only
-    const shouldShowNametag = this.type !== "mob" && this.type !== "item";
-    if (this.name && shouldShowNametag) {
-      this.createNameTag();
-    }
+    // Nametags disabled - OSRS pattern: names shown in right-click menu only
 
     // Only create health bars for combat entities (players and mobs)
     // Items, NPCs, and other entities should not have health bars
@@ -846,49 +833,6 @@ export class Entity implements IEntity {
       visualComponent.data.mesh = this.mesh;
       visualComponent.data.nameSprite = this.nameSprite;
       visualComponent.data.healthSprite = this.healthSprite;
-    }
-  }
-
-  /**
-   * Create name tag using atlas-based Nametags system (instanced mesh)
-   * PERFORMANCE: Uses texture atlas + instanced mesh for O(1) draw calls
-   * Falls back to legacy sprite creation if Nametags system unavailable
-   */
-  protected createNameTag(): void {
-    if (!this.name) return;
-
-    // Try to use atlas-based Nametags system (much more efficient)
-    const nametags = this.world.systems?.find(
-      (s) =>
-        (s as { systemName?: string }).systemName === "nametags" ||
-        s.constructor.name === "Nametags",
-    ) as NametagsSystem | undefined;
-
-    if (nametags) {
-      // Atlas-based: Register with Nametags system
-      this._entityNametagHandle = nametags.add({
-        name: this.name,
-        level: null, // Non-combat entities don't show level
-      });
-      // Position update happens in clientUpdate() via handle.move()
-      return;
-    }
-
-    // Fallback: Legacy sprite creation (less efficient but works without system)
-    const nameCanvas = UIRenderer.createNameTag(this.name, {
-      width: GAME_CONSTANTS.UI.NAME_TAG_WIDTH,
-      height: GAME_CONSTANTS.UI.NAME_TAG_HEIGHT,
-    });
-
-    this.nameSprite = UIRenderer.createSpriteFromCanvas(
-      nameCanvas,
-      GAME_CONSTANTS.UI.SPRITE_SCALE,
-    );
-    if (this.nameSprite) {
-      this.nameSprite.position.set(0, 2.15, 0);
-      if (this.node) {
-        this.node.add(this.nameSprite);
-      }
     }
   }
 
@@ -1441,25 +1385,13 @@ export class Entity implements IEntity {
 
   // Client-side update logic
   protected clientUpdate(_deltaTime: number): void {
-    // Update atlas-based UI element positions (nametag and health bar)
+    // Update atlas-based UI element positions (health bar)
     // These use instanced mesh, so we just need to update the position matrix
-    if (this._entityNametagHandle || this._entityHealthBarHandle) {
-      // Position UI elements above the entity
-      this._uiPositionMatrix.copyPosition(this.node.matrixWorld);
-
-      if (this._entityNametagHandle) {
-        // Nametag at Y=2.15
-        this._uiPositionMatrix.elements[13] =
-          this.node.matrixWorld.elements[13] + 2.15;
-        this._entityNametagHandle.move(this._uiPositionMatrix);
-      }
-
-      if (this._entityHealthBarHandle) {
-        // Health bar at Y=2.0
-        this._uiPositionMatrix.elements[13] =
-          this.node.matrixWorld.elements[13] + 2.0;
-        this._entityHealthBarHandle.move(this._uiPositionMatrix);
-      }
+    if (this._entityHealthBarHandle) {
+      // Health bar at Y=2.0
+      this._uiPositionMatrix.elements[13] =
+        this.node.matrixWorld.elements[13] + 2.0;
+      this._entityHealthBarHandle.move(this._uiPositionMatrix);
     }
 
     // Subclasses can override for additional client-specific logic
@@ -1611,12 +1543,7 @@ export class Entity implements IEntity {
       this.node.visible = false;
     }
 
-    // Clean up atlas-based UI elements (Nametags/HealthBars systems)
-    if (this._entityNametagHandle) {
-      this._entityNametagHandle.destroy();
-      this._entityNametagHandle = null;
-    }
-
+    // Clean up atlas-based UI elements (HealthBars system)
     if (this._entityHealthBarHandle) {
       this._entityHealthBarHandle.destroy();
       this._entityHealthBarHandle = null;

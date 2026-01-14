@@ -21,7 +21,7 @@
  * 6. Loading: ClientLoader (asset management)
  * 7. Physics: Physics (PhysX via WASM)
  * 8. Terrain: TerrainSystem (heightmap rendering)
- * 9. Visual Effects: LODs, Nametags, Particles, Wind
+ * 9. Visual Effects: LODs, HealthBars, Particles, Wind
  * 10. Actions: ClientActions (executable actions from UI/keybinds)
  * 11. RPG Systems: All game logic systems (shared with server)
  *
@@ -78,7 +78,6 @@ import { modelCache } from "../utils/rendering/ModelCache";
 
 import type { StageSystem } from "../types/systems/system-interfaces";
 import { LODs } from "../systems/shared";
-import { Nametags } from "../systems/client/Nametags";
 import { HealthBars } from "../systems/client/HealthBars";
 import { EquipmentVisualSystem } from "../systems/client/EquipmentVisualSystem";
 import { ZoneVisualsSystem } from "../systems/client/ZoneVisualsSystem";
@@ -189,8 +188,8 @@ export function createClientWorld() {
   // These systems enhance visual fidelity and user experience
 
   world.register("lods", LODs); // Level-of-detail mesh management
-  world.register("nametags", Nametags); // Player/NPC name labels
-  world.register("healthbars", HealthBars); // Entity health bars (separate from nametags)
+  // Nametags disabled - OSRS pattern: names shown in right-click menu only
+  world.register("healthbars", HealthBars); // Entity health bars
   world.register("equipment-visual", EquipmentVisualSystem); // Visual weapon/equipment attachment
   world.register("zone-detection", ZoneDetectionSystem); // Zone type detection (safe/pvp/wilderness)
   world.register("zone-visuals", ZoneVisualsSystem); // PvP zone ground overlays and warnings

@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "@hyperscape/hyperscape",
@@ -395,15 +396,15 @@
     },
   },
   "overrides": {
-    "typescript": "^5.9.2",
+    "@pixiv/three-vrm": "3.4.3",
     "@types/react": "^19.0.0",
-    "three": "0.180.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/three": "0.180.0",
+    "jws": "^3.2.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "@pixiv/three-vrm": "3.4.3",
-    "@types/react-dom": "^19.0.0",
-    "jws": "^3.2.3",
-    "@types/three": "0.180.0",
+    "three": "0.180.0",
+    "typescript": "^5.9.2",
   },
   "packages": {
     "3d-asset-forge": ["3d-asset-forge@workspace:packages/asset-forge"],
