@@ -62,6 +62,12 @@ import type {
 } from "../../types/entities";
 import { modelCache } from "../../utils/rendering/ModelCache";
 import { EventType } from "../../types/events";
+import { CollisionFlag } from "../../systems/shared/movement/CollisionFlags";
+import {
+  worldToTile,
+  type TileCoord,
+} from "../../systems/shared/movement/TileSystem";
+import { FOOTPRINT_SIZES } from "../../types/game/resource-processing-types";
 
 // Re-export types for external use
 export type { ResourceEntityConfig } from "../../types/entities";
@@ -75,6 +81,8 @@ export class ResourceEntity extends InteractableEntity {
   private rippleRings?: THREE.Mesh[];
   /** Animation frame ID for cleanup */
   private animationFrameId?: number;
+  /** Tiles this resource occupies for collision (cached for cleanup) */
+  private collisionTiles: TileCoord[] = [];
 
   constructor(world: World, config: ResourceEntityConfig) {
     // Convert ResourceEntityConfig to InteractableConfig format
@@ -102,6 +110,56 @@ export class ResourceEntity extends InteractableEntity {
     // Resources don't have health bars - they're not combatants
     this.health = 0;
     this.maxHealth = 0;
+
+    // Register collision for this resource (server-side only)
+    // Fishing spots don't block movement - they're in water
+    if (this.world.isServer && config.resourceType !== "fishing_spot") {
+      this.registerCollision();
+    }
+  }
+
+  /**
+   * Register this resource's tiles in the collision matrix.
+   * Called on construction, tiles remain blocked even when depleted (OSRS-accurate).
+   */
+  private registerCollision(): void {
+    // Get anchor tile from world position
+    const anchorTile = worldToTile(this.position.x, this.position.z);
+
+    // Get footprint size (defaults to standard 1x1)
+    const footprint = this.config.footprint || "standard";
+    const size = FOOTPRINT_SIZES[footprint];
+
+    // Calculate all tiles this resource occupies
+    this.collisionTiles = [];
+    for (let dx = 0; dx < size.x; dx++) {
+      for (let dz = 0; dz < size.z; dz++) {
+        this.collisionTiles.push({
+          x: anchorTile.x + dx,
+          z: anchorTile.z + dz,
+        });
+      }
+    }
+
+    // Store in config for potential serialization
+    this.config.anchorTile = anchorTile;
+    this.config.occupiedTiles = this.collisionTiles;
+
+    // Add BLOCKED flag to all tiles
+    for (const tile of this.collisionTiles) {
+      this.world.collision.addFlags(tile.x, tile.z, CollisionFlag.BLOCKED);
+    }
+  }
+
+  /**
+   * Unregister this resource's tiles from the collision matrix.
+   * Called on destroy.
+   */
+  private unregisterCollision(): void {
+    for (const tile of this.collisionTiles) {
+      this.world.collision.removeFlags(tile.x, tile.z, CollisionFlag.BLOCKED);
+    }
+    this.collisionTiles = [];
   }
 
   /**
@@ -560,6 +618,11 @@ export class ResourceEntity extends InteractableEntity {
   }
 
   destroy(local?: boolean): void {
+    // Unregister collision tiles (server-side only)
+    if (this.world.isServer && this.collisionTiles.length > 0) {
+      this.unregisterCollision();
+    }
+
     // Clear respawn timer to prevent memory leaks
     if (this.respawnTimer) {
       clearTimeout(this.respawnTimer);

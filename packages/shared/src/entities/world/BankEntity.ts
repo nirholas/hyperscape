@@ -28,10 +28,18 @@ import {
   type InteractableConfig,
 } from "../InteractableEntity";
 import { EventType } from "../../types/events";
+import { CollisionFlag } from "../../systems/shared/movement/CollisionFlags";
+import {
+  worldToTile,
+  type TileCoord,
+} from "../../systems/shared/movement/TileSystem";
 
 export class BankEntity extends InteractableEntity {
   protected config: BankEntityConfig;
   private bankId: string;
+
+  /** Tile this station occupies for collision */
+  private collisionTile: TileCoord | null = null;
 
   constructor(world: World, config: BankEntityConfig) {
     // Convert BankEntityConfig to InteractableConfig format
@@ -70,6 +78,33 @@ export class BankEntity extends InteractableEntity {
     super(world, interactableConfig);
     this.config = config;
     this.bankId = config.properties?.bankId || "spawn_bank";
+
+    // Register collision for this station (server-side only)
+    if (this.world.isServer) {
+      this.collisionTile = worldToTile(config.position.x, config.position.z);
+      this.world.collision.addFlags(
+        this.collisionTile.x,
+        this.collisionTile.z,
+        CollisionFlag.BLOCKED,
+      );
+    }
+  }
+
+  /**
+   * Clean up collision and resources when destroyed.
+   */
+  destroy(local?: boolean): void {
+    // Unregister collision tile (server-side only)
+    if (this.world.isServer && this.collisionTile) {
+      this.world.collision.removeFlags(
+        this.collisionTile.x,
+        this.collisionTile.z,
+        CollisionFlag.BLOCKED,
+      );
+      this.collisionTile = null;
+    }
+
+    super.destroy(local);
   }
 
   protected async createMesh(): Promise<void> {

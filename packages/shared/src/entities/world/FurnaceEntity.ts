@@ -30,6 +30,11 @@ import {
 import { EventType } from "../../types/events";
 import { modelCache } from "../../utils/rendering/ModelCache";
 import { stationDataProvider } from "../../data/StationDataProvider";
+import { CollisionFlag } from "../../systems/shared/movement/CollisionFlags";
+import {
+  worldToTile,
+  type TileCoord,
+} from "../../systems/shared/movement/TileSystem";
 
 /** Default interaction range for furnaces (in tiles) */
 const FURNACE_INTERACTION_RANGE = 2;
@@ -51,6 +56,9 @@ export class FurnaceEntity extends InteractableEntity {
 
   /** Display name */
   public displayName: string;
+
+  /** Tile this station occupies for collision */
+  private collisionTile: TileCoord | null = null;
 
   constructor(world: World, config: FurnaceEntityConfig) {
     // Convert to InteractableConfig format
@@ -91,6 +99,33 @@ export class FurnaceEntity extends InteractableEntity {
     super(world, interactableConfig);
 
     this.displayName = config.name || "Furnace";
+
+    // Register collision for this station (server-side only)
+    if (this.world.isServer) {
+      this.collisionTile = worldToTile(config.position.x, config.position.z);
+      this.world.collision.addFlags(
+        this.collisionTile.x,
+        this.collisionTile.z,
+        CollisionFlag.BLOCKED,
+      );
+    }
+  }
+
+  /**
+   * Clean up collision and resources when destroyed.
+   */
+  destroy(local?: boolean): void {
+    // Unregister collision tile (server-side only)
+    if (this.world.isServer && this.collisionTile) {
+      this.world.collision.removeFlags(
+        this.collisionTile.x,
+        this.collisionTile.z,
+        CollisionFlag.BLOCKED,
+      );
+      this.collisionTile = null;
+    }
+
+    super.destroy(local);
   }
 
   protected async createMesh(): Promise<void> {
