@@ -121,28 +121,34 @@ export class ResourceEntity extends InteractableEntity {
   /**
    * Register this resource's tiles in the collision matrix.
    * Called on construction, tiles remain blocked even when depleted (OSRS-accurate).
+   * Uses center-based registration (footprint centered on entity position) for
+   * consistency with station entities and tilesWithinRangeOfFootprint() checks.
    */
   private registerCollision(): void {
-    // Get anchor tile from world position
-    const anchorTile = worldToTile(this.position.x, this.position.z);
+    // Get center tile from world position
+    const centerTile = worldToTile(this.position.x, this.position.z);
 
     // Get footprint size (defaults to standard 1x1)
     const footprint = this.config.footprint || "standard";
     const size = FOOTPRINT_SIZES[footprint];
 
-    // Calculate all tiles this resource occupies
+    // Calculate offset to center the footprint on the entity
+    const offsetX = Math.floor(size.x / 2);
+    const offsetZ = Math.floor(size.z / 2);
+
+    // Calculate all tiles this resource occupies (centered on position)
     this.collisionTiles = [];
     for (let dx = 0; dx < size.x; dx++) {
       for (let dz = 0; dz < size.z; dz++) {
         this.collisionTiles.push({
-          x: anchorTile.x + dx,
-          z: anchorTile.z + dz,
+          x: centerTile.x + dx - offsetX,
+          z: centerTile.z + dz - offsetZ,
         });
       }
     }
 
     // Store in config for potential serialization
-    this.config.anchorTile = anchorTile;
+    this.config.anchorTile = centerTile;
     this.config.occupiedTiles = this.collisionTiles;
 
     // Add BLOCKED flag to all tiles

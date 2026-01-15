@@ -451,8 +451,7 @@ export class RaycastService {
     entityType: InteractableEntityType,
   ): EntityFootprint | undefined {
     // Station entities have footprints defined in the station manifest
-    const stationTypes = ["furnace", "anvil", "range", "bank"];
-    if (!stationTypes.includes(entityType)) {
+    if (!stationDataProvider.hasStation(entityType)) {
       return undefined;
     }
 
