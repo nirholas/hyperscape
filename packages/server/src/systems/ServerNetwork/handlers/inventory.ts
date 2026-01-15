@@ -781,17 +781,26 @@ export async function handleCoinPouchWithdraw(
       coins: newCoinBalance,
     });
 
-    // Reload and sync inventory
-    const inventorySystem = world.getSystem("inventory") as {
-      reloadFromDatabase?: (playerId: string) => Promise<void>;
-      emitInventoryUpdate?: (playerId: string) => void;
-    } | null;
-    if (
-      inventorySystem?.reloadFromDatabase &&
-      inventorySystem?.emitInventoryUpdate
-    ) {
-      await inventorySystem.reloadFromDatabase(playerId);
-      inventorySystem.emitInventoryUpdate(playerId);
+    // Reload and sync inventory (wrapped in try-catch for safety)
+    // Transaction already committed - if sync fails, player can relog to resync
+    try {
+      const inventorySystem = world.getSystem("inventory") as {
+        reloadFromDatabase?: (playerId: string) => Promise<void>;
+        emitInventoryUpdate?: (playerId: string) => void;
+      } | null;
+      if (
+        inventorySystem?.reloadFromDatabase &&
+        inventorySystem?.emitInventoryUpdate
+      ) {
+        await inventorySystem.reloadFromDatabase(playerId);
+        inventorySystem.emitInventoryUpdate(playerId);
+      }
+    } catch (syncError) {
+      // Log but don't fail - transaction succeeded, player can relog to resync
+      console.error(
+        `[Inventory] handleCoinPouchWithdraw: sync failed for player ${playerId}:`,
+        syncError,
+      );
     }
 
     // Step 6: Success feedback
