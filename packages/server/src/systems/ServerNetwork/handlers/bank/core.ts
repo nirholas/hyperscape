@@ -416,10 +416,16 @@ export async function handleBankWithdraw(
     );
   }
 
-  // Limit single withdrawal to max inventory size (unless withdrawing as note - all fit in 1 slot)
-  const withdrawQty = withdrawAsNote
-    ? data.quantity // Notes stack, so no slot limit
-    : Math.min(data.quantity, MAX_INVENTORY_SLOTS);
+  // Check if base item is stackable (like fishing bait, arrows, runes)
+  const itemData = getItem(data.itemId);
+  const isBaseStackable = itemData?.stackable === true;
+
+  // Limit single withdrawal to max inventory size for non-stackable items only
+  // Stackable items (notes or base stackable) all fit in 1 slot, so no limit needed
+  const withdrawQty =
+    withdrawAsNote || isBaseStackable
+      ? data.quantity // Stackable items have no slot limit
+      : Math.min(data.quantity, MAX_INVENTORY_SLOTS);
 
   // Step 3: Execute transaction with inventory lock (prevents race conditions)
   // The executeInventoryTransaction wrapper handles:
@@ -458,11 +464,7 @@ export async function handleBankWithdraw(
           }
         }
 
-        // Check if base item is stackable (like fishing bait, arrows, runes)
-        const itemData = getItem(data.itemId);
-        const isBaseStackable = itemData?.stackable === true;
-
-        // STACKING RULES:
+        // STACKING RULES (isBaseStackable already calculated above):
         // - Notes: 1 slot (always stackable)
         // - Stackable base items: 1 slot (stacks like notes)
         // - Non-stackable items: 1 slot per item
