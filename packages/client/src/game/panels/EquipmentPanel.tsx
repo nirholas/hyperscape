@@ -47,6 +47,90 @@ interface EquipmentHoverState {
   position: { x: number; y: number };
 }
 
+/**
+ * Render equipment hover tooltip content
+ * Extracted for better readability and testability
+ */
+function renderEquipmentHoverTooltip(
+  hoverState: EquipmentHoverState,
+): React.ReactNode {
+  const item = hoverState.slot.item;
+  if (!item) return null;
+
+  return createPortal(
+    <div
+      className="pointer-events-none"
+      style={{
+        position: "fixed",
+        left: hoverState.position.x + 16,
+        top: hoverState.position.y + 16,
+        zIndex: 99999,
+        background:
+          "linear-gradient(135deg, rgba(20, 20, 30, 0.98) 0%, rgba(30, 25, 40, 0.95) 100%)",
+        border: "2px solid rgba(242, 208, 138, 0.5)",
+        borderRadius: "4px",
+        padding: "8px 12px",
+        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.8)",
+        minWidth: "150px",
+        maxWidth: "250px",
+      }}
+    >
+      {/* Item name */}
+      <div
+        style={{
+          color: COLORS.ACCENT,
+          fontWeight: "bold",
+          marginBottom: "6px",
+          fontSize: "13px",
+        }}
+      >
+        {item.name}
+      </div>
+
+      {/* Bonuses */}
+      {item.bonuses && (
+        <div style={{ fontSize: "11px" }}>
+          {item.bonuses.attack !== undefined && item.bonuses.attack !== 0 && (
+            <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
+              ⚔️ Attack:{" "}
+              <span style={{ color: "#22c55e" }}>+{item.bonuses.attack}</span>
+            </div>
+          )}
+          {item.bonuses.defense !== undefined && item.bonuses.defense !== 0 && (
+            <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
+              🛡️ Defense:{" "}
+              <span style={{ color: "#22c55e" }}>+{item.bonuses.defense}</span>
+            </div>
+          )}
+          {item.bonuses.strength !== undefined &&
+            item.bonuses.strength !== 0 && (
+              <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
+                💪 Strength:{" "}
+                <span style={{ color: "#22c55e" }}>
+                  +{item.bonuses.strength}
+                </span>
+              </div>
+            )}
+        </div>
+      )}
+
+      {/* Click hint */}
+      <div
+        style={{
+          fontSize: "10px",
+          color: "rgba(150, 150, 150, 0.8)",
+          marginTop: "6px",
+          borderTop: "1px solid rgba(242, 208, 138, 0.2)",
+          paddingTop: "6px",
+        }}
+      >
+        Click to unequip
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function DroppableEquipmentSlot({
   slot,
   onSlotClick,
@@ -819,84 +903,7 @@ export function EquipmentPanel({
       {/* RS3-style hover tooltip - rendered via portal */}
       {hoverState &&
         hoverState.slot.item &&
-        createPortal(
-          <div
-            className="pointer-events-none"
-            style={{
-              position: "fixed",
-              left: hoverState.position.x + 16,
-              top: hoverState.position.y + 16,
-              zIndex: 99999,
-              background:
-                "linear-gradient(135deg, rgba(20, 20, 30, 0.98) 0%, rgba(30, 25, 40, 0.95) 100%)",
-              border: "2px solid rgba(242, 208, 138, 0.5)",
-              borderRadius: "4px",
-              padding: "8px 12px",
-              boxShadow: "0 4px 12px rgba(0, 0, 0, 0.8)",
-              minWidth: "150px",
-              maxWidth: "250px",
-            }}
-          >
-            {/* Item name */}
-            <div
-              style={{
-                color: COLORS.ACCENT,
-                fontWeight: "bold",
-                marginBottom: "6px",
-                fontSize: "13px",
-              }}
-            >
-              {hoverState.slot.item.name}
-            </div>
-
-            {/* Bonuses */}
-            {hoverState.slot.item.bonuses && (
-              <div style={{ fontSize: "11px" }}>
-                {hoverState.slot.item.bonuses.attack !== undefined &&
-                  hoverState.slot.item.bonuses.attack !== 0 && (
-                    <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
-                      ⚔️ Attack:{" "}
-                      <span style={{ color: "#22c55e" }}>
-                        +{hoverState.slot.item.bonuses.attack}
-                      </span>
-                    </div>
-                  )}
-                {hoverState.slot.item.bonuses.defense !== undefined &&
-                  hoverState.slot.item.bonuses.defense !== 0 && (
-                    <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
-                      🛡️ Defense:{" "}
-                      <span style={{ color: "#22c55e" }}>
-                        +{hoverState.slot.item.bonuses.defense}
-                      </span>
-                    </div>
-                  )}
-                {hoverState.slot.item.bonuses.strength !== undefined &&
-                  hoverState.slot.item.bonuses.strength !== 0 && (
-                    <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
-                      💪 Strength:{" "}
-                      <span style={{ color: "#22c55e" }}>
-                        +{hoverState.slot.item.bonuses.strength}
-                      </span>
-                    </div>
-                  )}
-              </div>
-            )}
-
-            {/* Click hint */}
-            <div
-              style={{
-                fontSize: "10px",
-                color: "rgba(150, 150, 150, 0.8)",
-                marginTop: "6px",
-                borderTop: "1px solid rgba(242, 208, 138, 0.2)",
-                paddingTop: "6px",
-              }}
-            >
-              Click to unequip
-            </div>
-          </div>,
-          document.body,
-        )}
+        renderEquipmentHoverTooltip(hoverState)}
     </>
   );
 }

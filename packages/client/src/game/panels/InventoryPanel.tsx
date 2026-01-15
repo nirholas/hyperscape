@@ -635,6 +635,89 @@ interface ItemHoverState {
   position: { x: number; y: number };
 }
 
+/**
+ * Render item hover tooltip content
+ * Extracted from IIFE for better readability and testability
+ */
+function renderItemHoverTooltip(itemHover: ItemHoverState): React.ReactNode {
+  const hoveredItemData = getItem(itemHover.item.itemId);
+  const itemName = hoveredItemData?.name || itemHover.item.itemId;
+  const bonuses = hoveredItemData?.bonuses;
+  const hasBonuses =
+    bonuses &&
+    ((bonuses.attack !== undefined && bonuses.attack !== 0) ||
+      (bonuses.defense !== undefined && bonuses.defense !== 0) ||
+      (bonuses.strength !== undefined && bonuses.strength !== 0));
+
+  return createPortal(
+    <div
+      className="pointer-events-none"
+      style={{
+        position: "fixed",
+        left: itemHover.position.x + 16,
+        top: itemHover.position.y + 16,
+        zIndex: 99999,
+        background:
+          "linear-gradient(135deg, rgba(20, 20, 30, 0.98) 0%, rgba(30, 25, 40, 0.95) 100%)",
+        border: "2px solid rgba(242, 208, 138, 0.5)",
+        borderRadius: "4px",
+        padding: "8px 12px",
+        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.8)",
+        minWidth: "120px",
+        maxWidth: "220px",
+      }}
+    >
+      {/* Item name */}
+      <div
+        style={{
+          color: "#fbbf24",
+          fontWeight: "bold",
+          marginBottom: hasBonuses ? "6px" : "0",
+          fontSize: "13px",
+        }}
+      >
+        {itemName}
+        {itemHover.item.quantity > 1 && (
+          <span
+            style={{
+              color: "rgba(242, 208, 138, 0.7)",
+              fontWeight: "normal",
+            }}
+          >
+            {" "}
+            x{itemHover.item.quantity.toLocaleString()}
+          </span>
+        )}
+      </div>
+
+      {/* Bonuses (for equipment) */}
+      {hasBonuses && (
+        <div style={{ fontSize: "11px" }}>
+          {bonuses.attack !== undefined && bonuses.attack !== 0 && (
+            <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
+              ⚔️ Attack:{" "}
+              <span style={{ color: "#22c55e" }}>+{bonuses.attack}</span>
+            </div>
+          )}
+          {bonuses.defense !== undefined && bonuses.defense !== 0 && (
+            <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
+              🛡️ Defense:{" "}
+              <span style={{ color: "#22c55e" }}>+{bonuses.defense}</span>
+            </div>
+          )}
+          {bonuses.strength !== undefined && bonuses.strength !== 0 && (
+            <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
+              💪 Strength:{" "}
+              <span style={{ color: "#22c55e" }}>+{bonuses.strength}</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>,
+    document.body,
+  );
+}
+
 const initialTargetingState: TargetingState = {
   active: false,
   sourceItem: null,
@@ -1145,91 +1228,7 @@ export function InventoryPanel({
         {/* RS3-style item hover tooltip - rendered via portal */}
         {!targetingState.active &&
           itemHover &&
-          (() => {
-            const hoveredItemData = getItem(itemHover.item.itemId);
-            const itemName = hoveredItemData?.name || itemHover.item.itemId;
-            const bonuses = hoveredItemData?.bonuses;
-            const hasBonuses =
-              bonuses &&
-              ((bonuses.attack !== undefined && bonuses.attack !== 0) ||
-                (bonuses.defense !== undefined && bonuses.defense !== 0) ||
-                (bonuses.strength !== undefined && bonuses.strength !== 0));
-
-            return createPortal(
-              <div
-                className="pointer-events-none"
-                style={{
-                  position: "fixed",
-                  left: itemHover.position.x + 16,
-                  top: itemHover.position.y + 16,
-                  zIndex: 99999,
-                  background:
-                    "linear-gradient(135deg, rgba(20, 20, 30, 0.98) 0%, rgba(30, 25, 40, 0.95) 100%)",
-                  border: "2px solid rgba(242, 208, 138, 0.5)",
-                  borderRadius: "4px",
-                  padding: "8px 12px",
-                  boxShadow: "0 4px 12px rgba(0, 0, 0, 0.8)",
-                  minWidth: "120px",
-                  maxWidth: "220px",
-                }}
-              >
-                {/* Item name */}
-                <div
-                  style={{
-                    color: "#fbbf24",
-                    fontWeight: "bold",
-                    marginBottom: hasBonuses ? "6px" : "0",
-                    fontSize: "13px",
-                  }}
-                >
-                  {itemName}
-                  {itemHover.item.quantity > 1 && (
-                    <span
-                      style={{
-                        color: "rgba(242, 208, 138, 0.7)",
-                        fontWeight: "normal",
-                      }}
-                    >
-                      {" "}
-                      x{itemHover.item.quantity.toLocaleString()}
-                    </span>
-                  )}
-                </div>
-
-                {/* Bonuses (for equipment) */}
-                {hasBonuses && (
-                  <div style={{ fontSize: "11px" }}>
-                    {bonuses.attack !== undefined && bonuses.attack !== 0 && (
-                      <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
-                        ⚔️ Attack:{" "}
-                        <span style={{ color: "#22c55e" }}>
-                          +{bonuses.attack}
-                        </span>
-                      </div>
-                    )}
-                    {bonuses.defense !== undefined && bonuses.defense !== 0 && (
-                      <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
-                        🛡️ Defense:{" "}
-                        <span style={{ color: "#22c55e" }}>
-                          +{bonuses.defense}
-                        </span>
-                      </div>
-                    )}
-                    {bonuses.strength !== undefined &&
-                      bonuses.strength !== 0 && (
-                        <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
-                          💪 Strength:{" "}
-                          <span style={{ color: "#22c55e" }}>
-                            +{bonuses.strength}
-                          </span>
-                        </div>
-                      )}
-                  </div>
-                )}
-              </div>,
-              document.body,
-            );
-          })()}
+          renderItemHoverTooltip(itemHover)}
 
         {/* Inventory Grid - 7 columns × 4 rows with square slots */}
         <div
