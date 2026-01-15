@@ -151,7 +151,13 @@ export function EntityContextMenu({ world: _world }: EntityContextMenuProps) {
         return;
       }
 
-      setMenu((prev) => ({ ...prev, visible: false }));
+      setMenu((prev) => {
+        // Only dispatch close event if menu was actually visible
+        if (prev.visible) {
+          window.dispatchEvent(new CustomEvent("contextmenu:close"));
+        }
+        return { ...prev, visible: false };
+      });
     };
 
     window.addEventListener("contextmenu", handleContextMenu as EventListener);

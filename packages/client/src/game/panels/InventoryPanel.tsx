@@ -77,6 +77,15 @@ interface DraggableItemProps {
     position: { x: number; y: number },
   ) => void;
   onTargetHoverEnd?: () => void;
+  // RS3-style hover tooltip (separate from targeting mode)
+  onItemHoverStart?: (
+    item: InventorySlotViewItem,
+    position: { x: number; y: number },
+  ) => void;
+  onItemHoverMove?: (position: { x: number; y: number }) => void;
+  onItemHoverEnd?: () => void;
+  // Callback when context menu opens (to suppress hover tooltips)
+  onContextMenuOpen?: () => void;
 }
 
 // OSRS-style: 4 columns × 7 rows = 28 slots, all visible (no pagination)
@@ -135,6 +144,10 @@ function DraggableInventorySlot({
   onInvalidTargetClick,
   onTargetHover,
   onTargetHoverEnd,
+  onItemHoverStart,
+  onItemHoverMove,
+  onItemHoverEnd,
+  onContextMenuOpen,
 }: DraggableItemProps) {
   // Use both draggable (for picking up) and droppable (for receiving)
   const {
@@ -283,22 +296,39 @@ function DraggableInventorySlot({
         // OSRS-style: show "Use X → Y" tooltip when hovering valid target
         if (isValidTarget && item && onTargetHover) {
           onTargetHover(item, { x: e.clientX, y: e.clientY });
+        } else if (!isTargetingActive && item && onItemHoverStart) {
+          // RS3-style: show item stats tooltip when not in targeting mode
+          onItemHoverStart(item, { x: e.clientX, y: e.clientY });
         }
       }}
       onMouseLeave={() => {
         if (onTargetHoverEnd) {
           onTargetHoverEnd();
         }
+        if (onItemHoverEnd) {
+          onItemHoverEnd();
+        }
       }}
       onMouseMove={(e) => {
         // Update tooltip position as mouse moves
         if (isValidTarget && item && onTargetHover) {
           onTargetHover(item, { x: e.clientX, y: e.clientY });
+        } else if (!isTargetingActive && item && onItemHoverMove) {
+          onItemHoverMove({ x: e.clientX, y: e.clientY });
         }
       }}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
+
+        // Hide hover tooltip and mark context menu as open
+        if (onItemHoverEnd) {
+          onItemHoverEnd();
+        }
+        if (onContextMenuOpen) {
+          onContextMenuOpen();
+        }
+
         if (!item) return;
 
         // Use memoized itemData and isItemNoted for efficiency
@@ -467,7 +497,6 @@ function DraggableInventorySlot({
         });
         window.dispatchEvent(evt);
       }}
-      title={item ? `${item.itemId} (${item.quantity})` : "Empty slot"}
       style={{
         opacity: isDragging ? 0.3 : 1,
         // OSRS-style targeting:
@@ -598,6 +627,14 @@ interface TargetHoverState {
   position: { x: number; y: number };
 }
 
+/**
+ * Hover state for RS3-style item tooltip
+ */
+interface ItemHoverState {
+  item: InventorySlotViewItem;
+  position: { x: number; y: number };
+}
+
 const initialTargetingState: TargetingState = {
   active: false,
   sourceItem: null,
@@ -626,6 +663,12 @@ export function InventoryPanel({
 
   // OSRS-style hover tooltip state for "Use X → Y"
   const [targetHover, setTargetHover] = useState<TargetHoverState | null>(null);
+
+  // RS3-style hover tooltip state for item stats
+  const [itemHover, setItemHover] = useState<ItemHoverState | null>(null);
+
+  // Track if context menu is open (suppress hover tooltips while open)
+  const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
 
   // Track pending move for rollback detection
   // If server update arrives and doesn't match our optimistic state, we know it was rejected
@@ -689,6 +732,21 @@ export function InventoryPanel({
         onCtxSelect as EventListener,
       );
   }, [slotItems, world]);
+
+  // Listen for context menu close to re-enable hover tooltips
+  useEffect(() => {
+    const handleContextMenuClose = () => {
+      setIsContextMenuOpen(false);
+    };
+
+    window.addEventListener("contextmenu:close", handleContextMenuClose);
+    window.addEventListener("contextmenu:select", handleContextMenuClose);
+
+    return () => {
+      window.removeEventListener("contextmenu:close", handleContextMenuClose);
+      window.removeEventListener("contextmenu:select", handleContextMenuClose);
+    };
+  }, []);
 
   // Listen for targeting mode events (OSRS-style "Use X on Y")
   useEffect(() => {
@@ -960,6 +1018,33 @@ export function InventoryPanel({
     setTargetHover(null);
   }, []);
 
+  // RS3-style item hover handlers for stats tooltip
+  const handleItemHoverStart = useCallback(
+    (item: InventorySlotViewItem, position: { x: number; y: number }) => {
+      // Don't show hover tooltip if context menu is open
+      if (isContextMenuOpen) return;
+      setItemHover({ item, position });
+    },
+    [isContextMenuOpen],
+  );
+
+  const handleItemHoverMove = useCallback(
+    (position: { x: number; y: number }) => {
+      // Don't update hover tooltip if context menu is open
+      if (isContextMenuOpen) return;
+      setItemHover((prev) => (prev ? { ...prev, position } : null));
+    },
+    [isContextMenuOpen],
+  );
+
+  const handleItemHoverEnd = useCallback(() => {
+    setItemHover(null);
+  }, []);
+
+  const handleContextMenuOpen = useCallback(() => {
+    setIsContextMenuOpen(true);
+  }, []);
+
   const handleInvalidTargetClick = useCallback(() => {
     // OSRS: "Nothing interesting happens." when using item on invalid target
     const message = "Nothing interesting happens.";
@@ -1057,6 +1142,95 @@ export function InventoryPanel({
             document.body,
           )}
 
+        {/* RS3-style item hover tooltip - rendered via portal */}
+        {!targetingState.active &&
+          itemHover &&
+          (() => {
+            const hoveredItemData = getItem(itemHover.item.itemId);
+            const itemName = hoveredItemData?.name || itemHover.item.itemId;
+            const bonuses = hoveredItemData?.bonuses;
+            const hasBonuses =
+              bonuses &&
+              ((bonuses.attack !== undefined && bonuses.attack !== 0) ||
+                (bonuses.defense !== undefined && bonuses.defense !== 0) ||
+                (bonuses.strength !== undefined && bonuses.strength !== 0));
+
+            return createPortal(
+              <div
+                className="pointer-events-none"
+                style={{
+                  position: "fixed",
+                  left: itemHover.position.x + 16,
+                  top: itemHover.position.y + 16,
+                  zIndex: 99999,
+                  background:
+                    "linear-gradient(135deg, rgba(20, 20, 30, 0.98) 0%, rgba(30, 25, 40, 0.95) 100%)",
+                  border: "2px solid rgba(242, 208, 138, 0.5)",
+                  borderRadius: "4px",
+                  padding: "8px 12px",
+                  boxShadow: "0 4px 12px rgba(0, 0, 0, 0.8)",
+                  minWidth: "120px",
+                  maxWidth: "220px",
+                }}
+              >
+                {/* Item name */}
+                <div
+                  style={{
+                    color: "#fbbf24",
+                    fontWeight: "bold",
+                    marginBottom: hasBonuses ? "6px" : "0",
+                    fontSize: "13px",
+                  }}
+                >
+                  {itemName}
+                  {itemHover.item.quantity > 1 && (
+                    <span
+                      style={{
+                        color: "rgba(242, 208, 138, 0.7)",
+                        fontWeight: "normal",
+                      }}
+                    >
+                      {" "}
+                      x{itemHover.item.quantity.toLocaleString()}
+                    </span>
+                  )}
+                </div>
+
+                {/* Bonuses (for equipment) */}
+                {hasBonuses && (
+                  <div style={{ fontSize: "11px" }}>
+                    {bonuses.attack !== undefined && bonuses.attack !== 0 && (
+                      <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
+                        ⚔️ Attack:{" "}
+                        <span style={{ color: "#22c55e" }}>
+                          +{bonuses.attack}
+                        </span>
+                      </div>
+                    )}
+                    {bonuses.defense !== undefined && bonuses.defense !== 0 && (
+                      <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
+                        🛡️ Defense:{" "}
+                        <span style={{ color: "#22c55e" }}>
+                          +{bonuses.defense}
+                        </span>
+                      </div>
+                    )}
+                    {bonuses.strength !== undefined &&
+                      bonuses.strength !== 0 && (
+                        <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
+                          💪 Strength:{" "}
+                          <span style={{ color: "#22c55e" }}>
+                            +{bonuses.strength}
+                          </span>
+                        </div>
+                      )}
+                  </div>
+                )}
+              </div>,
+              document.body,
+            );
+          })()}
+
         {/* Inventory Grid - 7 columns × 4 rows with square slots */}
         <div
           className="flex-1 border rounded p-1 overflow-hidden"
@@ -1084,6 +1258,10 @@ export function InventoryPanel({
                 onInvalidTargetClick={handleInvalidTargetClick}
                 onPrimaryAction={handlePrimaryAction}
                 onShiftClick={handleShiftClick}
+                onItemHoverStart={handleItemHoverStart}
+                onItemHoverMove={handleItemHoverMove}
+                onItemHoverEnd={handleItemHoverEnd}
+                onContextMenuOpen={handleContextMenuOpen}
               />
             ))}
           </div>
