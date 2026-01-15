@@ -181,6 +181,7 @@ let pathfindLimiter: RateLimiter | null = null;
 let combatLimiter: RateLimiter | null = null;
 let followLimiter: RateLimiter | null = null;
 let consumeLimiter: RateLimiter | null = null;
+let coinPouchLimiter: RateLimiter | null = null;
 
 /**
  * Get the pickup rate limiter (5/sec)
@@ -315,6 +316,20 @@ export function getFollowRateLimiter(): RateLimiter {
 }
 
 /**
+ * Get the coin pouch rate limiter (10/sec)
+ * Limits coin pouch withdrawal requests
+ */
+export function getCoinPouchRateLimiter(): RateLimiter {
+  if (!coinPouchLimiter) {
+    coinPouchLimiter = createRateLimiter({
+      maxPerSecond: 10,
+      name: "coin-pouch",
+    });
+  }
+  return coinPouchLimiter;
+}
+
+/**
  * Destroy all singleton rate limiters
  * Call this during server shutdown
  */
@@ -328,6 +343,7 @@ export function destroyAllRateLimiters(): void {
   pathfindLimiter?.destroy();
   combatLimiter?.destroy();
   followLimiter?.destroy();
+  coinPouchLimiter?.destroy();
 
   pickupLimiter = null;
   moveLimiter = null;
@@ -338,4 +354,5 @@ export function destroyAllRateLimiters(): void {
   pathfindLimiter = null;
   combatLimiter = null;
   followLimiter = null;
+  coinPouchLimiter = null;
 }

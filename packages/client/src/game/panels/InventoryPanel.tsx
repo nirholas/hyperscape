@@ -1299,9 +1299,11 @@ export function InventoryPanel({
             </div>
           </div>
 
-          {/* RS3-style Coins/Money Pouch - Click to withdraw */}
+          {/* RS3-style Coins/Money Pouch - Click or press Enter to withdraw */}
           <div
-            className="border rounded flex items-center justify-between py-1 px-2 cursor-pointer hover:brightness-110 transition-all"
+            role="button"
+            tabIndex={0}
+            className="border rounded flex items-center justify-between py-1 px-2 cursor-pointer hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-yellow-500/50 transition-all"
             style={{
               background:
                 "linear-gradient(180deg, rgba(45, 40, 35, 0.95) 0%, rgba(30, 25, 22, 0.98) 100%)",
@@ -1310,6 +1312,13 @@ export function InventoryPanel({
                 "inset 0 1px 0 rgba(150, 130, 80, 0.2), 0 1px 2px rgba(0, 0, 0, 0.3)",
             }}
             onClick={openCoinModal}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                openCoinModal();
+              }
+            }}
+            aria-label={`Money pouch: ${coins.toLocaleString()} coins. Press Enter to withdraw.`}
             title="Click to withdraw coins to inventory"
           >
             <div className="flex items-center gap-1.5">

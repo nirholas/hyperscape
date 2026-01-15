@@ -41,6 +41,7 @@ import {
   getDropRateLimiter,
   getEquipRateLimiter,
   getConsumeRateLimiter,
+  getCoinPouchRateLimiter,
 } from "../services/SlidingWindowRateLimiter";
 import { getIdempotencyService } from "../services/IdempotencyService";
 
@@ -596,19 +597,6 @@ export function handleMoveItem(
 // ============================================================================
 
 /**
- * Rate limiter for coin pouch operations
- * Simple timestamp-based limiter (100ms between operations)
- */
-const coinPouchRateLimiter = new Map<string, number>();
-function checkCoinPouchRateLimit(playerId: string): boolean {
-  const now = Date.now();
-  const last = coinPouchRateLimiter.get(playerId) || 0;
-  if (now - last < 100) return false; // 100ms between operations
-  coinPouchRateLimiter.set(playerId, now);
-  return true;
-}
-
-/**
  * Handle coin pouch withdrawal to inventory
  *
  * Moves coins from the protected money pouch (characters.coins)
@@ -639,8 +627,8 @@ export async function handleCoinPouchWithdraw(
 
   const playerId = playerEntity.id;
 
-  // Step 2: Rate limit
-  if (!checkCoinPouchRateLimit(playerId)) {
+  // Step 2: Rate limit (uses SlidingWindowRateLimiter with automatic cleanup)
+  if (!getCoinPouchRateLimiter().check(playerId)) {
     return;
   }
 
