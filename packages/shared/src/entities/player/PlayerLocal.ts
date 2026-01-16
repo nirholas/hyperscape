@@ -371,6 +371,7 @@ export class PlayerLocal extends Entity implements HotReloadable {
     defense: { level: 1, xp: 0 },
     constitution: { level: 1, xp: 0 },
     ranged: { level: 1, xp: 0 },
+    prayer: { level: 1, xp: 0 },
     woodcutting: { level: 1, xp: 0 },
     mining: { level: 1, xp: 0 },
     fishing: { level: 1, xp: 0 },

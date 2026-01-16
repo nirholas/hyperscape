@@ -24,7 +24,12 @@ export class StatsComponent extends Component {
   public constitution: SkillData;
   public ranged: SkillData;
   public magic: SkillData;
-  public prayer: { level: number; points: number };
+  public prayer: {
+    level: number;
+    xp: number;
+    points: number;
+    maxPoints: number;
+  };
   public woodcutting: SkillData;
   public mining: SkillData;
   public fishing: SkillData;
@@ -47,7 +52,7 @@ export class StatsComponent extends Component {
 
     // Initialize default values
     const defaultSkill: SkillData = { level: 1, xp: 0 };
-    const defaultPrayer = { level: 1, points: 0 };
+    const defaultPrayer = { level: 1, xp: 0, points: 1, maxPoints: 1 };
     const defaultEquipment: EquipmentComponent = {
       helmet: null,
       body: null,
@@ -60,24 +65,8 @@ export class StatsComponent extends Component {
       amulet: null,
       ring: null,
     };
-    const defaultPrayers: PrayerComponent = {
-      protectFromMelee: false,
-      protectFromRanged: false,
-      protectFromMagic: false,
-      piety: false,
-      chivalry: false,
-      ultimateStrength: false,
-      superhumanStrength: false,
-      burstOfStrength: false,
-      rigour: false,
-      eagleEye: false,
-      hawkEye: false,
-      sharpEye: false,
-      augury: false,
-      mysticMight: false,
-      mysticLore: false,
-      mysticWill: false,
-    };
+    // Active prayers is now a string array of prayer IDs (manifest-driven)
+    const defaultPrayers: PrayerComponent = [];
     const defaultBonuses: CombatBonuses = {
       attack: 0,
       defense: 0,
@@ -121,7 +110,7 @@ export class StatsComponent extends Component {
     this.firemaking = initialData.firemaking || { ...defaultSkill };
     this.cooking = initialData.cooking || { ...defaultSkill };
     this.smithing = initialData.smithing || { ...defaultSkill };
-    this.activePrayers = initialData.activePrayers || { ...defaultPrayers };
+    this.activePrayers = initialData.activePrayers || [...defaultPrayers];
     this.equipment = initialData.equipment || { ...defaultEquipment };
     this.equippedSpell = initialData.equippedSpell || null;
     this.effects = initialData.effects || { ...defaultEffects };

@@ -20,6 +20,7 @@ export interface Skills {
   defense: SkillData;
   constitution: SkillData;
   ranged: SkillData;
+  prayer: SkillData;
   woodcutting: SkillData;
   mining: SkillData;
   fishing: SkillData;
@@ -111,31 +112,15 @@ export interface StatsComponent {
   constitution: SkillData;
   ranged: SkillData;
   magic: SkillData;
-  prayer: { level: number; points: number };
+  prayer: { level: number; xp: number; points: number; maxPoints: number };
   woodcutting: SkillData;
   mining: SkillData;
   fishing: SkillData;
   firemaking: SkillData;
   cooking: SkillData;
   smithing: SkillData;
-  activePrayers: {
-    protectFromMelee: boolean;
-    protectFromRanged: boolean;
-    protectFromMagic: boolean;
-    piety: boolean;
-    chivalry: boolean;
-    ultimateStrength: boolean;
-    superhumanStrength: boolean;
-    burstOfStrength: boolean;
-    rigour: boolean;
-    eagleEye: boolean;
-    hawkEye: boolean;
-    sharpEye: boolean;
-    augury: boolean;
-    mysticMight: boolean;
-    mysticLore: boolean;
-    mysticWill: boolean;
-  };
+  /** Active prayer IDs from manifest (manifest-driven, replaces boolean flags) */
+  activePrayers: string[];
   equipment: {
     weapon: {
       id: string;
@@ -275,27 +260,11 @@ export interface NPCComponent {
   services: string[];
 }
 
-export interface PrayerComponent {
-  protectFromMelee: boolean;
-  protectFromRanged: boolean;
-  protectFromMagic: boolean;
-  // Melee strength prayers
-  piety: boolean;
-  chivalry: boolean;
-  ultimateStrength: boolean;
-  superhumanStrength: boolean;
-  burstOfStrength: boolean;
-  // Ranged strength prayers
-  rigour: boolean;
-  eagleEye: boolean;
-  hawkEye: boolean;
-  sharpEye: boolean;
-  // Magic damage prayers
-  augury: boolean;
-  mysticMight: boolean;
-  mysticLore: boolean;
-  mysticWill: boolean;
-}
+/**
+ * Active prayers - now manifest-driven using prayer IDs
+ * @example ["thick_skin", "burst_of_strength"]
+ */
+export type PrayerComponent = string[];
 
 export interface EquipmentComponent {
   weapon: {
