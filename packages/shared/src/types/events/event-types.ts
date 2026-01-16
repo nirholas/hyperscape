@@ -357,6 +357,9 @@ export enum EventType {
   PRAYER_STATE_SYNC = "prayer:state_sync",
   PRAYER_DRAIN_TICK = "prayer:drain_tick",
 
+  // Altar System (prayer recharge)
+  ALTAR_PRAY = "altar:pray",
+
   // Chat System
   CHAT_SEND = "chat:send",
   CHAT_MESSAGE = "chat:message",

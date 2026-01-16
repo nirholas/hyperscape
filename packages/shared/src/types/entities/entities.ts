@@ -37,6 +37,7 @@ export enum EntityType {
   RANGE = "range",
   FURNACE = "furnace",
   ANVIL = "anvil",
+  ALTAR = "altar",
 }
 
 export enum InteractionType {
@@ -54,6 +55,7 @@ export enum InteractionType {
   FIREMAKING = "firemaking",
   SMELTING = "smelting",
   SMITHING = "smithing",
+  ALTAR = "altar",
 }
 
 export enum PlayerCombatStyle {

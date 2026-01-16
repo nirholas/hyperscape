@@ -101,6 +101,7 @@ import {
 import {
   handlePrayerToggle,
   handlePrayerDeactivateAll,
+  handleAltarPray,
 } from "./handlers/prayer";
 import { handleResourceGather } from "./handlers/resources";
 import {
@@ -1308,6 +1309,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
     this.handlers["onPrayerDeactivateAll"] = (socket, data) =>
       handlePrayerDeactivateAll(socket, data, this.world);
+
+    this.handlers["onAltarPray"] = (socket, data) =>
+      handleAltarPray(socket, data, this.world);
 
     // Death/respawn handlers
     this.handlers["onRequestRespawn"] = (socket, _data) => {

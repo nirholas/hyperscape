@@ -431,6 +431,8 @@ export class RaycastService {
         return "furnace";
       case "anvil":
         return "anvil";
+      case "altar":
+        return "altar";
       default:
         // Default to npc for unknown interactive entities
         return "npc";

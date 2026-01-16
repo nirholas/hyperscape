@@ -192,6 +192,14 @@ export class PrayerSystem extends SystemBase {
       },
     );
 
+    // Subscribe to altar pray events (recharge prayer points)
+    this.subscribe<{ playerId: string; altarId: string }>(
+      EventType.ALTAR_PRAY,
+      (data) => {
+        this.handleAltarPray(data.playerId, data.altarId);
+      },
+    );
+
     Logger.system("PrayerSystem", "Initialized");
   }
 
@@ -318,6 +326,70 @@ export class PrayerSystem extends SystemBase {
   // ==========================================================================
   // PRAYER TOGGLING
   // ==========================================================================
+
+  /**
+   * Handle altar pray request - recharge prayer points to full
+   */
+  private handleAltarPray(playerId: string, _altarId: string): void {
+    if (!isValidPlayerID(playerId)) {
+      return;
+    }
+
+    const playerIdKey = toPlayerID(playerId);
+    if (!playerIdKey) return;
+
+    const state = this.playerStates.get(playerIdKey);
+    if (!state) {
+      Logger.systemError(
+        "PrayerSystem",
+        `Cannot pray at altar - prayer not initialized for ${playerId}`,
+        new Error("Prayer not initialized"),
+      );
+      return;
+    }
+
+    const oldPoints = state.points;
+    const maxPoints = state.maxPoints;
+
+    // Check if already at max
+    if (oldPoints >= maxPoints) {
+      this.emitTypedEvent(EventType.UI_TOAST, {
+        playerId,
+        message: "Your prayer is already fully recharged.",
+        type: "info",
+      });
+      return;
+    }
+
+    // Recharge to full
+    state.points = maxPoints;
+    state.dirty = true;
+
+    // Emit points changed event
+    this.emitTypedEvent(EventType.PRAYER_POINTS_CHANGED, {
+      playerId,
+      points: Math.floor(state.points),
+      maxPoints: state.maxPoints,
+    });
+
+    // Emit state sync
+    this.emitPrayerStateSync(playerId, state);
+
+    // Schedule persistence
+    this.schedulePersist(playerId);
+
+    // Show success message
+    this.emitTypedEvent(EventType.UI_TOAST, {
+      playerId,
+      message: "You recharge your prayer points.",
+      type: "success",
+    });
+
+    Logger.system(
+      "PrayerSystem",
+      `${playerId} recharged prayer at altar: ${Math.floor(oldPoints)} -> ${maxPoints}`,
+    );
+  }
 
   /**
    * Handle prayer toggle request

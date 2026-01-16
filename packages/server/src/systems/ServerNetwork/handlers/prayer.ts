@@ -106,6 +106,58 @@ export function handlePrayerToggle(
 }
 
 /**
+ * Handle altar pray request from client
+ * Restores prayer points to maximum when praying at an altar
+ *
+ * @param socket - Client socket with player entity
+ * @param data - Request payload { altarId: string }
+ * @param world - Game world instance
+ */
+export function handleAltarPray(
+  socket: ServerSocket,
+  data: unknown,
+  world: World,
+): void {
+  const playerEntity = socket.player;
+  if (!playerEntity) {
+    return;
+  }
+
+  const playerId = playerEntity.id;
+
+  // Rate limiting
+  const rateLimiter = getPrayerRateLimiter();
+  if (!rateLimiter.check(playerId)) {
+    return;
+  }
+
+  // Validate payload
+  if (!data || typeof data !== "object") {
+    console.warn(`[Prayer] Invalid altar pray request format from ${playerId}`);
+    return;
+  }
+
+  const payload = data as { altarId?: string };
+  if (!payload.altarId || typeof payload.altarId !== "string") {
+    console.warn(`[Prayer] Missing altarId from ${playerId}`);
+    return;
+  }
+
+  // Verify altar exists
+  const altar = world.entities.get(payload.altarId);
+  if (!altar || altar.type !== "altar") {
+    sendPrayerError(socket, "Altar not found");
+    return;
+  }
+
+  // Emit event for PrayerSystem to handle the actual recharge
+  world.emit(EventType.ALTAR_PRAY, {
+    playerId,
+    altarId: payload.altarId,
+  });
+}
+
+/**
  * Handle prayer deactivate all request from client
  * Turns off all active prayers at once (useful for "quick prayers off" button)
  *

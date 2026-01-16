@@ -196,4 +196,6 @@ export const MESSAGE_TYPES = {
   FIREMAKING_REQUEST: "firemakingRequest",
   /** Request to cook food on fire/range */
   COOKING_REQUEST: "cookingRequest",
+  /** Pray at altar to recharge prayer points */
+  ALTAR_PRAY: "altarPray",
 } as const;

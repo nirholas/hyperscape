@@ -41,6 +41,7 @@ import { PlayerInteractionHandler } from "./handlers/PlayerInteractionHandler";
 import { CookingSourceInteractionHandler } from "./handlers/CookingSourceInteractionHandler";
 import { SmeltingSourceInteractionHandler } from "./handlers/SmeltingSourceInteractionHandler";
 import { SmithingSourceInteractionHandler } from "./handlers/SmithingSourceInteractionHandler";
+import { AltarInteractionHandler } from "./handlers/AltarInteractionHandler";
 
 /**
  * Targeting mode state for "Use X on Y" interactions
@@ -154,6 +155,12 @@ export class InteractionRouter extends System {
     this.handlers.set(
       "anvil",
       new SmithingSourceInteractionHandler(this.world, this.actionQueue),
+    );
+
+    // Altar (prayer recharge)
+    this.handlers.set(
+      "altar",
+      new AltarInteractionHandler(this.world, this.actionQueue),
     );
   }
 

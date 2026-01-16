@@ -21,6 +21,10 @@ import {
   AnvilEntity,
   type AnvilEntityConfig,
 } from "../../../entities/world/AnvilEntity";
+import {
+  AltarEntity,
+  type AltarEntityConfig,
+} from "../../../entities/world/AltarEntity";
 import { MobEntity } from "../../../entities/npc/MobEntity";
 import { NPCEntity } from "../../../entities/npc/NPCEntity";
 import { ResourceEntity } from "../../../entities/world/ResourceEntity";
@@ -353,6 +357,32 @@ export class EntityManager extends SystemBase {
     } catch (err) {
       console.error("[EntityManager] Error spawning anvil:", err);
     }
+
+    // Spawn altar near bank (for prayer point recharging)
+    let altarY = 40;
+    if (terrain?.getHeightAt) {
+      const height = terrain.getHeightAt(3, -25);
+      if (height !== null && height !== undefined && Number.isFinite(height)) {
+        altarY = (height as number) + 0.1;
+      }
+    }
+
+    const altarConfig: AltarEntityConfig = {
+      id: "altar_spawn_1",
+      name: "Altar",
+      position: { x: 3, y: altarY, z: -25 },
+    };
+
+    try {
+      // Cast since AltarEntity handles its own config format
+      await this.spawnEntity({
+        ...altarConfig,
+        type: EntityType.ALTAR,
+      } as unknown as EntityConfig);
+      console.log(`[EntityManager] Spawned altar at (3, ${altarY}, -25)`);
+    } catch (err) {
+      console.error("[EntityManager] Error spawning altar:", err);
+    }
   }
 
   update(deltaTime: number): void {
@@ -456,6 +486,10 @@ export class EntityManager extends SystemBase {
       case EntityType.ANVIL:
       case "anvil":
         entity = new AnvilEntity(this.world, config as AnvilEntityConfig);
+        break;
+      case EntityType.ALTAR:
+      case "altar":
+        entity = new AltarEntity(this.world, config as AltarEntityConfig);
         break;
       default:
         throw new Error(`[EntityManager] Unknown entity type: ${config.type}`);
