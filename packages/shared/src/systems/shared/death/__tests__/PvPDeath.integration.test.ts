@@ -228,6 +228,9 @@ function createMockWorld(isServer = true, currentTick = 1000) {
     groundItems,
     gravestones,
     emittedEvents,
+    entities: {
+      players, // Required by SafeAreaDeathHandler.spawnGravestone
+    },
     getPlayer: (id: string) => players.get(id),
     getSystem: vi.fn().mockImplementation((name: string) => {
       switch (name) {

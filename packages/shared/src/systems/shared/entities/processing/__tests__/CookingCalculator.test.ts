@@ -314,7 +314,7 @@ describe("CookingCalculator", () => {
     it("returns a Set of valid raw food IDs", () => {
       const validIds = getValidRawFoodIds();
       expect(validIds).toBeInstanceOf(Set);
-      expect(validIds.size).toBe(11); // 11 food types
+      expect(validIds.size).toBe(12); // 12 food types
     });
 
     it("contains all expected food types", () => {

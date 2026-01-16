@@ -216,13 +216,12 @@ describe("RightPanel", () => {
     it("renders paperdoll layout with equipment slots", () => {
       render(<RightPanel {...defaultProps} mode="equipment" />);
 
-      // Should see slot labels
+      // Should see slot labels (Ammo slot hidden for melee-only MVP)
       expect(screen.getByText("Head")).toBeInTheDocument();
       expect(screen.getByText("Weapon")).toBeInTheDocument();
       expect(screen.getByText("Body")).toBeInTheDocument();
       expect(screen.getByText("Shield")).toBeInTheDocument();
       expect(screen.getByText("Legs")).toBeInTheDocument();
-      expect(screen.getByText("Ammo")).toBeInTheDocument();
     });
 
     it("shows equipped items with icons", () => {
