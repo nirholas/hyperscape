@@ -233,6 +233,13 @@ const names = [
   'clientReady',         // Client -> Server: client finished loading, player now targetable
   // World time sync packets (day/night cycle)
   'worldTimeSync',       // Server -> Client: periodic world time sync for day/night
+  // Prayer system packets
+  'prayerToggle',        // Client -> Server: toggle a prayer on/off
+  'prayerDeactivateAll', // Client -> Server: deactivate all prayers
+  'altarPray',           // Client -> Server: pray at altar to recharge
+  'prayerStateSync',     // Server -> Client: full prayer state sync
+  'prayerToggled',       // Server -> Client: prayer toggle feedback
+  'prayerPointsChanged', // Server -> Client: prayer points changed
 ]
 
 const byName: Record<string, PacketInfo> = {};
