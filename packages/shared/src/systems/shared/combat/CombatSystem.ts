@@ -14,7 +14,9 @@ import {
   isAttackOnCooldownTicks,
   calculateRetaliationDelay,
   CombatStyle,
+  PrayerCombatBonuses,
 } from "../../../utils/game/CombatCalculations";
+import { PrayerSystem } from "../character/PrayerSystem";
 import { createEntityID } from "../../../utils/IdentifierUtils";
 import { EntityManager } from "..";
 import { MobNPCSystem } from "..";
@@ -784,7 +786,36 @@ export class CombatSystem extends SystemBase {
     target: Entity | MobEntity,
     style: CombatStyle = "accurate",
   ): number {
-    return this.damageCalculator.calculateMeleeDamage(attacker, target, style);
+    // Get prayer bonuses for attacker and defender (players only)
+    let attackerPrayerBonuses: PrayerCombatBonuses | undefined;
+    let defenderPrayerBonuses: PrayerCombatBonuses | undefined;
+
+    const prayerSystem = this.world.getSystem("prayer") as PrayerSystem | null;
+    if (prayerSystem) {
+      // Attacker prayer bonuses (if player)
+      if (!(attacker instanceof MobEntity)) {
+        const bonuses = prayerSystem.getCombinedBonuses(attacker.id);
+        if (bonuses.attackMultiplier || bonuses.strengthMultiplier) {
+          attackerPrayerBonuses = bonuses;
+        }
+      }
+
+      // Defender prayer bonuses (if player)
+      if (!(target instanceof MobEntity)) {
+        const bonuses = prayerSystem.getCombinedBonuses(target.id);
+        if (bonuses.defenseMultiplier) {
+          defenderPrayerBonuses = bonuses;
+        }
+      }
+    }
+
+    return this.damageCalculator.calculateMeleeDamage(
+      attacker,
+      target,
+      style,
+      attackerPrayerBonuses,
+      defenderPrayerBonuses,
+    );
   }
 
   // MVP: calculateRangedDamage removed - melee only

@@ -12,6 +12,7 @@ import {
   calculateDamage,
   CombatStats,
   CombatStyle,
+  PrayerCombatBonuses,
 } from "../../../utils/game/CombatCalculations";
 import { isMobEntity } from "../../../utils/typeGuards";
 
@@ -47,12 +48,16 @@ export class DamageCalculator {
    * @param attacker - The attacking entity
    * @param target - The target entity
    * @param style - Combat style for OSRS-accurate stat bonuses (default: "accurate")
+   * @param attackerPrayerBonuses - Prayer multipliers for attacker (optional)
+   * @param defenderPrayerBonuses - Prayer multipliers for defender (optional)
    * @returns Calculated damage value
    */
   calculateMeleeDamage(
     attacker: Entity | MobEntity,
     target: Entity | MobEntity,
     style: CombatStyle = "accurate",
+    attackerPrayerBonuses?: PrayerCombatBonuses,
+    defenderPrayerBonuses?: PrayerCombatBonuses,
   ): number {
     // Extract required properties for damage calculation
     let attackerData: {
@@ -157,6 +162,9 @@ export class DamageCalculator {
       AttackType.MELEE,
       equipmentStats,
       style,
+      undefined, // defenderStyle - not tracked for mobs
+      attackerPrayerBonuses,
+      defenderPrayerBonuses,
     );
 
     return result.damage;

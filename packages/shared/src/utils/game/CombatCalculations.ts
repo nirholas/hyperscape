@@ -61,7 +61,21 @@ export interface DamageResult {
   didHit: boolean;
 }
 
-/** @see https://oldschool.runescape.wiki/w/Accuracy */
+/**
+ * Prayer bonus multipliers for combat.
+ * Applied to effective levels per OSRS formula.
+ */
+export interface PrayerCombatBonuses {
+  attackMultiplier?: number;
+  strengthMultiplier?: number;
+  defenseMultiplier?: number;
+}
+
+/**
+ * Calculate hit chance using OSRS-accurate formula.
+ * Prayer bonuses are applied as multipliers to effective levels.
+ * @see https://oldschool.runescape.wiki/w/Accuracy
+ */
 function calculateAccuracy(
   attackerAttackLevel: number,
   attackerAttackBonus: number,
@@ -70,6 +84,8 @@ function calculateAccuracy(
   attackerStyle: CombatStyle = "accurate",
   defenderStyle?: CombatStyle,
   rng?: SeededRandom,
+  attackerPrayerBonuses?: PrayerCombatBonuses,
+  defenderPrayerBonuses?: PrayerCombatBonuses,
 ): boolean {
   const random = rng ?? getGameRng();
 
@@ -78,10 +94,21 @@ function calculateAccuracy(
     ? getStyleBonus(defenderStyle)
     : { attack: 0, strength: 0, defense: 0 };
 
-  const effectiveAttack = attackerAttackLevel + 8 + attackerStyleBonus.attack;
+  // OSRS formula: prayer multiplier is applied to base level before adding constants
+  // effectiveLevel = floor(baseLevel * prayerMultiplier) + 8 + styleBonus
+  const prayerAttackMultiplier = attackerPrayerBonuses?.attackMultiplier ?? 1;
+  const boostedAttackLevel = Math.floor(
+    attackerAttackLevel * prayerAttackMultiplier,
+  );
+  const effectiveAttack = boostedAttackLevel + 8 + attackerStyleBonus.attack;
   const attackRoll = effectiveAttack * (attackerAttackBonus + 64);
 
-  const effectiveDefence = targetDefenseLevel + 9 + defenderStyleBonus.defense;
+  // Apply defender's prayer defense multiplier
+  const prayerDefenseMultiplier = defenderPrayerBonuses?.defenseMultiplier ?? 1;
+  const boostedDefenseLevel = Math.floor(
+    targetDefenseLevel * prayerDefenseMultiplier,
+  );
+  const effectiveDefence = boostedDefenseLevel + 9 + defenderStyleBonus.defense;
   const defenceRoll = effectiveDefence * (targetDefenseBonus + 64);
 
   let hitChance: number;
@@ -94,7 +121,11 @@ function calculateAccuracy(
   return random.random() < hitChance;
 }
 
-/** @see https://oldschool.runescape.wiki/w/Damage_per_second/Melee */
+/**
+ * Calculate melee damage using OSRS-accurate formulas.
+ * Prayer bonuses are applied as multipliers to effective levels.
+ * @see https://oldschool.runescape.wiki/w/Damage_per_second/Melee
+ */
 export function calculateDamage(
   attacker: { stats?: CombatStats; config?: { attackPower?: number } },
   target: { stats?: CombatStats; config?: { defense?: number } },
@@ -107,6 +138,8 @@ export function calculateDamage(
   },
   style: CombatStyle = "accurate",
   defenderStyle?: CombatStyle,
+  attackerPrayerBonuses?: PrayerCombatBonuses,
+  defenderPrayerBonuses?: PrayerCombatBonuses,
 ): DamageResult {
   let maxHit = 1;
   let attackStat = 0;
@@ -119,17 +152,22 @@ export function calculateDamage(
     const attackPower = attacker.config?.attackPower || 0;
 
     if (strengthStat > 0 || attackPower > 0) {
-      const effectiveStrengthLevel =
+      const baseStrengthLevel =
         strengthStat > 0
           ? strengthStat
           : Math.max(1, Math.floor(attackPower / 2));
-      const effectiveAttackLevel =
-        attackStat > 0 ? attackStat : effectiveStrengthLevel;
+      const baseAttackLevel = attackStat > 0 ? attackStat : baseStrengthLevel;
 
-      attackStat = effectiveAttackLevel;
+      attackStat = baseAttackLevel;
 
-      const effectiveStrength =
-        effectiveStrengthLevel + 8 + styleBonus.strength;
+      // OSRS formula: prayer multiplier is applied to base level before adding constants
+      // effectiveStrength = floor(baseStrength * prayerMultiplier) + 8 + styleBonus
+      const prayerStrengthMultiplier =
+        attackerPrayerBonuses?.strengthMultiplier ?? 1;
+      const boostedStrengthLevel = Math.floor(
+        baseStrengthLevel * prayerStrengthMultiplier,
+      );
+      const effectiveStrength = boostedStrengthLevel + 8 + styleBonus.strength;
       const strengthBonus = equipmentStats?.strength || 0;
       attackBonus = equipmentStats?.attack || 0;
 
@@ -159,6 +197,9 @@ export function calculateDamage(
     targetDefenseBonus,
     style,
     defenderStyle,
+    undefined, // rng - use default
+    attackerPrayerBonuses,
+    defenderPrayerBonuses,
   );
 
   if (!didHit) {
