@@ -182,6 +182,7 @@ let combatLimiter: RateLimiter | null = null;
 let followLimiter: RateLimiter | null = null;
 let consumeLimiter: RateLimiter | null = null;
 let coinPouchLimiter: RateLimiter | null = null;
+let prayerLimiter: RateLimiter | null = null;
 
 /**
  * Get the pickup rate limiter (5/sec)
@@ -330,6 +331,21 @@ export function getCoinPouchRateLimiter(): RateLimiter {
 }
 
 /**
+ * Get the prayer rate limiter (5/sec)
+ * Limits prayer toggle requests - matches PRAYER_TOGGLE_RATE_LIMIT
+ * OSRS allows quick prayer switching but we prevent spam
+ */
+export function getPrayerRateLimiter(): RateLimiter {
+  if (!prayerLimiter) {
+    prayerLimiter = createRateLimiter({
+      maxPerSecond: 5,
+      name: "prayer-toggle",
+    });
+  }
+  return prayerLimiter;
+}
+
+/**
  * Destroy all singleton rate limiters
  * Call this during server shutdown
  */
@@ -344,6 +360,7 @@ export function destroyAllRateLimiters(): void {
   combatLimiter?.destroy();
   followLimiter?.destroy();
   coinPouchLimiter?.destroy();
+  prayerLimiter?.destroy();
 
   pickupLimiter = null;
   moveLimiter = null;
@@ -355,4 +372,5 @@ export function destroyAllRateLimiters(): void {
   combatLimiter = null;
   followLimiter = null;
   coinPouchLimiter = null;
+  prayerLimiter = null;
 }

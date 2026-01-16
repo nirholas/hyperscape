@@ -98,6 +98,10 @@ import {
   handleMoveItem,
   handleCoinPouchWithdraw,
 } from "./handlers/inventory";
+import {
+  handlePrayerToggle,
+  handlePrayerDeactivateAll,
+} from "./handlers/prayer";
 import { handleResourceGather } from "./handlers/resources";
 import {
   handleBankOpen,
@@ -1297,6 +1301,13 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
     this.handlers["onCoinPouchWithdraw"] = (socket, data) =>
       handleCoinPouchWithdraw(socket, data as { amount: number }, this.world);
+
+    // Prayer handlers
+    this.handlers["onPrayerToggle"] = (socket, data) =>
+      handlePrayerToggle(socket, data, this.world);
+
+    this.handlers["onPrayerDeactivateAll"] = (socket, data) =>
+      handlePrayerDeactivateAll(socket, data, this.world);
 
     // Death/respawn handlers
     this.handlers["onRequestRespawn"] = (socket, _data) => {

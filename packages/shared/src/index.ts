@@ -202,6 +202,32 @@ export {
   createChunkID,
 } from "./types/core/identifiers";
 
+// Export prayer type guards and types
+export {
+  isValidPrayerId,
+  isValidPrayerTogglePayload,
+  isValidPrayerBonuses,
+  getPlayerPrayerLevel,
+  getPlayerPrayerBonus,
+  getPlayerPrayerXp,
+  MAX_PRAYER_ID_LENGTH,
+  MAX_ACTIVE_PRAYERS,
+  PRAYER_TOGGLE_COOLDOWN_MS,
+  PRAYER_TOGGLE_RATE_LIMIT,
+  PRAYER_ID_PATTERN,
+} from "./types/game/prayer-types";
+export type {
+  PrayerCategory,
+  PrayerBonuses,
+  PrayerDefinition,
+  PrayerManifest,
+  PrayerState,
+  PrayerTogglePayload,
+  PrayerToggledEvent,
+  PrayerStateSyncPayload,
+  PlayerWithPrayerStats,
+} from "./types/game/prayer-types";
+
 // Export item helpers used by server network snapshot
 export {
   getItem,
@@ -264,6 +290,7 @@ export { EventBus } from "./systems/shared";
 export { System as SystemClass } from "./systems/shared";
 export { SystemBase } from "./systems/shared";
 export { CombatSystem } from "./systems/shared/combat";
+export { PrayerSystem } from "./systems/shared/character/PrayerSystem";
 export { LootSystem } from "./systems/shared/economy/LootSystem";
 export { StoreSystem } from "./systems/shared/economy/StoreSystem";
 export { ResourceSystem } from "./systems/shared/entities/ResourceSystem";
