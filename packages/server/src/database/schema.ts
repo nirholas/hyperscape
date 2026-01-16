@@ -221,7 +221,12 @@ export const characters = pgTable(
     prayerPoints: integer("prayerPoints").default(1),
     prayerMaxPoints: integer("prayerMaxPoints").default(1),
 
-    // Active prayers (JSON array of prayer IDs, e.g., '["thick_skin", "burst_of_strength"]')
+    /**
+     * Active prayers stored as JSON array of prayer ID strings.
+     * Format: '["thick_skin", "burst_of_strength"]'
+     * IDs must match valid entries in prayers.json manifest.
+     * Empty array '[]' when no prayers are active.
+     */
     activePrayers: text("activePrayers").default("[]"),
 
     // Status

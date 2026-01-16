@@ -26,6 +26,7 @@ import {
   isValidPrayerBonuses,
   MAX_ACTIVE_PRAYERS,
 } from "../types/game/prayer-types";
+import { Logger } from "../utils/Logger";
 
 // Re-export types for consumers
 export type { PrayerDefinition, PrayerBonuses, PrayerCategory };
@@ -136,15 +137,17 @@ export class PrayerDataProvider {
     if (this.prayerManifest) {
       this.buildPrayerDataFromManifest();
     } else {
-      console.warn(
-        "[PrayerDataProvider] No prayer manifest loaded - prayer system will be unavailable",
+      Logger.warn(
+        "PrayerDataProvider",
+        "No prayer manifest loaded - prayer system will be unavailable",
       );
     }
 
     this.isInitialized = true;
 
-    console.log(
-      `[PrayerDataProvider] Initialized: ${this.prayerMap.size} prayers loaded`,
+    Logger.system(
+      "PrayerDataProvider",
+      `Initialized: ${this.prayerMap.size} prayers loaded`,
     );
   }
 
@@ -172,16 +175,18 @@ export class PrayerDataProvider {
     for (const input of this.prayerManifest.prayers) {
       // Validate prayer ID format (security)
       if (!isValidPrayerId(input.id)) {
-        console.warn(
-          `[PrayerDataProvider] Invalid prayer ID format: "${input.id}" - skipping`,
+        Logger.warn(
+          "PrayerDataProvider",
+          `Invalid prayer ID format: "${input.id}" - skipping`,
         );
         continue;
       }
 
       // Validate bonuses
       if (!isValidPrayerBonuses(input.bonuses)) {
-        console.warn(
-          `[PrayerDataProvider] Invalid bonuses for prayer "${input.id}" - skipping`,
+        Logger.warn(
+          "PrayerDataProvider",
+          `Invalid bonuses for prayer "${input.id}" - skipping`,
         );
         continue;
       }
@@ -189,8 +194,9 @@ export class PrayerDataProvider {
       // Validate category
       const category = input.category as PrayerCategory;
       if (!["offensive", "defensive", "utility"].includes(category)) {
-        console.warn(
-          `[PrayerDataProvider] Invalid category "${input.category}" for prayer "${input.id}" - skipping`,
+        Logger.warn(
+          "PrayerDataProvider",
+          `Invalid category "${input.category}" for prayer "${input.id}" - skipping`,
         );
         continue;
       }
@@ -201,8 +207,9 @@ export class PrayerDataProvider {
         if (isValidPrayerId(conflictId)) {
           validConflicts.push(conflictId);
         } else {
-          console.warn(
-            `[PrayerDataProvider] Invalid conflict ID "${conflictId}" in prayer "${input.id}" - ignoring`,
+          Logger.warn(
+            "PrayerDataProvider",
+            `Invalid conflict ID "${conflictId}" in prayer "${input.id}" - ignoring`,
           );
         }
       }

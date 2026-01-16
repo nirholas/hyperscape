@@ -272,10 +272,16 @@ export class PrayerSystem extends SystemBase {
   // PRE-ALLOCATED BUFFERS (Memory optimization)
   // ============================================================================
 
-  /** Reusable array for collecting prayers to deactivate */
+  /**
+   * Reusable array for collecting prayers to deactivate.
+   * WARNING: Do not store references to this buffer - contents change between calls.
+   */
   private readonly deactivateBuffer: string[] = [];
 
-  /** Reusable object for combined bonuses calculation */
+  /**
+   * Reusable object for combined bonuses calculation.
+   * WARNING: Do not store references to this buffer - contents change between calls.
+   */
   private readonly combinedBonusesBuffer: MutablePrayerBonuses = {
     attackMultiplier: undefined,
     strengthMultiplier: undefined,
