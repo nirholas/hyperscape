@@ -9,7 +9,7 @@
  * @see https://oldschool.runescape.wiki/w/Noted_items
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 import {
   itemMatchesToolCategory,
   getToolCategory,

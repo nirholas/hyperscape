@@ -166,8 +166,8 @@ describe("CombatStateService", () => {
       );
 
       const data = stateService.getCombatData("player1");
-      // Combat timeout is 8 ticks (COMBAT_CONSTANTS.COMBAT_TIMEOUT_TICKS)
-      expect(data?.combatEndTick).toBe(currentTick + 8);
+      // Combat timeout is 17 ticks (COMBAT_CONSTANTS.COMBAT_TIMEOUT_TICKS)
+      expect(data?.combatEndTick).toBe(currentTick + 17);
     });
 
     it("sets inCombat to true", () => {
@@ -356,14 +356,14 @@ describe("CombatStateService", () => {
         4,
       );
 
-      // Original combatEndTick: 100 + 8 = 108
-      expect(stateService.getCombatData("player1")?.combatEndTick).toBe(108);
+      // Original combatEndTick: 100 + 17 = 117
+      expect(stateService.getCombatData("player1")?.combatEndTick).toBe(117);
 
       // Extend from tick 105
       stateService.extendCombatTimer(attackerId, 105);
 
-      // New combatEndTick: 105 + 8 = 113
-      expect(stateService.getCombatData("player1")?.combatEndTick).toBe(113);
+      // New combatEndTick: 105 + 17 = 122
+      expect(stateService.getCombatData("player1")?.combatEndTick).toBe(122);
     });
 
     it("does nothing for entity not in combat", () => {

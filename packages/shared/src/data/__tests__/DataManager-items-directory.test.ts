@@ -7,7 +7,7 @@
  * - Duplicate ID detection across files
  */
 
-import { describe, it, expect, beforeAll } from "bun:test";
+import { describe, it, expect, beforeAll } from "vitest";
 import { dataManager } from "../DataManager";
 import { ITEMS } from "../items";
 import type { Item } from "../../types/core/core";
@@ -27,7 +27,7 @@ describe("DataManager items/ directory loading", () => {
         (item) => !item.id.endsWith("_noted"),
       );
       // Count reflects all items across weapons, tools, resources, food, misc
-      expect(baseItems.length).toBe(82);
+      expect(baseItems.length).toBe(86);
     });
 
     it("loads items from all 5 category files", () => {
@@ -118,8 +118,8 @@ describe("DataManager items/ directory loading", () => {
       const tools = Array.from(ITEMS.values()).filter(
         (item) => item.type === "tool" && !item.id.endsWith("_noted"),
       );
-      // 6 hatchets + 6 pickaxes + fishing rod, fly fishing rod, net, hammer, tinderbox = 17
-      expect(tools.length).toBe(17);
+      // 6 hatchets + 6 pickaxes + fishing rod, fly fishing rod, net, hammer, tinderbox, etc.
+      expect(tools.length).toBe(19);
     });
 
     it("has correct resource count", () => {
@@ -127,14 +127,14 @@ describe("DataManager items/ directory loading", () => {
         (item) => item.type === "resource" && !item.id.endsWith("_noted"),
       );
       // Ores, bars, logs, raw fish, etc.
-      expect(resources.length).toBe(35);
+      expect(resources.length).toBe(36);
     });
 
     it("has correct consumable count", () => {
       const consumables = Array.from(ITEMS.values()).filter(
         (item) => item.type === "consumable" && !item.id.endsWith("_noted"),
       );
-      expect(consumables.length).toBe(11);
+      expect(consumables.length).toBe(12);
     });
 
     it("has correct junk count", () => {
