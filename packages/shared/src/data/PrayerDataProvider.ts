@@ -27,6 +27,9 @@ import {
   MAX_ACTIVE_PRAYERS,
 } from "../types/game/prayer-types";
 
+// Re-export types for consumers
+export type { PrayerDefinition, PrayerBonuses, PrayerCategory };
+
 // ============================================================================
 // MANIFEST TYPE (matches prayers.json structure)
 // ============================================================================
