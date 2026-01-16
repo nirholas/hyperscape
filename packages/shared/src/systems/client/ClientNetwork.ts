@@ -1656,6 +1656,22 @@ export class ClientNetwork extends SystemBase {
     this.world.emit(EventType.PRAYER_TOGGLED, data);
   };
 
+  onPrayerPointsChanged = (data: {
+    playerId: string;
+    points: number;
+    maxPoints: number;
+    reason?: string;
+  }) => {
+    // Update cache if it exists
+    const cached = this.lastPrayerStateByPlayerId[data.playerId];
+    if (cached) {
+      cached.points = data.points;
+      cached.maxPoints = data.maxPoints;
+    }
+    // Re-emit with typed event so UI updates
+    this.world.emit(EventType.PRAYER_POINTS_CHANGED, data);
+  };
+
   /**
    * Handle world time sync from server - keeps day/night cycle in sync across all clients
    */

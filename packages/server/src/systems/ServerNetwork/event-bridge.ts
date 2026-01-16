@@ -358,6 +358,26 @@ export class EventBridge {
           points: data.points,
         });
       });
+
+      // Forward prayer points changes for real-time drain animation
+      this.world.on(EventType.PRAYER_POINTS_CHANGED, (payload: unknown) => {
+        const data = payload as {
+          playerId?: string;
+          points?: number;
+          maxPoints?: number;
+          reason?: string;
+        };
+
+        if (!data?.playerId) return;
+
+        // Send point update to the player
+        this.broadcast.sendToPlayer(data.playerId, "prayerPointsChanged", {
+          playerId: data.playerId,
+          points: data.points ?? 0,
+          maxPoints: data.maxPoints ?? 1,
+          reason: data.reason,
+        });
+      });
     } catch (_err) {
       console.error("[EventBridge] Error setting up prayer events:", _err);
     }
@@ -382,6 +402,22 @@ export class EventBridge {
 
         if (data.playerId && data.message) {
           this.broadcast.sendToPlayer(data.playerId, "systemMessage", {
+            message: data.message,
+            type: data.type || "info",
+          });
+        }
+      });
+
+      // Forward UI_TOAST events to client for toast notifications
+      this.world.on(EventType.UI_TOAST, (payload: unknown) => {
+        const data = payload as {
+          playerId: string;
+          message: string;
+          type?: "info" | "success" | "warning" | "error";
+        };
+
+        if (data.playerId && data.message) {
+          this.broadcast.sendToPlayer(data.playerId, "showToast", {
             message: data.message,
             type: data.type || "info",
           });

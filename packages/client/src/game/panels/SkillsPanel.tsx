@@ -337,8 +337,22 @@ export function SkillsPanel({ world, stats }: SkillsPanelProps) {
       });
     };
 
+    const handlePrayerPointsChanged = (data: unknown) => {
+      const pointsData = data as {
+        playerId: string;
+        points: number;
+        maxPoints: number;
+      };
+      // Only handle our own player's state
+      if (pointsData.playerId !== playerId) return;
+
+      setPrayerPoints(pointsData.points);
+      setPrayerMaxPoints(pointsData.maxPoints);
+    };
+
     world.on(EventType.PRAYER_STATE_SYNC, handlePrayerStateSync);
     world.on(EventType.PRAYER_TOGGLED, handlePrayerToggled);
+    world.on(EventType.PRAYER_POINTS_CHANGED, handlePrayerPointsChanged);
 
     // Initialize from cached state if available
     const network = world.network as {
@@ -357,6 +371,7 @@ export function SkillsPanel({ world, stats }: SkillsPanelProps) {
     return () => {
       world.off(EventType.PRAYER_STATE_SYNC, handlePrayerStateSync);
       world.off(EventType.PRAYER_TOGGLED, handlePrayerToggled);
+      world.off(EventType.PRAYER_POINTS_CHANGED, handlePrayerPointsChanged);
     };
   }, [world, playerId]);
 
