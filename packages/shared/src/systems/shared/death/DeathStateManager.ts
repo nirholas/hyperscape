@@ -80,6 +80,11 @@ type DatabaseSystem = {
   // P0-005: Crash recovery methods
   getUnrecoveredDeathsAsync: () => Promise<DeathLockData[]>;
   markDeathRecoveredAsync: (playerId: string) => Promise<void>;
+  // DS-C06: Atomic death lock acquisition (prevents race conditions)
+  acquireDeathLockAsync: (
+    data: DeathLockData,
+    tx?: TransactionContext,
+  ) => Promise<boolean>;
 };
 
 /**
@@ -281,10 +286,12 @@ export class DeathStateManager {
   /**
    * Track a player death (for cleanup purposes)
    * P0-004: Database-first write order - stores in database BEFORE memory
+   * DS-C06: Uses atomic acquisition to prevent race conditions
    *
    * @param playerId - The player who died
    * @param options - Death lock options (gravestone ID, ground items, position, etc.)
    * @param tx - Optional transaction context for atomic operations (server only)
+   * @returns true if death lock was created, false if player already has one
    */
   async createDeathLock(
     playerId: string,
@@ -299,66 +306,69 @@ export class DeathStateManager {
       killedBy?: string;
     },
     tx?: TransactionContext,
-  ): Promise<void> {
+  ): Promise<boolean> {
     // CRITICAL: Server authority check - prevent client from creating fake death locks
     if (!this.world.isServer) {
       console.error(
         `[DeathStateManager] ⚠️  Client attempted server-only death lock creation for ${playerId} - BLOCKED`,
       );
-      return;
+      return false;
     }
 
-    // DS-H02: Check for existing death lock (database + memory) to prevent death spam
-    // This persists across server restarts unlike in-memory only checks
+    // DS-H02: Fast path - check memory first to avoid DB round-trip
     if (this.activeDeaths.has(playerId)) {
       console.warn(
         `[DeathStateManager] Death lock already exists in memory for ${playerId} - rejecting duplicate`,
       );
-      return;
-    }
-
-    // DS-H02: Also check database in case memory was cleared (server restart)
-    if (this.databaseSystem) {
-      const existingLock =
-        await this.databaseSystem.getDeathLockAsync(playerId);
-      if (existingLock && !existingLock.recovered) {
-        console.warn(
-          `[DeathStateManager] Death lock already exists in database for ${playerId} - rejecting duplicate`,
-        );
-        // Restore to memory for faster future checks
-        this.activeDeaths.set(playerId, existingLock);
-        return;
-      }
+      return false;
     }
 
     const timestamp = Date.now();
 
-    // P0-004: CRITICAL - Write to DATABASE FIRST before memory!
-    // This prevents item loss if server crashes after memory update but before DB write.
+    const deathLockData: DeathLockData = {
+      playerId,
+      gravestoneId: options.gravestoneId || undefined,
+      groundItemIds: options.groundItemIds || [],
+      position: options.position,
+      timestamp,
+      zoneType: options.zoneType,
+      itemCount: options.itemCount,
+      // P0-003: Crash recovery fields
+      items: options.items || [],
+      killedBy: options.killedBy || "unknown",
+      recovered: false, // New deaths are not yet recovered
+    };
+
+    // DS-C06: Use ATOMIC acquisition to prevent race conditions
+    // This uses INSERT ... ON CONFLICT DO NOTHING with RETURNING
+    // If another request already inserted a death lock, this returns false
     if (this.databaseSystem) {
       try {
-        await this.databaseSystem.saveDeathLockAsync(
-          {
-            playerId,
-            gravestoneId: options.gravestoneId || undefined,
-            groundItemIds: options.groundItemIds || [],
-            position: options.position,
-            timestamp,
-            zoneType: options.zoneType,
-            itemCount: options.itemCount,
-            // P0-003: Crash recovery fields
-            items: options.items || [],
-            killedBy: options.killedBy || "unknown",
-            recovered: false, // New deaths are not yet recovered
-          },
-          tx, // Pass transaction context if provided
+        const acquired = await this.databaseSystem.acquireDeathLockAsync(
+          deathLockData,
+          tx,
         );
+
+        if (!acquired) {
+          // Another request already created a death lock for this player
+          console.warn(
+            `[DeathStateManager] Death lock already exists in database for ${playerId} - atomic acquisition failed`,
+          );
+          // Restore to memory for faster future checks
+          const existingLock =
+            await this.databaseSystem.getDeathLockAsync(playerId);
+          if (existingLock) {
+            this.activeDeaths.set(playerId, existingLock);
+          }
+          return false;
+        }
+
         console.log(
-          `[DeathStateManager] ✓ Persisted death lock to database for ${playerId}${tx ? " (in transaction)" : ""}`,
+          `[DeathStateManager] ✓ Atomically acquired death lock in database for ${playerId}${tx ? " (in transaction)" : ""}`,
         );
       } catch (error) {
         console.error(
-          `[DeathStateManager] ❌ Failed to persist death lock for ${playerId}:`,
+          `[DeathStateManager] ❌ Failed to acquire death lock for ${playerId}:`,
           error,
         );
         // If in transaction, re-throw to trigger rollback
@@ -388,6 +398,8 @@ export class DeathStateManager {
     console.log(
       `[DeathStateManager] ✓ Tracking death for ${playerId}: ${options.itemCount} items, zone: ${options.zoneType}`,
     );
+
+    return true;
   }
 
   /**
