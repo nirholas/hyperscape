@@ -178,6 +178,28 @@ export class AggroSystem extends SystemBase {
         this.playerSkills.set(data.playerId, data.skills);
       },
     );
+
+    // CRITICAL: Listen for player death to immediately stop all mobs chasing them
+    // This prevents mobs from following dead players to spawn point
+    this.subscribe(
+      EventType.PLAYER_SET_DEAD,
+      (data: { playerId: string; isDead: boolean }) => {
+        if (data.isDead) {
+          this.handlePlayerDied(data.playerId);
+        }
+      },
+    );
+
+    // Listen for player respawn to clear any lingering aggro state
+    this.subscribe(
+      EventType.PLAYER_RESPAWNED,
+      (data: {
+        playerId: string;
+        spawnPosition: { x: number; y: number; z: number };
+      }) => {
+        this.handlePlayerRespawned(data.playerId);
+      },
+    );
   }
 
   start(): void {
@@ -715,7 +737,28 @@ export class AggroSystem extends SystemBase {
       return;
     }
 
-    const player = this.world.getPlayer(mobState.currentTarget)!;
+    const player = this.world.getPlayer(mobState.currentTarget);
+
+    // CRITICAL: Check if player exists AND is alive before chasing
+    // This prevents mobs from following dead players to spawn point
+    if (!player) {
+      this.stopChasing(mobState);
+      return;
+    }
+
+    // Check if player is dead - stop chasing dead players immediately
+    // Use health check as primary death indicator (most reliable)
+    const playerHealth = (player as { health?: { current?: number } }).health;
+    if (
+      playerHealth &&
+      playerHealth.current !== undefined &&
+      playerHealth.current <= 0
+    ) {
+      this.stopChasing(mobState);
+      mobState.currentTarget = null;
+      mobState.aggroTargets.delete(player.id);
+      return;
+    }
 
     // Strong type assumption - player.node.position is always Vector3
     if (!player.node?.position) {
@@ -790,6 +833,73 @@ export class AggroSystem extends SystemBase {
         mobState.currentTarget = null;
         mobState.aggroTargets.clear();
       }
+    }
+  }
+
+  /**
+   * Handle player death - immediately stop all mobs from chasing/targeting them
+   *
+   * This is critical for death/respawn behavior:
+   * - Mobs should stop chasing the moment a player dies
+   * - Mobs should return to patrol/spawn rather than following to respawn point
+   * - All aggro towards the dead player should be cleared
+   */
+  private handlePlayerDied(playerId: string): void {
+    let mosbAffected = 0;
+
+    for (const [_mobId, mobState] of this.mobStates) {
+      // Check if this mob was targeting the dead player
+      if (mobState.currentTarget === playerId) {
+        // Stop chasing
+        mobState.isChasing = false;
+        mobState.currentTarget = null;
+        mobState.isInCombat = false;
+        mosbAffected++;
+      }
+
+      // Remove from aggro targets
+      if (mobState.aggroTargets.has(playerId)) {
+        mobState.aggroTargets.delete(playerId);
+      }
+    }
+
+    if (mosbAffected > 0) {
+      this.logger.debug(
+        `[AggroSystem] Cleared ${mosbAffected} mobs targeting dead player ${playerId}`,
+      );
+    }
+  }
+
+  /**
+   * Handle player respawn - clear any lingering aggro state
+   *
+   * Safety net to ensure respawned players start fresh:
+   * - No mobs should be targeting them from before death
+   * - They should be able to move freely at spawn point
+   */
+  private handlePlayerRespawned(playerId: string): void {
+    let staleAggro = 0;
+
+    for (const [_mobId, mobState] of this.mobStates) {
+      // Clear any stale targeting (shouldn't exist, but safety net)
+      if (mobState.currentTarget === playerId) {
+        mobState.currentTarget = null;
+        mobState.isChasing = false;
+        mobState.isInCombat = false;
+        staleAggro++;
+      }
+
+      // Clear from aggro targets
+      if (mobState.aggroTargets.has(playerId)) {
+        mobState.aggroTargets.delete(playerId);
+        staleAggro++;
+      }
+    }
+
+    if (staleAggro > 0) {
+      this.logger.warn(
+        `[AggroSystem] Cleared ${staleAggro} stale aggro entries for respawned player ${playerId}`,
+      );
     }
   }
 
