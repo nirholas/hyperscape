@@ -261,6 +261,18 @@ export class CombatSystem extends SystemBase {
       },
     );
 
+    // CRITICAL: Listen for player respawn to clear any lingering combat states
+    // This catches edge cases where combat states survive the death cleanup
+    this.subscribe(
+      EventType.PLAYER_RESPAWNED,
+      (data: {
+        playerId: string;
+        spawnPosition: { x: number; y: number; z: number };
+      }) => {
+        this.handlePlayerRespawned(data.playerId);
+      },
+    );
+
     this.subscribe(EventType.PLAYER_JOINED, (data: { playerId: string }) => {
       const tickNumber = this.world.currentTick ?? 0;
       this.pidManager.assignPid(data.playerId as EntityID, tickNumber);
@@ -1296,6 +1308,58 @@ export class CombatSystem extends SystemBase {
 
     // 7. Reset dead entity's emote if they were mid-animation
     this.animationManager.resetEmote(entityId, entityType as "player" | "mob");
+  }
+
+  /**
+   * Handle player respawn - clear any lingering combat states
+   *
+   * This is a safety net that catches edge cases where combat states
+   * might survive the death cleanup. When a player respawns:
+   * 1. They should have NO combat state (fresh start)
+   * 2. NO entities should be targeting them (they just spawned)
+   * 3. Their attack cooldown should be clear (can attack immediately)
+   *
+   * This ensures players respawn in a completely clean combat state,
+   * preventing bugs like:
+   * - Being immediately attacked at spawn point
+   * - Having stale combat UI indicators
+   * - Auto-retaliate triggering against old attackers
+   */
+  private handlePlayerRespawned(playerId: string): void {
+    const typedPlayerId = createEntityID(playerId);
+
+    // 1. Clear any lingering combat state the respawned player might have
+    const playerCombatState = this.stateService.getCombatData(typedPlayerId);
+    if (playerCombatState) {
+      this.logDebug(
+        `Clearing lingering combat state for respawned player ${playerId}`,
+      );
+      this.stateService.removeCombatState(typedPlayerId);
+      this.stateService.clearCombatStateFromEntity(playerId, "player");
+    }
+
+    // 2. Clear the respawned player's attack cooldown
+    this.nextAttackTicks.delete(typedPlayerId);
+
+    // 3. Clear any attacker states that might still be targeting this player
+    //    (Safety net - handleEntityDied should have already done this)
+    const clearedAttackers = this.stateService.clearStatesTargeting(playerId);
+    if (clearedAttackers.length > 0) {
+      this.logDebug(
+        `Cleared ${clearedAttackers.length} stale attacker states targeting respawned player ${playerId}`,
+      );
+    }
+
+    // 4. Clear any pending attacker reference on the player
+    const playerEntity = this.world.getPlayer?.(playerId);
+    if (playerEntity) {
+      clearPendingAttacker(playerEntity);
+    }
+
+    // 5. Clear face target so player doesn't auto-look at old attacker
+    this.emitTypedEvent(EventType.COMBAT_CLEAR_FACE_TARGET, {
+      playerId,
+    });
   }
 
   // Public API methods
