@@ -262,6 +262,29 @@ export class DeathStateManager {
       return;
     }
 
+    // DS-H02: Check for existing death lock (database + memory) to prevent death spam
+    // This persists across server restarts unlike in-memory only checks
+    if (this.activeDeaths.has(playerId)) {
+      console.warn(
+        `[DeathStateManager] Death lock already exists in memory for ${playerId} - rejecting duplicate`,
+      );
+      return;
+    }
+
+    // DS-H02: Also check database in case memory was cleared (server restart)
+    if (this.databaseSystem) {
+      const existingLock =
+        await this.databaseSystem.getDeathLockAsync(playerId);
+      if (existingLock && !existingLock.recovered) {
+        console.warn(
+          `[DeathStateManager] Death lock already exists in database for ${playerId} - rejecting duplicate`,
+        );
+        // Restore to memory for faster future checks
+        this.activeDeaths.set(playerId, existingLock);
+        return;
+      }
+    }
+
     const timestamp = Date.now();
 
     // P0-004: CRITICAL - Write to DATABASE FIRST before memory!

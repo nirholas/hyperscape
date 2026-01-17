@@ -29,6 +29,9 @@ export function LootWindow({
 }: LootWindowProps) {
   const [items, setItems] = useState<InventoryItem[]>(lootItems);
 
+  // P1-011: Close confirmation state
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+
   // P0-006: Shadow state - track pending loot transactions for rollback
   const [pendingTransactions, setPendingTransactions] = useState<
     Map<string, PendingLootTransaction>
@@ -138,6 +141,24 @@ export function LootWindow({
       timeoutRefs.current.forEach((timeout) => clearTimeout(timeout));
       timeoutRefs.current.clear();
     };
+  }, []);
+
+  // P1-011: Handle close with confirmation if items remain
+  const handleCloseClick = useCallback(() => {
+    if (items.length > 0) {
+      setShowCloseConfirm(true);
+    } else {
+      onClose();
+    }
+  }, [items.length, onClose]);
+
+  const handleConfirmClose = useCallback(() => {
+    setShowCloseConfirm(false);
+    onClose();
+  }, [onClose]);
+
+  const handleCancelClose = useCallback(() => {
+    setShowCloseConfirm(false);
   }, []);
 
   // Listen for server updates to the gravestone entity
@@ -369,7 +390,7 @@ export function LootWindow({
             Take All
           </button>
           <button
-            onClick={onClose}
+            onClick={handleCloseClick}
             className="bg-gray-600 hover:bg-gray-700 border-none rounded text-white py-1.5 px-3 cursor-pointer text-sm transition-colors"
           >
             Close
@@ -421,6 +442,35 @@ export function LootWindow({
           Click an item to take it • Take All to loot everything
         </p>
       </div>
+
+      {/* P1-011: Close Confirmation Dialog */}
+      {showCloseConfirm && (
+        <div className="absolute inset-0 bg-black/80 flex items-center justify-center rounded-lg z-10">
+          <div className="bg-gray-800 border border-yellow-600 rounded-lg p-4 max-w-xs text-center">
+            <p className="text-yellow-400 font-bold mb-2">
+              Leave items behind?
+            </p>
+            <p className="text-gray-300 text-sm mb-4">
+              There are still {items.length} item{items.length > 1 ? "s" : ""}{" "}
+              in this corpse. They may despawn if you leave them.
+            </p>
+            <div className="flex gap-2 justify-center">
+              <button
+                onClick={handleConfirmClose}
+                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded text-sm"
+              >
+                Leave Items
+              </button>
+              <button
+                onClick={handleCancelClose}
+                className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded text-sm"
+              >
+                Keep Looting
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -238,14 +238,16 @@ export class ZoneDetectionSystem extends SystemBase {
       };
     }
 
-    // Default: Unknown areas are safe (conservative approach)
+    // DS-H15: Default unknown areas to UNKNOWN type (treated as wilderness for death mechanics)
+    // This is the conservative approach for death system - prevents exploits in undefined areas
+    // Items will drop on death, incentivizing proper zone definition
     return {
-      type: ZoneTypeEnum.SAFE_AREA,
-      isSafe: true,
-      isPvPEnabled: false,
-      isWilderness: false,
+      type: ZoneTypeEnum.UNKNOWN,
+      isSafe: false, // Unknown areas are NOT safe
+      isPvPEnabled: false, // But PvP is still disabled
+      isWilderness: true, // Treat as wilderness for item drops
       name: "Unknown",
-      difficultyLevel: 0,
+      difficultyLevel: 1, // Low difficulty but not 0
     };
   }
 

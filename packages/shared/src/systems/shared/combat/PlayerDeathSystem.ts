@@ -388,6 +388,52 @@ export class PlayerDeathSystem extends SystemBase {
       return;
     }
 
+    // P1-013: Validate death position
+    // Check for NaN, Infinity, and out-of-bounds values
+    const { x, y, z } = deathPosition;
+    const isValidNumber = (n: number) => Number.isFinite(n) && !Number.isNaN(n);
+
+    if (!isValidNumber(x) || !isValidNumber(y) || !isValidNumber(z)) {
+      console.error(
+        `[PlayerDeathSystem] Invalid death position for ${playerId}: (${x}, ${y}, ${z}) - using player entity position`,
+      );
+      // Try to get player's actual position as fallback
+      const playerEntity = this.world.entities.get(playerId);
+      if (playerEntity?.position) {
+        deathPosition = {
+          x: playerEntity.position.x,
+          y: playerEntity.position.y,
+          z: playerEntity.position.z,
+        };
+      } else {
+        console.error(
+          `[PlayerDeathSystem] Cannot determine valid death position for ${playerId} - aborting`,
+        );
+        return;
+      }
+    }
+
+    // Check world bounds (reasonable game world limits)
+    const WORLD_BOUNDS = 10000; // Max 10km from origin
+    const MAX_HEIGHT = 500; // Max height
+    const MIN_HEIGHT = -50; // Allow some underground (caves)
+
+    if (
+      Math.abs(deathPosition.x) > WORLD_BOUNDS ||
+      Math.abs(deathPosition.z) > WORLD_BOUNDS ||
+      deathPosition.y > MAX_HEIGHT ||
+      deathPosition.y < MIN_HEIGHT
+    ) {
+      console.warn(
+        `[PlayerDeathSystem] Death position out of bounds for ${playerId}: (${deathPosition.x}, ${deathPosition.y}, ${deathPosition.z}) - clamping`,
+      );
+      deathPosition = {
+        x: Math.max(-WORLD_BOUNDS, Math.min(WORLD_BOUNDS, deathPosition.x)),
+        y: Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, deathPosition.y)),
+        z: Math.max(-WORLD_BOUNDS, Math.min(WORLD_BOUNDS, deathPosition.z)),
+      };
+    }
+
     const lastDeath = this.lastDeathTime.get(playerId) || 0;
     if (Date.now() - lastDeath < this.DEATH_COOLDOWN) {
       console.warn(`[PlayerDeathSystem] Death spam: ${playerId}`);
@@ -588,9 +634,15 @@ export class PlayerDeathSystem extends SystemBase {
         ];
 
         // Calculate respawn tick using tick system
+        // P1-004: Use safe addition to prevent integer overflow
         const currentTick = this.tickSystem?.getCurrentTick() ?? 0;
+        const animationTicks = COMBAT_CONSTANTS.DEATH.ANIMATION_TICKS;
+        // Cap at MAX_SAFE_INTEGER to prevent overflow issues during serialization
+        const MAX_SAFE_TICK = Number.MAX_SAFE_INTEGER - animationTicks;
         typedPlayerEntity.data.respawnTick =
-          currentTick + COMBAT_CONSTANTS.DEATH.ANIMATION_TICKS;
+          currentTick > MAX_SAFE_TICK
+            ? Number.MAX_SAFE_INTEGER
+            : currentTick + animationTicks;
       }
 
       if ("markNetworkDirty" in playerEntity) {

@@ -551,6 +551,13 @@ export class EntityManager extends SystemBase {
       }
     }
 
+    // DS-H18: Emit destroy event BEFORE removing entity from tracking
+    // This allows event handlers to still look up the entity if needed
+    this.emitTypedEvent(EventType.ENTITY_DEATH, {
+      entityId,
+      entityType: entity.type,
+    });
+
     // Call entity destroy method
     entity.destroy();
 
@@ -561,12 +568,6 @@ export class EntityManager extends SystemBase {
 
     // Remove from world entities system
     this.world.entities.remove(entityId);
-
-    // Emit destroy event
-    this.emitTypedEvent(EventType.ENTITY_DEATH, {
-      entityId,
-      entityType: entity.type,
-    });
 
     return true;
   }
