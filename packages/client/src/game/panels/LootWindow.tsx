@@ -1,8 +1,14 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import type { World } from "@hyperscape/shared";
-import type { InventoryItem } from "@hyperscape/shared";
-import { EventType } from "@hyperscape/shared";
-import { getItem } from "@hyperscape/shared";
+import type {
+  InventoryItem,
+  PendingLootTransaction,
+  LootResult,
+} from "@hyperscape/shared";
+import { EventType, generateTransactionId, getItem } from "@hyperscape/shared";
+
+// P0-006: Timeout for pending loot transactions (5 seconds)
+const LOOT_TRANSACTION_TIMEOUT_MS = 5000;
 
 interface LootWindowProps {
   visible: boolean;
@@ -23,10 +29,116 @@ export function LootWindow({
 }: LootWindowProps) {
   const [items, setItems] = useState<InventoryItem[]>(lootItems);
 
+  // P0-006: Shadow state - track pending loot transactions for rollback
+  const [pendingTransactions, setPendingTransactions] = useState<
+    Map<string, PendingLootTransaction>
+  >(new Map());
+  const timeoutRefs = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map(),
+  );
+
   // Update items when prop changes
   useEffect(() => {
     setItems(lootItems);
   }, [lootItems, corpseId]);
+
+  // P0-006: Rollback a failed/timed-out transaction
+  const rollbackTransaction = useCallback((transactionId: string) => {
+    setPendingTransactions((prev) => {
+      const transaction = prev.get(transactionId);
+      if (!transaction) return prev;
+
+      // Restore the item to its original position
+      setItems((currentItems) => {
+        const newItems = [...currentItems];
+        // Insert at original index or at end if out of bounds
+        const insertIndex = Math.min(
+          transaction.originalIndex,
+          newItems.length,
+        );
+        newItems.splice(insertIndex, 0, transaction.originalItem);
+        return newItems;
+      });
+
+      console.log(
+        `[LootWindow] Rolling back transaction ${transactionId} - restoring ${transaction.itemId} x${transaction.quantity}`,
+      );
+
+      // Remove from pending
+      const newPending = new Map(prev);
+      newPending.delete(transactionId);
+      return newPending;
+    });
+
+    // Clear any existing timeout
+    const existingTimeout = timeoutRefs.current.get(transactionId);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+      timeoutRefs.current.delete(transactionId);
+    }
+  }, []);
+
+  // P0-006: Handle loot result events from server
+  useEffect(() => {
+    if (!world.network) return;
+
+    const handleLootResult = (result: LootResult) => {
+      const { transactionId, success, reason } = result;
+
+      // Clear timeout for this transaction
+      const existingTimeout = timeoutRefs.current.get(transactionId);
+      if (existingTimeout) {
+        clearTimeout(existingTimeout);
+        timeoutRefs.current.delete(transactionId);
+      }
+
+      if (success) {
+        // Transaction confirmed - remove from pending (item already removed from UI)
+        setPendingTransactions((prev) => {
+          const newPending = new Map(prev);
+          newPending.delete(transactionId);
+          return newPending;
+        });
+        console.log(`[LootWindow] Loot confirmed: ${transactionId}`);
+      } else {
+        // Transaction failed - rollback
+        console.warn(`[LootWindow] Loot failed: ${transactionId} - ${reason}`);
+        rollbackTransaction(transactionId);
+
+        // Show error toast if available
+        if (reason) {
+          const errorMessages: Record<string, string> = {
+            ITEM_NOT_FOUND: "Item already looted by someone else",
+            INVENTORY_FULL: "Your inventory is full",
+            PROTECTED: "You cannot loot this yet",
+            GRAVESTONE_GONE: "The gravestone has despawned",
+            RATE_LIMITED: "Too many requests, slow down",
+            INVALID_REQUEST: "Invalid loot request",
+          };
+          world.emit(EventType.SHOW_TOAST, {
+            message: errorMessages[reason] || "Failed to loot item",
+            type: "error",
+          });
+        }
+      }
+    };
+
+    // Listen for loot result events
+    world.network.on("lootResult", handleLootResult);
+
+    return () => {
+      world.network?.off("lootResult", handleLootResult);
+    };
+  }, [world, rollbackTransaction]);
+
+  // P0-006: Cleanup timeouts on unmount
+  useEffect(() => {
+    return () => {
+      // Clear all pending timeouts
+      timeoutRefs.current.forEach((timeout) => clearTimeout(timeout));
+      timeoutRefs.current.clear();
+    };
+  }, []);
 
   // Listen for server updates to the gravestone entity
   // This keeps the loot window in sync when items are removed
@@ -105,7 +217,37 @@ export function LootWindow({
     const localPlayer = world.getPlayer();
     if (!localPlayer) return;
 
-    // Send loot request to server
+    // P0-006: Generate transaction ID for shadow state tracking
+    const transactionId = generateTransactionId();
+
+    // P0-006: Track pending transaction for potential rollback
+    const pendingTransaction: PendingLootTransaction = {
+      transactionId,
+      itemId: item.itemId,
+      quantity: item.quantity,
+      requestedAt: Date.now(),
+      originalItem: { ...item },
+      originalIndex: index,
+    };
+
+    setPendingTransactions((prev) => {
+      const newPending = new Map(prev);
+      newPending.set(transactionId, pendingTransaction);
+      return newPending;
+    });
+
+    // P0-006: Set timeout for transaction (auto-rollback if no response)
+    const timeout = setTimeout(() => {
+      console.warn(`[LootWindow] Transaction timed out: ${transactionId}`);
+      rollbackTransaction(transactionId);
+      world.emit(EventType.SHOW_TOAST, {
+        message: "Loot request timed out",
+        type: "error",
+      });
+    }, LOOT_TRANSACTION_TIMEOUT_MS);
+    timeoutRefs.current.set(transactionId, timeout);
+
+    // Send loot request to server with transaction ID
     if (world.network?.send) {
       world.network.send("entityEvent", {
         id: "world",
@@ -116,6 +258,7 @@ export function LootWindow({
           itemId: item.itemId,
           quantity: item.quantity,
           slot: index,
+          transactionId, // P0-006: Include transaction ID for confirmation
         },
       });
     } else {
@@ -125,10 +268,11 @@ export function LootWindow({
         itemId: item.itemId,
         quantity: item.quantity,
         slot: index,
+        transactionId,
       });
     }
 
-    // Optimistically remove item from UI
+    // Optimistically remove item from UI (will rollback if server rejects)
     setItems((prev) => prev.filter((_, i) => i !== index));
   };
 
@@ -140,8 +284,34 @@ export function LootWindow({
     // Copy current items array since we'll clear it optimistically
     const itemsToTake = [...items];
 
-    // Send loot request for each item
+    // P0-006: Send loot request for each item with transaction tracking
     itemsToTake.forEach((item, index) => {
+      // Generate transaction ID for each item
+      const transactionId = generateTransactionId();
+
+      // Track pending transaction
+      const pendingTransaction: PendingLootTransaction = {
+        transactionId,
+        itemId: item.itemId,
+        quantity: item.quantity,
+        requestedAt: Date.now(),
+        originalItem: { ...item },
+        originalIndex: index,
+      };
+
+      setPendingTransactions((prev) => {
+        const newPending = new Map(prev);
+        newPending.set(transactionId, pendingTransaction);
+        return newPending;
+      });
+
+      // Set timeout for transaction
+      const timeout = setTimeout(() => {
+        console.warn(`[LootWindow] Transaction timed out: ${transactionId}`);
+        rollbackTransaction(transactionId);
+      }, LOOT_TRANSACTION_TIMEOUT_MS);
+      timeoutRefs.current.set(transactionId, timeout);
+
       if (world.network?.send) {
         world.network.send("entityEvent", {
           id: "world",
@@ -152,6 +322,7 @@ export function LootWindow({
             itemId: item.itemId,
             quantity: item.quantity,
             slot: index,
+            transactionId,
           },
         });
       } else {
@@ -161,11 +332,12 @@ export function LootWindow({
           itemId: item.itemId,
           quantity: item.quantity,
           slot: index,
+          transactionId,
         });
       }
     });
 
-    // Optimistically clear ALL items at once
+    // Optimistically clear ALL items at once (will rollback individually if needed)
     setItems([]);
   };
 

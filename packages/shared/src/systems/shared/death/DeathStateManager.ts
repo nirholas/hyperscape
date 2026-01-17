@@ -478,6 +478,10 @@ export class DeathStateManager {
             timestamp: deathData.timestamp,
             zoneType: deathData.zoneType,
             itemCount: deathData.itemCount,
+            // P0-003: Preserve crash recovery fields
+            items: deathData.items || [],
+            killedBy: deathData.killedBy || "unknown",
+            recovered: deathData.recovered || false,
           });
         } catch (error) {
           console.error(

@@ -67,6 +67,8 @@ import {
   type InteractableConfig,
 } from "../InteractableEntity";
 import { EventType } from "../../types/events";
+import type { LootResult, LootFailureReason } from "../../types/death";
+import { generateTransactionId } from "../../utils/IdGenerator";
 
 export class HeadstoneEntity extends InteractableEntity {
   protected config: HeadstoneEntityConfig;
@@ -109,6 +111,7 @@ export class HeadstoneEntity extends InteractableEntity {
         itemId: string;
         quantity: number;
         slot?: number;
+        transactionId?: string; // P0-002: Client-provided transaction ID
       };
       if (lootData.corpseId === this.id) {
         this.handleLootRequest(lootData);
@@ -189,11 +192,15 @@ export class HeadstoneEntity extends InteractableEntity {
     return true;
   }
 
+  /**
+   * P0-002: Handle loot request with transaction ID for shadow state support
+   */
   private handleLootRequest(data: {
     playerId: string;
     itemId: string;
     quantity: number;
     slot?: number;
+    transactionId?: string;
   }): void {
     // CRITICAL: Server authority check - prevent client from looting
     if (!this.world.isServer) {
@@ -203,17 +210,28 @@ export class HeadstoneEntity extends InteractableEntity {
       return;
     }
 
+    // P0-002: Generate transactionId if client didn't provide one (backwards compat)
+    const transactionId = data.transactionId || generateTransactionId();
+
     // Queue loot operation to ensure atomicity
     // Only ONE loot operation can execute at a time (prevents duplication)
     this.lootQueue = this.lootQueue
-      .then(() => this.processLootRequest(data))
+      .then(() => this.processLootRequest({ ...data, transactionId }))
       .catch((error) => {
         console.error(`[HeadstoneEntity] Loot request failed:`, error);
+        // P0-002: Even on error, send rejection so client can rollback
+        this.emitLootResult(
+          data.playerId,
+          transactionId,
+          false,
+          "INVALID_REQUEST",
+        );
       });
   }
 
   /**
    * Process loot request atomically
+   * P0-002: Emits LOOT_RESULT events for shadow state confirmation
    * Queued to prevent concurrent access and item duplication
    */
   private async processLootRequest(data: {
@@ -221,77 +239,140 @@ export class HeadstoneEntity extends InteractableEntity {
     itemId: string;
     quantity: number;
     slot?: number;
+    transactionId: string;
   }): Promise<void> {
+    const { playerId, itemId, quantity, transactionId } = data;
+
     // Step 1: Check loot protection
-    if (!this.canPlayerLoot(data.playerId)) {
-      this.world.emit(EventType.UI_MESSAGE, {
-        playerId: data.playerId,
-        message: "This loot is protected!",
-        type: "error",
-      });
+    if (!this.canPlayerLoot(playerId)) {
+      this.emitLootResult(playerId, transactionId, false, "PROTECTED");
       return;
     }
 
     // Step 2: Check if item exists in gravestone
     const itemIndex = this.lootItems.findIndex(
-      (item) => item.itemId === data.itemId,
+      (item) => item.itemId === itemId,
     );
 
     if (itemIndex === -1) {
-      this.world.emit(EventType.UI_MESSAGE, {
-        playerId: data.playerId,
-        message: "Item already looted!",
-        type: "warning",
-      });
+      this.emitLootResult(playerId, transactionId, false, "ITEM_NOT_FOUND");
       return;
     }
 
     const item = this.lootItems[itemIndex];
 
     // Validate quantity
-    const quantityToLoot = Math.min(data.quantity, item.quantity);
+    const quantityToLoot = Math.min(quantity, item.quantity);
     if (quantityToLoot <= 0) {
-      console.warn(`[HeadstoneEntity] Invalid quantity: ${data.quantity}`);
+      console.warn(`[HeadstoneEntity] Invalid quantity: ${quantity}`);
+      this.emitLootResult(playerId, transactionId, false, "INVALID_REQUEST");
       return;
     }
 
     // Step 3: CRITICAL - Check inventory space BEFORE removing item
     // This prevents item deletion if inventory is full
-    const hasSpace = this.checkInventorySpace(
-      data.playerId,
-      data.itemId,
-      quantityToLoot,
-    );
+    const hasSpace = this.checkInventorySpace(playerId, itemId, quantityToLoot);
 
     if (!hasSpace) {
       // Inventory full - item NOT removed from gravestone
-      // This prevents permanent item loss!
+      this.emitLootResult(playerId, transactionId, false, "INVENTORY_FULL");
       return;
     }
 
     // Step 4: Atomic remove from gravestone (compare-and-swap pattern)
-    const removed = this.removeItem(data.itemId, quantityToLoot);
+    const removed = this.removeItem(itemId, quantityToLoot);
 
     if (!removed) {
-      this.world.emit(EventType.UI_MESSAGE, {
-        playerId: data.playerId,
-        message: "Item already looted!",
-        type: "warning",
-      });
+      // Race condition: item removed between find and remove
+      this.emitLootResult(playerId, transactionId, false, "ITEM_NOT_FOUND");
       return;
     }
 
     // Step 5: Add to player inventory (safe now, space already checked)
     this.world.emit(EventType.INVENTORY_ITEM_ADDED, {
-      playerId: data.playerId,
+      playerId,
       item: {
-        id: `loot_${data.playerId}_${Date.now()}`,
-        itemId: data.itemId,
+        id: `loot_${playerId}_${Date.now()}`,
+        itemId,
         quantity: quantityToLoot,
         slot: -1, // Auto-assign slot
         metadata: null,
       },
     });
+
+    // P0-002: Emit success result for shadow state confirmation
+    this.emitLootResult(
+      playerId,
+      transactionId,
+      true,
+      undefined,
+      itemId,
+      quantityToLoot,
+    );
+
+    // P0-007: Audit log for successful loot
+    this.world.emit(EventType.AUDIT_LOG, {
+      action: "LOOT_SUCCESS",
+      playerId: this.config.headstoneData.playerId, // Owner of gravestone
+      actorId: playerId, // Who looted
+      entityId: this.id,
+      items: [{ itemId, quantity: quantityToLoot }],
+      zoneType: "safe_area",
+      position: this.getPosition(),
+      success: true,
+      transactionId,
+      timestamp: Date.now(),
+    });
+  }
+
+  /**
+   * P0-002: Emit loot result to client for shadow state resolution
+   */
+  private emitLootResult(
+    playerId: string,
+    transactionId: string,
+    success: boolean,
+    reason?: LootFailureReason,
+    itemId?: string,
+    quantity?: number,
+  ): void {
+    const result: LootResult = {
+      transactionId,
+      success,
+      itemId,
+      quantity,
+      reason,
+      timestamp: Date.now(),
+    };
+
+    // Send directly to the requesting player via network
+    if (this.world.network && "sendTo" in this.world.network) {
+      (
+        this.world.network as {
+          sendTo: (id: string, event: string, data: unknown) => void;
+        }
+      ).sendTo(playerId, "lootResult", result);
+    }
+
+    // Also emit event for any listeners
+    this.world.emit(EventType.LOOT_RESULT, { playerId, ...result });
+
+    // P0-007: Audit log for failed loot attempts
+    if (!success) {
+      this.world.emit(EventType.AUDIT_LOG, {
+        action: "LOOT_FAILED",
+        playerId: this.config.headstoneData.playerId,
+        actorId: playerId,
+        entityId: this.id,
+        items: itemId ? [{ itemId, quantity: quantity || 1 }] : undefined,
+        zoneType: "safe_area",
+        position: this.getPosition(),
+        success: false,
+        failureReason: reason,
+        transactionId,
+        timestamp: Date.now(),
+      });
+    }
   }
 
   protected async createMesh(): Promise<void> {

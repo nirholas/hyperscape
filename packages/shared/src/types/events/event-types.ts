@@ -434,6 +434,11 @@ export enum EventType {
   WORLD_CREATE_GROUND_ITEM = "world:create_ground_item",
   // P0-005: Crash recovery - emitted when server recreates death items on startup
   DEATH_RECOVERED = "death:recovered",
+  // P0-002: Loot result events for shadow state confirmation
+  LOOT_RESULT = "loot:result",
+  LOOT_TIMEOUT = "loot:timeout",
+  // P0-007: Audit logging for death/loot operations
+  AUDIT_LOG = "audit:log",
 
   // AI Navigation System
   AI_NAVIGATION_REQUEST = "ai:navigation:request",

@@ -135,6 +135,17 @@ export { WeaponType, EquipmentSlotName } from "./types/core/core";
 // Export DeathState enum for death/respawn system
 export { DeathState } from "./types/entities/entities";
 
+// Export death/loot types for shadow state and transaction tracking (P0-002, P0-006)
+export type {
+  LootResult,
+  LootFailureReason,
+  PendingLootTransaction,
+  DeathAuditEntry,
+  DeathAuditAction,
+  DeathItemData,
+  DeathLock,
+} from "./types/death";
+
 // Export db helpers and type guards for server usage
 export { dbHelpers, isDatabaseInstance } from "./types/network/database";
 
@@ -146,6 +157,9 @@ export {
   serializeRoles,
   uuid,
 } from "./utils/index";
+
+// Export ID generation utilities (for transaction tracking, etc.)
+export { generateTransactionId } from "./utils/IdGenerator";
 
 // Export SeededRandom and game RNG utilities (OSRS-accurate deterministic RNG)
 export {
