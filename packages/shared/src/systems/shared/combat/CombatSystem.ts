@@ -63,6 +63,7 @@ import {
   isPlayerDamageHandler,
   isMobEntity,
 } from "../../../utils/typeGuards";
+import { ZoneDetectionSystem } from "../death/ZoneDetectionSystem";
 
 // Re-export CombatData from CombatStateService for backwards compatibility
 export type { CombatData } from "./CombatStateService";
@@ -940,6 +941,31 @@ export class CombatSystem extends SystemBase {
       attackerEntity?.type === "mob" ? ("mob" as const) : ("player" as const);
     const targetType =
       targetEntity?.type === "mob" ? ("mob" as const) : ("player" as const);
+
+    // PvP ZONE VALIDATION: Prevent player vs player combat in safe zones
+    // This is critical to prevent:
+    // - Combat resuming after respawn in safe zone
+    // - Players attacking each other in towns/banks
+    // - Auto-retaliate triggering in non-PvP areas
+    if (attackerType === "player" && targetType === "player") {
+      const zoneSystem =
+        this.world.getSystem<ZoneDetectionSystem>("zone-detection");
+      if (zoneSystem) {
+        const attackerPos = getEntityPosition(attackerEntity);
+        if (attackerPos) {
+          const isPvPAllowed = zoneSystem.isPvPEnabled({
+            x: attackerPos.x,
+            z: attackerPos.z,
+          });
+          if (!isPvPAllowed) {
+            this.logDebug(
+              `PvP combat blocked: ${attackerId} tried to attack ${targetId} in safe zone`,
+            );
+            return; // Cannot start PvP in safe zone
+          }
+        }
+      }
+    }
 
     // Get attack speeds in ticks (use provided or calculate)
     const attackerAttackSpeedTicks =
