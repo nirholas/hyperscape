@@ -1135,6 +1135,20 @@ export class PlayerDeathSystem extends SystemBase {
     const GRAVESTONE_DURATION = ticksToMs(COMBAT_CONSTANTS.GRAVESTONE_TICKS);
     const despawnTime = Date.now() + GRAVESTONE_DURATION;
 
+    // Get the player's display name from PlayerSystem
+    const playerSystem = this.world.getSystem("player") as
+      | { getPlayer: (id: string) => { name?: string } | undefined }
+      | undefined;
+    const playerFromSystem = playerSystem?.getPlayer?.(playerId);
+    const playerEntity = this.world.entities?.get?.(playerId) as
+      | { playerName?: string; name?: string }
+      | undefined;
+    const playerName =
+      playerFromSystem?.name ||
+      playerEntity?.playerName ||
+      playerEntity?.name ||
+      playerId;
+
     // Ground to terrain
     const groundedPosition = groundToTerrain(
       this.world,
@@ -1146,7 +1160,7 @@ export class PlayerDeathSystem extends SystemBase {
     // Create gravestone entity config
     const gravestoneConfig: HeadstoneEntityConfig = {
       id: gravestoneId,
-      name: `${playerId}'s Gravestone`,
+      name: `${playerName}'s Gravestone`,
       type: EntityType.HEADSTONE,
       position: groundedPosition,
       rotation: { x: 0, y: 0, z: 0, w: 1 },
@@ -1155,11 +1169,11 @@ export class PlayerDeathSystem extends SystemBase {
       interactable: true,
       interactionType: InteractionType.LOOT,
       interactionDistance: 2,
-      description: `Gravestone of ${playerId} (killed by ${killedBy})`,
+      description: `Gravestone of ${playerName} (killed by ${killedBy})`,
       model: "models/environment/gravestone.glb",
       headstoneData: {
         playerId: playerId,
-        playerName: playerId,
+        playerName: playerName,
         deathTime: Date.now(),
         deathMessage: `Slain by ${killedBy}`,
         position: groundedPosition,

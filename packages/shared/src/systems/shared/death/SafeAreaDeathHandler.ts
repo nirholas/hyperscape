@@ -159,8 +159,8 @@ export class SafeAreaDeathHandler {
       return "";
     }
 
-    // Get the player entity to retrieve their actual display name
-    const playerEntity = this.world.entities.players.get(playerId) as
+    // Get the player's display name (fallback to playerId if not found)
+    const playerEntity = this.world.entities?.get?.(playerId) as
       | { playerName?: string; name?: string }
       | undefined;
     const playerName =

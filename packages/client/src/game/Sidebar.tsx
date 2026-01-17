@@ -438,11 +438,20 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
         return;
       }
 
+      // Get the gravestone entity to retrieve its name
+      const gravestoneEntity = world.entities?.get?.(data.corpseId) as
+        | { name?: string; config?: { name?: string } }
+        | undefined;
+      const corpseName =
+        gravestoneEntity?.name ||
+        gravestoneEntity?.config?.name ||
+        "Gravestone";
+
       // Open loot window with corpse items
       setLootWindowData({
         visible: true,
         corpseId: data.corpseId,
-        corpseName: `Gravestone`, // TODO: Get actual corpse name
+        corpseName,
         lootItems:
           data.lootItems?.map((item, index) => ({
             id: `${data.corpseId}-${index}`,
