@@ -368,6 +368,7 @@ export enum EventType {
   CORPSE_SPAWNED = "corpse:spawned",
   CORPSE_CLICK = "corpse:click",
   CORPSE_LOOT_REQUEST = "corpse:loot_request",
+  CORPSE_LOOT_ALL_REQUEST = "corpse:loot_all_request",
   CORPSE_CLEANUP = "corpse:cleanup",
   CORPSE_EMPTY = "corpse:empty",
 

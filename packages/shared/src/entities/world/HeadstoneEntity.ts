@@ -69,6 +69,7 @@ import {
 import { EventType } from "../../types/events";
 import type { LootResult, LootFailureReason } from "../../types/death";
 import { generateTransactionId } from "../../utils/IdGenerator";
+import { DeathState } from "../../types/entities";
 
 /**
  * P2-022: Type guard for HeadstoneEntityConfig validation
@@ -92,6 +93,7 @@ export class HeadstoneEntity extends InteractableEntity {
   protected config: HeadstoneEntityConfig;
   private lootItems: InventoryItem[] = [];
   private lootRequestHandler?: (data: unknown) => void;
+  private lootAllRequestHandler?: (data: unknown) => void;
 
   // P2-004: Cache headstoneData reference to avoid deep property chains
   private get headstoneData() {
@@ -145,6 +147,22 @@ export class HeadstoneEntity extends InteractableEntity {
       }
     };
     this.world.on(EventType.CORPSE_LOOT_REQUEST, this.lootRequestHandler);
+
+    // Listen for "loot all" requests on this specific corpse
+    this.lootAllRequestHandler = (data: unknown) => {
+      const lootData = data as {
+        corpseId: string;
+        playerId: string;
+        transactionId?: string;
+      };
+      if (lootData.corpseId === this.id) {
+        this.handleLootAllRequest(lootData);
+      }
+    };
+    this.world.on(
+      EventType.CORPSE_LOOT_ALL_REQUEST,
+      this.lootAllRequestHandler,
+    );
   }
 
   /**
@@ -164,6 +182,31 @@ export class HeadstoneEntity extends InteractableEntity {
 
     // Player can loot
     return true;
+  }
+
+  /**
+   * DS-C07: Check if player is in death state (DYING or DEAD).
+   *
+   * Used to block looting during death animation, which prevents
+   * a race condition where items looted during death would be lost
+   * (removed from gravestone but not added to inventory).
+   *
+   * @param playerId - The player ID to check
+   * @returns true if player is currently dying or dead
+   */
+  private isPlayerInDeathState(playerId: string): boolean {
+    // Check player entity's death state (single source of truth)
+    const playerEntity = this.world.entities?.get?.(playerId);
+    if (playerEntity && "data" in playerEntity) {
+      const data = playerEntity.data as { deathState?: DeathState };
+      if (data?.deathState) {
+        return (
+          data.deathState === DeathState.DYING ||
+          data.deathState === DeathState.DEAD
+        );
+      }
+    }
+    return false;
   }
 
   /**
@@ -319,6 +362,13 @@ export class HeadstoneEntity extends InteractableEntity {
       return;
     }
 
+    // DS-C07: Check if player is dying/dead BEFORE removing item
+    // This prevents item loss when looting during death animation
+    if (this.isPlayerInDeathState(playerId)) {
+      this.emitLootResult(playerId, transactionId, false, "PLAYER_DYING");
+      return;
+    }
+
     // Step 4: Atomic remove from gravestone (compare-and-swap pattern)
     const removed = this.removeItem(itemId, quantityToLoot);
 
@@ -364,6 +414,171 @@ export class HeadstoneEntity extends InteractableEntity {
       transactionId,
       timestamp: Date.now(),
     });
+  }
+
+  /**
+   * Handle "loot all" request - takes all items from gravestone at once
+   * Bypasses per-item rate limiting since it's a single batch operation
+   */
+  private handleLootAllRequest(data: {
+    playerId: string;
+    transactionId?: string;
+  }): void {
+    // CRITICAL: Server authority check
+    if (!this.world.isServer) {
+      console.error(
+        `[HeadstoneEntity] Client attempted server-only loot all operation for ${this.id} - BLOCKED`,
+      );
+      return;
+    }
+
+    const { playerId } = data;
+    const transactionId = data.transactionId || generateTransactionId();
+
+    // Rate limit the batch operation itself (not per-item)
+    const now = Date.now();
+    const lastRequest = this.lootRateLimiter.get(playerId) || 0;
+    if (now - lastRequest < this.LOOT_RATE_LIMIT_MS) {
+      console.log(
+        `[HeadstoneEntity] Rate limited loot all request from ${playerId}`,
+      );
+      this.emitLootResult(playerId, transactionId, false, "RATE_LIMITED");
+      return;
+    }
+    this.lootRateLimiter.set(playerId, now);
+
+    // Queue the batch loot operation
+    this.lootQueue = this.lootQueue
+      .then(() => this.processLootAllRequest({ playerId, transactionId }))
+      .catch((error) => {
+        console.error(`[HeadstoneEntity] Loot all request failed:`, error);
+        this.emitLootResult(playerId, transactionId, false, "INVALID_REQUEST");
+      });
+  }
+
+  /**
+   * Process "loot all" request atomically
+   * Takes all items that fit in inventory
+   */
+  private async processLootAllRequest(data: {
+    playerId: string;
+    transactionId: string;
+  }): Promise<void> {
+    const { playerId, transactionId } = data;
+
+    // Check loot protection
+    if (!this.canPlayerLoot(playerId)) {
+      this.emitLootResult(playerId, transactionId, false, "PROTECTED");
+      return;
+    }
+
+    // DS-C07: Check if player is dying/dead BEFORE processing loot
+    // This prevents item loss when looting during death animation
+    if (this.isPlayerInDeathState(playerId)) {
+      this.emitLootResult(playerId, transactionId, false, "PLAYER_DYING");
+      return;
+    }
+
+    // Nothing to loot
+    if (this.lootItems.length === 0) {
+      this.emitLootResult(playerId, transactionId, true);
+      return;
+    }
+
+    // Get inventory system for space checking
+    const inventorySystem = this.world.getSystem("inventory") as unknown as {
+      getInventory?: (
+        playerId: string,
+      ) => { items: Array<{ itemId: string }> } | null;
+    };
+
+    if (!inventorySystem?.getInventory) {
+      console.error(
+        "[HeadstoneEntity] InventorySystem not available for loot all",
+      );
+      this.emitLootResult(playerId, transactionId, false, "INVALID_REQUEST");
+      return;
+    }
+
+    const inventory = inventorySystem.getInventory(playerId);
+    if (!inventory) {
+      console.error(`[HeadstoneEntity] No inventory for ${playerId}`);
+      this.emitLootResult(playerId, transactionId, false, "INVALID_REQUEST");
+      return;
+    }
+
+    // Calculate available space
+    const maxSlots = 28;
+    let usedSlots = inventory.items.length;
+    const existingItemIds = new Set(inventory.items.map((i) => i.itemId));
+
+    // Process each item
+    const itemsLooted: Array<{ itemId: string; quantity: number }> = [];
+    const itemsToRemove: Array<{ itemId: string; quantity: number }> = [];
+
+    for (const item of [...this.lootItems]) {
+      // Check if we can add this item
+      const canStack = existingItemIds.has(item.itemId);
+      const hasSpace = usedSlots < maxSlots || canStack;
+
+      if (!hasSpace) {
+        // Inventory full, stop looting
+        break;
+      }
+
+      // Track for removal and inventory add
+      itemsToRemove.push({ itemId: item.itemId, quantity: item.quantity });
+      itemsLooted.push({ itemId: item.itemId, quantity: item.quantity });
+
+      // Update space tracking
+      if (!canStack) {
+        usedSlots++;
+        existingItemIds.add(item.itemId);
+      }
+    }
+
+    // Actually remove items and add to inventory
+    for (const item of itemsToRemove) {
+      const removed = this.removeItem(item.itemId, item.quantity);
+      if (removed) {
+        this.world.emit(EventType.INVENTORY_ITEM_ADDED, {
+          playerId,
+          item: {
+            id: `loot_${playerId}_${Date.now()}_${item.itemId}`,
+            itemId: item.itemId,
+            quantity: item.quantity,
+            slot: -1,
+            metadata: null,
+          },
+        });
+      }
+    }
+
+    // Emit success with count of items looted
+    this.emitLootResult(
+      playerId,
+      transactionId,
+      true,
+      undefined,
+      undefined,
+      itemsLooted.length,
+    );
+
+    // Audit log
+    if (itemsLooted.length > 0) {
+      this.world.emit(EventType.AUDIT_LOG, {
+        action: "LOOT_ALL_SUCCESS",
+        playerId: this.headstoneData.playerId,
+        actorId: playerId,
+        entityId: this.id,
+        items: itemsLooted,
+        zoneType: "safe_area",
+        position: this.getPosition(),
+        success: true,
+        transactionId,
+        timestamp: Date.now(),
+      });
+    }
   }
 
   /**
@@ -587,6 +802,9 @@ export class HeadstoneEntity extends InteractableEntity {
       despawnTime: hd.despawnTime,
       playerId: hd.playerId,
       deathMessage: hd.deathMessage,
+      // P1-020: Sync loot protection timer to client
+      lootProtectionUntil: this.lootProtectionUntil,
+      protectedFor: this.protectedFor,
     };
   }
 
@@ -609,9 +827,15 @@ export class HeadstoneEntity extends InteractableEntity {
         items: this.lootItems, // CRITICAL: Include actual loot items for client
         itemCount: this.lootItems.length,
         despawnTime: hd.despawnTime,
+        // P1-020: Sync loot protection timer to client
+        lootProtectionUntil: this.lootProtectionUntil,
+        protectedFor: this.protectedFor,
       },
       lootItems: this.lootItems, // Also include at root level for easy access
       lootItemCount: this.lootItems.length,
+      // P1-020: Also at root level for easy access
+      lootProtectionUntil: this.lootProtectionUntil,
+      protectedFor: this.protectedFor,
     } as unknown as EntityData;
   }
 
@@ -620,7 +844,9 @@ export class HeadstoneEntity extends InteractableEntity {
 
     // Check if corpse should despawn
     // P2-004: Use cached headstoneData getter
-    if (this.world.getTime() > this.headstoneData.despawnTime) {
+    // DS-C08: Use Date.now() for comparison since despawnTime is set using Date.now()
+    // (world.getTime() returns seconds since world start, not epoch time)
+    if (Date.now() > this.headstoneData.despawnTime) {
       this.world.entities.remove(this.id);
     }
   }
@@ -636,10 +862,17 @@ export class HeadstoneEntity extends InteractableEntity {
   }
 
   public destroy(): void {
-    // Clean up event listener (P2-028: Prevents memory leak)
+    // Clean up event listeners (P2-028: Prevents memory leak)
     if (this.lootRequestHandler) {
       this.world.off(EventType.CORPSE_LOOT_REQUEST, this.lootRequestHandler);
       this.lootRequestHandler = undefined;
+    }
+    if (this.lootAllRequestHandler) {
+      this.world.off(
+        EventType.CORPSE_LOOT_ALL_REQUEST,
+        this.lootAllRequestHandler,
+      );
+      this.lootAllRequestHandler = undefined;
     }
     // P2-028: Clean up rate limiter map to prevent memory leak
     this.lootRateLimiter.clear();

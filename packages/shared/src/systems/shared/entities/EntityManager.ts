@@ -532,34 +532,52 @@ export class EntityManager extends SystemBase {
     return entity;
   }
 
+  /** Track entities currently being destroyed to prevent re-entrant calls */
+  private destroyingEntities = new Set<string>();
+
   destroyEntity(entityId: string): boolean {
+    // Guard against re-entrant destruction (prevents infinite loop)
+    // This can happen when ENTITY_DEATH event triggers handleEntityDestroy
+    // which calls destroyEntity again
+    if (this.destroyingEntities.has(entityId)) {
+      return false;
+    }
+
     const entity = this.getEntity(entityId);
     if (!entity) {
       return false;
     }
 
-    // Send entityRemoved packet to all clients before destroying
-    const network = this.world.network;
-    if (network && network.isServer) {
-      try {
-        network.send("entityRemoved", entityId);
-      } catch (error) {
-        console.warn(
-          `[EntityManager] Failed to send entityRemoved packet for ${entityId}:`,
-          error,
-        );
+    // Mark as being destroyed before any events are emitted
+    this.destroyingEntities.add(entityId);
+
+    try {
+      // Send entityRemoved packet to all clients before destroying
+      const network = this.world.network;
+      if (network && network.isServer) {
+        try {
+          network.send("entityRemoved", entityId);
+        } catch (error) {
+          console.warn(
+            `[EntityManager] Failed to send entityRemoved packet for ${entityId}:`,
+            error,
+          );
+        }
       }
+
+      // DS-H18: Emit destroy event BEFORE removing entity from tracking
+      // This allows event handlers to still look up the entity if needed
+      this.emitTypedEvent(EventType.ENTITY_DEATH, {
+        entityId,
+        entityType: entity.type,
+      });
+
+      // Call entity destroy method
+      entity.destroy();
+    } finally {
+      // Always clean up the guard
+      this.destroyingEntities.delete(entityId);
     }
-
-    // DS-H18: Emit destroy event BEFORE removing entity from tracking
-    // This allows event handlers to still look up the entity if needed
-    this.emitTypedEvent(EventType.ENTITY_DEATH, {
-      entityId,
-      entityType: entity.type,
-    });
-
-    // Call entity destroy method
-    entity.destroy();
 
     // Remove from tracking
     this.entities.delete(entityId);

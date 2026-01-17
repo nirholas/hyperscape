@@ -120,6 +120,13 @@
       "when": 1767712624034,
       "tag": "0016_add_prayer_system",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1768642521620,
+      "tag": "0017_add_death_recovery_columns",
+      "breakpoints": true
     }
   ]
 }

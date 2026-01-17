@@ -746,6 +746,10 @@ export class DatabaseSystem extends SystemBase {
     data: DeathLockData,
     tx?: NodePgDatabase<typeof schema>,
   ): Promise<void> {
+    if (!this.deathRepository) {
+      console.error("[DatabaseSystem] deathRepository not initialized");
+      return;
+    }
     return this.deathRepository.saveDeathLockAsync(data, tx);
   }
 
@@ -757,6 +761,10 @@ export class DatabaseSystem extends SystemBase {
    * P0-003: Now includes items, killedBy, recovered fields.
    */
   async getDeathLockAsync(playerId: string): Promise<DeathLockData | null> {
+    if (!this.deathRepository) {
+      console.error("[DatabaseSystem] deathRepository not initialized");
+      return null;
+    }
     return this.deathRepository.getDeathLockAsync(playerId);
   }
 
@@ -767,6 +775,10 @@ export class DatabaseSystem extends SystemBase {
    * Called when player respawns or death is fully resolved.
    */
   async deleteDeathLockAsync(playerId: string): Promise<void> {
+    if (!this.deathRepository) {
+      console.error("[DatabaseSystem] deathRepository not initialized");
+      return;
+    }
     return this.deathRepository.deleteDeathLockAsync(playerId);
   }
 
@@ -778,6 +790,10 @@ export class DatabaseSystem extends SystemBase {
    * P0-003: Now includes items, killedBy, recovered fields.
    */
   async getAllActiveDeathsAsync(): Promise<DeathLockData[]> {
+    if (!this.deathRepository) {
+      console.error("[DatabaseSystem] deathRepository not initialized");
+      return [];
+    }
     return this.deathRepository.getAllActiveDeathsAsync();
   }
 
@@ -791,6 +807,10 @@ export class DatabaseSystem extends SystemBase {
     playerId: string,
     groundItemIds: string[],
   ): Promise<void> {
+    if (!this.deathRepository) {
+      console.error("[DatabaseSystem] deathRepository not initialized");
+      return;
+    }
     return this.deathRepository.updateGroundItemsAsync(playerId, groundItemIds);
   }
 
@@ -804,6 +824,12 @@ export class DatabaseSystem extends SystemBase {
    * @returns Array of death locks that need recovery
    */
   async getUnrecoveredDeathsAsync(): Promise<DeathLockData[]> {
+    if (!this.deathRepository) {
+      console.error(
+        "[DatabaseSystem] deathRepository not initialized - ensure DatabaseSystem.init() was called",
+      );
+      return [];
+    }
     return this.deathRepository.getUnrecoveredDeathsAsync();
   }
 
@@ -816,6 +842,10 @@ export class DatabaseSystem extends SystemBase {
    * @param playerId - The player ID whose death was recovered
    */
   async markDeathRecoveredAsync(playerId: string): Promise<void> {
+    if (!this.deathRepository) {
+      console.error("[DatabaseSystem] deathRepository not initialized");
+      return;
+    }
     return this.deathRepository.markDeathRecoveredAsync(playerId);
   }
 
@@ -834,6 +864,10 @@ export class DatabaseSystem extends SystemBase {
     data: DeathLockData,
     tx?: NodePgDatabase<typeof schema>,
   ): Promise<boolean> {
+    if (!this.deathRepository) {
+      console.error("[DatabaseSystem] deathRepository not initialized");
+      return false;
+    }
     return this.deathRepository.acquireDeathLockAsync(data, tx);
   }
 

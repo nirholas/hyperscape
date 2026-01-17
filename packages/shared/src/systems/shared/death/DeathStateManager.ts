@@ -125,11 +125,25 @@ export class DeathStateManager {
   /** In-memory cache for fast death lock lookups (both client and server) */
   private activeDeaths = new Map<string, DeathLock>();
 
+  /** P1-010: Handler reference for cleanup on destroy */
+  private readonly handlePlayerUnregistered = (event: unknown): void => {
+    // Type guard: validate payload structure
+    if (!event || typeof event !== "object" || !("id" in event)) {
+      console.warn(
+        "[DeathStateManager] Invalid PLAYER_UNREGISTERED payload:",
+        event,
+      );
+      return;
+    }
+    const data = event as { id: string };
+    void this.handlePlayerDisconnect(data.id);
+  };
+
   constructor(private world: World) {}
 
   /**
    * Initialize - get entity manager and database system references
-   * P0-005: Also recovers unfinished deaths from previous server session
+   * Note: Death recovery is deferred to start() to ensure DatabaseSystem is fully initialized
    */
   async init(): Promise<void> {
     this.entityManager = this.world.getSystem(
@@ -145,18 +159,61 @@ export class DeathStateManager {
         console.log(
           "[DeathStateManager] ✓ Initialized with database persistence (server)",
         );
-
-        // P0-005: CRITICAL - Recover unfinished deaths from previous server session
-        // This prevents item loss when server crashes during death handling
-        await this.recoverUnfinishedDeaths();
       } else {
         console.warn(
           "[DeathStateManager] ⚠️ DatabaseSystem not available - running without persistence!",
         );
       }
+      // P1-010: Subscribe to player disconnect for death lock cleanup
+      this.world.on(
+        EventType.PLAYER_UNREGISTERED,
+        this.handlePlayerUnregistered,
+      );
     } else {
       console.log("[DeathStateManager] ✓ Initialized (client, in-memory only)");
     }
+  }
+
+  /**
+   * Start - called after all systems are initialized
+   * P0-005: Recovers unfinished deaths from previous server session
+   *
+   * This is separate from init() because DatabaseSystem must complete its init()
+   * before we can query for unrecovered deaths. By deferring to start(), we ensure
+   * all system init() calls have completed.
+   */
+  async start(): Promise<void> {
+    if (this.world.isServer && this.databaseSystem) {
+      // P0-005: CRITICAL - Recover unfinished deaths from previous server session
+      // This prevents item loss when server crashes during death handling
+      await this.recoverUnfinishedDeaths();
+    }
+  }
+
+  /**
+   * P1-010: Clean up death lock when player disconnects
+   *
+   * When a player disconnects mid-death, we keep the death lock in the database
+   * but clear it from memory. This allows:
+   * 1. The gravestone/ground items to persist for other players to see
+   * 2. The player to recover their items when they reconnect
+   * 3. Memory to be freed for disconnected players
+   *
+   * NOTE: We do NOT delete from database - the death lock ensures items
+   * aren't duplicated if the player reconnects and tries to die again.
+   */
+  private async handlePlayerDisconnect(playerId: string): Promise<void> {
+    const deathData = this.activeDeaths.get(playerId);
+    if (!deathData) {
+      return; // No active death for this player
+    }
+
+    // Clear from memory but keep in database for reconnect validation
+    this.activeDeaths.delete(playerId);
+
+    console.log(
+      `[DeathStateManager] P1-010: Cleared death lock from memory for disconnected player ${playerId} (preserved in database for reconnect)`,
+    );
   }
 
   /**
@@ -611,5 +668,22 @@ export class DeathStateManager {
     console.log(
       `[DeathStateManager] ✓ Gravestone expired for ${playerId}, transitioned to ${groundItemIds.length} ground items`,
     );
+  }
+
+  /**
+   * Clean up event listeners and clear memory
+   * P1-010: Unsubscribe from player disconnect events
+   */
+  destroy(): void {
+    // P1-010: Unsubscribe from player disconnect events
+    this.world.off(
+      EventType.PLAYER_UNREGISTERED,
+      this.handlePlayerUnregistered,
+    );
+
+    // Clear in-memory cache
+    this.activeDeaths.clear();
+
+    console.log("[DeathStateManager] Destroyed");
   }
 }

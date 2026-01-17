@@ -6,6 +6,7 @@ import type {
   LootResult,
 } from "@hyperscape/shared";
 import { EventType, generateTransactionId, getItem } from "@hyperscape/shared";
+import { ErrorBoundary } from "../../lib/ErrorBoundary";
 
 // P0-006: Timeout for pending loot transactions (5 seconds)
 const LOOT_TRANSACTION_TIMEOUT_MS = 5000;
@@ -19,7 +20,10 @@ interface LootWindowProps {
   world: World;
 }
 
-export function LootWindow({
+/**
+ * P2-018: Internal LootWindow component (wrapped with ErrorBoundary below)
+ */
+function LootWindowContent({
   visible,
   corpseId,
   corpseName,
@@ -88,7 +92,7 @@ export function LootWindow({
     const handleLootResult = (result: LootResult) => {
       const { transactionId, success, reason } = result;
 
-      // Clear timeout for this transaction
+      // Clear timeout for this transaction (handles both single and batch)
       const existingTimeout = timeoutRefs.current.get(transactionId);
       if (existingTimeout) {
         clearTimeout(existingTimeout);
@@ -99,14 +103,37 @@ export function LootWindow({
         // Transaction confirmed - remove from pending (item already removed from UI)
         setPendingTransactions((prev) => {
           const newPending = new Map(prev);
+          // Remove the exact transaction ID
           newPending.delete(transactionId);
+          // Also clear any batch-related transactions (e.g., "txn123_0", "txn123_1", etc.)
+          // This handles the "loot all" case where we track items as "${batchId}_${index}"
+          for (const key of prev.keys()) {
+            if (key.startsWith(`${transactionId}_`)) {
+              newPending.delete(key);
+            }
+          }
           return newPending;
         });
         console.log(`[LootWindow] Loot confirmed: ${transactionId}`);
       } else {
         // Transaction failed - rollback
         console.warn(`[LootWindow] Loot failed: ${transactionId} - ${reason}`);
-        rollbackTransaction(transactionId);
+
+        // For batch operations, rollback all related transactions
+        setPendingTransactions((prev) => {
+          const batchKeys = Array.from(prev.keys()).filter(
+            (key) =>
+              key === transactionId || key.startsWith(`${transactionId}_`),
+          );
+          if (batchKeys.length > 0) {
+            // Batch rollback
+            batchKeys.forEach((key) => rollbackTransaction(key));
+          } else {
+            // Single item rollback
+            rollbackTransaction(transactionId);
+          }
+          return prev;
+        });
 
         // Show error toast if available
         if (reason) {
@@ -117,6 +144,7 @@ export function LootWindow({
             GRAVESTONE_GONE: "The gravestone has despawned",
             RATE_LIMITED: "Too many requests, slow down",
             INVALID_REQUEST: "Invalid loot request",
+            PLAYER_DYING: "Cannot loot while dying",
           };
           world.emit(EventType.SHOW_TOAST, {
             message: errorMessages[reason] || "Failed to loot item",
@@ -300,19 +328,16 @@ export function LootWindow({
   const handleTakeAll = () => {
     const localPlayer = world.getPlayer();
     if (!localPlayer) return;
+    if (items.length === 0) return;
 
-    // Take ALL items in one batch request
-    // Copy current items array since we'll clear it optimistically
-    const itemsToTake = [...items];
+    // Generate single transaction ID for the batch operation
+    const transactionId = generateTransactionId();
 
-    // P0-006: Send loot request for each item with transaction tracking
-    itemsToTake.forEach((item, index) => {
-      // Generate transaction ID for each item
-      const transactionId = generateTransactionId();
-
-      // Track pending transaction
+    // Track all items as pending for potential rollback
+    const itemsCopy = [...items];
+    itemsCopy.forEach((item, index) => {
       const pendingTransaction: PendingLootTransaction = {
-        transactionId,
+        transactionId: `${transactionId}_${index}`,
         itemId: item.itemId,
         quantity: item.quantity,
         requestedAt: Date.now(),
@@ -322,43 +347,45 @@ export function LootWindow({
 
       setPendingTransactions((prev) => {
         const newPending = new Map(prev);
-        newPending.set(transactionId, pendingTransaction);
+        newPending.set(pendingTransaction.transactionId, pendingTransaction);
         return newPending;
       });
-
-      // Set timeout for transaction
-      const timeout = setTimeout(() => {
-        console.warn(`[LootWindow] Transaction timed out: ${transactionId}`);
-        rollbackTransaction(transactionId);
-      }, LOOT_TRANSACTION_TIMEOUT_MS);
-      timeoutRefs.current.set(transactionId, timeout);
-
-      if (world.network?.send) {
-        world.network.send("entityEvent", {
-          id: "world",
-          event: EventType.CORPSE_LOOT_REQUEST,
-          payload: {
-            corpseId,
-            playerId: localPlayer.id,
-            itemId: item.itemId,
-            quantity: item.quantity,
-            slot: index,
-            transactionId,
-          },
-        });
-      } else {
-        world.emit(EventType.CORPSE_LOOT_REQUEST, {
-          corpseId,
-          playerId: localPlayer.id,
-          itemId: item.itemId,
-          quantity: item.quantity,
-          slot: index,
-          transactionId,
-        });
-      }
     });
 
-    // Optimistically clear ALL items at once (will rollback individually if needed)
+    // Set single timeout for the batch operation
+    const timeout = setTimeout(() => {
+      console.warn(`[LootWindow] Loot all timed out: ${transactionId}`);
+      // Rollback all items
+      itemsCopy.forEach((_, index) => {
+        rollbackTransaction(`${transactionId}_${index}`);
+      });
+      world.emit(EventType.SHOW_TOAST, {
+        message: "Loot request timed out",
+        type: "error",
+      });
+    }, LOOT_TRANSACTION_TIMEOUT_MS);
+    timeoutRefs.current.set(transactionId, timeout);
+
+    // Send single batch loot request
+    if (world.network?.send) {
+      world.network.send("entityEvent", {
+        id: "world",
+        event: EventType.CORPSE_LOOT_ALL_REQUEST,
+        payload: {
+          corpseId,
+          playerId: localPlayer.id,
+          transactionId,
+        },
+      });
+    } else {
+      world.emit(EventType.CORPSE_LOOT_ALL_REQUEST, {
+        corpseId,
+        playerId: localPlayer.id,
+        transactionId,
+      });
+    }
+
+    // Optimistically clear ALL items at once
     setItems([]);
   };
 
@@ -472,5 +499,36 @@ export function LootWindow({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * P2-018: LootWindow wrapped with ErrorBoundary for resilience
+ *
+ * If the loot window crashes due to data issues, this prevents
+ * the entire game UI from failing. Shows a fallback with close button.
+ */
+export function LootWindow(props: LootWindowProps) {
+  const fallback = (
+    <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/50">
+      <div className="bg-gray-800 border-2 border-red-500 rounded-lg p-4 text-center max-w-sm">
+        <p className="text-red-400 font-bold mb-2">⚠️ Loot Window Error</p>
+        <p className="text-gray-300 text-sm mb-4">
+          Something went wrong displaying the loot. Your items are still safe.
+        </p>
+        <button
+          onClick={props.onClose}
+          className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded text-sm"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <ErrorBoundary fallback={fallback}>
+      <LootWindowContent {...props} />
+    </ErrorBoundary>
   );
 }

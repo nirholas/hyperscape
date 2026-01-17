@@ -244,7 +244,7 @@ export class PlayerDeathSystem extends SystemBase {
       name: "player-death",
       dependencies: {
         required: ["ground-items"], // Depends on shared GroundItemSystem
-        optional: ["inventory", "entity-manager"],
+        optional: ["inventory", "entity-manager", "database"], // database for death persistence (server only)
       },
       autoCleanup: true,
     });
@@ -363,6 +363,14 @@ export class PlayerDeathSystem extends SystemBase {
     this.subscribe(EventType.PLAYER_UNREGISTERED, (data: { id: string }) => {
       this.playerInventories.delete(data.id);
     });
+  }
+
+  /**
+   * Start - called after all systems are initialized
+   * Delegates to DeathStateManager to recover unfinished deaths
+   */
+  async start(): Promise<void> {
+    await this.deathStateManager.start();
   }
 
   destroy(): void {
@@ -540,6 +548,27 @@ export class PlayerDeathSystem extends SystemBase {
 
     // Update last death time (P2-007: use cached timestamp)
     this.lastDeathTime.set(playerId, now);
+
+    // DS-C07: Set death state IMMEDIATELY to block any incoming loot/pickup requests
+    // This must happen BEFORE the transaction to prevent race conditions where
+    // items are looted between inventory snapshot and clear
+    const playerEntity = this.world.entities?.get?.(playerId);
+    if (playerEntity && "data" in playerEntity) {
+      const typedPlayerEntity = playerEntity as PlayerEntityLike;
+      if (typedPlayerEntity.data) {
+        typedPlayerEntity.data.deathState = DeathState.DYING;
+        if ("markNetworkDirty" in playerEntity) {
+          (playerEntity as { markNetworkDirty: () => void }).markNetworkDirty();
+        }
+      }
+    }
+
+    // DS-C07: Emit PLAYER_SET_DEAD immediately so client can block loot window
+    // This must happen BEFORE the transaction so the client knows to reject clicks
+    this.emitTypedEvent(EventType.PLAYER_SET_DEAD, {
+      playerId,
+      isDead: true,
+    });
 
     // Get database system for transaction support
     const databaseSystem = this.world.getSystem(

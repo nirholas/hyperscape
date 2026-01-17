@@ -158,7 +158,8 @@ export type LootFailureReason =
   | "PROTECTED" // Loot protection still active
   | "GRAVESTONE_GONE" // Gravestone despawned
   | "RATE_LIMITED" // Too many requests
-  | "INVALID_REQUEST"; // Malformed request
+  | "INVALID_REQUEST" // Malformed request
+  | "PLAYER_DYING"; // DS-C07: Player is dying/dead, cannot loot
 
 /**
  * Loot operation result - sent from server to client
