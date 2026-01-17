@@ -487,8 +487,7 @@ export interface ProcessingCookingRequestPayload {
  */
 export interface FiremakingMoveRequestPayload {
   playerId: string;
-  fromPosition: Position3D;
-  toPosition: Position3D;
+  position: Position3D;
 }
 
 // =========================================================================
