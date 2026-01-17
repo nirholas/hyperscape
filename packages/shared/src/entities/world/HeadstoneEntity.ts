@@ -70,10 +70,33 @@ import { EventType } from "../../types/events";
 import type { LootResult, LootFailureReason } from "../../types/death";
 import { generateTransactionId } from "../../utils/IdGenerator";
 
+/**
+ * P2-022: Type guard for HeadstoneEntityConfig validation
+ * Ensures config has required headstoneData properties before use
+ */
+function isValidHeadstoneConfig(
+  config: unknown,
+): config is HeadstoneEntityConfig {
+  if (!config || typeof config !== "object") return false;
+  const c = config as Record<string, unknown>;
+  if (!c.headstoneData || typeof c.headstoneData !== "object") return false;
+  const hd = c.headstoneData as Record<string, unknown>;
+  return (
+    typeof hd.playerId === "string" &&
+    typeof hd.deathTime === "number" &&
+    Array.isArray(hd.items)
+  );
+}
+
 export class HeadstoneEntity extends InteractableEntity {
   protected config: HeadstoneEntityConfig;
   private lootItems: InventoryItem[] = [];
   private lootRequestHandler?: (data: unknown) => void;
+
+  // P2-004: Cache headstoneData reference to avoid deep property chains
+  private get headstoneData() {
+    return this.config.headstoneData;
+  }
 
   // Atomic loot operations (prevents concurrent duplication)
   private lootQueue: Promise<void> = Promise.resolve();
@@ -328,9 +351,10 @@ export class HeadstoneEntity extends InteractableEntity {
     );
 
     // P0-007: Audit log for successful loot
+    // P2-004: Use cached headstoneData getter
     this.world.emit(EventType.AUDIT_LOG, {
       action: "LOOT_SUCCESS",
-      playerId: this.config.headstoneData.playerId, // Owner of gravestone
+      playerId: this.headstoneData.playerId, // Owner of gravestone
       actorId: playerId, // Who looted
       entityId: this.id,
       items: [{ itemId, quantity: quantityToLoot }],
@@ -375,10 +399,11 @@ export class HeadstoneEntity extends InteractableEntity {
     this.world.emit(EventType.LOOT_RESULT, { playerId, ...result });
 
     // P0-007: Audit log for failed loot attempts
+    // P2-004: Use cached headstoneData getter
     if (!success) {
       this.world.emit(EventType.AUDIT_LOG, {
         action: "LOOT_FAILED",
-        playerId: this.config.headstoneData.playerId,
+        playerId: this.headstoneData.playerId,
         actorId: playerId,
         entityId: this.id,
         items: itemId ? [{ itemId, quantity: quantity || 1 }] : undefined,
@@ -414,6 +439,8 @@ export class HeadstoneEntity extends InteractableEntity {
     this.mesh = mesh;
 
     // Set up userData
+    // P2-004: Use cached headstoneData getter
+    const hd = this.headstoneData;
     mesh.userData = {
       type: "corpse",
       entityId: this.id,
@@ -421,8 +448,8 @@ export class HeadstoneEntity extends InteractableEntity {
       interactable: true,
       corpseData: {
         id: this.id,
-        playerName: this.config.headstoneData.playerName,
-        deathMessage: this.config.headstoneData.deathMessage,
+        playerName: hd.playerName,
+        deathMessage: hd.deathMessage,
         itemCount: this.lootItems.length,
       },
     };
@@ -446,10 +473,12 @@ export class HeadstoneEntity extends InteractableEntity {
 
     // Name stored in userData for right-click menu display (OSRS pattern)
     // Overhead nametags removed for accuracy
+    // P2-004: Use cached headstoneData getter
     if (this.mesh.userData) {
+      const playerName = this.headstoneData.playerName;
       this.mesh.userData.showLabel = true;
-      this.mesh.userData.labelText = this.config.headstoneData.playerName
-        ? `${this.config.headstoneData.playerName}'s corpse`
+      this.mesh.userData.labelText = playerName
+        ? `${playerName}'s corpse`
         : "Corpse";
     }
   }
@@ -505,10 +534,11 @@ export class HeadstoneEntity extends InteractableEntity {
     }
 
     // If no items left, mark for despawn
+    // P2-004: Use cached headstoneData getter
     if (this.lootItems.length === 0) {
       this.world.emit(EventType.CORPSE_EMPTY, {
         corpseId: this.id,
-        playerId: this.config.headstoneData.playerId,
+        playerId: this.headstoneData.playerId,
       });
 
       // Despawn almost immediately after all items taken (RuneScape-style)
@@ -548,13 +578,15 @@ export class HeadstoneEntity extends InteractableEntity {
    */
   getNetworkData(): Record<string, unknown> {
     const baseData = super.getNetworkData();
+    // P2-004: Use cached headstoneData getter
+    const hd = this.headstoneData;
     return {
       ...baseData,
       lootItemCount: this.lootItems.length,
       lootItems: this.lootItems, // CRITICAL: Send actual items to client for LootWindow
-      despawnTime: this.config.headstoneData.despawnTime,
-      playerId: this.config.headstoneData.playerId,
-      deathMessage: this.config.headstoneData.deathMessage,
+      despawnTime: hd.despawnTime,
+      playerId: hd.playerId,
+      deathMessage: hd.deathMessage,
     };
   }
 
@@ -564,17 +596,19 @@ export class HeadstoneEntity extends InteractableEntity {
    */
   serialize(): EntityData {
     const baseData = super.serialize();
+    // P2-004: Use cached headstoneData getter for cleaner code
+    const hd = this.headstoneData;
     return {
       ...baseData,
       headstoneData: {
-        playerId: this.config.headstoneData.playerId,
-        playerName: this.config.headstoneData.playerName,
-        deathTime: this.config.headstoneData.deathTime,
-        deathMessage: this.config.headstoneData.deathMessage,
-        position: this.config.headstoneData.position,
+        playerId: hd.playerId,
+        playerName: hd.playerName,
+        deathTime: hd.deathTime,
+        deathMessage: hd.deathMessage,
+        position: hd.position,
         items: this.lootItems, // CRITICAL: Include actual loot items for client
         itemCount: this.lootItems.length,
-        despawnTime: this.config.headstoneData.despawnTime,
+        despawnTime: hd.despawnTime,
       },
       lootItems: this.lootItems, // Also include at root level for easy access
       lootItemCount: this.lootItems.length,
@@ -585,7 +619,8 @@ export class HeadstoneEntity extends InteractableEntity {
     super.serverUpdate(deltaTime);
 
     // Check if corpse should despawn
-    if (this.world.getTime() > this.config.headstoneData.despawnTime) {
+    // P2-004: Use cached headstoneData getter
+    if (this.world.getTime() > this.headstoneData.despawnTime) {
       this.world.entities.remove(this.id);
     }
   }
@@ -601,11 +636,13 @@ export class HeadstoneEntity extends InteractableEntity {
   }
 
   public destroy(): void {
-    // Clean up event listener
+    // Clean up event listener (P2-028: Prevents memory leak)
     if (this.lootRequestHandler) {
       this.world.off(EventType.CORPSE_LOOT_REQUEST, this.lootRequestHandler);
       this.lootRequestHandler = undefined;
     }
+    // P2-028: Clean up rate limiter map to prevent memory leak
+    this.lootRateLimiter.clear();
     super.destroy();
   }
 }

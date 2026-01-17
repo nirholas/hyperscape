@@ -25,6 +25,9 @@ import type { HeadstoneEntityConfig } from "../../../types/entities";
 import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
 import { ticksToMs } from "../../../utils/game/CombatCalculations";
 
+/** P2-019: Gravestone model path constant (prevents typos and enables easy changes) */
+const GRAVESTONE_MODEL_PATH = "models/environment/gravestone.glb";
+
 /** Gravestone data tracked for tick-based expiration */
 interface GravestoneData {
   gravestoneId: string;
@@ -120,14 +123,17 @@ export class SafeAreaDeathHandler {
     );
 
     // Track gravestone for tick-based expiration (500 ticks = 5 minutes)
-    const currentTick = this.world.currentTick ?? 0;
-    const expirationTick = currentTick + COMBAT_CONSTANTS.GRAVESTONE_TICKS;
+    // P2-025: Type-safe tick calculation with explicit number type
+    const currentTick: number = this.world.currentTick ?? 0;
+    const gravestoneTicks: number = COMBAT_CONSTANTS.GRAVESTONE_TICKS;
+    const expirationTick: number = currentTick + gravestoneTicks;
 
+    // P2-024: Defensive copy of items array to prevent external mutation
     this.gravestones.set(gravestoneId, {
       gravestoneId,
       playerId,
-      position,
-      items,
+      position: { ...position },
+      items: items.map((item) => ({ ...item })),
       expirationTick,
     });
 
@@ -178,7 +184,7 @@ export class SafeAreaDeathHandler {
       interactionType: InteractionType.LOOT,
       interactionDistance: 2,
       description: `Gravestone of ${playerName} (killed by ${killedBy})`,
-      model: "models/environment/gravestone.glb",
+      model: GRAVESTONE_MODEL_PATH,
       headstoneData: {
         playerId: playerId,
         playerName: playerName,
@@ -222,6 +228,8 @@ export class SafeAreaDeathHandler {
    * Process tick - check for expired gravestones (TICK-BASED)
    * Called once per tick by TickSystem
    *
+   * P2-023: Uses consistent async/await pattern for promise handling
+   *
    * @param currentTick - Current server tick number
    */
   processTick(currentTick: number): void {
@@ -233,14 +241,17 @@ export class SafeAreaDeathHandler {
       }
     }
 
-    // Process expired gravestones
+    // P2-023: Process expired gravestones with proper error handling
+    // Using void operator to explicitly ignore the promise (fire-and-forget pattern)
     for (const gravestoneData of expiredGravestones) {
-      this.handleGravestoneExpire(gravestoneData, currentTick).catch((err) => {
-        console.error(
-          `[SafeAreaDeathHandler] Gravestone expiration failed for ${gravestoneData.gravestoneId}:`,
-          err,
-        );
-      });
+      void this.handleGravestoneExpire(gravestoneData, currentTick).catch(
+        (err) => {
+          console.error(
+            `[SafeAreaDeathHandler] Gravestone expiration failed for ${gravestoneData.gravestoneId}:`,
+            err,
+          );
+        },
+      );
     }
   }
 

@@ -27,6 +27,95 @@ import { ZoneType, type TransactionContext } from "../../../types/death";
 import type { InventorySystem } from "../character/InventorySystem";
 import { getEntityPosition } from "../../../utils/game/EntityPositionUtils";
 
+/**
+ * P2-014: Sanitize killedBy string to prevent injection attacks
+ * - Removes special characters that could cause issues in logs or UI
+ * - Limits length to prevent buffer overflow attacks
+ * - Defaults to "unknown" for invalid inputs
+ */
+function sanitizeKilledBy(killedBy: unknown): string {
+  if (typeof killedBy !== "string" || !killedBy) {
+    return "unknown";
+  }
+  // Remove control characters and limit length
+  const sanitized = killedBy
+    .replace(/[\x00-\x1F\x7F]/g, "") // Remove control characters
+    .replace(/[<>'"&]/g, "") // Remove potentially dangerous characters
+    .trim()
+    .substring(0, 64); // Limit to 64 characters
+  return sanitized || "unknown";
+}
+
+/**
+ * P2-017: Position validation constants
+ */
+const POSITION_VALIDATION = {
+  WORLD_BOUNDS: 10000, // Max 10km from origin
+  MAX_HEIGHT: 500, // Max height
+  MIN_HEIGHT: -50, // Allow some underground (caves)
+} as const;
+
+/**
+ * P2-017: Check if a number is valid for position use
+ */
+function isValidPositionNumber(n: number): boolean {
+  return Number.isFinite(n) && !Number.isNaN(n);
+}
+
+/**
+ * P2-017: Validate and clamp a position to world bounds
+ * @param position - Position to validate
+ * @returns Validated and clamped position, or null if completely invalid
+ */
+function validatePosition(position: {
+  x: number;
+  y: number;
+  z: number;
+}): { x: number; y: number; z: number } | null {
+  const { x, y, z } = position;
+
+  // Check for invalid numbers (NaN, Infinity)
+  if (
+    !isValidPositionNumber(x) ||
+    !isValidPositionNumber(y) ||
+    !isValidPositionNumber(z)
+  ) {
+    return null;
+  }
+
+  // Clamp to world bounds
+  return {
+    x: Math.max(
+      -POSITION_VALIDATION.WORLD_BOUNDS,
+      Math.min(POSITION_VALIDATION.WORLD_BOUNDS, x),
+    ),
+    y: Math.max(
+      POSITION_VALIDATION.MIN_HEIGHT,
+      Math.min(POSITION_VALIDATION.MAX_HEIGHT, y),
+    ),
+    z: Math.max(
+      -POSITION_VALIDATION.WORLD_BOUNDS,
+      Math.min(POSITION_VALIDATION.WORLD_BOUNDS, z),
+    ),
+  };
+}
+
+/**
+ * P2-017: Check if position is within world bounds without clamping
+ */
+function isPositionInBounds(position: {
+  x: number;
+  y: number;
+  z: number;
+}): boolean {
+  return (
+    Math.abs(position.x) <= POSITION_VALIDATION.WORLD_BOUNDS &&
+    Math.abs(position.z) <= POSITION_VALIDATION.WORLD_BOUNDS &&
+    position.y >= POSITION_VALIDATION.MIN_HEIGHT &&
+    position.y <= POSITION_VALIDATION.MAX_HEIGHT
+  );
+}
+
 interface PlayerSystemLike {
   players?: Map<string, { position?: { x: number; y: number; z: number } }>;
 }
@@ -288,8 +377,14 @@ export class PlayerDeathSystem extends SystemBase {
     for (const timer of this.respawnTimers.values()) {
       clearTimeout(timer);
     }
+
+    // P2-020: Clean up all Maps to prevent memory leaks
     this.respawnTimers.clear();
     this.deathLocations.clear();
+    this.playerPositions.clear();
+    this.playerInventories.clear();
+    this.pendingGravestones.clear();
+    this.lastDeathTime.clear();
   }
 
   private handlePlayerDeath(data: {
@@ -378,8 +473,10 @@ export class PlayerDeathSystem extends SystemBase {
   private async processPlayerDeath(
     playerId: string,
     deathPosition: { x: number; y: number; z: number },
-    killedBy: string,
+    killedByRaw: string,
   ): Promise<void> {
+    // P2-014: Sanitize killedBy input to prevent injection attacks
+    const killedBy = sanitizeKilledBy(killedByRaw);
     // Server-only - prevent client from triggering death events
     if (!this.world.isServer) {
       console.error(
@@ -388,24 +485,19 @@ export class PlayerDeathSystem extends SystemBase {
       return;
     }
 
-    // P1-013: Validate death position
-    // Check for NaN, Infinity, and out-of-bounds values
-    const { x, y, z } = deathPosition;
-    const isValidNumber = (n: number) => Number.isFinite(n) && !Number.isNaN(n);
+    // P1-013 + P2-017: Validate death position using extracted helper
+    let validatedPosition = validatePosition(deathPosition);
 
-    if (!isValidNumber(x) || !isValidNumber(y) || !isValidNumber(z)) {
+    if (!validatedPosition) {
       console.error(
-        `[PlayerDeathSystem] Invalid death position for ${playerId}: (${x}, ${y}, ${z}) - using player entity position`,
+        `[PlayerDeathSystem] Invalid death position for ${playerId}: (${deathPosition.x}, ${deathPosition.y}, ${deathPosition.z}) - using player entity position`,
       );
       // Try to get player's actual position as fallback
       const playerEntity = this.world.entities.get(playerId);
       if (playerEntity?.position) {
-        deathPosition = {
-          x: playerEntity.position.x,
-          y: playerEntity.position.y,
-          z: playerEntity.position.z,
-        };
-      } else {
+        validatedPosition = validatePosition(playerEntity.position);
+      }
+      if (!validatedPosition) {
         console.error(
           `[PlayerDeathSystem] Cannot determine valid death position for ${playerId} - aborting`,
         );
@@ -413,29 +505,21 @@ export class PlayerDeathSystem extends SystemBase {
       }
     }
 
-    // Check world bounds (reasonable game world limits)
-    const WORLD_BOUNDS = 10000; // Max 10km from origin
-    const MAX_HEIGHT = 500; // Max height
-    const MIN_HEIGHT = -50; // Allow some underground (caves)
-
-    if (
-      Math.abs(deathPosition.x) > WORLD_BOUNDS ||
-      Math.abs(deathPosition.z) > WORLD_BOUNDS ||
-      deathPosition.y > MAX_HEIGHT ||
-      deathPosition.y < MIN_HEIGHT
-    ) {
+    // P2-017: Check bounds and log warning if clamped
+    if (!isPositionInBounds(deathPosition)) {
       console.warn(
-        `[PlayerDeathSystem] Death position out of bounds for ${playerId}: (${deathPosition.x}, ${deathPosition.y}, ${deathPosition.z}) - clamping`,
+        `[PlayerDeathSystem] Death position out of bounds for ${playerId}: (${deathPosition.x}, ${deathPosition.y}, ${deathPosition.z}) - clamped`,
       );
-      deathPosition = {
-        x: Math.max(-WORLD_BOUNDS, Math.min(WORLD_BOUNDS, deathPosition.x)),
-        y: Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, deathPosition.y)),
-        z: Math.max(-WORLD_BOUNDS, Math.min(WORLD_BOUNDS, deathPosition.z)),
-      };
     }
 
+    // Use validated position from here on
+    deathPosition = validatedPosition;
+
+    // P2-007: Cache Date.now() to avoid multiple system calls
+    const now = Date.now();
+
     const lastDeath = this.lastDeathTime.get(playerId) || 0;
-    if (Date.now() - lastDeath < this.DEATH_COOLDOWN) {
+    if (now - lastDeath < this.DEATH_COOLDOWN) {
       console.warn(`[PlayerDeathSystem] Death spam: ${playerId}`);
       return;
     }
@@ -449,8 +533,8 @@ export class PlayerDeathSystem extends SystemBase {
       return;
     }
 
-    // Update last death time
-    this.lastDeathTime.set(playerId, Date.now());
+    // Update last death time (P2-007: use cached timestamp)
+    this.lastDeathTime.set(playerId, now);
 
     // Get database system for transaction support
     const databaseSystem = this.world.getSystem(

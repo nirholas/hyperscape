@@ -36,14 +36,16 @@ interface DeathItemData {
 
 /**
  * P0-003: Full death lock data including crash recovery fields
+ * Note: Uses `undefined` instead of `null` for optional fields to match DeathLock interface
+ * Note: zoneType uses ZoneType enum to match DeathLock interface
  */
 interface DeathLockData {
   playerId: string;
-  gravestoneId: string | null;
+  gravestoneId: string | undefined;
   groundItemIds: string[];
   position: { x: number; y: number; z: number };
   timestamp: number;
-  zoneType: string;
+  zoneType: ZoneType;
   itemCount: number;
   items: DeathItemData[];
   killedBy: string;
@@ -67,11 +69,42 @@ type DatabaseSystem = {
   markDeathRecoveredAsync: (playerId: string) => Promise<void>;
 };
 
+/**
+ * DeathStateManager - Manages player death state with dual persistence
+ *
+ * P2-016: Comprehensive JSDoc documentation for public API
+ *
+ * Key responsibilities:
+ * - Track active player deaths in-memory for fast access
+ * - Persist death locks to database for crash recovery (server only)
+ * - Recover unfinished deaths after server restart (P0-005)
+ * - Prevent duplicate death processing (DS-H02)
+ *
+ * @example
+ * ```typescript
+ * const manager = new DeathStateManager(world);
+ * await manager.init();
+ *
+ * // Track a player death
+ * await manager.createDeathLock(playerId, {
+ *   gravestoneId: 'gravestone_123',
+ *   position: { x: 100, y: 10, z: 200 },
+ *   zoneType: ZoneType.SAFE_AREA,
+ *   itemCount: 5,
+ * });
+ *
+ * // Check if player has active death
+ * const hasActiveDeath = await manager.hasActiveDeathLock(playerId);
+ *
+ * // Clear after items recovered
+ * await manager.clearDeathLock(playerId);
+ * ```
+ */
 export class DeathStateManager {
   private entityManager: EntityManager | null = null;
   private databaseSystem: DatabaseSystem | null = null;
 
-  // In-memory cache for fast access (both client and server)
+  /** In-memory cache for fast death lock lookups (both client and server) */
   private activeDeaths = new Map<string, DeathLock>();
 
   constructor(private world: World) {}
@@ -294,7 +327,7 @@ export class DeathStateManager {
         await this.databaseSystem.saveDeathLockAsync(
           {
             playerId,
-            gravestoneId: options.gravestoneId || null,
+            gravestoneId: options.gravestoneId || undefined,
             groundItemIds: options.groundItemIds || [],
             position: options.position,
             timestamp,
@@ -495,7 +528,7 @@ export class DeathStateManager {
         try {
           await this.databaseSystem.saveDeathLockAsync({
             playerId,
-            gravestoneId: deathData.gravestoneId || null,
+            gravestoneId: deathData.gravestoneId || undefined,
             groundItemIds: deathData.groundItemIds || [],
             position: deathData.position,
             timestamp: deathData.timestamp,
