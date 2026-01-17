@@ -65,6 +65,12 @@ export interface PlayerRow {
   positionZ: number;
   attackStyle?: string; // Combat style preference (accurate, aggressive, defensive)
   autoRetaliate?: number; // Auto-retaliate preference (1=ON, 0=OFF)
+  // Prayer system fields
+  prayerLevel?: number; // Prayer skill level
+  prayerXp?: number; // Prayer skill XP
+  prayerPoints?: number; // Current prayer points
+  prayerMaxPoints?: number; // Maximum prayer points
+  activePrayers?: string; // JSON array of active prayer IDs
   createdAt: number;
   lastLogin: number;
 }

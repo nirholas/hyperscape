@@ -115,6 +115,7 @@ export class PlayerEntity extends CombatantEntity {
         defense: { level: 1, xp: 0 },
         constitution: { level: 10, xp: 1154 },
         ranged: { level: 1, xp: 0 },
+        prayer: { level: 1, xp: 0 },
         woodcutting: { level: 1, xp: 0 },
         mining: { level: 1, xp: 0 },
         fishing: { level: 1, xp: 0 },
@@ -194,7 +195,7 @@ export class PlayerEntity extends CombatantEntity {
           ranged: playerData.skills.ranged,
           magic: { level: 1, xp: 0 },
           constitution: playerData.skills.constitution,
-          prayer: { level: 1, points: 0 },
+          prayer: playerData.skills.prayer || { level: 1, xp: 0 },
           woodcutting: playerData.skills.woodcutting,
           mining: playerData.skills.mining,
           fishing: playerData.skills.fishing,
@@ -202,7 +203,7 @@ export class PlayerEntity extends CombatantEntity {
           cooking: playerData.skills.cooking,
           smithing: playerData.skills.smithing || { level: 1, xp: 0 },
           // Placeholder for complex fields - will be initialized by systems
-          activePrayers: {} as PrayerComponent,
+          activePrayers: [] as PrayerComponent,
           equipment: {} as EquipmentComponent,
           equippedSpell: null,
           effects: {
@@ -232,24 +233,8 @@ export class PlayerEntity extends CombatantEntity {
           ring: null,
         },
 
-        prayerComponent: {
-          protectFromMelee: false,
-          protectFromRanged: false,
-          protectFromMagic: false,
-          piety: false,
-          chivalry: false,
-          ultimateStrength: false,
-          superhumanStrength: false,
-          burstOfStrength: false,
-          rigour: false,
-          eagleEye: false,
-          hawkEye: false,
-          sharpEye: false,
-          augury: false,
-          mysticMight: false,
-          mysticLore: false,
-          mysticWill: false,
-        },
+        // Active prayer IDs (manifest-driven)
+        prayerComponent: [],
 
         // Base entity components
         movementComponent: {
@@ -356,6 +341,7 @@ export class PlayerEntity extends CombatantEntity {
         defense: defaultSkill,
         constitution: { level: 10, xp: 0 }, // Higher starting constitution
         ranged: defaultSkill,
+        prayer: defaultSkill,
         woodcutting: defaultSkill,
         mining: defaultSkill,
         fishing: defaultSkill,

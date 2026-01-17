@@ -158,6 +158,12 @@ export interface Item {
   // Consumable properties - only for food/consumables
   healAmount?: number; // Health restored when consumed
 
+  // === BONE BURYING (Prayer XP) ===
+  /** Prayer XP granted when this item is buried (for bones) */
+  prayerXp?: number;
+  /** Prayer level required to bury this item (for high-tier bones) */
+  buryLevelRequired?: number;
+
   // Combat bonuses (for equipment) - optional for non-equipment items
   bonuses?: CombatBonuses;
 

@@ -69,6 +69,10 @@ import { Entity } from "./Entity";
 import type { World } from "../core/World";
 import type { EntityConfig, EntityInteractionData } from "../types/entities";
 import type { Position3D } from "../types/core/core";
+import {
+  worldToTile,
+  type TileCoord,
+} from "../systems/shared/movement/TileSystem";
 
 export interface InteractableConfig extends EntityConfig {
   interaction?: {
@@ -153,6 +157,46 @@ export abstract class InteractableEntity extends Entity {
   // === Interaction Methods ===
 
   /**
+   * Get tiles occupied by this entity for interaction checking.
+   * Override in subclasses (e.g., station entities) to return multi-tile footprints.
+   * Default: single tile at entity position.
+   *
+   * OSRS-style: Interaction is allowed if player is within `interactionRange`
+   * tiles of ANY occupied tile, using Chebyshev distance (diagonals count as 1).
+   */
+  protected getOccupiedTiles(): TileCoord[] {
+    const pos = this.getPosition();
+    return [worldToTile(pos.x, pos.z)];
+  }
+
+  /**
+   * Calculate tile distance (Chebyshev distance) between two tiles.
+   * Diagonal movement counts as 1 step, matching OSRS mechanics.
+   */
+  private getTileDistance(t1: TileCoord, t2: TileCoord): number {
+    return Math.max(Math.abs(t1.x - t2.x), Math.abs(t1.z - t2.z));
+  }
+
+  /**
+   * Calculate minimum tile distance from player to any occupied tile.
+   * For multi-tile objects, finds the closest occupied tile.
+   */
+  private calculateTileDistance(playerPosition: Position3D): number {
+    const playerTile = worldToTile(playerPosition.x, playerPosition.z);
+    const occupiedTiles = this.getOccupiedTiles();
+
+    let minDistance = Infinity;
+    for (const tile of occupiedTiles) {
+      const dist = this.getTileDistance(playerTile, tile);
+      if (dist < minDistance) {
+        minDistance = dist;
+      }
+    }
+
+    return minDistance;
+  }
+
+  /**
    * Check if a player can interact with this entity
    */
   public canInteract(playerId: string, playerPosition: Position3D): boolean {
@@ -175,14 +219,11 @@ export abstract class InteractableEntity extends Entity {
       return false;
     }
 
-    // Check distance
-    const entityPos = this.getPosition();
-    const distance = Math.sqrt(
-      Math.pow(playerPosition.x - entityPos.x, 2) +
-        Math.pow(playerPosition.z - entityPos.z, 2),
-    );
+    // Check distance using OSRS-style tile distance (Chebyshev)
+    // Player must be within interactionRange tiles of ANY occupied tile
+    const tileDistance = this.calculateTileDistance(playerPosition);
 
-    if (distance > this.interactionRange) {
+    if (tileDistance > this.interactionRange) {
       return false;
     }
 

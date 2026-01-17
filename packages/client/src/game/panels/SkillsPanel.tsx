@@ -3,10 +3,11 @@
  * Classic RuneScape-style skills interface with Prayer/Buffs system
  */
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { COLORS } from "../../constants";
 import type { ClientWorld, PlayerStats } from "../../types";
+import { EventType } from "@hyperscape/shared";
 
 interface SkillsPanelProps {
   world: ClientWorld;
@@ -122,29 +123,38 @@ function SkillBox({
 function PrayerCard({
   prayer,
   onToggle,
+  playerLevel,
 }: {
   prayer: Prayer;
   onToggle: (id: string) => void;
+  playerLevel: number;
 }) {
   const [showTooltip, setShowTooltip] = useState(false);
+  const isLocked = prayer.level > playerLevel;
 
   return (
     <button
       className="relative border rounded transition-all duration-200 group p-0.5"
       onMouseEnter={() => setShowTooltip(true)}
       onMouseLeave={() => setShowTooltip(false)}
-      onClick={() => onToggle(prayer.id)}
+      onClick={() => !isLocked && onToggle(prayer.id)}
+      disabled={isLocked}
       style={{
-        background: prayer.active
-          ? "linear-gradient(135deg, rgba(34, 197, 94, 0.2) 0%, rgba(34, 197, 94, 0.1) 100%)"
-          : "linear-gradient(135deg, rgba(20, 20, 30, 0.95) 0%, rgba(25, 20, 35, 0.92) 100%)",
-        borderColor: prayer.active
-          ? "rgba(34, 197, 94, 0.6)"
-          : "rgba(242, 208, 138, 0.35)",
+        background: isLocked
+          ? "linear-gradient(135deg, rgba(30, 30, 40, 0.95) 0%, rgba(20, 20, 30, 0.92) 100%)"
+          : prayer.active
+            ? "linear-gradient(135deg, rgba(34, 197, 94, 0.2) 0%, rgba(34, 197, 94, 0.1) 100%)"
+            : "linear-gradient(135deg, rgba(20, 20, 30, 0.95) 0%, rgba(25, 20, 35, 0.92) 100%)",
+        borderColor: isLocked
+          ? "rgba(100, 100, 100, 0.35)"
+          : prayer.active
+            ? "rgba(34, 197, 94, 0.6)"
+            : "rgba(242, 208, 138, 0.35)",
         boxShadow: prayer.active
           ? "0 0 4px rgba(34, 197, 94, 0.3), 0 1px 2px rgba(0, 0, 0, 0.5)"
           : "0 1px 2px rgba(0, 0, 0, 0.5)",
-        cursor: "pointer",
+        cursor: isLocked ? "not-allowed" : "pointer",
+        opacity: isLocked ? 0.6 : 1,
       }}
     >
       <div className="flex items-center justify-between gap-0.5">
@@ -233,6 +243,14 @@ function PrayerCard({
           >
             Drain rate: {prayer.drainRate}/min
           </div>
+          {isLocked && (
+            <div
+              className="text-[9px] mt-0.5 font-semibold"
+              style={{ color: "#ef4444" }}
+            >
+              🔒 Requires level {prayer.level}
+            </div>
+          )}
 
           {/* Tooltip arrow */}
           <div
@@ -264,11 +282,98 @@ function PrayerCard({
   );
 }
 
-export function SkillsPanel({ world: _world, stats }: SkillsPanelProps) {
+export function SkillsPanel({ world, stats }: SkillsPanelProps) {
   const [activeTab, setActiveTab] = useState<TabType>("skills");
   const [hoveredSkill, setHoveredSkill] = useState<Skill | null>(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+
+  // Prayer state from server
+  const [prayerPoints, setPrayerPoints] = useState(1);
+  const [prayerMaxPoints, setPrayerMaxPoints] = useState(1);
   const [activePrayers, setActivePrayers] = useState<Set<string>>(new Set());
+
+  // Get local player ID
+  const localPlayer = world?.getPlayer?.();
+  const playerId = localPlayer?.id;
+
+  // Listen for prayer state updates from server
+  useEffect(() => {
+    if (!world) return;
+
+    const handlePrayerStateSync = (data: unknown) => {
+      const prayerData = data as {
+        playerId: string;
+        points: number;
+        maxPoints: number;
+        active: string[];
+      };
+      // Only handle our own player's state
+      if (prayerData.playerId !== playerId) return;
+
+      setPrayerPoints(prayerData.points);
+      setPrayerMaxPoints(prayerData.maxPoints);
+      setActivePrayers(new Set(prayerData.active));
+    };
+
+    const handlePrayerToggled = (data: unknown) => {
+      const toggleData = data as {
+        playerId: string;
+        prayerId: string;
+        active: boolean;
+        points: number;
+      };
+      // Only handle our own player's state
+      if (toggleData.playerId !== playerId) return;
+
+      setPrayerPoints(toggleData.points);
+      setActivePrayers((prev) => {
+        const next = new Set(prev);
+        if (toggleData.active) {
+          next.add(toggleData.prayerId);
+        } else {
+          next.delete(toggleData.prayerId);
+        }
+        return next;
+      });
+    };
+
+    const handlePrayerPointsChanged = (data: unknown) => {
+      const pointsData = data as {
+        playerId: string;
+        points: number;
+        maxPoints: number;
+      };
+      // Only handle our own player's state
+      if (pointsData.playerId !== playerId) return;
+
+      setPrayerPoints(pointsData.points);
+      setPrayerMaxPoints(pointsData.maxPoints);
+    };
+
+    world.on(EventType.PRAYER_STATE_SYNC, handlePrayerStateSync);
+    world.on(EventType.PRAYER_TOGGLED, handlePrayerToggled);
+    world.on(EventType.PRAYER_POINTS_CHANGED, handlePrayerPointsChanged);
+
+    // Initialize from cached state if available
+    const network = world.network as {
+      lastPrayerStateByPlayerId?: Record<
+        string,
+        { points: number; maxPoints: number; active: string[] }
+      >;
+    };
+    if (playerId && network?.lastPrayerStateByPlayerId?.[playerId]) {
+      const cached = network.lastPrayerStateByPlayerId[playerId];
+      setPrayerPoints(cached.points);
+      setPrayerMaxPoints(cached.maxPoints);
+      setActivePrayers(new Set(cached.active));
+    }
+
+    return () => {
+      world.off(EventType.PRAYER_STATE_SYNC, handlePrayerStateSync);
+      world.off(EventType.PRAYER_TOGGLED, handlePrayerToggled);
+      world.off(EventType.PRAYER_POINTS_CHANGED, handlePrayerPointsChanged);
+    };
+  }, [world, playerId]);
 
   const s = stats?.skills || ({} as NonNullable<PlayerStats["skills"]>);
 
@@ -344,115 +449,74 @@ export function SkillsPanel({ world: _world, stats }: SkillsPanelProps) {
       level: s?.smithing?.level || 1,
       xp: s?.smithing?.xp || 0,
     },
-  ];
-
-  const prayers: Prayer[] = [
-    // Offensive Prayers
     {
-      id: "clarity",
-      name: "Clarity",
-      icon: "🧠",
-      level: 1,
-      description: "Increases accuracy by 5%",
-      drainRate: 3,
-      active: activePrayers.has("clarity"),
-      category: "offensive",
-    },
-    {
-      id: "strength",
-      name: "Strength",
-      icon: "💪",
-      level: 4,
-      description: "Increases max hit by 5%",
-      drainRate: 3,
-      active: activePrayers.has("strength"),
-      category: "offensive",
-    },
-    {
-      id: "sharpEye",
-      name: "Sharp Eye",
-      icon: "🎯",
-      level: 8,
-      description: "Increases ranged accuracy by 5%",
-      drainRate: 3,
-      active: activePrayers.has("sharpEye"),
-      category: "offensive",
-    },
-    {
-      id: "burst",
-      name: "Burst of Strength",
-      icon: "⚡",
-      level: 16,
-      description: "Increases max hit by 10%",
-      drainRate: 6,
-      active: activePrayers.has("burst"),
-      category: "offensive",
-    },
-
-    // Defensive Prayers
-    {
-      id: "thickSkin",
-      name: "Thick Skin",
-      icon: "🛡️",
-      level: 1,
-      description: "Increases defense by 5%",
-      drainRate: 3,
-      active: activePrayers.has("thickSkin"),
-      category: "defensive",
-    },
-    {
-      id: "rockSkin",
-      name: "Rock Skin",
-      icon: "🪨",
-      level: 10,
-      description: "Increases defense by 10%",
-      drainRate: 6,
-      active: activePrayers.has("rockSkin"),
-      category: "defensive",
-    },
-    {
-      id: "steelSkin",
-      name: "Steel Skin",
-      icon: "⚙️",
-      level: 28,
-      description: "Increases defense by 15%",
-      drainRate: 12,
-      active: activePrayers.has("steelSkin"),
-      category: "defensive",
-    },
-    {
-      id: "protect",
-      name: "Protect from Melee",
-      icon: "🔰",
-      level: 43,
-      description: "Blocks 40% melee damage",
-      drainRate: 12,
-      active: activePrayers.has("protect"),
-      category: "defensive",
-    },
-
-    // Utility Prayers
-    {
-      id: "rapidHeal",
-      name: "Rapid Heal",
-      icon: "❤️‍🩹",
-      level: 22,
-      description: "Doubles health regeneration",
-      drainRate: 6,
-      active: activePrayers.has("rapidHeal"),
-      category: "utility",
-    },
-    {
-      id: "preserveGather",
-      name: "Preserve",
-      icon: "🌿",
-      level: 35,
-      description: "Reduces gathering drain by 50%",
-      drainRate: 3,
-      active: activePrayers.has("preserveGather"),
-      category: "utility",
+      key: "prayer",
+      label: "Prayer",
+      icon: "🙏",
+      level: s?.prayer?.level || 1,
+      xp: s?.prayer?.xp || 0,
     },
   ];
+
+  // Prayer definitions (matches server manifest prayers.json)
+  // Server is authoritative - client just displays UI
+  const prayerLevel = s?.prayer?.level || 1;
+  const prayers: Prayer[] = React.useMemo(() => {
+    return [
+      // Defensive Prayers
+      {
+        id: "thick_skin",
+        name: "Thick Skin",
+        icon: "🛡️",
+        level: 1,
+        description: "Increases Defense by 5%",
+        drainRate: 3,
+        active: activePrayers.has("thick_skin"),
+        category: "defensive" as const,
+      },
+      {
+        id: "rock_skin",
+        name: "Rock Skin",
+        icon: "🪨",
+        level: 10,
+        description: "Increases Defense by 10%",
+        drainRate: 6,
+        active: activePrayers.has("rock_skin"),
+        category: "defensive" as const,
+      },
+      // Offensive Prayers
+      {
+        id: "burst_of_strength",
+        name: "Burst of Strength",
+        icon: "💪",
+        level: 4,
+        description: "Increases Strength by 5%",
+        drainRate: 3,
+        active: activePrayers.has("burst_of_strength"),
+        category: "offensive" as const,
+      },
+      {
+        id: "clarity_of_thought",
+        name: "Clarity of Thought",
+        icon: "🧠",
+        level: 7,
+        description: "Increases Attack by 5%",
+        drainRate: 3,
+        active: activePrayers.has("clarity_of_thought"),
+        category: "offensive" as const,
+      },
+      {
+        id: "superhuman_strength",
+        name: "Superhuman Strength",
+        icon: "⚡",
+        level: 13,
+        description: "Increases Strength by 10%",
+        drainRate: 6,
+        active: activePrayers.has("superhuman_strength"),
+        category: "offensive" as const,
+      },
+    ];
+  }, [activePrayers]);
 
   const totalLevel = skills.reduce((sum, skill) => sum + skill.level, 0);
   const totalXP = skills.reduce((sum, skill) => sum + skill.xp, 0);
@@ -461,19 +525,42 @@ export function SkillsPanel({ world: _world, stats }: SkillsPanelProps) {
     setMousePos({ x: e.clientX, y: e.clientY });
   };
 
-  const togglePrayer = (id: string) => {
-    const newActivePrayers = new Set(activePrayers);
-    if (newActivePrayers.has(id)) {
-      newActivePrayers.delete(id);
-    } else {
-      newActivePrayers.add(id);
-    }
-    setActivePrayers(newActivePrayers);
-  };
+  // Send prayer toggle request to server
+  const togglePrayer = useCallback(
+    (id: string) => {
+      if (!world?.network?.send) {
+        console.warn("[SkillsPanel] Cannot toggle prayer - no network");
+        return;
+      }
 
-  const offensivePrayers = prayers.filter((p) => p.category === "offensive");
-  const defensivePrayers = prayers.filter((p) => p.category === "defensive");
-  const utilityPrayers = prayers.filter((p) => p.category === "utility");
+      // Check level requirement
+      const prayer = prayers.find((p) => p.id === id);
+      if (prayer && prayer.level > prayerLevel) {
+        // Show requirement message (could emit a toast event)
+        console.log(`Requires prayer level ${prayer.level}`);
+        return;
+      }
+
+      // Send to server - server handles validation and state
+      world.network.send("prayerToggle", {
+        prayerId: id,
+        timestamp: Date.now(),
+      });
+    },
+    [world, prayers, prayerLevel],
+  );
+
+  // Filter prayers by category and sort by level
+  const sortByLevel = (a: Prayer, b: Prayer) => a.level - b.level;
+  const offensivePrayers = prayers
+    .filter((p) => p.category === "offensive")
+    .sort(sortByLevel);
+  const defensivePrayers = prayers
+    .filter((p) => p.category === "defensive")
+    .sort(sortByLevel);
+  const utilityPrayers = prayers
+    .filter((p) => p.category === "utility")
+    .sort(sortByLevel);
 
   return (
     <div className="flex flex-col h-full overflow-hidden gap-1">
@@ -627,6 +714,50 @@ export function SkillsPanel({ world: _world, stats }: SkillsPanelProps) {
           </div>
         ) : (
           <div className="flex flex-col gap-1.5">
+            {/* Prayer Points Bar */}
+            <div
+              className="border rounded p-1.5"
+              style={{
+                background:
+                  "linear-gradient(135deg, rgba(20, 20, 30, 0.95) 0%, rgba(25, 20, 35, 0.92) 100%)",
+                borderColor: "rgba(242, 208, 138, 0.35)",
+              }}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span
+                  className="font-semibold text-[10px]"
+                  style={{ color: COLORS.ACCENT }}
+                >
+                  🙏 Prayer Points
+                </span>
+                <span
+                  className="font-bold text-[10px]"
+                  style={{ color: prayerPoints > 0 ? "#22c55e" : "#ef4444" }}
+                >
+                  {Math.floor(prayerPoints)} / {prayerMaxPoints}
+                </span>
+              </div>
+              <div
+                className="rounded overflow-hidden h-2"
+                style={{ background: "rgba(0, 0, 0, 0.5)" }}
+              >
+                <div
+                  className="h-full transition-all duration-300"
+                  style={{
+                    width: `${Math.min(100, (prayerPoints / prayerMaxPoints) * 100)}%`,
+                    background:
+                      prayerPoints > prayerMaxPoints * 0.25
+                        ? "linear-gradient(90deg, rgba(34, 197, 94, 0.9) 0%, rgba(34, 197, 94, 0.7) 100%)"
+                        : "linear-gradient(90deg, rgba(239, 68, 68, 0.9) 0%, rgba(239, 68, 68, 0.7) 100%)",
+                    boxShadow:
+                      prayerPoints > prayerMaxPoints * 0.25
+                        ? "0 0 6px rgba(34, 197, 94, 0.4)"
+                        : "0 0 6px rgba(239, 68, 68, 0.4)",
+                  }}
+                />
+              </div>
+            </div>
+
             {/* Offensive Prayers */}
             <div>
               <div
@@ -641,6 +772,7 @@ export function SkillsPanel({ world: _world, stats }: SkillsPanelProps) {
                     key={prayer.id}
                     prayer={prayer}
                     onToggle={togglePrayer}
+                    playerLevel={prayerLevel}
                   />
                 ))}
               </div>
@@ -660,29 +792,33 @@ export function SkillsPanel({ world: _world, stats }: SkillsPanelProps) {
                     key={prayer.id}
                     prayer={prayer}
                     onToggle={togglePrayer}
+                    playerLevel={prayerLevel}
                   />
                 ))}
               </div>
             </div>
 
             {/* Utility Prayers */}
-            <div>
-              <div
-                className="font-semibold mb-1 text-[10px]"
-                style={{ color: COLORS.ACCENT }}
-              >
-                🌟 Utility
+            {utilityPrayers.length > 0 && (
+              <div>
+                <div
+                  className="font-semibold mb-1 text-[10px]"
+                  style={{ color: COLORS.ACCENT }}
+                >
+                  🌟 Utility
+                </div>
+                <div className="grid grid-cols-2 gap-1">
+                  {utilityPrayers.map((prayer) => (
+                    <PrayerCard
+                      key={prayer.id}
+                      prayer={prayer}
+                      onToggle={togglePrayer}
+                      playerLevel={prayerLevel}
+                    />
+                  ))}
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-1">
-                {utilityPrayers.map((prayer) => (
-                  <PrayerCard
-                    key={prayer.id}
-                    prayer={prayer}
-                    onToggle={togglePrayer}
-                  />
-                ))}
-              </div>
-            </div>
+            )}
           </div>
         )}
       </div>

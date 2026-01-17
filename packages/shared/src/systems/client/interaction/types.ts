@@ -8,6 +8,7 @@
 
 import type { Entity } from "../../../entities/Entity";
 import type { Position3D } from "../../../types/core/base-types";
+import type { TileCoord } from "../../shared/movement/TileSystem";
 
 /**
  * Entity types that can be interacted with
@@ -24,7 +25,24 @@ export type InteractableEntityType =
   | "fire"
   | "range"
   | "furnace"
-  | "anvil";
+  | "anvil"
+  | "altar";
+
+/**
+ * Target types for context menus (includes entities + special cases like terrain)
+ * Used only in UI/menu code - not for entity systems
+ */
+export type ContextMenuTargetType = InteractableEntityType | "terrain";
+
+/**
+ * Footprint specification for multi-tile entities (stations, large resources)
+ */
+export interface EntityFootprint {
+  /** Width in tiles (X-axis) */
+  width: number;
+  /** Depth in tiles (Z-axis) */
+  depth: number;
+}
 
 /**
  * Result of raycasting to find entity at screen position
@@ -44,6 +62,8 @@ export interface RaycastTarget {
   hitPoint: Position3D;
   /** Distance from camera to hit point */
   distance: number;
+  /** Optional footprint for multi-tile entities (e.g., furnace = 2x2) */
+  footprint?: EntityFootprint;
 }
 
 /**
@@ -71,6 +91,8 @@ export interface QueuedAction {
   maxWaitFrames: number;
   /** Last tile we sent a walk request toward (for following moving targets) */
   lastWalkTargetTile?: { x: number; z: number };
+  /** Optional footprint for multi-tile entities (enables OSRS-style interaction from any adjacent tile) */
+  footprint?: EntityFootprint;
 }
 
 /**
@@ -152,4 +174,6 @@ export interface QueueActionParams {
   onCancel?: () => void;
   /** Optional max frames to wait (default from constants) */
   maxWaitFrames?: number;
+  /** Optional footprint for multi-tile entities (enables OSRS-style interaction from any adjacent tile) */
+  footprint?: EntityFootprint;
 }

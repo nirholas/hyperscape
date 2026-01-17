@@ -88,6 +88,7 @@ export class EventBridge {
     this.setupResourceEvents();
     this.setupInventoryEvents();
     this.setupSkillEvents();
+    this.setupPrayerEvents();
     this.setupUIEvents();
     this.setupCombatEvents();
     this.setupPlayerEvents();
@@ -275,8 +276,11 @@ export class EventBridge {
           data.playerId,
           data.skill,
         );
-        const newLevel = skillData?.level ?? 1;
-        const newXp = skillData?.xp ?? 0;
+        // Safely get values, handling NaN (which passes ?? but fails Number.isFinite)
+        const rawLevel = skillData?.level;
+        const rawXp = skillData?.xp;
+        const newLevel = Number.isFinite(rawLevel) ? rawLevel : 1;
+        const newXp = Number.isFinite(rawXp) ? rawXp : 0;
 
         // Send XP drop to the player for visual feedback
         this.broadcast.sendToPlayer(data.playerId, "xpDrop", {
@@ -287,14 +291,18 @@ export class EventBridge {
           position: { x: position.x, y: position.y, z: position.z },
         });
 
-        // Persist skill XP to database
+        // Persist skill XP to database (only if values are valid)
         const dbSystem = this.world.getSystem("database") as {
           savePlayer?: (
             playerId: string,
             data: Record<string, unknown>,
           ) => void;
         };
-        if (dbSystem?.savePlayer) {
+        if (
+          dbSystem?.savePlayer &&
+          Number.isFinite(newXp) &&
+          Number.isFinite(newLevel)
+        ) {
           // Map skill name to database column names
           const skillLevelKey = `${data.skill}Level`;
           const skillXpKey = `${data.skill}Xp`;
@@ -306,6 +314,79 @@ export class EventBridge {
       });
     } catch (_err) {
       console.error("[EventBridge] Error setting up skill events:", _err);
+    }
+  }
+
+  /**
+   * Setup prayer event listeners
+   *
+   * Routes prayer state changes to specific players.
+   *
+   * @private
+   */
+  private setupPrayerEvents(): void {
+    try {
+      // Forward prayer state sync to clients
+      this.world.on(EventType.PRAYER_STATE_SYNC, (payload: unknown) => {
+        const data = payload as {
+          playerId?: string;
+          points?: number;
+          maxPoints?: number;
+          active?: string[];
+        };
+
+        if (!data?.playerId) return;
+
+        // Send prayer state to the specific player
+        this.broadcast.sendToPlayer(data.playerId, "prayerStateSync", {
+          playerId: data.playerId,
+          points: data.points ?? 0,
+          maxPoints: data.maxPoints ?? 1,
+          active: data.active ?? [],
+        });
+      });
+
+      // Forward prayer toggled events for visual feedback
+      this.world.on(EventType.PRAYER_TOGGLED, (payload: unknown) => {
+        const data = payload as {
+          playerId?: string;
+          prayerId?: string;
+          active?: boolean;
+          points?: number;
+        };
+
+        if (!data?.playerId) return;
+
+        // Send toggle confirmation to the player
+        this.broadcast.sendToPlayer(data.playerId, "prayerToggled", {
+          playerId: data.playerId,
+          prayerId: data.prayerId,
+          active: data.active,
+          points: data.points,
+        });
+      });
+
+      // Forward prayer points changes for real-time drain animation
+      this.world.on(EventType.PRAYER_POINTS_CHANGED, (payload: unknown) => {
+        const data = payload as {
+          playerId?: string;
+          points?: number;
+          maxPoints?: number;
+          reason?: string;
+        };
+
+        if (!data?.playerId) return;
+
+        // Send point update to the player
+        this.broadcast.sendToPlayer(data.playerId, "prayerPointsChanged", {
+          playerId: data.playerId,
+          points: data.points ?? 0,
+          maxPoints: data.maxPoints ?? 1,
+          reason: data.reason,
+        });
+      });
+    } catch (_err) {
+      console.error("[EventBridge] Error setting up prayer events:", _err);
     }
   }
 
@@ -328,6 +409,22 @@ export class EventBridge {
 
         if (data.playerId && data.message) {
           this.broadcast.sendToPlayer(data.playerId, "systemMessage", {
+            message: data.message,
+            type: data.type || "info",
+          });
+        }
+      });
+
+      // Forward UI_TOAST events to client for toast notifications
+      this.world.on(EventType.UI_TOAST, (payload: unknown) => {
+        const data = payload as {
+          playerId: string;
+          message: string;
+          type?: "info" | "success" | "warning" | "error";
+        };
+
+        if (data.playerId && data.message) {
+          this.broadcast.sendToPlayer(data.playerId, "showToast", {
             message: data.message,
             type: data.type || "info",
           });

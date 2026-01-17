@@ -28,6 +28,8 @@ import {
   getBestMeleeTile,
   createTileMovementState,
   BFSPathfinder,
+  // Collision system
+  CollisionMask,
 } from "@hyperscape/shared";
 import type { TileCoord, TileMovementState } from "@hyperscape/shared";
 
@@ -112,10 +114,20 @@ export class TileMovementManager {
   }
 
   /**
-   * Check if a tile is walkable based on terrain constraints
-   * Uses TerrainSystem to check water level, slope, and biome rules
+   * Check if a tile is walkable based on collision and terrain constraints
+   * Checks CollisionMatrix for static objects (trees, rocks, stations)
+   * and TerrainSystem for water level, slope, and biome rules
    */
   private isTileWalkable(tile: TileCoord): boolean {
+    // Check CollisionMatrix for static objects (trees, rocks, furnaces, etc.)
+    // BLOCKS_WALK includes BLOCKED, WATER, STEEP_SLOPE - excludes OCCUPIED
+    // (players should be able to walk through other players for pathfinding)
+    if (
+      this.world.collision.hasFlags(tile.x, tile.z, CollisionMask.BLOCKS_WALK)
+    ) {
+      return false;
+    }
+
     const terrain = this.getTerrain();
     if (!terrain) {
       // Fallback: walkable if no terrain system available

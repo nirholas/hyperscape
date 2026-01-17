@@ -131,6 +131,7 @@ import { SkillsSystem } from "..";
 import { SmeltingSystem } from "..";
 import { SmithingSystem } from "..";
 import { HealthRegenSystem } from "..";
+import { PrayerSystem } from "..";
 
 // Interface for the systems collection
 export interface Systems {
@@ -289,6 +290,9 @@ export async function registerSystems(world: World): Promise<void> {
 
   // 12. XP system - Experience and leveling (depends on player system)
   world.register("skills", SkillsSystem);
+
+  // 12b. Prayer system - Prayer mechanics (depends on player, skills systems)
+  world.register("prayer", PrayerSystem);
 
   // 12a. Health regeneration system - Passive health regen (depends on combat system)
   // Server-only: handles RuneScape-style out-of-combat health regeneration

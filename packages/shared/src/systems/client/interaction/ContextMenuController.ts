@@ -20,23 +20,30 @@ export class ContextMenuController {
   private selectHandler: ((e: Event) => void) | null = null;
 
   /**
-   * Show context menu for a target
+   * Show context menu for a target (or terrain if target is null)
    */
   showMenu(
-    target: RaycastTarget,
+    target: RaycastTarget | null,
     actions: ContextMenuAction[],
     screenX: number,
     screenY: number,
   ): void {
     if (actions.length === 0) {
-      console.warn(
-        "[ContextMenuController] No actions available for",
-        target.entityType,
-      );
+      if (target) {
+        console.warn(
+          "[ContextMenuController] No actions available for",
+          target.entityType,
+        );
+      }
       return;
     }
 
-    this.currentTargetId = target.entityId;
+    // For terrain clicks, use synthetic values
+    const targetId = target?.entityId ?? "terrain";
+    const targetType = target?.entityType ?? "terrain";
+    const targetName = target?.name ?? "";
+
+    this.currentTargetId = targetId;
     this.currentActions = actions;
 
     // Dispatch contextmenu event for React component
@@ -45,10 +52,10 @@ export class ContextMenuController {
     const evt = new CustomEvent("contextmenu", {
       detail: {
         target: {
-          id: target.entityId,
-          type: target.entityType,
-          name: target.name,
-          position: target.position,
+          id: targetId,
+          type: targetType,
+          name: targetName,
+          position: target?.position ?? null,
         },
         mousePosition: { x: screenX, y: screenY },
         items: actions.map((action) => ({

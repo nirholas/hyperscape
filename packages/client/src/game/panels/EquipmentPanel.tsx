@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { COLORS } from "../../constants";
 import { useDroppable } from "@dnd-kit/core";
 import {
@@ -32,11 +33,111 @@ interface EquipmentSlot {
 interface DroppableEquipmentSlotProps {
   slot: EquipmentSlot;
   onSlotClick: (slot: EquipmentSlot) => void;
+  onHoverStart: (
+    slot: EquipmentSlot,
+    position: { x: number; y: number },
+  ) => void;
+  onHoverMove: (position: { x: number; y: number }) => void;
+  onHoverEnd: () => void;
+  onContextMenuOpen: () => void;
+}
+
+interface EquipmentHoverState {
+  slot: EquipmentSlot;
+  position: { x: number; y: number };
+}
+
+/**
+ * Render equipment hover tooltip content
+ * Extracted for better readability and testability
+ */
+function renderEquipmentHoverTooltip(
+  hoverState: EquipmentHoverState,
+): React.ReactNode {
+  const item = hoverState.slot.item;
+  if (!item) return null;
+
+  return createPortal(
+    <div
+      className="pointer-events-none"
+      style={{
+        position: "fixed",
+        left: hoverState.position.x + 16,
+        top: hoverState.position.y + 16,
+        zIndex: 99999,
+        background:
+          "linear-gradient(135deg, rgba(20, 20, 30, 0.98) 0%, rgba(30, 25, 40, 0.95) 100%)",
+        border: "2px solid rgba(242, 208, 138, 0.5)",
+        borderRadius: "4px",
+        padding: "8px 12px",
+        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.8)",
+        minWidth: "150px",
+        maxWidth: "250px",
+      }}
+    >
+      {/* Item name */}
+      <div
+        style={{
+          color: COLORS.ACCENT,
+          fontWeight: "bold",
+          marginBottom: "6px",
+          fontSize: "13px",
+        }}
+      >
+        {item.name}
+      </div>
+
+      {/* Bonuses */}
+      {item.bonuses && (
+        <div style={{ fontSize: "11px" }}>
+          {item.bonuses.attack !== undefined && item.bonuses.attack !== 0 && (
+            <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
+              ⚔️ Attack:{" "}
+              <span style={{ color: "#22c55e" }}>+{item.bonuses.attack}</span>
+            </div>
+          )}
+          {item.bonuses.defense !== undefined && item.bonuses.defense !== 0 && (
+            <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
+              🛡️ Defense:{" "}
+              <span style={{ color: "#22c55e" }}>+{item.bonuses.defense}</span>
+            </div>
+          )}
+          {item.bonuses.strength !== undefined &&
+            item.bonuses.strength !== 0 && (
+              <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
+                💪 Strength:{" "}
+                <span style={{ color: "#22c55e" }}>
+                  +{item.bonuses.strength}
+                </span>
+              </div>
+            )}
+        </div>
+      )}
+
+      {/* Click hint */}
+      <div
+        style={{
+          fontSize: "10px",
+          color: "rgba(150, 150, 150, 0.8)",
+          marginTop: "6px",
+          borderTop: "1px solid rgba(242, 208, 138, 0.2)",
+          paddingTop: "6px",
+        }}
+      >
+        Click to unequip
+      </div>
+    </div>,
+    document.body,
+  );
 }
 
 function DroppableEquipmentSlot({
   slot,
   onSlotClick,
+  onHoverStart,
+  onHoverMove,
+  onHoverEnd,
+  onContextMenuOpen,
 }: DroppableEquipmentSlotProps) {
   const { isOver, setNodeRef } = useDroppable({
     id: `equipment-${slot.key}`,
@@ -49,9 +150,25 @@ function DroppableEquipmentSlot({
     <button
       ref={setNodeRef}
       onClick={() => onSlotClick(slot)}
+      onMouseEnter={(e) => {
+        if (slot.item) {
+          onHoverStart(slot, { x: e.clientX, y: e.clientY });
+        }
+      }}
+      onMouseMove={(e) => {
+        if (slot.item) {
+          onHoverMove({ x: e.clientX, y: e.clientY });
+        }
+      }}
+      onMouseLeave={() => onHoverEnd()}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
+
+        // Hide hover tooltip and mark context menu as open
+        onHoverEnd();
+        onContextMenuOpen();
+
         if (!slot.item) return;
 
         // OSRS uses orange for item names in context menus
@@ -192,7 +309,28 @@ export function EquipmentPanel({
   world,
   onItemDrop: _onItemDrop,
 }: EquipmentPanelProps) {
-  const [selectedSlot, setSelectedSlot] = useState<EquipmentSlot | null>(null);
+  // RS3-style hover tooltip state
+  const [hoverState, setHoverState] = useState<EquipmentHoverState | null>(
+    null,
+  );
+
+  // Track if context menu is open (suppress hover tooltips while open)
+  const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
+
+  // Listen for context menu close to re-enable hover tooltips
+  useEffect(() => {
+    const handleContextMenuClose = () => {
+      setIsContextMenuOpen(false);
+    };
+
+    window.addEventListener("contextmenu:close", handleContextMenuClose);
+    window.addEventListener("contextmenu:select", handleContextMenuClose);
+
+    return () => {
+      window.removeEventListener("contextmenu:close", handleContextMenuClose);
+      window.removeEventListener("contextmenu:select", handleContextMenuClose);
+    };
+  }, []);
 
   // Equipment slots with icons for paperdoll layout
   const slots: EquipmentSlot[] = [
@@ -243,10 +381,45 @@ export function EquipmentPanel({
     { attack: 0, defense: 0, strength: 0 },
   );
 
+  // RS3-style: Click immediately unequips
   const handleSlotClick = (slot: EquipmentSlot) => {
-    if (slot.item) {
-      setSelectedSlot(slot);
+    if (!slot.item) return;
+
+    const localPlayer = world?.getPlayer();
+    if (localPlayer && world?.network?.send) {
+      console.log("[EquipmentPanel] 📤 Click-to-unequip:", {
+        playerId: localPlayer.id,
+        slot: slot.key,
+      });
+      world.network.send("unequipItem", {
+        playerId: localPlayer.id,
+        slot: slot.key,
+      });
     }
+  };
+
+  // Hover handlers for tooltip
+  const handleHoverStart = (
+    slot: EquipmentSlot,
+    position: { x: number; y: number },
+  ) => {
+    // Don't show hover tooltip if context menu is open
+    if (isContextMenuOpen) return;
+    setHoverState({ slot, position });
+  };
+
+  const handleHoverMove = (position: { x: number; y: number }) => {
+    // Don't update hover tooltip if context menu is open
+    if (isContextMenuOpen) return;
+    setHoverState((prev) => (prev ? { ...prev, position } : null));
+  };
+
+  const handleHoverEnd = () => {
+    setHoverState(null);
+  };
+
+  const handleContextMenuOpen = () => {
+    setIsContextMenuOpen(true);
   };
 
   // Get player stats with proper defaults
@@ -360,6 +533,10 @@ export function EquipmentPanel({
                   <DroppableEquipmentSlot
                     slot={getSlot(EquipmentSlotName.HELMET)!}
                     onSlotClick={handleSlotClick}
+                    onHoverStart={handleHoverStart}
+                    onHoverMove={handleHoverMove}
+                    onHoverEnd={handleHoverEnd}
+                    onContextMenuOpen={handleContextMenuOpen}
                   />
                 </div>
                 <div />
@@ -369,18 +546,30 @@ export function EquipmentPanel({
                   <DroppableEquipmentSlot
                     slot={getSlot(EquipmentSlotName.WEAPON)!}
                     onSlotClick={handleSlotClick}
+                    onHoverStart={handleHoverStart}
+                    onHoverMove={handleHoverMove}
+                    onHoverEnd={handleHoverEnd}
+                    onContextMenuOpen={handleContextMenuOpen}
                   />
                 </div>
                 <div className="w-full h-full">
                   <DroppableEquipmentSlot
                     slot={getSlot(EquipmentSlotName.BODY)!}
                     onSlotClick={handleSlotClick}
+                    onHoverStart={handleHoverStart}
+                    onHoverMove={handleHoverMove}
+                    onHoverEnd={handleHoverEnd}
+                    onContextMenuOpen={handleContextMenuOpen}
                   />
                 </div>
                 <div className="w-full h-full">
                   <DroppableEquipmentSlot
                     slot={getSlot(EquipmentSlotName.SHIELD)!}
                     onSlotClick={handleSlotClick}
+                    onHoverStart={handleHoverStart}
+                    onHoverMove={handleHoverMove}
+                    onHoverEnd={handleHoverEnd}
+                    onContextMenuOpen={handleContextMenuOpen}
                   />
                 </div>
 
@@ -390,6 +579,10 @@ export function EquipmentPanel({
                   <DroppableEquipmentSlot
                     slot={getSlot(EquipmentSlotName.LEGS)!}
                     onSlotClick={handleSlotClick}
+                    onHoverStart={handleHoverStart}
+                    onHoverMove={handleHoverMove}
+                    onHoverEnd={handleHoverEnd}
+                    onContextMenuOpen={handleContextMenuOpen}
                   />
                 </div>
                 <div />
@@ -707,209 +900,10 @@ export function EquipmentPanel({
         </div>
       </div>
 
-      {/* Item Details Popup */}
-      {selectedSlot &&
-        selectedSlot.item &&
-        (() => {
-          const item = selectedSlot.item;
-          return (
-            <div
-              className="fixed inset-0 flex items-center justify-center z-[300]"
-              style={{ background: "rgba(0, 0, 0, 0.7)" }}
-              onClick={() => setSelectedSlot(null)}
-            >
-              <div
-                className="border rounded"
-                style={{
-                  background:
-                    "linear-gradient(135deg, rgba(20, 20, 30, 0.98) 0%, rgba(30, 25, 40, 0.95) 100%)",
-                  borderColor: "rgba(242, 208, 138, 0.5)",
-                  borderWidth: "2px",
-                  padding: "clamp(0.75rem, 1.5vw, 1rem)",
-                  boxShadow: "0 8px 24px rgba(0, 0, 0, 0.9)",
-                  width: "clamp(250px, 40vw, 350px)",
-                  maxHeight: "80vh",
-                  overflowY: "auto",
-                }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {/* Header */}
-                <div className="flex items-center justify-between mb-3">
-                  <div
-                    className="flex items-center"
-                    style={{ gap: "clamp(0.375rem, 0.8vw, 0.5rem)" }}
-                  >
-                    <span style={{ fontSize: "clamp(1.25rem, 2.5vw, 1.5rem)" }}>
-                      {selectedSlot.icon}
-                    </span>
-                    <div>
-                      <div
-                        className="font-bold"
-                        style={{
-                          color: COLORS.ACCENT,
-                          fontSize: "clamp(0.875rem, 1.5vw, 1rem)",
-                        }}
-                      >
-                        {item.name}
-                      </div>
-                      <div
-                        style={{
-                          color: "rgba(242, 208, 138, 0.7)",
-                          fontSize: "clamp(0.625rem, 1.1vw, 0.75rem)",
-                        }}
-                      >
-                        {selectedSlot.label}
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setSelectedSlot(null)}
-                    style={{
-                      color: "rgba(242, 208, 138, 0.7)",
-                      fontSize: "clamp(0.875rem, 1.5vw, 1rem)",
-                    }}
-                  >
-                    ✕
-                  </button>
-                </div>
-
-                {/* Description */}
-                {item.description && (
-                  <div
-                    className="mb-3 p-2 rounded"
-                    style={{
-                      background: "rgba(0, 0, 0, 0.3)",
-                      borderLeft: "2px solid rgba(242, 208, 138, 0.4)",
-                      fontSize: "clamp(0.625rem, 1.1vw, 0.75rem)",
-                      color: "rgba(242, 208, 138, 0.85)",
-                      lineHeight: "1.4",
-                    }}
-                  >
-                    {item.description}
-                  </div>
-                )}
-
-                {/* Requirements */}
-                {item.requirements &&
-                  ((item.requirements.level ?? 0) > 1 ||
-                    Object.keys(item.requirements.skills || {}).length > 0) && (
-                    <div className="mb-3">
-                      <div
-                        className="mb-1"
-                        style={{
-                          fontSize: "clamp(0.688rem, 1.2vw, 0.75rem)",
-                          color: "rgba(242, 208, 138, 0.9)",
-                          fontWeight: "bold",
-                        }}
-                      >
-                        Requirements
-                      </div>
-                      <div className="space-y-1">
-                        {(item.requirements.level ?? 0) > 1 && (
-                          <div
-                            style={{
-                              fontSize: "clamp(0.625rem, 1.1vw, 0.75rem)",
-                              color: "rgba(242, 208, 138, 0.8)",
-                            }}
-                          >
-                            Level {item.requirements.level}
-                          </div>
-                        )}
-                        {item.requirements.skills &&
-                          Object.entries(item.requirements.skills).map(
-                            ([skill, level]) => (
-                              <div
-                                key={skill}
-                                style={{
-                                  fontSize: "clamp(0.625rem, 1.1vw, 0.75rem)",
-                                  color: "rgba(242, 208, 138, 0.8)",
-                                }}
-                              >
-                                {skill.charAt(0).toUpperCase() + skill.slice(1)}
-                                : {level}
-                              </div>
-                            ),
-                          )}
-                      </div>
-                    </div>
-                  )}
-
-                {/* Item Properties */}
-                <div className="space-y-1">
-                  <div
-                    className="flex justify-between"
-                    style={{
-                      fontSize: "clamp(0.625rem, 1.1vw, 0.75rem)",
-                      color: "rgba(242, 208, 138, 0.8)",
-                    }}
-                  >
-                    <span>Value</span>
-                    <span style={{ color: COLORS.ACCENT, fontWeight: "bold" }}>
-                      {item.value} coins
-                    </span>
-                  </div>
-                  <div
-                    className="flex justify-between"
-                    style={{
-                      fontSize: "clamp(0.625rem, 1.1vw, 0.75rem)",
-                      color: "rgba(242, 208, 138, 0.8)",
-                    }}
-                  >
-                    <span>Weight</span>
-                    <span style={{ color: COLORS.ACCENT, fontWeight: "bold" }}>
-                      {item.weight} kg
-                    </span>
-                  </div>
-                  {(item.quantity ?? 1) > 1 && (
-                    <div
-                      className="flex justify-between"
-                      style={{
-                        fontSize: "clamp(0.625rem, 1.1vw, 0.75rem)",
-                        color: "rgba(242, 208, 138, 0.8)",
-                      }}
-                    >
-                      <span>Quantity</span>
-                      <span
-                        style={{ color: COLORS.ACCENT, fontWeight: "bold" }}
-                      >
-                        {item.quantity ?? 1}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Unequip Button */}
-                <button
-                  onClick={() => {
-                    // Send unequip request to server
-                    const localPlayer = world?.getPlayer();
-                    if (world?.network?.send && selectedSlot && localPlayer) {
-                      console.log(
-                        "[EquipmentPanel] 📤 Unequip button clicked, sending to server",
-                      );
-                      world.network.send("unequipItem", {
-                        playerId: localPlayer.id,
-                        slot: selectedSlot.key,
-                      });
-                    }
-                    setSelectedSlot(null);
-                  }}
-                  className="w-full mt-4 py-2 px-4 rounded transition-all duration-200 hover:scale-[1.02]"
-                  style={{
-                    background:
-                      "linear-gradient(135deg, rgba(139, 69, 19, 0.3) 0%, rgba(139, 69, 19, 0.2) 100%)",
-                    border: "1px solid rgba(139, 69, 19, 0.5)",
-                    color: COLORS.ACCENT,
-                    fontSize: "clamp(0.688rem, 1.2vw, 0.75rem)",
-                    fontWeight: "bold",
-                  }}
-                >
-                  🗑️ Unequip Item
-                </button>
-              </div>
-            </div>
-          );
-        })()}
+      {/* RS3-style hover tooltip - rendered via portal */}
+      {hoverState &&
+        hoverState.slot.item &&
+        renderEquipmentHoverTooltip(hoverState)}
     </>
   );
 }

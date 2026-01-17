@@ -20,8 +20,14 @@
 
 import * as THREE from "three";
 import type { World } from "../../../../core/World";
-import type { RaycastTarget, InteractableEntityType } from "../types";
+import type {
+  RaycastTarget,
+  InteractableEntityType,
+  EntityFootprint,
+} from "../types";
 import { INPUT } from "../constants";
+import { stationDataProvider } from "../../../../data/StationDataProvider";
+import { resolveFootprint } from "../../../../types/game/resource-processing-types";
 
 // === PRE-ALLOCATED OBJECTS (zero allocations in hot paths) ===
 const _raycaster = new THREE.Raycaster();
@@ -219,6 +225,9 @@ export class RaycastService {
             const rawType = entity.type || userData.type || "unknown";
             const entityType = this.getEntityType(rawType);
 
+            // Get footprint for station entities (multi-tile objects)
+            const footprint = this.getEntityFootprint(entityType);
+
             // Build result (object literals are cheap, no THREE objects allocated)
             const result: RaycastTarget = {
               entityId,
@@ -236,6 +245,7 @@ export class RaycastService {
                 z: intersect.point.z,
               },
               distance: intersect.distance,
+              footprint,
             };
 
             this.updateCache(screenX, screenY, result);
@@ -421,9 +431,44 @@ export class RaycastService {
         return "furnace";
       case "anvil":
         return "anvil";
+      case "altar":
+        return "altar";
       default:
         // Default to npc for unknown interactive entities
         return "npc";
     }
+  }
+
+  /**
+   * Get footprint for station entities (multi-tile objects like furnace, anvil, etc.)
+   *
+   * Returns footprint dimensions for entities that occupy multiple tiles.
+   * This enables OSRS-style interaction where players can interact from
+   * any tile adjacent to the entity's footprint, not just the center.
+   *
+   * @param entityType - The entity type
+   * @returns EntityFootprint if entity has a multi-tile footprint, undefined otherwise
+   */
+  private getEntityFootprint(
+    entityType: InteractableEntityType,
+  ): EntityFootprint | undefined {
+    // Station entities have footprints defined in the station manifest
+    if (!stationDataProvider.hasStation(entityType)) {
+      return undefined;
+    }
+
+    // Get footprint from station data provider
+    const footprintSpec = stationDataProvider.getFootprint(entityType);
+    const resolved = resolveFootprint(footprintSpec);
+
+    // Only return if it's actually multi-tile (skip 1x1)
+    if (resolved.x <= 1 && resolved.z <= 1) {
+      return undefined;
+    }
+
+    return {
+      width: resolved.x,
+      depth: resolved.z,
+    };
   }
 }

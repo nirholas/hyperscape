@@ -40,6 +40,8 @@ import {
 import { dispatchInventoryAction } from "../systems/InventoryActionDispatcher";
 import type { ClientWorld, InventorySlotItem } from "../../types";
 import { getItemIcon } from "./utils/item-display";
+import { CoinAmountModal } from "./BankPanel/components/modals/CoinAmountModal";
+import { CoinPouch } from "./inventory";
 
 /**
  * Maximum inventory slots (OSRS-style: 28 slots)
@@ -78,6 +80,15 @@ interface DraggableItemProps {
     position: { x: number; y: number },
   ) => void;
   onTargetHoverEnd?: () => void;
+  // RS3-style hover tooltip (separate from targeting mode)
+  onItemHoverStart?: (
+    item: InventorySlotViewItem,
+    position: { x: number; y: number },
+  ) => void;
+  onItemHoverMove?: (position: { x: number; y: number }) => void;
+  onItemHoverEnd?: () => void;
+  // Callback when context menu opens (to suppress hover tooltips)
+  onContextMenuOpen?: () => void;
 }
 
 // OSRS-style: 4 columns × 7 rows = 28 slots, all visible (no pagination)
@@ -136,6 +147,10 @@ function DraggableInventorySlot({
   onInvalidTargetClick,
   onTargetHover,
   onTargetHoverEnd,
+  onItemHoverStart,
+  onItemHoverMove,
+  onItemHoverEnd,
+  onContextMenuOpen,
 }: DraggableItemProps) {
   // Use both draggable (for picking up) and droppable (for receiving)
   const {
@@ -242,22 +257,39 @@ function DraggableInventorySlot({
         // OSRS-style: show "Use X → Y" tooltip when hovering valid target
         if (isValidTarget && item && onTargetHover) {
           onTargetHover(item, { x: e.clientX, y: e.clientY });
+        } else if (!isTargetingActive && item && onItemHoverStart) {
+          // RS3-style: show item stats tooltip when not in targeting mode
+          onItemHoverStart(item, { x: e.clientX, y: e.clientY });
         }
       }}
       onMouseLeave={() => {
         if (onTargetHoverEnd) {
           onTargetHoverEnd();
         }
+        if (onItemHoverEnd) {
+          onItemHoverEnd();
+        }
       }}
       onMouseMove={(e) => {
         // Update tooltip position as mouse moves
         if (isValidTarget && item && onTargetHover) {
           onTargetHover(item, { x: e.clientX, y: e.clientY });
+        } else if (!isTargetingActive && item && onItemHoverMove) {
+          onItemHoverMove({ x: e.clientX, y: e.clientY });
         }
       }}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
+
+        // Hide hover tooltip and mark context menu as open
+        if (onItemHoverEnd) {
+          onItemHoverEnd();
+        }
+        if (onContextMenuOpen) {
+          onContextMenuOpen();
+        }
+
         if (!item) return;
 
         // Use memoized itemData and isItemNoted for efficiency
@@ -426,7 +458,6 @@ function DraggableInventorySlot({
         });
         window.dispatchEvent(evt);
       }}
-      title={item ? `${item.itemId} (${item.quantity})` : "Empty slot"}
       style={{
         opacity: isDragging ? 0.3 : 1,
         // OSRS-style targeting:
@@ -557,6 +588,97 @@ interface TargetHoverState {
   position: { x: number; y: number };
 }
 
+/**
+ * Hover state for RS3-style item tooltip
+ */
+interface ItemHoverState {
+  item: InventorySlotViewItem;
+  position: { x: number; y: number };
+}
+
+/**
+ * Render item hover tooltip content
+ * Extracted from IIFE for better readability and testability
+ */
+function renderItemHoverTooltip(itemHover: ItemHoverState): React.ReactNode {
+  const hoveredItemData = getItem(itemHover.item.itemId);
+  const itemName = hoveredItemData?.name || itemHover.item.itemId;
+  const bonuses = hoveredItemData?.bonuses;
+  const hasBonuses =
+    bonuses &&
+    ((bonuses.attack !== undefined && bonuses.attack !== 0) ||
+      (bonuses.defense !== undefined && bonuses.defense !== 0) ||
+      (bonuses.strength !== undefined && bonuses.strength !== 0));
+
+  return createPortal(
+    <div
+      className="pointer-events-none"
+      style={{
+        position: "fixed",
+        left: itemHover.position.x + 16,
+        top: itemHover.position.y + 16,
+        zIndex: 99999,
+        background:
+          "linear-gradient(135deg, rgba(20, 20, 30, 0.98) 0%, rgba(30, 25, 40, 0.95) 100%)",
+        border: "2px solid rgba(242, 208, 138, 0.5)",
+        borderRadius: "4px",
+        padding: "8px 12px",
+        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.8)",
+        minWidth: "120px",
+        maxWidth: "220px",
+      }}
+    >
+      {/* Item name */}
+      <div
+        style={{
+          color: "#fbbf24",
+          fontWeight: "bold",
+          marginBottom: hasBonuses ? "6px" : "0",
+          fontSize: "13px",
+        }}
+      >
+        {itemName}
+        {itemHover.item.quantity > 1 && (
+          <span
+            style={{
+              color: "rgba(242, 208, 138, 0.7)",
+              fontWeight: "normal",
+            }}
+          >
+            {" "}
+            x{itemHover.item.quantity.toLocaleString()}
+          </span>
+        )}
+      </div>
+
+      {/* Bonuses (for equipment) */}
+      {hasBonuses && (
+        <div style={{ fontSize: "11px" }}>
+          {bonuses.attack !== undefined && bonuses.attack !== 0 && (
+            <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
+              ⚔️ Attack:{" "}
+              <span style={{ color: "#22c55e" }}>+{bonuses.attack}</span>
+            </div>
+          )}
+          {bonuses.defense !== undefined && bonuses.defense !== 0 && (
+            <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
+              🛡️ Defense:{" "}
+              <span style={{ color: "#22c55e" }}>+{bonuses.defense}</span>
+            </div>
+          )}
+          {bonuses.strength !== undefined && bonuses.strength !== 0 && (
+            <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
+              💪 Strength:{" "}
+              <span style={{ color: "#22c55e" }}>+{bonuses.strength}</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>,
+    document.body,
+  );
+}
+
 const initialTargetingState: TargetingState = {
   active: false,
   sourceItem: null,
@@ -585,6 +707,23 @@ export function InventoryPanel({
 
   // OSRS-style hover tooltip state for "Use X → Y"
   const [targetHover, setTargetHover] = useState<TargetHoverState | null>(null);
+
+  // RS3-style hover tooltip state for item stats
+  const [itemHover, setItemHover] = useState<ItemHoverState | null>(null);
+
+  // Track if context menu is open (suppress hover tooltips while open)
+  const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
+
+  // Coin withdrawal modal state (for withdrawing from money pouch to inventory)
+  const [coinModal, setCoinModal] = useState<{
+    visible: boolean;
+    action: "withdraw";
+    maxAmount: number;
+  }>({
+    visible: false,
+    action: "withdraw",
+    maxAmount: 0,
+  });
 
   // Track pending move for rollback detection
   // If server update arrives and doesn't match our optimistic state, we know it was rejected
@@ -648,6 +787,21 @@ export function InventoryPanel({
         onCtxSelect as EventListener,
       );
   }, [slotItems, world]);
+
+  // Listen for context menu close to re-enable hover tooltips
+  useEffect(() => {
+    const handleContextMenuClose = () => {
+      setIsContextMenuOpen(false);
+    };
+
+    window.addEventListener("contextmenu:close", handleContextMenuClose);
+    window.addEventListener("contextmenu:select", handleContextMenuClose);
+
+    return () => {
+      window.removeEventListener("contextmenu:close", handleContextMenuClose);
+      window.removeEventListener("contextmenu:select", handleContextMenuClose);
+    };
+  }, []);
 
   // Listen for targeting mode events (OSRS-style "Use X on Y")
   useEffect(() => {
@@ -919,6 +1073,56 @@ export function InventoryPanel({
     setTargetHover(null);
   }, []);
 
+  // RS3-style item hover handlers for stats tooltip
+  const handleItemHoverStart = useCallback(
+    (item: InventorySlotViewItem, position: { x: number; y: number }) => {
+      // Don't show hover tooltip if context menu is open
+      if (isContextMenuOpen) return;
+      setItemHover({ item, position });
+    },
+    [isContextMenuOpen],
+  );
+
+  const handleItemHoverMove = useCallback(
+    (position: { x: number; y: number }) => {
+      // Don't update hover tooltip if context menu is open
+      if (isContextMenuOpen) return;
+      setItemHover((prev) => (prev ? { ...prev, position } : null));
+    },
+    [isContextMenuOpen],
+  );
+
+  const handleItemHoverEnd = useCallback(() => {
+    setItemHover(null);
+  }, []);
+
+  const handleContextMenuOpen = useCallback(() => {
+    setIsContextMenuOpen(true);
+  }, []);
+
+  // Coin pouch withdrawal modal handlers
+  const openCoinModal = useCallback(() => {
+    if (coins > 0) {
+      setCoinModal({ visible: true, action: "withdraw", maxAmount: coins });
+    }
+  }, [coins]);
+
+  const closeCoinModal = useCallback(() => {
+    setCoinModal((prev) => ({ ...prev, visible: false }));
+  }, []);
+
+  const handleCoinWithdraw = useCallback(
+    (amount: number) => {
+      if (!world?.network?.send) return;
+      world.network.send("coinPouchWithdraw", {
+        amount,
+        timestamp: Date.now(), // Replay attack protection
+      });
+      closeCoinModal();
+    },
+    [world, closeCoinModal],
+  );
+
   const handleInvalidTargetClick = useCallback(() => {
     // OSRS: "Nothing interesting happens." when using item on invalid target
     const message = "Nothing interesting happens.";
@@ -982,148 +1186,138 @@ export function InventoryPanel({
     : null;
 
   return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={pointerWithin}
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
-    >
-      <div className="flex flex-col h-full overflow-hidden gap-1">
-        {/* OSRS-style "Use X → Y" tooltip - rendered via portal to avoid transform issues */}
-        {targetingState.active &&
-          targetHover &&
-          targetingState.sourceItem &&
-          createPortal(
-            <div
-              className="pointer-events-none px-2 py-1 text-sm font-medium whitespace-nowrap"
-              style={{
-                position: "fixed",
-                left: targetHover.position.x + 16,
-                top: targetHover.position.y + 16,
-                zIndex: 99999,
-                background: "rgba(0, 0, 0, 0.85)",
-                border: "1px solid rgba(180, 160, 100, 0.8)",
-                borderRadius: "2px",
-                color: "rgba(255, 200, 100, 0.95)",
-                textShadow: "1px 1px 0 #000",
-                boxShadow: "2px 2px 4px rgba(0, 0, 0, 0.5)",
-              }}
-            >
-              Use{" "}
-              {targetingState.sourceItem.name || targetingState.sourceItem.id} →{" "}
-              {targetHover.targetName}
-            </div>,
-            document.body,
-          )}
+    <>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={pointerWithin}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+      >
+        <div className="flex flex-col h-full overflow-hidden gap-1">
+          {/* OSRS-style "Use X → Y" tooltip - rendered via portal to avoid transform issues */}
+          {targetingState.active &&
+            targetHover &&
+            targetingState.sourceItem &&
+            createPortal(
+              <div
+                className="pointer-events-none px-2 py-1 text-sm font-medium whitespace-nowrap"
+                style={{
+                  position: "fixed",
+                  left: targetHover.position.x + 16,
+                  top: targetHover.position.y + 16,
+                  zIndex: 99999,
+                  background: "rgba(0, 0, 0, 0.85)",
+                  border: "1px solid rgba(180, 160, 100, 0.8)",
+                  borderRadius: "2px",
+                  color: "rgba(255, 200, 100, 0.95)",
+                  textShadow: "1px 1px 0 #000",
+                  boxShadow: "2px 2px 4px rgba(0, 0, 0, 0.5)",
+                }}
+              >
+                Use{" "}
+                {targetingState.sourceItem.name || targetingState.sourceItem.id}{" "}
+                → {targetHover.targetName}
+              </div>,
+              document.body,
+            )}
 
-        {/* Inventory Grid - 7 columns × 4 rows with square slots */}
-        <div
-          className="flex-1 border rounded p-1 overflow-hidden"
-          style={{
-            background:
-              "linear-gradient(180deg, rgba(35, 30, 28, 0.98) 0%, rgba(25, 22, 20, 0.98) 100%)",
-            borderColor: "rgba(80, 70, 55, 0.6)",
-            boxShadow:
-              "inset 0 2px 8px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.3)",
-          }}
-        >
+          {/* RS3-style item hover tooltip - rendered via portal */}
+          {!targetingState.active &&
+            itemHover &&
+            renderItemHoverTooltip(itemHover)}
+
+          {/* Inventory Grid - 7 columns × 4 rows with square slots */}
           <div
-            className="grid grid-cols-7 gap-[3px] h-full"
-            style={{ gridTemplateRows: "repeat(4, 1fr)" }}
-          >
-            {slotItems.map((item, index) => (
-              <DraggableInventorySlot
-                key={index}
-                item={item}
-                index={index}
-                targetingState={targetingState}
-                onTargetClick={handleTargetClick}
-                onTargetHover={handleTargetHover}
-                onTargetHoverEnd={handleTargetHoverEnd}
-                onInvalidTargetClick={handleInvalidTargetClick}
-                onPrimaryAction={handlePrimaryAction}
-                onShiftClick={handleShiftClick}
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* RS3-style Coins/Money Pouch */}
-        <div
-          className="border rounded flex items-center justify-between py-1 px-2"
-          style={{
-            background:
-              "linear-gradient(180deg, rgba(45, 40, 35, 0.95) 0%, rgba(30, 25, 22, 0.98) 100%)",
-            borderColor: "rgba(120, 100, 60, 0.5)",
-            boxShadow:
-              "inset 0 1px 0 rgba(150, 130, 80, 0.2), 0 1px 2px rgba(0, 0, 0, 0.3)",
-          }}
-        >
-          <div className="flex items-center gap-1.5">
-            <span className="text-base">💰</span>
-            <span
-              className="font-medium text-xs"
-              style={{ color: "rgba(210, 190, 130, 0.9)" }}
-            >
-              Coins
-            </span>
-          </div>
-          <span
-            className="font-bold text-xs"
+            className="flex-1 border rounded p-1 overflow-hidden"
             style={{
-              color: "#fbbf24",
-              textShadow: "0 1px 2px rgba(0, 0, 0, 0.8)",
+              background:
+                "linear-gradient(180deg, rgba(35, 30, 28, 0.98) 0%, rgba(25, 22, 20, 0.98) 100%)",
+              borderColor: "rgba(80, 70, 55, 0.6)",
+              boxShadow:
+                "inset 0 2px 8px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.3)",
             }}
           >
-            {coins.toLocaleString()}
-          </span>
-        </div>
+            <div
+              className="grid grid-cols-7 gap-[3px] h-full"
+              style={{ gridTemplateRows: "repeat(4, 1fr)" }}
+            >
+              {slotItems.map((item, index) => (
+                <DraggableInventorySlot
+                  key={index}
+                  item={item}
+                  index={index}
+                  targetingState={targetingState}
+                  onTargetClick={handleTargetClick}
+                  onTargetHover={handleTargetHover}
+                  onTargetHoverEnd={handleTargetHoverEnd}
+                  onInvalidTargetClick={handleInvalidTargetClick}
+                  onPrimaryAction={handlePrimaryAction}
+                  onShiftClick={handleShiftClick}
+                  onItemHoverStart={handleItemHoverStart}
+                  onItemHoverMove={handleItemHoverMove}
+                  onItemHoverEnd={handleItemHoverEnd}
+                  onContextMenuOpen={handleContextMenuOpen}
+                />
+              ))}
+            </div>
+          </div>
 
-        <DragOverlay dropAnimation={null} modifiers={[snapCenterToCursor]}>
-          {activeItem
-            ? (() => {
-                const qtyDisplay =
-                  activeItem.quantity > 1
-                    ? formatQuantity(activeItem.quantity)
-                    : null;
-                return (
-                  <div
-                    className="border rounded flex items-center justify-center aspect-square relative"
-                    style={{
-                      width: dragSlotSize ?? 40, // Use captured slot size, fallback to 40px
-                      height: dragSlotSize ?? 40,
-                      borderColor: "rgba(242, 208, 138, 0.6)",
-                      background:
-                        "linear-gradient(135deg, rgba(242, 208, 138, 0.2) 0%, rgba(242, 208, 138, 0.1) 100%)",
-                      fontSize: dragSlotSize
-                        ? `${dragSlotSize * 0.4}px`
-                        : "1rem", // Scale icon with slot
-                      color: COLORS.ACCENT,
-                      boxShadow: "0 4px 12px rgba(0, 0, 0, 0.5)",
-                    }}
-                  >
-                    {getItemIcon(activeItem.itemId)}
-                    {qtyDisplay && (
-                      <div
-                        className="absolute bottom-0.5 right-0.5 font-bold rounded px-0.5 py-0.5 leading-none"
-                        style={{
-                          background: "rgba(0, 0, 0, 0.8)",
-                          color: qtyDisplay.color,
-                          fontSize: dragSlotSize
-                            ? `${dragSlotSize * 0.18}px`
-                            : "0.4rem", // Scale with slot
-                          textShadow: "1px 1px 1px rgba(0, 0, 0, 0.8)",
-                        }}
-                      >
-                        {qtyDisplay.text}
-                      </div>
-                    )}
-                  </div>
-                );
-              })()
-            : null}
-        </DragOverlay>
-      </div>
-    </DndContext>
+          {/* RS3-style Coins/Money Pouch - Extracted component */}
+          <CoinPouch coins={coins} onWithdrawClick={openCoinModal} />
+
+          <DragOverlay dropAnimation={null} modifiers={[snapCenterToCursor]}>
+            {activeItem
+              ? (() => {
+                  const qtyDisplay =
+                    activeItem.quantity > 1
+                      ? formatQuantity(activeItem.quantity)
+                      : null;
+                  return (
+                    <div
+                      className="border rounded flex items-center justify-center aspect-square relative"
+                      style={{
+                        width: dragSlotSize ?? 40, // Use captured slot size, fallback to 40px
+                        height: dragSlotSize ?? 40,
+                        borderColor: "rgba(242, 208, 138, 0.6)",
+                        background:
+                          "linear-gradient(135deg, rgba(242, 208, 138, 0.2) 0%, rgba(242, 208, 138, 0.1) 100%)",
+                        fontSize: dragSlotSize
+                          ? `${dragSlotSize * 0.4}px`
+                          : "1rem", // Scale icon with slot
+                        color: COLORS.ACCENT,
+                        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.5)",
+                      }}
+                    >
+                      {getItemIcon(activeItem.itemId)}
+                      {qtyDisplay && (
+                        <div
+                          className="absolute bottom-0.5 right-0.5 font-bold rounded px-0.5 py-0.5 leading-none"
+                          style={{
+                            background: "rgba(0, 0, 0, 0.8)",
+                            color: qtyDisplay.color,
+                            fontSize: dragSlotSize
+                              ? `${dragSlotSize * 0.18}px`
+                              : "0.4rem", // Scale with slot
+                            textShadow: "1px 1px 1px rgba(0, 0, 0, 0.8)",
+                          }}
+                        >
+                          {qtyDisplay.text}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()
+              : null}
+          </DragOverlay>
+        </div>
+      </DndContext>
+
+      {/* Coin Withdrawal Modal */}
+      <CoinAmountModal
+        modal={coinModal}
+        onConfirm={handleCoinWithdraw}
+        onClose={closeCoinModal}
+      />
+    </>
   );
 }

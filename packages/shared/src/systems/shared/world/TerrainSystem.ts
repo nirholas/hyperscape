@@ -13,6 +13,8 @@ import { System } from "..";
 import { EventType } from "../../../types/events";
 import { NoiseGenerator } from "../../../utils/NoiseGenerator";
 import { InstancedMeshManager } from "../../../utils/rendering/InstancedMeshManager";
+import { CollisionMask } from "../movement/CollisionFlags";
+import { worldToTile } from "../movement/TileSystem";
 
 /**
  * Terrain System
@@ -1978,6 +1980,37 @@ export class TerrainSystem extends System {
     }
 
     return { walkable: true };
+  }
+
+  /**
+   * Unified walkability check combining CollisionMatrix and terrain.
+   *
+   * This is the single source of truth for tile walkability:
+   * 1. Check CollisionMatrix for static objects (trees, rocks, stations, entities)
+   * 2. Check terrain constraints (water, slopes)
+   *
+   * @param worldX - World X coordinate
+   * @param worldZ - World Z coordinate
+   * @returns Whether the position is walkable
+   */
+  isTileWalkable(worldX: number, worldZ: number): boolean {
+    // Convert to tile coordinates
+    const tile = worldToTile(worldX, worldZ);
+
+    // Check CollisionMatrix for static objects and entities
+    if (
+      this.world.collision.hasFlags(
+        tile.x,
+        tile.z,
+        CollisionMask.BLOCKS_MOVEMENT,
+      )
+    ) {
+      return false;
+    }
+
+    // Check terrain walkability (water, slopes)
+    const terrainCheck = this.isPositionWalkable(worldX, worldZ);
+    return terrainCheck.walkable;
   }
 
   /**

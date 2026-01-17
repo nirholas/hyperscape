@@ -114,6 +114,7 @@ import {
   getBestStepOutTile,
   type TileCoord,
 } from "../../systems/shared/movement/TileSystem";
+import { CollisionMask } from "../../systems/shared/movement/CollisionFlags";
 import type { EntityID } from "../../types/core/identifiers";
 import { getNPCSize, getOccupiedTiles } from "./LargeNPCSupport";
 import { getGameRng } from "../../utils/SeededRandom";
@@ -282,9 +283,19 @@ export class MobEntity extends CombatantEntity {
     );
 
     // Check if center is unoccupied (check all tiles for multi-tile NPCs)
+    // Must check BOTH entity occupancy AND static collision (resources, stations)
     let centerOccupied = false;
     for (let i = 0; i < tileCount; i++) {
-      if (this.world.entityOccupancy.isOccupied(this._occupiedTilesBuffer[i])) {
+      const tile = this._occupiedTilesBuffer[i];
+      // Check for other entities
+      if (this.world.entityOccupancy.isOccupied(tile)) {
+        centerOccupied = true;
+        break;
+      }
+      // Check for static collision (trees, rocks, furnaces, etc.)
+      if (
+        this.world.collision.hasFlags(tile.x, tile.z, CollisionMask.BLOCKS_WALK)
+      ) {
         centerOccupied = true;
         break;
       }
@@ -317,11 +328,21 @@ export class MobEntity extends CombatantEntity {
           );
 
           // Check if all tiles are unoccupied
+          // Must check BOTH entity occupancy AND static collision (resources, stations)
           let isValid = true;
           for (let i = 0; i < candTileCount; i++) {
+            const tile = this._occupiedTilesBuffer[i];
+            // Check for other entities
+            if (this.world.entityOccupancy.isOccupied(tile)) {
+              isValid = false;
+              break;
+            }
+            // Check for static collision (trees, rocks, furnaces, etc.)
             if (
-              this.world.entityOccupancy.isOccupied(
-                this._occupiedTilesBuffer[i],
+              this.world.collision.hasFlags(
+                tile.x,
+                tile.z,
+                CollisionMask.BLOCKS_WALK,
               )
             ) {
               isValid = false;
@@ -1399,6 +1420,17 @@ export class MobEntity extends CombatantEntity {
       getEntityId: () => this.id as EntityID,
       getEntityOccupancy: () => this.world.entityOccupancy,
       isWalkable: (tile) => {
+        // Check CollisionMatrix for static objects (trees, rocks, stations)
+        if (
+          this.world.collision.hasFlags(
+            tile.x,
+            tile.z,
+            CollisionMask.BLOCKS_WALK,
+          )
+        ) {
+          return false;
+        }
+
         // Check terrain walkability using TerrainSystem if available
         const terrain = this.world.getSystem("terrain");
         if (isTerrainSystem(terrain)) {
@@ -1429,6 +1461,17 @@ export class MobEntity extends CombatantEntity {
           this.world.entityOccupancy,
           this.id as EntityID,
           (tile) => {
+            // Check CollisionMatrix for static objects (trees, rocks, stations)
+            if (
+              this.world.collision.hasFlags(
+                tile.x,
+                tile.z,
+                CollisionMask.BLOCKS_WALK,
+              )
+            ) {
+              return false;
+            }
+
             // Check terrain walkability using type guard
             const terrain = this.world.getSystem?.("terrain");
             if (isTerrainSystem(terrain)) {

@@ -183,6 +183,22 @@ export class PlayerRepository extends BaseRepository {
     if (data.attackStyle !== undefined) {
       updateData.attackStyle = data.attackStyle;
     }
+    // Prayer system fields
+    if (data.prayerLevel !== undefined) {
+      updateData.prayerLevel = data.prayerLevel;
+    }
+    if (data.prayerXp !== undefined) {
+      updateData.prayerXp = data.prayerXp;
+    }
+    if (data.prayerPoints !== undefined) {
+      updateData.prayerPoints = data.prayerPoints;
+    }
+    if (data.prayerMaxPoints !== undefined) {
+      updateData.prayerMaxPoints = data.prayerMaxPoints;
+    }
+    if (data.activePrayers !== undefined) {
+      updateData.activePrayers = data.activePrayers;
+    }
 
     // If no update data provided, skip silently (character doesn't need updating)
     if (Object.keys(updateData).length === 0) {

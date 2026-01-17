@@ -14,7 +14,7 @@
  *
  * **Character System** (RuneScape-inspired):
  * - `characters`: Player characters with stats, levels, XP, and position
- *   - Combat skills: attack, strength, defense, constitution (health), ranged
+ *   - Combat skills: attack, strength, defense, constitution (health), ranged, prayer
  *   - Gathering skills: woodcutting, fishing, firemaking, cooking
  *   - Each skill has level and XP tracking
  * - `inventory`: Player item storage (28 slots with quantities and metadata)
@@ -167,7 +167,7 @@ export const entities = pgTable("entities", {
  * - Constitution XP starts at 1154 (level 10)
  *
  * **Skills**:
- * Combat: attack, strength, defense, constitution (health), ranged
+ * Combat: attack, strength, defense, constitution (health), ranged, prayer
  * Gathering: woodcutting, fishing, firemaking, cooking
  *
  * **Foreign Keys**:
@@ -192,6 +192,9 @@ export const characters = pgTable(
     constitutionLevel: integer("constitutionLevel").default(10),
     rangedLevel: integer("rangedLevel").default(1),
 
+    // Prayer skill
+    prayerLevel: integer("prayerLevel").default(1),
+
     // Gathering skills
     woodcuttingLevel: integer("woodcuttingLevel").default(1),
     miningLevel: integer("miningLevel").default(1),
@@ -206,12 +209,25 @@ export const characters = pgTable(
     defenseXp: integer("defenseXp").default(0),
     constitutionXp: integer("constitutionXp").default(1154),
     rangedXp: integer("rangedXp").default(0),
+    prayerXp: integer("prayerXp").default(0),
     woodcuttingXp: integer("woodcuttingXp").default(0),
     miningXp: integer("miningXp").default(0),
     fishingXp: integer("fishingXp").default(0),
     firemakingXp: integer("firemakingXp").default(0),
     cookingXp: integer("cookingXp").default(0),
     smithingXp: integer("smithingXp").default(0),
+
+    // Prayer points (current and max)
+    prayerPoints: integer("prayerPoints").default(1),
+    prayerMaxPoints: integer("prayerMaxPoints").default(1),
+
+    /**
+     * Active prayers stored as JSON array of prayer ID strings.
+     * Format: '["thick_skin", "burst_of_strength"]'
+     * IDs must match valid entries in prayers.json manifest.
+     * Empty array '[]' when no prayers are active.
+     */
+    activePrayers: text("activePrayers").default("[]"),
 
     // Status
     health: integer("health").default(100),

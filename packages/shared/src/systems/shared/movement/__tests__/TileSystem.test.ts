@@ -21,6 +21,7 @@ import {
   tilesAdjacent,
   tilesWithinRange,
   tilesWithinMeleeRange,
+  tilesWithinRangeOfFootprint,
   tilesCardinallyAdjacent,
   getBestMeleeTile,
   getBestAdjacentTile,
@@ -617,6 +618,248 @@ describe("TileSystem", () => {
         { x: 5, z: 6 }, // north
       ];
       expect(validCardinals).toContainEqual(result);
+    });
+  });
+
+  describe("tilesWithinRangeOfFootprint", () => {
+    describe("1x1 footprint (standard single-tile)", () => {
+      it("behaves like tilesWithinRange for 1x1 footprint", () => {
+        const center = { x: 5, z: 5 };
+        const player = { x: 6, z: 5 }; // 1 tile east
+
+        expect(tilesWithinRangeOfFootprint(player, center, 1, 1, 1)).toBe(true);
+        expect(tilesWithinRangeOfFootprint(player, center, 1, 1, 2)).toBe(true);
+      });
+
+      it("returns false when standing on 1x1 footprint", () => {
+        const center = { x: 5, z: 5 };
+        const player = { x: 5, z: 5 }; // Same tile
+
+        expect(tilesWithinRangeOfFootprint(player, center, 1, 1, 1)).toBe(
+          false,
+        );
+      });
+
+      it("returns false when out of range", () => {
+        const center = { x: 5, z: 5 };
+        const player = { x: 8, z: 5 }; // 3 tiles away
+
+        expect(tilesWithinRangeOfFootprint(player, center, 1, 1, 1)).toBe(
+          false,
+        );
+        expect(tilesWithinRangeOfFootprint(player, center, 1, 1, 2)).toBe(
+          false,
+        );
+      });
+    });
+
+    describe("2x2 footprint (small multi-tile)", () => {
+      // 2x2 footprint centered on (5,5) occupies:
+      // offset = floor(2/2) = 1, so tiles are (4,4), (5,4), (4,5), (5,5)
+      const center = { x: 5, z: 5 };
+
+      it("returns true for player adjacent to any occupied tile", () => {
+        // Player at (6,5) - adjacent to (5,5)
+        expect(
+          tilesWithinRangeOfFootprint({ x: 6, z: 5 }, center, 2, 2, 1),
+        ).toBe(true);
+        // Player at (3,4) - adjacent to (4,4)
+        expect(
+          tilesWithinRangeOfFootprint({ x: 3, z: 4 }, center, 2, 2, 1),
+        ).toBe(true);
+        // Player at (4,6) - adjacent to (4,5)
+        expect(
+          tilesWithinRangeOfFootprint({ x: 4, z: 6 }, center, 2, 2, 1),
+        ).toBe(true);
+      });
+
+      it("returns true when standing on one footprint tile (adjacent to others)", () => {
+        // When standing on a corner tile, player is in range of adjacent footprint tiles
+        // This is correct OSRS behavior - you're "in range" even if technically on the object
+        // (4,4) is distance 1 from (5,4) and (4,5)
+        expect(
+          tilesWithinRangeOfFootprint({ x: 4, z: 4 }, center, 2, 2, 1),
+        ).toBe(true);
+        expect(
+          tilesWithinRangeOfFootprint({ x: 5, z: 4 }, center, 2, 2, 1),
+        ).toBe(true);
+        expect(
+          tilesWithinRangeOfFootprint({ x: 4, z: 5 }, center, 2, 2, 1),
+        ).toBe(true);
+        expect(
+          tilesWithinRangeOfFootprint({ x: 5, z: 5 }, center, 2, 2, 1),
+        ).toBe(true);
+      });
+
+      it("returns false when too far from all occupied tiles", () => {
+        // Player at (8,8) - too far from any occupied tile
+        expect(
+          tilesWithinRangeOfFootprint({ x: 8, z: 8 }, center, 2, 2, 1),
+        ).toBe(false);
+      });
+
+      it("allows interaction from corners (diagonal)", () => {
+        // Player at (6,6) - diagonal from (5,5), distance 1
+        expect(
+          tilesWithinRangeOfFootprint({ x: 6, z: 6 }, center, 2, 2, 1),
+        ).toBe(true);
+        // Player at (3,3) - diagonal from (4,4), distance 1
+        expect(
+          tilesWithinRangeOfFootprint({ x: 3, z: 3 }, center, 2, 2, 1),
+        ).toBe(true);
+      });
+    });
+
+    describe("2x1 footprint (furnace-like)", () => {
+      // 2x1 footprint centered on (5,5) occupies:
+      // offsetX = floor(2/2) = 1, offsetZ = floor(1/2) = 0
+      // So tiles are (4,5), (5,5)
+      const center = { x: 5, z: 5 };
+
+      it("returns true for player adjacent to either occupied tile", () => {
+        // Player at (3,5) - adjacent to (4,5)
+        expect(
+          tilesWithinRangeOfFootprint({ x: 3, z: 5 }, center, 2, 1, 1),
+        ).toBe(true);
+        // Player at (6,5) - adjacent to (5,5)
+        expect(
+          tilesWithinRangeOfFootprint({ x: 6, z: 5 }, center, 2, 1, 1),
+        ).toBe(true);
+        // Player at (5,6) - adjacent to (5,5)
+        expect(
+          tilesWithinRangeOfFootprint({ x: 5, z: 6 }, center, 2, 1, 1),
+        ).toBe(true);
+        // Player at (4,4) - adjacent to (4,5)
+        expect(
+          tilesWithinRangeOfFootprint({ x: 4, z: 4 }, center, 2, 1, 1),
+        ).toBe(true);
+      });
+
+      it("returns true when standing on one footprint tile (adjacent to the other)", () => {
+        // 2x1 footprint: tiles (4,5) and (5,5)
+        // Standing on (4,5) is distance 1 from (5,5), so returns true
+        expect(
+          tilesWithinRangeOfFootprint({ x: 4, z: 5 }, center, 2, 1, 1),
+        ).toBe(true);
+        // Standing on (5,5) is distance 1 from (4,5), so returns true
+        expect(
+          tilesWithinRangeOfFootprint({ x: 5, z: 5 }, center, 2, 1, 1),
+        ).toBe(true);
+      });
+    });
+
+    describe("3x3 footprint (large multi-tile)", () => {
+      // 3x3 footprint centered on (10,10) occupies:
+      // offset = floor(3/2) = 1
+      // Tiles: (9,9), (10,9), (11,9), (9,10), (10,10), (11,10), (9,11), (10,11), (11,11)
+      const center = { x: 10, z: 10 };
+
+      it("returns true for player adjacent to outer tiles", () => {
+        // Player at (8,10) - adjacent to (9,10)
+        expect(
+          tilesWithinRangeOfFootprint({ x: 8, z: 10 }, center, 3, 3, 1),
+        ).toBe(true);
+        // Player at (12,10) - adjacent to (11,10)
+        expect(
+          tilesWithinRangeOfFootprint({ x: 12, z: 10 }, center, 3, 3, 1),
+        ).toBe(true);
+        // Player at (10,12) - adjacent to (10,11)
+        expect(
+          tilesWithinRangeOfFootprint({ x: 10, z: 12 }, center, 3, 3, 1),
+        ).toBe(true);
+      });
+
+      it("returns true when standing inside footprint (adjacent to other tiles)", () => {
+        // Player at center (10,10) is distance 1 from (9,10), (11,10), (10,9), (10,11)
+        expect(
+          tilesWithinRangeOfFootprint({ x: 10, z: 10 }, center, 3, 3, 1),
+        ).toBe(true);
+        // Player at corner (9,9) is distance 1 from (10,9), (9,10), (10,10)
+        expect(
+          tilesWithinRangeOfFootprint({ x: 9, z: 9 }, center, 3, 3, 1),
+        ).toBe(true);
+      });
+
+      it("allows interaction from diagonal corners", () => {
+        // Player at (12,12) - diagonal from (11,11), distance 1
+        expect(
+          tilesWithinRangeOfFootprint({ x: 12, z: 12 }, center, 3, 3, 1),
+        ).toBe(true);
+        // Player at (8,8) - diagonal from (9,9), distance 1
+        expect(
+          tilesWithinRangeOfFootprint({ x: 8, z: 8 }, center, 3, 3, 1),
+        ).toBe(true);
+      });
+    });
+
+    describe("range parameter", () => {
+      const center = { x: 5, z: 5 };
+
+      it("respects range 1 (adjacent only)", () => {
+        // 1x1 footprint, player 2 tiles away
+        expect(
+          tilesWithinRangeOfFootprint({ x: 7, z: 5 }, center, 1, 1, 1),
+        ).toBe(false);
+        // 1x1 footprint, player 1 tile away
+        expect(
+          tilesWithinRangeOfFootprint({ x: 6, z: 5 }, center, 1, 1, 1),
+        ).toBe(true);
+      });
+
+      it("respects range 2", () => {
+        // 1x1 footprint, player 2 tiles away
+        expect(
+          tilesWithinRangeOfFootprint({ x: 7, z: 5 }, center, 1, 1, 2),
+        ).toBe(true);
+        // 1x1 footprint, player 3 tiles away
+        expect(
+          tilesWithinRangeOfFootprint({ x: 8, z: 5 }, center, 1, 1, 2),
+        ).toBe(false);
+      });
+
+      it("enforces minimum range of 1", () => {
+        // Even with range 0, should use effectiveRange 1
+        expect(
+          tilesWithinRangeOfFootprint({ x: 6, z: 5 }, center, 1, 1, 0),
+        ).toBe(true);
+      });
+
+      it("floors fractional range values", () => {
+        // Range 1.9 should be treated as range 1
+        expect(
+          tilesWithinRangeOfFootprint({ x: 7, z: 5 }, center, 1, 1, 1.9),
+        ).toBe(false);
+        // Range 2.9 should be treated as range 2
+        expect(
+          tilesWithinRangeOfFootprint({ x: 7, z: 5 }, center, 1, 1, 2.9),
+        ).toBe(true);
+      });
+    });
+
+    describe("center-based calculation consistency", () => {
+      it("footprint is centered on center tile (not corner-based)", () => {
+        // This is the critical test for the PR review issue
+        // 2x2 footprint centered on (5,5):
+        // - Corner-based would occupy (5,5), (6,5), (5,6), (6,6)
+        // - Center-based occupies (4,4), (5,4), (4,5), (5,5)
+        const center = { x: 5, z: 5 };
+
+        // Player at (6,5) should be in range of center-based (5,5)
+        expect(
+          tilesWithinRangeOfFootprint({ x: 6, z: 5 }, center, 2, 2, 1),
+        ).toBe(true);
+
+        // Player at (3,4) should be in range of center-based (4,4)
+        expect(
+          tilesWithinRangeOfFootprint({ x: 3, z: 4 }, center, 2, 2, 1),
+        ).toBe(true);
+
+        // Player at (7,5) would be in range if corner-based, but not center-based
+        // Distance from (7,5) to (5,5) is 2, to (4,5) is 3
+        expect(
+          tilesWithinRangeOfFootprint({ x: 7, z: 5 }, center, 2, 2, 1),
+        ).toBe(false);
+      });
     });
   });
 });

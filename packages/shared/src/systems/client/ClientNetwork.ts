@@ -1610,6 +1610,68 @@ export class ClientNetwork extends SystemBase {
     this.world.emit(EventType.SKILLS_UPDATED, data);
   };
 
+  // --- Prayer state handlers ---
+
+  /** Cache for prayer state by player ID */
+  lastPrayerStateByPlayerId: Record<
+    string,
+    { points: number; maxPoints: number; active: string[] }
+  > = {};
+
+  onPrayerStateSync = (data: {
+    playerId: string;
+    points: number;
+    maxPoints: number;
+    active: string[];
+  }) => {
+    // Cache latest prayer state for late-mounting UI
+    this.lastPrayerStateByPlayerId[data.playerId] = {
+      points: data.points,
+      maxPoints: data.maxPoints,
+      active: data.active,
+    };
+    // Re-emit with typed event so UI updates
+    this.world.emit(EventType.PRAYER_STATE_SYNC, data);
+  };
+
+  onPrayerToggled = (data: {
+    playerId: string;
+    prayerId: string;
+    active: boolean;
+    points: number;
+  }) => {
+    // Update cache if it exists
+    const cached = this.lastPrayerStateByPlayerId[data.playerId];
+    if (cached) {
+      cached.points = data.points;
+      if (data.active) {
+        if (!cached.active.includes(data.prayerId)) {
+          cached.active.push(data.prayerId);
+        }
+      } else {
+        cached.active = cached.active.filter((id) => id !== data.prayerId);
+      }
+    }
+    // Re-emit with typed event so UI updates
+    this.world.emit(EventType.PRAYER_TOGGLED, data);
+  };
+
+  onPrayerPointsChanged = (data: {
+    playerId: string;
+    points: number;
+    maxPoints: number;
+    reason?: string;
+  }) => {
+    // Update cache if it exists
+    const cached = this.lastPrayerStateByPlayerId[data.playerId];
+    if (cached) {
+      cached.points = data.points;
+      cached.maxPoints = data.maxPoints;
+    }
+    // Re-emit with typed event so UI updates
+    this.world.emit(EventType.PRAYER_POINTS_CHANGED, data);
+  };
+
   /**
    * Handle world time sync from server - keeps day/night cycle in sync across all clients
    */

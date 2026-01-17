@@ -33,6 +33,7 @@ import {
   worldToTile,
   tileToWorld,
   tilesWithinRange,
+  tilesWithinRangeOfFootprint,
   TILE_SIZE,
 } from "../../../shared/movement/TileSystem";
 import { ACTION_QUEUE } from "../constants";
@@ -81,6 +82,8 @@ export class ActionQueueService {
       lastWalkTargetTile: initialTargetTile
         ? { x: initialTargetTile.x, z: initialTargetTile.z }
         : undefined,
+      // Multi-tile footprint for OSRS-style interaction from any adjacent tile
+      footprint: params.footprint,
     };
 
     this.currentAction = action;
@@ -189,7 +192,24 @@ export class ActionQueueService {
         action.targetPosition.x,
         action.targetPosition.z,
       );
-      inRange = tilesWithinRange(playerTile, targetTile, action.requiredRange);
+
+      if (action.footprint) {
+        // Multi-tile entity: Check if player is in range of ANY occupied tile
+        inRange = tilesWithinRangeOfFootprint(
+          playerTile,
+          targetTile,
+          action.footprint.width,
+          action.footprint.depth,
+          action.requiredRange,
+        );
+      } else {
+        // Single-tile entity: Standard range check
+        inRange = tilesWithinRange(
+          playerTile,
+          targetTile,
+          action.requiredRange,
+        );
+      }
     }
 
     if (inRange) {
@@ -319,11 +339,20 @@ export class ActionQueueService {
       action.lastWalkTargetTile = { x: targetTile.x, z: targetTile.z };
     }
 
-    const inRange = tilesWithinRange(
-      playerTile,
-      targetTile,
-      action.requiredRange,
-    );
+    let inRange: boolean;
+    if (action.footprint) {
+      // Multi-tile entity: Check if player is in range of ANY occupied tile
+      inRange = tilesWithinRangeOfFootprint(
+        playerTile,
+        targetTile,
+        action.footprint.width,
+        action.footprint.depth,
+        action.requiredRange,
+      );
+    } else {
+      // Single-tile entity: Standard range check
+      inRange = tilesWithinRange(playerTile, targetTile, action.requiredRange);
+    }
 
     if (inRange) {
       // In range - execute action

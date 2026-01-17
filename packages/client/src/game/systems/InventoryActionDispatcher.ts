@@ -46,13 +46,11 @@ export function dispatchInventoryAction(
   switch (action) {
     case "eat":
     case "drink":
-      // Send to server via network - server handles validation, consumption, and healing
-      // Server flow: useItem → INVENTORY_USE → InventorySystem → ITEM_USED → PlayerSystem
-      world.network?.send("useItem", { itemId, slot });
-      return { success: true };
-
     case "bury":
-      world.network?.send("buryBones", { itemId, slot });
+      // Send to server via network - server handles validation, consumption, and effects
+      // Server flow: useItem → INVENTORY_USE → InventorySystem → ITEM_USED → PlayerSystem
+      // PlayerSystem.handleItemUsed detects item type (food vs bones) and handles appropriately
+      world.network?.send("useItem", { itemId, slot });
       return { success: true };
 
     case "wield":

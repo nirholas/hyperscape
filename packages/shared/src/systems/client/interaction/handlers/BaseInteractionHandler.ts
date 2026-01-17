@@ -22,9 +22,11 @@ import {
   worldToTile,
   tileToWorld,
   tilesWithinRange,
+  tilesWithinRangeOfFootprint,
   TILE_SIZE,
   type TileCoord,
 } from "../../../shared/movement/TileSystem";
+import type { EntityFootprint } from "../types";
 import { ACTION_QUEUE } from "../constants";
 import { EventType } from "../../../../types/events/event-types";
 import { uuid } from "../../../../utils";
@@ -116,9 +118,24 @@ export abstract class BaseInteractionHandler {
       const tolerance = TILE_SIZE * ACTION_QUEUE.ITEM_PICKUP_TOLERANCE_TILES;
       inRange = worldDist < tolerance;
     } else {
-      // Range 1+ (combat): Use tile-based range check
+      // Range 1+ (combat/resources): Use tile-based range check
       const playerTile = worldToTile(playerPos.x, playerPos.z);
-      inRange = tilesWithinRange(playerTile, targetTile, params.range);
+      const footprint = params.target.footprint;
+
+      if (footprint) {
+        // Multi-tile entity: Check if player is in range of ANY occupied tile
+        // This enables OSRS-style interaction from any side of a 2x2 furnace, etc.
+        inRange = tilesWithinRangeOfFootprint(
+          playerTile,
+          targetTile,
+          footprint.width,
+          footprint.depth,
+          params.range,
+        );
+      } else {
+        // Single-tile entity: Standard range check
+        inRange = tilesWithinRange(playerTile, targetTile, params.range);
+      }
     }
 
     if (inRange) {
@@ -135,6 +152,7 @@ export abstract class BaseInteractionHandler {
         requiredRange: params.range,
         onExecute: params.onExecute,
         onCancel: params.onCancel,
+        footprint: params.target.footprint,
       });
 
       // Calculate walk destination based on required range

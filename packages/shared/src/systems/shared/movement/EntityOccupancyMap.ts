@@ -24,6 +24,8 @@
 import type { EntityID } from "../../../types/core/identifiers";
 import { isValidEntityID } from "../../../types/core/identifiers";
 import type { TileCoord } from "./TileSystem";
+import { CollisionFlag } from "./CollisionFlags";
+import type { ICollisionMatrix } from "./CollisionMatrix";
 
 // ============================================================================
 // TYPES
@@ -135,6 +137,12 @@ export class EntityOccupancyMap implements IEntityOccupancy {
     }
   >();
 
+  /**
+   * Reference to CollisionMatrix for unified collision storage.
+   * When set, occupy/vacate/move operations also update CollisionMatrix flags.
+   */
+  private _collisionMatrix: ICollisionMatrix | null = null;
+
   // ============================================================================
   // PRE-ALLOCATED BUFFERS (Zero-allocation hot path support)
   // ============================================================================
@@ -151,6 +159,29 @@ export class EntityOccupancyMap implements IEntityOccupancy {
 
   /** Maximum tiles per entity (5x5 boss = 25 tiles max) */
   private readonly MAX_TILES_PER_ENTITY = 25;
+
+  // ============================================================================
+  // COLLISION MATRIX INTEGRATION
+  // ============================================================================
+
+  /**
+   * Set the CollisionMatrix reference for unified collision storage.
+   * When set, occupy/vacate/move operations will also update CollisionMatrix.
+   *
+   * @param matrix - CollisionMatrix instance to delegate to
+   */
+  setCollisionMatrix(matrix: ICollisionMatrix): void {
+    this._collisionMatrix = matrix;
+  }
+
+  /**
+   * Get the collision flag for an entity type
+   */
+  private getCollisionFlag(entityType: OccupantType): number {
+    return entityType === "player"
+      ? CollisionFlag.OCCUPIED_PLAYER
+      : CollisionFlag.OCCUPIED_NPC;
+  }
 
   // ============================================================================
   // PUBLIC API
@@ -252,6 +283,11 @@ export class EntityOccupancyMap implements IEntityOccupancy {
     // Track tiles for this entity
     const tileKeys = new Set<string>();
 
+    // Get collision flag for this entity type (only used if not ignoring collision)
+    const collisionFlag = ignoresCollision
+      ? 0
+      : this.getCollisionFlag(entityType);
+
     for (let i = 0; i < tileCount; i++) {
       const tile = tiles[i];
       if (!this.isValidTile(tile)) continue;
@@ -259,6 +295,11 @@ export class EntityOccupancyMap implements IEntityOccupancy {
       const key = `${tile.x},${tile.z}`;
       this._occupiedTiles.set(key, entry);
       tileKeys.add(key);
+
+      // Add to CollisionMatrix if entity blocks movement
+      if (this._collisionMatrix && collisionFlag) {
+        this._collisionMatrix.addFlags(tile.x, tile.z, collisionFlag);
+      }
     }
 
     this._entityTiles.set(entityId, tileKeys);
@@ -278,9 +319,22 @@ export class EntityOccupancyMap implements IEntityOccupancy {
     const tileKeys = this._entityTiles.get(entityId);
     if (!tileKeys) return;
 
+    // Get metadata before cleanup (needed for collision flag removal)
+    const metadata = this._entityMetadata.get(entityId);
+    const collisionFlag =
+      metadata && !metadata.ignoresCollision
+        ? this.getCollisionFlag(metadata.entityType)
+        : 0;
+
     // Remove all tile entries
     for (const key of tileKeys) {
       this._occupiedTiles.delete(key);
+
+      // Remove from CollisionMatrix if entity was blocking
+      if (this._collisionMatrix && collisionFlag) {
+        const [x, z] = key.split(",").map(Number);
+        this._collisionMatrix.removeFlags(x, z, collisionFlag);
+      }
     }
 
     // Cleanup tracking
@@ -289,12 +343,15 @@ export class EntityOccupancyMap implements IEntityOccupancy {
   }
 
   /**
-   * Move entity to new tiles (atomic operation)
+   * Move entity to new tiles (atomic operation with delta-based CollisionMatrix updates)
    *
    * Follows OSRS flag update order:
-   * 1. Remove flags from old tiles
-   * 2. (Entity repositioned externally)
-   * 3. Add flags on new tiles
+   * 1. Remove flags from old tiles not in new position
+   * 2. Add flags on new tiles not in old position
+   * 3. Update internal tracking
+   *
+   * Delta optimization: Only modify tiles that actually changed.
+   * For a 3x3 boss moving 1 tile: 6 unchanged, 3 removed, 3 added.
    *
    * Uses cached metadata to avoid re-specifying entityType/ignoresCollision.
    *
@@ -315,35 +372,68 @@ export class EntityOccupancyMap implements IEntityOccupancy {
       return;
     }
 
-    // Step 1: Vacate old tiles (OSRS order: remove old flags first)
     const oldTileKeys = this._entityTiles.get(entityId);
-    if (oldTileKeys) {
-      for (const key of oldTileKeys) {
-        this._occupiedTiles.delete(key);
-      }
-      oldTileKeys.clear(); // Reuse the Set (zero allocation)
+    if (!oldTileKeys) {
+      // Entity not tracked, treat as occupy()
+      this.occupy(
+        entityId,
+        newTiles,
+        tileCount,
+        metadata.entityType,
+        metadata.ignoresCollision,
+      );
+      return;
     }
 
-    // Step 2: Create entry for new tiles
+    // Build set of new tile keys for delta calculation
+    const newTileKeySet = new Set<string>();
+    for (let i = 0; i < tileCount; i++) {
+      const tile = newTiles[i];
+      if (!this.isValidTile(tile)) continue;
+      newTileKeySet.add(`${tile.x},${tile.z}`);
+    }
+
+    // Get collision flag (0 if entity ignores collision)
+    const collisionFlag = metadata.ignoresCollision
+      ? 0
+      : this.getCollisionFlag(metadata.entityType);
+
+    // Create entry for new tiles
     const entry: OccupancyEntry = {
       entityId,
       entityType: metadata.entityType,
       ignoresCollision: metadata.ignoresCollision,
     };
 
-    // Step 3: Occupy new tiles (OSRS order: add new flags after reposition)
-    const tileKeys = oldTileKeys || new Set<string>();
+    // Step 1: Remove from tiles we're leaving (in old but not in new)
+    for (const oldKey of oldTileKeys) {
+      if (!newTileKeySet.has(oldKey)) {
+        this._occupiedTiles.delete(oldKey);
 
+        // Remove from CollisionMatrix
+        if (this._collisionMatrix && collisionFlag) {
+          const [x, z] = oldKey.split(",").map(Number);
+          this._collisionMatrix.removeFlags(x, z, collisionFlag);
+        }
+      }
+    }
+
+    // Step 2: Add to tiles we're entering (in new but not in old)
     for (let i = 0; i < tileCount; i++) {
       const tile = newTiles[i];
       if (!this.isValidTile(tile)) continue;
 
       const key = `${tile.x},${tile.z}`;
       this._occupiedTiles.set(key, entry);
-      tileKeys.add(key);
+
+      // Add to CollisionMatrix only if tile is new
+      if (this._collisionMatrix && collisionFlag && !oldTileKeys.has(key)) {
+        this._collisionMatrix.addFlags(tile.x, tile.z, collisionFlag);
+      }
     }
 
-    this._entityTiles.set(entityId, tileKeys);
+    // Step 3: Update tracking to new tile set
+    this._entityTiles.set(entityId, newTileKeySet);
   }
 
   /**

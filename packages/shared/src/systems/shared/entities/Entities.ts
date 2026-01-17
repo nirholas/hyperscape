@@ -84,6 +84,10 @@ import {
   AnvilEntity,
   type AnvilEntityConfig,
 } from "../../../entities/world/AnvilEntity";
+import {
+  AltarEntity,
+  type AltarEntityConfig,
+} from "../../../entities/world/AltarEntity";
 import type {
   MobEntityConfig,
   NPCEntityConfig,
@@ -879,6 +883,36 @@ export class Entities extends SystemBase implements IEntities {
       };
 
       const entity = new AnvilEntity(this.world, anvilConfig);
+      this.items.set(entity.id, entity);
+
+      // Initialize entity if it has an init method
+      if (entity.init) {
+        (entity.init() as Promise<void>)?.catch((err) =>
+          this.logger.error(`Entity ${entity.id} async init failed`, err),
+        );
+      }
+
+      return entity;
+    } else if (data.type === "altar") {
+      // Build AltarEntity from network data
+      const positionArray = (data.position || [3, 40, -25]) as [
+        number,
+        number,
+        number,
+      ];
+      const name = data.name || "Altar";
+
+      const altarConfig: AltarEntityConfig = {
+        id: data.id,
+        name: name,
+        position: {
+          x: positionArray[0],
+          y: positionArray[1],
+          z: positionArray[2],
+        },
+      };
+
+      const entity = new AltarEntity(this.world, altarConfig);
       this.items.set(entity.id, entity);
 
       // Initialize entity if it has an init method

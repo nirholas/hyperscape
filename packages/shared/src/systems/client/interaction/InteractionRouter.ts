@@ -17,7 +17,7 @@
 
 import { System } from "../..";
 import type { World } from "../../../core/World";
-import type { InteractableEntityType } from "./types";
+import type { InteractableEntityType, ContextMenuAction } from "./types";
 import type { Position3D } from "../../../types/core/base-types";
 import { INPUT, TIMING, MESSAGE_TYPES, DEBUG_INTERACTIONS } from "./constants";
 import { EventType } from "../../../types/events/event-types";
@@ -41,6 +41,7 @@ import { PlayerInteractionHandler } from "./handlers/PlayerInteractionHandler";
 import { CookingSourceInteractionHandler } from "./handlers/CookingSourceInteractionHandler";
 import { SmeltingSourceInteractionHandler } from "./handlers/SmeltingSourceInteractionHandler";
 import { SmithingSourceInteractionHandler } from "./handlers/SmithingSourceInteractionHandler";
+import { AltarInteractionHandler } from "./handlers/AltarInteractionHandler";
 
 /**
  * Targeting mode state for "Use X on Y" interactions
@@ -154,6 +155,12 @@ export class InteractionRouter extends System {
     this.handlers.set(
       "anvil",
       new SmithingSourceInteractionHandler(this.world, this.actionQueue),
+    );
+
+    // Altar (prayer recharge)
+    this.handlers.set(
+      "altar",
+      new AltarInteractionHandler(this.world, this.actionQueue),
     );
   }
 
@@ -320,6 +327,7 @@ export class InteractionRouter extends System {
     if (DEBUG_INTERACTIONS) console.timeEnd("[ContextMenu] Raycast");
 
     if (target) {
+      // Entity right-click - show entity-specific menu
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
@@ -338,6 +346,51 @@ export class InteractionRouter extends System {
           event.clientY,
         );
         if (DEBUG_INTERACTIONS) console.timeEnd("[ContextMenu] ShowMenu");
+      }
+    } else {
+      // Terrain right-click - show "Walk here" menu
+      const terrainPos = this.raycastService.getTerrainPosition(
+        event.clientX,
+        event.clientY,
+        this.canvas,
+      );
+
+      if (terrainPos) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+
+        // Capture event coordinates for the handler closure
+        const clickX = event.clientX;
+        const clickY = event.clientY;
+        const shiftKey = event.shiftKey;
+
+        const walkAction: ContextMenuAction = {
+          id: "walk-here",
+          label: "Walk here",
+          enabled: true,
+          priority: 0,
+          handler: () => {
+            this.handleMoveClick(clickX, clickY, shiftKey);
+          },
+        };
+
+        const cancelAction: ContextMenuAction = {
+          id: "cancel",
+          label: "Cancel",
+          enabled: true,
+          priority: 100,
+          handler: () => {
+            // Just close the menu - no action needed
+          },
+        };
+
+        this.contextMenu.showMenu(
+          null,
+          [walkAction, cancelAction],
+          clickX,
+          clickY,
+        );
       }
     }
 

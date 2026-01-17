@@ -7,6 +7,9 @@
       "outputs": ["dist/**", "build/**", ".next/**"],
       "cache": true
     },
+    "extract-bounds": {
+      "cache": true
+    },
     "physx-js-webidl#build": {
       "dependsOn": [],
       "outputs": [

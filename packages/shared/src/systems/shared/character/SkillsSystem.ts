@@ -44,12 +44,13 @@ import {
 import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
 
 /** Skill name constants for type-safe skill references */
-const Skill = {
+export const Skill = {
   ATTACK: "attack" as keyof Skills,
   STRENGTH: "strength" as keyof Skills,
   DEFENSE: "defense" as keyof Skills,
   RANGE: "ranged" as keyof Skills,
   CONSTITUTION: "constitution" as keyof Skills,
+  PRAYER: "prayer" as keyof Skills,
   WOODCUTTING: "woodcutting" as keyof Skills,
   MINING: "mining" as keyof Skills,
   FISHING: "fishing" as keyof Skills,
@@ -189,10 +190,15 @@ export class SkillsSystem extends SystemBase {
     // Apply XP modifiers (e.g., from equipment, prayers, etc.)
     const modifiedAmount = this.calculateModifiedXP(entity, skill, amount);
 
-    // Check XP cap
-    const oldXP = skillData.xp;
+    // Check XP cap - ensure oldXP is a valid number (handles undefined/NaN)
+    const oldXP = Number.isFinite(skillData.xp) ? skillData.xp : 0;
     const newXP = Math.min(oldXP + modifiedAmount, SkillsSystem.MAX_XP);
     const actualGain = newXP - oldXP;
+
+    // Initialize skill xp if it was invalid
+    if (!Number.isFinite(skillData.xp)) {
+      skillData.xp = 0;
+    }
 
     if (actualGain <= 0) return;
 
@@ -589,8 +595,19 @@ export class SkillsSystem extends SystemBase {
       stats.health.current = Math.floor(Math.min(stats.health.current, newMax));
     }
 
-    // Special handling for Prayer level up - skipping for MVP
-    // Prayer is not in our current Skill enum
+    // Special handling for Prayer level up
+    // Prayer level = max prayer points (OSRS-accurate)
+    if (skill === Skill.PRAYER) {
+      const prayerSystem = this.world.getSystem("prayer") as unknown as {
+        setMaxPrayerPoints?: (id: string, max: number) => void;
+        restorePrayerPoints?: (id: string, amount: number) => void;
+      } | null;
+      if (prayerSystem?.setMaxPrayerPoints) {
+        prayerSystem.setMaxPrayerPoints(entity.id, newLevel);
+        // Also restore prayer points to new max (OSRS behavior on level-up)
+        prayerSystem.restorePrayerPoints?.(entity.id, newLevel);
+      }
+    }
 
     this.emitTypedEvent(EventType.SKILLS_LEVEL_UP, {
       entityId: entity.id,
@@ -826,6 +843,7 @@ export class SkillsSystem extends SystemBase {
       defense: stats.defense ?? { level: 1, xp: 0 },
       constitution: stats.constitution ?? { level: 1, xp: 0 },
       ranged: stats.ranged ?? { level: 1, xp: 0 },
+      prayer: stats.prayer ?? { level: 1, xp: 0 },
       woodcutting: stats.woodcutting ?? { level: 1, xp: 0 },
       mining: stats.mining ?? { level: 1, xp: 0 },
       fishing: stats.fishing ?? { level: 1, xp: 0 },

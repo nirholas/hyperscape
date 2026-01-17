@@ -10,3 +10,4 @@ export * from "./FireEntity";
 export * from "./RangeEntity";
 export * from "./FurnaceEntity";
 export * from "./AnvilEntity";
+export * from "./AltarEntity";

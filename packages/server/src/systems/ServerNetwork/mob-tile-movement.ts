@@ -34,6 +34,8 @@ import {
   MobEntity,
   getBestUnoccupiedMeleeTile,
   tileKey,
+  // Collision system
+  CollisionMask,
 } from "@hyperscape/shared";
 import type {
   TileCoord,
@@ -175,10 +177,20 @@ export class MobTileMovementManager {
   }
 
   /**
-   * Check if a tile is walkable based on terrain constraints
-   * Uses TerrainSystem to check water level, slope, and biome rules
+   * Check if a tile is walkable based on collision and terrain constraints
+   * Checks CollisionMatrix for static objects (trees, rocks, stations)
+   * and TerrainSystem for water level, slope, and biome rules
    */
   private isTileWalkable(tile: TileCoord): boolean {
+    // Check CollisionMatrix for static objects (trees, rocks, furnaces, etc.)
+    // BLOCKS_WALK includes BLOCKED, WATER, STEEP_SLOPE - excludes OCCUPIED
+    // (mobs should be able to path through other entities for pathfinding)
+    if (
+      this.world.collision.hasFlags(tile.x, tile.z, CollisionMask.BLOCKS_WALK)
+    ) {
+      return false;
+    }
+
     const terrain = this.getTerrain();
     if (!terrain) {
       // Fallback: walkable if no terrain system available

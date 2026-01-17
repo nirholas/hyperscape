@@ -13,3 +13,4 @@ export * from "./world-structure";
 export * from "./banks-stores";
 export * from "./playerEmotes";
 export * from "./StationDataProvider";
+export * from "./PrayerDataProvider";

@@ -349,6 +349,17 @@ export enum EventType {
   XP_DROP_RECEIVED = "xp:drop_received",
   TOTAL_LEVEL_CHANGED = "total:level:changed",
 
+  // Prayer System
+  PRAYER_TOGGLE = "prayer:toggle",
+  PRAYER_TOGGLED = "prayer:toggled",
+  PRAYER_POINTS_CHANGED = "prayer:points_changed",
+  PRAYER_DEACTIVATED = "prayer:deactivated",
+  PRAYER_STATE_SYNC = "prayer:state_sync",
+  PRAYER_DRAIN_TICK = "prayer:drain_tick",
+
+  // Altar System (prayer recharge)
+  ALTAR_PRAY = "altar:pray",
+
   // Chat System
   CHAT_SEND = "chat:send",
   CHAT_MESSAGE = "chat:message",

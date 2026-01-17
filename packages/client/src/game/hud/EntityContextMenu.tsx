@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import type { World, LabelSegment } from "@hyperscape/shared";
 
 export interface ContextMenuAction {
@@ -55,7 +55,8 @@ export interface ContextMenuState {
       | "bank"
       | "store"
       | "headstone"
-      | "player";
+      | "player"
+      | "terrain";
     name: string;
   } | null;
   actions: ContextMenuAction[];
@@ -73,6 +74,10 @@ export function EntityContextMenu({ world: _world }: EntityContextMenuProps) {
     actions: [],
   });
 
+  // Ref to track menu visibility for event dispatch (avoids memory leak in state setter)
+  const menuVisibleRef = useRef(false);
+  menuVisibleRef.current = menu.visible;
+
   useEffect(() => {
     // Listen for context menu requests from any system
     const handleContextMenu = (event: Event) => {
@@ -88,9 +93,10 @@ export function EntityContextMenu({ world: _world }: EntityContextMenuProps) {
             | "bank"
             | "store"
             | "headstone"
-            | "player";
+            | "player"
+            | "terrain";
           name: string;
-          position?: { x: number; y: number; z: number };
+          position?: { x: number; y: number; z: number } | null;
           [key: string]: unknown;
         };
         mousePosition: { x: number; y: number };
@@ -149,6 +155,10 @@ export function EntityContextMenu({ world: _world }: EntityContextMenuProps) {
         return;
       }
 
+      // Dispatch close event before state update (using ref to avoid memory leak)
+      if (menuVisibleRef.current) {
+        window.dispatchEvent(new CustomEvent("contextmenu:close"));
+      }
       setMenu((prev) => ({ ...prev, visible: false }));
     };
 

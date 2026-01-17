@@ -644,6 +644,8 @@ export interface EventMap {
   };
   [EventType.UI_KICK]: { playerId: string; reason: string };
   [EventType.UI_TOAST]: {
+    /** Player to receive the toast (server-side routing). Client ignores this. */
+    playerId?: string;
     message: string;
     type: "info" | "success" | "warning" | "error" | string;
     /** Screen coordinates for positioned toasts (RS3-style). If omitted, toast displays centered. */

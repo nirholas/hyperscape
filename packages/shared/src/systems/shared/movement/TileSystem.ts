@@ -220,6 +220,62 @@ export function tilesWithinRange(
 }
 
 /**
+ * Check if player is within range of ANY tile in a multi-tile footprint.
+ *
+ * OSRS-ACCURATE: Multi-tile objects like furnaces (2x2) can be interacted with
+ * from any adjacent tile. The footprint is CENTERED on the target position.
+ *
+ * For a 2x2 furnace at position (10.5, 10.5):
+ * - Center tile: (10, 10)
+ * - Footprint offset: floor(2/2) = 1 in each direction
+ * - Occupied tiles: (9, 9), (9, 10), (10, 9), (10, 10)
+ *
+ * Player can interact if they are within `rangeTiles` of ANY of these 4 tiles.
+ *
+ * @param playerTile - The player's current tile
+ * @param centerTile - The center tile of the multi-tile object
+ * @param footprintWidth - Width of the footprint in tiles (X-axis)
+ * @param footprintDepth - Depth of the footprint in tiles (Z-axis)
+ * @param rangeTiles - Maximum range in tiles (minimum 1)
+ * @returns true if player is within range of any occupied tile
+ */
+export function tilesWithinRangeOfFootprint(
+  playerTile: TileCoord,
+  centerTile: TileCoord,
+  footprintWidth: number,
+  footprintDepth: number,
+  rangeTiles: number,
+): boolean {
+  const effectiveRange = Math.max(1, Math.floor(rangeTiles));
+
+  // Calculate footprint bounds (centered on center tile)
+  const offsetX = Math.floor(footprintWidth / 2);
+  const offsetZ = Math.floor(footprintDepth / 2);
+
+  // Check each tile in the footprint
+  for (let dx = 0; dx < footprintWidth; dx++) {
+    for (let dz = 0; dz < footprintDepth; dz++) {
+      const occupiedTile: TileCoord = {
+        x: centerTile.x + dx - offsetX,
+        z: centerTile.z + dz - offsetZ,
+      };
+
+      // Calculate Chebyshev distance from player to this occupied tile
+      const distX = Math.abs(playerTile.x - occupiedTile.x);
+      const distZ = Math.abs(playerTile.z - occupiedTile.z);
+      const chebyshevDistance = Math.max(distX, distZ);
+
+      // Player is in range if within range and not standing on the object
+      if (chebyshevDistance <= effectiveRange && chebyshevDistance > 0) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
  * OSRS-accurate melee range check
  *
  * OSRS melee attack rules (from wiki):

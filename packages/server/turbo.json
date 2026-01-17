@@ -1,0 +1,24 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "extract-bounds": {
+      "inputs": [
+        "world/assets/models/**/*.glb",
+        "scripts/extract-model-bounds.ts"
+      ],
+      "outputs": ["world/assets/manifests/model-bounds.json"],
+      "cache": true
+    },
+    "build": {
+      "dependsOn": ["^build", "extract-bounds"],
+      "outputs": ["dist/**"],
+      "cache": true
+    },
+    "dev": {
+      "dependsOn": ["^build", "extract-bounds"],
+      "cache": false,
+      "persistent": true
+    }
+  }
+}

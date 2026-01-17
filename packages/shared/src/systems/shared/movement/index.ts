@@ -10,3 +10,6 @@ export * from "./ObjectPools";
 export * from "./ChasePathfinding";
 export * from "./PathPersistenceManager";
 export * from "./WanderBehavior";
+export * from "./EntityOccupancyMap";
+export * from "./CollisionFlags";
+export * from "./CollisionMatrix";

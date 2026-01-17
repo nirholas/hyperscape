@@ -69,7 +69,9 @@ import { PlayerIdMapper } from "../../../utils/PlayerIdMapper";
 import type { DatabaseSystem } from "../../../types/systems/system-interfaces";
 import * as THREE from "three";
 import { EatDelayManager } from "./EatDelayManager";
+import { BuryDelayManager } from "./BuryDelayManager";
 import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
+import { Skill } from "./SkillsSystem";
 import type { CombatSystem } from "../combat/CombatSystem";
 
 /**
@@ -92,6 +94,9 @@ export class PlayerSystem extends SystemBase {
 
   // Eat delay tracking (OSRS-accurate 3-tick cooldown)
   private eatDelayManager = new EatDelayManager();
+
+  // Bury delay tracking (OSRS-accurate 2-tick cooldown)
+  private buryDelayManager = new BuryDelayManager();
 
   // Player spawn tracking (merged from PlayerSpawnSystem)
   private spawnedPlayers = new Map<string, PlayerSpawnData>();
@@ -959,14 +964,26 @@ export class PlayerSystem extends SystemBase {
       return;
     }
 
-    // Only process consumables
+    // Get the full item data first
+    const itemData = getItem(data.itemId);
+    if (!itemData) {
+      return;
+    }
+
+    // === BONE BURYING (Prayer XP) ===
+    // Check for bones before consumables - bones have prayerXp property
+    if (itemData.prayerXp && itemData.prayerXp > 0) {
+      this.handleBoneBury(data.playerId, data.slot, itemData);
+      return;
+    }
+
+    // Only process consumables for food eating
     if (data.itemData.type !== "consumable" && data.itemData.type !== "food") {
       return;
     }
 
-    // Get the full item data to check for healing properties
-    const itemData = getItem(data.itemId);
-    if (!itemData || !itemData.healAmount || itemData.healAmount <= 0) {
+    // Check for healing properties
+    if (!itemData.healAmount || itemData.healAmount <= 0) {
       return;
     }
 
@@ -1044,6 +1061,99 @@ export class PlayerSystem extends SystemBase {
       );
     }
     // If not on cooldown, do nothing (OSRS-accurate behavior)
+  }
+
+  /**
+   * Handle bone burying for prayer XP (OSRS-accurate)
+   *
+   * OSRS Mechanics:
+   * - 2-tick (1.2s) delay between burials
+   * - XP granted immediately upon bury
+   * - Some bones require minimum prayer level
+   * - Message: "You bury the bones."
+   *
+   * @see https://oldschool.runescape.wiki/w/Bones
+   */
+  private handleBoneBury(
+    playerId: string,
+    slot: number,
+    itemData: {
+      id: string;
+      name: string;
+      prayerXp?: number;
+      buryLevelRequired?: number;
+    },
+  ): void {
+    const currentTick = this.world.currentTick ?? 0;
+
+    // Check bury delay (2-tick cooldown)
+    if (!this.buryDelayManager.canBury(playerId, currentTick)) {
+      this.emitTypedEvent(EventType.UI_MESSAGE, {
+        playerId,
+        message: "You are already burying bones.",
+        type: "warning" as const,
+      });
+      return;
+    }
+
+    // Check prayer level requirement (if any)
+    if (itemData.buryLevelRequired && itemData.buryLevelRequired > 1) {
+      const prayerLevel = this.getPrayerLevel(playerId);
+      if (prayerLevel < itemData.buryLevelRequired) {
+        this.emitTypedEvent(EventType.UI_MESSAGE, {
+          playerId,
+          message: `You need level ${itemData.buryLevelRequired} Prayer to bury these bones.`,
+          type: "warning" as const,
+        });
+        return;
+      }
+    }
+
+    // Record bury action (starts cooldown)
+    this.buryDelayManager.recordBury(playerId, currentTick);
+
+    // Remove bones from inventory
+    this.emitTypedEvent(EventType.INVENTORY_REMOVE_ITEM, {
+      playerId,
+      itemId: itemData.id,
+      quantity: 1,
+      slot,
+    });
+
+    // Grant prayer XP
+    const prayerXp = itemData.prayerXp ?? 0;
+    if (prayerXp > 0) {
+      this.emitTypedEvent(EventType.SKILLS_XP_GAINED, {
+        playerId,
+        skill: Skill.PRAYER,
+        amount: prayerXp,
+      });
+    }
+
+    // OSRS-style message
+    this.emitTypedEvent(EventType.UI_MESSAGE, {
+      playerId,
+      message: "You bury the bones.",
+      type: "success" as const,
+    });
+  }
+
+  /**
+   * Get player's current prayer level
+   */
+  private getPrayerLevel(playerId: string): number {
+    const entity = this.entityManager?.getEntity(playerId);
+    if (!entity) return 1;
+
+    const stats = (
+      entity as unknown as {
+        getComponent?: (name: string) => Record<string, unknown> | undefined;
+      }
+    ).getComponent?.("stats");
+    if (!stats?.prayer) return 1;
+
+    const prayerData = stats.prayer as { level?: number };
+    return prayerData.level ?? 1;
   }
 
   async updatePlayerPosition(

@@ -20,6 +20,7 @@
   ],
   "scripts": {
     "dev": "bun scripts/dev.mjs",
+    "extract-bounds": "bun scripts/extract-model-bounds.ts",
     "build": "bun scripts/build-server.mjs",
     "start": "bun dist/index.js",
     "test": "vitest run --passWithNoTests",

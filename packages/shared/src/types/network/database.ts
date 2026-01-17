@@ -47,6 +47,11 @@ export interface PlayerRow {
   defenseXp: number;
   constitutionXp: number;
   rangedXp: number;
+  prayerLevel: number;
+  prayerXp: number;
+  prayerPoints: number;
+  prayerMaxPoints: number;
+  activePrayers: string; // JSON array of prayer IDs
   health: number;
   maxHealth: number;
   coins: number;

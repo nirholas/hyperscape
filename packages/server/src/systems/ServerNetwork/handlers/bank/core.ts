@@ -17,6 +17,7 @@ import {
   canBeNoted,
   isNotedItemId,
   getBaseItemId,
+  getItem,
 } from "@hyperscape/shared";
 import type { ServerSocket } from "../../../../shared/types";
 import { BankRepository } from "../../../../database/repositories/BankRepository";
@@ -45,8 +46,8 @@ import {
   MAX_BANK_SLOTS,
 } from "./utils";
 
-// Import coin handlers for the special case redirects
-import { handleBankDepositCoins, handleBankWithdrawCoins } from "./coins";
+// Import coin handler for bank withdraw redirect (coins go to money pouch, RS3-style)
+import { handleBankWithdrawCoins } from "./coins";
 
 /**
  * Handle bank open request
@@ -142,11 +143,9 @@ export async function handleBankDeposit(
   },
   world: World,
 ): Promise<void> {
-  // SPECIAL CASE: Coins should come from money pouch (CoinPouchSystem), not inventory
-  // This handles clicking on coins in inventory while bank is open
-  if (data.itemId === "coins") {
-    return handleBankDepositCoins(socket, { amount: data.quantity }, world);
-  }
+  // NOTE: Coins are handled as regular stackable inventory items here.
+  // This allows physical coins in inventory to be deposited to bank.
+  // For depositing from money pouch, use bankDepositCoins packet instead.
 
   // Step 1: Common validation (player, rate limit, distance, db)
   const baseResult = validateTransactionRequest(
@@ -415,10 +414,16 @@ export async function handleBankWithdraw(
     );
   }
 
-  // Limit single withdrawal to max inventory size (unless withdrawing as note - all fit in 1 slot)
-  const withdrawQty = withdrawAsNote
-    ? data.quantity // Notes stack, so no slot limit
-    : Math.min(data.quantity, MAX_INVENTORY_SLOTS);
+  // Check if base item is stackable (like fishing bait, arrows, runes)
+  const itemData = getItem(data.itemId);
+  const isBaseStackable = itemData?.stackable === true;
+
+  // Limit single withdrawal to max inventory size for non-stackable items only
+  // Stackable items (notes or base stackable) all fit in 1 slot, so no limit needed
+  const withdrawQty =
+    withdrawAsNote || isBaseStackable
+      ? data.quantity // Stackable items have no slot limit
+      : Math.min(data.quantity, MAX_INVENTORY_SLOTS);
 
   // Step 3: Execute transaction with inventory lock (prevents race conditions)
   // The executeInventoryTransaction wrapper handles:
@@ -457,21 +462,28 @@ export async function handleBankWithdraw(
           }
         }
 
-        // BANK NOTE SYSTEM: Notes only need 1 slot (stackable)
-        // Base items need 1 slot per item
-        const slotsNeeded = withdrawAsNote ? 1 : withdrawQty;
+        // STACKING RULES (isBaseStackable already calculated above):
+        // - Notes: 1 slot (always stackable)
+        // - Stackable base items: 1 slot (stacks like notes)
+        // - Non-stackable items: 1 slot per item
+        const slotsNeeded = withdrawAsNote || isBaseStackable ? 1 : withdrawQty;
 
         if (freeSlots.length === 0) {
           throw new Error("INVENTORY_FULL");
         }
 
-        if (freeSlots.length < slotsNeeded && !withdrawAsNote) {
-          // For base items, limit to available slots
+        if (
+          freeSlots.length < slotsNeeded &&
+          !withdrawAsNote &&
+          !isBaseStackable
+        ) {
+          // For non-stackable base items, limit to available slots
         }
 
-        const actualWithdrawQty = withdrawAsNote
-          ? withdrawQty // Notes can withdraw any amount (1 slot)
-          : Math.min(withdrawQty, freeSlots.length);
+        const actualWithdrawQty =
+          withdrawAsNote || isBaseStackable
+            ? withdrawQty // Stackable items can withdraw any amount (1 slot)
+            : Math.min(withdrawQty, freeSlots.length);
 
         // Lock and find bank item
         const bankResult = await tx.execute(
@@ -602,8 +614,48 @@ export async function handleBankWithdraw(
               itemId: notedItem.id,
             });
           }
+        } else if (isBaseStackable) {
+          // STACKABLE BASE ITEM: Single stack (like fishing bait, arrows, runes)
+          // Check for existing stack in inventory
+          const existingStack = await tx.execute(
+            sql`SELECT id, quantity, "slotIndex" FROM inventory
+                WHERE "playerId" = ${ctx.playerId} AND "itemId" = ${data.itemId}
+                FOR UPDATE`,
+          );
+
+          if (existingStack.rows.length > 0) {
+            // Add to existing stack
+            const existingRow = existingStack.rows[0] as {
+              id: number;
+              quantity: number;
+              slotIndex: number;
+            };
+            await tx.execute(
+              sql`UPDATE inventory SET quantity = quantity + ${finalWithdrawQty}
+                  WHERE id = ${existingRow.id}`,
+            );
+            addedSlots.push({
+              slot: existingRow.slotIndex,
+              quantity: finalWithdrawQty,
+              itemId: data.itemId,
+            });
+          } else {
+            // Create new stack
+            await tx.insert(schema.inventory).values({
+              playerId: ctx.playerId,
+              itemId: data.itemId,
+              quantity: finalWithdrawQty,
+              slotIndex: freeSlots[0],
+              metadata: null,
+            });
+            addedSlots.push({
+              slot: freeSlots[0],
+              quantity: finalWithdrawQty,
+              itemId: data.itemId,
+            });
+          }
         } else {
-          // BASE ITEM WITHDRAWAL: One item per slot (qty=1 each)
+          // NON-STACKABLE ITEM: One item per slot (qty=1 each)
           // BULK INSERT: Batch all items into single query for performance
           const inventoryItems: Array<{
             playerId: string;

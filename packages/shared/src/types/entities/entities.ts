@@ -17,7 +17,10 @@ import type {
   PrayerComponent,
   StatsComponent,
 } from "../core";
-import type { ResourceFootprint } from "../game/resource-processing-types";
+import type {
+  ResourceFootprint,
+  FootprintSpec,
+} from "../game/resource-processing-types";
 import type { TileCoord } from "../../systems/shared/movement/TileSystem";
 
 // Enums for better type safety instead of string literals
@@ -34,6 +37,7 @@ export enum EntityType {
   RANGE = "range",
   FURNACE = "furnace",
   ANVIL = "anvil",
+  ALTAR = "altar",
 }
 
 export enum InteractionType {
@@ -51,6 +55,7 @@ export enum InteractionType {
   FIREMAKING = "firemaking",
   SMELTING = "smelting",
   SMITHING = "smithing",
+  ALTAR = "altar",
 }
 
 export enum PlayerCombatStyle {
@@ -431,6 +436,8 @@ export interface BankEntityConfig extends EntityConfig<BaseEntityProperties> {
   properties: BaseEntityProperties & {
     bankId: string;
   };
+  /** Collision footprint - predefined ("standard", "large") or custom { width, depth } */
+  footprint?: FootprintSpec;
 }
 
 // Spawn data interfaces for entity creation

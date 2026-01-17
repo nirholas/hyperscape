@@ -6,6 +6,11 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const rootDir = path.join(__dirname, '../')
 
+// Note: Model bounds extraction is handled by turbo task `extract-bounds`
+// which runs before this build script with proper caching based on GLB file changes.
+// See turbo.json: server#extract-bounds
+
+// Build the server
 const serverCtx = await esbuild.context({
   entryPoints: ['src/index.ts'],
   outfile: 'dist/index.js',

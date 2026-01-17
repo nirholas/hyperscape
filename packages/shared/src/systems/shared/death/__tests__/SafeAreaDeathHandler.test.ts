@@ -22,6 +22,9 @@ interface MockWorld {
   isServer: boolean;
   currentTick: number;
   getSystem: Mock;
+  entities: {
+    players: Map<string, { playerName?: string; name?: string }>;
+  };
 }
 
 interface MockGroundItemSystem {
@@ -45,6 +48,9 @@ function createMockWorld(isServer = true, currentTick = 1000): MockWorld {
     isServer,
     currentTick,
     getSystem: vi.fn(),
+    entities: {
+      players: new Map<string, { playerName?: string; name?: string }>(),
+    },
   };
 }
 
