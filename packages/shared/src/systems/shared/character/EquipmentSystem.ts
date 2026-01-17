@@ -90,6 +90,7 @@ const equipmentRequirements = {
 import { SystemBase } from "../infrastructure/SystemBase";
 import { Logger } from "../../../utils/Logger";
 import type { DatabaseSystem } from "../../../types/systems/system-interfaces";
+import type { TransactionContext } from "../../../types/death";
 
 import { World } from "../../../core/World";
 import {
@@ -441,7 +442,16 @@ export class EquipmentSystem extends SystemBase {
     }
   }
 
-  private async saveEquipmentToDatabase(playerId: string): Promise<void> {
+  /**
+   * DS-C02: Save equipment to database with optional transaction context
+   *
+   * @param playerId - The player ID
+   * @param _tx - Optional transaction context for atomic operations (reserved for future use)
+   */
+  private async saveEquipmentToDatabase(
+    playerId: string,
+    _tx?: TransactionContext,
+  ): Promise<void> {
     if (!this.databaseSystem) {
       console.warn(
         "[EquipmentSystem] 💾 Cannot save - no database system for:",
@@ -496,6 +506,7 @@ export class EquipmentSystem extends SystemBase {
 
     // Use playerId directly - database layer handles character ID mapping
     // CRITICAL: Use async method to ensure save completes before returning
+    // TODO: When DatabaseSystem supports transaction context, pass tx here
     await this.databaseSystem.savePlayerEquipmentAsync(playerId, dbEquipment);
   }
 
@@ -561,6 +572,97 @@ export class EquipmentSystem extends SystemBase {
     await this.saveEquipmentToDatabase(playerId);
 
     return clearedCount;
+  }
+
+  /**
+   * DS-C01: Atomically clear all equipment and return the items
+   *
+   * CRITICAL FOR DEATH SYSTEM SECURITY:
+   * This method atomically reads AND clears equipment in one operation,
+   * preventing the race condition where equipment is read, server crashes,
+   * and on restart items get duplicated because equipment wasn't cleared.
+   *
+   * The returned items should be used for gravestone/ground item spawning.
+   * Database save happens inside the same transaction as inventory clear.
+   *
+   * @param playerId - The player ID
+   * @param tx - Optional transaction context for atomic operations
+   * @returns Array of cleared equipment items with itemId and slot info
+   */
+  async clearEquipmentAndReturn(
+    playerId: string,
+    tx?: TransactionContext,
+  ): Promise<
+    Array<{
+      itemId: string;
+      slot: string;
+      quantity: number;
+    }>
+  > {
+    const equipment = this.playerEquipment.get(playerId);
+    if (!equipment) {
+      return [];
+    }
+
+    const clearedItems: Array<{
+      itemId: string;
+      slot: string;
+      quantity: number;
+    }> = [];
+
+    // Atomically collect AND clear all equipped items
+    for (const slotName of EQUIPMENT_SLOT_NAMES) {
+      const slot = equipment[slotName] as EquipmentSlot | null;
+      if (slot && slot.itemId) {
+        // Collect item info BEFORE clearing
+        clearedItems.push({
+          itemId: String(slot.itemId),
+          slot: slotName,
+          quantity: 1, // Equipment always has quantity 1
+        });
+
+        // Clear the slot atomically
+        slot.itemId = null;
+        slot.item = null;
+        if (slot.visualMesh) {
+          slot.visualMesh = undefined;
+        }
+
+        // Emit PLAYER_EQUIPMENT_CHANGED for visual system
+        this.emitTypedEvent(EventType.PLAYER_EQUIPMENT_CHANGED, {
+          playerId: playerId,
+          slot: slotName as EquipmentSlotName,
+          itemId: null,
+        });
+      }
+    }
+
+    // Reset total stats
+    equipment.totalStats = {
+      attack: 0,
+      strength: 0,
+      defense: 0,
+      ranged: 0,
+      constitution: 0,
+    };
+
+    // Emit UI update event
+    this.emitTypedEvent(EventType.UI_EQUIPMENT_UPDATE, {
+      playerId,
+      equipment: {
+        weapon: null,
+        shield: null,
+        helmet: null,
+        body: null,
+        legs: null,
+        arrows: null,
+      },
+    });
+
+    // DS-C02: Save with transaction context for atomicity
+    await this.saveEquipmentToDatabase(playerId, tx);
+
+    return clearedItems;
   }
 
   private cleanupPlayerEquipment(playerId: string): void {

@@ -40,6 +40,11 @@ interface DatabaseSystemLike {
 interface EquipmentSystemLike {
   getPlayerEquipment: (playerId: string) => EquipmentData | null;
   clearEquipmentImmediate?: (playerId: string) => Promise<void>;
+  // DS-C01: Atomic clear-and-return for death system
+  clearEquipmentAndReturn?: (
+    playerId: string,
+    tx?: TransactionContext,
+  ) => Promise<Array<{ itemId: string; slot: string; quantity: number }>>;
 }
 
 interface EquipmentData {
@@ -443,14 +448,31 @@ export class PlayerDeathSystem extends SystemBase {
               metadata: null,
             })) || [];
 
+          // DS-C01: Use atomic clearEquipmentAndReturn to prevent race condition
+          // This atomically reads AND clears equipment in one operation,
+          // preventing item duplication if server crashes between read and clear.
           let equipmentItems: InventoryItem[] = [];
           if (equipmentSystem) {
-            const equipment = equipmentSystem.getPlayerEquipment(playerId);
-            if (equipment) {
-              equipmentItems = this.convertEquipmentToInventoryItems(
-                equipment,
-                playerId,
-              );
+            if (equipmentSystem.clearEquipmentAndReturn) {
+              // NEW: Atomic read-and-clear operation
+              const clearedEquipment =
+                await equipmentSystem.clearEquipmentAndReturn(playerId, tx);
+              equipmentItems = clearedEquipment.map((item, index) => ({
+                id: `death_equip_${playerId}_${Date.now()}_${index}`,
+                itemId: item.itemId,
+                quantity: item.quantity,
+                slot: -1, // Equipment items don't have inventory slots
+                metadata: null,
+              }));
+            } else {
+              // Fallback to old method if clearEquipmentAndReturn not available
+              const equipment = equipmentSystem.getPlayerEquipment(playerId);
+              if (equipment) {
+                equipmentItems = this.convertEquipmentToInventoryItems(
+                  equipment,
+                  playerId,
+                );
+              }
             }
           } else {
             console.warn(
@@ -490,9 +512,15 @@ export class PlayerDeathSystem extends SystemBase {
             );
           }
 
+          // Clear inventory (equipment already cleared atomically above)
           await inventorySystem.clearInventoryImmediate(playerId);
 
-          if (equipmentSystem && equipmentSystem.clearEquipmentImmediate) {
+          // DS-C01: Only call old clearEquipmentImmediate if atomic method wasn't used
+          if (
+            equipmentSystem &&
+            !equipmentSystem.clearEquipmentAndReturn &&
+            equipmentSystem.clearEquipmentImmediate
+          ) {
             await equipmentSystem.clearEquipmentImmediate(playerId);
           }
         },

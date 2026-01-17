@@ -356,10 +356,24 @@ export class GroundItemSystem extends SystemBase {
   /**
    * Spawn multiple ground items (from player death or mob loot)
    */
+  /**
+   * Spawn multiple ground items at a position (batch operation)
+   *
+   * DS-C03: Implements atomic batch spawn with rollback on failure.
+   * If ANY item fails to spawn, ALL previously spawned items are cleaned up
+   * and an empty array is returned (or error thrown if throwOnFailure is true).
+   *
+   * @param items - Array of inventory items to spawn
+   * @param position - Base position for spawning
+   * @param options - Ground item options (despawn time, scatter, etc.)
+   * @param throwOnFailure - If true, throw error on any failure (for transaction rollback)
+   * @returns Array of spawned entity IDs (empty if any spawn failed)
+   */
   async spawnGroundItems(
     items: InventoryItem[],
     position: { x: number; y: number; z: number },
     options: GroundItemOptions,
+    throwOnFailure = false,
   ): Promise<string[]> {
     // CRITICAL: Server authority check - prevent client from mass-spawning items
     if (!this.world.isServer) {
@@ -370,6 +384,8 @@ export class GroundItemSystem extends SystemBase {
     }
 
     const entityIds: string[] = [];
+    let failedIndex = -1;
+    let failedItem: InventoryItem | null = null;
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -396,7 +412,33 @@ export class GroundItemSystem extends SystemBase {
 
       if (entityId) {
         entityIds.push(entityId);
+      } else {
+        // DS-C03: Track failure for rollback
+        failedIndex = i;
+        failedItem = item;
+        break; // Stop spawning on first failure
       }
+    }
+
+    // DS-C03: Rollback all spawned items if ANY spawn failed
+    if (failedIndex >= 0) {
+      console.error(
+        `[GroundItemSystem] Batch spawn failed at index ${failedIndex} (${failedItem?.itemId}). Rolling back ${entityIds.length} spawned items.`,
+      );
+
+      // Clean up all previously spawned items
+      for (const entityId of entityIds) {
+        this.removeGroundItem(entityId);
+      }
+
+      // DS-C04: Throw error for transaction rollback if requested
+      if (throwOnFailure) {
+        throw new Error(
+          `Failed to spawn ground item ${failedItem?.itemId} at index ${failedIndex}`,
+        );
+      }
+
+      return []; // Return empty to indicate failure
     }
 
     console.log(
@@ -404,6 +446,28 @@ export class GroundItemSystem extends SystemBase {
     );
 
     return entityIds;
+  }
+
+  /**
+   * DS-C04: Rollback spawned ground items (for transaction failure cleanup)
+   *
+   * Removes all ground items with the given IDs. Call this if a transaction
+   * fails after ground items were already spawned.
+   *
+   * @param entityIds - Array of entity IDs to remove
+   * @returns Number of items successfully removed
+   */
+  rollbackGroundItems(entityIds: string[]): number {
+    let removedCount = 0;
+    for (const entityId of entityIds) {
+      if (this.removeGroundItem(entityId)) {
+        removedCount++;
+      }
+    }
+    console.log(
+      `[GroundItemSystem] Rolled back ${removedCount}/${entityIds.length} ground items`,
+    );
+    return removedCount;
   }
 
   /**
