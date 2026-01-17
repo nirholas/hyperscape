@@ -49,6 +49,20 @@ export class GroundItemSystem extends SystemBase {
   /** Pre-allocated buffer for tick processing (zero-allocation hot path) */
   private readonly _expiredItemsBuffer: string[] = [];
 
+  /**
+   * DS-C05: Pickup locks to prevent concurrent pickup race condition
+   * Key: entityId, Value: playerId who is currently picking up
+   * Lock is held for the duration of the pickup operation
+   */
+  private pickupLocks = new Map<string, string>();
+
+  /**
+   * DS-C05: Pickup lock timeout (5 seconds) to prevent stuck locks
+   * If a pickup doesn't complete within this time, the lock is auto-released
+   */
+  private pickupLockTimestamps = new Map<string, number>();
+  private readonly PICKUP_LOCK_TIMEOUT_MS = 5000;
+
   /** OSRS: Maximum items per tile */
   private readonly MAX_PILE_SIZE = 128;
 
@@ -523,6 +537,10 @@ export class GroundItemSystem extends SystemBase {
    * Handles both tracked items (spawned via GroundItemSystem) and untracked items
    */
   removeGroundItem(itemId: string): boolean {
+    // DS-C05: Clear any pickup lock on this item
+    this.pickupLocks.delete(itemId);
+    this.pickupLockTimestamps.delete(itemId);
+
     const itemData = this.groundItems.get(itemId);
 
     if (itemData) {
@@ -640,6 +658,9 @@ export class GroundItemSystem extends SystemBase {
    *
    * Returns true for untracked items (world spawns from ItemSpawnerSystem)
    * since they have no loot protection to enforce.
+   *
+   * NOTE: This only checks loot protection. Use tryAcquirePickupLock() to also
+   * prevent concurrent pickup race conditions (DS-C05).
    */
   canPickup(itemId: string, playerId: string, currentTick: number): boolean {
     const itemData = this.groundItems.get(itemId);
@@ -656,6 +677,100 @@ export class GroundItemSystem extends SystemBase {
 
     // Only the dropper/killer can pick up during protection
     return itemData.droppedBy === playerId;
+  }
+
+  /**
+   * DS-C05: Try to acquire a pickup lock for an item
+   *
+   * This prevents the concurrent pickup race condition where two players
+   * both check canPickup() → true and then both pick up the same item.
+   *
+   * The lock is atomic: if another player already has the lock, this returns false.
+   *
+   * @param itemId - Ground item entity ID
+   * @param playerId - Player attempting to pick up
+   * @param currentTick - Current server tick (for loot protection check)
+   * @returns true if lock acquired (caller can proceed with pickup), false if locked by another player
+   */
+  tryAcquirePickupLock(
+    itemId: string,
+    playerId: string,
+    currentTick: number,
+  ): boolean {
+    // First check loot protection
+    if (!this.canPickup(itemId, playerId, currentTick)) {
+      return false;
+    }
+
+    // Clean up any stale locks (timed out)
+    this.cleanupStaleLocks();
+
+    // Check if already locked by another player
+    const existingLock = this.pickupLocks.get(itemId);
+    if (existingLock && existingLock !== playerId) {
+      console.log(
+        `[GroundItemSystem] Pickup lock denied for ${playerId} on ${itemId} - locked by ${existingLock}`,
+      );
+      return false;
+    }
+
+    // Acquire lock
+    this.pickupLocks.set(itemId, playerId);
+    this.pickupLockTimestamps.set(itemId, Date.now());
+
+    console.log(
+      `[GroundItemSystem] Pickup lock acquired: ${playerId} → ${itemId}`,
+    );
+
+    return true;
+  }
+
+  /**
+   * DS-C05: Release a pickup lock
+   *
+   * Call this after pickup completes (success or failure) to allow
+   * other players to attempt pickup.
+   *
+   * @param itemId - Ground item entity ID
+   * @param playerId - Player who held the lock (for validation)
+   */
+  releasePickupLock(itemId: string, playerId: string): void {
+    const existingLock = this.pickupLocks.get(itemId);
+
+    // Only release if the caller owns the lock
+    if (existingLock === playerId) {
+      this.pickupLocks.delete(itemId);
+      this.pickupLockTimestamps.delete(itemId);
+      console.log(
+        `[GroundItemSystem] Pickup lock released: ${playerId} → ${itemId}`,
+      );
+    }
+  }
+
+  /**
+   * DS-C05: Check if an item is currently locked for pickup by another player
+   */
+  isPickupLocked(itemId: string, playerId: string): boolean {
+    const existingLock = this.pickupLocks.get(itemId);
+    return !!existingLock && existingLock !== playerId;
+  }
+
+  /**
+   * DS-C05: Clean up stale pickup locks (timed out)
+   */
+  private cleanupStaleLocks(): void {
+    const now = Date.now();
+
+    for (const [itemId, timestamp] of this.pickupLockTimestamps) {
+      if (now - timestamp > this.PICKUP_LOCK_TIMEOUT_MS) {
+        const playerId = this.pickupLocks.get(itemId);
+        console.warn(
+          `[GroundItemSystem] Pickup lock timed out: ${playerId} → ${itemId}`,
+        );
+        this.pickupLocks.delete(itemId);
+        this.pickupLockTimestamps.delete(itemId);
+      }
+    }
   }
 
   /**
@@ -690,6 +805,10 @@ export class GroundItemSystem extends SystemBase {
     }
     this.groundItems.clear();
     this.groundItemPiles.clear();
+
+    // DS-C05: Clear all pickup locks
+    this.pickupLocks.clear();
+    this.pickupLockTimestamps.clear();
 
     super.destroy();
   }

@@ -323,6 +323,15 @@ export class ItemEntity extends InteractableEntity {
   }
 
   private checkDespawn(): void {
+    // DS-H05: Skip native despawn for items managed by GroundItemSystem
+    // GroundItemSystem uses tick-based despawn which is more accurate (OSRS-style)
+    // Only run native despawn for world spawn items (from ItemSpawnerSystem)
+    if (this.id.startsWith("ground_item_")) {
+      // GroundItemSystem handles despawn via processTick()
+      return;
+    }
+
+    // Native time-based despawn for world spawn items
     // Items despawn after 10 minutes if not picked up
     const despawnTime =
       this.getProperty("spawnTime", this.world.getTime()) + 10 * 60 * 1000;

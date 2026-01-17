@@ -20,7 +20,16 @@ import type { WorldArea } from "../../../types/core/core";
 export class ZoneDetectionSystem extends SystemBase {
   // Cache zone lookups (key: "x,z", value: ZoneProperties)
   private zoneCache = new Map<string, ZoneProperties>();
-  private readonly CACHE_GRID_SIZE = 10; // Cache in 10x10 chunks
+  // DS-C09: Reduced from 10 to 2 to prevent boundary misclassification
+  // Smaller grid = more cache misses but correct results near boundaries
+  private readonly CACHE_GRID_SIZE = 2;
+  // DS-C09: Track zone boundaries for cache invalidation near edges
+  private zoneBoundaries: Array<{
+    minX: number;
+    maxX: number;
+    minZ: number;
+    maxZ: number;
+  }> = [];
 
   constructor(world: World) {
     super(world, {
@@ -34,8 +43,62 @@ export class ZoneDetectionSystem extends SystemBase {
   }
 
   async init(): Promise<void> {
+    // DS-C09: Build zone boundaries list for cache invalidation
+    this.buildBoundariesList();
     // Pre-warm cache for known areas
     this.prewarmCache();
+  }
+
+  /**
+   * DS-C09: Build list of zone boundaries for cache proximity checking
+   */
+  private buildBoundariesList(): void {
+    this.zoneBoundaries = [];
+
+    for (const area of Object.values(ALL_WORLD_AREAS) as WorldArea[]) {
+      if (area.bounds) {
+        this.zoneBoundaries.push({
+          minX: area.bounds.minX,
+          maxX: area.bounds.maxX,
+          minZ: area.bounds.minZ,
+          maxZ: area.bounds.maxZ,
+        });
+      }
+    }
+
+    console.log(
+      `[ZoneDetectionSystem] Loaded ${this.zoneBoundaries.length} zone boundaries`,
+    );
+  }
+
+  /**
+   * DS-C09: Check if position is near any zone boundary
+   * If so, we should skip caching to avoid misclassification
+   */
+  private isNearBoundary(x: number, z: number): boolean {
+    const margin = this.CACHE_GRID_SIZE + 1; // Extra margin for safety
+
+    for (const bounds of this.zoneBoundaries) {
+      // Check if within margin of any boundary edge
+      const nearMinX = Math.abs(x - bounds.minX) <= margin;
+      const nearMaxX = Math.abs(x - bounds.maxX) <= margin;
+      const nearMinZ = Math.abs(z - bounds.minZ) <= margin;
+      const nearMaxZ = Math.abs(z - bounds.maxZ) <= margin;
+
+      // Only count as near if we're actually potentially inside or just outside the zone
+      const inXRange = x >= bounds.minX - margin && x <= bounds.maxX + margin;
+      const inZRange = z >= bounds.minZ - margin && z <= bounds.maxZ + margin;
+
+      if (
+        inXRange &&
+        inZRange &&
+        (nearMinX || nearMaxX || nearMinZ || nearMaxZ)
+      ) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /**
@@ -72,22 +135,31 @@ export class ZoneDetectionSystem extends SystemBase {
 
   /**
    * Get complete zone properties (cached)
+   * DS-C09: Skip caching near zone boundaries to prevent misclassification
    */
   getZoneProperties(position: { x: number; z: number }): ZoneProperties {
-    // Check cache first
-    const cacheKey = this.getCacheKey(position.x, position.z);
-    const cached = this.zoneCache.get(cacheKey);
-    if (cached) {
-      return cached;
+    // DS-C09: Don't cache near boundaries to prevent misclassification
+    const nearBoundary = this.isNearBoundary(position.x, position.z);
+
+    if (!nearBoundary) {
+      // Check cache first (safe to use cache away from boundaries)
+      const cacheKey = this.getCacheKey(position.x, position.z);
+      const cached = this.zoneCache.get(cacheKey);
+      if (cached) {
+        return cached;
+      }
+
+      // Lookup zone
+      const props = this.lookupZoneProperties(position);
+
+      // Cache result (only if not near boundary)
+      this.zoneCache.set(cacheKey, props);
+
+      return props;
     }
 
-    // Lookup zone
-    const props = this.lookupZoneProperties(position);
-
-    // Cache result
-    this.zoneCache.set(cacheKey, props);
-
-    return props;
+    // Near boundary: always do fresh lookup, don't cache
+    return this.lookupZoneProperties(position);
   }
 
   /**
