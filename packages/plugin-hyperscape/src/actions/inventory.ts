@@ -21,6 +21,12 @@ import type {
 // Max distance to pick up items
 const MAX_PICKUP_DISTANCE = 4;
 
+// Max items to drop in a single "drop all" operation (prevents memory leak / DoS)
+const MAX_DROP_ALL_ITEMS = 50;
+
+// Delay between drops in milliseconds
+const DROP_DELAY_MS = 150;
+
 /**
  * Calculate 2D distance between player and entity
  */
@@ -337,6 +343,10 @@ export const dropItemAction: Action = {
         return { success: false };
       }
 
+      // Helper to escape regex special characters for word boundary matching
+      const escapeRegexDrop = (str: string) =>
+        str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
       // Check if user wants to drop ALL items
       const isDropAll =
         content.includes("all") ||
@@ -356,16 +366,26 @@ export const dropItemAction: Action = {
 
         if (isDropAllOfType) {
           // "drop all logs" - find all items matching a specific type
+          // Uses word boundary matching to prevent false matches
           itemsToDrop = validItems.filter((i) => {
             const itemName = getItemName(i)?.toLowerCase();
             if (!itemName) return false;
-            // Check if message contains the item name
-            if (content.includes(itemName)) return true;
+            // Check if message contains the item name (with word boundaries)
+            const nameRegex = new RegExp(
+              `\\b${escapeRegexDrop(itemName)}\\b`,
+              "i",
+            );
+            if (nameRegex.test(content)) return true;
             // Also check individual words from item name
             const itemWords = itemName.split(/\s+/);
-            return itemWords.some(
-              (word) => word.length > 3 && content.includes(word),
-            );
+            return itemWords.some((word) => {
+              if (word.length <= 3) return false;
+              const wordRegex = new RegExp(
+                `\\b${escapeRegexDrop(word)}\\b`,
+                "i",
+              );
+              return wordRegex.test(content);
+            });
           });
 
           if (itemsToDrop.length === 0) {
@@ -384,52 +404,89 @@ export const dropItemAction: Action = {
           itemsToDrop = validItems;
         }
 
+        // Limit items to prevent memory leak / DoS
+        const limitedItems = itemsToDrop.slice(0, MAX_DROP_ALL_ITEMS);
+        const wasLimited = itemsToDrop.length > MAX_DROP_ALL_ITEMS;
+
         logger.info(
-          `[DROP_ITEM] Dropping ${itemsToDrop.length} items (drop all)`,
+          `[DROP_ITEM] Dropping ${limitedItems.length} items (drop all)${wasLimited ? ` - limited from ${itemsToDrop.length}` : ""}`,
         );
 
         const droppedNames: string[] = [];
-        for (const item of itemsToDrop) {
+        let failedCount = 0;
+        const MAX_CONSECUTIVE_FAILURES = 3; // Stop if too many failures in a row
+        let consecutiveFailures = 0;
+
+        for (const item of limitedItems) {
+          // Early termination on too many consecutive failures
+          if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            logger.warn(
+              `[DROP_ITEM] Stopping drop-all after ${MAX_CONSECUTIVE_FAILURES} consecutive failures`,
+            );
+            break;
+          }
+
           const itemId = getItemId(item);
           const itemName = getItemName(item);
           const quantity = getItemQuantity(item);
           const slot = getItemSlot(item);
 
           if (itemId) {
-            logger.info(
-              `[DROP_ITEM] Dropping ${itemName} (id=${itemId}, qty=${quantity}, slot=${slot})`,
-            );
-            await service.executeDropItem(itemId, quantity, slot);
-            droppedNames.push(itemName || itemId);
+            try {
+              logger.info(
+                `[DROP_ITEM] Dropping ${itemName} (id=${itemId}, qty=${quantity}, slot=${slot})`,
+              );
+              await service.executeDropItem(itemId, quantity, slot);
+              droppedNames.push(itemName || itemId);
+              consecutiveFailures = 0; // Reset on success
+            } catch (dropError) {
+              logger.warn(
+                `[DROP_ITEM] Failed to drop ${itemName}: ${dropError instanceof Error ? dropError.message : String(dropError)}`,
+              );
+              failedCount++;
+              consecutiveFailures++;
+            }
             // Small delay between drops to avoid server issues
-            await new Promise((resolve) => setTimeout(resolve, 150));
+            await new Promise((resolve) => setTimeout(resolve, DROP_DELAY_MS));
           }
         }
 
-        const summary =
+        let summary =
           droppedNames.length <= 3
             ? droppedNames.join(", ")
             : `${droppedNames.length} items`;
 
+        // Add info about failures or limiting
+        if (failedCount > 0) {
+          summary += ` (${failedCount} failed)`;
+        }
+        if (wasLimited) {
+          summary += ` (limited to ${MAX_DROP_ALL_ITEMS})`;
+        }
+
         await callback?.({ text: `Dropped ${summary}`, action: "DROP_ITEM" });
         logger.info(
-          `[DROP_ITEM] Dropped ${droppedNames.length} items: ${droppedNames.join(", ")}`,
+          `[DROP_ITEM] Dropped ${droppedNames.length} items, ${failedCount} failed: ${droppedNames.join(", ")}`,
         );
 
         return { success: true, text: `Dropped ${summary}` };
       }
 
       // Single item drop - try to find item matching the user's description
-      let matchedItem = validItems.find((i) => {
+      // Uses word boundary matching to prevent false matches
+      const matchedItem = validItems.find((i) => {
         const itemName = getItemName(i)?.toLowerCase();
         if (!itemName) return false;
-        // Check if message contains the item name
-        if (content.includes(itemName)) return true;
+        // Check if message contains the item name (with word boundaries)
+        const nameRegex = new RegExp(`\\b${escapeRegexDrop(itemName)}\\b`, "i");
+        if (nameRegex.test(content)) return true;
         // Also check individual words from item name (e.g., "hatchet" from "Bronze Hatchet")
         const itemWords = itemName.split(/\s+/);
-        return itemWords.some(
-          (word) => word.length > 3 && content.includes(word),
-        );
+        return itemWords.some((word) => {
+          if (word.length <= 3) return false;
+          const wordRegex = new RegExp(`\\b${escapeRegexDrop(word)}\\b`, "i");
+          return wordRegex.test(content);
+        });
       });
 
       if (!matchedItem) {
@@ -598,22 +655,33 @@ export const pickupItemAction: Action = {
 
       // Try to find item matching the user's description using a scoring system
       // Higher score = better match. We prioritize items that match more words from the user's request
+      // Uses word boundary checks to prevent false matches (e.g., "log" in "dialogue")
       const scoreItem = (item: { entity: Entity }) => {
         const itemName = item.entity.name.toLowerCase();
         const itemWords = itemName.split(/\s+/);
         const contentWords = content.split(/\s+/).filter((w) => w.length > 2);
 
-        // Perfect match - item name is exactly in the content
-        if (content.includes(itemName)) return 100;
+        // Perfect match - item name is exactly in the content (with word boundaries)
+        const exactNameRegex = new RegExp(
+          `\\b${escapeRegex(itemName)}\\b`,
+          "i",
+        );
+        if (exactNameRegex.test(content)) return 100;
 
         // Score based on how many item words are in the content
         let score = 0;
         for (const itemWord of itemWords) {
           if (itemWord.length <= 3) continue; // Skip short words like "of", "the"
-          // Check if content contains this word
-          if (content.includes(itemWord)) {
+
+          // Word boundary check - prevents "log" matching in "dialogue"
+          const wordBoundaryRegex = new RegExp(
+            `\\b${escapeRegex(itemWord)}\\b`,
+            "i",
+          );
+          if (wordBoundaryRegex.test(content)) {
             score += 10; // Each matching word adds 10 points
           }
+
           // Also check if any content word matches (exact word match)
           for (const contentWord of contentWords) {
             if (contentWord === itemWord) {
@@ -624,6 +692,10 @@ export const pickupItemAction: Action = {
 
         return score;
       };
+
+      // Helper to escape regex special characters
+      const escapeRegex = (str: string) =>
+        str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
       // Score all items and find the best match
       const scoredItems = itemsWithDistance.map((item) => ({

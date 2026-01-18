@@ -9,6 +9,7 @@
  * - Credentials are tied to specific characterId + userId pairs
  * - JWTs are server-signed and cryptographically secure
  * - Agents are clearly marked with isAgent flag
+ * - Global rate limiting (100 req/min) protects against abuse
  *
  * Note: Dashboard on port 3333 calls ElizaOS API (port 3000) directly.
  * No proxying is needed for localhost development.
@@ -17,6 +18,9 @@
 import type { FastifyInstance } from "fastify";
 import type { World } from "@hyperscape/shared";
 import { createJWT } from "../../shared/utils.js";
+
+// Command acknowledgment delay (ms) - allows plugin to process before response
+const COMMAND_ACK_DELAY_MS = 100;
 
 /**
  * Register agent credential routes
@@ -1352,9 +1356,13 @@ export function registerAgentRoutes(
 
       console.log(`[AgentRoutes] ⏹️ Sent goal stop to ${characterId}`);
 
+      // Brief delay to allow plugin to process the command before responding
+      await new Promise((resolve) => setTimeout(resolve, COMMAND_ACK_DELAY_MS));
+
       return reply.send({
         success: true,
         message: "Goal stopped",
+        acknowledgedAt: Date.now(),
       });
     } catch (error) {
       console.error("[AgentRoutes] ❌ Failed to stop agent goal:", error);
@@ -1447,9 +1455,13 @@ export function registerAgentRoutes(
 
       console.log(`[AgentRoutes] ▶️ Sent goal resume to ${characterId}`);
 
+      // Brief delay to allow plugin to process the command before responding
+      await new Promise((resolve) => setTimeout(resolve, COMMAND_ACK_DELAY_MS));
+
       return reply.send({
         success: true,
         message: "Goals resumed",
+        acknowledgedAt: Date.now(),
       });
     } catch (error) {
       console.error("[AgentRoutes] ❌ Failed to resume agent goals:", error);
@@ -1819,9 +1831,7 @@ export function registerAgentRoutes(
       const dataManager = (
         world as {
           dataManager?: {
-            getItem?: (
-              id: string,
-            ) =>
+            getItem?: (id: string) =>
               | {
                   name?: string;
                   equippable?: boolean;

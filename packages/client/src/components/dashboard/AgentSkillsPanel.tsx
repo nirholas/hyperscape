@@ -3,6 +3,49 @@ import React, { useState, useEffect, useRef } from "react";
 import { Agent } from "../../screens/DashboardScreen";
 import { ChevronDown, ChevronUp, Swords, TrendingUp } from "lucide-react";
 
+// Configuration constants
+const SKILLS_POLL_INTERVAL_MS = 10000; // Poll every 10 seconds to avoid rate limiting
+const MAX_SKILL_LEVEL = 99; // Maximum level for skill progress calculation
+const MAX_RETRY_ATTEMPTS = 3; // Maximum retry attempts for failed requests
+const RETRY_DELAY_MS = 1000; // Base delay between retries (exponential backoff)
+
+/**
+ * Fetch with retry logic and exponential backoff
+ */
+async function fetchWithRetry(
+  url: string,
+  options?: RequestInit,
+  maxRetries = MAX_RETRY_ATTEMPTS,
+): Promise<Response> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      if (response.ok || response.status === 404) {
+        // Return on success or 404 (handled by caller for default skills)
+        return response;
+      }
+      // Don't retry on client errors (4xx except 404)
+      if (response.status >= 400 && response.status < 500) {
+        return response;
+      }
+      lastError = new Error(`HTTP ${response.status}`);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+    }
+
+    // Exponential backoff before retry
+    if (attempt < maxRetries - 1) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, RETRY_DELAY_MS * Math.pow(2, attempt)),
+      );
+    }
+  }
+
+  throw lastError || new Error("Request failed after retries");
+}
+
 interface SkillData {
   level: number;
   xp: number;
@@ -48,7 +91,7 @@ function calculateXPForLevel(level: number): number {
 }
 
 function getXPProgress(xp: number, level: number): number {
-  if (level >= 99) return 100;
+  if (level >= MAX_SKILL_LEVEL) return 100;
   const currentLevelXP = calculateXPForLevel(level);
   const nextLevelXP = calculateXPForLevel(level + 1);
   const xpIntoLevel = xp - currentLevelXP;
@@ -164,8 +207,8 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({
     // Fetch immediately
     fetchSkills();
 
-    // Poll every 10 seconds to avoid rate limiting (reduced from 2-5s)
-    const interval = setInterval(fetchSkills, 10000);
+    // Poll at configured interval to avoid rate limiting
+    const interval = setInterval(fetchSkills, SKILLS_POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [isViewportActive, agent.id, agent.status, characterId]);
 
@@ -174,7 +217,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({
       setLoading(true);
       setError(null);
 
-      const mappingResponse = await fetch(
+      const mappingResponse = await fetchWithRetry(
         `${GAME_API_URL}/api/agents/mapping/${agent.id}`,
       );
 
@@ -207,7 +250,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({
     if (!characterId) return;
 
     try {
-      const skillsResponse = await fetch(
+      const skillsResponse = await fetchWithRetry(
         `${GAME_API_URL}/api/characters/${characterId}/skills`,
       );
 

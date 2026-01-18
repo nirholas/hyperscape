@@ -893,6 +893,16 @@ Respond with ONLY the action name, nothing else.`;
             logger.info(
               `[HyperscapeService] 🚪 Re-sent enterWorld: ${this.characterId} (reconnection)`,
             );
+
+            // Sync pause state from server to maintain consistent state across reconnects
+            // Wait for connection to stabilize before syncing
+            setTimeout(() => {
+              this.syncPauseStateFromServer().catch((err) => {
+                logger.warn(
+                  `[HyperscapeService] Failed to sync pause state on reconnection: ${err instanceof Error ? err.message : String(err)}`,
+                );
+              });
+            }, 1000);
           } else {
             logger.info(
               `[HyperscapeService] Connected to Hyperscape server (WebSocket ${wsId})`,
@@ -2595,6 +2605,62 @@ Respond with ONLY the action name, nothing else.`;
    * Sync goal state to server for dashboard display
    * Called whenever the goal changes
    */
+  /**
+   * Sync pause state from server after reconnection
+   * Ensures goalsPaused state persists across reconnects
+   */
+  async syncPauseStateFromServer(): Promise<void> {
+    if (!this.characterId) {
+      logger.debug(
+        "[HyperscapeService] Cannot sync pause state: no characterId",
+      );
+      return;
+    }
+
+    try {
+      // Query the goal endpoint to get current goalsPaused state
+      const serverUrl =
+        process.env.HYPERSCAPE_API_URL || "http://localhost:5555";
+      const agentId = this.runtime?.agentId;
+
+      if (!agentId) {
+        logger.debug("[HyperscapeService] Cannot sync pause state: no agentId");
+        return;
+      }
+
+      const response = await fetch(`${serverUrl}/api/agents/${agentId}/goal`);
+
+      if (!response.ok) {
+        logger.warn(
+          `[HyperscapeService] Failed to sync pause state: HTTP ${response.status}`,
+        );
+        return;
+      }
+
+      const data = await response.json();
+      const goalsPaused = data.goalsPaused === true;
+
+      // Sync to behavior manager
+      if (this.autonomousBehaviorManager) {
+        const currentPaused = this.autonomousBehaviorManager.isGoalsPaused();
+        if (currentPaused !== goalsPaused) {
+          logger.info(
+            `[HyperscapeService] 🔄 Syncing pause state from server: ${currentPaused} → ${goalsPaused}`,
+          );
+          if (goalsPaused) {
+            this.autonomousBehaviorManager.pauseGoals();
+          } else {
+            this.autonomousBehaviorManager.resumeGoals();
+          }
+        }
+      }
+    } catch (error) {
+      logger.warn(
+        `[HyperscapeService] Error syncing pause state: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
   syncGoalToServer(): void {
     const goal = this.autonomousBehaviorManager?.getGoal();
     const availableGoals = getAvailableGoals(this);

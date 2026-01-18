@@ -2,6 +2,9 @@ import { useState, useEffect, useCallback } from "react";
 import type { QuickActionsData } from "./types";
 import { GAME_API_URL } from "../../../lib/api-config";
 
+// Configuration constants
+const QUICK_ACTIONS_POLL_INTERVAL_MS = 3000; // Poll every 3 seconds while menu is open
+
 interface UseQuickActionDataResult {
   data: QuickActionsData | null;
   loading: boolean;
@@ -69,8 +72,8 @@ export function useQuickActionData(
     // Initial fetch
     fetchData();
 
-    // Poll every 3 seconds
-    const interval = setInterval(fetchData, 3000);
+    // Poll while menu is open
+    const interval = setInterval(fetchData, QUICK_ACTIONS_POLL_INTERVAL_MS);
 
     return () => clearInterval(interval);
   }, [isOpen, fetchData]);

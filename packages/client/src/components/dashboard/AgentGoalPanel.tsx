@@ -22,6 +22,51 @@ import {
   Pause,
 } from "lucide-react";
 
+// Configuration constants
+const GOAL_POLL_INTERVAL_MS = 10000; // Poll every 10 seconds to avoid rate limiting
+const MAX_RECENT_GOALS = 5; // Maximum number of recent goals to track
+const MIN_ELAPSED_MS_FOR_ESTIMATE = 5000; // Minimum elapsed time before showing time estimate
+const MIN_PROGRESS_FOR_ESTIMATE = 1; // Minimum progress percentage for time estimate
+const MAX_RETRY_ATTEMPTS = 3; // Maximum retry attempts for failed requests
+const RETRY_DELAY_MS = 1000; // Base delay between retries (exponential backoff)
+
+/**
+ * Fetch with retry logic and exponential backoff
+ */
+async function fetchWithRetry(
+  url: string,
+  options?: RequestInit,
+  maxRetries = MAX_RETRY_ATTEMPTS,
+): Promise<Response> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      if (response.ok || response.status === 503) {
+        // Return on success or service unavailable (handled by caller)
+        return response;
+      }
+      // Don't retry on client errors (4xx)
+      if (response.status >= 400 && response.status < 500) {
+        return response;
+      }
+      lastError = new Error(`HTTP ${response.status}`);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+    }
+
+    // Exponential backoff before retry
+    if (attempt < maxRetries - 1) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, RETRY_DELAY_MS * Math.pow(2, attempt)),
+      );
+    }
+  }
+
+  throw lastError || new Error("Request failed after retries");
+}
+
 interface Goal {
   type: string;
   description: string;
@@ -88,15 +133,15 @@ export const AgentGoalPanel: React.FC<AgentGoalPanelProps> = ({
     // Fetch immediately
     fetchGoal();
 
-    // Poll every 10 seconds to avoid rate limiting (reduced from 2s)
-    const interval = setInterval(fetchGoal, 10000);
+    // Poll at configured interval to avoid rate limiting
+    const interval = setInterval(fetchGoal, GOAL_POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [agent.id, agent.status]);
 
   const fetchGoal = async () => {
     try {
-      // Call Hyperscape server API on port 5555
-      const response = await fetch(
+      // Call Hyperscape server API with retry logic
+      const response = await fetchWithRetry(
         `${GAME_API_URL}/api/agents/${agent.id}/goal`,
       );
 
@@ -120,7 +165,7 @@ export const AgentGoalPanel: React.FC<AgentGoalPanelProps> = ({
             completedAt: Date.now(),
             success: (goal?.progressPercent || 0) >= 100,
           };
-          return [newGoal, ...prev].slice(0, 5); // Keep last 5 goals
+          return [newGoal, ...prev].slice(0, MAX_RECENT_GOALS);
         });
       }
 
@@ -262,7 +307,13 @@ export const AgentGoalPanel: React.FC<AgentGoalPanelProps> = ({
   // Estimate time to completion based on progress rate
   const getEstimatedTimeRemaining = (g: Goal): string | null => {
     if (g.progressPercent >= 100) return null;
-    if (g.elapsedMs < 5000 || g.progressPercent < 1) return null; // Need some progress to estimate
+    // Need some progress and elapsed time to estimate
+    if (
+      g.elapsedMs < MIN_ELAPSED_MS_FOR_ESTIMATE ||
+      g.progressPercent < MIN_PROGRESS_FOR_ESTIMATE
+    ) {
+      return null;
+    }
 
     const msPerPercent = g.elapsedMs / g.progressPercent;
     const remainingPercent = 100 - g.progressPercent;

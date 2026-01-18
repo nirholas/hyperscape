@@ -100,32 +100,6 @@ function copyPhysXAssets() {
   return false
 }
 
-function copyManifests() {
-  // Copy manifest files from packages/server/world/assets/manifests/ to root assets/manifests/
-  const sourceManifestsDir = path.join(rootDir, 'packages/server/world/assets/manifests')
-  const targetManifestsDir = path.join(assetsDir, 'manifests')
-
-  if (!fs.existsSync(sourceManifestsDir)) {
-    console.log(`${colors.yellow}⚠️  Source manifests directory not found: ${sourceManifestsDir}${colors.reset}`)
-    return false
-  }
-
-  fs.mkdirSync(targetManifestsDir, { recursive: true })
-
-  const manifestFiles = fs.readdirSync(sourceManifestsDir).filter(f => f.endsWith('.json'))
-  let copied = 0
-
-  for (const file of manifestFiles) {
-    const sourcePath = path.join(sourceManifestsDir, file)
-    const targetPath = path.join(targetManifestsDir, file)
-    fs.copyFileSync(sourcePath, targetPath)
-    copied++
-  }
-
-  console.log(`${colors.green}✓ Manifests copied (${copied} files)${colors.reset}`)
-  return true
-}
-
 async function waitForHealthy(maxAttempts = 30) {
   console.log(`${colors.dim}Waiting for CDN to be healthy...${colors.reset}`)
   let attempts = 0
@@ -174,10 +148,6 @@ async function ensureCDNRunning() {
     // Copy PhysX assets
     console.log(`${colors.dim}Copying PhysX assets...${colors.reset}`)
     copyPhysXAssets()
-
-    // Copy manifest files from server assets
-    console.log(`${colors.dim}Copying manifests...${colors.reset}`)
-    copyManifests()
 
     // Start CDN
     console.log(`${colors.blue}Starting CDN container...${colors.reset}`)

@@ -130,7 +130,7 @@ if (!checkElizaOS() && process.env.START_ELIZAOS === 'true') {
     detached: true,
     env: {
       ...process.env,
-      PORT: process.env.ELIZAOS_PORT || '3000',
+      PORT: process.env.ELIZAOS_PORT || '4001',
     },
   });
 
@@ -151,7 +151,7 @@ if (!checkElizaOS() && process.env.START_ELIZAOS === 'true') {
     // Also kill any processes on common ports as fallback
     try { execSync('lsof -ti:3333 | xargs kill -9 2>/dev/null', { stdio: 'ignore' }); } catch {}
     try { execSync('lsof -ti:5555 | xargs kill -9 2>/dev/null', { stdio: 'ignore' }); } catch {}
-    try { execSync('lsof -ti:3000 | xargs kill -9 2>/dev/null', { stdio: 'ignore' }); } catch {}
+    try { execSync('lsof -ti:4001 | xargs kill -9 2>/dev/null', { stdio: 'ignore' }); } catch {}
     setTimeout(() => process.exit(0), 1500);
   };
 
@@ -177,7 +177,7 @@ if (!checkElizaOS() && process.env.START_ELIZAOS === 'true') {
   console.log(`\n${colors.green}✓ All services starting!${colors.reset}`);
   console.log(`${colors.cyan}  - Hyperscape Server: http://localhost:5555${colors.reset}`);
   console.log(`${colors.cyan}  - Hyperscape Client: http://localhost:3333${colors.reset}`);
-  console.log(`${colors.cyan}  - ElizaOS Server: http://localhost:${process.env.ELIZAOS_PORT || '3000'}${colors.reset}`);
+  console.log(`${colors.cyan}  - ElizaOS Server: http://localhost:${process.env.ELIZAOS_PORT || '4001'}${colors.reset}`);
   console.log(`\n${colors.dim}Press Ctrl+C to stop all services${colors.reset}\n`);
 } else {
   // ElizaOS not configured or not requested - run Turbo + Plugin Frontend
