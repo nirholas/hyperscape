@@ -23,6 +23,7 @@ import {
   TerrainSystem,
   Entity,
   World,
+  type EquipmentSyncData,
 } from "@hyperscape/shared";
 
 /**
@@ -739,13 +740,7 @@ export async function handleEnterWorld(
     // CRITICAL: Load equipment from DB BEFORE emitting PLAYER_JOINED
     // This ensures EquipmentSystem receives the data via event payload (single source of truth)
     // and eliminates the race condition where two systems query the DB independently
-    let equipmentRows:
-      | Array<{
-          slotType: string;
-          itemId: string | null;
-          quantity: number;
-        }>
-      | undefined;
+    let equipmentRows: EquipmentSyncData[] | undefined;
     try {
       const dbSys = world.getSystem?.("database") as
         | DatabaseSystemOperations

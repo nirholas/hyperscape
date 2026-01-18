@@ -10,7 +10,7 @@
  */
 
 import THREE from "../../../extras/three/three";
-import { EventType } from "../../../types/events";
+import { EventType, type EquipmentSyncData } from "../../../types/events";
 import { dataManager } from "../../../data/DataManager";
 import type { InventorySystem } from "./InventorySystem";
 import { EQUIPMENT_SLOT_NAMES } from "../../../constants/EquipmentConstants";
@@ -176,11 +176,7 @@ export class EquipmentSystem extends SystemBase {
     this.subscribe(EventType.PLAYER_JOINED, async (data) => {
       const typedData = data as {
         playerId: string;
-        equipment?: Array<{
-          slotType: string;
-          itemId: string | null;
-          quantity: number;
-        }>;
+        equipment?: EquipmentSyncData[];
       };
 
       // Use equipment from payload (single source of truth from character-selection)
@@ -475,11 +471,7 @@ export class EquipmentSystem extends SystemBase {
    */
   private async loadEquipmentFromPayload(
     playerId: string,
-    equipmentData: Array<{
-      slotType: string;
-      itemId: string | null;
-      quantity: number;
-    }>,
+    equipmentData: EquipmentSyncData[],
   ): Promise<void> {
     const equipment = this.playerEquipment.get(playerId);
     if (!equipment) {
