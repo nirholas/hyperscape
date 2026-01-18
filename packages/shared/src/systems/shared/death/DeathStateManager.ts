@@ -183,6 +183,9 @@ export class DeathStateManager {
    * all system init() calls have completed.
    */
   async start(): Promise<void> {
+    console.log(
+      `[DeathStateManager] start() called - isServer: ${this.world.isServer}, hasDB: ${!!this.databaseSystem}`,
+    );
     if (this.world.isServer && this.databaseSystem) {
       // P0-005: CRITICAL - Recover unfinished deaths from previous server session
       // This prevents item loss when server crashes during death handling
@@ -231,12 +234,18 @@ export class DeathStateManager {
     if (!this.databaseSystem) return;
 
     console.log(
+      "[DeathStateManager] ========== CRASH RECOVERY START ==========",
+    );
+    console.log(
       "[DeathStateManager] Checking for unfinished deaths to recover...",
     );
 
     try {
       const unrecoveredDeaths =
         await this.databaseSystem.getUnrecoveredDeathsAsync();
+      console.log(
+        `[DeathStateManager] Database returned ${unrecoveredDeaths.length} unrecovered deaths`,
+      );
 
       if (unrecoveredDeaths.length === 0) {
         console.log("[DeathStateManager] No unfinished deaths to recover");
@@ -278,8 +287,22 @@ export class DeathStateManager {
     } = death;
 
     console.log(
-      `[DeathStateManager] Recovering death for ${playerId}: ${items.length} items, zone: ${zoneType}`,
+      `[DeathStateManager] -------- Recovering death for ${playerId} --------`,
     );
+    console.log(
+      `[DeathStateManager]   Items: ${items.length}, Zone: ${zoneType}, Killed by: ${killedBy}`,
+    );
+    console.log(
+      `[DeathStateManager]   Position: (${position.x.toFixed(1)}, ${position.y.toFixed(1)}, ${position.z.toFixed(1)})`,
+    );
+    console.log(
+      `[DeathStateManager]   Gravestone ID: ${gravestoneId || "(none)"}, Ground items: ${groundItemIds.length}`,
+    );
+    if (items.length > 0) {
+      console.log(
+        `[DeathStateManager]   Item details: ${items.map((i) => `${i.itemId}x${i.quantity}`).join(", ")}`,
+      );
+    }
 
     // Check if gravestone still exists
     let gravestoneExists = false;
@@ -312,7 +335,7 @@ export class DeathStateManager {
     } else if (items.length > 0) {
       // Items were stored but entities don't exist - recreate them
       console.log(
-        `[DeathStateManager] Recreating items for ${playerId} death recovery`,
+        `[DeathStateManager] Recreating items for ${playerId} death recovery (${items.length} items)`,
       );
 
       // Convert stored items back to InventoryItem format
@@ -323,6 +346,21 @@ export class DeathStateManager {
         slot: -1,
         metadata: null,
       }));
+
+      // CRITICAL: Restore to in-memory cache for player reconnect flow
+      // This ensures onPlayerReconnect() can find the death lock with items
+      this.activeDeaths.set(playerId, {
+        playerId,
+        gravestoneId: undefined,
+        groundItemIds: [],
+        position,
+        timestamp: Date.now(),
+        zoneType: zoneType as ZoneType,
+        itemCount: items.length,
+        items: items,
+        killedBy,
+        recovered: false, // Will be marked true after reconnect
+      });
 
       // Emit DEATH_RECOVERED event - handlers will recreate gravestone/ground items
       this.world.emit(EventType.DEATH_RECOVERED, {
@@ -458,7 +496,7 @@ export class DeathStateManager {
     this.activeDeaths.set(playerId, deathData);
 
     console.log(
-      `[DeathStateManager] ✓ Tracking death for ${playerId}: ${options.itemCount} items, zone: ${options.zoneType}`,
+      `[DeathStateManager] ✓ Tracking death for ${playerId}: ${options.itemCount} items, zone: ${options.zoneType}, items saved: ${options.items?.length || 0}`,
     );
 
     return true;
@@ -507,7 +545,7 @@ export class DeathStateManager {
       try {
         const dbData = await this.databaseSystem.getDeathLockAsync(playerId);
         if (dbData) {
-          // Reconstruct DeathLock from database data
+          // Reconstruct DeathLock from database data INCLUDING crash recovery fields
           const deathLock: DeathLock = {
             playerId: dbData.playerId,
             gravestoneId: dbData.gravestoneId || undefined,
@@ -516,12 +554,16 @@ export class DeathStateManager {
             timestamp: dbData.timestamp,
             zoneType: dbData.zoneType as ZoneType,
             itemCount: dbData.itemCount,
+            // CRITICAL: Include crash recovery fields for gravestone recreation
+            items: dbData.items,
+            killedBy: dbData.killedBy,
+            recovered: dbData.recovered,
           };
 
           // Restore to in-memory cache
           this.activeDeaths.set(playerId, deathLock);
           console.log(
-            `[DeathStateManager] ✓ Restored death lock from database for ${playerId}`,
+            `[DeathStateManager] ✓ Restored death lock from database for ${playerId} (${dbData.items?.length || 0} items)`,
           );
           return deathLock;
         }

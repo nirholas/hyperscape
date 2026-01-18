@@ -537,13 +537,15 @@ export class PlayerDeathSystem extends SystemBase {
       return;
     }
 
-    const hasActiveDeathLock =
-      await this.deathStateManager.hasActiveDeathLock(playerId);
-    if (hasActiveDeathLock) {
-      console.warn(
-        `[PlayerDeathSystem] Player ${playerId} already has active death lock`,
+    // Check for existing death lock - if player dies again before looting, clear old one
+    // This matches OSRS behavior where dying again replaces your old gravestone
+    const existingDeathLock =
+      await this.deathStateManager.getDeathLock(playerId);
+    if (existingDeathLock) {
+      console.log(
+        `[PlayerDeathSystem] Player ${playerId} dying again with existing death lock - clearing old gravestone (items lost)`,
       );
-      return;
+      await this.deathStateManager.clearDeathLock(playerId);
     }
 
     // Update last death time (P2-007: use cached timestamp)
@@ -952,12 +954,14 @@ export class PlayerDeathSystem extends SystemBase {
 
   private async initiateRespawn(playerId: string): Promise<void> {
     this.respawnTimers.delete(playerId);
+    console.log(`[PlayerDeathSystem] initiateRespawn called for ${playerId}`);
 
     const deathData = this.deathLocations.get(playerId);
     if (!deathData) {
-      throw new Error(
-        `[PlayerDeathSystem] No death data found for player ${playerId}`,
+      console.log(
+        `[PlayerDeathSystem] No death data in deathLocations for ${playerId}, checking pendingGravestones...`,
       );
+      // For crash recovery, deathLocations might not have data but pendingGravestones might
     }
 
     const DEATH_RESPAWN_POSITION =
@@ -973,6 +977,9 @@ export class PlayerDeathSystem extends SystemBase {
 
     const gravestoneData = this.pendingGravestones.get(playerId);
     if (gravestoneData && gravestoneData.items.length > 0) {
+      console.log(
+        `[PlayerDeathSystem] ✓ Spawning gravestone for ${playerId} with ${gravestoneData.items.length} items at (${gravestoneData.position.x.toFixed(1)}, ${gravestoneData.position.y.toFixed(1)}, ${gravestoneData.position.z.toFixed(1)})`,
+      );
       this.spawnGravestoneAfterRespawn(
         playerId,
         gravestoneData.position,
@@ -980,6 +987,10 @@ export class PlayerDeathSystem extends SystemBase {
         gravestoneData.killedBy,
       );
       this.pendingGravestones.delete(playerId);
+    } else {
+      console.log(
+        `[PlayerDeathSystem] No pending gravestone data for ${playerId}`,
+      );
     }
   }
 
@@ -1107,9 +1118,11 @@ export class PlayerDeathSystem extends SystemBase {
       type: "info",
     });
 
-    // Clear death lock after successful respawn
-    // CRITICAL: Must await to ensure DB is cleared before next death can occur
-    await this.deathStateManager.clearDeathLock(playerId);
+    // NOTE: Do NOT clear death lock here - it must persist for crash recovery!
+    // Death lock is cleared when:
+    // 1. All items are looted from gravestone (CORPSE_EMPTY event)
+    // 2. Ground items despawn (timeout)
+    // This ensures that if server crashes before items are looted, they can be recovered.
 
     // Clear death cooldown so player can die again immediately after respawn
     this.lastDeathTime.delete(playerId);
@@ -1218,6 +1231,10 @@ export class PlayerDeathSystem extends SystemBase {
     position: { x: number; y: number; z: number },
     items: InventoryItem[],
   ): Promise<void> {
+    console.log(
+      `[PlayerDeathSystem] Gravestone ${gravestoneId} expired for ${playerId}, transitioning to ground items`,
+    );
+
     // Destroy gravestone entity
     const entityManager = this.world.getSystem(
       "entity-manager",
@@ -1226,17 +1243,37 @@ export class PlayerDeathSystem extends SystemBase {
       entityManager.destroyEntity(gravestoneId);
     }
 
-    // Spawn ground items (2 minute despawn timer)
+    // Spawn ground items (60 minute despawn timer)
     const GROUND_ITEM_DURATION = ticksToMs(
       COMBAT_CONSTANTS.GROUND_ITEM_DESPAWN_TICKS,
     );
-    await this.groundItemSystem.spawnGroundItems(items, position, {
-      despawnTime: GROUND_ITEM_DURATION,
-      droppedBy: playerId,
-      lootProtection: 0,
-      scatter: true,
-      scatterRadius: 2.0,
-    });
+    const groundItemIds = await this.groundItemSystem.spawnGroundItems(
+      items,
+      position,
+      {
+        despawnTime: GROUND_ITEM_DURATION,
+        droppedBy: playerId,
+        lootProtection: 0,
+        scatter: true,
+        scatterRadius: 2.0,
+      },
+    );
+
+    // Update death lock to track ground items instead of gravestone
+    await this.deathStateManager.onGravestoneExpired(playerId, groundItemIds);
+
+    // Schedule death lock cleanup when ground items despawn
+    // This ensures the death lock is cleared even if items aren't looted
+    setTimeout(async () => {
+      // Only clear if the player still has this death lock (hasn't died again)
+      const currentLock = await this.deathStateManager.getDeathLock(playerId);
+      if (currentLock && !currentLock.gravestoneId) {
+        console.log(
+          `[PlayerDeathSystem] Ground items despawned for ${playerId}, clearing death lock`,
+        );
+        await this.deathStateManager.clearDeathLock(playerId);
+      }
+    }, GROUND_ITEM_DURATION + 1000); // Add 1 second buffer
   }
 
   private handleRespawnRequest(data: { playerId: string }): void {
@@ -1268,9 +1305,13 @@ export class PlayerDeathSystem extends SystemBase {
   async onPlayerReconnect(playerId: string): Promise<{
     blockInventoryLoad: boolean;
   }> {
+    console.log(`[PlayerDeathSystem] onPlayerReconnect called for ${playerId}`);
     const deathLock = await this.deathStateManager.getDeathLock(playerId);
 
     if (deathLock) {
+      console.log(
+        `[PlayerDeathSystem] Found death lock for ${playerId}: ${deathLock.itemCount} items tracked, ${deathLock.items?.length || 0} items in recovery data`,
+      );
       // Check if death lock is stale (older than 1 hour)
       // Stale death locks should be cleared, not restored
       const MAX_DEATH_LOCK_AGE = ticksToMs(
@@ -1283,13 +1324,41 @@ export class PlayerDeathSystem extends SystemBase {
         return { blockInventoryLoad: false };
       }
 
-      // Restore death location to memory
+      // Convert death lock items to InventoryItem format for gravestone
+      const itemsFromDeathLock: InventoryItem[] = (deathLock.items || []).map(
+        (item, index) => ({
+          id: `recovery_${playerId}_${Date.now()}_${index}`,
+          itemId: item.itemId,
+          quantity: item.quantity,
+          slot: index,
+          metadata: null,
+        }),
+      );
+
+      // Restore death location to memory WITH items from death lock
       this.deathLocations.set(playerId, {
         playerId,
         deathPosition: deathLock.position,
         timestamp: deathLock.timestamp,
-        items: [], // Items are in gravestone/ground, not in memory
+        items: itemsFromDeathLock,
       });
+
+      // Restore pendingGravestones so initiateRespawn will spawn the gravestone
+      if (itemsFromDeathLock.length > 0) {
+        this.pendingGravestones.set(playerId, {
+          position: deathLock.position,
+          items: itemsFromDeathLock,
+          killedBy: deathLock.killedBy || "unknown",
+          zoneType: deathLock.zoneType,
+        });
+        console.log(
+          `[PlayerDeathSystem] ✓ Restored ${itemsFromDeathLock.length} items from death lock for ${playerId} - will spawn gravestone on respawn`,
+        );
+      } else {
+        console.log(
+          `[PlayerDeathSystem] No items to restore for ${playerId} - skipping gravestone spawn`,
+        );
+      }
 
       // Immediately trigger respawn (RuneScape-style - no waiting, no screen)
       // Very short delay, then auto-respawn (just enough for world to load)
@@ -1420,6 +1489,9 @@ export class PlayerDeathSystem extends SystemBase {
     corpseId: string;
     playerId: string;
   }): Promise<void> {
+    console.log(
+      `[PlayerDeathSystem] All items looted from ${data.corpseId}, clearing death lock for ${data.playerId}`,
+    );
     await this.deathStateManager.clearDeathLock(data.playerId);
   }
 
