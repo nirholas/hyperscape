@@ -506,7 +506,7 @@ export class EquipmentSystem extends SystemBase {
 
     // Use playerId directly - database layer handles character ID mapping
     // CRITICAL: Use async method to ensure save completes before returning
-    // TODO: When DatabaseSystem supports transaction context, pass tx here
+    // Note: Transaction context not passed here; equipment save is independent
     await this.databaseSystem.savePlayerEquipmentAsync(playerId, dbEquipment);
   }
 

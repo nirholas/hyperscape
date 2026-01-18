@@ -619,22 +619,21 @@ export class DeathStateManager {
     }
 
     // Remove item from items array (crash recovery tracking)
+    // Only decrement itemCount when item is fully removed, not on partial loot
     if (deathData.items) {
       const itemIndex = deathData.items.findIndex((i) => i.itemId === itemId);
       if (itemIndex !== -1) {
         const item = deathData.items[itemIndex];
         if (item.quantity <= quantity) {
-          // Remove entire item
+          // Remove entire item and decrement count
           deathData.items.splice(itemIndex, 1);
+          deathData.itemCount = Math.max(0, deathData.itemCount - 1);
         } else {
-          // Reduce quantity
+          // Reduce quantity but keep item in array (don't decrement itemCount)
           item.quantity -= quantity;
         }
       }
     }
-
-    // Decrement item count
-    deathData.itemCount = Math.max(0, deathData.itemCount - 1);
 
     // If all items looted, clear death tracking
     if (deathData.itemCount === 0) {
