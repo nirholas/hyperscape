@@ -28,6 +28,7 @@ import type {
 import { INPUT } from "../constants";
 import { stationDataProvider } from "../../../../data/StationDataProvider";
 import { resolveFootprint } from "../../../../types/game/resource-processing-types";
+import { MobAIState } from "../../../../types/entities/entities";
 
 // === PRE-ALLOCATED OBJECTS (zero allocations in hot paths) ===
 const _raycaster = new THREE.Raycaster();
@@ -219,7 +220,7 @@ export class RaycastService {
           if (entity && !entity.destroyed) {
             // Skip dead mobs to allow clicking items underneath (Issue #562)
             if (this.isDeadMob(entity, userData)) {
-              break; // Exit while loop, continue to next intersection
+              break; // Skip dead mob and check next intersection (item underneath)
             }
 
             // Get entity world position using pre-allocated vector
@@ -498,21 +499,21 @@ export class RaycastService {
       return false;
     }
 
-    // Check mob config for death state
-    const mobConfig = (
-      entity as unknown as {
-        config?: { aiState?: string; currentHealth?: number };
-      }
-    ).config;
+    // Type guard: check if entity has mob config properties
+    const mobEntity = entity as {
+      config?: { aiState?: MobAIState; currentHealth?: number };
+    };
 
-    if (!mobConfig) {
+    if (!mobEntity.config) {
       return false;
     }
 
-    // Mob is dead if aiState is "dead" or health is 0 or below
+    const { aiState, currentHealth } = mobEntity.config;
+
+    // Mob is dead if aiState is DEAD or health is 0 or below
     return (
-      mobConfig.aiState === "dead" ||
-      (mobConfig.currentHealth !== undefined && mobConfig.currentHealth <= 0)
+      aiState === MobAIState.DEAD ||
+      (currentHealth !== undefined && currentHealth <= 0)
     );
   }
 }
