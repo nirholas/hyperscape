@@ -52,6 +52,25 @@ import {
   DeathRepository,
   TemplateRepository,
 } from "../../database/repositories";
+import type {
+  DeathLockData,
+  DeathItemData,
+} from "../../database/repositories/DeathRepository";
+
+/**
+ * Transaction isolation levels for database operations
+ *
+ * - 'read committed' (default): Prevents dirty reads
+ * - 'repeatable read': Prevents dirty reads and non-repeatable reads
+ * - 'serializable': Prevents all concurrency anomalies (strictest)
+ *
+ * Use 'serializable' for critical financial/inventory operations where
+ * race conditions could cause item duplication or loss.
+ */
+export type IsolationLevel =
+  | "read committed"
+  | "repeatable read"
+  | "serializable";
 
 /**
  * DatabaseSystem class
@@ -221,20 +240,33 @@ export class DatabaseSystem extends SystemBase {
    * CRITICAL FOR SECURITY: Prevents partial database states that can lead to
    * item duplication or item loss (e.g., inventory cleared but gravestone not spawned).
    *
+   * Added isolationLevel option for stricter transaction guarantees.
+   * Use 'serializable' for death processing to prevent race conditions.
+   *
    * @param callback - Async function that receives transaction context
+   * @param options - Optional transaction configuration
+   * @param options.isolationLevel - Transaction isolation level (default: 'read committed')
    * @returns The result of the callback
    *
    * @example
    * ```typescript
+   * // Standard transaction
    * await dbSystem.executeInTransaction(async (tx) => {
    *   await tx.insert(table1).values({...});
    *   await tx.insert(table2).values({...});
    *   // If either fails, both are rolled back
    * });
+   *
+   * // Serializable transaction for critical operations
+   * await dbSystem.executeInTransaction(async (tx) => {
+   *   // Fully serialized - prevents all race conditions
+   *   await tx.insert(inventory).values({...});
+   * }, { isolationLevel: 'serializable' });
    * ```
    */
   async executeInTransaction<T>(
     callback: (tx: NodePgDatabase<typeof schema>) => Promise<T>,
+    options?: { isolationLevel?: IsolationLevel },
   ): Promise<T> {
     if (!this.db) {
       throw new Error(
@@ -242,7 +274,10 @@ export class DatabaseSystem extends SystemBase {
       );
     }
 
-    return this.db.transaction(callback);
+    // Use specified isolation level, or default to 'read committed'
+    return this.db.transaction(callback, {
+      isolationLevel: options?.isolationLevel ?? "read committed",
+    });
   }
 
   // ============================================================================
@@ -702,21 +737,19 @@ export class DatabaseSystem extends SystemBase {
    *
    * CRITICAL FOR SECURITY: Prevents item duplication on server restart!
    *
-   * @param data - Death lock data
+   * Now includes items array for crash recovery.
+   *
+   * @param data - Death lock data including items for recovery
    * @param tx - Optional transaction context for atomic operations
    */
   async saveDeathLockAsync(
-    data: {
-      playerId: string;
-      gravestoneId: string | null;
-      groundItemIds: string[];
-      position: { x: number; y: number; z: number };
-      timestamp: number;
-      zoneType: string;
-      itemCount: number;
-    },
+    data: DeathLockData,
     tx?: NodePgDatabase<typeof schema>,
   ): Promise<void> {
+    if (!this.deathRepository) {
+      console.error("[DatabaseSystem] deathRepository not initialized");
+      return;
+    }
     return this.deathRepository.saveDeathLockAsync(data, tx);
   }
 
@@ -725,16 +758,13 @@ export class DatabaseSystem extends SystemBase {
    * Delegates to DeathRepository
    *
    * Returns null if no active death lock exists (player is alive).
+   * Now includes items, killedBy, recovered fields.
    */
-  async getDeathLockAsync(playerId: string): Promise<{
-    playerId: string;
-    gravestoneId: string | null;
-    groundItemIds: string[];
-    position: { x: number; y: number; z: number };
-    timestamp: number;
-    zoneType: string;
-    itemCount: number;
-  } | null> {
+  async getDeathLockAsync(playerId: string): Promise<DeathLockData | null> {
+    if (!this.deathRepository) {
+      console.error("[DatabaseSystem] deathRepository not initialized");
+      return null;
+    }
     return this.deathRepository.getDeathLockAsync(playerId);
   }
 
@@ -745,6 +775,10 @@ export class DatabaseSystem extends SystemBase {
    * Called when player respawns or death is fully resolved.
    */
   async deleteDeathLockAsync(playerId: string): Promise<void> {
+    if (!this.deathRepository) {
+      console.error("[DatabaseSystem] deathRepository not initialized");
+      return;
+    }
     return this.deathRepository.deleteDeathLockAsync(playerId);
   }
 
@@ -753,18 +787,13 @@ export class DatabaseSystem extends SystemBase {
    * Delegates to DeathRepository
    *
    * Used for server restart recovery to restore gravestones/ground items.
+   * Now includes items, killedBy, recovered fields.
    */
-  async getAllActiveDeathsAsync(): Promise<
-    Array<{
-      playerId: string;
-      gravestoneId: string | null;
-      groundItemIds: string[];
-      position: { x: number; y: number; z: number };
-      timestamp: number;
-      zoneType: string;
-      itemCount: number;
-    }>
-  > {
+  async getAllActiveDeathsAsync(): Promise<DeathLockData[]> {
+    if (!this.deathRepository) {
+      console.error("[DatabaseSystem] deathRepository not initialized");
+      return [];
+    }
     return this.deathRepository.getAllActiveDeathsAsync();
   }
 
@@ -778,7 +807,68 @@ export class DatabaseSystem extends SystemBase {
     playerId: string,
     groundItemIds: string[],
   ): Promise<void> {
+    if (!this.deathRepository) {
+      console.error("[DatabaseSystem] deathRepository not initialized");
+      return;
+    }
     return this.deathRepository.updateGroundItemsAsync(playerId, groundItemIds);
+  }
+
+  /**
+   * Get all unrecovered deaths for crash recovery
+   * Delegates to DeathRepository
+   *
+   * Called during server startup to find deaths that need their
+   * gravestones/ground items recreated.
+   *
+   * @returns Array of death locks that need recovery
+   */
+  async getUnrecoveredDeathsAsync(): Promise<DeathLockData[]> {
+    if (!this.deathRepository) {
+      console.error(
+        "[DatabaseSystem] deathRepository not initialized - ensure DatabaseSystem.init() was called",
+      );
+      return [];
+    }
+    return this.deathRepository.getUnrecoveredDeathsAsync();
+  }
+
+  /**
+   * Mark a death as recovered after crash recovery processing
+   * Delegates to DeathRepository
+   *
+   * Called after successfully recreating gravestones/ground items.
+   *
+   * @param playerId - The player ID whose death was recovered
+   */
+  async markDeathRecoveredAsync(playerId: string): Promise<void> {
+    if (!this.deathRepository) {
+      console.error("[DatabaseSystem] deathRepository not initialized");
+      return;
+    }
+    return this.deathRepository.markDeathRecoveredAsync(playerId);
+  }
+
+  /**
+   * Atomically acquire a death lock (check-and-create)
+   * Delegates to DeathRepository
+   *
+   * Prevents race conditions where a player could die multiple times.
+   * Uses INSERT ... ON CONFLICT DO NOTHING for atomic semantics.
+   *
+   * @param data - Death lock data to create
+   * @param tx - Optional transaction context
+   * @returns true if death lock was created, false if player already has one
+   */
+  async acquireDeathLockAsync(
+    data: DeathLockData,
+    tx?: NodePgDatabase<typeof schema>,
+  ): Promise<boolean> {
+    if (!this.deathRepository) {
+      console.error("[DatabaseSystem] deathRepository not initialized");
+      return false;
+    }
+    return this.deathRepository.acquireDeathLockAsync(data, tx);
   }
 
   // ============================================================================

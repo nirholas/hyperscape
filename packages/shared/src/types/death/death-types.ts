@@ -59,6 +59,14 @@ export interface ZoneProperties {
 }
 
 /**
+ * Item data stored with death lock for crash recovery
+ */
+export interface DeathItemData {
+  itemId: string;
+  quantity: number;
+}
+
+/**
  * Death lock state stored in database
  * Prevents item duplication on reconnect
  */
@@ -70,6 +78,10 @@ export interface DeathLock {
   timestamp: number;
   zoneType: ZoneType;
   itemCount: number;
+  // Crash recovery fields (optional for backwards compatibility)
+  items?: DeathItemData[]; // Actual item data for recovery
+  killedBy?: string; // What killed the player
+  recovered?: boolean; // Whether death was processed during crash recovery
 }
 
 /**
@@ -131,4 +143,101 @@ export interface ReconnectValidation {
   groundItemsExist: string[]; // List of existing ground item IDs
   shouldBlockInventoryLoad: boolean;
   deathData?: DeathLock;
+}
+
+// =============================================================================
+// LOOT RESULT TYPES (Shadow State Support)
+// =============================================================================
+
+/**
+ * Loot operation failure reasons
+ */
+export type LootFailureReason =
+  | "ITEM_NOT_FOUND" // Item already looted by someone else
+  | "INVENTORY_FULL" // Player's inventory is full
+  | "PROTECTED" // Loot protection still active
+  | "GRAVESTONE_GONE" // Gravestone despawned
+  | "RATE_LIMITED" // Too many requests
+  | "INVALID_REQUEST" // Malformed request
+  | "PLAYER_DYING"; // Player is dying/dead, cannot loot
+
+/**
+ * Loot operation result - sent from server to client
+ * Used for shadow state confirmation/rejection
+ */
+export interface LootResult {
+  /** Unique ID matching the client's request */
+  transactionId: string;
+  /** Whether the loot was successful */
+  success: boolean;
+  /** Item that was looted (on success) */
+  itemId?: string;
+  /** Quantity looted (on success) */
+  quantity?: number;
+  /** Failure reason (on failure) */
+  reason?: LootFailureReason;
+  /** Server timestamp for ordering */
+  timestamp: number;
+}
+
+/**
+ * Pending loot transaction for client shadow state
+ */
+export interface PendingLootTransaction {
+  transactionId: string;
+  itemId: string;
+  quantity: number;
+  requestedAt: number;
+  /** Optimistically removed item for rollback */
+  originalItem: InventoryItem;
+  /** Original index in the loot items array */
+  originalIndex: number;
+}
+
+// =============================================================================
+// AUDIT LOGGING TYPES
+// =============================================================================
+
+/**
+ * Death/loot audit action types
+ */
+export type DeathAuditAction =
+  | "DEATH_STARTED" // Player death initiated
+  | "DEATH_COMPLETED" // Death processing finished
+  | "GRAVESTONE_CREATED" // Gravestone spawned
+  | "GRAVESTONE_EXPIRED" // Gravestone → ground items
+  | "LOOT_ATTEMPTED" // Loot request received
+  | "LOOT_SUCCESS" // Item successfully looted
+  | "LOOT_FAILED" // Loot attempt failed
+  | "DEATH_RECOVERED"; // Crash recovery processed death
+
+/**
+ * Audit log entry for death/loot operations
+ * Stored in database for forensic analysis
+ */
+export interface DeathAuditEntry {
+  /** Unique audit entry ID */
+  id: string;
+  /** Type of operation */
+  action: DeathAuditAction;
+  /** Player who died or owns the gravestone */
+  playerId: string;
+  /** Player performing the action (for loot, may differ from playerId) */
+  actorId: string;
+  /** Gravestone or ground item entity ID */
+  entityId?: string;
+  /** Items involved in operation */
+  items?: Array<{ itemId: string; quantity: number }>;
+  /** Zone where action occurred */
+  zoneType: ZoneType;
+  /** Position of action */
+  position: { x: number; y: number; z: number };
+  /** Success or failure */
+  success: boolean;
+  /** Failure reason if applicable */
+  failureReason?: string;
+  /** Transaction ID for loot operations */
+  transactionId?: string;
+  /** Server timestamp */
+  timestamp: number;
 }

@@ -24,6 +24,28 @@ import { BaseRepository } from "./BaseRepository";
 import * as schema from "../schema";
 
 /**
+ * Safely parse JSON with fallback value on error
+ * Prevents server crash on corrupted database data
+ */
+function safeJsonParse<T>(json: string | null, fallback: T): T {
+  if (!json) return fallback;
+  try {
+    return JSON.parse(json) as T;
+  } catch (error) {
+    console.error(`[DeathRepository] Failed to parse JSON: ${json}`, error);
+    return fallback;
+  }
+}
+
+/**
+ * Item data for crash recovery
+ */
+export interface DeathItemData {
+  itemId: string;
+  quantity: number;
+}
+
+/**
  * Death lock data structure
  */
 export interface DeathLockData {
@@ -34,6 +56,10 @@ export interface DeathLockData {
   timestamp: number;
   zoneType: string; // "safe_area" | "wilderness" | "pvp_zone"
   itemCount: number;
+  // Crash recovery fields
+  items: DeathItemData[]; // Actual item data for recovery
+  killedBy: string; // What killed the player
+  recovered: boolean; // Whether death was processed during crash recovery
 }
 
 /**
@@ -77,6 +103,10 @@ export class DeathRepository extends BaseRepository {
         timestamp: data.timestamp,
         zoneType: data.zoneType,
         itemCount: data.itemCount,
+        // Crash recovery fields
+        items: data.items,
+        killedBy: data.killedBy,
+        recovered: data.recovered,
         createdAt: now,
         updatedAt: now,
       })
@@ -89,6 +119,10 @@ export class DeathRepository extends BaseRepository {
           timestamp: data.timestamp,
           zoneType: data.zoneType,
           itemCount: data.itemCount,
+          // Crash recovery fields
+          items: data.items,
+          killedBy: data.killedBy,
+          recovered: data.recovered,
           updatedAt: now,
         },
       });
@@ -125,11 +159,18 @@ export class DeathRepository extends BaseRepository {
     return {
       playerId: row.playerId,
       gravestoneId: row.gravestoneId,
-      groundItemIds: JSON.parse(row.groundItemIds || "[]"),
-      position: JSON.parse(row.position),
+      groundItemIds: safeJsonParse<string[]>(row.groundItemIds, []),
+      position: safeJsonParse<{ x: number; y: number; z: number }>(
+        row.position,
+        { x: 0, y: 0, z: 0 },
+      ),
       timestamp: row.timestamp,
       zoneType: row.zoneType,
       itemCount: row.itemCount,
+      // Crash recovery fields
+      items: (row.items as DeathItemData[]) || [],
+      killedBy: row.killedBy,
+      recovered: row.recovered,
     };
   }
 
@@ -177,11 +218,18 @@ export class DeathRepository extends BaseRepository {
     return results.map((row) => ({
       playerId: row.playerId,
       gravestoneId: row.gravestoneId,
-      groundItemIds: JSON.parse(row.groundItemIds || "[]"),
-      position: JSON.parse(row.position),
+      groundItemIds: safeJsonParse<string[]>(row.groundItemIds, []),
+      position: safeJsonParse<{ x: number; y: number; z: number }>(
+        row.position,
+        { x: 0, y: 0, z: 0 },
+      ),
       timestamp: row.timestamp,
       zoneType: row.zoneType,
       itemCount: row.itemCount,
+      // Crash recovery fields
+      items: (row.items as DeathItemData[]) || [],
+      killedBy: row.killedBy,
+      recovered: row.recovered,
     }));
   }
 
@@ -212,5 +260,115 @@ export class DeathRepository extends BaseRepository {
         updatedAt: Date.now(),
       })
       .where(eq(schema.playerDeaths.playerId, playerId));
+  }
+
+  /**
+   * Get all unrecovered deaths for crash recovery
+   *
+   * Called during server startup to find deaths that weren't properly
+   * processed (server crashed during death sequence). These need to have
+   * their gravestones/ground items recreated.
+   *
+   * @returns Array of death locks that need recovery
+   */
+  async getUnrecoveredDeathsAsync(): Promise<DeathLockData[]> {
+    this.ensureDatabase();
+
+    const results = await this.db
+      .select()
+      .from(schema.playerDeaths)
+      .where(eq(schema.playerDeaths.recovered, false));
+
+    return results.map((row) => ({
+      playerId: row.playerId,
+      gravestoneId: row.gravestoneId,
+      groundItemIds: safeJsonParse<string[]>(row.groundItemIds, []),
+      position: safeJsonParse<{ x: number; y: number; z: number }>(
+        row.position,
+        { x: 0, y: 0, z: 0 },
+      ),
+      timestamp: row.timestamp,
+      zoneType: row.zoneType,
+      itemCount: row.itemCount,
+      items: (row.items as DeathItemData[]) || [],
+      killedBy: row.killedBy,
+      recovered: row.recovered,
+    }));
+  }
+
+  /**
+   * Mark a death as recovered after crash recovery processing
+   *
+   * Called after successfully recreating gravestones/ground items during
+   * server startup recovery. This prevents duplicate recovery on subsequent restarts.
+   *
+   * @param playerId - The player ID whose death was recovered
+   */
+  async markDeathRecoveredAsync(playerId: string): Promise<void> {
+    if (this.isDestroying) {
+      return;
+    }
+
+    this.ensureDatabase();
+
+    await this.db
+      .update(schema.playerDeaths)
+      .set({
+        recovered: true,
+        updatedAt: Date.now(),
+      })
+      .where(eq(schema.playerDeaths.playerId, playerId));
+  }
+
+  /**
+   * Atomic death lock acquisition (check-and-create)
+   *
+   * Atomically checks if a player already has a death lock and creates one if not.
+   * This prevents race conditions where a player could die multiple times simultaneously.
+   *
+   * Uses PostgreSQL's INSERT ... ON CONFLICT DO NOTHING with RETURNING to achieve
+   * atomic check-and-create semantics.
+   *
+   * @param data - Death lock data to create
+   * @param tx - Optional transaction context
+   * @returns true if death lock was created, false if player already has one
+   */
+  async acquireDeathLockAsync(
+    data: DeathLockData,
+    tx?: NodePgDatabase<typeof schema>,
+  ): Promise<boolean> {
+    if (this.isDestroying) {
+      return false;
+    }
+
+    this.ensureDatabase();
+
+    const now = Date.now();
+    const db = tx || this.db;
+
+    // Use INSERT ... ON CONFLICT DO NOTHING with RETURNING
+    // If conflict occurs (player already has death lock), nothing is returned
+    const result = await db
+      .insert(schema.playerDeaths)
+      .values({
+        playerId: data.playerId,
+        gravestoneId: data.gravestoneId,
+        groundItemIds: JSON.stringify(data.groundItemIds),
+        position: JSON.stringify(data.position),
+        timestamp: data.timestamp,
+        zoneType: data.zoneType,
+        itemCount: data.itemCount,
+        items: data.items,
+        killedBy: data.killedBy,
+        recovered: data.recovered,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoNothing({ target: schema.playerDeaths.playerId })
+      .returning({ playerId: schema.playerDeaths.playerId });
+
+    // If result has a row, the insert succeeded (lock acquired)
+    // If result is empty, conflict occurred (player already has death lock)
+    return result.length > 0;
   }
 }

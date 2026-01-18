@@ -11,7 +11,7 @@
  * one tile, matching OSRS mechanics for boss fights and large creatures.
  *
  * @see https://oldschool.runescape.wiki/w/Size
- * @see MOB_AGGRO_IMPLEMENTATION_PLAN.md Phase 3.2
+ * @see MOB_AGGRO_IMPLEMENTATION_PLAN.md
  */
 
 import type { TileCoord } from "../../systems/shared/movement/TileSystem";

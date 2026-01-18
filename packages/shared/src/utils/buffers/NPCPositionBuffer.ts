@@ -15,7 +15,6 @@
  * - Efficient batch iteration
  * - Direct buffer access for network serialization
  *
- * @see MOB_AGGRO_IMPLEMENTATION_PLAN.md Phase 4.3
  */
 
 import type { Position3D } from "../../types";

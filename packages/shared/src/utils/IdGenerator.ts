@@ -25,3 +25,22 @@ const ALPHABET =
  * const entityId = uuid() // => "7kP2mX9bH4"
  */
 export const uuid = customAlphabet(ALPHABET, 10);
+
+/**
+ * Generate unique transaction ID for loot operations
+ *
+ * Used for tracking loot requests between client and server.
+ * Enables shadow state confirmation/rollback on client.
+ *
+ * Format: loot_{timestamp36}_{random6}
+ *
+ * @returns A unique transaction ID (e.g., "loot_m1abc2_x7y8z9")
+ *
+ * @example
+ * const txId = generateTransactionId() // => "loot_m1abc2_x7y8z9"
+ */
+export function generateTransactionId(): string {
+  const timestamp = Date.now().toString(36);
+  const random = Math.random().toString(36).substring(2, 8);
+  return `loot_${timestamp}_${random}`;
+}

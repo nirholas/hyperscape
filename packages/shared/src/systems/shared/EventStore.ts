@@ -7,7 +7,6 @@
  * - Desync detection via state checksums
  * - Debugging production issues
  *
- * @see OSRS-IMPLEMENTATION-PLAN.md Phase 5.1
  */
 
 import type { SeededRandomState } from "../../utils/SeededRandom";

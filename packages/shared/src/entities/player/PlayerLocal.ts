@@ -404,7 +404,7 @@ export class PlayerLocal extends Entity implements HotReloadable {
   // Issue #322: Store last combat-facing rotation to preserve facing direction after combat ends
   private _lastCombatRotation: THREE.Quaternion | null = null;
 
-  // Phase 5: Server-controlled face target (removes client-side attacker search)
+  // Server-controlled face target (removes client-side attacker search)
   // This is set by COMBAT_FACE_TARGET events from the server
   // Client should NOT independently search for attackers
   private _serverFaceTargetId: string | null = null;
@@ -1318,7 +1318,7 @@ export class PlayerLocal extends Entity implements HotReloadable {
       this.handleAutoRetaliateChanged.bind(this),
     );
 
-    // Phase 5: Server-controlled combat visuals (client display-only)
+    // Server-controlled combat visuals (client display-only)
     // Client no longer searches for attackers - server tells us who to face
     this.world.on(
       EventType.COMBAT_FACE_TARGET,
@@ -1998,7 +1998,7 @@ export class PlayerLocal extends Entity implements HotReloadable {
     // (logging removed but keeping structure for future use)
 
     // COMBAT ROTATION: Rotate to face target when in combat (RuneScape-style)
-    // Phase 5: Client is display-only - server controls all combat facing
+    // Client is display-only - server controls all combat facing
     // Priority: 1) Our combat target (from server), 2) Server face target (attacker)
     let combatTarget: {
       position: { x: number; z: number };
@@ -2024,7 +2024,7 @@ export class PlayerLocal extends Entity implements HotReloadable {
       }
     }
 
-    // Phase 5: Server-controlled face target (client is display-only)
+    // Server-controlled face target (client is display-only)
     // If no combat target, check if server told us to face an attacker
     // This replaces the old client-side mob search loop
     if (!combatTarget && this._serverFaceTargetId) {
@@ -2347,10 +2347,10 @@ export class PlayerLocal extends Entity implements HotReloadable {
   }
 
   /**
-   * Handle COMBAT_FACE_TARGET event from server (Phase 5)
+   * Handle COMBAT_FACE_TARGET event from server.
    *
    * Server tells client to face a specific entity during combat.
-   * This replaces client-side attacker search - client is now display-only.
+   * The client acts as display-only; server is authoritative for target selection.
    *
    * @param event.playerId - Player who should face the target
    * @param event.targetId - Entity to face
@@ -2364,7 +2364,7 @@ export class PlayerLocal extends Entity implements HotReloadable {
   }
 
   /**
-   * Handle COMBAT_CLEAR_FACE_TARGET event from server (Phase 5)
+   * Handle COMBAT_CLEAR_FACE_TARGET event from server.
    *
    * Server tells client to stop facing a specific target.
    * Called when combat ends or target dies.
@@ -2593,7 +2593,7 @@ export class PlayerLocal extends Entity implements HotReloadable {
       EventType.UI_AUTO_RETALIATE_CHANGED,
       this.handleAutoRetaliateChanged,
     );
-    // Phase 5: Clean up server-controlled combat visual listeners
+    // Clean up server-controlled combat visual listeners
     this.world.off(EventType.COMBAT_FACE_TARGET, this.handleCombatFaceTarget);
     this.world.off(
       EventType.COMBAT_CLEAR_FACE_TARGET,

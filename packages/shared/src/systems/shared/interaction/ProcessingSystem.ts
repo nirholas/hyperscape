@@ -65,7 +65,6 @@ export class ProcessingSystem extends SystemBase {
     { dx: 0, dz: -1 }, // North (-Z in Three.js)
   ];
 
-  // === Phase 2: Memory Optimization ===
   // ProcessingAction object pool (avoids allocation per action)
   private readonly actionPool: ProcessingAction[] = [];
   private readonly MAX_POOL_SIZE = 100;
@@ -80,8 +79,6 @@ export class ProcessingSystem extends SystemBase {
       autoCleanup: true,
     });
   }
-
-  // === Phase 2: Memory Optimization Helpers ===
 
   /**
    * Count active fires for a player without allocating arrays.
@@ -127,8 +124,6 @@ export class ProcessingSystem extends SystemBase {
       this.actionPool.push(action);
     }
   }
-
-  // === Phase 3: DRY Emote Helpers ===
 
   /**
    * Set player emote during processing (squat for cooking/firemaking)
@@ -412,7 +407,7 @@ export class ProcessingSystem extends SystemBase {
 
     // Get player position (validated above)
 
-    // Start firemaking process - use pooled action object (Phase 2 optimization)
+    // Start firemaking process using pooled action object to reduce GC pressure
     const processingAction = this.acquireAction();
     processingAction.playerId = playerId;
     processingAction.actionType = "firemaking";
@@ -477,7 +472,7 @@ export class ProcessingSystem extends SystemBase {
     // Remove from active processing
     this.activeProcessing.delete(playerId);
 
-    // Phase 5.3: Explicit null check instead of non-null assertion
+    // Explicit null check instead of non-null assertion
     if (!action.targetItem) {
       console.error(
         `[ProcessingSystem] Firemaking action missing targetItem for ${playerId}`,
@@ -505,7 +500,7 @@ export class ProcessingSystem extends SystemBase {
     // Skip the broken callback pattern and just proceed
     this.completeFiremakingProcess(playerId, action, position);
 
-    // Release action back to pool (Phase 2: object pooling)
+    // Release action back to pool
     this.releaseAction(action);
   }
 
@@ -514,7 +509,7 @@ export class ProcessingSystem extends SystemBase {
     action: ProcessingAction,
     position: { x: number; y: number; z: number },
   ): void {
-    // Phase 5.3: Explicit null check instead of non-null assertion
+    // Explicit null check instead of non-null assertion
     if (!action.targetItem) {
       console.error(
         `[ProcessingSystem] completeFiremakingProcess missing targetItem for ${playerId}`,
@@ -714,7 +709,7 @@ export class ProcessingSystem extends SystemBase {
       return;
     }
 
-    // Start cooking process - use pooled action object (Phase 2 optimization)
+    // Start cooking process using pooled action object to reduce GC pressure
     const processingAction = this.acquireAction();
     processingAction.playerId = playerId;
     processingAction.actionType = "cooking";
@@ -759,7 +754,7 @@ export class ProcessingSystem extends SystemBase {
     // Remove from active processing
     this.activeProcessing.delete(playerId);
 
-    // Phase 5.3: Explicit null check instead of non-null assertion
+    // Explicit null check instead of non-null assertion
     if (!action.targetFire) {
       console.error(
         `[ProcessingSystem] Cooking action missing targetFire for ${playerId}`,
@@ -781,7 +776,7 @@ export class ProcessingSystem extends SystemBase {
       });
       // Reset emote when fire goes out
       this.resetPlayerEmote(playerId);
-      // Release action back to pool (Phase 2: object pooling)
+      // Release action back to pool
       this.releaseAction(action);
       return;
     }
@@ -789,7 +784,7 @@ export class ProcessingSystem extends SystemBase {
     // Complete this cook
     this.completeCookingProcess(playerId, action);
 
-    // Release action back to pool (Phase 2: object pooling)
+    // Release action back to pool
     this.releaseAction(action);
 
     // OSRS Auto-cooking: Check if player has more cookable items and continue
@@ -1088,7 +1083,7 @@ export class ProcessingSystem extends SystemBase {
 
     fire.isActive = false;
 
-    // Cancel animation before removing mesh (Phase 2: prevent RAF leak)
+    // Cancel animation before removing mesh to prevent requestAnimationFrame leak
     const fireWithAnimation = fire as { cancelAnimation?: () => void };
     fireWithAnimation.cancelAnimation?.();
 

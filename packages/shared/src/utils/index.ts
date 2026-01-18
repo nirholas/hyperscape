@@ -12,7 +12,7 @@ export * from "./IdentifierUtils";
 export * from "./PlayerIdMapper";
 export * from "./ExternalAssetUtils";
 export * from "./downloadFile";
-export * from "./SeededRandom"; // OSRS-accurate deterministic RNG (Phase 1)
+export * from "./SeededRandom"; // OSRS-accurate deterministic RNG
 
 // Export ValidationUtils without calculateDistance* (they re-export from MathUtils)
 export {

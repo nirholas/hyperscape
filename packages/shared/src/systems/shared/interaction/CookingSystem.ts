@@ -10,7 +10,6 @@
  * - Player squats during cooking animation
  *
  * @see https://oldschool.runescape.wiki/w/Cooking
- * @see Phase 4.1 of COOKING_FIREMAKING_HARDENING_PLAN.md
  */
 
 import { processingDataProvider } from "../../../data/ProcessingDataProvider";

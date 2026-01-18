@@ -10,7 +10,6 @@
  * entity blocking (temporary) and terrain blocking (permanent/safespot).
  *
  * @see https://oldschool.runescape.wiki/w/Pathfinding
- * @see MOB_AGGRO_IMPLEMENTATION_PLAN.md Phase 2.4
  */
 
 import type { TileCoord } from "./TileSystem";

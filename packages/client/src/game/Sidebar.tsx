@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { EventType } from "@hyperscape/shared";
 import type {
   ClientWorld,
@@ -66,6 +66,10 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
     corpseName: string;
     lootItems: InventoryItem[];
   } | null>(null);
+
+  // Track if local player is dead/dying to block loot window
+  const [isPlayerDead, setIsPlayerDead] = useState(false);
+  const isPlayerDeadRef = useRef(false);
 
   // Bank panel state (RS3-style: placeholders are items with qty=0 in items array)
   const [bankData, setBankData] = useState<{
@@ -429,11 +433,25 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
         position: { x: number; y: number; z: number };
       };
 
+      // Don't open loot window if player is dying/dead
+      if (isPlayerDeadRef.current) {
+        return;
+      }
+
+      // Get the gravestone entity to retrieve its name
+      const gravestoneEntity = world.entities?.get?.(data.corpseId) as
+        | { name?: string; config?: { name?: string } }
+        | undefined;
+      const corpseName =
+        gravestoneEntity?.name ||
+        gravestoneEntity?.config?.name ||
+        "Gravestone";
+
       // Open loot window with corpse items
       setLootWindowData({
         visible: true,
         corpseId: data.corpseId,
-        corpseName: `Gravestone`, // TODO: Get actual corpse name
+        corpseName,
         lootItems:
           data.lootItems?.map((item, index) => ({
             id: `${data.corpseId}-${index}`,
@@ -445,11 +463,26 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
       });
     };
 
+    // Close loot window when player dies and track death state
+    // This prevents looting from spawn point after death
+    const onPlayerDeath = (raw: unknown) => {
+      const data = raw as { playerId: string; isDead: boolean };
+      const localId = world.entities?.player?.id;
+      if (localId && data.playerId === localId) {
+        setIsPlayerDead(data.isDead);
+        isPlayerDeadRef.current = data.isDead;
+        if (data.isDead) {
+          setLootWindowData(null);
+        }
+      }
+    };
+
     world.on(EventType.UI_UPDATE, onUIUpdate);
     world.on(EventType.INVENTORY_UPDATED, onInventory);
     world.on(EventType.INVENTORY_UPDATE_COINS, onCoins);
     world.on(EventType.SKILLS_UPDATED, onSkillsUpdate);
     world.on(EventType.CORPSE_CLICK, onCorpseClick);
+    world.on(EventType.PLAYER_SET_DEAD, onPlayerDeath);
 
     const requestInitial = () => {
       const lp = world.entities?.player?.id;
@@ -509,6 +542,7 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
       world.off(EventType.INVENTORY_UPDATE_COINS, onCoins);
       world.off(EventType.SKILLS_UPDATED, onSkillsUpdate);
       world.off(EventType.CORPSE_CLICK, onCorpseClick);
+      world.off(EventType.PLAYER_SET_DEAD, onPlayerDeath);
     };
   }, []);
 

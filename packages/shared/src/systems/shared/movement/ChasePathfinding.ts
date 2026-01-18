@@ -23,7 +23,6 @@
  * - ChasePathfinder class provides zero-allocation alternative for hot paths
  *
  * @see https://oldschool.runescape.wiki/w/Pathfinding
- * @see MOB_AGGRO_IMPLEMENTATION_PLAN.md Phase 4.1
  */
 
 import type { TileCoord } from "./TileSystem";

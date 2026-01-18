@@ -30,6 +30,8 @@ import {
   BFSPathfinder,
   // Collision system
   CollisionMask,
+  // Death state
+  DeathState,
 } from "@hyperscape/shared";
 import type { TileCoord, TileMovementState } from "@hyperscape/shared";
 
@@ -231,6 +233,18 @@ export class TileMovementManager {
     }
 
     const playerId = playerEntity.id;
+
+    // CRITICAL: Block movement during death state
+    // Players should not be able to move while dying or dead
+    const entityData = playerEntity.data as
+      | { deathState?: DeathState }
+      | undefined;
+    if (
+      entityData?.deathState === DeathState.DYING ||
+      entityData?.deathState === DeathState.DEAD
+    ) {
+      return; // Silently reject - player is dead
+    }
 
     // Rate limit: prevent spam attacks
     if (!this.movementRateLimiter.check(playerId)) {

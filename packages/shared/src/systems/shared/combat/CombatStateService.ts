@@ -383,6 +383,33 @@ export class CombatStateService {
   }
 
   /**
+   * Clear all combat states where the target is the specified entity.
+   * Used when an entity dies or respawns to ensure no attackers retain stale targeting.
+   *
+   * This is critical for death/respawn behavior:
+   * - When a player dies, all attackers targeting them must have their combat states cleared
+   * - When a player respawns, any lingering states from before death must be purged
+   * - Without this, attackers would continue chasing dead/respawned entities
+   *
+   * @param targetEntityId - The entity ID that was being targeted
+   * @returns Array of attacker IDs whose states were cleared (for logging/debugging)
+   */
+  clearStatesTargeting(targetEntityId: EntityID | string): EntityID[] {
+    const targetIdStr = String(targetEntityId);
+    const clearedAttackers: EntityID[] = [];
+
+    for (const [attackerId, state] of this.combatStates) {
+      if (String(state.targetId) === targetIdStr) {
+        this.combatStates.delete(attackerId);
+        clearedAttackers.push(attackerId);
+        this.clearCombatStateFromEntity(attackerId, state.attackerType);
+      }
+    }
+
+    return clearedAttackers;
+  }
+
+  /**
    * Clear all combat state for cleanup
    */
   destroy(): void {

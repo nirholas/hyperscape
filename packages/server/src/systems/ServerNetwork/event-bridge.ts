@@ -843,7 +843,6 @@ export class EventBridge {
           return;
         }
 
-        // Phase 6: Removed socket.activeStoreNpcEntityId assignment
         // InteractionSessionManager now tracks targetEntityId as single source of truth
         // (It listens to STORE_OPEN_REQUEST and creates session with targetEntityId = npcEntityId)
 

@@ -12,7 +12,6 @@
  * - Level range: 3 (minimum) to 126 (maximum with all 99s)
  * - Used by AggroSystem for double-level aggro rule
  *
- * @see OSRS-IMPLEMENTATION-PLAN.md Phase 2
  */
 
 /**

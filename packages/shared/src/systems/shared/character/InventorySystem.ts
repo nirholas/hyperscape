@@ -28,6 +28,7 @@ import { Logger } from "../../../utils/Logger";
 import type { DatabaseSystem } from "../../../types/systems/system-interfaces";
 import type { GroundItemSystem } from "../economy/GroundItemSystem";
 import type { CoinPouchSystem } from "./CoinPouchSystem";
+import { DeathState } from "../../../types/entities";
 
 export class InventorySystem extends SystemBase {
   protected playerInventories = new Map<PlayerID, PlayerInventory>();
@@ -330,6 +331,17 @@ export class InventorySystem extends SystemBase {
         message: "Close bank/store first to pick up items",
         type: "warning",
       });
+      return false;
+    }
+
+    // Block item adds during death state (prevents race condition)
+    // When a player dies, items picked up between inventory snapshot and clear
+    // would persist after respawn. Block all adds while player is dying/dead.
+    if (this.isPlayerInDeathState(data.playerId)) {
+      Logger.system(
+        "InventorySystem",
+        `Cannot add item during death state: ${data.playerId}`,
+      );
       return false;
     }
 
@@ -917,7 +929,7 @@ export class InventorySystem extends SystemBase {
       const groundItems =
         this.world.getSystem<GroundItemSystem>("ground-items");
       if (groundItems) {
-        const currentTick = this.world.currentTick;
+        const currentTick = this.world.currentTick ?? 0;
         if (!groundItems.canPickup(data.entityId, data.playerId, currentTick)) {
           this.emitTypedEvent(EventType.UI_TOAST, {
             playerId: data.playerId,
@@ -1619,6 +1631,31 @@ export class InventorySystem extends SystemBase {
     if (!inventory) return false;
 
     return inventory.items.length >= this.MAX_INVENTORY_SLOTS;
+  }
+
+  /**
+   * Check if player is in death state (DYING or DEAD).
+   *
+   * Used to block item additions during death processing, which prevents
+   * a race condition where items picked up between inventory snapshot
+   * and inventory clear would persist after respawn.
+   *
+   * @param playerId - The player ID to check
+   * @returns true if player is currently dying or dead
+   */
+  private isPlayerInDeathState(playerId: string): boolean {
+    // Check player entity's death state (single source of truth)
+    const playerEntity = this.world.entities?.get?.(playerId);
+    if (playerEntity && "data" in playerEntity) {
+      const data = playerEntity.data as { deathState?: DeathState };
+      if (data?.deathState) {
+        return (
+          data.deathState === DeathState.DYING ||
+          data.deathState === DeathState.DEAD
+        );
+      }
+    }
+    return false;
   }
 
   // Store system event handlers

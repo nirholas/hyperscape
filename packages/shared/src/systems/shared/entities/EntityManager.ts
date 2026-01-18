@@ -506,24 +506,7 @@ export class EntityManager extends SystemBase {
     this.world.entities.set(config.id, entity);
 
     // Broadcast entityAdded to all clients (server-only)
-    if (this.world.isServer) {
-      const network = this.world.network as {
-        send?: (method: string, data: unknown, excludeId?: string) => void;
-      };
-      if (network?.send) {
-        network.send("entityAdded", entity.serialize());
-      }
-    }
-
-    // Emit spawn event using world.emit to avoid type mismatch
-    this.emitTypedEvent(EventType.ENTITY_SPAWNED, {
-      entityId: config.id,
-      entityType: config.type,
-      position: config.position,
-      entityData: entity.getNetworkData(),
-    });
-
-    // CRITICAL FIX: Broadcast new entity to all connected clients
+    // Single broadcast point to prevent duplicate packets
     if (this.world.isServer) {
       const network = this.world.network;
       if (network && typeof network.send === "function") {
@@ -538,30 +521,63 @@ export class EntityManager extends SystemBase {
       }
     }
 
+    // Emit spawn event using world.emit to avoid type mismatch
+    this.emitTypedEvent(EventType.ENTITY_SPAWNED, {
+      entityId: config.id,
+      entityType: config.type,
+      position: config.position,
+      entityData: entity.getNetworkData(),
+    });
+
     return entity;
   }
 
+  /** Track entities currently being destroyed to prevent re-entrant calls */
+  private destroyingEntities = new Set<string>();
+
   destroyEntity(entityId: string): boolean {
+    // Guard against re-entrant destruction (prevents infinite loop)
+    // This can happen when ENTITY_DEATH event triggers handleEntityDestroy
+    // which calls destroyEntity again
+    if (this.destroyingEntities.has(entityId)) {
+      return false;
+    }
+
     const entity = this.getEntity(entityId);
     if (!entity) {
       return false;
     }
 
-    // Send entityRemoved packet to all clients before destroying
-    const network = this.world.network;
-    if (network && network.isServer) {
-      try {
-        network.send("entityRemoved", entityId);
-      } catch (error) {
-        console.warn(
-          `[EntityManager] Failed to send entityRemoved packet for ${entityId}:`,
-          error,
-        );
-      }
-    }
+    // Mark as being destroyed before any events are emitted
+    this.destroyingEntities.add(entityId);
 
-    // Call entity destroy method
-    entity.destroy();
+    try {
+      // Send entityRemoved packet to all clients before destroying
+      const network = this.world.network;
+      if (network && network.isServer) {
+        try {
+          network.send("entityRemoved", entityId);
+        } catch (error) {
+          console.warn(
+            `[EntityManager] Failed to send entityRemoved packet for ${entityId}:`,
+            error,
+          );
+        }
+      }
+
+      // Emit destroy event BEFORE removing entity from tracking
+      // This allows event handlers to still look up the entity if needed
+      this.emitTypedEvent(EventType.ENTITY_DEATH, {
+        entityId,
+        entityType: entity.type,
+      });
+
+      // Call entity destroy method
+      entity.destroy();
+    } finally {
+      // Always clean up the guard
+      this.destroyingEntities.delete(entityId);
+    }
 
     // Remove from tracking
     this.entities.delete(entityId);
@@ -570,12 +586,6 @@ export class EntityManager extends SystemBase {
 
     // Remove from world entities system
     this.world.entities.remove(entityId);
-
-    // Emit destroy event
-    this.emitTypedEvent(EventType.ENTITY_DEATH, {
-      entityId,
-      entityType: entity.type,
-    });
 
     return true;
   }

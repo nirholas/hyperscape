@@ -46,6 +46,16 @@ export class MobDamageHandler implements DamageHandler {
     attackerId: EntityID,
     _attackerType: "player" | "mob",
   ): DamageResult {
+    // Validate attacker exists before applying damage
+    // This prevents spoofed damage from non-existent attackers
+    const attacker = this.world.entities.get(String(attackerId));
+    if (!attacker) {
+      console.warn(
+        `[MobDamageHandler] Rejecting damage - attacker ${attackerId} does not exist`,
+      );
+      return { actualDamage: 0, targetDied: false, success: false };
+    }
+
     const mobEntity = this.getEntity(targetId) as MobLike | null;
     if (!mobEntity) {
       return { actualDamage: 0, targetDied: false, success: false };

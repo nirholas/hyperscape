@@ -8,8 +8,6 @@
  * - Player emote helpers
  *
  * Subclasses: FiremakingSystem, CookingSystem
- *
- * @see Phase 4.1 of COOKING_FIREMAKING_HARDENING_PLAN.md
  */
 
 import THREE from "../../../extras/three/three";
@@ -50,7 +48,7 @@ export abstract class ProcessingSystemBase
   protected readonly FIRE_DURATION = 120000; // 2 minutes
   protected readonly MAX_FIRES_PER_PLAYER = 3;
 
-  // Object pool for ProcessingAction (Phase 2 optimization)
+  // Object pool for ProcessingAction
   protected readonly actionPool: ProcessingAction[] = [];
   protected readonly MAX_POOL_SIZE = 100;
 
@@ -66,7 +64,7 @@ export abstract class ProcessingSystemBase
   }
 
   // =========================================================================
-  // OBJECT POOLING (Phase 2)
+  // OBJECT POOLING
   // =========================================================================
 
   /**
@@ -113,7 +111,7 @@ export abstract class ProcessingSystemBase
   }
 
   // =========================================================================
-  // EMOTE HELPERS (Phase 3 DRY)
+  // EMOTE HELPERS
   // =========================================================================
 
   /**
@@ -195,7 +193,7 @@ export abstract class ProcessingSystemBase
 
     fire.isActive = false;
 
-    // Cancel animation before removing mesh (Phase 2: prevent RAF leak)
+    // Cancel animation before removing mesh to prevent requestAnimationFrame leak
     const fireWithAnimation = fire as { cancelAnimation?: () => void };
     fireWithAnimation.cancelAnimation?.();
 

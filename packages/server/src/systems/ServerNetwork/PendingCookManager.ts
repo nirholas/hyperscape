@@ -12,13 +12,12 @@
  * 5. Every tick, server checks if player arrived at cardinal tile
  * 6. When arrived, server starts cooking via PROCESSING_COOKING_REQUEST event
  *
- * DEPENDENCY INJECTION (Phase 4.2):
- * FireRegistry is now injected via constructor instead of looked up via getSystem().
+ * DEPENDENCY INJECTION:
+ * FireRegistry is injected via constructor instead of looked up via getSystem().
  * This improves testability and follows the Dependency Inversion Principle.
  *
  * @see PendingGatherManager - resource gathering equivalent
  * @see PendingAttackManager - combat equivalent
- * @see Phase 4.2 of COOKING_FIREMAKING_HARDENING_PLAN.md
  */
 
 import type { World } from "@hyperscape/shared";
@@ -91,7 +90,7 @@ export class PendingCookManager {
    *
    * @param world - World instance for player lookups
    * @param tileMovementManager - Movement manager for pathing
-   * @param fireRegistry - Injected fire registry (Phase 4.2 DIP)
+   * @param fireRegistry - Injected fire registry for dependency inversion
    */
   constructor(
     world: World,
@@ -127,7 +126,7 @@ export class PendingCookManager {
     // Cancel any existing pending cook
     this.cancelPendingCook(playerId);
 
-    // Look up fire using injected FireRegistry (Phase 4.2 DIP)
+    // Look up fire using injected FireRegistry
     const fires = this.fireRegistry.getActiveFires();
     const fire = fires.get(fireId);
 

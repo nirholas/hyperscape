@@ -782,7 +782,7 @@ export class PlayerSystem extends SystemBase {
 
       // Set lastDamageTick for health regen cooldown (17 ticks = 10.2s after damage)
       (playerEntity as unknown as { lastDamageTick: number }).lastDamageTick =
-        this.world.currentTick;
+        this.world.currentTick ?? 0;
     }
 
     // Check for death
@@ -1306,7 +1306,7 @@ export class PlayerSystem extends SystemBase {
 
       // Set lastDamageTick for health regen cooldown (17 ticks = 10.2s after damage)
       (playerEntity as unknown as { lastDamageTick: number }).lastDamageTick =
-        this.world.currentTick;
+        this.world.currentTick ?? 0;
     }
 
     this.emitTypedEvent(EventType.PLAYER_HEALTH_UPDATED, {

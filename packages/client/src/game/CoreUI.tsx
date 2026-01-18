@@ -349,7 +349,57 @@ function DeathScreen({
   data: { message: string; killedBy: string; respawnTime: number };
   world: ClientWorld;
 }) {
+  // Track respawn state to prevent button spam
+  const [isRespawning, setIsRespawning] = useState(false);
+  // Track if respawn request timed out
+  const [respawnTimedOut, setRespawnTimedOut] = useState(false);
+  // Death countdown timer - seconds until items despawn
+  const [countdown, setCountdown] = useState<number>(
+    Math.max(0, Math.floor((data.respawnTime - Date.now()) / 1000)),
+  );
+
+  // Timeout handler - re-enable button if server doesn't respond
+  const RESPAWN_TIMEOUT_MS = 10000; // 10 seconds
+
+  useEffect(() => {
+    if (!isRespawning) return;
+
+    const timeoutId = setTimeout(() => {
+      console.warn("[DeathScreen] Respawn request timed out after 10 seconds");
+      setIsRespawning(false);
+      setRespawnTimedOut(true);
+    }, RESPAWN_TIMEOUT_MS);
+
+    return () => clearTimeout(timeoutId);
+  }, [isRespawning]);
+
+  // Update countdown every second
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      const remaining = Math.max(
+        0,
+        Math.floor((data.respawnTime - Date.now()) / 1000),
+      );
+      setCountdown(remaining);
+    }, 1000);
+
+    return () => clearInterval(intervalId);
+  }, [data.respawnTime]);
+
+  // Format countdown as mm:ss
+  const formatCountdown = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
   const handleRespawn = () => {
+    // Prevent multiple clicks
+    if (isRespawning) return;
+
+    // Clear timeout state on retry
+    setRespawnTimedOut(false);
+
     // Send respawn request to server via network
     const network = world.network as {
       send?: (packet: string, data: unknown) => void;
@@ -365,12 +415,17 @@ function DeathScreen({
       return;
     }
 
+    // Disable button immediately to prevent spam
+    setIsRespawning(true);
+
     try {
       network.send("requestRespawn", {
         playerId: world.entities?.player?.id,
       });
     } catch (err) {
       console.error("[DeathScreen] Error sending packet:", err);
+      // Re-enable button on error so user can retry
+      setIsRespawning(false);
     }
   };
 
@@ -391,13 +446,37 @@ function DeathScreen({
         <div className="flex flex-col items-center gap-4 mt-4">
           <button
             onClick={handleRespawn}
-            className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white text-lg font-bold rounded-lg transition-colors cursor-pointer border-2 border-blue-400"
+            disabled={isRespawning}
+            className={`px-8 py-3 text-white text-lg font-bold rounded-lg transition-colors border-2 ${
+              isRespawning
+                ? "bg-gray-600 border-gray-500 cursor-not-allowed opacity-60"
+                : "bg-blue-600 hover:bg-blue-700 border-blue-400 cursor-pointer"
+            }`}
           >
-            Click here to respawn
+            {isRespawning ? "Respawning..." : "Click here to respawn"}
           </button>
-          <div className="text-sm text-gray-400 text-center max-w-sm">
-            Your items have been dropped at your death location. You have 5
-            minutes to retrieve them before they despawn!
+          {respawnTimedOut && (
+            <div className="text-sm text-yellow-400 text-center max-w-sm">
+              Respawn request timed out. Please try again.
+            </div>
+          )}
+          {/* Death countdown timer */}
+          <div className="text-sm text-center max-w-sm">
+            {countdown > 0 ? (
+              <>
+                <span className="text-gray-400">
+                  Your items have been dropped at your death location.
+                </span>
+                <br />
+                <span
+                  className={`font-bold ${countdown <= 60 ? "text-red-400" : "text-yellow-400"}`}
+                >
+                  Time remaining: {formatCountdown(countdown)}
+                </span>
+              </>
+            ) : (
+              <span className="text-red-400">Your items have despawned!</span>
+            )}
           </div>
         </div>
       </div>

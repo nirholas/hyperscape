@@ -108,7 +108,7 @@ export class StoreSystem extends SystemBase {
       return;
     }
 
-    // NOTE (Phase 8): Distance check removed - now handled by:
+    // NOTE: Distance check removed - now handled by:
     // 1. Server handler (per-operation validation using Chebyshev distance)
     // 2. InteractionSessionManager (periodic validation, auto-close on walk away)
     // This eliminates the inconsistency between Euclidean 3D (old) vs Chebyshev 2D (new)

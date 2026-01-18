@@ -2,8 +2,8 @@
  * SafeAreaDeathHandler (TICK-BASED)
  *
  * Handles player death in safe zones (RuneScape-style):
- * 1. Items → gravestone (500 ticks = 5 minutes)
- * 2. Gravestone expires → ground items (200 ticks = 2 minutes)
+ * 1. Items → gravestone (1500 ticks = 15 minutes)
+ * 2. Gravestone expires → ground items (6000 ticks = 60 minutes)
  * 3. Ground items despawn via GroundItemSystem tick processing
  *
  * TICK-BASED TIMING (OSRS-accurate):
@@ -24,6 +24,8 @@ import { EntityType, InteractionType } from "../../../types/entities";
 import type { HeadstoneEntityConfig } from "../../../types/entities";
 import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
 import { ticksToMs } from "../../../utils/game/CombatCalculations";
+
+const GRAVESTONE_MODEL_PATH = "models/environment/gravestone.glb";
 
 /** Gravestone data tracked for tick-based expiration */
 interface GravestoneData {
@@ -120,14 +122,17 @@ export class SafeAreaDeathHandler {
     );
 
     // Track gravestone for tick-based expiration (500 ticks = 5 minutes)
-    const currentTick = this.world.currentTick;
-    const expirationTick = currentTick + COMBAT_CONSTANTS.GRAVESTONE_TICKS;
+    // Type-safe tick calculation with explicit number type
+    const currentTick: number = this.world.currentTick ?? 0;
+    const gravestoneTicks: number = COMBAT_CONSTANTS.GRAVESTONE_TICKS;
+    const expirationTick: number = currentTick + gravestoneTicks;
 
+    // Defensive copy of items array to prevent external mutation
     this.gravestones.set(gravestoneId, {
       gravestoneId,
       playerId,
-      position,
-      items,
+      position: { ...position },
+      items: items.map((item) => ({ ...item })),
       expirationTick,
     });
 
@@ -153,8 +158,8 @@ export class SafeAreaDeathHandler {
       return "";
     }
 
-    // Get the player entity to retrieve their actual display name
-    const playerEntity = this.world.entities.players.get(playerId) as
+    // Get the player's display name (fallback to playerId if not found)
+    const playerEntity = this.world.entities?.get?.(playerId) as
       | { playerName?: string; name?: string }
       | undefined;
     const playerName =
@@ -178,7 +183,7 @@ export class SafeAreaDeathHandler {
       interactionType: InteractionType.LOOT,
       interactionDistance: 2,
       description: `Gravestone of ${playerName} (killed by ${killedBy})`,
-      model: "models/environment/gravestone.glb",
+      model: GRAVESTONE_MODEL_PATH,
       headstoneData: {
         playerId: playerId,
         playerName: playerName,
@@ -222,6 +227,8 @@ export class SafeAreaDeathHandler {
    * Process tick - check for expired gravestones (TICK-BASED)
    * Called once per tick by TickSystem
    *
+   * Uses consistent async/await pattern for promise handling
+   *
    * @param currentTick - Current server tick number
    */
   processTick(currentTick: number): void {
@@ -233,9 +240,17 @@ export class SafeAreaDeathHandler {
       }
     }
 
-    // Process expired gravestones
+    // Process expired gravestones with proper error handling
+    // Using void operator to explicitly ignore the promise (fire-and-forget pattern)
     for (const gravestoneData of expiredGravestones) {
-      this.handleGravestoneExpire(gravestoneData, currentTick);
+      void this.handleGravestoneExpire(gravestoneData, currentTick).catch(
+        (err) => {
+          console.error(
+            `[SafeAreaDeathHandler] Gravestone expiration failed for ${gravestoneData.gravestoneId}:`,
+            err,
+          );
+        },
+      );
     }
   }
 

@@ -1,8 +1,15 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import type { World } from "@hyperscape/shared";
-import type { InventoryItem } from "@hyperscape/shared";
-import { EventType } from "@hyperscape/shared";
-import { getItem } from "@hyperscape/shared";
+import type {
+  InventoryItem,
+  PendingLootTransaction,
+  LootResult,
+} from "@hyperscape/shared";
+import { EventType, generateTransactionId, getItem } from "@hyperscape/shared";
+import { ErrorBoundary } from "../../lib/ErrorBoundary";
+
+// Timeout for pending loot transactions (3 seconds for better UX)
+const LOOT_TRANSACTION_TIMEOUT_MS = 3000;
 
 interface LootWindowProps {
   visible: boolean;
@@ -13,7 +20,10 @@ interface LootWindowProps {
   world: World;
 }
 
-export function LootWindow({
+/**
+ * Internal LootWindow component (wrapped with ErrorBoundary below)
+ */
+function LootWindowContent({
   visible,
   corpseId,
   corpseName,
@@ -23,27 +33,177 @@ export function LootWindow({
 }: LootWindowProps) {
   const [items, setItems] = useState<InventoryItem[]>(lootItems);
 
+  // Close confirmation state
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+
+  // Shadow state - track pending loot transactions for rollback
+  const [pendingTransactions, setPendingTransactions] = useState<
+    Map<string, PendingLootTransaction>
+  >(new Map());
+  const timeoutRefs = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map(),
+  );
+
   // Update items when prop changes
   useEffect(() => {
     setItems(lootItems);
   }, [lootItems, corpseId]);
 
-  // Listen for server updates to the gravestone entity
-  // This keeps the loot window in sync when items are removed
-  useEffect(() => {
-    const updateInterval = setInterval(() => {
-      if (!visible || !corpseId) return;
+  // Rollback a failed/timed-out transaction
+  const rollbackTransaction = useCallback((transactionId: string) => {
+    setPendingTransactions((prev) => {
+      const transaction = prev.get(transactionId);
+      if (!transaction) return prev;
 
-      // Get the gravestone entity from the world
+      // Restore the item to its original position
+      setItems((currentItems) => {
+        const newItems = [...currentItems];
+        // Insert at original index or at end if out of bounds
+        const insertIndex = Math.min(
+          transaction.originalIndex,
+          newItems.length,
+        );
+        newItems.splice(insertIndex, 0, transaction.originalItem);
+        return newItems;
+      });
+
+      console.log(
+        `[LootWindow] Rolling back transaction ${transactionId} - restoring ${transaction.itemId} x${transaction.quantity}`,
+      );
+
+      // Remove from pending
+      const newPending = new Map(prev);
+      newPending.delete(transactionId);
+      return newPending;
+    });
+
+    // Clear any existing timeout
+    const existingTimeout = timeoutRefs.current.get(transactionId);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+      timeoutRefs.current.delete(transactionId);
+    }
+  }, []);
+
+  // Handle loot result events from server
+  useEffect(() => {
+    if (!world.network) return;
+
+    const handleLootResult = (result: LootResult) => {
+      const { transactionId, success, reason } = result;
+
+      // Clear timeout for this transaction (handles both single and batch)
+      const existingTimeout = timeoutRefs.current.get(transactionId);
+      if (existingTimeout) {
+        clearTimeout(existingTimeout);
+        timeoutRefs.current.delete(transactionId);
+      }
+
+      if (success) {
+        // Transaction confirmed - remove from pending (item already removed from UI)
+        setPendingTransactions((prev) => {
+          const newPending = new Map(prev);
+          // Remove the exact transaction ID
+          newPending.delete(transactionId);
+          // Also clear any batch-related transactions (e.g., "txn123_0", "txn123_1", etc.)
+          // This handles the "loot all" case where we track items as "${batchId}_${index}"
+          for (const key of prev.keys()) {
+            if (key.startsWith(`${transactionId}_`)) {
+              newPending.delete(key);
+            }
+          }
+          return newPending;
+        });
+        console.log(`[LootWindow] Loot confirmed: ${transactionId}`);
+      } else {
+        // Transaction failed - rollback
+        console.warn(`[LootWindow] Loot failed: ${transactionId} - ${reason}`);
+
+        // For batch operations, rollback all related transactions
+        setPendingTransactions((prev) => {
+          const batchKeys = Array.from(prev.keys()).filter(
+            (key) =>
+              key === transactionId || key.startsWith(`${transactionId}_`),
+          );
+          if (batchKeys.length > 0) {
+            // Batch rollback
+            batchKeys.forEach((key) => rollbackTransaction(key));
+          } else {
+            // Single item rollback
+            rollbackTransaction(transactionId);
+          }
+          return prev;
+        });
+
+        // Show error toast if available
+        if (reason) {
+          const errorMessages: Record<string, string> = {
+            ITEM_NOT_FOUND: "Item already looted by someone else",
+            INVENTORY_FULL: "Your inventory is full",
+            PROTECTED: "You cannot loot this yet",
+            GRAVESTONE_GONE: "The gravestone has despawned",
+            RATE_LIMITED: "Too many requests, slow down",
+            INVALID_REQUEST: "Invalid loot request",
+            PLAYER_DYING: "Cannot loot while dying",
+          };
+          world.emit(EventType.SHOW_TOAST, {
+            message: errorMessages[reason] || "Failed to loot item",
+            type: "error",
+          });
+        }
+      }
+    };
+
+    // Listen for loot result events
+    world.network.on("lootResult", handleLootResult);
+
+    return () => {
+      world.network?.off("lootResult", handleLootResult);
+    };
+  }, [world, rollbackTransaction]);
+
+  // Cleanup timeouts on unmount
+  useEffect(() => {
+    return () => {
+      // Clear all pending timeouts
+      timeoutRefs.current.forEach((timeout) => clearTimeout(timeout));
+      timeoutRefs.current.clear();
+    };
+  }, []);
+
+  // Handle close with confirmation if items remain
+  const handleCloseClick = useCallback(() => {
+    if (items.length > 0) {
+      setShowCloseConfirm(true);
+    } else {
+      onClose();
+    }
+  }, [items.length, onClose]);
+
+  const handleConfirmClose = useCallback(() => {
+    setShowCloseConfirm(false);
+    onClose();
+  }, [onClose]);
+
+  const handleCancelClose = useCallback(() => {
+    setShowCloseConfirm(false);
+  }, []);
+
+  // Sync gravestone state with server using events + reduced polling fallback
+  useEffect(() => {
+    if (!visible || !corpseId) return;
+
+    // Helper to check entity state and sync items
+    const syncEntityState = (): boolean => {
       const gravestoneEntity = world.entities?.get(corpseId);
 
-      // If gravestone entity no longer exists (despawned), close window immediately
+      // If gravestone entity no longer exists (despawned), close window
       if (!gravestoneEntity) {
         console.log(
           "[LootWindow] Gravestone despawned, closing window immediately...",
         );
         onClose();
-        return;
+        return false;
       }
 
       // Check if entity has lootItems in its data
@@ -62,13 +222,10 @@ export function LootWindow({
         const serverItems: InventoryItem[] =
           entityData?.lootItems || entityWithLoot.lootItems || [];
 
-        // Only update if items actually changed - compare by reference first, then by length/content
+        // Only update if items actually changed
         setItems((prevItems) => {
-          // Quick reference equality check
           if (prevItems === serverItems) return prevItems;
-          // Length check
           if (prevItems.length !== serverItems.length) return serverItems;
-          // Deep equality check - compare item IDs and quantities
           for (let i = 0; i < prevItems.length; i++) {
             if (
               prevItems[i].itemId !== serverItems[i].itemId ||
@@ -77,7 +234,6 @@ export function LootWindow({
               return serverItems;
             }
           }
-          // Items are the same, return previous reference to avoid re-render
           return prevItems;
         });
       }
@@ -95,17 +251,81 @@ export function LootWindow({
         setTimeout(() => {
           onClose();
         }, 500);
+        return false;
       }
-    }, 100); // Check every 100ms for updates
 
-    return () => clearInterval(updateInterval);
+      return true;
+    };
+
+    // Initial sync on mount
+    if (!syncEntityState()) return;
+
+    // Event handler for entity updates (includes gravestone state changes)
+    const handleEntityUpdate = (data: { id?: string; entityId?: string }) => {
+      const entityId = data.id || data.entityId;
+      if (entityId === corpseId) {
+        syncEntityState();
+      }
+    };
+
+    // Event handler for gravestone expiration
+    const handleHeadstoneExpired = (data: { gravestoneId?: string }) => {
+      if (data.gravestoneId === corpseId) {
+        console.log("[LootWindow] Headstone expired event received");
+        onClose();
+      }
+    };
+
+    // Subscribe to entity update events
+    world.on(EventType.ENTITY_UPDATED, handleEntityUpdate);
+    world.on(EventType.DEATH_HEADSTONE_EXPIRED, handleHeadstoneExpired);
+
+    // Reduced polling as fallback (1s instead of 100ms = 10x less CPU)
+    // This catches edge cases where events might be missed
+    const fallbackInterval = setInterval(syncEntityState, 1000);
+
+    return () => {
+      world.off(EventType.ENTITY_UPDATED, handleEntityUpdate);
+      world.off(EventType.DEATH_HEADSTONE_EXPIRED, handleHeadstoneExpired);
+      clearInterval(fallbackInterval);
+    };
   }, [visible, corpseId, world, items.length, onClose]);
 
   const handleTakeItem = (item: InventoryItem, index: number) => {
     const localPlayer = world.getPlayer();
     if (!localPlayer) return;
 
-    // Send loot request to server
+    // Generate transaction ID for shadow state tracking
+    const transactionId = generateTransactionId();
+
+    // Track pending transaction for potential rollback
+    const pendingTransaction: PendingLootTransaction = {
+      transactionId,
+      itemId: item.itemId,
+      quantity: item.quantity,
+      requestedAt: Date.now(),
+      originalItem: { ...item },
+      originalIndex: index,
+    };
+
+    setPendingTransactions((prev) => {
+      const newPending = new Map(prev);
+      newPending.set(transactionId, pendingTransaction);
+      return newPending;
+    });
+
+    // Set timeout for transaction (auto-rollback if no response)
+    const timeout = setTimeout(() => {
+      console.warn(`[LootWindow] Transaction timed out: ${transactionId}`);
+      rollbackTransaction(transactionId);
+      world.emit(EventType.SHOW_TOAST, {
+        message: "Loot request timed out",
+        type: "error",
+      });
+    }, LOOT_TRANSACTION_TIMEOUT_MS);
+    timeoutRefs.current.set(transactionId, timeout);
+
+    // Send loot request to server with transaction ID
     if (world.network?.send) {
       world.network.send("entityEvent", {
         id: "world",
@@ -116,6 +336,7 @@ export function LootWindow({
           itemId: item.itemId,
           quantity: item.quantity,
           slot: index,
+          transactionId, // Include transaction ID for confirmation
         },
       });
     } else {
@@ -125,45 +346,73 @@ export function LootWindow({
         itemId: item.itemId,
         quantity: item.quantity,
         slot: index,
+        transactionId,
       });
     }
 
-    // Optimistically remove item from UI
+    // Optimistically remove item from UI (will rollback if server rejects)
     setItems((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleTakeAll = () => {
     const localPlayer = world.getPlayer();
     if (!localPlayer) return;
+    if (items.length === 0) return;
 
-    // Take ALL items in one batch request
-    // Copy current items array since we'll clear it optimistically
-    const itemsToTake = [...items];
+    // Generate single transaction ID for the batch operation
+    const transactionId = generateTransactionId();
 
-    // Send loot request for each item
-    itemsToTake.forEach((item, index) => {
-      if (world.network?.send) {
-        world.network.send("entityEvent", {
-          id: "world",
-          event: EventType.CORPSE_LOOT_REQUEST,
-          payload: {
-            corpseId,
-            playerId: localPlayer.id,
-            itemId: item.itemId,
-            quantity: item.quantity,
-            slot: index,
-          },
-        });
-      } else {
-        world.emit(EventType.CORPSE_LOOT_REQUEST, {
+    // Track all items as pending for potential rollback
+    const itemsCopy = [...items];
+    itemsCopy.forEach((item, index) => {
+      const pendingTransaction: PendingLootTransaction = {
+        transactionId: `${transactionId}_${index}`,
+        itemId: item.itemId,
+        quantity: item.quantity,
+        requestedAt: Date.now(),
+        originalItem: { ...item },
+        originalIndex: index,
+      };
+
+      setPendingTransactions((prev) => {
+        const newPending = new Map(prev);
+        newPending.set(pendingTransaction.transactionId, pendingTransaction);
+        return newPending;
+      });
+    });
+
+    // Set single timeout for the batch operation
+    const timeout = setTimeout(() => {
+      console.warn(`[LootWindow] Loot all timed out: ${transactionId}`);
+      // Rollback all items
+      itemsCopy.forEach((_, index) => {
+        rollbackTransaction(`${transactionId}_${index}`);
+      });
+      world.emit(EventType.SHOW_TOAST, {
+        message: "Loot request timed out",
+        type: "error",
+      });
+    }, LOOT_TRANSACTION_TIMEOUT_MS);
+    timeoutRefs.current.set(transactionId, timeout);
+
+    // Send single batch loot request
+    if (world.network?.send) {
+      world.network.send("entityEvent", {
+        id: "world",
+        event: EventType.CORPSE_LOOT_ALL_REQUEST,
+        payload: {
           corpseId,
           playerId: localPlayer.id,
-          itemId: item.itemId,
-          quantity: item.quantity,
-          slot: index,
-        });
-      }
-    });
+          transactionId,
+        },
+      });
+    } else {
+      world.emit(EventType.CORPSE_LOOT_ALL_REQUEST, {
+        corpseId,
+        playerId: localPlayer.id,
+        transactionId,
+      });
+    }
 
     // Optimistically clear ALL items at once
     setItems([]);
@@ -197,7 +446,7 @@ export function LootWindow({
             Take All
           </button>
           <button
-            onClick={onClose}
+            onClick={handleCloseClick}
             className="bg-gray-600 hover:bg-gray-700 border-none rounded text-white py-1.5 px-3 cursor-pointer text-sm transition-colors"
           >
             Close
@@ -249,6 +498,66 @@ export function LootWindow({
           Click an item to take it • Take All to loot everything
         </p>
       </div>
+
+      {/* Close Confirmation Dialog */}
+      {showCloseConfirm && (
+        <div className="absolute inset-0 bg-black/80 flex items-center justify-center rounded-lg z-10">
+          <div className="bg-gray-800 border border-yellow-600 rounded-lg p-4 max-w-xs text-center">
+            <p className="text-yellow-400 font-bold mb-2">
+              Leave items behind?
+            </p>
+            <p className="text-gray-300 text-sm mb-4">
+              There are still {items.length} item{items.length > 1 ? "s" : ""}{" "}
+              in this corpse. They may despawn if you leave them.
+            </p>
+            <div className="flex gap-2 justify-center">
+              <button
+                onClick={handleConfirmClose}
+                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded text-sm"
+              >
+                Leave Items
+              </button>
+              <button
+                onClick={handleCancelClose}
+                className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded text-sm"
+              >
+                Keep Looting
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+/**
+ * LootWindow wrapped with ErrorBoundary for resilience
+ *
+ * If the loot window crashes due to data issues, this prevents
+ * the entire game UI from failing. Shows a fallback with close button.
+ */
+export function LootWindow(props: LootWindowProps) {
+  const fallback = (
+    <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/50">
+      <div className="bg-gray-800 border-2 border-red-500 rounded-lg p-4 text-center max-w-sm">
+        <p className="text-red-400 font-bold mb-2">⚠️ Loot Window Error</p>
+        <p className="text-gray-300 text-sm mb-4">
+          Something went wrong displaying the loot. Your items are still safe.
+        </p>
+        <button
+          onClick={props.onClose}
+          className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded text-sm"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <ErrorBoundary fallback={fallback}>
+      <LootWindowContent {...props} />
+    </ErrorBoundary>
   );
 }

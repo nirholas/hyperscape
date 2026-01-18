@@ -71,6 +71,16 @@ export class PlayerDamageHandler implements DamageHandler {
 
     const targetIdStr = String(targetId);
 
+    // Validate attacker exists before applying damage
+    // This prevents spoofed damage from non-existent attackers
+    const attacker = this.world.entities.get(String(attackerId));
+    if (!attacker) {
+      console.warn(
+        `[PlayerDamageHandler] Rejecting damage - attacker ${attackerId} does not exist`,
+      );
+      return { actualDamage: 0, targetDied: false, success: false };
+    }
+
     // Check if player exists and is alive before damage
     const player = this.getEntity(targetId);
     if (!player) {

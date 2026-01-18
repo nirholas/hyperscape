@@ -2047,6 +2047,14 @@ export class ClientNetwork extends SystemBase {
     // Only show death screen for local player
     const localPlayer = this.world.getPlayer();
     if (localPlayer && localPlayer.id === data.playerId) {
+      // Ensure input is blocked BEFORE death screen shows
+      // This prevents the race condition where death screen appears
+      // but player can still briefly send inputs
+      this.world.emit(EventType.PLAYER_SET_DEAD, {
+        playerId: data.playerId,
+        isDead: true,
+      });
+
       // Forward to local event system for death screen display
       this.world.emit(EventType.UI_DEATH_SCREEN, {
         message: data.message,

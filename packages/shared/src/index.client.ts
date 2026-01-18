@@ -85,6 +85,16 @@ export {
   uuid,
 } from "./utils/index";
 
+// Export ID generation utilities (for transaction tracking, etc.)
+export { generateTransactionId } from "./utils/IdGenerator";
+
+// Export death/loot types for shadow state and transaction tracking
+export type {
+  LootResult,
+  LootFailureReason,
+  PendingLootTransaction,
+} from "./types/death";
+
 // Export tile utilities (used for OSRS-style tile-based distance checks)
 export {
   worldToTile,

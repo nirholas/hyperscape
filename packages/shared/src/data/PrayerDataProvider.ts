@@ -138,8 +138,7 @@ export class PrayerDataProvider {
       this.buildPrayerDataFromManifest();
     } else {
       Logger.warn(
-        "PrayerDataProvider",
-        "No prayer manifest loaded - prayer system will be unavailable",
+        "[PrayerDataProvider] No prayer manifest loaded - prayer system will be unavailable",
       );
     }
 
@@ -176,8 +175,7 @@ export class PrayerDataProvider {
       // Validate prayer ID format (security)
       if (!isValidPrayerId(input.id)) {
         Logger.warn(
-          "PrayerDataProvider",
-          `Invalid prayer ID format: "${input.id}" - skipping`,
+          `[PrayerDataProvider] Invalid prayer ID format: "${input.id}" - skipping`,
         );
         continue;
       }
@@ -185,8 +183,7 @@ export class PrayerDataProvider {
       // Validate bonuses
       if (!isValidPrayerBonuses(input.bonuses)) {
         Logger.warn(
-          "PrayerDataProvider",
-          `Invalid bonuses for prayer "${input.id}" - skipping`,
+          `[PrayerDataProvider] Invalid bonuses for prayer "${input.id}" - skipping`,
         );
         continue;
       }
@@ -195,8 +192,7 @@ export class PrayerDataProvider {
       const category = input.category as PrayerCategory;
       if (!["offensive", "defensive", "utility"].includes(category)) {
         Logger.warn(
-          "PrayerDataProvider",
-          `Invalid category "${input.category}" for prayer "${input.id}" - skipping`,
+          `[PrayerDataProvider] Invalid category "${input.category}" for prayer "${input.id}" - skipping`,
         );
         continue;
       }
@@ -208,8 +204,7 @@ export class PrayerDataProvider {
           validConflicts.push(conflictId);
         } else {
           Logger.warn(
-            "PrayerDataProvider",
-            `Invalid conflict ID "${conflictId}" in prayer "${input.id}" - ignoring`,
+            `[PrayerDataProvider] Invalid conflict ID "${conflictId}" in prayer "${input.id}" - ignoring`,
           );
         }
       }

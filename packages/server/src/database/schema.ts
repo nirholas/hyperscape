@@ -88,6 +88,8 @@ import {
   unique,
   uniqueIndex,
   index,
+  jsonb,
+  boolean,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -726,6 +728,12 @@ export const playerDeaths = pgTable(
     timestamp: bigint("timestamp", { mode: "number" }).notNull(),
     zoneType: text("zoneType").notNull(), // "safe_area" | "wilderness" | "pvp_zone"
     itemCount: integer("itemCount").default(0).notNull(),
+    // Crash recovery columns
+    items: jsonb("items")
+      .default(sql`'[]'::jsonb`)
+      .notNull(), // Array of {itemId, quantity} for recovery
+    killedBy: text("killedBy").default("unknown").notNull(), // What killed the player
+    recovered: boolean("recovered").default(false).notNull(), // Whether death was processed during crash recovery
     createdAt: bigint("createdAt", { mode: "number" })
       .notNull()
       .default(sql`(EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT`),
@@ -735,6 +743,11 @@ export const playerDeaths = pgTable(
   },
   (table) => ({
     timestampIdx: index("idx_player_deaths_timestamp").on(table.timestamp),
+    recoveredIdx: index("idx_player_deaths_recovered").on(table.recovered),
+    recoveryLookupIdx: index("idx_player_deaths_recovery_lookup").on(
+      table.recovered,
+      table.timestamp,
+    ),
   }),
 );
 

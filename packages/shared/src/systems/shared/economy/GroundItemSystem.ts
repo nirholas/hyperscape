@@ -49,6 +49,20 @@ export class GroundItemSystem extends SystemBase {
   /** Pre-allocated buffer for tick processing (zero-allocation hot path) */
   private readonly _expiredItemsBuffer: string[] = [];
 
+  /**
+   * Pickup locks to prevent concurrent pickup race condition
+   * Key: entityId, Value: playerId who is currently picking up
+   * Lock is held for the duration of the pickup operation
+   */
+  private pickupLocks = new Map<string, string>();
+
+  /**
+   * Pickup lock timeout (5 seconds) to prevent stuck locks
+   * If a pickup doesn't complete within this time, the lock is auto-released
+   */
+  private pickupLockTimestamps = new Map<string, number>();
+  private readonly PICKUP_LOCK_TIMEOUT_MS = 5000;
+
   /** OSRS: Maximum items per tile */
   private readonly MAX_PILE_SIZE = 128;
 
@@ -169,7 +183,7 @@ export class GroundItemSystem extends SystemBase {
       return "";
     }
 
-    const currentTick = this.world.currentTick;
+    const currentTick = this.world.currentTick ?? 0;
 
     // OSRS: Untradeable items ALWAYS despawn in 3 min, tradeable uses caller's time
     // This overrides caller's despawnTime for untradeable items (OSRS-accurate behavior)
@@ -356,10 +370,24 @@ export class GroundItemSystem extends SystemBase {
   /**
    * Spawn multiple ground items (from player death or mob loot)
    */
+  /**
+   * Spawn multiple ground items at a position (batch operation)
+   *
+   * Implements atomic batch spawn with rollback on failure.
+   * If ANY item fails to spawn, ALL previously spawned items are cleaned up
+   * and an empty array is returned (or error thrown if throwOnFailure is true).
+   *
+   * @param items - Array of inventory items to spawn
+   * @param position - Base position for spawning
+   * @param options - Ground item options (despawn time, scatter, etc.)
+   * @param throwOnFailure - If true, throw error on any failure (for transaction rollback)
+   * @returns Array of spawned entity IDs (empty if any spawn failed)
+   */
   async spawnGroundItems(
     items: InventoryItem[],
     position: { x: number; y: number; z: number },
     options: GroundItemOptions,
+    throwOnFailure = false,
   ): Promise<string[]> {
     // CRITICAL: Server authority check - prevent client from mass-spawning items
     if (!this.world.isServer) {
@@ -370,6 +398,8 @@ export class GroundItemSystem extends SystemBase {
     }
 
     const entityIds: string[] = [];
+    let failedIndex = -1;
+    let failedItem: InventoryItem | null = null;
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -396,7 +426,33 @@ export class GroundItemSystem extends SystemBase {
 
       if (entityId) {
         entityIds.push(entityId);
+      } else {
+        // Track failure for rollback
+        failedIndex = i;
+        failedItem = item;
+        break; // Stop spawning on first failure
       }
+    }
+
+    // Rollback all spawned items if ANY spawn failed
+    if (failedIndex >= 0) {
+      console.error(
+        `[GroundItemSystem] Batch spawn failed at index ${failedIndex} (${failedItem?.itemId}). Rolling back ${entityIds.length} spawned items.`,
+      );
+
+      // Clean up all previously spawned items
+      for (const entityId of entityIds) {
+        this.removeGroundItem(entityId);
+      }
+
+      // Throw error for transaction rollback if requested
+      if (throwOnFailure) {
+        throw new Error(
+          `Failed to spawn ground item ${failedItem?.itemId} at index ${failedIndex}`,
+        );
+      }
+
+      return []; // Return empty to indicate failure
     }
 
     console.log(
@@ -404,6 +460,28 @@ export class GroundItemSystem extends SystemBase {
     );
 
     return entityIds;
+  }
+
+  /**
+   * Rollback spawned ground items (for transaction failure cleanup)
+   *
+   * Removes all ground items with the given IDs. Call this if a transaction
+   * fails after ground items were already spawned.
+   *
+   * @param entityIds - Array of entity IDs to remove
+   * @returns Number of items successfully removed
+   */
+  rollbackGroundItems(entityIds: string[]): number {
+    let removedCount = 0;
+    for (const entityId of entityIds) {
+      if (this.removeGroundItem(entityId)) {
+        removedCount++;
+      }
+    }
+    console.log(
+      `[GroundItemSystem] Rolled back ${removedCount}/${entityIds.length} ground items`,
+    );
+    return removedCount;
   }
 
   /**
@@ -459,6 +537,10 @@ export class GroundItemSystem extends SystemBase {
    * Handles both tracked items (spawned via GroundItemSystem) and untracked items
    */
   removeGroundItem(itemId: string): boolean {
+    // Clear any pickup lock on this item
+    this.pickupLocks.delete(itemId);
+    this.pickupLockTimestamps.delete(itemId);
+
     const itemData = this.groundItems.get(itemId);
 
     if (itemData) {
@@ -552,8 +634,8 @@ export class GroundItemSystem extends SystemBase {
    * - Private phase (0-100 ticks): Only dropper/killer sees item
    * - Public phase (100-200 ticks): Everyone sees item
    *
-   * NOTE: Currently used for validation. Full visual filtering requires
-   * network layer changes (see GROUND_ITEM_IMPLEMENTATION_PLAN.md Phase 5).
+   * NOTE: Currently used for server-side validation only. Full visual filtering
+   * on the client would require network layer changes to filter items per-player.
    */
   isVisibleTo(itemId: string, playerId: string, currentTick: number): boolean {
     const itemData = this.groundItems.get(itemId);
@@ -576,6 +658,9 @@ export class GroundItemSystem extends SystemBase {
    *
    * Returns true for untracked items (world spawns from ItemSpawnerSystem)
    * since they have no loot protection to enforce.
+   *
+   * NOTE: This only checks loot protection. Use tryAcquirePickupLock() to also
+   * prevent concurrent pickup race conditions.
    */
   canPickup(itemId: string, playerId: string, currentTick: number): boolean {
     const itemData = this.groundItems.get(itemId);
@@ -592,6 +677,100 @@ export class GroundItemSystem extends SystemBase {
 
     // Only the dropper/killer can pick up during protection
     return itemData.droppedBy === playerId;
+  }
+
+  /**
+   * Try to acquire a pickup lock for an item
+   *
+   * This prevents the concurrent pickup race condition where two players
+   * both check canPickup() → true and then both pick up the same item.
+   *
+   * The lock is atomic: if another player already has the lock, this returns false.
+   *
+   * @param itemId - Ground item entity ID
+   * @param playerId - Player attempting to pick up
+   * @param currentTick - Current server tick (for loot protection check)
+   * @returns true if lock acquired (caller can proceed with pickup), false if locked by another player
+   */
+  tryAcquirePickupLock(
+    itemId: string,
+    playerId: string,
+    currentTick: number,
+  ): boolean {
+    // First check loot protection
+    if (!this.canPickup(itemId, playerId, currentTick)) {
+      return false;
+    }
+
+    // Clean up any stale locks (timed out)
+    this.cleanupStaleLocks();
+
+    // Check if already locked by another player
+    const existingLock = this.pickupLocks.get(itemId);
+    if (existingLock && existingLock !== playerId) {
+      console.log(
+        `[GroundItemSystem] Pickup lock denied for ${playerId} on ${itemId} - locked by ${existingLock}`,
+      );
+      return false;
+    }
+
+    // Acquire lock
+    this.pickupLocks.set(itemId, playerId);
+    this.pickupLockTimestamps.set(itemId, Date.now());
+
+    console.log(
+      `[GroundItemSystem] Pickup lock acquired: ${playerId} → ${itemId}`,
+    );
+
+    return true;
+  }
+
+  /**
+   * Release a pickup lock
+   *
+   * Call this after pickup completes (success or failure) to allow
+   * other players to attempt pickup.
+   *
+   * @param itemId - Ground item entity ID
+   * @param playerId - Player who held the lock (for validation)
+   */
+  releasePickupLock(itemId: string, playerId: string): void {
+    const existingLock = this.pickupLocks.get(itemId);
+
+    // Only release if the caller owns the lock
+    if (existingLock === playerId) {
+      this.pickupLocks.delete(itemId);
+      this.pickupLockTimestamps.delete(itemId);
+      console.log(
+        `[GroundItemSystem] Pickup lock released: ${playerId} → ${itemId}`,
+      );
+    }
+  }
+
+  /**
+   * Check if an item is currently locked for pickup by another player
+   */
+  isPickupLocked(itemId: string, playerId: string): boolean {
+    const existingLock = this.pickupLocks.get(itemId);
+    return !!existingLock && existingLock !== playerId;
+  }
+
+  /**
+   * Clean up stale pickup locks (timed out)
+   */
+  private cleanupStaleLocks(): void {
+    const now = Date.now();
+
+    for (const [itemId, timestamp] of this.pickupLockTimestamps) {
+      if (now - timestamp > this.PICKUP_LOCK_TIMEOUT_MS) {
+        const playerId = this.pickupLocks.get(itemId);
+        console.warn(
+          `[GroundItemSystem] Pickup lock timed out: ${playerId} → ${itemId}`,
+        );
+        this.pickupLocks.delete(itemId);
+        this.pickupLockTimestamps.delete(itemId);
+      }
+    }
   }
 
   /**
@@ -626,6 +805,10 @@ export class GroundItemSystem extends SystemBase {
     }
     this.groundItems.clear();
     this.groundItemPiles.clear();
+
+    // Clear all pickup locks
+    this.pickupLocks.clear();
+    this.pickupLockTimestamps.clear();
 
     super.destroy();
   }

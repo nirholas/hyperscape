@@ -54,7 +54,6 @@ import { handleBankWithdrawCoins } from "./coins";
  *
  * Loads player's bank from database and sends state to client.
  * InteractionSessionManager automatically tracks the session with targetEntityId.
- * (Phase 6: session manager is single source of truth for entity IDs)
  */
 export async function handleBankOpen(
   socket: ServerSocket,
@@ -81,7 +80,6 @@ export async function handleBankOpen(
     const alwaysSetPlaceholder =
       await bankRepo.getAlwaysSetPlaceholder(playerId);
 
-    // Phase 6: Removed socket.activeBankEntityId assignment
     // InteractionSessionManager now tracks targetEntityId as single source of truth
 
     // Send bank state to client (include isOpen and bankId for initial open)
@@ -916,7 +914,8 @@ export async function handleBankDepositAll(
 
 /**
  * Handle bank close request
- * (Phase 6: InteractionSessionManager handles session cleanup via BANK_CLOSE event)
+ *
+ * InteractionSessionManager handles session cleanup via BANK_CLOSE event.
  */
 export function handleBankClose(
   socket: ServerSocket,
@@ -926,7 +925,6 @@ export function handleBankClose(
   const playerId = getPlayerId(socket);
   if (!playerId) return;
 
-  // Phase 6: Removed socket.activeBankEntityId assignments
   // InteractionSessionManager handles session cleanup automatically
   // Get bankEntityId from session for the event (if needed for logging)
   const sessionManager = getSessionManager(world);

@@ -63,6 +63,7 @@ import {
   isPlayerDamageHandler,
   isMobEntity,
 } from "../../../utils/typeGuards";
+import { ZoneDetectionSystem } from "../death/ZoneDetectionSystem";
 
 // Re-export CombatData from CombatStateService for backwards compatibility
 export type { CombatData } from "./CombatStateService";
@@ -261,6 +262,18 @@ export class CombatSystem extends SystemBase {
       },
     );
 
+    // CRITICAL: Listen for player respawn to clear any lingering combat states
+    // This catches edge cases where combat states survive the death cleanup
+    this.subscribe(
+      EventType.PLAYER_RESPAWNED,
+      (data: {
+        playerId: string;
+        spawnPosition: { x: number; y: number; z: number };
+      }) => {
+        this.handlePlayerRespawned(data.playerId);
+      },
+    );
+
     this.subscribe(EventType.PLAYER_JOINED, (data: { playerId: string }) => {
       const tickNumber = this.world.currentTick ?? 0;
       this.pidManager.assignPid(data.playerId as EntityID, tickNumber);
@@ -331,7 +344,7 @@ export class CombatSystem extends SystemBase {
    */
   private handleMeleeAttack(data: MeleeAttackData): void {
     const { attackerId, targetId, attackerType } = data;
-    const currentTick = this.world.currentTick;
+    const currentTick = this.world.currentTick ?? 0;
 
     if (!this.entityIdValidator.isValid(attackerId)) {
       const sanitized = this.entityIdValidator.sanitizeForLogging(attackerId);
@@ -904,7 +917,7 @@ export class CombatSystem extends SystemBase {
     targetId: EntityID,
     attackerSpeedTicks?: number,
   ): void {
-    const currentTick = this.world.currentTick;
+    const currentTick = this.world.currentTick ?? 0;
 
     // Detect entity types (don't assume attacker is always player!)
     const attackerEntity = this.world.entities.get(String(attackerId));
@@ -928,6 +941,31 @@ export class CombatSystem extends SystemBase {
       attackerEntity?.type === "mob" ? ("mob" as const) : ("player" as const);
     const targetType =
       targetEntity?.type === "mob" ? ("mob" as const) : ("player" as const);
+
+    // PvP ZONE VALIDATION: Prevent player vs player combat in safe zones
+    // This is critical to prevent:
+    // - Combat resuming after respawn in safe zone
+    // - Players attacking each other in towns/banks
+    // - Auto-retaliate triggering in non-PvP areas
+    if (attackerType === "player" && targetType === "player") {
+      const zoneSystem =
+        this.world.getSystem<ZoneDetectionSystem>("zone-detection");
+      if (zoneSystem) {
+        const attackerPos = getEntityPosition(attackerEntity);
+        if (attackerPos) {
+          const isPvPAllowed = zoneSystem.isPvPEnabled({
+            x: attackerPos.x,
+            z: attackerPos.z,
+          });
+          if (!isPvPAllowed) {
+            this.logger.debug(
+              `PvP combat blocked: ${attackerId} tried to attack ${targetId} in safe zone`,
+            );
+            return; // Cannot start PvP in safe zone
+          }
+        }
+      }
+    }
 
     // Get attack speeds in ticks (use provided or calculate)
     const attackerAttackSpeedTicks =
@@ -1214,12 +1252,24 @@ export class CombatSystem extends SystemBase {
   }
 
   /**
-   * Handle entity death - combat times out naturally after 8 ticks (4.8s)
-   * so health bars stay visible briefly after death
+   * Handle entity death - immediately clear ALL combat states involving the dead entity
+   *
+   * CRITICAL FIX: Previously only cleared the dead entity's state, leaving attackers
+   * with stale targetIds pointing to the dead (soon respawned) entity. This caused:
+   * - Players chasing dead players to spawn point
+   * - Mobs following dead players
+   * - Combat resuming immediately after respawn
+   *
+   * Now we:
+   * 1. Clear the dead entity's combat state
+   * 2. Notify mob attackers via onTargetDied() so they can return to patrol
+   * 3. Clear ALL attacker combat states targeting this entity
+   * 4. Clean up attack cooldowns for all involved parties
    */
   private handleEntityDied(entityId: string, entityType: string): void {
     const typedEntityId = createEntityID(entityId);
 
+    // Record death event for analytics
     const deathEventType =
       entityType === "player"
         ? GameEventType.DEATH_PLAYER
@@ -1230,24 +1280,30 @@ export class CombatSystem extends SystemBase {
       killedBy: combatState ? String(combatState.targetId) : "unknown",
     });
 
-    // Simply remove the dead entity's combat state - they're no longer in combat
-    // But DON'T call endCombat() for attackers - let their combat timer expire naturally
+    // 1. Remove the dead entity's own combat state from the internal map
     this.stateService.removeCombatState(typedEntityId);
 
-    // Also clear the dead entity's attack cooldown so they can attack immediately after respawn
+    // 1b. CRITICAL: Sync the cleared state to the entity/client
+    //     Without this, the client's combat.combatTarget persists and they keep facing the target!
+    if (entityType === "player") {
+      this.stateService.clearCombatStateFromEntity(entityId, "player");
+    }
+
+    // 2. Clear the dead entity's attack cooldown so they can attack immediately after respawn
     this.nextAttackTicks.delete(typedEntityId);
 
-    // Clear any scheduled emote resets for the dead entity
+    // 3. Clear any scheduled emote resets for the dead entity
     this.animationManager.cancelEmoteReset(entityId);
 
-    // Find all attackers targeting this dead entity
-    // Their combat will naturally timeout after 4.8 seconds (8 ticks) since they got the last hit
+    // 4. BEFORE clearing attacker states, notify mob attackers so they can return to patrol
+    //    and clear attack cooldowns so attackers can target someone else immediately
     const combatStatesMap = this.stateService.getCombatStatesMap();
     for (const [attackerId, state] of combatStatesMap) {
       if (String(state.targetId) === entityId) {
-        // Allow attacker to target someone else immediately
+        // Clear attacker's cooldown so they can engage new targets immediately
         this.nextAttackTicks.delete(attackerId);
 
+        // Notify mob attackers so they can return to patrol/spawn
         if (state.attackerType === "mob") {
           const mobEntity = this.world.entities.get(String(attackerId));
           if (
@@ -1260,16 +1316,21 @@ export class CombatSystem extends SystemBase {
       }
     }
 
-    // Clear face target for players who had this as pending attacker
+    // 5. CRITICAL: Clear ALL attacker combat states targeting this dead entity
+    //    This prevents attackers from continuing to chase/fight the respawned entity
+    const clearedAttackers = this.stateService.clearStatesTargeting(entityId);
+    if (clearedAttackers.length > 0) {
+      this.logger.debug(
+        `Cleared ${clearedAttackers.length} attacker states targeting dead ${entityType} ${entityId}`,
+      );
+    }
+
+    // 6. Clear face target for players who had this as pending attacker
     if (entityType === "mob") {
-      // Check all players to see if they had this mob as their pending attacker
       for (const player of this.world.entities.players.values()) {
-        // Use type guards for safe property access
         const pendingAttacker = getPendingAttacker(player);
         if (pendingAttacker === entityId) {
-          // Clear the pending attacker state using type guard helper
           clearPendingAttacker(player);
-          // Tell client to stop facing this entity
           this.emitTypedEvent(EventType.COMBAT_CLEAR_FACE_TARGET, {
             playerId: player.id,
           });
@@ -1277,8 +1338,60 @@ export class CombatSystem extends SystemBase {
       }
     }
 
-    // Reset dead entity's emote if they were mid-animation
+    // 7. Reset dead entity's emote if they were mid-animation
     this.animationManager.resetEmote(entityId, entityType as "player" | "mob");
+  }
+
+  /**
+   * Handle player respawn - clear any lingering combat states
+   *
+   * This is a safety net that catches edge cases where combat states
+   * might survive the death cleanup. When a player respawns:
+   * 1. They should have NO combat state (fresh start)
+   * 2. NO entities should be targeting them (they just spawned)
+   * 3. Their attack cooldown should be clear (can attack immediately)
+   *
+   * This ensures players respawn in a completely clean combat state,
+   * preventing bugs like:
+   * - Being immediately attacked at spawn point
+   * - Having stale combat UI indicators
+   * - Auto-retaliate triggering against old attackers
+   */
+  private handlePlayerRespawned(playerId: string): void {
+    const typedPlayerId = createEntityID(playerId);
+
+    // 1. Clear any lingering combat state the respawned player might have
+    const playerCombatState = this.stateService.getCombatData(typedPlayerId);
+    if (playerCombatState) {
+      this.logger.debug(
+        `Clearing lingering combat state for respawned player ${playerId}`,
+      );
+      this.stateService.removeCombatState(typedPlayerId);
+      this.stateService.clearCombatStateFromEntity(playerId, "player");
+    }
+
+    // 2. Clear the respawned player's attack cooldown
+    this.nextAttackTicks.delete(typedPlayerId);
+
+    // 3. Clear any attacker states that might still be targeting this player
+    //    (Safety net - handleEntityDied should have already done this)
+    const clearedAttackers = this.stateService.clearStatesTargeting(playerId);
+    if (clearedAttackers.length > 0) {
+      this.logger.debug(
+        `Cleared ${clearedAttackers.length} stale attacker states targeting respawned player ${playerId}`,
+      );
+    }
+
+    // 4. Clear any pending attacker reference on the player
+    const playerEntity = this.world.getPlayer?.(playerId);
+    if (playerEntity) {
+      clearPendingAttacker(playerEntity);
+    }
+
+    // 5. Clear face target so player doesn't auto-look at old attacker
+    this.emitTypedEvent(EventType.COMBAT_CLEAR_FACE_TARGET, {
+      playerId,
+    });
   }
 
   // Public API methods
@@ -1669,6 +1782,10 @@ export class CombatSystem extends SystemBase {
   /**
    * OSRS-style: Check if player is in range of target, emit follow event if not
    * Called EVERY tick to ensure continuous pursuit of moving targets
+   *
+   * CRITICAL: This method must NOT extend combat timeout for invalid targets.
+   * Invalid targets include: dead entities, entities that no longer exist,
+   * or (for PvP) targets that are now in a safe zone.
    */
   private checkRangeAndFollow(
     combatState: CombatData,
@@ -1691,12 +1808,41 @@ export class CombatSystem extends SystemBase {
       combatState.targetType,
     );
 
+    // Don't process if either entity is missing - let combat timeout naturally
     if (!attacker || !target) return;
+
+    // Don't extend combat for dead attackers - their state should be cleaned up
+    if (!this.entityResolver.isAlive(attacker, combatState.attackerType)) {
+      return;
+    }
 
     // Don't follow dead targets - let combat timeout naturally
     // This prevents player getting stuck after killing a mob
     if (!this.entityResolver.isAlive(target, combatState.targetType)) {
       return;
+    }
+
+    // PvP zone check: Don't extend combat if we're no longer in a PvP zone
+    // This prevents combat from persisting after respawning in safe zone
+    if (
+      combatState.attackerType === "player" &&
+      combatState.targetType === "player"
+    ) {
+      const zoneSystem =
+        this.world.getSystem<ZoneDetectionSystem>("zone-detection");
+      if (zoneSystem) {
+        const attackerPos = getEntityPosition(attacker);
+        if (
+          attackerPos &&
+          !zoneSystem.isPvPEnabled({ x: attackerPos.x, z: attackerPos.z })
+        ) {
+          // Attacker is in safe zone - end combat instead of extending
+          this.logger.debug(
+            `PvP combat timeout: ${attackerId} left PvP zone while chasing ${targetId}`,
+          );
+          return; // Don't extend timeout - let combat expire
+        }
+      }
     }
 
     const attackerPos = getEntityPosition(attacker);
@@ -2060,7 +2206,7 @@ export class CombatSystem extends SystemBase {
   private buildGameStateInfo(): GameStateInfo {
     const combatStatesMap = this.stateService.getCombatStatesMap();
     return {
-      currentTick: this.world.currentTick,
+      currentTick: this.world.currentTick ?? 0,
       playerCount: this.world.entities.players.size,
       activeCombats: combatStatesMap.size,
     };
@@ -2139,7 +2285,7 @@ export class CombatSystem extends SystemBase {
   ): void {
     if (!this.eventRecordingEnabled) return;
 
-    const tick = this.world.currentTick;
+    const tick = this.world.currentTick ?? 0;
     const stateInfo = this.buildGameStateInfo();
 
     // Include snapshot data periodically (every 100 ticks)

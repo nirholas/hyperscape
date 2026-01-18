@@ -27,6 +27,117 @@ import { ZoneType, type TransactionContext } from "../../../types/death";
 import type { InventorySystem } from "../character/InventorySystem";
 import { getEntityPosition } from "../../../utils/game/EntityPositionUtils";
 
+/**
+ * Sanitize killedBy string to prevent injection attacks
+ * - Normalizes Unicode to prevent homograph attacks (Cyrillic 'а' vs Latin 'a')
+ * - Removes zero-width characters and BiDi overrides that could manipulate display
+ * - Removes control characters and dangerous HTML characters
+ * - Limits length to prevent buffer overflow attacks
+ * - Defaults to "unknown" for invalid inputs
+ */
+function sanitizeKilledBy(killedBy: unknown): string {
+  if (typeof killedBy !== "string" || !killedBy) {
+    return "unknown";
+  }
+
+  // Normalize Unicode to NFKC form to prevent homograph attacks
+  let normalized = killedBy.normalize("NFKC");
+
+  // Build sanitized string character by character
+  let sanitized = "";
+  for (const char of normalized) {
+    const code = char.charCodeAt(0);
+
+    // Skip zero-width characters (U+200B-U+200D, U+FEFF)
+    if (code >= 0x200b && code <= 0x200d) continue;
+    if (code === 0xfeff) continue;
+
+    // Skip BiDi override characters (U+202A-U+202E)
+    if (code >= 0x202a && code <= 0x202e) continue;
+
+    // Skip control characters (0x00-0x1F and 0x7F)
+    if (code < 32 || code === 127) continue;
+
+    // Skip dangerous HTML characters
+    if ("<>'\"&".includes(char)) continue;
+
+    sanitized += char;
+  }
+
+  sanitized = sanitized.trim().substring(0, 64); // Limit to 64 characters
+  return sanitized || "unknown";
+}
+
+/**
+ * Position validation constants
+ */
+const POSITION_VALIDATION = {
+  WORLD_BOUNDS: 10000, // Max 10km from origin
+  MAX_HEIGHT: 500, // Max height
+  MIN_HEIGHT: -50, // Allow some underground (caves)
+} as const;
+
+/**
+ * Check if a number is valid for position use
+ */
+function isValidPositionNumber(n: number): boolean {
+  return Number.isFinite(n) && !Number.isNaN(n);
+}
+
+/**
+ * Validate and clamp a position to world bounds
+ * @param position - Position to validate
+ * @returns Validated and clamped position, or null if completely invalid
+ */
+function validatePosition(position: {
+  x: number;
+  y: number;
+  z: number;
+}): { x: number; y: number; z: number } | null {
+  const { x, y, z } = position;
+
+  // Check for invalid numbers (NaN, Infinity)
+  if (
+    !isValidPositionNumber(x) ||
+    !isValidPositionNumber(y) ||
+    !isValidPositionNumber(z)
+  ) {
+    return null;
+  }
+
+  // Clamp to world bounds
+  return {
+    x: Math.max(
+      -POSITION_VALIDATION.WORLD_BOUNDS,
+      Math.min(POSITION_VALIDATION.WORLD_BOUNDS, x),
+    ),
+    y: Math.max(
+      POSITION_VALIDATION.MIN_HEIGHT,
+      Math.min(POSITION_VALIDATION.MAX_HEIGHT, y),
+    ),
+    z: Math.max(
+      -POSITION_VALIDATION.WORLD_BOUNDS,
+      Math.min(POSITION_VALIDATION.WORLD_BOUNDS, z),
+    ),
+  };
+}
+
+/**
+ * Check if position is within world bounds without clamping
+ */
+function isPositionInBounds(position: {
+  x: number;
+  y: number;
+  z: number;
+}): boolean {
+  return (
+    Math.abs(position.x) <= POSITION_VALIDATION.WORLD_BOUNDS &&
+    Math.abs(position.z) <= POSITION_VALIDATION.WORLD_BOUNDS &&
+    position.y >= POSITION_VALIDATION.MIN_HEIGHT &&
+    position.y <= POSITION_VALIDATION.MAX_HEIGHT
+  );
+}
+
 interface PlayerSystemLike {
   players?: Map<string, { position?: { x: number; y: number; z: number } }>;
 }
@@ -40,6 +151,11 @@ interface DatabaseSystemLike {
 interface EquipmentSystemLike {
   getPlayerEquipment: (playerId: string) => EquipmentData | null;
   clearEquipmentImmediate?: (playerId: string) => Promise<void>;
+  // Atomic clear-and-return for death system
+  clearEquipmentAndReturn?: (
+    playerId: string,
+    tx?: TransactionContext,
+  ) => Promise<Array<{ itemId: string; slot: string; quantity: number }>>;
 }
 
 interface EquipmentData {
@@ -145,7 +261,7 @@ export class PlayerDeathSystem extends SystemBase {
       name: "player-death",
       dependencies: {
         required: ["ground-items"], // Depends on shared GroundItemSystem
-        optional: ["inventory", "entity-manager"],
+        optional: ["inventory", "entity-manager", "database"], // database for death persistence (server only)
       },
       autoCleanup: true,
     });
@@ -266,6 +382,14 @@ export class PlayerDeathSystem extends SystemBase {
     });
   }
 
+  /**
+   * Start - called after all systems are initialized
+   * Delegates to DeathStateManager to recover unfinished deaths
+   */
+  async start(): Promise<void> {
+    await this.deathStateManager.start();
+  }
+
   destroy(): void {
     // Unsubscribe from tick system
     if (this.tickUnsubscribe) {
@@ -283,8 +407,14 @@ export class PlayerDeathSystem extends SystemBase {
     for (const timer of this.respawnTimers.values()) {
       clearTimeout(timer);
     }
+
+    // Clean up all Maps to prevent memory leaks
     this.respawnTimers.clear();
     this.deathLocations.clear();
+    this.playerPositions.clear();
+    this.playerInventories.clear();
+    this.pendingGravestones.clear();
+    this.lastDeathTime.clear();
   }
 
   private handlePlayerDeath(data: {
@@ -373,8 +503,10 @@ export class PlayerDeathSystem extends SystemBase {
   private async processPlayerDeath(
     playerId: string,
     deathPosition: { x: number; y: number; z: number },
-    killedBy: string,
+    killedByRaw: string,
   ): Promise<void> {
+    // Sanitize killedBy input to prevent injection attacks
+    const killedBy = sanitizeKilledBy(killedByRaw);
     // Server-only - prevent client from triggering death events
     if (!this.world.isServer) {
       console.error(
@@ -383,23 +515,79 @@ export class PlayerDeathSystem extends SystemBase {
       return;
     }
 
+    // Validate death position using extracted helper
+    let validatedPosition = validatePosition(deathPosition);
+
+    if (!validatedPosition) {
+      console.error(
+        `[PlayerDeathSystem] Invalid death position for ${playerId}: (${deathPosition.x}, ${deathPosition.y}, ${deathPosition.z}) - using player entity position`,
+      );
+      // Try to get player's actual position as fallback
+      const playerEntity = this.world.entities.get(playerId);
+      if (playerEntity?.position) {
+        validatedPosition = validatePosition(playerEntity.position);
+      }
+      if (!validatedPosition) {
+        console.error(
+          `[PlayerDeathSystem] Cannot determine valid death position for ${playerId} - aborting`,
+        );
+        return;
+      }
+    }
+
+    // Check bounds and log warning if clamped
+    if (!isPositionInBounds(deathPosition)) {
+      console.warn(
+        `[PlayerDeathSystem] Death position out of bounds for ${playerId}: (${deathPosition.x}, ${deathPosition.y}, ${deathPosition.z}) - clamped`,
+      );
+    }
+
+    // Use validated position from here on
+    deathPosition = validatedPosition;
+
+    // Cache Date.now() to avoid multiple system calls
+    const now = Date.now();
+
     const lastDeath = this.lastDeathTime.get(playerId) || 0;
-    if (Date.now() - lastDeath < this.DEATH_COOLDOWN) {
+    if (now - lastDeath < this.DEATH_COOLDOWN) {
       console.warn(`[PlayerDeathSystem] Death spam: ${playerId}`);
       return;
     }
 
-    const hasActiveDeathLock =
-      await this.deathStateManager.hasActiveDeathLock(playerId);
-    if (hasActiveDeathLock) {
-      console.warn(
-        `[PlayerDeathSystem] Player ${playerId} already has active death lock`,
+    // Check for existing death lock - if player dies again before looting, clear old one
+    // This matches OSRS behavior where dying again replaces your old gravestone
+    const existingDeathLock =
+      await this.deathStateManager.getDeathLock(playerId);
+    if (existingDeathLock) {
+      console.log(
+        `[PlayerDeathSystem] Player ${playerId} dying again with existing death lock - clearing old gravestone (items lost)`,
       );
-      return;
+      await this.deathStateManager.clearDeathLock(playerId);
     }
 
-    // Update last death time
-    this.lastDeathTime.set(playerId, Date.now());
+    // Update last death time (use cached timestamp)
+    this.lastDeathTime.set(playerId, now);
+
+    // Set death state IMMEDIATELY to block any incoming loot/pickup requests
+    // This must happen BEFORE the transaction to prevent race conditions where
+    // items are looted between inventory snapshot and clear
+    const playerEntity = this.world.entities?.get?.(playerId);
+    if (playerEntity && "data" in playerEntity) {
+      const typedPlayerEntity = playerEntity as PlayerEntityLike;
+      if (typedPlayerEntity.data) {
+        typedPlayerEntity.data.deathState = DeathState.DYING;
+        if ("markNetworkDirty" in playerEntity) {
+          (playerEntity as { markNetworkDirty: () => void }).markNetworkDirty();
+        }
+      }
+    }
+
+    // Emit PLAYER_SET_DEAD immediately so client can block loot window
+    // This must happen BEFORE the transaction so the client knows to reject clicks
+    this.emitTypedEvent(EventType.PLAYER_SET_DEAD, {
+      playerId,
+      isDead: true,
+    });
 
     // Get database system for transaction support
     const databaseSystem = this.world.getSystem(
@@ -443,14 +631,31 @@ export class PlayerDeathSystem extends SystemBase {
               metadata: null,
             })) || [];
 
+          // Use atomic clearEquipmentAndReturn to prevent race condition
+          // This atomically reads AND clears equipment in one operation,
+          // preventing item duplication if server crashes between read and clear.
           let equipmentItems: InventoryItem[] = [];
           if (equipmentSystem) {
-            const equipment = equipmentSystem.getPlayerEquipment(playerId);
-            if (equipment) {
-              equipmentItems = this.convertEquipmentToInventoryItems(
-                equipment,
-                playerId,
-              );
+            if (equipmentSystem.clearEquipmentAndReturn) {
+              // NEW: Atomic read-and-clear operation
+              const clearedEquipment =
+                await equipmentSystem.clearEquipmentAndReturn(playerId, tx);
+              equipmentItems = clearedEquipment.map((item, index) => ({
+                id: `death_equip_${playerId}_${Date.now()}_${index}`,
+                itemId: item.itemId,
+                quantity: item.quantity,
+                slot: -1, // Equipment items don't have inventory slots
+                metadata: null,
+              }));
+            } else {
+              // Fallback to old method if clearEquipmentAndReturn not available
+              const equipment = equipmentSystem.getPlayerEquipment(playerId);
+              if (equipment) {
+                equipmentItems = this.convertEquipmentToInventoryItems(
+                  equipment,
+                  playerId,
+                );
+              }
             }
           } else {
             console.warn(
@@ -469,6 +674,7 @@ export class PlayerDeathSystem extends SystemBase {
               zoneType,
             });
 
+            // Include items and killedBy for crash recovery
             await this.deathStateManager.createDeathLock(
               playerId,
               {
@@ -476,6 +682,11 @@ export class PlayerDeathSystem extends SystemBase {
                 position: deathPosition,
                 zoneType: ZoneType.SAFE_AREA,
                 itemCount: itemsToDrop.length,
+                items: itemsToDrop.map((item) => ({
+                  itemId: item.itemId,
+                  quantity: item.quantity,
+                })),
+                killedBy,
               },
               tx,
             );
@@ -490,9 +701,15 @@ export class PlayerDeathSystem extends SystemBase {
             );
           }
 
+          // Clear inventory (equipment already cleared atomically above)
           await inventorySystem.clearInventoryImmediate(playerId);
 
-          if (equipmentSystem && equipmentSystem.clearEquipmentImmediate) {
+          // Only call old clearEquipmentImmediate if atomic method wasn't used
+          if (
+            equipmentSystem &&
+            !equipmentSystem.clearEquipmentAndReturn &&
+            equipmentSystem.clearEquipmentImmediate
+          ) {
             await equipmentSystem.clearEquipmentImmediate(playerId);
           }
         },
@@ -554,9 +771,14 @@ export class PlayerDeathSystem extends SystemBase {
         ];
 
         // Calculate respawn tick using tick system
+        // Use safe addition to prevent integer overflow
         const currentTick = this.tickSystem?.getCurrentTick() ?? 0;
+        const animationTicks = COMBAT_CONSTANTS.DEATH.ANIMATION_TICKS;
+        // Cap at 32-bit max to prevent overflow during serialization (MessagePack, etc.)
+        const MAX_TICK = 2147483647; // 2^31-1, safe for 32-bit serialization
+        const MAX_SAFE_TICK = MAX_TICK - animationTicks;
         typedPlayerEntity.data.respawnTick =
-          currentTick + COMBAT_CONSTANTS.DEATH.ANIMATION_TICKS;
+          currentTick > MAX_SAFE_TICK ? MAX_TICK : currentTick + animationTicks;
       }
 
       if ("markNetworkDirty" in playerEntity) {
@@ -584,7 +806,12 @@ export class PlayerDeathSystem extends SystemBase {
           }
         }
 
-        this.initiateRespawn(playerId);
+        this.initiateRespawn(playerId).catch((err) => {
+          console.error(
+            `[PlayerDeathSystem] Respawn failed for ${playerId}:`,
+            err,
+          );
+        });
       }, DEATH_ANIMATION_DURATION);
 
       this.respawnTimers.set(playerId, respawnTimer);
@@ -741,24 +968,34 @@ export class PlayerDeathSystem extends SystemBase {
     }
   }
 
-  private initiateRespawn(playerId: string): void {
+  private async initiateRespawn(playerId: string): Promise<void> {
     this.respawnTimers.delete(playerId);
+    console.log(`[PlayerDeathSystem] initiateRespawn called for ${playerId}`);
 
     const deathData = this.deathLocations.get(playerId);
     if (!deathData) {
-      throw new Error(
-        `[PlayerDeathSystem] No death data found for player ${playerId}`,
+      console.log(
+        `[PlayerDeathSystem] No death data in deathLocations for ${playerId}, checking pendingGravestones...`,
       );
+      // For crash recovery, deathLocations might not have data but pendingGravestones might
     }
 
     const DEATH_RESPAWN_POSITION =
       COMBAT_CONSTANTS.DEATH.DEFAULT_RESPAWN_POSITION;
     const DEATH_RESPAWN_TOWN = COMBAT_CONSTANTS.DEATH.DEFAULT_RESPAWN_TOWN;
 
-    this.respawnPlayer(playerId, DEATH_RESPAWN_POSITION, DEATH_RESPAWN_TOWN);
+    // CRITICAL: Must await to ensure death lock is cleared before next death
+    await this.respawnPlayer(
+      playerId,
+      DEATH_RESPAWN_POSITION,
+      DEATH_RESPAWN_TOWN,
+    );
 
     const gravestoneData = this.pendingGravestones.get(playerId);
     if (gravestoneData && gravestoneData.items.length > 0) {
+      console.log(
+        `[PlayerDeathSystem] ✓ Spawning gravestone for ${playerId} with ${gravestoneData.items.length} items at (${gravestoneData.position.x.toFixed(1)}, ${gravestoneData.position.y.toFixed(1)}, ${gravestoneData.position.z.toFixed(1)})`,
+      );
       this.spawnGravestoneAfterRespawn(
         playerId,
         gravestoneData.position,
@@ -766,14 +1003,18 @@ export class PlayerDeathSystem extends SystemBase {
         gravestoneData.killedBy,
       );
       this.pendingGravestones.delete(playerId);
+    } else {
+      console.log(
+        `[PlayerDeathSystem] No pending gravestone data for ${playerId}`,
+      );
     }
   }
 
-  private respawnPlayer(
+  private async respawnPlayer(
     playerId: string,
     spawnPosition: { x: number; y: number; z: number },
     townName: string,
-  ): void {
+  ): Promise<void> {
     const playerEntity = this.world.entities?.get?.(playerId);
     if (playerEntity) {
       if ("setHealth" in playerEntity && "getMaxHealth" in playerEntity) {
@@ -893,8 +1134,14 @@ export class PlayerDeathSystem extends SystemBase {
       type: "info",
     });
 
-    // Clear death lock after successful respawn
-    this.deathStateManager.clearDeathLock(playerId);
+    // NOTE: Do NOT clear death lock here - it must persist for crash recovery!
+    // Death lock is cleared when:
+    // 1. All items are looted from gravestone (CORPSE_EMPTY event)
+    // 2. Ground items despawn (timeout)
+    // This ensures that if server crashes before items are looted, they can be recovered.
+
+    // Clear death cooldown so player can die again immediately after respawn
+    this.lastDeathTime.delete(playerId);
   }
 
   private async spawnGravestoneAfterRespawn(
@@ -917,6 +1164,20 @@ export class PlayerDeathSystem extends SystemBase {
     const GRAVESTONE_DURATION = ticksToMs(COMBAT_CONSTANTS.GRAVESTONE_TICKS);
     const despawnTime = Date.now() + GRAVESTONE_DURATION;
 
+    // Get the player's display name from PlayerSystem
+    const playerSystem = this.world.getSystem("player") as
+      | { getPlayer: (id: string) => { name?: string } | undefined }
+      | undefined;
+    const playerFromSystem = playerSystem?.getPlayer?.(playerId);
+    const playerEntity = this.world.entities?.get?.(playerId) as
+      | { playerName?: string; name?: string }
+      | undefined;
+    const playerName =
+      playerFromSystem?.name ||
+      playerEntity?.playerName ||
+      playerEntity?.name ||
+      playerId;
+
     // Ground to terrain
     const groundedPosition = groundToTerrain(
       this.world,
@@ -928,7 +1189,7 @@ export class PlayerDeathSystem extends SystemBase {
     // Create gravestone entity config
     const gravestoneConfig: HeadstoneEntityConfig = {
       id: gravestoneId,
-      name: `${playerId}'s Gravestone`,
+      name: `${playerName}'s Gravestone`,
       type: EntityType.HEADSTONE,
       position: groundedPosition,
       rotation: { x: 0, y: 0, z: 0, w: 1 },
@@ -937,11 +1198,11 @@ export class PlayerDeathSystem extends SystemBase {
       interactable: true,
       interactionType: InteractionType.LOOT,
       interactionDistance: 2,
-      description: `Gravestone of ${playerId} (killed by ${killedBy})`,
+      description: `Gravestone of ${playerName} (killed by ${killedBy})`,
       model: "models/environment/gravestone.glb",
       headstoneData: {
         playerId: playerId,
-        playerName: playerId,
+        playerName: playerName,
         deathTime: Date.now(),
         deathMessage: `Slain by ${killedBy}`,
         position: groundedPosition,
@@ -986,6 +1247,10 @@ export class PlayerDeathSystem extends SystemBase {
     position: { x: number; y: number; z: number },
     items: InventoryItem[],
   ): Promise<void> {
+    console.log(
+      `[PlayerDeathSystem] Gravestone ${gravestoneId} expired for ${playerId}, transitioning to ground items`,
+    );
+
     // Destroy gravestone entity
     const entityManager = this.world.getSystem(
       "entity-manager",
@@ -994,17 +1259,37 @@ export class PlayerDeathSystem extends SystemBase {
       entityManager.destroyEntity(gravestoneId);
     }
 
-    // Spawn ground items (2 minute despawn timer)
+    // Spawn ground items (60 minute despawn timer)
     const GROUND_ITEM_DURATION = ticksToMs(
       COMBAT_CONSTANTS.GROUND_ITEM_DESPAWN_TICKS,
     );
-    await this.groundItemSystem.spawnGroundItems(items, position, {
-      despawnTime: GROUND_ITEM_DURATION,
-      droppedBy: playerId,
-      lootProtection: 0,
-      scatter: true,
-      scatterRadius: 2.0,
-    });
+    const groundItemIds = await this.groundItemSystem.spawnGroundItems(
+      items,
+      position,
+      {
+        despawnTime: GROUND_ITEM_DURATION,
+        droppedBy: playerId,
+        lootProtection: 0,
+        scatter: true,
+        scatterRadius: 2.0,
+      },
+    );
+
+    // Update death lock to track ground items instead of gravestone
+    await this.deathStateManager.onGravestoneExpired(playerId, groundItemIds);
+
+    // Schedule death lock cleanup when ground items despawn
+    // This ensures the death lock is cleared even if items aren't looted
+    setTimeout(async () => {
+      // Only clear if the player still has this death lock (hasn't died again)
+      const currentLock = await this.deathStateManager.getDeathLock(playerId);
+      if (currentLock && !currentLock.gravestoneId) {
+        console.log(
+          `[PlayerDeathSystem] Ground items despawned for ${playerId}, clearing death lock`,
+        );
+        await this.deathStateManager.clearDeathLock(playerId);
+      }
+    }, GROUND_ITEM_DURATION + 1000); // Add 1 second buffer
   }
 
   private handleRespawnRequest(data: { playerId: string }): void {
@@ -1013,7 +1298,12 @@ export class PlayerDeathSystem extends SystemBase {
     if (timer) {
       clearTimeout(timer);
       this.respawnTimers.delete(data.playerId);
-      this.initiateRespawn(data.playerId);
+      this.initiateRespawn(data.playerId).catch((err) => {
+        console.error(
+          `[PlayerDeathSystem] Respawn request failed for ${data.playerId}:`,
+          err,
+        );
+      });
     }
   }
 
@@ -1031,9 +1321,13 @@ export class PlayerDeathSystem extends SystemBase {
   async onPlayerReconnect(playerId: string): Promise<{
     blockInventoryLoad: boolean;
   }> {
+    console.log(`[PlayerDeathSystem] onPlayerReconnect called for ${playerId}`);
     const deathLock = await this.deathStateManager.getDeathLock(playerId);
 
     if (deathLock) {
+      console.log(
+        `[PlayerDeathSystem] Found death lock for ${playerId}: ${deathLock.itemCount} items tracked, ${deathLock.items?.length || 0} items in recovery data`,
+      );
       // Check if death lock is stale (older than 1 hour)
       // Stale death locks should be cleared, not restored
       const MAX_DEATH_LOCK_AGE = ticksToMs(
@@ -1046,18 +1340,51 @@ export class PlayerDeathSystem extends SystemBase {
         return { blockInventoryLoad: false };
       }
 
-      // Restore death location to memory
+      // Convert death lock items to InventoryItem format for gravestone
+      const itemsFromDeathLock: InventoryItem[] = (deathLock.items || []).map(
+        (item, index) => ({
+          id: `recovery_${playerId}_${Date.now()}_${index}`,
+          itemId: item.itemId,
+          quantity: item.quantity,
+          slot: index,
+          metadata: null,
+        }),
+      );
+
+      // Restore death location to memory WITH items from death lock
       this.deathLocations.set(playerId, {
         playerId,
         deathPosition: deathLock.position,
         timestamp: deathLock.timestamp,
-        items: [], // Items are in gravestone/ground, not in memory
+        items: itemsFromDeathLock,
       });
+
+      // Restore pendingGravestones so initiateRespawn will spawn the gravestone
+      if (itemsFromDeathLock.length > 0) {
+        this.pendingGravestones.set(playerId, {
+          position: deathLock.position,
+          items: itemsFromDeathLock,
+          killedBy: deathLock.killedBy || "unknown",
+          zoneType: deathLock.zoneType,
+        });
+        console.log(
+          `[PlayerDeathSystem] ✓ Restored ${itemsFromDeathLock.length} items from death lock for ${playerId} - will spawn gravestone on respawn`,
+        );
+      } else {
+        console.log(
+          `[PlayerDeathSystem] No items to restore for ${playerId} - skipping gravestone spawn`,
+        );
+      }
 
       // Immediately trigger respawn (RuneScape-style - no waiting, no screen)
       // Very short delay, then auto-respawn (just enough for world to load)
       setTimeout(() => {
-        this.initiateRespawn(playerId);
+        this.initiateRespawn(playerId).catch((err) => {
+          console.error(
+            `[PlayerDeathSystem] Reconnect respawn failed for ${playerId}:`,
+            err,
+          );
+        });
       }, ticksToMs(COMBAT_CONSTANTS.DEATH.RECONNECT_RESPAWN_DELAY_TICKS));
 
       // Block inventory load until respawn
@@ -1164,6 +1491,7 @@ export class PlayerDeathSystem extends SystemBase {
     const playerId = data.id;
     this.clearDeathLocation(playerId);
     this.playerPositions.delete(playerId);
+    this.lastDeathTime.delete(playerId);
   }
 
   private handleHeadstoneExpired(data: {
@@ -1177,6 +1505,9 @@ export class PlayerDeathSystem extends SystemBase {
     corpseId: string;
     playerId: string;
   }): Promise<void> {
+    console.log(
+      `[PlayerDeathSystem] All items looted from ${data.corpseId}, clearing death lock for ${data.playerId}`,
+    );
     await this.deathStateManager.clearDeathLock(data.playerId);
   }
 
@@ -1304,7 +1635,12 @@ export class PlayerDeathSystem extends SystemBase {
         }
 
         // Initiate respawn for this player
-        this.initiateRespawn(playerId);
+        this.initiateRespawn(playerId).catch((err) => {
+          console.error(
+            `[PlayerDeathSystem] Tick-based respawn failed for ${playerId}:`,
+            err,
+          );
+        });
       }
     }
   }

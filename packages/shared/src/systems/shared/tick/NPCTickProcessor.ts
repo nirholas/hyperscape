@@ -13,7 +13,6 @@
  * in the correct order and with zero allocations in the hot path.
  *
  * @see https://osrs-docs.com/docs/mechanics/timers/
- * @see MOB_AGGRO_IMPLEMENTATION_PLAN.md Phase 2.1
  */
 
 import type { TileCoord } from "../movement/TileSystem";

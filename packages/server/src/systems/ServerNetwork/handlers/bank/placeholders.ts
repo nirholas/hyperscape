@@ -323,15 +323,15 @@ export async function handleBankReleaseAllPlaceholders(
       // processed before row B (slot 6→3), they collide on slot 6.
       // Solution: First offset all slots to 1000+ range, then renumber to 0-N.
       for (const tabIndex of affectedTabs) {
-        // Phase 1: Add large offset to move all slots far from target range
+        // Add large offset to move all slots far from target range
         await tx.execute(
           sql`UPDATE bank_storage
               SET slot = slot + ${SLOT_OFFSET_TEMP}
               WHERE "playerId" = ${ctx.playerId} AND "tabIndex" = ${tabIndex}`,
         );
 
-        // Phase 2: Renumber slots sequentially using ROW_NUMBER
-        // Source slots are now ≥1000, target slots are 0-N, no overlap possible
+        // Renumber slots sequentially using ROW_NUMBER
+        // Source slots are now >=1000, target slots are 0-N, no overlap possible
         await tx.execute(
           sql`UPDATE bank_storage
               SET slot = subq.new_slot

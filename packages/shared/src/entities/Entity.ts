@@ -385,11 +385,9 @@ export class Entity implements IEntity {
     // Initialize common components
     this.initializeRPGComponents();
 
-    // Network sync for local entities
-    const network = getWorldNetwork(this.world);
-    if (local && network) {
-      network.send("entityAdded", this.serialize());
-    }
+    // Removed duplicate entityAdded broadcast
+    // EntityManager.spawnEntity() is the single source of truth for entity broadcasts
+    // This prevents duplicate packets when entities are spawned via EntityManager
   }
 
   // Transform getters - return THREE.Vector3 instances

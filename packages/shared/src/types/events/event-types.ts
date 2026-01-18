@@ -182,7 +182,7 @@ export enum EventType {
   COMBAT_PLAYER_DISENGAGE = "combat:player_disengage", // Player clicked away, cancel their attacking combat
   PENDING_ATTACK_CANCEL = "combat:pending_attack_cancel", // Player clicked elsewhere, cancel pending attack
 
-  // Server-controlled combat visuals (Phase 5 - Client display-only)
+  // Server-controlled combat visuals (Client display-only)
   // These events are sent from server to client to control combat visuals
   // Client should NOT independently search for attackers or decide facing
   COMBAT_FACE_TARGET = "combat:face_target", // Server tells client to face a specific entity
@@ -368,6 +368,7 @@ export enum EventType {
   CORPSE_SPAWNED = "corpse:spawned",
   CORPSE_CLICK = "corpse:click",
   CORPSE_LOOT_REQUEST = "corpse:loot_request",
+  CORPSE_LOOT_ALL_REQUEST = "corpse:loot_all_request",
   CORPSE_CLEANUP = "corpse:cleanup",
   CORPSE_EMPTY = "corpse:empty",
 
@@ -432,6 +433,13 @@ export enum EventType {
   ENTITY_CREATE_HEADSTONE = "entity:create_headstone",
   ENTITY_REMOVE = "entity:remove",
   WORLD_CREATE_GROUND_ITEM = "world:create_ground_item",
+  // Crash recovery - emitted when server recreates death items on startup
+  DEATH_RECOVERED = "death:recovered",
+  // Loot result events for shadow state confirmation
+  LOOT_RESULT = "loot:result",
+  LOOT_TIMEOUT = "loot:timeout",
+  // Audit logging for death/loot operations
+  AUDIT_LOG = "audit:log",
 
   // AI Navigation System
   AI_NAVIGATION_REQUEST = "ai:navigation:request",

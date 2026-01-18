@@ -103,12 +103,12 @@ export type DamageAttackType = "melee" | "ranged" | "magic";
 /**
  * Queued damage for OSRS-style tick scheduling
  *
- * Includes hit delay support (Phase 3):
+ * Hit delay based on attack type:
  * - Melee: 0 tick delay (instant)
  * - Ranged: 1 + floor((3 + distance) / 6) ticks
  * - Magic: 1 + floor((1 + distance) / 3) ticks
  *
- * Also implements damage asymmetry (Phase 1):
+ * Damage asymmetry:
  * - Player → NPC damage: queued for next tick
  * - NPC → Player damage: applies same tick
  */
@@ -150,7 +150,7 @@ export class GameTickProcessor {
   private pendingAttacks: PendingAttackManager;
   private broadcastManager: BroadcastManager;
 
-  // OSRS-accurate script queues (Phase 2)
+  // OSRS-accurate script queues
   // Players have Strong/Normal/Weak/Soft priority system
   // NPCs have single queue type (FIFO)
   private playerScriptQueue: PlayerScriptQueue | null = null;
@@ -165,9 +165,8 @@ export class GameTickProcessor {
   // When false, falls back to legacy per-system tick processing
   private enabled = true;
 
-  // Feature flag for OSRS script queue system (Phase 2)
+  // Feature flag for OSRS script queue system
   // When true, uses Strong/Normal/Weak/Soft priority system
-  // ENABLED: Phase 1 implementation - OSRS-accurate script priorities
   private scriptQueueEnabled = true;
 
   // Damage queue for next-tick application (OSRS asymmetry)
@@ -222,7 +221,7 @@ export class GameTickProcessor {
     this.pendingAttacks = deps.pendingAttacks;
     this.broadcastManager = deps.broadcastManager;
 
-    // Script queues (optional - Phase 2)
+    // Script queues (optional)
     if (deps.playerScriptQueue) {
       this.playerScriptQueue = deps.playerScriptQueue;
     }
@@ -288,8 +287,8 @@ export class GameTickProcessor {
   }
 
   /**
-   * Enable or disable OSRS script queue system (Phase 2)
-   * When enabled, uses Strong/Normal/Weak/Soft priority system
+   * Enable or disable OSRS script queue system.
+   * When enabled, uses Strong/Normal/Weak/Soft priority system.
    */
   setScriptQueueEnabled(enabled: boolean): void {
     this.scriptQueueEnabled = enabled;
@@ -471,7 +470,7 @@ export class GameTickProcessor {
       // 1. Process NPC AI (handles timers internally)
       this.processNPCAI(mob, tickNumber);
 
-      // 2. Process NPC script queue (Phase 2 - OSRS-accurate)
+      // 2. Process NPC script queue (OSRS-accurate)
       // NPCs have single queue type (no priority system)
       if (this.scriptQueueEnabled && this.npcScriptQueue) {
         this.npcScriptQueue.processNPCTick(mobId, tickNumber);
@@ -540,7 +539,7 @@ export class GameTickProcessor {
       // 3. Movement processing
       // 4. Combat interactions
 
-      // 1. Process player script queue (Phase 2 - OSRS-accurate)
+      // 1. Process player script queue (OSRS-accurate)
       // Players have Strong/Normal/Weak/Soft priority system
       if (this.scriptQueueEnabled && this.playerScriptQueue) {
         this.playerScriptQueue.processPlayerTick(playerId, tickNumber);
@@ -640,7 +639,7 @@ export class GameTickProcessor {
     // Cap at maximum delay (10 ticks)
     hitDelayTicks = Math.min(hitDelayTicks, 10);
 
-    // Apply OSRS damage asymmetry (Phase 1)
+    // Apply OSRS damage asymmetry
     // Player → NPC damage: +1 tick (queued for next tick)
     // NPC → Player damage: +0 ticks (same tick)
     let asymmetryDelay = 0;

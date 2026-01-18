@@ -5,7 +5,6 @@
  * Following SOLID principles, high-level modules (NPCTickProcessor)
  * depend on these abstractions, not concrete implementations.
  *
- * @see MOB_AGGRO_IMPLEMENTATION_PLAN.md Phase 2.1
  */
 
 import type { TileCoord } from "../../systems/shared/movement/TileSystem";

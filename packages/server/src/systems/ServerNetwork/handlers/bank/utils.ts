@@ -259,7 +259,7 @@ export async function compactBankSlots(
   //
   // Solution: First add SLOT_OFFSET_TEMP to move them far away, then subtract SLOT_OFFSET_RECOVER.
 
-  // Phase 1: Add large offset to avoid conflicts during shift
+  // Add large offset to avoid conflicts during shift
   await tx.execute(
     sql`UPDATE bank_storage
         SET slot = slot + ${SLOT_OFFSET_TEMP}
@@ -268,7 +268,7 @@ export async function compactBankSlots(
           AND slot > ${deletedSlot}`,
   );
 
-  // Phase 2: Subtract offset + 1 to get final values (shifted down by 1)
+  // Subtract offset + 1 to get final values (shifted down by 1)
   await tx.execute(
     sql`UPDATE bank_storage
         SET slot = slot - ${SLOT_OFFSET_RECOVER}

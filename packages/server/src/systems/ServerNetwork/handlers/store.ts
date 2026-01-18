@@ -41,7 +41,7 @@ import {
   isValidQuantity,
 } from "../services";
 
-// Import common handler utilities (Phase: Extract Common Patterns)
+// Import common handler utilities
 import {
   validateTransactionRequest,
   executeSecureTransaction,
@@ -87,7 +87,6 @@ function getStoreFromSystem(
  * Emits STORE_OPEN_REQUEST which is handled by EventBridge
  * to look up the store and send storeState packet.
  * InteractionSessionManager automatically tracks the session with targetEntityId.
- * (Phase 6: session manager is single source of truth for entity IDs)
  */
 export function handleStoreOpen(
   socket: ServerSocket,
@@ -565,7 +564,8 @@ export async function handleStoreSell(
 
 /**
  * Handle store close request
- * (Phase 6: InteractionSessionManager handles session cleanup via STORE_CLOSE event)
+ *
+ * InteractionSessionManager handles session cleanup via STORE_CLOSE event.
  */
 export function handleStoreClose(
   socket: ServerSocket,
@@ -578,7 +578,6 @@ export function handleStoreClose(
     return;
   }
 
-  // Phase 6: Removed socket.activeStoreNpcEntityId = undefined
   // InteractionSessionManager handles session cleanup automatically
 
   world.emit(EventType.STORE_CLOSE, {

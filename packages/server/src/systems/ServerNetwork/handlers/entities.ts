@@ -63,10 +63,11 @@ export function handleEntityEvent(
       : incoming.payload
   ) as unknown;
   if (!name) return;
-  // Attach playerId if not provided - assume payload is an object
+  // ALWAYS override playerId with socket.player.id to prevent spoofing
+  // Previously only added if missing, allowing clients to spoof other player IDs
   const enriched = (() => {
     const payloadObj = payload as Record<string, unknown>;
-    if (payloadObj && !payloadObj.playerId && socket.player?.id) {
+    if (payloadObj && socket.player?.id) {
       return { ...payloadObj, playerId: socket.player.id };
     }
     return payload;

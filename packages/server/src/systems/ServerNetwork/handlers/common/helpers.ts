@@ -86,7 +86,7 @@ export function getDatabase(world: World): DatabaseConnection | null {
  * Get session manager from world.
  * Returns undefined if session manager is not available.
  *
- * Phase 6: Session manager is single source of truth for entity IDs.
+ * Session manager is single source of truth for entity IDs.
  */
 export function getSessionManager(
   world: World,

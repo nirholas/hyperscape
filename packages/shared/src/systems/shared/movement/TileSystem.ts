@@ -862,7 +862,6 @@ export function getExtendedMeleeTilesInto(
  * @param range - Attack range (default 1)
  * @returns Best tile reference (internal buffer) or null if all blocked
  *
- * @see NPC_ENTITY_COLLISION_PLAN.md Phase 4
  */
 export function getBestUnoccupiedMeleeTile(
   attackerTile: TileCoord,

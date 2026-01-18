@@ -9,7 +9,6 @@
  * This replaces the time-based idle system with probabilistic wandering.
  *
  * @see https://osrs-docs.com/docs/mechanics/random-walk/
- * @see MOB_AGGRO_IMPLEMENTATION_PLAN.md Phase 3.1
  */
 
 import type { TileCoord } from "./TileSystem";

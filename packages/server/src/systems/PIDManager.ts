@@ -15,7 +15,6 @@
  * - PID rotation ensures fairness over time
  *
  * @see https://oldschool.runescape.wiki/w/Player_identification_number
- * @see OSRS-IMPLEMENTATION-PLAN.md Phase 1
  */
 
 import { SeededRandom, getGameRng } from "@hyperscape/shared";

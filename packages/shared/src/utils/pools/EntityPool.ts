@@ -12,7 +12,6 @@
  * - Zero allocations after warmup (unless pool exhausted)
  * - Automatic pool growth when exhausted (with configurable max)
  *
- * @see MOB_AGGRO_IMPLEMENTATION_PLAN.md Phase 4.2
  */
 
 /**

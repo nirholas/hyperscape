@@ -242,7 +242,7 @@ export interface MobEntityConfig extends EntityConfig<MobEntityProperties> {
    * Boss sizes are pre-defined: goblin=1x1, general_graardor=2x2, etc.
    *
    * @default false
-   * @see NPC_ENTITY_COLLISION_PLAN.md Phase 7
+   * @see NPC_ENTITY_COLLISION_PLAN.md
    */
   ignoresEntityCollision?: boolean;
 }

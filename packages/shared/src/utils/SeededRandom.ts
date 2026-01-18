@@ -10,7 +10,6 @@
  * - Deterministic server behavior for esports/streaming
  *
  * @see https://en.wikipedia.org/wiki/Xorshift
- * @see OSRS-IMPLEMENTATION-PLAN.md Phase 1
  */
 
 /**

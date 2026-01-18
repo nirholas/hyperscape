@@ -65,7 +65,7 @@ function verifyDistanceToTarget(
     return "Player not found";
   }
 
-  // Get target from session manager (Phase 6: single source of truth)
+  // Get target from session manager (single source of truth)
   const sessionManager = getSessionManager(world);
   const session = sessionManager?.getSession(playerId);
 

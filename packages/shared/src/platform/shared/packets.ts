@@ -195,12 +195,12 @@ const names = [
   'bankWithdrawCoins',
   'bankClose',
   'bankMove',
-  // Bank tab packets (Phase 2)
+  // Bank tab packets
   'bankCreateTab',     // Create new tab with first item
   'bankDeleteTab',     // Delete tab (items move to main tab)
   'bankMoveToTab',     // Move item between tabs
   'bankSelectTab',     // Client selected a different tab
-  // Bank placeholder packets (Phase 3 - RS3 style: qty=0 in bank_storage)
+  // Bank placeholder packets (RS3 style: qty=0 in bank_storage)
   'bankWithdrawPlaceholder',      // Withdraw all and leave qty=0 placeholder (RS3 style)
   'bankReleasePlaceholder',       // Release single placeholder (delete qty=0 row)
   'bankReleaseAllPlaceholders',   // Clear all placeholders (delete all qty=0 rows)

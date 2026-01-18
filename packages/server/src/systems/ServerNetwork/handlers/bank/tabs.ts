@@ -257,7 +257,7 @@ export async function handleBankDeleteTab(
       // PostgreSQL doesn't guarantee update order, so concurrent updates can cause conflicts.
       // Using two-phase approach with SLOT_OFFSET_TEMP and SLOT_OFFSET_RECOVER.
 
-      // Phase 1: Add large offset to avoid conflicts during shift
+      // Add large offset to avoid conflicts during shift
       await tx.execute(
         sql`UPDATE bank_tabs
             SET "tabIndex" = "tabIndex" + ${SLOT_OFFSET_TEMP}
@@ -269,7 +269,7 @@ export async function handleBankDeleteTab(
             WHERE "playerId" = ${ctx.playerId} AND "tabIndex" > ${data.tabIndex}`,
       );
 
-      // Phase 2: Subtract offset + 1 to get final values (shifted down by 1)
+      // Subtract offset + 1 to get final values (shifted down by 1)
       await tx.execute(
         sql`UPDATE bank_tabs
             SET "tabIndex" = "tabIndex" - ${SLOT_OFFSET_RECOVER}

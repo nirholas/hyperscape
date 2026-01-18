@@ -9,7 +9,6 @@
  * - Player squats during lighting animation
  *
  * @see https://oldschool.runescape.wiki/w/Firemaking
- * @see Phase 4.1 of COOKING_FIREMAKING_HARDENING_PLAN.md
  */
 
 import { ITEM_IDS } from "../../../constants/GameConstants";
