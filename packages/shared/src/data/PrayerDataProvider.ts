@@ -137,7 +137,7 @@ export class PrayerDataProvider {
     if (this.prayerManifest) {
       this.buildPrayerDataFromManifest();
     } else {
-      Logger.warn(
+      Logger.systemWarn(
         "PrayerDataProvider",
         "No prayer manifest loaded - prayer system will be unavailable",
       );
@@ -175,7 +175,7 @@ export class PrayerDataProvider {
     for (const input of this.prayerManifest.prayers) {
       // Validate prayer ID format (security)
       if (!isValidPrayerId(input.id)) {
-        Logger.warn(
+        Logger.systemWarn(
           "PrayerDataProvider",
           `Invalid prayer ID format: "${input.id}" - skipping`,
         );
@@ -184,7 +184,7 @@ export class PrayerDataProvider {
 
       // Validate bonuses
       if (!isValidPrayerBonuses(input.bonuses)) {
-        Logger.warn(
+        Logger.systemWarn(
           "PrayerDataProvider",
           `Invalid bonuses for prayer "${input.id}" - skipping`,
         );
@@ -194,7 +194,7 @@ export class PrayerDataProvider {
       // Validate category
       const category = input.category as PrayerCategory;
       if (!["offensive", "defensive", "utility"].includes(category)) {
-        Logger.warn(
+        Logger.systemWarn(
           "PrayerDataProvider",
           `Invalid category "${input.category}" for prayer "${input.id}" - skipping`,
         );
@@ -207,7 +207,7 @@ export class PrayerDataProvider {
         if (isValidPrayerId(conflictId)) {
           validConflicts.push(conflictId);
         } else {
-          Logger.warn(
+          Logger.systemWarn(
             "PrayerDataProvider",
             `Invalid conflict ID "${conflictId}" in prayer "${input.id}" - ignoring`,
           );
