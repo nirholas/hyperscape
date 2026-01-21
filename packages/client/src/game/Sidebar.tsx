@@ -28,6 +28,8 @@ import { DialoguePanel } from "./panels/DialoguePanel";
 import { SmeltingPanel } from "./panels/SmeltingPanel";
 import { SmithingPanel } from "./panels/SmithingPanel";
 import { SkillSelectModal } from "./panels/SkillSelectModal";
+import { QuestJournal } from "./panels/QuestJournal";
+import { QuestCompleteScreen } from "./panels/QuestCompleteScreen";
 
 type InventorySlotViewItem = Pick<
   InventorySlotItem,
@@ -152,12 +154,32 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
     xpAmount: number;
   } | null>(null);
 
+  // Quest Journal state
+  const [questJournalVisible, setQuestJournalVisible] = useState(false);
+
+  // Quest Complete screen state
+  const [questCompleteData, setQuestCompleteData] = useState<{
+    visible: boolean;
+    questName: string;
+    rewards: {
+      questPoints: number;
+      items: Array<{ itemId: string; quantity: number }>;
+      xp: Record<string, number>;
+    };
+  } | null>(null);
+
   // Update chat context whenever windows open/close
   useEffect(() => {
     setHasOpenWindows(openWindows.size > 0);
   }, [openWindows, setHasOpenWindows]);
 
   const toggleWindow = (windowId: string) => {
+    // Special handling for quest journal (uses modal instead of window)
+    if (windowId === "quests") {
+      setQuestJournalVisible((prev) => !prev);
+      return;
+    }
+
     setOpenWindows((prev) => {
       const next = new Set(prev);
       if (next.has(windowId)) {
@@ -516,6 +538,30 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
     };
     world.on(EventType.XP_LAMP_USE_REQUEST, onXpLampUseRequest);
 
+    // Quest completion screen
+    const onQuestCompleted = (raw: unknown) => {
+      const data = raw as {
+        playerId: string;
+        questId: string;
+        questName: string;
+        rewards: {
+          questPoints: number;
+          items: Array<{ itemId: string; quantity: number }>;
+          xp: Record<string, number>;
+        };
+      };
+      // Only show for local player
+      const localId = world.entities?.player?.id;
+      if (localId && data.playerId === localId) {
+        setQuestCompleteData({
+          visible: true,
+          questName: data.questName,
+          rewards: data.rewards,
+        });
+      }
+    };
+    world.on(EventType.QUEST_COMPLETED, onQuestCompleted);
+
     const requestInitial = () => {
       // For spectator/embedded mode, use characterId from config
       let lp = world.entities?.player?.id;
@@ -595,6 +641,7 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
       world.off(EventType.CORPSE_CLICK, onCorpseClick);
       world.off(EventType.PLAYER_SET_DEAD, onPlayerDeath);
       world.off(EventType.XP_LAMP_USE_REQUEST, onXpLampUseRequest);
+      world.off(EventType.QUEST_COMPLETED, onQuestCompleted);
     };
   }, []);
 
@@ -614,6 +661,7 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
     { windowId: "skills", icon: "🧠", label: "Skills" },
     { windowId: "inventory", icon: "🎒", label: "Inventory" },
     { windowId: "equipment", icon: "🛡️", label: "Equipment" },
+    { windowId: "quests", icon: "📜", label: "Quests" },
     { windowId: "prefs", icon: "⚙️", label: "Settings" },
     { windowId: "account", icon: "👤", label: "Account" },
   ] as const;
@@ -713,7 +761,11 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
                   <MenuButton
                     icon={button.icon}
                     label={button.label}
-                    active={openWindows.has(button.windowId)}
+                    active={
+                      button.windowId === "quests"
+                        ? questJournalVisible
+                        : openWindows.has(button.windowId)
+                    }
                     onClick={() => toggleWindow(button.windowId)}
                     size={radialButtonSize}
                     circular={true}
@@ -970,6 +1022,24 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
             itemId={xpLampData.itemId}
             slot={xpLampData.slot}
             onClose={() => setXpLampData(null)}
+          />
+        )}
+
+        {/* Quest Journal */}
+        <QuestJournal
+          world={world}
+          visible={questJournalVisible}
+          onClose={() => setQuestJournalVisible(false)}
+        />
+
+        {/* Quest Complete Screen */}
+        {questCompleteData?.visible && (
+          <QuestCompleteScreen
+            visible={questCompleteData.visible}
+            questName={questCompleteData.questName}
+            rewards={questCompleteData.rewards}
+            world={world}
+            onClose={() => setQuestCompleteData(null)}
           />
         )}
       </div>
