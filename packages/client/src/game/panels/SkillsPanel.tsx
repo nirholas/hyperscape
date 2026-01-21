@@ -7,7 +7,8 @@ import React, { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { COLORS } from "../../constants";
 import type { ClientWorld, PlayerStats } from "../../types";
-import { EventType } from "@hyperscape/shared";
+import { EventType, getAllSkillUnlocks } from "@hyperscape/shared";
+import { SkillGuidePanel } from "./SkillGuidePanel";
 
 interface SkillsPanelProps {
   world: ClientWorld;
@@ -48,10 +49,12 @@ function SkillBox({
   skill,
   onHover,
   onLeave,
+  onClick,
 }: {
   skill: Skill;
   onHover: (skill: Skill, e: React.MouseEvent) => void;
   onLeave: () => void;
+  onClick: (skill: Skill) => void;
 }) {
   return (
     <button
@@ -59,6 +62,7 @@ function SkillBox({
       onMouseEnter={(e) => onHover(skill, e)}
       onMouseMove={(e) => onHover(skill, e)}
       onMouseLeave={onLeave}
+      onClick={() => onClick(skill)}
       style={{
         background:
           "linear-gradient(to bottom, rgba(45, 35, 25, 0.95) 0%, rgba(30, 25, 20, 0.95) 100%)",
@@ -66,7 +70,7 @@ function SkillBox({
         borderRadius: "3px",
         boxShadow:
           "inset 1px 1px 0 rgba(80, 65, 50, 0.8), inset -1px -1px 0 rgba(20, 15, 10, 0.9), 0 1px 3px rgba(0, 0, 0, 0.8)",
-        cursor: "default",
+        cursor: "pointer",
         width: "100%",
         minHeight: "40px",
       }}
@@ -286,6 +290,24 @@ export function SkillsPanel({ world, stats }: SkillsPanelProps) {
   const [activeTab, setActiveTab] = useState<TabType>("skills");
   const [hoveredSkill, setHoveredSkill] = useState<Skill | null>(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+
+  // Skill Guide Panel state
+  const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
+  const [isGuideOpen, setIsGuideOpen] = useState(false);
+
+  // Get skill unlocks data
+  const skillUnlocks = getAllSkillUnlocks();
+
+  // Skill Guide Panel handlers
+  const handleSkillClick = useCallback((skill: Skill) => {
+    setSelectedSkill(skill);
+    setIsGuideOpen(true);
+  }, []);
+
+  const handleGuideClose = useCallback(() => {
+    setIsGuideOpen(false);
+    setSelectedSkill(null);
+  }, []);
 
   // Prayer state from server
   const [prayerPoints, setPrayerPoints] = useState(1);
@@ -643,6 +665,7 @@ export function SkillsPanel({ world, stats }: SkillsPanelProps) {
                     setMousePos({ x: e.clientX, y: e.clientY });
                   }}
                   onLeave={() => setHoveredSkill(null)}
+                  onClick={handleSkillClick}
                 />
               ))}
             </div>
@@ -943,6 +966,19 @@ export function SkillsPanel({ world, stats }: SkillsPanelProps) {
           })(),
           document.body,
         )}
+
+      {/* Skill Guide Panel */}
+      {selectedSkill && (
+        <SkillGuidePanel
+          visible={isGuideOpen}
+          skillKey={selectedSkill.key}
+          skillLabel={selectedSkill.label}
+          skillIcon={selectedSkill.icon}
+          playerLevel={selectedSkill.level}
+          unlocks={skillUnlocks[selectedSkill.key] || []}
+          onClose={handleGuideClose}
+        />
+      )}
     </div>
   );
 }
