@@ -9,6 +9,10 @@ on:
     # Run security scans weekly on Monday at 9am UTC
     - cron: '0 9 * * 1'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   audit:
     name: npm Audit
