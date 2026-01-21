@@ -5,6 +5,7 @@
     "nixpacksConfigPath": "nixpacks.toml",
     "watchPatterns": [
       "packages/shared/**",
+      "packages/client/**",
       "packages/server/**",
       "packages/plugin-hyperscape/**",
       "package.json",

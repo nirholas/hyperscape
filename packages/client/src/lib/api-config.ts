@@ -5,8 +5,8 @@
  * URLs are set via Vite's define feature in vite.config.ts.
  *
  * In production builds (vite build):
- *   - GAME_API_URL = https://api.hyperscape.lol
- *   - GAME_WS_URL = wss://api.hyperscape.lol/ws
+ *   - GAME_API_URL = https://hyperscape-production.up.railway.app
+ *   - GAME_WS_URL = wss://hyperscape-production.up.railway.app/ws
  *   - CDN_URL = https://d20g7vd4m53hpb.cloudfront.net
  *
  * In development (vite dev):
@@ -22,7 +22,7 @@
 export const ELIZAOS_URL =
   import.meta.env.PUBLIC_ELIZAOS_URL ||
   (import.meta.env.PROD
-    ? "https://api.hyperscape.lol"
+    ? "https://hyperscape-production.up.railway.app"
     : "http://localhost:4001");
 
 export const ELIZAOS_API = `${ELIZAOS_URL}/api`;

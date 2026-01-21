@@ -191,13 +191,13 @@ export default defineConfig(({ mode }) => {
       "import.meta.env.PUBLIC_API_URL": JSON.stringify(
         env.PUBLIC_API_URL ||
           (mode === "production"
-            ? "https://api.hyperscape.lol"
+            ? "https://hyperscape-production.up.railway.app"
             : "http://localhost:5555"),
       ),
       "import.meta.env.PUBLIC_WS_URL": JSON.stringify(
         env.PUBLIC_WS_URL ||
           (mode === "production"
-            ? "wss://api.hyperscape.lol/ws"
+            ? "wss://hyperscape-production.up.railway.app/ws"
             : "ws://localhost:5555/ws"),
       ),
       "import.meta.env.PUBLIC_CDN_URL": JSON.stringify(
@@ -215,7 +215,7 @@ export default defineConfig(({ mode }) => {
       "import.meta.env.PUBLIC_ELIZAOS_URL": JSON.stringify(
         env.PUBLIC_ELIZAOS_URL ||
           (mode === "production"
-            ? "https://api.hyperscape.lol"
+            ? "https://hyperscape-production.up.railway.app"
             : "http://localhost:4001"),
       ),
       "import.meta.env.PUBLIC_PRIVY_APP_ID": JSON.stringify(

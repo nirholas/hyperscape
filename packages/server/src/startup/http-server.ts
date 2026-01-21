@@ -75,6 +75,7 @@ export async function createHttpServer(
     // Production domains
     "https://hyperscape.lol",
     "https://api.hyperscape.lol",
+    "https://hyperscape-production.up.railway.app",
     // Development (from env vars or defaults)
     elizaOSUrl, // ElizaOS API
     clientUrl, // Game Client
@@ -85,6 +86,7 @@ export async function createHttpServer(
     /^https:\/\/.+\.warpcast\.com$/,
     /^https:\/\/.+\.privy\.io$/,
     /^https:\/\/.+\.hyperscape\.lol$/,
+    /^https:\/\/.+\.up\.railway\.app$/,
   ];
 
   // Add custom domain from env if set
@@ -137,6 +139,10 @@ export async function createHttpServer(
     fastify.log.error(err);
     reply.status(500).send({ error: "Internal server error" });
   });
+
+  // SPA catch-all route - serve index.html for any unmatched routes
+  // This must be registered AFTER all other routes
+  await registerSpaCatchAll(fastify, config);
 
   console.log("[HTTP] ✅ HTTP server created");
   return fastify;
@@ -458,4 +464,62 @@ async function logAvailableAssets(
     const mobFiles = await fs.readdir(mobsDir);
     fastify.log.info(`[HTTP] Mob models available: ${mobFiles.join(", ")}`);
   }
+}
+
+/**
+ * Register SPA catch-all route
+ *
+ * For client-side routing, any route that doesn't match an API endpoint
+ * or static file should serve index.html. This allows React Router or
+ * similar client-side routers to handle the route.
+ *
+ * @param fastify - Fastify instance
+ * @param config - Server configuration
+ * @private
+ */
+async function registerSpaCatchAll(
+  fastify: FastifyInstance,
+  config: ServerConfig,
+): Promise<void> {
+  const indexHtmlPath = path.join(config.__dirname, "public", "index.html");
+
+  // Check if index.html exists before registering catch-all
+  if (!(await fs.pathExists(indexHtmlPath))) {
+    console.log(
+      "[HTTP] ⚠️  No index.html found in public directory, skipping SPA catch-all",
+    );
+    return;
+  }
+
+  fastify.setNotFoundHandler(
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const url = request.url;
+
+      // Don't serve index.html for API routes or asset requests
+      if (
+        url.startsWith("/api/") ||
+        url.startsWith("/ws") ||
+        url.startsWith("/assets/") ||
+        url.startsWith("/manifests/") ||
+        url.startsWith("/dist/") ||
+        url.startsWith("/status") ||
+        // Don't serve index.html for file extensions (static files that weren't found)
+        /\.[a-zA-Z0-9]+$/.test(url)
+      ) {
+        return reply.status(404).send({ error: "Not found", path: url });
+      }
+
+      // Serve index.html for SPA routes
+      const html = await fs.promises.readFile(indexHtmlPath, "utf-8");
+
+      return reply
+        .type("text/html; charset=utf-8")
+        .header("Cache-Control", "no-cache, no-store, must-revalidate")
+        .header("Pragma", "no-cache")
+        .header("Expires", "0")
+        .send(html);
+    },
+  );
+
+  console.log("[HTTP] ✅ SPA catch-all route registered");
 }

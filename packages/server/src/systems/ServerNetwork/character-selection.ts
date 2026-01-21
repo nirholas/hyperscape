@@ -42,7 +42,7 @@ async function _createElizaOSAgent(
     const elizaOSApiUrl =
       process.env.ELIZAOS_API_URL ||
       (process.env.NODE_ENV === "production"
-        ? "https://api.hyperscape.lol"
+        ? "https://hyperscape-production.up.railway.app"
         : "http://localhost:4001");
 
     console.log(

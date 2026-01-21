@@ -95,8 +95,8 @@ jobs:
         run: bun run build
         working-directory: packages/client
         env:
-          PUBLIC_API_URL: https://api.hyperscape.lol
-          PUBLIC_WS_URL: wss://api.hyperscape.lol/ws
+          PUBLIC_API_URL: https://hyperscape-production.up.railway.app
+          PUBLIC_WS_URL: wss://hyperscape-production.up.railway.app/ws
           PUBLIC_CDN_URL: https://d20g7vd4m53hpb.cloudfront.net
           PUBLIC_APP_URL: https://hyperscape.lol
 
@@ -157,8 +157,8 @@ jobs:
         run: bun run build
         working-directory: packages/client
         env:
-          PUBLIC_API_URL: https://api.hyperscape.lol
-          PUBLIC_WS_URL: wss://api.hyperscape.lol/ws
+          PUBLIC_API_URL: https://hyperscape-production.up.railway.app
+          PUBLIC_WS_URL: wss://hyperscape-production.up.railway.app/ws
           PUBLIC_CDN_URL: https://d20g7vd4m53hpb.cloudfront.net
           PUBLIC_APP_URL: https://hyperscape.lol
 
@@ -233,8 +233,8 @@ jobs:
         run: bun run build
         working-directory: packages/client
         env:
-          PUBLIC_API_URL: https://api.hyperscape.lol
-          PUBLIC_WS_URL: wss://api.hyperscape.lol/ws
+          PUBLIC_API_URL: https://hyperscape-production.up.railway.app
+          PUBLIC_WS_URL: wss://hyperscape-production.up.railway.app/ws
           PUBLIC_CDN_URL: https://d20g7vd4m53hpb.cloudfront.net
           PUBLIC_APP_URL: https://hyperscape.lol
 

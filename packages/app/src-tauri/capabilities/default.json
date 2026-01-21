@@ -50,6 +50,18 @@
           "url": "wss://api.hyperscape.lol/*"
         },
         {
+          "url": "https://hyperscape-production.up.railway.app/*"
+        },
+        {
+          "url": "wss://hyperscape-production.up.railway.app/*"
+        },
+        {
+          "url": "https://*.up.railway.app/*"
+        },
+        {
+          "url": "wss://*.up.railway.app/*"
+        },
+        {
           "url": "https://*.privy.io/*"
         },
         {

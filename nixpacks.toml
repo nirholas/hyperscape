@@ -19,7 +19,7 @@ aptPkgs = [
 
 [phases.install]
 # Use bun for package installation
-cmds = ["bun install --frozen-lockfile"]
+cmds = ["bun install"]
 
 [phases.assets]
 # Clone game assets repository (contains manifests needed by DataManager)
@@ -27,11 +27,15 @@ dependsOn = ["install"]
 cmds = ["git clone --depth 1 https://github.com/HyperscapeAI/assets.git packages/server/world/assets"]
 
 [phases.build]
-# Build the packages in correct order
+# Build the packages in correct order: shared -> client -> server
+# Then copy client dist to server public for static serving
 dependsOn = ["assets"]
 cmds = [
   "bun run build:shared",
-  "bun run build:server"
+  "bun run build:client",
+  "bun run build:server",
+  "mkdir -p packages/server/public",
+  "cp -r packages/client/dist/* packages/server/public/"
 ]
 
 [start]
