@@ -7,12 +7,11 @@
 # ============================================================================
 FROM oven/bun:1.1.38-debian AS builder
 
-# Install build dependencies for native modules (canvas, better-sqlite3) and git for assets
+# Install build dependencies for native modules (canvas, better-sqlite3)
 RUN apt-get update && apt-get install -y \
     python3 \
     make \
     g++ \
-    git \
     pkg-config \
     libcairo2-dev \
     libpango1.0-dev \
@@ -47,8 +46,8 @@ COPY packages/plugin-hyperscape ./packages/plugin-hyperscape
 COPY turbo.json ./
 COPY tsconfig.json ./
 
-# Clone assets repository (contains game manifests)
-RUN git clone --depth 1 https://github.com/HyperscapeAI/assets.git ./packages/server/world/assets
+# Note: Assets are served from CDN - no local clone needed
+# Manifests are fetched at server startup from PUBLIC_CDN_URL
 
 # Build packages in correct order
 # 1. PhysX (copies prebuilt files)
@@ -116,8 +115,8 @@ COPY --from=builder /app/packages/plugin-hyperscape ./packages/plugin-hyperscape
 # Copy server source files needed at runtime (for paths, configs, etc.)
 COPY --from=builder /app/packages/server/src ./packages/server/src
 
-# Copy game manifests from assets repository (server needs these for DataManager)
-COPY --from=builder /app/packages/server/world/assets/manifests ./packages/server/world/assets/manifests
+# Create manifests directory - manifests are fetched from CDN at startup
+RUN mkdir -p ./packages/server/world/assets/manifests
 
 # Set working directory to server
 WORKDIR /app/packages/server

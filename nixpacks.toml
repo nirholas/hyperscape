@@ -7,7 +7,6 @@ aptPkgs = [
   "python3",
   "make",
   "g++",
-  "git",
   "pkg-config",
   "libcairo2-dev",
   "libpango1.0-dev",
@@ -21,21 +20,18 @@ aptPkgs = [
 # Use bun for package installation
 cmds = ["bun install"]
 
-[phases.assets]
-# Clone game assets repository (contains manifests needed by DataManager)
-dependsOn = ["install"]
-cmds = ["git clone --depth 1 https://github.com/HyperscapeAI/assets.git packages/server/world/assets"]
-
 [phases.build]
 # Build the packages in correct order: shared -> client -> server
 # Then copy client dist to server public for static serving
-dependsOn = ["assets"]
+# Note: Assets/manifests are fetched from CDN at server startup
+dependsOn = ["install"]
 cmds = [
   "bun run build:shared",
   "bun run build:client",
   "bun run build:server",
   "mkdir -p packages/server/public",
-  "cp -r packages/client/dist/* packages/server/public/"
+  "cp -r packages/client/dist/* packages/server/public/",
+  "mkdir -p packages/server/world/assets/manifests"
 ]
 
 [start]
