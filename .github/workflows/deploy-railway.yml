@@ -12,18 +12,8 @@ on:
       - 'bun.lock'
       - 'nixpacks.toml'
       - 'railway.server.json'
+      - 'Dockerfile.server'
   workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Deployment environment'
-        required: true
-        type: choice
-        options:
-          - production
-        default: production
-
-env:
-  RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
 jobs:
   deploy:
@@ -36,7 +26,13 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
+      - name: Link Railway Project
+        run: |
+          railway link --project e5f5ba11-0380-4d71-aa0b-343d89a58c0d --service f0b42e3b-3001-4ef1-926f-af6c3c138777 --environment 194f3565-ba2f-4c98-87d2-85dfc3a5110b
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
       - name: Deploy to Railway
-        run: railway up --service hyperscape --detach
+        run: railway up --detach
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
