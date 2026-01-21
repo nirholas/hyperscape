@@ -62,6 +62,12 @@ export function loadSkillUnlocks(manifest: SkillUnlocksManifest): void {
       .sort((a, b) => a.level - b.level);
   }
 
+  // Normalize British/American spelling: "defence" -> "defense"
+  // JSON uses OSRS-accurate British spelling, but UI uses American spelling
+  if (loadedUnlocks["defence"] && !loadedUnlocks["defense"]) {
+    loadedUnlocks["defense"] = loadedUnlocks["defence"];
+  }
+
   const skillCount = Object.keys(loadedUnlocks).length;
   const unlockCount = Object.values(loadedUnlocks).reduce(
     (sum, arr) => sum + arr.length,
