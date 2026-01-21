@@ -175,6 +175,20 @@ export function SkillGuidePanel({
           transform: translateY(0);
         }
       }
+      .skill-guide-scroll::-webkit-scrollbar {
+        width: 8px;
+      }
+      .skill-guide-scroll::-webkit-scrollbar-track {
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 4px;
+      }
+      .skill-guide-scroll::-webkit-scrollbar-thumb {
+        background: rgba(139, 69, 19, 0.6);
+        border-radius: 4px;
+      }
+      .skill-guide-scroll::-webkit-scrollbar-thumb:hover {
+        background: rgba(139, 69, 19, 0.8);
+      }
     `;
     document.head.appendChild(style);
   }, []);
@@ -218,7 +232,7 @@ export function SkillGuidePanel({
           border: "2px solid rgba(139, 69, 19, 0.8)",
           borderRadius: "8px",
           boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
-          width: "320px",
+          width: "400px",
           maxHeight: "500px",
           display: "flex",
           flexDirection: "column",
@@ -313,6 +327,7 @@ export function SkillGuidePanel({
 
         {/* Unlocks List */}
         <div
+          className="skill-guide-scroll"
           style={{
             flex: 1,
             overflowY: "auto",
