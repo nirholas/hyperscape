@@ -298,6 +298,7 @@ export function SkillsPanel({ world, stats }: SkillsPanelProps) {
   const [skillUnlocks, setSkillUnlocks] = useState<
     Record<string, SkillUnlock[]>
   >({});
+  const [isLoadingUnlocks, setIsLoadingUnlocks] = useState(true);
 
   // Fetch skill unlocks data from server
   useEffect(() => {
@@ -310,6 +311,8 @@ export function SkillsPanel({ world, stats }: SkillsPanelProps) {
         }
       } catch (error) {
         console.warn("[SkillsPanel] Failed to fetch skill unlocks:", error);
+      } finally {
+        setIsLoadingUnlocks(false);
       }
     };
     fetchSkillUnlocks();
@@ -988,11 +991,11 @@ export function SkillsPanel({ world, stats }: SkillsPanelProps) {
       {selectedSkill && (
         <SkillGuidePanel
           visible={isGuideOpen}
-          skillKey={selectedSkill.key}
           skillLabel={selectedSkill.label}
           skillIcon={selectedSkill.icon}
           playerLevel={selectedSkill.level}
           unlocks={skillUnlocks[selectedSkill.key] || []}
+          isLoading={isLoadingUnlocks}
           onClose={handleGuideClose}
         />
       )}

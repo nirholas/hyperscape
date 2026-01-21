@@ -9,11 +9,11 @@ import type { SkillUnlock } from "@hyperscape/shared";
 
 interface SkillGuidePanelProps {
   visible: boolean;
-  skillKey: string;
   skillLabel: string;
   skillIcon: string;
   playerLevel: number;
   unlocks: readonly SkillUnlock[];
+  isLoading: boolean;
   onClose: () => void;
 }
 
@@ -140,6 +140,7 @@ export function SkillGuidePanel({
   skillIcon,
   playerLevel,
   unlocks,
+  isLoading,
   onClose,
 }: SkillGuidePanelProps) {
   // Close on ESC key
@@ -188,6 +189,9 @@ export function SkillGuidePanel({
       }
       .skill-guide-scroll::-webkit-scrollbar-thumb:hover {
         background: rgba(139, 69, 19, 0.8);
+      }
+      @keyframes spin {
+        to { transform: rotate(360deg); }
       }
     `;
     document.head.appendChild(style);
@@ -337,7 +341,29 @@ export function SkillGuidePanel({
             gap: "4px",
           }}
         >
-          {sortedUnlocks.length === 0 ? (
+          {isLoading ? (
+            <div
+              style={{
+                textAlign: "center",
+                color: "#c9b386",
+                padding: "24px",
+                fontSize: "12px",
+              }}
+            >
+              <div
+                style={{
+                  display: "inline-block",
+                  width: "20px",
+                  height: "20px",
+                  border: "2px solid rgba(139, 69, 19, 0.3)",
+                  borderTopColor: "#c9b386",
+                  borderRadius: "50%",
+                  animation: "spin 0.8s linear infinite",
+                }}
+              />
+              <div style={{ marginTop: "8px" }}>Loading unlocks...</div>
+            </div>
+          ) : sortedUnlocks.length === 0 ? (
             <div
               style={{
                 textAlign: "center",
