@@ -619,6 +619,18 @@ export class EventBridge {
    */
   private setupPlayerEvents(): void {
     try {
+      // Forward weight changes to specific player (for stamina drain calculations)
+      this.world.on(EventType.PLAYER_WEIGHT_CHANGED, (payload: unknown) => {
+        const data = payload as { playerId: string; weight: number };
+
+        if (data.playerId) {
+          this.broadcast.sendToPlayer(data.playerId, "playerWeightUpdated", {
+            playerId: data.playerId,
+            weight: data.weight,
+          });
+        }
+      });
+
       // Forward player updates to specific player (health, stats, etc.)
       // Note: emitPlayerUpdate() sends { playerId, component, data: playerData }
       // where data.health is { current, max } object
