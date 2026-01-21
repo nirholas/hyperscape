@@ -291,10 +291,11 @@ export const stopMovementAction: Action = {
         };
       }
 
-      // Send move command to current position (stops movement)
+      // Send cancel command to properly stop movement and clear the path
       const command: MoveToCommand = {
         target: playerEntity.position,
         runMode: false,
+        cancel: true,
       };
 
       await service.executeMove(command);

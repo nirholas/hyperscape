@@ -1,20 +1,15 @@
 import { GAME_API_URL } from "@/lib/api-config";
 import { usePrivy } from "@privy-io/react-auth";
-import { Bot, Mic, Paperclip, Send } from "lucide-react";
+import { Bot, Mic, Send } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
 import { Agent } from "../../screens/DashboardScreen";
+import { QuickActionMenu } from "./QuickActionMenu";
 
 interface Message {
   id: string;
   sender: "user" | "agent";
   text: string;
   timestamp: Date;
-}
-
-interface ElizaOSResponse {
-  text?: string;
-  content?: string;
-  [key: string]: unknown;
 }
 
 interface AgentViewportChatProps {
@@ -34,6 +29,7 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
   const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isMountedRef = useRef(true);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   // Use Privy hook to get fresh access token (not stale localStorage token)
   const { getAccessToken, user } = usePrivy();
@@ -223,23 +219,34 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
       }
 
       const data = await response.json();
-      const responses = Array.isArray(data) ? data : [data];
 
-      responses.forEach((resp: ElizaOSResponse, index: number) => {
-        const agentMessage: Message = {
-          id: (Date.now() + index).toString(),
+      // Game server returns { success: true, message: "Message sent" }
+      // Agent's actual response will appear in the game chat (visible in iframe)
+      if (data.success) {
+        const confirmMessage: Message = {
+          id: Date.now().toString(),
           sender: "agent",
-          text: resp.text || resp.content || "No response",
+          text: "Message delivered. Opening game chat...",
           timestamp: new Date(),
         };
-        setMessages((prev) => [...prev, agentMessage]);
-      });
+        setMessages((prev) => [...prev, confirmMessage]);
+
+        // Tell the iframe to open the chat panel
+        if (iframeRef.current?.contentWindow) {
+          iframeRef.current.contentWindow.postMessage(
+            { type: "OPEN_CHAT" },
+            "*",
+          );
+        }
+      } else {
+        throw new Error(data.error || "Failed to deliver message");
+      }
     } catch (error) {
       console.error("Failed to send message:", error);
       const errorMessage: Message = {
         id: Date.now().toString(),
         sender: "agent",
-        text: "⚠️ Failed to send message to agent. Is ElizaOS running?",
+        text: `⚠️ ${error instanceof Error ? error.message : "Failed to send message"}`,
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMessage]);
@@ -337,6 +344,7 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
     <div className="flex flex-col h-full bg-black relative">
       {/* 3D Game Viewport (Background) */}
       <iframe
+        ref={iframeRef}
         className="absolute inset-0 w-full h-full border-none bg-[#0b0a15]"
         src={`/?${iframeParams.toString()}`}
         allow="autoplay; fullscreen; microphone; camera"
@@ -414,9 +422,59 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
       <div className="absolute bottom-4 left-4 right-4 z-10 pointer-events-auto">
         <div className="max-w-3xl mx-auto">
           <div className="relative flex items-end gap-2 bg-black/60 backdrop-blur-md border border-[#8b4513]/50 rounded-xl p-2 focus-within:border-[#f2d08a]/50 transition-colors shadow-2xl">
-            <button className="p-2 text-[#f2d08a]/40 hover:text-[#f2d08a] transition-colors rounded-lg hover:bg-[#f2d08a]/5">
-              <Paperclip size={20} />
-            </button>
+            <QuickActionMenu
+              agentId={agent.id}
+              authToken={authToken}
+              onCommandSend={(command) => {
+                setInputValue(command);
+                // Auto-send the command
+                setTimeout(async () => {
+                  const userMessage: Message = {
+                    id: Date.now().toString(),
+                    sender: "user",
+                    text: command,
+                    timestamp: new Date(),
+                  };
+                  setMessages((prev) => [...prev, userMessage]);
+                  setIsTyping(true);
+                  try {
+                    const response = await fetch(
+                      `${GAME_API_URL}/api/agents/${agent.id}/message`,
+                      {
+                        method: "POST",
+                        headers: {
+                          "Content-Type": "application/json",
+                          Authorization: `Bearer ${authToken}`,
+                        },
+                        body: JSON.stringify({ content: command }),
+                      },
+                    );
+                    const data = await response.json();
+                    if (data.success) {
+                      const confirmMessage: Message = {
+                        id: Date.now().toString(),
+                        sender: "agent",
+                        text: "Command sent to agent",
+                        timestamp: new Date(),
+                      };
+                      setMessages((prev) => [...prev, confirmMessage]);
+                      // Open chat in iframe
+                      if (iframeRef.current?.contentWindow) {
+                        iframeRef.current.contentWindow.postMessage(
+                          { type: "OPEN_CHAT" },
+                          "*",
+                        );
+                      }
+                    }
+                  } catch (err) {
+                    console.error("Failed to send command:", err);
+                  } finally {
+                    setIsTyping(false);
+                    setInputValue("");
+                  }
+                }, 0);
+              }}
+            />
 
             <textarea
               value={inputValue}

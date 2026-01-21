@@ -1,7 +1,20 @@
 import { GAME_API_URL } from "@/lib/api-config";
 import React, { useState, useEffect } from "react";
 import { Agent } from "../../screens/DashboardScreen";
-import { ChevronDown, ChevronUp, MapPin } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  MapPin,
+  TreePine,
+  Landmark,
+  Coins,
+  Flame,
+  Pickaxe,
+  Fish,
+  Swords,
+  Store,
+  Home,
+} from "lucide-react";
 
 interface Position {
   x: number;
@@ -9,9 +22,83 @@ interface Position {
   z: number;
 }
 
+interface NearbyLocation {
+  type: string;
+  name: string;
+  distance: number;
+}
+
 interface AgentPositionPanelProps {
   agent: Agent;
   isViewportActive: boolean;
+}
+
+// Zone detection based on coordinates
+function getZoneName(x: number, z: number): string {
+  // Central area (spawn)
+  if (Math.abs(x) < 30 && Math.abs(z) < 30) {
+    return "Central Haven";
+  }
+
+  // Forest areas
+  if (x > 30 && z > 0) {
+    return "Eastern Forest";
+  }
+  if (x < -30 && z > 0) {
+    return "Western Woods";
+  }
+
+  // Mining area
+  if (x > 0 && z < -30) {
+    return "Mining Quarry";
+  }
+
+  // Fishing area
+  if (x < 0 && z < -30) {
+    return "Riverside";
+  }
+
+  // Combat areas
+  if (Math.abs(x) > 50 || Math.abs(z) > 50) {
+    return "Wilderness";
+  }
+
+  return "Unknown Region";
+}
+
+// POI definitions with their coordinates
+const POINTS_OF_INTEREST = [
+  { type: "bank", name: "Bank", x: 0, z: 5, icon: Landmark },
+  { type: "shop", name: "General Store", x: -10, z: 8, icon: Store },
+  { type: "trees", name: "Oak Trees", x: 40, z: 20, icon: TreePine },
+  { type: "trees", name: "Willow Trees", x: -35, z: 25, icon: TreePine },
+  { type: "furnace", name: "Furnace", x: 15, z: -10, icon: Flame },
+  { type: "anvil", name: "Anvil", x: 18, z: -10, icon: Pickaxe },
+  { type: "fishing", name: "Fishing Spot", x: -20, z: -40, icon: Fish },
+  { type: "combat", name: "Goblin Camp", x: 60, z: 40, icon: Swords },
+  { type: "combat", name: "Training Dummies", x: 25, z: -5, icon: Swords },
+  { type: "spawn", name: "Spawn Point", x: 0, z: 0, icon: Home },
+];
+
+// Calculate distance between two points (2D, ignoring Y)
+function getDistance(x1: number, z1: number, x2: number, z2: number): number {
+  return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(z2 - z1, 2));
+}
+
+// Get nearby POIs sorted by distance
+function getNearbyPOIs(
+  x: number,
+  z: number,
+  maxDistance = 50,
+): NearbyLocation[] {
+  return POINTS_OF_INTEREST.map((poi) => ({
+    type: poi.type,
+    name: poi.name,
+    distance: Math.round(getDistance(x, z, poi.x, poi.z)),
+  }))
+    .filter((poi) => poi.distance <= maxDistance && poi.distance > 0)
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, 4);
 }
 
 export const AgentPositionPanel: React.FC<AgentPositionPanelProps> = ({
@@ -24,6 +111,8 @@ export const AgentPositionPanel: React.FC<AgentPositionPanelProps> = ({
   const [expanded, setExpanded] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [characterId, setCharacterId] = useState<string | null>(null);
+  const [zoneName, setZoneName] = useState<string>("Unknown");
+  const [nearbyPOIs, setNearbyPOIs] = useState<NearbyLocation[]>([]);
 
   // Fetch character ID once when agent changes
   useEffect(() => {
@@ -31,19 +120,25 @@ export const AgentPositionPanel: React.FC<AgentPositionPanelProps> = ({
       setPosition(null);
       setOnline(false);
       setCharacterId(null);
+      setZoneName("Unknown");
+      setNearbyPOIs([]);
       return;
     }
     fetchCharacterId();
   }, [agent.id, agent.status]);
 
-  // Poll for position updates when viewport is active and we have characterId
+  // Poll for position updates - always active, faster when viewport is active
   useEffect(() => {
-    if (!isViewportActive || agent.status !== "active" || !characterId) return;
+    if (agent.status !== "active" || !characterId) return;
 
     // Fetch immediately
     fetchPosition();
 
-    const interval = setInterval(fetchPosition, 1000); // Poll every 1 second for position
+    // Poll every 5-10 seconds to avoid rate limiting (reduced from 1-3s)
+    const interval = setInterval(
+      fetchPosition,
+      isViewportActive ? 5000 : 10000,
+    );
     return () => clearInterval(interval);
   }, [isViewportActive, agent.id, agent.status, characterId]);
 
@@ -96,6 +191,14 @@ export const AgentPositionPanel: React.FC<AgentPositionPanelProps> = ({
       const positionData = await positionResponse.json();
       setOnline(positionData.online);
       setPosition(positionData.position);
+
+      // Calculate zone and nearby POIs
+      if (positionData.position) {
+        const { x, z } = positionData.position;
+        setZoneName(getZoneName(x, z));
+        setNearbyPOIs(getNearbyPOIs(x, z));
+      }
+
       setError(null);
     } catch (err) {
       console.error("[AgentPositionPanel] Error fetching position:", err);
@@ -118,11 +221,11 @@ export const AgentPositionPanel: React.FC<AgentPositionPanelProps> = ({
         <div className="flex items-center gap-2">
           <MapPin size={14} className="text-[#f2d08a]/60" />
           <span className="text-xs font-bold text-[#f2d08a]/80 uppercase tracking-wider">
-            Position
+            Location
           </span>
           {online && position && (
-            <span className="text-[10px] text-[#f2d08a]/50">
-              ({Math.floor(position.x)}, {Math.floor(position.z)})
+            <span className="text-[10px] text-[#f2d08a]/50 truncate max-w-[100px]">
+              {zoneName}
             </span>
           )}
         </div>
@@ -149,8 +252,36 @@ export const AgentPositionPanel: React.FC<AgentPositionPanelProps> = ({
               Agent offline
             </div>
           ) : position ? (
-            <div className="space-y-1">
-              {/* Coordinate Grid - Show tile positions (whole numbers) */}
+            <div className="space-y-2">
+              {/* Zone Name Banner */}
+              <div className="flex items-center gap-2 p-2 rounded bg-[#f2d08a]/10 border border-[#f2d08a]/20">
+                <MapPin size={14} className="text-[#f2d08a]" />
+                <div className="flex-1">
+                  <div className="text-[10px] font-bold text-[#f2d08a]">
+                    {zoneName}
+                  </div>
+                  <div className="text-[8px] text-[#f2d08a]/50">
+                    X: {Math.floor(position.x)} Y: {Math.floor(position.y)} Z:{" "}
+                    {Math.floor(position.z)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Nearby POIs */}
+              {nearbyPOIs.length > 0 && (
+                <div>
+                  <div className="text-[8px] text-[#f2d08a]/50 uppercase tracking-wider mb-1 font-medium">
+                    Nearby
+                  </div>
+                  <div className="grid grid-cols-2 gap-1">
+                    {nearbyPOIs.map((poi, idx) => (
+                      <POIBadge key={idx} poi={poi} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Coordinate Grid - Collapsed view */}
               <div className="grid grid-cols-3 gap-1">
                 <CoordinateBox
                   label="X"
@@ -175,14 +306,14 @@ export const AgentPositionPanel: React.FC<AgentPositionPanelProps> = ({
                   const coordString = `${Math.floor(position.x)}, ${Math.floor(position.y)}, ${Math.floor(position.z)}`;
                   navigator.clipboard.writeText(coordString);
                 }}
-                className="w-full mt-1 py-1 px-2 text-[9px] text-[#f2d08a]/60 hover:text-[#f2d08a] hover:bg-[#f2d08a]/10 rounded transition-colors"
+                className="w-full py-1 px-2 text-[9px] text-[#f2d08a]/60 hover:text-[#f2d08a] hover:bg-[#f2d08a]/10 rounded transition-colors"
               >
                 Copy Coordinates
               </button>
 
               {/* Live indicator when viewport active */}
               {isViewportActive && (
-                <div className="flex items-center justify-center gap-1 mt-1 pt-1 border-t border-[#8b4513]/20">
+                <div className="flex items-center justify-center gap-1 pt-1 border-t border-[#8b4513]/20">
                   <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
                   <span className="text-[9px] text-green-500/80">
                     Live Tracking
@@ -218,6 +349,27 @@ function CoordinateBox({
     >
       <span className="text-[8px] opacity-60 uppercase">{label}</span>
       <span className="text-[11px] font-mono font-bold">{value}</span>
+    </div>
+  );
+}
+
+// Get icon for POI type
+function getPOIIcon(type: string) {
+  const IconComponent = POINTS_OF_INTEREST.find((p) => p.type === type)?.icon;
+  if (IconComponent) {
+    return <IconComponent size={10} className="text-[#f2d08a]/70" />;
+  }
+  return <MapPin size={10} className="text-[#f2d08a]/70" />;
+}
+
+function POIBadge({ poi }: { poi: NearbyLocation }) {
+  return (
+    <div className="flex items-center gap-1.5 p-1 rounded bg-black/30 border border-[#8b4513]/20">
+      {getPOIIcon(poi.type)}
+      <span className="text-[8px] text-[#e8ebf4]/70 truncate flex-1">
+        {poi.name}
+      </span>
+      <span className="text-[8px] text-[#f2d08a]/50">{poi.distance}m</span>
     </div>
   );
 }

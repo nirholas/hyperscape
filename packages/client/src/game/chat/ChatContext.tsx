@@ -1,4 +1,10 @@
-import React, { createContext, useContext, useState, ReactNode } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  ReactNode,
+} from "react";
 
 interface ChatContextType {
   collapsed: boolean;
@@ -15,6 +21,19 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(true);
   const [active, setActive] = useState(false);
   const [hasOpenWindows, setHasOpenWindows] = useState(false);
+
+  // Listen for postMessage from parent (dashboard iframe)
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === "OPEN_CHAT") {
+        setCollapsed(false);
+        setActive(true);
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
 
   return (
     <ChatContext.Provider

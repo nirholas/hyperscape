@@ -37,6 +37,23 @@ export interface ShouldRespondOptions {
   state?: State;
 }
 
+// Helper to get value from State.values (supports both Map in 1.6.4 and object in 1.7.0)
+function getStateValue(state: State | undefined, key: string): unknown {
+  if (!state?.values) return undefined;
+  // Check if it's a Map (1.6.4) or object (1.7.0)
+  if (state.values instanceof Map) {
+    return state.values.get(key);
+  }
+  // Object access for 1.7.0
+  return (state.values as Record<string, unknown>)[key];
+}
+
+// Helper to create a State object that works with both versions
+function createEmptyState(): State {
+  // Use object for 1.7.0 compatibility, cast as any for cross-version support
+  return { values: {} as any, data: {}, text: "" };
+}
+
 // Main functions
 export function composeContext(options: ComposeContextOptions): string {
   const {
@@ -56,9 +73,9 @@ export function composeContext(options: ComposeContextOptions): string {
     agentName,
     characterBio,
     currentLocation:
-      state?.values?.get("currentLocation") || "Unknown Location",
+      getStateValue(state, "currentLocation") || "Unknown Location",
     recentMessages:
-      state?.values?.get("recentMessages") || "No recent messages",
+      getStateValue(state, "recentMessages") || "No recent messages",
     ...additionalContext,
   };
 
@@ -87,12 +104,13 @@ export async function generateMessageResponse(
 
   const response = await runtime.useModel(modelType, {
     prompt: context,
-    max_tokens: 1000,
+    maxTokens: 1000,
+    max_tokens: 1000, // Fallback for older versions
     temperature: 0.8,
     frequency_penalty: 0.0,
     presence_penalty: 0.0,
     stop,
-  });
+  } as any);
 
   // Model returns either string directly or object with text property
   const text = (response as { text?: string }).text || String(response);
@@ -110,15 +128,12 @@ export async function shouldRespond(
   } = {},
 ): Promise<boolean> {
   const context = composeContext({
-    state: state || { values: new Map(), data: {}, text: "" },
+    state: state || createEmptyState(),
     template: options.template || hyperscapeShouldRespondTemplate,
     runtime,
   });
 
-  const result = await runtime.evaluate(
-    message,
-    state || { values: new Map(), data: {}, text: "" },
-  );
+  const result = await runtime.evaluate(message, state || createEmptyState());
 
   return !!result;
 }
@@ -147,9 +162,10 @@ export async function generateDetailedResponse(
     options.modelType || ModelType.TEXT_LARGE,
     {
       prompt: context,
-      max_tokens: 2000,
+      maxTokens: 2000,
+      max_tokens: 2000, // Fallback for older versions
       temperature: 0.8,
-    },
+    } as any,
   )) as string;
 
   const text = response;

@@ -18,7 +18,11 @@ import type { HyperscapeService } from "../services/HyperscapeService.js";
 /**
  * Known locations in the game world
  * - spawn: Central area where goblins roam (0,0,0)
- * - forest: Western forest with trees for woodcutting (-130, 0, 400)
+ * - forest: Area with trees for woodcutting (25, 10, -15) - near spawn, within anti-cheat range
+ *
+ * NOTE: Coordinates are based on actual resource spawns in central_haven area:
+ * - Trees spawn at: (16,-10), (21,-10), (29,-18), (37,-28)
+ * - Must be within 200 tiles of spawn for anti-cheat compliance
  */
 export const KNOWN_LOCATIONS: Record<
   string,
@@ -34,8 +38,8 @@ export const KNOWN_LOCATIONS: Record<
     entities: ["goblin"],
   },
   forest: {
-    position: [-130, 30, 400],
-    description: "Western forest with plenty of trees for woodcutting",
+    position: [25, 10, -15],
+    description: "Nearby grove with trees for woodcutting",
     entities: ["tree"],
   },
 };

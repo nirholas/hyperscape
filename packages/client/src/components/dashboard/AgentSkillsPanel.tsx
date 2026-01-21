@@ -1,7 +1,50 @@
 import { GAME_API_URL } from "@/lib/api-config";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Agent } from "../../screens/DashboardScreen";
-import { ChevronDown, ChevronUp, Swords } from "lucide-react";
+import { ChevronDown, ChevronUp, Swords, TrendingUp } from "lucide-react";
+
+// Configuration constants
+const SKILLS_POLL_INTERVAL_MS = 10000; // Poll every 10 seconds to avoid rate limiting
+const MAX_SKILL_LEVEL = 99; // Maximum level for skill progress calculation
+const MAX_RETRY_ATTEMPTS = 3; // Maximum retry attempts for failed requests
+const RETRY_DELAY_MS = 1000; // Base delay between retries (exponential backoff)
+
+/**
+ * Fetch with retry logic and exponential backoff
+ */
+async function fetchWithRetry(
+  url: string,
+  options?: RequestInit,
+  maxRetries = MAX_RETRY_ATTEMPTS,
+): Promise<Response> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      if (response.ok || response.status === 404) {
+        // Return on success or 404 (handled by caller for default skills)
+        return response;
+      }
+      // Don't retry on client errors (4xx except 404)
+      if (response.status >= 400 && response.status < 500) {
+        return response;
+      }
+      lastError = new Error(`HTTP ${response.status}`);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+    }
+
+    // Exponential backoff before retry
+    if (attempt < maxRetries - 1) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, RETRY_DELAY_MS * Math.pow(2, attempt)),
+      );
+    }
+  }
+
+  throw lastError || new Error("Request failed after retries");
+}
 
 interface SkillData {
   level: number;
@@ -48,7 +91,7 @@ function calculateXPForLevel(level: number): number {
 }
 
 function getXPProgress(xp: number, level: number): number {
-  if (level >= 99) return 100;
+  if (level >= MAX_SKILL_LEVEL) return 100;
   const currentLevelXP = calculateXPForLevel(level);
   const nextLevelXP = calculateXPForLevel(level + 1);
   const xpIntoLevel = xp - currentLevelXP;
@@ -73,51 +116,63 @@ function SkillRow({
   label,
   level,
   xp,
-  showProgress,
+  sessionGain,
 }: {
   icon: string;
   label: string;
   level: number;
   xp: number;
-  showProgress?: boolean;
+  sessionGain?: number;
 }) {
   const progress = getXPProgress(xp, level);
 
   return (
-    <div className="flex items-center gap-2 py-0.5">
-      <span className="text-sm" title={label}>
-        {icon}
-      </span>
-      <div className="flex-1 min-w-0">
-        {showProgress ? (
-          <div className="relative h-3 bg-black/40 rounded overflow-hidden">
-            <div
-              className="absolute inset-y-0 left-0 bg-gradient-to-r from-green-600 to-green-500 transition-all duration-500"
-              style={{ width: `${progress}%` }}
-            />
-            <div className="absolute inset-0 flex items-center justify-between px-1">
-              <span className="text-[8px] text-[#f2d08a]/80 font-medium truncate">
-                {label}
-              </span>
-              <span
-                className="text-[9px] text-white font-bold"
-                style={{ textShadow: "0 1px 2px black" }}
-              >
-                {level}
-              </span>
-            </div>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between">
-            <span className="text-[9px] text-[#f2d08a]/70">{label}</span>
-            <span className="text-[10px] text-[#f2d08a] font-semibold">
-              {level}
+    <div className="flex flex-col gap-0.5 py-0.5">
+      {/* Skill name and level */}
+      <div className="flex items-center gap-1.5">
+        <span className="text-sm" title={label}>
+          {icon}
+        </span>
+        <span className="text-[9px] text-[#f2d08a]/80 font-medium flex-1">
+          {label}
+        </span>
+        <span className="text-[10px] text-[#f2d08a] font-bold">Lv {level}</span>
+      </div>
+
+      {/* XP bar with actual numbers */}
+      <div className="ml-5">
+        <div className="relative h-2.5 bg-black/40 rounded overflow-hidden">
+          <div
+            className="absolute inset-y-0 left-0 bg-gradient-to-r from-green-600 to-green-500 transition-all duration-500"
+            style={{ width: `${progress}%` }}
+          />
+          <div className="absolute inset-0 flex items-center justify-end pr-1">
+            <span
+              className="text-[8px] text-white/90 font-medium"
+              style={{ textShadow: "0 1px 2px black" }}
+            >
+              {Math.round(progress)}%
             </span>
           </div>
-        )}
+        </div>
+        <div className="flex items-center justify-between mt-0.5">
+          <span className="text-[8px] text-[#f2d08a]/50">
+            {formatXP(xp)} XP
+          </span>
+          {sessionGain && sessionGain > 0 ? (
+            <span className="text-[8px] text-green-400/80 flex items-center gap-0.5">
+              <TrendingUp size={8} />+{formatXP(sessionGain)}
+            </span>
+          ) : null}
+        </div>
       </div>
     </div>
   );
+}
+
+// Format XP with comma separators
+function formatXP(xp: number): string {
+  return xp.toLocaleString();
 }
 
 export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({
@@ -129,6 +184,11 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({
   const [expanded, setExpanded] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [characterId, setCharacterId] = useState<string | null>(null);
+  // Track session XP gains
+  const initialSkillsRef = useRef<AgentSkills | null>(null);
+  const [sessionXpGains, setSessionXpGains] = useState<Record<string, number>>(
+    {},
+  );
 
   // Fetch character ID once when agent changes
   useEffect(() => {
@@ -140,14 +200,15 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({
     fetchCharacterId();
   }, [agent.id, agent.status]);
 
-  // Poll for skills updates when viewport is active and we have characterId
+  // Poll for skills updates regardless of viewport state
   useEffect(() => {
-    if (!isViewportActive || agent.status !== "active" || !characterId) return;
+    if (agent.status !== "active" || !characterId) return;
 
     // Fetch immediately
     fetchSkills();
 
-    const interval = setInterval(fetchSkills, 5000); // Poll every 5 seconds
+    // Poll at configured interval to avoid rate limiting
+    const interval = setInterval(fetchSkills, SKILLS_POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [isViewportActive, agent.id, agent.status, characterId]);
 
@@ -156,7 +217,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({
       setLoading(true);
       setError(null);
 
-      const mappingResponse = await fetch(
+      const mappingResponse = await fetchWithRetry(
         `${GAME_API_URL}/api/agents/mapping/${agent.id}`,
       );
 
@@ -189,7 +250,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({
     if (!characterId) return;
 
     try {
-      const skillsResponse = await fetch(
+      const skillsResponse = await fetchWithRetry(
         `${GAME_API_URL}/api/characters/${characterId}/skills`,
       );
 
@@ -212,7 +273,29 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({
       }
 
       const skillsData = await skillsResponse.json();
-      setSkills(skillsData.skills || skillsData);
+      const newSkills = skillsData.skills || skillsData;
+
+      // Track initial skills for session gains
+      if (!initialSkillsRef.current) {
+        initialSkillsRef.current = JSON.parse(JSON.stringify(newSkills));
+      }
+
+      // Calculate session XP gains
+      if (initialSkillsRef.current) {
+        const gains: Record<string, number> = {};
+        for (const config of SKILL_CONFIG) {
+          const key = config.key as keyof AgentSkills;
+          const currentXp = newSkills[key]?.xp || 0;
+          const initialXp = initialSkillsRef.current[key]?.xp || 0;
+          const gain = currentXp - initialXp;
+          if (gain > 0) {
+            gains[config.key] = gain;
+          }
+        }
+        setSessionXpGains(gains);
+      }
+
+      setSkills(newSkills);
       setError(null);
     } catch (err) {
       console.error("[AgentSkillsPanel] Error fetching skills:", err);
@@ -285,7 +368,10 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({
           ) : skills ? (
             <div className="space-y-0.5">
               {/* Combat Skills (melee-only MVP: 4 skills) */}
-              <div className="grid grid-cols-2 gap-x-2">
+              <div className="text-[8px] text-[#f2d08a]/50 uppercase tracking-wider mb-1 font-medium">
+                Combat
+              </div>
+              <div className="space-y-1">
                 {SKILL_CONFIG.slice(0, 4).map((skillConfig) => {
                   const skill = skills[skillConfig.key as keyof AgentSkills];
                   return (
@@ -295,17 +381,20 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({
                       label={skillConfig.label}
                       level={skill?.level || 1}
                       xp={skill?.xp || 0}
-                      showProgress={isViewportActive}
+                      sessionGain={sessionXpGains[skillConfig.key]}
                     />
                   );
                 })}
               </div>
 
               {/* Divider */}
-              <div className="border-t border-[#8b4513]/20 my-1" />
+              <div className="border-t border-[#8b4513]/20 my-2" />
 
               {/* Gathering Skills */}
-              <div className="grid grid-cols-2 gap-x-2">
+              <div className="text-[8px] text-[#f2d08a]/50 uppercase tracking-wider mb-1 font-medium">
+                Gathering
+              </div>
+              <div className="space-y-1">
                 {SKILL_CONFIG.slice(4).map((skillConfig) => {
                   const skill = skills[skillConfig.key as keyof AgentSkills];
                   return (
@@ -315,11 +404,34 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({
                       label={skillConfig.label}
                       level={skill?.level || 1}
                       xp={skill?.xp || 0}
-                      showProgress={isViewportActive}
+                      sessionGain={sessionXpGains[skillConfig.key]}
                     />
                   );
                 })}
               </div>
+
+              {/* Session Total XP Gains */}
+              {Object.keys(sessionXpGains).length > 0 && (
+                <div className="mt-2 pt-2 border-t border-[#8b4513]/20">
+                  <div className="flex items-center justify-between p-1.5 rounded bg-green-500/10 border border-green-500/20">
+                    <div className="flex items-center gap-1.5">
+                      <TrendingUp size={12} className="text-green-400" />
+                      <span className="text-[9px] text-green-400/80 font-medium">
+                        Session XP
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-green-400 font-bold">
+                      +
+                      {formatXP(
+                        Object.values(sessionXpGains).reduce(
+                          (a, b) => a + b,
+                          0,
+                        ),
+                      )}
+                    </span>
+                  </div>
+                </div>
+              )}
 
               {/* Live indicator when viewport active */}
               {isViewportActive && (

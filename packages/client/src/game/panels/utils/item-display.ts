@@ -8,9 +8,18 @@
 /**
  * Get emoji icon for item based on itemId.
  * Comprehensive list - includes all cases from both panels.
+ *
+ * IMPORTANT: Order matters! More specific checks must come before general ones.
+ * e.g., "pickaxe" before "axe", "hatchet" before "hat"
  */
 export function getItemIcon(itemId: string): string {
   const id = itemId.toLowerCase();
+
+  // Tools - check specific tool names FIRST (before partial matches)
+  if (id.includes("pickaxe")) return "⛏️";
+  if (id.includes("hatchet")) return "🪓";
+  if (id.includes("fishing") || id.includes("rod")) return "🎣";
+  if (id.includes("tinderbox")) return "🔥";
 
   // Weapons
   if (id.includes("sword") || id.includes("dagger") || id.includes("scimitar"))
@@ -18,10 +27,9 @@ export function getItemIcon(itemId: string): string {
   if (id.includes("bow")) return "🎯";
   if (id.includes("arrow") || id.includes("bolt")) return "🏹";
 
-  // Armor
+  // Armor - check AFTER tools to avoid "hatchet" matching "hat"
   if (id.includes("shield") || id.includes("defender")) return "🛡️";
-  if (id.includes("helmet") || id.includes("helm") || id.includes("hat"))
-    return "⛑️";
+  if (id.includes("helmet") || id.includes("helm")) return "⛑️";
   if (
     id.includes("body") ||
     id.includes("platebody") ||
@@ -39,21 +47,27 @@ export function getItemIcon(itemId: string): string {
 
   // Resources
   if (id.includes("coins") || id.includes("gold")) return "🪙";
-  if (id.includes("fish") || id.includes("shrimp") || id.includes("lobster"))
+  if (
+    id.includes("fish") ||
+    id.includes("shrimp") ||
+    id.includes("lobster") ||
+    id.includes("trout") ||
+    id.includes("salmon") ||
+    id.includes("sardine")
+  )
     return "🐟";
   if (id.includes("log") || id.includes("wood")) return "🪵";
-  if (id.includes("ore") || id.includes("bar")) return "🪨";
+  if (id.includes("ore")) return "🪨";
+  if (id.includes("bar")) return "🧱";
+  if (id.includes("coal")) return "⚫";
 
   // Consumables
   if (id.includes("food") || id.includes("bread") || id.includes("meat"))
     return "🍖";
   if (id.includes("potion")) return "🧪";
 
-  // Tools (was only in StorePanel - now shared)
-  if (id.includes("fishing") || id.includes("rod")) return "🎣";
-  if (id.includes("tinderbox")) return "🔥";
-  if (id.includes("hatchet") || id.includes("axe")) return "🪓";
-  if (id.includes("pickaxe")) return "⛏️";
+  // Fallback for general "axe" (after hatchet check)
+  if (id.includes("axe")) return "🪓";
 
   // Other
   if (id.includes("rune")) return "🔮";

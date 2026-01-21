@@ -1503,6 +1503,14 @@ export class ClientNetwork extends SystemBase {
     coins: number;
     maxSlots: number;
   }) => {
+    // Debug logging for inventory packet
+    console.log("[ClientNetwork] Received inventoryUpdated packet:", {
+      playerId: data.playerId,
+      itemCount: data.items?.length || 0,
+      coins: data.coins,
+      localPlayerId: this.world?.entities?.player?.id,
+      networkId: this.id,
+    });
     // Cache latest snapshot for late-mounting UI
     this.lastInventoryByPlayerId[data.playerId] = data;
     // Re-emit with typed event so UI updates without waiting for local add

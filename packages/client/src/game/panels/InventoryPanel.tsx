@@ -39,6 +39,7 @@ import {
 } from "@hyperscape/shared";
 import { dispatchInventoryAction } from "../systems/InventoryActionDispatcher";
 import type { ClientWorld, InventorySlotItem } from "../../types";
+import { getItemIcon } from "./utils/item-display";
 import { CoinAmountModal } from "./BankPanel/components/modals/CoinAmountModal";
 import { CoinPouch } from "./inventory";
 
@@ -202,48 +203,6 @@ function DraggableInventorySlot({
   const isItemNoted = useMemo(() => {
     return isNotedItem(itemData);
   }, [itemData]);
-
-  // Get icon for item
-  const getItemIcon = (itemId: string) => {
-    if (
-      itemId.includes("sword") ||
-      itemId.includes("dagger") ||
-      itemId.includes("scimitar")
-    )
-      return "⚔️";
-    if (itemId.includes("shield") || itemId.includes("defender")) return "🛡️";
-    if (
-      itemId.includes("helmet") ||
-      itemId.includes("helm") ||
-      itemId.includes("hat")
-    )
-      return "⛑️";
-    if (itemId.includes("boots") || itemId.includes("boot")) return "👢";
-    if (itemId.includes("glove") || itemId.includes("gauntlet")) return "🧤";
-    if (itemId.includes("cape") || itemId.includes("cloak")) return "🧥";
-    if (itemId.includes("amulet") || itemId.includes("necklace")) return "📿";
-    if (itemId.includes("ring")) return "💍";
-    if (itemId.includes("arrow") || itemId.includes("bolt")) return "🏹";
-    if (
-      itemId.includes("fish") ||
-      itemId.includes("lobster") ||
-      itemId.includes("shark")
-    )
-      return "🐟";
-    if (itemId.includes("log") || itemId.includes("wood")) return "🪵";
-    if (itemId.includes("ore") || itemId.includes("bar")) return "⛏️";
-    if (itemId.includes("coin")) return "💰";
-    if (itemId.includes("potion") || itemId.includes("vial")) return "🧪";
-    if (
-      itemId.includes("food") ||
-      itemId.includes("bread") ||
-      itemId.includes("meat")
-    )
-      return "🍖";
-    if (itemId.includes("axe")) return "🪓";
-    if (itemId.includes("pickaxe")) return "⛏️";
-    return itemId.substring(0, 2).toUpperCase();
-  };
 
   return (
     <button
@@ -1309,43 +1268,6 @@ export function InventoryPanel({
           <DragOverlay dropAnimation={null} modifiers={[snapCenterToCursor]}>
             {activeItem
               ? (() => {
-                  // Get icon for drag overlay
-                  const getOverlayIcon = (itemId: string) => {
-                    if (
-                      itemId.includes("sword") ||
-                      itemId.includes("dagger") ||
-                      itemId.includes("scimitar")
-                    )
-                      return "⚔️";
-                    if (
-                      itemId.includes("shield") ||
-                      itemId.includes("defender")
-                    )
-                      return "🛡️";
-                    if (
-                      itemId.includes("helmet") ||
-                      itemId.includes("helm") ||
-                      itemId.includes("hat")
-                    )
-                      return "⛑️";
-                    if (itemId.includes("boots") || itemId.includes("boot"))
-                      return "👢";
-                    if (
-                      itemId.includes("fish") ||
-                      itemId.includes("lobster") ||
-                      itemId.includes("shark")
-                    )
-                      return "🐟";
-                    if (itemId.includes("log") || itemId.includes("wood"))
-                      return "🪵";
-                    if (itemId.includes("ore") || itemId.includes("bar"))
-                      return "⛏️";
-                    if (itemId.includes("coin")) return "💰";
-                    if (itemId.includes("potion") || itemId.includes("vial"))
-                      return "🧪";
-                    if (itemId.includes("axe")) return "🪓";
-                    return itemId.substring(0, 2).toUpperCase();
-                  };
                   const qtyDisplay =
                     activeItem.quantity > 1
                       ? formatQuantity(activeItem.quantity)
@@ -1366,7 +1288,7 @@ export function InventoryPanel({
                         boxShadow: "0 4px 12px rgba(0, 0, 0, 0.5)",
                       }}
                     >
-                      {getOverlayIcon(activeItem.itemId)}
+                      {getItemIcon(activeItem.itemId)}
                       {qtyDisplay && (
                         <div
                           className="absolute bottom-0.5 right-0.5 font-bold rounded px-0.5 py-0.5 leading-none"

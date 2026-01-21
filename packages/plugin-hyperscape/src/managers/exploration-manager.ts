@@ -356,11 +356,13 @@ export class ExplorationManager {
       logger.debug("[ExplorationManager] LLM Prompt:", prompt);
 
       // Call the LLM with high temperature for variety
+      // Cast to any for cross-version compatibility (1.6.x uses max_tokens, 1.7.x uses maxTokens)
       const response = await this.runtime.useModel(ModelType.TEXT_SMALL, {
         prompt,
-        max_tokens: 100,
+        maxTokens: 100,
+        max_tokens: 100, // Fallback for older versions
         temperature: 1.2, // High temperature for exploration variety
-      });
+      } as any);
 
       // Parse response - extract coordinates from "DESTINATION: X, Z"
       const responseText =

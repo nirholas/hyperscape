@@ -405,8 +405,12 @@ export const idleAction: Action = {
       return { success: false, error: "Player entity not available" };
     }
 
-    // Stop any current movement by moving to current position
-    await service.executeMove({ target: player.position, runMode: false });
+    // Cancel any current movement by sending cancel flag to clear the path
+    await service.executeMove({
+      target: player.position,
+      runMode: false,
+      cancel: true,
+    });
 
     const responseText = "Standing still and observing...";
     await callback?.({ text: responseText, action: "IDLE" });

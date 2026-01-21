@@ -402,7 +402,8 @@ Hyperscape world integration service that enables agents to:
             ? disconnectData
             : undefined) || "Unknown reason";
       console.warn(`Hyperscape world disconnected: ${reason}`);
-      this.runtime.emitEvent(EventType.WORLD_LEFT, {
+      // Cast as any for cross-version ElizaOS compatibility
+      (this.runtime.emitEvent as any)(EventType.WORLD_LEFT, {
         runtime: this.runtime,
         eventName: "HYPERSCAPE_DISCONNECTED",
         data: { worldId: this._currentWorldId, reason },
@@ -903,8 +904,8 @@ Hyperscape world integration service that enables agents to:
       }
     }
 
-    // Emit event for content loaded
-    this.runtime.emitEvent(EventType.WORLD_JOINED, {
+    // Emit event for content loaded (cast as any for cross-version compatibility)
+    (this.runtime.emitEvent as any)(EventType.WORLD_JOINED, {
       runtime: this.runtime,
       eventName: "UGC_CONTENT_LOADED",
       data: {
@@ -978,8 +979,8 @@ Hyperscape world integration service that enables agents to:
 
     this.loadedContent.delete(contentId);
 
-    // Emit event for content unloaded
-    this.runtime.emitEvent(EventType.WORLD_LEFT, {
+    // Emit event for content unloaded (cast as any for cross-version compatibility)
+    (this.runtime.emitEvent as any)(EventType.WORLD_LEFT, {
       runtime: this.runtime,
       eventName: "UGC_CONTENT_UNLOADED",
       data: {

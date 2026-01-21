@@ -274,7 +274,17 @@ export class ItemSpawnerSystem extends SystemBase {
     // Spawn resources close to origin for easy visual verification
     // Y values will be grounded to terrain
     const resourceSpawns = [
-      // Logs near origin
+      // Tools for gathering skills (near anvil/furnace area at -12 to -15, 15)
+      { itemId: "bronze_hatchet", x: -10, y: 0, z: 15 },
+      { itemId: "bronze_pickaxe", x: -11, y: 0, z: 15 },
+
+      // Additional tools and items near anvil/furnace for bots to pick up
+      { itemId: "bronze_hatchet", x: -9, y: 0, z: 16 },
+      { itemId: "bronze_hatchet", x: -8, y: 0, z: 15 },
+      { itemId: "bronze_pickaxe", x: -12, y: 0, z: 16 },
+      { itemId: "bronze_pickaxe", x: -13, y: 0, z: 15 },
+
+      // Logs near origin (original spawns)
       { itemId: "logs", x: 2, y: 0, z: 2 },
       { itemId: "oak_logs", x: 3, y: 0, z: 2 },
       { itemId: "willow_logs", x: 4, y: 0, z: 2 },

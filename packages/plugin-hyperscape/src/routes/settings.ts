@@ -7,12 +7,18 @@ export const getSettingsRoute: Route = {
   public: true,
   handler: async (req, res, runtime) => {
     try {
-      const agentId = req.params.agentId;
+      const agentId = (req.params as { agentId?: string })?.agentId;
       const character = runtime.character;
 
-      // If the runtime character matches the requested agentId, return its config
-      // Note: In a multi-agent setup, we might need to lookup the specific agent
-      if (character.id === agentId || agentId === "current") {
+      // Check if this is the correct agent by comparing runtime.agentId
+      // agentId from dashboard is the ElizaOS runtime ID, not the character ID
+      const runtimeAgentId = runtime.agentId;
+
+      logger.info(
+        `[Settings] Request for agentId: ${agentId}, runtime.agentId: ${runtimeAgentId}`,
+      );
+
+      if (runtimeAgentId === agentId || agentId === "current") {
         const char = character as any;
         res.json({
           success: true,
@@ -28,6 +34,9 @@ export const getSettingsRoute: Route = {
           },
         });
       } else {
+        logger.warn(
+          `[Settings] Agent ID mismatch: requested=${agentId}, runtime=${runtimeAgentId}`,
+        );
         res.status(404).json({ success: false, error: "Agent not found" });
       }
     } catch (error) {

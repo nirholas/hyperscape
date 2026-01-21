@@ -31,7 +31,7 @@
     "assets:optimize:models": "node scripts/optimize-assets.mjs --models",
     "assets:atlas": "node scripts/atlas-materials.mjs",
     "assets:atlas:all": "node scripts/atlas-materials.mjs --dir assets --recursive",
-    "build": "bun run docs:generate",
+    "build": "bun run docs:generate && turbo run build --filter='!3d-asset-forge'",
     "build:shared": "cd packages/shared && bun run build",
     "build:client": "cd packages/client && bun run build",
     "build:server": "cd packages/server && bun run build",
@@ -78,7 +78,7 @@
     "@gltf-transform/functions": "^4.1.1",
     "@docusaurus/core": "^3.9.1",
     "@docusaurus/preset-classic": "^3.9.2",
-    "@elizaos/cli": "^1.6.4",
+    "@elizaos/cli": "^1.7.0",
     "@eslint/js": "^9.0.0",
     "@types/node": "^24.8.0",
     "@typescript-eslint/eslint-plugin": "^8.38.0",
@@ -111,7 +111,12 @@
     "three": "0.180.0",
     "@types/three": "0.180.0",
     "@pixiv/three-vrm": "3.4.3",
-    "jws": "^3.2.3"
+    "jws": "^3.2.3",
+    "@elizaos/core": "^1.7.0",
+    "@elizaos/plugin-sql": "^1.7.0",
+    "@elizaos/server": "^1.7.0",
+    "@elizaos/plugin-bootstrap": "^1.7.0",
+    "@elizaos/cli": "^1.7.0"
   },
   "packageManager": "bun@1.1.38",
   "lint-staged": {

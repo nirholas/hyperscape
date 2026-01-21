@@ -9,6 +9,7 @@
  * - Credentials are tied to specific characterId + userId pairs
  * - JWTs are server-signed and cryptographically secure
  * - Agents are clearly marked with isAgent flag
+ * - Global rate limiting (100 req/min) protects against abuse
  *
  * Note: Dashboard on port 3333 calls ElizaOS API (port 3000) directly.
  * No proxying is needed for localhost development.
@@ -17,6 +18,9 @@
 import type { FastifyInstance } from "fastify";
 import type { World } from "@hyperscape/shared";
 import { createJWT } from "../../shared/utils.js";
+
+// Command acknowledgment delay (ms) - allows plugin to process before response
+const COMMAND_ACK_DELAY_MS = 100;
 
 /**
  * Register agent credential routes
@@ -1013,13 +1017,16 @@ export function registerAgentRoutes(
       const goal = ServerNetwork.agentGoals.get(characterId);
       const availableGoals =
         ServerNetwork.agentAvailableGoals.get(characterId) || [];
+      const goalsPaused =
+        ServerNetwork.agentGoalsPaused.get(characterId) || false;
 
       if (!goal) {
         return reply.send({
           success: true,
           goal: null,
           availableGoals,
-          message: "No active goal",
+          goalsPaused,
+          message: goalsPaused ? "Goals paused by user" : "No active goal",
         });
       }
 
@@ -1044,6 +1051,7 @@ export function registerAgentRoutes(
           elapsedMs: goalData.startedAt ? Date.now() - goalData.startedAt : 0,
         },
         availableGoals,
+        goalsPaused,
       });
     } catch (error) {
       console.error("[AgentRoutes] ❌ Failed to fetch agent goal:", error);
@@ -1155,6 +1163,9 @@ export function registerAgentRoutes(
         source: "dashboard",
       });
 
+      // Clear the paused flag since user is manually setting a goal
+      ServerNetwork.agentGoalsPaused.set(characterId, false);
+
       console.log(
         `[AgentRoutes] 🎯 Sent goalOverride to ${characterId}: ${goalId}`,
       );
@@ -1261,6 +1272,619 @@ export function registerAgentRoutes(
       return reply.status(500).send({
         success: false,
         error: error instanceof Error ? error.message : "Failed to unlock goal",
+      });
+    }
+  });
+
+  /**
+   * POST /api/agents/:agentId/goal/stop
+   *
+   * Stop/clear the current goal, making the agent idle.
+   */
+  fastify.post("/api/agents/:agentId/goal/stop", async (request, reply) => {
+    try {
+      const params = request.params as { agentId: string };
+      const { agentId } = params;
+
+      if (!agentId) {
+        return reply.status(400).send({
+          success: false,
+          error: "Missing required parameter: agentId",
+        });
+      }
+
+      // Get database system to find character ID
+      const databaseSystem = world.getSystem("database") as
+        | {
+            db: {
+              select: (fields?: unknown) => {
+                from: (table: unknown) => {
+                  where: (condition: unknown) => Promise<unknown[]>;
+                };
+              };
+            };
+          }
+        | undefined;
+
+      if (!databaseSystem || !databaseSystem.db) {
+        return reply.status(500).send({
+          success: false,
+          error: "Database system not available",
+        });
+      }
+
+      const { agentMappings } = await import("../../database/schema.js");
+      const { eq } = await import("drizzle-orm");
+
+      const mappings = (await databaseSystem.db
+        .select()
+        .from(agentMappings)
+        .where(eq(agentMappings.agentId, agentId))) as Array<{
+        characterId: string;
+      }>;
+
+      if (mappings.length === 0) {
+        return reply.status(404).send({
+          success: false,
+          error: "Agent not registered in game",
+        });
+      }
+
+      const characterId = mappings[0].characterId;
+
+      // Get the socket for this character
+      const { ServerNetwork } = await import(
+        "../../systems/ServerNetwork/index.js"
+      );
+      const socket = ServerNetwork.characterSockets.get(characterId);
+
+      if (!socket) {
+        return reply.status(404).send({
+          success: false,
+          error: "Agent not connected (no active WebSocket)",
+        });
+      }
+
+      // Send goalOverride packet with "stop" command to clear the goal
+      socket.send("goalOverride", {
+        stop: true,
+        source: "dashboard",
+      });
+
+      // Mark goals as paused on the server side so UI can show correct state
+      ServerNetwork.agentGoalsPaused.set(characterId, true);
+
+      console.log(`[AgentRoutes] ⏹️ Sent goal stop to ${characterId}`);
+
+      // Brief delay to allow plugin to process the command before responding
+      await new Promise((resolve) => setTimeout(resolve, COMMAND_ACK_DELAY_MS));
+
+      return reply.send({
+        success: true,
+        message: "Goal stopped",
+        acknowledgedAt: Date.now(),
+      });
+    } catch (error) {
+      console.error("[AgentRoutes] ❌ Failed to stop agent goal:", error);
+
+      return reply.status(500).send({
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to stop goal",
+      });
+    }
+  });
+
+  /**
+   * POST /api/agents/:agentId/goal/resume
+   *
+   * Resume autonomous goal setting after being paused.
+   * Clears the paused flag and allows the agent to pick goals again.
+   */
+  fastify.post("/api/agents/:agentId/goal/resume", async (request, reply) => {
+    try {
+      const params = request.params as { agentId: string };
+      const { agentId } = params;
+
+      if (!agentId) {
+        return reply.status(400).send({
+          success: false,
+          error: "Missing required parameter: agentId",
+        });
+      }
+
+      // Get database system to find character ID
+      const databaseSystem = world.getSystem("database") as
+        | {
+            db: {
+              select: (fields?: unknown) => {
+                from: (table: unknown) => {
+                  where: (condition: unknown) => Promise<unknown[]>;
+                };
+              };
+            };
+          }
+        | undefined;
+
+      if (!databaseSystem || !databaseSystem.db) {
+        return reply.status(500).send({
+          success: false,
+          error: "Database system not available",
+        });
+      }
+
+      const { agentMappings } = await import("../../database/schema.js");
+      const { eq } = await import("drizzle-orm");
+
+      const mappings = (await databaseSystem.db
+        .select()
+        .from(agentMappings)
+        .where(eq(agentMappings.agentId, agentId))) as Array<{
+        characterId: string;
+      }>;
+
+      if (mappings.length === 0) {
+        return reply.status(404).send({
+          success: false,
+          error: "Agent not registered in game",
+        });
+      }
+
+      const characterId = mappings[0].characterId;
+
+      // Get the socket for this character
+      const { ServerNetwork } = await import(
+        "../../systems/ServerNetwork/index.js"
+      );
+      const socket = ServerNetwork.characterSockets.get(characterId);
+
+      if (!socket) {
+        return reply.status(404).send({
+          success: false,
+          error: "Agent not connected (no active WebSocket)",
+        });
+      }
+
+      // Send goalOverride packet with "resume" command
+      socket.send("goalOverride", {
+        resume: true,
+        source: "dashboard",
+      });
+
+      // Clear the paused flag on the server side
+      ServerNetwork.agentGoalsPaused.set(characterId, false);
+
+      console.log(`[AgentRoutes] ▶️ Sent goal resume to ${characterId}`);
+
+      // Brief delay to allow plugin to process the command before responding
+      await new Promise((resolve) => setTimeout(resolve, COMMAND_ACK_DELAY_MS));
+
+      return reply.send({
+        success: true,
+        message: "Goals resumed",
+        acknowledgedAt: Date.now(),
+      });
+    } catch (error) {
+      console.error("[AgentRoutes] ❌ Failed to resume agent goals:", error);
+
+      return reply.status(500).send({
+        success: false,
+        error:
+          error instanceof Error ? error.message : "Failed to resume goals",
+      });
+    }
+  });
+
+  /**
+   * GET /api/agents/:agentId/quick-actions
+   *
+   * Get quick action data for the dashboard menu.
+   * Returns nearby locations, available goals, quick commands, and inventory.
+   *
+   * Response:
+   * {
+   *   success: true,
+   *   nearbyLocations: [...],
+   *   availableGoals: [...],
+   *   quickCommands: [...],
+   *   inventory: [...],
+   *   playerPosition: [x, y, z]
+   * }
+   */
+  fastify.get("/api/agents/:agentId/quick-actions", async (request, reply) => {
+    try {
+      const params = request.params as { agentId: string };
+      const { agentId } = params;
+
+      if (!agentId) {
+        return reply.status(400).send({
+          success: false,
+          error: "Missing required parameter: agentId",
+        });
+      }
+
+      // Get database system
+      const databaseSystem = world.getSystem("database") as
+        | {
+            db: {
+              select: (fields?: unknown) => {
+                from: (table: unknown) => {
+                  where: (condition: unknown) => Promise<unknown[]>;
+                };
+              };
+            };
+          }
+        | undefined;
+
+      if (!databaseSystem || !databaseSystem.db) {
+        return reply.status(500).send({
+          success: false,
+          error: "Database system not available",
+        });
+      }
+
+      // Import schema and eq operator
+      const { agentMappings } = await import("../../database/schema.js");
+      const { eq } = await import("drizzle-orm");
+
+      // Get agent's character ID
+      const mappings = (await databaseSystem.db
+        .select()
+        .from(agentMappings)
+        .where(eq(agentMappings.agentId, agentId))) as Array<{
+        characterId: string;
+      }>;
+
+      if (mappings.length === 0) {
+        return reply.send({
+          success: true,
+          nearbyLocations: [],
+          availableGoals: [],
+          quickCommands: [],
+          inventory: [],
+          playerPosition: null,
+          message: "Agent not registered in game yet",
+        });
+      }
+
+      const characterId = mappings[0].characterId;
+
+      // Get player entity from world
+      const playersMap = (world.entities as { players?: Map<string, unknown> })
+        .players;
+      const playerEntity = playersMap?.get(characterId) as
+        | Record<string, unknown>
+        | undefined;
+
+      if (!playerEntity) {
+        return reply.send({
+          success: true,
+          nearbyLocations: [],
+          availableGoals: [],
+          quickCommands: [],
+          inventory: [],
+          playerPosition: null,
+          message: "Agent not connected to game",
+        });
+      }
+
+      // Get player position
+      const playerPos = playerEntity.position as
+        | [number, number, number]
+        | { x: number; y: number; z: number }
+        | undefined;
+
+      let playerPosition: [number, number, number] | null = null;
+      if (Array.isArray(playerPos)) {
+        playerPosition = playerPos;
+      } else if (playerPos && typeof playerPos === "object") {
+        playerPosition = [playerPos.x || 0, playerPos.y || 0, playerPos.z || 0];
+      }
+
+      // Helper to calculate distance
+      const calcDistance = (
+        pos1: [number, number, number],
+        pos2: [number, number, number],
+      ): number => {
+        const dx = pos2[0] - pos1[0];
+        const dy = pos2[1] - pos1[1];
+        const dz = pos2[2] - pos1[2];
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+      };
+
+      // Helper to get entity position
+      const getEntityPos = (
+        entity: Record<string, unknown>,
+      ): [number, number, number] | null => {
+        const pos = entity.position as
+          | [number, number, number]
+          | { x: number; y: number; z: number }
+          | undefined;
+        if (Array.isArray(pos)) return pos;
+        if (pos && typeof pos === "object") {
+          return [pos.x || 0, pos.y || 0, pos.z || 0];
+        }
+        return null;
+      };
+
+      // Categorize entity by name
+      const categorizeEntity = (
+        name: string,
+      ):
+        | "bank"
+        | "furnace"
+        | "tree"
+        | "fishing_spot"
+        | "anvil"
+        | "store"
+        | "mob"
+        | null => {
+        const lowerName = name.toLowerCase();
+        if (lowerName.includes("bank")) return "bank";
+        if (lowerName.includes("furnace") || lowerName.includes("smelter"))
+          return "furnace";
+        if (lowerName.includes("anvil")) return "anvil";
+        if (
+          lowerName.includes("store") ||
+          lowerName.includes("shop") ||
+          lowerName.includes("general")
+        )
+          return "store";
+        if (
+          lowerName.includes("tree") ||
+          lowerName.includes("oak") ||
+          lowerName.includes("willow")
+        )
+          return "tree";
+        if (
+          lowerName.includes("fish") ||
+          lowerName.includes("spot") ||
+          lowerName.includes("water")
+        )
+          return "fishing_spot";
+        if (lowerName.includes("goblin") || lowerName.includes("mob"))
+          return "mob";
+        return null;
+      };
+
+      // Collect nearby entities (within 100 units)
+      const nearbyLocations: Array<{
+        id: string;
+        name: string;
+        type: string;
+        distance: number;
+      }> = [];
+
+      let hasNearbyMobs = false;
+      let hasNearbyTrees = false;
+      let hasGroundItems = false;
+      let hasNearbyBank = false;
+      let hasNearbyFish = false;
+      let hasNearbyOre = false;
+
+      const entitiesMap =
+        (world.entities as { items?: Map<string, unknown> }).items || new Map();
+      for (const [id, entity] of entitiesMap.entries()) {
+        if (id === characterId) continue; // Skip self
+
+        const entityAny = entity as Record<string, unknown>;
+        const entityName = (entityAny.name || "") as string;
+        const entityPos = getEntityPos(entityAny);
+
+        if (!entityPos || !playerPosition) continue;
+
+        const distance = calcDistance(playerPosition, entityPos);
+        if (distance > 100) continue; // Only within 100 units
+
+        const type = categorizeEntity(entityName);
+        if (type) {
+          nearbyLocations.push({
+            id: id as string,
+            name: entityName,
+            type,
+            distance: Math.round(distance),
+          });
+
+          // Track what's available
+          if (type === "mob") hasNearbyMobs = true;
+          if (type === "tree") hasNearbyTrees = true;
+          if (type === "bank") hasNearbyBank = true;
+          if (type === "fishing_spot") hasNearbyFish = true;
+        }
+
+        // Check for ore deposits
+        const resourceType =
+          (entityAny.resourceType as string)?.toLowerCase() || "";
+        if (
+          resourceType === "ore" ||
+          entityName.toLowerCase().includes("ore") ||
+          entityName.toLowerCase().includes("rock")
+        ) {
+          hasNearbyOre = true;
+        }
+
+        // Check for fishing spots
+        if (
+          resourceType === "fish" ||
+          entityName.toLowerCase().includes("fishing")
+        ) {
+          hasNearbyFish = true;
+        }
+
+        // Check for ground items
+        if (
+          entityAny.itemType ||
+          entityAny.isItem ||
+          (entityAny.type as string)?.includes("item")
+        ) {
+          hasGroundItems = true;
+        }
+      }
+
+      // Sort by distance
+      nearbyLocations.sort((a, b) => a.distance - b.distance);
+
+      // Get available goals from ServerNetwork storage
+      const { ServerNetwork } = await import(
+        "../../systems/ServerNetwork/index.js"
+      );
+      const availableGoalsRaw = (ServerNetwork.agentAvailableGoals.get(
+        characterId,
+      ) || []) as Array<{
+        id: string;
+        type: string;
+        description: string;
+        priority: number;
+      }>;
+      const availableGoals = availableGoalsRaw.map((g) => ({
+        id: g.id,
+        type: g.type,
+        description: g.description,
+        priority: g.priority,
+      }));
+
+      // Build quick commands based on what's available
+      const quickCommands = [
+        {
+          id: "chop_tree",
+          label: "Woodcutting",
+          command: "chop nearest tree",
+          icon: "TreePine",
+          available: hasNearbyTrees,
+          reason: hasNearbyTrees ? undefined : "No trees nearby",
+        },
+        {
+          id: "mine_ore",
+          label: "Mining",
+          command: "mine nearest ore",
+          icon: "Pickaxe",
+          available: hasNearbyOre,
+          reason: hasNearbyOre ? undefined : "No ore nearby",
+        },
+        {
+          id: "catch_fish",
+          label: "Fishing",
+          command: "fish at nearest spot",
+          icon: "Fish",
+          available: hasNearbyFish,
+          reason: hasNearbyFish ? undefined : "No fishing spots",
+        },
+        {
+          id: "attack_nearest",
+          label: "Combat",
+          command: "attack nearest goblin",
+          icon: "Swords",
+          available: hasNearbyMobs,
+          reason: hasNearbyMobs ? undefined : "No enemies nearby",
+        },
+        {
+          id: "pickup_items",
+          label: "Pick Up",
+          command: "pick up nearby items",
+          icon: "Package",
+          available: hasGroundItems,
+          reason: hasGroundItems ? undefined : "No items nearby",
+        },
+        {
+          id: "go_to_bank",
+          label: "Bank",
+          command: "go to bank",
+          icon: "Building2",
+          available: hasNearbyBank,
+          reason: hasNearbyBank ? undefined : "Bank not nearby",
+        },
+        {
+          id: "stop",
+          label: "Stop",
+          command: "stop",
+          icon: "Square",
+          available: true,
+          reason: undefined,
+        },
+        {
+          id: "idle",
+          label: "Idle",
+          command: "idle",
+          icon: "Pause",
+          available: true,
+          reason: undefined,
+        },
+      ];
+
+      // Get player inventory from inventory system
+      const invSystem = world.getSystem("inventory") as
+        | {
+            getInventoryData?: (id: string) => {
+              items: Array<{
+                id?: string;
+                itemId?: string;
+                name?: string;
+                slot?: number;
+                quantity?: number;
+              }>;
+              coins: number;
+              maxSlots: number;
+            };
+          }
+        | undefined;
+
+      // Get data manager to look up item names
+      const dataManager = (
+        world as {
+          dataManager?: {
+            getItem?: (id: string) =>
+              | {
+                  name?: string;
+                  equippable?: boolean;
+                  consumable?: boolean;
+                  slot?: string;
+                }
+              | undefined;
+          };
+        }
+      ).dataManager;
+
+      const invData = invSystem?.getInventoryData?.(characterId);
+      const playerItems = invData?.items || [];
+
+      const inventory = playerItems.map((item, index) => {
+        // Look up item info from manifest
+        const itemInfo = dataManager?.getItem?.(item.itemId || "");
+        const name =
+          item.name || itemInfo?.name || item.itemId || "Unknown Item";
+        // Check if equippable based on slot type
+        const canEquip =
+          itemInfo?.equippable ??
+          (itemInfo?.slot != null && itemInfo.slot !== "none");
+        const canUse = itemInfo?.consumable ?? false;
+
+        return {
+          id: item.id || item.itemId || `item-${index}`,
+          name,
+          slot: item.slot ?? index,
+          quantity: item.quantity ?? 1,
+          canEquip,
+          canUse,
+          canDrop: true,
+        };
+      });
+
+      return reply.send({
+        success: true,
+        nearbyLocations: nearbyLocations.slice(0, 10), // Limit to 10
+        availableGoals,
+        quickCommands,
+        inventory: inventory.slice(0, 20), // Limit to 20
+        playerPosition,
+      });
+    } catch (error) {
+      console.error("[AgentRoutes] ❌ Failed to fetch quick actions:", error);
+
+      return reply.status(500).send({
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to fetch quick actions",
       });
     }
   });
@@ -1380,6 +2004,143 @@ export function registerAgentRoutes(
         success: false,
         error:
           error instanceof Error ? error.message : "Failed to fetch resources",
+      });
+    }
+  });
+
+  /**
+   * GET /api/agents/:agentId/activity
+   *
+   * Get recent activity and session stats for an agent.
+   * Returns significant events like kills, XP gains, item pickups, and goal changes.
+   *
+   * Response:
+   * {
+   *   success: true,
+   *   recentActions: [...],
+   *   sessionStats: { kills, deaths, totalXpGained, goldEarned, resourcesGathered }
+   * }
+   */
+  fastify.get("/api/agents/:agentId/activity", async (request, reply) => {
+    try {
+      const params = request.params as { agentId: string };
+      const { agentId } = params;
+
+      if (!agentId) {
+        return reply.status(400).send({
+          success: false,
+          error: "Missing required parameter: agentId",
+        });
+      }
+
+      // Get database system
+      const databaseSystem = world.getSystem("database") as
+        | {
+            db: {
+              select: (fields?: unknown) => {
+                from: (table: unknown) => {
+                  where: (condition: unknown) => Promise<unknown[]>;
+                };
+              };
+            };
+          }
+        | undefined;
+
+      if (!databaseSystem || !databaseSystem.db) {
+        return reply.status(500).send({
+          success: false,
+          error: "Database system not available",
+        });
+      }
+
+      // Import schema and eq operator
+      const { agentMappings } = await import("../../database/schema.js");
+      const { eq } = await import("drizzle-orm");
+
+      // Get agent's character ID
+      const mappings = (await databaseSystem.db
+        .select()
+        .from(agentMappings)
+        .where(eq(agentMappings.agentId, agentId))) as Array<{
+        characterId: string;
+      }>;
+
+      if (mappings.length === 0) {
+        return reply.send({
+          success: true,
+          recentActions: [],
+          sessionStats: {
+            kills: 0,
+            deaths: 0,
+            totalXpGained: 0,
+            goldEarned: 0,
+            resourcesGathered: {},
+          },
+          message: "Agent not registered in game yet",
+        });
+      }
+
+      const characterId = mappings[0].characterId;
+
+      // Get activity from ServerNetwork storage (if we add activity tracking there)
+      const { ServerNetwork } = await import(
+        "../../systems/ServerNetwork/index.js"
+      );
+
+      // Check if activity tracking exists
+      const activityData = (
+        ServerNetwork as {
+          agentActivity?: Map<
+            string,
+            {
+              recentActions: Array<{
+                type: string;
+                description: string;
+                xpGained?: number;
+                timestamp: number;
+              }>;
+              sessionStats: {
+                kills: number;
+                deaths: number;
+                totalXpGained: number;
+                goldEarned: number;
+                resourcesGathered: Record<string, number>;
+              };
+            }
+          >;
+        }
+      ).agentActivity?.get(characterId);
+
+      if (activityData) {
+        return reply.send({
+          success: true,
+          recentActions: activityData.recentActions.slice(0, 15),
+          sessionStats: activityData.sessionStats,
+        });
+      }
+
+      // Return empty activity if no tracking data yet
+      return reply.send({
+        success: true,
+        recentActions: [],
+        sessionStats: {
+          kills: 0,
+          deaths: 0,
+          totalXpGained: 0,
+          goldEarned: 0,
+          resourcesGathered: {},
+        },
+        message: "Activity tracking not yet available for this agent",
+      });
+    } catch (error) {
+      console.error("[AgentRoutes] ❌ Failed to fetch agent activity:", error);
+
+      return reply.status(500).send({
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to fetch agent activity",
       });
     }
   });

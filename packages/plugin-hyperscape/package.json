@@ -33,11 +33,12 @@
     "package.json"
   ],
   "dependencies": {
-    "@elizaos/core": "^1.2.9",
+    "@elizaos/core": "^1.7.0",
     "@elizaos/plugin-anthropic": "^1.5.12",
-    "@elizaos/plugin-openai": "1.5.16",
-    "@elizaos/plugin-openrouter": "^1.5.15",
-    "@elizaos/plugin-sql": "^1.6.4",
+    "@elizaos/plugin-ollama": "^1.2.4",
+    "@elizaos/plugin-openai": "^1.6.0",
+    "@elizaos/plugin-openrouter": "^1.5.17",
+    "@elizaos/plugin-sql": "^1.7.0",
     "@hyperscape/shared": "workspace:*",
     "clsx": "^2.1.1",
     "jsonwebtoken": "^9.0.2",
@@ -51,7 +52,7 @@
     "zod": "^3.25.67"
   },
   "devDependencies": {
-    "@elizaos/cli": "^1.6.4",
+    "@elizaos/cli": "^1.7.0",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.8.0",
     "@types/react": "^19.0.0",

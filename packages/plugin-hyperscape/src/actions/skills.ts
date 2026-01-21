@@ -264,7 +264,7 @@ export const chopTreeAction: Action = {
           return { success: false };
         }
 
-        // Get player position to calculate approach direction
+        // Get player position to find nearest cardinal adjacent tile
         let px = 0,
           pz = 0;
         if (Array.isArray(playerPos)) {
@@ -280,35 +280,44 @@ export const chopTreeAction: Action = {
           pz = pos.z;
         }
 
-        // Calculate direction from tree to player (to stop 2m BEFORE the tree)
-        const dx = px - treeX;
-        const dz = pz - treeZ;
-        const dist = Math.sqrt(dx * dx + dz * dz);
-        const STOP_DISTANCE = 2.5; // Stop 2.5m from tree center
+        // Server requires player to be on a CARDINAL adjacent tile (N/S/E/W, not diagonal)
+        // Calculate the 4 cardinal adjacent positions and pick the nearest one to player
+        const treeTileX = Math.floor(treeX);
+        const treeTileZ = Math.floor(treeZ);
+        const cardinalPositions = [
+          { x: treeTileX, z: treeTileZ - 1, dir: "South" }, // South (Z-)
+          { x: treeTileX, z: treeTileZ + 1, dir: "North" }, // North (Z+)
+          { x: treeTileX - 1, z: treeTileZ, dir: "West" }, // West (X-)
+          { x: treeTileX + 1, z: treeTileZ, dir: "East" }, // East (X+)
+        ];
 
-        // Target position is 2.5m from tree towards where player is coming from
-        let targetPos: [number, number, number];
-        if (dist > 0.1) {
-          // Normalize direction and offset from tree
-          const nx = dx / dist;
-          const nz = dz / dist;
-          targetPos = [
-            treeX + nx * STOP_DISTANCE,
-            treeY,
-            treeZ + nz * STOP_DISTANCE,
-          ];
-        } else {
-          // Player is very close to tree center, just offset in X
-          targetPos = [treeX + STOP_DISTANCE, treeY, treeZ];
+        // Find the cardinal position nearest to player
+        let nearestCardinal = cardinalPositions[0];
+        let minDist = Infinity;
+        for (const pos of cardinalPositions) {
+          const dist = Math.sqrt(
+            Math.pow(px - pos.x, 2) + Math.pow(pz - pos.z, 2),
+          );
+          if (dist < minDist) {
+            minDist = dist;
+            nearestCardinal = pos;
+          }
         }
+
+        // Target the center of the cardinal adjacent tile
+        const targetPos: [number, number, number] = [
+          nearestCardinal.x + 0.5,
+          treeY,
+          nearestCardinal.z + 0.5,
+        ];
 
         logger.info(
           `[CHOP_TREE] Handler: Walking to tree ${nearest.entity.name} - ` +
-            `stopping at ${JSON.stringify(targetPos.map((n) => Math.round(n)))} ` +
-            `(tree at [${Math.round(treeX)}, ${Math.round(treeZ)}], ${nearest.distance?.toFixed(1)}m away)`,
+            `stopping at cardinal tile [${nearestCardinal.x}, ${nearestCardinal.z}] (${nearestCardinal.dir}) ` +
+            `(tree at tile [${treeTileX}, ${treeTileZ}], ${nearest.distance?.toFixed(1)}m away)`,
         );
 
-        // Walk to position near the tree
+        // Walk to cardinal adjacent position
         await service.executeMove({ target: targetPos, runMode: false });
         await callback?.({
           text: `Walking to ${nearest.entity.name}...`,
@@ -329,11 +338,91 @@ export const chopTreeAction: Action = {
       const treeAny = tree as unknown as Record<string, unknown>;
       const treePos = treeAny.position;
       const treeDist = nearbyTrees[0]?.distance;
+
+      // Get tree position for cardinal check
+      let treeX = 0,
+        treeY = 0,
+        treeZ = 0;
+      if (Array.isArray(treePos)) {
+        [treeX, treeY, treeZ] = treePos as [number, number, number];
+      } else if (treePos && typeof treePos === "object" && "x" in treePos) {
+        const pos = treePos as { x: number; y: number; z: number };
+        treeX = pos.x;
+        treeY = pos.y;
+        treeZ = pos.z;
+      }
+
+      // Get player position
+      let px = 0,
+        pz = 0;
+      if (Array.isArray(playerPos)) {
+        px = playerPos[0];
+        pz = playerPos[2];
+      } else if (
+        playerPos &&
+        typeof playerPos === "object" &&
+        "x" in playerPos
+      ) {
+        const pos = playerPos as { x: number; z: number };
+        px = pos.x;
+        pz = pos.z;
+      }
+
+      // Check if player is on a cardinal adjacent tile
+      const treeTileX = Math.floor(treeX);
+      const treeTileZ = Math.floor(treeZ);
+      const playerTileX = Math.floor(px);
+      const playerTileZ = Math.floor(pz);
+
+      const isCardinalAdjacent =
+        (playerTileX === treeTileX &&
+          Math.abs(playerTileZ - treeTileZ) === 1) ||
+        (playerTileZ === treeTileZ && Math.abs(playerTileX - treeTileX) === 1);
+
       logger.info(
-        `[CHOP_TREE] Handler: Chopping tree ${tree.id} (${tree.name}) ` +
-          `at pos=${JSON.stringify(treePos)}, dist=${treeDist?.toFixed(1)}m, ` +
-          `playerPos=${JSON.stringify(playerPos)}`,
+        `[CHOP_TREE] Handler: Tree ${tree.id} (${tree.name}) ` +
+          `at tile [${treeTileX}, ${treeTileZ}], player at tile [${playerTileX}, ${playerTileZ}], ` +
+          `dist=${treeDist?.toFixed(1)}m, cardinalAdjacent=${isCardinalAdjacent}`,
       );
+
+      // If not on cardinal adjacent tile, walk to one
+      if (!isCardinalAdjacent) {
+        const cardinalPositions = [
+          { x: treeTileX, z: treeTileZ - 1, dir: "South" },
+          { x: treeTileX, z: treeTileZ + 1, dir: "North" },
+          { x: treeTileX - 1, z: treeTileZ, dir: "West" },
+          { x: treeTileX + 1, z: treeTileZ, dir: "East" },
+        ];
+
+        let nearestCardinal = cardinalPositions[0];
+        let minDist = Infinity;
+        for (const pos of cardinalPositions) {
+          const dist = Math.sqrt(
+            Math.pow(px - pos.x, 2) + Math.pow(pz - pos.z, 2),
+          );
+          if (dist < minDist) {
+            minDist = dist;
+            nearestCardinal = pos;
+          }
+        }
+
+        const targetPos: [number, number, number] = [
+          nearestCardinal.x + 0.5,
+          treeY,
+          nearestCardinal.z + 0.5,
+        ];
+
+        logger.info(
+          `[CHOP_TREE] Handler: Not on cardinal tile, moving to [${nearestCardinal.x}, ${nearestCardinal.z}] (${nearestCardinal.dir})`,
+        );
+
+        await service.executeMove({ target: targetPos, runMode: false });
+        await callback?.({
+          text: `Positioning to chop ${tree.name}...`,
+          action: "CHOP_TREE",
+        });
+        return { success: true, text: `Positioning to chop ${tree.name}` };
+      }
 
       const command: GatherResourceCommand = {
         resourceEntityId: tree.id,

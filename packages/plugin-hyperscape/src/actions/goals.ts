@@ -48,6 +48,12 @@ export const setGoalAction: Action = {
     const behaviorManager = service.getBehaviorManager();
     const currentGoal = behaviorManager?.getGoal();
 
+    // Don't set a goal if user has paused goals (clicked stop button)
+    if (behaviorManager?.isGoalsPaused?.()) {
+      logger.debug("[SET_GOAL] Validation failed: goals are paused by user");
+      return false;
+    }
+
     // Don't override locked goals (manually set from dashboard)
     if (currentGoal?.locked) {
       logger.debug(
@@ -364,13 +370,62 @@ export const navigateToAction: Action = {
         return { success: false, error: `Unknown location: ${destinationKey}` };
       }
 
-      // Move towards destination
+      // Get current player position
+      const player = service.getPlayerEntity();
+      const rawPos = player?.position as unknown;
+      let playerX: number, playerY: number, playerZ: number;
+
+      if (Array.isArray(rawPos) && rawPos.length >= 3) {
+        playerX = rawPos[0];
+        playerY = rawPos[1];
+        playerZ = rawPos[2];
+      } else if (rawPos && typeof rawPos === "object" && "x" in rawPos) {
+        const posObj = rawPos as { x: number; y: number; z: number };
+        playerX = posObj.x;
+        playerY = posObj.y || 0;
+        playerZ = posObj.z;
+      } else {
+        return { success: false, error: "Could not get player position" };
+      }
+
+      // Calculate distance to destination
+      const targetX = destination.position[0];
+      const targetY = destination.position[1];
+      const targetZ = destination.position[2];
+
+      const dx = targetX - playerX;
+      const dz = targetZ - playerZ;
+      const distance = Math.sqrt(dx * dx + dz * dz);
+
+      // Max move distance allowed by server (200 tiles, use 150 for safety margin)
+      const MAX_MOVE_DISTANCE = 150;
+
+      let moveTarget: [number, number, number];
+      let responseText: string;
+
+      if (distance > MAX_MOVE_DISTANCE) {
+        // Move in steps - calculate intermediate waypoint
+        const ratio = MAX_MOVE_DISTANCE / distance;
+        const stepX = playerX + dx * ratio;
+        const stepZ = playerZ + dz * ratio;
+
+        moveTarget = [stepX, targetY, stepZ];
+        responseText = `Moving towards ${destinationKey} (${Math.round(distance - MAX_MOVE_DISTANCE)} units remaining)`;
+
+        logger.info(
+          `[NAVIGATE_TO] Distance ${distance.toFixed(0)} exceeds max ${MAX_MOVE_DISTANCE}, moving to intermediate point`,
+        );
+      } else {
+        // Close enough to move directly
+        moveTarget = [targetX, targetY, targetZ];
+        responseText = `Navigating to ${destinationKey}`;
+      }
+
       await service.executeMove({
-        target: destination.position,
+        target: moveTarget,
         runMode: false,
       });
 
-      const responseText = `Navigating to ${destinationKey}`;
       await callback?.({ text: responseText, action: "NAVIGATE_TO" });
 
       logger.info(`[NAVIGATE_TO] ${responseText}`);

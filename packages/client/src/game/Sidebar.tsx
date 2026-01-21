@@ -7,6 +7,7 @@ import type {
   InventorySlotItem,
   InventoryItem,
 } from "../types";
+import { getEmbeddedConfig } from "../types/embeddedConfig";
 import { useChatContext } from "./chat/ChatContext";
 import { HintProvider } from "../components/Hint";
 import { Minimap } from "./hud/Minimap";
@@ -404,6 +405,11 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
         playerId: string;
         coins: number;
       };
+      console.log("[Sidebar] INVENTORY_UPDATED event received:", {
+        playerId: data.playerId,
+        itemCount: data.items?.length || 0,
+        localPlayerId: world.entities?.player?.id,
+      });
       setInventory(data.items);
       setCoins(data.coins);
     };
@@ -485,9 +491,26 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
     world.on(EventType.PLAYER_SET_DEAD, onPlayerDeath);
 
     const requestInitial = () => {
-      const lp = world.entities?.player?.id;
+      // For spectator/embedded mode, use characterId from config
+      let lp = world.entities?.player?.id;
+      if (!lp) {
+        const embeddedConfig = getEmbeddedConfig();
+        if (embeddedConfig?.characterId) {
+          lp = embeddedConfig.characterId;
+        }
+      }
+      console.log("[Sidebar] requestInitial called:", {
+        playerId: lp,
+        hasNetwork: !!world.network,
+        cacheKeys: Object.keys(world.network?.lastInventoryByPlayerId || {}),
+      });
       if (lp) {
         const cached = world.network?.lastInventoryByPlayerId?.[lp];
+        console.log("[Sidebar] Cache lookup:", {
+          playerId: lp,
+          hasCached: !!cached,
+          cachedItemCount: cached?.items?.length || 0,
+        });
         if (cached && Array.isArray(cached.items)) {
           setInventory(cached.items);
           setCoins(cached.coins);
@@ -532,8 +555,10 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
       return false;
     };
     let timeoutId: number | null = null;
-    if (!requestInitial())
+    if (!requestInitial()) {
+      console.log("[Sidebar] Player not ready, scheduling retry in 400ms");
       timeoutId = window.setTimeout(() => requestInitial(), 400);
+    }
     return () => {
       if (timeoutId !== null) window.clearTimeout(timeoutId);
       world.off(EventType.UI_OPEN_PANE, onOpenPane);

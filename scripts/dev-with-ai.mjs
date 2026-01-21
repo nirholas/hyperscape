@@ -8,10 +8,33 @@
  * Usage: bun run dev:ai
  */
 
-import { spawn, execSync } from 'child_process';
+import { spawn, execSync, spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs';
+
+// Helper to kill process tree (shell spawns create child processes that don't die with parent)
+function killProcessTree(proc) {
+  if (!proc || !proc.pid) return;
+  try {
+    // On macOS/Linux, kill the entire process group
+    process.kill(-proc.pid, 'SIGTERM');
+  } catch (e) {
+    // Fallback: try killing just the process
+    try {
+      proc.kill('SIGTERM');
+    } catch {}
+  }
+  // Force kill after a short delay if still running
+  setTimeout(() => {
+    try {
+      process.kill(-proc.pid, 'SIGKILL');
+    } catch {}
+    try {
+      proc.kill('SIGKILL');
+    } catch {}
+  }, 1000);
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.join(__dirname, '..');
@@ -57,15 +80,21 @@ if (!checkElizaOS() && process.env.START_ELIZAOS === 'true') {
     cwd: rootDir,
     stdio: 'inherit',
     shell: true,
+    detached: true,
   });
-  
+
   turbo.on('error', (err) => {
     console.error(`${colors.red}Failed to start Turbo:${colors.reset}`, err);
     process.exit(1);
   });
-  
+
   process.on('SIGINT', () => {
-    turbo.kill();
+    killProcessTree(turbo);
+    process.exit(0);
+  });
+
+  process.on('SIGHUP', () => {
+    killProcessTree(turbo);
     process.exit(0);
   });
   
@@ -75,15 +104,16 @@ if (!checkElizaOS() && process.env.START_ELIZAOS === 'true') {
   
 } else if (shouldStartElizaOS) {
   console.log(`${colors.green}✓ Starting all services...${colors.reset}\n`);
-  
+
   // Start Turbo (Hyperscape services)
   console.log(`${colors.blue}[Turbo]${colors.reset} Starting Hyperscape dev servers...`);
   const turbo = spawn('bun', ['x', 'turbo', 'run', 'dev', '--filter=!3d-asset-forge'], {
     cwd: rootDir,
     stdio: 'inherit',
     shell: true,
+    detached: true,
   });
-  
+
   // Start ElizaOS from plugin directory with default Hyperscape agent
   // The default agent acts as the bridge between ElizaOS and Hyperscape game
   const pluginDir = path.join(rootDir, 'packages', 'plugin-hyperscape');
@@ -97,31 +127,37 @@ if (!checkElizaOS() && process.env.START_ELIZAOS === 'true') {
     cwd: pluginDir,
     stdio: 'inherit',
     shell: true,
+    detached: true,
     env: {
       ...process.env,
       PORT: process.env.ELIZAOS_PORT || '4001',
     },
   });
-  
+
   // Handle errors
   turbo.on('error', (err) => {
     console.error(`${colors.red}[Turbo] Failed to start:${colors.reset}`, err);
   });
-  
+
   elizaos.on('error', (err) => {
     console.error(`${colors.red}[ElizaOS] Failed to start:${colors.reset}`, err);
   });
-  
-  // Handle exit
+
+  // Handle exit - kill entire process trees
   const cleanup = () => {
     console.log(`\n${colors.yellow}Shutting down all services...${colors.reset}`);
-    turbo.kill();
-    elizaos.kill();
-    process.exit(0);
+    killProcessTree(turbo);
+    killProcessTree(elizaos);
+    // Also kill any processes on common ports as fallback
+    try { execSync('lsof -ti:3333 | xargs kill -9 2>/dev/null', { stdio: 'ignore' }); } catch {}
+    try { execSync('lsof -ti:5555 | xargs kill -9 2>/dev/null', { stdio: 'ignore' }); } catch {}
+    try { execSync('lsof -ti:4001 | xargs kill -9 2>/dev/null', { stdio: 'ignore' }); } catch {}
+    setTimeout(() => process.exit(0), 1500);
   };
-  
+
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
+  process.on('SIGHUP', cleanup);
   
   // Exit if any process exits unexpectedly
   turbo.on('exit', (code) => {
@@ -142,31 +178,34 @@ if (!checkElizaOS() && process.env.START_ELIZAOS === 'true') {
   console.log(`${colors.cyan}  - Hyperscape Server: http://localhost:5555${colors.reset}`);
   console.log(`${colors.cyan}  - Hyperscape Client: http://localhost:3333${colors.reset}`);
   console.log(`${colors.cyan}  - ElizaOS Server: http://localhost:${process.env.ELIZAOS_PORT || '4001'}${colors.reset}`);
-  console.log(`${colors.cyan}  - ElizaOS UI: http://localhost:4000 (with Hyperscape plugin components)${colors.reset}`);
   console.log(`\n${colors.dim}Press Ctrl+C to stop all services${colors.reset}\n`);
 } else {
   // ElizaOS not configured or not requested - run Turbo + Plugin Frontend
   console.log(`${colors.blue}[Turbo]${colors.reset} Starting Hyperscape dev servers...\n`);
-  
+
   const turbo = spawn('bun', ['x', 'turbo', 'run', 'dev', '--filter=!3d-asset-forge'], {
     cwd: rootDir,
     stdio: 'inherit',
     shell: true,
+    detached: true,
   });
-  
+
   const cleanup = () => {
     console.log(`\n${colors.yellow}Shutting down all services...${colors.reset}`);
-    turbo.kill();
-    process.exit(0);
+    killProcessTree(turbo);
+    try { execSync('lsof -ti:3333 | xargs kill -9 2>/dev/null', { stdio: 'ignore' }); } catch {}
+    try { execSync('lsof -ti:5555 | xargs kill -9 2>/dev/null', { stdio: 'ignore' }); } catch {}
+    setTimeout(() => process.exit(0), 1500);
   };
-  
+
   turbo.on('error', (err) => {
     console.error(`${colors.red}Failed to start Turbo:${colors.reset}`, err);
     process.exit(1);
   });
-  
+
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
+  process.on('SIGHUP', cleanup);
   
   turbo.on('exit', (code) => {
     if (code !== 0 && code !== null) {

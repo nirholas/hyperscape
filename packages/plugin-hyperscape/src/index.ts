@@ -47,6 +47,7 @@ import {
   equipItemAction,
   useItemAction,
   dropItemAction,
+  pickupItemAction,
 } from "./actions/inventory.js";
 import { chatMessageAction } from "./actions/social.js";
 import { bankDepositAction, bankWithdrawAction } from "./actions/banking.js";
@@ -226,6 +227,7 @@ export const hyperscapePlugin: Plugin = {
     equipItemAction,
     useItemAction,
     dropItemAction,
+    pickupItemAction,
 
     // Social
     chatMessageAction,

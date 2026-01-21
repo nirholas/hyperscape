@@ -168,6 +168,7 @@ export interface ConnectionState {
 export interface MoveToCommand {
   target: [number, number, number]; // [x, y, z]
   runMode?: boolean;
+  cancel?: boolean; // If true, cancels current movement path
 }
 
 export interface AttackEntityCommand {

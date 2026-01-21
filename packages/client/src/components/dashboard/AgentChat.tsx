@@ -1,7 +1,8 @@
 import { GAME_API_URL } from "@/lib/api-config";
 import React, { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, MoreVertical, Paperclip, Mic } from "lucide-react";
+import { Send, Bot, User, MoreVertical, Mic } from "lucide-react";
 import { Agent } from "../../screens/DashboardScreen";
+import { QuickActionMenu } from "./QuickActionMenu";
 
 interface Message {
   id: string;
@@ -199,9 +200,57 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agent }) => {
       {/* Input Area */}
       <div className="p-4 bg-[#0b0a15]/80 border-t border-[#8b4513]/30">
         <div className="relative flex items-end gap-2 bg-[#1a1005] border border-[#8b4513]/50 rounded-xl p-2 focus-within:border-[#f2d08a]/50 transition-colors">
-          <button className="p-2 text-[#f2d08a]/40 hover:text-[#f2d08a] transition-colors rounded-lg hover:bg-[#f2d08a]/5">
-            <Paperclip size={20} />
-          </button>
+          <QuickActionMenu
+            agentId={agent.id}
+            onCommandSend={(command) => {
+              setInputValue(command);
+              // Auto-send the command
+              setTimeout(() => {
+                const userMessage: Message = {
+                  id: Date.now().toString(),
+                  sender: "user",
+                  text: command,
+                  timestamp: new Date(),
+                };
+                setMessages((prev) => [...prev, userMessage]);
+                setIsTyping(true);
+                fetch(`${GAME_API_URL}/api/agents/${agent.id}/message`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    content: command,
+                    userId:
+                      localStorage.getItem("privy_user_id") || "anonymous-user",
+                  }),
+                })
+                  .then((res) => res.json())
+                  .then((data) => {
+                    const responses = Array.isArray(data) ? data : [data];
+                    responses.forEach(
+                      (
+                        resp: { text?: string; content?: string },
+                        index: number,
+                      ) => {
+                        const agentMessage: Message = {
+                          id: (Date.now() + index).toString(),
+                          sender: "agent",
+                          text: resp.text || resp.content || "Command sent",
+                          timestamp: new Date(),
+                        };
+                        setMessages((prev) => [...prev, agentMessage]);
+                      },
+                    );
+                  })
+                  .catch((err) => {
+                    console.error("Failed to send command:", err);
+                  })
+                  .finally(() => {
+                    setIsTyping(false);
+                    setInputValue("");
+                  });
+              }, 0);
+            }}
+          />
 
           <textarea
             value={inputValue}

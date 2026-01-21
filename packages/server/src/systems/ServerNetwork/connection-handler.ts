@@ -627,9 +627,67 @@ export class ConnectionHandler {
 
       // Register spectator socket
       this.sockets.set(socket.id, socket);
+
+      // Send inventory of spectated character to spectator
+      await this.sendSpectatorInventory(socket, characterId);
     } catch (err) {
       console.error(
         "[ConnectionHandler] Error in handleSpectatorConnection:",
+        err,
+      );
+    }
+  }
+
+  /**
+   * Send inventory data of spectated character to spectator socket
+   */
+  private async sendSpectatorInventory(
+    socket: ServerSocket,
+    characterId: string,
+  ): Promise<void> {
+    try {
+      const invSystem = this.world.getSystem?.("inventory") as
+        | {
+            getInventoryData?: (id: string) => {
+              items: unknown[];
+              coins: number;
+              maxSlots: number;
+            };
+            isInventoryReady?: (id: string) => boolean;
+          }
+        | undefined;
+
+      // Wait a bit for inventory to be ready if loading
+      if (
+        invSystem?.isInventoryReady &&
+        !invSystem.isInventoryReady(characterId)
+      ) {
+        // Wait up to 2 seconds for inventory to be ready
+        for (let i = 0; i < 20; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          if (invSystem.isInventoryReady(characterId)) break;
+        }
+      }
+
+      const inv = invSystem?.getInventoryData
+        ? invSystem.getInventoryData(characterId)
+        : { items: [], coins: 0, maxSlots: 28 };
+
+      const packet = {
+        playerId: characterId,
+        items: inv.items,
+        coins: inv.coins,
+        maxSlots: inv.maxSlots,
+      };
+
+      console.log(
+        `[ConnectionHandler] Sending inventory to spectator ${socket.id} for character ${characterId}: ${inv.items.length} items`,
+      );
+
+      socket.send("inventoryUpdated", packet);
+    } catch (err) {
+      console.error(
+        "[ConnectionHandler] Error sending spectator inventory:",
         err,
       );
     }

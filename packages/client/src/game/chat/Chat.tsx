@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { ControlPriorities, EventType, isTouch } from "@hyperscape/shared";
 import type { ClientWorld, InventorySlotItem } from "../../types";
+import { getEmbeddedConfig } from "../../types/embeddedConfig";
 import { ActionPanel } from "../panels/ActionPanel";
 import { cls } from "../../utils/classnames";
 import { useChatContext } from "./ChatContext";
@@ -106,16 +107,38 @@ export function Chat({ world }: { world: ChatWorld }) {
         playerId: string;
         coins: number;
       };
+      console.log("[Chat] INVENTORY_UPDATED event received:", {
+        playerId: data.playerId,
+        itemCount: data.items?.length || 0,
+        localPlayerId: world.entities?.player?.id,
+      });
       setInventory(data.items);
     };
     world.on(EventType.INVENTORY_UPDATED, onInventory);
 
     // Request initial inventory data (same pattern as Sidebar.tsx)
     const requestInitial = () => {
-      const playerId = world.entities?.player?.id;
+      // For spectator/embedded mode, use characterId from config
+      let playerId = world.entities?.player?.id;
+      if (!playerId) {
+        const embeddedConfig = getEmbeddedConfig();
+        if (embeddedConfig?.characterId) {
+          playerId = embeddedConfig.characterId;
+        }
+      }
+      console.log("[Chat] requestInitial called:", {
+        playerId,
+        hasNetwork: !!world.network,
+        cacheKeys: Object.keys(world.network?.lastInventoryByPlayerId || {}),
+      });
       if (playerId) {
         // Check cached inventory first for instant load
         const cached = world.network?.lastInventoryByPlayerId?.[playerId];
+        console.log("[Chat] Cache lookup:", {
+          playerId,
+          hasCached: !!cached,
+          cachedItemCount: cached?.items?.length || 0,
+        });
         if (cached && Array.isArray(cached.items)) {
           setInventory(cached.items);
         }
@@ -129,6 +152,7 @@ export function Chat({ world }: { world: ChatWorld }) {
     // Try immediately, retry after delay if player not ready
     let timeoutId: number | null = null;
     if (!requestInitial()) {
+      console.log("[Chat] Player not ready, scheduling retry in 400ms");
       timeoutId = window.setTimeout(() => requestInitial(), 400);
     }
 

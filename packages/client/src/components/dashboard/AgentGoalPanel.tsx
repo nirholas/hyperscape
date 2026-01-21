@@ -12,7 +12,60 @@ import {
   Lock,
   Unlock,
   RefreshCw,
+  Timer,
+  CheckCircle,
+  Fish,
+  Flame,
+  Pickaxe,
+  Square,
+  Play,
+  Pause,
 } from "lucide-react";
+
+// Configuration constants
+const GOAL_POLL_INTERVAL_MS = 10000; // Poll every 10 seconds to avoid rate limiting
+const MAX_RECENT_GOALS = 5; // Maximum number of recent goals to track
+const MIN_ELAPSED_MS_FOR_ESTIMATE = 5000; // Minimum elapsed time before showing time estimate
+const MIN_PROGRESS_FOR_ESTIMATE = 1; // Minimum progress percentage for time estimate
+const MAX_RETRY_ATTEMPTS = 3; // Maximum retry attempts for failed requests
+const RETRY_DELAY_MS = 1000; // Base delay between retries (exponential backoff)
+
+/**
+ * Fetch with retry logic and exponential backoff
+ */
+async function fetchWithRetry(
+  url: string,
+  options?: RequestInit,
+  maxRetries = MAX_RETRY_ATTEMPTS,
+): Promise<Response> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      if (response.ok || response.status === 503) {
+        // Return on success or service unavailable (handled by caller)
+        return response;
+      }
+      // Don't retry on client errors (4xx)
+      if (response.status >= 400 && response.status < 500) {
+        return response;
+      }
+      lastError = new Error(`HTTP ${response.status}`);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+    }
+
+    // Exponential backoff before retry
+    if (attempt < maxRetries - 1) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, RETRY_DELAY_MS * Math.pow(2, attempt)),
+      );
+    }
+  }
+
+  throw lastError || new Error("Request failed after retries");
+}
 
 interface Goal {
   type: string;
@@ -41,6 +94,13 @@ interface AvailableGoal {
   location?: string;
 }
 
+interface RecentGoal {
+  type: string;
+  description: string;
+  completedAt: number;
+  success: boolean;
+}
+
 interface AgentGoalPanelProps {
   agent: Agent;
   isViewportActive: boolean;
@@ -58,6 +118,9 @@ export const AgentGoalPanel: React.FC<AgentGoalPanelProps> = ({
   const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
   const [settingGoal, setSettingGoal] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [recentGoals, setRecentGoals] = useState<RecentGoal[]>([]);
+  const [lastGoalType, setLastGoalType] = useState<string | null>(null);
+  const [goalsPaused, setGoalsPaused] = useState(false);
 
   // Poll for goal updates when viewport is active
   useEffect(() => {
@@ -70,15 +133,15 @@ export const AgentGoalPanel: React.FC<AgentGoalPanelProps> = ({
     // Fetch immediately
     fetchGoal();
 
-    // Poll every 2 seconds for goal updates
-    const interval = setInterval(fetchGoal, 2000);
+    // Poll at configured interval to avoid rate limiting
+    const interval = setInterval(fetchGoal, GOAL_POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [agent.id, agent.status]);
 
   const fetchGoal = async () => {
     try {
-      // Call Hyperscape server API on port 5555
-      const response = await fetch(
+      // Call Hyperscape server API with retry logic
+      const response = await fetchWithRetry(
         `${GAME_API_URL}/api/agents/${agent.id}/goal`,
       );
 
@@ -91,8 +154,28 @@ export const AgentGoalPanel: React.FC<AgentGoalPanelProps> = ({
       }
 
       const data = await response.json();
+
+      // Track goal changes for history
+      if (data.goal && lastGoalType && lastGoalType !== data.goal.type) {
+        // Previous goal completed or changed
+        setRecentGoals((prev) => {
+          const newGoal: RecentGoal = {
+            type: lastGoalType,
+            description: goal?.description || lastGoalType.replace(/_/g, " "),
+            completedAt: Date.now(),
+            success: (goal?.progressPercent || 0) >= 100,
+          };
+          return [newGoal, ...prev].slice(0, MAX_RECENT_GOALS);
+        });
+      }
+
+      if (data.goal) {
+        setLastGoalType(data.goal.type);
+      }
+
       setGoal(data.goal);
       setAvailableGoals(data.availableGoals || []);
+      setGoalsPaused(data.goalsPaused || false);
       setError(null);
     } catch (err) {
       console.error("[AgentGoalPanel] Error fetching goal:", err);
@@ -152,23 +235,120 @@ export const AgentGoalPanel: React.FC<AgentGoalPanelProps> = ({
     }
   };
 
+  const handleStopGoal = async () => {
+    try {
+      const response = await fetch(
+        `${GAME_API_URL}/api/agents/${agent.id}/goal/stop`,
+        { method: "POST" },
+      );
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to stop goal");
+      }
+
+      await fetchGoal();
+    } catch (err) {
+      console.error("[AgentGoalPanel] Error stopping goal:", err);
+      setError(err instanceof Error ? err.message : "Failed to stop goal");
+    }
+  };
+
+  const handleResumeGoal = async () => {
+    try {
+      const response = await fetch(
+        `${GAME_API_URL}/api/agents/${agent.id}/goal/resume`,
+        { method: "POST" },
+      );
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to resume goals");
+      }
+
+      await fetchGoal();
+    } catch (err) {
+      console.error("[AgentGoalPanel] Error resuming goals:", err);
+      setError(err instanceof Error ? err.message : "Failed to resume goals");
+    }
+  };
+
   // Don't show if agent is inactive
   if (agent.status !== "active") {
     return null;
   }
 
   // Get icon based on goal type
-  const getGoalIcon = (type: string) => {
+  const getGoalIcon = (type: string, size = 14) => {
     switch (type) {
       case "combat_training":
-        return <Swords size={14} className="text-red-400" />;
+      case "combat":
+        return <Swords size={size} className="text-red-400" />;
       case "woodcutting":
-        return <TreePine size={14} className="text-green-400" />;
+      case "train_woodcutting":
+        return <TreePine size={size} className="text-green-400" />;
+      case "fishing":
+      case "train_fishing":
+        return <Fish size={size} className="text-blue-400" />;
+      case "firemaking":
+      case "train_firemaking":
+        return <Flame size={size} className="text-orange-400" />;
+      case "mining":
+      case "train_mining":
+        return <Pickaxe size={size} className="text-gray-400" />;
       case "exploration":
-        return <Compass size={14} className="text-blue-400" />;
+      case "explore":
+        return <Compass size={size} className="text-blue-400" />;
       default:
-        return <Target size={14} className="text-[#f2d08a]" />;
+        return <Target size={size} className="text-[#f2d08a]" />;
     }
+  };
+
+  // Estimate time to completion based on progress rate
+  const getEstimatedTimeRemaining = (g: Goal): string | null => {
+    if (g.progressPercent >= 100) return null;
+    // Need some progress and elapsed time to estimate
+    if (
+      g.elapsedMs < MIN_ELAPSED_MS_FOR_ESTIMATE ||
+      g.progressPercent < MIN_PROGRESS_FOR_ESTIMATE
+    ) {
+      return null;
+    }
+
+    const msPerPercent = g.elapsedMs / g.progressPercent;
+    const remainingPercent = 100 - g.progressPercent;
+    const estimatedMs = msPerPercent * remainingPercent;
+
+    // Format as human readable
+    const minutes = Math.floor(estimatedMs / 60000);
+    const hours = Math.floor(minutes / 60);
+
+    if (hours > 0) {
+      return `~${hours}h ${minutes % 60}m remaining`;
+    } else if (minutes > 0) {
+      return `~${minutes}m remaining`;
+    } else {
+      return "< 1m remaining";
+    }
+  };
+
+  // Get XP rate if applicable
+  const getXpRate = (g: Goal): string | null => {
+    if (!g.targetSkill || g.elapsedMs < 10000) return null;
+
+    // Estimate XP based on progress and typical XP curves
+    // This is an approximation - server should provide actual XP
+    const hoursElapsed = g.elapsedMs / 3600000;
+    if (hoursElapsed < 0.01) return null;
+
+    // Rough XP estimate based on progress (varies by skill)
+    const xpGained = g.progress * 25; // ~25 XP per unit of progress (avg)
+    const xpPerHour = Math.round(xpGained / hoursElapsed);
+
+    if (xpPerHour > 0) {
+      return `${xpPerHour.toLocaleString()} XP/hr`;
+    }
+    return null;
   };
 
   // Format elapsed time
@@ -227,17 +407,48 @@ export const AgentGoalPanel: React.FC<AgentGoalPanelProps> = ({
             </div>
           ) : !goal ? (
             <div className="text-center py-3 text-[10px] text-[#f2d08a]/50">
-              No active goal
-              <div className="text-[9px] opacity-60 mt-1">
-                Agent will set a goal automatically
-              </div>
-              {availableGoals.length > 0 && (
-                <button
-                  onClick={() => setShowSelector(true)}
-                  className="mt-2 px-3 py-1 text-[9px] bg-[#f2d08a]/20 hover:bg-[#f2d08a]/30 text-[#f2d08a] rounded border border-[#f2d08a]/30 transition-colors"
-                >
-                  Set Goal Manually
-                </button>
+              {goalsPaused ? (
+                <>
+                  <div className="flex items-center justify-center gap-1.5 text-yellow-500/80">
+                    <Pause size={12} />
+                    <span className="font-medium">Goals Paused</span>
+                  </div>
+                  <div className="text-[9px] opacity-60 mt-1">
+                    Agent is idle and waiting for instructions
+                  </div>
+                  <div className="flex gap-2 mt-2 justify-center">
+                    <button
+                      onClick={handleResumeGoal}
+                      className="px-3 py-1 text-[9px] bg-green-500/20 hover:bg-green-500/30 text-green-400 rounded border border-green-500/30 transition-colors flex items-center gap-1"
+                    >
+                      <Play size={10} />
+                      Resume Auto
+                    </button>
+                    {availableGoals.length > 0 && (
+                      <button
+                        onClick={() => setShowSelector(true)}
+                        className="px-3 py-1 text-[9px] bg-[#f2d08a]/20 hover:bg-[#f2d08a]/30 text-[#f2d08a] rounded border border-[#f2d08a]/30 transition-colors"
+                      >
+                        Set Goal
+                      </button>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  No active goal
+                  <div className="text-[9px] opacity-60 mt-1">
+                    Agent will set a goal automatically
+                  </div>
+                  {availableGoals.length > 0 && (
+                    <button
+                      onClick={() => setShowSelector(true)}
+                      className="mt-2 px-3 py-1 text-[9px] bg-[#f2d08a]/20 hover:bg-[#f2d08a]/30 text-[#f2d08a] rounded border border-[#f2d08a]/30 transition-colors"
+                    >
+                      Set Goal Manually
+                    </button>
+                  )}
+                </>
               )}
             </div>
           ) : (
@@ -280,6 +491,25 @@ export const AgentGoalPanel: React.FC<AgentGoalPanelProps> = ({
                   <span className="text-[10px] font-bold text-blue-300">
                     Level {goal.targetSkillLevel}
                   </span>
+                </div>
+              )}
+
+              {/* Estimated Time & XP Rate */}
+              {(getEstimatedTimeRemaining(goal) || getXpRate(goal)) && (
+                <div className="flex items-center justify-between p-1.5 rounded bg-[#f2d08a]/5 border border-[#f2d08a]/10">
+                  {getEstimatedTimeRemaining(goal) && (
+                    <div className="flex items-center gap-1">
+                      <Timer size={10} className="text-[#f2d08a]/60" />
+                      <span className="text-[9px] text-[#f2d08a]/80">
+                        {getEstimatedTimeRemaining(goal)}
+                      </span>
+                    </div>
+                  )}
+                  {getXpRate(goal) && (
+                    <span className="text-[9px] text-green-400/80 font-medium">
+                      {getXpRate(goal)}
+                    </span>
+                  )}
                 </div>
               )}
 
@@ -329,6 +559,17 @@ export const AgentGoalPanel: React.FC<AgentGoalPanelProps> = ({
                       className="text-[#f2d08a]/40 group-hover:text-[#f2d08a]/80"
                     />
                   </button>
+                  <button
+                    onClick={handleStopGoal}
+                    className="p-1 rounded hover:bg-red-500/20 transition-colors group"
+                    title="Stop current goal"
+                  >
+                    <Square
+                      size={12}
+                      fill="currentColor"
+                      className="text-red-400/40 group-hover:text-red-400/80"
+                    />
+                  </button>
                 </div>
               </div>
 
@@ -339,6 +580,38 @@ export const AgentGoalPanel: React.FC<AgentGoalPanelProps> = ({
                   <span className="text-[9px] text-green-500/80">
                     Live Tracking
                   </span>
+                </div>
+              )}
+
+              {/* Recent Goals History */}
+              {recentGoals.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-[#8b4513]/20">
+                  <div className="text-[9px] font-bold text-[#f2d08a]/60 uppercase tracking-wider mb-1.5">
+                    Recent Goals
+                  </div>
+                  <div className="space-y-1">
+                    {recentGoals.slice(0, 3).map((rg, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center gap-2 text-[9px] text-[#e8ebf4]/60"
+                      >
+                        {rg.success ? (
+                          <CheckCircle
+                            size={10}
+                            className="text-green-400/70"
+                          />
+                        ) : (
+                          getGoalIcon(rg.type, 10)
+                        )}
+                        <span className="flex-1 truncate">
+                          {rg.description}
+                        </span>
+                        <span className="text-[8px] text-[#f2d08a]/40">
+                          {formatElapsed(Date.now() - rg.completedAt)} ago
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

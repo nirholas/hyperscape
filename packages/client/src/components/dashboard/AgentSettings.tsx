@@ -1,7 +1,7 @@
 import React from "react";
-import { Save, RefreshCw, Trash2 } from "lucide-react";
+import { Save, RefreshCw, Trash2, Key, Eye, EyeOff } from "lucide-react";
 import { Agent } from "../../screens/DashboardScreen";
-import { ELIZAOS_URL, ELIZAOS_API } from "@/lib/api-config";
+import { ELIZAOS_API } from "@/lib/api-config";
 
 interface AgentSettingsProps {
   agent: Agent;
@@ -15,6 +15,13 @@ interface AgentSettingsData {
   [key: string]: unknown;
 }
 
+interface SecretsData {
+  OPENROUTER_API_KEY?: string;
+  OPENAI_API_KEY?: string;
+  ANTHROPIC_API_KEY?: string;
+  [key: string]: string | undefined;
+}
+
 export const AgentSettings: React.FC<AgentSettingsProps> = ({
   agent,
   onDelete,
@@ -22,21 +29,72 @@ export const AgentSettings: React.FC<AgentSettingsProps> = ({
   const [settings, setSettings] = React.useState<AgentSettingsData | null>(
     null,
   );
+  const [secrets, setSecrets] = React.useState<SecretsData>({});
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
+  const [savingSecrets, setSavingSecrets] = React.useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
+  const [activeTab, setActiveTab] = React.useState("Basic");
+  const [showSecrets, setShowSecrets] = React.useState<Record<string, boolean>>(
+    {},
+  );
+
+  const tabs = ["Basic", "Content", "Style", "API Keys"] as const;
+
+  // Common API key configurations
+  const apiKeyConfigs = [
+    {
+      key: "OPENROUTER_API_KEY",
+      label: "OpenRouter API Key",
+      placeholder: "sk-or-v1-...",
+      description: "Required for LLM access via OpenRouter",
+    },
+    {
+      key: "OPENAI_API_KEY",
+      label: "OpenAI API Key",
+      placeholder: "sk-...",
+      description: "Optional: Direct OpenAI API access",
+    },
+    {
+      key: "ANTHROPIC_API_KEY",
+      label: "Anthropic API Key",
+      placeholder: "sk-ant-...",
+      description: "Optional: Direct Anthropic API access",
+    },
+  ];
 
   React.useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const response = await fetch(
-          `${ELIZAOS_URL}/hyperscape/settings/${agent.id}`,
-        );
+        // Use ElizaOS native agent API endpoint
+        const response = await fetch(`${ELIZAOS_API}/agents/${agent.id}`);
         if (response.ok) {
           const data = await response.json();
-          if (data.success) {
-            setSettings(data.settings);
+          if (data.success && data.data) {
+            // Map ElizaOS agent data to settings format
+            const agentData = data.data;
+            setSettings({
+              name: agentData.name,
+              username: agentData.username,
+              bio: Array.isArray(agentData.bio)
+                ? agentData.bio.join("\n")
+                : agentData.bio || agentData.system,
+              lore: agentData.lore,
+              topics: agentData.topics,
+              style: agentData.style,
+              adjectives: agentData.adjectives,
+              modelProvider: agentData.settings?.model,
+            });
+            // Extract secrets (they come masked from the API)
+            if (agentData.settings?.secrets) {
+              const existingSecrets: SecretsData = {};
+              for (const key of Object.keys(agentData.settings.secrets)) {
+                // Show placeholder if secret exists but is masked
+                existingSecrets[key] = agentData.settings.secrets[key] || "";
+              }
+              setSecrets(existingSecrets);
+            }
           }
         }
       } catch (error) {
@@ -87,6 +145,54 @@ export const AgentSettings: React.FC<AgentSettingsProps> = ({
     }
   };
 
+  const handleSaveSecrets = async () => {
+    setSavingSecrets(true);
+    try {
+      // Filter out empty secrets and only send non-empty values
+      const secretsToSave: Record<string, string> = {};
+      for (const [key, value] of Object.entries(secrets)) {
+        if (value && value.trim() && !value.startsWith("***")) {
+          secretsToSave[key] = value.trim();
+        }
+      }
+
+      if (Object.keys(secretsToSave).length === 0) {
+        alert("No API keys to save. Please enter at least one API key.");
+        setSavingSecrets(false);
+        return;
+      }
+
+      // Use ElizaOS API to update agent secrets
+      const response = await fetch(`${ELIZAOS_API}/agents/${agent.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          settings: {
+            secrets: secretsToSave,
+          },
+        }),
+      });
+
+      if (response.ok) {
+        console.log("[AgentSettings] ✅ API keys saved successfully");
+        alert(
+          "API keys saved successfully! Restart the agent for changes to take effect.",
+        );
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        console.error("[AgentSettings] ❌ Failed to save API keys:", errorData);
+        alert(
+          `Failed to save API keys: ${errorData.error || response.statusText}`,
+        );
+      }
+    } catch (error) {
+      console.error("[AgentSettings] ❌ Error saving API keys:", error);
+      alert("Error saving API keys.");
+    } finally {
+      setSavingSecrets(false);
+    }
+  };
+
   const handleDelete = async () => {
     if (!onDelete) return;
     setDeleting(true);
@@ -101,6 +207,10 @@ export const AgentSettings: React.FC<AgentSettingsProps> = ({
       setDeleting(false);
       setShowDeleteConfirm(false);
     }
+  };
+
+  const toggleSecretVisibility = (key: string) => {
+    setShowSecrets((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   if (loading)
@@ -123,104 +233,266 @@ export const AgentSettings: React.FC<AgentSettingsProps> = ({
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-6">
         <div className="max-w-3xl mx-auto space-y-8">
-          {/* Template Selector */}
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-[#f2d08a]/80">
-              Start with a template
-            </label>
-            <select className="w-full bg-[#1a1005] border border-[#8b4513]/30 rounded-lg p-3 text-[#e8ebf4] focus:border-[#f2d08a] outline-none transition-colors">
-              <option>None (Start Blank)</option>
-              <option>Hyperscape Adventurer</option>
-              <option>Merchant Bot</option>
-              <option>Lore Keeper</option>
-            </select>
-          </div>
-
           {/* Tabs */}
           <div className="flex border-b border-[#8b4513]/30 gap-6">
-            {["Basic", "Content", "Style", "Plugins", "Secret", "Avatar"].map(
-              (tab, i) => (
-                <button
-                  key={tab}
-                  className={`pb-3 text-sm font-medium transition-colors relative ${
-                    i === 0
-                      ? "text-[#f2d08a]"
-                      : "text-[#f2d08a]/40 hover:text-[#f2d08a]/80"
-                  }`}
-                >
-                  {tab}
-                  {i === 0 && (
-                    <div className="absolute bottom-0 left-0 w-full h-0.5 bg-[#f2d08a]" />
-                  )}
-                </button>
-              ),
-            )}
+            {tabs.map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`pb-3 text-sm font-medium transition-colors relative ${
+                  activeTab === tab
+                    ? "text-[#f2d08a]"
+                    : "text-[#f2d08a]/40 hover:text-[#f2d08a]/80"
+                }`}
+              >
+                {tab}
+                {activeTab === tab && (
+                  <div className="absolute bottom-0 left-0 w-full h-0.5 bg-[#f2d08a]" />
+                )}
+              </button>
+            ))}
           </div>
 
-          {/* Form Fields */}
+          {/* Form Fields - Tab Content */}
           <div className="space-y-6">
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-[#f2d08a]/80">
-                Name <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={(settings.name as string | undefined) || ""}
-                onChange={(e) =>
-                  setSettings({ ...settings, name: e.target.value })
-                }
-                className="w-full bg-[#1a1005] border border-[#8b4513]/30 rounded-lg p-3 text-[#e8ebf4] focus:border-[#f2d08a] outline-none transition-colors"
-              />
-              <p className="text-xs text-[#f2d08a]/40">
-                The primary identifier for this agent
-              </p>
-            </div>
+            {activeTab === "Basic" && (
+              <>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-[#f2d08a]/80">
+                    Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={(settings.name as string | undefined) || ""}
+                    onChange={(e) =>
+                      setSettings({ ...settings, name: e.target.value })
+                    }
+                    className="w-full bg-[#1a1005] border border-[#8b4513]/30 rounded-lg p-3 text-[#e8ebf4] focus:border-[#f2d08a] outline-none transition-colors"
+                  />
+                  <p className="text-xs text-[#f2d08a]/40">
+                    The primary identifier for this agent
+                  </p>
+                </div>
 
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-[#f2d08a]/80">
-                Username
-              </label>
-              <input
-                type="text"
-                value={(settings.username as string | undefined) || ""}
-                onChange={(e) =>
-                  setSettings({ ...settings, username: e.target.value })
-                }
-                placeholder="@username"
-                className="w-full bg-[#1a1005] border border-[#8b4513]/30 rounded-lg p-3 text-[#e8ebf4] focus:border-[#f2d08a] outline-none transition-colors"
-              />
-              <p className="text-xs text-[#f2d08a]/40">
-                Used in URLs and API endpoints
-              </p>
-            </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-[#f2d08a]/80">
+                    Username
+                  </label>
+                  <input
+                    type="text"
+                    value={(settings.username as string | undefined) || ""}
+                    onChange={(e) =>
+                      setSettings({ ...settings, username: e.target.value })
+                    }
+                    placeholder="@username"
+                    className="w-full bg-[#1a1005] border border-[#8b4513]/30 rounded-lg p-3 text-[#e8ebf4] focus:border-[#f2d08a] outline-none transition-colors"
+                  />
+                  <p className="text-xs text-[#f2d08a]/40">
+                    Used in URLs and API endpoints
+                  </p>
+                </div>
 
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-[#f2d08a]/80">
-                System <span className="text-red-500">*</span>
-              </label>
-              <textarea
-                rows={6}
-                value={(settings.bio as string | undefined) || ""}
-                onChange={(e) =>
-                  setSettings({ ...settings, bio: e.target.value })
-                }
-                className="w-full bg-[#1a1005] border border-[#8b4513]/30 rounded-lg p-3 text-[#e8ebf4] focus:border-[#f2d08a] outline-none transition-colors resize-none font-mono text-sm"
-              />
-              <p className="text-xs text-[#f2d08a]/40">
-                System prompt defining agent behavior
-              </p>
-            </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-[#f2d08a]/80">
+                    System Prompt <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    rows={6}
+                    value={(settings.bio as string | undefined) || ""}
+                    onChange={(e) =>
+                      setSettings({ ...settings, bio: e.target.value })
+                    }
+                    className="w-full bg-[#1a1005] border border-[#8b4513]/30 rounded-lg p-3 text-[#e8ebf4] focus:border-[#f2d08a] outline-none transition-colors resize-none font-mono text-sm"
+                  />
+                  <p className="text-xs text-[#f2d08a]/40">
+                    System prompt defining agent behavior
+                  </p>
+                </div>
+              </>
+            )}
 
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-[#f2d08a]/80">
-                Voice Model
-              </label>
-              <select className="w-full bg-[#1a1005] border border-[#8b4513]/30 rounded-lg p-3 text-[#e8ebf4] focus:border-[#f2d08a] outline-none transition-colors">
-                <option>Select a voice model</option>
-                <option>ElevenLabs - Rachel</option>
-                <option>ElevenLabs - Drew</option>
-              </select>
-            </div>
+            {activeTab === "Content" && (
+              <>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-[#f2d08a]/80">
+                    Lore
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={
+                      Array.isArray(settings.lore)
+                        ? (settings.lore as string[]).join("\n")
+                        : (settings.lore as string | undefined) || ""
+                    }
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        lore: e.target.value.split("\n"),
+                      })
+                    }
+                    placeholder="Background story and lore (one item per line)"
+                    className="w-full bg-[#1a1005] border border-[#8b4513]/30 rounded-lg p-3 text-[#e8ebf4] focus:border-[#f2d08a] outline-none transition-colors resize-none font-mono text-sm"
+                  />
+                  <p className="text-xs text-[#f2d08a]/40">
+                    Background information about the agent (one item per line)
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-[#f2d08a]/80">
+                    Topics
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={
+                      Array.isArray(settings.topics)
+                        ? (settings.topics as string[]).join(", ")
+                        : (settings.topics as string | undefined) || ""
+                    }
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        topics: e.target.value
+                          .split(",")
+                          .map((t) => t.trim())
+                          .filter(Boolean),
+                      })
+                    }
+                    placeholder="gaming, rpg, exploration, combat"
+                    className="w-full bg-[#1a1005] border border-[#8b4513]/30 rounded-lg p-3 text-[#e8ebf4] focus:border-[#f2d08a] outline-none transition-colors resize-none"
+                  />
+                  <p className="text-xs text-[#f2d08a]/40">
+                    Topics the agent is knowledgeable about (comma-separated)
+                  </p>
+                </div>
+              </>
+            )}
+
+            {activeTab === "Style" && (
+              <>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-[#f2d08a]/80">
+                    Adjectives
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={
+                      Array.isArray(settings.adjectives)
+                        ? (settings.adjectives as string[]).join(", ")
+                        : (settings.adjectives as string | undefined) || ""
+                    }
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        adjectives: e.target.value
+                          .split(",")
+                          .map((a) => a.trim())
+                          .filter(Boolean),
+                      })
+                    }
+                    placeholder="adventurous, strategic, friendly"
+                    className="w-full bg-[#1a1005] border border-[#8b4513]/30 rounded-lg p-3 text-[#e8ebf4] focus:border-[#f2d08a] outline-none transition-colors resize-none"
+                  />
+                  <p className="text-xs text-[#f2d08a]/40">
+                    Personality traits (comma-separated)
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-[#f2d08a]/80">
+                    Communication Style
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={
+                      typeof settings.style === "object" &&
+                      settings.style !== null
+                        ? JSON.stringify(settings.style, null, 2)
+                        : ""
+                    }
+                    onChange={(e) => {
+                      try {
+                        const parsed = JSON.parse(e.target.value);
+                        setSettings({ ...settings, style: parsed });
+                      } catch {
+                        // Allow typing invalid JSON temporarily
+                      }
+                    }}
+                    placeholder='{"all": ["Be helpful", "Be concise"]}'
+                    className="w-full bg-[#1a1005] border border-[#8b4513]/30 rounded-lg p-3 text-[#e8ebf4] focus:border-[#f2d08a] outline-none transition-colors resize-none font-mono text-sm"
+                  />
+                  <p className="text-xs text-[#f2d08a]/40">
+                    Style configuration (JSON format)
+                  </p>
+                </div>
+              </>
+            )}
+
+            {activeTab === "API Keys" && (
+              <>
+                <div className="bg-[#1a1005]/50 border border-[#8b4513]/30 rounded-lg p-4 mb-6">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Key size={16} className="text-[#f2d08a]" />
+                    <span className="text-sm font-medium text-[#f2d08a]">
+                      API Key Configuration
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#f2d08a]/60">
+                    Configure API keys for LLM providers. These are stored
+                    securely and used by the agent for AI responses. You'll need
+                    to restart the agent after saving for changes to take
+                    effect.
+                  </p>
+                </div>
+
+                {apiKeyConfigs.map((config) => (
+                  <div key={config.key} className="space-y-2">
+                    <label className="block text-sm font-medium text-[#f2d08a]/80">
+                      {config.label}
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showSecrets[config.key] ? "text" : "password"}
+                        value={secrets[config.key] || ""}
+                        onChange={(e) =>
+                          setSecrets({
+                            ...secrets,
+                            [config.key]: e.target.value,
+                          })
+                        }
+                        placeholder={config.placeholder}
+                        className="w-full bg-[#1a1005] border border-[#8b4513]/30 rounded-lg p-3 pr-12 text-[#e8ebf4] focus:border-[#f2d08a] outline-none transition-colors font-mono text-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => toggleSecretVisibility(config.key)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-[#f2d08a]/40 hover:text-[#f2d08a] transition-colors"
+                      >
+                        {showSecrets[config.key] ? (
+                          <EyeOff size={18} />
+                        ) : (
+                          <Eye size={18} />
+                        )}
+                      </button>
+                    </div>
+                    <p className="text-xs text-[#f2d08a]/40">
+                      {config.description}
+                    </p>
+                  </div>
+                ))}
+
+                <div className="pt-4">
+                  <button
+                    onClick={handleSaveSecrets}
+                    disabled={savingSecrets}
+                    className="flex items-center gap-2 px-6 py-2 rounded-lg bg-[#f2d08a] text-[#0b0a15] font-bold hover:bg-[#e5c07b] transition-colors shadow-lg shadow-[#f2d08a]/20 disabled:opacity-50"
+                  >
+                    <Key size={16} />
+                    {savingSecrets ? "Saving..." : "Save API Keys"}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Actions */}

@@ -203,6 +203,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   /** Agent available goals storage (characterId -> available goals) for dashboard selection */
   static agentAvailableGoals: Map<string, unknown[]> = new Map();
 
+  /** Agent goals paused state (characterId -> boolean) for dashboard display */
+  static agentGoalsPaused: Map<string, boolean> = new Map();
+
   /** Character ID to socket mapping for sending goal overrides */
   static characterSockets: Map<string, ServerSocket> = new Map();
 

@@ -224,6 +224,7 @@ export class VoiceManager {
     const type = ChannelType.WORLD;
 
     // Ensure connection for the sender entity
+    // Cast as any for cross-version compatibility (serverId added in 1.7.0)
     await this.runtime.ensureConnection({
       entityId,
       roomId,
@@ -235,7 +236,7 @@ export class VoiceManager {
       type: ChannelType.WORLD,
       worldId: _currentWorldId,
       userId: playerId,
-    });
+    } as any);
 
     const memory: Memory = {
       id: createUniqueUuid(
@@ -284,11 +285,12 @@ export class VoiceManager {
       await this.runtime.createMemory(responseMemory, "messages");
 
       if (responseMemory.content.text?.trim()) {
-        const responseStream = await this.runtime.useModel(
+        // Cast as any for cross-version ElizaOS compatibility
+        const responseStream = await (this.runtime.useModel as any)(
           ModelType.TEXT_TO_SPEECH,
-          content.text,
+          content.text || "",
         );
-        const audioBuffer = await convertToAudioBuffer(responseStream);
+        const audioBuffer = await convertToAudioBuffer(responseStream as any);
         const emoteManager = service.getEmoteManager()!;
         const emote = (content.emote as string) || "TALK";
         emoteManager.playEmote(emote);
@@ -299,15 +301,18 @@ export class VoiceManager {
     };
 
     agentActivityLock.enter();
-    // Emit voice-specific events
-    this.runtime.emitEvent([hyperscapeEventType.VOICE_MESSAGE_RECEIVED], {
-      runtime: this.runtime,
-      message: memory,
-      callback,
-      onComplete: () => {
-        agentActivityLock.exit();
+    // Emit voice-specific events (cast as any for cross-version compatibility)
+    (this.runtime.emitEvent as any)(
+      [hyperscapeEventType.VOICE_MESSAGE_RECEIVED],
+      {
+        runtime: this.runtime,
+        message: memory,
+        callback,
+        onComplete: () => {
+          agentActivityLock.exit();
+        },
       },
-    });
+    );
   }
 
   async playAudio(audioBuffer: Buffer) {

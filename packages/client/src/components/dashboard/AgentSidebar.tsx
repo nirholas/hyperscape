@@ -1,8 +1,10 @@
 import React from "react";
 import { Plus, Settings, LogOut, Play, Square } from "lucide-react";
 import { Agent } from "../../screens/DashboardScreen";
+import { AgentSummaryCard } from "./AgentSummaryCard";
 import { AgentGoalPanel } from "./AgentGoalPanel";
 import { AgentSkillsPanel } from "./AgentSkillsPanel";
+import { AgentActivityPanel } from "./AgentActivityPanel";
 import { AgentPositionPanel } from "./AgentPositionPanel";
 
 interface AgentSidebarProps {
@@ -125,28 +127,41 @@ export const AgentSidebar: React.FC<AgentSidebarProps> = ({
         </button>
       </div>
 
-      {/* Goal Panel for Selected Agent - Most important, show first */}
+      {/* Summary Card for Selected Agent - Always visible overview */}
       {selectedAgent && (
-        <AgentGoalPanel
+        <AgentSummaryCard
           agent={selectedAgent}
           isViewportActive={viewportAgentId === selectedAgentId}
         />
       )}
 
-      {/* Skills Panel for Selected Agent */}
+      {/* Scrollable Panel Container for collapsible panels */}
       {selectedAgent && (
-        <AgentSkillsPanel
-          agent={selectedAgent}
-          isViewportActive={viewportAgentId === selectedAgentId}
-        />
-      )}
+        <div className="flex-shrink overflow-y-auto max-h-[400px] scrollbar-thin scrollbar-thumb-[#8b4513]/30 scrollbar-track-transparent">
+          {/* Goal Panel - Current objective and progress */}
+          <AgentGoalPanel
+            agent={selectedAgent}
+            isViewportActive={viewportAgentId === selectedAgentId}
+          />
 
-      {/* Position Panel for Selected Agent */}
-      {selectedAgent && (
-        <AgentPositionPanel
-          agent={selectedAgent}
-          isViewportActive={viewportAgentId === selectedAgentId}
-        />
+          {/* Skills Panel - Levels and XP tracking */}
+          <AgentSkillsPanel
+            agent={selectedAgent}
+            isViewportActive={viewportAgentId === selectedAgentId}
+          />
+
+          {/* Activity Panel - Recent actions and session stats */}
+          <AgentActivityPanel
+            agent={selectedAgent}
+            isViewportActive={viewportAgentId === selectedAgentId}
+          />
+
+          {/* Location Panel - Position and nearby POIs */}
+          <AgentPositionPanel
+            agent={selectedAgent}
+            isViewportActive={viewportAgentId === selectedAgentId}
+          />
+        </div>
       )}
 
       {/* Footer */}

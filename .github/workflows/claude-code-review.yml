@@ -1,7 +1,9 @@
 name: Claude Code Review
 
 on:
-  pull_request:
+  # Use pull_request_target to allow fork PRs to access secrets
+  # This is safe because we're not running code from the PR, just reviewing it
+  pull_request_target:
     types: [opened, synchronize, ready_for_review, reopened]
     # Optional: Only run on specific file changes
     # paths:
@@ -29,6 +31,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          # For pull_request_target, checkout the PR head commit
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
 
       - name: Run Claude Code Review
