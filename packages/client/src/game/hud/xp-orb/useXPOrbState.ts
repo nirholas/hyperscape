@@ -91,6 +91,23 @@ export function getXPForLevel(level: number): number {
   return XP_TABLE[level];
 }
 
+/** Get level for a given XP amount (binary search for efficiency) */
+function getLevelForXP(xp: number): number {
+  if (xp <= 0) return 1;
+  // Binary search through XP_TABLE to find highest level where XP_TABLE[level] <= xp
+  let low = 1;
+  let high = 99;
+  while (low < high) {
+    const mid = Math.ceil((low + high + 1) / 2);
+    if (XP_TABLE[mid] <= xp) {
+      low = mid;
+    } else {
+      high = mid - 1;
+    }
+  }
+  return low;
+}
+
 /** Type guard for runtime validation of XP drop data from server */
 function isValidXPDropData(data: unknown): data is XPDropData {
   if (typeof data !== "object" || data === null) return false;
@@ -134,6 +151,29 @@ export function useXPOrbState(world: ClientWorld): UseXPOrbStateResult {
   const pendingDropRef = useRef<GroupedXPDrop | null>(null);
   const pendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousLevelsRef = useRef<Record<string, number>>({});
+
+  // Initialize previousLevelsRef from player's current skills on mount
+  // This ensures level-up detection works even for first XP gain in a skill
+  useEffect(() => {
+    const player = world.entities?.player;
+    if (!player) return;
+
+    // Try to get skills from player data
+    const playerData = player.data as {
+      skills?: Record<string, { level: number; xp: number }>;
+    };
+    const skills = playerData?.skills;
+
+    if (skills) {
+      const levels: Record<string, number> = {};
+      for (const [skillName, skillData] of Object.entries(skills)) {
+        if (skillData && typeof skillData.level === "number") {
+          levels[normalizeSkillName(skillName)] = skillData.level;
+        }
+      }
+      previousLevelsRef.current = levels;
+    }
+  }, [world.entities?.player]);
 
   // Calculate progress to next level (uses pre-computed XP table)
   const calculateProgress = useCallback((xp: number, level: number): number => {
@@ -246,14 +286,21 @@ export function useXPOrbState(world: ClientWorld): UseXPOrbStateResult {
 
       // Check for level up
       const prevLevel = previousLevelsRef.current[skillKey];
-      if (prevLevel !== undefined && data.newLevel > prevLevel) {
+
+      // Calculate what level they were at before this XP gain
+      // This handles cases where prevLevel wasn't initialized (e.g., first XP drop for this skill)
+      const xpBefore = data.newXp - data.xpGained;
+      const calculatedPrevLevel = getLevelForXP(xpBefore);
+      const effectivePrevLevel = prevLevel ?? calculatedPrevLevel;
+
+      if (data.newLevel > effectivePrevLevel) {
         setLevelUpSkill(skillKey);
 
         // Emit client-side level-up event (single source of truth)
         // Note: Server also emits SKILLS_LEVEL_UP but doesn't send over WebSocket
         world.emit(EventType.SKILLS_LEVEL_UP, {
           skill: data.skill,
-          oldLevel: prevLevel,
+          oldLevel: effectivePrevLevel,
           newLevel: data.newLevel,
           timestamp: Date.now(),
         });

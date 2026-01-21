@@ -90,9 +90,11 @@ export function SkillSelectModal({
 
   return (
     <div
-      className="fixed inset-0 z-[1001] flex items-center justify-center"
+      className="fixed inset-0 z-[10001] flex items-center justify-center pointer-events-auto"
       style={{ backgroundColor: "rgba(0, 0, 0, 0.7)" }}
       onClick={onClose}
+      onMouseDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
     >
       <div
         className="relative"
@@ -107,6 +109,8 @@ export function SkillSelectModal({
           boxShadow: "0 8px 32px rgba(0, 0, 0, 0.5)",
         }}
         onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div

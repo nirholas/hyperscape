@@ -237,6 +237,17 @@ export class SkillsSystem extends SystemBase {
       playerId: entityId,
       skills: this.getSkills(entityId) || {},
     });
+
+    // Emit XP drop broadcast for server to send to client (with updated level data)
+    const position = entity.position || { x: 0, y: 0, z: 0 };
+    this.emitTypedEvent(EventType.XP_DROP_BROADCAST, {
+      playerId: entityId,
+      skill,
+      amount: actualGain,
+      newXp: newXP,
+      newLevel: skillData.level, // Use updated level after handleLevelUp
+      position: { x: position.x, y: position.y, z: position.z },
+    });
   }
 
   /**

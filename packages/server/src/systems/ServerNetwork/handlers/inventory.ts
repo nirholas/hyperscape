@@ -934,41 +934,44 @@ export async function handleXpLampUse(
   const itemId = payload.itemId as string;
   const slot = payload.slot as number;
 
-  // Get inventory system to validate item exists and consume it
+  // Get inventory system to validate item exists
   const inventorySystem = world.getSystem("inventory") as {
-    getItemAtSlot?: (
-      playerId: string,
-      slot: number,
-    ) => { itemId: string; quantity: number } | null;
-    removeItem?: (
-      playerId: string,
-      itemId: string,
-      quantity: number,
-      slot?: number,
-    ) => boolean;
+    getInventory?: (playerId: string) =>
+      | {
+          items: Array<{ slot: number; itemId: string; quantity: number }>;
+        }
+      | undefined;
   } | null;
 
-  if (!inventorySystem?.getItemAtSlot || !inventorySystem?.removeItem) {
+  if (!inventorySystem?.getInventory) {
     console.error("[Inventory] handleXpLampUse: inventory system unavailable");
     return;
   }
 
-  // Validate item exists at slot
-  const itemAtSlot = inventorySystem.getItemAtSlot(playerId, slot);
+  // Get player's inventory and find item at slot
+  const inventory = inventorySystem.getInventory(playerId);
+  if (!inventory) {
+    sendInventoryError(socket, "xpLampUse", "Inventory not found");
+    return;
+  }
+
+  // Find item at the specified slot
+  const itemAtSlot = inventory.items.find((item) => item.slot === slot);
   if (!itemAtSlot || itemAtSlot.itemId !== itemId) {
     sendInventoryError(socket, "xpLampUse", "Item not found");
     return;
   }
 
-  // Remove the lamp from inventory
-  const removed = inventorySystem.removeItem(playerId, itemId, 1, slot);
-  if (!removed) {
-    sendInventoryError(socket, "xpLampUse", "Failed to use lamp");
-    return;
-  }
+  // Remove the lamp from inventory via event
+  world.emit(EventType.INVENTORY_ITEM_REMOVED, {
+    playerId,
+    itemId,
+    quantity: 1,
+    slot,
+  });
 
-  // Grant XP via SkillsSystem
-  world.emit(EventType.PLAYER_XP_GAINED, {
+  // Grant XP via SkillsSystem (uses SKILLS_XP_GAINED which SkillsSystem listens to)
+  world.emit(EventType.SKILLS_XP_GAINED, {
     playerId,
     skill: skillId,
     amount: xpAmount,

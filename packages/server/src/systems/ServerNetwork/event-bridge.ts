@@ -251,45 +251,28 @@ export class EventBridge {
         }
       });
 
-      // Forward XP gains to clients for visual XP drop feedback (RS3-style)
-      this.world.on(EventType.SKILLS_XP_GAINED, (payload: unknown) => {
+      // Forward XP drops to clients for visual feedback (RS3-style)
+      // Uses XP_DROP_BROADCAST which is emitted AFTER SkillsSystem processes XP
+      // This ensures newLevel reflects any level-ups that occurred
+      this.world.on(EventType.XP_DROP_BROADCAST, (payload: unknown) => {
         const data = payload as {
           playerId: string;
           skill: string;
           amount: number;
+          newXp: number;
+          newLevel: number;
+          position: { x: number; y: number; z: number };
         };
 
         if (!data?.playerId) return;
-
-        // Get player entity for position
-        const player = this.world.entities.get(data.playerId);
-        const position = player?.position || { x: 0, y: 0, z: 0 };
-
-        // Get updated skill data (SkillsSystem has already processed the XP gain)
-        const skillsSystem = this.world.getSystem("skills") as {
-          getSkillData?: (
-            entityId: string,
-            skill: string,
-          ) => { level: number; xp: number } | undefined;
-        };
-
-        const skillData = skillsSystem?.getSkillData?.(
-          data.playerId,
-          data.skill,
-        );
-        // Safely get values, handling NaN (which passes ?? but fails Number.isFinite)
-        const rawLevel = skillData?.level;
-        const rawXp = skillData?.xp;
-        const newLevel = Number.isFinite(rawLevel) ? rawLevel : 1;
-        const newXp = Number.isFinite(rawXp) ? rawXp : 0;
 
         // Send XP drop to the player for visual feedback
         this.broadcast.sendToPlayer(data.playerId, "xpDrop", {
           skill: data.skill,
           xpGained: data.amount,
-          newXp,
-          newLevel,
-          position: { x: position.x, y: position.y, z: position.z },
+          newXp: data.newXp,
+          newLevel: data.newLevel,
+          position: data.position,
         });
 
         // Persist skill XP to database (only if values are valid)
@@ -301,15 +284,15 @@ export class EventBridge {
         };
         if (
           dbSystem?.savePlayer &&
-          Number.isFinite(newXp) &&
-          Number.isFinite(newLevel)
+          Number.isFinite(data.newXp) &&
+          Number.isFinite(data.newLevel)
         ) {
           // Map skill name to database column names
           const skillLevelKey = `${data.skill}Level`;
           const skillXpKey = `${data.skill}Xp`;
           dbSystem.savePlayer(data.playerId, {
-            [skillLevelKey]: newLevel,
-            [skillXpKey]: newXp,
+            [skillLevelKey]: data.newLevel,
+            [skillXpKey]: data.newXp,
           });
         }
       });
