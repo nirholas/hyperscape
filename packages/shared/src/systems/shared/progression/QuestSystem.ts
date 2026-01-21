@@ -86,6 +86,14 @@ export class QuestSystem extends SystemBase {
       this.playerStates.delete(data.id);
     });
 
+    // Subscribe to quest start acceptance (player clicked Accept on quest start screen)
+    this.subscribe(
+      EventType.QUEST_START_ACCEPTED,
+      async (data: { playerId: string; questId: string }) => {
+        await this.startQuest(data.playerId, data.questId);
+      },
+    );
+
     this.logger.info(
       `QuestSystem initialized with ${this.questDefinitions.size} quests`,
     );
@@ -96,15 +104,65 @@ export class QuestSystem extends SystemBase {
    */
   private async loadQuestManifest(): Promise<void> {
     try {
-      // In a real implementation, this would load from the manifest file
-      // For now, we'll use a dynamic import pattern that the server can override
-      const manifestPath =
-        "../../../../../../server/world/assets/manifests/quests.json";
+      // Check if we're on the server (Node.js environment)
+      const isServer =
+        typeof process !== "undefined" &&
+        process.versions !== undefined &&
+        process.versions.node !== undefined;
 
-      // Try to load manifest (server-side only)
+      if (!isServer) {
+        // Client-side - quests are server-only
+        this.logger.warn("Quest manifest not available on client");
+        this.manifestLoaded = true;
+        return;
+      }
+
+      // Server-side: Load from filesystem
+      const fs = await import("fs/promises");
+      const path = await import("path");
+
+      // Find manifests directory
+      let manifestsDir: string;
+      if (process.env.ASSETS_DIR) {
+        manifestsDir = path.join(process.env.ASSETS_DIR, "manifests");
+      } else {
+        const cwd = process.cwd();
+        const normalizedCwd = cwd.replace(/\\/g, "/");
+        if (
+          normalizedCwd.endsWith("/packages/server") ||
+          normalizedCwd.includes("/packages/server/")
+        ) {
+          manifestsDir = path.join(cwd, "world", "assets", "manifests");
+        } else if (normalizedCwd.includes("/packages/")) {
+          const workspaceRoot = path.resolve(cwd, "../..");
+          manifestsDir = path.join(
+            workspaceRoot,
+            "packages",
+            "server",
+            "world",
+            "assets",
+            "manifests",
+          );
+        } else {
+          manifestsDir = path.join(
+            cwd,
+            "packages",
+            "server",
+            "world",
+            "assets",
+            "manifests",
+          );
+        }
+      }
+
+      const questsPath = path.join(manifestsDir, "quests.json");
+
       try {
-        const manifest = await import(manifestPath);
-        const questData = manifest.default || manifest;
+        const questsData = await fs.readFile(questsPath, "utf-8");
+        const questData = JSON.parse(questsData) as Record<
+          string,
+          QuestDefinition
+        >;
 
         for (const [questId, definition] of Object.entries(questData)) {
           this.questDefinitions.set(questId, definition as QuestDefinition);
@@ -112,12 +170,11 @@ export class QuestSystem extends SystemBase {
 
         this.manifestLoaded = true;
         this.logger.info(
-          `Loaded ${this.questDefinitions.size} quest definitions`,
+          `Loaded ${this.questDefinitions.size} quest definitions from ${questsPath}`,
         );
-      } catch {
-        // Manifest not available (likely client-side or test environment)
+      } catch (err) {
         this.logger.warn(
-          "Quest manifest not available, using empty quest list",
+          `Quest manifest not found at ${questsPath}, using empty quest list`,
         );
         this.manifestLoaded = true;
       }
@@ -271,9 +328,74 @@ export class QuestSystem extends SystemBase {
   }
 
   /**
-   * Start a quest for a player
+   * Request to start a quest - shows confirmation screen to player
    *
    * Called when DialogueSystem processes a "startQuest:quest_id" effect
+   * This emits QUEST_START_CONFIRM to show the quest accept screen
+   */
+  public requestQuestStart(playerId: string, questId: string): boolean {
+    const state = this.playerStates.get(playerId);
+    if (!state) {
+      this.logger.warn(
+        `Cannot request quest start: player ${playerId} not found`,
+      );
+      return false;
+    }
+
+    // Check if already started or completed
+    if (state.completedQuests.has(questId)) {
+      this.logger.info(`Quest ${questId} already completed for ${playerId}`);
+      return false;
+    }
+
+    if (state.activeQuests.has(questId)) {
+      this.logger.info(`Quest ${questId} already active for ${playerId}`);
+      return false;
+    }
+
+    const definition = this.questDefinitions.get(questId);
+    if (!definition) {
+      this.logger.warn(`Quest definition not found: ${questId}`);
+      return false;
+    }
+
+    // Check requirements
+    if (!this.checkRequirements(playerId, definition)) {
+      this.logger.info(
+        `Player ${playerId} doesn't meet requirements for ${questId}`,
+      );
+      return false;
+    }
+
+    // Emit confirmation event to show quest start screen
+    this.emitTypedEvent(EventType.QUEST_START_CONFIRM, {
+      playerId,
+      questId,
+      questName: definition.name,
+      description: definition.description,
+      difficulty: definition.difficulty,
+      requirements: {
+        quests: definition.requirements?.quests || [],
+        skills: definition.requirements?.skills || {},
+        items: definition.requirements?.items || [],
+      },
+      rewards: {
+        questPoints: definition.rewards.questPoints,
+        items: definition.rewards.items || [],
+        xp: definition.rewards.xp || {},
+      },
+    });
+
+    this.logger.info(
+      `Quest start confirmation shown for ${questId} to ${playerId}`,
+    );
+    return true;
+  }
+
+  /**
+   * Start a quest for a player (actually starts the quest)
+   *
+   * Called when player accepts quest via QUEST_START_ACCEPTED event
    */
   public async startQuest(playerId: string, questId: string): Promise<boolean> {
     const state = this.playerStates.get(playerId);
@@ -418,31 +540,73 @@ export class QuestSystem extends SystemBase {
    * Handle NPC death for kill quest tracking
    */
   private handleNPCDied(data: NPCDiedPayload): void {
-    const { killerId, mobId } = data;
+    const { killedBy, mobType } = data;
 
-    const state = this.playerStates.get(killerId);
+    this.logger.info(
+      `[QuestSystem] NPC_DIED received: killedBy=${killedBy}, mobType=${mobType}`,
+    );
+
+    const state = this.playerStates.get(killedBy);
     if (!state) {
+      this.logger.info(
+        `[QuestSystem] No player state for ${killedBy}. Known players: ${Array.from(this.playerStates.keys()).join(", ")}`,
+      );
       return;
     }
 
+    this.logger.info(
+      `[QuestSystem] Player ${killedBy} has ${state.activeQuests.size} active quests`,
+    );
+
     // Check all active quests for kill objectives
     for (const [questId, progress] of state.activeQuests) {
+      this.logger.info(
+        `[QuestSystem] Checking quest ${questId}, currentStage=${progress.currentStage}`,
+      );
+
       const definition = this.questDefinitions.get(questId);
-      if (!definition) continue;
+      if (!definition) {
+        this.logger.info(`[QuestSystem] No definition for quest ${questId}`);
+        continue;
+      }
 
       const stage = definition.stages.find(
         (s) => s.id === progress.currentStage,
       );
-      if (!stage || stage.type !== "kill") continue;
+      if (!stage) {
+        this.logger.info(
+          `[QuestSystem] Stage ${progress.currentStage} not found in quest ${questId}`,
+        );
+        continue;
+      }
+
+      if (stage.type !== "kill") {
+        this.logger.info(
+          `[QuestSystem] Stage ${stage.id} is type=${stage.type}, not kill`,
+        );
+        continue;
+      }
 
       // Check if this mob matches the target
-      // mobId might be "goblin_123" and target is "goblin"
+      // mobType is "goblin" and target is "goblin"
       const targetType = stage.target;
-      if (!targetType || !mobId.startsWith(targetType)) continue;
+      this.logger.info(
+        `[QuestSystem] Comparing mobType="${mobType}" with target="${targetType}"`,
+      );
+      if (!targetType || mobType !== targetType) {
+        this.logger.info(
+          `[QuestSystem] mobType doesn't match target, skipping`,
+        );
+        continue;
+      }
 
       // Increment kill count
       const kills = (progress.stageProgress.kills || 0) + 1;
       progress.stageProgress = { ...progress.stageProgress, kills };
+
+      this.logger.info(
+        `[QuestSystem] Player ${killedBy} killed ${mobType}, quest ${questId} progress: ${kills}/${stage.count}`,
+      );
 
       // Check if objective complete
       if (stage.count && kills >= stage.count) {
@@ -450,7 +614,7 @@ export class QuestSystem extends SystemBase {
 
         // Send chat message that objective is complete
         this.emitTypedEvent(EventType.CHAT_MESSAGE, {
-          playerId: killerId,
+          playerId: killedBy,
           message: `You've killed enough ${targetType}s. Return to ${definition.startNpc.replace(/_/g, " ")}.`,
           type: "game",
         });
@@ -458,7 +622,7 @@ export class QuestSystem extends SystemBase {
 
       // Save progress
       this.saveQuestProgress(
-        killerId,
+        killedBy,
         questId,
         progress.currentStage,
         progress.stageProgress,
@@ -466,7 +630,7 @@ export class QuestSystem extends SystemBase {
 
       // Emit progress event
       this.emitTypedEvent(EventType.QUEST_PROGRESSED, {
-        playerId: killerId,
+        playerId: killedBy,
         questId,
         stage: progress.currentStage,
         progress: progress.stageProgress,
@@ -509,7 +673,7 @@ export class QuestSystem extends SystemBase {
       this.emitTypedEvent(EventType.INVENTORY_ITEM_ADDED, {
         playerId,
         item: {
-          id: itemId,
+          itemId,
           quantity,
           slot: -1, // Let inventory system find a slot
         },

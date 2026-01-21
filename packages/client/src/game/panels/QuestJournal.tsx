@@ -55,6 +55,7 @@ const STATUS_COLORS = {
 export function QuestJournal({ world, visible, onClose }: QuestJournalProps) {
   const [quests, setQuests] = useState<QuestListItem[]>([]);
   const [selectedQuest, setSelectedQuest] = useState<QuestDetail | null>(null);
+  const [selectedQuestId, setSelectedQuestId] = useState<string | null>(null);
   const [questPoints, setQuestPoints] = useState(0);
   const [loading, setLoading] = useState(true);
 
@@ -69,9 +70,20 @@ export function QuestJournal({ world, visible, onClose }: QuestJournalProps) {
       }
     };
 
-    fetchQuestData();
+    const fetchQuestDetail = (questId: string) => {
+      if (world.network?.send) {
+        world.network.send("getQuestDetail", { questId });
+      }
+    };
 
-    // Listen for quest list updates
+    // Always fetch fresh data when panel opens
+    fetchQuestData();
+    // If a quest was previously selected, refresh its detail too
+    if (selectedQuestId) {
+      fetchQuestDetail(selectedQuestId);
+    }
+
+    // Listen for quest list updates via network packets
     const onQuestListUpdate = (data: unknown) => {
       const payload = data as {
         quests: QuestListItem[];
@@ -82,36 +94,48 @@ export function QuestJournal({ world, visible, onClose }: QuestJournalProps) {
       setLoading(false);
     };
 
-    // Listen for quest detail updates
+    // Listen for quest detail updates via network packets
     const onQuestDetailUpdate = (data: unknown) => {
       const payload = data as QuestDetail;
       setSelectedQuest(payload);
+      setSelectedQuestId(payload.id);
     };
 
-    world.on(EventType.UI_UPDATE, (raw: unknown) => {
-      const update = raw as { component: string; data: unknown };
-      if (update.component === "questList") {
-        onQuestListUpdate(update.data);
-      } else if (update.component === "questDetail") {
-        onQuestDetailUpdate(update.data);
-      }
-    });
+    // Register network packet handlers
+    world.network?.on("questList", onQuestListUpdate);
+    world.network?.on("questDetail", onQuestDetailUpdate);
 
     // Also listen for quest events to refresh
     const onQuestEvent = () => {
       fetchQuestData();
     };
 
+    // Listen for quest progress to update the detail view
+    const onQuestProgressed = (data: unknown) => {
+      const payload = data as {
+        questId: string;
+        progress: Record<string, number>;
+      };
+      // Refresh list
+      fetchQuestData();
+      // Refresh the quest detail that progressed
+      if (payload.questId) {
+        fetchQuestDetail(payload.questId);
+      }
+    };
+
     world.on(EventType.QUEST_STARTED, onQuestEvent);
-    world.on(EventType.QUEST_PROGRESSED, onQuestEvent);
+    world.on(EventType.QUEST_PROGRESSED, onQuestProgressed);
     world.on(EventType.QUEST_COMPLETED, onQuestEvent);
 
     return () => {
+      world.network?.off("questList", onQuestListUpdate);
+      world.network?.off("questDetail", onQuestDetailUpdate);
       world.off(EventType.QUEST_STARTED, onQuestEvent);
-      world.off(EventType.QUEST_PROGRESSED, onQuestEvent);
+      world.off(EventType.QUEST_PROGRESSED, onQuestProgressed);
       world.off(EventType.QUEST_COMPLETED, onQuestEvent);
     };
-  }, [visible, world]);
+  }, [visible, world, selectedQuestId]);
 
   const handleSelectQuest = (questId: string) => {
     // Request quest details from server
@@ -122,15 +146,18 @@ export function QuestJournal({ world, visible, onClose }: QuestJournalProps) {
 
   const handleBackToList = () => {
     setSelectedQuest(null);
+    setSelectedQuestId(null);
   };
 
   if (!visible) return null;
 
   return (
     <div
-      className="fixed inset-0 z-[1001] flex items-center justify-center"
+      className="fixed inset-0 z-[9999] flex items-center justify-center pointer-events-auto"
       style={{ backgroundColor: "rgba(0, 0, 0, 0.7)" }}
       onClick={onClose}
+      onMouseDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
     >
       <div
         className="relative"
@@ -148,6 +175,8 @@ export function QuestJournal({ world, visible, onClose }: QuestJournalProps) {
           flexDirection: "column",
         }}
         onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div

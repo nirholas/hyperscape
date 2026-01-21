@@ -1939,6 +1939,75 @@ export class ClientNetwork extends SystemBase {
     this.world.emit(EventType.CHARACTER_SELECTED, data);
   };
 
+  // --- Quest system handlers ---
+  onQuestList = (data: {
+    quests: Array<{
+      id: string;
+      name: string;
+      status: string;
+      difficulty: string;
+      questPoints: number;
+    }>;
+    questPoints: number;
+  }) => {
+    // Emit for QuestJournal to update
+    this.emit("questList", data);
+  };
+
+  onQuestDetail = (data: {
+    id: string;
+    name: string;
+    description: string;
+    status: string;
+    difficulty: string;
+    questPoints: number;
+    currentStage: string;
+    stageProgress: Record<string, number>;
+    stages: Array<{
+      id: string;
+      description: string;
+      type: string;
+      target?: string;
+      count?: number;
+    }>;
+  }) => {
+    // Emit for QuestJournal to update
+    this.emit("questDetail", data);
+  };
+
+  onQuestStartConfirm = (data: {
+    questId: string;
+    questName: string;
+    description: string;
+    difficulty: string;
+    requirements: {
+      quests: string[];
+      skills: Record<string, number>;
+      items: string[];
+    };
+    rewards: {
+      questPoints: number;
+      items: Array<{ itemId: string; quantity: number }>;
+      xp: Record<string, number>;
+    };
+  }) => {
+    // Emit QUEST_START_CONFIRM event for Sidebar to show QuestStartScreen
+    // Add playerId since server doesn't send it (packet is already routed to this player)
+    const playerId = this.world?.entities?.player?.id || "";
+    this.world.emit(EventType.QUEST_START_CONFIRM, { ...data, playerId });
+  };
+
+  onQuestProgressed = (data: {
+    questId: string;
+    stage: string;
+    progress: Record<string, number>;
+    description: string;
+  }) => {
+    // Emit QUEST_PROGRESSED event for QuestJournal to update
+    const playerId = this.world?.entities?.player?.id || "";
+    this.world.emit(EventType.QUEST_PROGRESSED, { ...data, playerId });
+  };
+
   // Convenience methods
   requestCharacterCreate(name: string) {
     this.send("characterCreate", { name });

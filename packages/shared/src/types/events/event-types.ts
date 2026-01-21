@@ -269,6 +269,9 @@ export enum EventType {
   NPC_QUEST_OPEN = "quest:open_request",
 
   // Quest System
+  QUEST_START_CONFIRM = "quest:start_confirm", // Show quest accept screen
+  QUEST_START_ACCEPTED = "quest:start_accepted", // Player accepted quest
+  QUEST_START_DECLINED = "quest:start_declined", // Player declined quest
   QUEST_STARTED = "quest:started",
   QUEST_PROGRESSED = "quest:progressed",
   QUEST_COMPLETED = "quest:completed",

@@ -79,9 +79,11 @@ export function QuestCompleteScreen({
 
   return (
     <div
-      className="fixed inset-0 z-[1100] flex items-center justify-center"
+      className="fixed inset-0 z-[10000] flex items-center justify-center pointer-events-auto"
       style={{ backgroundColor: "rgba(0, 0, 0, 0.85)" }}
       onClick={onClose}
+      onMouseDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
     >
       {/* Parchment/Scroll Style Container */}
       <div
@@ -109,6 +111,8 @@ export function QuestCompleteScreen({
           `,
         }}
         onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
       >
         {/* Decorative Top Border */}
         <div

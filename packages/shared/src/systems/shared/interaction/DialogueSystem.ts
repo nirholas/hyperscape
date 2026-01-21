@@ -353,14 +353,12 @@ export class DialogueSystem extends SystemBase {
           this.logger.warn("startQuest effect missing quest ID");
           break;
         }
-        // Get QuestSystem and start the quest
+        // Get QuestSystem and request quest start (shows confirmation screen)
         const questSystem = this.world.getSystem("quest") as {
-          startQuest?: (playerId: string, questId: string) => Promise<boolean>;
+          requestQuestStart?: (playerId: string, questId: string) => boolean;
         };
-        if (questSystem?.startQuest) {
-          questSystem.startQuest(playerId, questId).catch((err) => {
-            this.logger.error(`Failed to start quest ${questId}:`, err);
-          });
+        if (questSystem?.requestQuestStart) {
+          questSystem.requestQuestStart(playerId, questId);
         } else {
           this.logger.warn("QuestSystem not available for startQuest effect");
         }

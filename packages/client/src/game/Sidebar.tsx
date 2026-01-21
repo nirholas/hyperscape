@@ -30,6 +30,7 @@ import { SmithingPanel } from "./panels/SmithingPanel";
 import { SkillSelectModal } from "./panels/SkillSelectModal";
 import { QuestJournal } from "./panels/QuestJournal";
 import { QuestCompleteScreen } from "./panels/QuestCompleteScreen";
+import { QuestStartScreen } from "./panels/QuestStartScreen";
 
 type InventorySlotViewItem = Pick<
   InventorySlotItem,
@@ -161,6 +162,25 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
   const [questCompleteData, setQuestCompleteData] = useState<{
     visible: boolean;
     questName: string;
+    rewards: {
+      questPoints: number;
+      items: Array<{ itemId: string; quantity: number }>;
+      xp: Record<string, number>;
+    };
+  } | null>(null);
+
+  // Quest Start confirmation screen state
+  const [questStartData, setQuestStartData] = useState<{
+    visible: boolean;
+    questId: string;
+    questName: string;
+    description: string;
+    difficulty: string;
+    requirements: {
+      quests: string[];
+      skills: Record<string, number>;
+      items: string[];
+    };
     rewards: {
       questPoints: number;
       items: Array<{ itemId: string; quantity: number }>;
@@ -562,6 +582,39 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
     };
     world.on(EventType.QUEST_COMPLETED, onQuestCompleted);
 
+    // Listen for quest start confirmation (show quest accept screen)
+    const onQuestStartConfirm = (data: {
+      playerId: string;
+      questId: string;
+      questName: string;
+      description: string;
+      difficulty: string;
+      requirements: {
+        quests: string[];
+        skills: Record<string, number>;
+        items: string[];
+      };
+      rewards: {
+        questPoints: number;
+        items: Array<{ itemId: string; quantity: number }>;
+        xp: Record<string, number>;
+      };
+    }) => {
+      const localId = world.entities?.player?.id;
+      if (localId && data.playerId === localId) {
+        setQuestStartData({
+          visible: true,
+          questId: data.questId,
+          questName: data.questName,
+          description: data.description,
+          difficulty: data.difficulty,
+          requirements: data.requirements,
+          rewards: data.rewards,
+        });
+      }
+    };
+    world.on(EventType.QUEST_START_CONFIRM, onQuestStartConfirm);
+
     const requestInitial = () => {
       // For spectator/embedded mode, use characterId from config
       let lp = world.entities?.player?.id;
@@ -642,6 +695,7 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
       world.off(EventType.PLAYER_SET_DEAD, onPlayerDeath);
       world.off(EventType.XP_LAMP_USE_REQUEST, onXpLampUseRequest);
       world.off(EventType.QUEST_COMPLETED, onQuestCompleted);
+      world.off(EventType.QUEST_START_CONFIRM, onQuestStartConfirm);
     };
   }, []);
 
@@ -1040,6 +1094,32 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
             rewards={questCompleteData.rewards}
             world={world}
             onClose={() => setQuestCompleteData(null)}
+          />
+        )}
+
+        {/* Quest Start Confirmation Screen */}
+        {questStartData?.visible && (
+          <QuestStartScreen
+            visible={questStartData.visible}
+            questId={questStartData.questId}
+            questName={questStartData.questName}
+            description={questStartData.description}
+            difficulty={questStartData.difficulty}
+            requirements={questStartData.requirements}
+            rewards={questStartData.rewards}
+            onAccept={() => {
+              // Send quest accept to server
+              if (world.network?.send) {
+                world.network.send("questAccept", {
+                  questId: questStartData.questId,
+                });
+              }
+              setQuestStartData(null);
+            }}
+            onDecline={() => {
+              // Just close the screen
+              setQuestStartData(null);
+            }}
           />
         )}
       </div>

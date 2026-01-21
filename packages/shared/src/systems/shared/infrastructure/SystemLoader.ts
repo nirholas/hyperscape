@@ -132,6 +132,7 @@ import { SmeltingSystem } from "..";
 import { SmithingSystem } from "..";
 import { HealthRegenSystem } from "..";
 import { PrayerSystem } from "..";
+import { QuestSystem } from "..";
 
 // Interface for the systems collection
 export interface Systems {
@@ -376,6 +377,14 @@ export async function registerSystems(world: World): Promise<void> {
 
   // Dialogue system - handles NPC dialogue trees
   world.register("dialogue", DialogueSystem);
+
+  // Quest system - handles quest progression (server only)
+  // Note: world.isServer isn't reliable here because ServerNetwork registers later
+  // Use Node.js environment check instead (isServerEnvironment defined above)
+  if (isServerEnvironment) {
+    world.register("quest", QuestSystem);
+    console.log("[SystemLoader] ✅ QuestSystem registered (server-only)");
+  }
 
   // DYNAMIC WORLD CONTENT SYSTEMS - FULL THREE.JS ACCESS, NO SANDBOX
   world.register("mob-npc-spawner", MobNPCSpawnerSystem);

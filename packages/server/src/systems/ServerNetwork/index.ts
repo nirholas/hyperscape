@@ -141,6 +141,11 @@ import {
   handleDialogueResponse,
   handleDialogueClose,
 } from "./handlers/dialogue";
+import {
+  handleGetQuestList,
+  handleGetQuestDetail,
+  handleQuestAccept,
+} from "./handlers/quest";
 import { PendingAttackManager } from "./PendingAttackManager";
 import { PendingGatherManager } from "./PendingGatherManager";
 import { PendingCookManager } from "./PendingCookManager";
@@ -1619,6 +1624,19 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
     this.handlers["onDialogueClose"] = (socket, data) =>
       handleDialogueClose(socket, data as { npcId: string }, this.world);
+
+    // Quest handlers
+    this.handlers["onGetQuestList"] = (socket, data) =>
+      handleGetQuestList(socket, data as Record<string, unknown>, this.world);
+    this.handlers["getQuestList"] = this.handlers["onGetQuestList"];
+
+    this.handlers["onGetQuestDetail"] = (socket, data) =>
+      handleGetQuestDetail(socket, data as { questId: string }, this.world);
+    this.handlers["getQuestDetail"] = this.handlers["onGetQuestDetail"];
+
+    this.handlers["onQuestAccept"] = (socket, data) =>
+      handleQuestAccept(socket, data as { questId: string }, this.world);
+    this.handlers["questAccept"] = this.handlers["onQuestAccept"];
 
     // Store handlers
     this.handlers["onStoreOpen"] = (socket, data) =>

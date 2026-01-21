@@ -97,6 +97,7 @@ export class EventBridge {
     this.setupStoreEvents();
     this.setupFireEvents();
     this.setupSmeltingEvents();
+    this.setupQuestEvents();
   }
 
   /**
@@ -1052,6 +1053,72 @@ export class EventBridge {
       });
     } catch (_err) {
       console.error("[EventBridge] Error setting up smelting events:", _err);
+    }
+  }
+
+  /**
+   * Setup quest system event listeners
+   *
+   * Forwards quest confirmation screen events to specific players
+   * so they can see the quest accept/decline UI.
+   *
+   * @private
+   */
+  private setupQuestEvents(): void {
+    try {
+      // Forward quest start confirmation to specific player
+      this.world.on(EventType.QUEST_START_CONFIRM, (payload: unknown) => {
+        const data = payload as {
+          playerId: string;
+          questId: string;
+          questName: string;
+          description: string;
+          difficulty: string;
+          requirements: {
+            quests: string[];
+            skills: Record<string, number>;
+            items: string[];
+          };
+          rewards: {
+            questPoints: number;
+            items: Array<{ itemId: string; quantity: number }>;
+            xp: Record<string, number>;
+          };
+        };
+
+        if (data.playerId) {
+          this.broadcast.sendToPlayer(data.playerId, "questStartConfirm", {
+            questId: data.questId,
+            questName: data.questName,
+            description: data.description,
+            difficulty: data.difficulty,
+            requirements: data.requirements,
+            rewards: data.rewards,
+          });
+        }
+      });
+
+      // Forward quest progress updates to specific player
+      this.world.on(EventType.QUEST_PROGRESSED, (payload: unknown) => {
+        const data = payload as {
+          playerId: string;
+          questId: string;
+          stage: string;
+          progress: Record<string, number>;
+          description: string;
+        };
+
+        if (data.playerId) {
+          this.broadcast.sendToPlayer(data.playerId, "questProgressed", {
+            questId: data.questId,
+            stage: data.stage,
+            progress: data.progress,
+            description: data.description,
+          });
+        }
+      });
+    } catch (_err) {
+      console.error("[EventBridge] Error setting up quest events:", _err);
     }
   }
 }

@@ -88,8 +88,11 @@ export interface InventoryItemAddedPayload {
 
 export interface NPCDiedPayload {
   mobId: string;
-  killerId: string;
-  loot: InventoryItem[];
+  mobType: string;
+  level: number;
+  killedBy: string;
+  position: { x: number; y: number; z: number };
+  loot?: InventoryItem[];
 }
 
 // Item System Event Payloads
@@ -944,6 +947,9 @@ export interface EventMap {
   [EventType.PROCESSING_SMITHING_REQUEST]: ProcessingSmithingRequestPayload;
 
   // Quest Events
+  [EventType.QUEST_START_CONFIRM]: QuestStartConfirmPayload;
+  [EventType.QUEST_START_ACCEPTED]: QuestStartAcceptedPayload;
+  [EventType.QUEST_START_DECLINED]: QuestStartDeclinedPayload;
   [EventType.QUEST_STARTED]: QuestStartedPayload;
   [EventType.QUEST_PROGRESSED]: QuestProgressedPayload;
   [EventType.QUEST_COMPLETED]: QuestCompletedPayload;
@@ -1009,6 +1015,43 @@ export interface QuestCompletedPayload {
     items: Array<{ itemId: string; quantity: number }>;
     xp: Record<string, number>;
   };
+}
+
+/**
+ * Quest start confirm payload - show quest accept screen
+ */
+export interface QuestStartConfirmPayload {
+  playerId: string;
+  questId: string;
+  questName: string;
+  description: string;
+  difficulty: string;
+  requirements: {
+    quests: string[];
+    skills: Record<string, number>;
+    items: string[];
+  };
+  rewards: {
+    questPoints: number;
+    items: Array<{ itemId: string; quantity: number }>;
+    xp: Record<string, number>;
+  };
+}
+
+/**
+ * Quest start accepted payload - player confirmed quest start
+ */
+export interface QuestStartAcceptedPayload {
+  playerId: string;
+  questId: string;
+}
+
+/**
+ * Quest start declined payload - player declined quest
+ */
+export interface QuestStartDeclinedPayload {
+  playerId: string;
+  questId: string;
 }
 
 // =========================================================================
