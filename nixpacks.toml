@@ -1,0 +1,37 @@
+# Nixpacks configuration for Railway deployment
+# This file configures how Railway builds the Hyperscape server
+
+[phases.setup]
+# Install system dependencies needed for native modules (canvas, better-sqlite3)
+aptPkgs = [
+  "python3",
+  "make",
+  "g++",
+  "pkg-config",
+  "libcairo2-dev",
+  "libpango1.0-dev",
+  "libjpeg-dev",
+  "libgif-dev",
+  "librsvg2-dev",
+  "ca-certificates"
+]
+
+[phases.install]
+# Use bun for package installation
+cmds = ["bun install --frozen-lockfile"]
+
+[phases.build]
+# Build the packages in correct order
+cmds = [
+  "bun run build:shared",
+  "bun run build:server"
+]
+
+[start]
+cmd = "bun dist/index.js"
+
+[variables]
+# Skip asset download in CI - assets are served from CDN
+CI = "true"
+SKIP_ASSETS = "true"
+NODE_ENV = "production"

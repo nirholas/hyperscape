@@ -54,8 +54,32 @@ Then re-run:
 `);
 }
 
+function isCI() {
+  // Check for common CI/deployment environment variables
+  return !!(
+    process.env.CI ||
+    process.env.RAILWAY_ENVIRONMENT ||
+    process.env.RAILWAY_SERVICE_ID ||
+    process.env.VERCEL ||
+    process.env.NETLIFY ||
+    process.env.GITHUB_ACTIONS ||
+    process.env.GITLAB_CI ||
+    process.env.CIRCLECI ||
+    process.env.DOCKER_BUILD ||
+    process.env.SKIP_ASSETS
+  );
+}
+
 async function main() {
   console.log("📦 Checking game assets...");
+
+  // Skip asset download in CI/production environments
+  // Assets should be pre-bundled or served from CDN in production
+  if (isCI()) {
+    console.log("⏭️  Skipping asset download (CI/production environment detected)");
+    console.log("   Assets are served from CDN in production");
+    return;
+  }
 
   if (hasContent(assetsDir)) {
     console.log("✅ Assets already present");
