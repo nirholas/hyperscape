@@ -325,6 +325,7 @@ export interface NPCDialogueNode {
   id: string; // Unique identifier for this node
   text: string; // NPC's dialogue text
   responses?: NPCDialogueResponse[]; // Player response options (if empty, dialogue ends)
+  effect?: string; // Effect to execute when this node is displayed (for terminal nodes)
 }
 
 /**

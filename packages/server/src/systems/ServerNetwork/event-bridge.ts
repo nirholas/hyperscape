@@ -1117,6 +1117,28 @@ export class EventBridge {
           });
         }
       });
+
+      // Forward quest completed event to specific player
+      this.world.on(EventType.QUEST_COMPLETED, (payload: unknown) => {
+        const data = payload as {
+          playerId: string;
+          questId: string;
+          questName: string;
+          rewards: {
+            questPoints: number;
+            items: Array<{ itemId: string; quantity: number }>;
+            xp: Record<string, number>;
+          };
+        };
+
+        if (data.playerId) {
+          this.broadcast.sendToPlayer(data.playerId, "questCompleted", {
+            questId: data.questId,
+            questName: data.questName,
+            rewards: data.rewards,
+          });
+        }
+      });
     } catch (_err) {
       console.error("[EventBridge] Error setting up quest events:", _err);
     }

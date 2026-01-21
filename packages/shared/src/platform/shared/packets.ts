@@ -249,6 +249,7 @@ const names = [
   'questStartConfirm',   // Server -> Client: show quest accept screen
   'questAccept',         // Client -> Server: player accepted quest
   'questProgressed',     // Server -> Client: quest progress updated
+  'questCompleted',      // Server -> Client: quest completed, show rewards
   // XP Lamp packets
   'xpLampUse',           // Client -> Server: use XP lamp on skill
 ]

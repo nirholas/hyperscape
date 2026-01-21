@@ -176,6 +176,19 @@ export class DialogueSystem extends SystemBase {
       true,
       npcEntityId,
     );
+
+    // Check if entry node is terminal (no responses)
+    if (!entryNode.responses || entryNode.responses.length === 0) {
+      // Execute effect if present on terminal entry node
+      if (entryNode.effect) {
+        this.logger.info(
+          `[DialogueSystem] Terminal entry node ${entryNode.id} has effect: ${entryNode.effect}`,
+        );
+        this.executeEffect(playerId, npcId, entryNode.effect, npcEntityId);
+      }
+      // End dialogue after displaying terminal node
+      this.endDialogue(playerId, npcId);
+    }
   }
 
   /**
@@ -249,6 +262,18 @@ export class DialogueSystem extends SystemBase {
 
     // Check if this node has responses
     if (!nextNode.responses || nextNode.responses.length === 0) {
+      // Terminal node - execute any effect on the node itself
+      // This allows nodes like "quest_complete" to have effects without responses
+      if (nextNode.effect) {
+        this.logger.info(
+          `[DialogueSystem] Terminal node ${nextNode.id} has effect: ${nextNode.effect}`,
+        );
+        this.executeEffect(playerId, npcId, nextNode.effect, state.npcEntityId);
+      } else {
+        this.logger.info(
+          `[DialogueSystem] Terminal node ${nextNode.id} has no effect`,
+        );
+      }
       // Send final node text then end dialogue
       this.sendDialogueNode(playerId, npcId, state.npcName, nextNode, false);
       // Auto-end after a brief moment (client will handle timing)
@@ -367,6 +392,9 @@ export class DialogueSystem extends SystemBase {
 
       case "completeQuest": {
         const questIdToComplete = params[0];
+        this.logger.info(
+          `[DialogueSystem] completeQuest effect called for quest: ${questIdToComplete}`,
+        );
         if (!questIdToComplete) {
           this.logger.warn("completeQuest effect missing quest ID");
           break;
@@ -379,8 +407,16 @@ export class DialogueSystem extends SystemBase {
           ) => Promise<boolean>;
         };
         if (questSystemForComplete?.completeQuest) {
+          this.logger.info(
+            `[DialogueSystem] Calling QuestSystem.completeQuest for ${questIdToComplete}`,
+          );
           questSystemForComplete
             .completeQuest(playerId, questIdToComplete)
+            .then((success) => {
+              this.logger.info(
+                `[DialogueSystem] completeQuest returned: ${success}`,
+              );
+            })
             .catch((err) => {
               this.logger.error(
                 `Failed to complete quest ${questIdToComplete}:`,

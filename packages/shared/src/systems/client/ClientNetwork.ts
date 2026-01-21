@@ -2008,6 +2008,20 @@ export class ClientNetwork extends SystemBase {
     this.world.emit(EventType.QUEST_PROGRESSED, { ...data, playerId });
   };
 
+  onQuestCompleted = (data: {
+    questId: string;
+    questName: string;
+    rewards: {
+      questPoints: number;
+      items: Array<{ itemId: string; quantity: number }>;
+      xp: Record<string, number>;
+    };
+  }) => {
+    // Emit QUEST_COMPLETED event for Sidebar to show completion screen
+    const playerId = this.world?.entities?.player?.id || "";
+    this.world.emit(EventType.QUEST_COMPLETED, { ...data, playerId });
+  };
+
   // Convenience methods
   requestCharacterCreate(name: string) {
     this.send("characterCreate", { name });

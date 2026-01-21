@@ -521,10 +521,16 @@ export class QuestSystem extends SystemBase {
 
     // Grant reward items
     if (definition.rewards.items.length > 0) {
+      this.logger.info(
+        `[QuestSystem] Granting ${definition.rewards.items.length} reward items to ${playerId}`,
+      );
       await this.grantItems(playerId, definition.rewards.items);
     }
 
     // Emit quest completed event (SkillsSystem will handle XP rewards)
+    this.logger.info(
+      `[QuestSystem] Emitting QUEST_COMPLETED for ${playerId}, quest ${questId}`,
+    );
     this.emitTypedEvent(EventType.QUEST_COMPLETED, {
       playerId,
       questId,
