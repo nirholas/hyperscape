@@ -113,13 +113,47 @@ export class DialogueSystem extends SystemBase {
     dialogueTree: NPCDialogueTree,
     npcEntityId?: string,
   ): void {
+    // Determine entry node ID, considering quest overrides
+    let entryNodeId = dialogueTree.entryNodeId;
+
+    // Check for quest-based entry node overrides
+    if (dialogueTree.questOverrides) {
+      const questSystem = this.world.getSystem("quest") as {
+        getQuestStatus?: (
+          playerId: string,
+          questId: string,
+        ) => "not_started" | "in_progress" | "ready_to_complete" | "completed";
+      };
+
+      if (questSystem?.getQuestStatus) {
+        // Check each quest's status and use override if available
+        for (const [questId, overrides] of Object.entries(
+          dialogueTree.questOverrides,
+        )) {
+          const status = questSystem.getQuestStatus(playerId, questId);
+
+          // Priority: ready_to_complete > in_progress > completed > default
+          if (status === "ready_to_complete" && overrides.ready_to_complete) {
+            entryNodeId = overrides.ready_to_complete;
+            break; // Use first matching quest override
+          } else if (status === "in_progress" && overrides.in_progress) {
+            entryNodeId = overrides.in_progress;
+            break;
+          } else if (status === "completed" && overrides.completed) {
+            entryNodeId = overrides.completed;
+            break;
+          }
+        }
+      }
+    }
+
     // Find entry node
     const entryNode = dialogueTree.nodes.find(
-      (node) => node.id === dialogueTree.entryNodeId,
+      (node) => node.id === entryNodeId,
     );
     if (!entryNode) {
       this.logger.error(
-        `Dialogue tree for ${npcId} has invalid entryNodeId: ${dialogueTree.entryNodeId}`,
+        `Dialogue tree for ${npcId} has invalid entryNodeId: ${entryNodeId}`,
       );
       return;
     }

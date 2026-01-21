@@ -328,10 +328,25 @@ export interface NPCDialogueNode {
 }
 
 /**
+ * Quest-based dialogue overrides for NPCs
+ * Allows different entry nodes based on player's quest status
+ */
+export interface NPCDialogueQuestOverrides {
+  /** Entry node when quest is in progress but objective incomplete */
+  in_progress?: string;
+  /** Entry node when quest is in progress AND objective complete */
+  ready_to_complete?: string;
+  /** Entry node after quest is completed */
+  completed?: string;
+}
+
+/**
  * NPC Dialogue Tree - Full conversation tree for an NPC
  */
 export interface NPCDialogueTree {
   entryNodeId: string; // Starting node ID
+  /** Quest-specific entry node overrides, keyed by quest ID */
+  questOverrides?: Record<string, NPCDialogueQuestOverrides>;
   nodes: NPCDialogueNode[]; // All dialogue nodes
 }
 
