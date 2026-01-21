@@ -258,6 +258,9 @@ export const characters = pgTable(
 
     // Bank settings
     alwaysSetPlaceholder: integer("alwaysSetPlaceholder").default(0).notNull(), // SQLite: 0=false, 1=true
+
+    // Quest progression
+    questPoints: integer("questPoints").default(0).notNull(),
   },
   (table) => ({
     accountIdx: index("idx_characters_account").on(table.accountId),
@@ -695,6 +698,48 @@ export const npcKills = pgTable(
   (table) => ({
     uniquePlayerNpc: unique().on(table.playerId, table.npcId),
     playerIdx: index("idx_npc_kills_player").on(table.playerId),
+  }),
+);
+
+/**
+ * Quest Progress Table - Player quest state tracking
+ *
+ * Tracks quest progress for each player. Each row represents a player's
+ * progress on a specific quest.
+ *
+ * Key columns:
+ * - `playerId` - References characters.id (CASCADE DELETE)
+ * - `questId` - Quest identifier from quests.json manifest
+ * - `status` - "not_started" | "in_progress" | "completed"
+ * - `currentStage` - Current stage ID within the quest
+ * - `stageProgress` - JSON object tracking stage-specific progress (e.g., {"kills": 7})
+ * - `startedAt` - Unix timestamp when quest was started
+ * - `completedAt` - Unix timestamp when quest was completed
+ *
+ * Note: "ready_to_complete" is a derived state computed by QuestSystem when
+ * status is "in_progress" AND the current stage objective is met.
+ */
+export const questProgress = pgTable(
+  "quest_progress",
+  {
+    id: serial("id").primaryKey(),
+    playerId: text("playerId")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    questId: text("questId").notNull(),
+    status: text("status").default("not_started").notNull(),
+    currentStage: text("currentStage"),
+    stageProgress: jsonb("stageProgress").default({}),
+    startedAt: bigint("startedAt", { mode: "number" }),
+    completedAt: bigint("completedAt", { mode: "number" }),
+  },
+  (table) => ({
+    uniquePlayerQuest: unique().on(table.playerId, table.questId),
+    playerIdx: index("idx_quest_progress_player").on(table.playerId),
+    statusIdx: index("idx_quest_progress_status").on(
+      table.playerId,
+      table.status,
+    ),
   }),
 );
 
