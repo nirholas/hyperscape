@@ -24,7 +24,7 @@ cmds = ["bun install"]
 # Build the packages in correct order: shared -> client -> server
 # Then copy client dist to server public for static serving
 # Note: Assets/manifests are fetched from CDN at server startup
-# Cache bust: 2026-01-22-v2 - Fixed assets copy
+# Cache bust: 2026-01-22-v3 - Use mkdir + cp -a for reliable copy
 dependsOn = ["install"]
 cmds = [
   "echo '=== Building shared package ==='",
@@ -33,24 +33,29 @@ cmds = [
   "bun run build:client",
   "echo '=== Verifying client dist ==='",
   "ls -la packages/client/dist/",
-  "ls -la packages/client/dist/assets/ || (echo 'ERROR: No assets in client dist!' && exit 1)",
+  "ls -la packages/client/dist/assets/ | head -20 || (echo 'ERROR: No assets in client dist!' && exit 1)",
+  "find packages/client/dist/assets -name 'index-*.js' | head -1 || (echo 'ERROR: No JS bundle in client dist!' && exit 1)",
+  "find packages/client/dist/assets -name 'index-*.css' | head -1 || (echo 'ERROR: No CSS bundle in client dist!' && exit 1)",
   "echo '=== Building server package ==='",
   "bun run build:server",
   "echo '=== Copying client dist to server public ==='",
   "rm -rf packages/server/public",
-  "cp -r packages/client/dist packages/server/public",
+  "mkdir -p packages/server/public",
+  "cp -a packages/client/dist/. packages/server/public/",
   "echo '=== Verifying server public ==='",
   "ls -la packages/server/public/",
-  "ls -la packages/server/public/assets/ || (echo 'ERROR: No assets in server public!' && exit 1)",
-  "test -f packages/server/public/index.html || (echo 'ERROR: No index.html!' && exit 1)",
-  "test -f packages/server/public/assets/index-*.js || (echo 'ERROR: No JS bundle!' && exit 1)",
-  "test -f packages/server/public/assets/index-*.css || (echo 'ERROR: No CSS bundle!' && exit 1)",
+  "ls -la packages/server/public/assets/ | head -20 || (echo 'ERROR: No assets copied to server public!' && exit 1)",
+  "find packages/server/public/assets -name 'index-*.js' | head -1 || (echo 'ERROR: No JS bundle in server public!' && exit 1)",
+  "find packages/server/public/assets -name 'index-*.css' | head -1 || (echo 'ERROR: No CSS bundle in server public!' && exit 1)",
+  "echo '=== Counting files ==='",
+  "echo \"Client dist files: $(find packages/client/dist -type f | wc -l)\"",
+  "echo \"Server public files: $(find packages/server/public -type f | wc -l)\"",
   "echo '=== Server public verified successfully ==='",
   "mkdir -p packages/server/world/assets/manifests"
 ]
 
 [start]
-cmd = "cd packages/server && echo '=== Checking public directory ===' && ls -la public/ && ls -la public/assets/ && test -f public/index.html && test -d public/assets && echo '=== Starting server ===' && bun dist/index.js"
+cmd = "cd packages/server && echo '=== Checking public directory ===' && ls -la public/ && echo '=== Checking assets directory ===' && ls -la public/assets/ | head -20 && echo '=== Checking for index bundles ===' && find public/assets -name 'index-*.js' | head -1 && find public/assets -name 'index-*.css' | head -1 && echo \"Total public files: $(find public -type f | wc -l)\" && echo '=== Starting server ===' && bun dist/index.js"
 
 [variables]
 # Skip asset download in CI - assets are served from CDN

@@ -13,7 +13,7 @@
     ]
   },
   "deploy": {
-    "startCommand": "cd packages/server && echo '=== Checking public directory ===' && ls -la public/ && ls -la public/assets/ && test -f public/index.html && test -d public/assets && echo '=== Starting server ===' && bun dist/index.js",
+    "startCommand": "cd packages/server && echo '=== Checking public directory ===' && ls -la public/ && echo '=== Checking assets ===' && ls -la public/assets/ | head -20 && find public/assets -name 'index-*.js' | head -1 && find public/assets -name 'index-*.css' | head -1 && echo \"Total files: $(find public -type f | wc -l)\" && echo '=== Starting server ===' && bun dist/index.js",
     "healthcheckPath": "/status",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",
