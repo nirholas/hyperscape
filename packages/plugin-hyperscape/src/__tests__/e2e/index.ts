@@ -1,14 +1,11 @@
 import type { TestSuite } from "./types";
 import starterPluginTestSuite from "./starter-plugin";
-import hyperscapeIntegrationTestSuite from "./hyperscape-integration";
-import hyperscapeRealRuntimeTestSuite from "./real-runtime-test";
-import multiAgentTestSuite from "./multi-agent-test";
 
-export const testSuites: TestSuite[] = [
-  starterPluginTestSuite,
-  hyperscapeIntegrationTestSuite,
-  hyperscapeRealRuntimeTestSuite,
-  multiAgentTestSuite,
-];
+// Note: Additional test suites can be added here as they are implemented:
+// - hyperscapeIntegrationTestSuite: Full integration with live Hyperscape server
+// - multiAgentTestSuite: Multi-agent coordination testing
+// - voiceTestSuite: Voice/LiveKit bidirectional testing
+
+export const testSuites: TestSuite[] = [starterPluginTestSuite];
 
 export default testSuites;

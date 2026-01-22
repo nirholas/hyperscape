@@ -12,7 +12,7 @@
  * @see https://oldschool.runescape.wiki/w/Cooking/Burn_level
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import {
   calculateBurnChance,
   getStopBurnLevel,
@@ -25,8 +25,18 @@ import {
   getValidRawFoodIds,
   rollBurn,
 } from "../CookingCalculator";
+import { dataManager } from "../../../../../data/DataManager";
+import { ProcessingDataProvider } from "../../../../../data/ProcessingDataProvider";
 
 describe("CookingCalculator", () => {
+  beforeAll(async () => {
+    // Initialize DataManager to load recipe manifests before tests
+    if (!dataManager.isReady()) {
+      await dataManager.initialize();
+    }
+    // Force rebuild ProcessingDataProvider to use loaded manifests
+    ProcessingDataProvider.getInstance().rebuild();
+  });
   describe("getStopBurnLevel", () => {
     it("returns correct fire stop-burn level for shrimp", () => {
       expect(getStopBurnLevel("raw_shrimp", "fire")).toBe(34);

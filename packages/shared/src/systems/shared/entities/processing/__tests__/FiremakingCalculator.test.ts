@@ -22,6 +22,7 @@ import {
 } from "../FiremakingCalculator";
 import { PROCESSING_CONSTANTS } from "../../../../../constants/ProcessingConstants";
 import { dataManager } from "../../../../../data/DataManager";
+import { ProcessingDataProvider } from "../../../../../data/ProcessingDataProvider";
 
 describe("FiremakingCalculator", () => {
   beforeAll(async () => {
@@ -29,6 +30,8 @@ describe("FiremakingCalculator", () => {
     if (!dataManager.isReady()) {
       await dataManager.initialize();
     }
+    // Force rebuild ProcessingDataProvider to use loaded manifests
+    ProcessingDataProvider.getInstance().rebuild();
   });
   describe("calculateFiremakingSuccess", () => {
     it("returns ~25.4% at level 1 (65/256)", () => {

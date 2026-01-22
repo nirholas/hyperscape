@@ -21,9 +21,11 @@ describe("LootTableService", () => {
   // Load NPC data before tests (required for loot tables)
   beforeAll(async () => {
     try {
-      await dataManager.loadNPCs();
+      if (!dataManager.isReady()) {
+        await dataManager.initialize();
+      }
     } catch {
-      // NPCs may already be loaded or unavailable in test environment
+      // Data may be unavailable in test environment
     }
   });
 
