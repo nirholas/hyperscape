@@ -166,9 +166,23 @@ async function registerIndexHtmlRoute(
 
   // Check if index.html exists before registering routes
   if (!(await fs.pathExists(indexHtmlPath))) {
+    // Get additional debug info
+    const publicDir = path.dirname(indexHtmlPath);
+    let publicDirContents: string[] = [];
+    try {
+      publicDirContents = await fs.readdir(publicDir);
+    } catch {
+      publicDirContents = ["ERROR: Could not read directory"];
+    }
+
     console.log(
       `[HTTP] ⚠️  No index.html found at ${indexHtmlPath}, registering fallback routes`,
     );
+    console.log(
+      `[HTTP] ⚠️  Public dir contents: ${JSON.stringify(publicDirContents)}`,
+    );
+    console.log(`[HTTP] ⚠️  config.__dirname: ${config.__dirname}`);
+    console.log(`[HTTP] ⚠️  process.cwd(): ${process.cwd()}`);
 
     // Register fallback routes that return a helpful message
     const fallbackHandler = async (
@@ -180,6 +194,9 @@ async function registerIndexHtmlRoute(
         message:
           "The client application has not been built or deployed. Please ensure the client is built and copied to the server's public directory.",
         expectedPath: indexHtmlPath,
+        configDirname: config.__dirname,
+        cwd: process.cwd(),
+        publicDirContents,
       });
     };
 
