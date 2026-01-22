@@ -96,10 +96,5 @@ eliza/
 
 # Server world assets - ignore large binaries, keep manifests
 # The manifests/ directory contains essential JSON data and MUST be tracked
-packages/server/world/assets/models/
-packages/server/world/assets/textures/
-packages/server/world/assets/audio/
-# Ensure manifests are tracked (negate ignore)
-!packages/server/world/assets/manifests/
-!packages/server/world/assets/manifests/**
+packages/server/world/assets/
 .wrangler/
