@@ -110,8 +110,8 @@ export default defineConfig(({ mode }) => {
       outDir: path.resolve(__dirname, "dist"),
       emptyOutDir: true,
       target: "esnext", // Support top-level await
-      minify: false, // Disable minification for debugging
-      sourcemap: true, // Enable source maps for better debugging
+      minify: mode === "production" ? "esbuild" : false, // Enable minification in production
+      sourcemap: mode !== "production", // Disable source maps in production to save memory
       rollupOptions: {
         input: path.resolve(__dirname, "src/index.html"),
         external: ["fs", "fs-extra", "path", "node:fs", "node:path"],
@@ -123,6 +123,12 @@ export default defineConfig(({ mode }) => {
             path: "{}",
             "node:fs": "{}",
             "node:path": "{}",
+          },
+          // Manual chunk splitting to reduce memory pressure during build
+          manualChunks: {
+            "vendor-react": ["react", "react-dom"],
+            "vendor-three": ["three"],
+            "vendor-ui": ["styled-components", "lucide-react"],
           },
         },
         onwarn(warning, warn) {

@@ -12,10 +12,24 @@ pages_build_output_dir = "dist"
 [env.production]
 vars = { }
 
-# Environment variables are set in Cloudflare Pages dashboard:
-# Settings → Environment variables → Production
+# ============================================================
+# CLOUDFLARE PAGES BUILD CONFIGURATION
+# ============================================================
+# Configure in Dashboard: Settings → Builds & deployments
 #
-# Required:
+# Build command:     npm run build:cf
+# Build output dir:  packages/client/dist
+# Root directory:    packages/client
+#
+# ============================================================
+# REQUIRED ENVIRONMENT VARIABLES
+# ============================================================
+# Set in Dashboard: Settings → Environment variables → Production
+#
+# Build Configuration (REQUIRED - prevents heap out of memory):
+#   NODE_OPTIONS            - --max-old-space-size=4096
+#
+# App Configuration:
 #   PUBLIC_PRIVY_APP_ID     - cmgk4zu56005kjj0bcaae0rei
 #   PUBLIC_API_URL          - https://hyperscape-production.up.railway.app
 #   PUBLIC_WS_URL           - wss://hyperscape-production.up.railway.app/ws

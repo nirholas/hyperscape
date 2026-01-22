@@ -19,7 +19,8 @@
   ],
   "scripts": {
     "dev": "vite --host --port 3333",
-    "build": "cd ../.. && turbo run build --filter=@hyperscape/shared && cd packages/client && vite build",
+    "build": "cd ../.. && turbo run build --filter=@hyperscape/shared && cd packages/client && NODE_OPTIONS='--max-old-space-size=4096' vite build",
+    "build:cf": "NODE_OPTIONS='--max-old-space-size=4096' vite build",
     "preview": "vite preview",
     "lint": "eslint src --max-warnings 22100",
     "typecheck": "tsc --noEmit",
