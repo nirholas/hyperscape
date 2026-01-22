@@ -160,7 +160,13 @@ export class ProcessingSystem extends SystemBase {
     );
     this.subscribe(
       EventType.PROCESSING_COOKING_REQUEST,
-      (data: { playerId: string; fishSlot: number; fireId: string }) => {
+      (data: {
+        playerId: string;
+        fishSlot: number;
+        fireId?: string;
+        rangeId?: string;
+        sourceType?: "fire" | "range";
+      }) => {
         this.startCooking(data);
       },
     );
@@ -588,10 +594,25 @@ export class ProcessingSystem extends SystemBase {
   private startCooking(data: {
     playerId: string;
     fishSlot: number;
-    fireId: string;
+    fireId?: string;
+    rangeId?: string;
+    sourceType?: "fire" | "range";
   }): void {
-    const { playerId, fireId } = data;
+    const { playerId, fireId, rangeId, sourceType } = data;
     let { fishSlot } = data;
+
+    // Determine cooking source ID
+    const cookingSourceId = rangeId || fireId;
+    const isRange = sourceType === "range" || !!rangeId;
+
+    if (!cookingSourceId) {
+      this.emitTypedEvent(EventType.UI_MESSAGE, {
+        playerId,
+        message: "No cooking source specified.",
+        type: "error",
+      });
+      return;
+    }
 
     // Handle fishSlot=-1: find first cookable item slot automatically
     if (fishSlot === -1) {
@@ -610,7 +631,8 @@ export class ProcessingSystem extends SystemBase {
       console.log("[ProcessingSystem] 🍳 startCooking called:", {
         playerId,
         fishSlot,
-        fireId,
+        sourceId: cookingSourceId,
+        isRange,
       });
     }
 
@@ -624,30 +646,41 @@ export class ProcessingSystem extends SystemBase {
       return;
     }
 
-    // Check if fire exists and is active
-    const fire = this.activeFires.get(fireId);
-    if (!fire || !fire.isActive) {
-      this.emitTypedEvent(EventType.UI_MESSAGE, {
-        playerId,
-        message: "That fire is no longer lit.",
-        type: "error",
-      });
-      return;
+    // For ranges, they're permanent and always active
+    // For fires, check if fire exists and is active
+    if (!isRange) {
+      const fire = this.activeFires.get(cookingSourceId);
+      if (!fire || !fire.isActive) {
+        this.emitTypedEvent(EventType.UI_MESSAGE, {
+          playerId,
+          message: "That fire is no longer lit.",
+          type: "error",
+        });
+        return;
+      }
     }
 
     // Start the cooking process directly
-    this.startCookingProcess(playerId, fishSlot, fireId, true);
+    this.startCookingProcess(
+      playerId,
+      fishSlot,
+      cookingSourceId,
+      true,
+      isRange,
+    );
   }
 
   /**
    * Start cooking a single item.
    * @param isFirstCook - If true, show "You begin cooking" message. If false, cooking silently continues.
+   * @param isRange - If true, cooking on a permanent range (always active).
    */
   private startCookingProcess(
     playerId: string,
     fishSlot: number,
-    fireId: string,
+    sourceId: string,
     isFirstCook: boolean = false,
+    isRange: boolean = false,
   ): void {
     // Get the actual item ID from inventory
     const inventory = this.world.getInventory?.(playerId);
@@ -704,11 +737,14 @@ export class ProcessingSystem extends SystemBase {
     processingAction.playerId = playerId;
     processingAction.actionType = "cooking";
     processingAction.primaryItem = { id: rawItemId, slot: fishSlot };
-    processingAction.targetFire = fireId;
+    processingAction.targetFire = sourceId;
     processingAction.startTime = Date.now();
     processingAction.duration = this.COOKING_TIME;
     processingAction.xpReward = cookingData.xp;
     processingAction.skillRequired = "cooking";
+    // Store whether this is a range (always active) vs fire (can go out)
+    (processingAction as ProcessingAction & { isRange?: boolean }).isRange =
+      isRange;
 
     this.activeProcessing.set(playerId, processingAction);
 
@@ -753,22 +789,27 @@ export class ProcessingSystem extends SystemBase {
       return;
     }
 
-    // Store fireId before any early returns (needed for auto-cook)
-    const fireId = action.targetFire;
+    // Store sourceId and isRange before any early returns (needed for auto-cook)
+    const sourceId = action.targetFire;
+    const isRange =
+      (action as ProcessingAction & { isRange?: boolean }).isRange ?? false;
 
-    // Check if fire still exists
-    const fire = this.activeFires.get(fireId);
-    if (!fire || !fire.isActive) {
-      this.emitTypedEvent(EventType.UI_MESSAGE, {
-        playerId,
-        message: "The fire goes out.",
-        type: "error",
-      });
-      // Reset emote when fire goes out
-      this.resetPlayerEmote(playerId);
-      // Release action back to pool
-      this.releaseAction(action);
-      return;
+    // Check if cooking source still exists
+    // Ranges are always active, fires can go out
+    if (!isRange) {
+      const fire = this.activeFires.get(sourceId);
+      if (!fire || !fire.isActive) {
+        this.emitTypedEvent(EventType.UI_MESSAGE, {
+          playerId,
+          message: "The fire goes out.",
+          type: "error",
+        });
+        // Reset emote when fire goes out
+        this.resetPlayerEmote(playerId);
+        // Release action back to pool
+        this.releaseAction(action);
+        return;
+      }
     }
 
     // Complete this cook
@@ -778,20 +819,28 @@ export class ProcessingSystem extends SystemBase {
     this.releaseAction(action);
 
     // OSRS Auto-cooking: Check if player has more cookable items and continue
-    this.tryAutoCookNext(playerId, fireId);
+    this.tryAutoCookNext(playerId, sourceId, isRange);
   }
 
   /**
    * Check if player has more cookable items and automatically continue cooking.
    * This implements OSRS-style auto-cooking where you cook all items until done.
+   * @param isRange - If true, cooking on a permanent range (always active).
    */
-  private tryAutoCookNext(playerId: string, fireId: string): void {
-    // Check if fire still active
-    const fire = this.activeFires.get(fireId);
-    if (!fire || !fire.isActive) {
-      // Reset emote when fire goes out
-      this.resetPlayerEmote(playerId);
-      return; // Fire went out, stop cooking
+  private tryAutoCookNext(
+    playerId: string,
+    sourceId: string,
+    isRange: boolean = false,
+  ): void {
+    // Check if cooking source still active
+    // Ranges are always active, fires can go out
+    if (!isRange) {
+      const fire = this.activeFires.get(sourceId);
+      if (!fire || !fire.isActive) {
+        // Reset emote when fire goes out
+        this.resetPlayerEmote(playerId);
+        return; // Fire went out, stop cooking
+      }
     }
 
     // Check if player has more cookable items
@@ -803,7 +852,7 @@ export class ProcessingSystem extends SystemBase {
     }
 
     // Continue cooking the next one (not first cook, so no message)
-    this.startCookingProcess(playerId, nextSlot, fireId, false);
+    this.startCookingProcess(playerId, nextSlot, sourceId, false, isRange);
   }
 
   /**
@@ -931,9 +980,12 @@ export class ProcessingSystem extends SystemBase {
       type: messageType,
     });
 
-    // Emit cooking completion event for test system observability
+    // Emit cooking completion event for quest tracking and observability
     this.emitTypedEvent(EventType.COOKING_COMPLETED, {
       playerId: playerId,
+      resultItemId: resultItemId,
+      wasBurnt: didBurn,
+      // Legacy fields for backwards compatibility
       result: didBurn ? "burnt" : "cooked",
       itemCreated: resultItemId,
       xpGained: didBurn ? 0 : cookingData.xp,

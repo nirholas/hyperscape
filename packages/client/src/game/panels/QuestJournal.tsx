@@ -329,49 +329,27 @@ function QuestDetailView({ quest }: { quest: QuestDetail }) {
     return "future";
   };
 
-  // Helper to format target IDs for display (e.g., "bronze_bar" -> "Bronze Bar")
-  const formatTarget = (target?: string): string => {
-    if (!target) return "Items";
-    return target
-      .split("_")
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(" ");
-  };
+  // Get progress text for a specific stage (inline display)
+  const getStageProgress = (stage: QuestDetail["stages"][0]): string | null => {
+    if (!stage.count) return null;
 
-  // Get progress text for current stage
-  const getProgressText = (): string | null => {
-    const currentStage = quest.stages.find((s) => s.id === quest.currentStage);
-    if (!currentStage) return null;
-
-    if (currentStage.type === "kill" && currentStage.count) {
+    if (stage.type === "kill" && stage.target) {
       const kills = quest.stageProgress.kills || 0;
-      return `${formatTarget(currentStage.target)} killed: ${kills}/${currentStage.count}`;
+      return `(${kills}/${stage.count})`;
     }
 
-    if (
-      currentStage.type === "gather" &&
-      currentStage.count &&
-      currentStage.target
-    ) {
-      // Progress is tracked by item ID (e.g., copper_ore, tin_ore)
-      const gathered = quest.stageProgress[currentStage.target] || 0;
-      return `${formatTarget(currentStage.target)} gathered: ${gathered}/${currentStage.count}`;
+    if (stage.type === "gather" && stage.target) {
+      const gathered = quest.stageProgress[stage.target] || 0;
+      return `(${gathered}/${stage.count})`;
     }
 
-    if (
-      currentStage.type === "interact" &&
-      currentStage.count &&
-      currentStage.target
-    ) {
-      // Progress is tracked by target ID (e.g., fire, bronze_bar)
-      const interacted = quest.stageProgress[currentStage.target] || 0;
-      return `${formatTarget(currentStage.target)} created: ${interacted}/${currentStage.count}`;
+    if (stage.type === "interact" && stage.target) {
+      const interacted = quest.stageProgress[stage.target] || 0;
+      return `(${interacted}/${stage.count})`;
     }
 
     return null;
   };
-
-  const progressText = getProgressText();
 
   return (
     <div className="space-y-4">
@@ -422,10 +400,14 @@ function QuestDetailView({ quest }: { quest: QuestDetail }) {
         </h4>
         {quest.stages.map((stage, index) => {
           const status = getStageStatus(index);
+          const progress = getStageProgress(stage);
+          const showProgress =
+            progress && status !== "completed" && quest.status !== "completed";
+
           return (
             <div
               key={stage.id}
-              className="text-sm"
+              className="text-sm flex justify-between items-center"
               style={{
                 color:
                   status === "completed"
@@ -437,24 +419,16 @@ function QuestDetailView({ quest }: { quest: QuestDetail }) {
                   status === "completed" ? "line-through" : "none",
               }}
             >
-              • {stage.description}
+              <span>• {stage.description}</span>
+              {showProgress && (
+                <span style={{ color: "#c9a227", marginLeft: "0.5rem" }}>
+                  {progress}
+                </span>
+              )}
             </div>
           );
         })}
       </div>
-
-      {/* Progress Counter */}
-      {progressText && quest.status !== "completed" && (
-        <div
-          className="text-center py-2 rounded"
-          style={{
-            backgroundColor: "rgba(201, 162, 39, 0.1)",
-            color: "#c9a227",
-          }}
-        >
-          {progressText}
-        </div>
-      )}
     </div>
   );
 }

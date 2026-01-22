@@ -25,6 +25,10 @@ import {
   AltarEntity,
   type AltarEntityConfig,
 } from "../../../entities/world/AltarEntity";
+import {
+  RangeEntity,
+  type RangeEntityConfig,
+} from "../../../entities/world/RangeEntity";
 import { MobEntity } from "../../../entities/npc/MobEntity";
 import { NPCEntity } from "../../../entities/npc/NPCEntity";
 import { ResourceEntity } from "../../../entities/world/ResourceEntity";
@@ -383,6 +387,33 @@ export class EntityManager extends SystemBase {
     } catch (err) {
       console.error("[EntityManager] Error spawning altar:", err);
     }
+
+    // Spawn cooking range near fisherman NPC (at -15, -15)
+    let rangeY = 40;
+    if (terrain?.getHeightAt) {
+      const height = terrain.getHeightAt(-17, -13);
+      if (height !== null && height !== undefined && Number.isFinite(height)) {
+        rangeY = (height as number) + 0.1;
+      }
+    }
+
+    const rangeConfig: RangeEntityConfig = {
+      id: "range_spawn_1",
+      name: "Cooking Range",
+      position: { x: -17, y: rangeY, z: -13 },
+    };
+
+    try {
+      await this.spawnEntity({
+        ...rangeConfig,
+        type: EntityType.RANGE,
+      } as unknown as EntityConfig);
+      console.log(
+        `[EntityManager] Spawned cooking range at (-17, ${rangeY}, -13)`,
+      );
+    } catch (err) {
+      console.error("[EntityManager] Error spawning cooking range:", err);
+    }
   }
 
   update(deltaTime: number): void {
@@ -490,6 +521,10 @@ export class EntityManager extends SystemBase {
       case EntityType.ALTAR:
       case "altar":
         entity = new AltarEntity(this.world, config as AltarEntityConfig);
+        break;
+      case EntityType.RANGE:
+      case "range":
+        entity = new RangeEntity(this.world, config as RangeEntityConfig);
         break;
       default:
         throw new Error(`[EntityManager] Unknown entity type: ${config.type}`);

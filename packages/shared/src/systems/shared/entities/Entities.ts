@@ -88,6 +88,10 @@ import {
   AltarEntity,
   type AltarEntityConfig,
 } from "../../../entities/world/AltarEntity";
+import {
+  RangeEntity,
+  type RangeEntityConfig,
+} from "../../../entities/world/RangeEntity";
 import type {
   MobEntityConfig,
   NPCEntityConfig,
@@ -913,6 +917,36 @@ export class Entities extends SystemBase implements IEntities {
       };
 
       const entity = new AltarEntity(this.world, altarConfig);
+      this.items.set(entity.id, entity);
+
+      // Initialize entity if it has an init method
+      if (entity.init) {
+        (entity.init() as Promise<void>)?.catch((err) =>
+          this.logger.error(`Entity ${entity.id} async init failed`, err),
+        );
+      }
+
+      return entity;
+    } else if (data.type === "range") {
+      // Build RangeEntity from network data
+      const positionArray = (data.position || [-17, 40, -13]) as [
+        number,
+        number,
+        number,
+      ];
+      const name = data.name || "Cooking Range";
+
+      const rangeConfig: RangeEntityConfig = {
+        id: data.id,
+        name: name,
+        position: {
+          x: positionArray[0],
+          y: positionArray[1],
+          z: positionArray[2],
+        },
+      };
+
+      const entity = new RangeEntity(this.world, rangeConfig);
       this.items.set(entity.id, entity);
 
       // Initialize entity if it has an init method

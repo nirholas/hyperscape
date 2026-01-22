@@ -177,54 +177,26 @@ export class RangeEntity extends InteractableEntity {
       return;
     }
 
-    // Create range visual (brown/gray stove-like box)
-    const group = new THREE.Group();
-    group.name = `Range_${this.id}`;
-
-    // Main body
-    const bodyGeometry = new THREE.BoxGeometry(0.9, 0.8, 0.9);
-    const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: 0x4a3728, // Dark brown
-      roughness: 0.8,
-      metalness: 0.2,
+    // Create a red box for the range (placeholder, 1 tile size)
+    const boxHeight = 0.8;
+    const geometry = new THREE.BoxGeometry(0.9, boxHeight, 0.9);
+    // Use MeshBasicMaterial so color shows regardless of lighting
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xcc3333, // Red (placeholder)
     });
-    const bodyMesh = new THREE.Mesh(bodyGeometry, bodyMaterial);
-    bodyMesh.name = "RangeBody";
-    bodyMesh.position.y = 0.4;
-    bodyMesh.castShadow = true;
-    bodyMesh.receiveShadow = true;
-    group.add(bodyMesh);
 
-    // Top surface (darker, like cast iron)
-    const topGeometry = new THREE.BoxGeometry(0.95, 0.05, 0.95);
-    const topMaterial = new THREE.MeshStandardMaterial({
-      color: 0x222222, // Dark gray
-      roughness: 0.5,
-      metalness: 0.6,
-    });
-    const topMesh = new THREE.Mesh(topGeometry, topMaterial);
-    topMesh.name = "RangeTop";
-    topMesh.position.y = 0.825;
-    topMesh.castShadow = true;
-    group.add(topMesh);
-
-    // Add a subtle glow to indicate it's usable
-    const glowGeometry = new THREE.BoxGeometry(0.3, 0.02, 0.3);
-    const glowMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff4400,
-      transparent: true,
-      opacity: 0.3,
-    });
-    const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
-    glowMesh.name = "RangeGlow";
-    glowMesh.position.y = 0.86;
-    group.add(glowMesh);
-
-    // Store mesh
-    this.mesh = group;
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = `Range_${this.id}`;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    // Offset mesh up so it sits on the ground (BoxGeometry is centered at origin)
+    mesh.position.y = boxHeight / 2;
+    // Set layer for raycasting (required for interaction detection)
+    mesh.layers.set(1);
+    this.mesh = mesh;
 
     // Set up userData for interaction detection
-    group.userData = {
+    mesh.userData = {
       type: "range",
       entityId: this.id,
       name: this.displayName,
@@ -232,13 +204,11 @@ export class RangeEntity extends InteractableEntity {
       burnReduction: this.burnReduction,
     };
 
-    // Also set on child meshes for raycast detection
-    bodyMesh.userData = { ...group.userData };
-    topMesh.userData = { ...group.userData };
+    // Add mesh to the entity's node
+    if (this.mesh && this.node) {
+      this.node.add(this.mesh);
 
-    // Add to node
-    if (this.node) {
-      this.node.add(group);
+      // Also set userData on node for easier detection
       this.node.userData.type = "range";
       this.node.userData.entityId = this.id;
       this.node.userData.interactable = true;

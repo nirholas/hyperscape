@@ -53,15 +53,26 @@ export interface FireRegistry {
 }
 
 /**
+ * Cooking source - either a fire or a permanent range entity
+ */
+interface CookingSource {
+  id: string;
+  position: { x: number; y: number; z: number };
+  isActive: boolean;
+  sourceType: "fire" | "range";
+}
+
+/**
  * Pending cook request data
  */
 interface PendingCook {
   playerId: string;
-  fireId: string;
-  /** Fire tile position */
-  fireTile: TileCoord;
-  /** Fire world position */
-  firePosition: { x: number; y: number; z: number };
+  sourceId: string;
+  sourceType: "fire" | "range";
+  /** Source tile position */
+  sourceTile: TileCoord;
+  /** Source world position */
+  sourcePosition: { x: number; y: number; z: number };
   /** Last known player tile (for detecting arrival) */
   lastPlayerTile: TileCoord;
   /** When this pending cook was created (for timeout) */
@@ -104,21 +115,21 @@ export class PendingCookManager {
 
   /**
    * Queue a pending cook for a player.
-   * Called when player clicks a fire OR uses raw food on fire.
+   * Called when player clicks a fire/range OR uses raw food on fire/range.
    *
-   * SERVER-AUTHORITATIVE: Server looks up fire position and paths player.
+   * SERVER-AUTHORITATIVE: Server looks up cooking source position and paths player.
    *
    * @param playerId - The player ID
-   * @param fireId - The fire ID
-   * @param firePosition - Fire world position from client (validated against server)
+   * @param sourceId - The fire or range ID
+   * @param sourcePosition - Source world position from client (validated against server)
    * @param currentTick - Current game tick
    * @param runMode - Player's run mode preference from client
    * @param fishSlot - Specific inventory slot to cook from (-1 = find first raw_shrimp)
    */
   queuePendingCook(
     playerId: string,
-    fireId: string,
-    firePosition: { x: number; y: number; z: number },
+    sourceId: string,
+    sourcePosition: { x: number; y: number; z: number },
     currentTick: number,
     runMode?: boolean,
     fishSlot: number = -1,
@@ -126,12 +137,13 @@ export class PendingCookManager {
     // Cancel any existing pending cook
     this.cancelPendingCook(playerId);
 
-    // Look up fire using injected FireRegistry
-    const fires = this.fireRegistry.getActiveFires();
-    const fire = fires.get(fireId);
+    // Look up cooking source - could be fire or range
+    const cookingSource = this.getCookingSource(sourceId);
 
-    if (!fire || !fire.isActive) {
-      console.log(`[PendingCook] Fire ${fireId} not found or inactive`);
+    if (!cookingSource) {
+      console.log(
+        `[PendingCook] Cooking source ${sourceId} not found or inactive`,
+      );
       return;
     }
 
@@ -144,19 +156,23 @@ export class PendingCookManager {
 
     // Calculate tiles
     worldToTileInto(player.position.x, player.position.z, this._playerTile);
-    worldToTileInto(fire.position.x, fire.position.z, this._fireTile);
+    worldToTileInto(
+      cookingSource.position.x,
+      cookingSource.position.z,
+      this._fireTile,
+    );
 
     console.log(
-      `[PendingCook] SERVER-AUTHORITATIVE: Player ${playerId} wants to cook at fire ${fireId}`,
+      `[PendingCook] SERVER-AUTHORITATIVE: Player ${playerId} wants to cook at ${cookingSource.sourceType} ${sourceId}`,
     );
     console.log(
-      `[PendingCook]   Fire at tile (${this._fireTile.x}, ${this._fireTile.z})`,
+      `[PendingCook]   Source at tile (${this._fireTile.x}, ${this._fireTile.z})`,
     );
     console.log(
       `[PendingCook]   Player at tile (${this._playerTile.x}, ${this._playerTile.z})`,
     );
 
-    // Check if already on a cardinal tile adjacent to fire
+    // Check if already on a cardinal tile adjacent to source
     if (
       tilesWithinMeleeRange(
         this._playerTile,
@@ -167,11 +183,11 @@ export class PendingCookManager {
       console.log(
         `[PendingCook]   Already on cardinal tile - starting cook immediately`,
       );
-      this.startCooking(playerId, fireId, fishSlot);
+      this.startCooking(playerId, sourceId, cookingSource.sourceType, fishSlot);
       return;
     }
 
-    // Walk to cardinal tile adjacent to fire
+    // Walk to cardinal tile adjacent to source
     const isRunning =
       runMode ?? this.tileMovementManager.getIsRunning(playerId);
 
@@ -182,7 +198,7 @@ export class PendingCookManager {
     // Use GATHERING_RANGE (1) for cardinal-only positioning
     this.tileMovementManager.movePlayerToward(
       playerId,
-      fire.position,
+      cookingSource.position,
       isRunning,
       GATHERING_CONSTANTS.GATHERING_RANGE,
     );
@@ -190,9 +206,10 @@ export class PendingCookManager {
     // Store pending cook
     this.pendingCooks.set(playerId, {
       playerId,
-      fireId,
-      fireTile: { x: this._fireTile.x, z: this._fireTile.z },
-      firePosition: { ...fire.position },
+      sourceId,
+      sourceType: cookingSource.sourceType,
+      sourceTile: { x: this._fireTile.x, z: this._fireTile.z },
+      sourcePosition: { ...cookingSource.position },
       lastPlayerTile: { x: this._playerTile.x, z: this._playerTile.z },
       createdTick: currentTick,
       fishSlot,
@@ -201,6 +218,41 @@ export class PendingCookManager {
     console.log(
       `[PendingCook]   Queued pending cook, waiting for player to arrive`,
     );
+  }
+
+  /**
+   * Look up a cooking source by ID - handles both fires and permanent ranges
+   */
+  private getCookingSource(sourceId: string): CookingSource | null {
+    // First check fire registry
+    const fires = this.fireRegistry.getActiveFires();
+    const fire = fires.get(sourceId);
+    if (fire && fire.isActive) {
+      return {
+        id: fire.id,
+        position: fire.position,
+        isActive: true,
+        sourceType: "fire",
+      };
+    }
+
+    // Check if it's a range entity
+    const entity = this.world.entities.get(sourceId);
+    if (entity && (entity as { entityType?: string }).entityType === "range") {
+      const position = (
+        entity as { position?: { x: number; y: number; z: number } }
+      ).position;
+      if (position) {
+        return {
+          id: sourceId,
+          position,
+          isActive: true,
+          sourceType: "range",
+        };
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -266,12 +318,13 @@ export class PendingCookManager {
       return;
     }
 
-    // Check if fire still exists and is active (using injected FireRegistry)
-    const fires = this.fireRegistry.getActiveFires();
-    const fire = fires.get(pending.fireId);
+    // Check if cooking source still exists and is active
+    const cookingSource = this.getCookingSource(pending.sourceId);
 
-    if (!fire || !fire.isActive) {
-      console.log(`[PendingCook] Fire ${pending.fireId} no longer available`);
+    if (!cookingSource) {
+      console.log(
+        `[PendingCook] Source ${pending.sourceId} no longer available`,
+      );
       this.pendingCooks.delete(playerId);
       return;
     }
@@ -279,10 +332,10 @@ export class PendingCookManager {
     // Get current player tile
     worldToTileInto(player.position.x, player.position.z, this._playerTile);
 
-    // Check if player arrived at cardinal tile adjacent to fire
+    // Check if player arrived at cardinal tile adjacent to source
     const hasArrived = tilesWithinMeleeRange(
       this._playerTile,
-      pending.fireTile,
+      pending.sourceTile,
       GATHERING_CONSTANTS.GATHERING_RANGE,
     );
 
@@ -292,7 +345,12 @@ export class PendingCookManager {
       );
 
       // Start cooking with the stored fishSlot
-      this.startCooking(playerId, pending.fireId, pending.fishSlot);
+      this.startCooking(
+        playerId,
+        pending.sourceId,
+        pending.sourceType,
+        pending.fishSlot,
+      );
 
       // Remove from pending
       this.pendingCooks.delete(playerId);
@@ -301,19 +359,36 @@ export class PendingCookManager {
 
   /**
    * Start the cooking process
+   * @param sourceType - "fire" or "range"
    * @param fishSlot - Specific inventory slot to cook from (-1 = find first raw_shrimp)
    */
   private startCooking(
     playerId: string,
-    fireId: string,
+    sourceId: string,
+    sourceType: "fire" | "range",
     fishSlot: number,
   ): void {
-    // Emit PROCESSING_COOKING_REQUEST event - ProcessingSystem will handle the actual cooking
+    // Emit PROCESSING_COOKING_REQUEST event via EventBus - ProcessingSystem subscribes to EventBus
     // fishSlot = -1 means server should find first raw_shrimp slot
-    this.world.emit(EventType.PROCESSING_COOKING_REQUEST, {
+    const eventData = {
       playerId,
-      fireId,
+      fireId: sourceType === "fire" ? sourceId : undefined,
+      rangeId: sourceType === "range" ? sourceId : undefined,
+      sourceType,
       fishSlot,
-    });
+    };
+
+    // Use EventBus (world.$eventBus) instead of EventEmitter (world.emit)
+    // ProcessingSystem uses SystemBase.subscribe() which listens to EventBus
+    if (this.world.$eventBus) {
+      this.world.$eventBus.emitEvent(
+        EventType.PROCESSING_COOKING_REQUEST,
+        eventData,
+        "PendingCookManager",
+      );
+    } else {
+      // Fallback to EventEmitter if EventBus not available
+      this.world.emit(EventType.PROCESSING_COOKING_REQUEST, eventData);
+    }
   }
 }

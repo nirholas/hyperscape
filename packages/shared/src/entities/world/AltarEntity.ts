@@ -187,6 +187,8 @@ export class AltarEntity extends InteractableEntity {
     mesh.receiveShadow = true;
     // Offset mesh up so it sits on the ground (BoxGeometry is centered at origin)
     mesh.position.y = boxHeight / 2;
+    // Set layer for raycasting (required for interaction detection)
+    mesh.layers.set(1);
     this.mesh = mesh;
 
     // Set up userData for interaction detection
