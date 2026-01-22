@@ -1004,6 +1004,70 @@ export const userBansRelations = relations(userBans, ({ one }) => ({
 }));
 
 // ============================================================================
+// QUEST AUDIT TABLES
+// ============================================================================
+
+/**
+ * Quest Audit Log Table - Tracks all quest state changes for security auditing
+ *
+ * Provides an immutable audit trail for quest actions to detect exploits.
+ * Each row represents a single quest action (start, progress, complete).
+ *
+ * Key columns:
+ * - `id` - Auto-incrementing primary key
+ * - `playerId` - References characters.id (who performed the action)
+ * - `questId` - Quest identifier from quests.json manifest
+ * - `action` - Type of action ("started", "progressed", "completed")
+ * - `questPointsAwarded` - Points awarded (for completed actions)
+ * - `stageId` - Current stage at time of action
+ * - `stageProgress` - Progress snapshot at time of action (JSON)
+ * - `timestamp` - When the action occurred (Unix ms)
+ * - `metadata` - Additional context (IP, session, etc.)
+ *
+ * Design notes:
+ * - Immutable log - no updates or deletes in normal operation
+ * - Used for security auditing and exploit detection
+ * - Indexed for efficient queries by player and quest
+ * - CASCADE DELETE ensures cleanup when character is deleted
+ */
+export const questAuditLog = pgTable(
+  "quest_audit_log",
+  {
+    id: serial("id").primaryKey(),
+    playerId: text("playerId")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    questId: text("questId").notNull(),
+    action: text("action").notNull(), // "started", "progressed", "completed"
+    questPointsAwarded: integer("questPointsAwarded").default(0),
+    stageId: text("stageId"),
+    stageProgress: jsonb("stageProgress").default({}),
+    timestamp: bigint("timestamp", { mode: "number" }).notNull(),
+    metadata: jsonb("metadata").default({}),
+  },
+  (table) => ({
+    playerIdx: index("idx_quest_audit_log_player").on(table.playerId),
+    questIdx: index("idx_quest_audit_log_quest").on(table.questId),
+    playerQuestIdx: index("idx_quest_audit_log_player_quest").on(
+      table.playerId,
+      table.questId,
+    ),
+    timestampIdx: index("idx_quest_audit_log_timestamp").on(table.timestamp),
+    actionIdx: index("idx_quest_audit_log_action").on(table.action),
+  }),
+);
+
+/**
+ * Quest Audit Log Relations
+ */
+export const questAuditLogRelations = relations(questAuditLog, ({ one }) => ({
+  character: one(characters, {
+    fields: [questAuditLog.playerId],
+    references: [characters.id],
+  }),
+}));
+
+// ============================================================================
 // ADMIN PANEL TABLES
 // ============================================================================
 

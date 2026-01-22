@@ -10,13 +10,17 @@
  * - Complete quests
  * - Query quest status and progress
  * - Manage quest points
+ * - Audit logging for all quest state changes
  *
  * Used by: QuestSystem
  */
 
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, desc } from "drizzle-orm";
 import { BaseRepository } from "./BaseRepository";
 import * as schema from "../schema";
+
+/** Quest audit action types */
+export type QuestAuditAction = "started" | "progressed" | "completed";
 
 /** Database status values (not including derived "ready_to_complete") */
 export type QuestDbStatus = "not_started" | "in_progress" | "completed";
@@ -153,13 +157,27 @@ export class QuestRepository extends BaseRepository {
 
     this.ensureDatabase();
 
-    await this.db.insert(schema.questProgress).values({
-      playerId,
-      questId,
-      status: "in_progress",
-      currentStage: initialStage,
-      stageProgress: {},
-      startedAt: Date.now(),
+    const now = Date.now();
+
+    await this.db.transaction(async (tx) => {
+      // Create quest progress entry
+      await tx.insert(schema.questProgress).values({
+        playerId,
+        questId,
+        status: "in_progress",
+        currentStage: initialStage,
+        stageProgress: {},
+        startedAt: now,
+      });
+
+      // Audit log entry for quest start
+      await tx.insert(schema.questAuditLog).values({
+        playerId,
+        questId,
+        action: "started",
+        stageId: initialStage,
+        timestamp: now,
+      });
     });
   }
 
@@ -314,6 +332,149 @@ export class QuestRepository extends BaseRepository {
           })
           .where(eq(schema.characters.id, playerId));
       }
+
+      // Audit log entry for quest completion
+      await tx.insert(schema.questAuditLog).values({
+        playerId,
+        questId,
+        action: "completed",
+        questPointsAwarded: questPoints,
+        timestamp: Date.now(),
+      });
     });
+  }
+
+  // =========================================================================
+  // AUDIT LOGGING
+  // =========================================================================
+
+  /**
+   * Log a quest audit event
+   *
+   * Creates an immutable audit trail entry for quest actions.
+   * Used for security auditing and exploit detection.
+   *
+   * @param playerId - The player ID
+   * @param questId - The quest identifier
+   * @param action - The action type ("started", "progressed", "completed")
+   * @param options - Optional additional data
+   */
+  async logAuditEvent(
+    playerId: string,
+    questId: string,
+    action: QuestAuditAction,
+    options?: {
+      questPointsAwarded?: number;
+      stageId?: string;
+      stageProgress?: StageProgress;
+      metadata?: Record<string, unknown>;
+    },
+  ): Promise<void> {
+    if (this.isDestroying) {
+      return;
+    }
+
+    this.ensureDatabase();
+
+    await this.db.insert(schema.questAuditLog).values({
+      playerId,
+      questId,
+      action,
+      questPointsAwarded: options?.questPointsAwarded ?? 0,
+      stageId: options?.stageId ?? null,
+      stageProgress: options?.stageProgress ?? {},
+      timestamp: Date.now(),
+      metadata: options?.metadata ?? {},
+    });
+  }
+
+  /**
+   * Get audit log entries for a player
+   *
+   * @param playerId - The player ID
+   * @param limit - Maximum entries to return (default: 100)
+   * @returns Array of audit log entries, newest first
+   */
+  async getPlayerAuditLog(
+    playerId: string,
+    limit: number = 100,
+  ): Promise<
+    Array<{
+      id: number;
+      playerId: string;
+      questId: string;
+      action: string;
+      questPointsAwarded: number | null;
+      stageId: string | null;
+      stageProgress: StageProgress;
+      timestamp: number;
+      metadata: Record<string, unknown>;
+    }>
+  > {
+    this.ensureDatabase();
+
+    const results = await this.db
+      .select()
+      .from(schema.questAuditLog)
+      .where(eq(schema.questAuditLog.playerId, playerId))
+      .orderBy(desc(schema.questAuditLog.timestamp))
+      .limit(limit);
+
+    return results.map((row) => ({
+      id: row.id,
+      playerId: row.playerId,
+      questId: row.questId,
+      action: row.action,
+      questPointsAwarded: row.questPointsAwarded,
+      stageId: row.stageId,
+      stageProgress: (row.stageProgress as StageProgress) || {},
+      timestamp: row.timestamp,
+      metadata: (row.metadata as Record<string, unknown>) || {},
+    }));
+  }
+
+  /**
+   * Get audit log entries for a specific quest
+   *
+   * @param questId - The quest identifier
+   * @param limit - Maximum entries to return (default: 100)
+   * @returns Array of audit log entries, newest first
+   */
+  async getQuestAuditLog(
+    questId: string,
+    limit: number = 100,
+  ): Promise<
+    Array<{
+      id: number;
+      playerId: string;
+      questId: string;
+      action: string;
+      questPointsAwarded: number | null;
+      stageId: string | null;
+      stageProgress: StageProgress;
+      timestamp: number;
+      metadata: Record<string, unknown>;
+    }>
+  > {
+    this.ensureDatabase();
+
+    const results = await this.db
+      .select()
+      .from(schema.questAuditLog)
+      .where(eq(schema.questAuditLog.questId, questId))
+      .orderBy(desc(schema.questAuditLog.timestamp))
+      .limit(limit);
+
+    return results.map((row) => ({
+      id: row.id,
+      playerId: row.playerId,
+      questId: row.questId,
+      action: row.action,
+      questPointsAwarded: row.questPointsAwarded,
+      stageId: row.stageId,
+      stageProgress: (row.stageProgress as StageProgress) || {},
+      timestamp: row.timestamp,
+      metadata: (row.metadata as Record<string, unknown>) || {},
+    }));
   }
 }

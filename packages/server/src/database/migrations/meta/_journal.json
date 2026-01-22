@@ -148,6 +148,13 @@
       "when": 1768901721620,
       "tag": "0020_add_trading_activity_bans",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1768988121620,
+      "tag": "0021_add_quest_audit_log",
+      "breakpoints": true
     }
   ]
 }
