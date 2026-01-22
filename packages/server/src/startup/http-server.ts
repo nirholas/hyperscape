@@ -74,17 +74,20 @@ export async function createHttpServer(
   const serverUrl = process.env.SERVER_URL || `http://localhost:${config.port}`;
 
   const allowedOrigins = [
-    // Production domains
+    // Production domains (HTTPS)
     "https://hyperscape.club",
+    "https://www.hyperscape.club",
     "https://hyperscape.pages.dev",
     "https://hyperscape-production.up.railway.app",
+    // Production domains (HTTP for legacy/testing)
+    "http://hyperscape.pages.dev",
     // Development (from env vars or defaults)
     elizaOSUrl, // ElizaOS API
     clientUrl, // Game Client
     serverUrl, // Game Server
     // Dynamic patterns (for localhost dev and preview deployments)
-    /^https?:\/\/localhost:\d+$/,
-    /^https:\/\/.+\.hyperscape\.pages\.dev$/, // Cloudflare Pages preview deployments
+    /^https?:\/\/localhost:\d+$/, // Matches http://localhost:3000, 3333, 5555, etc.
+    /^https?:\/\/.+\.hyperscape\.pages\.dev$/, // Cloudflare Pages preview deployments
     /^https:\/\/.+\.farcaster\.xyz$/,
     /^https:\/\/.+\.warpcast\.com$/,
     /^https:\/\/.+\.privy\.io$/,
