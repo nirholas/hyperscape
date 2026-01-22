@@ -180,11 +180,10 @@ async function deployFrontend() {
   logStep("1/4", "Building frontend...");
 
   // Get all URLs for frontend environment
-  const frontendUrl = getTerraformOutput("frontend_url") || "https://hyperscape.lol";
-  // IMPORTANT: Use custom domain api.hyperscape.lol, NOT the raw ALB DNS name
-  // The ALB SSL certificate is configured for api.hyperscape.lol, not the ALB hostname
-  const apiUrl = "https://api.hyperscape.lol";
-  const wsUrl = "wss://api.hyperscape.lol/ws";
+  const frontendUrl = getTerraformOutput("frontend_url") || "https://hyperscape.club";
+  // Backend is hosted on Railway
+  const apiUrl = "https://hyperscape-production.up.railway.app";
+  const wsUrl = "wss://hyperscape-production.up.railway.app/ws";
 
   // Set environment variables for build
   // CRITICAL: Set ALL production URLs to prevent localhost values from .env files
@@ -256,6 +255,7 @@ async function deployAssets() {
   const distributionId = getTerraformOutput("assets_cloudfront_id");
 
   const assetsDir = join(ROOT_DIR, "assets");
+  const manifestsDir = join(ROOT_DIR, "packages/server/world/assets/manifests");
 
   if (!existsSync(assetsDir)) {
     logError(`Assets directory not found: ${assetsDir}`);
@@ -309,6 +309,15 @@ async function deployAssets() {
   // Upload to root of bucket (not /assets/) so paths like /manifests/, /models/, /world/ work correctly
   // Exclude .git directory and other unnecessary files
   exec(`aws s3 sync ${assetsDir} s3://${bucketName} --delete --exclude ".git/*" --exclude ".DS_Store" --exclude "*.git" --region ${config.region}`);
+
+  // Upload manifests from packages/server/world/assets/manifests/ to /manifests/
+  if (existsSync(manifestsDir)) {
+    log("Uploading manifests to /manifests/...");
+    exec(`aws s3 sync ${manifestsDir} s3://${bucketName}/manifests --delete --exclude ".git/*" --exclude ".DS_Store" --region ${config.region}`);
+    logSuccess("Manifests uploaded to s3://" + bucketName + "/manifests");
+  } else {
+    log(`${colors.yellow}⚠ Manifests directory not found at ${manifestsDir} - skipping${colors.reset}`);
+  }
 
   // Set content types for specific extensions
   // This is critical for WASM files which need application/wasm MIME type

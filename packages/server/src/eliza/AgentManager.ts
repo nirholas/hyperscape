@@ -17,7 +17,6 @@ import type {
   EmbeddedAgentConfig,
   EmbeddedAgentInfo,
   AgentState,
-  AgentCharacterConfig,
 } from "./types.js";
 
 /**

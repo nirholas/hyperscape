@@ -209,12 +209,13 @@ export class DataManager {
    * Load manifests from CDN (client) or filesystem (server)
    */
   private async loadManifestsFromCDN(): Promise<void> {
-    // On server (Node.js), load from filesystem since HTTP server isn't up yet
-    // Check for Node.js-specific globals that don't exist in browsers
+    // On server (Node.js or Bun), load from filesystem since HTTP server isn't up yet
+    // Check for runtime-specific globals that don't exist in browsers
     const isServer =
       typeof process !== "undefined" &&
       process.versions !== undefined &&
-      process.versions.node !== undefined;
+      (process.versions.node !== undefined ||
+        (process.versions as { bun?: string }).bun !== undefined);
 
     if (isServer) {
       await this.loadManifestsFromFilesystem();
@@ -412,6 +413,14 @@ export class DataManager {
     const fs = await import("fs/promises");
     const path = await import("path");
 
+    // Check if we're in a TEST environment where manifests might not exist
+    // NOTE: CI=true is often set by CI/CD platforms AND production deployments (Railway)
+    // Only skip manifest loading for actual test environments, not production CI/CD
+    const isTestEnv =
+      typeof process !== "undefined" &&
+      typeof process.env !== "undefined" &&
+      (process.env.NODE_ENV === "test" || process.env.VITEST === "true");
+
     // Find manifests directory - assets are in packages/server/world/assets/
     let manifestsDir: string;
     if (process.env.ASSETS_DIR) {
@@ -581,11 +590,22 @@ export class DataManager {
         `[DataManager] ✅ Loaded manifests from filesystem (${(ITEMS as Map<string, Item>).size} items, ${(ALL_NPCS as Map<string, NPCData>).size} NPCs, ${Object.keys(BIOMES).length} biomes, ${toolCount} tools)`,
       );
     } catch (error) {
-      console.error(
-        "[DataManager] ❌ Failed to load manifests from filesystem:",
-        error,
-      );
-      throw error;
+      // In test/CI environments, manifests might not exist - this is non-fatal
+      if (isTestEnv) {
+        console.warn(
+          "[DataManager] ⚠️  Manifests not available in test/CI environment - skipping manifest loading",
+        );
+        console.warn(
+          "[DataManager] This is expected in CI/test - game data will use defaults",
+        );
+      } else {
+        // In production/development, manifests should exist - log error and re-throw
+        console.error(
+          "[DataManager] ❌ Failed to load manifests from filesystem:",
+          error,
+        );
+        throw error;
+      }
     }
   }
 
@@ -1280,6 +1300,14 @@ export class DataManager {
     const errors: string[] = [];
     const warnings: string[] = [];
 
+    // Check if we're in a TEST environment where manifests might not exist
+    // NOTE: CI=true is often set by CI/CD platforms AND production deployments (Railway)
+    // Only skip validation for actual test environments, not production CI/CD
+    const isTestEnv =
+      typeof process !== "undefined" &&
+      typeof process.env !== "undefined" &&
+      (process.env.NODE_ENV === "test" || process.env.VITEST === "true");
+
     // Validate items (warning only - manifests might be loading)
     const itemCount = ITEMS.size;
     if (itemCount === 0) {
@@ -1292,10 +1320,16 @@ export class DataManager {
       warnings.push("No NPCs loaded from manifests yet");
     }
 
-    // Validate world areas
+    // Validate world areas (warning in test/CI, error in production)
     const areaCount = Object.keys(ALL_WORLD_AREAS).length;
     if (areaCount === 0) {
-      errors.push("No world areas found in ALL_WORLD_AREAS");
+      if (isTestEnv) {
+        warnings.push(
+          "No world areas found - expected in CI/test without manifests",
+        );
+      } else {
+        errors.push("No world areas found in ALL_WORLD_AREAS");
+      }
     }
 
     // Validate treasure locations

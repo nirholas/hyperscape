@@ -139,7 +139,7 @@ The app uses the same environment variables as the client:
 The app handles OAuth callbacks via deep links:
 
 - **Desktop:** `hyperscape://` URL scheme
-- **Mobile:** Universal links to `hyperscape.lol/auth/*`
+- **Mobile:** Universal links to `hyperscape.club/auth/*`
 
 Configure redirect URLs in your Privy dashboard.
 
@@ -153,7 +153,7 @@ Desktop builds include auto-update functionality. Configure in `tauri.conf.json`
     "updater": {
       "active": true,
       "pubkey": "YOUR_PUBLIC_KEY",
-      "endpoints": ["https://releases.hyperscape.lol/..."]
+      "endpoints": ["https://releases.hyperscape.club/..."]
     }
   }
 }

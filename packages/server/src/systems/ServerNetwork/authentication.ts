@@ -100,12 +100,26 @@ export async function checkUserBan(
     // ONLY allow connection if the error is specifically about missing table
     // This prevents security bypass if database has other issues
     const errorMessage = err instanceof Error ? err.message : String(err);
+
+    // DrizzleQueryError wraps the original PG error in cause - check both
+    type ErrorWithCause = Error & {
+      cause?: Error & { code?: string; message?: string };
+    };
+    const cause =
+      err instanceof Error ? (err as ErrorWithCause).cause : undefined;
+    const causeMessage = cause?.message || "";
+    const causeCode = cause?.code || "";
+
+    // Combine main error message with cause message for detection
+    const fullErrorText = `${errorMessage} ${causeMessage}`;
+
     const isTableMissing =
-      errorMessage.includes("user_bans") &&
-      (errorMessage.includes("does not exist") ||
-        errorMessage.includes("no such table") ||
-        errorMessage.includes("relation") ||
-        errorMessage.includes("42P01")); // PostgreSQL error code for undefined table
+      fullErrorText.includes("user_bans") &&
+      (fullErrorText.includes("does not exist") ||
+        fullErrorText.includes("no such table") ||
+        fullErrorText.includes("relation") ||
+        fullErrorText.includes("42P01") ||
+        causeCode === "42P01"); // PostgreSQL error code for undefined table
 
     if (isTableMissing) {
       console.warn(

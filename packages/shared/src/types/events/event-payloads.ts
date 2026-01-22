@@ -30,6 +30,8 @@ export interface PlayerJoinedPayload {
   equipment?: EquipmentSyncData[];
   /** Whether this player is a load test bot */
   isLoadTestBot?: boolean;
+  /** Whether this player is an embedded AI agent */
+  isEmbeddedAgent?: boolean;
 }
 
 export interface PlayerEnterPayload {

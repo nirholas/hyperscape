@@ -5,7 +5,7 @@
  */
 
 import type { Route, Memory, UUID } from "@elizaos/core";
-import { logger, MemoryType, ModelType } from "@elizaos/core";
+import { logger, ModelType } from "@elizaos/core";
 import {
   composeContext,
   generateMessageResponse,
@@ -122,9 +122,6 @@ Generate a natural response.
         },
         roomId: memory.roomId,
         createdAt: Date.now(),
-        metadata: {
-          type: MemoryType.MESSAGE,
-        },
       };
 
       // Save both memories

@@ -367,8 +367,9 @@ export class WaterSystem {
     material.metalness = 0.0;
     material.fog = false; // Water should not be affected by scene fog
     // Disable environment map completely - use planar reflection only
+    // NOTE: Don't set envMap = null - it causes WebGPU texture cache corruption
+    // Setting envMapIntensity to 0 is sufficient to disable the environment map effect
     material.envMapIntensity = 0;
-    material.envMap = null;
 
     const normalTex1 = this.normalTex1!;
     const normalTex2 = this.normalTex2!;

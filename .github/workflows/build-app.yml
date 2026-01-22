@@ -2,18 +2,13 @@ name: Build Native Apps
 
 on:
   push:
-    branches: [main]
+    branches: [main, staging]
     paths:
       - 'packages/app/**'
       - 'packages/client/**'
       - 'packages/shared/**'
       - '.github/workflows/build-app.yml'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'packages/app/**'
-      - 'packages/client/**'
-      - 'packages/shared/**'
+  # Note: PRs don't trigger builds to save resources - builds only happen on push
   workflow_dispatch:
     inputs:
       platform:
@@ -28,6 +23,14 @@ on:
           - linux
           - ios
           - android
+      environment:
+        description: 'Build environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
 
 env:
   CARGO_TERM_COLOR: always
@@ -91,14 +94,32 @@ jobs:
         run: bun run build
         working-directory: packages/shared
 
+      - name: Determine environment URLs
+        id: env
+        run: |
+          if [ "${{ github.ref_name }}" = "staging" ] || [ "${{ inputs.environment }}" = "staging" ]; then
+            echo "api_url=https://staging-api.hyperscape.club" >> $GITHUB_OUTPUT
+            echo "ws_url=wss://staging-api.hyperscape.club/ws" >> $GITHUB_OUTPUT
+            echo "app_url=https://staging.hyperscape.club" >> $GITHUB_OUTPUT
+            echo "cdn_url=https://staging-assets.hyperscape.club" >> $GITHUB_OUTPUT
+            echo "🎭 Building for STAGING environment"
+          else
+            echo "api_url=https://api.hyperscape.club" >> $GITHUB_OUTPUT
+            echo "ws_url=wss://api.hyperscape.club/ws" >> $GITHUB_OUTPUT
+            echo "app_url=https://hyperscape.club" >> $GITHUB_OUTPUT
+            echo "cdn_url=https://assets.hyperscape.club" >> $GITHUB_OUTPUT
+            echo "🚀 Building for PRODUCTION environment"
+          fi
+
       - name: Build client
         run: bun run build
         working-directory: packages/client
         env:
-          PUBLIC_API_URL: https://hyperscape-production.up.railway.app
-          PUBLIC_WS_URL: wss://hyperscape-production.up.railway.app/ws
-          PUBLIC_CDN_URL: https://d20g7vd4m53hpb.cloudfront.net
-          PUBLIC_APP_URL: https://hyperscape.lol
+          PUBLIC_API_URL: ${{ steps.env.outputs.api_url }}
+          PUBLIC_WS_URL: ${{ steps.env.outputs.ws_url }}
+          PUBLIC_APP_URL: ${{ steps.env.outputs.app_url }}
+          PUBLIC_CDN_URL: ${{ steps.env.outputs.cdn_url }}
+          PUBLIC_PRIVY_APP_ID: ${{ secrets.PUBLIC_PRIVY_APP_ID }}
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
@@ -113,7 +134,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v5
         with:
-          name: hyperscape-${{ matrix.target }}
+          name: hyperscape-${{ matrix.target }}-${{ github.ref_name == 'staging' && 'staging' || 'production' }}
           path: |
             packages/app/src-tauri/target/${{ matrix.rust_target }}/release/bundle/**/*
           retention-days: 7
@@ -153,14 +174,32 @@ jobs:
         run: bun run build
         working-directory: packages/shared
 
+      - name: Determine environment URLs
+        id: env
+        run: |
+          if [ "${{ github.ref_name }}" = "staging" ] || [ "${{ inputs.environment }}" = "staging" ]; then
+            echo "api_url=https://staging-api.hyperscape.club" >> $GITHUB_OUTPUT
+            echo "ws_url=wss://staging-api.hyperscape.club/ws" >> $GITHUB_OUTPUT
+            echo "app_url=https://staging.hyperscape.club" >> $GITHUB_OUTPUT
+            echo "cdn_url=https://staging-assets.hyperscape.club" >> $GITHUB_OUTPUT
+            echo "🎭 Building for STAGING environment"
+          else
+            echo "api_url=https://api.hyperscape.club" >> $GITHUB_OUTPUT
+            echo "ws_url=wss://api.hyperscape.club/ws" >> $GITHUB_OUTPUT
+            echo "app_url=https://hyperscape.club" >> $GITHUB_OUTPUT
+            echo "cdn_url=https://assets.hyperscape.club" >> $GITHUB_OUTPUT
+            echo "🚀 Building for PRODUCTION environment"
+          fi
+
       - name: Build client
         run: bun run build
         working-directory: packages/client
         env:
-          PUBLIC_API_URL: https://hyperscape-production.up.railway.app
-          PUBLIC_WS_URL: wss://hyperscape-production.up.railway.app/ws
-          PUBLIC_CDN_URL: https://d20g7vd4m53hpb.cloudfront.net
-          PUBLIC_APP_URL: https://hyperscape.lol
+          PUBLIC_API_URL: ${{ steps.env.outputs.api_url }}
+          PUBLIC_WS_URL: ${{ steps.env.outputs.ws_url }}
+          PUBLIC_APP_URL: ${{ steps.env.outputs.app_url }}
+          PUBLIC_CDN_URL: ${{ steps.env.outputs.cdn_url }}
+          PUBLIC_PRIVY_APP_ID: ${{ secrets.PUBLIC_PRIVY_APP_ID }}
 
       - name: Initialize iOS project
         run: bun run ios:init
@@ -181,7 +220,7 @@ jobs:
         uses: actions/upload-artifact@v5
         if: success()
         with:
-          name: hyperscape-ios
+          name: hyperscape-ios-${{ github.ref_name == 'staging' && 'staging' || 'production' }}
           path: packages/app/src-tauri/gen/apple/build/**/*.ipa
           retention-days: 7
 
@@ -229,14 +268,32 @@ jobs:
         run: bun run build
         working-directory: packages/shared
 
+      - name: Determine environment URLs
+        id: env
+        run: |
+          if [ "${{ github.ref_name }}" = "staging" ] || [ "${{ inputs.environment }}" = "staging" ]; then
+            echo "api_url=https://staging-api.hyperscape.club" >> $GITHUB_OUTPUT
+            echo "ws_url=wss://staging-api.hyperscape.club/ws" >> $GITHUB_OUTPUT
+            echo "app_url=https://staging.hyperscape.club" >> $GITHUB_OUTPUT
+            echo "cdn_url=https://staging-assets.hyperscape.club" >> $GITHUB_OUTPUT
+            echo "🎭 Building for STAGING environment"
+          else
+            echo "api_url=https://api.hyperscape.club" >> $GITHUB_OUTPUT
+            echo "ws_url=wss://api.hyperscape.club/ws" >> $GITHUB_OUTPUT
+            echo "app_url=https://hyperscape.club" >> $GITHUB_OUTPUT
+            echo "cdn_url=https://assets.hyperscape.club" >> $GITHUB_OUTPUT
+            echo "🚀 Building for PRODUCTION environment"
+          fi
+
       - name: Build client
         run: bun run build
         working-directory: packages/client
         env:
-          PUBLIC_API_URL: https://hyperscape-production.up.railway.app
-          PUBLIC_WS_URL: wss://hyperscape-production.up.railway.app/ws
-          PUBLIC_CDN_URL: https://d20g7vd4m53hpb.cloudfront.net
-          PUBLIC_APP_URL: https://hyperscape.lol
+          PUBLIC_API_URL: ${{ steps.env.outputs.api_url }}
+          PUBLIC_WS_URL: ${{ steps.env.outputs.ws_url }}
+          PUBLIC_APP_URL: ${{ steps.env.outputs.app_url }}
+          PUBLIC_CDN_URL: ${{ steps.env.outputs.cdn_url }}
+          PUBLIC_PRIVY_APP_ID: ${{ secrets.PUBLIC_PRIVY_APP_ID }}
 
       - name: Initialize Android project
         run: bun run android:init
@@ -255,7 +312,7 @@ jobs:
       - name: Upload Android artifact
         uses: actions/upload-artifact@v5
         with:
-          name: hyperscape-android
+          name: hyperscape-android-${{ github.ref_name == 'staging' && 'staging' || 'production' }}
           path: |
             packages/app/src-tauri/gen/android/app/build/outputs/**/*.apk
             packages/app/src-tauri/gen/android/app/build/outputs/**/*.aab
@@ -264,7 +321,8 @@ jobs:
   release:
     needs: [build-desktop]
     runs-on: ubuntu-22.04
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Create releases for both main (production) and staging branches
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
     permissions:
       contents: write
 

@@ -110,8 +110,8 @@ export default defineConfig(({ mode }) => {
       outDir: path.resolve(__dirname, "dist"),
       emptyOutDir: true,
       target: "esnext", // Support top-level await
-      minify: false, // Disable minification for debugging
-      sourcemap: true, // Enable source maps for better debugging
+      minify: mode === "production" ? "esbuild" : false, // Enable minification in production
+      sourcemap: mode !== "production", // Disable source maps in production to save memory
       rollupOptions: {
         input: path.resolve(__dirname, "src/index.html"),
         external: ["fs", "fs-extra", "path", "node:fs", "node:path"],
@@ -123,6 +123,12 @@ export default defineConfig(({ mode }) => {
             path: "{}",
             "node:fs": "{}",
             "node:path": "{}",
+          },
+          // Manual chunk splitting to reduce memory pressure during build
+          manualChunks: {
+            "vendor-react": ["react", "react-dom"],
+            "vendor-three": ["three"],
+            "vendor-ui": ["styled-components", "lucide-react"],
           },
         },
         onwarn(warning, warn) {
@@ -187,7 +193,9 @@ export default defineConfig(({ mode }) => {
       // These ALWAYS use production URLs when mode is "production", ignoring .env files
       // NOTE: mode is passed from Vite - "production" for `vite build`, "development" for `vite dev`
       // Use environment variables if set, otherwise use defaults
-      // Deployment script sets these from Terraform outputs during build
+      //
+      // Production: Frontend on Cloudflare Pages (hyperscape.club)
+      //             Server on Railway (hyperscape-production.up.railway.app)
       "import.meta.env.PUBLIC_API_URL": JSON.stringify(
         env.PUBLIC_API_URL ||
           (mode === "production"
@@ -200,16 +208,17 @@ export default defineConfig(({ mode }) => {
             ? "wss://hyperscape-production.up.railway.app/ws"
             : "ws://localhost:5555/ws"),
       ),
+      // CDN URL - Cloudflare R2 with custom domain
       "import.meta.env.PUBLIC_CDN_URL": JSON.stringify(
         env.PUBLIC_CDN_URL ||
           (mode === "production"
-            ? "https://d20g7vd4m53hpb.cloudfront.net"
+            ? "https://assets.hyperscape.club"
             : "http://localhost:8080"),
       ),
       "import.meta.env.PUBLIC_APP_URL": JSON.stringify(
         env.PUBLIC_APP_URL ||
           (mode === "production"
-            ? "https://hyperscape.lol"
+            ? "https://hyperscape.club"
             : "http://localhost:3333"),
       ),
       "import.meta.env.PUBLIC_ELIZAOS_URL": JSON.stringify(

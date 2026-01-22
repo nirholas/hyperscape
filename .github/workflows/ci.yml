@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, staging, develop]
   pull_request:
-    branches: [main, develop]
+    branches: [main, staging, develop]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -50,20 +50,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-
-      - name: Fetch manifests from CDN
-        run: |
-          mkdir -p packages/server/world/assets/manifests
-          CDN_URL="https://d20g7vd4m53hpb.cloudfront.net"
-          MANIFESTS="items npcs resources tools biomes world-areas stores music vegetation buildings"
-          for file in $MANIFESTS; do
-            echo "Fetching ${file}.json..."
-            curl -sSf "$CDN_URL/manifests/${file}.json" -o "packages/server/world/assets/manifests/${file}.json" || echo "Warning: ${file}.json not found"
-          done
-          echo "✅ Manifests fetched from CDN"
-          ls -la packages/server/world/assets/manifests/
-        env:
-          PUBLIC_CDN_URL: https://d20g7vd4m53hpb.cloudfront.net
+        with:
+          submodules: recursive
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -84,6 +72,15 @@ jobs:
       - name: Build server package
         working-directory: packages/server
         run: bun run build
+
+      - name: Build hs-kit package (if exists)
+        run: |
+          if [ -d "packages/hs-kit" ]; then
+            echo "Building hs-kit package..."
+            cd packages/hs-kit && bun run build
+          else
+            echo "hs-kit package not found, skipping..."
+          fi
 
       - name: Setup database schema
         working-directory: packages/server
@@ -92,11 +89,11 @@ jobs:
           DATABASE_URL: postgresql://hyperscape:hyperscape_test@localhost:5432/hyperscape_test
 
       - name: Run tests
-        run: bun run test
+        run: turbo run test --filter='!@hyperscape/app'
         env:
           DATABASE_URL: postgresql://hyperscape:hyperscape_test@localhost:5432/hyperscape_test
           NODE_ENV: test
-          PUBLIC_CDN_URL: https://d20g7vd4m53hpb.cloudfront.net
+          PUBLIC_CDN_URL: https://assets.hyperscape.club
 
   build:
     name: Build
@@ -105,19 +102,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-
-      - name: Fetch manifests from CDN
-        run: |
-          mkdir -p packages/server/world/assets/manifests
-          CDN_URL="https://d20g7vd4m53hpb.cloudfront.net"
-          MANIFESTS="items npcs resources tools biomes world-areas stores music vegetation buildings"
-          for file in $MANIFESTS; do
-            echo "Fetching ${file}.json..."
-            curl -sSf "$CDN_URL/manifests/${file}.json" -o "packages/server/world/assets/manifests/${file}.json" || echo "Warning: ${file}.json not found"
-          done
-          echo "✅ Manifests fetched from CDN"
-        env:
-          PUBLIC_CDN_URL: https://d20g7vd4m53hpb.cloudfront.net
+        with:
+          submodules: recursive
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -138,6 +124,15 @@ jobs:
       - name: Build server package
         working-directory: packages/server
         run: bun run build
+
+      - name: Build hs-kit package (if exists)
+        run: |
+          if [ -d "packages/hs-kit" ]; then
+            echo "Building hs-kit package..."
+            cd packages/hs-kit && bun run build
+          else
+            echo "hs-kit package not found, skipping..."
+          fi
 
       - name: Build client package
         working-directory: packages/client
@@ -159,7 +154,7 @@ jobs:
     name: Docker Build
     runs-on: ubuntu-latest
     needs: [build]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -167,13 +162,24 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Determine environment
+        id: env
+        run: |
+          if [ "${{ github.ref_name }}" = "staging" ]; then
+            echo "env_tag=staging" >> $GITHUB_OUTPUT
+          else
+            echo "env_tag=production" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile.server
           push: false
-          tags: hyperscape-server:${{ github.sha }}
+          tags: |
+            hyperscape-server:${{ github.sha }}
+            hyperscape-server:${{ steps.env.outputs.env_tag }}-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

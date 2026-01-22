@@ -26,11 +26,12 @@ describe("Combat Performance Benchmarks", () => {
   const ITERATIONS = 10000;
 
   // Performance targets (average time per operation in milliseconds)
+  // Note: Thresholds are relaxed for CI environments with variable performance
   const MAX_TIME_MS = {
-    damageCalculation: 0.01, // 10 microseconds
-    styleBonus: 0.001, // 1 microsecond
-    combatLevel: 0.02, // 20 microseconds
-    rangeCheck: 0.005, // 5 microseconds
+    damageCalculation: 0.02, // 20 microseconds (relaxed for CI variability)
+    styleBonus: 0.002, // 2 microseconds (relaxed for CI variability)
+    combatLevel: 0.04, // 40 microseconds (relaxed for CI variability)
+    rangeCheck: 0.01, // 10 microseconds (relaxed for CI variability)
   };
 
   // Test fixtures

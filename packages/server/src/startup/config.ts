@@ -23,18 +23,40 @@ import fs from "fs-extra";
 import path from "path";
 import { fileURLToPath } from "url";
 
-/** List of manifest files to fetch from CDN */
+/**
+ * List of manifest files to fetch from CDN
+ * Includes root-level files and subdirectory files (items/, gathering/, recipes/)
+ */
 const MANIFEST_FILES = [
-  "items.json",
-  "npcs.json",
-  "resources.json",
-  "tools.json",
+  // Root-level manifests
   "biomes.json",
-  "world-areas.json",
-  "stores.json",
-  "music.json",
-  "vegetation.json",
   "buildings.json",
+  "model-bounds.json",
+  "music.json",
+  "npcs.json",
+  "prayers.json",
+  "skill-unlocks.json",
+  "stations.json",
+  "stores.json",
+  "tier-requirements.json",
+  "tools.json",
+  "vegetation.json",
+  "world-areas.json",
+  // Items directory
+  "items/food.json",
+  "items/misc.json",
+  "items/resources.json",
+  "items/tools.json",
+  "items/weapons.json",
+  // Gathering directory
+  "gathering/fishing.json",
+  "gathering/mining.json",
+  "gathering/woodcutting.json",
+  // Recipes directory
+  "recipes/cooking.json",
+  "recipes/firemaking.json",
+  "recipes/smelting.json",
+  "recipes/smithing.json",
 ];
 
 /**
@@ -143,6 +165,10 @@ async function fetchManifestsFromCDN(
       const newContent = await response.text();
       fetched++;
 
+      // Ensure subdirectory exists for nested files (items/, gathering/, recipes/)
+      const localDir = path.dirname(localPath);
+      await fs.ensureDir(localDir);
+
       // Compare with existing file to check if update needed
       let existingContent = "";
       try {
@@ -168,12 +194,25 @@ async function fetchManifestsFromCDN(
     `[Config] 📦 Manifests: ${fetched} fetched, ${updated} updated, ${failed} failed`,
   );
 
-  // Fail if no manifests could be fetched and none exist locally
+  // Check if we have any manifests after fetch attempt
   if (fetched === 0) {
     const existingFiles = await fs.readdir(manifestsDir).catch(() => []);
     if (existingFiles.length === 0) {
+      // In TEST environments, allow starting without manifests
+      // NOTE: CI=true is set by many platforms but also used in production (Railway)
+      // Use explicit SKIP_MANIFESTS=true or NODE_ENV=test for actual tests
+      if (nodeEnv === "test" || process.env.SKIP_MANIFESTS === "true") {
+        console.warn(
+          `[Config] ⚠️  No manifests available - running in minimal mode (test)`,
+        );
+        console.warn(
+          `[Config] 💡 For full functionality, clone the assets repo or set PUBLIC_CDN_URL to a valid CDN`,
+        );
+        return;
+      }
       throw new Error(
-        `Failed to fetch any manifests from CDN (${cdnUrl}) and no local manifests exist`,
+        `Failed to fetch any manifests from CDN (${cdnUrl}) and no local manifests exist. ` +
+          `Set SKIP_MANIFESTS=true to bypass this check in test environments.`,
       );
     }
     console.warn(
@@ -304,3 +343,4 @@ export function getPublicEnvs(): Record<string, string> {
 
   return publicEnvs;
 }
+// Deploy trigger: 1769051068

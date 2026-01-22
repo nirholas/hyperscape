@@ -68,7 +68,7 @@ import { registerWebSocket } from "./startup/websocket.js";
 import { registerShutdownHandlers } from "./startup/shutdown.js";
 
 // Import embedded agent system
-import { initializeAgents, getAgentManager } from "./eliza/index.js";
+import { initializeAgents } from "./eliza/index.js";
 
 /**
  * Starts the Hyperscape server

@@ -7,6 +7,7 @@ on:
 
 jobs:
   claude-review:
+    # Skip if actor is a bot OR if the required secret is not configured
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     permissions:
@@ -15,7 +16,18 @@ jobs:
       issues: read
       id-token: write
     steps:
+      - name: Check for required secrets
+        id: check-secrets
+        run: |
+          if [ -z "${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::warning::CLAUDE_CODE_OAUTH_TOKEN secret is not configured. Skipping code review."
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Checkout repository
+        if: steps.check-secrets.outputs.skip != 'true'
         uses: actions/checkout@v5
         with:
           # For pull_request_target, checkout the PR head commit
@@ -23,6 +35,7 @@ jobs:
           fetch-depth: 0
 
       - name: Run Claude Code Review
+        if: steps.check-secrets.outputs.skip != 'true'
         id: claude-review
         uses: anthropics/claude-code-action@v1
         with:

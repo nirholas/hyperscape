@@ -1,18 +1,42 @@
-# Cloudflare Pages Configuration for Hyperscape Client
-name = "hyperscape-client"
+# Cloudflare Pages Configuration for Hyperscape
+# Project: hyperscape (https://hyperscape.club)
+# Account: 50ad2052bbc6ca528d6993a689b419a4
+
+name = "hyperscape"
 compatibility_date = "2024-10-01"
 pages_build_output_dir = "dist"
 
-# This file is mainly for reference - Cloudflare Pages uses CLI or GitHub integration
-# Actual deployment: wrangler pages deploy dist --project-name=hyperscape-client
+# Deployment is handled by Cloudflare Pages GitHub integration
+# Manual deploy: wrangler pages deploy dist --project-name=hyperscape
 
 [env.production]
 vars = { }
 
-# Set via Cloudflare Pages dashboard → Settings → Environment variables:
-# PUBLIC_WS_URL = wss://game.yourgame.com/ws
-# PUBLIC_CDN_URL = https://pub-your-r2-id.r2.dev
-# PUBLIC_PRIVY_APP_ID = clxxxxxxxxxxxx
-# PUBLIC_ENABLE_FARCASTER = true
-# PUBLIC_APP_URL = https://yourgame.com
+# ============================================================
+# CLOUDFLARE PAGES BUILD CONFIGURATION
+# ============================================================
+# Configure in Dashboard: Settings → Builds & deployments
+#
+# Build command:     npm run build:cf
+# Build output dir:  packages/client/dist
+# Root directory:    packages/client
+#
+# ============================================================
+# REQUIRED ENVIRONMENT VARIABLES
+# ============================================================
+# Set in Dashboard: Settings → Environment variables → Production
+#
+# Build Configuration (REQUIRED - prevents heap out of memory):
+#   NODE_OPTIONS            - --max-old-space-size=4096
+#
+# App Configuration:
+#   PUBLIC_PRIVY_APP_ID     - cmgk4zu56005kjj0bcaae0rei
+#   PUBLIC_API_URL          - https://hyperscape-production.up.railway.app
+#   PUBLIC_WS_URL           - wss://hyperscape-production.up.railway.app/ws
+#   PUBLIC_CDN_URL          - https://assets.hyperscape.club
+#   PUBLIC_APP_URL          - https://hyperscape.club
+#
+# Optional:
+#   PUBLIC_ELIZAOS_URL      - ElizaOS API for AI dashboard
+#   PUBLIC_ENABLE_FARCASTER - Enable Farcaster mini-app features
 

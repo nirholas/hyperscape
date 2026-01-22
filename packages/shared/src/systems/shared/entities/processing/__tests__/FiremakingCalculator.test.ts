@@ -21,14 +21,32 @@ import {
   getValidLogIds,
 } from "../FiremakingCalculator";
 import { PROCESSING_CONSTANTS } from "../../../../../constants/ProcessingConstants";
-import { dataManager } from "../../../../../data/DataManager";
+import {
+  ProcessingDataProvider,
+  type FiremakingManifest,
+} from "../../../../../data/ProcessingDataProvider";
+
+// OSRS-accurate firemaking data from recipes/firemaking.json
+const FIREMAKING_MANIFEST: FiremakingManifest = {
+  recipes: [
+    { log: "logs", level: 1, xp: 40, ticks: 4 },
+    { log: "oak_logs", level: 15, xp: 60, ticks: 4 },
+    { log: "willow_logs", level: 30, xp: 90, ticks: 4 },
+    { log: "teak_logs", level: 35, xp: 105, ticks: 4 },
+    { log: "maple_logs", level: 45, xp: 135, ticks: 4 },
+    { log: "mahogany_logs", level: 50, xp: 157.5, ticks: 4 },
+    { log: "yew_logs", level: 60, xp: 202.5, ticks: 4 },
+    { log: "magic_logs", level: 75, xp: 303.8, ticks: 4 },
+  ],
+};
 
 describe("FiremakingCalculator", () => {
-  beforeAll(async () => {
-    // Initialize DataManager to load recipe manifests before tests
-    if (!dataManager.isReady()) {
-      await dataManager.initialize();
-    }
+  beforeAll(() => {
+    // Load firemaking recipes directly for unit tests
+    // (CDN/filesystem loading may not be available in test environment)
+    const provider = ProcessingDataProvider.getInstance();
+    provider.loadFiremakingRecipes(FIREMAKING_MANIFEST);
+    provider.rebuild();
   });
   describe("calculateFiremakingSuccess", () => {
     it("returns ~25.4% at level 1 (65/256)", () => {

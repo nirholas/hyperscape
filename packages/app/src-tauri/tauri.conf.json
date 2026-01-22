@@ -58,7 +58,7 @@
     "longDescription": "Hyperscape is a 3D multiplayer game built with WebGPU technology.",
     "copyright": "© 2025 Hyperscape",
     "publisher": "Hyperscape",
-    "homepage": "https://hyperscape.lol",
+    "homepage": "https://hyperscape.club",
     "licenseFile": "../../LICENSE",
     "resources": [],
     "externalBin": [],
@@ -113,8 +113,8 @@
   "plugins": {
     "deep-link": {
       "mobile": [
-        { "host": "hyperscape.lol", "pathPrefix": ["/auth"] },
-        { "host": "auth.hyperscape.lol" }
+        { "host": "hyperscape.club", "pathPrefix": ["/auth"] },
+        { "host": "auth.hyperscape.club" }
       ],
       "desktop": {
         "schemes": ["hyperscape"]
@@ -124,7 +124,7 @@
       "active": true,
       "pubkey": "",
       "endpoints": [
-        "https://releases.hyperscape.lol/{{target}}/{{arch}}/{{current_version}}"
+        "https://releases.hyperscape.club/{{target}}/{{arch}}/{{current_version}}"
       ],
       "dialog": true
     }

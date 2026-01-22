@@ -59,11 +59,13 @@ export async function createHttpServer(
   const fastify = Fastify({ logger: { level: "error" } });
 
   // Configure CORS for development and production
+  // Frontend: Cloudflare Pages (hyperscape.club)
+  // Backend: Railway (hyperscape-production.up.railway.app)
   const elizaOSUrl =
     process.env.ELIZAOS_URL ||
     process.env.ELIZAOS_API_URL ||
     (process.env.NODE_ENV === "production"
-      ? "https://api.hyperscape.lol"
+      ? "https://hyperscape-production.up.railway.app"
       : "http://localhost:4001");
   const clientUrl =
     process.env.CLIENT_URL ||
@@ -72,20 +74,23 @@ export async function createHttpServer(
   const serverUrl = process.env.SERVER_URL || `http://localhost:${config.port}`;
 
   const allowedOrigins = [
-    // Production domains
-    "https://hyperscape.lol",
-    "https://api.hyperscape.lol",
+    // Production domains (HTTPS)
+    "https://hyperscape.club",
+    "https://www.hyperscape.club",
+    "https://hyperscape.pages.dev",
     "https://hyperscape-production.up.railway.app",
+    // Production domains (HTTP for legacy/testing)
+    "http://hyperscape.pages.dev",
     // Development (from env vars or defaults)
     elizaOSUrl, // ElizaOS API
     clientUrl, // Game Client
     serverUrl, // Game Server
-    // Dynamic patterns (for localhost dev)
-    /^https?:\/\/localhost:\d+$/,
+    // Dynamic patterns (for localhost dev and preview deployments)
+    /^https?:\/\/localhost:\d+$/, // Matches http://localhost:3000, 3333, 5555, etc.
+    /^https?:\/\/.+\.hyperscape\.pages\.dev$/, // Cloudflare Pages preview deployments
     /^https:\/\/.+\.farcaster\.xyz$/,
     /^https:\/\/.+\.warpcast\.com$/,
     /^https:\/\/.+\.privy\.io$/,
-    /^https:\/\/.+\.hyperscape\.lol$/,
     /^https:\/\/.+\.up\.railway\.app$/,
   ];
 
@@ -140,6 +145,31 @@ export async function createHttpServer(
     reply.status(500).send({ error: "Internal server error" });
   });
 
+  // Debug endpoint to see public directory contents
+  fastify.get("/debug/public", async (_req, reply) => {
+    const publicDir = path.join(config.__dirname, "public");
+    const assetsDir = path.join(publicDir, "assets");
+    let publicContents: string[] = [];
+    let assetsContents: string[] = [];
+    try {
+      publicContents = await fs.readdir(publicDir);
+    } catch (e) {
+      publicContents = [`ERROR: ${e}`];
+    }
+    try {
+      assetsContents = await fs.readdir(assetsDir);
+    } catch (e) {
+      assetsContents = [`ERROR: ${e}`];
+    }
+    return reply.send({
+      publicDir,
+      assetsDir,
+      publicContents,
+      assetsContents: assetsContents.slice(0, 20), // Limit to 20 items
+      configDirname: config.__dirname,
+    });
+  });
+
   // SPA catch-all route - serve index.html for any unmatched routes
   // This must be registered AFTER all other routes
   await registerSpaCatchAll(fastify, config);
@@ -166,9 +196,23 @@ async function registerIndexHtmlRoute(
 
   // Check if index.html exists before registering routes
   if (!(await fs.pathExists(indexHtmlPath))) {
+    // Get additional debug info
+    const publicDir = path.dirname(indexHtmlPath);
+    let publicDirContents: string[] = [];
+    try {
+      publicDirContents = await fs.readdir(publicDir);
+    } catch {
+      publicDirContents = ["ERROR: Could not read directory"];
+    }
+
     console.log(
       `[HTTP] ⚠️  No index.html found at ${indexHtmlPath}, registering fallback routes`,
     );
+    console.log(
+      `[HTTP] ⚠️  Public dir contents: ${JSON.stringify(publicDirContents)}`,
+    );
+    console.log(`[HTTP] ⚠️  config.__dirname: ${config.__dirname}`);
+    console.log(`[HTTP] ⚠️  process.cwd(): ${process.cwd()}`);
 
     // Register fallback routes that return a helpful message
     const fallbackHandler = async (
@@ -180,6 +224,9 @@ async function registerIndexHtmlRoute(
         message:
           "The client application has not been built or deployed. Please ensure the client is built and copied to the server's public directory.",
         expectedPath: indexHtmlPath,
+        configDirname: config.__dirname,
+        cwd: process.cwd(),
+        publicDirContents,
       });
     };
 
@@ -236,6 +283,17 @@ async function registerStaticFiles(
   });
   console.log("[HTTP] ✅ Public directory registered");
 
+  // Check if client assets exist in public/assets (built frontend)
+  // If they do, we DON'T want to register /assets/ for world assets as it would conflict
+  const publicAssetsPath = path.join(config.__dirname, "public", "assets");
+  const hasClientAssets = await fs.pathExists(publicAssetsPath);
+
+  if (hasClientAssets) {
+    console.log(
+      `[HTTP] ✅ Client assets found in public/assets - serving from there`,
+    );
+  }
+
   // Register world assets at /assets/world/ (only if assets directory exists)
   // In production, clients get assets directly from CDN (PUBLIC_CDN_URL)
   if (await fs.pathExists(config.assetsDir)) {
@@ -252,16 +310,19 @@ async function registerStaticFiles(
     // Manual music route (workaround for static file issues)
     registerMusicRoute(fastify, config);
 
-    // ALSO register as /assets/ for backward compatibility
-    await fastify.register(statics, {
-      root: config.assetsDir,
-      prefix: "/assets/",
-      decorateReply: false,
-      setHeaders: (res, filePath) => {
-        setAssetHeaders(res, filePath);
-      },
-    });
-    console.log(`[HTTP] ✅ Registered /assets/ → ${config.assetsDir}`);
+    // ONLY register /assets/ for world assets if NO client assets exist
+    // Otherwise, the public directory already serves /assets/ for the frontend
+    if (!hasClientAssets) {
+      await fastify.register(statics, {
+        root: config.assetsDir,
+        prefix: "/assets/",
+        decorateReply: false,
+        setHeaders: (res, filePath) => {
+          setAssetHeaders(res, filePath);
+        },
+      });
+      console.log(`[HTTP] ✅ Registered /assets/ → ${config.assetsDir}`);
+    }
   } else {
     console.log(
       `[HTTP] ⏭️  Skipping local assets routes (assets served from CDN: ${config.cdnUrl})`,

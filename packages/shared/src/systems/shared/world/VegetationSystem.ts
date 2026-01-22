@@ -1165,9 +1165,11 @@ export class VegetationSystem extends System {
 
     // OPTIMIZATION: Only use textures if vertex colors are not available
     // Vertex colors are faster (no texture sampling) and use less GPU memory
-    const map = hasVertexColors ? null : matAny.map || null;
+    // NOTE: Use undefined instead of null for optional textures
+    // Setting null causes WebGPU texture cache corruption (WeakMap key error)
+    const map = hasVertexColors ? undefined : matAny.map || undefined;
     const color = matAny.color || new THREE.Color(0xffffff);
-    const alphaMap = hasVertexColors ? null : matAny.alphaMap || null;
+    const alphaMap = hasVertexColors ? undefined : matAny.alphaMap || undefined;
 
     // Create fresh MeshStandardMaterial for vegetation
     const stdMat = new THREE.MeshStandardMaterial({
@@ -1183,7 +1185,8 @@ export class VegetationSystem extends System {
       // Matte surface - no specular, no reflections
       roughness: 1.0,
       metalness: 0.0,
-      envMap: null,
+      // NOTE: Don't set envMap to null - it causes WebGPU texture cache corruption
+      // Setting envMapIntensity to 0 is sufficient to disable the environment map effect
       envMapIntensity: 0,
       // Enable fog
       fog: true,

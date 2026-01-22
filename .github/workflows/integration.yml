@@ -2,9 +2,9 @@ name: Integration Tests
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, staging, develop]
   pull_request:
-    branches: [main, develop]
+    branches: [main, staging, develop]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -33,20 +33,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+        with:
+          submodules: recursive
 
-      - name: Fetch manifests from CDN
+      - name: Clone assets repository
         run: |
-          mkdir -p packages/server/world/assets/manifests
-          CDN_URL="https://d20g7vd4m53hpb.cloudfront.net"
-          MANIFESTS="items npcs resources tools biomes world-areas stores music vegetation buildings"
-          for file in $MANIFESTS; do
-            echo "Fetching ${file}.json..."
-            curl -sSf "$CDN_URL/manifests/${file}.json" -o "packages/server/world/assets/manifests/${file}.json" || echo "Warning: ${file}.json not found"
-          done
-          echo "✅ Manifests fetched from CDN"
-          ls -la packages/server/world/assets/manifests/
-        env:
-          PUBLIC_CDN_URL: https://d20g7vd4m53hpb.cloudfront.net
+          git clone --depth 1 https://github.com/HyperscapeAI/assets.git packages/server/world/assets
+          echo "✓ Assets cloned ($(ls packages/server/world/assets/manifests/*.json 2>/dev/null | wc -l) manifest files)"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -84,7 +77,9 @@ jobs:
           DATABASE_URL: postgresql://hyperscape:hyperscape_test@localhost:5432/hyperscape_test
           NODE_ENV: test
           PORT: 5555
-          PUBLIC_CDN_URL: https://d20g7vd4m53hpb.cloudfront.net
+          CI: "true"
+          SKIP_MANIFESTS: "true"
+          PUBLIC_CDN_URL: https://assets.hyperscape.club
 
       - name: Wait for server to be ready
         working-directory: packages/server

@@ -58,15 +58,17 @@ tmp/
 .turbo/
 .claude-plugin/
 
-# Assets (generated/temporary)
-assets/
+# Assets (generated/temporary - root assets directory)
+/assets/
 # Exception: asset-forge component directory should be tracked
 !packages/asset-forge/src/components/Assets/
 
 # 3D Models and Avatars - downloaded from separate assets repo
-packages/server/world/assets/
-# Exception: manifests directory contains essential JSON data for server startup
-!packages/server/world/assets/manifests/
+# Ignore large binary assets (models, textures) but keep manifests JSON
+packages/server/world/assets/models/
+packages/server/world/assets/textures/
+packages/server/world/assets/audio/
+# manifests/ directory IS tracked (essential JSON data for server startup)
 packages/client/src/public/models/
 packages/client/dist/models/
 
@@ -90,15 +92,9 @@ clear-users.sql
 
 logs/
 
-# Terraform
-terraform.tfstate
-terraform.tfstate.*
-infrastructure/.terraform/
-infrastructure/*.tfstate
-infrastructure/*.tfstate.*
-infrastructure/terraform.tfvars
-infrastructure/*.tfplan
-infrastructure/crash.log
-
-packages/server/world/assets/
 eliza/
+
+# Server world assets - ignore large binaries, keep manifests
+# The manifests/ directory contains essential JSON data and MUST be tracked
+packages/server/world/assets/
+.wrangler/

@@ -2,8 +2,6 @@
 node_modules/
 .git/
 *.log
-dist/
-build/
 coverage/
 .next/
 .nuxt/
@@ -11,9 +9,11 @@ coverage/
 tmp/
 .turbo/
 
-# Large asset directories (served from CDN)
+# Note: NOT ignoring dist/ and build/ as they're needed for deployment
+# The client dist is copied to server/public during build
+
+# Large asset directories (served from CDN, not needed for build)
 packages/server/world/assets/
-packages/client/public/assets/
 
 # Test files
 test-results/

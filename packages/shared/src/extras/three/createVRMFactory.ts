@@ -135,10 +135,12 @@ export function createVRMFactory(
           originalMat.emissive?.clone() ||
           baseColor.clone().multiplyScalar(0.15);
 
+        // NOTE: Use undefined instead of null for optional textures
+        // Setting null causes WebGPU texture cache corruption (WeakMap key error)
         const newMat = new THREE.MeshStandardMaterial({
-          map: originalMat.map || null,
-          normalMap: originalMat.normalMap || null,
-          emissiveMap: originalMat.emissiveMap || null,
+          map: originalMat.map || undefined,
+          normalMap: originalMat.normalMap || undefined,
+          emissiveMap: originalMat.emissiveMap || undefined,
           color: baseColor,
           emissive: emissiveColor,
           emissiveIntensity: 0.3, // Subtle glow - matches PlayerEntity placeholder

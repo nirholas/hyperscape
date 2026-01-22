@@ -2,14 +2,14 @@
 /**
  * Ensure Assets Script (Local Development Only)
  *
- * Downloads game assets for local development. In production and CI,
- * assets are served from CDN (https://d20g7vd4m53hpb.cloudfront.net).
+ * Downloads game assets for local development. In CI/production,
+ * manifests are committed to the repo and don't need to be fetched.
  *
  * Behavior:
- * - CI/Production: Skip - assets come from CDN
+ * - CI/Production: Skip - manifests are in the repo
  * - Development: If /packages/server/world/assets/ is empty → clone from GitHub
  *
- * Note: The server fetches manifests from CDN at startup. This script is only
+ * Note: Manifests are committed to the repo. This script is only
  * needed for local development with full assets (models, audio, textures).
  */
 
@@ -23,8 +23,8 @@ const rootDir = path.join(__dirname, "..");
 const assetsDir = path.join(rootDir, "packages/server/world/assets");
 const assetsRepo = "https://github.com/HyperscapeAI/assets.git";
 
-// CDN URL for production assets
-const CDN_URL = "https://d20g7vd4m53hpb.cloudfront.net";
+// Local CDN URL for development
+const LOCAL_CDN_URL = "http://localhost:8080";
 
 function hasContent(dir) {
   if (!existsSync(dir)) return false;
@@ -58,7 +58,7 @@ Install it for your platform:
 Then re-run:
   bun install
 
-Note: In CI/production, assets are served from CDN: ${CDN_URL}
+Note: In CI/production, manifests are committed to the repo.
 `);
 }
 
@@ -82,11 +82,10 @@ async function main() {
   console.log("📦 Checking game assets...");
 
   // Skip asset download in CI/production environments
-  // Assets are served from CDN, manifests fetched at server startup
+  // Manifests are committed to the repo
   if (isCI()) {
     console.log("⏭️  Skipping asset download (CI/production environment)");
-    console.log(`   Assets served from CDN: ${CDN_URL}`);
-    console.log("   Manifests fetched at server startup");
+    console.log("   Manifests are committed to the repo");
     return;
   }
 
@@ -111,7 +110,6 @@ async function main() {
   console.log("📥 Downloading game assets for local development (~200MB)...");
   console.log(`   From: ${assetsRepo}`);
   console.log(`   To: ${assetsDir}`);
-  console.log(`   (Production uses CDN: ${CDN_URL})`);
 
   try {
     // Ensure parent directory exists

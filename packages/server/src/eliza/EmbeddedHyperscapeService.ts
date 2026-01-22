@@ -8,7 +8,7 @@
  * agents that run on the server itself.
  */
 
-import { EventType, type World, type Entity } from "@hyperscape/shared";
+import { EventType, type World } from "@hyperscape/shared";
 import type {
   IEmbeddedHyperscapeService,
   EmbeddedGameState,

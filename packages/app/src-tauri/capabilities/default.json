@@ -41,13 +41,7 @@
       "identifier": "http:default",
       "allow": [
         {
-          "url": "https://*.hyperscape.lol/*"
-        },
-        {
-          "url": "https://api.hyperscape.lol/*"
-        },
-        {
-          "url": "wss://api.hyperscape.lol/*"
+          "url": "https://*.hyperscape.club/*"
         },
         {
           "url": "https://hyperscape-production.up.railway.app/*"
@@ -66,9 +60,6 @@
         },
         {
           "url": "https://auth.privy.io/*"
-        },
-        {
-          "url": "https://*.cloudfront.net/*"
         }
       ]
     },

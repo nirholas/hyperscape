@@ -12,7 +12,7 @@
  * @see https://oldschool.runescape.wiki/w/Cooking/Burn_level
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import {
   calculateBurnChance,
   getStopBurnLevel,
@@ -25,8 +25,51 @@ import {
   getValidRawFoodIds,
   rollBurn,
 } from "../CookingCalculator";
+import {
+  ProcessingDataProvider,
+  type CookingManifest,
+} from "../../../../../data/ProcessingDataProvider";
+
+/**
+ * Get CDN base URL from environment
+ */
+function getCdnUrl(): string {
+  // Check for PUBLIC_CDN_URL in environment (set by CI)
+  if (process.env.PUBLIC_CDN_URL) {
+    return process.env.PUBLIC_CDN_URL;
+  }
+  // Default to production CDN
+  return "https://assets.hyperscape.club";
+}
 
 describe("CookingCalculator", () => {
+  beforeAll(async () => {
+    // Load cooking recipes from CDN
+    const cdnUrl = getCdnUrl();
+    const manifestUrl = `${cdnUrl}/manifests/recipes/cooking.json`;
+
+    const response = await fetch(manifestUrl);
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch cooking.json from CDN: ${response.status} ${response.statusText}\nURL: ${manifestUrl}`,
+      );
+    }
+
+    const manifest = (await response.json()) as CookingManifest;
+
+    // Load recipes into ProcessingDataProvider
+    const provider = ProcessingDataProvider.getInstance();
+    provider.loadCookingRecipes(manifest);
+    provider.rebuild();
+
+    // Verify data is loaded
+    const cookableCount = provider.getCookableItemIds().size;
+    if (cookableCount === 0) {
+      throw new Error(
+        `Manifest loaded from ${manifestUrl} but ProcessingDataProvider has 0 cookable items after rebuild`,
+      );
+    }
+  });
   describe("getStopBurnLevel", () => {
     it("returns correct fire stop-burn level for shrimp", () => {
       expect(getStopBurnLevel("raw_shrimp", "fire")).toBe(34);

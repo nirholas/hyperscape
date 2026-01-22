@@ -9,7 +9,18 @@ jobs:
   update-docs:
     runs-on: ubuntu-latest
     steps:
+      - name: Check for required secrets
+        id: check-secrets
+        run: |
+          if [ -z "${{ secrets.MINTLIFY_API_KEY }}" ] || [ -z "${{ secrets.MINTLIFY_PROJECT_ID }}" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::warning::MINTLIFY_API_KEY or MINTLIFY_PROJECT_ID secrets are not configured. Skipping docs update."
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - uses: actions/github-script@v8
+        if: steps.check-secrets.outputs.skip != 'true'
         env:
           MINTLIFY_API_KEY: ${{ secrets.MINTLIFY_API_KEY }}
           PROJECT_ID: ${{ secrets.MINTLIFY_PROJECT_ID }}
@@ -20,7 +31,7 @@ jobs:
             const apiKey = process.env.MINTLIFY_API_KEY;
 
             if (!projectId || !apiKey) {
-              core.setFailed('Missing MINTLIFY_PROJECT_ID or MINTLIFY_API_KEY secrets');
+              core.warning('Missing MINTLIFY_PROJECT_ID or MINTLIFY_API_KEY secrets - skipping docs update');
               return;
             }
 

@@ -2,9 +2,9 @@ name: TypeScript Type Check
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, staging, develop]
   pull_request:
-    branches: [main, develop]
+    branches: [main, staging, develop]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -31,6 +31,15 @@ jobs:
 
       - name: Build shared package (required for types)
         run: cd packages/shared && bun run build
+
+      - name: Build hs-kit package (if exists)
+        run: |
+          if [ -d "packages/hs-kit" ]; then
+            echo "Building hs-kit package..."
+            cd packages/hs-kit && bun run build
+          else
+            echo "hs-kit package not found, skipping..."
+          fi
 
       - name: Type check shared package
         working-directory: packages/shared

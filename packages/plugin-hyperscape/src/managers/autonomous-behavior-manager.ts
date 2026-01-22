@@ -18,7 +18,6 @@
 
 import {
   logger,
-  MemoryType,
   ModelType,
   type IAgentRuntime,
   type Memory,
@@ -861,9 +860,6 @@ export class AutonomousBehaviorManager {
                   action: content.action,
                   source: "autonomous_behavior",
                 },
-                metadata: {
-                  type: MemoryType.CUSTOM,
-                },
               },
               "messages",
               false, // not unique
@@ -1049,13 +1045,79 @@ export class AutonomousBehaviorManager {
     tickCount: number;
     lastTickTime: number;
     tickInterval: number;
+    hasGoal: boolean;
+    goalType: string | null;
+    goalProgress: string | null;
   } {
     return {
       running: this.isRunning,
       tickCount: this.tickCount,
       lastTickTime: this.lastTickTime,
       tickInterval: this.tickInterval,
+      hasGoal: this.currentGoal !== null,
+      goalType: this.currentGoal?.type ?? null,
+      goalProgress: this.currentGoal
+        ? `${this.currentGoal.progress}/${this.currentGoal.target}`
+        : null,
     };
+  }
+
+  /**
+   * Process a message using the canonical ElizaOS messageService pipeline.
+   * Use this for responding to player chat messages.
+   * For autonomous game behavior, the tick() method is preferred.
+   */
+  async processMessageCanonically(
+    messageText: string,
+    source: string = "hyperscape_chat",
+  ): Promise<{ responded: boolean; responseText?: string }> {
+    if (!this.runtime.messageService) {
+      logger.warn(
+        "[AutonomousBehavior] messageService not available, falling back to manual processing",
+      );
+      return { responded: false };
+    }
+
+    const message: Memory = {
+      id: crypto.randomUUID() as UUID,
+      entityId: this.runtime.agentId,
+      agentId: this.runtime.agentId,
+      roomId: this.runtime.agentId,
+      content: {
+        text: messageText,
+        source,
+      },
+      createdAt: Date.now(),
+    };
+
+    let responseText = "";
+
+    try {
+      const result = await this.runtime.messageService.handleMessage(
+        this.runtime,
+        message,
+        async (content) => {
+          if (content.text) {
+            responseText = content.text;
+            logger.info(
+              `[AutonomousBehavior] Canonical response: ${content.text}`,
+            );
+          }
+          return [];
+        },
+      );
+
+      return {
+        responded: result.didRespond ?? responseText.length > 0,
+        responseText: responseText || undefined,
+      };
+    } catch (error) {
+      logger.error(
+        "[AutonomousBehavior] Error in canonical message processing:",
+        error instanceof Error ? error.message : String(error),
+      );
+      return { responded: false };
+    }
   }
 
   /**

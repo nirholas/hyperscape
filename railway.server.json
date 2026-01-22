@@ -5,7 +5,6 @@
     "nixpacksConfigPath": "nixpacks.toml",
     "watchPatterns": [
       "packages/shared/**",
-      "packages/client/**",
       "packages/server/**",
       "packages/plugin-hyperscape/**",
       "package.json",
@@ -13,7 +12,7 @@
     ]
   },
   "deploy": {
-    "startCommand": "cd packages/server && ls -la public/ && test -f public/index.html && bun dist/index.js",
+    "startCommand": "cd packages/server && bun dist/index.js",
     "healthcheckPath": "/status",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",

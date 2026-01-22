@@ -18,8 +18,6 @@ export interface AvatarOption {
  *
  * - `url`: Uses asset:// protocol which is resolved by the ClientLoader for in-game rendering
  * - `previewPath`: Path portion used by CharacterPreview component (CDN URL is prepended at runtime)
- *
- * The actual files are served from the CDN (S3/CloudFront in production)
  */
 export const AVATAR_OPTIONS: AvatarOption[] = [
   {

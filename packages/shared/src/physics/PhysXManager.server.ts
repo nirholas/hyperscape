@@ -39,8 +39,23 @@ export async function loadPhysXWasmForNode(): Promise<Buffer> {
   const { join } = await import("node:path");
   const { tmpdir } = await import("node:os");
 
-  // Try local assets/web/ directory first (for development and direct workspace access)
+  // Try local paths first (for development, CI, and direct workspace access)
   const localPaths = [
+    // Built package location (CI builds here)
+    join(process.cwd(), "../physx-js-webidl/dist/physx-js-webidl.wasm"),
+    join(
+      process.cwd(),
+      "../../packages/physx-js-webidl/dist/physx-js-webidl.wasm",
+    ),
+    // Node modules (installed package)
+    join(
+      process.cwd(),
+      "node_modules/@hyperscape/physx-js-webidl/dist/physx-js-webidl.wasm",
+    ),
+    join(
+      process.cwd(),
+      "../../node_modules/@hyperscape/physx-js-webidl/dist/physx-js-webidl.wasm",
+    ),
     // Workspace root assets
     join(process.cwd(), "assets/web/physx-js-webidl.wasm"),
     join(process.cwd(), "../../assets/web/physx-js-webidl.wasm"),

@@ -2215,7 +2215,7 @@ export function registerAgentRoutes(
         });
       }
 
-      const { characters } = await import("../../database/schema.js");
+      await import("../../database/schema.js");
       const { eq } = await import("drizzle-orm");
 
       const character = await databaseSystem.db.query.characters.findFirst({
@@ -2671,4 +2671,603 @@ export function registerAgentRoutes(
 
   console.log("[AgentRoutes] ✅ Agent credential routes registered");
   console.log("[AgentRoutes] ✅ Embedded agent routes registered");
+
+  // ===========================================================================
+  // ELIZAOS-COMPATIBLE API ROUTES
+  // These routes provide ElizaOS API compatibility for the dashboard
+  // Maps to the embedded agent system under the hood
+  // ===========================================================================
+
+  /**
+   * GET /api/agents
+   *
+   * List all agents (ElizaOS-compatible format).
+   * Used by DashboardScreen to list agents.
+   *
+   * Query params:
+   * - accountId?: string - Filter by account ID
+   *
+   * Response (ElizaOS format):
+   * {
+   *   success: true,
+   *   data: {
+   *     agents: [
+   *       { id, name, status, ... }
+   *     ]
+   *   }
+   * }
+   */
+  fastify.get("/api/agents", async (request, reply) => {
+    try {
+      const { getAgentManager } = await import("../../eliza/index.js");
+      const agentManager = getAgentManager();
+
+      if (!agentManager) {
+        // Return empty list if agent system not initialized
+        return reply.send({
+          success: true,
+          data: {
+            agents: [],
+          },
+        });
+      }
+
+      const query = request.query as { accountId?: string };
+      const agents = query.accountId
+        ? agentManager.getAgentsByAccount(query.accountId)
+        : agentManager.getAllAgents();
+
+      // Convert to ElizaOS format
+      const elizaAgents = agents.map((agent) => ({
+        id: agent.agentId,
+        name: agent.name,
+        status: agent.state === "running" ? "active" : agent.state,
+        character: {
+          name: agent.name,
+          settings: {
+            accountId: agent.accountId,
+          },
+        },
+        createdAt: new Date(agent.startedAt).toISOString(),
+        updatedAt: new Date(agent.lastActivity).toISOString(),
+      }));
+
+      return reply.send({
+        success: true,
+        data: {
+          agents: elizaAgents,
+        },
+      });
+    } catch (error) {
+      console.error("[AgentRoutes] ❌ Failed to list agents:", error);
+      return reply.status(500).send({
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to list agents",
+      });
+    }
+  });
+
+  /**
+   * POST /api/agents
+   *
+   * Create a new agent (ElizaOS-compatible).
+   * Used by CharacterSelectScreen and CharacterEditorScreen.
+   *
+   * Request body:
+   * {
+   *   characterJson: {
+   *     name: string,
+   *     settings: { accountId: string, characterId: string, ... }
+   *   }
+   * }
+   *
+   * Response:
+   * {
+   *   success: true,
+   *   data: {
+   *     agent: { id, name, status, ... }
+   *   }
+   * }
+   */
+  fastify.post("/api/agents", async (request, reply) => {
+    try {
+      const { getAgentManager } = await import("../../eliza/index.js");
+      const agentManager = getAgentManager();
+
+      if (!agentManager) {
+        return reply.status(503).send({
+          success: false,
+          error: "Agent system not initialized",
+        });
+      }
+
+      const body = request.body as {
+        characterJson?: {
+          name?: string;
+          settings?: {
+            accountId?: string;
+            characterId?: string;
+          };
+        };
+      };
+
+      const characterJson = body.characterJson;
+      if (!characterJson) {
+        return reply.status(400).send({
+          success: false,
+          error: "Missing required field: characterJson",
+        });
+      }
+
+      const name = characterJson.name || "Agent";
+      const accountId = characterJson.settings?.accountId;
+      const characterId = characterJson.settings?.characterId;
+
+      if (!accountId || !characterId) {
+        return reply.status(400).send({
+          success: false,
+          error:
+            "Missing required fields: characterJson.settings.accountId, characterJson.settings.characterId",
+        });
+      }
+
+      // Create the agent
+      const agentId = await agentManager.createAgent({
+        characterId,
+        accountId,
+        name,
+        autoStart: true,
+      });
+
+      const agentInfo = agentManager.getAgentInfo(agentId);
+
+      // Also save to agent mappings for dashboard filtering
+      const databaseSystem = world.getSystem("database") as
+        | {
+            db: {
+              insert: (table: unknown) => {
+                values: (values: unknown) => {
+                  onConflictDoUpdate: (config: {
+                    target: unknown;
+                    set: unknown;
+                  }) => Promise<unknown>;
+                };
+              };
+            };
+          }
+        | undefined;
+
+      if (databaseSystem?.db) {
+        try {
+          const { agentMappings } = await import("../../database/schema.js");
+          await databaseSystem.db
+            .insert(agentMappings)
+            .values({
+              agentId: characterId, // Use characterId as agentId for embedded agents
+              accountId,
+              characterId,
+              agentName: name,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .onConflictDoUpdate({
+              target: agentMappings.agentId,
+              set: {
+                agentName: name,
+                updatedAt: new Date(),
+              },
+            });
+        } catch (mappingError) {
+          console.warn(
+            "[AgentRoutes] Failed to save agent mapping:",
+            mappingError instanceof Error
+              ? mappingError.message
+              : String(mappingError),
+          );
+        }
+      }
+
+      console.log(`[AgentRoutes] ✅ Created agent via ElizaOS API: ${name}`);
+
+      return reply.send({
+        success: true,
+        data: {
+          agent: {
+            id: agentId,
+            name: agentInfo?.name || name,
+            status:
+              agentInfo?.state === "running" ? "active" : agentInfo?.state,
+            character: characterJson,
+            createdAt: new Date().toISOString(),
+          },
+        },
+      });
+    } catch (error) {
+      console.error("[AgentRoutes] ❌ Failed to create agent:", error);
+      return reply.status(500).send({
+        success: false,
+        error:
+          error instanceof Error ? error.message : "Failed to create agent",
+      });
+    }
+  });
+
+  /**
+   * GET /api/agents/:agentId
+   *
+   * Get agent details (ElizaOS-compatible).
+   * Used by AgentSettings and character editor.
+   *
+   * Response:
+   * {
+   *   success: true,
+   *   data: {
+   *     agent: { id, name, status, character, ... }
+   *   }
+   * }
+   */
+  fastify.get("/api/agents/:agentId", async (request, reply) => {
+    try {
+      const { getAgentManager } = await import("../../eliza/index.js");
+      const agentManager = getAgentManager();
+
+      const params = request.params as { agentId: string };
+      const { agentId } = params;
+
+      if (!agentManager) {
+        return reply.status(404).send({
+          success: false,
+          error: "Agent system not initialized",
+        });
+      }
+
+      const agentInfo = agentManager.getAgentInfo(agentId);
+
+      if (!agentInfo) {
+        return reply.status(404).send({
+          success: false,
+          error: "Agent not found",
+        });
+      }
+
+      return reply.send({
+        success: true,
+        data: {
+          agent: {
+            id: agentInfo.agentId,
+            name: agentInfo.name,
+            status: agentInfo.state === "running" ? "active" : agentInfo.state,
+            character: {
+              name: agentInfo.name,
+              settings: {
+                accountId: agentInfo.accountId,
+                characterId: agentInfo.characterId,
+              },
+            },
+            createdAt: new Date(agentInfo.startedAt).toISOString(),
+            updatedAt: new Date(agentInfo.lastActivity).toISOString(),
+          },
+        },
+      });
+    } catch (error) {
+      console.error("[AgentRoutes] ❌ Failed to get agent:", error);
+      return reply.status(500).send({
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to get agent",
+      });
+    }
+  });
+
+  /**
+   * PUT /api/agents/:agentId
+   *
+   * Update agent (ElizaOS-compatible).
+   * Used by AgentSettings to update character config.
+   *
+   * Request body:
+   * {
+   *   character: { name, ... }
+   * }
+   */
+  fastify.put("/api/agents/:agentId", async (request, reply) => {
+    try {
+      const params = request.params as { agentId: string };
+      const { agentId } = params;
+
+      // For now, just acknowledge the update
+      // Full character editing would require more complex logic
+      console.log(`[AgentRoutes] Update request for agent ${agentId}`);
+
+      return reply.send({
+        success: true,
+        message: "Agent updated",
+      });
+    } catch (error) {
+      console.error("[AgentRoutes] ❌ Failed to update agent:", error);
+      return reply.status(500).send({
+        success: false,
+        error:
+          error instanceof Error ? error.message : "Failed to update agent",
+      });
+    }
+  });
+
+  /**
+   * DELETE /api/agents/:agentId
+   *
+   * Delete an agent (ElizaOS-compatible).
+   */
+  fastify.delete("/api/agents/:agentId", async (request, reply) => {
+    try {
+      const { getAgentManager } = await import("../../eliza/index.js");
+      const agentManager = getAgentManager();
+
+      const params = request.params as { agentId: string };
+      const { agentId } = params;
+
+      if (!agentManager) {
+        return reply.status(503).send({
+          success: false,
+          error: "Agent system not initialized",
+        });
+      }
+
+      await agentManager.removeAgent(agentId);
+
+      // Also remove from agent mappings
+      const databaseSystem = world.getSystem("database") as
+        | {
+            db: {
+              delete: (table: unknown) => {
+                where: (condition: unknown) => Promise<unknown>;
+              };
+            };
+          }
+        | undefined;
+
+      if (databaseSystem?.db) {
+        try {
+          const { agentMappings } = await import("../../database/schema.js");
+          const { eq } = await import("drizzle-orm");
+          await databaseSystem.db
+            .delete(agentMappings)
+            .where(eq(agentMappings.agentId, agentId));
+        } catch {
+          // Ignore mapping deletion errors
+        }
+      }
+
+      return reply.send({
+        success: true,
+        message: "Agent deleted",
+      });
+    } catch (error) {
+      console.error("[AgentRoutes] ❌ Failed to delete agent:", error);
+      return reply.status(500).send({
+        success: false,
+        error:
+          error instanceof Error ? error.message : "Failed to delete agent",
+      });
+    }
+  });
+
+  /**
+   * POST /api/agents/:agentId/start
+   *
+   * Start an agent (ElizaOS-compatible).
+   * Used by DashboardScreen startAgent function.
+   */
+  fastify.post("/api/agents/:agentId/start", async (request, reply) => {
+    try {
+      const { getAgentManager } = await import("../../eliza/index.js");
+      const agentManager = getAgentManager();
+
+      const params = request.params as { agentId: string };
+      const { agentId } = params;
+
+      if (!agentManager) {
+        return reply.status(503).send({
+          success: false,
+          error: "Agent system not initialized",
+        });
+      }
+
+      // Check if agent exists, if not try to create it
+      if (!agentManager.hasAgent(agentId)) {
+        // Try to find character in database and create agent
+        const databaseSystem = world.getSystem("database") as
+          | {
+              db: {
+                query: {
+                  characters: {
+                    findFirst: (opts: {
+                      where: (
+                        chars: { id: unknown },
+                        ops: { eq: (a: unknown, b: string) => unknown },
+                      ) => unknown;
+                    }) => Promise<{
+                      id: string;
+                      accountId: string;
+                      name: string;
+                    } | null>;
+                  };
+                };
+              };
+            }
+          | undefined;
+
+        if (databaseSystem?.db) {
+          const character = await databaseSystem.db.query.characters.findFirst({
+            where: (chars, ops) => ops.eq(chars.id, agentId),
+          });
+
+          if (character) {
+            await agentManager.createAgent({
+              characterId: character.id,
+              accountId: character.accountId,
+              name: character.name,
+              autoStart: true,
+            });
+          }
+        }
+      }
+
+      await agentManager.startAgent(agentId);
+      const agentInfo = agentManager.getAgentInfo(agentId);
+
+      console.log(`[AgentRoutes] ✅ Started agent ${agentId}`);
+
+      return reply.send({
+        success: true,
+        data: {
+          agent: agentInfo
+            ? {
+                id: agentInfo.agentId,
+                name: agentInfo.name,
+                status: "active",
+              }
+            : { id: agentId, status: "active" },
+        },
+      });
+    } catch (error) {
+      console.error("[AgentRoutes] ❌ Failed to start agent:", error);
+      return reply.status(500).send({
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to start agent",
+      });
+    }
+  });
+
+  /**
+   * POST /api/agents/:agentId/stop
+   *
+   * Stop an agent (ElizaOS-compatible).
+   * Used by DashboardScreen stopAgent function.
+   */
+  fastify.post("/api/agents/:agentId/stop", async (request, reply) => {
+    try {
+      const { getAgentManager } = await import("../../eliza/index.js");
+      const agentManager = getAgentManager();
+
+      const params = request.params as { agentId: string };
+      const { agentId } = params;
+
+      if (!agentManager) {
+        return reply.status(503).send({
+          success: false,
+          error: "Agent system not initialized",
+        });
+      }
+
+      await agentManager.stopAgent(agentId);
+      const agentInfo = agentManager.getAgentInfo(agentId);
+
+      console.log(`[AgentRoutes] ✅ Stopped agent ${agentId}`);
+
+      return reply.send({
+        success: true,
+        data: {
+          agent: agentInfo
+            ? {
+                id: agentInfo.agentId,
+                name: agentInfo.name,
+                status: "stopped",
+              }
+            : { id: agentId, status: "stopped" },
+        },
+      });
+    } catch (error) {
+      console.error("[AgentRoutes] ❌ Failed to stop agent:", error);
+      return reply.status(500).send({
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to stop agent",
+      });
+    }
+  });
+
+  /**
+   * GET /api/agents/:agentId/logs
+   *
+   * Get agent logs (ElizaOS-compatible).
+   * Returns empty logs for now - would need log storage.
+   */
+  fastify.get("/api/agents/:agentId/logs", async (request, reply) => {
+    try {
+      const params = request.params as { agentId: string };
+      const { agentId } = params;
+
+      // Return empty logs for now
+      // Full implementation would require log storage
+      return reply.send({
+        success: true,
+        data: {
+          logs: [],
+          agentId,
+        },
+      });
+    } catch (error) {
+      console.error("[AgentRoutes] ❌ Failed to get agent logs:", error);
+      return reply.status(500).send({
+        success: false,
+        error:
+          error instanceof Error ? error.message : "Failed to get agent logs",
+      });
+    }
+  });
+
+  /**
+   * GET /api/agents/:agentId/panels
+   *
+   * Get agent dynamic panels (ElizaOS-compatible).
+   * Returns empty panels for now.
+   */
+  fastify.get("/api/agents/:agentId/panels", async (request, reply) => {
+    try {
+      return reply.send({
+        success: true,
+        data: {
+          panels: [],
+        },
+      });
+    } catch (error) {
+      console.error("[AgentRoutes] ❌ Failed to get agent panels:", error);
+      return reply.status(500).send({
+        success: false,
+        error:
+          error instanceof Error ? error.message : "Failed to get agent panels",
+      });
+    }
+  });
+
+  /**
+   * GET /api/server/health
+   *
+   * ElizaOS server health check.
+   * Used by SystemStatus component.
+   */
+  fastify.get("/api/server/health", async (_request, reply) => {
+    try {
+      const { getAgentManager } = await import("../../eliza/index.js");
+      const agentManager = getAgentManager();
+
+      const agents = agentManager?.getAllAgents() || [];
+      const runningCount = agents.filter((a) => a.state === "running").length;
+
+      return reply.send({
+        status: "healthy",
+        timestamp: new Date().toISOString(),
+        agents: {
+          total: agents.length,
+          running: runningCount,
+        },
+      });
+    } catch (error) {
+      return reply.status(500).send({
+        status: "unhealthy",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  console.log("[AgentRoutes] ✅ ElizaOS-compatible API routes registered");
 }
