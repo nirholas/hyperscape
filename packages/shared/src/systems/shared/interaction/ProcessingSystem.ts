@@ -360,16 +360,6 @@ export class ProcessingSystem extends SystemBase {
     logsSlot: number,
     tinderboxSlot: number,
   ): void {
-    // Check fire limit (optimized: no array allocation)
-    if (this.countPlayerFires(playerId) >= this.MAX_FIRES_PER_PLAYER) {
-      this.emitTypedEvent(EventType.UI_MESSAGE, {
-        playerId,
-        message: `You can only have ${this.MAX_FIRES_PER_PLAYER} fires lit at once.`,
-        type: "error",
-      });
-      return;
-    }
-
     // Get firemaking data from manifest
     const firemakingData = processingDataProvider.getFiremakingData(logsId);
     if (!firemakingData) {

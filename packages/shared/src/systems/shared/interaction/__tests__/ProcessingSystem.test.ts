@@ -139,13 +139,7 @@ describe("Burn Chance Calculation", () => {
   });
 });
 
-describe("Fire Limit Constants", () => {
-  it("MAX_FIRES_PER_PLAYER should be 3", () => {
-    // This is defined in ProcessingSystemBase
-    const MAX_FIRES_PER_PLAYER = 3;
-    expect(MAX_FIRES_PER_PLAYER).toBe(3);
-  });
-
+describe("Fire Constants", () => {
   it("FIRE_DURATION should be 2 minutes (120000ms)", () => {
     const FIRE_DURATION = 120000;
     expect(FIRE_DURATION).toBe(120000);
