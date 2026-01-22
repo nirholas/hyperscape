@@ -275,6 +275,9 @@ export type {
   TradeRequestModalState,
 } from "./types/game/trade-types";
 
+// Export quest type guards for server validation
+export { isValidQuestId } from "./types/game/quest-types";
+
 // Export item helpers used by server network snapshot
 export {
   getItem,

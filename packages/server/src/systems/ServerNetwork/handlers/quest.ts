@@ -8,8 +8,7 @@
 
 import type { World } from "@hyperscape/shared";
 import type { QuestSystem } from "@hyperscape/shared";
-import { SystemLogger } from "@hyperscape/shared";
-import { isValidQuestId } from "@hyperscape/shared/types/game/quest-types";
+import { SystemLogger, isValidQuestId } from "@hyperscape/shared";
 import type { ServerSocket } from "../../../shared/types";
 import { sendToSocket, getPlayerId } from "./common";
 import {

@@ -994,6 +994,12 @@ export class Entities extends SystemBase implements IEntities {
           );
         }
         this.player = entity as Player;
+        // Emit PLAYER_JOINED for local player so PlayerSystem can track them
+        // (Previously only PLAYER_REGISTERED was emitted, breaking skill updates)
+        this.emitTypedEvent("PLAYER_JOINED", {
+          playerId: entity.id,
+          player: entity as PlayerLocal,
+        });
         this.emitTypedEvent("PLAYER_REGISTERED", { playerId: entity.id });
       }
     }
