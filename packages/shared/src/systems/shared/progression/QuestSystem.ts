@@ -774,60 +774,47 @@ export class QuestSystem extends SystemBase {
   private handleNPCDied(data: NPCDiedPayload): void {
     const { killedBy, mobType } = data;
 
-    this.logger.info(
-      `[QuestSystem] NPC_DIED received: killedBy=${killedBy}, mobType=${mobType}`,
-    );
+    // Debug-level logging for hot path (reduces I/O and string allocations)
+    this.logger.debug(`NPC_DIED: killedBy=${killedBy}, mobType=${mobType}`);
 
     const state = this.playerStates.get(killedBy);
     if (!state) {
-      this.logger.info(
-        `[QuestSystem] No player state for ${killedBy}. Known players: ${Array.from(this.playerStates.keys()).join(", ")}`,
-      );
+      this.logger.debug(`No player state for ${killedBy}`);
       return;
     }
 
-    this.logger.info(
-      `[QuestSystem] Player ${killedBy} has ${state.activeQuests.size} active quests`,
+    this.logger.debug(
+      `Player ${killedBy} has ${state.activeQuests.size} active quests`,
     );
 
     // Check all active quests for kill objectives
     for (const [questId, progress] of state.activeQuests) {
-      this.logger.info(
-        `[QuestSystem] Checking quest ${questId}, currentStage=${progress.currentStage}`,
+      this.logger.debug(
+        `Checking quest ${questId}, stage=${progress.currentStage}`,
       );
 
       const definition = this.questDefinitions.get(questId);
       if (!definition) {
-        this.logger.info(`[QuestSystem] No definition for quest ${questId}`);
+        this.logger.debug(`No definition for quest ${questId}`);
         continue;
       }
 
       // Use cached lookup (O(1) instead of O(n))
       const stage = this.getStageById(questId, progress.currentStage);
       if (!stage) {
-        this.logger.info(
-          `[QuestSystem] Stage ${progress.currentStage} not found in quest ${questId}`,
-        );
+        this.logger.debug(`Stage ${progress.currentStage} not found`);
         continue;
       }
 
       if (stage.type !== "kill") {
-        this.logger.info(
-          `[QuestSystem] Stage ${stage.id} is type=${stage.type}, not kill`,
-        );
+        this.logger.debug(`Stage ${stage.id} is ${stage.type}, not kill`);
         continue;
       }
 
       // Check if this mob matches the target
-      // mobType is "goblin" and target is "goblin"
       const targetType = stage.target;
-      this.logger.info(
-        `[QuestSystem] Comparing mobType="${mobType}" with target="${targetType}"`,
-      );
       if (!targetType || mobType !== targetType) {
-        this.logger.info(
-          `[QuestSystem] mobType doesn't match target, skipping`,
-        );
+        this.logger.debug(`Target mismatch: ${mobType} vs ${targetType}`);
         continue;
       }
 
@@ -836,9 +823,12 @@ export class QuestSystem extends SystemBase {
       const kills = progress.stageProgress.kills;
       this.markActiveQuestsDirty(killedBy);
 
-      this.logger.info(
-        `[QuestSystem] Player ${killedBy} killed ${mobType}, quest ${questId} progress: ${kills}/${stage.count}`,
-      );
+      // Log at info level only for milestones (first, halfway, complete)
+      const requiredCount = stage.count || 1;
+      const halfway = Math.floor(requiredCount / 2);
+      if (kills === 1 || kills === halfway || kills >= requiredCount) {
+        this.logger.info(`Quest ${questId}: ${kills}/${requiredCount} kills`);
+      }
 
       // Check if objective complete
       if (stage.count && kills >= stage.count) {
@@ -901,9 +891,18 @@ export class QuestSystem extends SystemBase {
       const currentCount = progress.stageProgress[itemId];
       this.markActiveQuestsDirty(playerId);
 
-      this.logger.info(
-        `[QuestSystem] ${playerId} gathered ${itemId}: ${currentCount}/${relevantStage.count}`,
-      );
+      // Log at info level only for milestones (first, halfway, complete)
+      const requiredCount = relevantStage.count || 1;
+      const halfway = Math.floor(requiredCount / 2);
+      if (
+        currentCount === 1 ||
+        currentCount === halfway ||
+        currentCount >= requiredCount
+      ) {
+        this.logger.info(
+          `Quest ${questId}: gathered ${currentCount}/${requiredCount} ${itemId}`,
+        );
+      }
 
       // Check if CURRENT stage is complete (only advance if we're on that stage)
       // Use cached lookup (O(1) instead of O(n))
@@ -966,9 +965,18 @@ export class QuestSystem extends SystemBase {
       const currentCount = progress.stageProgress[target];
       this.markActiveQuestsDirty(playerId);
 
-      this.logger.info(
-        `[QuestSystem] ${playerId} interacted ${target}: ${currentCount}/${relevantStage.count}`,
-      );
+      // Log at info level only for milestones (first, halfway, complete)
+      const requiredCount = relevantStage.count || 1;
+      const halfway = Math.floor(requiredCount / 2);
+      if (
+        currentCount === 1 ||
+        currentCount === halfway ||
+        currentCount >= requiredCount
+      ) {
+        this.logger.info(
+          `Quest ${questId}: interacted ${currentCount}/${requiredCount} ${target}`,
+        );
+      }
 
       // Check if CURRENT stage is complete (only advance if we're on that stage)
       // Use cached lookup (O(1) instead of O(n))
