@@ -8,7 +8,7 @@
  * - Load environment variables from .env files
  * - Resolve file paths for assets, world data, and build outputs
  * - Create necessary directories
- * - Copy built-in assets if needed
+ * - Fetch manifests from CDN at startup
  * - Export typed configuration object
  *
  * Usage:
@@ -23,6 +23,20 @@ import fs from "fs-extra";
 import path from "path";
 import { fileURLToPath } from "url";
 
+/** List of manifest files to fetch from CDN */
+const MANIFEST_FILES = [
+  "items.json",
+  "npcs.json",
+  "resources.json",
+  "tools.json",
+  "biomes.json",
+  "world-areas.json",
+  "stores.json",
+  "music.json",
+  "vegetation.json",
+  "buildings.json",
+];
+
 /**
  * Server configuration interface
  * Contains all paths, ports, and settings needed by server modules
@@ -36,6 +50,9 @@ export interface ServerConfig {
 
   /** Assets directory path (models, music, textures) */
   assetsDir: string;
+
+  /** Manifests directory path (fetched from CDN) */
+  manifestsDir: string;
 
   /** Hyperscape root directory */
   hyperscapeRoot: string;
@@ -78,10 +95,98 @@ export interface ServerConfig {
 }
 
 /**
+ * Fetch manifests from CDN and cache locally
+ *
+ * Downloads all manifest JSON files from the CDN and saves them to the local
+ * manifests directory. Compares with existing files to avoid unnecessary updates
+ * and ensure cache freshness.
+ *
+ * @param cdnUrl - Base CDN URL
+ * @param manifestsDir - Local directory to cache manifests
+ * @param nodeEnv - Current environment (development/production)
+ */
+async function fetchManifestsFromCDN(
+  cdnUrl: string,
+  manifestsDir: string,
+  nodeEnv: string,
+): Promise<void> {
+  // In development, skip if local manifests already exist (dev may have local assets)
+  if (nodeEnv === "development") {
+    const existingFiles = await fs.readdir(manifestsDir).catch(() => []);
+    if (existingFiles.length > 0) {
+      console.log(
+        `[Config] ⏭️  Skipping CDN fetch in development - ${existingFiles.length} local manifests found`,
+      );
+      return;
+    }
+  }
+
+  console.log(`[Config] 📥 Fetching manifests from CDN: ${cdnUrl}`);
+  const baseUrl = cdnUrl.endsWith("/") ? cdnUrl : `${cdnUrl}/`;
+
+  let fetched = 0;
+  let updated = 0;
+  let failed = 0;
+
+  for (const file of MANIFEST_FILES) {
+    const url = `${baseUrl}manifests/${file}`;
+    const localPath = path.join(manifestsDir, file);
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        console.warn(`[Config] ⚠️  ${file}: HTTP ${response.status}`);
+        failed++;
+        continue;
+      }
+
+      const newContent = await response.text();
+      fetched++;
+
+      // Compare with existing file to check if update needed
+      let existingContent = "";
+      try {
+        existingContent = await fs.readFile(localPath, "utf-8");
+      } catch {
+        // File doesn't exist, will be created
+      }
+
+      // Only write if content changed (avoids unnecessary disk writes)
+      if (newContent !== existingContent) {
+        await fs.writeFile(localPath, newContent, "utf-8");
+        updated++;
+        console.log(`[Config] ✅ ${file} updated`);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[Config] ⚠️  Failed to fetch ${file}: ${message}`);
+      failed++;
+    }
+  }
+
+  console.log(
+    `[Config] 📦 Manifests: ${fetched} fetched, ${updated} updated, ${failed} failed`,
+  );
+
+  // Fail if no manifests could be fetched and none exist locally
+  if (fetched === 0) {
+    const existingFiles = await fs.readdir(manifestsDir).catch(() => []);
+    if (existingFiles.length === 0) {
+      throw new Error(
+        `Failed to fetch any manifests from CDN (${cdnUrl}) and no local manifests exist`,
+      );
+    }
+    console.warn(
+      `[Config] ⚠️  Using ${existingFiles.length} existing local manifests`,
+    );
+  }
+}
+
+/**
  * Load and validate server configuration
  *
  * Loads environment variables from multiple locations (workspace root, parent dirs),
- * resolves all necessary paths, creates directories, and copies built-in assets.
+ * resolves all necessary paths, creates directories, and fetches manifests from CDN.
  *
  * @returns Promise resolving to complete server configuration
  * @throws Error if critical directories cannot be created
@@ -136,23 +241,31 @@ export async function loadConfig(): Promise<ServerConfig> {
     ? WORLD
     : path.join(hyperscapeRoot, WORLD);
 
+  // Manifests directory - local cache for CDN-fetched manifests
+  const manifestsDir = path.join(hyperscapeRoot, "world/assets/manifests");
+
   // Use root assets directory (not per-world assets)
   // This is the main assets folder at workspace root: /assets/
   const workspaceRoot = path.resolve(hyperscapeRoot, "../..");
   const assetsDir = path.join(workspaceRoot, "assets");
   const builtInAssetsDir = path.join(hyperscapeRoot, "src/world/assets");
 
-  // Create world folders if needed
+  // Create world and manifests folders if needed
   await fs.ensureDir(worldDir);
-  // Note: assetsDir points to root /assets/ which should always exist
+  await fs.ensureDir(manifestsDir);
 
   // Construct assets URL with trailing slash
   const assetsUrl = CDN_URL.endsWith("/") ? CDN_URL : `${CDN_URL}/`;
+
+  // Fetch manifests from CDN at startup (production and CI)
+  // Skip in development if manifests already exist locally
+  await fetchManifestsFromCDN(CDN_URL, manifestsDir, NODE_ENV);
 
   return {
     port: PORT,
     worldDir,
     assetsDir,
+    manifestsDir,
     hyperscapeRoot,
     builtInAssetsDir,
     __dirname: hyperscapeRoot, // Package root (for public/ access)

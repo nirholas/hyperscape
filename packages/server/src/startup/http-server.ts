@@ -236,42 +236,51 @@ async function registerStaticFiles(
   });
   console.log("[HTTP] ✅ Public directory registered");
 
-  // Register world assets at /assets/world/
-  await fastify.register(statics, {
-    root: config.assetsDir,
-    prefix: "/assets/world/",
-    decorateReply: false,
-    setHeaders: (res, filePath) => {
-      setAssetHeaders(res, filePath);
-    },
-  });
-  console.log(`[HTTP] ✅ Registered /assets/world/ → ${config.assetsDir}`);
+  // Register world assets at /assets/world/ (only if assets directory exists)
+  // In production, clients get assets directly from CDN (PUBLIC_CDN_URL)
+  if (await fs.pathExists(config.assetsDir)) {
+    await fastify.register(statics, {
+      root: config.assetsDir,
+      prefix: "/assets/world/",
+      decorateReply: false,
+      setHeaders: (res, filePath) => {
+        setAssetHeaders(res, filePath);
+      },
+    });
+    console.log(`[HTTP] ✅ Registered /assets/world/ → ${config.assetsDir}`);
 
-  // Manual music route (workaround for static file issues)
-  registerMusicRoute(fastify, config);
+    // Manual music route (workaround for static file issues)
+    registerMusicRoute(fastify, config);
 
-  // ALSO register as /assets/ for backward compatibility
-  await fastify.register(statics, {
-    root: config.assetsDir,
-    prefix: "/assets/",
-    decorateReply: false,
-    setHeaders: (res, filePath) => {
-      setAssetHeaders(res, filePath);
-    },
-  });
-  console.log(`[HTTP] ✅ Registered /assets/ → ${config.assetsDir}`);
+    // ALSO register as /assets/ for backward compatibility
+    await fastify.register(statics, {
+      root: config.assetsDir,
+      prefix: "/assets/",
+      decorateReply: false,
+      setHeaders: (res, filePath) => {
+        setAssetHeaders(res, filePath);
+      },
+    });
+    console.log(`[HTTP] ✅ Registered /assets/ → ${config.assetsDir}`);
+  } else {
+    console.log(
+      `[HTTP] ⏭️  Skipping local assets routes (assets served from CDN: ${config.cdnUrl})`,
+    );
+  }
 
   // Register manifests at /manifests/ for DataManager compatibility
-  const manifestsDir = path.join(config.assetsDir, "manifests");
+  // Manifests are fetched from CDN at startup and cached in manifestsDir
   await fastify.register(statics, {
-    root: manifestsDir,
+    root: config.manifestsDir,
     prefix: "/manifests/",
     decorateReply: false,
     setHeaders: (res, filePath) => {
-      setAssetHeaders(res, filePath);
+      // Manifests should have short cache to allow updates
+      // But not no-cache (that would cause excessive requests)
+      setManifestHeaders(res, filePath);
     },
   });
-  console.log(`[HTTP] ✅ Registered /manifests/ → ${manifestsDir}`);
+  console.log(`[HTTP] ✅ Registered /manifests/ → ${config.manifestsDir}`);
 
   // Log available assets
   await logAvailableAssets(fastify, config);
@@ -333,6 +342,28 @@ function setStaticHeaders(
   // Security headers for SharedArrayBuffer support
   res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
   res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+}
+
+/**
+ * Set headers for manifest files
+ *
+ * Manifests use shorter cache times to allow for updates while still
+ * providing reasonable caching. ETags are used for cache validation.
+ *
+ * @param res - HTTP response object
+ * @param filePath - Path to the manifest being served
+ * @private
+ */
+function setManifestHeaders(
+  res: { setHeader: (k: string, v: string) => void },
+  _filePath: string,
+): void {
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  // Short cache with revalidation - manifests can change but shouldn't
+  // cause excessive requests. 5 minutes cache, must revalidate after.
+  res.setHeader("Cache-Control", "public, max-age=300, must-revalidate");
+  // CORS headers for client access
+  res.setHeader("Access-Control-Allow-Origin", "*");
 }
 
 /**
