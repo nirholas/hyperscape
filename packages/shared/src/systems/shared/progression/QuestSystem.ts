@@ -50,6 +50,35 @@ export class QuestSystem extends SystemBase {
   /** Flag to check if manifest is loaded */
   private manifestLoaded: boolean = false;
 
+  // =========================================================================
+  // PRE-ALLOCATED REUSABLES (Memory optimization - avoid GC in hot paths)
+  // =========================================================================
+
+  /** Pre-allocated empty array for getActiveQuests when player has no state */
+  private readonly _emptyQuestArray: QuestProgress[] = [];
+
+  /** Cache for getActiveQuests results - invalidated when quest state changes */
+  private _activeQuestsCache: Map<string, QuestProgress[]> = new Map();
+
+  /** Tracks which players have dirty (stale) active quest caches */
+  private _activeQuestsDirty: Set<string> = new Set();
+
+  /** Pre-allocated payload for QUEST_PROGRESSED events */
+  private readonly _progressEventPayload = {
+    playerId: "",
+    questId: "",
+    stage: "",
+    progress: {} as StageProgress,
+    description: "",
+  };
+
+  /** Pre-allocated payload for CHAT_MESSAGE events */
+  private readonly _chatEventPayload = {
+    playerId: "",
+    message: "",
+    type: "game" as const,
+  };
+
   constructor(world: World) {
     super(world, {
       name: "quest",
@@ -85,6 +114,8 @@ export class QuestSystem extends SystemBase {
     // Subscribe to player cleanup
     this.subscribe(EventType.PLAYER_CLEANUP, (data: { id: string }) => {
       this.playerStates.delete(data.id);
+      this._activeQuestsCache.delete(data.id);
+      this._activeQuestsDirty.delete(data.id);
     });
 
     // Subscribe to quest start acceptance (player clicked Accept on quest start screen)
@@ -396,13 +427,35 @@ export class QuestSystem extends SystemBase {
 
   /**
    * Get all active quests for a player
+   * Uses cached array to avoid allocations - cache invalidated on quest state changes
    */
   public getActiveQuests(playerId: string): QuestProgress[] {
     const state = this.playerStates.get(playerId);
     if (!state) {
-      return [];
+      return this._emptyQuestArray;
     }
-    return Array.from(state.activeQuests.values());
+
+    // Return cached array if still valid
+    if (
+      !this._activeQuestsDirty.has(playerId) &&
+      this._activeQuestsCache.has(playerId)
+    ) {
+      return this._activeQuestsCache.get(playerId)!;
+    }
+
+    // Rebuild cache
+    const quests = Array.from(state.activeQuests.values());
+    this._activeQuestsCache.set(playerId, quests);
+    this._activeQuestsDirty.delete(playerId);
+    return quests;
+  }
+
+  /**
+   * Mark a player's active quests cache as dirty (needs rebuild)
+   * Call this whenever quest state changes for a player
+   */
+  private markActiveQuestsDirty(playerId: string): void {
+    this._activeQuestsDirty.add(playerId);
   }
 
   /**
@@ -531,6 +584,7 @@ export class QuestSystem extends SystemBase {
     };
 
     state.activeQuests.set(questId, progress);
+    this.markActiveQuestsDirty(playerId);
 
     // Save to database (isNew=true since we just started the quest)
     await this.saveQuestProgress(playerId, questId, initialStage, {}, true);
@@ -594,6 +648,7 @@ export class QuestSystem extends SystemBase {
     // Move to completed
     state.activeQuests.delete(questId);
     state.completedQuests.add(questId);
+    this.markActiveQuestsDirty(playerId);
 
     // Update in-memory quest points
     if (definition.rewards.questPoints > 0) {
@@ -694,9 +749,10 @@ export class QuestSystem extends SystemBase {
         continue;
       }
 
-      // Increment kill count
-      const kills = (progress.stageProgress.kills || 0) + 1;
-      progress.stageProgress = { ...progress.stageProgress, kills };
+      // Increment kill count (direct mutation to avoid GC pressure)
+      progress.stageProgress.kills = (progress.stageProgress.kills || 0) + 1;
+      const kills = progress.stageProgress.kills;
+      this.markActiveQuestsDirty(killedBy);
 
       this.logger.info(
         `[QuestSystem] Player ${killedBy} killed ${mobType}, quest ${questId} progress: ${kills}/${stage.count}`,
@@ -759,12 +815,11 @@ export class QuestSystem extends SystemBase {
       );
       if (!relevantStage) continue;
 
-      // Track progress by item ID (e.g., copper_ore: 2, tin_ore: 3)
-      const currentCount = (progress.stageProgress[itemId] || 0) + quantity;
-      progress.stageProgress = {
-        ...progress.stageProgress,
-        [itemId]: currentCount,
-      };
+      // Track progress by item ID (direct mutation to avoid GC pressure)
+      progress.stageProgress[itemId] =
+        (progress.stageProgress[itemId] || 0) + quantity;
+      const currentCount = progress.stageProgress[itemId];
+      this.markActiveQuestsDirty(playerId);
 
       this.logger.info(
         `[QuestSystem] ${playerId} gathered ${itemId}: ${currentCount}/${relevantStage.count}`,
@@ -828,12 +883,11 @@ export class QuestSystem extends SystemBase {
       );
       if (!relevantStage) continue;
 
-      // Track progress by target ID (e.g., bronze_bar: 2, fire: 3)
-      const currentCount = (progress.stageProgress[target] || 0) + count;
-      progress.stageProgress = {
-        ...progress.stageProgress,
-        [target]: currentCount,
-      };
+      // Track progress by target ID (direct mutation to avoid GC pressure)
+      progress.stageProgress[target] =
+        (progress.stageProgress[target] || 0) + count;
+      const currentCount = progress.stageProgress[target];
+      this.markActiveQuestsDirty(playerId);
 
       this.logger.info(
         `[QuestSystem] ${playerId} interacted ${target}: ${currentCount}/${relevantStage.count}`,
