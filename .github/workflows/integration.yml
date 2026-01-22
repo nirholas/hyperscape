@@ -79,6 +79,7 @@ jobs:
           PORT: 5555
           CI: "true"
           SKIP_MANIFESTS: "true"
+          PUBLIC_CDN_URL: https://assets.hyperscape.club
 
       - name: Wait for server to be ready
         working-directory: packages/server

@@ -412,13 +412,13 @@ export class DataManager {
     const fs = await import("fs/promises");
     const path = await import("path");
 
-    // Check if we're in a test/CI environment where manifests might not exist
+    // Check if we're in a TEST environment where manifests might not exist
+    // NOTE: CI=true is often set by CI/CD platforms AND production deployments (Railway)
+    // Only skip manifest loading for actual test environments, not production CI/CD
     const isTestEnv =
       typeof process !== "undefined" &&
       typeof process.env !== "undefined" &&
-      (process.env.NODE_ENV === "test" ||
-        process.env.CI === "true" ||
-        process.env.VITEST === "true");
+      (process.env.NODE_ENV === "test" || process.env.VITEST === "true");
 
     // Find manifests directory - assets are in packages/server/world/assets/
     let manifestsDir: string;
@@ -1299,13 +1299,13 @@ export class DataManager {
     const errors: string[] = [];
     const warnings: string[] = [];
 
-    // Check if we're in a test/CI environment where manifests might not exist
+    // Check if we're in a TEST environment where manifests might not exist
+    // NOTE: CI=true is often set by CI/CD platforms AND production deployments (Railway)
+    // Only skip validation for actual test environments, not production CI/CD
     const isTestEnv =
       typeof process !== "undefined" &&
       typeof process.env !== "undefined" &&
-      (process.env.NODE_ENV === "test" ||
-        process.env.CI === "true" ||
-        process.env.VITEST === "true");
+      (process.env.NODE_ENV === "test" || process.env.VITEST === "true");
 
     // Validate items (warning only - manifests might be loading)
     const itemCount = ITEMS.size;
