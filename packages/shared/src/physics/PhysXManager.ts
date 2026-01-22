@@ -302,7 +302,7 @@ class PhysXManager extends EventEmitter {
     const isServer =
       typeof process !== "undefined" &&
       process.versions &&
-      process.versions.node;
+      (process.versions.node || (process.versions as { bun?: string }).bun);
     const isBrowser =
       !isServer &&
       typeof window !== "undefined" &&

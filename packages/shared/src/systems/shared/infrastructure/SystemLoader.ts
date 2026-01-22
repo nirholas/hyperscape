@@ -297,11 +297,12 @@ export async function registerSystems(world: World): Promise<void> {
   // 12a. Health regeneration system - Passive health regen (depends on combat system)
   // Server-only: handles RuneScape-style out-of-combat health regeneration
   // Note: world.isServer isn't reliable here because ServerNetwork registers later
-  // Use Node.js environment check instead
+  // Use Node.js/Bun environment check instead
   const isServerEnvironment =
     typeof process !== "undefined" &&
     process.versions &&
-    typeof process.versions.node === "string";
+    (typeof process.versions.node === "string" ||
+      typeof (process.versions as { bun?: string }).bun === "string");
 
   if (isServerEnvironment) {
     world.register("health-regen", HealthRegenSystem);

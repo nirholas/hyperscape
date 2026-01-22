@@ -96,10 +96,12 @@ export class ModelCache {
       vertexColors?: boolean;
     };
 
+    // NOTE: Use undefined instead of null for optional textures
+    // Setting null causes WebGPU texture cache corruption (WeakMap key error)
     const newMat = new THREE.MeshStandardMaterial({
-      map: originalMat.map || null,
-      normalMap: originalMat.normalMap || null,
-      emissiveMap: originalMat.emissiveMap || null,
+      map: originalMat.map || undefined,
+      normalMap: originalMat.normalMap || undefined,
+      emissiveMap: originalMat.emissiveMap || undefined,
       color: originalMat.color?.clone() || new THREE.Color(0xffffff),
       emissive: originalMat.emissive?.clone() || new THREE.Color(0x000000),
       emissiveIntensity: originalMat.emissiveIntensity ?? 0,
