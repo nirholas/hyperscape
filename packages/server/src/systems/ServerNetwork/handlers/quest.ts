@@ -9,6 +9,7 @@
 import type { World } from "@hyperscape/shared";
 import type { QuestSystem } from "@hyperscape/shared";
 import { SystemLogger } from "@hyperscape/shared";
+import { isValidQuestId } from "@hyperscape/shared/types/game/quest-types";
 import type { ServerSocket } from "../../../shared/types";
 import { sendToSocket, getPlayerId } from "./common";
 import {
@@ -88,8 +89,10 @@ export function handleGetQuestDetail(
   }
 
   const { questId } = data;
-  if (!questId) {
-    logger.warn("No questId provided");
+
+  // Validate questId format (prevents log injection and invalid lookups)
+  if (!isValidQuestId(questId)) {
+    logger.warn("Invalid or missing questId format for getQuestDetail");
     return;
   }
 
@@ -101,6 +104,7 @@ export function handleGetQuestDetail(
 
   const definition = questSystem.getQuestDefinition(questId);
   if (!definition) {
+    // Safe to log questId now since it passed validation
     logger.warn(`Quest not found: ${questId}`);
     return;
   }
@@ -164,8 +168,10 @@ export async function handleQuestAccept(
   }
 
   const { questId } = data;
-  if (!questId) {
-    logger.warn("No questId provided for questAccept");
+
+  // Validate questId format (prevents log injection and invalid lookups)
+  if (!isValidQuestId(questId)) {
+    logger.warn("Invalid or missing questId format for questAccept");
     return;
   }
 
@@ -176,6 +182,7 @@ export async function handleQuestAccept(
   }
 
   // Start the quest (this will validate requirements and set status to in_progress)
+  // Safe to use questId now since it passed validation
   const success = await questSystem.startQuest(playerId, questId);
 
   if (success) {
