@@ -26,15 +26,7 @@ cmds = ["bun install"]
 # Note: Assets/manifests are fetched from CDN at server startup
 dependsOn = ["install"]
 cmds = [
-  "echo '=== Starting build ===' && pwd && ls -la",
-  "echo '=== Building shared ===' && bun run build:shared",
-  "echo '=== Building client ===' && bun run build:client",
-  "echo '=== Client dist contents ===' && ls -la packages/client/dist/ || echo 'ERROR: No dist folder!'",
-  "echo '=== Building server ===' && bun run build:server",
-  "echo '=== Copying client to server public ===' && mkdir -p packages/server/public && cp -rv packages/client/dist/* packages/server/public/",
-  "echo '=== Server public contents ===' && ls -la packages/server/public/",
-  "mkdir -p packages/server/world/assets/manifests",
-  "echo '=== Build complete ==='"
+  "set -ex && bun run build:shared && bun run build:client && test -f packages/client/dist/index.html && bun run build:server && mkdir -p packages/server/public && cp -r packages/client/dist/* packages/server/public/ && test -f packages/server/public/index.html && mkdir -p packages/server/world/assets/manifests && echo 'Build complete - index.html verified'"
 ]
 
 [start]
