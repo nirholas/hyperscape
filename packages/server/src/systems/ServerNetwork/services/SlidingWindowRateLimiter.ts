@@ -183,6 +183,9 @@ let followLimiter: RateLimiter | null = null;
 let consumeLimiter: RateLimiter | null = null;
 let coinPouchLimiter: RateLimiter | null = null;
 let prayerLimiter: RateLimiter | null = null;
+let questListLimiter: RateLimiter | null = null;
+let questDetailLimiter: RateLimiter | null = null;
+let questAcceptLimiter: RateLimiter | null = null;
 
 /**
  * Get the pickup rate limiter (5/sec)
@@ -346,6 +349,48 @@ export function getPrayerRateLimiter(): RateLimiter {
 }
 
 /**
+ * Get the quest list rate limiter (5/sec)
+ * Limits quest list fetches to prevent UI spam
+ */
+export function getQuestListRateLimiter(): RateLimiter {
+  if (!questListLimiter) {
+    questListLimiter = createRateLimiter({
+      maxPerSecond: 5,
+      name: "quest-list",
+    });
+  }
+  return questListLimiter;
+}
+
+/**
+ * Get the quest detail rate limiter (10/sec)
+ * Limits quest detail fetches
+ */
+export function getQuestDetailRateLimiter(): RateLimiter {
+  if (!questDetailLimiter) {
+    questDetailLimiter = createRateLimiter({
+      maxPerSecond: 10,
+      name: "quest-detail",
+    });
+  }
+  return questDetailLimiter;
+}
+
+/**
+ * Get the quest accept rate limiter (3/sec)
+ * Limits quest accept requests
+ */
+export function getQuestAcceptRateLimiter(): RateLimiter {
+  if (!questAcceptLimiter) {
+    questAcceptLimiter = createRateLimiter({
+      maxPerSecond: 3,
+      name: "quest-accept",
+    });
+  }
+  return questAcceptLimiter;
+}
+
+/**
  * Destroy all singleton rate limiters
  * Call this during server shutdown
  */
@@ -361,6 +406,9 @@ export function destroyAllRateLimiters(): void {
   followLimiter?.destroy();
   coinPouchLimiter?.destroy();
   prayerLimiter?.destroy();
+  questListLimiter?.destroy();
+  questDetailLimiter?.destroy();
+  questAcceptLimiter?.destroy();
 
   pickupLimiter = null;
   moveLimiter = null;
@@ -373,4 +421,7 @@ export function destroyAllRateLimiters(): void {
   followLimiter = null;
   coinPouchLimiter = null;
   prayerLimiter = null;
+  questListLimiter = null;
+  questDetailLimiter = null;
+  questAcceptLimiter = null;
 }

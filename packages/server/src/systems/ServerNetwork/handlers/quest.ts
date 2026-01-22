@@ -11,6 +11,11 @@ import type { QuestSystem } from "@hyperscape/shared";
 import { SystemLogger } from "@hyperscape/shared";
 import type { ServerSocket } from "../../../shared/types";
 import { sendToSocket, getPlayerId } from "./common";
+import {
+  getQuestListRateLimiter,
+  getQuestDetailRateLimiter,
+  getQuestAcceptRateLimiter,
+} from "../services/SlidingWindowRateLimiter";
 
 /** Logger for quest handlers */
 const logger = new SystemLogger("QuestHandlers");
@@ -26,6 +31,12 @@ export function handleGetQuestList(
   const playerId = getPlayerId(socket);
   if (!playerId) {
     logger.warn("No playerId for getQuestList request");
+    return;
+  }
+
+  // Rate limit check
+  if (!getQuestListRateLimiter().check(playerId)) {
+    logger.debug(`Rate limit exceeded for ${playerId} on getQuestList`);
     return;
   }
 
@@ -67,6 +78,12 @@ export function handleGetQuestDetail(
   const playerId = getPlayerId(socket);
   if (!playerId) {
     logger.warn("No playerId for getQuestDetail request");
+    return;
+  }
+
+  // Rate limit check
+  if (!getQuestDetailRateLimiter().check(playerId)) {
+    logger.debug(`Rate limit exceeded for ${playerId} on getQuestDetail`);
     return;
   }
 
@@ -137,6 +154,12 @@ export async function handleQuestAccept(
   const playerId = getPlayerId(socket);
   if (!playerId) {
     logger.warn("No playerId for questAccept request");
+    return;
+  }
+
+  // Rate limit check
+  if (!getQuestAcceptRateLimiter().check(playerId)) {
+    logger.debug(`Rate limit exceeded for ${playerId} on questAccept`);
     return;
   }
 
