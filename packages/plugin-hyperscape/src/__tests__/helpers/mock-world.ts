@@ -4,90 +4,104 @@ import { vi } from "vitest";
 export { createMockWorld } from "../../types/test-mocks";
 
 interface MockHyperscapeServiceOverrides {
-  world?: unknown;
   [key: string]: unknown;
 }
 
 /**
- * Creates a mock Hyperscape world for testing
- */
-
-/**
  * Creates a mock Hyperscape service for testing
+ * Matches the current HyperscapeService API (WebSocket-based, no local World)
  */
 export function createMockHyperscapeService(
   overrides: MockHyperscapeServiceOverrides = {},
 ) {
-  // Import createMockWorld from the correct location
-  const { createMockWorld } = require("../../types/test-mocks");
-  const mockWorld = createMockWorld(overrides.world);
+  const mockPlayerEntity = {
+    id: "test-player-id",
+    name: "TestPlayer",
+    position: [0, 0, 0] as [number, number, number],
+    alive: true,
+    health: 100,
+    skills: {},
+    inventory: [],
+    equipment: {},
+  };
+
+  const mockNearbyEntities = new Map<string, unknown>();
 
   return {
-    serviceType: "hyperscape",
+    serviceType: "hyperscapeService",
     capabilityDescription:
-      "Manages connection and interaction with a Hyperscape world.",
+      "Manages WebSocket connection to Hyperscape game server",
 
     // Connection state
     isConnected: vi.fn().mockReturnValue(true),
-    connect: vi.fn().mockResolvedValue(true),
-    disconnect: vi.fn().mockResolvedValue(true),
+    connect: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
 
-    // World access
-    getWorld: vi.fn().mockReturnValue(mockWorld),
-    currentWorldId: "test-world-id",
-
-    // Entity methods
-    getEntityById: vi.fn((id) => mockWorld.entities.items.get(id)),
-    getEntityName: vi.fn((id) => {
-      const entity = mockWorld.entities.items.get(id);
-      return entity?.data?.name || "Unnamed";
+    // Game state access
+    getPlayerEntity: vi.fn().mockReturnValue(mockPlayerEntity),
+    getNearbyEntities: vi
+      .fn()
+      .mockReturnValue(Array.from(mockNearbyEntities.values())),
+    getGameState: vi.fn().mockReturnValue({
+      playerEntity: mockPlayerEntity,
+      nearbyEntities: mockNearbyEntities,
+      currentRoomId: null,
+      worldId: "test-world",
+      lastUpdate: Date.now(),
     }),
+    getLastRemovedEntity: vi.fn().mockReturnValue(null),
 
-    // Manager access
-    getEmoteManager: vi.fn().mockReturnValue({
-      playEmote: vi.fn(),
-      uploadEmotes: vi.fn().mockResolvedValue(true),
-    }),
+    // Behavior manager (the only manager that still exists)
     getBehaviorManager: vi.fn().mockReturnValue({
+      running: false,
       start: vi.fn(),
       stop: vi.fn(),
-    }),
-    getMessageManager: vi.fn().mockReturnValue({
-      sendMessage: vi.fn(),
-      handleMessage: vi.fn().mockResolvedValue(true),
-      getRecentMessages: vi.fn().mockResolvedValue({
-        formattedHistory: "",
-        lastResponseText: null,
-        lastActions: [],
-      }),
-    }),
-    getVoiceManager: vi.fn().mockReturnValue({
-      start: vi.fn(),
-      handleUserBuffer: vi.fn(),
-      playAudio: vi.fn().mockResolvedValue(true),
-    }),
-    getPlaywrightManager: vi.fn().mockReturnValue({
-      snapshotEquirectangular: vi
-        .fn()
-        .mockResolvedValue("data:image/jpeg;base64,mock"),
-      snapshotFacingDirection: vi
-        .fn()
-        .mockResolvedValue("data:image/jpeg;base64,mock"),
-      snapshotViewToTarget: vi
-        .fn()
-        .mockResolvedValue("data:image/jpeg;base64,mock"),
-    }),
-    getBuildManager: vi.fn().mockReturnValue({
-      translate: vi.fn().mockResolvedValue(true),
-      rotate: vi.fn().mockResolvedValue(true),
-      scale: vi.fn().mockResolvedValue(true),
-      duplicate: vi.fn().mockResolvedValue(true),
-      delete: vi.fn().mockResolvedValue(true),
-      importEntity: vi.fn().mockResolvedValue(true),
+      getGoal: vi.fn().mockReturnValue(null),
+      setGoal: vi.fn(),
+      clearGoal: vi.fn(),
+      pauseGoals: vi.fn(),
+      resumeGoals: vi.fn(),
+      isGoalsPaused: vi.fn().mockReturnValue(false),
     }),
 
-    // Name/appearance
-    changeName: vi.fn().mockResolvedValue(true),
+    // Event handling
+    onGameEvent: vi.fn(),
+    offGameEvent: vi.fn(),
+    getLogs: vi.fn().mockReturnValue([]),
+
+    // Command execution
+    executeMove: vi.fn().mockResolvedValue(undefined),
+    executeAttack: vi.fn().mockResolvedValue(undefined),
+    executeUseItem: vi.fn().mockResolvedValue(undefined),
+    executeEquipItem: vi.fn().mockResolvedValue(undefined),
+    executePickupItem: vi.fn().mockResolvedValue(undefined),
+    executeDropItem: vi.fn().mockResolvedValue(undefined),
+    executeChatMessage: vi.fn().mockResolvedValue(undefined),
+    executeGatherResource: vi.fn().mockResolvedValue(undefined),
+    executeBankAction: vi.fn().mockResolvedValue(undefined),
+
+    // Autonomous behavior control
+    startAutonomousBehavior: vi.fn(),
+    stopAutonomousBehavior: vi.fn(),
+    isAutonomousBehaviorRunning: vi.fn().mockReturnValue(false),
+    setAutonomousBehaviorEnabled: vi.fn(),
+
+    // Legacy aliases
+    startAutonomousExploration: vi.fn(),
+    stopAutonomousExploration: vi.fn(),
+    isExplorationRunning: vi.fn().mockReturnValue(false),
+
+    // Goal sync
+    syncGoalToServer: vi.fn(),
+    unlockGoal: vi.fn(),
+
+    // Adapter methods (return null since we don't have a local World)
+    currentWorldId: "test-world",
+    getWorld: vi.fn().mockReturnValue(null),
+    getEmoteManager: vi.fn().mockReturnValue(null),
+    getMessageManager: vi.fn().mockReturnValue(null),
+    getDynamicActionLoader: vi.fn().mockReturnValue(null),
+    playEmote: vi.fn().mockResolvedValue(undefined),
 
     // Apply overrides
     ...overrides,
@@ -98,6 +112,7 @@ interface MockChatMessageOverrides {
   fromId?: string;
   from?: string;
   body?: string;
+  text?: string;
   createdAt?: string;
   [key: string]: unknown;
 }
@@ -108,18 +123,21 @@ interface MockChatMessageOverrides {
 export function createMockChatMessage(
   overrides: MockChatMessageOverrides = {},
 ) {
+  const body = overrides.body || "Hello agent!";
   return {
     id: `msg-${Date.now()}`,
     fromId: overrides.fromId || "user-123",
     from: overrides.from || "TestUser",
-    body: overrides.body || "Hello agent!",
+    body,
+    text: overrides.text || body,
     createdAt: overrides.createdAt || new Date().toISOString(),
+    timestamp: Date.now(),
     ...overrides,
   };
 }
 
 interface MockWorld {
-  _eventListeners?: Record<string, Function[]>;
+  _eventListeners?: Record<string, ((...args: unknown[]) => void)[]>;
   [key: string]: unknown;
 }
 
@@ -132,111 +150,33 @@ export function simulateWorldEvent(
   data: unknown,
 ) {
   const listeners = world._eventListeners?.[event] || [];
-  listeners.forEach((listener: Function) => listener(data));
+  listeners.forEach((listener) => listener(data));
 }
 
-export function createMockPlaywrightManager() {
-  return {
-    snapshotEquirectangular: vi
-      .fn()
-      .mockResolvedValue("data:image/png;base64,test"),
-    snapshotFacingDirection: vi
-      .fn()
-      .mockResolvedValue("data:image/png;base64,test"),
-    snapshotViewToTarget: vi
-      .fn()
-      .mockResolvedValue("data:image/png;base64,test"),
-    start: vi.fn(),
-    stop: vi.fn(),
-  };
-}
-
-export function createMockEmoteManager(): {
-  playEmote: ReturnType<typeof vi.fn>;
-  stopEmote: ReturnType<typeof vi.fn>;
-  uploadEmotes: ReturnType<typeof vi.fn>;
-  getEmoteList: ReturnType<typeof vi.fn>;
-} {
-  return {
-    playEmote: vi.fn(),
-    stopEmote: vi.fn(),
-    uploadEmotes: vi.fn().mockResolvedValue(true),
-    getEmoteList: vi.fn().mockReturnValue([
-      {
-        name: "wave",
-        path: "/emotes/wave.glb",
-        duration: 2000,
-        description: "Wave gesture",
-      },
-      {
-        name: "dance",
-        path: "/emotes/dance.glb",
-        duration: 5000,
-        description: "Dance animation",
-      },
-    ]),
-  };
-}
-
-export function createMockMessageManager(): {
-  sendMessage: ReturnType<typeof vi.fn>;
-  processMessage: ReturnType<typeof vi.fn>;
-  getHistory: ReturnType<typeof vi.fn>;
-} {
-  return {
-    sendMessage: vi.fn(),
-    processMessage: vi.fn(),
-    getHistory: vi.fn().mockReturnValue([]),
-  };
-}
-
-export function createMockVoiceManager(): {
-  start: ReturnType<typeof vi.fn>;
-  stop: ReturnType<typeof vi.fn>;
-  joinChannel: ReturnType<typeof vi.fn>;
-  leaveChannel: ReturnType<typeof vi.fn>;
-  mute: ReturnType<typeof vi.fn>;
-  unmute: ReturnType<typeof vi.fn>;
-} {
-  return {
-    start: vi.fn(),
-    stop: vi.fn(),
-    joinChannel: vi.fn(),
-    leaveChannel: vi.fn(),
-    mute: vi.fn(),
-    unmute: vi.fn(),
-  };
-}
-
+/**
+ * Creates a mock behavior manager for testing
+ * This is the only manager that still exists in the plugin
+ */
 export function createMockBehaviorManager(): {
+  running: boolean;
   start: ReturnType<typeof vi.fn>;
   stop: ReturnType<typeof vi.fn>;
-  isRunning: boolean;
+  getGoal: ReturnType<typeof vi.fn>;
+  setGoal: ReturnType<typeof vi.fn>;
+  clearGoal: ReturnType<typeof vi.fn>;
+  pauseGoals: ReturnType<typeof vi.fn>;
+  resumeGoals: ReturnType<typeof vi.fn>;
+  isGoalsPaused: ReturnType<typeof vi.fn>;
 } {
   return {
+    running: false,
     start: vi.fn(),
     stop: vi.fn(),
-    isRunning: false,
-  };
-}
-
-export function createMockBuildManager(): {
-  duplicate: ReturnType<typeof vi.fn>;
-  translate: ReturnType<typeof vi.fn>;
-  rotate: ReturnType<typeof vi.fn>;
-  scale: ReturnType<typeof vi.fn>;
-  delete: ReturnType<typeof vi.fn>;
-  importEntity: ReturnType<typeof vi.fn>;
-  findNearbyEntities: ReturnType<typeof vi.fn>;
-} {
-  return {
-    duplicate: vi.fn(),
-    translate: vi.fn(),
-    rotate: vi.fn(),
-    scale: vi.fn(),
-    delete: vi.fn(),
-    importEntity: vi.fn(),
-    findNearbyEntities: vi.fn().mockReturnValue([]),
-    getEntityInfo: vi.fn(),
+    getGoal: vi.fn().mockReturnValue(null),
+    setGoal: vi.fn(),
+    clearGoal: vi.fn(),
+    pauseGoals: vi.fn(),
+    resumeGoals: vi.fn(),
+    isGoalsPaused: vi.fn().mockReturnValue(false),
   };
 }

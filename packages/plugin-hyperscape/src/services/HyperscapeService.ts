@@ -2694,4 +2694,70 @@ Respond with ONLY the action name, nothing else.`;
       })),
     });
   }
+
+  // ============================================
+  // Adapter methods for manager compatibility
+  // These provide compatibility with managers that expect a local World instance
+  // ============================================
+
+  /**
+   * Get the current world ID
+   * Used by managers that need world context
+   */
+  get currentWorldId(): string | null {
+    return this.gameState.worldId;
+  }
+
+  /**
+   * Get world reference (not implemented - service uses WebSocket, not local World)
+   * Returns null since this service doesn't maintain a local Three.js World
+   * Managers should use getGameState() or WebSocket commands instead
+   */
+  getWorld(): null {
+    logger.debug(
+      "[HyperscapeService] getWorld() called - this service uses WebSocket, not local World",
+    );
+    return null;
+  }
+
+  /**
+   * Get emote manager (not implemented in WebSocket-based service)
+   * Emotes are sent via WebSocket commands instead
+   */
+  getEmoteManager(): null {
+    logger.debug(
+      "[HyperscapeService] getEmoteManager() - use executeCommand for emotes",
+    );
+    return null;
+  }
+
+  /**
+   * Get message manager (not implemented - chat uses WebSocket)
+   * Messages are sent via executeChatMessage() instead
+   */
+  getMessageManager(): null {
+    logger.debug(
+      "[HyperscapeService] getMessageManager() - use executeChatMessage() instead",
+    );
+    return null;
+  }
+
+  /**
+   * Get dynamic action loader (not implemented)
+   */
+  getDynamicActionLoader(): null {
+    return null;
+  }
+
+  /**
+   * Play an emote animation
+   * Sends emote command to server
+   */
+  async playEmote(emoteName: string): Promise<void> {
+    this.sendCommand("entityEvent", {
+      entityId: this.characterId,
+      event: "emote",
+      data: { emote: emoteName },
+    });
+  }
 }

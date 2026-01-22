@@ -91,55 +91,12 @@ jobs:
         env:
           DATABASE_URL: postgresql://hyperscape:hyperscape_test@localhost:5432/hyperscape_test
 
-      - name: Build plugin-hyperscape package
-        working-directory: packages/plugin-hyperscape
-        run: bun run build
-
-      - name: Start ElizaOS in background
-        working-directory: packages/plugin-hyperscape
-        run: |
-          mkdir -p logs
-          # Use bunx to run elizaos from workspace context so it can find local plugins
-          bunx elizaos start --character character.json > logs/elizaos.log 2>&1 &
-          echo "ELIZAOS_PID=$!" >> $GITHUB_ENV
-        env:
-          NODE_ENV: test
-          SERVER_PORT: 3000
-
-      - name: Wait for ElizaOS to be ready
-        run: |
-          echo "⏳ Waiting for ElizaOS to start..."
-          MAX_RETRIES=30
-          RETRY_DELAY=2
-          for i in $(seq 1 $MAX_RETRIES); do
-            # Check both /health and /healthz endpoints (ElizaOS 1.7.x uses these)
-            if curl -f -s http://localhost:3000/health > /dev/null 2>&1 || curl -f -s http://localhost:3000/healthz > /dev/null 2>&1; then
-              echo "✓ ElizaOS is ready (attempt $i/$MAX_RETRIES)"
-              exit 0
-            fi
-            if [ $i -eq 1 ]; then
-              echo "  Waiting for health endpoint..."
-            fi
-            sleep $RETRY_DELAY
-          done
-          echo "❌ ElizaOS did not become ready after $((MAX_RETRIES * RETRY_DELAY)) seconds"
-          echo "=== ElizaOS Logs ==="
-          cat packages/plugin-hyperscape/logs/elizaos.log || echo "No ElizaOS logs found"
-          exit 1
-
       - name: Run tests
         run: bun run test
         env:
           DATABASE_URL: postgresql://hyperscape:hyperscape_test@localhost:5432/hyperscape_test
           NODE_ENV: test
-          ELIZAOS_API_URL: http://localhost:3000
           PUBLIC_CDN_URL: https://d20g7vd4m53hpb.cloudfront.net
-
-      - name: Show ElizaOS logs if tests failed
-        if: failure()
-        run: |
-          echo "=== ElizaOS Logs ==="
-          cat packages/plugin-hyperscape/logs/elizaos.log || echo "No ElizaOS logs found"
 
   build:
     name: Build
@@ -214,7 +171,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./packages/server/Dockerfile
+          file: ./Dockerfile.server
           push: false
           tags: hyperscape-server:${{ github.sha }}
           cache-from: type=gha

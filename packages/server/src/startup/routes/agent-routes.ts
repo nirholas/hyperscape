@@ -2145,5 +2145,530 @@ export function registerAgentRoutes(
     }
   });
 
+  // ===========================================================================
+  // EMBEDDED AGENT ROUTES
+  // These routes manage agents running directly on the server
+  // ===========================================================================
+
+  /**
+   * POST /api/embedded-agents
+   *
+   * Create and start an embedded agent.
+   * The agent will run directly on the server without an external ElizaOS process.
+   *
+   * Request body:
+   * {
+   *   characterId: "character-uuid",
+   *   autoStart?: boolean  // defaults to true
+   * }
+   */
+  fastify.post("/api/embedded-agents", async (request, reply) => {
+    try {
+      const { getAgentManager } = await import("../../eliza/index.js");
+      const agentManager = getAgentManager();
+
+      if (!agentManager) {
+        return reply.status(503).send({
+          success: false,
+          error: "Agent system not initialized",
+        });
+      }
+
+      const body = request.body as {
+        characterId: string;
+        autoStart?: boolean;
+      };
+
+      if (!body.characterId) {
+        return reply.status(400).send({
+          success: false,
+          error: "Missing required field: characterId",
+        });
+      }
+
+      // Get character from database to retrieve accountId and name
+      const databaseSystem = world.getSystem("database") as
+        | {
+            db: {
+              query: {
+                characters: {
+                  findFirst: (opts: {
+                    where: (
+                      chars: { id: unknown },
+                      ops: { eq: (a: unknown, b: string) => unknown },
+                    ) => unknown;
+                  }) => Promise<{
+                    id: string;
+                    accountId: string;
+                    name: string;
+                  } | null>;
+                };
+              };
+            };
+          }
+        | undefined;
+
+      if (!databaseSystem?.db) {
+        return reply.status(500).send({
+          success: false,
+          error: "Database not available",
+        });
+      }
+
+      const { characters } = await import("../../database/schema.js");
+      const { eq } = await import("drizzle-orm");
+
+      const character = await databaseSystem.db.query.characters.findFirst({
+        where: (chars, ops) => ops.eq(chars.id, body.characterId),
+      });
+
+      if (!character) {
+        return reply.status(404).send({
+          success: false,
+          error: "Character not found",
+        });
+      }
+
+      // Create the embedded agent
+      const characterId = await agentManager.createAgent({
+        characterId: character.id,
+        accountId: character.accountId,
+        name: character.name,
+        autoStart: body.autoStart !== false,
+      });
+
+      const agentInfo = agentManager.getAgentInfo(characterId);
+
+      console.log(
+        `[AgentRoutes] ✅ Embedded agent created: ${character.name} (${characterId})`,
+      );
+
+      return reply.send({
+        success: true,
+        agent: agentInfo,
+      });
+    } catch (error) {
+      console.error("[AgentRoutes] ❌ Failed to create embedded agent:", error);
+      return reply.status(500).send({
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to create embedded agent",
+      });
+    }
+  });
+
+  /**
+   * GET /api/embedded-agents
+   *
+   * List all embedded agents.
+   * Optionally filter by accountId.
+   */
+  fastify.get("/api/embedded-agents", async (request, reply) => {
+    try {
+      const { getAgentManager } = await import("../../eliza/index.js");
+      const agentManager = getAgentManager();
+
+      if (!agentManager) {
+        return reply.status(503).send({
+          success: false,
+          error: "Agent system not initialized",
+        });
+      }
+
+      const query = request.query as { accountId?: string };
+      const agents = query.accountId
+        ? agentManager.getAgentsByAccount(query.accountId)
+        : agentManager.getAllAgents();
+
+      return reply.send({
+        success: true,
+        agents,
+        count: agents.length,
+      });
+    } catch (error) {
+      console.error("[AgentRoutes] ❌ Failed to list embedded agents:", error);
+      return reply.status(500).send({
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to list embedded agents",
+      });
+    }
+  });
+
+  /**
+   * GET /api/embedded-agents/:characterId
+   *
+   * Get information about a specific embedded agent.
+   */
+  fastify.get("/api/embedded-agents/:characterId", async (request, reply) => {
+    try {
+      const { getAgentManager } = await import("../../eliza/index.js");
+      const agentManager = getAgentManager();
+
+      if (!agentManager) {
+        return reply.status(503).send({
+          success: false,
+          error: "Agent system not initialized",
+        });
+      }
+
+      const { characterId } = request.params as { characterId: string };
+      const agentInfo = agentManager.getAgentInfo(characterId);
+
+      if (!agentInfo) {
+        return reply.status(404).send({
+          success: false,
+          error: "Agent not found",
+        });
+      }
+
+      return reply.send({
+        success: true,
+        agent: agentInfo,
+      });
+    } catch (error) {
+      console.error("[AgentRoutes] ❌ Failed to get embedded agent:", error);
+      return reply.status(500).send({
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to get embedded agent",
+      });
+    }
+  });
+
+  /**
+   * POST /api/embedded-agents/:characterId/start
+   *
+   * Start an embedded agent.
+   */
+  fastify.post(
+    "/api/embedded-agents/:characterId/start",
+    async (request, reply) => {
+      try {
+        const { getAgentManager } = await import("../../eliza/index.js");
+        const agentManager = getAgentManager();
+
+        if (!agentManager) {
+          return reply.status(503).send({
+            success: false,
+            error: "Agent system not initialized",
+          });
+        }
+
+        const { characterId } = request.params as { characterId: string };
+
+        await agentManager.startAgent(characterId);
+        const agentInfo = agentManager.getAgentInfo(characterId);
+
+        return reply.send({
+          success: true,
+          agent: agentInfo,
+        });
+      } catch (error) {
+        console.error(
+          "[AgentRoutes] ❌ Failed to start embedded agent:",
+          error,
+        );
+        return reply.status(500).send({
+          success: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to start embedded agent",
+        });
+      }
+    },
+  );
+
+  /**
+   * POST /api/embedded-agents/:characterId/stop
+   *
+   * Stop an embedded agent.
+   */
+  fastify.post(
+    "/api/embedded-agents/:characterId/stop",
+    async (request, reply) => {
+      try {
+        const { getAgentManager } = await import("../../eliza/index.js");
+        const agentManager = getAgentManager();
+
+        if (!agentManager) {
+          return reply.status(503).send({
+            success: false,
+            error: "Agent system not initialized",
+          });
+        }
+
+        const { characterId } = request.params as { characterId: string };
+
+        await agentManager.stopAgent(characterId);
+        const agentInfo = agentManager.getAgentInfo(characterId);
+
+        return reply.send({
+          success: true,
+          agent: agentInfo,
+        });
+      } catch (error) {
+        console.error("[AgentRoutes] ❌ Failed to stop embedded agent:", error);
+        return reply.status(500).send({
+          success: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to stop embedded agent",
+        });
+      }
+    },
+  );
+
+  /**
+   * POST /api/embedded-agents/:characterId/pause
+   *
+   * Pause an embedded agent (keep entity but stop behavior).
+   */
+  fastify.post(
+    "/api/embedded-agents/:characterId/pause",
+    async (request, reply) => {
+      try {
+        const { getAgentManager } = await import("../../eliza/index.js");
+        const agentManager = getAgentManager();
+
+        if (!agentManager) {
+          return reply.status(503).send({
+            success: false,
+            error: "Agent system not initialized",
+          });
+        }
+
+        const { characterId } = request.params as { characterId: string };
+
+        await agentManager.pauseAgent(characterId);
+        const agentInfo = agentManager.getAgentInfo(characterId);
+
+        return reply.send({
+          success: true,
+          agent: agentInfo,
+        });
+      } catch (error) {
+        console.error(
+          "[AgentRoutes] ❌ Failed to pause embedded agent:",
+          error,
+        );
+        return reply.status(500).send({
+          success: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to pause embedded agent",
+        });
+      }
+    },
+  );
+
+  /**
+   * POST /api/embedded-agents/:characterId/resume
+   *
+   * Resume a paused embedded agent.
+   */
+  fastify.post(
+    "/api/embedded-agents/:characterId/resume",
+    async (request, reply) => {
+      try {
+        const { getAgentManager } = await import("../../eliza/index.js");
+        const agentManager = getAgentManager();
+
+        if (!agentManager) {
+          return reply.status(503).send({
+            success: false,
+            error: "Agent system not initialized",
+          });
+        }
+
+        const { characterId } = request.params as { characterId: string };
+
+        await agentManager.resumeAgent(characterId);
+        const agentInfo = agentManager.getAgentInfo(characterId);
+
+        return reply.send({
+          success: true,
+          agent: agentInfo,
+        });
+      } catch (error) {
+        console.error(
+          "[AgentRoutes] ❌ Failed to resume embedded agent:",
+          error,
+        );
+        return reply.status(500).send({
+          success: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to resume embedded agent",
+        });
+      }
+    },
+  );
+
+  /**
+   * POST /api/embedded-agents/:characterId/command
+   *
+   * Send a command to an embedded agent.
+   *
+   * Request body:
+   * {
+   *   command: "move" | "attack" | "gather" | "pickup" | "drop" | "equip" | "use" | "chat" | "stop",
+   *   data: { ... }  // command-specific data
+   * }
+   */
+  fastify.post(
+    "/api/embedded-agents/:characterId/command",
+    async (request, reply) => {
+      try {
+        const { getAgentManager } = await import("../../eliza/index.js");
+        const agentManager = getAgentManager();
+
+        if (!agentManager) {
+          return reply.status(503).send({
+            success: false,
+            error: "Agent system not initialized",
+          });
+        }
+
+        const { characterId } = request.params as { characterId: string };
+        const { command, data } = request.body as {
+          command: string;
+          data: unknown;
+        };
+
+        if (!command) {
+          return reply.status(400).send({
+            success: false,
+            error: "Missing required field: command",
+          });
+        }
+
+        await agentManager.sendCommand(characterId, command, data || {});
+
+        return reply.send({
+          success: true,
+          message: `Command ${command} sent to agent`,
+        });
+      } catch (error) {
+        console.error(
+          "[AgentRoutes] ❌ Failed to send command to embedded agent:",
+          error,
+        );
+        return reply.status(500).send({
+          success: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to send command to embedded agent",
+        });
+      }
+    },
+  );
+
+  /**
+   * DELETE /api/embedded-agents/:characterId
+   *
+   * Remove an embedded agent completely.
+   */
+  fastify.delete(
+    "/api/embedded-agents/:characterId",
+    async (request, reply) => {
+      try {
+        const { getAgentManager } = await import("../../eliza/index.js");
+        const agentManager = getAgentManager();
+
+        if (!agentManager) {
+          return reply.status(503).send({
+            success: false,
+            error: "Agent system not initialized",
+          });
+        }
+
+        const { characterId } = request.params as { characterId: string };
+
+        await agentManager.removeAgent(characterId);
+
+        return reply.send({
+          success: true,
+          message: "Agent removed",
+        });
+      } catch (error) {
+        console.error(
+          "[AgentRoutes] ❌ Failed to remove embedded agent:",
+          error,
+        );
+        return reply.status(500).send({
+          success: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to remove embedded agent",
+        });
+      }
+    },
+  );
+
+  /**
+   * GET /api/embedded-agents/:characterId/state
+   *
+   * Get the full game state for an embedded agent.
+   */
+  fastify.get(
+    "/api/embedded-agents/:characterId/state",
+    async (request, reply) => {
+      try {
+        const { getAgentManager } = await import("../../eliza/index.js");
+        const agentManager = getAgentManager();
+
+        if (!agentManager) {
+          return reply.status(503).send({
+            success: false,
+            error: "Agent system not initialized",
+          });
+        }
+
+        const { characterId } = request.params as { characterId: string };
+        const service = agentManager.getAgentService(characterId);
+
+        if (!service) {
+          return reply.status(404).send({
+            success: false,
+            error: "Agent not found",
+          });
+        }
+
+        const gameState = service.getGameState();
+
+        return reply.send({
+          success: true,
+          gameState,
+        });
+      } catch (error) {
+        console.error(
+          "[AgentRoutes] ❌ Failed to get embedded agent state:",
+          error,
+        );
+        return reply.status(500).send({
+          success: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to get embedded agent state",
+        });
+      }
+    },
+  );
+
   console.log("[AgentRoutes] ✅ Agent credential routes registered");
+  console.log("[AgentRoutes] ✅ Embedded agent routes registered");
 }

@@ -67,6 +67,9 @@ import { registerApiRoutes } from "./startup/api-routes.js";
 import { registerWebSocket } from "./startup/websocket.js";
 import { registerShutdownHandlers } from "./startup/shutdown.js";
 
+// Import embedded agent system
+import { initializeAgents, getAgentManager } from "./eliza/index.js";
+
 /**
  * Starts the Hyperscape server
  *
@@ -100,39 +103,48 @@ async function startServer() {
   console.log("=".repeat(60));
 
   // Step 1: Load configuration
-  console.log("[Server] Step 1/7: Loading configuration...");
+  console.log("[Server] Step 1/8: Loading configuration...");
   const config = await loadConfig();
   console.log(`[Server] ✅ Configuration loaded (port: ${config.port})`);
 
   // Step 2: Initialize database
-  console.log("[Server] Step 2/7: Initializing database...");
+  console.log("[Server] Step 2/8: Initializing database...");
   const dbContext = await initializeDatabase(config);
   console.log("[Server] ✅ Database initialized");
 
   // Step 3: Initialize world
-  console.log("[Server] Step 3/7: Initializing world...");
+  console.log("[Server] Step 3/8: Initializing world...");
   const world = await initializeWorld(config, dbContext);
   console.log("[Server] ✅ World initialized");
 
   // Step 4: Create HTTP server
-  console.log("[Server] Step 4/7: Creating HTTP server...");
+  console.log("[Server] Step 4/8: Creating HTTP server...");
   const fastify = await createHttpServer(config);
   console.log("[Server] ✅ HTTP server created");
 
   // Step 5: Register API routes
-  console.log("[Server] Step 5/7: Registering API routes...");
+  console.log("[Server] Step 5/8: Registering API routes...");
   registerApiRoutes(fastify, world, config);
   console.log("[Server] ✅ API routes registered");
 
   // Step 6: Register WebSocket
-  console.log("[Server] Step 6/7: Registering WebSocket...");
+  console.log("[Server] Step 6/8: Registering WebSocket...");
   registerWebSocket(fastify, world);
   console.log("[Server] ✅ WebSocket registered");
 
   // Step 7: Start listening
-  console.log("[Server] Step 7/7: Starting HTTP server...");
+  console.log("[Server] Step 7/8: Starting HTTP server...");
   await fastify.listen({ port: config.port, host: "0.0.0.0" });
   console.log(`[Server] ✅ Server listening on http://0.0.0.0:${config.port}`);
+
+  // Step 8: Initialize embedded agents
+  console.log("[Server] Step 8/8: Initializing embedded agents...");
+  const agentManager = await initializeAgents(world, {
+    autoStartAgents: process.env.AUTO_START_AGENTS !== "false",
+  });
+  console.log(
+    `[Server] ✅ Embedded agents initialized (${agentManager.getAllAgents().length} agent(s))`,
+  );
 
   // Register shutdown handlers
   registerShutdownHandlers(fastify, world, dbContext);

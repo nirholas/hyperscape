@@ -160,11 +160,17 @@ bunx drizzle-kit migrate   # Run pending migrations
 
 ### Assets
 
-Game assets (3D models, textures, audio) are stored in a [separate repo](https://github.com/HyperscapeAI/assets) and auto-downloaded during `bun install` (~200MB via Git LFS).
+Game assets (3D models, textures, audio) are served from CDN in production:
+- **CDN URL**: `https://d20g7vd4m53hpb.cloudfront.net`
+- **Source**: [HyperscapeAI/assets](https://github.com/HyperscapeAI/assets)
+
+**Local Development**: Assets are auto-downloaded during `bun install` (~200MB via Git LFS).
 
 ```bash
-bun run assets:sync    # Pull latest assets from repo
+bun run assets:sync    # Pull latest assets from repo (local dev only)
 ```
+
+**Production/CI**: No local assets needed - manifests fetched from CDN at server startup.
 
 ## Configuration
 

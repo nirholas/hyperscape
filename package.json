@@ -8,8 +8,6 @@
     "hyperscape",
     "virtual-worlds",
     "rpg",
-    "ai",
-    "elizaos",
     "3d",
     "metaverse"
   ],
@@ -38,8 +36,6 @@
     "build:all": "bun run build",
     "predev": "bun scripts/dev-setup.mjs",
     "dev": "turbo run dev",
-    "dev:ai": "bun scripts/dev-with-ai.mjs",
-    "dev:all": "concurrently \"bun run dev:ai\" \"bun run dev:forge\"",
     "dev:shared": "cd packages/shared && bun run dev",
     "dev:client": "cd packages/client && bun run dev",
     "dev:server": "cd packages/server && bun run dev",
@@ -83,7 +79,6 @@
     "@gltf-transform/functions": "^4.1.1",
     "@docusaurus/core": "^3.9.1",
     "@docusaurus/preset-classic": "^3.9.2",
-    "@elizaos/cli": "^1.7.0",
     "@eslint/js": "^9.0.0",
     "@types/node": "^24.8.0",
     "@typescript-eslint/eslint-plugin": "^8.38.0",
@@ -116,11 +111,7 @@
     "three": "0.180.0",
     "@types/three": "0.180.0",
     "@pixiv/three-vrm": "3.4.3",
-    "jws": "^3.2.3",
-    "@elizaos/core": "^2.0.0-alpha.1",
-    "@elizaos/plugin-sql": "^1.7.0",
-    "@elizaos/server": "^1.7.0",
-    "@elizaos/cli": "^1.7.0"
+    "jws": "^3.2.3"
   },
   "packageManager": "bun@1.1.38",
   "lint-staged": {
@@ -128,7 +119,6 @@
     "*.{js,jsx}": "prettier --write"
   },
   "dependencies": {
-    "@hyperscape/plugin-hyperscape": "workspace:*",
     "@rollup/rollup-darwin-x64": "^4.52.4",
     "@types/pg": "^8.15.5",
     "better-sqlite3": "^12.2.0",

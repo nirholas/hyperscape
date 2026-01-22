@@ -11,7 +11,6 @@ The Hyperscape RPG is a persistent multiplayer RPG featuring:
 - Banking and trading systems
 - Mob spawning and AI entities
 - Comprehensive UI with inventory, equipment, and banking interfaces
-- AI agent compatibility through ElizaOS integration
 
 ## Quick Start
 
@@ -538,39 +537,6 @@ Tests use colored cube proxies for visual verification:
 - 🟡 Trees
 - 🟣 Banks
 - 🟨 Stores
-
-## AI Agent Integration
-
-### ElizaOS Plugin
-
-The RPG supports AI agents through the `plugin-hyperscape` ElizaOS plugin:
-
-```bash
-# Start ElizaOS with Hyperscape plugin
-cd packages/plugin-hyperscape
-elizaos start
-```
-
-### Agent Capabilities
-
-AI agents can:
-- Join the world as players
-- Navigate using semantic directions
-- Engage in combat with mobs
-- Gather resources and manage inventory
-- Use banking and store systems
-- Interact with other players
-
-### Agent Actions
-
-Available actions for AI agents:
-- `attack` - Combat with enemies
-- `gather` - Resource collection
-- `go_to` - Movement and navigation
-- `interact` - Object/NPC interaction
-- `equip/unequip` - Equipment management
-- `drop/pickup` - Item handling
-- `bank/store` - Economic transactions
 
 ## Production Deployment
 

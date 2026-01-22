@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Hyperscape is an AI-powered RuneScape-style MMORPG built on a custom 3D multiplayer engine. The project combines a real-time 3D metaverse engine (Hyperscape) with ElizaOS AI agents, allowing both humans and AI to play together in a persistent world.
+Hyperscape is a RuneScape-style MMORPG built on a custom 3D multiplayer engine. The project features a real-time 3D metaverse engine (Hyperscape) in a persistent world.
 
 ## Essential Commands
 
@@ -91,7 +91,7 @@ npm run docs:build
 
 ### Monorepo Structure
 
-This is a **Turbo monorepo** with 7 packages:
+This is a **Turbo monorepo** with packages:
 
 ```
 packages/
@@ -108,9 +108,6 @@ packages/
 │   ├── 3D rendering
 │   ├── Player controls
 │   └── UI/HUD
-├── plugin-hyperscape/   # ElizaOS AI agent plugin
-│   ├── AI agent actions (combat, skills, movement)
-│   └── ElizaOS providers for world state
 ├── physx-js-webidl/     # PhysX WASM bindings
 ├── asset-forge/         # AI asset generation (GPT-4, MeshyAI)
 └── docs-site/           # Docusaurus documentation site
@@ -257,8 +254,6 @@ The dev server provides:
 **Commands:**
 ```bash
 bun run dev        # Core game (client + server + shared)
-bun run dev:ai     # Core game + ElizaOS AI agents
-bun run dev:all    # Everything: game + AI + AssetForge
 bun run dev:forge  # AssetForge (standalone)
 bun run docs:dev   # Documentation site (standalone)
 ```
@@ -273,8 +268,6 @@ All services have unique default ports to avoid conflicts:
 | 3400 | AssetForge UI | `ASSET_FORGE_PORT` | `bun run dev:forge` |
 | 3401 | AssetForge API | `ASSET_FORGE_API_PORT` | `bun run dev:forge` |
 | 3402 | Docusaurus | (hardcoded) | `bun run docs:dev` |
-| 4000 | ElizaOS Dashboard | (internal) | `bun run dev:ai` |
-| 4001 | ElizaOS API | `ELIZAOS_PORT` | `bun run dev:ai` |
 | 5555 | Game Server | `PORT` | `bun run dev` |
 
 ### Environment Variables
@@ -324,7 +317,6 @@ This project uses **Bun** (v1.1.38+) as the package manager and runtime.
 - **Database**: SQLite (local), PostgreSQL (production via Neon)
 - **Testing**: Playwright, Vitest
 - **Build**: Turbo, esbuild, Vite
-- **AI Agents**: ElizaOS
 - **Mobile**: Capacitor
 
 ## Troubleshooting
@@ -353,7 +345,6 @@ cd packages/physx-js-webidl
 # Kill processes on common Hyperscape ports
 lsof -ti:3333 | xargs kill -9  # Game Client
 lsof -ti:5555 | xargs kill -9  # Game Server
-lsof -ti:4001 | xargs kill -9  # ElizaOS
 ```
 
 See [Port Allocation](#port-allocation) section for full port list.

@@ -33,43 +33,23 @@ export interface AgentContext {
   rotation?: Quaternion;
 }
 
-export interface HyperscapeService extends Service {
-  // Core service methods
-  initialize(runtime: IAgentRuntime): Promise<void>;
-  getWorld(): World | null;
-  connect(worldId: string): Promise<void>;
+// Note: The actual HyperscapeService implementation is in services/HyperscapeService.ts
+// This interface provides a minimal type contract for external use
+export interface IHyperscapeService extends Service {
+  // Connection state
+  isConnected(): boolean;
+  connect(serverUrl: string): Promise<void>;
   disconnect(): Promise<void>;
 
-  // Entity management
-  spawnAgent(agentId: UUID, position?: Vector3): Promise<Entity | null>;
-  despawnAgent(agentId: UUID): Promise<void>;
-  getAgentEntity(agentId: UUID): Entity | null;
+  // Game state access
+  getPlayerEntity(): any;
+  getNearbyEntities(): any[];
+  getGameState(): any;
 
-  // Movement and positioning
-  moveAgent(agentId: UUID, position: Vector3): Promise<void>;
-  rotateAgent(agentId: UUID, rotation: Quaternion): Promise<void>;
-
-  // Communication
-  sendMessage(message: string, targetId?: UUID): Promise<void>;
-  broadcast(message: string): Promise<void>;
-
-  // Build system integration
-  getBuildManager(): BuildManager | null;
-
-  // World state
-  getWorldState(): any;
-  updateWorldState(state: any): Promise<void>;
-}
-
-export interface BuildManager {
-  // Build system methods
-  createEntity(type: string, position: Vector3, data?: any): Entity | null;
-  destroyEntity(entityId: string): boolean;
-  updateEntity(entityId: string, data: any): boolean;
-
-  // Build validation
-  canBuild(position: Vector3, type: string): boolean;
-  getBuildPermissions(agentId: UUID): string[];
+  // Command execution
+  executeMove(command: { target: any; runMode?: boolean }): Promise<void>;
+  executeAttack(command: { targetEntityId: string }): Promise<void>;
+  executeChatMessage(command: { message: string }): Promise<void>;
 }
 
 export interface AgentState {

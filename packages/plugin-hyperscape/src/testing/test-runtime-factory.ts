@@ -7,15 +7,11 @@ import {
   ServiceTypeName,
   Service,
 } from "@elizaos/core";
-import { HyperscapeService } from "../service";
+import { HyperscapeService } from "../services/HyperscapeService.js";
 
 // Helper function to generate test UUIDs
 function generateTestUUID(): UUID {
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
-    const r = (Math.random() * 16) | 0;
-    const v = c == "x" ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  }) as UUID;
+  return crypto.randomUUID() as UUID;
 }
 
 export interface TestRuntimeConfig {
@@ -73,24 +69,20 @@ export async function createDynamicRuntime(
   const hyperscapeService = new HyperscapeService(mockRuntime);
 
   // Connect to specified world if provided
-  if (config.wsUrl && config.worldId) {
+  if (config.wsUrl) {
     logger.info(
-      `[TestRuntimeFactory] Connecting to test world: ${config.wsUrl}`,
+      `[TestRuntimeFactory] Connecting to test server: ${config.wsUrl}`,
     );
     try {
-      await hyperscapeService.connect({
-        wsUrl: config.wsUrl,
-        worldId: config.worldId as UUID,
-        authToken: undefined,
-      });
-      logger.info("[TestRuntimeFactory] Test world connection successful");
+      await hyperscapeService.connect(config.wsUrl);
+      logger.info("[TestRuntimeFactory] Test server connection successful");
     } catch (error) {
       logger.error(
-        "[TestRuntimeFactory] Failed to connect to test world:",
+        "[TestRuntimeFactory] Failed to connect to test server:",
         error,
       );
       throw new Error(
-        `Test world connection failed: ${(error as Error).message}`,
+        `Test server connection failed: ${(error as Error).message}`,
       );
     }
   }

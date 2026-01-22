@@ -1,16 +1,54 @@
+/**
+ * AgentAvatar - Avatar Management for AI Agents
+ *
+ * Manages VRM avatar models and animations for AI agents operating in Hyperscape.
+ * This system wraps the core Hyperscape Avatar node to provide agent-specific
+ * functionality like automatic emote selection and state synchronization.
+ *
+ * **Features:**
+ * - VRM model loading and management
+ * - Animation state machine (idle, walk, run, emotes)
+ * - Movement detection for automatic animation switching
+ * - Emote playback for social interactions
+ * - Integration with player entity state
+ *
+ * **Architecture:**
+ * - Extends the core System class
+ * - Delegates model rendering to the shared Avatar node
+ * - Tracks movement state to select appropriate animations
+ * - Responds to entity state changes (alive, combat, etc.)
+ *
+ * **Referenced by:** HyperscapeService, EntitySystem
+ */
+
 import { logger } from "@elizaos/core";
 import { THREE } from "@hyperscape/shared";
 import type { World, Player } from "../types/core-types";
+
+// Animation state constants
+const EMOTE_IDLE = "idle";
+const EMOTE_WALK = "walk";
+const EMOTE_RUN = "run";
+
+// Movement detection thresholds
+const WALK_SPEED_THRESHOLD = 0.5; // m/s
+const RUN_SPEED_THRESHOLD = 4.0; // m/s
+const POSITION_CHANGE_THRESHOLD = 0.01; // Minimum position change to detect movement
 
 interface NodeContext {
   entity?: {
     data?: {
       avatarUrl?: string;
+      emote?: string;
       [key: string]: unknown;
     };
   };
   world?: World;
   player?: Player;
+  loader?: {
+    get(type: string, src: string): unknown;
+    load(type: string, src: string): Promise<unknown>;
+  };
   [key: string]: unknown;
 }
 
@@ -25,224 +63,346 @@ interface ParentNode extends THREE.Object3D {
     position: THREE.Vector3;
     quaternion: THREE.Quaternion;
   };
-  refCount?: number;
 }
 
-interface ProxyNode extends THREE.Object3D {
-  emoteFactories?: Map<string, AnimationFactory>;
-  refCount?: number;
+interface AvatarInstance {
+  setEmote(emote: string | null): void;
+  move(matrix: THREE.Matrix4): void;
+  destroy(): void;
+  height?: number;
+  headToHeight?: number;
+  getBoneTransform?(boneName: string): THREE.Matrix4 | null;
+  disableRateCheck?(): void;
 }
 
-// Create a base Node class since @hyperscape/shared is not available
+interface AvatarFactory {
+  create(
+    matrix: THREE.Matrix4,
+    hooks?: unknown,
+    node?: unknown,
+  ): AvatarInstance;
+  applyStats?(stats: unknown): void;
+}
+
+/**
+ * Base Node class implementation for the avatar system
+ */
 class Node extends THREE.Object3D {
   ctx: NodeContext;
+  dirty: boolean = false;
+  proxy: unknown = null;
+
   constructor(ctx: NodeContext) {
     super();
     this.ctx = ctx;
   }
-  setDirty() {}
+
+  setDirty(): void {
+    this.dirty = true;
+  }
+
+  updateTransform(): void {
+    this.updateMatrix();
+    this.updateMatrixWorld(true);
+  }
+
+  getProxy(): Record<string, unknown> {
+    return {};
+  }
 }
 
-interface AnimationFactory {
-  toClip?(target: THREE.Object3D): THREE.AnimationClip | null;
-  [key: string]: unknown;
-}
-
-interface EmotePlayerNode extends THREE.Group {
-  parent: THREE.Object3D | null;
-  destroy(): void;
-}
-
-// Local implementation of createEmotePlayerNodes
-// This is a placeholder implementation since it's not available in hyperscape
-function createEmotePlayerNodes(
-  _factory: AnimationFactory,
-  _objects: THREE.Object3D[],
-  _autoplay: boolean,
-): EmotePlayerNode {
-  // Return a simple object that can be added to the scene
-  const group = new THREE.Group() as EmotePlayerNode;
-  // The actual implementation would apply the emote animation to the objects
-  // For now, just return an empty group with a destroy method
-  group.destroy = () => {
-    group.parent?.remove(group);
-  };
-  return group;
-}
-
+/**
+ * AgentAvatar - Avatar system for AI agents
+ *
+ * Manages avatar appearance and animations for agents in Hyperscape worlds.
+ */
 export class AgentAvatar extends Node {
   // Player and model properties
   player: Player | null = null;
-  model: THREE.Object3D | null = null;
-  mixer: THREE.AnimationMixer | null = null;
-  idleClip: THREE.AnimationClip | null = null;
-  walkClip: THREE.AnimationClip | null = null;
-  runClip: THREE.AnimationClip | null = null;
+  factory: AvatarFactory | null = null;
+  instance: AvatarInstance | null = null;
+
+  // Animation state
   isMoving: boolean = false;
-  movingN: number = 0;
-  factory: AnimationFactory;
-  lookTarget: THREE.Vector3;
-  effect: Record<string, unknown> = {};
-  emote: string | null = null;
-  emotePlayer: EmotePlayerNode | null = null;
-  emoteN: number = 0;
+  isRunning: boolean = false;
+  currentEmote: string | null = EMOTE_IDLE;
+  overrideEmote: string | null = null;
 
-  // Required Node properties
-  declare name: string;
-  declare ctx: NodeContext;
-  declare parent: ParentNode | null;
-  declare proxy: ProxyNode;
-  declare position: THREE.Vector3;
-  declare quaternion: THREE.Quaternion;
-  declare add: (...objects: THREE.Object3D[]) => this;
+  // Movement tracking
+  private lastPosition: THREE.Vector3 = new THREE.Vector3();
+  private velocity: THREE.Vector3 = new THREE.Vector3();
+  private movementStartTime: number = 0;
 
-  constructor(ctx: NodeContext & { factory: AnimationFactory }) {
+  // Emote management
+  private emoteQueue: string[] = [];
+  private emoteEndTime: number = 0;
+
+  constructor(ctx: NodeContext & { factory?: AvatarFactory }) {
     super(ctx);
-    this.factory = ctx.factory;
-    this.lookTarget = new THREE.Vector3();
-  }
-
-  setMoving(isMoving: boolean) {
-    this.isMoving = isMoving;
-    this.movingN++;
-  }
-
-  async init() {
     this.name = "AgentAvatar";
+    this.factory = ctx.factory ?? null;
+  }
 
-    // --- Proxy Load (No-op) ---
-    if (!this.proxy) {
-      logger.info("[AgentAvatar] Proxy not available, skipping proxy load.");
-    } else {
-      // Proxy loading logic if proxy were available
-      // logger.info('[AgentAvatar] Loading proxy model:', this.proxy);
-    }
-    // --- End Proxy Load ---
+  /**
+   * Initialize the avatar with player data
+   */
+  async init(): Promise<void> {
+    logger.info("[AgentAvatar] Initializing avatar system");
 
     if (this.ctx.player) {
       await this.updatePlayer(this.ctx.player);
     } else {
-      logger.warn("[AgentAvatar] No player in context at init.");
+      logger.warn("[AgentAvatar] No player in context at init");
     }
   }
 
-  async updatePlayer(player: Player) {
+  /**
+   * Update avatar when player data changes
+   */
+  async updatePlayer(player: Player): Promise<void> {
     this.player = player;
 
-    // --- Data-driven Model Update (Partial) ---
-    // This is simplified without actual model loading and mixer setup
-    if (this.ctx.entity?.data) {
-      logger.info(
-        "[AgentAvatar] Entity avatar URL:",
-        this.ctx.entity.data.avatarUrl || "none",
-      );
-    }
+    // Get avatar URL from player data
+    const avatarUrl =
+      this.ctx.entity?.data?.avatarUrl ||
+      (player as { data?: { avatar?: string } })?.data?.avatar;
 
-    if (this.ctx && this.ctx.gltf) {
-      logger.info("[AgentAvatar] Default world avatar available.");
-    }
-
-    logger.info(
-      "[AgentAvatar] Skipping actual model/mixer setup (not implemented).",
-    );
-    // --- End Model Update ---
-
-    // Names shown in right-click context menu only (OSRS pattern)
-    this.setDirty();
-  }
-
-  // --- Placeholder Methods ---
-  // These would handle animations and updates in a real implementation
-
-  tick(_delta: number) {
-    // Mixer update logic
-  }
-
-  update(_delta: number) {
-    // Movement and rotation logic
-  }
-
-  lateUpdate(_delta: number) {
-    // Position and scale updates
-    if (this.model && this.player) {
-      this.position.x = this.parent?.position.x || 0;
-      this.position.y = (this.parent?.position.y || 0) - 0.95;
-      this.position.z = this.parent?.position.z || 0;
-
-      this.quaternion.x = this.parent?.quaternion.x || 0;
-      this.quaternion.y = this.parent?.quaternion.y || 0;
-      this.quaternion.z = this.parent?.quaternion.z || 0;
-      this.quaternion.w = this.parent?.quaternion.w || 1;
-
-      // Handle animations
-      if (this.mixer) {
-        const isRunning = false; // Placeholder for run detection
-        const _walkSpeed = isRunning ? 0 : 1;
-        const _runSpeed = isRunning ? 1 : 0;
-
-        // Update animation weights
-        // this.idleClip?.setEffectiveWeight(this.isMoving ? 0 : 1);
-        // this.walkClip?.setEffectiveWeight(this.isMoving ? walkSpeed : 0);
-        // this.runClip?.setEffectiveWeight(this.isMoving ? runSpeed : 0);
-      }
-
-      // Emote handling
-      if (this.player) {
-        const effect = (this.player as any).data?.effect as
-          | PlayerEffect
-          | undefined;
-        if (effect?.emote !== this.emote) {
-          this.emote = effect?.emote || null;
-          this.updateEmote();
+    if (avatarUrl && this.ctx.loader) {
+      logger.info(`[AgentAvatar] Loading avatar from: ${avatarUrl}`);
+      try {
+        // Load avatar through the world's loader
+        const avatarData = await this.ctx.loader.load("avatar", avatarUrl);
+        if (avatarData) {
+          const data = avatarData as { factory?: AvatarFactory };
+          this.factory = data.factory ?? null;
+          await this.createInstance();
         }
+      } catch (error) {
+        logger.error(
+          `[AgentAvatar] Failed to load avatar: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    // Initialize position tracking
+    if (player.position) {
+      const pos = player.position as { x: number; y: number; z: number };
+      this.lastPosition.set(pos.x, pos.y, pos.z);
+    }
+  }
+
+  /**
+   * Create avatar instance from factory
+   */
+  private async createInstance(): Promise<void> {
+    if (!this.factory) {
+      logger.warn("[AgentAvatar] No factory available, cannot create instance");
+      return;
+    }
+
+    // Destroy existing instance if any
+    if (this.instance) {
+      this.instance.destroy();
+      this.instance = null;
+    }
+
+    // Update transform before creating instance
+    this.updateTransform();
+
+    // Create new instance
+    this.instance = this.factory.create(this.matrixWorld, undefined, this);
+
+    if (this.instance) {
+      this.instance.setEmote(this.currentEmote);
+      logger.info("[AgentAvatar] Avatar instance created successfully");
+    }
+  }
+
+  /**
+   * Set movement state
+   */
+  setMoving(isMoving: boolean, isRunning: boolean = false): void {
+    const wasMoving = this.isMoving;
+    this.isMoving = isMoving;
+    this.isRunning = isRunning;
+
+    if (isMoving && !wasMoving) {
+      this.movementStartTime = Date.now();
+    }
+
+    // Update animation if no override emote
+    if (!this.overrideEmote) {
+      this.updateMovementEmote();
+    }
+  }
+
+  /**
+   * Update emote based on movement state
+   */
+  private updateMovementEmote(): void {
+    let targetEmote: string;
+
+    if (!this.isMoving) {
+      targetEmote = EMOTE_IDLE;
+    } else if (this.isRunning) {
+      targetEmote = EMOTE_RUN;
+    } else {
+      targetEmote = EMOTE_WALK;
+    }
+
+    if (targetEmote !== this.currentEmote) {
+      this.currentEmote = targetEmote;
+      this.instance?.setEmote(targetEmote);
+    }
+  }
+
+  /**
+   * Play an emote animation
+   * @param emoteName - Name of the emote to play
+   * @param duration - Duration in ms (0 = play once then return to state emote)
+   */
+  playEmote(emoteName: string, duration: number = 0): void {
+    logger.info(`[AgentAvatar] Playing emote: ${emoteName}`);
+
+    this.overrideEmote = emoteName;
+    this.instance?.setEmote(emoteName);
+
+    if (duration > 0) {
+      this.emoteEndTime = Date.now() + duration;
+    } else {
+      // For single-play emotes, estimate duration or use default
+      this.emoteEndTime = Date.now() + 2000;
+    }
+  }
+
+  /**
+   * Stop override emote and return to movement-based animation
+   */
+  stopEmote(): void {
+    this.overrideEmote = null;
+    this.emoteEndTime = 0;
+    this.updateMovementEmote();
+  }
+
+  /**
+   * Update called each frame
+   */
+  tick(delta: number): void {
+    // Check if override emote should end
+    if (this.overrideEmote && this.emoteEndTime > 0) {
+      if (Date.now() >= this.emoteEndTime) {
+        this.stopEmote();
       }
     }
   }
 
-  updateEmote() {
-    const emote = this.emote;
-    const n = ++this.emoteN;
+  /**
+   * Update called each frame for position tracking
+   */
+  update(delta: number): void {
+    if (!this.player) return;
 
-    if (this.emotePlayer) {
-      this.emotePlayer.destroy();
-      this.emotePlayer = null;
-    }
+    // Track movement from player position changes
+    const playerPos = this.player.position as
+      | { x: number; y: number; z: number }
+      | undefined;
 
-    if (!emote) {
-      return;
-    }
+    if (playerPos) {
+      const currentPos = new THREE.Vector3(
+        playerPos.x,
+        playerPos.y,
+        playerPos.z,
+      );
+      this.velocity
+        .subVectors(currentPos, this.lastPosition)
+        .divideScalar(delta);
 
-    logger.info("[AgentAvatar] Updating emote:", emote);
+      const speed = this.velocity.length();
+      const positionChanged =
+        currentPos.distanceTo(this.lastPosition) > POSITION_CHANGE_THRESHOLD;
 
-    const factory = this.proxy?.emoteFactories?.get(emote);
-    if (!factory) {
-      logger.warn("[AgentAvatar] Emote factory not found for:", emote);
-      return;
-    }
+      // Update movement state based on velocity
+      if (positionChanged) {
+        const isRunning = speed > RUN_SPEED_THRESHOLD;
+        const isMoving = speed > WALK_SPEED_THRESHOLD;
+        this.setMoving(isMoving, isRunning);
+      } else {
+        this.setMoving(false);
+      }
 
-    if (n !== this.emoteN) {
-      return;
-    }
-
-    if (!this.model) {
-      logger.warn("[AgentAvatar] Model not available for emote");
-      return;
-    }
-
-    const objects = [this.model];
-    this.emotePlayer = createEmotePlayerNodes(factory, objects, true);
-    this.add(this.emotePlayer);
-  }
-
-  onDestroy() {
-    if (this.proxy && this.proxy.refCount && this.proxy.refCount > 0) {
-      this.proxy.refCount--;
+      this.lastPosition.copy(currentPos);
     }
   }
 
-  // Required Node method
-  setDirty() {
-    // This is typically set by the framework
-    // For now, just a no-op
+  /**
+   * Late update for position and rotation sync
+   */
+  lateUpdate(delta: number): void {
+    if (!this.player || !this.instance) return;
+
+    // Update avatar position and rotation from player
+    const playerPos = this.player.position as
+      | { x: number; y: number; z: number }
+      | undefined;
+    // Get rotation from player node or data
+    const playerNode = (
+      this.player as {
+        node?: { quaternion?: { x: number; y: number; z: number; w: number } };
+      }
+    ).node;
+    const playerRot = playerNode?.quaternion;
+
+    if (playerPos) {
+      this.position.set(playerPos.x, playerPos.y, playerPos.z);
+    }
+
+    if (playerRot) {
+      this.quaternion.set(playerRot.x, playerRot.y, playerRot.z, playerRot.w);
+    }
+
+    // Update transform and move instance
+    this.updateTransform();
+    this.instance.move(this.matrixWorld);
+
+    // Check for effect emotes from player entity
+    const playerData = this.player as { data?: { effect?: PlayerEffect } };
+    const effect = playerData?.data?.effect;
+    if (effect?.emote && effect.emote !== this.overrideEmote) {
+      this.playEmote(effect.emote);
+    }
+  }
+
+  /**
+   * Get avatar height
+   */
+  getHeight(): number | null {
+    return this.instance?.height ?? 1.8; // Default human height
+  }
+
+  /**
+   * Get head-to-total-height ratio
+   */
+  getHeadToHeight(): number | null {
+    return this.instance?.headToHeight ?? 0.85; // Typical ratio
+  }
+
+  /**
+   * Get bone transform for attachment points
+   */
+  getBoneTransform(boneName: string): THREE.Matrix4 | null {
+    return this.instance?.getBoneTransform?.(boneName) ?? null;
+  }
+
+  /**
+   * Cleanup when destroying avatar
+   */
+  onDestroy(): void {
+    if (this.instance) {
+      this.instance.destroy();
+      this.instance = null;
+    }
+    this.player = null;
+    this.factory = null;
+    logger.info("[AgentAvatar] Avatar destroyed");
   }
 }

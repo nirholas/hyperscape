@@ -68,42 +68,6 @@ jobs:
         working-directory: packages/server
         run: bun run build
 
-      - name: Build plugin-hyperscape package
-        working-directory: packages/plugin-hyperscape
-        run: bun run build
-
-      - name: Start ElizaOS in background
-        working-directory: packages/plugin-hyperscape
-        run: |
-          mkdir -p logs
-          # Use bunx to run elizaos from workspace context so it can find local plugins
-          bunx elizaos start --character character.json > logs/elizaos.log 2>&1 &
-          echo "ELIZAOS_PID=$!" >> $GITHUB_ENV
-        env:
-          NODE_ENV: test
-          SERVER_PORT: 3000
-
-      - name: Wait for ElizaOS to be ready
-        run: |
-          echo "⏳ Waiting for ElizaOS to start..."
-          MAX_RETRIES=30
-          RETRY_DELAY=2
-          for i in $(seq 1 $MAX_RETRIES); do
-            # Check both /health and /healthz endpoints (ElizaOS 1.7.x uses these)
-            if curl -f -s http://localhost:3000/health > /dev/null 2>&1 || curl -f -s http://localhost:3000/healthz > /dev/null 2>&1; then
-              echo "✓ ElizaOS is ready (attempt $i/$MAX_RETRIES)"
-              exit 0
-            fi
-            if [ $i -eq 1 ]; then
-              echo "  Waiting for health endpoint..."
-            fi
-            sleep $RETRY_DELAY
-          done
-          echo "❌ ElizaOS did not become ready after $((MAX_RETRIES * RETRY_DELAY)) seconds"
-          echo "=== ElizaOS Logs ==="
-          cat packages/plugin-hyperscape/logs/elizaos.log || echo "No ElizaOS logs found"
-          exit 1
-
       - name: Run database migrations
         working-directory: packages/server
         run: bunx drizzle-kit push
@@ -146,17 +110,12 @@ jobs:
       - name: Run integration tests
         working-directory: packages/server
         run: bun scripts/test-integration.mjs
-        env:
-          ELIZAOS_API_URL: http://localhost:3000
 
       - name: Show logs if test failed
         if: failure()
         run: |
           echo "=== Server Logs ==="
           cat packages/server/logs/server.log || echo "No server logs found"
-          echo ""
-          echo "=== ElizaOS Logs ==="
-          cat packages/plugin-hyperscape/logs/elizaos.log || echo "No ElizaOS logs found"
 
       - name: Upload test results
         if: always()
@@ -176,6 +135,5 @@ jobs:
           name: test-logs
           path: |
             packages/server/logs/
-            packages/plugin-hyperscape/logs/
           retention-days: 7
 

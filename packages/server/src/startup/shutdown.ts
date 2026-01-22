@@ -31,6 +31,7 @@ import type { World } from "@hyperscape/shared";
 import { DatabaseSystem } from "../systems/DatabaseSystem/index.js";
 import type { DatabaseContext } from "./database.js";
 import { closeDatabase } from "./database.js";
+import { getAgentManager } from "../eliza/index.js";
 
 /**
  * Shutdown context for cleanup
@@ -83,19 +84,22 @@ export function registerShutdownHandlers(
     // Step 1: Close HTTP server
     await closeHttpServer(context);
 
-    // Step 2: Wait for pending database operations
+    // Step 2: Shutdown embedded agents
+    await shutdownAgents();
+
+    // Step 3: Wait for pending database operations
     await waitForDatabaseOperations(context);
 
-    // Step 3: Destroy world and systems
+    // Step 4: Destroy world and systems
     await destroyWorld(context);
 
-    // Step 4: Close database connections
+    // Step 5: Close database connections
     await closeDatabaseConnections(context);
 
-    // Step 5: Stop Docker containers
+    // Step 6: Stop Docker containers
     await stopDocker(context);
 
-    // Step 6: Clear startup flag
+    // Step 7: Clear startup flag
     clearStartupFlag();
 
     console.log("[Shutdown] ✅ Graceful shutdown complete");
@@ -139,6 +143,28 @@ export function registerShutdownHandlers(
   }
 
   console.log("[Shutdown] ✅ Shutdown handlers registered");
+}
+
+/**
+ * Shutdown embedded agents
+ *
+ * Gracefully stops all embedded agents and removes their player entities.
+ *
+ * @private
+ */
+async function shutdownAgents(): Promise<void> {
+  try {
+    console.log("[Shutdown] Shutting down embedded agents...");
+    const agentManager = getAgentManager();
+    if (agentManager) {
+      await agentManager.shutdown();
+      console.log("[Shutdown] ✅ Embedded agents shut down");
+    } else {
+      console.log("[Shutdown] No agent manager found, skipping agent shutdown");
+    }
+  } catch (err) {
+    console.error("[Shutdown] Error shutting down agents:", err);
+  }
 }
 
 /**
