@@ -30,7 +30,7 @@ cmds = [
 ]
 
 [start]
-cmd = "cd packages/server && bun dist/index.js"
+cmd = "cd packages/server && ls -la public/ && test -f public/index.html && echo 'index.html exists' && bun dist/index.js"
 
 [variables]
 # Skip asset download in CI - assets are served from CDN
