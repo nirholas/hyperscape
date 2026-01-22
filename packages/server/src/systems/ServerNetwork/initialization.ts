@@ -20,15 +20,10 @@
  */
 
 import type { World } from "@hyperscape/shared";
+import { STARTER_TOWNS } from "@hyperscape/shared";
 import type { SystemDatabase, SpawnData } from "../../shared/types";
 
-interface TownSystemLike {
-  getSpawnTown: () =>
-    | { name: string; position: { x: number; y: number; z: number } }
-    | undefined;
-}
-
-// Default spawn point (fallback if TownSystem unavailable)
+// Default spawn point (fallback if manifest unavailable)
 const DEFAULT_SPAWN = '{ "position": [0, 50, 0], "quaternion": [0, 0, 0, 1] }';
 
 /**
@@ -51,50 +46,30 @@ export class InitializationManager {
   /**
    * Load spawn point configuration
    *
-   * Priority: TownSystem spawn town > DB config > default fallback
-   * Uses the town nearest to world origin (0,0) as spawn point.
+   * Uses Central Haven from manifest (starter town at world origin).
    *
    * @returns Spawn point configuration
    */
   async loadSpawnPoint(): Promise<SpawnData> {
-    // Try TownSystem first (town nearest to origin)
-    const townSystem = this.world.getSystem(
-      "towns",
-    ) as unknown as TownSystemLike | null;
-    const spawnTown = townSystem?.getSpawnTown?.();
-
-    if (spawnTown) {
+    // Use manifest starter town (Central Haven at origin)
+    const centralHaven = STARTER_TOWNS["central_haven"];
+    if (centralHaven) {
+      const centerX = (centralHaven.bounds.minX + centralHaven.bounds.maxX) / 2;
+      const centerZ = (centralHaven.bounds.minZ + centralHaven.bounds.maxZ) / 2;
       console.log(
-        `[InitializationManager] Using spawn town: ${spawnTown.name} at (${spawnTown.position.x.toFixed(0)}, ${spawnTown.position.z.toFixed(0)})`,
+        `[InitializationManager] Using starter town: ${centralHaven.name} at (${centerX}, ${centerZ})`,
       );
       return {
-        position: [
-          spawnTown.position.x,
-          spawnTown.position.y,
-          spawnTown.position.z,
-        ],
+        position: [centerX, 0, centerZ], // Y gets grounded to terrain later
         quaternion: [0, 0, 0, 1],
       };
     }
 
-    // Fallback to database config
-    try {
-      const spawnRow = (await this.db("config")
-        .where("key", "spawn")
-        .first()) as { value?: string } | undefined;
-
-      const spawnValue = spawnRow?.value || DEFAULT_SPAWN;
-      console.log(
-        "[InitializationManager] TownSystem unavailable, using DB/default spawn",
-      );
-      return JSON.parse(spawnValue) as SpawnData;
-    } catch (err) {
-      console.error(
-        "[InitializationManager] Error loading spawn point, using default:",
-        err,
-      );
-      return JSON.parse(DEFAULT_SPAWN) as SpawnData;
-    }
+    // Fallback to default spawn at origin
+    console.log(
+      "[InitializationManager] Starter town not found, using default spawn",
+    );
+    return JSON.parse(DEFAULT_SPAWN) as SpawnData;
   }
 
   /**

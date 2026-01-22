@@ -34,8 +34,8 @@ export const PLAYER_CONSTANTS = {
 
 // === HOME TELEPORT ===
 export const HOME_TELEPORT_CONSTANTS = {
-  /** Cooldown in milliseconds (15 minutes = 900,000ms) */
-  COOLDOWN_MS: 15 * 60 * 1000,
+  /** Cooldown in milliseconds (5 seconds) */
+  COOLDOWN_MS: 5 * 1000,
   /** Cast time in milliseconds (10 seconds - can be interrupted by movement/combat) */
   CAST_TIME_MS: 10 * 1000,
   /** Cast time in ticks (for server-side processing, 10s = ~17 ticks at 600ms/tick) */

@@ -26,6 +26,7 @@ import { WildernessDeathHandler } from "../death/WildernessDeathHandler";
 import { ZoneType, type TransactionContext } from "../../../types/death";
 import type { InventorySystem } from "../character/InventorySystem";
 import { getEntityPosition } from "../../../utils/game/EntityPositionUtils";
+import { STARTER_TOWNS } from "../../../data/world-areas";
 
 /**
  * Sanitize killedBy string to prevent injection attacks
@@ -171,12 +172,6 @@ interface EquipmentData {
 interface TerrainSystemLike {
   isReady: () => boolean;
   getHeightAt: (x: number, z: number) => number;
-}
-
-interface TownSystemLike {
-  getSpawnTown: () =>
-    | { name: string; position: { x: number; y: number; z: number } }
-    | undefined;
 }
 
 interface NetworkLike {
@@ -985,16 +980,17 @@ export class PlayerDeathSystem extends SystemBase {
       );
     }
 
-    // Get spawn town from TownSystem (nearest to origin)
-    const townSystem = this.world.getSystem(
-      "towns",
-    ) as unknown as TownSystemLike | null;
-    const spawnTown = townSystem?.getSpawnTown?.();
-
-    const spawnPosition =
-      spawnTown?.position ?? COMBAT_CONSTANTS.DEATH.DEFAULT_RESPAWN_POSITION;
+    // Get spawn position from manifest starter town (Central Haven at origin)
+    const centralHaven = STARTER_TOWNS["central_haven"];
+    const spawnPosition = centralHaven
+      ? {
+          x: (centralHaven.bounds.minX + centralHaven.bounds.maxX) / 2,
+          y: 0,
+          z: (centralHaven.bounds.minZ + centralHaven.bounds.maxZ) / 2,
+        }
+      : COMBAT_CONSTANTS.DEATH.DEFAULT_RESPAWN_POSITION;
     const spawnTownName =
-      spawnTown?.name ?? COMBAT_CONSTANTS.DEATH.DEFAULT_RESPAWN_TOWN;
+      centralHaven?.name ?? COMBAT_CONSTANTS.DEATH.DEFAULT_RESPAWN_TOWN;
 
     // CRITICAL: Must await to ensure death lock is cleared before next death
     await this.respawnPlayer(playerId, spawnPosition, spawnTownName);

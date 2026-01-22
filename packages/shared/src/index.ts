@@ -317,7 +317,7 @@ export type {
 } from "./data/skill-unlocks";
 
 // Export world area data for server use
-export { ALL_WORLD_AREAS } from "./data/world-areas";
+export { ALL_WORLD_AREAS, STARTER_TOWNS } from "./data/world-areas";
 
 // Export systems (organized by platform for tree-shaking)
 export { Entities } from "./systems/shared";
