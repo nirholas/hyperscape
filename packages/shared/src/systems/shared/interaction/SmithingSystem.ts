@@ -384,7 +384,7 @@ export class SmithingSystem extends SystemBase {
     this.emitTypedEvent(EventType.SMITHING_COMPLETE, {
       playerId,
       recipeId: session.recipeId,
-      outputItemId: recipe?.output || session.recipeId,
+      outputItemId: recipe?.itemId || session.recipeId,
       totalSmithed: session.smithed,
       totalXp: session.smithed * (recipe?.xp || 0),
     });
