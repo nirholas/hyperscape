@@ -209,12 +209,13 @@ export class DataManager {
    * Load manifests from CDN (client) or filesystem (server)
    */
   private async loadManifestsFromCDN(): Promise<void> {
-    // On server (Node.js), load from filesystem since HTTP server isn't up yet
-    // Check for Node.js-specific globals that don't exist in browsers
+    // On server (Node.js or Bun), load from filesystem since HTTP server isn't up yet
+    // Check for runtime-specific globals that don't exist in browsers
     const isServer =
       typeof process !== "undefined" &&
       process.versions !== undefined &&
-      process.versions.node !== undefined;
+      (process.versions.node !== undefined ||
+        (process.versions as { bun?: string }).bun !== undefined);
 
     if (isServer) {
       await this.loadManifestsFromFilesystem();
