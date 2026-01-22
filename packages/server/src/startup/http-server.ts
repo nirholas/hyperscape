@@ -253,6 +253,17 @@ async function registerStaticFiles(
   });
   console.log("[HTTP] ✅ Public directory registered");
 
+  // Check if client assets exist in public/assets (built frontend)
+  // If they do, we DON'T want to register /assets/ for world assets as it would conflict
+  const publicAssetsPath = path.join(config.__dirname, "public", "assets");
+  const hasClientAssets = await fs.pathExists(publicAssetsPath);
+
+  if (hasClientAssets) {
+    console.log(
+      `[HTTP] ✅ Client assets found in public/assets - serving from there`,
+    );
+  }
+
   // Register world assets at /assets/world/ (only if assets directory exists)
   // In production, clients get assets directly from CDN (PUBLIC_CDN_URL)
   if (await fs.pathExists(config.assetsDir)) {
@@ -269,16 +280,19 @@ async function registerStaticFiles(
     // Manual music route (workaround for static file issues)
     registerMusicRoute(fastify, config);
 
-    // ALSO register as /assets/ for backward compatibility
-    await fastify.register(statics, {
-      root: config.assetsDir,
-      prefix: "/assets/",
-      decorateReply: false,
-      setHeaders: (res, filePath) => {
-        setAssetHeaders(res, filePath);
-      },
-    });
-    console.log(`[HTTP] ✅ Registered /assets/ → ${config.assetsDir}`);
+    // ONLY register /assets/ for world assets if NO client assets exist
+    // Otherwise, the public directory already serves /assets/ for the frontend
+    if (!hasClientAssets) {
+      await fastify.register(statics, {
+        root: config.assetsDir,
+        prefix: "/assets/",
+        decorateReply: false,
+        setHeaders: (res, filePath) => {
+          setAssetHeaders(res, filePath);
+        },
+      });
+      console.log(`[HTTP] ✅ Registered /assets/ → ${config.assetsDir}`);
+    }
   } else {
     console.log(
       `[HTTP] ⏭️  Skipping local assets routes (assets served from CDN: ${config.cdnUrl})`,
