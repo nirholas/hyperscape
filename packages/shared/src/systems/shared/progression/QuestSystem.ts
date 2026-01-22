@@ -30,6 +30,7 @@ import type {
   QuestManifest,
   QuestStatus,
   QuestDbStatus,
+  QuestStage,
   StageProgress,
   QuestProgress,
   PlayerQuestState,
@@ -78,6 +79,22 @@ export class QuestSystem extends SystemBase {
     message: "",
     type: "game" as const,
   };
+
+  // =========================================================================
+  // STAGE LOOKUP CACHES (O(1) lookups instead of O(n) find() calls)
+  // =========================================================================
+
+  /** Cache: questId -> stageId -> QuestStage */
+  private _stageByIdCache: Map<string, Map<string, QuestStage>> = new Map();
+
+  /** Cache: questId -> stageId -> index in stages array */
+  private _stageIndexCache: Map<string, Map<string, number>> = new Map();
+
+  /** Cache: questId -> itemId -> QuestStage (for gather stages) */
+  private _gatherStageCache: Map<string, Map<string, QuestStage>> = new Map();
+
+  /** Cache: questId -> target -> QuestStage (for interact stages) */
+  private _interactStageCache: Map<string, Map<string, QuestStage>> = new Map();
 
   constructor(world: World) {
     super(world, {
@@ -260,6 +277,7 @@ export class QuestSystem extends SystemBase {
           }
 
           this.questDefinitions.set(questId, definition as QuestDefinition);
+          this.buildStageCaches(questId, definition as QuestDefinition);
           validCount++;
         }
 
@@ -456,6 +474,71 @@ export class QuestSystem extends SystemBase {
    */
   private markActiveQuestsDirty(playerId: string): void {
     this._activeQuestsDirty.add(playerId);
+  }
+
+  /**
+   * Build stage lookup caches for O(1) access in hot paths
+   * Called once per quest when loading manifest
+   */
+  private buildStageCaches(questId: string, definition: QuestDefinition): void {
+    const byId = new Map<string, QuestStage>();
+    const byIndex = new Map<string, number>();
+    const byGatherTarget = new Map<string, QuestStage>();
+    const byInteractTarget = new Map<string, QuestStage>();
+
+    definition.stages.forEach((stage, index) => {
+      byId.set(stage.id, stage);
+      byIndex.set(stage.id, index);
+
+      if (stage.type === "gather" && stage.target) {
+        byGatherTarget.set(stage.target, stage);
+      }
+      if (stage.type === "interact" && stage.target) {
+        byInteractTarget.set(stage.target, stage);
+      }
+    });
+
+    this._stageByIdCache.set(questId, byId);
+    this._stageIndexCache.set(questId, byIndex);
+    this._gatherStageCache.set(questId, byGatherTarget);
+    this._interactStageCache.set(questId, byInteractTarget);
+  }
+
+  /**
+   * Get stage by ID using cache (O(1) instead of O(n))
+   */
+  private getStageById(
+    questId: string,
+    stageId: string,
+  ): QuestStage | undefined {
+    return this._stageByIdCache.get(questId)?.get(stageId);
+  }
+
+  /**
+   * Get stage index using cache (O(1) instead of O(n))
+   */
+  private getStageIndex(questId: string, stageId: string): number {
+    return this._stageIndexCache.get(questId)?.get(stageId) ?? -1;
+  }
+
+  /**
+   * Get gather stage by item ID using cache (O(1) instead of O(n))
+   */
+  private getGatherStageByTarget(
+    questId: string,
+    itemId: string,
+  ): QuestStage | undefined {
+    return this._gatherStageCache.get(questId)?.get(itemId);
+  }
+
+  /**
+   * Get interact stage by target using cache (O(1) instead of O(n))
+   */
+  private getInteractStageByTarget(
+    questId: string,
+    target: string,
+  ): QuestStage | undefined {
+    return this._interactStageCache.get(questId)?.get(target);
   }
 
   /**
@@ -719,9 +802,8 @@ export class QuestSystem extends SystemBase {
         continue;
       }
 
-      const stage = definition.stages.find(
-        (s) => s.id === progress.currentStage,
-      );
+      // Use cached lookup (O(1) instead of O(n))
+      const stage = this.getStageById(questId, progress.currentStage);
       if (!stage) {
         this.logger.info(
           `[QuestSystem] Stage ${progress.currentStage} not found in quest ${questId}`,
@@ -809,10 +891,8 @@ export class QuestSystem extends SystemBase {
       const definition = this.questDefinitions.get(questId);
       if (!definition) continue;
 
-      // Check if ANY gather stage in this quest needs this item
-      const relevantStage = definition.stages.find(
-        (s) => s.type === "gather" && s.target === itemId,
-      );
+      // Check if ANY gather stage in this quest needs this item (O(1) cached lookup)
+      const relevantStage = this.getGatherStageByTarget(questId, itemId);
       if (!relevantStage) continue;
 
       // Track progress by item ID (direct mutation to avoid GC pressure)
@@ -826,9 +906,8 @@ export class QuestSystem extends SystemBase {
       );
 
       // Check if CURRENT stage is complete (only advance if we're on that stage)
-      const currentStage = definition.stages.find(
-        (s) => s.id === progress.currentStage,
-      );
+      // Use cached lookup (O(1) instead of O(n))
+      const currentStage = this.getStageById(questId, progress.currentStage);
       if (
         currentStage?.type === "gather" &&
         currentStage.target &&
@@ -877,10 +956,8 @@ export class QuestSystem extends SystemBase {
       const definition = this.questDefinitions.get(questId);
       if (!definition) continue;
 
-      // Check if ANY interact stage in this quest needs this target
-      const relevantStage = definition.stages.find(
-        (s) => s.type === "interact" && s.target === target,
-      );
+      // Check if ANY interact stage in this quest needs this target (O(1) cached lookup)
+      const relevantStage = this.getInteractStageByTarget(questId, target);
       if (!relevantStage) continue;
 
       // Track progress by target ID (direct mutation to avoid GC pressure)
@@ -894,9 +971,8 @@ export class QuestSystem extends SystemBase {
       );
 
       // Check if CURRENT stage is complete (only advance if we're on that stage)
-      const currentStage = definition.stages.find(
-        (s) => s.id === progress.currentStage,
-      );
+      // Use cached lookup (O(1) instead of O(n))
+      const currentStage = this.getStageById(questId, progress.currentStage);
       if (
         currentStage?.type === "interact" &&
         currentStage.target &&
@@ -936,17 +1012,17 @@ export class QuestSystem extends SystemBase {
     progress: QuestProgress,
     definition: QuestDefinition,
   ): void {
-    const currentIndex = definition.stages.findIndex(
-      (s) => s.id === progress.currentStage,
-    );
+    // Use cached index lookup (O(1) instead of O(n))
+    const currentIndex = this.getStageIndex(questId, progress.currentStage);
 
     // Find next stage
     let nextStage = definition.stages[currentIndex + 1];
 
     // Skip dialogue stages to find next objective
     while (nextStage && nextStage.type === "dialogue") {
-      const afterDialogue =
-        definition.stages[definition.stages.indexOf(nextStage) + 1];
+      // Use cached index lookup (O(1) instead of O(n))
+      const nextStageIndex = this.getStageIndex(questId, nextStage.id);
+      const afterDialogue = definition.stages[nextStageIndex + 1];
       if (!afterDialogue || afterDialogue.type === "dialogue") {
         // This is the final "return to NPC" dialogue - quest is ready to complete
         progress.status = "ready_to_complete";
