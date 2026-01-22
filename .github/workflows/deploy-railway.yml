@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - staging
     paths:
       - 'packages/shared/**'
       - 'packages/client/**'
@@ -15,26 +16,75 @@ on:
       - 'railway.server.json'
       - 'Dockerfile.server'
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
 
-env:
-  RAILWAY_PROJECT_ID: e5f5ba11-0380-4d71-aa0b-343d89a58c0d
-  RAILWAY_SERVICE_ID: f0b42e3b-3001-4ef1-926f-af6c3c138777
-  RAILWAY_ENVIRONMENT_ID: 194f3565-ba2f-4c98-87d2-85dfc3a5110b
+# Railway environment IDs
+# Production: api.hyperscape.club
+# Staging: staging-api.hyperscape.club
 
 jobs:
   deploy:
-    name: Deploy to Railway
+    name: Deploy to Railway (${{ github.ref_name == 'staging' && 'staging' || 'production' }})
     runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'staging' && 'staging' || 'production' }}
+    env:
+      # Production environment
+      RAILWAY_PROJECT_ID: e5f5ba11-0380-4d71-aa0b-343d89a58c0d
+      RAILWAY_PRODUCTION_SERVICE_ID: f0b42e3b-3001-4ef1-926f-af6c3c138777
+      RAILWAY_PRODUCTION_ENVIRONMENT_ID: 194f3565-ba2f-4c98-87d2-85dfc3a5110b
+      # Staging environment (set these after creating staging environment in Railway)
+      RAILWAY_STAGING_SERVICE_ID: ${{ vars.RAILWAY_STAGING_SERVICE_ID }}
+      RAILWAY_STAGING_ENVIRONMENT_ID: ${{ vars.RAILWAY_STAGING_ENVIRONMENT_ID }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Determine deployment target
+        id: target
+        run: |
+          if [ "${{ github.ref_name }}" = "staging" ] || [ "${{ inputs.environment }}" = "staging" ]; then
+            echo "environment=staging" >> $GITHUB_OUTPUT
+            echo "service_id=${{ env.RAILWAY_STAGING_SERVICE_ID }}" >> $GITHUB_OUTPUT
+            echo "environment_id=${{ env.RAILWAY_STAGING_ENVIRONMENT_ID }}" >> $GITHUB_OUTPUT
+            echo "🎭 Deploying to STAGING (staging-api.hyperscape.club)"
+          else
+            echo "environment=production" >> $GITHUB_OUTPUT
+            echo "service_id=${{ env.RAILWAY_PRODUCTION_SERVICE_ID }}" >> $GITHUB_OUTPUT
+            echo "environment_id=${{ env.RAILWAY_PRODUCTION_ENVIRONMENT_ID }}" >> $GITHUB_OUTPUT
+            echo "🚀 Deploying to PRODUCTION (api.hyperscape.club)"
+          fi
+
+      - name: Validate staging configuration
+        if: steps.target.outputs.environment == 'staging'
+        run: |
+          if [ -z "${{ env.RAILWAY_STAGING_SERVICE_ID }}" ] || [ -z "${{ env.RAILWAY_STAGING_ENVIRONMENT_ID }}" ]; then
+            echo "❌ Staging environment not configured!"
+            echo ""
+            echo "To set up staging deployment:"
+            echo "1. Create a new environment in Railway called 'staging'"
+            echo "2. Add repository variables in GitHub:"
+            echo "   - RAILWAY_STAGING_SERVICE_ID"
+            echo "   - RAILWAY_STAGING_ENVIRONMENT_ID"
+            echo ""
+            echo "Get these IDs from Railway dashboard or API."
+            exit 1
+          fi
+
       - name: Trigger Railway Deployment
         run: |
+          echo "📦 Triggering deployment to ${{ steps.target.outputs.environment }}..."
           RESPONSE=$(curl -s -X POST https://backboard.railway.com/graphql/v2 \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${{ secrets.RAILWAY_TOKEN }}" \
-            -d '{"query":"mutation { serviceInstanceRedeploy(environmentId: \"${{ env.RAILWAY_ENVIRONMENT_ID }}\", serviceId: \"${{ env.RAILWAY_SERVICE_ID }}\") }"}')
+            -d '{"query":"mutation { serviceInstanceRedeploy(environmentId: \"${{ steps.target.outputs.environment_id }}\", serviceId: \"${{ steps.target.outputs.service_id }}\") }"}')
           echo "Response: $RESPONSE"
           if echo "$RESPONSE" | grep -q '"serviceInstanceRedeploy":true'; then
             echo "✅ Deployment triggered successfully"

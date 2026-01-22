@@ -2,14 +2,31 @@ name: Deploy Assets to Cloudflare R2
 
 # NOTE: Frontend deployment is handled by Cloudflare Pages GitHub integration
 # This workflow only handles R2 asset uploads (manifests, WASM, models, etc.)
+#
+# Frontend URLs:
+#   - Production: hyperscape.club (main branch)
+#   - Staging: staging.hyperscape.club (staging branch)
+#
+# API URLs (Railway):
+#   - Production: api.hyperscape.club
+#   - Staging: staging-api.hyperscape.club
 
 on:
   push:
-    branches: [main]
+    branches: [main, staging]
     paths:
       - 'packages/server/world/assets/manifests/**'
       - 'assets/**'
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -17,17 +34,34 @@ concurrency:
 
 env:
   CLOUDFLARE_ACCOUNT_ID: 50ad2052bbc6ca528d6993a689b419a4
-  R2_BUCKET_NAME: hyperscape-assets
+  # Production uses hyperscape-assets bucket
+  # Staging uses hyperscape-assets-staging bucket (create this in Cloudflare R2)
+  R2_BUCKET_PRODUCTION: hyperscape-assets
+  R2_BUCKET_STAGING: hyperscape-assets-staging
 
 jobs:
   deploy-assets:
-    name: Deploy Assets to R2
+    name: Deploy Assets to R2 (${{ github.ref_name == 'staging' && 'staging' || 'production' }})
     runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'staging' && 'staging' || 'production' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
         with:
           submodules: recursive
+
+      - name: Determine deployment target
+        id: target
+        run: |
+          if [ "${{ github.ref_name }}" = "staging" ] || [ "${{ inputs.environment }}" = "staging" ]; then
+            echo "environment=staging" >> $GITHUB_OUTPUT
+            echo "bucket=${{ env.R2_BUCKET_STAGING }}" >> $GITHUB_OUTPUT
+            echo "🎭 Deploying to STAGING (staging-assets.hyperscape.club)"
+          else
+            echo "environment=production" >> $GITHUB_OUTPUT
+            echo "bucket=${{ env.R2_BUCKET_PRODUCTION }}" >> $GITHUB_OUTPUT
+            echo "🚀 Deploying to PRODUCTION (assets.hyperscape.club)"
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -40,20 +74,21 @@ jobs:
       - name: Upload manifests to R2
         run: |
           MANIFESTS_DIR="packages/server/world/assets/manifests"
+          BUCKET="${{ steps.target.outputs.bucket }}"
           
           if [ ! -d "$MANIFESTS_DIR" ]; then
             echo "⚠️ Manifests directory not found, skipping"
             exit 0
           fi
           
-          echo "📦 Uploading manifests to R2..."
+          echo "📦 Uploading manifests to R2 bucket: $BUCKET"
           
           # Upload all JSON files recursively
           find "$MANIFESTS_DIR" -type f -name "*.json" | while read file; do
             rel_path="${file#$MANIFESTS_DIR/}"
             key="manifests/$rel_path"
             echo "  → $key"
-            wrangler r2 object put "$R2_BUCKET_NAME/$key" \
+            wrangler r2 object put "$BUCKET/$key" \
               --file="$file" \
               --content-type="application/json"
           done
@@ -65,13 +100,14 @@ jobs:
       - name: Upload WASM and web assets to R2
         run: |
           ASSETS_DIR="assets"
+          BUCKET="${{ steps.target.outputs.bucket }}"
           
           if [ ! -d "$ASSETS_DIR" ]; then
             echo "⚠️ Assets directory not found, skipping"
             exit 0
           fi
           
-          echo "📦 Uploading assets to R2..."
+          echo "📦 Uploading assets to R2 bucket: $BUCKET"
           
           find "$ASSETS_DIR" -type f | while read file; do
             rel_path="${file#$ASSETS_DIR/}"
@@ -94,7 +130,7 @@ jobs:
             esac
             
             echo "  → $key ($content_type)"
-            wrangler r2 object put "$R2_BUCKET_NAME/$key" \
+            wrangler r2 object put "$BUCKET/$key" \
               --file="$file" \
               --content-type="$content_type"
           done
