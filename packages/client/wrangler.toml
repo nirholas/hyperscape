@@ -16,10 +16,10 @@ vars = { }
 # Settings → Environment variables → Production
 #
 # Required:
-#   PUBLIC_PRIVY_APP_ID     - From https://dashboard.privy.io/
-#   PUBLIC_API_URL          - Game server API (https://hyperscape-production.up.railway.app)
-#   PUBLIC_WS_URL           - Game server WebSocket (wss://hyperscape-production.up.railway.app/ws)
-#   PUBLIC_CDN_URL          - R2 bucket URL for assets
+#   PUBLIC_PRIVY_APP_ID     - cmgk4zu56005kjj0bcaae0rei
+#   PUBLIC_API_URL          - https://hyperscape-production.up.railway.app
+#   PUBLIC_WS_URL           - wss://hyperscape-production.up.railway.app/ws
+#   PUBLIC_CDN_URL          - https://assets.hyperscape.club
 #   PUBLIC_APP_URL          - https://hyperscape.club
 #
 # Optional:

@@ -202,10 +202,12 @@ export default defineConfig(({ mode }) => {
             ? "wss://hyperscape-production.up.railway.app/ws"
             : "ws://localhost:5555/ws"),
       ),
-      // CDN URL must be set via environment variable in Cloudflare Pages dashboard
-      // There's no sensible default for production - it depends on your R2 bucket config
+      // CDN URL - Cloudflare R2 with custom domain
       "import.meta.env.PUBLIC_CDN_URL": JSON.stringify(
-        env.PUBLIC_CDN_URL || "http://localhost:8080",
+        env.PUBLIC_CDN_URL ||
+          (mode === "production"
+            ? "https://assets.hyperscape.club"
+            : "http://localhost:8080"),
       ),
       "import.meta.env.PUBLIC_APP_URL": JSON.stringify(
         env.PUBLIC_APP_URL ||
