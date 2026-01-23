@@ -1459,16 +1459,102 @@ export class TerrainSystem extends System {
     // Apply gentle power curve
     height = Math.pow(height, 1.1);
 
-    // Create ocean depressions
-    const oceanScale = 0.0015;
-    const oceanMask = this.noise.simplex2D(
-      worldX * oceanScale,
-      worldZ * oceanScale,
+    // ============================================
+    // ISLAND CONFIGURATION
+    // ============================================
+    const ISLAND_RADIUS = 220; // Base radius: ~220m (~440m diameter)
+    const ISLAND_FALLOFF = 60; // Transition zone width (beach/shore)
+    const POND_RADIUS = 50; // Pond radius (bigger pond)
+    const POND_DEPTH = 0.55; // Pond depth (normalized) - deeper to get below water with high island
+
+    // ============================================
+    // NATURAL COASTLINE - Use noise to vary radius
+    // ============================================
+    const distFromCenter = Math.sqrt(worldX * worldX + worldZ * worldZ);
+    const angle = Math.atan2(worldZ, worldX);
+
+    // Multi-octave noise based on angle creates irregular coastline
+    // Use position on a circle to sample noise (avoids seam at angle wrap)
+    const coastlineNoiseX = Math.cos(angle) * 2;
+    const coastlineNoiseZ = Math.sin(angle) * 2;
+
+    // Large-scale bays and peninsulas
+    const coastNoise1 = this.noise.fractal2D(
+      coastlineNoiseX,
+      coastlineNoiseZ,
+      3,
+      0.5,
+      2.0,
+    );
+    // Medium features
+    const coastNoise2 = this.noise.fractal2D(
+      coastlineNoiseX * 3,
+      coastlineNoiseZ * 3,
+      2,
+      0.5,
+      2.0,
+    );
+    // Small coves and points
+    const coastNoise3 = this.noise.simplex2D(
+      coastlineNoiseX * 8,
+      coastlineNoiseZ * 8,
     );
 
-    if (oceanMask < -0.3) {
-      const oceanDepth = (-0.3 - oceanMask) * 2;
-      height *= Math.max(0.1, 1 - oceanDepth);
+    // Combine for natural variation (±30% of radius)
+    const coastlineVariation =
+      coastNoise1 * 0.2 + coastNoise2 * 0.08 + coastNoise3 * 0.02;
+    const effectiveRadius = ISLAND_RADIUS * (1 + coastlineVariation);
+
+    // ============================================
+    // ISLAND MASK - Smooth falloff at edges
+    // ============================================
+    let islandMask = 1.0;
+    if (distFromCenter > effectiveRadius - ISLAND_FALLOFF) {
+      // Smooth transition from land to ocean
+      const edgeDist = distFromCenter - (effectiveRadius - ISLAND_FALLOFF);
+      const falloffFactor = edgeDist / ISLAND_FALLOFF;
+      islandMask = 1.0 - Math.min(1.0, falloffFactor * falloffFactor);
+    }
+
+    // Outside island = deep ocean
+    if (distFromCenter > effectiveRadius + 50) {
+      islandMask = 0;
+    }
+
+    // ============================================
+    // POND - Offset from center but near spawn
+    // ============================================
+    const POND_CENTER_X = -80; // West of spawn
+    const POND_CENTER_Z = 60; // South
+    const distFromPond = Math.sqrt(
+      (worldX - POND_CENTER_X) * (worldX - POND_CENTER_X) +
+        (worldZ - POND_CENTER_Z) * (worldZ - POND_CENTER_Z),
+    );
+
+    let pondDepression = 0;
+    if (distFromPond < POND_RADIUS * 2) {
+      // Smooth bowl shape for pond
+      const pondFactor = 1.0 - distFromPond / (POND_RADIUS * 2);
+      pondDepression = pondFactor * pondFactor * POND_DEPTH;
+    }
+
+    // ============================================
+    // APPLY TO HEIGHT
+    // ============================================
+    // Keep existing terrain features but modulate by island mask
+    height = height * islandMask;
+
+    // Add base island elevation (so center is above vegetation threshold)
+    // Vegetation spawns above 11.4m (water 5.4m + 6m buffer), so base must be ~0.4+ normalized
+    const baseElevation = 0.42; // Normalized (~12.6m base, above 11.4m veg threshold)
+    height = height * 0.2 + baseElevation * islandMask;
+
+    // Apply pond depression
+    height -= pondDepression;
+
+    // Ocean floor outside island
+    if (islandMask === 0) {
+      height = 0.05; // Very low = deep underwater
     }
 
     return height * this.CONFIG.MAX_HEIGHT;

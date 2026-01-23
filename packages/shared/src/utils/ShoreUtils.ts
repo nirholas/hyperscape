@@ -27,7 +27,7 @@ export interface FindShorePointsOptions {
   sampleInterval?: number;
   /** Height below which is considered water (default: 5.4m from TerrainSystem) */
   waterThreshold?: number;
-  /** Maximum height for valid shore positions (default: 8.0m) */
+  /** Maximum height for valid shore positions (default: 20.0m for elevated terrain) */
   shoreMaxHeight?: number;
   /** Minimum distance between shore points in meters (default: 6m) */
   minSpacing?: number;
@@ -73,7 +73,7 @@ export function findShorePoints(
   const {
     sampleInterval = 1, // 1m = 1 tile for tile-accurate sampling
     waterThreshold = 5.4,
-    shoreMaxHeight = 8.0,
+    shoreMaxHeight = 20.0,
     minSpacing = 6,
   } = options;
 
@@ -141,7 +141,7 @@ export function findWaterEdgePoints(
   const {
     sampleInterval = 1, // 1m = 1 tile for tile-accurate sampling
     waterThreshold = 5.4,
-    shoreMaxHeight = 8.0,
+    shoreMaxHeight = 20.0,
     minSpacing = 6,
   } = options;
 

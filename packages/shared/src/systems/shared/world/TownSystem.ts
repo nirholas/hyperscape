@@ -181,7 +181,13 @@ export class TownSystem extends System {
     this.generateTowns();
 
     if (this.towns.length === 0) {
-      throw new Error("Town generation failed - no valid locations");
+      // No procedural towns generated - this is OK if using manifest-defined towns
+      // (e.g., Central Haven in world-areas.json)
+      Logger.systemWarn(
+        "TownSystem",
+        "No procedural towns generated - using manifest-defined areas only",
+      );
+      return;
     }
 
     if (this.towns.length < TOWN_COUNT) {
