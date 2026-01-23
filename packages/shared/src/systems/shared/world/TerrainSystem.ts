@@ -442,6 +442,12 @@ export class TerrainSystem extends System {
     WATER_LEVEL_NORMALIZED: 0.15, // Normalized height where water starts
     SHORELINE_THRESHOLD: 0.25, // Normalized height where shoreline effect ends
     SHORELINE_STRENGTH: 0.6, // How strong the brown tint is (0-1)
+    SHORELINE_MIN_SLOPE: 0.06, // Minimum slope to enforce near shorelines
+    SHORELINE_SLOPE_SAMPLE_DISTANCE: 1.0, // Sample distance for shoreline slope checks
+    SHORELINE_LAND_BAND: 3.0, // Meters above water to shape shoreline
+    SHORELINE_LAND_MAX_MULTIPLIER: 1.6, // Max land steepening multiplier
+    SHORELINE_UNDERWATER_BAND: 3.0, // Meters below water to deepen shoreline
+    UNDERWATER_DEPTH_MULTIPLIER: 1.8, // Max depth multiplier near shoreline
   };
 
   // Biomes now loaded from assets/manifests/biomes.json via DataManager
@@ -1079,6 +1085,7 @@ export class TerrainSystem extends System {
     const colors = new Float32Array(positions.count * 3);
     const heightData: number[] = [];
     const biomeIds = new Float32Array(positions.count);
+    const roadInfluences = new Float32Array(positions.count);
 
     // Verify biome data is loaded - error if not
     if (Object.keys(BIOMES).length === 0) {
@@ -1174,6 +1181,7 @@ export class TerrainSystem extends System {
         tileX,
         tileZ,
       );
+      roadInfluences[i] = roadInfluence;
       if (roadInfluence > 0) {
         // Blend toward road color based on influence (1.0 = fully on road)
         // Use slightly different colors for center vs edge of road
@@ -1198,6 +1206,10 @@ export class TerrainSystem extends System {
 
     geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     geometry.setAttribute("biomeId", new THREE.BufferAttribute(biomeIds, 1));
+    geometry.setAttribute(
+      "roadInfluence",
+      new THREE.BufferAttribute(roadInfluences, 1),
+    );
     geometry.computeVertexNormals();
 
     // Store height data for persistence
@@ -1320,12 +1332,20 @@ export class TerrainSystem extends System {
       const positions = geometry.attributes.position;
       const colors = geometry.attributes.color;
       if (!positions || !colors) continue;
+      const roadInfluenceAttribute = geometry.getAttribute("roadInfluence");
+      const roadInfluenceBuffer =
+        roadInfluenceAttribute instanceof THREE.BufferAttribute
+          ? roadInfluenceAttribute
+          : null;
 
       // Verify biome data is loaded
       if (Object.keys(BIOMES).length === 0) continue;
 
       // Update colors with road influence
       const colorArray = colors.array as Float32Array;
+      const roadInfluenceArray = roadInfluenceBuffer
+        ? (roadInfluenceBuffer.array as Float32Array)
+        : null;
 
       for (let i = 0; i < positions.count; i++) {
         const localX = positions.getX(i);
@@ -1345,6 +1365,9 @@ export class TerrainSystem extends System {
           tileX,
           tileZ,
         );
+        if (roadInfluenceArray) {
+          roadInfluenceArray[i] = roadInfluence;
+        }
         if (roadInfluence > 0) {
           // Blend toward road color based on influence
           const edgeFactor = 1.0 - roadInfluence;
@@ -1368,6 +1391,9 @@ export class TerrainSystem extends System {
 
       // Mark color attribute as needing update
       colors.needsUpdate = true;
+      if (roadInfluenceBuffer) {
+        roadInfluenceBuffer.needsUpdate = true;
+      }
     }
 
     console.log("[TerrainSystem] Tile color refresh complete");
@@ -1474,7 +1500,7 @@ export class TerrainSystem extends System {
     return height * this.CONFIG.MAX_HEIGHT;
   }
 
-  getHeightAt(worldX: number, worldZ: number): number {
+  private getHeightAtWithoutShore(worldX: number, worldZ: number): number {
     // Ensure biome centers are initialized
     if (!this.biomeCenters || this.biomeCenters.length === 0) {
       if (!this.noise) {
@@ -1509,6 +1535,91 @@ export class TerrainSystem extends System {
     height = Math.min(1, height); // Cap at max
 
     return height * this.CONFIG.MAX_HEIGHT;
+  }
+
+  private calculateBaseSlopeAt(
+    worldX: number,
+    worldZ: number,
+    centerHeight: number,
+  ): number {
+    const checkDistance = this.CONFIG.SHORELINE_SLOPE_SAMPLE_DISTANCE;
+    const northHeight = this.getHeightAtWithoutShore(
+      worldX,
+      worldZ + checkDistance,
+    );
+    const southHeight = this.getHeightAtWithoutShore(
+      worldX,
+      worldZ - checkDistance,
+    );
+    const eastHeight = this.getHeightAtWithoutShore(
+      worldX + checkDistance,
+      worldZ,
+    );
+    const westHeight = this.getHeightAtWithoutShore(
+      worldX - checkDistance,
+      worldZ,
+    );
+
+    const slopes = [
+      Math.abs(northHeight - centerHeight) / checkDistance,
+      Math.abs(southHeight - centerHeight) / checkDistance,
+      Math.abs(eastHeight - centerHeight) / checkDistance,
+      Math.abs(westHeight - centerHeight) / checkDistance,
+    ];
+
+    return Math.max(...slopes);
+  }
+
+  private adjustHeightForShoreline(baseHeight: number, slope: number): number {
+    const waterThreshold = this.CONFIG.WATER_THRESHOLD;
+    if (baseHeight === waterThreshold) return baseHeight;
+
+    const isLand = baseHeight > waterThreshold;
+    const band = isLand
+      ? this.CONFIG.SHORELINE_LAND_BAND
+      : this.CONFIG.SHORELINE_UNDERWATER_BAND;
+    if (band <= 0) return baseHeight;
+
+    const delta = Math.abs(baseHeight - waterThreshold);
+    if (delta >= band) return baseHeight;
+
+    const minSlope = this.CONFIG.SHORELINE_MIN_SLOPE;
+    if (minSlope <= 0) return baseHeight;
+
+    const maxMultiplier = isLand
+      ? this.CONFIG.SHORELINE_LAND_MAX_MULTIPLIER
+      : this.CONFIG.UNDERWATER_DEPTH_MULTIPLIER;
+    if (maxMultiplier <= 1) return baseHeight;
+
+    const slopeSafe = Math.max(0.0001, slope);
+    const targetMultiplier = Math.min(
+      maxMultiplier,
+      Math.max(1, minSlope / slopeSafe),
+    );
+    const falloff = 1 - delta / band;
+    const multiplier = 1 + (targetMultiplier - 1) * falloff;
+    const adjustedDelta = delta * multiplier;
+
+    return isLand
+      ? waterThreshold + adjustedDelta
+      : waterThreshold - adjustedDelta;
+  }
+
+  getHeightAt(worldX: number, worldZ: number): number {
+    const baseHeight = this.getHeightAtWithoutShore(worldX, worldZ);
+    const waterThreshold = this.CONFIG.WATER_THRESHOLD;
+    const landBand = this.CONFIG.SHORELINE_LAND_BAND;
+    const underwaterBand = this.CONFIG.SHORELINE_UNDERWATER_BAND;
+
+    if (
+      baseHeight >= waterThreshold + landBand ||
+      baseHeight <= waterThreshold - underwaterBand
+    ) {
+      return baseHeight;
+    }
+
+    const slope = this.calculateBaseSlopeAt(worldX, worldZ, baseHeight);
+    return this.adjustHeightForShoreline(baseHeight, slope);
   }
 
   /**

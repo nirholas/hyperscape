@@ -18,7 +18,7 @@ import { EventType } from "../../../types/events";
 import { Logger } from "../../../utils/Logger";
 
 const ROAD_WIDTH = 4;
-const PATH_STEP_SIZE = 8;
+const PATH_STEP_SIZE = 12;
 const MAX_PATH_ITERATIONS = 10000;
 const EXTRA_CONNECTIONS_RATIO = 0.25;
 
@@ -54,6 +54,9 @@ const DIRECTIONS = [
   { dx: -PATH_STEP_SIZE, dz: -PATH_STEP_SIZE },
 ];
 
+// Weighted A* - higher weight makes search more greedy (faster but less optimal)
+const HEURISTIC_WEIGHT = 1.5;
+
 const dist2D = (x1: number, z1: number, x2: number, z2: number): number =>
   Math.sqrt((x2 - x1) ** 2 + (z2 - z1) ** 2);
 
@@ -64,6 +67,82 @@ interface PathNode {
   h: number;
   f: number;
   parent: PathNode | null;
+  heapIndex: number;
+}
+
+/**
+ * Binary min-heap for efficient priority queue operations.
+ * O(log n) insert and extract-min instead of O(n).
+ */
+class PathNodeHeap {
+  private nodes: PathNode[] = [];
+
+  get length(): number {
+    return this.nodes.length;
+  }
+
+  push(node: PathNode): void {
+    node.heapIndex = this.nodes.length;
+    this.nodes.push(node);
+    this.bubbleUp(this.nodes.length - 1);
+  }
+
+  pop(): PathNode | undefined {
+    if (this.nodes.length === 0) return undefined;
+    const result = this.nodes[0];
+    const last = this.nodes.pop()!;
+    if (this.nodes.length > 0) {
+      this.nodes[0] = last;
+      last.heapIndex = 0;
+      this.bubbleDown(0);
+    }
+    return result;
+  }
+
+  updateNode(node: PathNode): void {
+    this.bubbleUp(node.heapIndex);
+    this.bubbleDown(node.heapIndex);
+  }
+
+  private bubbleUp(index: number): void {
+    const node = this.nodes[index];
+    while (index > 0) {
+      const parentIndex = (index - 1) >> 1;
+      const parent = this.nodes[parentIndex];
+      if (node.f >= parent.f) break;
+      this.nodes[index] = parent;
+      parent.heapIndex = index;
+      index = parentIndex;
+    }
+    this.nodes[index] = node;
+    node.heapIndex = index;
+  }
+
+  private bubbleDown(index: number): void {
+    const node = this.nodes[index];
+    const length = this.nodes.length;
+    const halfLength = length >> 1;
+
+    while (index < halfLength) {
+      const leftIndex = (index << 1) + 1;
+      const rightIndex = leftIndex + 1;
+      let bestIndex = leftIndex;
+      let best = this.nodes[leftIndex];
+
+      if (rightIndex < length && this.nodes[rightIndex].f < best.f) {
+        bestIndex = rightIndex;
+        best = this.nodes[rightIndex];
+      }
+
+      if (node.f <= best.f) break;
+
+      this.nodes[index] = best;
+      best.heapIndex = index;
+      index = bestIndex;
+    }
+    this.nodes[index] = node;
+    node.heapIndex = index;
+  }
 }
 
 interface Edge {
@@ -330,30 +409,38 @@ export class RoadNetworkSystem extends System {
     const gridEndX = Math.round(endX / PATH_STEP_SIZE) * PATH_STEP_SIZE;
     const gridEndZ = Math.round(endZ / PATH_STEP_SIZE) * PATH_STEP_SIZE;
 
-    const openSet: PathNode[] = [];
-    const closedSet = new Map<string, PathNode>();
+    // Use binary heap for O(log n) min extraction instead of O(n) linear search
+    const openHeap = new PathNodeHeap();
+    // Use Map for O(1) lookup of nodes in open set
+    const openMap = new Map<string, PathNode>();
+    const closedSet = new Set<string>();
 
+    const startH =
+      dist2D(gridStartX, gridStartZ, gridEndX, gridEndZ) *
+      COST_BASE *
+      HEURISTIC_WEIGHT;
     const startNode: PathNode = {
       x: gridStartX,
       z: gridStartZ,
       g: 0,
-      h: dist2D(gridStartX, gridStartZ, gridEndX, gridEndZ) * COST_BASE,
-      f: 0,
+      h: startH,
+      f: startH,
       parent: null,
+      heapIndex: 0,
     };
-    startNode.f = startNode.g + startNode.h;
-    openSet.push(startNode);
+    openHeap.push(startNode);
+    openMap.set(`${gridStartX},${gridStartZ}`, startNode);
 
     let iterations = 0;
-    while (openSet.length > 0 && iterations < MAX_PATH_ITERATIONS) {
+    while (openHeap.length > 0 && iterations < MAX_PATH_ITERATIONS) {
       iterations++;
 
-      let lowestIndex = 0;
-      for (let i = 1; i < openSet.length; i++) {
-        if (openSet[i].f < openSet[lowestIndex].f) lowestIndex = i;
-      }
+      // O(log n) extraction of minimum f-score node
+      const current = openHeap.pop()!;
+      const currentKey = `${current.x},${current.z}`;
+      openMap.delete(currentKey);
 
-      const current = openSet[lowestIndex];
+      // Check if we've reached the goal
       if (
         Math.abs(current.x - gridEndX) <= PATH_STEP_SIZE &&
         Math.abs(current.z - gridEndZ) <= PATH_STEP_SIZE
@@ -361,8 +448,7 @@ export class RoadNetworkSystem extends System {
         return this.reconstructPath(current, endX, endZ);
       }
 
-      openSet.splice(lowestIndex, 1);
-      closedSet.set(`${current.x},${current.z}`, current);
+      closedSet.add(currentKey);
 
       for (const dir of DIRECTIONS) {
         const neighborX = current.x + dir.dx;
@@ -379,25 +465,31 @@ export class RoadNetworkSystem extends System {
         if (moveCost >= COST_WATER_PENALTY) continue;
 
         const tentativeG = current.g + moveCost;
-        const existingIndex = openSet.findIndex(
-          (n) => n.x === neighborX && n.z === neighborZ,
-        );
+        const existing = openMap.get(neighborKey);
 
-        if (existingIndex === -1) {
+        if (!existing) {
+          // New node - add to open set
+          const h =
+            dist2D(neighborX, neighborZ, gridEndX, gridEndZ) *
+            COST_BASE *
+            HEURISTIC_WEIGHT;
           const neighbor: PathNode = {
             x: neighborX,
             z: neighborZ,
             g: tentativeG,
-            h: dist2D(neighborX, neighborZ, gridEndX, gridEndZ) * COST_BASE,
-            f: 0,
+            h,
+            f: tentativeG + h,
             parent: current,
+            heapIndex: 0,
           };
-          neighbor.f = neighbor.g + neighbor.h;
-          openSet.push(neighbor);
-        } else if (tentativeG < openSet[existingIndex].g) {
-          openSet[existingIndex].g = tentativeG;
-          openSet[existingIndex].f = tentativeG + openSet[existingIndex].h;
-          openSet[existingIndex].parent = current;
+          openHeap.push(neighbor);
+          openMap.set(neighborKey, neighbor);
+        } else if (tentativeG < existing.g) {
+          // Better path to existing node - update it
+          existing.g = tentativeG;
+          existing.f = tentativeG + existing.h;
+          existing.parent = current;
+          openHeap.updateNode(existing);
         }
       }
     }

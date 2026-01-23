@@ -45,6 +45,7 @@ export interface ClientPrefsData {
   music?: number;
   sfx?: number;
   voice?: number;
+  voiceEnabled?: boolean;
   chatVisible?: boolean;
   v?: number;
 }
@@ -81,6 +82,7 @@ export class ClientInterface extends SystemBase {
   music: number = 1;
   sfx: number = 1;
   voice: number = 1;
+  voiceEnabled: boolean = false;
   chatVisible: boolean = true;
   v: number = 0;
   changes: Record<string, { prev: PrefsValue; value: PrefsValue }> | null =
@@ -156,6 +158,8 @@ export class ClientInterface extends SystemBase {
       if (parsed.music !== undefined) this.music = parsed.music;
       if (parsed.sfx !== undefined) this.sfx = parsed.sfx;
       if (parsed.voice !== undefined) this.voice = parsed.voice;
+      if (parsed.voiceEnabled !== undefined)
+        this.voiceEnabled = parsed.voiceEnabled;
       if (parsed.v !== undefined) this.v = parsed.v;
     }
   }
@@ -178,6 +182,10 @@ export class ClientInterface extends SystemBase {
       | undefined;
     if (keyEscape) {
       keyEscape.onPress = () => this.toggleActive(false);
+    }
+    const keyV = this.control.keyV as { onPress: () => void } | undefined;
+    if (keyV) {
+      keyV.onPress = () => this.toggleVoiceEnabled();
     }
 
     // Setup target guide
@@ -435,6 +443,32 @@ export class ClientInterface extends SystemBase {
   }
 
   // Preference Methods
+  private isTextInputFocused(): boolean {
+    const active = document.activeElement;
+    if (!active) return false;
+    const tagName = active.tagName;
+    if (tagName === "INPUT" || tagName === "TEXTAREA") return true;
+    return active instanceof HTMLElement && active.isContentEditable;
+  }
+
+  private toggleVoiceEnabled(): void {
+    if (this.isTextInputFocused()) return;
+    const livekitAvailable = this.world.livekit?.status?.available ?? false;
+    if (!livekitAvailable) {
+      this.world.emit(EventType.UI_TOAST, {
+        message: "Voice chat is unavailable",
+        type: "warning",
+      });
+      return;
+    }
+    const next = !this.voiceEnabled;
+    this.setVoiceEnabled(next);
+    this.world.emit(EventType.UI_TOAST, {
+      message: next ? "Voice chat enabled" : "Voice chat disabled",
+      type: "info",
+    });
+  }
+
   modify(key: PrefsKey, value: PrefsValue) {
     if (!this.changes) this.changes = {};
 
@@ -462,6 +496,7 @@ export class ClientInterface extends SystemBase {
       music: this.music,
       sfx: this.sfx,
       voice: this.voice,
+      voiceEnabled: this.voiceEnabled,
       chatVisible: this.chatVisible,
       v: this.v,
     };
@@ -506,6 +541,9 @@ export class ClientInterface extends SystemBase {
   }
   setVoice(value: number) {
     this.modify("voice", value);
+  }
+  setVoiceEnabled(value: boolean) {
+    this.modify("voiceEnabled", value);
   }
   setChatVisible(value: boolean) {
     this.modify("chatVisible", value);

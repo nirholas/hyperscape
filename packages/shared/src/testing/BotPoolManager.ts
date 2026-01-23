@@ -13,6 +13,7 @@ export type BotPoolConfig = {
   botCount: number;
   behavior: LoadTestBehavior;
   rampUpDelayMs?: number;
+  connectTimeoutMs?: number;
   namePrefix?: string;
   updateInterval?: number;
   onProgress?: (connected: number, total: number, errors: number) => void;
@@ -49,6 +50,7 @@ export class BotPoolManager {
   constructor(config: BotPoolConfig) {
     this.config = {
       rampUpDelayMs: 50,
+      connectTimeoutMs: 15000,
       namePrefix: "Bot",
       updateInterval: 3000,
       onProgress: () => {},
@@ -111,14 +113,28 @@ export class BotPoolManager {
   }
 
   private async connectBot(bot: LoadTestBot): Promise<void> {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<void>((_resolve, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(
+          new Error(
+            `Connection timed out after ${this.config.connectTimeoutMs}ms`,
+          ),
+        );
+      }, this.config.connectTimeoutMs);
+    });
+
     try {
-      await bot.connect();
+      await Promise.race([bot.connect(), timeoutPromise]);
     } catch (err) {
+      bot.disconnect();
       this.connectionErrors++;
       this.failedBots.add(bot.name);
       const error = err instanceof Error ? err : new Error(String(err));
       this.config.onBotError(bot.name, error);
       console.error(`[BotPool] ${bot.name} failed:`, error.message);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
     }
   }
 

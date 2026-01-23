@@ -9,6 +9,7 @@ import THREE, {
   positionWorld,
   normalWorld,
   cameraPosition,
+  attribute,
   uniform,
   float,
   vec2,
@@ -444,6 +445,17 @@ export function createTerrainMaterial(): THREE.Material & {
     ),
   );
 
+  // Road overlay from geometry attribute (0-1)
+  const roadInfluence = smoothstep(
+    float(0.0),
+    float(1.0),
+    attribute("roadInfluence", "float"),
+  );
+  const roadColor = vec3(0.45, 0.35, 0.25);
+  const roadEdgeColor = vec3(0.5, 0.4, 0.3);
+  const roadTint = mix(roadEdgeColor, roadColor, roadInfluence);
+  const baseWithRoads = mix(variedColor, roadTint, roadInfluence);
+
   // === DISTANCE FOG ===
   // NOTE: distSq already computed above for LOD - reusing it here
   // Fog squared distances are pre-computed uniforms (avoids per-fragment mul)
@@ -453,7 +465,7 @@ export function createTerrainMaterial(): THREE.Material & {
   const fogFactor = mul(baseFogFactor, fogEnabledUniform);
 
   // Mix terrain color with fog color based on distance
-  const finalColor = mix(variedColor, fogColorUniform, fogFactor);
+  const finalColor = mix(baseWithRoads, fogColorUniform, fogFactor);
 
   // === CREATE MATERIAL ===
   const material = new MeshStandardNodeMaterial();

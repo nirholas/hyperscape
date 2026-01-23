@@ -143,6 +143,7 @@ export class Environment extends System {
   // Set to true on: viewport resize, camera near/far change, CSM config change
   private needsFrustumUpdate: boolean = true;
   private csmNeedsAttach: boolean = false; // True until CSM shadowNode is attached to light
+  private csmFrustumWarningShown: boolean = false; // Prevent log spam while camera initializes
 
   // Ambient lighting for day/night cycle (non-shadow casting)
   private hemisphereLight: THREE.HemisphereLight | null = null;
@@ -658,30 +659,40 @@ export class Environment extends System {
       camera.updateProjectionMatrix();
       camera.updateMatrixWorld(true);
 
+      const shadow = this.sunLight.shadow as THREE.DirectionalLightShadow & {
+        shadowNode?: InstanceType<typeof CSMShadowNode>;
+      };
+      const attachedThisFrame = this.csmNeedsAttach;
+
+      // Attach before updating frustums so CSM can initialize internal state.
+      if (attachedThisFrame) {
+        shadow.shadowNode = this.csmShadowNode;
+      }
+
       try {
         this.csmShadowNode.updateFrustums();
         this.needsFrustumUpdate = false;
+        this.csmFrustumWarningShown = false;
 
-        // After successful frustum init, attach shadowNode to light
-        // We defer this because CSM shader will crash if frustums aren't initialized
-        if (this.csmNeedsAttach && this.sunLight) {
-          (
-            this.sunLight.shadow as THREE.DirectionalLightShadow & {
-              shadowNode?: InstanceType<typeof CSMShadowNode>;
-            }
-          ).shadowNode = this.csmShadowNode;
+        if (this.csmNeedsAttach) {
           this.csmNeedsAttach = false;
           console.log("[Environment] CSM shadowNode attached to light");
         }
       } catch (err) {
+        // If init failed, detach to avoid renderer using uninitialized CSM.
+        if (attachedThisFrame) {
+          shadow.shadowNode = undefined;
+        }
+
         // CSMShadowNode.updateFrustums() can fail if camera projection isn't ready yet
         // Will retry on next update() - this is expected during startup
         // Log only on first attempt to avoid console spam
-        if (this.csmNeedsAttach) {
+        if (this.csmNeedsAttach && !this.csmFrustumWarningShown) {
           console.warn(
             "[Environment] CSM frustum update failed:",
             err instanceof Error ? err.message : String(err),
           );
+          this.csmFrustumWarningShown = true;
         }
       }
     }
@@ -958,11 +969,9 @@ export class Environment extends System {
     // Enable smooth cascade transitions (prevents hard seams between cascades)
     this.csmShadowNode.fade = true;
 
-    // Defer frustum initialization AND shadowNode assignment to first update() call
-    // CSMShadowNode.updateFrustums() requires the camera's projection matrix to be valid,
-    // but at start() time the camera may not be fully configured yet.
-    // We MUST NOT assign shadowNode until frustums are initialized, otherwise the
-    // renderer will try to use an uninitialized CSM and crash.
+    // Defer frustum initialization to the first update() when the camera is ready.
+    // We attach the shadowNode right before updateFrustums() and detach on failure
+    // to avoid the renderer using an uninitialized CSM.
     this.needsFrustumUpdate = true;
     this.csmNeedsAttach = true;
 
@@ -1002,26 +1011,39 @@ export class Environment extends System {
     camera.updateProjectionMatrix();
     camera.updateMatrixWorld(true);
 
+    const shadow = this.sunLight!.shadow as THREE.DirectionalLightShadow & {
+      shadowNode?: InstanceType<typeof CSMShadowNode>;
+    };
+    const attachedThisFrame = this.csmNeedsAttach;
+
+    // Attach before updating frustums so CSM can initialize internal state.
+    if (attachedThisFrame) {
+      shadow.shadowNode = this.csmShadowNode;
+    }
+
     try {
       this.csmShadowNode.updateFrustums();
       this.needsFrustumUpdate = false;
+      this.csmFrustumWarningShown = false;
 
-      // Attach shadowNode to light now that frustums are initialized
-      if (this.csmNeedsAttach && this.sunLight) {
-        (
-          this.sunLight.shadow as THREE.DirectionalLightShadow & {
-            shadowNode?: InstanceType<typeof CSMShadowNode>;
-          }
-        ).shadowNode = this.csmShadowNode;
+      if (this.csmNeedsAttach) {
         this.csmNeedsAttach = false;
         console.log("[Environment] CSM shadowNode attached to light (init)");
       }
     } catch (err) {
+      // If init failed, detach to avoid renderer using uninitialized CSM.
+      if (attachedThisFrame) {
+        shadow.shadowNode = undefined;
+      }
+
       // Will be retried during update() - this is expected during startup
-      console.debug(
-        "[Environment] CSM init deferred:",
-        err instanceof Error ? err.message : String(err),
-      );
+      if (!this.csmFrustumWarningShown) {
+        console.debug(
+          "[Environment] CSM init deferred:",
+          err instanceof Error ? err.message : String(err),
+        );
+        this.csmFrustumWarningShown = true;
+      }
     }
   }
 

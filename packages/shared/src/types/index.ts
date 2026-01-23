@@ -1250,7 +1250,7 @@ export interface SnapshotData {
   assetsUrl?: string;
   settings?: Partial<SettingsData>;
   entities?: EntityData[];
-  livekit?: { token?: string };
+  livekit?: { token?: string; wsUrl?: string };
   chat?: ChatMessage[];
   authToken?: string;
 }

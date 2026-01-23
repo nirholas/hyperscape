@@ -3,6 +3,7 @@ import { COLORS } from "../../constants";
 import { isTouch } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
 import { useFullscreen } from "../../hooks/useFullscreen";
+import { MicIcon, MicOffIcon } from "../../components/Icons";
 
 interface SettingsPanelProps {
   world: ClientWorld;
@@ -53,6 +54,9 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
   const [music, setMusic] = useState(prefs?.music || 0.5);
   const [sfx, setSFX] = useState(prefs?.sfx || 0.5);
   const [voice, setVoice] = useState(prefs?.voice || 1);
+  const [voiceEnabled, setVoiceEnabled] = useState(
+    prefs?.voiceEnabled ?? false,
+  );
   const [uiScale, setUiScale] = useState(prefs?.ui || 1);
   const [statsOn, setStatsOn] = useState(prefs?.stats || false);
 
@@ -105,6 +109,8 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
       if (changes.music) setMusic(changes.music.value as number);
       if (changes.sfx) setSFX(changes.sfx.value as number);
       if (changes.voice) setVoice(changes.voice.value as number);
+      if (changes.voiceEnabled)
+        setVoiceEnabled(changes.voiceEnabled.value as boolean);
       if (changes.ui) setUiScale(changes.ui.value as number);
       if (changes.stats) setStatsOn(changes.stats.value as boolean);
     };
@@ -918,6 +924,43 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
 
                   {/* Voice Volume */}
                   <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-0.5">
+                        <span className="text-[9px]">🎙️</span>
+                        <span
+                          className="text-[8px]"
+                          style={{ color: "rgba(242, 208, 138, 0.9)" }}
+                        >
+                          Voice Chat
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={!world.livekit?.status?.available}
+                        onClick={() => {
+                          const next = !voiceEnabled;
+                          setVoiceEnabled(next);
+                          prefs?.setVoiceEnabled?.(next);
+                        }}
+                        className={`flex items-center gap-1 px-1.5 py-0.5 text-[8px] rounded transition-colors ${
+                          voiceEnabled
+                            ? "bg-emerald-500/20 text-emerald-200 border border-emerald-400/40"
+                            : "bg-red-500/20 text-red-200 border border-red-400/40"
+                        } ${
+                          world.livekit?.status?.available
+                            ? "cursor-pointer"
+                            : "opacity-50 cursor-not-allowed"
+                        }`}
+                        title="Toggle voice chat (V)"
+                      >
+                        {voiceEnabled ? (
+                          <MicIcon size={12} />
+                        ) : (
+                          <MicOffIcon size={12} />
+                        )}
+                        <span>{voiceEnabled ? "On" : "Off"}</span>
+                      </button>
+                    </div>
                     <div className="flex justify-between items-center mb-0.5">
                       <div className="flex items-center gap-0.5">
                         <span className="text-[9px]">🎤</span>

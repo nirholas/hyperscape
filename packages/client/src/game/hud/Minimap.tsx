@@ -31,6 +31,14 @@ interface EntityPip {
   color: string;
 }
 
+type MinimapDebugWindow = Window & {
+  __HYPERSCAPE_MINIMAP_EXTENT__?: number;
+  __HYPERSCAPE_MINIMAP_MAX_EXTENT__?: number;
+  __HYPERSCAPE_MINIMAP_TARGET__?: { x: number; z: number };
+  __HYPERSCAPE_MINIMAP_SET_EXTENT__?: (value: number) => void;
+  __HYPERSCAPE_MINIMAP_SET_TARGET__?: (value: { x: number; z: number }) => void;
+};
+
 interface MinimapProps {
   world: ClientWorld;
   width?: number;
@@ -65,10 +73,25 @@ export function Minimap({
   const rendererInitializedRef = useRef<boolean>(false);
 
   // Minimap zoom state (orthographic half-extent in world units)
-  const [extent, setExtent] = useState<number>(zoom);
-  const extentRef = useRef<number>(extent); // Ref for synchronous access in render loop
+  const debugWindow =
+    typeof window !== "undefined" ? (window as MinimapDebugWindow) : null;
+  const debugMaxExtent =
+    typeof debugWindow?.__HYPERSCAPE_MINIMAP_MAX_EXTENT__ === "number"
+      ? debugWindow.__HYPERSCAPE_MINIMAP_MAX_EXTENT__
+      : null;
+  const debugExtent =
+    typeof debugWindow?.__HYPERSCAPE_MINIMAP_EXTENT__ === "number"
+      ? debugWindow.__HYPERSCAPE_MINIMAP_EXTENT__
+      : null;
   const MIN_EXTENT = 20;
-  const MAX_EXTENT = 200;
+  const MAX_EXTENT = Math.max(debugMaxExtent ?? 200, MIN_EXTENT);
+  const clampExtent = useCallback(
+    (value: number) => Math.max(MIN_EXTENT, Math.min(MAX_EXTENT, value)),
+    [MAX_EXTENT],
+  );
+  const initialExtent = debugExtent !== null ? clampExtent(debugExtent) : zoom;
+  const [extent, setExtent] = useState<number>(initialExtent);
+  const extentRef = useRef<number>(extent); // Ref for synchronous access in render loop
   const STEP_EXTENT = 10;
 
   // Rotation: follow main camera yaw (RS3-like) with North toggle
@@ -260,6 +283,25 @@ export function Minimap({
   useEffect(() => {
     extentRef.current = extent;
   }, [extent]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const debugWin = window as MinimapDebugWindow;
+    debugWin.__HYPERSCAPE_MINIMAP_SET_EXTENT__ = (value: number) => {
+      setExtent(clampExtent(value));
+    };
+    debugWin.__HYPERSCAPE_MINIMAP_SET_TARGET__ = (value: {
+      x: number;
+      z: number;
+    }) => {
+      debugWin.__HYPERSCAPE_MINIMAP_TARGET__ = value;
+    };
+
+    return () => {
+      delete debugWin.__HYPERSCAPE_MINIMAP_SET_EXTENT__;
+      delete debugWin.__HYPERSCAPE_MINIMAP_SET_TARGET__;
+    };
+  }, [clampExtent]);
 
   useEffect(() => {
     rotateWithCameraRef.current = rotateWithCamera;
@@ -536,6 +578,12 @@ export function Minimap({
             };
           }
         }
+      }
+
+      const debugTarget =
+        (window as MinimapDebugWindow).__HYPERSCAPE_MINIMAP_TARGET__ || null;
+      if (debugTarget) {
+        targetPosition = { x: debugTarget.x, z: debugTarget.z };
       }
 
       if (cam && targetPosition) {
@@ -911,15 +959,9 @@ export function Minimap({
         Math.min(5, Math.round(Math.abs(e.deltaY) / 100)),
       );
       // Use functional update to always have the latest extent value
-      setExtent((prev) =>
-        THREE.MathUtils.clamp(
-          prev + sign * steps * STEP_EXTENT,
-          MIN_EXTENT,
-          MAX_EXTENT,
-        ),
-      );
+      setExtent((prev) => clampExtent(prev + sign * steps * STEP_EXTENT));
     },
-    [], // No dependencies - uses functional update
+    [clampExtent],
   );
 
   // Attach wheel listener with { passive: false } to allow preventDefault()

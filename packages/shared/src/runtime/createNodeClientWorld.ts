@@ -45,6 +45,7 @@
  */
 
 import { World } from "../core/World";
+import { installThreeJSExtensions } from "../utils/physics/PhysicsUtils";
 
 import { NodeClient } from "../systems/client/NodeClient";
 import { ClientNetwork } from "../systems/client/ClientNetwork";
@@ -60,6 +61,9 @@ import { Environment } from "../systems/shared";
  * @returns A headless World instance configured for Node.js client operation
  */
 export function createNodeClientWorld() {
+  // Ensure PhysX/THREE prototype helpers are available in headless clients.
+  installThreeJSExtensions();
+
   const world = new World();
 
   // Minimal headless client systems

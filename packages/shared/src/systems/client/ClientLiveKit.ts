@@ -33,6 +33,7 @@
 
 import { ParticipantEvent, RemoteTrack, Room, RoomEvent } from "livekit-client";
 import type { World } from "../../types/index";
+import { EventType } from "../../types/events";
 import { System } from "../shared/infrastructure/System";
 
 /**
@@ -60,6 +61,7 @@ export class ClientLiveKit extends System {
     element: HTMLVideoElement;
     playerId: string;
   }[];
+  private prefsBound: boolean = false;
 
   constructor(world: World) {
     super(world);
@@ -69,6 +71,17 @@ export class ClientLiveKit extends System {
     };
     this.voices = new Map(); // playerId -> PlayerVoice
     this.screens = [];
+  }
+
+  override start() {
+    const prefs = this.world.prefs;
+    if (prefs && !this.prefsBound) {
+      if (typeof prefs.voiceEnabled === "boolean") {
+        this.status.audio = prefs.voiceEnabled;
+      }
+      prefs.on?.("change", this.onPrefsChange);
+      this.prefsBound = true;
+    }
   }
 
   async deserialize(opts: { token?: string; wsUrl?: string }) {
@@ -115,18 +128,44 @@ export class ClientLiveKit extends System {
       return;
     }
     await this.room.connect(livekitUrl, token);
+    await this.applyMicrophonePreference();
   }
 
   async enableAudio() {
-    if (!this.room) return;
-    this.status.audio = true;
-    await this.room.localParticipant.setMicrophoneEnabled(true);
+    await this.setMicrophoneEnabled(true);
   }
 
   async disableAudio() {
-    if (!this.room) return;
-    this.status.audio = false;
-    await this.room.localParticipant.setMicrophoneEnabled(false);
+    await this.setMicrophoneEnabled(false);
+  }
+
+  private onPrefsChange = (changes: { voiceEnabled?: { value: boolean } }) => {
+    if (changes.voiceEnabled) {
+      this.setMicrophoneEnabled(changes.voiceEnabled.value);
+    }
+  };
+
+  private async applyMicrophonePreference(): Promise<void> {
+    const enabled = this.world.prefs?.voiceEnabled ?? false;
+    await this.setMicrophoneEnabled(enabled);
+  }
+
+  private async setMicrophoneEnabled(enabled: boolean): Promise<void> {
+    this.status.audio = enabled;
+    if (!this.room?.localParticipant) return;
+    try {
+      await this.room.localParticipant.setMicrophoneEnabled(enabled);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Microphone unavailable";
+      console.warn("[ClientLiveKit] Failed to toggle microphone:", message);
+      this.status.audio = false;
+      this.world.prefs?.setVoiceEnabled?.(false);
+      this.world.emit(EventType.UI_TOAST, {
+        message: "Microphone permission denied",
+        type: "warning",
+      });
+    }
   }
 
   onTrackMuted = (_publication: unknown, _participant: unknown) => {};
@@ -149,28 +188,27 @@ export class ClientLiveKit extends System {
     const player = this.world.entities.players?.get(playerId);
     if (!player) return;
     if (track.kind === "audio") {
-      // @ts-ignore - audio might not exist on world
-      const audioCtx =
-        this.world.audio && "ctx" in this.world.audio
-          ? (this.world.audio as { ctx: AudioContext }).ctx
-          : undefined;
-      if (!audioCtx || !track.mediaStream) return;
-      const source = audioCtx.createMediaStreamSource(track.mediaStream);
-      const gainNode = audioCtx.createGain();
-      const pannerNode = audioCtx.createPanner();
-      pannerNode.panningModel = "HRTF";
-      pannerNode.distanceModel = "exponential";
-      pannerNode.refDistance = 1;
-      pannerNode.maxDistance = 100;
-      pannerNode.rolloffFactor = 1.5;
-      pannerNode.coneInnerAngle = 360;
-      pannerNode.coneOuterAngle = 0;
-      pannerNode.coneOuterGain = 0;
-      source.connect(gainNode);
-      gainNode.connect(pannerNode);
-      pannerNode.connect(audioCtx.destination);
-      const voice = { source, gainNode, pannerNode };
-      this.voices.set(playerId, voice);
+      const audio = this.world.audio;
+      if (!audio || !track.mediaStream) return;
+      audio.ready(() => {
+        const audioCtx = audio.getContext();
+        const source = audioCtx.createMediaStreamSource(track.mediaStream);
+        const gainNode = audioCtx.createGain();
+        const pannerNode = audioCtx.createPanner();
+        pannerNode.panningModel = "HRTF";
+        pannerNode.distanceModel = "exponential";
+        pannerNode.refDistance = 1;
+        pannerNode.maxDistance = 100;
+        pannerNode.rolloffFactor = 1.5;
+        pannerNode.coneInnerAngle = 360;
+        pannerNode.coneOuterAngle = 0;
+        pannerNode.coneOuterGain = 0;
+        source.connect(gainNode);
+        gainNode.connect(pannerNode);
+        pannerNode.connect(audio.getVoiceGain());
+        const voice = { source, gainNode, pannerNode };
+        this.voices.set(playerId, voice);
+      });
     }
   };
 
@@ -207,6 +245,10 @@ export class ClientLiveKit extends System {
   }
 
   override destroy() {
+    if (this.world.prefs && this.prefsBound) {
+      this.world.prefs.off?.("change", this.onPrefsChange);
+      this.prefsBound = false;
+    }
     if (this.room) {
       this.room.disconnect();
     }

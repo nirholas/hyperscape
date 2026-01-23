@@ -102,6 +102,9 @@ export class ClientCameraSystem extends SystemBase {
   // Orbit state to prevent press-down snap until actual drag movement
   private orbitingActive = false;
   private orbitingPrimed = false;
+  // Track left-click drag to suppress click events when dragging
+  private leftDragStarted = false;
+  private leftMouseStartPosition = new THREE.Vector2();
 
   // Bound event handlers for cleanup
   private boundHandlers = {
@@ -111,6 +114,7 @@ export class ClientCameraSystem extends SystemBase {
     mouseWheel: this.onMouseWheel.bind(this),
     mouseLeave: this.onMouseLeave.bind(this),
     contextMenu: this.onContextMenu.bind(this),
+    click: this.onClickCapture.bind(this),
     keyDown: this.onKeyDown.bind(this),
     keyUp: this.onKeyUp.bind(this),
     touchStart: this.onTouchStart.bind(this),
@@ -301,6 +305,12 @@ export class ClientCameraSystem extends SystemBase {
       this.boundHandlers.contextMenu as EventListener,
       true,
     );
+    // Capture click events to suppress them when we've been dragging
+    this.canvas.addEventListener(
+      "click",
+      this.boundHandlers.click as EventListener,
+      true,
+    );
 
     document.addEventListener(
       "keydown",
@@ -355,27 +365,47 @@ export class ClientCameraSystem extends SystemBase {
 
       this.canvas!.style.cursor = "grabbing";
     } else if (event.button === 0) {
-      // Left mouse button - click to move only (no rotation)
+      // Left mouse button - can rotate camera if dragged, or click-to-move if not
       this.mouseState.leftDown = true;
-      // Don't prevent default - let click propagate to InteractionSystem
+      this.leftDragStarted = false;
+      this.leftMouseStartPosition.set(event.clientX, event.clientY);
+
+      // Align targets to current spherical to avoid any initial jump (same as middle mouse)
+      this.targetSpherical.theta = this.spherical.theta;
+      this.targetSpherical.phi = this.spherical.phi;
+      // Prime orbiting; activate only after passing small drag threshold
+      this.orbitingPrimed = true;
+      // Don't prevent default yet - let click propagate if no drag occurs
     }
 
     this.mouseState.lastPosition.set(event.clientX, event.clientY);
   }
 
   private onMouseMove(event: MouseEvent): void {
-    // Handle middle mouse button drag for camera rotation
-    if (this.mouseState.middleDown) {
-      event.preventDefault();
-      event.stopPropagation();
-
+    // Handle middle mouse button OR left mouse button drag for camera rotation
+    if (this.mouseState.middleDown || this.mouseState.leftDown) {
       this.mouseState.delta.set(
         event.clientX - this.mouseState.lastPosition.x,
         event.clientY - this.mouseState.lastPosition.y,
       );
 
-      // Activate orbiting only after surpassing a small movement threshold
-      if (!this.orbitingActive) {
+      // For left mouse, check if we've exceeded drag threshold from start position
+      if (this.mouseState.leftDown && !this.leftDragStarted) {
+        const totalDrag = Math.hypot(
+          event.clientX - this.leftMouseStartPosition.x,
+          event.clientY - this.leftMouseStartPosition.y,
+        );
+        if (totalDrag > 5) {
+          // 5px threshold before we consider it a drag
+          this.leftDragStarted = true;
+          this.orbitingActive = true;
+          this.orbitingPrimed = false;
+          this.canvas!.style.cursor = "grabbing";
+        }
+      }
+
+      // For middle mouse, activate orbiting after small movement threshold
+      if (this.mouseState.middleDown && !this.orbitingActive) {
         const drag =
           Math.abs(this.mouseState.delta.x) + Math.abs(this.mouseState.delta.y);
         if (drag > 3) {
@@ -385,6 +415,14 @@ export class ClientCameraSystem extends SystemBase {
         }
       }
 
+      const shouldBlockEvent =
+        this.mouseState.middleDown || this.leftDragStarted;
+      if (shouldBlockEvent) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+
+      // Only rotate camera if we've actually started dragging
       if (this.orbitingActive) {
         const invert = this.settings.invertY === true ? -1 : 1;
         // RS3-like: keep rotation responsive when fully zoomed out
@@ -428,8 +466,20 @@ export class ClientCameraSystem extends SystemBase {
     }
 
     if (event.button === 0) {
-      // Left mouse button - just track state
+      // Left mouse button
       this.mouseState.leftDown = false;
+      // If we were dragging (orbiting), reset state and prevent click
+      if (this.leftDragStarted) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.orbitingActive = false;
+        this.orbitingPrimed = false;
+        this.canvas!.style.cursor = "default";
+        // leftDragStarted stays true briefly so onClickCapture can suppress the click
+      } else {
+        // No drag occurred - reset orbiting state that was primed
+        this.orbitingPrimed = false;
+      }
     }
   }
 
@@ -474,6 +524,7 @@ export class ClientCameraSystem extends SystemBase {
     this.mouseState.leftDown = false;
     this.orbitingActive = false;
     this.orbitingPrimed = false;
+    this.leftDragStarted = false;
     if (this.canvas) {
       this.canvas.style.cursor = "default";
     }
@@ -498,6 +549,16 @@ export class ClientCameraSystem extends SystemBase {
     // Not clicking on entity - prevent default context menu
     event.preventDefault();
     event.stopPropagation();
+  }
+
+  private onClickCapture(event: MouseEvent): void {
+    // Suppress click events if we were dragging to rotate camera
+    if (this.leftDragStarted) {
+      event.preventDefault();
+      event.stopPropagation();
+      // Reset the flag after suppressing
+      this.leftDragStarted = false;
+    }
   }
 
   private onKeyDown(event: KeyboardEvent): void {
@@ -821,7 +882,11 @@ export class ClientCameraSystem extends SystemBase {
 
     // Apply spherical smoothing only while orbiting. When not orbiting, snap to target to avoid drift.
     const rotationDamping = this.settings.rotationDampingFactor;
-    if (this.mouseState.middleDown || this.touchState.active) {
+    const isOrbiting =
+      this.mouseState.middleDown ||
+      (this.mouseState.leftDown && this.leftDragStarted) ||
+      this.touchState.active;
+    if (isOrbiting) {
       const phiDelta = this.targetSpherical.phi - this.spherical.phi;
       const thetaDelta = this.shortestAngleDelta(
         this.spherical.theta,
@@ -1037,7 +1102,10 @@ export class ClientCameraSystem extends SystemBase {
       target: this.target,
       offset: _cameraInfoOffset,
       position: position,
-      isControlling: this.mouseState.middleDown || this.touchState.active,
+      isControlling:
+        this.mouseState.middleDown ||
+        (this.mouseState.leftDown && this.leftDragStarted) ||
+        this.touchState.active,
       spherical: {
         radius: this.spherical.radius,
         phi: this.spherical.phi,
@@ -1074,10 +1142,14 @@ export class ClientCameraSystem extends SystemBase {
         this.boundHandlers.mouseLeave as EventListener,
         true,
       );
-      // Note: can't remove onClickCapture because it was bound inline - that's okay, canvas cleanup will handle it
       this.canvas.removeEventListener(
         "contextmenu",
         this.boundHandlers.contextMenu as EventListener,
+        true,
+      );
+      this.canvas.removeEventListener(
+        "click",
+        this.boundHandlers.click as EventListener,
         true,
       );
       document.removeEventListener(

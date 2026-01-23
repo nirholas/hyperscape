@@ -7,7 +7,7 @@ import { describe, it, expect } from "vitest";
 
 // ============== Constants (must match RoadNetworkSystem.ts) ==============
 const ROAD_WIDTH = 4;
-const PATH_STEP_SIZE = 8;
+const PATH_STEP_SIZE = 12;
 const _MAX_PATH_ITERATIONS = 10000;
 const EXTRA_CONNECTIONS_RATIO = 0.25;
 
@@ -31,6 +31,7 @@ const _NOISE_DISPLACEMENT_STRENGTH = 3;
 const _MIN_POINT_SPACING = 4;
 const TILE_SIZE = 100;
 const WATER_THRESHOLD = 5.4;
+const HEURISTIC_WEIGHT = 1.5;
 
 // A* neighbor directions
 const DIRECTIONS = [
@@ -1119,6 +1120,406 @@ describe("RoadNetworkSystem Algorithms", () => {
 
       const elapsed = performance.now() - start;
       expect(elapsed).toBeLessThan(50);
+    });
+  });
+
+  describe("A* Pathfinding with Binary Heap (Optimized)", () => {
+    const MAX_PATH_ITERATIONS = _MAX_PATH_ITERATIONS;
+
+    interface HeapPathNode {
+      x: number;
+      z: number;
+      g: number;
+      h: number;
+      f: number;
+      parent: HeapPathNode | null;
+      heapIndex: number;
+    }
+
+    /**
+     * Binary min-heap implementation matching the production code
+     */
+    class PathNodeHeap {
+      private nodes: HeapPathNode[] = [];
+
+      get length(): number {
+        return this.nodes.length;
+      }
+
+      push(node: HeapPathNode): void {
+        node.heapIndex = this.nodes.length;
+        this.nodes.push(node);
+        this.bubbleUp(this.nodes.length - 1);
+      }
+
+      pop(): HeapPathNode | undefined {
+        if (this.nodes.length === 0) return undefined;
+        const result = this.nodes[0];
+        const last = this.nodes.pop()!;
+        if (this.nodes.length > 0) {
+          this.nodes[0] = last;
+          last.heapIndex = 0;
+          this.bubbleDown(0);
+        }
+        return result;
+      }
+
+      updateNode(node: HeapPathNode): void {
+        this.bubbleUp(node.heapIndex);
+        this.bubbleDown(node.heapIndex);
+      }
+
+      private bubbleUp(index: number): void {
+        const node = this.nodes[index];
+        while (index > 0) {
+          const parentIndex = (index - 1) >> 1;
+          const parent = this.nodes[parentIndex];
+          if (node.f >= parent.f) break;
+          this.nodes[index] = parent;
+          parent.heapIndex = index;
+          index = parentIndex;
+        }
+        this.nodes[index] = node;
+        node.heapIndex = index;
+      }
+
+      private bubbleDown(index: number): void {
+        const node = this.nodes[index];
+        const length = this.nodes.length;
+        const halfLength = length >> 1;
+
+        while (index < halfLength) {
+          const leftIndex = (index << 1) + 1;
+          const rightIndex = leftIndex + 1;
+          let bestIndex = leftIndex;
+          let best = this.nodes[leftIndex];
+
+          if (rightIndex < length && this.nodes[rightIndex].f < best.f) {
+            bestIndex = rightIndex;
+            best = this.nodes[rightIndex];
+          }
+
+          if (node.f <= best.f) break;
+
+          this.nodes[index] = best;
+          best.heapIndex = index;
+          index = bestIndex;
+        }
+        this.nodes[index] = node;
+        node.heapIndex = index;
+      }
+    }
+
+    /**
+     * Optimized A* pathfinding using binary heap - matches production implementation
+     */
+    function findPathOptimized(
+      startX: number,
+      startZ: number,
+      endX: number,
+      endZ: number,
+      getHeight: (x: number, z: number) => number,
+      getBiome?: (x: number, z: number) => string,
+    ): { path: RoadPathPoint[]; iterations: number; hitFallback: boolean } {
+      const gridStartX = Math.round(startX / PATH_STEP_SIZE) * PATH_STEP_SIZE;
+      const gridStartZ = Math.round(startZ / PATH_STEP_SIZE) * PATH_STEP_SIZE;
+      const gridEndX = Math.round(endX / PATH_STEP_SIZE) * PATH_STEP_SIZE;
+      const gridEndZ = Math.round(endZ / PATH_STEP_SIZE) * PATH_STEP_SIZE;
+
+      const openHeap = new PathNodeHeap();
+      const openMap = new Map<string, HeapPathNode>();
+      const closedSet = new Set<string>();
+
+      const startH =
+        dist2D(gridStartX, gridStartZ, gridEndX, gridEndZ) *
+        COST_BASE *
+        HEURISTIC_WEIGHT;
+      const startNode: HeapPathNode = {
+        x: gridStartX,
+        z: gridStartZ,
+        g: 0,
+        h: startH,
+        f: startH,
+        parent: null,
+        heapIndex: 0,
+      };
+      openHeap.push(startNode);
+      openMap.set(`${gridStartX},${gridStartZ}`, startNode);
+
+      let iterations = 0;
+      while (openHeap.length > 0 && iterations < MAX_PATH_ITERATIONS) {
+        iterations++;
+
+        const current = openHeap.pop()!;
+        const currentKey = `${current.x},${current.z}`;
+        openMap.delete(currentKey);
+
+        if (
+          Math.abs(current.x - gridEndX) <= PATH_STEP_SIZE &&
+          Math.abs(current.z - gridEndZ) <= PATH_STEP_SIZE
+        ) {
+          // Reconstruct path
+          const path: RoadPathPoint[] = [];
+          let node: HeapPathNode | null = current;
+          while (node) {
+            path.unshift({
+              x: node.x,
+              z: node.z,
+              y: getHeight(node.x, node.z),
+            });
+            node = node.parent;
+          }
+          path.push({ x: endX, z: endZ, y: getHeight(endX, endZ) });
+          return { path, iterations, hitFallback: false };
+        }
+
+        closedSet.add(currentKey);
+
+        for (const dir of DIRECTIONS) {
+          const neighborX = current.x + dir.dx;
+          const neighborZ = current.z + dir.dz;
+          const neighborKey = `${neighborX},${neighborZ}`;
+          if (closedSet.has(neighborKey)) continue;
+
+          const moveCost = calculateMovementCost(
+            current.x,
+            current.z,
+            neighborX,
+            neighborZ,
+            getHeight,
+            getBiome,
+          );
+          if (moveCost >= COST_WATER_PENALTY) continue;
+
+          const tentativeG = current.g + moveCost;
+          const existing = openMap.get(neighborKey);
+
+          if (!existing) {
+            const h =
+              dist2D(neighborX, neighborZ, gridEndX, gridEndZ) *
+              COST_BASE *
+              HEURISTIC_WEIGHT;
+            const neighbor: HeapPathNode = {
+              x: neighborX,
+              z: neighborZ,
+              g: tentativeG,
+              h,
+              f: tentativeG + h,
+              parent: current,
+              heapIndex: 0,
+            };
+            openHeap.push(neighbor);
+            openMap.set(neighborKey, neighbor);
+          } else if (tentativeG < existing.g) {
+            existing.g = tentativeG;
+            existing.f = tentativeG + existing.h;
+            existing.parent = current;
+            openHeap.updateNode(existing);
+          }
+        }
+      }
+
+      // Fallback to direct path
+      const path: RoadPathPoint[] = [];
+      const dx = endX - startX;
+      const dz = endZ - startZ;
+      const steps = Math.ceil(Math.sqrt(dx * dx + dz * dz) / PATH_STEP_SIZE);
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const x = startX + dx * t;
+        const z = startZ + dz * t;
+        path.push({ x, z, y: getHeight(x, z) });
+      }
+      return { path, iterations, hitFallback: true };
+    }
+
+    it("finds path for short distances without fallback", () => {
+      const flatHeight = () => 10;
+      const result = findPathOptimized(0, 0, 200, 200, flatHeight);
+
+      expect(result.hitFallback).toBe(false);
+      expect(result.path.length).toBeGreaterThan(2);
+      expect(result.iterations).toBeLessThan(MAX_PATH_ITERATIONS);
+    });
+
+    it("finds path for medium distances (500 units) without fallback", () => {
+      const flatHeight = () => 10;
+      const result = findPathOptimized(0, 0, 500, 0, flatHeight);
+
+      expect(result.hitFallback).toBe(false);
+      expect(result.iterations).toBeLessThan(MAX_PATH_ITERATIONS);
+    });
+
+    it("finds path for long distances (1000 units) without fallback", () => {
+      const flatHeight = () => 10;
+      const result = findPathOptimized(0, 0, 1000, 0, flatHeight);
+
+      expect(result.hitFallback).toBe(false);
+      expect(result.iterations).toBeLessThan(MAX_PATH_ITERATIONS);
+    });
+
+    it("finds path for very long distances (2000 units) without fallback", () => {
+      const flatHeight = () => 10;
+      const result = findPathOptimized(0, 0, 2000, 0, flatHeight);
+
+      expect(result.hitFallback).toBe(false);
+      expect(result.iterations).toBeLessThan(MAX_PATH_ITERATIONS);
+    });
+
+    it("finds diagonal path (1500 units) without fallback", () => {
+      const flatHeight = () => 10;
+      const result = findPathOptimized(0, 0, 1000, 1000, flatHeight);
+
+      expect(result.hitFallback).toBe(false);
+      expect(result.iterations).toBeLessThan(MAX_PATH_ITERATIONS);
+    });
+
+    it("handles varied terrain biomes efficiently", () => {
+      const flatHeight = () => 10;
+      // Checkerboard of different biomes
+      const biome = (x: number, z: number) => {
+        const tx = Math.floor(x / 50);
+        const tz = Math.floor(z / 50);
+        const biomes = ["plains", "forest", "desert", "mountains"];
+        return biomes[(tx + tz) % biomes.length];
+      };
+
+      const result = findPathOptimized(0, 0, 800, 800, flatHeight, biome);
+
+      expect(result.hitFallback).toBe(false);
+      expect(result.iterations).toBeLessThan(MAX_PATH_ITERATIONS);
+    });
+
+    it("handles sloped terrain efficiently", () => {
+      // Terrain with gentle hills
+      const hillyHeight = (x: number, z: number) =>
+        10 + Math.sin(x / 100) * 5 + Math.cos(z / 100) * 5;
+
+      const result = findPathOptimized(0, 0, 1000, 500, hillyHeight);
+
+      expect(result.hitFallback).toBe(false);
+      expect(result.iterations).toBeLessThan(MAX_PATH_ITERATIONS);
+    });
+
+    it("avoids water obstacles efficiently", () => {
+      // Water in the middle, forcing path around
+      const waterHeight = (x: number, z: number) => {
+        const inWaterZone = x > 200 && x < 300 && z > -100 && z < 500;
+        return inWaterZone ? WATER_THRESHOLD - 1 : 10;
+      };
+
+      const result = findPathOptimized(0, 200, 500, 200, waterHeight);
+
+      expect(result.hitFallback).toBe(false);
+      expect(result.iterations).toBeLessThan(MAX_PATH_ITERATIONS);
+      // Path should go around water, making it longer than direct
+      expect(result.path.length).toBeGreaterThan(500 / PATH_STEP_SIZE);
+    });
+
+    it("completes 20 paths quickly (simulates connecting towns)", () => {
+      const flatHeight = () => 10;
+
+      // Generate random town positions
+      const towns: Array<{ x: number; z: number }> = [];
+      let seed = 12345;
+      for (let i = 0; i < 10; i++) {
+        seed = (seed * 1664525 + 1013904223) >>> 0;
+        const x = (seed % 3000) - 1500;
+        seed = (seed * 1664525 + 1013904223) >>> 0;
+        const z = (seed % 3000) - 1500;
+        towns.push({ x, z });
+      }
+
+      const results: Array<{ iterations: number; hitFallback: boolean }> = [];
+      const startTime = performance.now();
+
+      // Connect each town to closest 2 neighbors (simulates MST + extras)
+      for (let i = 0; i < towns.length; i++) {
+        for (let j = i + 1; j < Math.min(i + 3, towns.length); j++) {
+          const result = findPathOptimized(
+            towns[i].x,
+            towns[i].z,
+            towns[j].x,
+            towns[j].z,
+            flatHeight,
+          );
+          results.push({
+            iterations: result.iterations,
+            hitFallback: result.hitFallback,
+          });
+        }
+      }
+
+      const elapsed = performance.now() - startTime;
+
+      // No paths should hit fallback
+      const fallbackCount = results.filter((r) => r.hitFallback).length;
+      expect(fallbackCount).toBe(0);
+
+      // Total time should be reasonable (< 500ms for 20 paths)
+      expect(elapsed).toBeLessThan(500);
+
+      // Average iterations should be well below max
+      const avgIterations =
+        results.reduce((sum, r) => sum + r.iterations, 0) / results.length;
+      expect(avgIterations).toBeLessThan(MAX_PATH_ITERATIONS / 2);
+    });
+
+    it("binary heap maintains correct ordering", () => {
+      const heap = new PathNodeHeap();
+
+      // Add nodes in random order
+      const values = [50, 20, 80, 10, 60, 30, 90, 40, 70];
+      for (let i = 0; i < values.length; i++) {
+        heap.push({
+          x: i,
+          z: 0,
+          g: 0,
+          h: values[i],
+          f: values[i],
+          parent: null,
+          heapIndex: 0,
+        });
+      }
+
+      // Extract should give sorted order
+      const extracted: number[] = [];
+      while (heap.length > 0) {
+        extracted.push(heap.pop()!.f);
+      }
+
+      // Should be in ascending order
+      for (let i = 1; i < extracted.length; i++) {
+        expect(extracted[i]).toBeGreaterThanOrEqual(extracted[i - 1]);
+      }
+    });
+
+    it("heap update correctly reorders nodes", () => {
+      const heap = new PathNodeHeap();
+
+      const nodes: HeapPathNode[] = [];
+      for (let i = 0; i < 5; i++) {
+        const node: HeapPathNode = {
+          x: i,
+          z: 0,
+          g: 0,
+          h: (i + 1) * 10,
+          f: (i + 1) * 10,
+          parent: null,
+          heapIndex: 0,
+        };
+        nodes.push(node);
+        heap.push(node);
+      }
+
+      // Update middle node to be smallest
+      nodes[2].f = 5;
+      heap.updateNode(nodes[2]);
+
+      // Should now be first
+      const first = heap.pop()!;
+      expect(first.x).toBe(2);
+      expect(first.f).toBe(5);
     });
   });
 });

@@ -499,7 +499,9 @@ export interface ProcessingFiremakingRequestPayload {
 export interface ProcessingCookingRequestPayload {
   playerId: string;
   fishSlot: number;
-  fireId: string;
+  fireId?: string;
+  rangeId?: string;
+  sourceType?: "fire" | "range";
 }
 
 /**

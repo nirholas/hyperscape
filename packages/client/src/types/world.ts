@@ -103,6 +103,7 @@ export interface WorldPreferences {
   music: number;
   sfx: number;
   voice: number;
+  voiceEnabled: boolean;
   ui: number;
   actions: boolean;
   stats: boolean;
@@ -118,6 +119,7 @@ export interface WorldPreferences {
   setMusic: (value: number) => void;
   setSFX: (value: number) => void;
   setVoice: (value: number) => void;
+  setVoiceEnabled: (value: boolean) => void;
   setUI: (value: number) => void;
   setActions: (value: boolean) => void;
   setStats: (value: boolean) => void;

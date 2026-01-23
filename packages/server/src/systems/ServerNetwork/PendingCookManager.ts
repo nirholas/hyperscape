@@ -288,7 +288,7 @@ export class PendingCookManager {
         this.processPlayerPendingCook(playerId, pending, currentTick);
       } catch (error) {
         console.error(
-          `[PendingCook] Error processing player ${playerId} for fire ${pending.fireId}:`,
+          `[PendingCook] Error processing player ${playerId} for ${pending.sourceType} ${pending.sourceId}:`,
           error,
         );
         this.pendingCooks.delete(playerId);

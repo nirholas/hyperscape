@@ -142,6 +142,14 @@ export class ClientAudio extends System {
     }
   }
 
+  getContext(): AudioContext {
+    return this.ctx;
+  }
+
+  getVoiceGain(): GainNode {
+    return this.groupGains.voice;
+  }
+
   ready(fn: () => void) {
     if (this.unlocked) return fn();
     this.queue.push(fn);

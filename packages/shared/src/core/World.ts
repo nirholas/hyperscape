@@ -361,6 +361,7 @@ export class World extends EventEmitter {
     music?: number;
     sfx?: number;
     voice?: number;
+    voiceEnabled?: boolean;
     ui?: number;
     stats?: boolean;
     chatVisible?: boolean;
@@ -375,6 +376,7 @@ export class World extends EventEmitter {
     setMusic?: (value: number) => void;
     setSFX?: (value: number) => void;
     setVoice?: (value: number) => void;
+    setVoiceEnabled?: (value: boolean) => void;
     setUI?: (value: number) => void;
     setStats?: (value: boolean) => void;
   };

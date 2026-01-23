@@ -63,7 +63,21 @@ const parentRestWorldRotation = new THREE.Quaternion();
  * No manual compensation needed!
  */
 
-export function createEmoteFactory(glb: GLBData, _url: string) {
+const queryParamsCache: Record<string, Record<string, string>> = {};
+
+function getQueryParams(url: string): Record<string, string> {
+  if (!queryParamsCache[url]) {
+    const params: Record<string, string> = {};
+    const urlObj = new URL(url);
+    for (const [key, value] of urlObj.searchParams.entries()) {
+      params[key] = value;
+    }
+    queryParamsCache[url] = params;
+  }
+  return queryParamsCache[url];
+}
+
+export function createEmoteFactory(glb: GLBData, url: string) {
   // console.time('emote-init')
 
   if (!glb.animations || glb.animations.length === 0) {
@@ -73,10 +87,13 @@ export function createEmoteFactory(glb: GLBData, _url: string) {
   const clip = glb.animations[0];
 
   const scale = (glb.scene as THREE.Scene).children[0].scale.x; // armature should be here?
+  const opts = getQueryParams(url);
+  const allowHipsTranslationY = opts.ty === "1";
 
   // no matter what vrm/emote combo we use for some reason avatars
   // levitate roughly 5cm above ground. this is a hack but it works.
-  const yOffset = -0.05 / scale;
+  // Disable when we are preserving hips Y translation (grounded clips).
+  const yOffset = allowHipsTranslationY ? 0 : -0.05 / scale;
 
   // we only keep tracks that are:
   // 1. the root position
@@ -207,11 +224,30 @@ export function createEmoteFactory(glb: GLBData, _url: string) {
               ),
             );
           } else if (track instanceof THREE.VectorKeyframeTrack) {
-            // SKIP position tracks entirely - don't add them to the animation
-            // This prevents root motion (sliding, bobbing, sinking)
-            // VRM skeleton will use its bind pose position instead
-            // Character position is controlled by game engine, not animation
-            // Don't push this track - effectively removes position animation
+            if (!allowHipsTranslationY) {
+              // Skip position tracks entirely for non-grounded clips
+              // This prevents root motion (sliding, bobbing, sinking)
+              return;
+            }
+            if (vrmBoneName !== "hips") {
+              // Only allow vertical translation on hips
+              return;
+            }
+
+            const scaledValues = new Float32Array(track.values.length);
+            for (let i = 0; i < track.values.length; i += 3) {
+              scaledValues[i] = 0;
+              scaledValues[i + 1] = track.values[i + 1] * _scaler;
+              scaledValues[i + 2] = 0;
+            }
+
+            tracks.push(
+              new THREE.VectorKeyframeTrack(
+                `${vrmNodeName}.${propertyName}`,
+                track.times,
+                scaledValues,
+              ),
+            );
           }
         }
       });
