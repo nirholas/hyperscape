@@ -2285,6 +2285,28 @@ export class ClientNetwork extends SystemBase {
     });
   };
 
+  // OSRS-STYLE: Show gathering tool in hand during gathering (e.g., fishing rod)
+  onGatheringToolShow = (data: {
+    playerId: string;
+    itemId: string;
+    slot: string;
+  }) => {
+    // Forward to local event system for EquipmentVisualSystem
+    this.world.emit(EventType.GATHERING_TOOL_SHOW, {
+      playerId: data.playerId,
+      itemId: data.itemId,
+      slot: data.slot,
+    });
+  };
+
+  onGatheringToolHide = (data: { playerId: string; slot: string }) => {
+    // Forward to local event system for EquipmentVisualSystem
+    this.world.emit(EventType.GATHERING_TOOL_HIDE, {
+      playerId: data.playerId,
+      slot: data.slot,
+    });
+  };
+
   onPlayerState = (data: unknown) => {
     // Forward player state updates from server to local UI_UPDATE event
     const playerData = data as {

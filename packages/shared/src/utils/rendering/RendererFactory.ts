@@ -1,15 +1,27 @@
 /**
  * Renderer Factory
  *
- * Creates WebGPU renderers for Hyperscape.
- * WebGPU is required - environments without WebGPU support will fail early.
+ * Creates renderers for Hyperscape.
+ *
+ * Primary path is WebGPU. When WebGPU is unavailable (e.g. WKWebView in Tauri),
+ * we fall back to WebGL so the client can still run instead of hard-failing.
  */
 
 import THREE from "../../extras/three/three";
 import { Logger } from "../Logger";
 
 /**
- * Renderer type - always WebGPU
+ * Renderer backend types
+ */
+export type RendererBackend = "webgpu" | "webgl";
+
+/**
+ * Renderer type used across the app.
+ *
+ * NOTE: `THREE.WebGPURenderer` supports a WebGL fallback backend via `forceWebGL`.
+ * This lets us run in environments like WKWebView (Tauri) where `navigator.gpu`
+ * is not exposed, without switching to `THREE.WebGLRenderer` (which isn't part
+ * of the three/webgpu bundle).
  */
 export type WebGPURenderer = InstanceType<typeof THREE.WebGPURenderer>;
 export type UniversalRenderer = WebGPURenderer;
@@ -20,6 +32,12 @@ export interface RendererOptions {
   powerPreference?: "high-performance" | "low-power" | "default";
   preserveDrawingBuffer?: boolean;
   canvas?: HTMLCanvasElement;
+}
+
+export interface RenderingCapabilities {
+  supportsWebGPU: boolean;
+  supportsWebGL: boolean;
+  backend: RendererBackend;
 }
 
 /**
@@ -47,8 +65,49 @@ export async function isWebGPUAvailable(): Promise<boolean> {
 }
 
 /**
- * Create a WebGPU renderer.
- * WebGPU is required - will throw if not available.
+ * Check if WebGL is available in the current browser.
+ */
+export function isWebGLAvailable(): boolean {
+  if (typeof document === "undefined") return false;
+
+  const canvas = document.createElement("canvas");
+  const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
+  return gl !== null;
+}
+
+/**
+ * Detect rendering capabilities.
+ *
+ * Note: Some platforms (notably WKWebView) may have a newer Safari installed but still
+ * not expose WebGPU to embedded WebViews. In those cases we fall back to WebGL.
+ */
+export async function detectRenderingCapabilities(): Promise<RenderingCapabilities> {
+  const supportsWebGPU = await isWebGPUAvailable();
+  if (supportsWebGPU) {
+    return {
+      supportsWebGPU: true,
+      supportsWebGL: true,
+      backend: "webgpu",
+    };
+  }
+
+  const supportsWebGL = isWebGLAvailable();
+  if (supportsWebGL) {
+    return {
+      supportsWebGPU: false,
+      supportsWebGL: true,
+      backend: "webgl",
+    };
+  }
+
+  throw new Error(
+    "Neither WebGPU nor WebGL is supported in this environment. " +
+      "Please use a modern browser or a WebView with GPU acceleration enabled.",
+  );
+}
+
+/**
+ * Create a renderer (WebGPU preferred, WebGL fallback)
  */
 export async function createRenderer(
   options: RendererOptions = {},
@@ -60,26 +119,62 @@ export async function createRenderer(
     canvas,
   } = options;
 
-  // WebGPU powerPreference does not support "default"
+  // WebGPU powerPreference does not support "default" (WebGL does).
   const webgpuPowerPreference =
     powerPreference === "default" ? undefined : powerPreference;
 
+  const create = async (forceWebGL: boolean): Promise<UniversalRenderer> => {
+    const renderer = new THREE.WebGPURenderer({
+      canvas,
+      antialias,
+      alpha,
+      powerPreference: webgpuPowerPreference,
+      forceWebGL,
+    });
+    await renderer.init();
+    return renderer;
+  };
+
   const supportsWebGPU = await isWebGPUAvailable();
-  if (!supportsWebGPU) {
+
+  // Prefer real WebGPU when available.
+  if (supportsWebGPU) {
+    try {
+      return await create(false);
+    } catch {
+      Logger.warn(
+        "[RendererFactory] WebGPU init failed, falling back to WebGL",
+      );
+    }
+  }
+
+  // WebGPU unavailable → WebGL backend via WebGPURenderer.forceWebGL
+  if (!isWebGLAvailable()) {
     throw new Error(
-      "WebGPU is required but not supported in this browser. " +
-        "Please use a modern browser with WebGPU support (Chrome 113+, Edge 113+, Safari 17+, Firefox 127+).",
+      "WebGPU is not supported in this browser or WebView, and WebGL is not available. " +
+        "Please use a modern browser or enable GPU acceleration.",
     );
   }
 
-  const renderer = new THREE.WebGPURenderer({
-    canvas,
-    antialias,
-    alpha,
-    powerPreference: webgpuPowerPreference,
-  });
-  await renderer.init();
-  return renderer;
+  return await create(true);
+}
+
+/**
+ * Check if the active backend is WebGPU (not the WebGL fallback backend).
+ */
+export function isWebGPURenderer(renderer: UniversalRenderer): boolean {
+  return getRendererBackend(renderer) === "webgpu";
+}
+
+/**
+ * Get renderer backend type
+ */
+export function getRendererBackend(
+  renderer: UniversalRenderer,
+): RendererBackend {
+  type BackendWithFlag = { isWebGPUBackend?: true };
+  const backend = renderer.backend as BackendWithFlag;
+  return backend.isWebGPUBackend ? "webgpu" : "webgl";
 }
 
 /**
@@ -155,6 +250,7 @@ export function getMaxAnisotropy(renderer: UniversalRenderer): number {
  * Get WebGPU capabilities for logging and debugging
  */
 export function getWebGPUCapabilities(renderer: UniversalRenderer): {
+  backend: RendererBackend;
   features: string[];
 } {
   type FeatureSetLike = { forEach: (cb: (feature: string) => void) => void };
@@ -172,7 +268,10 @@ export function getWebGPUCapabilities(renderer: UniversalRenderer): {
     });
   }
 
-  return { features };
+  return {
+    backend: getRendererBackend(renderer),
+    features,
+  };
 }
 
 /**
@@ -180,6 +279,8 @@ export function getWebGPUCapabilities(renderer: UniversalRenderer): {
  */
 export function logWebGPUInfo(renderer: UniversalRenderer): void {
   const caps = getWebGPUCapabilities(renderer);
+  if (caps.backend !== "webgpu") return;
+
   Logger.info("[RendererFactory] WebGPU initialized", {
     features: caps.features.length,
   });

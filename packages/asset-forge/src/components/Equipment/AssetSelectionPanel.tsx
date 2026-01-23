@@ -6,6 +6,7 @@ import {
   Shield,
   Box,
   Loader2,
+  Pickaxe,
 } from "lucide-react";
 import React from "react";
 
@@ -41,13 +42,12 @@ export const AssetSelectionPanel: React.FC<AssetSelectionPanelProps> = ({
     (a) => a.type === "character" && a.modelFormat === "vrm",
   );
   const equipmentAssets = assets.filter((a) => {
-    // Only include weapons and shields, exclude armor
+    // Include weapons, tools, and shields - exclude armor
     if (a.type === "armor") return false;
     if (a.type === "weapon") return true;
+    if (a.type === "tool") return true;
     if (a.type === "shield") return true;
-    // Check by name for items that might be shields
-    const name = a.name.toLowerCase();
-    return name.includes("shield");
+    return false;
   });
 
   const filteredAssets =
@@ -65,6 +65,7 @@ export const AssetSelectionPanel: React.FC<AssetSelectionPanelProps> = ({
 
     const groups: Record<string, Asset[]> = {
       weapons: [],
+      tools: [],
       shields: [],
     };
 
@@ -72,6 +73,8 @@ export const AssetSelectionPanel: React.FC<AssetSelectionPanelProps> = ({
       const name = asset.name.toLowerCase();
       if (name.includes("shield") || asset.type === "shield") {
         groups.shields.push(asset);
+      } else if (asset.type === "tool") {
+        groups.tools.push(asset);
       } else {
         groups.weapons.push(asset);
       }
@@ -83,6 +86,7 @@ export const AssetSelectionPanel: React.FC<AssetSelectionPanelProps> = ({
   // Get icon for asset type
   const getAssetIcon = (asset: Asset) => {
     if (asset.type === "character") return User;
+    if (asset.type === "tool") return Pickaxe;
     const name = asset.name.toLowerCase();
     if (name.includes("shield")) return Shield;
     // All weapons get sword icon

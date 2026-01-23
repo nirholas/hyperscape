@@ -78,6 +78,7 @@ import {
   configureRenderer,
   configureShadowMaps,
   getMaxAnisotropy,
+  isWebGPURenderer,
   type UniversalRenderer,
   logWebGPUInfo,
   getWebGPUCapabilities,
@@ -125,6 +126,7 @@ export class ClientGraphics extends System {
   height: number = 0;
   aspect: number = 0;
   worldToScreenFactor: number = 0;
+  isWebGPU: boolean = true;
 
   constructor(world: World) {
     super(world);
@@ -147,13 +149,20 @@ export class ClientGraphics extends System {
     this.world.camera.aspect = this.aspect;
     this.world.camera.updateProjectionMatrix();
 
-    // Create WebGPU renderer (required)
+    // Create renderer (WebGPU preferred, WebGL fallback)
     this.renderer = await getRenderer();
+    this.isWebGPU = isWebGPURenderer(this.renderer);
 
-    // Log WebGPU capabilities
-    logWebGPUInfo(this.renderer);
-    const caps = getWebGPUCapabilities(this.renderer);
-    console.log("[ClientGraphics] WebGPU features:", caps.features.length);
+    // Log backend capabilities
+    if (isWebGPURenderer(this.renderer)) {
+      logWebGPUInfo(this.renderer);
+      const caps = getWebGPUCapabilities(this.renderer);
+      console.log("[ClientGraphics] WebGPU features:", caps.features.length);
+    } else {
+      console.warn(
+        "[ClientGraphics] WebGPU unavailable (falling back to WebGL renderer)",
+      );
+    }
 
     // Configure renderer
     configureRenderer(this.renderer, {
@@ -178,9 +187,10 @@ export class ClientGraphics extends System {
     THREE.Texture.DEFAULT_ANISOTROPY = this.maxAnisotropy;
 
     // Setup post-processing with TSL
-    this.usePostprocessing = this.world.prefs?.postprocessing ?? true;
+    this.usePostprocessing =
+      (this.world.prefs?.postprocessing ?? true) && this.isWebGPU;
 
-    if (this.usePostprocessing) {
+    if (this.usePostprocessing && isWebGPURenderer(this.renderer)) {
       // Get color grading settings from preferences
       const colorGradingLut = this.world.prefs?.colorGrading ?? "none";
       const colorGradingIntensity =
@@ -340,7 +350,8 @@ export class ClientGraphics extends System {
     }
     // postprocessing
     if (changes.postprocessing) {
-      this.usePostprocessing = changes.postprocessing.value;
+      // WebGL fallback currently runs without TSL post-processing.
+      this.usePostprocessing = changes.postprocessing.value && this.isWebGPU;
     }
     // color grading LUT
     if (changes.colorGrading && this.composer) {

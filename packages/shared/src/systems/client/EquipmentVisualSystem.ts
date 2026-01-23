@@ -47,12 +47,20 @@ interface EquipmentAttachmentData {
   weaponType?: string; // Weapon type for debugging
   usage?: string; // Usage instructions
   note?: string; // Developer notes
+  // V2 format fields
+  version?: number; // Format version (2 = relative matrix approach)
+  relativeMatrix?: number[]; // 16-element matrix array (for v2)
+  avatarId?: string; // Avatar used for fitting (for v2)
+  avatarHeight?: number; // Avatar height used for fitting
 }
 
 interface PlayerEquipmentVisuals {
   weapon?: THREE.Object3D;
   shield?: THREE.Object3D;
   helmet?: THREE.Object3D;
+  // Temporary gathering tool (e.g., fishing rod during fishing animation)
+  // Note: lowercase to match slot.toLowerCase() in equip/unequip methods
+  gatheringtool?: THREE.Object3D;
   // Add more slots as needed
 }
 
@@ -68,6 +76,10 @@ export class EquipmentVisualSystem extends SystemBase {
     string,
     { slot: string; itemId: string }[]
   >();
+
+  // Track players whose weapon is temporarily hidden during gathering
+  // (e.g., fishing - weapon hidden while fishing rod is shown)
+  private hiddenWeapons = new Set<string>();
 
   constructor(world: World) {
     super(world, {
@@ -101,6 +113,22 @@ export class EquipmentVisualSystem extends SystemBase {
     this.subscribe(EventType.PLAYER_CLEANUP, (data: { playerId: string }) => {
       this.cleanupPlayerEquipment(data.playerId);
     });
+
+    // OSRS-STYLE: Show gathering tool during gathering (e.g., fishing rod during fishing)
+    this.subscribe(
+      EventType.GATHERING_TOOL_SHOW,
+      (data: { playerId: string; itemId: string; slot: string }) => {
+        this.handleGatheringToolShow(data);
+      },
+    );
+
+    // Hide gathering tool when gathering stops
+    this.subscribe(
+      EventType.GATHERING_TOOL_HIDE,
+      (data: { playerId: string; slot: string }) => {
+        this.handleGatheringToolHide(data);
+      },
+    );
   }
 
   private async handleEquipmentChange(data: {
@@ -252,9 +280,16 @@ export class EquipmentVisualSystem extends SystemBase {
       const weaponMesh: THREE.Object3D = gltf.scene.clone(true); // Clone to allow multiple instances
 
       // Read attachment metadata from Asset Forge export
-      const attachmentData = weaponMesh.userData.hyperscape as
+      // Try root first, then first child (EquipmentWrapper)
+      let attachmentData = weaponMesh.userData.hyperscape as
         | EquipmentAttachmentData
         | undefined;
+
+      // If not on root, check first child (the EquipmentWrapper)
+      if (!attachmentData && weaponMesh.children[0]?.userData?.hyperscape) {
+        attachmentData = weaponMesh.children[0].userData
+          .hyperscape as EquipmentAttachmentData;
+      }
 
       const boneName = attachmentData?.vrmBoneName || "rightHand";
 
@@ -277,35 +312,7 @@ export class EquipmentVisualSystem extends SystemBase {
       // Remove existing visual for this slot first
       this.unequipVisual(playerId, slot, equipment, vrm);
 
-      // CRITICAL: Asset Forge exports have transforms baked into the hierarchy
-      // Find the EquipmentWrapper child which has the fitting position
-      const equipmentWrapper = weaponMesh.children.find(
-        (child) => child.name === "EquipmentWrapper",
-      );
-
-      if (equipmentWrapper) {
-        // TRUST THE BAKED TRANSFORMS!
-        // Previous logic attempted to re-scale position based on NormalizedWeapon scale
-        // and apply a 180 degree rotation. This contradicted the "baked" nature of the export.
-        // We now use the EquipmentWrapper exactly as is.
-
-        // TWEAK: Apply a scale multiplier to make weapons look better in-game
-        const WEAPON_SCALE_MULTIPLIER = 1.75;
-        weaponMesh.scale.multiplyScalar(WEAPON_SCALE_MULTIPLIER);
-      } else if (!attachmentData) {
-        console.warn(
-          `[EquipmentVisual] ⚠️ No EquipmentWrapper or metadata - applying default transform`,
-        );
-        // Fallback: Scale down to reasonable size
-        weaponMesh.scale.set(0.01, 0.01, 0.01);
-      }
-
-      // --- ATTACHMENT LOGIC ---
-      // We attach to the RAW BONE to match the Asset Forge export pipeline.
-      // CRITICAL: VRM instances are often shared/prefab-based, so `vrm.humanoid.getRawBoneNode`
-      // might return a bone from the PREFAB, not the live player instance.
-      // We must find the corresponding bone in the PLAYER'S hierarchy.
-
+      // Get player entity for bone attachment
       const player = this.world.entities.get(playerId);
       if (!player) {
         console.error(
@@ -314,6 +321,7 @@ export class EquipmentVisualSystem extends SystemBase {
         return;
       }
 
+      // Find the target bone in the player's live hierarchy
       const prefabBone = vrm.humanoid.getRawBoneNode(
         boneName as VRMHumanBoneName,
       );
@@ -328,8 +336,6 @@ export class EquipmentVisualSystem extends SystemBase {
       let targetBone: THREE.Object3D | undefined = undefined;
 
       // Traverse the avatar's visual root (instance.raw) to find the bone
-      // player.node is just a container and might not hold the full hierarchy
-      // instance.raw might be the GLTF result object or VRM object, so check for .scene
       const playerWithAvatar = player as PlayerWithAvatar;
       const rawInstance = playerWithAvatar._avatar?.instance?.raw;
       const avatarRoot = (rawInstance?.scene || rawInstance) as
@@ -361,6 +367,76 @@ export class EquipmentVisualSystem extends SystemBase {
 
       // Store in component for tracking
       const slotKey = slot.toLowerCase() as keyof PlayerEquipmentVisuals;
+
+      // === V2 FORMAT: Use relative matrix directly ===
+      // Validate relativeMatrix is a proper 16-element array of numbers
+      const hasValidMatrix =
+        attachmentData?.version === 2 &&
+        Array.isArray(attachmentData.relativeMatrix) &&
+        attachmentData.relativeMatrix.length === 16 &&
+        attachmentData.relativeMatrix.every(
+          (n) => typeof n === "number" && !isNaN(n),
+        );
+
+      if (hasValidMatrix) {
+        // Find the EquipmentWrapper which has the pre-baked transforms
+        const equipmentWrapper = weaponMesh.children.find(
+          (child) => child.name === "EquipmentWrapper",
+        );
+
+        if (equipmentWrapper) {
+          // V2: The wrapper already has the correct relative transform baked in
+          // Just attach it directly - no scale hacks needed!
+          equipment[slotKey] = weaponMesh;
+          (targetBone as THREE.Object3D).add(weaponMesh);
+        } else {
+          // Fallback: Apply relativeMatrix manually if no wrapper found
+          const relativeMatrix = new THREE.Matrix4();
+          // Safe to assert: hasValidMatrix guarantees attachmentData.relativeMatrix is valid
+          relativeMatrix.fromArray(attachmentData!.relativeMatrix!);
+
+          // Create a wrapper group with the relative transform
+          const wrapperGroup = new THREE.Group();
+          wrapperGroup.name = "EquipmentWrapper";
+
+          // Decompose and apply the matrix
+          const position = new THREE.Vector3();
+          const quaternion = new THREE.Quaternion();
+          const scale = new THREE.Vector3();
+          relativeMatrix.decompose(position, quaternion, scale);
+
+          wrapperGroup.position.copy(position);
+          wrapperGroup.quaternion.copy(quaternion);
+          wrapperGroup.scale.copy(scale);
+
+          // Add weapon as child
+          wrapperGroup.add(weaponMesh);
+
+          equipment[slotKey] = wrapperGroup;
+          (targetBone as THREE.Object3D).add(wrapperGroup);
+        }
+        return;
+      }
+
+      // === LEGACY FORMAT (V1): Use old logic with scale hack ===
+
+      // Find the EquipmentWrapper child which has the fitting position
+      const equipmentWrapper = weaponMesh.children.find(
+        (child) => child.name === "EquipmentWrapper",
+      );
+
+      if (equipmentWrapper) {
+        // LEGACY: Apply scale multiplier hack for V1 exports
+        const WEAPON_SCALE_MULTIPLIER = 1.75;
+        weaponMesh.scale.multiplyScalar(WEAPON_SCALE_MULTIPLIER);
+      } else if (!attachmentData) {
+        console.warn(
+          `[EquipmentVisual] ⚠️ No EquipmentWrapper or metadata - applying default transform`,
+        );
+        // Fallback: Scale down to reasonable size
+        weaponMesh.scale.set(0.01, 0.01, 0.01);
+      }
+
       equipment[slotKey] = weaponMesh;
 
       // Add to the LIVE bone
@@ -383,6 +459,107 @@ export class EquipmentVisualSystem extends SystemBase {
 
     this.playerEquipment.delete(playerId);
     this.pendingEquipment.delete(playerId); // Clear pending equipment too
+    this.hiddenWeapons.delete(playerId); // Clear hidden weapon tracking
+  }
+
+  /**
+   * OSRS-STYLE: Show gathering tool in hand during gathering animation
+   * (e.g., fishing rod appears in hand even though it's in inventory, not equipped)
+   *
+   * This temporarily hides any equipped weapon and shows the gathering tool instead.
+   */
+  private async handleGatheringToolShow(data: {
+    playerId: string;
+    itemId: string;
+    slot: string;
+  }): Promise<void> {
+    const { playerId, itemId } = data;
+
+    // Get player entity to access VRM
+    const player = this.world.entities.get(playerId);
+    if (!player) {
+      return;
+    }
+
+    const playerWithAvatar = player as PlayerWithAvatar;
+    const avatarInstance = playerWithAvatar._avatar?.instance;
+    const vrm = avatarInstance?.raw?.userData?.vrm;
+
+    if (!avatarInstance || !vrm) {
+      // VRM not ready - queue this for retry
+      if (!this.pendingEquipment.has(playerId)) {
+        this.pendingEquipment.set(playerId, []);
+      }
+      const queue = this.pendingEquipment.get(playerId)!;
+      // Use special slot name to identify gathering tools
+      queue.push({ slot: "gatheringTool", itemId });
+      this.pendingEquipment.set(playerId, queue);
+      return;
+    }
+
+    // Get or create equipment visuals for this player
+    if (!this.playerEquipment.has(playerId)) {
+      this.playerEquipment.set(playerId, {});
+    }
+    const equipment = this.playerEquipment.get(playerId)!;
+
+    // OSRS-STYLE: Temporarily hide the equipped weapon while showing gathering tool
+    // Check hiddenWeapons to prevent hiding multiple times on rapid calls
+    if (
+      equipment.weapon &&
+      equipment.weapon.visible &&
+      !this.hiddenWeapons.has(playerId)
+    ) {
+      equipment.weapon.visible = false;
+      this.hiddenWeapons.add(playerId);
+    }
+
+    // Use "gatheringTool" slot to avoid conflicting with actual equipped weapon
+    await this.equipVisual(playerId, "gatheringTool", itemId, equipment, vrm);
+  }
+
+  /**
+   * Hide the temporary gathering tool when gathering stops
+   *
+   * This removes the gathering tool and restores any previously hidden weapon.
+   */
+  private handleGatheringToolHide(data: {
+    playerId: string;
+    slot: string;
+  }): void {
+    const { playerId } = data;
+
+    // Get player entity to access VRM
+    const player = this.world.entities.get(playerId);
+    if (!player) {
+      return;
+    }
+
+    const playerWithAvatar = player as PlayerWithAvatar;
+    const vrm = playerWithAvatar._avatar?.instance?.raw?.userData?.vrm;
+
+    if (!vrm) {
+      return;
+    }
+
+    const equipment = this.playerEquipment.get(playerId);
+    if (!equipment) {
+      return;
+    }
+
+    // Remove the gathering tool visual
+    this.unequipVisual(playerId, "gatheringTool", equipment, vrm);
+
+    // OSRS-STYLE: Restore the equipped weapon that was hidden
+    // Verify weapon exists and is currently hidden before restoring
+    if (
+      this.hiddenWeapons.has(playerId) &&
+      equipment.weapon &&
+      !equipment.weapon.visible
+    ) {
+      equipment.weapon.visible = true;
+      this.hiddenWeapons.delete(playerId);
+    }
   }
 
   update(_dt: number): void {

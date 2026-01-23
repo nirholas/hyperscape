@@ -312,9 +312,6 @@ async function fetchManifestsFromCDN(
       return;
     }
 
-    // NOTE: Production intentionally does NOT fall back to assets.hyperscape.club.
-    // If PUBLIC_CDN_URL is misconfigured in production, we want a hard failure
-    // rather than silently falling back (which could mask deployment issues).
     throw new Error(
       `Missing required manifests in ${manifestsDir}: ${missingRequiredAfter.join(", ")}. ` +
         `Ensure your CDN has /manifests populated (PUBLIC_CDN_URL=${cdnUrl}) or run 'bun install' to download assets for local development.`,
