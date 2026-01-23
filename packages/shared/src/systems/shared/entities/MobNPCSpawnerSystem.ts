@@ -716,6 +716,10 @@ export class MobNPCSpawnerSystem extends SystemBase {
     area: (typeof ALL_WORLD_AREAS)[keyof typeof ALL_WORLD_AREAS],
     tileData: { tileX: number; tileZ: number },
   ): void {
+    if (area.safeZone || area.difficultyLevel <= 0) {
+      return;
+    }
+
     const TILE_SIZE = this.terrainSystem.getTileSize();
 
     for (const spawnPoint of area.mobSpawns) {
@@ -753,7 +757,25 @@ export class MobNPCSpawnerSystem extends SystemBase {
           const th = this.terrainSystem.getHeightAt(mobX, mobZ);
           if (Number.isFinite(th)) mobY = th;
 
-          this.spawnMobFromData(mobData, { x: mobX, y: mobY, z: mobZ });
+          const difficultySample =
+            this.terrainSystem.getDifficultyAtWorldPosition(
+              mobX,
+              mobZ,
+              area.difficultyLevel,
+            );
+          if (difficultySample.isSafe || difficultySample.level <= 0) {
+            continue;
+          }
+
+          const levelRange = this.getMobLevelRange(mobData);
+          this.spawnMobFromData(
+            mobData,
+            { x: mobX, y: mobY, z: mobZ },
+            {
+              level: difficultySample.level,
+              levelRange,
+            },
+          );
         }
       }
     }
