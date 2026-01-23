@@ -2,6 +2,7 @@ name: Deploy Assets to Cloudflare R2
 
 # NOTE: Frontend deployment is handled by Cloudflare Pages GitHub integration
 # This workflow only handles R2 asset uploads (manifests, WASM, models, etc.)
+# Only runs on pushes to main branch (NOT on PRs or staging branch)
 #
 # Frontend URLs:
 #   - Production: hyperscape.club (main branch)
@@ -13,7 +14,7 @@ name: Deploy Assets to Cloudflare R2
 
 on:
   push:
-    branches: [main, staging]
+    branches: [main]
     paths:
       - 'packages/server/world/assets/manifests/**'
       - 'assets/**'
