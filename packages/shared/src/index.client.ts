@@ -200,9 +200,6 @@ export {
   createRenderer,
   configureRenderer,
   configureShadowMaps,
-  isWebGPURenderer,
-  getRendererBackend,
-  detectRenderingCapabilities,
   type UniversalRenderer,
   type RendererOptions,
 } from "./utils/rendering/RendererFactory";

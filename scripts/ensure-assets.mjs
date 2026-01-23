@@ -157,7 +157,7 @@ async function main() {
     console.log("✅ Assets downloaded successfully!");
     console.log("   Run 'bun run assets:sync' to update assets later");
   } catch (error) {
-    console.error("❌ Failed to download assets:", error.message);
+    console.error("❌ Failed to download assets:", error);
     console.error("   You can manually clone:");
     console.error(`   git clone ${assetsRepo} ${assetsDir}`);
     process.exit(1);

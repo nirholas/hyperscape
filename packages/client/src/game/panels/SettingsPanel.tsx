@@ -969,21 +969,15 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
                 style={{
                   borderWidth: "1px",
                   borderStyle: "solid",
-                  borderColor: world.graphics?.isWebGPU
-                    ? "rgba(34, 197, 94, 0.4)"
-                    : "rgba(96, 165, 250, 0.4)",
-                  boxShadow: world.graphics?.isWebGPU
-                    ? "0 0 10px rgba(34, 197, 94, 0.1)"
-                    : "0 0 10px rgba(96, 165, 250, 0.1)",
+                  borderColor: "rgba(34, 197, 94, 0.4)",
+                  boxShadow: "0 0 10px rgba(34, 197, 94, 0.1)",
                 }}
               >
                 {/* Decorative glow effect */}
                 <div
                   className="absolute top-0 right-0 w-16 h-16 rounded-full blur-2xl opacity-15"
                   style={{
-                    background: world.graphics?.isWebGPU
-                      ? "#22c55e"
-                      : "#60a5fa",
+                    background: "#22c55e",
                     transform: "translate(30%, -30%)",
                   }}
                 />
@@ -994,9 +988,7 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
                       <div
                         className="w-1 h-1 rounded-full animate-pulse"
                         style={{
-                          backgroundColor: world.graphics?.isWebGPU
-                            ? "#22c55e"
-                            : "#60a5fa",
+                          backgroundColor: "#22c55e",
                         }}
                       />
                       <span
@@ -1009,14 +1001,12 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
                     <span
                       className="text-[7px] font-medium px-1 py-0.5 rounded-full"
                       style={{
-                        backgroundColor: world.graphics?.isWebGPU
-                          ? "rgba(34, 197, 94, 0.15)"
-                          : "rgba(96, 165, 250, 0.15)",
-                        color: world.graphics?.isWebGPU ? "#22c55e" : "#60a5fa",
-                        border: `1px solid ${world.graphics?.isWebGPU ? "rgba(34, 197, 94, 0.3)" : "rgba(96, 165, 250, 0.3)"}`,
+                        backgroundColor: "rgba(34, 197, 94, 0.15)",
+                        color: "#22c55e",
+                        border: "1px solid rgba(34, 197, 94, 0.3)",
                       }}
                     >
-                      {world.graphics?.isWebGPU ? "⚡ Modern" : "🔷 Compatible"}
+                      ⚡ Modern
                     </span>
                   </div>
 
@@ -1024,16 +1014,14 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
                     className="text-sm font-bold mb-0.5"
                     style={{ color: COLORS.ACCENT }}
                   >
-                    {world.graphics?.isWebGPU ? "WebGPU" : "WebGL"}
+                    WebGPU
                   </div>
 
                   <div
                     className="text-[8px]"
                     style={{ color: "rgba(242, 208, 138, 0.5)" }}
                   >
-                    {world.graphics?.isWebGPU
-                      ? "High-performance rendering"
-                      : "Cross-browser compatible"}
+                    High-performance rendering
                   </div>
                 </div>
               </div>

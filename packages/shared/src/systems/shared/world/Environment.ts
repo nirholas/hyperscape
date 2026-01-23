@@ -774,7 +774,6 @@ export class Environment extends System {
   buildSunLight(): void {
     if (!this.isClientWithGraphics) return;
 
-    const useWebGPU = this.world.graphics?.isWebGPU !== false;
     const shadowsLevel = this.world.prefs?.shadows || "med";
     const csmConfig =
       csmLevels[shadowsLevel as keyof typeof csmLevels] || csmLevels.med;
@@ -812,7 +811,7 @@ export class Environment extends System {
 
     // Create directional light for CSM
     this.sunLight = new THREE.DirectionalLight(0xffffff, 1.8);
-    this.sunLight.name = useWebGPU ? "SunLight_CSM" : "SunLight_WebGL";
+    this.sunLight.name = "SunLight_CSM";
     this.sunLight.castShadow = true;
 
     // Shadow map settings (CSMShadowNode will use this as base resolution per cascade)
@@ -821,15 +820,11 @@ export class Environment extends System {
     this.sunLight.shadow.bias = csmConfig.shadowBias;
     this.sunLight.shadow.normalBias = csmConfig.shadowNormalBias;
 
-    // Shadow camera settings
-    // CSMShadowNode overrides these per-cascade (WebGPU), but we set reasonable defaults.
+    // Shadow camera settings - CSMShadowNode will manage actual cascade frustums
     const shadowCam = this.sunLight.shadow.camera;
     shadowCam.near = 0.5;
     shadowCam.far = this.LIGHT_DISTANCE + 200; // Light distance + scene depth
-    // Base frustum:
-    // - WebGPU: CSMShadowNode will manage actual cascade frustums.
-    // - WebGL fallback: this frustum is the only shadow coverage area.
-    const baseFrustumSize = useWebGPU ? 100 : Math.min(250, csmConfig.maxFar);
+    const baseFrustumSize = 100;
     shadowCam.left = -baseFrustumSize;
     shadowCam.right = baseFrustumSize;
     shadowCam.top = baseFrustumSize;
@@ -839,21 +834,6 @@ export class Environment extends System {
     // Initial position
     this.sunLight.position.set(100, 200, 100);
     this.sunLight.target.position.set(0, 0, 0);
-
-    // WebGL fallback: single directional light shadows (no cascades / no shadowNode)
-    if (!useWebGPU) {
-      this.csmShadowNode = null;
-      this.csmNeedsAttach = false;
-      this.needsFrustumUpdate = false;
-
-      scene.add(this.sunLight);
-      scene.add(this.sunLight.target);
-
-      console.log(
-        `[Environment] WebGL shadow map enabled (no CSM): mapSize=${csmConfig.shadowMapSize}, frustum=${baseFrustumSize * 2}`,
-      );
-      return;
-    }
 
     // Create CSMShadowNode for WebGPU cascaded shadows
     // Light direction is derived from sunLight.position and sunLight.target.position
