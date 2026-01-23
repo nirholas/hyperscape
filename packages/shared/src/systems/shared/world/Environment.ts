@@ -130,6 +130,12 @@ export class Environment extends System {
   private shadowTexelSize: number = 0; // For texel snapping calculation
   private readonly LIGHT_DISTANCE = 400; // Distance from target to light
 
+  // Auto exposure settings - mimics eye adaptation to different light levels
+  // Higher exposure at night compensates for lower light, keeping things visible
+  private readonly DAY_EXPOSURE = 0.85; // Standard exposure for bright daylight
+  private readonly NIGHT_EXPOSURE = 1.7; // Boosted exposure for night visibility
+  private currentExposure: number = 0.85; // Smoothed current value
+
   // CSMShadowNode for WebGPU cascaded shadows
   private csmShadowNode: InstanceType<typeof CSMShadowNode> | null = null;
 
@@ -172,6 +178,10 @@ export class Environment extends System {
     // Client with graphics - full environment setup
     // Create sun light immediately - stage should be ready by start()
     this.buildSunLight();
+
+    // Initialize CSM frustums immediately if camera is ready
+    // This ensures shadows work from the first frame
+    this.initializeCSMFrustums();
 
     // Create ambient lighting for day/night visibility
     this.createAmbientLighting();
@@ -541,9 +551,9 @@ export class Environment extends System {
             this.sunLight.color.setRGB(1.0, 0.98, 0.92);
           }
         } else {
-          // Moonlight - cool blue light
+          // Moonlight - cool blue light (stronger for better night visibility)
           const nightIntensity = 1 - dayIntensity;
-          const moonIntensity = nightIntensity * 0.4 * transitionFade;
+          const moonIntensity = nightIntensity * 0.6 * transitionFade;
           this.sunLight.intensity = moonIntensity;
           this.sunLight.color.setRGB(0.6, 0.7, 0.9);
         }
@@ -556,6 +566,10 @@ export class Environment extends System {
 
       // Update ambient lighting based on day/night
       this.updateAmbientLighting(this.skySystem.dayIntensity);
+
+      // Update auto exposure based on day/night cycle
+      // Higher exposure at night mimics eye adaptation - keeps things visible while still darker
+      this.updateAutoExposure(this.skySystem.dayIntensity);
 
       // Update fog color based on day/night cycle
       this.updateFogColor(this.skySystem.dayIntensity);
@@ -617,13 +631,28 @@ export class Environment extends System {
     // Update CSM frustums only when needed (expensive operation)
     // Frustum recalculation is needed on: viewport resize, camera near/far change
     // Light position updates do NOT require frustum recalculation
-    if (
-      this.csmShadowNode &&
-      this.needsFrustumUpdate &&
-      this.csmShadowNode.camera
-    ) {
-      // Ensure camera projection is up to date before frustum calculation
-      this.world.camera.updateProjectionMatrix();
+    if (this.csmShadowNode && this.needsFrustumUpdate) {
+      // Pre-flight checks: ensure camera has valid projection before CSM update
+      const camera = this.world.camera;
+      const hasValidAspect = camera.aspect > 0;
+      const hasValidFov = camera.fov > 0;
+      const hasValidNearFar = camera.near > 0 && camera.far > camera.near;
+
+      // Ensure CSM has camera reference
+      if (!this.csmShadowNode.camera) {
+        this.csmShadowNode.camera = camera;
+      }
+
+      if (!hasValidAspect || !hasValidFov || !hasValidNearFar) {
+        // Camera not fully configured yet - skip this frame
+        // This is normal during startup, will succeed on next frame
+        return;
+      }
+
+      // Ensure camera matrices are fully up to date before frustum calculation
+      camera.updateProjectionMatrix();
+      camera.updateMatrixWorld(true);
+
       try {
         this.csmShadowNode.updateFrustums();
         this.needsFrustumUpdate = false;
@@ -639,12 +668,16 @@ export class Environment extends System {
           this.csmNeedsAttach = false;
           console.log("[Environment] CSM shadowNode attached to light");
         }
-      } catch (_err) {
+      } catch (err) {
         // CSMShadowNode.updateFrustums() can fail if camera projection isn't ready yet
         // Will retry on next update() - this is expected during startup
-        console.debug(
-          "[Environment] CSM frustum update deferred - camera not ready",
-        );
+        // Log only on first attempt to avoid console spam
+        if (this.csmNeedsAttach) {
+          console.warn(
+            "[Environment] CSM frustum update failed:",
+            err instanceof Error ? err.message : String(err),
+          );
+        }
       }
     }
   }
@@ -657,37 +690,63 @@ export class Environment extends System {
     const nightIntensity = 1 - dayIntensity;
 
     if (this.hemisphereLight) {
-      // Hemisphere light: brighter during day, dim but visible at night
-      // Day: 0.9, Night: 0.25 (enough to see terrain/objects clearly)
-      this.hemisphereLight.intensity = 0.25 + dayIntensity * 0.65;
+      // Hemisphere light: brighter during day, visible at night
+      // Day: 0.9, Night: 0.4 (auto exposure handles the rest)
+      this.hemisphereLight.intensity = 0.4 + dayIntensity * 0.5;
 
-      // Shift sky color from bright blue (day) to dark blue (night)
+      // Shift sky color from bright blue (day) to blue-silver (night)
       this.hemisphereLight.color.setRGB(
-        0.53 * dayIntensity + 0.1 * nightIntensity, // R: slight visibility at night
-        0.81 * dayIntensity + 0.15 * nightIntensity, // G: slight visibility at night
-        0.92 * dayIntensity + 0.25 * nightIntensity, // B: blue tint at night
+        0.53 * dayIntensity + 0.25 * nightIntensity, // R: moonlit sky
+        0.81 * dayIntensity + 0.35 * nightIntensity, // G: moonlit sky
+        0.92 * dayIntensity + 0.5 * nightIntensity, // B: blue tint at night
       );
 
-      // Ground color: warm brown during day, dark blue-brown at night
+      // Ground color: warm brown during day, blue-grey at night
       this.hemisphereLight.groundColor.setRGB(
-        0.36 * dayIntensity + 0.06 * nightIntensity,
-        0.27 * dayIntensity + 0.05 * nightIntensity,
-        0.18 * dayIntensity + 0.08 * nightIntensity,
+        0.36 * dayIntensity + 0.15 * nightIntensity,
+        0.27 * dayIntensity + 0.15 * nightIntensity,
+        0.18 * dayIntensity + 0.2 * nightIntensity,
       );
     }
 
     if (this.ambientLight) {
       // Ambient fill: provides base visibility
-      // Day: 0.4, Night: 0.18 (can see things clearly in moonlight)
-      this.ambientLight.intensity = 0.18 + dayIntensity * 0.22;
+      // Day: 0.5, Night: 0.3 (auto exposure handles the rest)
+      this.ambientLight.intensity = 0.3 + dayIntensity * 0.2;
 
-      // Day: warm neutral white, Night: cool blue moonlight tint
+      // Day: warm neutral white, Night: brighter blue moonlight tint
       this.ambientLight.color.setRGB(
-        0.35 + dayIntensity * 0.65, // R: 0.35 at night, 1.0 at day
-        0.4 + dayIntensity * 0.55, // G: 0.4 at night, 0.95 at day
-        0.55 + dayIntensity * 0.4, // B: 0.55 at night, 0.95 at day (bluer at night)
+        0.5 + dayIntensity * 0.5, // R: 0.5 at night, 1.0 at day
+        0.55 + dayIntensity * 0.4, // G: 0.55 at night, 0.95 at day
+        0.7 + dayIntensity * 0.25, // B: 0.7 at night, 0.95 at day (bluer at night)
       );
     }
+  }
+
+  /**
+   * Update auto exposure based on day/night cycle
+   * Mimics eye adaptation - higher exposure at night compensates for lower light
+   * @param dayIntensity 0-1 (0 = night, 1 = day)
+   */
+  private updateAutoExposure(dayIntensity: number): void {
+    // Get renderer reference
+    const graphics = this.world.graphics as
+      | { renderer?: { toneMappingExposure?: number } }
+      | undefined;
+    if (!graphics?.renderer) return;
+
+    // Calculate target exposure: lerp from night (high) to day (low)
+    // Using smoothstep for natural-feeling transitions
+    const t = dayIntensity * dayIntensity * (3 - 2 * dayIntensity); // smoothstep
+    const targetExposure =
+      this.NIGHT_EXPOSURE + (this.DAY_EXPOSURE - this.NIGHT_EXPOSURE) * t;
+
+    // Smooth interpolation to prevent jarring changes
+    // Lerp factor of 0.03 = gradual adaptation over ~30 frames
+    this.currentExposure += (targetExposure - this.currentExposure) * 0.03;
+
+    // Apply to renderer
+    graphics.renderer.toneMappingExposure = this.currentExposure;
   }
 
   // Day fog color: warm beige
@@ -886,6 +945,56 @@ export class Environment extends System {
     console.log(
       `[Environment] CSM created: ${csmConfig.cascades} cascades, maxFar=${csmConfig.maxFar}, mapSize=${csmConfig.shadowMapSize} (pending frustum init)`,
     );
+  }
+
+  /**
+   * Initialize CSM frustums and attach shadowNode to light.
+   * Called during start() to ensure shadows work from the first frame.
+   * If initialization fails, it will be retried during update().
+   */
+  private initializeCSMFrustums(): void {
+    if (!this.csmShadowNode || !this.needsFrustumUpdate) return;
+
+    const camera = this.world.camera;
+
+    // Validate camera is properly configured
+    if (camera.aspect <= 0 || camera.fov <= 0 || camera.near <= 0) {
+      console.debug(
+        "[Environment] CSM init deferred - camera not configured yet",
+      );
+      return;
+    }
+
+    // Ensure CSM has camera reference
+    if (!this.csmShadowNode.camera) {
+      this.csmShadowNode.camera = camera;
+    }
+
+    // Update camera matrices before frustum calculation
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld(true);
+
+    try {
+      this.csmShadowNode.updateFrustums();
+      this.needsFrustumUpdate = false;
+
+      // Attach shadowNode to light now that frustums are initialized
+      if (this.csmNeedsAttach && this.sunLight) {
+        (
+          this.sunLight.shadow as THREE.DirectionalLightShadow & {
+            shadowNode?: InstanceType<typeof CSMShadowNode>;
+          }
+        ).shadowNode = this.csmShadowNode;
+        this.csmNeedsAttach = false;
+        console.log("[Environment] CSM shadowNode attached to light (init)");
+      }
+    } catch (err) {
+      // Will be retried during update() - this is expected during startup
+      console.debug(
+        "[Environment] CSM init deferred:",
+        err instanceof Error ? err.message : String(err),
+      );
+    }
   }
 
   onSettingsChange = (changes: { model?: string | { url?: string } }) => {
