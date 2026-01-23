@@ -44,64 +44,12 @@ import {
 } from "../actions/skills.js";
 import { equipItemAction } from "../actions/inventory.js";
 import { KNOWN_LOCATIONS } from "../providers/goalProvider.js";
-import type { Entity } from "../types.js";
 import {
   hasCombatCapableItem,
   hasWeapon,
   hasOre,
   hasBars,
 } from "../utils/item-detection.js";
-
-/**
- * Find the nearest entity matching a type/name pattern from nearby entities
- * Returns the entity's position if found, null otherwise
- *
- * @param entities - Array of nearby entities
- * @param typePatterns - Array of type/name patterns to match (case-insensitive)
- * @param playerPos - Current player position for distance calculation
- * @returns Position [x, y, z] of nearest matching entity, or null if not found
- */
-function findNearestEntityPosition(
-  entities: Entity[],
-  typePatterns: string[],
-  playerPos: [number, number, number] | null,
-): [number, number, number] | null {
-  if (!entities || entities.length === 0) return null;
-
-  const patterns = typePatterns.map((p) => p.toLowerCase());
-
-  // Filter entities matching any pattern
-  const matchingEntities = entities.filter((e) => {
-    const name = (e.name || "").toLowerCase();
-    const id = (e.id || "").toLowerCase();
-    return patterns.some((p) => name.includes(p) || id.includes(p));
-  });
-
-  if (matchingEntities.length === 0) return null;
-
-  // If no player position, return first match
-  if (!playerPos) {
-    const first = matchingEntities[0];
-    return first.position || null;
-  }
-
-  // Find nearest
-  let nearest: Entity | null = null;
-  let nearestDist = Infinity;
-
-  for (const e of matchingEntities) {
-    if (!e.position) continue;
-    const dx = e.position[0] - playerPos[0];
-    const dz = e.position[2] - playerPos[2];
-    const dist = dx * dx + dz * dz; // squared distance is fine for comparison
-    if (dist < nearestDist) {
-      nearestDist = dist;
-      nearest = e;
-    }
-  }
-
-  return nearest?.position || null;
-}
 
 // Configuration
 const DEFAULT_TICK_INTERVAL = 10000; // 10 seconds between decisions
@@ -360,89 +308,11 @@ export class AutonomousBehaviorManager {
       return;
     }
 
-    // STARTER ITEMS OVERRIDE: Force LOOT_STARTER_CHEST if goal is starter_items
-    // This bypasses LLM selection to ensure agent gets starter tools
-    if (this.currentGoal?.type === "starter_items") {
-      logger.info(
-        `[AutonomousBehavior] 📦 FORCE LOOT_STARTER_CHEST: Goal is starter_items`,
-      );
+    // NOTE: Removed STARTER ITEMS OVERRIDE - LLM now decides when to loot chest
+    // The LLM has full context about the starter_items goal and can choose appropriately
 
-      // Create message and state for the action
-      const lootMessage = this.createTickMessage();
-      const lootState = await this.runtime.composeState(lootMessage);
-
-      // Validate the action first
-      const isValid = await lootStarterChestAction.validate(
-        this.runtime,
-        lootMessage,
-        lootState,
-      );
-
-      if (isValid) {
-        // Execute loot starter chest directly, bypassing LLM selection
-        await this.executeAction(
-          lootStarterChestAction,
-          lootMessage,
-          lootState,
-        );
-        return;
-      } else {
-        logger.info(
-          `[AutonomousBehavior] LOOT_STARTER_CHEST validation failed - agent may already have tools`,
-        );
-        // Clear the goal since it's no longer valid (already have tools)
-        this.clearGoal();
-        // Fall through to normal tick processing to select a new goal
-      }
-    }
-
-    // COMBAT READINESS OVERRIDE: Force EQUIP_ITEM if combat goal but weapon not equipped
-    // This ensures agent equips a weapon before engaging in combat
-    // Check for any combat-related goal type (combat_training, combat_training_goblins, etc.)
-    const goalType = this.currentGoal?.type || "";
-    const isCombatGoal =
-      goalType.startsWith("combat") || goalType.includes("combat");
-
-    if (isCombatGoal) {
-      const player = this.service?.getPlayerEntity();
-      const hasWeaponEquipped = hasWeapon(player);
-      const hasCombatItem = hasCombatCapableItem(player);
-
-      logger.info(
-        `[AutonomousBehavior] 🔍 Combat readiness check: goalType=${goalType}, hasWeapon=${hasWeaponEquipped}, hasCombatItem=${hasCombatItem}`,
-      );
-
-      if (!hasWeaponEquipped && hasCombatItem) {
-        logger.info(
-          `[AutonomousBehavior] ⚔️ FORCE EQUIP_ITEM: Combat goal but weapon not equipped (has combat item in inventory)`,
-        );
-
-        // Import the equip action
-        const { equipItemAction } = await import("../actions/inventory.js");
-
-        // Create message and state for the action
-        const equipMessage = this.createTickMessage();
-        const equipState = await this.runtime.composeState(equipMessage);
-
-        // Validate the action first
-        const isValid = await equipItemAction.validate(
-          this.runtime,
-          equipMessage,
-          equipState,
-        );
-
-        if (isValid) {
-          // Execute equip item directly, bypassing LLM selection
-          await this.executeAction(equipItemAction, equipMessage, equipState);
-          return;
-        } else {
-          logger.info(
-            `[AutonomousBehavior] EQUIP_ITEM validation failed - may already have weapon equipped`,
-          );
-          // Fall through to normal tick processing
-        }
-      }
-    }
+    // NOTE: Removed COMBAT READINESS OVERRIDE - LLM now decides when to equip weapons
+    // The LLM has full context about combat goals and equipment status
 
     // Check for locked user command goal - continue executing it
     if (this.currentGoal?.locked && this.currentGoal?.lockedBy === "manual") {
@@ -567,37 +437,10 @@ export class AutonomousBehaviorManager {
       `[AutonomousBehavior] LLM selected action: ${selectedAction.name}`,
     );
 
-    // DEFENSIVE CHECK: Force SET_GOAL if there's no goal and LLM didn't select SET_GOAL
-    // This ensures the agent always has a goal before taking other actions
-    if (
-      !this.currentGoal &&
-      !this.goalPaused &&
-      selectedAction.name !== "SET_GOAL"
-    ) {
-      logger.warn(
-        `[AutonomousBehavior] ⚠️ No goal but LLM selected ${selectedAction.name} - forcing SET_GOAL`,
-      );
-      selectedAction = setGoalAction;
-    }
-
-    // DEFENSIVE CHECK: Force EQUIP_ITEM if "Prepare for Combat" goal and has equippable weapon
-    // This ensures the agent equips weapons before doing unrelated tasks like chopping wood
-    if (
-      this.currentGoal?.type === "exploration" &&
-      this.currentGoal?.description?.toLowerCase().includes("combat") &&
-      selectedAction.name !== "EQUIP_ITEM" &&
-      selectedAction.name !== "NAVIGATE_TO"
-    ) {
-      const player = this.service?.getPlayerEntity();
-      const hasWeaponEquipped = hasWeapon(player);
-
-      if (!hasWeaponEquipped && hasCombatCapableItem(player)) {
-        logger.warn(
-          `[AutonomousBehavior] ⚠️ "Prepare for Combat" goal but LLM selected ${selectedAction.name} - forcing EQUIP_ITEM`,
-        );
-        selectedAction = equipItemAction;
-      }
-    }
+    // NOTE: Removed defensive overrides - LLM now has full autonomy to:
+    // - Choose actions even without a goal (it will learn from context)
+    // - Choose when to equip weapons (it has equipment context)
+    // Only survival (FLEE) is still enforced above
 
     logger.info(
       `[AutonomousBehavior] Executing action: ${selectedAction.name}`,
@@ -614,80 +457,11 @@ export class AutonomousBehaviorManager {
         `[AutonomousBehavior] Action ${selectedAction.name} failed validation`,
       );
 
-      // Smart fallback: If a goal-related action failed (CHOP_TREE, ATTACK_ENTITY),
-      // try NAVIGATE_TO first to get to the goal location
-      const goalRelatedActions = [
-        "CHOP_TREE",
-        "ATTACK_ENTITY",
-        "APPROACH_ENTITY",
-      ];
-      if (goalRelatedActions.includes(selectedAction.name)) {
-        const goal = this.currentGoal;
-        if (goal?.location) {
-          logger.info(
-            `[AutonomousBehavior] Goal has location "${goal.location}", trying NAVIGATE_TO`,
-          );
-          const navValid = await navigateToAction.validate(
-            this.runtime,
-            tickMessage,
-            state,
-          );
-          if (navValid) {
-            logger.info(
-              "[AutonomousBehavior] NAVIGATE_TO validated, executing...",
-            );
-            await this.executeAction(navigateToAction, tickMessage, state);
-            return;
-          } else {
-            logger.info(
-              "[AutonomousBehavior] NAVIGATE_TO also failed validation",
-            );
-          }
-        }
-      }
+      // NOTE: Removed smart fallback logic that forced NAVIGATE_TO or goal actions
+      // LLM will try again next tick with updated context
+      // This gives more autonomy - let the LLM learn from failed validations
 
-      // Reverse fallback: If NAVIGATE_TO failed (already at location), try the goal's target action
-      if (selectedAction.name === "NAVIGATE_TO") {
-        const goal = this.currentGoal;
-        if (goal) {
-          let goalAction: Action | null = null;
-          if (goal.type === "woodcutting") {
-            goalAction = chopTreeAction;
-            logger.info(
-              "[AutonomousBehavior] At forest location, trying CHOP_TREE instead",
-            );
-          } else if (
-            goal.type?.startsWith("combat") ||
-            goal.type?.includes("combat")
-          ) {
-            goalAction = attackEntityAction;
-            logger.info(
-              "[AutonomousBehavior] At spawn location, trying ATTACK_ENTITY instead",
-            );
-          }
-
-          if (goalAction) {
-            const goalActionValid = await goalAction.validate(
-              this.runtime,
-              tickMessage,
-              state,
-            );
-            if (goalActionValid) {
-              logger.info(
-                `[AutonomousBehavior] ${goalAction.name} validated, executing...`,
-              );
-              await this.executeAction(goalAction, tickMessage, state);
-              return;
-            } else {
-              logger.info(
-                `[AutonomousBehavior] ${goalAction.name} also failed validation - may need to wait`,
-              );
-            }
-          }
-        }
-      }
-
-      // Final fallback to IDLE
+      // Simple fallback to IDLE - wait for next tick
       logger.info("[AutonomousBehavior] Falling back to IDLE");
       const idleValid = await idleAction.validate(
         this.runtime,
@@ -704,8 +478,12 @@ export class AutonomousBehaviorManager {
     await this.executeAction(selectedAction, tickMessage, state);
   }
 
+  /** Last LLM reasoning - synced to dashboard as agent thoughts */
+  private lastThinking: string = "";
+
   /**
    * Select an action using the LLM based on current state
+   * Now parses THINKING + ACTION format for genuine LLM reasoning
    */
   private async selectAction(
     _message: Memory,
@@ -714,33 +492,49 @@ export class AutonomousBehaviorManager {
     // Get available actions for autonomous behavior
     const availableActions = this.getAvailableActions();
 
-    // Build the action selection prompt
+    // Build the action selection prompt (now asks for THINKING + ACTION)
     const prompt = this.buildActionSelectionPrompt(state, availableActions);
 
     try {
-      // Use the LLM to select an action
+      // Use the LLM to select an action - allow longer response for reasoning
       const response = await this.runtime.useModel(ModelType.TEXT_SMALL, {
         prompt,
-        stopSequences: ["\n\n"],
+        stopSequences: [], // Don't cut off early - we want full reasoning
       });
 
       const responseText =
         typeof response === "string" ? response : String(response);
-      if (this.debug)
-        logger.debug(
-          `[AutonomousBehavior] LLM response: ${responseText.trim()}`,
-        );
 
-      // Parse the selected action from response
-      let selectedActionName = this.parseActionFromResponse(
+      // Parse THINKING and ACTION from the response
+      const { thinking, actionName } = this.parseThinkingAndAction(
         responseText,
         availableActions,
       );
+
+      // Store thinking for dashboard sync
+      if (thinking) {
+        this.lastThinking = thinking;
+        logger.info(`[AutonomousBehavior] LLM Thinking: ${thinking}`);
+
+        // Sync to dashboard via service
+        this.syncThinkingToDashboard(thinking);
+      }
+
+      if (this.debug) {
+        logger.debug(
+          `[AutonomousBehavior] LLM full response:\n${responseText.trim()}`,
+        );
+      }
+
+      let selectedActionName = actionName;
 
       if (!selectedActionName) {
         logger.warn(
           "[AutonomousBehavior] Could not parse action from LLM response, defaulting to EXPLORE",
         );
+        this.lastThinking =
+          "Could not determine action - exploring to find opportunities";
+        this.syncThinkingToDashboard(this.lastThinking);
         return exploreAction;
       }
 
@@ -749,8 +543,14 @@ export class AutonomousBehaviorManager {
         logger.info(
           "[AutonomousBehavior] Blocked SET_GOAL because goals are paused by user - forcing IDLE",
         );
+        this.lastThinking = "Goals are paused - waiting for direction";
+        this.syncThinkingToDashboard(this.lastThinking);
         selectedActionName = "IDLE";
       }
+
+      logger.info(
+        `[AutonomousBehavior] Selected action: ${selectedActionName}`,
+      );
 
       // Find the action object
       const action = availableActions.find(
@@ -762,9 +562,92 @@ export class AutonomousBehaviorManager {
         "[AutonomousBehavior] Error selecting action:",
         error instanceof Error ? error.message : String(error),
       );
-      // Default to EXPLORE on error
+      this.lastThinking = "Error occurred - exploring as fallback";
+      this.syncThinkingToDashboard(this.lastThinking);
       return exploreAction;
     }
+  }
+
+  /**
+   * Parse THINKING and ACTION from LLM response
+   * Handles format: "THINKING: [reasoning]\nACTION: [action_name]"
+   */
+  private parseThinkingAndAction(
+    response: string,
+    actions: Action[],
+  ): { thinking: string; actionName: string | null } {
+    let thinking = "";
+    let actionName: string | null = null;
+
+    // Try to extract THINKING section
+    const thinkingMatch = response.match(/THINKING:\s*(.+?)(?=ACTION:|$)/is);
+    if (thinkingMatch) {
+      thinking = thinkingMatch[1].trim();
+      // Clean up any trailing whitespace or newlines
+      thinking = thinking.replace(/\n+$/, "").trim();
+      // Limit length for dashboard display
+      if (thinking.length > 500) {
+        thinking = thinking.substring(0, 497) + "...";
+      }
+    }
+
+    // Try to extract ACTION section
+    const actionMatch = response.match(/ACTION:\s*(\w+)/i);
+    if (actionMatch) {
+      const rawAction = actionMatch[1].toUpperCase();
+      // Verify it's a valid action
+      const validAction = actions.find((a) => a.name === rawAction);
+      if (validAction) {
+        actionName = validAction.name;
+      }
+    }
+
+    // Fallback: if no ACTION: prefix, try to find any action name in the response
+    if (!actionName) {
+      actionName = this.parseActionFromResponse(response, actions);
+    }
+
+    // If no thinking was extracted but we have a response, use a cleaned version
+    if (!thinking && response.trim()) {
+      // Remove ACTION line and use rest as thinking
+      thinking = response
+        .replace(/ACTION:\s*\w+/gi, "")
+        .replace(/THINKING:/gi, "")
+        .trim();
+      if (thinking.length > 500) {
+        thinking = thinking.substring(0, 497) + "...";
+      }
+    }
+
+    return { thinking, actionName };
+  }
+
+  /**
+   * Sync the LLM's thinking to the dashboard for display
+   */
+  private syncThinkingToDashboard(thinking: string): void {
+    if (!this.service) return;
+
+    try {
+      // Use the service to sync thoughts to the server
+      // This will be displayed in the agent dashboard
+      this.service.syncThoughtsToServer(thinking);
+    } catch (error) {
+      // Non-critical - just log and continue
+      if (this.debug) {
+        logger.debug(
+          "[AutonomousBehavior] Could not sync thinking to dashboard:",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
+  }
+
+  /**
+   * Get the last LLM reasoning (for external access)
+   */
+  getLastThinking(): string {
+    return this.lastThinking;
   }
 
   /**
@@ -779,6 +662,7 @@ export class AutonomousBehaviorManager {
       mineRockAction, // For mining goals
       catchFishAction, // For fishing goals
       equipItemAction, // For equipping weapons/armor
+      lootStarterChestAction, // For getting starter tools
       exploreAction,
       fleeAction,
       idleAction,
@@ -787,109 +671,78 @@ export class AutonomousBehaviorManager {
   }
 
   /**
-   * Build prompt for action selection
+   * Build prompt for action selection with OSRS common sense knowledge
+   * This prompt gives the LLM context AND common sense rules so it can make intelligent decisions
    */
   private buildActionSelectionPrompt(state: State, actions: Action[]): string {
-    // Read goal directly from behavior manager (more reliable than evaluator state)
     const goal = this.currentGoal;
+    const player = this.service?.getPlayerEntity();
+    const nearbyEntities = this.service?.getNearbyEntities() || [];
+
+    // Extract player stats
+    const skills = player?.skills as
+      | Record<string, { level: number; xp: number }>
+      | undefined;
+    const skillsData = state.skillsData as
+      | { totalLevel?: number; combatLevel?: number }
+      | undefined;
 
     // Extract facts from evaluators
     const survivalFacts = (state.survivalFacts as string[]) || [];
     const combatFacts = (state.combatFacts as string[]) || [];
-    const combatRecommendations =
-      (state.combatRecommendations as string[]) || [];
-    const survivalRecommendations =
-      (state.survivalRecommendations as string[]) || [];
 
-    // Extract data from providers (populated by composeState)
-    const skillsData = state.skillsData as
-      | { totalLevel?: number; combatLevel?: number }
-      | undefined;
-    const skills = this.service?.getPlayerEntity()?.skills as
-      | Record<string, { level: number; xp: number }>
-      | undefined;
+    // Get equipment status using item detection utilities
+    const hasWeaponEquipped = hasWeapon(player);
+    const hasCombatItem = hasCombatCapableItem(player);
+    const playerHasOre = hasOre(player);
+    const playerHasBars = hasBars(player);
 
-    const lines = [
-      "You are an AI agent playing a 3D RPG game. Select ONE action to perform.",
-      "You should have a GOAL and work towards it purposefully, not wander randomly.",
-      "",
-    ];
+    // Check for specific tools in inventory
+    const inventory = player?.items || [];
+    const inventoryNames = inventory.map(
+      (item: { name?: string; itemId?: string }) =>
+        (item.name || item.itemId || "").toLowerCase(),
+    );
+    const hasAxe = inventoryNames.some(
+      (n: string) => n.includes("axe") || n.includes("hatchet"),
+    );
+    const hasPickaxe = inventoryNames.some((n: string) =>
+      n.includes("pickaxe"),
+    );
+    const hasTinderbox = inventoryNames.some((n: string) =>
+      n.includes("tinderbox"),
+    );
+    const hasNet = inventoryNames.some(
+      (n: string) => n.includes("net") || n.includes("rod"),
+    );
+    const hasFood = inventoryNames.some(
+      (n: string) =>
+        n.includes("shrimp") ||
+        n.includes("bread") ||
+        n.includes("meat") ||
+        n.includes("fish") ||
+        n.includes("cooked") ||
+        n.includes("trout") ||
+        n.includes("salmon"),
+    );
+    const hasLogs = inventoryNames.some((n: string) => n.includes("log"));
 
-    // Add skills summary if available
-    if (skills) {
-      lines.push("=== YOUR SKILLS ===");
-      const combatSkills = ["attack", "strength", "defense", "constitution"];
-      for (const skillName of combatSkills) {
-        const skill = skills[skillName];
-        if (skill) {
-          lines.push(`  ${skillName}: Level ${skill.level} (${skill.xp} XP)`);
-        }
-      }
-      if (skillsData?.combatLevel) {
-        lines.push(`  Combat Level: ${skillsData.combatLevel}`);
-      }
-      lines.push("");
+    // Calculate health
+    const playerAny = player as unknown as Record<string, unknown>;
+    let currentHealth = 100,
+      maxHealth = 100;
+    if (player?.health && typeof player.health === "object") {
+      currentHealth = player.health.current ?? 100;
+      maxHealth = player.health.max ?? 100;
+    } else if (typeof player?.health === "number") {
+      currentHealth = player.health;
+      maxHealth = (playerAny?.maxHealth as number) ?? 100;
     }
+    const healthPercent =
+      maxHealth > 0 ? Math.round((currentHealth / maxHealth) * 100) : 100;
 
-    lines.push("=== GOAL STATUS ===");
-
-    // Add goal info directly from behavior manager
-    if (goal) {
-      lines.push(`  Goal: ${goal.description}`);
-      lines.push(`  Type: ${goal.type}`);
-      lines.push(`  Kill Progress: ${goal.progress}/${goal.target}`);
-      if (goal.location) lines.push(`  Location: ${goal.location}`);
-      if (goal.targetEntity) lines.push(`  Target: ${goal.targetEntity}`);
-
-      // Show skill-based progress if applicable
-      if (goal.targetSkill && goal.targetSkillLevel && skills) {
-        const currentLevel = skills[goal.targetSkill]?.level ?? 0;
-        const skillProgress = `${currentLevel}/${goal.targetSkillLevel}`;
-        lines.push(`  Skill Goal: ${goal.targetSkill} ${skillProgress}`);
-        if (currentLevel >= goal.targetSkillLevel) {
-          lines.push("  ** SKILL GOAL REACHED! **");
-        }
-      }
-
-      // Add recommendation based on goal type
-      if (goal.progress >= goal.target) {
-        lines.push("  ** KILL GOAL COMPLETE! Set a new goal. **");
-      }
-    } else {
-      lines.push("  ** NO ACTIVE GOAL ** - You MUST use SET_GOAL first!");
-    }
-
-    // Add survival facts
-    if (survivalFacts.length > 0) {
-      lines.push("");
-      lines.push("Survival Status:");
-      survivalFacts.forEach((f) => lines.push(`  ${f}`));
-    }
-
-    // Add combat facts
-    if (combatFacts.length > 0) {
-      lines.push("");
-      lines.push("Combat:");
-      combatFacts.forEach((f) => lines.push(`  ${f}`));
-    }
-
-    // Add all recommendations
-    const allRecommendations = [
-      ...survivalRecommendations,
-      ...combatRecommendations,
-    ].filter(Boolean);
-    if (allRecommendations.length > 0) {
-      lines.push("");
-      lines.push("Recommendations:");
-      allRecommendations.forEach((r) => lines.push(`  ${r}`));
-    }
-
-    // === DYNAMIC NEARBY ENTITIES SECTION ===
-    // Let the LLM see what's nearby and figure out the appropriate action
-    const nearbyEntities = this.service?.getNearbyEntities() || [];
-    const playerPos = this.service?.getPlayerEntity()?.position;
-
-    // Categorize nearby entities dynamically
+    // Calculate distance helper
+    const playerPos = player?.position;
     const getDistance = (entityPos: unknown): number | null => {
       if (!playerPos || !entityPos) return null;
       let ex = 0,
@@ -917,42 +770,38 @@ export class AutonomousBehaviorManager {
       return Math.sqrt((px - ex) ** 2 + (pz - ez) ** 2);
     };
 
-    // Count nearby resource types (within 20m approach range)
+    // Count nearby entities
     let treesNearby = 0,
       rocksNearby = 0,
       fishingSpotsNearby = 0,
       mobsNearby = 0;
+    let starterChestNearby = false;
     const mobNames: string[] = [];
 
     for (const entity of nearbyEntities) {
       const entityAny = entity as unknown as Record<string, unknown>;
       const dist = getDistance(entityAny.position);
-      if (dist === null || dist > 20) continue;
-      if (entityAny.depleted === true) continue; // Skip depleted resources
+      if (dist === null || dist > 25) continue;
+      if (entityAny.depleted === true) continue;
 
       const name = entity.name?.toLowerCase() || "";
       const resourceType = entityAny.resourceType as string | undefined;
+      const entityType = entityAny.entityType as string | undefined;
 
-      // Trees
-      if (resourceType === "tree" || name.includes("tree")) {
+      if (entityType === "starter_chest" || name.includes("starter")) {
+        starterChestNearby = true;
+      } else if (resourceType === "tree" || name.includes("tree")) {
         treesNearby++;
-      }
-      // Rocks/Ore
-      else if (
+      } else if (
         resourceType === "rock" ||
         resourceType === "ore" ||
         name.includes("rock") ||
-        name.includes("ore") ||
         /copper|tin|iron|coal/i.test(name)
       ) {
         rocksNearby++;
-      }
-      // Fishing spots
-      else if (resourceType === "fishing_spot" || name.includes("fishing")) {
+      } else if (resourceType === "fishing_spot" || name.includes("fishing")) {
         fishingSpotsNearby++;
-      }
-      // Mobs
-      else if (
+      } else if (
         entityAny.mobType ||
         entityAny.type === "mob" ||
         /goblin|bandit|skeleton|zombie|rat|spider|wolf/i.test(name)
@@ -964,291 +813,198 @@ export class AutonomousBehaviorManager {
       }
     }
 
+    // Build the prompt with THINKING + ACTION format
+    const lines: string[] = [];
+
+    // === SYSTEM INSTRUCTION ===
+    lines.push(
+      "You are an AI agent playing an OSRS-style RPG. Think through your decision step by step.",
+    );
     lines.push("");
-    lines.push("=== NEARBY RESOURCES (informational only) ===");
-    if (treesNearby > 0) lines.push(`  🌲 Trees: ${treesNearby}`);
-    if (rocksNearby > 0) lines.push(`  �ite Rocks/Ore: ${rocksNearby}`);
+    lines.push("RESPONSE FORMAT:");
+    lines.push("THINKING: [Your reasoning about what to do and why]");
+    lines.push("ACTION: [The action name to take]");
+    lines.push("");
+
+    // === OSRS COMMON SENSE RULES ===
+    lines.push("=== GAME KNOWLEDGE (Important!) ===");
+    lines.push("These are the fundamental rules of the game:");
+    lines.push("");
+    lines.push("GATHERING SKILLS:");
+    lines.push(
+      "- Woodcutting: You NEED an axe/hatchet to chop trees. Without one, you cannot cut trees.",
+    );
+    lines.push(
+      "- Mining: You NEED a pickaxe to mine rocks. Without one, you cannot mine ore.",
+    );
+    lines.push(
+      "- Fishing: You NEED a fishing net or rod to catch fish. Without one, you cannot fish.",
+    );
+    lines.push("- Firemaking: You NEED a tinderbox AND logs to make a fire.");
+    lines.push("");
+    lines.push("COMBAT:");
+    lines.push(
+      "- You fight MUCH better with a weapon equipped. Unarmed combat is very weak.",
+    );
+    lines.push(
+      "- If you have a weapon in inventory but not equipped, EQUIP IT before fighting!",
+    );
+    lines.push(
+      "- Having food lets you heal during combat. Without food, you might die.",
+    );
+    lines.push("- If health drops below 30%, you should FLEE to survive.");
+    lines.push("");
+    lines.push("STARTER EQUIPMENT:");
+    lines.push(
+      "- New players should look for a STARTER CHEST near spawn to get basic tools.",
+    );
+    lines.push(
+      "- The starter chest gives: bronze hatchet, bronze pickaxe, tinderbox, fishing net, food.",
+    );
+    lines.push("- You can only loot the starter chest ONCE per character.");
+    lines.push("");
+    lines.push("GENERAL LOGIC:");
+    lines.push("- Have a goal and work toward it. Don't wander aimlessly.");
+    lines.push(
+      "- If you need to be somewhere specific, NAVIGATE_TO that location first.",
+    );
+    lines.push(
+      "- If the resources/mobs for your goal aren't nearby, travel to where they are.",
+    );
+    lines.push(
+      "- Only use IDLE if you're genuinely waiting for something (like health regen).",
+    );
+    lines.push("");
+
+    // === CURRENT STATUS ===
+    lines.push("=== YOUR CURRENT STATUS ===");
+    lines.push(`Health: ${healthPercent}% (${currentHealth}/${maxHealth})`);
+    lines.push(`In Combat: ${player?.inCombat ? "Yes" : "No"}`);
+    if (skills) {
+      const combatSkills = ["attack", "strength", "defense"];
+      const skillSummary = combatSkills
+        .map((s) => (skills[s] ? `${s}:${skills[s].level}` : null))
+        .filter(Boolean)
+        .join(", ");
+      if (skillSummary) lines.push(`Combat Skills: ${skillSummary}`);
+      if (skillsData?.combatLevel)
+        lines.push(`Combat Level: ${skillsData.combatLevel}`);
+    }
+    lines.push("");
+
+    // === INVENTORY/EQUIPMENT ===
+    lines.push("=== YOUR EQUIPMENT & INVENTORY ===");
+    lines.push(`Weapon Equipped: ${hasWeaponEquipped ? "YES" : "NO"}`);
+    if (!hasWeaponEquipped && hasCombatItem) {
+      lines.push(
+        `>>> You have a COMBAT WEAPON in inventory but NOT equipped! <<<`,
+      );
+    }
+    lines.push(`Has Axe/Hatchet: ${hasAxe ? "Yes" : "No"}`);
+    lines.push(`Has Pickaxe: ${hasPickaxe ? "Yes" : "No"}`);
+    lines.push(`Has Fishing Equipment: ${hasNet ? "Yes" : "No"}`);
+    lines.push(`Has Tinderbox: ${hasTinderbox ? "Yes" : "No"}`);
+    lines.push(`Has Food: ${hasFood ? "Yes" : "No"}`);
+    lines.push(`Has Logs: ${hasLogs ? "Yes" : "No"}`);
+    if (playerHasOre) lines.push(`Has Ore: Yes (can smelt at furnace)`);
+    if (playerHasBars) lines.push(`Has Bars: Yes (can smith at anvil)`);
+    lines.push("");
+
+    // === GOAL STATUS ===
+    lines.push("=== YOUR CURRENT GOAL ===");
+    if (goal) {
+      lines.push(`Goal: ${goal.description}`);
+      lines.push(`Type: ${goal.type}`);
+      if (goal.targetSkill && goal.targetSkillLevel && skills) {
+        const currentLevel = skills[goal.targetSkill]?.level ?? 1;
+        lines.push(
+          `Skill Progress: ${goal.targetSkill} level ${currentLevel}/${goal.targetSkillLevel}`,
+        );
+        if (currentLevel >= goal.targetSkillLevel) {
+          lines.push(
+            `*** GOAL COMPLETE! You've reached level ${goal.targetSkillLevel}. Set a new goal. ***`,
+          );
+        }
+      } else {
+        lines.push(`Progress: ${goal.progress}/${goal.target}`);
+        if (goal.progress >= goal.target) {
+          lines.push(`*** GOAL COMPLETE! Set a new goal. ***`);
+        }
+      }
+      if (goal.location) lines.push(`Target Location: ${goal.location}`);
+      if (goal.targetEntity) lines.push(`Target Entity: ${goal.targetEntity}`);
+    } else if (this.goalPaused) {
+      lines.push("Goals are PAUSED by user. Wait for direction or use IDLE.");
+    } else {
+      lines.push("*** NO GOAL SET ***");
+      lines.push("You should SET_GOAL to give yourself direction!");
+    }
+    lines.push("");
+
+    // === NEARBY ENVIRONMENT ===
+    lines.push("=== WHAT'S NEARBY ===");
+    if (starterChestNearby)
+      lines.push(`STARTER CHEST: Yes! (can get starter tools)`);
+    if (treesNearby > 0) lines.push(`Trees: ${treesNearby} (need axe to chop)`);
+    if (rocksNearby > 0)
+      lines.push(`Rocks/Ore: ${rocksNearby} (need pickaxe to mine)`);
     if (fishingSpotsNearby > 0)
-      lines.push(`  🎣 Fishing spots: ${fishingSpotsNearby}`);
+      lines.push(`Fishing Spots: ${fishingSpotsNearby} (need net/rod)`);
     if (mobsNearby > 0)
-      lines.push(`  ⚔️ Mobs: ${mobsNearby} - ${mobNames.join(", ")}`);
+      lines.push(`Attackable Mobs: ${mobsNearby} - ${mobNames.join(", ")}`);
     if (
+      !starterChestNearby &&
       treesNearby === 0 &&
       rocksNearby === 0 &&
       fishingSpotsNearby === 0 &&
       mobsNearby === 0
     ) {
-      lines.push("  (No harvestable resources or attackable mobs nearby)");
+      lines.push("(Nothing of interest nearby - consider traveling)");
+    }
+    lines.push("");
+
+    // === KNOWN LOCATIONS ===
+    lines.push("=== WORLD LOCATIONS ===");
+    lines.push("spawn: [0, 0] - Starting area with goblins for combat");
+    lines.push(
+      `forest: [${KNOWN_LOCATIONS.forest?.position[0]}, ${KNOWN_LOCATIONS.forest?.position[2]}] - Trees for woodcutting`,
+    );
+    lines.push(
+      `mine: [${KNOWN_LOCATIONS.mine?.position[0]}, ${KNOWN_LOCATIONS.mine?.position[2]}] - Rocks for mining`,
+    );
+    lines.push(
+      `fishing: [${KNOWN_LOCATIONS.fishing?.position[0]}, ${KNOWN_LOCATIONS.fishing?.position[2]}] - Fishing spots`,
+    );
+    lines.push("");
+
+    // === SURVIVAL WARNINGS ===
+    if (survivalFacts.length > 0 || combatFacts.length > 0) {
+      lines.push("=== WARNINGS ===");
+      survivalFacts.forEach((f) => lines.push(`! ${f}`));
+      combatFacts.forEach((f) => lines.push(`! ${f}`));
+      lines.push("");
     }
 
-    lines.push("");
+    // === AVAILABLE ACTIONS ===
     lines.push("=== AVAILABLE ACTIONS ===");
     for (const action of actions) {
       lines.push(`${action.name}: ${action.description}`);
     }
-
     lines.push("");
-    lines.push("=== KNOWN LOCATIONS ===");
-    lines.push(`  spawn: [0, 0] - Goblins for combat training`);
-    lines.push(
-      `  forest: [${KNOWN_LOCATIONS.forest?.position[0]}, ${KNOWN_LOCATIONS.forest?.position[2]}] - Trees for woodcutting`,
-    );
-    lines.push(
-      `  mine: [${KNOWN_LOCATIONS.mine?.position[0]}, ${KNOWN_LOCATIONS.mine?.position[2]}] - Rocks for mining`,
-    );
-    lines.push(
-      `  fishing: [${KNOWN_LOCATIONS.fishing?.position[0]}, ${KNOWN_LOCATIONS.fishing?.position[2]}] - Fishing spots`,
-    );
 
+    // === DECISION GUIDANCE ===
+    lines.push("=== MAKE YOUR DECISION ===");
+    lines.push("Think about:");
+    lines.push("1. What is your goal? Do you have one?");
+    lines.push("2. Do you have the required tools/equipment for your goal?");
+    lines.push(
+      "3. Are the resources/mobs for your goal nearby, or do you need to travel?",
+    );
+    lines.push("4. Is your health safe? Should you flee or heal?");
     lines.push("");
-    lines.push("=== DECISION GUIDELINES ===");
-    lines.push(
-      "1. CRITICAL: If health < 30% with threats nearby → FLEE immediately",
-    );
-    lines.push("2. If NO GOAL → SET_GOAL (you must have purpose!)");
-    lines.push("3. If starter_items goal → LOOT_STARTER_CHEST");
-    lines.push(
-      "4. ** IMPORTANT: Follow the RECOMMENDED ACTION below if one is shown! **",
-    );
-    lines.push("5. If 'Prepare for Combat' goal:");
-    lines.push(
-      "   - If you have axe/pickaxe/sword in inventory → EQUIP_ITEM (these are weapons!)",
-    );
-    lines.push(
-      "   - If no weapon in inventory → MINE_ROCK to get ore, then smith",
-    );
-    lines.push(
-      "6. Match your goal to nearby resources ONLY if no recommended action:",
-    );
-    lines.push("   - woodcutting goal + trees nearby → CHOP_TREE");
-    lines.push("   - mining goal + rocks nearby → MINE_ROCK");
-    lines.push("   - fishing goal + fishing spots nearby → CATCH_FISH");
-    lines.push("   - combat_training goal + mobs nearby → ATTACK_ENTITY");
-    lines.push(
-      "7. If goal resources NOT nearby → NAVIGATE_TO the appropriate location",
-    );
-    lines.push(
-      "8. If at location but resources not visible → EXPLORE the area",
-    );
-
-    // === MINIMAL GUARDRAILS (only critical safety checks) ===
-    let priorityAction: string | null = null;
-
-    if (!goal) {
-      // No goal - must set one (unless paused)
-      if (this.goalPaused) {
-        priorityAction = "IDLE";
-        lines.push("");
-        lines.push("** GOALS PAUSED ** - Waiting for user to set a new goal");
-      } else {
-        priorityAction = "SET_GOAL";
-        lines.push("");
-        lines.push("** NO GOAL - You MUST use SET_GOAL first! **");
-      }
-    } else if (goal.type === "woodcutting") {
-      // Woodcutting goal - force CHOP_TREE if trees are nearby, else NAVIGATE_TO forest
-      if (treesNearby > 0) {
-        priorityAction = "CHOP_TREE";
-        lines.push("");
-        lines.push(
-          `** WOODCUTTING GOAL - ${treesNearby} trees nearby! Use CHOP_TREE to continue training! **`,
-        );
-      } else {
-        // No trees nearby - navigate to forest
-        if (this.currentGoal) {
-          this.currentGoal.location = "forest";
-        }
-        priorityAction = "NAVIGATE_TO";
-        lines.push("");
-        lines.push(
-          "** WOODCUTTING GOAL - No trees nearby! Use NAVIGATE_TO to get to the forest! **",
-        );
-      }
-    } else if (goal.type === "mining") {
-      // Mining goal - force MINE_ROCK if rocks are nearby, else NAVIGATE_TO mine
-      if (rocksNearby > 0) {
-        priorityAction = "MINE_ROCK";
-        lines.push("");
-        lines.push(
-          `** MINING GOAL - ${rocksNearby} rocks nearby! Use MINE_ROCK to continue training! **`,
-        );
-      } else {
-        // No rocks nearby - navigate to mine
-        if (this.currentGoal) {
-          this.currentGoal.location = "mine";
-        }
-        priorityAction = "NAVIGATE_TO";
-        lines.push("");
-        lines.push(
-          "** MINING GOAL - No rocks nearby! Use NAVIGATE_TO to get to the mine! **",
-        );
-      }
-    } else if (goal.type === "fishing") {
-      // Fishing goal - force CATCH_FISH if fishing spots are nearby, else NAVIGATE_TO fishing
-      if (fishingSpotsNearby > 0) {
-        priorityAction = "CATCH_FISH";
-        lines.push("");
-        lines.push(
-          `** FISHING GOAL - ${fishingSpotsNearby} fishing spots nearby! Use CATCH_FISH to continue training! **`,
-        );
-      } else {
-        // No fishing spots nearby - navigate to fishing area
-        if (this.currentGoal) {
-          this.currentGoal.location = "fishing";
-        }
-        priorityAction = "NAVIGATE_TO";
-        lines.push("");
-        lines.push(
-          "** FISHING GOAL - No fishing spots nearby! Use NAVIGATE_TO to get to the fishing area! **",
-        );
-      }
-    } else if (
-      goal.type?.startsWith("combat") ||
-      goal.type?.includes("combat")
-    ) {
-      // Combat training goal - check combat readiness first, then attack or navigate
-      const player = this.service?.getPlayerEntity();
-      const hasWeaponEquipped = hasWeapon(player);
-      const hasCombatItem = hasCombatCapableItem(player);
-
-      // First priority: equip a weapon if we have one but it's not equipped
-      if (!hasWeaponEquipped && hasCombatItem) {
-        priorityAction = "EQUIP_ITEM";
-        lines.push("");
-        lines.push(
-          "** COMBAT GOAL - You have a weapon in inventory but it's not equipped! Use EQUIP_ITEM first! **",
-        );
-      } else if (mobsNearby > 0) {
-        // Have weapon (or no weapon available) and mobs nearby - attack
-        priorityAction = "ATTACK_ENTITY";
-        lines.push("");
-        if (!hasWeaponEquipped) {
-          lines.push(
-            `** COMBAT GOAL - ${mobsNearby} mobs nearby but NO WEAPON! Consider getting a weapon first. **`,
-          );
-        } else {
-          lines.push(
-            `** COMBAT GOAL - ${mobsNearby} mobs nearby (${mobNames.join(", ")})! Use ATTACK_ENTITY to continue training! **`,
-          );
-        }
-      } else {
-        // No mobs nearby - navigate to spawn area
-        if (this.currentGoal) {
-          this.currentGoal.location = "spawn";
-        }
-        priorityAction = "NAVIGATE_TO";
-        lines.push("");
-        lines.push(
-          "** COMBAT GOAL - No mobs nearby! Use NAVIGATE_TO to get to the spawn area! **",
-        );
-      }
-    } else if (goal.type === "starter_items") {
-      // Starter items is a special case - always loot chest
-      priorityAction = "LOOT_STARTER_CHEST";
-      lines.push("");
-      lines.push(
-        "** STARTER ITEMS GOAL - Use LOOT_STARTER_CHEST to get tools! **",
-      );
-    } else if (
-      goal.type === "exploration" &&
-      goal.description?.toLowerCase().includes("combat")
-    ) {
-      // "Prepare for Combat" goal - need to get a weapon equipped
-      const player = this.service?.getPlayerEntity();
-      const hasWeaponEquipped = hasWeapon(player);
-      const hasCombatItem = hasCombatCapableItem(player);
-      const playerHasOre = hasOre(player);
-      const playerHasBars = hasBars(player);
-
-      if (!hasWeaponEquipped && hasCombatItem) {
-        // Has a combat-capable item in inventory - equip it!
-        priorityAction = "EQUIP_ITEM";
-        lines.push("");
-        lines.push(
-          "** PREPARE FOR COMBAT - You have a weapon in inventory! Use EQUIP_ITEM to equip it! **",
-        );
-      } else if (!hasWeaponEquipped && !playerHasOre && !playerHasBars) {
-        // No weapon and no materials - need to mine ore first
-        if (rocksNearby > 0) {
-          priorityAction = "MINE_ROCK";
-          lines.push("");
-          lines.push(
-            "** PREPARE FOR COMBAT - No weapon! Use MINE_ROCK to gather ore for smithing! **",
-          );
-        } else {
-          // Try to find rocks/mine dynamically from nearby entities
-          const nearbyEntities = this.service?.getNearbyEntities() || [];
-          const playerPos = player?.position as [number, number, number] | null;
-          const rockPos = findNearestEntityPosition(
-            nearbyEntities,
-            ["rock", "ore", "mine"],
-            playerPos,
-          );
-
-          if (this.currentGoal) {
-            if (rockPos) {
-              // Found a rock/mine - set dynamic position
-              this.currentGoal.targetPosition = rockPos;
-              this.currentGoal.location = "mine";
-            } else {
-              // Fall back to KNOWN_LOCATIONS
-              this.currentGoal.location = "mine";
-            }
-          }
-          priorityAction = "NAVIGATE_TO";
-          lines.push("");
-          lines.push(
-            "** PREPARE FOR COMBAT - No weapon! Use NAVIGATE_TO to get to the mine for ore! **",
-          );
-        }
-      } else if (!hasWeaponEquipped && (playerHasOre || playerHasBars)) {
-        // Has materials - need to find furnace or anvil
-        const nearbyEntities = this.service?.getNearbyEntities() || [];
-        const playerPos = player?.position as [number, number, number] | null;
-        const targetType = playerHasOre ? "furnace" : "anvil";
-        const stationPos = findNearestEntityPosition(
-          nearbyEntities,
-          [targetType],
-          playerPos,
-        );
-
-        if (this.currentGoal) {
-          if (stationPos) {
-            // Found the station - set dynamic position
-            this.currentGoal.targetPosition = stationPos;
-            this.currentGoal.location = targetType;
-          } else {
-            // Fall back to KNOWN_LOCATIONS
-            this.currentGoal.location = targetType;
-          }
-        }
-        priorityAction = "NAVIGATE_TO";
-        lines.push("");
-        lines.push(
-          `** PREPARE FOR COMBAT - You have ore/bars! Use NAVIGATE_TO to find a ${targetType} to smith a weapon. **`,
-        );
-      }
-    }
-    // For all other goals, let the LLM figure it out based on:
-    // - Current goal type
-    // - Nearby resources listed above
-    // - Available actions and known locations
-
-    if (priorityAction) {
-      lines.push("");
-      lines.push("╔════════════════════════════════════════════╗");
-      lines.push(`║  >>> YOU MUST USE: ${priorityAction} <<<`);
-      lines.push("╚════════════════════════════════════════════╝");
-    }
-
+    lines.push("Now reason through your decision:");
     lines.push("");
-    if (priorityAction) {
-      lines.push(`Respond with ONLY: ${priorityAction}`);
-    } else {
-      lines.push(
-        "Respond with ONLY the action name (e.g., SET_GOAL or ATTACK_ENTITY or NAVIGATE_TO):",
-      );
-    }
+    lines.push("THINKING:");
 
     return lines.join("\n");
   }

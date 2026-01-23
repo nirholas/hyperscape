@@ -4,20 +4,17 @@ import { Agent } from "../../screens/DashboardScreen";
 import {
   ChevronDown,
   ChevronUp,
-  Brain,
-  Lightbulb,
-  Target,
-  Check,
-  Trash2,
+  Scroll,
+  Clock,
   RefreshCw,
-  X,
-  Maximize2,
   Minimize2,
+  Maximize2,
 } from "lucide-react";
 
 // Configuration constants
 const THOUGHTS_POLL_INTERVAL_MS = 3000;
 const MAX_THOUGHTS_DISPLAYED = 20;
+const FLASH_DURATION_MS = 1500; // How long the "new thought" flash lasts
 
 interface AgentThought {
   id: string;
@@ -29,36 +26,6 @@ interface AgentThought {
 interface AgentThoughtsOverlayProps {
   agent: Agent;
 }
-
-const getThoughtIcon = (type: AgentThought["type"], size = 12) => {
-  switch (type) {
-    case "situation":
-      return <Brain size={size} className="text-blue-400" />;
-    case "evaluation":
-      return <Target size={size} className="text-yellow-400" />;
-    case "thinking":
-      return <Lightbulb size={size} className="text-purple-400" />;
-    case "decision":
-      return <Check size={size} className="text-green-400" />;
-    default:
-      return <Brain size={size} className="text-[#f2d08a]" />;
-  }
-};
-
-const getThoughtBgColor = (type: AgentThought["type"]) => {
-  switch (type) {
-    case "situation":
-      return "bg-blue-500/10 border-blue-500/30";
-    case "evaluation":
-      return "bg-yellow-500/10 border-yellow-500/30";
-    case "thinking":
-      return "bg-purple-500/10 border-purple-500/30";
-    case "decision":
-      return "bg-green-500/10 border-green-500/30";
-    default:
-      return "bg-[#f2d08a]/10 border-[#f2d08a]/30";
-  }
-};
 
 const formatTimeAgo = (timestamp: number): string => {
   const diff = Date.now() - timestamp;
@@ -72,55 +39,28 @@ const formatTimeAgo = (timestamp: number): string => {
   return "just now";
 };
 
+const cleanThoughtContent = (content: string): string => {
+  let cleaned = content.replace(/\*\*/g, "");
+  cleaned = cleaned.trim().replace(/\n{3,}/g, "\n\n");
+  return cleaned;
+};
+
 const renderThoughtContent = (content: string): React.ReactNode => {
-  const lines = content.split("\n");
+  const cleaned = cleanThoughtContent(content);
+  const lines = cleaned.split("\n");
 
-  return lines.map((line, idx) => {
-    if (idx === 0 && !line.trim()) return null;
-
-    if (line.startsWith("**") && line.endsWith("**") && line.includes(" ")) {
-      const text = line.slice(2, -2);
-      return (
-        <div key={idx} className="font-bold text-[#f2d08a] mb-1">
-          {text}
-        </div>
-      );
-    }
-
-    const parts: React.ReactNode[] = [];
-    let lastIdx = 0;
-    const boldRegex = /\*\*(.+?)\*\*/g;
-    let match;
-
-    while ((match = boldRegex.exec(line)) !== null) {
-      if (match.index > lastIdx) {
-        parts.push(line.slice(lastIdx, match.index));
-      }
-      parts.push(
-        <span
-          key={`bold-${idx}-${match.index}`}
-          className="font-bold text-[#f2d08a]"
-        >
-          {match[1]}
-        </span>,
-      );
-      lastIdx = match.index + match[0].length;
-    }
-
-    if (lastIdx < line.length) {
-      parts.push(line.slice(lastIdx));
-    }
-
-    if (parts.length === 0) {
-      return <div key={idx} className="h-1" />;
-    }
-
-    return (
-      <div key={idx} className="text-[10px] text-[#e8ebf4]/80 leading-relaxed">
-        {parts}
-      </div>
-    );
-  });
+  return (
+    <div className="space-y-1">
+      {lines.map((line, idx) => {
+        if (!line.trim()) return null;
+        return (
+          <p key={idx} className="text-[11px] text-[#e8dcc8] leading-relaxed">
+            {line}
+          </p>
+        );
+      })}
+    </div>
+  );
 };
 
 export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
@@ -128,11 +68,20 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
 }) => {
   const [thoughts, setThoughts] = useState<AgentThought[]>([]);
   const [loading, setLoading] = useState(false);
-  const [expanded, setExpanded] = useState(true);
   const [minimized, setMinimized] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [isNewThought, setIsNewThought] = useState(false);
   const lastTimestampRef = useRef<number>(0);
+  const lastThoughtIdRef = useRef<string | null>(null);
+
+  // Flash effect when new thought arrives
+  useEffect(() => {
+    if (isNewThought) {
+      const timer = setTimeout(() => setIsNewThought(false), FLASH_DURATION_MS);
+      return () => clearTimeout(timer);
+    }
+  }, [isNewThought]);
 
   useEffect(() => {
     if (agent.status !== "active") {
@@ -144,12 +93,6 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
     const interval = setInterval(fetchThoughts, THOUGHTS_POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [agent.id, agent.status]);
-
-  useEffect(() => {
-    if (scrollRef.current && thoughts.length > 0) {
-      scrollRef.current.scrollTop = 0;
-    }
-  }, [thoughts]);
 
   const fetchThoughts = async () => {
     try {
@@ -174,6 +117,16 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
       if (data.thoughts && data.thoughts.length > 0) {
         lastTimestampRef.current = data.thoughts[0].timestamp;
 
+        // Check if there's a new thought
+        const latestId = data.thoughts[0]?.id;
+        if (latestId && latestId !== lastThoughtIdRef.current) {
+          lastThoughtIdRef.current = latestId;
+          // Only flash if we had a previous thought (not on initial load)
+          if (thoughts.length > 0) {
+            setIsNewThought(true);
+          }
+        }
+
         setThoughts((prev) => {
           const existingIds = new Set(prev.map((t) => t.id));
           const newThoughts = data.thoughts.filter(
@@ -196,176 +149,205 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
     }
   };
 
-  const handleClearThoughts = async () => {
-    try {
-      const response = await fetch(
-        `${GAME_API_URL}/api/agents/${agent.id}/thoughts`,
-        { method: "DELETE" },
-      );
-
-      if (!response.ok) {
-        throw new Error("Failed to clear thoughts");
-      }
-
-      setThoughts([]);
-      lastTimestampRef.current = 0;
-    } catch (err) {
-      console.error("[AgentThoughtsOverlay] Error clearing thoughts:", err);
-      setError("Failed to clear");
-    }
-  };
-
   // Don't show if agent is inactive
   if (agent.status !== "active") {
     return null;
   }
 
-  // Minimized state - just show a small button
+  // Get latest thinking thought
+  const latestThinking =
+    thoughts.find((t) => t.type === "thinking") || thoughts[0];
+  const olderThoughts = thoughts
+    .filter((t) => t.id !== latestThinking?.id)
+    .slice(0, 5);
+
+  // Minimized state - compact pill button
   if (minimized) {
     return (
       <button
         onClick={() => setMinimized(false)}
-        className="bg-black/70 backdrop-blur-md border border-purple-500/30 rounded-lg p-2 flex items-center gap-2 hover:bg-black/80 hover:border-purple-500/50 transition-all shadow-lg"
+        className="group bg-[#1a150a]/95 backdrop-blur-md border border-[#8b4513]/40 rounded-full px-3 py-1.5 flex items-center gap-2 hover:border-[#c9a227]/50 hover:bg-[#2a1f0f] transition-all shadow-lg"
       >
-        <Brain size={16} className="text-purple-400" />
-        <span className="text-xs font-bold text-[#f2d08a]">Thoughts</span>
+        <Scroll size={14} className="text-[#c9a227]" />
+        <span className="text-[11px] font-medium text-[#f2d08a]/80">Mind</span>
         {thoughts.length > 0 && (
-          <span className="text-[10px] bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded">
-            {thoughts.length}
-          </span>
+          <>
+            <div className="w-1 h-1 rounded-full bg-[#4ade80] animate-pulse" />
+            <span className="text-[10px] text-[#c9a227]/70">
+              {thoughts.length}
+            </span>
+          </>
         )}
-        <Maximize2 size={12} className="text-[#f2d08a]/40" />
+        <Maximize2
+          size={10}
+          className="text-[#f2d08a]/30 group-hover:text-[#f2d08a]/60"
+        />
       </button>
     );
   }
 
   return (
-    <div className="bg-black/80 backdrop-blur-md border border-[#8b4513]/50 rounded-lg shadow-2xl w-80 max-h-96 flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between p-2 border-b border-[#8b4513]/30 bg-black/40">
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="flex items-center gap-2 hover:bg-[#f2d08a]/5 rounded px-1 py-0.5 transition-colors"
-        >
-          <Brain size={14} className="text-purple-400" />
-          <span className="text-xs font-bold text-[#f2d08a] uppercase tracking-wider">
-            Agent Thoughts
+    <div className="bg-[#0f0d08]/95 backdrop-blur-md border border-[#8b4513]/40 rounded-xl shadow-2xl w-80 overflow-hidden">
+      {/* Header - RuneScape scroll style */}
+      <div className="flex items-center justify-between px-3 py-2 bg-gradient-to-r from-[#2a1f0f] to-[#1a150a] border-b border-[#8b4513]/40">
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Scroll size={16} className="text-[#c9a227]" />
+            {thoughts.length > 0 && (
+              <div className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#4ade80] animate-pulse" />
+            )}
+          </div>
+          <span className="text-xs font-semibold text-[#f2d08a] tracking-wide">
+            Agent's Mind
           </span>
-          {thoughts.length > 0 && (
-            <span className="text-[10px] text-[#f2d08a]/50">
-              ({thoughts.length})
+          {isNewThought && (
+            <span className="text-[9px] text-[#4ade80] font-medium animate-pulse">
+              NEW
             </span>
           )}
-          {thoughts.length > 0 && (
-            <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-          )}
-          {expanded ? (
-            <ChevronUp size={12} className="text-[#f2d08a]/40" />
-          ) : (
-            <ChevronDown size={12} className="text-[#f2d08a]/40" />
-          )}
-        </button>
-
+        </div>
         <div className="flex items-center gap-1">
+          <button
+            onClick={fetchThoughts}
+            className="p-1 rounded hover:bg-[#f2d08a]/10 transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw
+              size={11}
+              className={`text-[#c9a227]/60 hover:text-[#c9a227] ${loading ? "animate-spin" : ""}`}
+            />
+          </button>
           <button
             onClick={() => setMinimized(true)}
             className="p-1 rounded hover:bg-[#f2d08a]/10 transition-colors"
             title="Minimize"
           >
             <Minimize2
-              size={12}
-              className="text-[#f2d08a]/40 hover:text-[#f2d08a]/80"
+              size={11}
+              className="text-[#c9a227]/60 hover:text-[#c9a227]"
             />
           </button>
         </div>
       </div>
 
       {/* Content */}
-      {expanded && (
-        <div className="flex-1 overflow-hidden flex flex-col">
-          {loading && thoughts.length === 0 ? (
-            <div className="flex items-center justify-center py-4">
-              <div className="animate-spin rounded-full h-4 w-4 border-t border-b border-[#f2d08a]/60" />
+      <div
+        className="p-3 max-h-80 overflow-y-auto"
+        style={{ scrollbarWidth: "thin" }}
+      >
+        {loading && thoughts.length === 0 ? (
+          <div className="flex items-center justify-center py-4">
+            <div className="flex items-center gap-2 text-[#c9a227]/60">
+              <Scroll size={14} className="animate-pulse" />
+              <span className="text-[11px]">Reading the scrolls...</span>
             </div>
-          ) : error ? (
-            <div className="text-center py-3 text-[10px] text-red-400/70">
-              {error}
-            </div>
-          ) : thoughts.length === 0 ? (
-            <div className="text-center py-4 text-[10px] text-[#f2d08a]/50">
-              <Brain size={20} className="mx-auto mb-1 opacity-30" />
-              No thoughts yet
-              <div className="text-[9px] opacity-60 mt-1">
-                Agent's decisions will appear here
-              </div>
-            </div>
-          ) : (
-            <>
-              {/* Controls */}
-              <div className="flex items-center justify-between px-2 py-1 border-b border-[#8b4513]/20">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={fetchThoughts}
-                    className="p-1 rounded hover:bg-[#f2d08a]/10 transition-colors"
-                    title="Refresh"
-                  >
-                    <RefreshCw
-                      size={12}
-                      className={`text-[#f2d08a]/40 hover:text-[#f2d08a]/80 ${loading ? "animate-spin" : ""}`}
-                    />
-                  </button>
-                  <button
-                    onClick={handleClearThoughts}
-                    className="p-1 rounded hover:bg-red-500/10 transition-colors"
-                    title="Clear thoughts"
-                  >
-                    <Trash2
-                      size={12}
-                      className="text-red-400/40 hover:text-red-400/80"
-                    />
-                  </button>
-                </div>
-                <span className="text-[9px] text-green-500/80 flex items-center gap-1">
-                  <div className="w-1 h-1 rounded-full bg-green-500 animate-pulse" />
-                  Live
+          </div>
+        ) : error ? (
+          <div className="text-center py-3 text-[11px] text-red-400/70">
+            {error}
+          </div>
+        ) : !latestThinking ? (
+          <div className="text-center py-4">
+            <Scroll size={24} className="mx-auto mb-2 text-[#c9a227]/30" />
+            <p className="text-[11px] text-[#c9a227]/50">
+              The mind is quiet...
+            </p>
+            <p className="text-[10px] text-[#c9a227]/30 mt-1">
+              Thoughts will appear here
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {/* Current Thinking - Parchment style */}
+            <div className="relative">
+              {/* Header */}
+              <div className="flex items-center gap-1.5 mb-2">
+                <div
+                  className={`w-2 h-2 rounded-full ${isNewThought ? "bg-[#4ade80] animate-ping" : "bg-[#c9a227]/60"}`}
+                />
+                <span className="text-[10px] font-medium text-[#c9a227] uppercase tracking-wider">
+                  Current Thought
+                </span>
+                <span className="text-[9px] text-[#8b7355] ml-auto">
+                  {formatTimeAgo(latestThinking.timestamp)}
                 </span>
               </div>
 
-              {/* Thoughts List */}
+              {/* Thought content - Parchment/scroll look */}
               <div
-                ref={scrollRef}
-                className="flex-1 overflow-y-auto p-2 space-y-2"
-                style={{ scrollbarWidth: "thin" }}
+                className={`
+                  relative rounded border p-3 transition-all duration-300
+                  ${
+                    isNewThought
+                      ? "bg-[#3d2f1a] border-[#c9a227]/60 shadow-[0_0_12px_rgba(201,162,39,0.3)]"
+                      : "bg-[#1f1a10] border-[#8b4513]/40"
+                  }
+                `}
               >
-                {thoughts.map((thought) => (
-                  <div
-                    key={thought.id}
-                    className={`p-2 rounded border ${getThoughtBgColor(thought.type)} transition-all duration-300`}
-                  >
-                    {/* Header */}
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-1.5">
-                        {getThoughtIcon(thought.type)}
-                        <span className="text-[9px] font-bold uppercase text-[#e8ebf4]/70">
-                          {thought.type}
-                        </span>
-                      </div>
-                      <span className="text-[8px] text-[#f2d08a]/40">
-                        {formatTimeAgo(thought.timestamp)}
-                      </span>
-                    </div>
+                {/* Decorative corner */}
+                <div className="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-[#8b4513]/60 rounded-tl" />
+                <div className="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-[#8b4513]/60 rounded-br" />
 
-                    {/* Content */}
-                    <div className="pl-4">
-                      {renderThoughtContent(thought.content)}
-                    </div>
-                  </div>
-                ))}
+                {/* Content */}
+                <div className="px-1">
+                  {renderThoughtContent(latestThinking.content)}
+                </div>
               </div>
-            </>
-          )}
-        </div>
-      )}
+            </div>
+
+            {/* History Section (collapsible) */}
+            {olderThoughts.length > 0 && (
+              <div className="pt-2 border-t border-[#8b4513]/30">
+                <button
+                  onClick={() => setShowHistory(!showHistory)}
+                  className="flex items-center gap-1.5 text-[10px] text-[#8b7355] hover:text-[#c9a227] transition-colors w-full"
+                >
+                  <Clock size={10} />
+                  <span>Past thoughts ({olderThoughts.length})</span>
+                  {showHistory ? (
+                    <ChevronUp size={10} className="ml-auto" />
+                  ) : (
+                    <ChevronDown size={10} className="ml-auto" />
+                  )}
+                </button>
+
+                {showHistory && (
+                  <div
+                    className="mt-2 space-y-2 max-h-40 overflow-y-auto pr-1"
+                    style={{ scrollbarWidth: "thin" }}
+                  >
+                    {olderThoughts.map((thought) => (
+                      <div
+                        key={thought.id}
+                        className="bg-[#151208] border border-[#8b4513]/20 rounded p-2"
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[9px] text-[#8b7355] uppercase">
+                            {thought.type}
+                          </span>
+                          <span className="text-[8px] text-[#8b7355]/60">
+                            {formatTimeAgo(thought.timestamp)}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-[#c9b896]/70 line-clamp-2">
+                          {cleanThoughtContent(thought.content).slice(0, 150)}
+                          {thought.content.length > 150 ? "..." : ""}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Live indicator */}
+            <div className="flex items-center justify-center gap-1.5 pt-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-[#4ade80] animate-pulse" />
+              <span className="text-[9px] text-[#4ade80]/70">Live</span>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

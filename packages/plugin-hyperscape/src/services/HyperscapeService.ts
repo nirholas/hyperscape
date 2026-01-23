@@ -2659,4 +2659,15 @@ Respond with ONLY the action name, nothing else.`;
 
     logger.debug(`[HyperscapeService] 🧠 Synced thought: [${type}]`);
   }
+
+  /**
+   * Sync LLM reasoning/thoughts to server for dashboard display
+   * Simplified wrapper for syncAgentThought - used by AutonomousBehaviorManager
+   *
+   * @param thinking - The LLM's reasoning/thought process
+   */
+  syncThoughtsToServer(thinking: string): void {
+    if (!thinking || !thinking.trim()) return;
+    this.syncAgentThought("thinking", thinking);
+  }
 }
