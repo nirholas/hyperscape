@@ -35,7 +35,7 @@
     "build:server": "cd packages/server && bun run build",
     "build:all": "bun run build",
     "predev": "bun scripts/dev-setup.mjs",
-    "dev": "turbo run dev",
+    "dev": "turbo run dev --filter=@hyperscape/shared --filter=@hyperscape/server --filter=@hyperscape/client --filter=@hyperscape/plugin-hyperscape",
     "dev:shared": "cd packages/shared && bun run dev",
     "dev:client": "cd packages/client && bun run dev",
     "dev:server": "cd packages/server && bun run dev",

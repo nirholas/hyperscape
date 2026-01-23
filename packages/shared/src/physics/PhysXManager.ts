@@ -339,7 +339,9 @@ class PhysXManager extends EventEmitter {
       // Use dynamic path construction to prevent bundler from trying to resolve this
 
       const importPath = new Function('return "./PhysXManager.server"')();
-      const serverModule = await import(importPath);
+      // Vite can't statically analyze the computed import path; ignore import analysis here
+      // to prevent noisy warnings during `@hyperscape/client` dev bundling.
+      const serverModule = await import(/* @vite-ignore */ importPath);
       const wasmBuffer = await serverModule.loadPhysXWasmForNode();
 
       // Provide the WASM module directly

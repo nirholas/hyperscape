@@ -31,10 +31,14 @@ const MANIFEST_FILES = [
   // Root-level manifests
   "biomes.json",
   "buildings.json",
+  // Legacy single-file items (backwards compatibility)
+  "items.json",
   "model-bounds.json",
   "music.json",
   "npcs.json",
   "prayers.json",
+  // Legacy single-file gathering/resources (backwards compatibility)
+  "resources.json",
   "skill-unlocks.json",
   "stations.json",
   "stores.json",
@@ -58,6 +62,77 @@ const MANIFEST_FILES = [
   "recipes/smelting.json",
   "recipes/smithing.json",
 ];
+
+/**
+ * Determine which REQUIRED manifests are missing locally.
+ *
+ * These are the minimum files needed for server startup (DataManager).
+ * Other manifests are optional and have sensible fallbacks.
+ */
+async function getMissingRequiredManifests(
+  manifestsDir: string,
+): Promise<string[]> {
+  const requiredRootFiles = [
+    "npcs.json",
+    "world-areas.json",
+    "biomes.json",
+    "stores.json",
+  ] as const;
+
+  const missing: string[] = [];
+
+  for (const file of requiredRootFiles) {
+    const exists = await fs.pathExists(path.join(manifestsDir, file));
+    if (!exists) {
+      missing.push(file);
+    }
+  }
+
+  // Items manifest: either legacy single file OR the full category directory set
+  const hasItemsJson = await fs.pathExists(
+    path.join(manifestsDir, "items.json"),
+  );
+
+  const requiredItemCategoryFiles = [
+    "weapons",
+    "tools",
+    "resources",
+    "food",
+    "misc",
+  ] as const;
+
+  let hasAllItemCategoryFiles = true;
+  for (const file of requiredItemCategoryFiles) {
+    const exists = await fs.pathExists(
+      path.join(manifestsDir, "items", `${file}.json`),
+    );
+    if (!exists) {
+      hasAllItemCategoryFiles = false;
+    }
+  }
+
+  if (!hasItemsJson && !hasAllItemCategoryFiles) {
+    missing.push(
+      "items.json or items/{weapons,tools,resources,food,misc}.json",
+    );
+  }
+
+  return missing;
+}
+
+function isLocalhostUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.hostname === "localhost" ||
+      parsed.hostname === "127.0.0.1" ||
+      parsed.hostname === "0.0.0.0"
+    );
+  } catch {
+    // If URL parsing fails, treat as non-localhost to avoid surprising fallbacks
+    return false;
+  }
+}
 
 /**
  * Server configuration interface
@@ -132,91 +207,114 @@ async function fetchManifestsFromCDN(
   manifestsDir: string,
   nodeEnv: string,
 ): Promise<void> {
-  // In development, skip if local manifests already exist (dev may have local assets)
+  // In development, skip CDN fetch only if REQUIRED local manifests already exist.
+  // This preserves local asset editing while preventing partial-cache startup failures.
   if (nodeEnv === "development") {
-    const existingFiles = await fs.readdir(manifestsDir).catch(() => []);
-    if (existingFiles.length > 0) {
+    const missingRequired = await getMissingRequiredManifests(manifestsDir);
+    if (missingRequired.length === 0) {
+      const existingFiles = await fs.readdir(manifestsDir).catch(() => []);
       console.log(
-        `[Config] ⏭️  Skipping CDN fetch in development - ${existingFiles.length} local manifests found`,
+        `[Config] ⏭️  Skipping CDN fetch in development - required local manifests found (${existingFiles.length} file(s))`,
       );
       return;
     }
+    console.log(
+      `[Config] 📦 Local manifests incomplete (${missingRequired.join(", ")}). Fetching from CDN...`,
+    );
   }
 
-  console.log(`[Config] 📥 Fetching manifests from CDN: ${cdnUrl}`);
-  const baseUrl = cdnUrl.endsWith("/") ? cdnUrl : `${cdnUrl}/`;
+  const fetchFrom = async (sourceCdnUrl: string): Promise<void> => {
+    console.log(`[Config] 📥 Fetching manifests from CDN: ${sourceCdnUrl}`);
+    const baseUrl = sourceCdnUrl.endsWith("/")
+      ? sourceCdnUrl
+      : `${sourceCdnUrl}/`;
 
-  let fetched = 0;
-  let updated = 0;
-  let failed = 0;
+    let fetched = 0;
+    let updated = 0;
+    let failed = 0;
 
-  for (const file of MANIFEST_FILES) {
-    const url = `${baseUrl}manifests/${file}`;
-    const localPath = path.join(manifestsDir, file);
+    for (const file of MANIFEST_FILES) {
+      const url = `${baseUrl}manifests/${file}`;
+      const localPath = path.join(manifestsDir, file);
 
-    try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        console.warn(`[Config] ⚠️  ${file}: HTTP ${response.status}`);
-        failed++;
-        continue;
-      }
-
-      const newContent = await response.text();
-      fetched++;
-
-      // Ensure subdirectory exists for nested files (items/, gathering/, recipes/)
-      const localDir = path.dirname(localPath);
-      await fs.ensureDir(localDir);
-
-      // Compare with existing file to check if update needed
-      let existingContent = "";
       try {
-        existingContent = await fs.readFile(localPath, "utf-8");
-      } catch {
-        // File doesn't exist, will be created
-      }
+        const response = await fetch(url);
+        if (!response.ok) {
+          console.warn(`[Config] ⚠️  ${file}: HTTP ${response.status}`);
+          failed++;
+          continue;
+        }
 
-      // Only write if content changed (avoids unnecessary disk writes)
-      if (newContent !== existingContent) {
-        await fs.writeFile(localPath, newContent, "utf-8");
-        updated++;
-        console.log(`[Config] ✅ ${file} updated`);
+        const newContent = await response.text();
+        fetched++;
+
+        // Ensure subdirectory exists for nested files (items/, gathering/, recipes/)
+        const localDir = path.dirname(localPath);
+        await fs.ensureDir(localDir);
+
+        // Compare with existing file to check if update needed
+        let existingContent = "";
+        try {
+          existingContent = await fs.readFile(localPath, "utf-8");
+        } catch {
+          // File doesn't exist, will be created
+        }
+
+        // Only write if content changed (avoids unnecessary disk writes)
+        if (newContent !== existingContent) {
+          await fs.writeFile(localPath, newContent, "utf-8");
+          updated++;
+          console.log(`[Config] ✅ ${file} updated`);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn(`[Config] ⚠️  Failed to fetch ${file}: ${message}`);
+        failed++;
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.warn(`[Config] ⚠️  Failed to fetch ${file}: ${message}`);
-      failed++;
     }
+
+    console.log(
+      `[Config] 📦 Manifests: ${fetched} fetched, ${updated} updated, ${failed} failed`,
+    );
+  };
+
+  // First attempt: fetch from configured CDN URL
+  await fetchFrom(cdnUrl);
+
+  // Validate required manifests exist after fetch
+  let missingRequiredAfter = await getMissingRequiredManifests(manifestsDir);
+
+  // Development convenience: if configured CDN is localhost and required manifests are still missing,
+  // fall back to the production assets CDN to bootstrap local manifests.
+  if (
+    nodeEnv === "development" &&
+    missingRequiredAfter.length > 0 &&
+    isLocalhostUrl(cdnUrl)
+  ) {
+    const fallbackCdnUrl = "https://assets.hyperscape.club";
+    console.warn(
+      `[Config] ⚠️  Required manifests still missing after fetching from ${cdnUrl}: ${missingRequiredAfter.join(", ")}.`,
+    );
+    console.warn(
+      `[Config] 💡 Falling back to production CDN for manifests: ${fallbackCdnUrl}`,
+    );
+    await fetchFrom(fallbackCdnUrl);
+    missingRequiredAfter = await getMissingRequiredManifests(manifestsDir);
   }
 
-  console.log(
-    `[Config] 📦 Manifests: ${fetched} fetched, ${updated} updated, ${failed} failed`,
-  );
-
-  // Check if we have any manifests after fetch attempt
-  if (fetched === 0) {
-    const existingFiles = await fs.readdir(manifestsDir).catch(() => []);
-    if (existingFiles.length === 0) {
-      // In TEST environments, allow starting without manifests
-      // NOTE: CI=true is set by many platforms but also used in production (Railway)
-      // Use explicit SKIP_MANIFESTS=true or NODE_ENV=test for actual tests
-      if (nodeEnv === "test" || process.env.SKIP_MANIFESTS === "true") {
-        console.warn(
-          `[Config] ⚠️  No manifests available - running in minimal mode (test)`,
-        );
-        console.warn(
-          `[Config] 💡 For full functionality, clone the assets repo or set PUBLIC_CDN_URL to a valid CDN`,
-        );
-        return;
-      }
-      throw new Error(
-        `Failed to fetch any manifests from CDN (${cdnUrl}) and no local manifests exist. ` +
-          `Set SKIP_MANIFESTS=true to bypass this check in test environments.`,
+  if (missingRequiredAfter.length > 0) {
+    // In TEST environments, allow starting without manifests
+    if (nodeEnv === "test" || process.env.SKIP_MANIFESTS === "true") {
+      console.warn(
+        `[Config] ⚠️  Required manifests missing - running in minimal mode (test)`,
       );
+      console.warn(`[Config] Missing: ${missingRequiredAfter.join(", ")}`);
+      return;
     }
-    console.warn(
-      `[Config] ⚠️  Using ${existingFiles.length} existing local manifests`,
+
+    throw new Error(
+      `Missing required manifests in ${manifestsDir}: ${missingRequiredAfter.join(", ")}. ` +
+        `Ensure your CDN has /manifests populated (PUBLIC_CDN_URL=${cdnUrl}) or run 'bun install' to download assets for local development.`,
     );
   }
 }
