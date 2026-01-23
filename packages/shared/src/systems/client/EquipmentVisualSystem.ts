@@ -58,6 +58,9 @@ interface PlayerEquipmentVisuals {
   weapon?: THREE.Object3D;
   shield?: THREE.Object3D;
   helmet?: THREE.Object3D;
+  // Temporary gathering tool (e.g., fishing rod during fishing animation)
+  // Note: lowercase to match slot.toLowerCase() in equip/unequip methods
+  gatheringtool?: THREE.Object3D;
   // Add more slots as needed
 }
 
@@ -73,6 +76,10 @@ export class EquipmentVisualSystem extends SystemBase {
     string,
     { slot: string; itemId: string }[]
   >();
+
+  // Track players whose weapon is temporarily hidden during gathering
+  // (e.g., fishing - weapon hidden while fishing rod is shown)
+  private hiddenWeapons = new Set<string>();
 
   constructor(world: World) {
     super(world, {
@@ -106,6 +113,22 @@ export class EquipmentVisualSystem extends SystemBase {
     this.subscribe(EventType.PLAYER_CLEANUP, (data: { playerId: string }) => {
       this.cleanupPlayerEquipment(data.playerId);
     });
+
+    // OSRS-STYLE: Show gathering tool during gathering (e.g., fishing rod during fishing)
+    this.subscribe(
+      EventType.GATHERING_TOOL_SHOW,
+      (data: { playerId: string; itemId: string; slot: string }) => {
+        this.handleGatheringToolShow(data);
+      },
+    );
+
+    // Hide gathering tool when gathering stops
+    this.subscribe(
+      EventType.GATHERING_TOOL_HIDE,
+      (data: { playerId: string; slot: string }) => {
+        this.handleGatheringToolHide(data);
+      },
+    );
   }
 
   private async handleEquipmentChange(data: {
@@ -433,6 +456,97 @@ export class EquipmentVisualSystem extends SystemBase {
 
     this.playerEquipment.delete(playerId);
     this.pendingEquipment.delete(playerId); // Clear pending equipment too
+    this.hiddenWeapons.delete(playerId); // Clear hidden weapon tracking
+  }
+
+  /**
+   * OSRS-STYLE: Show gathering tool in hand during gathering animation
+   * (e.g., fishing rod appears in hand even though it's in inventory, not equipped)
+   *
+   * This temporarily hides any equipped weapon and shows the gathering tool instead.
+   */
+  private async handleGatheringToolShow(data: {
+    playerId: string;
+    itemId: string;
+    slot: string;
+  }): Promise<void> {
+    const { playerId, itemId } = data;
+
+    // Get player entity to access VRM
+    const player = this.world.entities.get(playerId);
+    if (!player) {
+      return;
+    }
+
+    const playerWithAvatar = player as PlayerWithAvatar;
+    const avatarInstance = playerWithAvatar._avatar?.instance;
+    const vrm = avatarInstance?.raw?.userData?.vrm;
+
+    if (!avatarInstance || !vrm) {
+      // VRM not ready - queue this for retry
+      if (!this.pendingEquipment.has(playerId)) {
+        this.pendingEquipment.set(playerId, []);
+      }
+      const queue = this.pendingEquipment.get(playerId)!;
+      // Use special slot name to identify gathering tools
+      queue.push({ slot: "gatheringTool", itemId });
+      this.pendingEquipment.set(playerId, queue);
+      return;
+    }
+
+    // Get or create equipment visuals for this player
+    if (!this.playerEquipment.has(playerId)) {
+      this.playerEquipment.set(playerId, {});
+    }
+    const equipment = this.playerEquipment.get(playerId)!;
+
+    // OSRS-STYLE: Temporarily hide the equipped weapon while showing gathering tool
+    if (equipment.weapon && equipment.weapon.visible) {
+      equipment.weapon.visible = false;
+      this.hiddenWeapons.add(playerId);
+    }
+
+    // Use "gatheringTool" slot to avoid conflicting with actual equipped weapon
+    await this.equipVisual(playerId, "gatheringTool", itemId, equipment, vrm);
+  }
+
+  /**
+   * Hide the temporary gathering tool when gathering stops
+   *
+   * This removes the gathering tool and restores any previously hidden weapon.
+   */
+  private handleGatheringToolHide(data: {
+    playerId: string;
+    slot: string;
+  }): void {
+    const { playerId } = data;
+
+    // Get player entity to access VRM
+    const player = this.world.entities.get(playerId);
+    if (!player) {
+      return;
+    }
+
+    const playerWithAvatar = player as PlayerWithAvatar;
+    const vrm = playerWithAvatar._avatar?.instance?.raw?.userData?.vrm;
+
+    if (!vrm) {
+      return;
+    }
+
+    const equipment = this.playerEquipment.get(playerId);
+    if (!equipment) {
+      return;
+    }
+
+    // Remove the gathering tool visual
+    this.unequipVisual(playerId, "gatheringTool", equipment, vrm);
+
+    // OSRS-STYLE: Restore the equipped weapon that was hidden
+    if (this.hiddenWeapons.has(playerId) && equipment.weapon) {
+      equipment.weapon.visible = true;
+      this.hiddenWeapons.delete(playerId);
+    }
   }
 
   update(_dt: number): void {

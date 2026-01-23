@@ -55,8 +55,8 @@ export const PositionControls: React.FC<PositionControlsProps> = ({
             </div>
             <RangeInput
               type="range"
-              min="-0.2"
-              max="0.2"
+              min="-0.8"
+              max="0.8"
               step="0.001"
               value={manualPosition[axis as keyof typeof manualPosition]}
               onChange={(e) =>

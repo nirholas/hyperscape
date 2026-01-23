@@ -362,6 +362,10 @@ export enum EventType {
   RESOURCE_MESH_CREATED = "resource:mesh:created",
   RESOURCE_ACTION = "resource:action",
 
+  // Gathering Tool Visuals (show tool in hand during gathering, like OSRS fishing)
+  GATHERING_TOOL_SHOW = "gathering:tool:show",
+  GATHERING_TOOL_HIDE = "gathering:tool:hide",
+
   // Skills & XP System
   SKILLS_XP_GAINED = "skills:xp_gained",
   SKILLS_LEVEL_UP = "skills:level_up",

@@ -126,6 +126,10 @@ export class ResourceSystem extends SystemBase {
       cycleTickInterval: number; // Ticks between attempts
       attempts: number;
       successes: number;
+      // Skill being used (woodcutting, mining, fishing)
+      skill: string;
+      // Tool item ID being used (for visual display, e.g., fishing rod)
+      toolItemId: string | null;
       // PERFORMANCE: Cached at session start to avoid per-tick allocations
       cachedTuning: {
         levelRequired: number;
@@ -1550,6 +1554,9 @@ export class ResourceSystem extends SystemBase {
       cycleTickInterval,
       attempts: 0,
       successes: 0,
+      // Store skill and tool for visual display
+      skill: resource.skillRequired,
+      toolItemId: toolInfo?.itemId ?? null,
       // PERFORMANCE: Cache everything needed during tick processing
       cachedTuning: tuned,
       cachedSuccessRate: successRate,
@@ -1619,6 +1626,16 @@ export class ResourceSystem extends SystemBase {
       tickDurationMs: TICK_DURATION_MS,
     });
 
+    // OSRS-STYLE: Show gathering tool in hand during fishing (tool is in inventory, not equipped)
+    // For fishing, the rod appears in hand even though it's not wielded as a weapon
+    if (resource.skillRequired === "fishing" && toolInfo?.itemId) {
+      this.emitTypedEvent(EventType.GATHERING_TOOL_SHOW, {
+        playerId: data.playerId,
+        itemId: toolInfo.itemId,
+        slot: "weapon", // Show in weapon hand
+      });
+    }
+
     // OSRS-ACCURACY: Send OSRS-style gathering start message via chat and UI
     this.sendChat(data.playerId, gatheringStartMessage);
     this.emitTypedEvent(EventType.UI_MESSAGE, {
@@ -1646,6 +1663,14 @@ export class ResourceSystem extends SystemBase {
 
       // Reset emote back to idle when gathering stops
       this.resetGatheringEmote(data.playerId);
+
+      // OSRS-STYLE: Hide gathering tool visual if fishing
+      if (session.skill === "fishing" && session.toolItemId) {
+        this.emitTypedEvent(EventType.GATHERING_TOOL_HIDE, {
+          playerId: data.playerId,
+          slot: "weapon",
+        });
+      }
 
       this.emitTypedEvent(EventType.RESOURCE_GATHERING_STOPPED, {
         playerId: data.playerId,
@@ -1683,6 +1708,14 @@ export class ResourceSystem extends SystemBase {
       }
       patterns.lastDisconnect = now;
       this.suspiciousPatterns.set(pid, patterns);
+
+      // OSRS-STYLE: Hide gathering tool visual if fishing
+      if (session.skill === "fishing" && session.toolItemId) {
+        this.emitTypedEvent(EventType.GATHERING_TOOL_HIDE, {
+          playerId: playerId,
+          slot: "weapon",
+        });
+      }
 
       // FORESTRY: Remove from active gatherers before deleting session
       this.removeActiveGatherer(pid, session.resourceId);
@@ -1725,6 +1758,14 @@ export class ResourceSystem extends SystemBase {
       }
       // FORESTRY: Remove from active gatherers (timer will regenerate if no other gatherers)
       this.removeActiveGatherer(pid, session.resourceId);
+
+      // OSRS-STYLE: Hide gathering tool visual if fishing
+      if (session.skill === "fishing" && session.toolItemId) {
+        this.emitTypedEvent(EventType.GATHERING_TOOL_HIDE, {
+          playerId: playerId,
+          slot: "weapon",
+        });
+      }
 
       this.emitTypedEvent(EventType.RESOURCE_GATHERING_STOPPED, {
         playerId: playerId,
