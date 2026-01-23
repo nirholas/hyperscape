@@ -47,6 +47,11 @@ interface EquipmentAttachmentData {
   weaponType?: string; // Weapon type for debugging
   usage?: string; // Usage instructions
   note?: string; // Developer notes
+  // V2 format fields
+  version?: number; // Format version (2 = relative matrix approach)
+  relativeMatrix?: number[]; // 16-element matrix array (for v2)
+  avatarId?: string; // Avatar used for fitting (for v2)
+  avatarHeight?: number; // Avatar height used for fitting
 }
 
 interface PlayerEquipmentVisuals {
@@ -252,9 +257,16 @@ export class EquipmentVisualSystem extends SystemBase {
       const weaponMesh: THREE.Object3D = gltf.scene.clone(true); // Clone to allow multiple instances
 
       // Read attachment metadata from Asset Forge export
-      const attachmentData = weaponMesh.userData.hyperscape as
+      // Try root first, then first child (EquipmentWrapper)
+      let attachmentData = weaponMesh.userData.hyperscape as
         | EquipmentAttachmentData
         | undefined;
+
+      // If not on root, check first child (the EquipmentWrapper)
+      if (!attachmentData && weaponMesh.children[0]?.userData?.hyperscape) {
+        attachmentData = weaponMesh.children[0].userData
+          .hyperscape as EquipmentAttachmentData;
+      }
 
       const boneName = attachmentData?.vrmBoneName || "rightHand";
 
@@ -277,35 +289,7 @@ export class EquipmentVisualSystem extends SystemBase {
       // Remove existing visual for this slot first
       this.unequipVisual(playerId, slot, equipment, vrm);
 
-      // CRITICAL: Asset Forge exports have transforms baked into the hierarchy
-      // Find the EquipmentWrapper child which has the fitting position
-      const equipmentWrapper = weaponMesh.children.find(
-        (child) => child.name === "EquipmentWrapper",
-      );
-
-      if (equipmentWrapper) {
-        // TRUST THE BAKED TRANSFORMS!
-        // Previous logic attempted to re-scale position based on NormalizedWeapon scale
-        // and apply a 180 degree rotation. This contradicted the "baked" nature of the export.
-        // We now use the EquipmentWrapper exactly as is.
-
-        // TWEAK: Apply a scale multiplier to make weapons look better in-game
-        const WEAPON_SCALE_MULTIPLIER = 1.75;
-        weaponMesh.scale.multiplyScalar(WEAPON_SCALE_MULTIPLIER);
-      } else if (!attachmentData) {
-        console.warn(
-          `[EquipmentVisual] ⚠️ No EquipmentWrapper or metadata - applying default transform`,
-        );
-        // Fallback: Scale down to reasonable size
-        weaponMesh.scale.set(0.01, 0.01, 0.01);
-      }
-
-      // --- ATTACHMENT LOGIC ---
-      // We attach to the RAW BONE to match the Asset Forge export pipeline.
-      // CRITICAL: VRM instances are often shared/prefab-based, so `vrm.humanoid.getRawBoneNode`
-      // might return a bone from the PREFAB, not the live player instance.
-      // We must find the corresponding bone in the PLAYER'S hierarchy.
-
+      // Get player entity for bone attachment
       const player = this.world.entities.get(playerId);
       if (!player) {
         console.error(
@@ -314,6 +298,7 @@ export class EquipmentVisualSystem extends SystemBase {
         return;
       }
 
+      // Find the target bone in the player's live hierarchy
       const prefabBone = vrm.humanoid.getRawBoneNode(
         boneName as VRMHumanBoneName,
       );
@@ -328,8 +313,6 @@ export class EquipmentVisualSystem extends SystemBase {
       let targetBone: THREE.Object3D | undefined = undefined;
 
       // Traverse the avatar's visual root (instance.raw) to find the bone
-      // player.node is just a container and might not hold the full hierarchy
-      // instance.raw might be the GLTF result object or VRM object, so check for .scene
       const playerWithAvatar = player as PlayerWithAvatar;
       const rawInstance = playerWithAvatar._avatar?.instance?.raw;
       const avatarRoot = (rawInstance?.scene || rawInstance) as
@@ -361,6 +344,73 @@ export class EquipmentVisualSystem extends SystemBase {
 
       // Store in component for tracking
       const slotKey = slot.toLowerCase() as keyof PlayerEquipmentVisuals;
+
+      // === V2 FORMAT: Use relative matrix directly ===
+      if (
+        attachmentData?.version === 2 &&
+        attachmentData.relativeMatrix?.length === 16
+      ) {
+        // Find the EquipmentWrapper which has the pre-baked transforms
+        const equipmentWrapper = weaponMesh.children.find(
+          (child) => child.name === "EquipmentWrapper",
+        );
+
+        if (equipmentWrapper) {
+          // V2: The wrapper already has the correct relative transform baked in
+          // Just attach it directly - no scale hacks needed!
+          equipment[slotKey] = weaponMesh;
+          (targetBone as THREE.Object3D).add(weaponMesh);
+        } else {
+          // Fallback: Apply relativeMatrix manually if no wrapper found
+          const relativeMatrix = new THREE.Matrix4();
+          relativeMatrix.fromArray(attachmentData.relativeMatrix);
+
+          // Create a wrapper group with the relative transform
+          const wrapperGroup = new THREE.Group();
+          wrapperGroup.name = "EquipmentWrapper";
+
+          // Decompose and apply the matrix
+          const position = new THREE.Vector3();
+          const quaternion = new THREE.Quaternion();
+          const scale = new THREE.Vector3();
+          relativeMatrix.decompose(position, quaternion, scale);
+
+          wrapperGroup.position.copy(position);
+          wrapperGroup.quaternion.copy(quaternion);
+          wrapperGroup.scale.copy(scale);
+
+          // Add weapon as child
+          wrapperGroup.add(weaponMesh);
+
+          equipment[slotKey] = wrapperGroup;
+          (targetBone as THREE.Object3D).add(wrapperGroup);
+          console.log(
+            `[EquipmentVisual] ✅ V2 equipment (manual matrix) attached to ${targetBoneName}`,
+          );
+        }
+        return;
+      }
+
+      // === LEGACY FORMAT (V1): Use old logic with scale hack ===
+      console.log(`[EquipmentVisual] Using legacy V1 format for ${itemId}`);
+
+      // Find the EquipmentWrapper child which has the fitting position
+      const equipmentWrapper = weaponMesh.children.find(
+        (child) => child.name === "EquipmentWrapper",
+      );
+
+      if (equipmentWrapper) {
+        // LEGACY: Apply scale multiplier hack for V1 exports
+        const WEAPON_SCALE_MULTIPLIER = 1.75;
+        weaponMesh.scale.multiplyScalar(WEAPON_SCALE_MULTIPLIER);
+      } else if (!attachmentData) {
+        console.warn(
+          `[EquipmentVisual] ⚠️ No EquipmentWrapper or metadata - applying default transform`,
+        );
+        // Fallback: Scale down to reasonable size
+        weaponMesh.scale.set(0.01, 0.01, 0.01);
+      }
+
       equipment[slotKey] = weaponMesh;
 
       // Add to the LIVE bone

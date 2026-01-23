@@ -2663,6 +2663,7 @@ export class ResourceSystem extends SystemBase {
       return null;
     }
 
+    // Build a set of item IDs from inventory
     const inventorySystem = this.world.getSystem?.("inventory") as {
       getInventory?: (playerId: string) => {
         items?: Array<{ itemId?: string }>;
@@ -2672,10 +2673,31 @@ export class ResourceSystem extends SystemBase {
     const inv = inventorySystem?.getInventory?.(playerId);
     const items = inv?.items || [];
 
-    // Build a set of item IDs for fast lookup
     const playerItemIds = new Set(
       items.map((item) => item?.itemId).filter(Boolean),
     );
+
+    // Also check equipped weapon slot (tools go in weapon slot)
+    const equipmentSystem = this.world.getSystem?.("equipment") as {
+      getPlayerEquipment?: (playerId: string) =>
+        | {
+            weapon?: { itemId?: string | number | null };
+          }
+        | undefined;
+    } | null;
+
+    if (equipmentSystem?.getPlayerEquipment) {
+      const equipment = equipmentSystem.getPlayerEquipment(playerId);
+      const weaponItemId = equipment?.weapon?.itemId;
+
+      if (weaponItemId) {
+        const itemIdStr =
+          typeof weaponItemId === "number"
+            ? weaponItemId.toString()
+            : weaponItemId;
+        playerItemIds.add(itemIdStr);
+      }
+    }
 
     // Check tools in priority order (best first) - exact itemId match
     for (const tool of skillTools) {
@@ -2771,26 +2793,56 @@ export class ResourceSystem extends SystemBase {
 
   /**
    * Check if player has any tool matching the required category.
+   * Checks both inventory AND equipped items (tools in weapon slot).
    * @see gathering/ToolUtils.ts for matching logic
    */
   private playerHasToolCategory(playerId: string, category: string): boolean {
+    // Check inventory first
     const inventorySystem = this.world.getSystem?.("inventory") as {
       getInventory?: (playerId: string) => {
         items?: Array<{ itemId?: string }>;
       };
     } | null;
 
-    if (!inventorySystem?.getInventory) {
-      return false;
+    if (inventorySystem?.getInventory) {
+      const inv = inventorySystem.getInventory(playerId);
+      const items = inv?.items || [];
+
+      const hasInInventory = items.some((item) => {
+        if (!item?.itemId) return false;
+        return itemMatchesToolCategory(item.itemId, category);
+      });
+
+      if (hasInInventory) {
+        return true;
+      }
     }
 
-    const inv = inventorySystem.getInventory(playerId);
-    const items = inv?.items || [];
+    // Check equipped items (tools go in weapon slot)
+    const equipmentSystem = this.world.getSystem?.("equipment") as {
+      getPlayerEquipment?: (playerId: string) =>
+        | {
+            weapon?: { itemId?: string | number | null };
+          }
+        | undefined;
+    } | null;
 
-    return items.some((item) => {
-      if (!item?.itemId) return false;
-      return itemMatchesToolCategory(item.itemId, category);
-    });
+    if (equipmentSystem?.getPlayerEquipment) {
+      const equipment = equipmentSystem.getPlayerEquipment(playerId);
+      const weaponItemId = equipment?.weapon?.itemId;
+
+      if (weaponItemId) {
+        const itemIdStr =
+          typeof weaponItemId === "number"
+            ? weaponItemId.toString()
+            : weaponItemId;
+        if (itemMatchesToolCategory(itemIdStr, category)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
   }
 
   /**
