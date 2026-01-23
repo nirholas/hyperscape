@@ -19,8 +19,16 @@
 
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { System } from "../types/core-types";
-import type { World } from "@hyperscape/shared";
+import type { World } from "../types/core-types";
+
+// Base System class for this module
+abstract class System {
+  protected world: World;
+
+  constructor(world: World) {
+    this.world = world;
+  }
+}
 
 export interface LiveKitInitOptions {
   wsUrl: string;

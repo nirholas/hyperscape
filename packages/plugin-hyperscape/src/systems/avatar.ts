@@ -22,7 +22,7 @@
  */
 
 import { logger } from "@elizaos/core";
-import { THREE } from "@hyperscape/shared";
+import { Vector3, Quaternion, Matrix4, Object3D } from "three";
 import type { World, Player } from "../types/core-types";
 
 // Animation state constants
@@ -56,38 +56,34 @@ interface PlayerEffect {
   emote?: string | null;
 }
 
-interface ParentNode extends THREE.Object3D {
-  position: THREE.Vector3;
-  quaternion: THREE.Quaternion;
+interface ParentNode extends Object3D {
+  position: Vector3;
+  quaternion: Quaternion;
   base?: {
-    position: THREE.Vector3;
-    quaternion: THREE.Quaternion;
+    position: Vector3;
+    quaternion: Quaternion;
   };
 }
 
 interface AvatarInstance {
   setEmote(emote: string | null): void;
-  move(matrix: THREE.Matrix4): void;
+  move(matrix: Matrix4): void;
   destroy(): void;
   height?: number;
   headToHeight?: number;
-  getBoneTransform?(boneName: string): THREE.Matrix4 | null;
+  getBoneTransform?(boneName: string): Matrix4 | null;
   disableRateCheck?(): void;
 }
 
 interface AvatarFactory {
-  create(
-    matrix: THREE.Matrix4,
-    hooks?: unknown,
-    node?: unknown,
-  ): AvatarInstance;
+  create(matrix: Matrix4, hooks?: unknown, node?: unknown): AvatarInstance;
   applyStats?(stats: unknown): void;
 }
 
 /**
  * Base Node class implementation for the avatar system
  */
-class Node extends THREE.Object3D {
+class Node extends Object3D {
   ctx: NodeContext;
   dirty: boolean = false;
   proxy: unknown = null;
@@ -129,8 +125,8 @@ export class AgentAvatar extends Node {
   overrideEmote: string | null = null;
 
   // Movement tracking
-  private lastPosition: THREE.Vector3 = new THREE.Vector3();
-  private velocity: THREE.Vector3 = new THREE.Vector3();
+  private lastPosition: Vector3 = new Vector3();
+  private velocity: Vector3 = new Vector3();
   private movementStartTime: number = 0;
 
   // Emote management
@@ -308,11 +304,7 @@ export class AgentAvatar extends Node {
       | undefined;
 
     if (playerPos) {
-      const currentPos = new THREE.Vector3(
-        playerPos.x,
-        playerPos.y,
-        playerPos.z,
-      );
+      const currentPos = new Vector3(playerPos.x, playerPos.y, playerPos.z);
       this.velocity
         .subVectors(currentPos, this.lastPosition)
         .divideScalar(delta);
@@ -389,7 +381,7 @@ export class AgentAvatar extends Node {
   /**
    * Get bone transform for attachment points
    */
-  getBoneTransform(boneName: string): THREE.Matrix4 | null {
+  getBoneTransform(boneName: string): Matrix4 | null {
     return this.instance?.getBoneTransform?.(boneName) ?? null;
   }
 

@@ -2,9 +2,13 @@
  * Specific system types for Hyperscape plugin
  */
 
-import { THREE } from "@hyperscape/shared";
-import { System } from "./core-types";
-import type { ClientInput } from "@hyperscape/shared";
+import type { System } from "./core-types";
+
+// ClientInput interface defined locally
+interface ClientInput {
+  // Standard input properties
+  enabled: boolean;
+}
 
 // Client Input system interface with agent control methods
 // ClientInput now provides both hardware input and programmatic agent control
@@ -21,9 +25,14 @@ export interface ClientInputSystem extends System {
 
 // Type guard for ClientInput with agent methods
 export function isClientInputSystem(
-  system: System,
+  system: unknown,
 ): system is ClientInputSystem {
-  return system.constructor.name === "ClientInput" && "goto" in system;
+  return (
+    system !== null &&
+    typeof system === "object" &&
+    system.constructor.name === "ClientInput" &&
+    "goto" in system
+  );
 }
 
 // Backward compatibility alias (deprecated, use ClientInputSystem)

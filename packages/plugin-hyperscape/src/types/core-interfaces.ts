@@ -9,20 +9,28 @@ import type {
   IAgentRuntime,
   Memory,
   State,
-  HandlerCallback,
   Action,
   Provider,
   Service,
   UUID,
 } from "@elizaos/core";
 
-import { World, Entity, System } from "./core-types.js";
+// Import types from local core-types (not @hyperscape/shared)
 import type {
+  World,
+  Entity,
+  System,
   Player,
   Vector3,
   Quaternion,
   Component,
-} from "@hyperscape/shared";
+  Physics,
+  Entities,
+  Events,
+  WorldOptions,
+  Position,
+  ContentInstance,
+} from "./core-types.js";
 
 // Core agent interfaces for Hyperscape integration
 export interface AgentContext {
@@ -42,12 +50,12 @@ export interface IHyperscapeService extends Service {
   disconnect(): Promise<void>;
 
   // Game state access
-  getPlayerEntity(): any;
-  getNearbyEntities(): any[];
-  getGameState(): any;
+  getPlayerEntity(): Player | null;
+  getNearbyEntities(): Entity[];
+  getGameState(): unknown;
 
   // Command execution
-  executeMove(command: { target: any; runMode?: boolean }): Promise<void>;
+  executeMove(command: { target: Position; runMode?: boolean }): Promise<void>;
   executeAttack(command: { targetEntityId: string }): Promise<void>;
   executeChatMessage(command: { message: string }): Promise<void>;
 }
@@ -59,15 +67,15 @@ export interface AgentState {
   rotation?: Quaternion;
   isConnected: boolean;
   lastActivity: Date;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface WorldState {
   worldId: string;
   connectedAgents: UUID[];
-  entities: Record<string, any>;
+  entities: Record<string, Entity>;
   lastUpdate: Date;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface AgentMemory extends Memory {
@@ -76,7 +84,7 @@ export interface AgentMemory extends Memory {
   position?: Vector3;
   rotation?: Quaternion;
   lastAction?: string;
-  relationships?: Record<UUID, any>;
+  relationships?: Record<UUID, unknown>;
 }
 
 export interface HyperscapeAction extends Action {
@@ -107,7 +115,7 @@ export interface MessageContext {
 // Event interfaces for Hyperscape integration
 export interface HyperscapeEvent {
   type: string;
-  data: any;
+  data: unknown;
   timestamp: number;
   agentId?: UUID;
   worldId?: string;
@@ -125,15 +133,15 @@ export interface AgentConnection {
 // Utility interfaces
 export interface ProviderResult {
   success: boolean;
-  data?: any;
+  data?: unknown;
   error?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ActionResult {
   success: boolean;
   message?: string;
-  data?: any;
+  data?: unknown;
   error?: string;
 }
 
@@ -147,8 +155,6 @@ export interface IGameSystem {
   update?(deltaTime: number): void;
   destroy?(): void;
   shutdown?(): Promise<void>;
-
-  // Optional properties for system configuration
   enabled?: boolean;
   priority?: number;
 }
@@ -171,7 +177,7 @@ export interface ICharacterController {
 // Network interfaces for multiplayer functionality
 export interface NetworkMessage {
   type: string;
-  data: any;
+  data: unknown;
   sender?: UUID;
   recipients?: UUID[];
   timestamp: number;
@@ -184,15 +190,11 @@ export interface NetworkHandler {
   broadcast(message: NetworkMessage): Promise<void>;
 }
 
-// Re-export ChatMessage for use in plugin
-// export type { ChatMessage } from '@hyperscape/shared'
-
-// Re-export core types and classes for convenience
-// World and System are classes from @hyperscape/shared
-export { World, System } from "./core-types.js";
-// Entity is a type alias
-export type { Entity } from "./core-types.js";
+// Re-export types for convenience
 export type {
+  World,
+  Entity,
+  System,
   Player,
   Vector3,
   Quaternion,
@@ -203,6 +205,4 @@ export type {
   WorldOptions,
   Position,
   ContentInstance,
-} from "./core-types.js";
-
-// Note: HyperscapeAction and HyperscapeProvider are already exported above in this file
+};
