@@ -129,6 +129,25 @@ export class EventBridge {
           this.broadcast.sendToAll("resourceSpawnPoints", args[0]);
         },
       );
+
+      // OSRS-STYLE: Forward gathering tool show/hide events (for fishing rod visual)
+      this.world.on(EventType.GATHERING_TOOL_SHOW, (payload: unknown) => {
+        const data = payload as {
+          playerId: string;
+          itemId: string;
+          slot: string;
+        };
+        if (data.playerId) {
+          this.broadcast.sendToPlayer(data.playerId, "gatheringToolShow", data);
+        }
+      });
+
+      this.world.on(EventType.GATHERING_TOOL_HIDE, (payload: unknown) => {
+        const data = payload as { playerId: string; slot: string };
+        if (data.playerId) {
+          this.broadcast.sendToPlayer(data.playerId, "gatheringToolHide", data);
+        }
+      });
     } catch (_err) {
       console.error("[EventBridge] Error setting up resource events:", _err);
     }

@@ -720,9 +720,22 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
             currentActionRef.current = null;
           }
 
-          // Don't modify the avatar - preserve original mesh
-          // Just position it at origin
+          // Position at origin
           avatar.position.set(0, 0, 0);
+
+          // === CRITICAL: Normalize avatar height to 1.6m ===
+          // This matches Hyperscape's createVRMFactory.ts which also normalizes to 1.6m
+          // Without this, equipment fitted here would appear at wrong scale in Hyperscape
+          const currentHeight = calculateAvatarHeight(avatar);
+          const TARGET_HEIGHT = 1.6;
+          if (currentHeight > 0.1) {
+            const scaleFactor = TARGET_HEIGHT / currentHeight;
+            avatar.scale.setScalar(scaleFactor);
+            avatar.updateMatrixWorld(true);
+            console.log(
+              `📏 Normalized avatar height: ${currentHeight.toFixed(2)}m → ${TARGET_HEIGHT}m (scale: ${scaleFactor.toFixed(4)})`,
+            );
+          }
 
           // Enable shadows
           avatar.traverse((child) => {
@@ -1845,8 +1858,12 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
           return new ArrayBuffer(0);
         }
 
-        // Clone the wrapper with all children (preserves hierarchy and transforms)
-        const exportRoot = wrapper.clone(true);
+        // Get the bone the wrapper is attached to
+        const handBone = wrapper.parent;
+        if (!handBone) {
+          console.error("Wrapper not attached to bone!");
+          return new ArrayBuffer(0);
+        }
 
         // Map Asset Forge bone names to VRM standard bone names
         const boneNameMap: Record<string, string> = {
@@ -1863,164 +1880,84 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
 
         const vrmBoneName = boneNameMap[equipmentSlot] || "rightHand";
 
-        // --- REBAKE LOGIC (Paranoid Mode) ---
-        // We directly measure the environment to ensure we get the correct factors.
-        // Reliance on userData or refs has proven flaky.
+        // === NEW V2 EXPORT: World-Space Relative Matrix ===
+        // Instead of trying to normalize scales and convert coordinate spaces,
+        // we export the exact visual relationship between hand bone and weapon.
+        // This captures position, rotation, and scale in one transform.
 
-        let boneScale = 1.0;
-        let heightRatio = 1.0;
+        // Update world matrices to get accurate transforms
+        handBone.updateMatrixWorld(true);
+        wrapper.updateMatrixWorld(true);
 
-        if (wrapper.parent) {
-          const rawBone = wrapper.parent;
-
-          // 1. Measure Bone Scale Directly
-          rawBone.updateMatrixWorld(true);
-          const worldScale = new THREE.Vector3();
-          rawBone.getWorldScale(worldScale);
-          boneScale = worldScale.x; // Assume uniform scale for simplicity, or use max component
-          console.log(`📏 Measured Bone Scale: ${boneScale.toFixed(6)}`);
-
-          // 2. Find Avatar Root to measure Height
-          let avatarRoot = avatarRef.current;
-          if (!avatarRoot) {
-            // Traverse up to find the root (usually the Scene or a Group containing the SkinnedMesh)
-            let curr: THREE.Object3D | null = rawBone;
-            while (curr && curr.parent && curr.parent.type !== "Scene") {
-              curr = curr.parent;
-            }
-            avatarRoot = curr;
-            console.log(
-              `🔍 Found Avatar Root via traversal: ${avatarRoot?.name}`,
-            );
-          }
-
-          if (avatarRoot) {
-            const currentHeight = calculateAvatarHeight(avatarRoot);
-            const TARGET_HEIGHT = 1.6;
-            if (Math.abs(currentHeight - TARGET_HEIGHT) > 0.1) {
-              heightRatio = TARGET_HEIGHT / currentHeight;
-            }
-            console.log(
-              `📏 Measured Avatar Height: ${currentHeight.toFixed(2)}m (Target: ${TARGET_HEIGHT}m) -> Ratio: ${heightRatio.toFixed(4)}`,
-            );
-          }
-        } else {
-          console.warn("⚠️ Wrapper has no parent! Cannot measure bone scale.");
-          // Fallback to userData if available
-          if (wrapper.userData.boneScale) {
-            boneScale = wrapper.userData.boneScale;
-            console.log(`⚠️ Using fallback userData.boneScale: ${boneScale}`);
-          }
-        }
-
-        const totalScaleFactor = boneScale * heightRatio;
-
-        // 3. Apply Scale/Position Correction
-        // REVERT FIX: The Hyperscape bone is actually Scale 1.0 (Normalized).
-        // Asset Forge bone is Scale 0.01 (Tiny).
-        // Wrapper is Scale 100 (Huge) to compensate.
-        // We MUST multiply by boneScale (0.01) to convert Wrapper to Scale 1.0.
-        // Hyperscape: Bone(1.0) * Wrapper(1.0) = 1.0 (Correct).
-
-        const originalScale = wrapper.scale.clone();
-        exportRoot.scale.copy(originalScale).multiplyScalar(totalScaleFactor);
-
-        const originalPos = wrapper.position.clone();
-        const scaledPos = originalPos.multiplyScalar(totalScaleFactor);
-        exportRoot.position.copy(scaledPos);
-
-        // 4. Apply Rotation Correction (if VRM is available)
-        // Try to find VRM instance if ref is missing
-        let vrmInstance = vrmRef.current;
-        if (
-          !vrmInstance &&
-          avatarRef.current &&
-          avatarRef.current.userData.vrm
-        ) {
-          vrmInstance = avatarRef.current.userData.vrm;
-          console.log("✅ Found VRM instance in avatarRef.userData");
-        }
-
-        if (vrmInstance && wrapper.parent) {
-          const rawBone = wrapper.parent;
-          const normalizedBone =
-            vrmInstance.humanoid.getNormalizedBoneNode(vrmBoneName);
-
-          if (normalizedBone) {
-            console.log(`🔄 Applying rotation correction for ${vrmBoneName}`);
-
-            rawBone.updateMatrixWorld(true);
-            normalizedBone.updateMatrixWorld(true);
-
-            const rawQuat = new THREE.Quaternion();
-            rawBone.getWorldQuaternion(rawQuat);
-
-            const normQuat = new THREE.Quaternion();
-            normalizedBone.getWorldQuaternion(normQuat);
-
-            // Rotation needed to go from Raw Bone space to Normalized Bone space
-            const rotationCorrection = normQuat
-              .clone()
-              .invert()
-              .multiply(rawQuat);
-
-            // Apply rotation to position
-            exportRoot.position.applyQuaternion(rotationCorrection);
-
-            // Apply rotation to orientation
-            const originalRot = wrapper.quaternion.clone();
-            const correctedRot = rotationCorrection.multiply(originalRot);
-            exportRoot.quaternion.copy(correctedRot);
-          } else {
-            console.warn(
-              `⚠️ Could not find normalized bone ${vrmBoneName} - skipping rotation correction`,
-            );
-          }
-        } else {
-          console.warn(
-            `⚠️ VRM ref or parent missing - skipping rotation correction`,
-          );
-          if (!vrmInstance) console.warn("   Reason: No VRM instance found");
-          if (!wrapper.parent) console.warn("   Reason: No wrapper parent");
-        }
-        exportRoot.updateMatrix();
-
-        console.log(`✅ Rebaked Final:`);
-        console.log(
-          `   Pos: ${exportRoot.position.x.toFixed(3)}, ${exportRoot.position.y.toFixed(3)}, ${exportRoot.position.z.toFixed(3)}`,
+        // Calculate relative transform: weapon position in hand bone's local space
+        // This is: handBone.matrixWorld.inverse() * wrapper.matrixWorld
+        const handWorldInverse = new THREE.Matrix4()
+          .copy(handBone.matrixWorld)
+          .invert();
+        const relativeMatrix = new THREE.Matrix4().multiplyMatrices(
+          handWorldInverse,
+          wrapper.matrixWorld,
         );
-        console.log(
-          `   Rot: ${exportRoot.rotation.x.toFixed(3)}, ${exportRoot.rotation.y.toFixed(3)}, ${exportRoot.rotation.z.toFixed(3)}`,
-        );
-        console.log(`   Scl: ${exportRoot.scale.x.toFixed(6)}`);
 
-        // Embed attachment metadata for Hyperscape
+        // Create export root and apply the relative matrix
+        const exportRoot = new THREE.Group();
+        exportRoot.name = "EquipmentWrapper";
+
+        // Decompose relative matrix into position/rotation/scale
+        const position = new THREE.Vector3();
+        const quaternion = new THREE.Quaternion();
+        const scale = new THREE.Vector3();
+        relativeMatrix.decompose(position, quaternion, scale);
+
+        exportRoot.position.copy(position);
+        exportRoot.quaternion.copy(quaternion);
+        exportRoot.scale.copy(scale);
+
+        // Clone the equipment mesh and reset position/rotation (handled by wrapper)
+        // but PRESERVE the scale - it contains bone scale compensation needed for correct sizing
+        const equipmentClone = equipmentRef.current.clone(true);
+        equipmentClone.position.set(0, 0, 0);
+        equipmentClone.quaternion.identity();
+        // Keep the compensated scale (e.g., 3.3x) - this counteracts bone world scale in Hyperscape
+        equipmentClone.scale.copy(equipmentRef.current.scale);
+        exportRoot.add(equipmentClone);
+
+        // Measure avatar height for reference
+        let currentAvatarHeight = 1.6;
+        if (avatarRef.current) {
+          currentAvatarHeight = calculateAvatarHeight(avatarRef.current);
+        }
+
+        // Embed V2 attachment metadata for Hyperscape
         exportRoot.userData.hyperscape = {
-          // VRM bone name to attach to (Hyperscape uses VRM standard)
+          // Version 2 format - uses relative matrix approach
+          version: 2,
+
+          // VRM bone name to attach to
           vrmBoneName: vrmBoneName,
+
+          // The relative matrix as a 16-element array
+          // Hyperscape can apply this directly to get exact same positioning
+          relativeMatrix: relativeMatrix.toArray(),
 
           // Original slot from Asset Forge (for reference)
           originalSlot: equipmentSlot,
 
-          // Instructions for Hyperscape
-          usage:
-            "Attach to VRM bone '" +
-            vrmBoneName +
-            "' with identity transform. Position/rotation are pre-baked relative to NORMALIZED bone.",
+          // Avatar info for validation/debugging
+          avatarId: avatarUrl || "unknown",
+          avatarHeight: currentAvatarHeight,
 
-          // Metadata for debugging/info
+          // Metadata
           weaponType: weaponType || "weapon",
-          avatarHeight: avatarHeight || 1.83,
-          exportedFrom: "asset-forge-equipment-fitting",
+          exportedFrom: "asset-forge-equipment-fitting-v2",
           exportedAt: new Date().toISOString(),
 
-          // Note: position/rotation are already in the GLB hierarchy!
-          // No need to apply offsets in Hyperscape - just attach directly
-          note:
-            "This weapon is pre-positioned. In Hyperscape: vrm.humanoid.getNormalizedBoneNode('" +
-            vrmBoneName +
-            "').add(weaponMesh)",
+          // Instructions for Hyperscape
+          usage:
+            "V2 format: Apply relativeMatrix directly to weapon, then attach to raw bone. No scale hacks needed.",
         };
+
+        console.log("✅ V2 Export complete");
 
         const _exporter = new GLTFExporter();
         const gltf = await _exporter.parseAsync(exportRoot, {
