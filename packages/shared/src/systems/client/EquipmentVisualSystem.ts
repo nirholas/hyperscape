@@ -369,10 +369,16 @@ export class EquipmentVisualSystem extends SystemBase {
       const slotKey = slot.toLowerCase() as keyof PlayerEquipmentVisuals;
 
       // === V2 FORMAT: Use relative matrix directly ===
-      if (
+      // Validate relativeMatrix is a proper 16-element array of numbers
+      const hasValidMatrix =
         attachmentData?.version === 2 &&
-        attachmentData.relativeMatrix?.length === 16
-      ) {
+        Array.isArray(attachmentData.relativeMatrix) &&
+        attachmentData.relativeMatrix.length === 16 &&
+        attachmentData.relativeMatrix.every(
+          (n) => typeof n === "number" && !isNaN(n),
+        );
+
+      if (hasValidMatrix) {
         // Find the EquipmentWrapper which has the pre-baked transforms
         const equipmentWrapper = weaponMesh.children.find(
           (child) => child.name === "EquipmentWrapper",
@@ -501,7 +507,12 @@ export class EquipmentVisualSystem extends SystemBase {
     const equipment = this.playerEquipment.get(playerId)!;
 
     // OSRS-STYLE: Temporarily hide the equipped weapon while showing gathering tool
-    if (equipment.weapon && equipment.weapon.visible) {
+    // Check hiddenWeapons to prevent hiding multiple times on rapid calls
+    if (
+      equipment.weapon &&
+      equipment.weapon.visible &&
+      !this.hiddenWeapons.has(playerId)
+    ) {
       equipment.weapon.visible = false;
       this.hiddenWeapons.add(playerId);
     }
@@ -543,7 +554,12 @@ export class EquipmentVisualSystem extends SystemBase {
     this.unequipVisual(playerId, "gatheringTool", equipment, vrm);
 
     // OSRS-STYLE: Restore the equipped weapon that was hidden
-    if (this.hiddenWeapons.has(playerId) && equipment.weapon) {
+    // Verify weapon exists and is currently hidden before restoring
+    if (
+      this.hiddenWeapons.has(playerId) &&
+      equipment.weapon &&
+      !equipment.weapon.visible
+    ) {
       equipment.weapon.visible = true;
       this.hiddenWeapons.delete(playerId);
     }

@@ -47,9 +47,7 @@ export const AssetSelectionPanel: React.FC<AssetSelectionPanelProps> = ({
     if (a.type === "weapon") return true;
     if (a.type === "tool") return true;
     if (a.type === "shield") return true;
-    // Check by name for items that might be shields
-    const name = a.name.toLowerCase();
-    return name.includes("shield");
+    return false;
   });
 
   const filteredAssets =
