@@ -478,6 +478,13 @@ export function registerAgentRoutes(
       const databaseSystem = world.getSystem("database") as
         | {
             db: {
+              select: () => {
+                from: (table: unknown) => {
+                  where: (
+                    condition: unknown,
+                  ) => Promise<{ characterId?: string }[]>;
+                };
+              };
               delete: (table: unknown) => {
                 where: (condition: unknown) => Promise<unknown>;
               };
@@ -497,7 +504,66 @@ export function registerAgentRoutes(
       const { agentMappings } = await import("../../database/schema.js");
       const { eq } = await import("drizzle-orm");
 
-      // Delete agent mapping
+      // First, get the characterId before deleting so we can disconnect the player
+      const mappings = await databaseSystem.db
+        .select()
+        .from(agentMappings)
+        .where(eq(agentMappings.agentId, agentId));
+
+      const characterId = mappings[0]?.characterId;
+
+      // Disconnect the player from the game if they're connected
+      if (characterId) {
+        console.log(
+          `[AgentRoutes] 🔌 Disconnecting character ${characterId} from game...`,
+        );
+
+        // Get ServerNetwork to find and disconnect the socket
+        const serverNetwork = world.getSystem("network") as
+          | {
+              socketManager?: {
+                sockets: Map<
+                  string,
+                  {
+                    characterId?: string;
+                    player?: { id: string };
+                    disconnect?: () => void;
+                  }
+                >;
+                handleDisconnect: (socket: unknown, code?: string) => void;
+              };
+            }
+          | undefined;
+
+        if (serverNetwork?.socketManager) {
+          // Find socket by characterId
+          for (const [socketId, socket] of serverNetwork.socketManager
+            .sockets) {
+            if (
+              socket.characterId === characterId ||
+              socket.player?.id === characterId
+            ) {
+              console.log(
+                `[AgentRoutes] Found socket ${socketId} for character ${characterId}, disconnecting...`,
+              );
+              serverNetwork.socketManager.handleDisconnect(
+                socket,
+                "agent_deleted",
+              );
+              break;
+            }
+          }
+        }
+
+        // Also clear any agent thoughts
+        const { ServerNetwork } = await import(
+          "../../systems/ServerNetwork/index.js"
+        );
+        ServerNetwork.agentThoughts.delete(characterId);
+        ServerNetwork.agentGoals.delete(characterId);
+      }
+
+      // Delete agent mapping from database
       await databaseSystem.db
         .delete(agentMappings)
         .where(eq(agentMappings.agentId, agentId));
@@ -506,7 +572,7 @@ export function registerAgentRoutes(
 
       return reply.send({
         success: true,
-        message: "Agent mapping deleted",
+        message: "Agent mapping deleted and player disconnected",
       });
     } catch (error) {
       console.error("[AgentRoutes] ❌ Failed to delete agent mapping:", error);
@@ -2141,6 +2207,202 @@ export function registerAgentRoutes(
           error instanceof Error
             ? error.message
             : "Failed to fetch agent activity",
+      });
+    }
+  });
+
+  /**
+   * GET /api/agents/:agentId/thoughts
+   *
+   * Get recent thought process for an agent.
+   * Used by the dashboard to display agent's decision-making process.
+   *
+   * Query params:
+   * - limit: number (default: 20, max: 50) - Number of thoughts to return
+   * - since: number (timestamp) - Only return thoughts after this timestamp
+   *
+   * Response:
+   * {
+   *   success: true,
+   *   thoughts: [...],
+   *   count: number
+   * }
+   */
+  fastify.get("/api/agents/:agentId/thoughts", async (request, reply) => {
+    try {
+      const params = request.params as { agentId: string };
+      const query = request.query as { limit?: string; since?: string };
+      const { agentId } = params;
+
+      if (!agentId) {
+        return reply.status(400).send({
+          success: false,
+          error: "Missing required parameter: agentId",
+        });
+      }
+
+      // Parse query params
+      const limit = Math.min(parseInt(query.limit || "20", 10), 50);
+      const since = query.since ? parseInt(query.since, 10) : 0;
+
+      // Get database system
+      const databaseSystem = world.getSystem("database") as
+        | {
+            db: {
+              select: (fields?: unknown) => {
+                from: (table: unknown) => {
+                  where: (condition: unknown) => Promise<unknown[]>;
+                };
+              };
+            };
+          }
+        | undefined;
+
+      if (!databaseSystem || !databaseSystem.db) {
+        return reply.status(500).send({
+          success: false,
+          error: "Database system not available",
+        });
+      }
+
+      // Import schema and eq operator
+      const { agentMappings } = await import("../../database/schema.js");
+      const { eq } = await import("drizzle-orm");
+
+      // Get agent's character ID
+      const mappings = (await databaseSystem.db
+        .select()
+        .from(agentMappings)
+        .where(eq(agentMappings.agentId, agentId))) as Array<{
+        characterId: string;
+      }>;
+
+      if (mappings.length === 0) {
+        return reply.send({
+          success: true,
+          thoughts: [],
+          count: 0,
+          message: "Agent not registered in game yet",
+        });
+      }
+
+      const characterId = mappings[0].characterId;
+
+      // Get thoughts from ServerNetwork storage
+      const { ServerNetwork } = await import(
+        "../../systems/ServerNetwork/index.js"
+      );
+      const allThoughts = ServerNetwork.agentThoughts.get(characterId) || [];
+
+      // Filter by timestamp if requested and apply limit
+      let thoughts =
+        since > 0
+          ? allThoughts.filter((t) => t.timestamp > since)
+          : allThoughts;
+
+      thoughts = thoughts.slice(0, limit);
+
+      return reply.send({
+        success: true,
+        thoughts,
+        count: thoughts.length,
+        totalCount: allThoughts.length,
+      });
+    } catch (error) {
+      console.error("[AgentRoutes] ❌ Failed to fetch agent thoughts:", error);
+
+      return reply.status(500).send({
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to fetch agent thoughts",
+      });
+    }
+  });
+
+  /**
+   * DELETE /api/agents/:agentId/thoughts
+   *
+   * Clear all thought history for an agent.
+   * Used to reset the thought log.
+   */
+  fastify.delete("/api/agents/:agentId/thoughts", async (request, reply) => {
+    try {
+      const params = request.params as { agentId: string };
+      const { agentId } = params;
+
+      if (!agentId) {
+        return reply.status(400).send({
+          success: false,
+          error: "Missing required parameter: agentId",
+        });
+      }
+
+      // Get database system
+      const databaseSystem = world.getSystem("database") as
+        | {
+            db: {
+              select: (fields?: unknown) => {
+                from: (table: unknown) => {
+                  where: (condition: unknown) => Promise<unknown[]>;
+                };
+              };
+            };
+          }
+        | undefined;
+
+      if (!databaseSystem || !databaseSystem.db) {
+        return reply.status(500).send({
+          success: false,
+          error: "Database system not available",
+        });
+      }
+
+      // Import schema and eq operator
+      const { agentMappings } = await import("../../database/schema.js");
+      const { eq } = await import("drizzle-orm");
+
+      // Get agent's character ID
+      const mappings = (await databaseSystem.db
+        .select()
+        .from(agentMappings)
+        .where(eq(agentMappings.agentId, agentId))) as Array<{
+        characterId: string;
+      }>;
+
+      if (mappings.length === 0) {
+        return reply.send({
+          success: true,
+          message: "Agent not registered in game",
+        });
+      }
+
+      const characterId = mappings[0].characterId;
+
+      // Clear thoughts from ServerNetwork storage
+      const { ServerNetwork } = await import(
+        "../../systems/ServerNetwork/index.js"
+      );
+      ServerNetwork.agentThoughts.delete(characterId);
+
+      console.log(
+        `[AgentRoutes] 🗑️ Cleared thoughts for character ${characterId}`,
+      );
+
+      return reply.send({
+        success: true,
+        message: "Thought history cleared",
+      });
+    } catch (error) {
+      console.error("[AgentRoutes] ❌ Failed to clear agent thoughts:", error);
+
+      return reply.status(500).send({
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to clear agent thoughts",
       });
     }
   });

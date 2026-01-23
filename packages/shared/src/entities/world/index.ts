@@ -11,3 +11,5 @@ export * from "./RangeEntity";
 export * from "./FurnaceEntity";
 export * from "./AnvilEntity";
 export * from "./AltarEntity";
+export * from "./BankEntity";
+export * from "./StarterChestEntity";

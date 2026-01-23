@@ -42,6 +42,7 @@ import { CookingSourceInteractionHandler } from "./handlers/CookingSourceInterac
 import { SmeltingSourceInteractionHandler } from "./handlers/SmeltingSourceInteractionHandler";
 import { SmithingSourceInteractionHandler } from "./handlers/SmithingSourceInteractionHandler";
 import { AltarInteractionHandler } from "./handlers/AltarInteractionHandler";
+import { StarterChestInteractionHandler } from "./handlers/StarterChestInteractionHandler";
 
 /**
  * Targeting mode state for "Use X on Y" interactions
@@ -161,6 +162,12 @@ export class InteractionRouter extends System {
     this.handlers.set(
       "altar",
       new AltarInteractionHandler(this.world, this.actionQueue),
+    );
+
+    // Starter chest (new player equipment)
+    this.handlers.set(
+      "starter_chest",
+      new StarterChestInteractionHandler(this.world, this.actionQueue),
     );
   }
 

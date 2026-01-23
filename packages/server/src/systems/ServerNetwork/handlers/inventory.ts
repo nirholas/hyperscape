@@ -373,6 +373,7 @@ export function handleEquipItem(
 
   // itemId can be string or number (some systems use numeric IDs)
   const itemId = payload.itemId;
+
   if (
     (typeof itemId !== "string" && typeof itemId !== "number") ||
     (typeof itemId === "string" && !isValidItemId(itemId))

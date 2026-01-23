@@ -161,7 +161,12 @@ export class EventBridge {
           maxSlots: data.inventory.maxSlots,
         };
 
-        this.broadcast.sendToPlayer(data.playerId, "inventoryUpdated", packet);
+        // Send inventory update to player AND spectators
+        this.broadcast.sendToPlayerAndSpectators(
+          data.playerId,
+          "inventoryUpdated",
+          packet,
+        );
       });
 
       // Handle coin updates - send to specific player
@@ -212,7 +217,8 @@ export class EventBridge {
             maxSlots: inv.maxSlots,
           };
 
-          this.broadcast.sendToPlayer(
+          // Send inventory update to player AND spectators
+          this.broadcast.sendToPlayerAndSpectators(
             data.playerId,
             "inventoryUpdated",
             packet,
@@ -242,8 +248,12 @@ export class EventBridge {
         const data = payload as { playerId?: string; skills?: unknown };
 
         if (data?.playerId) {
-          // Send to specific player
-          this.broadcast.sendToPlayer(data.playerId, "skillsUpdated", data);
+          // Send to specific player AND spectators watching them
+          this.broadcast.sendToPlayerAndSpectators(
+            data.playerId,
+            "skillsUpdated",
+            data,
+          );
         } else {
           // Broadcast to all
           this.broadcast.sendToAll("skillsUpdated", payload);
@@ -282,8 +292,9 @@ export class EventBridge {
         const newLevel = Number.isFinite(rawLevel) ? rawLevel : 1;
         const newXp = Number.isFinite(rawXp) ? rawXp : 0;
 
-        // Send XP drop to the player for visual feedback
-        this.broadcast.sendToPlayer(data.playerId, "xpDrop", {
+        // Send XP drop to the player AND spectators for visual feedback
+        // Spectators watching the player should see XP orbs too
+        this.broadcast.sendToPlayerAndSpectators(data.playerId, "xpDrop", {
           skill: data.skill,
           xpGained: data.amount,
           newXp,
@@ -455,16 +466,26 @@ export class EventBridge {
         };
 
         if (data.playerId) {
-          this.broadcast.sendToPlayer(data.playerId, "deathScreen", data);
+          // Send death screen to player AND spectators
+          this.broadcast.sendToPlayerAndSpectators(
+            data.playerId,
+            "deathScreen",
+            data,
+          );
         }
       });
 
-      // Forward death screen close events to specific player
+      // Forward death screen close events to specific player AND spectators
       this.world.on(EventType.UI_DEATH_SCREEN_CLOSE, (payload: unknown) => {
         const data = payload as { playerId: string };
 
         if (data.playerId) {
-          this.broadcast.sendToPlayer(data.playerId, "deathScreenClose", data);
+          // Send death screen close to player AND spectators
+          this.broadcast.sendToPlayerAndSpectators(
+            data.playerId,
+            "deathScreenClose",
+            data,
+          );
         }
       });
 
@@ -650,12 +671,16 @@ export class EventBridge {
         if (data.playerId && data.data) {
           const playerData = data.data;
 
-          // Send to specific player with flat health values for client
-          this.broadcast.sendToPlayer(data.playerId, "playerUpdated", {
-            health: playerData.health.current,
-            maxHealth: playerData.health.max,
-            alive: playerData.alive,
-          });
+          // Send to specific player AND spectators with flat health values for client
+          this.broadcast.sendToPlayerAndSpectators(
+            data.playerId,
+            "playerUpdated",
+            {
+              health: playerData.health.current,
+              maxHealth: playerData.health.max,
+              alive: playerData.alive,
+            },
+          );
         }
       });
     } catch (_err) {

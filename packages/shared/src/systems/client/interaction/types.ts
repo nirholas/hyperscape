@@ -26,7 +26,8 @@ export type InteractableEntityType =
   | "range"
   | "furnace"
   | "anvil"
-  | "altar";
+  | "altar"
+  | "starter_chest";
 
 /**
  * Target types for context menus (includes entities + special cases like terrain)

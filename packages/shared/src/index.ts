@@ -803,7 +803,13 @@ export type {
   ExtendedTriggerEvent,
   OverlapHit,
 } from "./systems/shared";
-export { writePacket, readPacket } from "./platform/shared/packets";
+export {
+  writePacket,
+  readPacket,
+  getPacketId,
+  getPacketName,
+  PACKET_NAMES,
+} from "./platform/shared/packets";
 
 // Export physics utilities
 export { installThreeJSExtensions } from "./utils/physics/PhysicsUtils";

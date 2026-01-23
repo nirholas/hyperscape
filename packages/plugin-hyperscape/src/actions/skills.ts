@@ -1,5 +1,5 @@
 /**
- * Skill actions - CHOP_TREE, CATCH_FISH, LIGHT_FIRE, COOK_FOOD
+ * Skill actions - CHOP_TREE, MINE_ROCK, CATCH_FISH, LIGHT_FIRE, COOK_FOOD
  */
 
 import type {
@@ -12,6 +12,13 @@ import type {
 import { logger } from "@elizaos/core";
 import type { HyperscapeService } from "../services/HyperscapeService.js";
 import type { GatherResourceCommand, Entity } from "../types.js";
+import {
+  hasAxe as detectHasAxe,
+  hasPickaxe as detectHasPickaxe,
+  hasTinderbox as detectHasTinderbox,
+  hasLogs as detectHasLogs,
+  getItemName,
+} from "../utils/item-detection.js";
 
 // Max distance to attempt gathering (server update loop requires <= 4m)
 const MAX_GATHER_DISTANCE = 4;
@@ -56,11 +63,17 @@ function getEntityDistance(
 
 /**
  * Check if an entity is a tree (strict detection)
+ * Also checks that the tree is not depleted
  */
 function isTree(e: Entity): boolean {
   const entityAny = e as unknown as Record<string, unknown>;
   const name = e.name?.toLowerCase() || "";
   const id = (e.id || "").toLowerCase();
+
+  // Exclude depleted resources - they can't be gathered
+  if (entityAny.depleted === true) {
+    return false;
+  }
 
   // Exclude ground items (by type or ID patterns)
   const entityType = (entityAny.type as string)?.toLowerCase() || "";
@@ -84,6 +97,51 @@ function isTree(e: Entity): boolean {
   }
 
   return false;
+}
+
+/**
+ * Check if an entity is a tree but depleted (for logging purposes)
+ */
+function isDepletedTree(e: Entity): boolean {
+  const entityAny = e as unknown as Record<string, unknown>;
+  const name = e.name?.toLowerCase() || "";
+
+  // Must be depleted
+  if (entityAny.depleted !== true) {
+    return false;
+  }
+
+  // Check if it's a tree type
+  if (entityAny.resourceType === "tree" || entityAny.type === "tree") {
+    return true;
+  }
+
+  // Check for tree-like names
+  if (name.includes("tree")) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Check if a player has the required woodcutting level to chop a tree
+ * @param tree - The tree entity
+ * @param playerWoodcuttingLevel - Player's current woodcutting level
+ * @returns true if the player can chop this tree
+ */
+function canChopTree(tree: Entity, playerWoodcuttingLevel: number): boolean {
+  const entityAny = tree as unknown as Record<string, unknown>;
+  const requiredLevel = (entityAny.requiredLevel as number) ?? 1;
+  return playerWoodcuttingLevel >= requiredLevel;
+}
+
+/**
+ * Get the required level for a tree
+ */
+function getTreeRequiredLevel(tree: Entity): number {
+  const entityAny = tree as unknown as Record<string, unknown>;
+  return (entityAny.requiredLevel as number) ?? 1;
 }
 
 export const chopTreeAction: Action = {
@@ -115,21 +173,15 @@ export const chopTreeAction: Action = {
       return false;
     }
 
-    // Check for axe or hatchet in inventory (hatchets are woodcutting tools)
-    // Handle both flat (i.name) and nested (i.item.name) inventory formats
-    const hasAxe =
-      playerEntity.items?.some((i) => {
-        const itemAny = i as unknown as Record<string, unknown>;
-        const name = (
-          i.name ||
-          (itemAny.item as { name?: string } | undefined)?.name ||
-          itemAny.itemId ||
-          ""
-        )
-          .toString()
-          .toLowerCase();
-        return name.includes("axe") || name.includes("hatchet");
-      }) ?? false;
+    // Check for axe or hatchet in inventory using centralized item detection
+    const hasAxe = detectHasAxe(playerEntity);
+
+    // Get player's woodcutting level
+    const playerAny = playerEntity as unknown as Record<string, unknown>;
+    const skills = playerAny.skills as
+      | Record<string, { level?: number }>
+      | undefined;
+    const woodcuttingLevel = skills?.woodcutting?.level ?? 1;
 
     // Check for trees WITHIN approach range (20m)
     // Handler will walk to tree if needed, then chop when within 4m
@@ -143,12 +195,17 @@ export const chopTreeAction: Action = {
       return dist !== null && dist <= 20; // 20m approach range
     });
 
-    // Use approachable trees for validation
-    const trees = approachableTrees;
+    // Filter by level requirement
+    const choppableTrees = approachableTrees.filter((tree) =>
+      canChopTree(tree, woodcuttingLevel),
+    );
+    const tooHighLevel = approachableTrees.filter(
+      (tree) => !canChopTree(tree, woodcuttingLevel),
+    );
 
     logger.info(
-      `[CHOP_TREE] Validation: hasAxe=${hasAxe}, trees=${trees.length}, ` +
-        `totalEntities=${entities.length}, items=${playerEntity.items?.length || 0}`,
+      `[CHOP_TREE] Validation: hasAxe=${hasAxe}, choppableTrees=${choppableTrees.length}, ` +
+        `tooHighLevel=${tooHighLevel.length}, woodcuttingLevel=${woodcuttingLevel}, totalEntities=${entities.length}`,
     );
 
     if (!hasAxe) {
@@ -159,16 +216,9 @@ export const chopTreeAction: Action = {
       if (itemCount === 0) {
         logger.info(`[CHOP_TREE] Inventory is empty (${itemCount} items)`);
       } else {
+        // Use centralized getItemName for consistent item name extraction
         const itemDetails = items
-          .map((i) => {
-            const itemAny = i as unknown as Record<string, unknown>;
-            const name =
-              i.name ||
-              (itemAny.item as { name?: string } | undefined)?.name ||
-              itemAny.itemId ||
-              "unknown";
-            return `${name}`;
-          })
+          .map((i) => getItemName(i) || "unknown")
           .join(", ");
         logger.info(
           `[CHOP_TREE] Inventory items (${itemCount}): ${itemDetails}`,
@@ -176,7 +226,11 @@ export const chopTreeAction: Action = {
       }
     }
 
-    if (trees.length === 0) {
+    if (choppableTrees.length === 0 && tooHighLevel.length > 0) {
+      logger.info(
+        `[CHOP_TREE] Validation failed: ${tooHighLevel.length} trees nearby but all require higher Woodcutting level (player: ${woodcuttingLevel})`,
+      );
+    } else if (approachableTrees.length === 0) {
       logger.info("[CHOP_TREE] Validation failed: no trees nearby");
       // Log first few entities for debugging
       const entityInfo = entities
@@ -189,7 +243,7 @@ export const chopTreeAction: Action = {
       logger.info(`[CHOP_TREE] Nearby entities sample: ${entityInfo}`);
     }
 
-    return hasAxe && trees.length > 0;
+    return hasAxe && choppableTrees.length > 0;
   },
 
   handler: async (
@@ -214,9 +268,30 @@ export const chopTreeAction: Action = {
       const player = service.getPlayerEntity();
       const playerPos = player?.position;
       const allTrees = entities.filter(isTree);
+      const depletedTrees = entities.filter(isDepletedTree);
+
+      // Get player's woodcutting level for level requirement filtering
+      const playerAny = player as unknown as Record<string, unknown>;
+      const skills = playerAny?.skills as
+        | Record<string, { level?: number }>
+        | undefined;
+      const woodcuttingLevel = skills?.woodcutting?.level ?? 1;
+
+      // Log depleted trees if any found (helps debug why agent might be waiting)
+      if (depletedTrees.length > 0) {
+        logger.info(
+          `[CHOP_TREE] Handler: ${depletedTrees.length} depleted tree(s) nearby (waiting to respawn): ` +
+            depletedTrees
+              .slice(0, 3)
+              .map((t) => t.id)
+              .join(", "),
+        );
+      }
 
       // Get all trees with distance, sorted by nearest
+      // CRITICAL: Filter by level requirement first so we don't walk to trees we can't chop
       const treesWithDistance = allTrees
+        .filter((tree) => canChopTree(tree, woodcuttingLevel)) // Only trees we can chop
         .map((e) => {
           const entityAny = e as unknown as Record<string, unknown>;
           const entityPos = entityAny.position;
@@ -227,6 +302,20 @@ export const chopTreeAction: Action = {
         })
         .filter((t) => t.distance !== null)
         .sort((a, b) => (a.distance ?? 999) - (b.distance ?? 999));
+
+      // Log trees that are too high level
+      const tooHighLevelTrees = allTrees.filter(
+        (tree) => !canChopTree(tree, woodcuttingLevel),
+      );
+      if (tooHighLevelTrees.length > 0) {
+        const examples = tooHighLevelTrees
+          .slice(0, 3)
+          .map((t) => `${t.name} (requires ${getTreeRequiredLevel(t)})`)
+          .join(", ");
+        logger.info(
+          `[CHOP_TREE] Handler: Skipping ${tooHighLevelTrees.length} tree(s) requiring higher level than ${woodcuttingLevel}: ${examples}`,
+        );
+      }
 
       // Trees within gathering range (4m)
       const nearbyTrees = treesWithDistance.filter(
@@ -239,8 +328,8 @@ export const chopTreeAction: Action = {
       );
 
       logger.info(
-        `[CHOP_TREE] Handler: Found ${nearbyTrees.length} trees within ${MAX_GATHER_DISTANCE}m, ` +
-          `${approachableTrees.length} within 20m (${allTrees.length} total)`,
+        `[CHOP_TREE] Handler: Found ${nearbyTrees.length} choppable trees within ${MAX_GATHER_DISTANCE}m, ` +
+          `${approachableTrees.length} within 20m (woodcutting level: ${woodcuttingLevel})`,
       );
 
       // If no trees within gathering range but some within approach range, walk to nearest first
@@ -329,8 +418,31 @@ export const chopTreeAction: Action = {
       const tree = nearbyTrees[0]?.entity; // Pick nearest tree within range
 
       if (!tree) {
-        logger.info("[CHOP_TREE] Handler: No tree found within approach range");
-        await callback?.({ text: "No tree found nearby.", error: true });
+        // Check if there are trees but all too high level
+        const allNearbyTrees = allTrees.filter((t) => {
+          const entityAny = t as unknown as Record<string, unknown>;
+          const entityPos = entityAny.position;
+          if (!entityPos) return false;
+          const dist = getEntityDistance(playerPos, entityPos);
+          return dist !== null && dist <= 20;
+        });
+
+        if (allNearbyTrees.length > 0) {
+          const example = allNearbyTrees[0];
+          const requiredLvl = getTreeRequiredLevel(example);
+          logger.info(
+            `[CHOP_TREE] Handler: All nearby trees require higher level (need ${requiredLvl}, have ${woodcuttingLevel})`,
+          );
+          await callback?.({
+            text: `All nearby trees require higher Woodcutting level (need ${requiredLvl}, have ${woodcuttingLevel}). Look for regular trees for lower levels.`,
+            error: true,
+          });
+        } else {
+          logger.info(
+            "[CHOP_TREE] Handler: No tree found within approach range",
+          );
+          await callback?.({ text: "No tree found nearby.", error: true });
+        }
         return { success: false };
       }
 
@@ -456,6 +568,485 @@ export const chopTreeAction: Action = {
   ],
 };
 
+/**
+ * Check if an entity is a rock/ore node (for mining)
+ * Also checks that the rock is not depleted
+ */
+function isRock(e: Entity): boolean {
+  const entityAny = e as unknown as Record<string, unknown>;
+  const name = e.name?.toLowerCase() || "";
+
+  // Exclude depleted resources - they can't be gathered
+  if (entityAny.depleted === true) {
+    return false;
+  }
+
+  // Exclude ground items
+  const entityType = (entityAny.type as string)?.toLowerCase() || "";
+  if (entityType === "item" || name.startsWith("item:")) {
+    return false;
+  }
+
+  // Check for explicit rock/ore types
+  if (entityAny.resourceType === "rock" || entityAny.resourceType === "ore") {
+    return true;
+  }
+
+  // Check for rock-like names
+  if (name.includes("rock") || name.includes("ore") || name.includes("vein")) {
+    return true;
+  }
+
+  // Check for specific ore types
+  if (/copper|tin|iron|coal|mithril|adamant|rune|gold|silver/i.test(name)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Check if a player has the required mining level to mine a rock
+ * @param rock - The rock entity
+ * @param playerMiningLevel - Player's current mining level
+ * @returns true if the player can mine this rock
+ */
+function canMineRock(rock: Entity, playerMiningLevel: number): boolean {
+  const entityAny = rock as unknown as Record<string, unknown>;
+  const requiredLevel = (entityAny.requiredLevel as number) ?? 1;
+  return playerMiningLevel >= requiredLevel;
+}
+
+/**
+ * Get the required level for a rock
+ */
+function getRockRequiredLevel(rock: Entity): number {
+  const entityAny = rock as unknown as Record<string, unknown>;
+  return (entityAny.requiredLevel as number) ?? 1;
+}
+
+/**
+ * Check if an entity is a rock but depleted (for logging purposes)
+ */
+function isDepletedRock(e: Entity): boolean {
+  const entityAny = e as unknown as Record<string, unknown>;
+  const name = e.name?.toLowerCase() || "";
+
+  // Must be depleted
+  if (entityAny.depleted !== true) {
+    return false;
+  }
+
+  // Check if it's a rock type
+  if (entityAny.resourceType === "rock" || entityAny.resourceType === "ore") {
+    return true;
+  }
+
+  // Check for rock-like names
+  if (name.includes("rock") || name.includes("ore") || name.includes("vein")) {
+    return true;
+  }
+
+  return false;
+}
+
+export const mineRockAction: Action = {
+  name: "MINE_ROCK",
+  similes: ["MINE", "MINING", "MINE_ORE"],
+  description: "Mine a rock to gather ore. Requires a pickaxe.",
+
+  validate: async (runtime: IAgentRuntime) => {
+    const service = runtime.getService<HyperscapeService>("hyperscapeService");
+    if (!service) {
+      logger.info("[MINE_ROCK] Validation failed: no service");
+      return false;
+    }
+    const playerEntity = service.getPlayerEntity();
+    const entities = service.getNearbyEntities() || [];
+
+    // Check player entity exists and is alive
+    if (!playerEntity) {
+      logger.info("[MINE_ROCK] Validation failed: no player entity");
+      return false;
+    }
+
+    const isAlive = playerEntity.alive !== false;
+    if (!service.isConnected() || !isAlive) {
+      logger.info(
+        `[MINE_ROCK] Validation failed: connected=${service.isConnected()}, alive=${playerEntity.alive}`,
+      );
+      return false;
+    }
+
+    // Check for pickaxe in inventory using centralized item detection
+    const hasPickaxe = detectHasPickaxe(playerEntity);
+
+    // Get player's mining level
+    const playerAny = playerEntity as unknown as Record<string, unknown>;
+    const skills = playerAny.skills as
+      | Record<string, { level?: number }>
+      | undefined;
+    const miningLevel = skills?.mining?.level ?? 1;
+
+    // Check for rocks within approach range (20m) that player can mine
+    const playerPos = playerEntity.position;
+    const allRocks = entities.filter(isRock);
+    const approachableRocks = allRocks.filter((e) => {
+      const entityAny = e as unknown as Record<string, unknown>;
+      const entityPos = entityAny.position;
+      if (!entityPos) return false;
+      const dist = getEntityDistance(playerPos, entityPos);
+      return dist !== null && dist <= 20;
+    });
+
+    // Filter by level requirement
+    const mineableRocks = approachableRocks.filter((rock) =>
+      canMineRock(rock, miningLevel),
+    );
+    const tooHighLevel = approachableRocks.filter(
+      (rock) => !canMineRock(rock, miningLevel),
+    );
+
+    logger.info(
+      `[MINE_ROCK] Validation: hasPickaxe=${hasPickaxe}, mineableRocks=${mineableRocks.length}, ` +
+        `tooHighLevel=${tooHighLevel.length}, miningLevel=${miningLevel}, totalEntities=${entities.length}`,
+    );
+
+    if (!hasPickaxe) {
+      logger.info("[MINE_ROCK] Validation failed: no pickaxe in inventory");
+    }
+
+    if (mineableRocks.length === 0 && tooHighLevel.length > 0) {
+      logger.info(
+        `[MINE_ROCK] Validation failed: ${tooHighLevel.length} rocks nearby but all require higher mining level (player: ${miningLevel})`,
+      );
+    } else if (approachableRocks.length === 0) {
+      logger.info("[MINE_ROCK] Validation failed: no rocks nearby");
+    }
+
+    return hasPickaxe && mineableRocks.length > 0;
+  },
+
+  handler: async (
+    runtime: IAgentRuntime,
+    message: Memory,
+    _state?: State,
+    _options?: unknown,
+    callback?: HandlerCallback,
+  ) => {
+    try {
+      const service =
+        runtime.getService<HyperscapeService>("hyperscapeService");
+      if (!service) {
+        return {
+          success: false,
+          error: new Error("Hyperscape service not available"),
+        };
+      }
+      const entities = service.getNearbyEntities();
+
+      // Find rocks and sort by distance
+      const player = service.getPlayerEntity();
+      const playerPos = player?.position;
+      const allRocks = entities.filter(isRock);
+      const depletedRocks = entities.filter(isDepletedRock);
+
+      // Get player's mining level for level requirement filtering
+      const playerAny = player as unknown as Record<string, unknown>;
+      const skills = playerAny?.skills as
+        | Record<string, { level?: number }>
+        | undefined;
+      const miningLevel = skills?.mining?.level ?? 1;
+
+      // Log depleted rocks if any found
+      if (depletedRocks.length > 0) {
+        logger.info(
+          `[MINE_ROCK] Handler: ${depletedRocks.length} depleted rock(s) nearby (waiting to respawn): ` +
+            depletedRocks
+              .slice(0, 3)
+              .map((r) => r.id)
+              .join(", "),
+        );
+      }
+
+      // Get all rocks with distance, sorted by nearest
+      // CRITICAL: Filter by level requirement first so we don't walk to rocks we can't mine
+      const rocksWithDistance = allRocks
+        .filter((rock) => canMineRock(rock, miningLevel)) // Only rocks we can mine
+        .map((e) => {
+          const entityAny = e as unknown as Record<string, unknown>;
+          const entityPos = entityAny.position;
+          const dist = entityPos
+            ? getEntityDistance(playerPos, entityPos)
+            : null;
+          return { entity: e, distance: dist, position: entityPos };
+        })
+        .filter((r) => r.distance !== null)
+        .sort((a, b) => (a.distance ?? 999) - (b.distance ?? 999));
+
+      // Log rocks that are too high level
+      const tooHighLevelRocks = allRocks.filter(
+        (rock) => !canMineRock(rock, miningLevel),
+      );
+      if (tooHighLevelRocks.length > 0) {
+        const examples = tooHighLevelRocks
+          .slice(0, 3)
+          .map((r) => `${r.name} (requires ${getRockRequiredLevel(r)})`)
+          .join(", ");
+        logger.info(
+          `[MINE_ROCK] Handler: Skipping ${tooHighLevelRocks.length} rock(s) requiring higher level than ${miningLevel}: ${examples}`,
+        );
+      }
+
+      // Rocks within gathering range (4m)
+      const nearbyRocks = rocksWithDistance.filter(
+        (r) => r.distance !== null && r.distance <= MAX_GATHER_DISTANCE,
+      );
+
+      // Rocks within approach range (20m)
+      const approachableRocks = rocksWithDistance.filter(
+        (r) => r.distance !== null && r.distance <= 20,
+      );
+
+      logger.info(
+        `[MINE_ROCK] Handler: Found ${nearbyRocks.length} mineable rocks within ${MAX_GATHER_DISTANCE}m, ` +
+          `${approachableRocks.length} within 20m (mining level: ${miningLevel})`,
+      );
+
+      // If no rocks within gathering range but some within approach range, walk to nearest
+      if (nearbyRocks.length === 0 && approachableRocks.length > 0) {
+        const nearest = approachableRocks[0];
+        const rockPos = nearest.position as
+          | [number, number, number]
+          | { x: number; y: number; z: number };
+
+        let rockX: number, rockY: number, rockZ: number;
+        if (Array.isArray(rockPos)) {
+          [rockX, rockY, rockZ] = rockPos;
+        } else if (rockPos && typeof rockPos === "object" && "x" in rockPos) {
+          rockX = rockPos.x;
+          rockY = rockPos.y;
+          rockZ = rockPos.z;
+        } else {
+          logger.info("[MINE_ROCK] Handler: Could not get rock position");
+          await callback?.({ text: "Could not locate rock.", error: true });
+          return { success: false };
+        }
+
+        // Get player position to find nearest cardinal adjacent tile
+        let px = 0,
+          pz = 0;
+        if (Array.isArray(playerPos)) {
+          px = playerPos[0];
+          pz = playerPos[2];
+        } else if (
+          playerPos &&
+          typeof playerPos === "object" &&
+          "x" in playerPos
+        ) {
+          const pos = playerPos as { x: number; z: number };
+          px = pos.x;
+          pz = pos.z;
+        }
+
+        // Calculate cardinal adjacent positions
+        const rockTileX = Math.floor(rockX);
+        const rockTileZ = Math.floor(rockZ);
+        const cardinalPositions = [
+          { x: rockTileX, z: rockTileZ - 1, dir: "South" },
+          { x: rockTileX, z: rockTileZ + 1, dir: "North" },
+          { x: rockTileX - 1, z: rockTileZ, dir: "West" },
+          { x: rockTileX + 1, z: rockTileZ, dir: "East" },
+        ];
+
+        // Find the cardinal position nearest to player
+        let nearestCardinal = cardinalPositions[0];
+        let minDist = Infinity;
+        for (const pos of cardinalPositions) {
+          const dist = Math.sqrt(
+            Math.pow(px - pos.x, 2) + Math.pow(pz - pos.z, 2),
+          );
+          if (dist < minDist) {
+            minDist = dist;
+            nearestCardinal = pos;
+          }
+        }
+
+        const targetPos: [number, number, number] = [
+          nearestCardinal.x + 0.5,
+          rockY,
+          nearestCardinal.z + 0.5,
+        ];
+
+        logger.info(
+          `[MINE_ROCK] Handler: Walking to rock ${nearest.entity.name} - ` +
+            `stopping at cardinal tile [${nearestCardinal.x}, ${nearestCardinal.z}] (${nearestCardinal.dir}) ` +
+            `(rock at tile [${rockTileX}, ${rockTileZ}], ${nearest.distance?.toFixed(1)}m away)`,
+        );
+
+        await service.executeMove({ target: targetPos, runMode: false });
+        await callback?.({
+          text: `Walking to ${nearest.entity.name}...`,
+          action: "MINE_ROCK",
+        });
+        return { success: true, text: `Walking to ${nearest.entity.name}` };
+      }
+
+      // Find the nearest rock we can mine
+      const rock = nearbyRocks[0]?.entity || approachableRocks[0]?.entity;
+      if (!rock) {
+        // Check if there are rocks but all too high level
+        const allNearbyRocks = allRocks.filter((r) => {
+          const entityAny = r as unknown as Record<string, unknown>;
+          const entityPos = entityAny.position;
+          if (!entityPos) return false;
+          const dist = getEntityDistance(playerPos, entityPos);
+          return dist !== null && dist <= 20;
+        });
+
+        if (allNearbyRocks.length > 0) {
+          const example = allNearbyRocks[0];
+          const requiredLvl = getRockRequiredLevel(example);
+          await callback?.({
+            text: `All nearby rocks require higher Mining level (need ${requiredLvl}, have ${miningLevel}). Look for copper/tin rocks for lower levels.`,
+            error: true,
+          });
+        } else {
+          await callback?.({
+            text: "No mineable rocks found nearby.",
+            error: true,
+          });
+        }
+        return { success: false };
+      }
+
+      // Check if we're on a cardinal adjacent tile
+      const rockAny = rock as unknown as Record<string, unknown>;
+      const rockPosition = rockAny.position as
+        | [number, number, number]
+        | { x: number; y: number; z: number };
+
+      let rockX: number, rockY: number, rockZ: number;
+      if (Array.isArray(rockPosition)) {
+        [rockX, rockY, rockZ] = rockPosition;
+      } else if (
+        rockPosition &&
+        typeof rockPosition === "object" &&
+        "x" in rockPosition
+      ) {
+        rockX = rockPosition.x;
+        rockY = rockPosition.y;
+        rockZ = rockPosition.z;
+      } else {
+        await callback?.({
+          text: "Could not determine rock position.",
+          error: true,
+        });
+        return { success: false };
+      }
+
+      // Get player tile position
+      let px = 0,
+        pz = 0;
+      if (Array.isArray(playerPos)) {
+        px = playerPos[0];
+        pz = playerPos[2];
+      } else if (
+        playerPos &&
+        typeof playerPos === "object" &&
+        "x" in playerPos
+      ) {
+        px = (playerPos as { x: number; z: number }).x;
+        pz = (playerPos as { x: number; z: number }).z;
+      }
+
+      const rockTileX = Math.floor(rockX);
+      const rockTileZ = Math.floor(rockZ);
+      const playerTileX = Math.floor(px);
+      const playerTileZ = Math.floor(pz);
+
+      const isCardinalAdjacent =
+        (playerTileX === rockTileX &&
+          Math.abs(playerTileZ - rockTileZ) === 1) ||
+        (playerTileZ === rockTileZ && Math.abs(playerTileX - rockTileX) === 1);
+
+      logger.info(
+        `[MINE_ROCK] Handler: Rock ${rock.id} (${rock.name}) ` +
+          `at tile [${rockTileX}, ${rockTileZ}], player at tile [${playerTileX}, ${playerTileZ}], ` +
+          `cardinalAdjacent=${isCardinalAdjacent}`,
+      );
+
+      // If not on cardinal adjacent tile, walk to one
+      if (!isCardinalAdjacent) {
+        const cardinalPositions = [
+          { x: rockTileX, z: rockTileZ - 1, dir: "South" },
+          { x: rockTileX, z: rockTileZ + 1, dir: "North" },
+          { x: rockTileX - 1, z: rockTileZ, dir: "West" },
+          { x: rockTileX + 1, z: rockTileZ, dir: "East" },
+        ];
+
+        let nearestCardinal = cardinalPositions[0];
+        let minDist = Infinity;
+        for (const pos of cardinalPositions) {
+          const dist = Math.sqrt(
+            Math.pow(px - pos.x, 2) + Math.pow(pz - pos.z, 2),
+          );
+          if (dist < minDist) {
+            minDist = dist;
+            nearestCardinal = pos;
+          }
+        }
+
+        const targetPos: [number, number, number] = [
+          nearestCardinal.x + 0.5,
+          rockY,
+          nearestCardinal.z + 0.5,
+        ];
+
+        logger.info(
+          `[MINE_ROCK] Handler: Not on cardinal tile, moving to [${nearestCardinal.x}, ${nearestCardinal.z}] (${nearestCardinal.dir})`,
+        );
+
+        await service.executeMove({ target: targetPos, runMode: false });
+        await callback?.({
+          text: `Positioning to mine ${rock.name}...`,
+          action: "MINE_ROCK",
+        });
+        return { success: true, text: `Positioning to mine ${rock.name}` };
+      }
+
+      const command: GatherResourceCommand = {
+        resourceEntityId: rock.id,
+        skill: "mining",
+      };
+      await service.executeGatherResource(command);
+
+      await callback?.({ text: `Mining ${rock.name}`, action: "MINE_ROCK" });
+
+      return { success: true, text: `Started mining ${rock.name}` };
+    } catch (error) {
+      logger.error(
+        `[MINE_ROCK] Handler error: ${error instanceof Error ? error.message : error}`,
+      );
+      await callback?.({
+        text: `Failed to mine: ${error instanceof Error ? error.message : ""}`,
+        error: true,
+      });
+      return { success: false, error: error as Error };
+    }
+  },
+
+  examples: [
+    [
+      { name: "user", content: { text: "Mine that copper rock" } },
+      {
+        name: "agent",
+        content: { text: "Mining Copper Rock", action: "MINE_ROCK" },
+      },
+    ],
+  ],
+};
+
 export const catchFishAction: Action = {
   name: "CATCH_FISH",
   similes: ["FISH", "FISHING"],
@@ -551,12 +1142,9 @@ export const lightFireAction: Action = {
 
     if (!service.isConnected() || !playerEntity?.alive) return false;
 
-    const hasTinderbox = playerEntity.items.some((i) =>
-      i.name.toLowerCase().includes("tinderbox"),
-    );
-    const hasLogs = playerEntity.items.some((i) =>
-      i.name.toLowerCase().includes("logs"),
-    );
+    // Use centralized item detection utility
+    const hasTinderbox = detectHasTinderbox(playerEntity);
+    const hasLogs = detectHasLogs(playerEntity);
 
     return hasTinderbox && hasLogs;
   },

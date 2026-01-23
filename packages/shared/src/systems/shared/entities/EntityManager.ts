@@ -25,6 +25,10 @@ import {
   AltarEntity,
   type AltarEntityConfig,
 } from "../../../entities/world/AltarEntity";
+import {
+  StarterChestEntity,
+  type StarterChestEntityConfig,
+} from "../../../entities/world/StarterChestEntity";
 import { MobEntity } from "../../../entities/npc/MobEntity";
 import { NPCEntity } from "../../../entities/npc/NPCEntity";
 import { ResourceEntity } from "../../../entities/world/ResourceEntity";
@@ -383,6 +387,35 @@ export class EntityManager extends SystemBase {
     } catch (err) {
       console.error("[EntityManager] Error spawning altar:", err);
     }
+
+    // Spawn starter chest near spawn point (for new player tools)
+    let starterChestY = 40;
+    if (terrain?.getHeightAt) {
+      const height = terrain.getHeightAt(5, -20);
+      if (height !== null && height !== undefined && Number.isFinite(height)) {
+        starterChestY = (height as number) + 0.1;
+      }
+    }
+
+    const starterChestConfig: StarterChestEntityConfig = {
+      id: "starter_chest_spawn",
+      name: "Starter Chest",
+      position: { x: 5, y: starterChestY, z: -20 },
+      description: "A chest containing starter equipment for new adventurers.",
+      interactionDistance: 2,
+    };
+
+    try {
+      await this.spawnEntity({
+        ...starterChestConfig,
+        type: EntityType.STARTER_CHEST,
+      } as unknown as EntityConfig);
+      console.log(
+        `[EntityManager] Spawned starter chest at (5, ${starterChestY}, -20)`,
+      );
+    } catch (err) {
+      console.error("[EntityManager] Error spawning starter chest:", err);
+    }
   }
 
   update(deltaTime: number): void {
@@ -490,6 +523,13 @@ export class EntityManager extends SystemBase {
       case EntityType.ALTAR:
       case "altar":
         entity = new AltarEntity(this.world, config as AltarEntityConfig);
+        break;
+      case EntityType.STARTER_CHEST:
+      case "starter_chest":
+        entity = new StarterChestEntity(
+          this.world,
+          config as StarterChestEntityConfig,
+        );
         break;
       default:
         throw new Error(`[EntityManager] Unknown entity type: ${config.type}`);

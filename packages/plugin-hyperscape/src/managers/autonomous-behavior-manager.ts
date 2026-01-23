@@ -34,10 +34,74 @@ import {
   idleAction,
   approachEntityAction,
   attackEntityAction,
+  lootStarterChestAction,
 } from "../actions/autonomous.js";
 import { setGoalAction, navigateToAction } from "../actions/goals.js";
-import { chopTreeAction } from "../actions/skills.js";
+import {
+  chopTreeAction,
+  mineRockAction,
+  catchFishAction,
+} from "../actions/skills.js";
+import { equipItemAction } from "../actions/inventory.js";
 import { KNOWN_LOCATIONS } from "../providers/goalProvider.js";
+import type { Entity } from "../types.js";
+import {
+  hasCombatCapableItem,
+  hasWeapon,
+  hasOre,
+  hasBars,
+} from "../utils/item-detection.js";
+
+/**
+ * Find the nearest entity matching a type/name pattern from nearby entities
+ * Returns the entity's position if found, null otherwise
+ *
+ * @param entities - Array of nearby entities
+ * @param typePatterns - Array of type/name patterns to match (case-insensitive)
+ * @param playerPos - Current player position for distance calculation
+ * @returns Position [x, y, z] of nearest matching entity, or null if not found
+ */
+function findNearestEntityPosition(
+  entities: Entity[],
+  typePatterns: string[],
+  playerPos: [number, number, number] | null,
+): [number, number, number] | null {
+  if (!entities || entities.length === 0) return null;
+
+  const patterns = typePatterns.map((p) => p.toLowerCase());
+
+  // Filter entities matching any pattern
+  const matchingEntities = entities.filter((e) => {
+    const name = (e.name || "").toLowerCase();
+    const id = (e.id || "").toLowerCase();
+    return patterns.some((p) => name.includes(p) || id.includes(p));
+  });
+
+  if (matchingEntities.length === 0) return null;
+
+  // If no player position, return first match
+  if (!playerPos) {
+    const first = matchingEntities[0];
+    return first.position || null;
+  }
+
+  // Find nearest
+  let nearest: Entity | null = null;
+  let nearestDist = Infinity;
+
+  for (const e of matchingEntities) {
+    if (!e.position) continue;
+    const dx = e.position[0] - playerPos[0];
+    const dz = e.position[2] - playerPos[2];
+    const dist = dx * dx + dz * dz; // squared distance is fine for comparison
+    if (dist < nearestDist) {
+      nearestDist = dist;
+      nearest = e;
+    }
+  }
+
+  return nearest?.position || null;
+}
 
 // Configuration
 const DEFAULT_TICK_INTERVAL = 10000; // 10 seconds between decisions
@@ -66,11 +130,23 @@ export interface AutonomousBehaviorConfig {
 
 /** Simple goal structure stored in memory */
 export interface CurrentGoal {
-  type: "combat_training" | "woodcutting" | "exploration" | "idle";
+  type:
+    | "combat_training"
+    | "woodcutting"
+    | "mining"
+    | "smithing"
+    | "fishing"
+    | "firemaking"
+    | "cooking"
+    | "exploration"
+    | "idle"
+    | "starter_items";
   description: string;
   target: number;
   progress: number;
   location?: string;
+  /** Dynamic position found at runtime (overrides KNOWN_LOCATIONS lookup) */
+  targetPosition?: [number, number, number];
   targetEntity?: string;
   /** For skill-based goals: which skill to train */
   targetSkill?: string;
@@ -103,6 +179,22 @@ export class AutonomousBehaviorManager {
   /** If true, the user explicitly paused goals - don't auto-set new ones */
   private goalPaused: boolean = false;
 
+  /**
+   * Goal history - tracks recently completed goals to encourage variety
+   * Used by goal templates provider to penalize repetitive goal selection
+   */
+  private goalHistory: Array<{ goal: CurrentGoal; completedAt: number }> = [];
+  private readonly GOAL_HISTORY_RETENTION = 5 * 60 * 1000; // Keep history for 5 minutes
+  private readonly MAX_GOAL_HISTORY = 10; // Max goals to track
+
+  /**
+   * Target locking for combat - prevents switching targets mid-fight
+   * Agent should finish killing current target before switching to another
+   */
+  private lockedTargetId: string | null = null;
+  private lockedTargetStartTime: number = 0;
+  private readonly TARGET_LOCK_TIMEOUT = 30000; // 30s max lock duration
+
   constructor(runtime: IAgentRuntime, config?: AutonomousBehaviorConfig) {
     this.runtime = runtime;
     this.tickInterval = Math.max(
@@ -129,7 +221,12 @@ export class AutonomousBehaviorManager {
         "EXPLORE",
         // Skills
         "CHOP_TREE",
+        "MINE_ROCK",
         "CATCH_FISH",
+        // Equipment management
+        "EQUIP_ITEM",
+        // World interactions
+        "LOOT_STARTER_CHEST",
         // Idle
         "IDLE",
       ],
@@ -243,6 +340,110 @@ export class AutonomousBehaviorManager {
 
     logger.info(`[AutonomousBehavior] === Tick ${this.tickCount} ===`);
 
+    // SURVIVAL OVERRIDE: Force flee if health is critical with threats nearby
+    // This bypasses LLM selection to ensure agent survives
+    const forceFleeResult = await this.checkForceFleeNeeded();
+    if (forceFleeResult.shouldFlee) {
+      logger.warn(
+        `[AutonomousBehavior] ⚠️ FORCE FLEE: ${forceFleeResult.reason}`,
+      );
+
+      // Clear target lock - survival > combat
+      this.clearTargetLock();
+
+      // Create minimal state for flee action
+      const fleeMessage = this.createTickMessage();
+      const fleeState = await this.runtime.composeState(fleeMessage);
+
+      // Execute flee directly, bypassing LLM selection
+      await this.executeAction(fleeAction, fleeMessage, fleeState);
+      return;
+    }
+
+    // STARTER ITEMS OVERRIDE: Force LOOT_STARTER_CHEST if goal is starter_items
+    // This bypasses LLM selection to ensure agent gets starter tools
+    if (this.currentGoal?.type === "starter_items") {
+      logger.info(
+        `[AutonomousBehavior] 📦 FORCE LOOT_STARTER_CHEST: Goal is starter_items`,
+      );
+
+      // Create message and state for the action
+      const lootMessage = this.createTickMessage();
+      const lootState = await this.runtime.composeState(lootMessage);
+
+      // Validate the action first
+      const isValid = await lootStarterChestAction.validate(
+        this.runtime,
+        lootMessage,
+        lootState,
+      );
+
+      if (isValid) {
+        // Execute loot starter chest directly, bypassing LLM selection
+        await this.executeAction(
+          lootStarterChestAction,
+          lootMessage,
+          lootState,
+        );
+        return;
+      } else {
+        logger.info(
+          `[AutonomousBehavior] LOOT_STARTER_CHEST validation failed - agent may already have tools`,
+        );
+        // Clear the goal since it's no longer valid (already have tools)
+        this.clearGoal();
+        // Fall through to normal tick processing to select a new goal
+      }
+    }
+
+    // COMBAT READINESS OVERRIDE: Force EQUIP_ITEM if combat goal but weapon not equipped
+    // This ensures agent equips a weapon before engaging in combat
+    // Check for any combat-related goal type (combat_training, combat_training_goblins, etc.)
+    const goalType = this.currentGoal?.type || "";
+    const isCombatGoal =
+      goalType.startsWith("combat") || goalType.includes("combat");
+
+    if (isCombatGoal) {
+      const player = this.service?.getPlayerEntity();
+      const hasWeaponEquipped = hasWeapon(player);
+      const hasCombatItem = hasCombatCapableItem(player);
+
+      logger.info(
+        `[AutonomousBehavior] 🔍 Combat readiness check: goalType=${goalType}, hasWeapon=${hasWeaponEquipped}, hasCombatItem=${hasCombatItem}`,
+      );
+
+      if (!hasWeaponEquipped && hasCombatItem) {
+        logger.info(
+          `[AutonomousBehavior] ⚔️ FORCE EQUIP_ITEM: Combat goal but weapon not equipped (has combat item in inventory)`,
+        );
+
+        // Import the equip action
+        const { equipItemAction } = await import("../actions/inventory.js");
+
+        // Create message and state for the action
+        const equipMessage = this.createTickMessage();
+        const equipState = await this.runtime.composeState(equipMessage);
+
+        // Validate the action first
+        const isValid = await equipItemAction.validate(
+          this.runtime,
+          equipMessage,
+          equipState,
+        );
+
+        if (isValid) {
+          // Execute equip item directly, bypassing LLM selection
+          await this.executeAction(equipItemAction, equipMessage, equipState);
+          return;
+        } else {
+          logger.info(
+            `[AutonomousBehavior] EQUIP_ITEM validation failed - may already have weapon equipped`,
+          );
+          // Fall through to normal tick processing
+        }
+      }
+    }
+
     // Check for locked user command goal - continue executing it
     if (this.currentGoal?.locked && this.currentGoal?.lockedBy === "manual") {
       const goalDescription = this.currentGoal.description || "";
@@ -335,34 +536,72 @@ export class AutonomousBehaviorManager {
     const tickMessage = this.createTickMessage();
 
     // Step 3: Compose state (gathers context from all providers)
-    logger.info("[AutonomousBehavior] Composing state...");
+    if (this.debug) logger.debug("[AutonomousBehavior] Composing state...");
     const state = await this.runtime.composeState(tickMessage);
 
     // Step 4: Run evaluators (assess the situation)
-    logger.info("[AutonomousBehavior] Running evaluators...");
+    if (this.debug) logger.debug("[AutonomousBehavior] Running evaluators...");
     const evaluatorResults = await this.runtime.evaluate(
       tickMessage,
       state,
       false, // didRespond
     );
 
-    if (evaluatorResults && evaluatorResults.length > 0) {
-      logger.info(
+    if (this.debug && evaluatorResults && evaluatorResults.length > 0) {
+      logger.debug(
         `[AutonomousBehavior] ${evaluatorResults.length} evaluators ran: ${evaluatorResults.map((e) => e.name).join(", ")}`,
       );
     }
 
     // Step 5: Select and execute an action using the LLM
-    logger.info("[AutonomousBehavior] Selecting action...");
+    if (this.debug) logger.debug("[AutonomousBehavior] Selecting action...");
 
-    const selectedAction = await this.selectAction(tickMessage, state);
+    let selectedAction = await this.selectAction(tickMessage, state);
 
     if (!selectedAction) {
       logger.info("[AutonomousBehavior] No action selected this tick");
       return;
     }
 
-    logger.info(`[AutonomousBehavior] Selected action: ${selectedAction.name}`);
+    logger.info(
+      `[AutonomousBehavior] LLM selected action: ${selectedAction.name}`,
+    );
+
+    // DEFENSIVE CHECK: Force SET_GOAL if there's no goal and LLM didn't select SET_GOAL
+    // This ensures the agent always has a goal before taking other actions
+    if (
+      !this.currentGoal &&
+      !this.goalPaused &&
+      selectedAction.name !== "SET_GOAL"
+    ) {
+      logger.warn(
+        `[AutonomousBehavior] ⚠️ No goal but LLM selected ${selectedAction.name} - forcing SET_GOAL`,
+      );
+      selectedAction = setGoalAction;
+    }
+
+    // DEFENSIVE CHECK: Force EQUIP_ITEM if "Prepare for Combat" goal and has equippable weapon
+    // This ensures the agent equips weapons before doing unrelated tasks like chopping wood
+    if (
+      this.currentGoal?.type === "exploration" &&
+      this.currentGoal?.description?.toLowerCase().includes("combat") &&
+      selectedAction.name !== "EQUIP_ITEM" &&
+      selectedAction.name !== "NAVIGATE_TO"
+    ) {
+      const player = this.service?.getPlayerEntity();
+      const hasWeaponEquipped = hasWeapon(player);
+
+      if (!hasWeaponEquipped && hasCombatCapableItem(player)) {
+        logger.warn(
+          `[AutonomousBehavior] ⚠️ "Prepare for Combat" goal but LLM selected ${selectedAction.name} - forcing EQUIP_ITEM`,
+        );
+        selectedAction = equipItemAction;
+      }
+    }
+
+    logger.info(
+      `[AutonomousBehavior] Executing action: ${selectedAction.name}`,
+    );
 
     // Step 6: Validate the selected action
     const isValid = await selectedAction.validate(
@@ -417,7 +656,10 @@ export class AutonomousBehaviorManager {
             logger.info(
               "[AutonomousBehavior] At forest location, trying CHOP_TREE instead",
             );
-          } else if (goal.type === "combat_training") {
+          } else if (
+            goal.type?.startsWith("combat") ||
+            goal.type?.includes("combat")
+          ) {
             goalAction = attackEntityAction;
             logger.info(
               "[AutonomousBehavior] At spawn location, trying ATTACK_ENTITY instead",
@@ -484,7 +726,10 @@ export class AutonomousBehaviorManager {
 
       const responseText =
         typeof response === "string" ? response : String(response);
-      logger.info(`[AutonomousBehavior] LLM response: ${responseText.trim()}`);
+      if (this.debug)
+        logger.debug(
+          `[AutonomousBehavior] LLM response: ${responseText.trim()}`,
+        );
 
       // Parse the selected action from response
       let selectedActionName = this.parseActionFromResponse(
@@ -531,6 +776,9 @@ export class AutonomousBehaviorManager {
       navigateToAction,
       attackEntityAction,
       chopTreeAction, // For woodcutting goals
+      mineRockAction, // For mining goals
+      catchFishAction, // For fishing goals
+      equipItemAction, // For equipping weapons/armor
       exploreAction,
       fleeAction,
       idleAction,
@@ -636,175 +884,371 @@ export class AutonomousBehaviorManager {
       allRecommendations.forEach((r) => lines.push(`  ${r}`));
     }
 
+    // === DYNAMIC NEARBY ENTITIES SECTION ===
+    // Let the LLM see what's nearby and figure out the appropriate action
+    const nearbyEntities = this.service?.getNearbyEntities() || [];
+    const playerPos = this.service?.getPlayerEntity()?.position;
+
+    // Categorize nearby entities dynamically
+    const getDistance = (entityPos: unknown): number | null => {
+      if (!playerPos || !entityPos) return null;
+      let ex = 0,
+        ez = 0,
+        px = 0,
+        pz = 0;
+      if (Array.isArray(entityPos)) {
+        ex = entityPos[0];
+        ez = entityPos[2];
+      } else if (
+        typeof entityPos === "object" &&
+        entityPos &&
+        "x" in entityPos
+      ) {
+        ex = (entityPos as { x: number; z: number }).x;
+        ez = (entityPos as { x: number; z: number }).z;
+      }
+      if (Array.isArray(playerPos)) {
+        px = playerPos[0];
+        pz = playerPos[2];
+      } else if (typeof playerPos === "object" && "x" in playerPos) {
+        px = (playerPos as { x: number; z: number }).x;
+        pz = (playerPos as { x: number; z: number }).z;
+      }
+      return Math.sqrt((px - ex) ** 2 + (pz - ez) ** 2);
+    };
+
+    // Count nearby resource types (within 20m approach range)
+    let treesNearby = 0,
+      rocksNearby = 0,
+      fishingSpotsNearby = 0,
+      mobsNearby = 0;
+    const mobNames: string[] = [];
+
+    for (const entity of nearbyEntities) {
+      const entityAny = entity as unknown as Record<string, unknown>;
+      const dist = getDistance(entityAny.position);
+      if (dist === null || dist > 20) continue;
+      if (entityAny.depleted === true) continue; // Skip depleted resources
+
+      const name = entity.name?.toLowerCase() || "";
+      const resourceType = entityAny.resourceType as string | undefined;
+
+      // Trees
+      if (resourceType === "tree" || name.includes("tree")) {
+        treesNearby++;
+      }
+      // Rocks/Ore
+      else if (
+        resourceType === "rock" ||
+        resourceType === "ore" ||
+        name.includes("rock") ||
+        name.includes("ore") ||
+        /copper|tin|iron|coal/i.test(name)
+      ) {
+        rocksNearby++;
+      }
+      // Fishing spots
+      else if (resourceType === "fishing_spot" || name.includes("fishing")) {
+        fishingSpotsNearby++;
+      }
+      // Mobs
+      else if (
+        entityAny.mobType ||
+        entityAny.type === "mob" ||
+        /goblin|bandit|skeleton|zombie|rat|spider|wolf/i.test(name)
+      ) {
+        if (entityAny.alive !== false) {
+          mobsNearby++;
+          if (mobNames.length < 3) mobNames.push(entity.name || "mob");
+        }
+      }
+    }
+
+    lines.push("");
+    lines.push("=== NEARBY RESOURCES (informational only) ===");
+    if (treesNearby > 0) lines.push(`  🌲 Trees: ${treesNearby}`);
+    if (rocksNearby > 0) lines.push(`  �ite Rocks/Ore: ${rocksNearby}`);
+    if (fishingSpotsNearby > 0)
+      lines.push(`  🎣 Fishing spots: ${fishingSpotsNearby}`);
+    if (mobsNearby > 0)
+      lines.push(`  ⚔️ Mobs: ${mobsNearby} - ${mobNames.join(", ")}`);
+    if (
+      treesNearby === 0 &&
+      rocksNearby === 0 &&
+      fishingSpotsNearby === 0 &&
+      mobsNearby === 0
+    ) {
+      lines.push("  (No harvestable resources or attackable mobs nearby)");
+    }
+
     lines.push("");
     lines.push("=== AVAILABLE ACTIONS ===");
-
     for (const action of actions) {
       lines.push(`${action.name}: ${action.description}`);
     }
 
     lines.push("");
-    lines.push("=== DECISION PRIORITY ===");
-    lines.push("1. If urgency is CRITICAL or health < 30% with threats: FLEE");
-    lines.push("2. If NO GOAL: SET_GOAL (you must have purpose!)");
-    lines.push("3. If goal requires travel: NAVIGATE_TO the goal location");
-    lines.push("4. If combat_training goal with mobs nearby: ATTACK_ENTITY");
-    lines.push("5. If woodcutting goal with trees nearby: CHOP_TREE");
-    lines.push("6. If waiting for respawn/recovery: IDLE briefly");
-    lines.push("7. If goal is exploration or no targets: EXPLORE");
+    lines.push("=== KNOWN LOCATIONS ===");
+    lines.push(`  spawn: [0, 0] - Goblins for combat training`);
+    lines.push(
+      `  forest: [${KNOWN_LOCATIONS.forest?.position[0]}, ${KNOWN_LOCATIONS.forest?.position[2]}] - Trees for woodcutting`,
+    );
+    lines.push(
+      `  mine: [${KNOWN_LOCATIONS.mine?.position[0]}, ${KNOWN_LOCATIONS.mine?.position[2]}] - Rocks for mining`,
+    );
+    lines.push(
+      `  fishing: [${KNOWN_LOCATIONS.fishing?.position[0]}, ${KNOWN_LOCATIONS.fishing?.position[2]}] - Fishing spots`,
+    );
 
-    // Compute priority action directly based on goal and nearby entities
+    lines.push("");
+    lines.push("=== DECISION GUIDELINES ===");
+    lines.push(
+      "1. CRITICAL: If health < 30% with threats nearby → FLEE immediately",
+    );
+    lines.push("2. If NO GOAL → SET_GOAL (you must have purpose!)");
+    lines.push("3. If starter_items goal → LOOT_STARTER_CHEST");
+    lines.push(
+      "4. ** IMPORTANT: Follow the RECOMMENDED ACTION below if one is shown! **",
+    );
+    lines.push("5. If 'Prepare for Combat' goal:");
+    lines.push(
+      "   - If you have axe/pickaxe/sword in inventory → EQUIP_ITEM (these are weapons!)",
+    );
+    lines.push(
+      "   - If no weapon in inventory → MINE_ROCK to get ore, then smith",
+    );
+    lines.push(
+      "6. Match your goal to nearby resources ONLY if no recommended action:",
+    );
+    lines.push("   - woodcutting goal + trees nearby → CHOP_TREE");
+    lines.push("   - mining goal + rocks nearby → MINE_ROCK");
+    lines.push("   - fishing goal + fishing spots nearby → CATCH_FISH");
+    lines.push("   - combat_training goal + mobs nearby → ATTACK_ENTITY");
+    lines.push(
+      "7. If goal resources NOT nearby → NAVIGATE_TO the appropriate location",
+    );
+    lines.push(
+      "8. If at location but resources not visible → EXPLORE the area",
+    );
+
+    // === MINIMAL GUARDRAILS (only critical safety checks) ===
     let priorityAction: string | null = null;
-    const nearbyEntities = this.service?.getNearbyEntities() || [];
 
     if (!goal) {
-      // If goals are paused (user clicked stop), don't auto-set a new goal
+      // No goal - must set one (unless paused)
       if (this.goalPaused) {
         priorityAction = "IDLE";
-        lines.push("  ** GOALS PAUSED ** - Waiting for user to set a new goal");
+        lines.push("");
+        lines.push("** GOALS PAUSED ** - Waiting for user to set a new goal");
       } else {
         priorityAction = "SET_GOAL";
-      }
-    } else if (goal.type === "combat_training") {
-      // Check for nearby mobs - flexible detection
-      const mobs = nearbyEntities.filter((entity) => {
-        const entityAny = entity as unknown as Record<string, unknown>;
-        const isMob =
-          "mobType" in entity ||
-          entityAny.type === "mob" ||
-          entityAny.entityType === "mob" ||
-          (entity.name &&
-            /goblin|bandit|skeleton|zombie|rat|spider|wolf/i.test(entity.name));
-        return isMob && entityAny.alive !== false;
-      });
-      if (mobs.length > 0) {
-        priorityAction = "ATTACK_ENTITY";
-        lines.push(`  ** ${mobs.length} attackable mob(s) nearby! **`);
-      } else {
-        // No mobs nearby - navigate to where mobs are (spawn area has goblins)
-        const playerPos = this.service?.getPlayerEntity()?.position || [
-          0, 0, 0,
-        ];
-        const spawnPos = [0, 0, 0]; // Goblins are at spawn
-        const distToSpawn = Math.sqrt(
-          Math.pow(playerPos[0] - spawnPos[0], 2) +
-            Math.pow(playerPos[2] - spawnPos[2], 2),
-        );
-
-        if (distToSpawn > 15) {
-          priorityAction = "NAVIGATE_TO";
-          lines.push(
-            `  No mobs nearby - navigate to spawn (${Math.round(distToSpawn)} units away)`,
-          );
-        } else {
-          priorityAction = "EXPLORE";
-          lines.push("  At spawn but no mobs visible - explore nearby");
-        }
+        lines.push("");
+        lines.push("** NO GOAL - You MUST use SET_GOAL first! **");
       }
     } else if (goal.type === "woodcutting") {
-      // Check for trees WITHIN approach range (20m - CHOP_TREE will walk to tree)
-      const APPROACH_RANGE = 20;
-      const playerPos = this.service?.getPlayerEntity()?.position;
-      const allTrees = nearbyEntities.filter((entity) => {
-        const entityAny = entity as unknown as Record<string, unknown>;
-        const name = entity.name?.toLowerCase() || "";
-        // Exclude items
-        if (name.startsWith("item:")) return false;
-        return (
-          entityAny.resourceType === "tree" ||
-          entityAny.type === "tree" ||
-          (entity.name && /tree/i.test(entity.name) && !name.includes("item"))
-        );
-      });
-
-      // Filter by distance - trees within approach range
-      const approachableTrees = allTrees.filter((entity) => {
-        const entityAny = entity as unknown as Record<string, unknown>;
-        const entityPos = entityAny.position as
-          | [number, number, number]
-          | { x: number; z: number }
-          | undefined;
-        if (!entityPos || !playerPos) return false;
-
-        let ex: number, ez: number;
-        if (Array.isArray(entityPos)) {
-          ex = entityPos[0];
-          ez = entityPos[2];
-        } else if (typeof entityPos === "object" && "x" in entityPos) {
-          ex = entityPos.x;
-          ez = entityPos.z;
-        } else {
-          return false;
-        }
-
-        let px: number, pz: number;
-        if (Array.isArray(playerPos)) {
-          px = playerPos[0];
-          pz = playerPos[2];
-        } else if (typeof playerPos === "object" && "x" in playerPos) {
-          px = (playerPos as { x: number; z: number }).x;
-          pz = (playerPos as { x: number; z: number }).z;
-        } else {
-          return false;
-        }
-
-        const dist = Math.sqrt((px - ex) ** 2 + (pz - ez) ** 2);
-        return dist <= APPROACH_RANGE;
-      });
-
-      if (approachableTrees.length > 0) {
+      // Woodcutting goal - force CHOP_TREE if trees are nearby, else NAVIGATE_TO forest
+      if (treesNearby > 0) {
         priorityAction = "CHOP_TREE";
+        lines.push("");
         lines.push(
-          `  ** ${approachableTrees.length} tree(s) within approach range! Use CHOP_TREE to walk to and chop them! **`,
-        );
-      } else if (allTrees.length > 0) {
-        // Trees exist but not in approach range - need to navigate to forest
-        priorityAction = "NAVIGATE_TO";
-        lines.push(
-          `  Trees in world but too far (${allTrees.length} total). Navigate to forest.`,
+          `** WOODCUTTING GOAL - ${treesNearby} trees nearby! Use CHOP_TREE to continue training! **`,
         );
       } else {
-        // No trees anywhere - navigate to the forest where trees are
-        const forestPos = KNOWN_LOCATIONS.forest?.position || [-130, 30, 400];
-        const pPos = playerPos || [0, 0, 0];
-        let fpx = 0,
-          fpz = 0;
-        if (Array.isArray(pPos)) {
-          fpx = pPos[0];
-          fpz = pPos[2];
-        } else if (typeof pPos === "object" && "x" in pPos) {
-          fpx = (pPos as { x: number; z: number }).x;
-          fpz = (pPos as { x: number; z: number }).z;
+        // No trees nearby - navigate to forest
+        if (this.currentGoal) {
+          this.currentGoal.location = "forest";
         }
-        const distToForest = Math.sqrt(
-          Math.pow(fpx - forestPos[0], 2) + Math.pow(fpz - forestPos[2], 2),
+        priorityAction = "NAVIGATE_TO";
+        lines.push("");
+        lines.push(
+          "** WOODCUTTING GOAL - No trees nearby! Use NAVIGATE_TO to get to the forest! **",
         );
+      }
+    } else if (goal.type === "mining") {
+      // Mining goal - force MINE_ROCK if rocks are nearby, else NAVIGATE_TO mine
+      if (rocksNearby > 0) {
+        priorityAction = "MINE_ROCK";
+        lines.push("");
+        lines.push(
+          `** MINING GOAL - ${rocksNearby} rocks nearby! Use MINE_ROCK to continue training! **`,
+        );
+      } else {
+        // No rocks nearby - navigate to mine
+        if (this.currentGoal) {
+          this.currentGoal.location = "mine";
+        }
+        priorityAction = "NAVIGATE_TO";
+        lines.push("");
+        lines.push(
+          "** MINING GOAL - No rocks nearby! Use NAVIGATE_TO to get to the mine! **",
+        );
+      }
+    } else if (goal.type === "fishing") {
+      // Fishing goal - force CATCH_FISH if fishing spots are nearby, else NAVIGATE_TO fishing
+      if (fishingSpotsNearby > 0) {
+        priorityAction = "CATCH_FISH";
+        lines.push("");
+        lines.push(
+          `** FISHING GOAL - ${fishingSpotsNearby} fishing spots nearby! Use CATCH_FISH to continue training! **`,
+        );
+      } else {
+        // No fishing spots nearby - navigate to fishing area
+        if (this.currentGoal) {
+          this.currentGoal.location = "fishing";
+        }
+        priorityAction = "NAVIGATE_TO";
+        lines.push("");
+        lines.push(
+          "** FISHING GOAL - No fishing spots nearby! Use NAVIGATE_TO to get to the fishing area! **",
+        );
+      }
+    } else if (
+      goal.type?.startsWith("combat") ||
+      goal.type?.includes("combat")
+    ) {
+      // Combat training goal - check combat readiness first, then attack or navigate
+      const player = this.service?.getPlayerEntity();
+      const hasWeaponEquipped = hasWeapon(player);
+      const hasCombatItem = hasCombatCapableItem(player);
 
-        if (distToForest > 15) {
-          priorityAction = "NAVIGATE_TO";
+      // First priority: equip a weapon if we have one but it's not equipped
+      if (!hasWeaponEquipped && hasCombatItem) {
+        priorityAction = "EQUIP_ITEM";
+        lines.push("");
+        lines.push(
+          "** COMBAT GOAL - You have a weapon in inventory but it's not equipped! Use EQUIP_ITEM first! **",
+        );
+      } else if (mobsNearby > 0) {
+        // Have weapon (or no weapon available) and mobs nearby - attack
+        priorityAction = "ATTACK_ENTITY";
+        lines.push("");
+        if (!hasWeaponEquipped) {
           lines.push(
-            `  No trees nearby - navigate to forest (${Math.round(distToForest)} units away)`,
+            `** COMBAT GOAL - ${mobsNearby} mobs nearby but NO WEAPON! Consider getting a weapon first. **`,
           );
         } else {
-          priorityAction = "EXPLORE";
-          lines.push("  At forest but no trees visible - explore nearby");
+          lines.push(
+            `** COMBAT GOAL - ${mobsNearby} mobs nearby (${mobNames.join(", ")})! Use ATTACK_ENTITY to continue training! **`,
+          );
         }
+      } else {
+        // No mobs nearby - navigate to spawn area
+        if (this.currentGoal) {
+          this.currentGoal.location = "spawn";
+        }
+        priorityAction = "NAVIGATE_TO";
+        lines.push("");
+        lines.push(
+          "** COMBAT GOAL - No mobs nearby! Use NAVIGATE_TO to get to the spawn area! **",
+        );
       }
-    } else if (goal.type === "exploration") {
-      priorityAction = "EXPLORE";
-    } else if (goal.type === "idle") {
-      priorityAction = "IDLE";
+    } else if (goal.type === "starter_items") {
+      // Starter items is a special case - always loot chest
+      priorityAction = "LOOT_STARTER_CHEST";
+      lines.push("");
+      lines.push(
+        "** STARTER ITEMS GOAL - Use LOOT_STARTER_CHEST to get tools! **",
+      );
+    } else if (
+      goal.type === "exploration" &&
+      goal.description?.toLowerCase().includes("combat")
+    ) {
+      // "Prepare for Combat" goal - need to get a weapon equipped
+      const player = this.service?.getPlayerEntity();
+      const hasWeaponEquipped = hasWeapon(player);
+      const hasCombatItem = hasCombatCapableItem(player);
+      const playerHasOre = hasOre(player);
+      const playerHasBars = hasBars(player);
+
+      if (!hasWeaponEquipped && hasCombatItem) {
+        // Has a combat-capable item in inventory - equip it!
+        priorityAction = "EQUIP_ITEM";
+        lines.push("");
+        lines.push(
+          "** PREPARE FOR COMBAT - You have a weapon in inventory! Use EQUIP_ITEM to equip it! **",
+        );
+      } else if (!hasWeaponEquipped && !playerHasOre && !playerHasBars) {
+        // No weapon and no materials - need to mine ore first
+        if (rocksNearby > 0) {
+          priorityAction = "MINE_ROCK";
+          lines.push("");
+          lines.push(
+            "** PREPARE FOR COMBAT - No weapon! Use MINE_ROCK to gather ore for smithing! **",
+          );
+        } else {
+          // Try to find rocks/mine dynamically from nearby entities
+          const nearbyEntities = this.service?.getNearbyEntities() || [];
+          const playerPos = player?.position as [number, number, number] | null;
+          const rockPos = findNearestEntityPosition(
+            nearbyEntities,
+            ["rock", "ore", "mine"],
+            playerPos,
+          );
+
+          if (this.currentGoal) {
+            if (rockPos) {
+              // Found a rock/mine - set dynamic position
+              this.currentGoal.targetPosition = rockPos;
+              this.currentGoal.location = "mine";
+            } else {
+              // Fall back to KNOWN_LOCATIONS
+              this.currentGoal.location = "mine";
+            }
+          }
+          priorityAction = "NAVIGATE_TO";
+          lines.push("");
+          lines.push(
+            "** PREPARE FOR COMBAT - No weapon! Use NAVIGATE_TO to get to the mine for ore! **",
+          );
+        }
+      } else if (!hasWeaponEquipped && (playerHasOre || playerHasBars)) {
+        // Has materials - need to find furnace or anvil
+        const nearbyEntities = this.service?.getNearbyEntities() || [];
+        const playerPos = player?.position as [number, number, number] | null;
+        const targetType = playerHasOre ? "furnace" : "anvil";
+        const stationPos = findNearestEntityPosition(
+          nearbyEntities,
+          [targetType],
+          playerPos,
+        );
+
+        if (this.currentGoal) {
+          if (stationPos) {
+            // Found the station - set dynamic position
+            this.currentGoal.targetPosition = stationPos;
+            this.currentGoal.location = targetType;
+          } else {
+            // Fall back to KNOWN_LOCATIONS
+            this.currentGoal.location = targetType;
+          }
+        }
+        priorityAction = "NAVIGATE_TO";
+        lines.push("");
+        lines.push(
+          `** PREPARE FOR COMBAT - You have ore/bars! Use NAVIGATE_TO to find a ${targetType} to smith a weapon. **`,
+        );
+      }
     }
+    // For all other goals, let the LLM figure it out based on:
+    // - Current goal type
+    // - Nearby resources listed above
+    // - Available actions and known locations
 
     if (priorityAction) {
       lines.push("");
-      lines.push(`** RECOMMENDED ACTION: ${priorityAction} **`);
+      lines.push("╔════════════════════════════════════════════╗");
+      lines.push(`║  >>> YOU MUST USE: ${priorityAction} <<<`);
+      lines.push("╚════════════════════════════════════════════╝");
     }
 
     lines.push("");
-    lines.push(
-      "Respond with ONLY the action name (e.g., SET_GOAL or ATTACK_ENTITY or NAVIGATE_TO):",
-    );
+    if (priorityAction) {
+      lines.push(`Respond with ONLY: ${priorityAction}`);
+    } else {
+      lines.push(
+        "Respond with ONLY the action name (e.g., SET_GOAL or ATTACK_ENTITY or NAVIGATE_TO):",
+      );
+    }
 
     return lines.join("\n");
   }
@@ -857,7 +1301,8 @@ export class AutonomousBehaviorManager {
         undefined,
         async (content) => {
           // Callback when action produces output
-          logger.info(`[AutonomousBehavior] Action output: ${content.text}`);
+          if (this.debug)
+            logger.debug(`[AutonomousBehavior] Action output: ${content.text}`);
 
           // Store in memory for learning - use ElizaOS pattern (no manual id/createdAt)
           try {
@@ -1082,6 +1527,11 @@ export class AutonomousBehaviorManager {
    * Set a new goal
    */
   setGoal(goal: CurrentGoal): void {
+    // Save previous goal to history before setting new one
+    if (this.currentGoal) {
+      this.addToGoalHistory(this.currentGoal);
+    }
+
     this.currentGoal = goal;
     // Only clear paused state for autonomous goals (not locked/user commands)
     // If it's a locked goal (user command while paused), keep paused state
@@ -1100,10 +1550,69 @@ export class AutonomousBehaviorManager {
    * Clear the current goal
    */
   clearGoal(): void {
+    // Save completed goal to history
+    if (this.currentGoal) {
+      this.addToGoalHistory(this.currentGoal);
+    }
     this.currentGoal = null;
     logger.info("[AutonomousBehavior] Goal cleared");
     // Sync to server for dashboard display
     this.service?.syncGoalToServer();
+  }
+
+  /**
+   * Add a goal to history (for diversity tracking)
+   */
+  private addToGoalHistory(goal: CurrentGoal): void {
+    // Clean up old entries first
+    const now = Date.now();
+    this.goalHistory = this.goalHistory.filter(
+      (entry) => now - entry.completedAt < this.GOAL_HISTORY_RETENTION,
+    );
+
+    // Add new entry
+    this.goalHistory.push({ goal, completedAt: now });
+
+    // Trim to max size
+    if (this.goalHistory.length > this.MAX_GOAL_HISTORY) {
+      this.goalHistory = this.goalHistory.slice(-this.MAX_GOAL_HISTORY);
+    }
+
+    logger.debug(
+      `[AutonomousBehavior] Goal added to history: ${goal.type} (${this.goalHistory.length} in history)`,
+    );
+  }
+
+  /**
+   * Get recent goal history for diversity scoring
+   * Returns goals completed in the last GOAL_HISTORY_RETENTION ms
+   */
+  getGoalHistory(): Array<{
+    type: string;
+    skill?: string;
+    completedAt: number;
+  }> {
+    const now = Date.now();
+    return this.goalHistory
+      .filter((entry) => now - entry.completedAt < this.GOAL_HISTORY_RETENTION)
+      .map((entry) => ({
+        type: entry.goal.type,
+        skill: entry.goal.targetSkill,
+        completedAt: entry.completedAt,
+      }));
+  }
+
+  /**
+   * Get count of recent goals by type (for diversity scoring)
+   */
+  getRecentGoalCounts(): Record<string, number> {
+    const history = this.getGoalHistory();
+    const counts: Record<string, number> = {};
+    for (const entry of history) {
+      const key = entry.skill || entry.type;
+      counts[key] = (counts[key] || 0) + 1;
+    }
+    return counts;
   }
 
   /**
@@ -1188,5 +1697,206 @@ export class AutonomousBehaviorManager {
    */
   hasGoal(): boolean {
     return this.currentGoal !== null;
+  }
+
+  // ============================================================================
+  // TARGET LOCKING - Prevents switching targets mid-combat
+  // ============================================================================
+
+  /**
+   * Lock onto a combat target
+   * Agent will prioritize this target until it's dead, gone, or timeout
+   */
+  lockTarget(targetId: string): void {
+    this.lockedTargetId = targetId;
+    this.lockedTargetStartTime = Date.now();
+    logger.info(`[AutonomousBehavior] 🎯 Target locked: ${targetId}`);
+  }
+
+  /**
+   * Clear the current target lock
+   * Called when target dies, despawns, or agent needs to flee
+   */
+  clearTargetLock(): void {
+    if (this.lockedTargetId) {
+      logger.info(
+        `[AutonomousBehavior] 🎯 Target lock cleared: ${this.lockedTargetId}`,
+      );
+    }
+    this.lockedTargetId = null;
+    this.lockedTargetStartTime = 0;
+  }
+
+  /**
+   * Get the currently locked target ID
+   * Returns null if no lock, lock expired, or target is no longer valid
+   */
+  getLockedTarget(): string | null {
+    if (!this.lockedTargetId) return null;
+
+    // Check for timeout
+    const lockAge = Date.now() - this.lockedTargetStartTime;
+    if (lockAge > this.TARGET_LOCK_TIMEOUT) {
+      logger.info(
+        `[AutonomousBehavior] 🎯 Target lock expired after ${Math.round(lockAge / 1000)}s`,
+      );
+      this.clearTargetLock();
+      return null;
+    }
+
+    // Validate target still exists and is alive
+    const nearbyEntities = this.service?.getNearbyEntities() || [];
+    const target = nearbyEntities.find((e) => e.id === this.lockedTargetId);
+
+    if (!target) {
+      logger.info(
+        `[AutonomousBehavior] 🎯 Locked target ${this.lockedTargetId} no longer nearby`,
+      );
+      this.clearTargetLock();
+      return null;
+    }
+
+    // Check if target is dead
+    const targetAny = target as unknown as Record<string, unknown>;
+    if (targetAny.alive === false || targetAny.dead === true) {
+      logger.info(
+        `[AutonomousBehavior] 🎯 Locked target ${this.lockedTargetId} is dead`,
+      );
+      this.clearTargetLock();
+      return null;
+    }
+
+    return this.lockedTargetId;
+  }
+
+  /**
+   * Check if we have a valid locked target
+   */
+  hasLockedTarget(): boolean {
+    return this.getLockedTarget() !== null;
+  }
+
+  // ============================================================================
+  // SURVIVAL OVERRIDE - Force flee when health is critical
+  // ============================================================================
+
+  /**
+   * Check if force flee is needed (health critical with threats nearby)
+   * This bypasses LLM selection to ensure agent survival
+   */
+  private async checkForceFleeNeeded(): Promise<{
+    shouldFlee: boolean;
+    reason: string;
+  }> {
+    if (!this.service) {
+      return { shouldFlee: false, reason: "" };
+    }
+
+    const player = this.service.getPlayerEntity();
+    if (!player) {
+      return { shouldFlee: false, reason: "" };
+    }
+
+    // Calculate health percentage - check multiple possible formats
+    const playerAny = player as unknown as Record<string, unknown>;
+
+    // Try different health data formats
+    // Server can send: { health: number, maxHealth: number } (flat)
+    // Or normalized: { health: { current: number, max: number } } (nested)
+    let currentHealth = 100;
+    let maxHealth = 100;
+
+    if (player.health && typeof player.health === "object") {
+      // Standard format: health: { current: number, max: number }
+      currentHealth = player.health.current ?? 100;
+      maxHealth = player.health.max ?? 100;
+    } else if (typeof player.health === "number") {
+      // Flat format from server: health = current value, maxHealth = max value
+      currentHealth = player.health;
+      maxHealth = (playerAny.maxHealth as number) ?? 100;
+    } else if (typeof playerAny.hp === "number") {
+      // Alternative format: hp/maxHp
+      currentHealth = playerAny.hp;
+      maxHealth = (playerAny.maxHp as number) ?? 100;
+    } else if (typeof playerAny.currentHealth === "number") {
+      // Another alternative
+      currentHealth = playerAny.currentHealth;
+      maxHealth = (playerAny.maxHealth as number) ?? 100;
+    }
+
+    const healthPercent =
+      maxHealth > 0 ? (currentHealth / maxHealth) * 100 : 100;
+
+    // Log health status for debugging (only when in combat or low health)
+    if (player.inCombat || healthPercent < 50) {
+      logger.info(
+        `[AutonomousBehavior] 🏥 Health check: ${currentHealth}/${maxHealth} (${healthPercent.toFixed(0)}%) - inCombat: ${player.inCombat}`,
+      );
+    }
+
+    // Force flee threshold: 25% (slightly higher than validate's 30% for proactive escape)
+    const CRITICAL_HEALTH_THRESHOLD = 25;
+
+    if (healthPercent >= CRITICAL_HEALTH_THRESHOLD) {
+      return { shouldFlee: false, reason: "" };
+    }
+
+    // Check for nearby threats (hostile mobs)
+    const nearbyEntities = this.service.getNearbyEntities() || [];
+    const threats = nearbyEntities.filter((entity) => {
+      const entityAny = entity as unknown as Record<string, unknown>;
+
+      // Check if this is a mob
+      const isMob =
+        "mobType" in entity ||
+        entityAny.type === "mob" ||
+        entityAny.entityType === "mob" ||
+        (entity.name &&
+          /goblin|bandit|skeleton|zombie|rat|spider|wolf/i.test(entity.name));
+
+      if (!isMob) return false;
+
+      // Check if alive
+      if (entityAny.alive === false || entityAny.dead === true) return false;
+
+      // Check distance (within 15 units = immediate threat)
+      const playerPos = player.position;
+      const entityPos = entity.position;
+      if (!playerPos || !entityPos) return false;
+
+      let px: number, pz: number;
+      if (Array.isArray(playerPos)) {
+        px = playerPos[0];
+        pz = playerPos[2];
+      } else if (typeof playerPos === "object" && "x" in playerPos) {
+        px = (playerPos as { x: number }).x;
+        pz = (playerPos as { z: number }).z;
+      } else {
+        return false;
+      }
+
+      let ex: number, ez: number;
+      if (Array.isArray(entityPos)) {
+        ex = entityPos[0];
+        ez = entityPos[2];
+      } else if (typeof entityPos === "object" && "x" in entityPos) {
+        ex = (entityPos as { x: number }).x;
+        ez = (entityPos as { z: number }).z;
+      } else {
+        return false;
+      }
+
+      const dist = Math.sqrt((px - ex) ** 2 + (pz - ez) ** 2);
+      return dist < 15; // Within 15 units = immediate threat
+    });
+
+    if (threats.length > 0) {
+      return {
+        shouldFlee: true,
+        reason: `Health critical (${healthPercent.toFixed(0)}%) with ${threats.length} threat(s) nearby`,
+      };
+    }
+
+    return { shouldFlee: false, reason: "" };
   }
 }
