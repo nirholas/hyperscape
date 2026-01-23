@@ -130,7 +130,7 @@ console.log(`${colors.blue}Setting up file watcher...${colors.reset}`)
 const { default: chokidar } = await import('chokidar')
 
 const watcher = chokidar.watch([
-  'src/**/*.{ts,tsx,js,mjs}',
+  'src/**/*.{ts,tsx,js,mjs,sql}',
   '../shared/build/**/*.{js,d.ts}'
 ], {
   cwd: rootDir,

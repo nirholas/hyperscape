@@ -225,7 +225,7 @@ export default defineConfig(({ mode }) => {
         env.PUBLIC_ELIZAOS_URL ||
           (mode === "production"
             ? "https://hyperscape-production.up.railway.app"
-            : "http://localhost:4001"),
+            : env.PUBLIC_API_URL || "http://localhost:5555"),
       ),
       "import.meta.env.PUBLIC_PRIVY_APP_ID": JSON.stringify(
         env.PUBLIC_PRIVY_APP_ID || "",

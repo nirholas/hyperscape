@@ -19,7 +19,8 @@ import fs from 'fs'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.join(__dirname, '..')
 const serverDir = path.join(rootDir, 'packages/server')
-const assetsDir = path.join(rootDir, 'assets')
+// CDN serves from packages/server/world/assets by default (docker-compose.yml)
+const assetsDir = path.join(serverDir, 'world', 'assets')
 
 const args = process.argv.slice(2)
 const forceRestart = args.includes('--force') || args.includes('-f')
@@ -74,14 +75,15 @@ function isCDNRunning() {
 function restartCDN() {
   console.log(`${colors.blue}Restarting CDN container...${colors.reset}`)
   const dockerComposeCmd = getDockerComposeCommand()
-  execSync(`${dockerComposeCmd} restart cdn`, {
+  // Use force-recreate so volume mounts refresh (important if assets dir was replaced)
+  execSync(`${dockerComposeCmd} up -d --force-recreate cdn`, {
     stdio: 'inherit',
     cwd: serverDir
   })
 }
 
 function copyPhysXAssets() {
-  // Copy PhysX assets to root assets directory (where CDN serves from)
+  // Copy PhysX assets to the assets directory (where CDN serves from)
   const assetsWebDir = path.join(assetsDir, 'web')
   fs.mkdirSync(assetsWebDir, { recursive: true })
 
@@ -91,9 +93,6 @@ function copyPhysXAssets() {
   if (fs.existsSync(physxWasm)) {
     fs.copyFileSync(physxWasm, path.join(assetsWebDir, 'physx-js-webidl.wasm'))
     fs.copyFileSync(physxJs, path.join(assetsWebDir, 'physx-js-webidl.js'))
-    // Also copy to root assets for compatibility
-    fs.copyFileSync(physxWasm, path.join(assetsDir, 'physx-js-webidl.wasm'))
-    fs.copyFileSync(physxJs, path.join(assetsDir, 'physx-js-webidl.js'))
     console.log(`${colors.green}✓ PhysX assets copied${colors.reset}`)
     return true
   }

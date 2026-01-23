@@ -176,6 +176,7 @@ export async function initializeDatabase(connectionString: string) {
     const isExistsError =
       (hasCode && errorWithCause.cause?.code === "42P07") || // Table already exists
       (hasCode && errorWithCause.cause?.code === "42701") || // Column already exists
+      (hasCode && errorWithCause.cause?.code === "42710") || // Constraint already exists
       (hasMessage &&
         typeof errorWithCause.message === "string" &&
         errorWithCause.message.includes("already exists"));

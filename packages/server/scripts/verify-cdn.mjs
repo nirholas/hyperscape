@@ -8,10 +8,11 @@ const CDN_URL = process.env.PUBLIC_CDN_URL || 'http://localhost:8080'
 
 const tests = [
   { name: 'Health Check', url: `${CDN_URL}/health`, expect: '200' },
-  { name: 'Music (Normal)', url: `${CDN_URL}/music/normal/1.mp3`, expect: '200' },
-  { name: 'Music (Combat)', url: `${CDN_URL}/music/combat/1.mp3`, expect: '200' },
+  { name: 'Music (Normal)', url: `${CDN_URL}/audio/music/normal/1.mp3`, expect: '200' },
+  { name: 'Music (Combat)', url: `${CDN_URL}/audio/music/combat/1.mp3`, expect: '200' },
   { name: 'Manifest', url: `${CDN_URL}/manifests/music.json`, expect: '200' },
-  { name: '3D Model', url: `${CDN_URL}/forge/sword-bronze/sword-bronze.glb`, expect: '200' },
+  { name: 'Environment Model', url: `${CDN_URL}/world/base-environment.glb`, expect: '200' },
+  { name: 'Environment Texture', url: `${CDN_URL}/world/day2-2k.jpg`, expect: '200' },
 ]
 
 console.log(`\n🧪 Testing CDN at: ${CDN_URL}\n`)

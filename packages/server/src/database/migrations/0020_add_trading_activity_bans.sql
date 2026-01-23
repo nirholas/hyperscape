@@ -35,11 +35,31 @@ CREATE TABLE IF NOT EXISTS "user_bans" (
 	"active" integer DEFAULT 1 NOT NULL
 );
 --> statement-breakpoint
-ALTER TABLE "activity_log" ADD CONSTRAINT "activity_log_playerId_characters_id_fk" FOREIGN KEY ("playerId") REFERENCES "public"."characters"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "trades" ADD CONSTRAINT "trades_initiatorId_characters_id_fk" FOREIGN KEY ("initiatorId") REFERENCES "public"."characters"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "trades" ADD CONSTRAINT "trades_receiverId_characters_id_fk" FOREIGN KEY ("receiverId") REFERENCES "public"."characters"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "user_bans" ADD CONSTRAINT "user_bans_bannedUserId_users_id_fk" FOREIGN KEY ("bannedUserId") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "user_bans" ADD CONSTRAINT "user_bans_bannedByUserId_users_id_fk" FOREIGN KEY ("bannedByUserId") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'activity_log_playerId_characters_id_fk') THEN
+    ALTER TABLE "activity_log" ADD CONSTRAINT "activity_log_playerId_characters_id_fk" FOREIGN KEY ("playerId") REFERENCES "public"."characters"("id") ON DELETE cascade ON UPDATE no action;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'trades_initiatorId_characters_id_fk') THEN
+    ALTER TABLE "trades" ADD CONSTRAINT "trades_initiatorId_characters_id_fk" FOREIGN KEY ("initiatorId") REFERENCES "public"."characters"("id") ON DELETE set null ON UPDATE no action;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'trades_receiverId_characters_id_fk') THEN
+    ALTER TABLE "trades" ADD CONSTRAINT "trades_receiverId_characters_id_fk" FOREIGN KEY ("receiverId") REFERENCES "public"."characters"("id") ON DELETE set null ON UPDATE no action;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_bans_bannedUserId_users_id_fk') THEN
+    ALTER TABLE "user_bans" ADD CONSTRAINT "user_bans_bannedUserId_users_id_fk" FOREIGN KEY ("bannedUserId") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_bans_bannedByUserId_users_id_fk') THEN
+    ALTER TABLE "user_bans" ADD CONSTRAINT "user_bans_bannedByUserId_users_id_fk" FOREIGN KEY ("bannedByUserId") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
+  END IF;
+END $$;--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_activity_log_player" ON "activity_log" USING btree ("playerId");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_activity_log_timestamp" ON "activity_log" USING btree ("timestamp");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_activity_log_player_timestamp" ON "activity_log" USING btree ("playerId","timestamp");--> statement-breakpoint

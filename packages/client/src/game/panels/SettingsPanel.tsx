@@ -1024,7 +1024,7 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
                     className="text-sm font-bold mb-0.5"
                     style={{ color: COLORS.ACCENT }}
                   >
-                    WebGPU
+                    {world.graphics?.isWebGPU ? "WebGPU" : "WebGL"}
                   </div>
 
                   <div

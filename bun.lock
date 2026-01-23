@@ -402,8 +402,6 @@
     "@types/react-dom": "^19.0.0",
     "@types/three": "0.180.0",
     "jws": "^3.2.3",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
     "three": "0.180.0",
     "typescript": "^5.9.2",
   },

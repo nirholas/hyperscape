@@ -13,7 +13,7 @@
  * needed for local development with full assets (models, audio, textures).
  */
 
-import { existsSync, readdirSync } from "fs";
+import { existsSync, readdirSync, rmSync, mkdirSync } from "fs";
 import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 import path from "path";
@@ -26,15 +26,29 @@ const assetsRepo = "https://github.com/HyperscapeAI/assets.git";
 // Local CDN URL for development
 const LOCAL_CDN_URL = "http://localhost:8080";
 
-function hasContent(dir) {
+function dirHasNonHiddenFiles(dir) {
   if (!existsSync(dir)) return false;
   try {
     const files = readdirSync(dir);
-    // Ignore hidden files like .gitkeep
     return files.some((f) => !f.startsWith("."));
   } catch {
     return false;
   }
+}
+
+function hasFullAssets(dir) {
+  // IMPORTANT:
+  // The repo may contain a local manifests cache (manifests/) and PhysX runtime (web/),
+  // but local development also needs the full binary assets (world/, models/, audio/, etc).
+  //
+  // Treat manifests-only as "missing" so we auto-download real assets.
+  const hasWorld = dirHasNonHiddenFiles(path.join(dir, "world"));
+  const hasModels = dirHasNonHiddenFiles(path.join(dir, "models"));
+  return hasWorld && hasModels;
+}
+
+function isGitRepo(dir) {
+  return existsSync(path.join(dir, ".git"));
 }
 
 function checkGitLfs() {
@@ -89,8 +103,16 @@ async function main() {
     return;
   }
 
-  if (hasContent(assetsDir)) {
-    console.log("✅ Assets already present");
+  if (hasFullAssets(assetsDir)) {
+    console.log("✅ Assets already present (full asset pack found)");
+    // Ensure LFS objects are present if this is a git repo (safe no-op if up-to-date)
+    if (isGitRepo(assetsDir)) {
+      try {
+        execSync(`git -C "${assetsDir}" lfs pull`, { stdio: "ignore" });
+      } catch {
+        // Non-fatal: some environments may not have LFS filters configured
+      }
+    }
     return;
   }
 
@@ -114,8 +136,13 @@ async function main() {
   try {
     // Ensure parent directory exists
     const parentDir = path.dirname(assetsDir);
-    if (!existsSync(parentDir)) {
-      execSync(`mkdir -p "${parentDir}"`, { stdio: "inherit" });
+    mkdirSync(parentDir, { recursive: true });
+
+    // If we have a partial/manifest-only directory, remove it so clone succeeds.
+    // (This directory is intentionally gitignored in the main repo.)
+    if (existsSync(assetsDir) && !isGitRepo(assetsDir)) {
+      console.log("🧹 Removing partial assets directory (manifests-only)...");
+      rmSync(assetsDir, { recursive: true, force: true });
     }
 
     // Clone with depth 1 for faster download (keep .git for future syncs)
@@ -123,6 +150,9 @@ async function main() {
       stdio: "inherit",
       cwd: rootDir,
     });
+
+    // Ensure large binary assets are downloaded
+    execSync(`git -C "${assetsDir}" lfs pull`, { stdio: "inherit" });
 
     console.log("✅ Assets downloaded successfully!");
     console.log("   Run 'bun run assets:sync' to update assets later");
