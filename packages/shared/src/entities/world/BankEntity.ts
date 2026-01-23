@@ -50,25 +50,36 @@ export class BankEntity extends InteractableEntity {
   /** Footprint specification for this station */
   private footprint: FootprintSpec;
 
+  /** Default interaction range for banks (in tiles) */
+  private static readonly BANK_INTERACTION_RANGE = 3;
+
   constructor(world: World, config: BankEntityConfig) {
     // Convert BankEntityConfig to InteractableConfig format
+    // Provide defaults for optional fields (like FurnaceEntity pattern)
+    const interactionDistance =
+      config.interactionDistance ?? BankEntity.BANK_INTERACTION_RANGE;
+    const description =
+      config.description ?? "A secure place to store your items.";
+
     const interactableConfig: InteractableConfig = {
       id: config.id,
-      name: config.name,
+      name: config.name || "Bank",
       type: EntityType.BANK,
       position: config.position,
-      rotation: config.rotation,
-      scale: config.scale,
-      visible: config.visible,
-      interactable: config.interactable,
+      rotation: config.rotation
+        ? { ...config.rotation }
+        : { x: 0, y: 0, z: 0, w: 1 },
+      scale: config.scale ?? { x: 1, y: 1, z: 1 },
+      visible: config.visible ?? true,
+      interactable: config.interactable ?? true,
       interactionType: InteractionType.BANK,
-      interactionDistance: config.interactionDistance,
-      description: config.description,
-      model: config.model,
+      interactionDistance: interactionDistance,
+      description: description,
+      model: config.model ?? null,
       interaction: {
         prompt: "Use Bank",
-        description: config.description,
-        range: config.interactionDistance,
+        description: description,
+        range: interactionDistance,
         cooldown: 0,
         usesRemaining: -1,
         maxUses: -1,

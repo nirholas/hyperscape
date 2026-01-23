@@ -18,6 +18,7 @@ import type {
   BiomeResource,
   NPCLocation,
   MobSpawnPoint,
+  StationLocation,
   WorldArea,
 } from "../types/core/core";
 
@@ -27,6 +28,7 @@ export type {
   BiomeResource,
   NPCLocation,
   MobSpawnPoint,
+  StationLocation,
 } from "../types/core/core";
 
 /**
@@ -125,6 +127,16 @@ export function getResourcesInArea(areaId: string): BiomeResource[] {
 export function getMobSpawnsInArea(areaId: string): MobSpawnPoint[] {
   const area = getAreaById(areaId);
   return area ? area.mobSpawns : [];
+}
+
+/**
+ * Get all stations defined in a specific area
+ * @param areaId - The area ID to query
+ * @returns Array of station locations, or empty array if none
+ */
+export function getStationsInArea(areaId: string): StationLocation[] {
+  const area = getAreaById(areaId);
+  return area?.stations ?? [];
 }
 
 /**

@@ -100,6 +100,7 @@ import { InventoryInteractionSystem } from "..";
 import { InventorySystem } from "..";
 import { ItemSpawnerSystem } from "..";
 import { MobNPCSpawnerSystem } from "..";
+import { StationSpawnerSystem } from "..";
 import { MobNPCSystem } from "..";
 import { PersistenceSystem } from "../../server/PersistenceSystem";
 import { PlayerSystem } from "..";
@@ -161,6 +162,7 @@ export interface Systems {
   movementSystem?: unknown;
   npc?: NPCSystem;
   mobNpcSpawner?: MobNPCSpawnerSystem;
+  stationSpawner?: StationSpawnerSystem;
   itemSpawner?: ItemSpawnerSystem;
   healthRegen?: HealthRegenSystem;
 }
@@ -390,6 +392,7 @@ export async function registerSystems(world: World): Promise<void> {
 
   // DYNAMIC WORLD CONTENT SYSTEMS - FULL THREE.JS ACCESS, NO SANDBOX
   world.register("mob-npc-spawner", MobNPCSpawnerSystem);
+  world.register("station-spawner", StationSpawnerSystem);
   world.register("item-spawner", ItemSpawnerSystem);
 
   // Zone Detection System - registered on server only (client registers in createClientWorld.ts)
@@ -444,6 +447,10 @@ export async function registerSystems(world: World): Promise<void> {
     world,
     "mob-npc-spawner",
   ) as MobNPCSpawnerSystem;
+  systems.stationSpawner = getSystem(
+    world,
+    "station-spawner",
+  ) as StationSpawnerSystem;
   systems.itemSpawner = getSystem(world, "item-spawner") as ItemSpawnerSystem;
 
   // Set up API for apps to access functionality

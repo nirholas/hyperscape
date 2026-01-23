@@ -251,6 +251,23 @@ export interface MobSpawnPoint {
   respawnTime: number;
 }
 
+/**
+ * Station placement in a world area
+ * Position only - full data comes from stations.json manifest
+ */
+export interface StationLocation {
+  /** Unique instance ID for this station */
+  id: string;
+  /** Station type - must match type in stations.json (anvil, furnace, range, bank, altar) */
+  type: "bank" | "furnace" | "anvil" | "altar" | "range";
+  /** World position (Y will be grounded to terrain) */
+  position: WorldPosition;
+  /** Optional rotation in degrees (Y-axis only, default: 0) */
+  rotation?: number;
+  /** Optional: override bankId for bank stations (default: "spawn_bank") */
+  bankId?: string;
+}
+
 // ============== WORLD AREAS ==============
 
 /**
@@ -287,6 +304,8 @@ export interface WorldArea {
     /** Resource IDs to spawn (e.g., "fishing_spot_net", "fishing_spot_bait") */
     spotTypes: string[];
   };
+  /** Station placements for this area (furnaces, anvils, banks, altars, ranges) */
+  stations?: StationLocation[];
 }
 
 // ============== ZONE SPAWN POINTS ==============
