@@ -117,6 +117,10 @@ const names = [
   'resourceInteract',  // Server-authoritative: client sends resourceId, server calculates path
   'resourceGather',    // Legacy: used after server paths player to cardinal tile
   'gatheringComplete',
+  'gatheringStarted',  // Server -> Client: gathering session started
+  'gatheringStopped',  // Server -> Client: gathering session stopped
+  'gatheringToolShow', // Server -> Client: show gathering tool in hand (OSRS fishing rod)
+  'gatheringToolHide', // Server -> Client: hide gathering tool from hand
   // Processing packets (firemaking/cooking)
   'firemakingRequest', // Client -> Server: request to light fire (tinderbox + logs)
   'cookingRequest',    // Client -> Server: request to cook food on fire/range
