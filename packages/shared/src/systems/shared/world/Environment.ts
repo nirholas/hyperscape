@@ -202,6 +202,11 @@ export class Environment extends System {
     this.skySystem = new SkySystem(this.world);
     await this.skySystem.init({} as unknown as WorldOptions);
     this.skySystem.start();
+
+    // Initialize exposure based on current time of day to avoid jarring transitions
+    // when joining at night (otherwise exposure would lerp from 0.85 day → 1.7 night)
+    this.initializeExposure();
+
     // Ensure legacy sky sphere never occludes dynamic sky
     if (this.sky) {
       const mat = this.sky.material as THREE.MeshBasicMaterial;
@@ -720,6 +725,29 @@ export class Environment extends System {
         0.55 + dayIntensity * 0.4, // G: 0.55 at night, 0.95 at day
         0.7 + dayIntensity * 0.25, // B: 0.7 at night, 0.95 at day (bluer at night)
       );
+    }
+  }
+
+  /**
+   * Initialize exposure to match current time of day.
+   * Called once during start() after skySystem is ready to prevent jarring
+   * transitions when players join at night (would otherwise lerp from day to night).
+   */
+  private initializeExposure(): void {
+    if (!this.skySystem) return;
+
+    // Calculate target exposure based on current dayIntensity using same formula as update
+    const dayIntensity = this.skySystem.dayIntensity;
+    const t = dayIntensity * dayIntensity * (3 - 2 * dayIntensity); // smoothstep
+    this.currentExposure =
+      this.NIGHT_EXPOSURE + (this.DAY_EXPOSURE - this.NIGHT_EXPOSURE) * t;
+
+    // Apply immediately to renderer
+    const graphics = this.world.graphics as
+      | { renderer?: { toneMappingExposure?: number } }
+      | undefined;
+    if (graphics?.renderer) {
+      graphics.renderer.toneMappingExposure = this.currentExposure;
     }
   }
 
