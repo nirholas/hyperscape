@@ -56,6 +56,7 @@ export { ResourceInteractionHandler } from "./handlers/ResourceInteractionHandle
 export { BankInteractionHandler } from "./handlers/BankInteractionHandler";
 export { CorpseInteractionHandler } from "./handlers/CorpseInteractionHandler";
 export { PlayerInteractionHandler } from "./handlers/PlayerInteractionHandler";
+export { StarterChestInteractionHandler } from "./handlers/StarterChestInteractionHandler";
 
 // Controllers
 export { ContextMenuController } from "./ContextMenuController";

@@ -449,11 +449,15 @@ export async function handleEnterWorld(
       console.warn(
         `[CharacterSelection] ⚠️ Character ${characterId} is already connected with alive socket ${existingActiveSocket.id}! Rejecting duplicate spawn from socket ${socket.id}.`,
       );
-      sendToFn(socket.id, "showToast", {
+
+      // Send rejection packet - client will show a dialog and stay on character select
+      // Don't close the socket - let user choose a different character
+      sendToFn(socket.id, "enterWorldRejected", {
+        reason: "already_logged_in",
         message:
-          "This character is already logged in. Please disconnect the other session first.",
-        type: "error",
+          "Your character is already logged in. Please close the other session first.",
       });
+
       return; // Reject duplicate connection
     }
 
@@ -904,6 +908,12 @@ export async function handleEnterWorld(
         });
       }
       // If equipmentRows is undefined (load failed), EquipmentSystem will send after DB fallback
+
+      // Send enterWorldApproved to signal client can proceed to game
+      // This is sent AFTER all entity/inventory/equipment data to ensure client has everything
+      sendToFn(socket.id, "enterWorldApproved", {
+        characterId: characterId || socket.player.id,
+      });
     } catch (_err) {}
   }
 }

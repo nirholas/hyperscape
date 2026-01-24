@@ -38,6 +38,7 @@ export enum EntityType {
   FURNACE = "furnace",
   ANVIL = "anvil",
   ALTAR = "altar",
+  STARTER_CHEST = "starter_chest",
 }
 
 export enum InteractionType {

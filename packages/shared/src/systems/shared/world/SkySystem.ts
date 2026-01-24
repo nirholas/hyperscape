@@ -866,7 +866,7 @@ export class SkySystem extends System {
       mat.side = THREE.DoubleSide;
       mat.transparent = true;
       mat.depthWrite = false;
-      mat.depthTest = false; // Ignore camera far plane
+      mat.depthTest = true; // Check depth buffer - don't render over closer objects
       mat.toneMapped = false;
       mat.fog = false; // Don't let scene fog affect clouds
 

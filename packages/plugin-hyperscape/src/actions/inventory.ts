@@ -17,6 +17,7 @@ import type {
   Equipment,
   Entity,
 } from "../types.js";
+import { getItemName } from "../utils/item-detection.js";
 
 // Max distance to pick up items
 const MAX_PICKUP_DISTANCE = 4;
@@ -103,34 +104,85 @@ export const equipItemAction: Action = {
       }
       const playerEntity = service.getPlayerEntity();
       const content = message.content.text || "";
+      const searchTerm = content.toLowerCase();
 
-      const item = playerEntity?.items.find((i) =>
-        i.name.toLowerCase().includes(content.toLowerCase()),
-      );
+      // Find item using centralized item name detection (handles name, itemId, etc.)
+      const item = playerEntity?.items.find((i) => {
+        const itemName = getItemName(i);
+        return itemName.includes(searchTerm);
+      });
 
-      if (!item) {
-        await callback?.({ text: "Item not found in inventory.", error: true });
+      // If no specific item requested, find first equippable item (weapon-like)
+      const equippableItem =
+        item ||
+        playerEntity?.items.find((i) => {
+          const itemName = getItemName(i);
+          return (
+            itemName.includes("axe") ||
+            itemName.includes("hatchet") ||
+            itemName.includes("pickaxe") ||
+            itemName.includes("sword") ||
+            itemName.includes("scimitar") ||
+            itemName.includes("dagger") ||
+            itemName.includes("mace") ||
+            itemName.includes("spear")
+          );
+        });
+
+      if (!equippableItem) {
+        await callback?.({
+          text: "No equippable item found in inventory.",
+          error: true,
+        });
+        return { success: false };
+      }
+
+      // Get the item name for display and slot detection
+      const itemName = getItemName(equippableItem);
+      const itemAny = equippableItem as unknown as Record<string, unknown>;
+      const itemDisplayName =
+        (itemAny.name as string) || (itemAny.itemId as string) || itemName;
+
+      // Get the item ID to send to server - prefer itemId (server format) over id (legacy)
+      // Server expects itemId (e.g., "bronze_hatchet"), not the unique instance ID
+      let serverItemId: string | undefined;
+
+      if (typeof itemAny.itemId === "string" && itemAny.itemId.length > 0) {
+        serverItemId = itemAny.itemId;
+      } else if (
+        typeof equippableItem.id === "string" &&
+        equippableItem.id.length > 0
+      ) {
+        serverItemId = equippableItem.id;
+      }
+
+      if (!serverItemId) {
+        logger.warn("[EQUIP_ITEM] Could not determine item ID for equipping");
+        await callback?.({
+          text: "Could not get item ID for equipping.",
+          error: true,
+        });
         return { success: false };
       }
 
       // Determine equip slot based on item name
       let equipSlot: keyof Equipment = "weapon";
-      if (item.name.toLowerCase().includes("shield")) equipSlot = "shield";
-      else if (item.name.toLowerCase().includes("helmet")) equipSlot = "helmet";
-      else if (
-        item.name.toLowerCase().includes("body") ||
-        item.name.toLowerCase().includes("platebody")
-      )
+      if (itemName.includes("shield")) equipSlot = "shield";
+      else if (itemName.includes("helmet")) equipSlot = "helmet";
+      else if (itemName.includes("body") || itemName.includes("platebody"))
         equipSlot = "body";
-      else if (item.name.toLowerCase().includes("legs")) equipSlot = "legs";
-      else if (item.name.toLowerCase().includes("boots")) equipSlot = "boots";
+      else if (itemName.includes("legs")) equipSlot = "legs";
+      else if (itemName.includes("boots")) equipSlot = "boots";
 
-      const command: EquipItemCommand = { itemId: item.id, equipSlot };
+      const command: EquipItemCommand = { itemId: serverItemId, equipSlot };
       await service.executeEquipItem(command);
 
-      await callback?.({ text: `Equipped ${item.name}`, action: "EQUIP_ITEM" });
+      await callback?.({
+        text: `Equipped ${itemDisplayName}`,
+        action: "EQUIP_ITEM",
+      });
 
-      return { success: true, text: `Equipped ${item.name}` };
+      return { success: true, text: `Equipped ${itemDisplayName}` };
     } catch (error) {
       await callback?.({
         text: `Failed to equip: ${error instanceof Error ? error.message : ""}`,

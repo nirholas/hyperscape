@@ -335,6 +335,9 @@ export enum EventType {
   STORE_TRANSACTION = "store:transaction",
   STORE_PLAYER_COINS = "store:player_coins",
 
+  // Starter Chest System
+  STARTER_CHEST_LOOTED = "starter_chest:looted",
+
   // Dialogue System
   DIALOGUE_START = "dialogue:start",
   DIALOGUE_NODE_CHANGE = "dialogue:node_change",

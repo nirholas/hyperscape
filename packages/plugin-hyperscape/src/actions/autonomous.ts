@@ -20,6 +20,7 @@ import type {
 } from "@elizaos/core";
 import { logger } from "@elizaos/core";
 import type { HyperscapeService } from "../services/HyperscapeService.js";
+import { hasAxe, hasPickaxe } from "../utils/item-detection.js";
 
 /**
  * Helper to get x, z coordinates from a position (handles array or object format)
@@ -98,8 +99,19 @@ export const exploreAction: Action = {
     }
 
     // Don't explore if health is too low - defensive calculation
-    const currentHealth = player.health?.current ?? 100;
-    const maxHealth = player.health?.max ?? 100;
+    // Handle both nested { current, max } and flat { health, maxHealth } formats
+    const playerAny = player as unknown as Record<string, unknown>;
+    let currentHealth = 100;
+    let maxHealth = 100;
+
+    if (player.health && typeof player.health === "object") {
+      currentHealth = player.health.current ?? 100;
+      maxHealth = player.health.max ?? 100;
+    } else if (typeof player.health === "number") {
+      currentHealth = player.health;
+      maxHealth = (playerAny.maxHealth as number) ?? 100;
+    }
+
     const healthPercent =
       maxHealth > 0 ? (currentHealth / maxHealth) * 100 : 100;
     if (healthPercent < 30) {
@@ -235,8 +247,19 @@ export const fleeAction: Action = {
     if (player.alive === false) return false;
 
     // Validate that fleeing makes sense - defensive health calculation
-    const currentHealth = player.health?.current ?? 100;
-    const maxHealth = player.health?.max ?? 100;
+    // Handle both nested { current, max } and flat { health, maxHealth } formats
+    const playerAny = player as unknown as Record<string, unknown>;
+    let currentHealth = 100;
+    let maxHealth = 100;
+
+    if (player.health && typeof player.health === "object") {
+      currentHealth = player.health.current ?? 100;
+      maxHealth = player.health.max ?? 100;
+    } else if (typeof player.health === "number") {
+      currentHealth = player.health;
+      maxHealth = (playerAny.maxHealth as number) ?? 100;
+    }
+
     const healthPercent =
       maxHealth > 0 ? (currentHealth / maxHealth) * 100 : 100;
 
@@ -333,6 +356,13 @@ export const fleeAction: Action = {
           playerPos[1],
           playerPos[2] + Math.sin(angle) * 30,
         ];
+      }
+
+      // Clear any combat target lock when fleeing - survival > combat
+      const behaviorManager = service.getBehaviorManager?.();
+      if (behaviorManager?.hasLockedTarget?.()) {
+        logger.info(`[FLEE] 🎯 Clearing target lock to flee`);
+        behaviorManager.clearTargetLock?.();
       }
 
       // Execute flee movement (running)
@@ -626,11 +656,8 @@ export const attackEntityAction: Action = {
       return false;
     }
 
-    // Don't attack if already in combat
-    if (player.inCombat) {
-      logger.debug("[ATTACK_ENTITY] Validation failed: already in combat");
-      return false;
-    }
+    // NOTE: We ALLOW attacking while in combat - the player needs to fight back!
+    // Being in combat (e.g., being attacked by goblins) should not prevent attacking.
 
     // Don't attack if dead
     if (player.alive === false) {
@@ -639,8 +666,21 @@ export const attackEntityAction: Action = {
     }
 
     // Require minimum health to engage (30%)
-    const currentHealth = player.health?.current ?? 100;
-    const maxHealth = player.health?.max ?? 100;
+    // Handle both nested { current, max } and flat { health, maxHealth } formats
+    const playerAny = player as unknown as Record<string, unknown>;
+    let currentHealth = 100;
+    let maxHealth = 100;
+
+    if (player.health && typeof player.health === "object") {
+      // Nested format: health = { current, max }
+      currentHealth = player.health.current ?? 100;
+      maxHealth = player.health.max ?? 100;
+    } else if (typeof player.health === "number") {
+      // Flat format from server: health = current value, maxHealth = max value
+      currentHealth = player.health;
+      maxHealth = (playerAny.maxHealth as number) ?? 100;
+    }
+
     const healthPercent =
       maxHealth > 0 ? (currentHealth / maxHealth) * 100 : 100;
 
@@ -802,17 +842,61 @@ export const attackEntityAction: Action = {
         return { success: false, error: "No attackable mobs nearby" };
       }
 
-      // Find nearest mob
-      let nearestMob = attackableMobs[0];
-      let nearestDist = calculateDistance(player.position, nearestMob.position);
+      // TARGET LOCKING: Prioritize locked target to finish kills
+      const behaviorManager = service.getBehaviorManager?.();
+      const lockedTargetId = behaviorManager?.getLockedTarget?.();
 
-      for (const mob of attackableMobs) {
-        const dist = calculateDistance(player.position, mob.position);
-        if (dist < nearestDist) {
-          nearestDist = dist;
-          nearestMob = mob;
+      let targetMob: (typeof attackableMobs)[0] | null = null;
+
+      // Check if locked target is still valid and nearby
+      if (lockedTargetId) {
+        targetMob =
+          attackableMobs.find((mob) => mob.id === lockedTargetId) || null;
+        if (targetMob) {
+          logger.info(
+            `[ATTACK_ENTITY] 🎯 Using locked target: ${targetMob.name} (${lockedTargetId})`,
+          );
+        } else {
+          // Locked target no longer valid, clear it
+          logger.info(
+            `[ATTACK_ENTITY] 🎯 Locked target ${lockedTargetId} no longer available, finding new target`,
+          );
+          behaviorManager?.clearTargetLock?.();
         }
       }
+
+      // If no locked target, find nearest mob and lock onto it
+      if (!targetMob) {
+        let nearestMob = attackableMobs[0];
+        let nearestDist = calculateDistance(
+          player.position,
+          nearestMob.position,
+        );
+
+        for (const mob of attackableMobs) {
+          const dist = calculateDistance(player.position, mob.position);
+          if (dist < nearestDist) {
+            nearestDist = dist;
+            nearestMob = mob;
+          }
+        }
+
+        targetMob = nearestMob;
+
+        // Lock onto this new target
+        if (behaviorManager?.lockTarget) {
+          behaviorManager.lockTarget(targetMob.id);
+          logger.info(
+            `[ATTACK_ENTITY] 🎯 Locked onto new target: ${targetMob.name} (${targetMob.id})`,
+          );
+        }
+      }
+
+      const nearestDist = calculateDistance(
+        player.position,
+        targetMob.position,
+      );
+      const nearestMob = targetMob;
 
       // Get mob position for movement
       // Debug: log the raw position data to diagnose (0,0) issue after respawn
@@ -915,6 +999,249 @@ export const attackEntityAction: Action = {
   ],
 };
 
+/**
+ * Known starter chest location (spawned by EntityManager near bank)
+ */
+const STARTER_CHEST_LOCATION: [number, number, number] = [5, 0, -20];
+
+/**
+ * LOOT_STARTER_CHEST - Interact with the starter chest to get starter equipment
+ *
+ * New players/agents should use this to acquire basic tools and food.
+ * Only works once per character. Will navigate to the chest if not nearby.
+ */
+export const lootStarterChestAction: Action = {
+  name: "LOOT_STARTER_CHEST",
+  similes: ["SEARCH_CHEST", "GET_STARTER_ITEMS", "OPEN_STARTER_CHEST"],
+  description:
+    "Search the starter chest to get starter equipment (bronze tools, tinderbox, net, food). Only works once per character. Use when you have no basic tools.",
+
+  validate: async (
+    runtime: IAgentRuntime,
+    _message: Memory,
+    _state?: State,
+  ) => {
+    const service = runtime.getService<HyperscapeService>("hyperscapeService");
+    if (!service?.isConnected()) {
+      logger.debug(
+        "[LOOT_STARTER_CHEST] Validation failed: service not connected",
+      );
+      return false;
+    }
+
+    const player = service.getPlayerEntity();
+    if (!player) {
+      logger.debug("[LOOT_STARTER_CHEST] Validation failed: no player entity");
+      return false;
+    }
+
+    // Only treat as dead if explicitly false
+    if (player.alive === false) {
+      logger.debug("[LOOT_STARTER_CHEST] Validation failed: player is dead");
+      return false;
+    }
+
+    // Don't loot if in combat
+    if (player.inCombat) {
+      logger.debug("[LOOT_STARTER_CHEST] Validation failed: player in combat");
+      return false;
+    }
+
+    // Check if player has basic tools (if they do, no need to loot chest)
+    // Use centralized item detection utility for consistent detection
+    const playerHasAxe = hasAxe(player);
+    const playerHasPickaxe = hasPickaxe(player);
+
+    // Only validate if player needs tools (doesn't have axe or pickaxe)
+    if (playerHasAxe && playerHasPickaxe) {
+      logger.info(
+        "[LOOT_STARTER_CHEST] Validation failed: player already has basic tools (axe and pickaxe)",
+      );
+      return false;
+    }
+
+    logger.info(
+      `[LOOT_STARTER_CHEST] Validation passed: player needs tools (hasAxe=${playerHasAxe}, hasPickaxe=${playerHasPickaxe})`,
+    );
+    return true;
+  },
+
+  handler: async (
+    runtime: IAgentRuntime,
+    _message: Memory,
+    _state?: State,
+    _options?: unknown,
+    callback?: HandlerCallback,
+  ) => {
+    try {
+      const service =
+        runtime.getService<HyperscapeService>("hyperscapeService");
+      if (!service) {
+        return { success: false, error: "Hyperscape service not available" };
+      }
+
+      const player = service.getPlayerEntity();
+      if (!player) {
+        return { success: false, error: "Player entity not available" };
+      }
+
+      // Find starter chest in nearby entities
+      const nearbyEntities = service.getNearbyEntities();
+      const starterChest = nearbyEntities.find(
+        (e) =>
+          (e as unknown as { type?: string }).type === "starter_chest" ||
+          e.name?.toLowerCase().includes("starter chest"),
+      );
+
+      const playerPos = getXZ(player.position);
+      if (!playerPos) {
+        return { success: false, error: "Cannot determine player position" };
+      }
+
+      // Calculate distance to known chest location
+      const distanceToKnownLocation = calculateDistance(
+        player.position,
+        STARTER_CHEST_LOCATION,
+      );
+
+      const INTERACTION_RANGE = 3; // Interaction range in units
+      const NEARBY_RANGE = 10; // Range where we can see the entity
+
+      // If starter chest not nearby and we're far from known location, navigate there first
+      if (!starterChest && distanceToKnownLocation > NEARBY_RANGE) {
+        logger.info(
+          `[LOOT_STARTER_CHEST] Navigating to starter chest at known location [${STARTER_CHEST_LOCATION[0]}, ${STARTER_CHEST_LOCATION[2]}] (distance: ${distanceToKnownLocation.toFixed(1)})`,
+        );
+
+        // Move towards known chest location
+        await service.executeMove({
+          target: STARTER_CHEST_LOCATION,
+          runMode: true,
+        });
+
+        const responseText = `Heading to starter chest near spawn...`;
+        await callback?.({ text: responseText, action: "LOOT_STARTER_CHEST" });
+
+        return {
+          success: true,
+          text: responseText,
+          data: {
+            action: "LOOT_STARTER_CHEST",
+            navigating: true,
+            targetLocation: STARTER_CHEST_LOCATION,
+          },
+        };
+      }
+
+      // If we still can't see the chest but we're close to the location, keep moving closer
+      if (!starterChest) {
+        logger.info(
+          `[LOOT_STARTER_CHEST] Close to chest location but not visible yet, moving closer (distance: ${distanceToKnownLocation.toFixed(1)})`,
+        );
+
+        await service.executeMove({
+          target: STARTER_CHEST_LOCATION,
+          runMode: true,
+        });
+
+        const responseText = `Approaching starter chest...`;
+        await callback?.({ text: responseText, action: "LOOT_STARTER_CHEST" });
+
+        return {
+          success: true,
+          text: responseText,
+          data: {
+            action: "LOOT_STARTER_CHEST",
+            moving: true,
+          },
+        };
+      }
+
+      // Chest found! Check distance
+      const chestPos = getXZ(starterChest.position);
+      if (!chestPos) {
+        return { success: false, error: "Cannot determine chest position" };
+      }
+
+      const distance = calculateDistance(
+        player.position,
+        starterChest.position,
+      );
+
+      // If not in interaction range, move towards the chest
+      if (distance > INTERACTION_RANGE) {
+        logger.info(
+          `[LOOT_STARTER_CHEST] Moving towards starter chest at [${chestPos.x.toFixed(1)}, ${chestPos.z.toFixed(1)}] (distance: ${distance.toFixed(1)})`,
+        );
+
+        // Move towards chest
+        await service.executeMove({
+          target: [chestPos.x, 0, chestPos.z],
+          runMode: true,
+        });
+
+        const responseText = `Moving to starter chest...`;
+        await callback?.({ text: responseText, action: "LOOT_STARTER_CHEST" });
+
+        return {
+          success: true,
+          text: responseText,
+          data: {
+            action: "LOOT_STARTER_CHEST",
+            chestId: starterChest.id,
+            moving: true,
+          },
+        };
+      }
+
+      // In range - interact with the chest
+      logger.info(
+        `[LOOT_STARTER_CHEST] Interacting with starter chest (${starterChest.id})`,
+      );
+
+      service.interactWithEntity(starterChest.id, "loot");
+
+      const responseText = `Searching starter chest for equipment...`;
+      await callback?.({ text: responseText, action: "LOOT_STARTER_CHEST" });
+
+      logger.info(`[LOOT_STARTER_CHEST] ${responseText}`);
+
+      return {
+        success: true,
+        text: responseText,
+        data: {
+          action: "LOOT_STARTER_CHEST",
+          chestId: starterChest.id,
+        },
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      logger.error(`[LOOT_STARTER_CHEST] Failed: ${errorMsg}`);
+      await callback?.({
+        text: `Failed to loot starter chest: ${errorMsg}`,
+        error: true,
+      });
+      return { success: false, error: errorMsg };
+    }
+  },
+
+  examples: [
+    [
+      {
+        name: "system",
+        content: { text: "New player with no tools, starter chest nearby" },
+      },
+      {
+        name: "agent",
+        content: {
+          text: "Searching starter chest for equipment...",
+          action: "LOOT_STARTER_CHEST",
+        },
+      },
+    ],
+  ],
+};
+
 // Export all autonomous actions
 export const autonomousActions = [
   exploreAction,
@@ -922,4 +1249,5 @@ export const autonomousActions = [
   idleAction,
   approachEntityAction,
   attackEntityAction,
+  lootStarterChestAction,
 ];

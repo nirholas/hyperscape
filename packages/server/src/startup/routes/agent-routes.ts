@@ -2145,6 +2145,213 @@ export function registerAgentRoutes(
     }
   });
 
+  /**
+   * GET /api/agents/:agentId/thoughts
+   *
+   * Get recent thought process for an agent.
+   * Used by the dashboard to display agent's decision-making process.
+   *
+   * Query params:
+   * - limit: number (default: 20, max: 50) - Number of thoughts to return
+   * - since: number (timestamp) - Only return thoughts after this timestamp
+   *
+   * Response:
+   * {
+   *   success: true,
+   *   thoughts: [...],
+   *   count: number
+   * }
+   */
+  fastify.get("/api/agents/:agentId/thoughts", async (request, reply) => {
+    try {
+      const params = request.params as { agentId: string };
+      const query = request.query as { limit?: string; since?: string };
+      const { agentId } = params;
+
+      if (!agentId) {
+        return reply.status(400).send({
+          success: false,
+          error: "Missing required parameter: agentId",
+        });
+      }
+
+      // Parse query params
+      const limit = Math.min(parseInt(query.limit || "20", 10), 50);
+      const since = query.since ? parseInt(query.since, 10) : 0;
+
+      // Get database system
+      const databaseSystem = world.getSystem("database") as
+        | {
+            db: {
+              select: (fields?: unknown) => {
+                from: (table: unknown) => {
+                  where: (condition: unknown) => Promise<unknown[]>;
+                };
+              };
+            };
+          }
+        | undefined;
+
+      if (!databaseSystem || !databaseSystem.db) {
+        return reply.status(500).send({
+          success: false,
+          error: "Database system not available",
+        });
+      }
+
+      // Import schema and eq operator
+      const { agentMappings } = await import("../../database/schema.js");
+      const { eq } = await import("drizzle-orm");
+
+      // Get agent's character ID
+      const mappings = (await databaseSystem.db
+        .select()
+        .from(agentMappings)
+        .where(eq(agentMappings.agentId, agentId))) as Array<{
+        characterId: string;
+      }>;
+
+      if (mappings.length === 0) {
+        return reply.send({
+          success: true,
+          thoughts: [],
+          count: 0,
+          message: "Agent not registered in game yet",
+        });
+      }
+
+      const characterId = mappings[0].characterId;
+
+      // Get thoughts from ServerNetwork storage
+      const { ServerNetwork } = await import(
+        "../../systems/ServerNetwork/index.js"
+      );
+
+      const thoughts =
+        (
+          ServerNetwork as {
+            agentThoughts?: Map<
+              string,
+              Array<{
+                id: string;
+                type: string;
+                content: string;
+                timestamp: number;
+              }>
+            >;
+          }
+        ).agentThoughts?.get(characterId) || [];
+
+      // Filter by since timestamp and limit
+      let filteredThoughts = thoughts;
+      if (since > 0) {
+        filteredThoughts = thoughts.filter((t) => t.timestamp > since);
+      }
+      filteredThoughts = filteredThoughts.slice(0, limit);
+
+      return reply.send({
+        success: true,
+        thoughts: filteredThoughts,
+        count: filteredThoughts.length,
+      });
+    } catch (error) {
+      console.error("[AgentRoutes] ❌ Failed to fetch agent thoughts:", error);
+      return reply.status(500).send({
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to fetch agent thoughts",
+      });
+    }
+  });
+
+  /**
+   * DELETE /api/agents/:agentId/thoughts
+   *
+   * Clear all thought history for an agent.
+   * Used to reset the thought log.
+   */
+  fastify.delete("/api/agents/:agentId/thoughts", async (request, reply) => {
+    try {
+      const params = request.params as { agentId: string };
+      const { agentId } = params;
+
+      if (!agentId) {
+        return reply.status(400).send({
+          success: false,
+          error: "Missing required parameter: agentId",
+        });
+      }
+
+      // Get database system
+      const databaseSystem = world.getSystem("database") as
+        | {
+            db: {
+              select: (fields?: unknown) => {
+                from: (table: unknown) => {
+                  where: (condition: unknown) => Promise<unknown[]>;
+                };
+              };
+            };
+          }
+        | undefined;
+
+      if (!databaseSystem || !databaseSystem.db) {
+        return reply.status(500).send({
+          success: false,
+          error: "Database system not available",
+        });
+      }
+
+      // Import schema and eq operator
+      const { agentMappings } = await import("../../database/schema.js");
+      const { eq } = await import("drizzle-orm");
+
+      // Get agent's character ID
+      const mappings = (await databaseSystem.db
+        .select()
+        .from(agentMappings)
+        .where(eq(agentMappings.agentId, agentId))) as Array<{
+        characterId: string;
+      }>;
+
+      if (mappings.length === 0) {
+        return reply.send({
+          success: true,
+          message: "Agent not registered in game",
+        });
+      }
+
+      const characterId = mappings[0].characterId;
+
+      // Clear thoughts from ServerNetwork storage
+      const { ServerNetwork } = await import(
+        "../../systems/ServerNetwork/index.js"
+      );
+      ServerNetwork.agentThoughts.delete(characterId);
+
+      console.log(
+        `[AgentRoutes] 🗑️ Cleared thoughts for character ${characterId}`,
+      );
+
+      return reply.send({
+        success: true,
+        message: "Thought history cleared",
+      });
+    } catch (error) {
+      console.error("[AgentRoutes] ❌ Failed to clear agent thoughts:", error);
+
+      return reply.status(500).send({
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to clear agent thoughts",
+      });
+    }
+  });
+
   // ===========================================================================
   // EMBEDDED AGENT ROUTES
   // These routes manage agents running directly on the server

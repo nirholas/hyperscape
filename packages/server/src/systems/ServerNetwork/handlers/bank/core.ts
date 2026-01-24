@@ -66,6 +66,18 @@ export async function handleBankOpen(
     return;
   }
 
+  // Validate bankId before processing
+  if (!data.bankId) {
+    console.warn(
+      `[BankHandler] bankOpen called with undefined bankId for player ${playerId}`,
+    );
+    sendToSocket(socket, "showToast", {
+      message: "Invalid bank",
+      type: "error",
+    });
+    return;
+  }
+
   const db = getDatabase(world);
   if (!db) {
     console.error("[BankHandler] No database available");
