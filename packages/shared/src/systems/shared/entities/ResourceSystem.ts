@@ -1626,9 +1626,12 @@ export class ResourceSystem extends SystemBase {
       tickDurationMs: TICK_DURATION_MS,
     });
 
-    // OSRS-STYLE: Show gathering tool in hand during fishing (tool is in inventory, not equipped)
-    // For fishing, the rod appears in hand even though it's not wielded as a weapon
-    if (resource.skillRequired === "fishing" && toolInfo?.itemId) {
+    // OSRS-STYLE: Show gathering tool in hand during skilling (tool is in inventory, not equipped)
+    // The tool appears in hand even though it's not wielded as a weapon
+    if (
+      ["fishing", "woodcutting", "mining"].includes(resource.skillRequired) &&
+      toolInfo?.itemId
+    ) {
       this.emitTypedEvent(EventType.GATHERING_TOOL_SHOW, {
         playerId: data.playerId,
         itemId: toolInfo.itemId,
@@ -1664,8 +1667,11 @@ export class ResourceSystem extends SystemBase {
       // Reset emote back to idle when gathering stops
       this.resetGatheringEmote(data.playerId);
 
-      // OSRS-STYLE: Hide gathering tool visual if fishing
-      if (session.skill === "fishing" && session.toolItemId) {
+      // OSRS-STYLE: Hide gathering tool visual
+      if (
+        ["fishing", "woodcutting", "mining"].includes(session.skill) &&
+        session.toolItemId
+      ) {
         this.emitTypedEvent(EventType.GATHERING_TOOL_HIDE, {
           playerId: data.playerId,
           slot: "weapon",
@@ -1709,8 +1715,11 @@ export class ResourceSystem extends SystemBase {
       patterns.lastDisconnect = now;
       this.suspiciousPatterns.set(pid, patterns);
 
-      // OSRS-STYLE: Hide gathering tool visual if fishing
-      if (session.skill === "fishing" && session.toolItemId) {
+      // OSRS-STYLE: Hide gathering tool visual
+      if (
+        ["fishing", "woodcutting", "mining"].includes(session.skill) &&
+        session.toolItemId
+      ) {
         this.emitTypedEvent(EventType.GATHERING_TOOL_HIDE, {
           playerId: playerId,
           slot: "weapon",
@@ -1759,8 +1768,11 @@ export class ResourceSystem extends SystemBase {
       // FORESTRY: Remove from active gatherers (timer will regenerate if no other gatherers)
       this.removeActiveGatherer(pid, session.resourceId);
 
-      // OSRS-STYLE: Hide gathering tool visual if fishing
-      if (session.skill === "fishing" && session.toolItemId) {
+      // OSRS-STYLE: Hide gathering tool visual
+      if (
+        ["fishing", "woodcutting", "mining"].includes(session.skill) &&
+        session.toolItemId
+      ) {
         this.emitTypedEvent(EventType.GATHERING_TOOL_HIDE, {
           playerId: playerId,
           slot: "weapon",
@@ -2550,6 +2562,17 @@ export class ResourceSystem extends SystemBase {
       if (session) {
         // FORESTRY: Remove from active gatherers (timer will regenerate if no other gatherers)
         this.removeActiveGatherer(playerId, session.resourceId);
+
+        // OSRS-STYLE: Hide gathering tool visual
+        if (
+          ["fishing", "woodcutting", "mining"].includes(session.skill) &&
+          session.toolItemId
+        ) {
+          this.emitTypedEvent(EventType.GATHERING_TOOL_HIDE, {
+            playerId: playerId,
+            slot: "weapon",
+          });
+        }
       }
       this.activeGathering.delete(playerId);
       // Reset emote back to idle when gathering completes
