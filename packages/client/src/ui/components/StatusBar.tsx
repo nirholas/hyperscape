@@ -76,7 +76,7 @@ export const StatusBar = memo(function StatusBar({
     height,
     position: "relative",
     backgroundColor: theme.colors.status[bgKey],
-    borderRadius: theme.borderRadius.sm,
+    borderRadius: 0,
     border: `1px solid ${theme.colors.border.default}`,
     overflow: "hidden",
     cursor: onClick ? "pointer" : "default",

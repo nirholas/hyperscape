@@ -548,7 +548,7 @@ export function StatusBars({
                 height: 12,
                 marginLeft: -barOrbSize * 0.25,
                 background: theme.colors.background.overlay,
-                borderRadius: "0 6px 6px 0",
+                borderRadius: 0,
                 overflow: "hidden",
                 border: `1px solid ${theme.colors.border.default}`,
                 borderLeft: "none",
@@ -563,7 +563,7 @@ export function StatusBars({
                   width: `${orb.percent}%`,
                   height: "100%",
                   background: orb.fillColor,
-                  borderRadius: "0 4px 4px 0",
+                  borderRadius: 0,
                   transition: "width 0.3s ease-out",
                 }}
               />
@@ -630,7 +630,7 @@ export function StatusBars({
         gap: config.displayMode === "bars" ? 0 : gap,
         padding: config.displayMode === "bars" ? "6px 8px" : padding,
         background: theme.colors.background.tertiary,
-        borderRadius: theme.borderRadius.md,
+        borderRadius: 0,
         border: `1px solid ${theme.colors.border.default}`,
         boxShadow: isUnlocked
           ? `${theme.shadows.md}, 0 0 0 2px ${theme.colors.accent.primary}40`

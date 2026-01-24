@@ -1,8 +1,8 @@
 /**
  * Quest Log Component
  *
- * OSRS-style quest log with clean list view and popup details.
- * Features color-coded quest status and category grouping.
+ * Clean OSRS-style quest log with minimal UI chrome.
+ * Features color-coded quest status and collapsible filters.
  *
  * @packageDocumentation
  */
@@ -18,6 +18,20 @@ import React, {
 
 /** Mobile breakpoint (matches client/constants breakpoints.md) */
 const MOBILE_BREAKPOINT = 640;
+
+/** Filter icon SVG */
+const FilterIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+    <path d="M1 2h14v2H1V2zm2 4h10v2H3V6zm2 4h6v2H5v-2z" />
+  </svg>
+);
+
+/** Search icon SVG */
+const SearchIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+    <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z" />
+  </svg>
+);
 import { useTheme, useAccessibilityStore } from "@/ui";
 import {
   type Quest,
@@ -835,7 +849,7 @@ const CategoryGroup = memo(function CategoryGroup({
 /**
  * Quest Log Component
  *
- * OSRS-style quest log with clean list and popup details.
+ * Clean OSRS-style quest log with minimal UI chrome and collapsible filters.
  */
 export const QuestLog = memo(function QuestLog({
   quests,
@@ -873,6 +887,8 @@ export const QuestLog = memo(function QuestLog({
   const theme = useTheme();
   const { reducedMotion } = useAccessibilityStore();
   const [popupQuest, setPopupQuest] = useState<Quest | null>(null);
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const [searchExpanded, setSearchExpanded] = useState(false);
 
   // Mobile responsiveness
   const [isMobile, setIsMobile] = useState(() =>
@@ -888,6 +904,13 @@ export const QuestLog = memo(function QuestLog({
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
+
+  // Auto-expand search if there's text
+  useEffect(() => {
+    if (searchText && searchText.length > 0) {
+      setSearchExpanded(true);
+    }
+  }, [searchText]);
 
   // Handle quest click - open popup or call external handler
   const handleQuestClick = useCallback(
@@ -960,7 +983,10 @@ export const QuestLog = memo(function QuestLog({
     [categoryFilter, onCategoryFilterChange],
   );
 
-  // Container styles - use theme tokens
+  // Check if any filters are active
+  const hasActiveFilters = stateFilter.length > 0 || categoryFilter.length > 0;
+
+  // Container styles
   const containerStyle: CSSProperties = {
     display: "flex",
     flexDirection: "column",
@@ -970,96 +996,91 @@ export const QuestLog = memo(function QuestLog({
     ...style,
   };
 
-  // Header styles (responsive)
+  // Compact header with stats and toolbar
   const headerStyle: CSSProperties = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: isMobile
-      ? `${theme.spacing.xs}px ${theme.spacing.sm}px`
-      : `${theme.spacing.sm}px ${theme.spacing.md}px`,
+    padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
     backgroundColor: theme.colors.background.secondary,
     borderBottom: `1px solid ${theme.colors.border.default}`,
-    minHeight: isMobile ? "40px" : "44px",
+    minHeight: "32px",
+    gap: theme.spacing.xs,
   };
 
-  // Title styles (responsive)
-  const titleStyle: CSSProperties = {
-    color: theme.colors.accent.primary,
-    fontSize: isMobile
-      ? theme.typography.fontSize.sm
-      : theme.typography.fontSize.base,
-    fontWeight: theme.typography.fontWeight.semibold,
-    margin: 0,
-  };
-
-  // Stats container (responsive)
+  // Compact stats
   const statsStyle: CSSProperties = {
     display: "flex",
-    gap: isMobile ? theme.spacing.xs : theme.spacing.sm,
+    gap: theme.spacing.sm,
     fontSize: theme.typography.fontSize.xs,
     color: theme.colors.text.muted,
+    flex: 1,
   };
 
-  // Search container (responsive)
+  // Toolbar buttons
+  const toolbarStyle: CSSProperties = {
+    display: "flex",
+    gap: "4px",
+    alignItems: "center",
+  };
+
+  // Small icon button
+  const iconButtonStyle = (active: boolean): CSSProperties => ({
+    width: "24px",
+    height: "24px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: active
+      ? theme.colors.accent.primary
+      : theme.colors.background.tertiary,
+    color: active ? theme.colors.background.primary : theme.colors.text.muted,
+    border: `1px solid ${active ? theme.colors.accent.primary : theme.colors.border.default}`,
+    borderRadius: `${theme.borderRadius.sm}px`,
+    cursor: "pointer",
+    padding: 0,
+    transition: reducedMotion ? "none" : theme.transitions.fast,
+  });
+
+  // Collapsible search
   const searchContainerStyle: CSSProperties = {
-    padding: isMobile
-      ? `${theme.spacing.xs}px ${theme.spacing.sm}px`
-      : `${theme.spacing.sm}px ${theme.spacing.md}px`,
+    padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
     borderBottom: `1px solid ${theme.colors.border.default}`,
+    display: searchExpanded ? "block" : "none",
   };
 
-  // Search input (responsive)
   const searchInputStyle: CSSProperties = {
     width: "100%",
-    padding: isMobile
-      ? `${theme.spacing.sm}px ${theme.spacing.sm}px`
-      : `${theme.spacing.xs}px ${theme.spacing.sm}px`,
+    padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
     backgroundColor: theme.colors.background.tertiary,
     border: `1px solid ${theme.colors.border.default}`,
     borderRadius: `${theme.borderRadius.sm}px`,
     color: theme.colors.text.primary,
-    fontSize: isMobile
-      ? theme.typography.fontSize.base
-      : theme.typography.fontSize.sm,
+    fontSize: theme.typography.fontSize.sm,
     outline: "none",
-    minHeight: isMobile ? "40px" : "auto",
   };
 
-  // Filters container (responsive)
+  // Collapsible filters - compact
   const filtersContainerStyle: CSSProperties = {
-    padding: isMobile
-      ? `${theme.spacing.xs}px ${theme.spacing.sm}px`
-      : `${theme.spacing.sm}px ${theme.spacing.md}px`,
+    padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
     borderBottom: `1px solid ${theme.colors.border.default}`,
-    display: "flex",
+    display: filtersExpanded ? "flex" : "none",
     flexDirection: "column",
-    gap: isMobile ? theme.spacing.sm : theme.spacing.xs,
+    gap: theme.spacing.xs,
+    backgroundColor: theme.colors.background.secondary,
   };
 
-  // Filter row (responsive)
+  // Compact filter row
   const filterRowStyle: CSSProperties = {
     display: "flex",
     alignItems: "center",
-    gap: isMobile ? theme.spacing.sm : theme.spacing.xs,
+    gap: "4px",
     flexWrap: "wrap",
   };
 
-  // Filter label (responsive)
-  const filterLabelStyle: CSSProperties = {
-    color: theme.colors.text.muted,
-    fontSize: isMobile
-      ? theme.typography.fontSize.sm
-      : theme.typography.fontSize.xs,
-    fontWeight: theme.typography.fontWeight.medium,
-    minWidth: isMobile ? "50px" : "45px",
-  };
-
-  // Filter chip (responsive - larger on mobile for touch)
+  // Smaller filter chips
   const getFilterChipStyle = (active: boolean): CSSProperties => ({
-    padding: isMobile
-      ? `${theme.spacing.xs}px ${theme.spacing.sm}px`
-      : `2px ${theme.spacing.xs}px`,
+    padding: `2px 6px`,
     borderRadius: `${theme.borderRadius.sm}px`,
     backgroundColor: active
       ? theme.colors.accent.primary
@@ -1067,71 +1088,28 @@ export const QuestLog = memo(function QuestLog({
     color: active
       ? theme.colors.background.primary
       : theme.colors.text.secondary,
-    fontSize: isMobile
-      ? theme.typography.fontSize.sm
-      : theme.typography.fontSize.xs,
+    fontSize: "10px",
     fontWeight: theme.typography.fontWeight.medium,
     cursor: "pointer",
     border: active ? "none" : `1px solid ${theme.colors.border.default}`,
     transition: reducedMotion ? "none" : theme.transitions.fast,
-    minHeight: isMobile ? "32px" : "auto",
+    lineHeight: "1.4",
   });
 
-  // Sort container
-  const sortContainerStyle: CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    gap: isMobile ? theme.spacing.sm : theme.spacing.xs,
-  };
-
-  // Sort select (responsive)
-  const sortSelectStyle: CSSProperties = {
-    padding: isMobile
-      ? `${theme.spacing.xs}px ${theme.spacing.sm}px`
-      : `2px ${theme.spacing.xs}px`,
-    backgroundColor: theme.colors.background.tertiary,
-    border: `1px solid ${theme.colors.border.default}`,
-    borderRadius: `${theme.borderRadius.sm}px`,
-    color: theme.colors.text.secondary,
-    fontSize: isMobile
-      ? theme.typography.fontSize.sm
-      : theme.typography.fontSize.xs,
-    cursor: "pointer",
-    outline: "none",
-    minHeight: isMobile ? "32px" : "auto",
-  };
-
-  // Sort direction button
-  const sortDirectionStyle: CSSProperties = {
-    width: "22px",
-    height: "22px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: theme.colors.background.tertiary,
-    border: `1px solid ${theme.colors.border.default}`,
-    borderRadius: `${theme.borderRadius.sm}px`,
-    color: theme.colors.text.muted,
-    cursor: "pointer",
-    padding: 0,
-  };
-
-  // Content area (responsive)
+  // Content area - takes remaining space
   const contentStyle: CSSProperties = {
     flex: 1,
     overflowY: "auto",
     maxHeight: maxHeight,
-    WebkitOverflowScrolling: "touch", // Smooth scrolling on iOS
+    WebkitOverflowScrolling: "touch",
   };
 
-  // Empty state (responsive)
+  // Empty state
   const emptyStyle: CSSProperties = {
-    padding: isMobile ? theme.spacing.lg : theme.spacing.xl,
+    padding: theme.spacing.lg,
     textAlign: "center",
     color: theme.colors.text.muted,
-    fontSize: isMobile
-      ? theme.typography.fontSize.base
-      : theme.typography.fontSize.sm,
+    fontSize: theme.typography.fontSize.sm,
   };
 
   // Sort options
@@ -1140,7 +1118,6 @@ export const QuestLog = memo(function QuestLog({
     { value: "name", label: "Name" },
     { value: "level", label: "Level" },
     { value: "progress", label: "Progress" },
-    { value: "recent", label: "Recent" },
   ];
 
   // State filter options
@@ -1151,41 +1128,80 @@ export const QuestLog = memo(function QuestLog({
     "failed",
   ];
 
-  // Category filter options
-  const categoryOptions: QuestCategory[] = [
-    "main",
-    "side",
-    "daily",
-    "weekly",
-    "event",
-  ];
+  // Category filter options - only main ones
+  const categoryOptions: QuestCategory[] = ["main", "side", "daily"];
 
   return (
     <>
       <div className={className} style={containerStyle}>
-        {/* Header */}
+        {/* Compact Header with Stats and Toolbar */}
         {showHeader && (
           <div style={headerStyle}>
-            <span style={titleStyle}>{title}</span>
             {questCounts && (
               <div style={statsStyle}>
-                <span style={{ color: theme.colors.state.warning }}>
-                  {questCounts.active} Active
+                <span style={{ color: STATUS_COLORS.active }}>
+                  {questCounts.active}
                 </span>
-                <span>·</span>
-                <span style={{ color: theme.colors.state.danger }}>
-                  {questCounts.available} Available
+                <span style={{ color: STATUS_COLORS.available }}>
+                  {questCounts.available}
                 </span>
-                <span>·</span>
-                <span style={{ color: theme.colors.state.success }}>
-                  {questCounts.completed} Complete
+                <span style={{ color: STATUS_COLORS.completed }}>
+                  {questCounts.completed}
                 </span>
               </div>
             )}
+            <div style={toolbarStyle}>
+              {/* Search toggle */}
+              {showSearch && onSearchChange && (
+                <button
+                  style={iconButtonStyle(searchExpanded)}
+                  onClick={() => setSearchExpanded(!searchExpanded)}
+                  title="Search"
+                >
+                  <SearchIcon />
+                </button>
+              )}
+              {/* Filter toggle */}
+              {showFilters &&
+                (onStateFilterChange || onCategoryFilterChange) && (
+                  <button
+                    style={iconButtonStyle(filtersExpanded || hasActiveFilters)}
+                    onClick={() => setFiltersExpanded(!filtersExpanded)}
+                    title="Filters"
+                  >
+                    <FilterIcon />
+                  </button>
+                )}
+              {/* Sort dropdown - inline */}
+              {showSort && onSortChange && (
+                <select
+                  value={sortBy}
+                  onChange={(e) =>
+                    onSortChange(e.target.value as QuestSortOption)
+                  }
+                  style={{
+                    padding: "2px 4px",
+                    backgroundColor: theme.colors.background.tertiary,
+                    border: `1px solid ${theme.colors.border.default}`,
+                    borderRadius: `${theme.borderRadius.sm}px`,
+                    color: theme.colors.text.muted,
+                    fontSize: "10px",
+                    cursor: "pointer",
+                    outline: "none",
+                  }}
+                >
+                  {sortOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
           </div>
         )}
 
-        {/* Search */}
+        {/* Collapsible Search */}
         {showSearch && onSearchChange && (
           <div style={searchContainerStyle}>
             <input
@@ -1194,17 +1210,17 @@ export const QuestLog = memo(function QuestLog({
               value={searchText}
               onChange={(e) => onSearchChange(e.target.value)}
               style={searchInputStyle}
+              autoFocus={searchExpanded}
             />
           </div>
         )}
 
-        {/* Filters */}
+        {/* Collapsible Filters */}
         {showFilters && (
           <div style={filtersContainerStyle}>
             {/* State filters */}
             {onStateFilterChange && (
               <div style={filterRowStyle}>
-                <span style={filterLabelStyle}>Status:</span>
                 {stateOptions.map((state) => (
                   <button
                     key={state}
@@ -1220,7 +1236,6 @@ export const QuestLog = memo(function QuestLog({
             {/* Category filters */}
             {onCategoryFilterChange && (
               <div style={filterRowStyle}>
-                <span style={filterLabelStyle}>Type:</span>
                 {categoryOptions.map((category) => (
                   <button
                     key={category}
@@ -1234,72 +1249,16 @@ export const QuestLog = memo(function QuestLog({
                 ))}
               </div>
             )}
-
-            {/* Sort */}
-            {showSort && onSortChange && (
-              <div style={filterRowStyle}>
-                <span style={filterLabelStyle}>Sort:</span>
-                <div style={sortContainerStyle}>
-                  <select
-                    value={sortBy}
-                    onChange={(e) =>
-                      onSortChange(e.target.value as QuestSortOption)
-                    }
-                    style={sortSelectStyle}
-                  >
-                    {sortOptions.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                  {onSortDirectionChange && (
-                    <button
-                      style={sortDirectionStyle}
-                      onClick={() =>
-                        onSortDirectionChange(
-                          sortDirection === "asc" ? "desc" : "asc",
-                        )
-                      }
-                      title={
-                        sortDirection === "asc" ? "Ascending" : "Descending"
-                      }
-                    >
-                      <svg
-                        width="10"
-                        height="10"
-                        viewBox="0 0 12 12"
-                        fill="currentColor"
-                        style={{
-                          transform:
-                            sortDirection === "desc"
-                              ? "rotate(180deg)"
-                              : "rotate(0deg)",
-                        }}
-                      >
-                        <path d="M6 2l4 4H2l4-4zm0 8L2 6h8l-4 4z" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
         )}
 
-        {/* Content */}
+        {/* Content - Quest List */}
         <div style={contentStyle} className="osrs-scrollbar">
           {quests.length === 0 ? (
             <div style={emptyStyle}>
-              <svg
-                width="40"
-                height="40"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-                style={{ opacity: 0.3, marginBottom: theme.spacing.sm }}
-              >
-                <path d="M3 3v10h10V3H3zm1 1h8v8H4V4zm2 1v2h2V5H6zm3 0v2h2V5H9zM6 8v2h2V8H6zm3 0v2h2V8H9z" />
-              </svg>
+              <div style={{ opacity: 0.5, marginBottom: theme.spacing.xs }}>
+                📜
+              </div>
               <div>{emptyMessage}</div>
             </div>
           ) : groupByCategory && questsByCategory ? (
