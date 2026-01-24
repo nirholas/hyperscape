@@ -55,6 +55,15 @@ interface ActionBarPanelProps {
   isEditMode?: boolean;
   /** Window ID for dynamic minSize updates */
   windowId?: string;
+  /** When true, uses parent DndProvider context (for cross-panel drag-drop) */
+  useParentDndContext?: boolean;
+}
+
+/** Payload for action bar slot update events */
+export interface ActionBarSlotUpdatePayload {
+  barId: number;
+  slotIndex: number;
+  slot: ActionBarSlotContent;
 }
 
 interface ContextMenuItem {
@@ -328,7 +337,25 @@ function getSlotIcon(slot: ActionBarSlotContent): string {
     return slot.itemId.substring(0, 2).toUpperCase();
   }
 
-  if (slot.type === "skill") return "📊";
+  if (slot.type === "skill" && slot.skillId) {
+    // Skill-specific fallback icons
+    const skillId = slot.skillId.toLowerCase();
+    if (skillId === "attack") return "⚔️";
+    if (skillId === "strength") return "💪";
+    if (skillId === "defense" || skillId === "defence") return "🛡️";
+    if (skillId === "constitution" || skillId === "hitpoints") return "❤️";
+    if (skillId === "ranged") return "🏹";
+    if (skillId === "magic") return "✨";
+    if (skillId === "prayer") return "🙏";
+    if (skillId === "woodcutting") return "🪓";
+    if (skillId === "mining") return "⛏️";
+    if (skillId === "fishing") return "🐟";
+    if (skillId === "firemaking") return "🔥";
+    if (skillId === "cooking") return "🍖";
+    if (skillId === "smithing") return "🔨";
+    if (skillId === "agility") return "🏃";
+    return "📊";
+  }
   if (slot.type === "spell") return "✨";
   if (slot.type === "prayer") return slot.icon || "✨";
   return "?";
@@ -514,6 +541,7 @@ export function ActionBarPanel({
   barId = 0,
   isEditMode = false,
   windowId,
+  useParentDndContext = false,
 }: ActionBarPanelProps): React.ReactElement {
   const theme = useTheme();
   const updateWindow = useWindowStore((s) => s.updateWindow);
@@ -682,6 +710,28 @@ export function ActionBarPanel({
     };
   }, [world, barId]);
 
+  // Listen for slot updates from InterfaceManager (cross-panel drag-drop)
+  useEffect(() => {
+    if (!world || !useParentDndContext) return;
+
+    const handleSlotUpdate = (payload: unknown) => {
+      const data = payload as ActionBarSlotUpdatePayload;
+      // Only handle updates for this bar
+      if (data.barId !== barId) return;
+
+      setSlots((prev) => {
+        const newSlots = [...prev];
+        newSlots[data.slotIndex] = data.slot;
+        return newSlots;
+      });
+    };
+
+    world.on(EventType.ACTION_BAR_SLOT_UPDATE, handleSlotUpdate);
+    return () => {
+      world.off(EventType.ACTION_BAR_SLOT_UPDATE, handleSlotUpdate);
+    };
+  }, [world, barId, useParentDndContext]);
+
   // Persist slots to localStorage and server
   useEffect(() => {
     saveSlots(barId, slots);
@@ -769,14 +819,15 @@ export function ActionBarPanel({
           slot: invItem.slot,
         });
       } else if (slot.type === "skill" && slot.skillId) {
-        // Use skill ability
-        const network = world.network;
-        if (network && "useSkill" in network) {
-          (network as { useSkill: (id: string) => void }).useSkill(
-            slot.skillId,
-          );
-          console.debug("[ActionBar] Skill activated:", slot.skillId);
-        }
+        // Skills in the action bar open the skill panel or show skill info
+        // This is similar to RS3 where clicking a skill on action bar shows the skill guide
+        console.debug(
+          "[ActionBar] Skill clicked:",
+          slot.skillId,
+          "- opens skill panel",
+        );
+        // Future: Could emit an event to open the skills panel focused on this skill
+        // For now, skills are placed for quick reference (showing level/XP in tooltip)
       } else if (slot.type === "spell" && slot.spellId) {
         // Cast spell - get current target if any for targeted spells
         const network = world.network;
@@ -840,6 +891,13 @@ export function ActionBarPanel({
         icon: string;
         level: number;
       };
+      // Skill drag data
+      skill?: {
+        id: string;
+        name: string;
+        icon: string;
+        level: number;
+      };
     } | null;
     const overData = over.data as {
       slotIndex?: number;
@@ -878,6 +936,33 @@ export function ActionBarPanel({
           prayerId: activeData.prayer.id,
           icon: activeData.prayer.icon,
           label: activeData.prayer.name,
+        };
+        setSlots((prev) => {
+          const newSlots = [...prev];
+          newSlots[targetIndex] = newSlot;
+          return newSlots;
+        });
+      }
+      return;
+    }
+
+    // Check if this is a drop from skill panel
+    if (activeData?.source === "skill" && activeData.skill) {
+      const targetIndex = overData?.slotIndex;
+      if (targetIndex !== undefined) {
+        const skillData = activeData.skill as {
+          id: string;
+          name: string;
+          icon: string;
+          level: number;
+        };
+        // Create new slot content from skill
+        const newSlot: ActionBarSlotContent = {
+          type: "skill",
+          id: `skill-${skillData.id}-${Date.now()}`,
+          skillId: skillData.id,
+          icon: skillData.icon,
+          label: skillData.name,
         };
         setSlots((prev) => {
           const newSlots = [...prev];
@@ -930,18 +1015,26 @@ export function ActionBarPanel({
           slot.prayerId ||
           "Unknown";
 
-        // Use/Activate action based on type
-        const actionText = slot.type === "prayer" ? "Activate " : "Use ";
+        // Determine action text and color based on type
+        const actionText =
+          slot.type === "prayer"
+            ? "Activate "
+            : slot.type === "skill"
+              ? "View "
+              : "Use ";
+        const slotColor =
+          slot.type === "prayer"
+            ? "#60a5fa"
+            : slot.type === "skill"
+              ? "#4ade80" // Green for skills
+              : CONTEXT_MENU_COLORS.ITEM;
+
         menuItems.push({
           id: "use",
           label: `${actionText}${name}`,
           styledLabel: [
             { text: actionText, color: "#fff" },
-            {
-              text: name,
-              color:
-                slot.type === "prayer" ? "#60a5fa" : CONTEXT_MENU_COLORS.ITEM,
-            },
+            { text: name, color: slotColor },
           ],
         });
 
@@ -951,11 +1044,7 @@ export function ActionBarPanel({
           label: `Remove ${name}`,
           styledLabel: [
             { text: "Remove ", color: "#fff" },
-            {
-              text: name,
-              color:
-                slot.type === "prayer" ? "#60a5fa" : CONTEXT_MENU_COLORS.ITEM,
-            },
+            { text: name, color: slotColor },
           ],
         });
       }
@@ -1034,6 +1123,139 @@ export function ActionBarPanel({
     boxShadow: `inset 0 2px 4px rgba(0, 0, 0, 0.4)`,
   });
 
+  // Action bar content (slots + controls)
+  const actionBarContent = (
+    <>
+      {/* Flex container - buttons wrap around the slots container (horizontal only) */}
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "row",
+          alignItems: "center",
+          gap: CONTROL_BUTTON_GAP,
+        }}
+      >
+        {/* Decrease slot count button (-) - only rendered in edit mode */}
+        {isEditMode && (
+          <button
+            onClick={handleDecreaseSlots}
+            disabled={slotCount <= MIN_SLOT_COUNT}
+            title={`Remove slot (${slotCount}/${MAX_SLOT_COUNT})`}
+            className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+            style={getControlButtonStyle(slotCount <= MIN_SLOT_COUNT)}
+            onMouseEnter={(e) => {
+              if (slotCount > MIN_SLOT_COUNT) {
+                e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.accent.secondary}22 0%, ${theme.colors.background.primary} 100%)`;
+                e.currentTarget.style.borderColor = theme.colors.accent.primary;
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background =
+                slotCount <= MIN_SLOT_COUNT
+                  ? theme.colors.background.primary
+                  : `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`;
+              e.currentTarget.style.borderColor =
+                slotCount <= MIN_SLOT_COUNT
+                  ? `${theme.colors.border.default}33`
+                  : theme.colors.border.default;
+            }}
+          >
+            −
+          </button>
+        )}
+
+        {/* Slots container - horizontal grid layout */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: `repeat(${slotCount}, ${SLOT_SIZE}px)`,
+            gap: SLOT_GAP,
+            padding: PADDING,
+            justifyContent: "center",
+            background: `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+            border: `1px solid ${theme.colors.border.default}`,
+            borderRadius: 4,
+            boxShadow: `inset 0 2px 8px rgba(0, 0, 0, 0.5), ${theme.shadows.md}`,
+          }}
+        >
+          {slots.map((slot, index) => (
+            <DraggableSlot
+              key={`${barId}-${index}`}
+              slot={slot}
+              slotIndex={index}
+              slotSize={SLOT_SIZE}
+              shortcut={keyboardShortcuts[index] || ""}
+              isHovered={hoveredSlot === index}
+              isActive={
+                slot.type === "prayer" && slot.prayerId
+                  ? activePrayers.has(slot.prayerId)
+                  : false
+              }
+              onHover={() => setHoveredSlot(index)}
+              onLeave={() => setHoveredSlot(null)}
+              onClick={() => handleUseSlot(slot, index)}
+              onContextMenu={(e) => handleContextMenu(e, slot, index)}
+            />
+          ))}
+        </div>
+
+        {/* Increase slot count button (+) - only rendered in edit mode */}
+        {isEditMode && (
+          <button
+            onClick={handleIncreaseSlots}
+            disabled={slotCount >= MAX_SLOT_COUNT}
+            title={`Add slot (${slotCount}/${MAX_SLOT_COUNT})`}
+            className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+            style={getControlButtonStyle(slotCount >= MAX_SLOT_COUNT)}
+            onMouseEnter={(e) => {
+              if (slotCount < MAX_SLOT_COUNT) {
+                e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.accent.secondary}22 0%, ${theme.colors.background.primary} 100%)`;
+                e.currentTarget.style.borderColor = theme.colors.accent.primary;
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background =
+                slotCount >= MAX_SLOT_COUNT
+                  ? theme.colors.background.primary
+                  : `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`;
+              e.currentTarget.style.borderColor =
+                slotCount >= MAX_SLOT_COUNT
+                  ? `${theme.colors.border.default}33`
+                  : theme.colors.border.default;
+            }}
+          >
+            +
+          </button>
+        )}
+      </div>
+
+      {/* Drag Overlay for slot dragging (only when using own provider) */}
+      {!useParentDndContext && (
+        <ComposableDragOverlay adjustToPointer>
+          {draggedSlot && (
+            <div
+              style={{
+                width: SLOT_SIZE,
+                height: SLOT_SIZE,
+                background: `linear-gradient(180deg, ${theme.colors.accent.secondary}4D 0%, ${theme.colors.background.secondary} 100%)`,
+                border: `2px solid ${theme.colors.accent.primary}CC`,
+                borderRadius: 4,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 16,
+                boxShadow: `0 4px 12px rgba(0, 0, 0, 0.4), 0 0 8px ${theme.colors.accent.primary}40`,
+                pointerEvents: "none",
+              }}
+            >
+              {getSlotIcon(draggedSlot)}
+            </div>
+          )}
+        </ComposableDragOverlay>
+      )}
+    </>
+  );
+
   return (
     <>
       {/* Outer container - centers content in panel */}
@@ -1046,135 +1268,14 @@ export function ActionBarPanel({
           justifyContent: "center",
         }}
       >
-        <DndProvider onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-          {/* Flex container - buttons wrap around the slots container (horizontal only) */}
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "row",
-              alignItems: "center",
-              gap: CONTROL_BUTTON_GAP,
-            }}
-          >
-            {/* Decrease slot count button (-) - only rendered in edit mode */}
-            {isEditMode && (
-              <button
-                onClick={handleDecreaseSlots}
-                disabled={slotCount <= MIN_SLOT_COUNT}
-                title={`Remove slot (${slotCount}/${MAX_SLOT_COUNT})`}
-                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
-                style={getControlButtonStyle(slotCount <= MIN_SLOT_COUNT)}
-                onMouseEnter={(e) => {
-                  if (slotCount > MIN_SLOT_COUNT) {
-                    e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.accent.secondary}22 0%, ${theme.colors.background.primary} 100%)`;
-                    e.currentTarget.style.borderColor =
-                      theme.colors.accent.primary;
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background =
-                    slotCount <= MIN_SLOT_COUNT
-                      ? theme.colors.background.primary
-                      : `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`;
-                  e.currentTarget.style.borderColor =
-                    slotCount <= MIN_SLOT_COUNT
-                      ? `${theme.colors.border.default}33`
-                      : theme.colors.border.default;
-                }}
-              >
-                −
-              </button>
-            )}
-
-            {/* Slots container - horizontal grid layout */}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: `repeat(${slotCount}, ${SLOT_SIZE}px)`,
-                gap: SLOT_GAP,
-                padding: PADDING,
-                justifyContent: "center",
-                background: `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
-                border: `1px solid ${theme.colors.border.default}`,
-                borderRadius: 4,
-                boxShadow: `inset 0 2px 8px rgba(0, 0, 0, 0.5), ${theme.shadows.md}`,
-              }}
-            >
-              {slots.map((slot, index) => (
-                <DraggableSlot
-                  key={`${barId}-${index}`}
-                  slot={slot}
-                  slotIndex={index}
-                  slotSize={SLOT_SIZE}
-                  shortcut={keyboardShortcuts[index] || ""}
-                  isHovered={hoveredSlot === index}
-                  isActive={
-                    slot.type === "prayer" && slot.prayerId
-                      ? activePrayers.has(slot.prayerId)
-                      : false
-                  }
-                  onHover={() => setHoveredSlot(index)}
-                  onLeave={() => setHoveredSlot(null)}
-                  onClick={() => handleUseSlot(slot, index)}
-                  onContextMenu={(e) => handleContextMenu(e, slot, index)}
-                />
-              ))}
-            </div>
-
-            {/* Increase slot count button (+) - only rendered in edit mode */}
-            {isEditMode && (
-              <button
-                onClick={handleIncreaseSlots}
-                disabled={slotCount >= MAX_SLOT_COUNT}
-                title={`Add slot (${slotCount}/${MAX_SLOT_COUNT})`}
-                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
-                style={getControlButtonStyle(slotCount >= MAX_SLOT_COUNT)}
-                onMouseEnter={(e) => {
-                  if (slotCount < MAX_SLOT_COUNT) {
-                    e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.accent.secondary}22 0%, ${theme.colors.background.primary} 100%)`;
-                    e.currentTarget.style.borderColor =
-                      theme.colors.accent.primary;
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background =
-                    slotCount >= MAX_SLOT_COUNT
-                      ? theme.colors.background.primary
-                      : `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`;
-                  e.currentTarget.style.borderColor =
-                    slotCount >= MAX_SLOT_COUNT
-                      ? `${theme.colors.border.default}33`
-                      : theme.colors.border.default;
-                }}
-              >
-                +
-              </button>
-            )}
-          </div>
-
-          {/* Drag Overlay for slot dragging */}
-          <ComposableDragOverlay adjustToPointer>
-            {draggedSlot && (
-              <div
-                style={{
-                  width: SLOT_SIZE,
-                  height: SLOT_SIZE,
-                  background: `linear-gradient(180deg, ${theme.colors.accent.secondary}4D 0%, ${theme.colors.background.secondary} 100%)`,
-                  border: `2px solid ${theme.colors.accent.primary}CC`,
-                  borderRadius: 4,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 16,
-                  boxShadow: `0 4px 12px rgba(0, 0, 0, 0.4), 0 0 8px ${theme.colors.accent.primary}40`,
-                  pointerEvents: "none",
-                }}
-              >
-                {getSlotIcon(draggedSlot)}
-              </div>
-            )}
-          </ComposableDragOverlay>
-        </DndProvider>
+        {/* When using parent context, don't wrap with DndProvider */}
+        {useParentDndContext ? (
+          actionBarContent
+        ) : (
+          <DndProvider onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+            {actionBarContent}
+          </DndProvider>
+        )}
       </div>
 
       {/* Context Menu Portal */}

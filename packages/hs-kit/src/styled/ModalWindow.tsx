@@ -154,6 +154,9 @@ export const ModalWindow = memo(function ModalWindow({
     justifyContent: "center",
     zIndex,
     animation: "modalFadeIn 0.2s ease-out",
+    // CRITICAL: Enable pointer events to block clicks from reaching the game canvas
+    // CoreUI parent has pointer-events: none, so we must explicitly enable them here
+    pointerEvents: "auto",
   };
 
   // Modal container styles
@@ -221,6 +224,7 @@ export const ModalWindow = memo(function ModalWindow({
     overflow: "auto",
     padding: theme.spacing.md,
     backgroundColor: theme.colors.background.primary,
+    pointerEvents: "auto",
   };
 
   return (

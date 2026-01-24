@@ -2,14 +2,16 @@
  * Skills Panel
  * Hyperscape-themed skills interface (Prayer is now in separate PrayerPanel)
  * Uses project theme colors (gold #f2d08a, brown borders)
+ * Supports drag-drop to action bar
  */
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import {
   calculateCursorTooltipPosition,
   useThemeStore,
   useMobileLayout,
+  useDraggable,
 } from "hs-kit";
 import { zIndex, MOBILE_SKILLS } from "../../constants";
 import { useTooltipSize } from "../../hooks";
@@ -43,6 +45,144 @@ function calculateCombatLevel(stats: Partial<Skills>): number {
   const constitution = stats.constitution?.level ?? 10;
   return Math.floor(
     0.25 * (defense + constitution) + 0.325 * (attack + strength),
+  );
+}
+
+/** Draggable skill card component for action bar drag-drop */
+function DraggableSkillCard({
+  skill,
+  isHovered,
+  isMobile,
+  onMouseEnter,
+  onMouseMove,
+  onMouseLeave,
+}: {
+  skill: Skill;
+  isHovered: boolean;
+  isMobile: boolean;
+  onMouseEnter: (e: React.MouseEvent) => void;
+  onMouseMove: (e: React.MouseEvent) => void;
+  onMouseLeave: () => void;
+}) {
+  const theme = useThemeStore((s) => s.theme);
+
+  // Make skill draggable for action bar
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: `skill-${skill.key}`,
+    data: {
+      skill: {
+        id: skill.key,
+        name: skill.label,
+        icon: skill.icon,
+        level: skill.level,
+      },
+      source: "skill",
+    },
+  });
+
+  // Memoize card style to prevent recreation on every render
+  const cardStyle = useMemo(
+    (): React.CSSProperties => ({
+      background: isHovered
+        ? theme.colors.slot.hover
+        : theme.colors.slot.filled,
+      border: `1px solid ${isHovered ? theme.colors.border.hover : theme.colors.border.default}`,
+      borderRadius: "6px",
+      padding: isMobile ? "6px 8px" : "8px 10px",
+      minHeight: isMobile ? MOBILE_SKILLS.cardHeight : 44,
+      cursor: isDragging ? "grabbing" : "grab",
+      transition: "all 0.15s ease",
+      display: "flex",
+      alignItems: "center",
+      flexDirection: "row" as const,
+      touchAction: "none",
+      opacity: isDragging ? 0.5 : 1,
+    }),
+    [isHovered, isDragging, theme, isMobile],
+  );
+
+  return (
+    <div
+      ref={setNodeRef}
+      className="relative"
+      style={cardStyle}
+      onMouseEnter={onMouseEnter}
+      onMouseMove={onMouseMove}
+      onMouseLeave={onMouseLeave}
+      {...attributes}
+      {...listeners}
+    >
+      {/* Unified layout: Icon + Level inline (same for mobile and desktop) */}
+      <div className="flex items-center gap-1.5 w-full">
+        <span
+          style={{
+            fontSize: "15px",
+            filter: "drop-shadow(1px 1px 1px rgba(0,0,0,0.5))",
+            lineHeight: 1,
+          }}
+        >
+          {skill.icon}
+        </span>
+        {/* RuneScape-style slanted level display: current↗/↘base */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            position: "relative",
+            height: "16px",
+          }}
+        >
+          {/* Current level - shifted up */}
+          <span
+            style={{
+              fontSize: "11px",
+              fontWeight: 700,
+              color:
+                skill.level >= 99
+                  ? theme.colors.state.success
+                  : theme.colors.text.accent,
+              lineHeight: 1,
+              position: "relative",
+              top: "-3px",
+              textShadow: "1px 1px 1px rgba(0,0,0,0.5)",
+            }}
+          >
+            {skill.level}
+          </span>
+          {/* Slanted separator */}
+          <span
+            style={{
+              fontSize: "10px",
+              fontWeight: 400,
+              color: theme.colors.text.disabled,
+              lineHeight: 1,
+              margin: "0 1px",
+              transform: "rotate(-20deg)",
+              display: "inline-block",
+            }}
+          >
+            /
+          </span>
+          {/* Base level - shifted down */}
+          <span
+            style={{
+              fontSize: "11px",
+              fontWeight: 700,
+              color:
+                skill.level >= 99
+                  ? theme.colors.state.success
+                  : theme.colors.text.accent,
+              lineHeight: 1,
+              position: "relative",
+              top: "3px",
+              textShadow: "1px 1px 1px rgba(0,0,0,0.5)",
+            }}
+          >
+            {skill.level}
+          </span>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -177,29 +317,11 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
           }}
         >
           {skills.map((skill) => (
-            <div
+            <DraggableSkillCard
               key={skill.key}
-              className="relative"
-              style={{
-                background:
-                  hoveredSkill?.key === skill.key
-                    ? theme.colors.slot.hover
-                    : theme.colors.slot.filled,
-                border: `1px solid ${
-                  hoveredSkill?.key === skill.key
-                    ? theme.colors.border.hover
-                    : theme.colors.border.default
-                }`,
-                borderRadius: "6px",
-                padding: shouldUseMobileUI ? "6px 8px" : "8px 10px",
-                minHeight: shouldUseMobileUI ? MOBILE_SKILLS.cardHeight : 44,
-                cursor: "default",
-                transition: "all 0.15s ease",
-                display: "flex",
-                alignItems: "center",
-                flexDirection: "row",
-                touchAction: "manipulation",
-              }}
+              skill={skill}
+              isHovered={hoveredSkill?.key === skill.key}
+              isMobile={shouldUseMobileUI}
               onMouseEnter={(e) => {
                 setHoveredSkill(skill);
                 setMousePos({ x: e.clientX, y: e.clientY });
@@ -208,61 +330,7 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
               onMouseLeave={() => {
                 setHoveredSkill(null);
               }}
-            >
-              {/* Unified layout: Icon + Level inline (same for mobile and desktop) */}
-              {
-                <div className="flex items-center gap-1.5 w-full">
-                  <span
-                    style={{
-                      fontSize: "15px",
-                      filter: "drop-shadow(1px 1px 1px rgba(0,0,0,0.5))",
-                      lineHeight: 1,
-                    }}
-                  >
-                    {skill.icon}
-                  </span>
-                  {/* RuneScape-style level display: current/max */}
-                  <div className="flex items-center gap-0.5">
-                    <span
-                      style={{
-                        fontSize: "11px",
-                        fontWeight: 600,
-                        color:
-                          skill.level >= 99
-                            ? theme.colors.state.success
-                            : theme.colors.text.accent,
-                        lineHeight: 1,
-                      }}
-                    >
-                      {skill.level}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "10px",
-                        fontWeight: 400,
-                        color: theme.colors.text.disabled,
-                        lineHeight: 1,
-                      }}
-                    >
-                      /
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "11px",
-                        fontWeight: 600,
-                        color:
-                          skill.level >= 99
-                            ? theme.colors.state.success
-                            : theme.colors.text.accent,
-                        lineHeight: 1,
-                      }}
-                    >
-                      {skill.level}
-                    </span>
-                  </div>
-                </div>
-              }
-            </div>
+            />
           ))}
         </div>
 

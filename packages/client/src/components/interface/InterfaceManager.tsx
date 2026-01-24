@@ -34,6 +34,7 @@ import {
   useFeatureEnabled,
   initializeAccessibility,
   useMobileLayout,
+  useThemeStore,
   type WindowConfig,
   type DragEndEvent,
   type WindowState,
@@ -411,150 +412,325 @@ function createDefaultWindows(): WindowConfig[] {
   ];
 }
 
-/** World Map Content Component - Uses the Minimap component with larger size */
-function WorldMapContent({
+/**
+ * FullscreenWorldMap - RuneScape-style fullscreen world map overlay
+ *
+ * Features:
+ * - Takes up entire screen with dark backdrop
+ * - ESC key closes it (handled via useEffect)
+ * - M key also toggles it
+ * - Close button in top-right corner
+ * - Player position display
+ * - Zoom controls and legend
+ */
+function FullscreenWorldMap({
   world,
+  onClose,
 }: {
   world: ClientWorld;
+  onClose: () => void;
 }): React.ReactElement {
+  const theme = useThemeStore((s) => s.theme);
+
   // Get player position for header display
   const player = world?.getPlayer?.();
   const playerPos = player?.position || { x: 0, y: 0, z: 0 };
 
+  // Calculate map dimensions based on viewport
+  const [mapDimensions, setMapDimensions] = React.useState({
+    width: Math.min(window.innerWidth - 80, 1400),
+    height: Math.min(window.innerHeight - 120, 900),
+  });
+
+  // Handle ESC key to close
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  // Update map dimensions on window resize
+  React.useEffect(() => {
+    const handleResize = () => {
+      setMapDimensions({
+        width: Math.min(window.innerWidth - 80, 1400),
+        height: Math.min(window.innerHeight - 120, 900),
+      });
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
   return (
     <div
+      role="dialog"
+      aria-modal="true"
       data-modal="true"
       style={{
-        width: "100%",
-        height: 550,
-        maxHeight: "75vh",
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 10000,
         display: "flex",
-        flexDirection: "column",
-        background: "rgba(20, 15, 10, 0.95)",
-        borderRadius: 4,
-        overflow: "hidden",
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: "rgba(0, 0, 0, 0.85)",
+        pointerEvents: "auto",
+        animation: "worldMapFadeIn 0.2s ease-out",
       }}
       onMouseDown={(e) => {
         (e.nativeEvent as PointerEvent & { isCoreUI?: boolean }).isCoreUI =
           true;
-        e.stopPropagation();
       }}
       onPointerDown={(e) => {
         (e.nativeEvent as PointerEvent & { isCoreUI?: boolean }).isCoreUI =
           true;
-        e.stopPropagation();
       }}
-      onClick={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        // Close when clicking backdrop (not the map)
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
       }}
     >
-      {/* Header */}
-      <div
-        style={{
-          padding: "10px 16px",
-          background: "rgba(0, 0, 0, 0.3)",
-          borderBottom: "1px solid rgba(139, 69, 19, 0.4)",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}
-      >
-        <span
-          style={{
-            color: "rgba(242, 208, 138, 0.9)",
-            fontSize: 14,
-            fontWeight: 600,
-          }}
-        >
-          World of Hyperia
-        </span>
-        <span style={{ color: "rgba(242, 208, 138, 0.7)", fontSize: 12 }}>
-          Position: ({Math.round(playerPos.x)}, {Math.round(playerPos.z)})
-        </span>
-      </div>
+      {/* Animation keyframes */}
+      <style>
+        {`
+          @keyframes worldMapFadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+          }
+          @keyframes worldMapSlideIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+          }
+        `}
+      </style>
 
-      {/* Use the proven Minimap component with larger size and adjusted zoom */}
-      {/* zoom=80 shows ~260 world units which fills terrain better without black edges */}
+      {/* Map Container */}
       <div
         style={{
-          flex: 1,
           display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: 8,
+          flexDirection: "column",
+          background: `linear-gradient(135deg, ${theme.colors.background.primary}fa 0%, ${theme.colors.background.secondary}fa 100%)`,
+          border: `2px solid ${theme.colors.border.decorative}`,
+          borderRadius: theme.borderRadius.lg,
+          boxShadow: "0 20px 60px rgba(0, 0, 0, 0.8)",
+          overflow: "hidden",
+          animation: "worldMapSlideIn 0.2s ease-out",
+          maxWidth: "calc(100vw - 40px)",
+          maxHeight: "calc(100vh - 40px)",
         }}
+        onClick={(e) => e.stopPropagation()}
       >
-        <Minimap
-          world={world}
-          width={850}
-          height={450}
-          zoom={80}
-          embedded={true}
-          resizable={false}
-          isVisible={true}
-        />
-      </div>
-
-      {/* Footer with legend */}
-      <div
-        style={{
-          padding: "8px 16px",
-          background: "rgba(0, 0, 0, 0.3)",
-          borderTop: "1px solid rgba(139, 69, 19, 0.4)",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          fontSize: 11,
-          color: "rgba(242, 208, 138, 0.7)",
-        }}
-      >
-        <div style={{ display: "flex", gap: 16 }}>
-          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <span
-              style={{
-                width: 8,
-                height: 8,
-                background: "#00ff00",
-                borderRadius: "50%",
-              }}
-            />
-            You
-          </span>
-          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <span
-              style={{
-                width: 8,
-                height: 8,
-                background: "#ff4444",
-                borderRadius: "50%",
-              }}
-            />
-            Enemies
-          </span>
-          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <span
-              style={{
-                width: 8,
-                height: 8,
-                background: "#22cc55",
-                borderRadius: "50%",
-              }}
-            />
-            Resources
-          </span>
-        </div>
+        {/* Header */}
         <div
           style={{
+            padding: "12px 20px",
+            background: theme.colors.background.secondary,
+            borderBottom: `1px solid ${theme.colors.border.default}`,
             display: "flex",
-            gap: 12,
-            color: "rgba(242, 208, 138, 0.5)",
+            justifyContent: "space-between",
+            alignItems: "center",
           }}
         >
-          <span>Scroll to zoom</span>
-          <span>Click to move</span>
-          <span>M to close</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <span
+              style={{
+                color: theme.colors.text.primary,
+                fontSize: theme.typography.fontSize.lg,
+                fontWeight: theme.typography.fontWeight.semibold,
+              }}
+            >
+              🗺️ World Map
+            </span>
+            <span
+              style={{
+                color: theme.colors.text.secondary,
+                fontSize: theme.typography.fontSize.sm,
+              }}
+            >
+              World of Hyperia
+            </span>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+            <span
+              style={{
+                color: theme.colors.accent.primary,
+                fontSize: theme.typography.fontSize.sm,
+                fontFamily: theme.typography.fontFamily.mono,
+              }}
+            >
+              📍 ({Math.round(playerPos.x)}, {Math.round(playerPos.z)})
+            </span>
+
+            {/* Close button */}
+            <button
+              onClick={onClose}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 32,
+                height: 32,
+                borderRadius: theme.borderRadius.md,
+                border: `1px solid ${theme.colors.border.default}`,
+                backgroundColor: theme.colors.background.tertiary,
+                color: theme.colors.text.secondary,
+                cursor: "pointer",
+                fontSize: 18,
+                transition: "all 0.15s ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor =
+                  theme.colors.state.danger;
+                e.currentTarget.style.color = theme.colors.text.primary;
+                e.currentTarget.style.borderColor = theme.colors.state.danger;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor =
+                  theme.colors.background.tertiary;
+                e.currentTarget.style.color = theme.colors.text.secondary;
+                e.currentTarget.style.borderColor = theme.colors.border.default;
+              }}
+              aria-label="Close map (ESC)"
+              title="Close (ESC)"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        {/* Map area - using Minimap with full size */}
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            background: theme.colors.background.primary,
+          }}
+        >
+          <Minimap
+            world={world}
+            width={mapDimensions.width}
+            height={mapDimensions.height}
+            zoom={60}
+            embedded={true}
+            resizable={false}
+            isVisible={true}
+          />
+        </div>
+
+        {/* Footer with legend and controls hint */}
+        <div
+          style={{
+            padding: "10px 20px",
+            background: theme.colors.background.secondary,
+            borderTop: `1px solid ${theme.colors.border.default}`,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          {/* Legend */}
+          <div
+            style={{
+              display: "flex",
+              gap: 20,
+              fontSize: theme.typography.fontSize.xs,
+              color: theme.colors.text.secondary,
+            }}
+          >
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span
+                style={{
+                  width: 10,
+                  height: 10,
+                  background: "#00ff00",
+                  borderRadius: "50%",
+                  border: "1px solid white",
+                }}
+              />
+              You
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span
+                style={{
+                  width: 10,
+                  height: 10,
+                  background: "#ff4444",
+                  borderRadius: "50%",
+                  border: "1px solid white",
+                }}
+              />
+              Enemies
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span
+                style={{
+                  width: 10,
+                  height: 10,
+                  background: "#22cc55",
+                  borderRadius: "50%",
+                  border: "1px solid white",
+                }}
+              />
+              Resources
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span
+                style={{
+                  width: 10,
+                  height: 10,
+                  background: "#3b82f6",
+                  borderRadius: "50%",
+                  border: "1px solid white",
+                }}
+              />
+              NPCs
+            </span>
+          </div>
+
+          {/* Controls hint */}
+          <div
+            style={{
+              display: "flex",
+              gap: 16,
+              fontSize: theme.typography.fontSize.xs,
+              color: theme.colors.text.muted,
+            }}
+          >
+            <span>🖱️ Drag to pan</span>
+            <span>🔍 Scroll to zoom</span>
+            <span>📍 Click to move</span>
+            <span
+              style={{
+                padding: "2px 8px",
+                background: theme.colors.background.tertiary,
+                borderRadius: theme.borderRadius.sm,
+                color: theme.colors.text.secondary,
+              }}
+            >
+              ESC or M to close
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -1905,6 +2081,94 @@ function DesktopInterfaceManager({
         return;
       }
 
+      // Handle drops to action bar (skills, prayers, items)
+      if (overId?.startsWith("actionbar-drop-")) {
+        const slotIndex = parseInt(overId.replace("actionbar-drop-", ""), 10);
+        // hs-kit: custom data is in active.data.data (DragItem wraps our data)
+        const activeData = active.data.data as
+          | {
+              skill?: { id: string; name: string; icon: string; level: number };
+              prayer?: {
+                id: string;
+                name: string;
+                icon: string;
+                level: number;
+              };
+              // Inventory item data has different structure
+              item?: { slot: number; itemId: string; quantity: number };
+              index?: number;
+              source?: string;
+            }
+          | undefined;
+
+        // Determine which bar this drop is for (default to bar 0)
+        // The drop ID format is "actionbar-drop-{slotIndex}" for bar 0
+        // For other bars it would be "actionbar-{barId}-drop-{slotIndex}"
+        const barId = 0; // TODO: Parse barId from overId if multiple bars supported
+
+        if (activeData?.source === "skill" && activeData.skill && world) {
+          // Skill → ActionBar drop
+          console.log("[InterfaceManager] 📊→⚡ Skill to ActionBar:", {
+            skill: activeData.skill.name,
+            slotIndex,
+          });
+          world.emit(EventType.ACTION_BAR_SLOT_UPDATE, {
+            barId,
+            slotIndex,
+            slot: {
+              type: "skill",
+              id: `skill-${activeData.skill.id}-${Date.now()}`,
+              skillId: activeData.skill.id,
+              icon: activeData.skill.icon,
+              label: activeData.skill.name,
+            },
+          });
+          return;
+        }
+
+        if (activeData?.source === "prayer" && activeData.prayer && world) {
+          // Prayer → ActionBar drop
+          console.log("[InterfaceManager] ✨→⚡ Prayer to ActionBar:", {
+            prayer: activeData.prayer.name,
+            slotIndex,
+          });
+          world.emit(EventType.ACTION_BAR_SLOT_UPDATE, {
+            barId,
+            slotIndex,
+            slot: {
+              type: "prayer",
+              id: `prayer-${activeData.prayer.id}-${Date.now()}`,
+              prayerId: activeData.prayer.id,
+              icon: activeData.prayer.icon,
+              label: activeData.prayer.name,
+            },
+          });
+          return;
+        }
+
+        // Inventory items: detected by activeId starting with "inventory-"
+        // Data structure is { item: { slot, itemId, quantity }, index }
+        if (activeId.startsWith("inventory-") && activeData?.item && world) {
+          // Inventory Item → ActionBar drop
+          console.log("[InterfaceManager] 🎒→⚡ Item to ActionBar:", {
+            itemId: activeData.item.itemId,
+            slotIndex,
+          });
+          world.emit(EventType.ACTION_BAR_SLOT_UPDATE, {
+            barId,
+            slotIndex,
+            slot: {
+              type: "item",
+              id: `item-${activeData.item.itemId}-${Date.now()}`,
+              itemId: activeData.item.itemId,
+              quantity: activeData.item.quantity,
+              label: activeData.item.itemId,
+            },
+          });
+          return;
+        }
+      }
+
       // Only handle tab drags for the remaining logic
       if (active.data.type !== "tab") return;
 
@@ -2196,17 +2460,12 @@ function DesktopInterfaceManager({
           </ModalWindow>
         )}
 
-        {/* World Map Modal */}
+        {/* World Map - Fullscreen Overlay (RuneScape-style) */}
         {worldMapOpen && (
-          <ModalWindow
-            visible={true}
+          <FullscreenWorldMap
+            world={world}
             onClose={() => setWorldMapOpen(false)}
-            title="World Map"
-            width={900}
-            maxWidth="95vw"
-          >
-            <WorldMapContent world={world} />
-          </ModalWindow>
+          />
         )}
 
         {/* Stats Modal */}

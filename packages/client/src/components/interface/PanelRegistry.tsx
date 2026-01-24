@@ -1420,6 +1420,7 @@ export function createPanelRenderer(
         );
 
       // Action bar panels (up to 5)
+      // useParentDndContext enables cross-panel drag-drop (skills, prayers, items)
       case "action":
       case "actionbar-0":
         return (
@@ -1428,6 +1429,7 @@ export function createPanelRenderer(
             barId={0}
             isEditMode={isEditMode}
             windowId={windowId}
+            useParentDndContext={true}
           />
         );
       case "actionbar-1":
@@ -1437,6 +1439,7 @@ export function createPanelRenderer(
             barId={1}
             isEditMode={isEditMode}
             windowId={windowId}
+            useParentDndContext={true}
           />
         );
       case "actionbar-2":
@@ -1446,6 +1449,7 @@ export function createPanelRenderer(
             barId={2}
             isEditMode={isEditMode}
             windowId={windowId}
+            useParentDndContext={true}
           />
         );
       case "actionbar-3":
@@ -1455,6 +1459,7 @@ export function createPanelRenderer(
             barId={3}
             isEditMode={isEditMode}
             windowId={windowId}
+            useParentDndContext={true}
           />
         );
       case "actionbar-4":
@@ -1464,6 +1469,7 @@ export function createPanelRenderer(
             barId={4}
             isEditMode={isEditMode}
             windowId={windowId}
+            useParentDndContext={true}
           />
         );
 

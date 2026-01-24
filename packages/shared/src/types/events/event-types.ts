@@ -624,6 +624,9 @@ export enum EventType {
   ENTITY_INTERACT_REQUEST = "entity:interact_request",
   AGGRO_FORCE_TRIGGER = "aggro:force-trigger",
 
+  // Action Bar System
+  ACTION_BAR_SLOT_UPDATE = "actionbar:slot:update",
+
   // Trading System
   TRADE_REQUEST = "trade:request",
   TRADE_REQUEST_RECEIVED = "trade:request_received",
