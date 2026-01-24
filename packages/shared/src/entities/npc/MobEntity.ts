@@ -1927,6 +1927,11 @@ export class MobEntity extends CombatantEntity {
       // Start tracking client-side death time when we first see DEAD state
       if (!this.clientDeathStartTime) {
         this.clientDeathStartTime = Date.now();
+        // Destroy health bar immediately when mob dies (frees atlas slot)
+        if (this._healthBarHandle) {
+          this._healthBarHandle.destroy();
+          this._healthBarHandle = null;
+        }
       }
 
       const currentTime = Date.now();
@@ -2971,6 +2976,23 @@ export class MobEntity extends CombatantEntity {
       // Restore mesh visibility
       if (this.mesh && !this.mesh.visible) {
         this.mesh.visible = true;
+      }
+
+      // Recreate health bar (was destroyed on death to free atlas slot)
+      if (!this._healthBarHandle) {
+        const healthbars = this.world.systems.find(
+          (s) =>
+            (s as { systemName?: string }).systemName === "healthbars" ||
+            s.constructor.name === "HealthBars",
+        ) as HealthBarsSystem | undefined;
+
+        if (healthbars) {
+          this._healthBarHandle = healthbars.add(
+            this.id,
+            this.config.currentHealth,
+            this.config.maxHealth,
+          );
+        }
       }
 
       // Update health bar now that mesh is visible again
