@@ -7,12 +7,12 @@
 
 import React, { useState, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
+import { useDraggable } from "@dnd-kit/core";
 import {
   calculateCursorTooltipPosition,
   useThemeStore,
   useMobileLayout,
-  useDraggable,
-} from "hs-kit";
+} from "@/ui";
 import { zIndex, MOBILE_SKILLS } from "../../constants";
 import { useTooltipSize } from "../../hooks";
 import type { PlayerStats, Skills } from "../../types";

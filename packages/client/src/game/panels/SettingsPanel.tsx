@@ -24,9 +24,9 @@ import {
   useComplexityMode,
   COMPLEXITY_MODE_CONFIGS,
   useThemeStore,
-} from "hs-kit";
+  type ComplexityMode,
+} from "@/ui";
 import type { StatusBarsConfig } from "../hud/StatusBars";
-import type { ComplexityMode } from "hs-kit";
 import { privyAuthManager } from "../../auth/PrivyAuthManager";
 import {
   type GraphicsQuality,

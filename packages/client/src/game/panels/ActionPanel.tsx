@@ -7,14 +7,14 @@
 import React, { useState, useEffect, useCallback, useRef, memo } from "react";
 import { createPortal } from "react-dom";
 import {
-  DndProvider,
+  DndContext,
   useDraggable,
   useDroppable,
-  ComposableDragOverlay,
-  useThemeStore,
+  DragOverlay,
   type DragStartEvent,
   type DragEndEvent,
-} from "hs-kit";
+} from "@dnd-kit/core";
+import { useThemeStore } from "@/ui";
 import { breakpoints, gameUI } from "../../constants";
 import {
   getItem,
@@ -314,8 +314,11 @@ export function ActionPanel({
 
   const handleDragStart = (event: DragStartEvent) => {
     const { active } = event;
-    // hs-kit: data is at active.data.data (DragItem.data)
-    const dragData = active.data.data as
+    // @dnd-kit: data is at active.data.current.data (DragItem.data)
+    const activeDataWrapper = active.data.current as
+      | { data?: Record<string, unknown> }
+      | undefined;
+    const dragData = activeDataWrapper?.data as
       | { item?: ActionPanelItem; slotNumber?: number }
       | undefined;
     const item = dragData?.item || null;
@@ -328,11 +331,19 @@ export function ActionPanel({
 
     if (!over || active.id === over.id) return;
 
-    // hs-kit: data is at active.data.data (DragItem.data)
-    const activeData = active.data.data as { slotNumber?: number } | undefined;
-    const overData = over.data as { slotNumber?: number } | undefined;
+    // @dnd-kit: data is at active.data.current.data (DragItem.data)
+    const activeDataWrapper = active.data.current as
+      | { data?: Record<string, unknown> }
+      | undefined;
+    const activeData = activeDataWrapper?.data as
+      | { slotNumber?: number }
+      | undefined;
+    // @dnd-kit: data is at over.data.current
+    const overDataCurrent = over.data.current as
+      | { slotNumber?: number }
+      | undefined;
     const fromSlot = activeData?.slotNumber;
-    const toSlot = overData?.slotNumber;
+    const toSlot = overDataCurrent?.slotNumber;
 
     if (fromSlot !== undefined && toSlot !== undefined && onItemMove) {
       onItemMove(fromSlot, toSlot);
@@ -537,7 +548,7 @@ export function ActionPanel({
 
   return (
     <>
-      <DndProvider onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         <div
           className={
             isVertical ? "flex flex-col items-center" : "flex items-center"
@@ -674,7 +685,7 @@ export function ActionPanel({
         </div>
 
         {/* Drag Overlay - Follows cursor smoothly */}
-        <ComposableDragOverlay adjustToPointer>
+        <DragOverlay>
           {draggedItem && (
             <div
               style={{
@@ -694,8 +705,8 @@ export function ActionPanel({
               {getItemIcon(draggedItem.itemId)}
             </div>
           )}
-        </ComposableDragOverlay>
-      </DndProvider>
+        </DragOverlay>
+      </DndContext>
 
       {/* Context Menu Portal - Compact, with dynamic positioning */}
       {contextMenu.visible &&

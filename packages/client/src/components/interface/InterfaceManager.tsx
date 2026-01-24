@@ -44,7 +44,7 @@ import {
   EditModeOverlay,
   DragOverlay,
   ModalWindow,
-} from "hs-kit";
+} from "@/ui";
 import { MobileInterfaceManager } from "./MobileInterfaceManager";
 import type { ClientWorld, PlayerEquipmentItems } from "../../types";
 import type { InventoryItem, Item } from "@hyperscape/shared";
@@ -1995,11 +1995,12 @@ function DesktopInterfaceManager({
       const overId = over?.id as string | undefined;
 
       // Debug: Log all drag end events
+      const activeRawData = active.data as Record<string, unknown> | undefined;
       console.log("[InterfaceManager] Drag end:", {
         activeId,
         overId,
         activeDataType: typeof active.data,
-        hasCustomData: !!active.data?.data,
+        hasCustomData: !!activeRawData,
       });
 
       // Handle inventory → equipment drops
@@ -2092,8 +2093,8 @@ function DesktopInterfaceManager({
       // Handle drops to action bar (skills, prayers, items)
       if (overId?.startsWith("actionbar-drop-")) {
         const slotIndex = parseInt(overId.replace("actionbar-drop-", ""), 10);
-        // hs-kit: custom data is in active.data.data (DragItem wraps our data)
-        const activeData = active.data.data as
+        // Our custom DragProvider stores data directly in active.data
+        const activeData = active.data as
           | {
               skill?: { id: string; name: string; icon: string; level: number };
               prayer?: {
@@ -2197,10 +2198,13 @@ function DesktopInterfaceManager({
       }
 
       // Only handle tab drags for the remaining logic
-      if (active.data.type !== "tab") return;
+      const tabData = active.data as
+        | { type?: string; sourceId?: string }
+        | undefined;
+      if (tabData?.type !== "tab") return;
 
       // Get source window ID from the drag item
-      const sourceWindowId = active.data.sourceId;
+      const sourceWindowId = tabData?.sourceId;
 
       // Debug logging
       console.log("[InterfaceManager] Tab drag end:", {
@@ -2279,7 +2283,79 @@ function DesktopInterfaceManager({
         {/* MenuBar panel with Lucide React icons provides panel shortcuts - see menubar-window */}
 
         {/* Edit mode overlay - only in advanced mode */}
-        {isUnlocked && editModeEnabled && <EditModeOverlay />}
+        {isUnlocked &&
+          editModeEnabled &&
+          (() => {
+            // Count existing action bar windows
+            const actionBarCount = windows.filter(
+              (w) => w.id.startsWith("actionbar-") && w.id.endsWith("-window"),
+            ).length;
+
+            const handleAddActionBar = () => {
+              // Find next available action bar ID
+              const existingIds = new Set(
+                windows
+                  .filter((w) => w.id.startsWith("actionbar-"))
+                  .map((w) => w.id),
+              );
+              let nextId = 0;
+              while (
+                existingIds.has(`actionbar-${nextId}-window`) &&
+                nextId < MAX_ACTION_BARS
+              ) {
+                nextId++;
+              }
+              if (nextId < MAX_ACTION_BARS) {
+                // Use responsive sizing for action bars
+                const viewport =
+                  typeof window !== "undefined"
+                    ? {
+                        width: window.innerWidth,
+                        height: window.innerHeight,
+                      }
+                    : { width: 1920, height: 1080 };
+                const actionbarSizing = getResponsivePanelSizing(
+                  "actionbar",
+                  viewport,
+                );
+
+                createWindow({
+                  id: `actionbar-${nextId}-window`,
+                  position: {
+                    x: 100 + nextId * 50,
+                    y:
+                      viewport.height -
+                      actionbarSizing.size.height -
+                      10 -
+                      nextId * 60,
+                  },
+                  size: actionbarSizing.size,
+                  minSize: actionbarSizing.minSize,
+                  maxSize: actionbarSizing.maxSize,
+                  tabs: [
+                    {
+                      id: `actionbar-${nextId}`,
+                      label: `Action Bar ${nextId + 1}`,
+                      content: `actionbar-${nextId}`,
+                      closeable: false,
+                      icon: "⚡",
+                    },
+                  ],
+                  transparency: 0,
+                });
+              }
+            };
+
+            return (
+              <EditModeOverlay
+                actionBarCount={actionBarCount}
+                maxActionBars={MAX_ACTION_BARS}
+                onAddActionBar={
+                  multipleActionBarsEnabled ? handleAddActionBar : undefined
+                }
+              />
+            );
+          })()}
 
         {/* Drag overlay for ghost during drag */}
         <DragOverlay />
@@ -2716,160 +2792,6 @@ function DesktopInterfaceManager({
             </div>
           </div>
         </div>
-
-        {/* Edit mode controls (shows when unlocked) - only in advanced mode */}
-        {isUnlocked && !isHolding && editModeEnabled && (
-          <div className="fixed bottom-4 right-4 z-[1000] flex flex-col items-end gap-2">
-            {/* Action Bar controls - only if multiple action bars enabled (standard+) */}
-            {multipleActionBarsEnabled &&
-              (() => {
-                // Count existing action bar windows
-                const actionBarCount = windows.filter(
-                  (w) =>
-                    w.id.startsWith("actionbar-") && w.id.endsWith("-window"),
-                ).length;
-                const canAddMore = actionBarCount < MAX_ACTION_BARS;
-                const canRemove = actionBarCount > 1;
-
-                return (
-                  <div className="flex gap-2">
-                    {canAddMore && (
-                      <button
-                        className="pointer-events-auto"
-                        onClick={() => {
-                          // Find next available action bar ID
-                          const existingIds = new Set(
-                            windows
-                              .filter((w) => w.id.startsWith("actionbar-"))
-                              .map((w) => w.id),
-                          );
-                          let nextId = 0;
-                          while (
-                            existingIds.has(`actionbar-${nextId}-window`) &&
-                            nextId < MAX_ACTION_BARS
-                          ) {
-                            nextId++;
-                          }
-                          if (nextId < MAX_ACTION_BARS) {
-                            // Use responsive sizing for action bars
-                            const viewport =
-                              typeof window !== "undefined"
-                                ? {
-                                    width: window.innerWidth,
-                                    height: window.innerHeight,
-                                  }
-                                : { width: 1920, height: 1080 };
-                            const actionbarSizing = getResponsivePanelSizing(
-                              "actionbar",
-                              viewport,
-                            );
-
-                            createWindow({
-                              id: `actionbar-${nextId}-window`,
-                              position: {
-                                x: 100 + nextId * 50,
-                                y:
-                                  viewport.height -
-                                  actionbarSizing.size.height -
-                                  10 -
-                                  nextId * 60,
-                              },
-                              size: actionbarSizing.size,
-                              minSize: actionbarSizing.minSize,
-                              maxSize: actionbarSizing.maxSize,
-                              tabs: [
-                                {
-                                  id: `actionbar-${nextId}`,
-                                  label: `Action Bar ${nextId + 1}`,
-                                  content: `actionbar-${nextId}`,
-                                  closeable: false,
-                                  icon: "⚡",
-                                },
-                              ],
-                              transparency: 0,
-                            });
-                          }
-                        }}
-                        style={{
-                          padding: "6px 12px",
-                          backgroundColor: "rgba(59, 130, 246, 0.9)",
-                          color: "#fff",
-                          borderRadius: 6,
-                          fontSize: 11,
-                          fontWeight: 600,
-                          border: "none",
-                          cursor: "pointer",
-                        }}
-                      >
-                        + Add ({actionBarCount}/{MAX_ACTION_BARS})
-                      </button>
-                    )}
-                    {canRemove && (
-                      <button
-                        className="pointer-events-auto"
-                        onClick={() => {
-                          // Find the last action bar (highest ID) and remove it
-                          const actionBars = windows
-                            .filter(
-                              (w) =>
-                                w.id.startsWith("actionbar-") &&
-                                w.id.endsWith("-window"),
-                            )
-                            .sort((a, b) => {
-                              // Extract number from actionbar-N-window
-                              const aNum = parseInt(
-                                a.id
-                                  .replace("actionbar-", "")
-                                  .replace("-window", ""),
-                                10,
-                              );
-                              const bNum = parseInt(
-                                b.id
-                                  .replace("actionbar-", "")
-                                  .replace("-window", ""),
-                                10,
-                              );
-                              return bNum - aNum;
-                            });
-                          if (actionBars.length > 1) {
-                            // Remove the last one (highest numbered)
-                            destroyWindowFromStore(actionBars[0].id);
-                          }
-                        }}
-                        style={{
-                          padding: "6px 12px",
-                          backgroundColor: "rgba(239, 68, 68, 0.9)",
-                          color: "#fff",
-                          borderRadius: 6,
-                          fontSize: 11,
-                          fontWeight: 600,
-                          border: "none",
-                          cursor: "pointer",
-                        }}
-                      >
-                        − Remove ({actionBarCount}/{MAX_ACTION_BARS})
-                      </button>
-                    )}
-                  </div>
-                );
-              })()}
-
-            {/* Edit mode indicator */}
-            <div
-              className="pointer-events-none"
-              style={{
-                padding: "6px 12px",
-                backgroundColor: "rgba(255, 153, 0, 0.9)",
-                color: "#fff",
-                borderRadius: 6,
-                fontSize: 11,
-                fontWeight: 600,
-              }}
-            >
-              🔓 Edit Mode (Hold L to lock)
-            </div>
-          </div>
-        )}
       </DndProvider>
     </HintProvider>
   );

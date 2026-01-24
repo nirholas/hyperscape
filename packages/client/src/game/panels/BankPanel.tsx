@@ -21,7 +21,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { getItem } from "@hyperscape/shared";
-import { useThemeStore, useMobileLayout } from "hs-kit";
+import { useThemeStore, useMobileLayout } from "@/ui";
 
 // Types
 import type {

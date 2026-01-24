@@ -6,8 +6,8 @@ import {
   useBadge,
   BADGE_COLORS,
   type WindowConfig,
-} from "hs-kit";
-import { useThemeStore } from "hs-kit";
+  useThemeStore,
+} from "@/ui";
 
 /** Ribbon category definition */
 interface RibbonCategory {

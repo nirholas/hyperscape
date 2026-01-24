@@ -6,7 +6,7 @@
  */
 
 import { useState, type CSSProperties } from "react";
-import { ModalWindow, useThemeStore } from "hs-kit";
+import { ModalWindow, useThemeStore } from "@/ui";
 import type { ConfirmModalState } from "../../types";
 
 interface ConfirmModalProps {

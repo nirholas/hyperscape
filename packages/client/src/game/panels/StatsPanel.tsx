@@ -11,7 +11,7 @@
  */
 
 import React, { useMemo, useState } from "react";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 import type { PlayerEquipmentItems, PlayerStats } from "../../types";
 import { skillColors } from "../../constants";
 

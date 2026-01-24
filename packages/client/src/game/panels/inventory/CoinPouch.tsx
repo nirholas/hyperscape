@@ -15,7 +15,7 @@
  */
 
 import { useCallback } from "react";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 
 // ============================================================================
 // Props Interface

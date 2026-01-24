@@ -1,5 +1,5 @@
 import { MessageSquareIcon } from "lucide-react";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 import { GRADIENTS, typography } from "../../constants";
 import React, {
   useCallback,

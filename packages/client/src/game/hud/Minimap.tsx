@@ -11,7 +11,7 @@ import React, {
   useState,
   useMemo,
 } from "react";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 import { Entity, THREE, createRenderer } from "@hyperscape/shared";
 import type { UniversalRenderer } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";

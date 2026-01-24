@@ -11,7 +11,7 @@
  */
 
 import React, { useState, useCallback } from "react";
-import { useTheme, useWindowStore } from "hs-kit";
+import { useTheme, useWindowStore } from "@/ui";
 
 /** Preset data returned from API */
 interface CommunityPreset {

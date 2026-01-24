@@ -11,7 +11,7 @@
  */
 
 import { SKILL_ICONS } from "@hyperscape/shared";
-import { AchievementPopup } from "hs-kit";
+import { AchievementPopup } from "@/ui";
 import type { LevelUpEvent } from "./useLevelUpState";
 import { capitalizeSkill } from "./utils";
 import { UnlocksSection } from "./UnlocksSection";

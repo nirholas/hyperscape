@@ -6,18 +6,20 @@
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
-  DndProvider,
+  DndContext,
   useDraggable,
   useDroppable,
+  DragOverlay,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import {
   useDragStore,
-  ComposableDragOverlay,
   calculateCursorTooltipPosition,
   TOOLTIP_SIZE_ESTIMATES,
   useThemeStore,
   useMobileLayout,
-  type DragEndEvent,
-  type DragStartEvent,
-} from "hs-kit";
+} from "@/ui";
 import { useContextMenuState } from "../../hooks";
 import {
   EventType,
@@ -671,7 +673,7 @@ interface ItemHoverState {
 
 // Tooltip positioning now uses shared calculateCursorTooltipPosition from hs-kit
 
-import type { Theme } from "hs-kit";
+import type { Theme } from "@/ui";
 
 /**
  * Render item hover tooltip content
@@ -1389,7 +1391,7 @@ export function InventoryPanel({
         </div>
       )}
 
-      <ComposableDragOverlay adjustToPointer>
+      <DragOverlay>
         {activeItem
           ? (() => {
               // Get icon for drag overlay
@@ -1463,7 +1465,7 @@ export function InventoryPanel({
               );
             })()
           : null}
-      </ComposableDragOverlay>
+      </DragOverlay>
     </div>
   );
 
@@ -1473,9 +1475,9 @@ export function InventoryPanel({
       {useParentDndContext ? (
         inventoryContent
       ) : (
-        <DndProvider onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+        <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
           {inventoryContent}
-        </DndProvider>
+        </DndContext>
       )}
 
       {/* Coin Withdrawal Modal */}

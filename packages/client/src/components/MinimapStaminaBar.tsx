@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useId } from "react";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 import type { ClientWorld } from "../types";
 
 interface MinimapStaminaOrbProps {

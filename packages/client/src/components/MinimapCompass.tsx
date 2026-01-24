@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { THREE } from "@hyperscape/shared";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 import { borderRadius, animation } from "../constants";
 import type { ClientWorld } from "../types";
 

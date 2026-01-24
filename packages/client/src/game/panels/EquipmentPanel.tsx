@@ -7,7 +7,7 @@ import {
   TOOLTIP_SIZE_ESTIMATES,
   useThemeStore,
   useMobileLayout,
-} from "hs-kit";
+} from "@/ui";
 import { MOBILE_EQUIPMENT } from "../../constants";
 import { useContextMenuState } from "../../hooks";
 import {

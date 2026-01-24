@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { useThemeStore, useMobileLayout } from "hs-kit";
+import { useThemeStore, useMobileLayout } from "@/ui";
 import { EventType, getAvailableStyles, WeaponType } from "@hyperscape/shared";
-import { MOBILE_COMBAT } from "../../constants";
 import type {
   ClientWorld,
   PlayerStats,
@@ -9,63 +8,59 @@ import type {
   PlayerHealth,
 } from "../../types";
 
-/** Memoized combat stats row component - the component itself is memoized, so no need for useMemo on the array */
+/** Icons for attack styles */
+const STYLE_ICONS: Record<string, string> = {
+  accurate: "🎯",
+  aggressive: "💥",
+  defensive: "🛡️",
+  controlled: "⚖️",
+};
+
+/** Compact combat stats row - inline horizontal layout */
 const CombatStatsRow = React.memo(function CombatStatsRow({
   attackLevel,
   strengthLevel,
   defenseLevel,
+  isMobile,
 }: {
   attackLevel: number;
   strengthLevel: number;
   defenseLevel: number;
+  isMobile: boolean;
 }) {
   const theme = useThemeStore((s) => s.theme);
-  // Plain array - React.memo on the component handles render optimization
   const stats = [
-    { label: "Atk", value: attackLevel },
-    { label: "Str", value: strengthLevel },
-    { label: "Def", value: defenseLevel },
+    { key: "attack", icon: "⚔️", value: attackLevel },
+    { key: "strength", icon: "💪", value: strengthLevel },
+    { key: "defense", icon: "🛡️", value: defenseLevel },
   ];
 
   return (
-    <div
-      className="rounded"
-      style={{
-        background: theme.colors.background.tertiary,
-        border: `1px solid ${theme.colors.border.default}`,
-        padding: `${theme.spacing.xs}px`,
-      }}
-    >
-      <div className="flex gap-1">
-        {stats.map((stat) => (
-          <div
-            key={stat.label}
-            className="flex-1 text-center rounded"
+    <div className="flex gap-1">
+      {stats.map((stat) => (
+        <div
+          key={stat.key}
+          className="flex-1 flex items-center justify-center gap-1 rounded"
+          style={{
+            background: theme.colors.slot.filled,
+            border: `1px solid ${theme.colors.border.default}60`,
+            padding: isMobile ? "6px 4px" : "4px 3px",
+          }}
+        >
+          <span style={{ fontSize: isMobile ? "12px" : "11px" }}>
+            {stat.icon}
+          </span>
+          <span
             style={{
-              background: theme.colors.background.overlay,
-              padding: `${theme.spacing.xs}px`,
+              fontSize: isMobile ? "13px" : "12px",
+              color: theme.colors.text.accent,
+              fontWeight: 700,
             }}
           >
-            <div
-              style={{
-                fontSize: theme.typography.fontSize.xs,
-                color: theme.colors.text.muted,
-              }}
-            >
-              {stat.label}
-            </div>
-            <div
-              style={{
-                fontSize: theme.typography.fontSize.sm,
-                color: theme.colors.accent.primary,
-                fontWeight: theme.typography.fontWeight.semibold,
-              }}
-            >
-              {stat.value}
-            </div>
-          </div>
-        ))}
-      </div>
+            {stat.value}
+          </span>
+        </div>
+      ))}
     </div>
   );
 });
@@ -371,12 +366,17 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
     actions.actionMethods.setAutoRetaliate(playerId, !autoRetaliate);
   };
 
-  // All possible combat styles with their XP training info
-  const allStyles: Array<{ id: string; label: string; xp: string }> = [
-    { id: "accurate", label: "Accurate", xp: "Attack" },
-    { id: "aggressive", label: "Aggressive", xp: "Strength" },
-    { id: "defensive", label: "Defensive", xp: "Defense" },
-    { id: "controlled", label: "Controlled", xp: "All" },
+  // All possible combat styles with their XP training info and colors
+  const allStyles: Array<{
+    id: string;
+    label: string;
+    xp: string;
+    color: string;
+  }> = [
+    { id: "accurate", label: "Accurate", xp: "Attack", color: "#ef4444" },
+    { id: "aggressive", label: "Aggressive", xp: "Strength", color: "#f59e0b" },
+    { id: "defensive", label: "Defensive", xp: "Defense", color: "#3b82f6" },
+    { id: "controlled", label: "Controlled", xp: "All", color: "#a855f7" },
   ];
 
   // Filter styles based on equipped weapon (OSRS-accurate restrictions)
@@ -395,113 +395,127 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
     ? Math.round((targetHealth.current / targetHealth.max) * 100)
     : 0;
 
+  // Responsive padding/sizing
+  const p = shouldUseMobileUI
+    ? { outer: 4, inner: 6, gap: 4 }
+    : { outer: 3, inner: 4, gap: 3 };
+
   return (
     <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: "8px",
-        padding: "4px",
-      }}
+      className="flex flex-col h-full overflow-auto"
+      style={{ padding: `${p.outer}px`, gap: `${p.gap}px` }}
     >
-      {/* Health Bar - Compact */}
+      {/* Inline CSS animations */}
+      <style>{`
+        @keyframes combat-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+        .combat-pulse { animation: combat-pulse 1.5s ease-in-out infinite; }
+      `}</style>
+
+      {/* HP + Combat Level Row */}
       <div
         className="rounded"
         style={{
-          background: theme.colors.background.secondary,
+          background: theme.colors.slot.filled,
           border: inCombat
-            ? `1px solid ${theme.colors.state.danger}99`
-            : `1px solid ${theme.colors.border.default}`,
-          padding: `${theme.spacing.sm}px`,
-          transition: theme.transitions.normal,
+            ? `1px solid ${theme.colors.state.danger}60`
+            : `1px solid ${theme.colors.border.default}60`,
+          padding: `${p.inner}px`,
           boxShadow: inCombat
-            ? `0 0 8px ${theme.colors.state.danger}4d`
+            ? `0 0 8px ${theme.colors.state.danger}20`
             : "none",
         }}
       >
-        <div className="flex items-center justify-between mb-1">
-          <div className="flex items-center gap-2">
+        {/* HP Header Row */}
+        <div
+          className="flex items-center justify-between"
+          style={{ marginBottom: "4px" }}
+        >
+          <div className="flex items-center gap-1.5">
+            <span style={{ fontSize: shouldUseMobileUI ? "14px" : "12px" }}>
+              ❤️
+            </span>
             <span
               style={{
-                fontSize: theme.typography.fontSize.xs,
-                color: theme.colors.accent.primary,
-                fontWeight: theme.typography.fontWeight.semibold,
+                fontSize: shouldUseMobileUI ? "12px" : "11px",
+                color: theme.colors.text.accent,
+                fontWeight: 600,
               }}
             >
               HP
             </span>
             {inCombat && (
               <span
+                className="combat-pulse"
                 style={{
-                  fontSize: theme.typography.fontSize.xs,
+                  fontSize: "9px",
                   color: theme.colors.state.danger,
-                  fontWeight: theme.typography.fontWeight.semibold,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.05em",
-                  animation: "pulse 1.5s ease-in-out infinite",
+                  fontWeight: 600,
+                  background: `${theme.colors.state.danger}20`,
+                  padding: "1px 4px",
+                  borderRadius: "3px",
+                  marginLeft: "2px",
                 }}
               >
-                In Combat
+                ⚔️
               </span>
             )}
           </div>
           <span
             style={{
-              fontSize: theme.typography.fontSize.xs,
-              color: theme.colors.accent.primary,
+              fontSize: shouldUseMobileUI ? "12px" : "11px",
+              color:
+                healthPercent > 50
+                  ? theme.colors.state.success
+                  : healthPercent > 25
+                    ? theme.colors.state.warning
+                    : theme.colors.state.danger,
+              fontWeight: 700,
+              fontFamily: theme.typography.fontFamily.mono,
             }}
           >
             {health.current}/{health.max}
           </span>
         </div>
-        {/* Inline CSS animation for in-combat pulse */}
-        {inCombat && (
-          <style>{`
-            @keyframes pulse {
-              0%, 100% { opacity: 1; }
-              50% { opacity: 0.5; }
-            }
-          `}</style>
-        )}
+
+        {/* HP Bar */}
         <div
           style={{
             width: "100%",
-            // Mobile: thicker bar (16px), Desktop: 8px
-            height: shouldUseMobileUI
-              ? `${MOBILE_COMBAT.healthBarHeight}px`
-              : "8px",
-            background: theme.colors.background.overlay,
-            borderRadius: `${theme.borderRadius.md}px`,
+            height: shouldUseMobileUI ? "10px" : "8px",
+            background: theme.colors.background.primary,
+            borderRadius: "4px",
             overflow: "hidden",
+            border: `1px solid ${theme.colors.border.default}40`,
           }}
         >
           <div
             style={{
               height: "100%",
               width: `${healthPercent}%`,
-              borderRadius: `${theme.borderRadius.md}px`,
-              transition: theme.transitions.normal,
+              borderRadius: "3px",
+              transition: "width 0.2s ease",
               background:
                 healthPercent > 50
-                  ? `linear-gradient(90deg, ${theme.colors.state.success}, ${theme.colors.status.energy})`
+                  ? "linear-gradient(180deg, #4ade80, #22c55e)"
                   : healthPercent > 25
-                    ? `linear-gradient(90deg, ${theme.colors.state.warning}, ${theme.colors.status.adrenaline})`
-                    : `linear-gradient(90deg, ${theme.colors.state.danger}, ${theme.colors.status.hp})`,
+                    ? "linear-gradient(180deg, #fbbf24, #f59e0b)"
+                    : "linear-gradient(180deg, #f87171, #ef4444)",
             }}
           />
         </div>
 
-        {/* Combat Level inline */}
+        {/* Combat Level - inline below HP */}
         <div
-          className="flex items-center justify-between mt-2"
+          className="flex items-center justify-between"
           style={{
-            paddingTop: `${theme.spacing.xs}px`,
-            borderTop: `1px solid ${theme.colors.border.default}`,
+            marginTop: "6px",
+            paddingTop: "6px",
+            borderTop: `1px solid ${theme.colors.border.default}30`,
           }}
         >
           <span
             style={{
-              fontSize: theme.typography.fontSize.xs,
+              fontSize: shouldUseMobileUI ? "11px" : "10px",
               color: theme.colors.text.muted,
             }}
           >
@@ -509,9 +523,9 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
           </span>
           <span
             style={{
-              fontSize: theme.typography.fontSize.xs,
-              color: theme.colors.accent.primary,
-              fontWeight: theme.typography.fontWeight.semibold,
+              fontSize: shouldUseMobileUI ? "14px" : "13px",
+              color: theme.colors.state.danger,
+              fontWeight: 700,
             }}
           >
             {combatLevel}
@@ -519,30 +533,34 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
         </div>
       </div>
 
-      {/* Target Info (when in combat) */}
+      {/* Target (only when in combat) */}
       {targetName && targetHealth && (
         <div
           className="rounded"
           style={{
-            background: `${theme.colors.state.danger}33`,
-            border: `1px solid ${theme.colors.state.danger}4d`,
-            padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
+            background: `${theme.colors.state.danger}10`,
+            border: `1px solid ${theme.colors.state.danger}30`,
+            padding: `${p.inner}px`,
           }}
         >
-          <div className="flex items-center justify-between mb-1">
+          <div
+            className="flex items-center justify-between"
+            style={{ marginBottom: "3px" }}
+          >
             <span
               style={{
-                fontSize: theme.typography.fontSize.xs,
+                fontSize: shouldUseMobileUI ? "11px" : "10px",
                 color: theme.colors.state.danger,
-                fontWeight: theme.typography.fontWeight.medium,
+                fontWeight: 600,
               }}
             >
-              {targetName}
+              🎯 {targetName}
             </span>
             <span
               style={{
-                fontSize: theme.typography.fontSize.xs,
+                fontSize: shouldUseMobileUI ? "11px" : "10px",
                 color: theme.colors.state.danger,
+                fontWeight: 700,
               }}
             >
               {targetHealth.current}/{targetHealth.max}
@@ -551,12 +569,9 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
           <div
             style={{
               width: "100%",
-              // Mobile: thicker bar (12px), Desktop: 6px
-              height: shouldUseMobileUI
-                ? `${MOBILE_COMBAT.targetBarHeight}px`
-                : "6px",
-              background: theme.colors.background.overlay,
-              borderRadius: `${theme.borderRadius.sm}px`,
+              height: shouldUseMobileUI ? "8px" : "6px",
+              background: theme.colors.background.primary,
+              borderRadius: "3px",
               overflow: "hidden",
             }}
           >
@@ -564,146 +579,138 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
               style={{
                 height: "100%",
                 width: `${targetHealthPercent}%`,
-                borderRadius: `${theme.borderRadius.sm}px`,
-                transition: theme.transitions.normal,
-                background: `linear-gradient(90deg, ${theme.colors.state.danger}, ${theme.colors.status.hp})`,
+                borderRadius: "3px",
+                background: "linear-gradient(180deg, #f87171, #dc2626)",
               }}
             />
           </div>
         </div>
       )}
 
-      {/* Combat Stats - Compact Row */}
+      {/* Stats Row */}
       <CombatStatsRow
         attackLevel={attackLevel}
         strengthLevel={strengthLevel}
         defenseLevel={defenseLevel}
+        isMobile={shouldUseMobileUI}
       />
 
-      {/* Attack Style - Compact */}
+      {/* Attack Styles - 2 column grid */}
       <div
         className="rounded"
         style={{
-          background: theme.colors.background.secondary,
-          border: `1px solid ${theme.colors.border.default}`,
-          padding: `${theme.spacing.xs}px`,
+          background: theme.colors.slot.filled,
+          border: `1px solid ${theme.colors.border.default}60`,
+          padding: `${p.inner}px`,
         }}
       >
         <div
-          style={{
-            fontSize: theme.typography.fontSize.xs,
-            color: theme.colors.text.muted,
-            marginBottom: `${theme.spacing.xs}px`,
-          }}
+          className="grid gap-1.5"
+          style={{ gridTemplateColumns: "repeat(2, 1fr)" }}
         >
-          Attack Style
-        </div>
-        <div className="flex flex-col gap-1">
-          {styles.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => changeStyle(s.id)}
-              disabled={cooldown > 0}
-              aria-pressed={style === s.id}
-              aria-label={`${s.label} - trains ${s.xp}`}
-              className="rounded attack-style-btn focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
-              style={{
-                padding: `${theme.spacing.sm}px ${theme.spacing.md}px`,
-                // Mobile: larger buttons (52px), Desktop: 44px minimum
-                minHeight: shouldUseMobileUI
-                  ? MOBILE_COMBAT.styleButtonHeight
-                  : 44,
-                cursor: cooldown > 0 ? "not-allowed" : "pointer",
-                transition: theme.transitions.fast,
-                fontSize: shouldUseMobileUI
-                  ? theme.typography.fontSize.base
-                  : theme.typography.fontSize.sm,
-                fontWeight:
-                  style === s.id
-                    ? theme.typography.fontWeight.semibold
-                    : theme.typography.fontWeight.normal,
-                background:
-                  style === s.id
-                    ? `${theme.colors.state.success}33`
-                    : theme.colors.background.overlay,
-                border:
-                  style === s.id
-                    ? `2px solid ${theme.colors.state.success}80`
-                    : `1px solid ${theme.colors.border.default}`,
-                color:
-                  style === s.id
-                    ? theme.colors.state.success
-                    : theme.colors.text.secondary,
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                touchAction: "manipulation",
-                // Mobile: stronger highlight for active style
-                boxShadow:
-                  style === s.id && shouldUseMobileUI
-                    ? `0 0 8px ${theme.colors.state.success}40`
-                    : "none",
-              }}
-            >
-              <span>{s.label}</span>
-              <span
-                style={{ fontSize: theme.typography.fontSize.xs, opacity: 0.6 }}
+          {styles.map((s) => {
+            const isActive = style === s.id;
+            return (
+              <button
+                key={s.id}
+                onClick={() => changeStyle(s.id)}
+                disabled={cooldown > 0}
+                aria-pressed={isActive}
+                className="rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/60"
+                style={{
+                  padding: shouldUseMobileUI ? "8px 6px" : "6px 5px",
+                  minHeight: shouldUseMobileUI ? "40px" : "36px",
+                  cursor: cooldown > 0 ? "not-allowed" : "pointer",
+                  transition: "all 0.1s ease",
+                  fontSize: shouldUseMobileUI ? "12px" : "11px",
+                  fontWeight: isActive ? 600 : 500,
+                  background: isActive
+                    ? `${s.color}20`
+                    : theme.colors.slot.empty,
+                  border: isActive
+                    ? `2px solid ${s.color}70`
+                    : `1px solid ${theme.colors.border.default}50`,
+                  color: isActive ? s.color : theme.colors.text.secondary,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "2px",
+                  touchAction: "manipulation",
+                  opacity: cooldown > 0 ? 0.5 : 1,
+                }}
               >
-                +{s.xp}
-              </span>
-            </button>
-          ))}
+                <div className="flex items-center gap-1">
+                  <span
+                    style={{ fontSize: shouldUseMobileUI ? "12px" : "11px" }}
+                  >
+                    {STYLE_ICONS[s.id]}
+                  </span>
+                  <span>{s.label}</span>
+                </div>
+                <span style={{ fontSize: "9px", opacity: 0.7 }}>+{s.xp}</span>
+              </button>
+            );
+          })}
         </div>
+
         {cooldown > 0 && (
           <div
+            className="text-center"
             style={{
-              fontSize: theme.typography.fontSize.xs,
-              color: theme.colors.text.muted,
-              marginTop: `${theme.spacing.xs}px`,
+              marginTop: "4px",
+              fontSize: "10px",
+              color: theme.colors.state.warning,
+              background: `${theme.colors.state.warning}15`,
+              padding: "2px 6px",
+              borderRadius: "3px",
             }}
           >
-            Cooldown: {Math.ceil(cooldown / 1000)}s
+            ⏱️ {Math.ceil(cooldown / 1000)}s
           </div>
         )}
       </div>
 
-      {/* Auto Retaliate - Touch-friendly Toggle */}
+      {/* Auto Retaliate - compact toggle */}
       <button
         onClick={toggleAutoRetaliate}
-        className="rounded"
+        className="rounded w-full focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/60"
         style={{
-          padding: `${theme.spacing.sm}px ${theme.spacing.md}px`,
-          minHeight: 44, // Touch-friendly minimum
+          padding: shouldUseMobileUI ? "8px 10px" : "6px 8px",
+          minHeight: shouldUseMobileUI ? "40px" : "34px",
           cursor: "pointer",
-          transition: theme.transitions.fast,
+          transition: "all 0.1s ease",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          fontSize: theme.typography.fontSize.sm,
+          fontSize: shouldUseMobileUI ? "12px" : "11px",
           touchAction: "manipulation",
           background: autoRetaliate
-            ? `${theme.colors.state.success}26`
-            : theme.colors.background.secondary,
+            ? `${theme.colors.state.success}15`
+            : theme.colors.slot.filled,
           border: autoRetaliate
-            ? `1px solid ${theme.colors.state.success}4d`
-            : `1px solid ${theme.colors.border.default}`,
+            ? `1px solid ${theme.colors.state.success}40`
+            : `1px solid ${theme.colors.border.default}60`,
           color: autoRetaliate
             ? theme.colors.state.success
             : theme.colors.text.muted,
         }}
       >
-        <span style={{ fontWeight: theme.typography.fontWeight.medium }}>
-          Auto Retaliate
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span style={{ fontSize: shouldUseMobileUI ? "12px" : "11px" }}>
+            {autoRetaliate ? "🔄" : "🚫"}
+          </span>
+          <span style={{ fontWeight: 500 }}>Auto Retaliate</span>
+        </div>
         <span
           style={{
-            padding: `2px ${theme.spacing.xs}px`,
-            borderRadius: `${theme.borderRadius.sm}px`,
-            fontSize: theme.typography.fontSize.xs,
-            fontWeight: theme.typography.fontWeight.semibold,
+            padding: "2px 8px",
+            borderRadius: "3px",
+            fontSize: "10px",
+            fontWeight: 700,
             background: autoRetaliate
-              ? `${theme.colors.state.success}4d`
-              : `${theme.colors.state.danger}33`,
+              ? `${theme.colors.state.success}30`
+              : `${theme.colors.state.danger}25`,
             color: autoRetaliate
               ? theme.colors.state.success
               : theme.colors.state.danger,

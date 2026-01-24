@@ -12,7 +12,7 @@
  * @packageDocumentation
  */
 
-import type { MobileLayoutResult } from "hs-kit";
+import type { MobileLayoutResult } from "@/ui";
 import {
   MOBILE_TOUCH_TARGET,
   MOBILE_SLOT_SIZE,

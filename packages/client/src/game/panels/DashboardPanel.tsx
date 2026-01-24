@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 import type {
   ClientWorld,
   PlayerStats,

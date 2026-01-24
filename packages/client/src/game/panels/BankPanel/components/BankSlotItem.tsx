@@ -12,7 +12,7 @@
  */
 
 import React, { memo } from "react";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 import type { BankItem } from "../types";
 import { formatItemName, formatQuantity, getItemIcon } from "../utils";
 

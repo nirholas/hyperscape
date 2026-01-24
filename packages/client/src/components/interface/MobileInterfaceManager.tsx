@@ -22,7 +22,7 @@ import React, {
 } from "react";
 import { EventType, getItem } from "@hyperscape/shared";
 import type { PlayerStats, InventoryItem, Item } from "@hyperscape/shared";
-import { useMobileLayout, useTheme, ModalWindow } from "hs-kit";
+import { useMobileLayout, useTheme, ModalWindow } from "@/ui";
 import type { ClientWorld, PlayerEquipmentItems } from "../../types";
 import { createPanelRenderer, MODAL_PANEL_IDS } from "./PanelRegistry";
 import { RadialMinimapMenu } from "../../game/hud/RadialMinimapMenu";

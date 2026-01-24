@@ -6,7 +6,7 @@
  */
 
 import React, { useMemo } from "react";
-import { ModalWindow, useThemeStore } from "hs-kit";
+import { ModalWindow, useThemeStore } from "@/ui";
 import type { SkillUnlock } from "@hyperscape/shared";
 import type { CSSProperties } from "react";
 

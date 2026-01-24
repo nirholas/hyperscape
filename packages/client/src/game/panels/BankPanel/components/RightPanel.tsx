@@ -6,7 +6,7 @@
  */
 
 import React, { useCallback } from "react";
-import { useThemeStore, useMobileLayout } from "hs-kit";
+import { useThemeStore, useMobileLayout } from "@/ui";
 import type { PlayerEquipmentItems } from "@hyperscape/shared";
 import { INV_SLOTS_PER_ROW, INV_SLOT_SIZE } from "../constants";
 import { getItemIcon, formatItemName } from "../utils";

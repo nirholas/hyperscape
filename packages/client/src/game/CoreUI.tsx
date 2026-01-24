@@ -1,6 +1,6 @@
 import { RefreshCwIcon } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 
 import type { ControlAction, EventMap } from "@hyperscape/shared";
 import {

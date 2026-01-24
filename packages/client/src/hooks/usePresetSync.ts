@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useRef, useCallback, useState } from "react";
-import { useCloudSync } from "hs-kit";
+import { useCloudSync } from "@/ui";
 import { privyAuthManager } from "../auth/PrivyAuthManager";
 
 /** Preset sync state */

@@ -10,7 +10,7 @@
  * - Delete tabs via right-click
  */
 
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 import type { BankItem, BankTab, ConfirmModalState } from "../types";
 import type { DragState } from "../hooks";
 import { TAB_INDEX_ALL, TAB_INDEX_NEW_TAB_HOVER } from "../constants";

@@ -39,7 +39,7 @@ import {
   AccessibilityPanel,
   useWindowStore,
   useThemeStore,
-} from "hs-kit";
+} from "@/ui";
 
 /** Size dimensions type */
 export interface PanelSize {
@@ -652,6 +652,20 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
       tablet: { width: 260, height: 325 },
       desktop: { width: 280, height: 350 },
     },
+  },
+  // Quest Detail - separate window for quest details
+  "quest-detail": {
+    minSize: { width: 320, height: 400 },
+    preferredSize: { width: 400, height: 500 },
+    maxSize: { width: 500, height: 700 },
+    scrollable: true,
+    resizable: true,
+    scaleFactor: { min: 0.85, max: 1.15 },
+    responsive: {
+      mobile: { width: 300, height: 400 },
+      tablet: { width: 350, height: 450 },
+      desktop: { width: 400, height: 500 },
+    },
     mobileLayout: {
       drawerType: "modal",
       drawerHeight: "full",
@@ -1148,6 +1162,11 @@ const QuestsPanel = lazy(() =>
     default: m.QuestsPanel,
   })),
 );
+const QuestDetailPanel = lazy(() =>
+  import("../../game/panels/QuestDetailPanel").then((m) => ({
+    default: m.QuestDetailPanel,
+  })),
+);
 const MapPanel = lazy(() =>
   import("../../game/panels/MapPanel").then((m) => ({
     default: m.MapPanel,
@@ -1224,6 +1243,7 @@ function getPanelIcon(panelId: string): string {
     settings: "⚙️",
     bank: "🏦",
     quests: "📜",
+    "quest-detail": "📋",
     map: "🗺️",
     minimap: "🧭",
     chat: "💬",
@@ -1495,6 +1515,15 @@ export function createPanelRenderer(
           <ScrollablePanelWrapper scrollable={config.scrollable}>
             <Suspense fallback={<PanelLoadingFallback />}>
               <QuestsPanel world={world} />
+            </Suspense>
+          </ScrollablePanelWrapper>
+        );
+
+      case "quest-detail":
+        return (
+          <ScrollablePanelWrapper scrollable={config.scrollable}>
+            <Suspense fallback={<PanelLoadingFallback />}>
+              <QuestDetailPanel world={world} />
             </Suspense>
           </ScrollablePanelWrapper>
         );

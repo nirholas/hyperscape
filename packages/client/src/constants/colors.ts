@@ -8,135 +8,132 @@
  */
 
 /**
- * Core Color Palette
+ * Core Color Palette - Dark Theme
+ * Matches hyperscapeTheme from hs-kit for consistency
  */
 export const COLORS = {
   // ===========================================
   // BRAND / ACCENT COLORS
   // ===========================================
 
-  /** Primary accent - Gold/tan (RuneScape signature) */
-  ACCENT: "#f2d08a",
-  /** Lighter accent variant */
-  ACCENT_LIGHT: "#f7e4b4",
+  /** Primary accent - Rich classic gold */
+  ACCENT: "#d4a84b",
+  /** Lighter accent variant - Bright gold highlight */
+  ACCENT_LIGHT: "#ffd866",
   /** Darker accent variant */
-  ACCENT_DARK: "#c9a654",
+  ACCENT_DARK: "#c49530",
   /** Chat-specific accent */
-  CHAT_ACCENT: "#f7d98c",
+  CHAT_ACCENT: "#e8c55a",
 
   // ===========================================
   // BACKGROUND COLORS (Dark Theme)
   // ===========================================
 
-  /** Primary panel background */
-  BG_PRIMARY: "rgba(20, 15, 10, 0.75)",
-  /** Secondary/darker background */
-  BG_SECONDARY: "rgba(15, 10, 5, 0.85)",
-  /** Tertiary/accent background */
-  BG_TERTIARY: "rgba(30, 20, 10, 0.9)",
+  /** Primary panel background - Slightly cooler black */
+  BG_PRIMARY: "#0a0a0c",
+  /** Secondary/darker background - Dark with hint of blue */
+  BG_SECONDARY: "#141418",
+  /** Tertiary/accent background - Elevated surface */
+  BG_TERTIARY: "#1e1e24",
   /** Solid dark background */
-  BG_SOLID: "#0b0a15",
+  BG_SOLID: "#0a0a0c",
   /** Elevated surface */
-  BG_ELEVATED: "rgba(25, 20, 15, 0.9)",
+  BG_ELEVATED: "#1e1e24",
   /** Overlay/inset background */
-  BG_OVERLAY: "rgba(0, 0, 0, 0.2)",
+  BG_OVERLAY: "rgba(0, 0, 0, 0.8)",
 
   // ===========================================
   // BORDER COLORS
   // ===========================================
 
-  /** Primary border (wood brown) */
-  BORDER_PRIMARY: "rgba(139, 69, 19, 0.6)",
+  /** Primary border - Subtle brown border */
+  BORDER_PRIMARY: "#2d2820",
   /** Secondary/subtle border */
-  BORDER_SECONDARY: "rgba(139, 69, 19, 0.3)",
+  BORDER_SECONDARY: "#2d2820",
   /** Accent border (gold) */
-  BORDER_ACCENT: "rgba(242, 208, 138, 0.4)",
-  /** Focus ring color */
-  BORDER_FOCUS: "rgba(242, 208, 138, 0.8)",
+  BORDER_ACCENT: "#4a3f30",
+  /** Focus ring color - Bright gold */
+  BORDER_FOCUS: "#e8c55a",
 
   // ===========================================
   // TEXT COLORS
   // ===========================================
 
-  /** Primary text (high contrast) */
-  TEXT_PRIMARY: "rgba(232, 235, 244, 0.92)",
-  /** Secondary text (medium contrast) */
-  TEXT_SECONDARY: "rgba(232, 235, 244, 0.75)",
-  /** Muted text (low contrast) */
-  TEXT_MUTED: "rgba(205, 212, 230, 0.5)",
+  /** Primary text - Warm white */
+  TEXT_PRIMARY: "#f5f0e8",
+  /** Secondary text - Muted gold */
+  TEXT_SECONDARY: "#c4b896",
+  /** Muted text - Subtle brown */
+  TEXT_MUTED: "#7d7460",
   /** Disabled text */
-  TEXT_DISABLED: "rgba(205, 212, 230, 0.3)",
+  TEXT_DISABLED: "#454545",
   /** Inverted text (for light backgrounds) */
-  TEXT_INVERTED: "#1a1a2e",
+  TEXT_INVERTED: "#0a0a0c",
 
   // ===========================================
   // SEMANTIC / STATUS COLORS
   // ===========================================
 
-  /** Success state */
-  SUCCESS: "#22c55e",
+  /** Success state - Modern green */
+  SUCCESS: "#4ade80",
   /** Success dark variant */
-  SUCCESS_DARK: "#16a34a",
-  /** Error state */
-  ERROR: "#ef4444",
+  SUCCESS_DARK: "#22c55e",
+  /** Error state - Soft red */
+  ERROR: "#f87171",
   /** Error dark variant */
   ERROR_DARK: "#dc2626",
-  /** Warning state */
-  WARNING: "#f59e0b",
+  /** Warning state - Bright amber */
+  WARNING: "#fbbf24",
   /** Warning dark variant */
-  WARNING_DARK: "#d97706",
-  /** Info state */
-  INFO: "#3b82f6",
+  WARNING_DARK: "#f59e0b",
+  /** Info state - Soft blue */
+  INFO: "#60a5fa",
   /** Info dark variant */
-  INFO_DARK: "#2563eb",
+  INFO_DARK: "#3b82f6",
 
   // ===========================================
   // INTERACTIVE STATES
   // ===========================================
 
   /** Hover overlay */
-  HOVER: "rgba(255, 255, 255, 0.1)",
+  HOVER: "#24222a",
   /** Active/pressed overlay */
-  ACTIVE: "rgba(255, 255, 255, 0.15)",
+  ACTIVE: "#3d3830",
   /** Disabled overlay */
-  DISABLED: "rgba(0, 0, 0, 0.4)",
+  DISABLED: "#080808",
   /** Selection highlight */
-  SELECTION: "rgba(242, 208, 138, 0.2)",
+  SELECTION: "#3d3830",
 } as const;
 
 /**
- * Gradient Definitions
+ * Gradient Definitions - Dark Theme
  */
 export const GRADIENTS = {
-  /** Panel background gradient */
-  PANEL:
-    "linear-gradient(135deg, rgba(20, 15, 10, 0.75) 0%, rgba(15, 10, 5, 0.85) 50%, rgba(20, 15, 10, 0.75) 100%)",
+  /** Panel background gradient - Dark theme */
+  PANEL: "linear-gradient(135deg, #0a0a0c 0%, #141418 50%, #0a0a0c 100%)",
 
-  /** Header gradient */
-  HEADER:
-    "linear-gradient(180deg, rgba(30, 20, 10, 0.9) 0%, rgba(20, 15, 10, 0.7) 100%)",
+  /** Header gradient - Dark theme */
+  HEADER: "linear-gradient(180deg, #1e1e24 0%, #141418 100%)",
 
-  /** Button gradient (wood theme) */
-  BUTTON:
-    "linear-gradient(135deg, rgba(139, 69, 19, 0.9) 0%, rgba(101, 50, 15, 0.95) 100%)",
+  /** Button gradient - Gold accent */
+  BUTTON: "linear-gradient(135deg, #d4a84b 0%, #c49530 100%)",
 
   /** Button hover gradient */
-  BUTTON_HOVER:
-    "linear-gradient(135deg, rgba(159, 89, 39, 0.95) 0%, rgba(121, 70, 35, 1) 100%)",
+  BUTTON_HOVER: "linear-gradient(135deg, #e8be5a 0%, #d4a84b 100%)",
 
-  /** Decorative divider */
+  /** Decorative divider - Gold */
   DIVIDER:
-    "linear-gradient(90deg, rgba(242,208,138,0), rgba(242,208,138,0.4) 14%, rgba(255,215,128,0.95) 50%, rgba(242,208,138,0.4) 86%, rgba(242,208,138,0))",
+    "linear-gradient(90deg, transparent, #d4a84b40 14%, #ffd86699 50%, #d4a84b40 86%, transparent)",
 
   /** Success gradient */
-  SUCCESS: "linear-gradient(180deg, #22c55e 0%, #16a34a 100%)",
+  SUCCESS: "linear-gradient(180deg, #4ade80 0%, #22c55e 100%)",
 
   /** Error gradient */
-  ERROR: "linear-gradient(180deg, #ef4444 0%, #dc2626 100%)",
+  ERROR: "linear-gradient(180deg, #f87171 0%, #dc2626 100%)",
 
   /** Gold shimmer (for rare items) */
   GOLD_SHIMMER:
-    "linear-gradient(135deg, #f59e0b 0%, #fbbf24 50%, #f59e0b 100%)",
+    "linear-gradient(135deg, #d4a84b 0%, #ffd866 50%, #d4a84b 100%)",
 
   /** Purple shimmer (for epic items) */
   PURPLE_SHIMMER:

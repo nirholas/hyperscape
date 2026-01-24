@@ -4,7 +4,7 @@
  */
 
 import React from "react";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 
 /** Toggle switch sizing constants */
 const TRACK_PADDING = 2; // px - padding inside the track (top-0.5 = 2px in Tailwind)

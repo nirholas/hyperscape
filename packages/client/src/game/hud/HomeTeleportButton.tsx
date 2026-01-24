@@ -10,7 +10,7 @@ import React, {
   useMemo,
   useRef,
 } from "react";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 import { HOME_TELEPORT_CONSTANTS, EventType } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
 

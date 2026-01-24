@@ -27,7 +27,7 @@ import {
   LayoutGrid,
   type LucideIcon,
 } from "lucide-react";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 import { animation } from "../constants";
 
 /** Available icon names for menu buttons */

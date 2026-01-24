@@ -21,7 +21,7 @@ import React, {
   useCallback,
   useMemo,
 } from "react";
-import { useEditMode, useSnap, useThemeStore, useMobileLayout } from "hs-kit";
+import { useEditMode, useSnap, useThemeStore, useMobileLayout } from "@/ui";
 import type { PlayerStats } from "../../types";
 
 /** Display mode type */

@@ -21,17 +21,19 @@ import React, {
 } from "react";
 import { createPortal } from "react-dom";
 import {
-  DndProvider,
+  DndContext,
   useDraggable,
   useDroppable,
-  ComposableDragOverlay,
+  DragOverlay,
+  type DragStartEvent,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
   useActionBarKeybinds,
   useFeatureEnabled,
   useWindowStore,
   useTheme,
-  type DragStartEvent,
-  type DragEndEvent,
-} from "hs-kit";
+} from "@/ui";
 import { CONTEXT_MENU_COLORS, EventType } from "@hyperscape/shared";
 import type { ClientWorld, InventorySlotItem } from "../../types";
 
@@ -952,7 +954,11 @@ export function ActionBarPanel({
   // Handle drag start - track what's being dragged for visual overlay
   const handleDragStart = (event: DragStartEvent) => {
     const { active } = event;
-    const dragData = active.data.data as
+    // @dnd-kit: access data via active.data.current.data
+    const activeDataWrapper = active.data.current as
+      | { data?: Record<string, unknown> }
+      | undefined;
+    const dragData = activeDataWrapper?.data as
       | { slot?: ActionBarSlotContent }
       | undefined;
     setDraggedSlot(dragData?.slot || null);
@@ -965,7 +971,11 @@ export function ActionBarPanel({
 
     if (!over) return;
 
-    const activeData = active.data.data as {
+    // @dnd-kit: access data via active.data.current.data
+    const activeDataWrapper = active.data.current as
+      | { data?: Record<string, unknown> }
+      | undefined;
+    const activeData = activeDataWrapper?.data as {
       slot?: ActionBarSlotContent;
       slotIndex?: number;
       source?: string;
@@ -985,14 +995,15 @@ export function ActionBarPanel({
         level: number;
       };
     } | null;
-    const overData = over.data as {
+    // @dnd-kit: access data via over.data.current
+    const overDataCurrent = over.data.current as {
       slotIndex?: number;
       target?: string;
     } | null;
 
     // Check if this is a drop from inventory
     if (activeData?.source === "inventory" && activeData.item) {
-      const targetIndex = overData?.slotIndex;
+      const targetIndex = overDataCurrent?.slotIndex;
       if (targetIndex !== undefined) {
         // Create new slot content from inventory item
         const newSlot: ActionBarSlotContent = {
@@ -1013,7 +1024,7 @@ export function ActionBarPanel({
 
     // Check if this is a drop from prayer panel
     if (activeData?.source === "prayer" && activeData.prayer) {
-      const targetIndex = overData?.slotIndex;
+      const targetIndex = overDataCurrent?.slotIndex;
       if (targetIndex !== undefined) {
         // Create new slot content from prayer
         const newSlot: ActionBarSlotContent = {
@@ -1034,7 +1045,7 @@ export function ActionBarPanel({
 
     // Check if this is a drop from skill panel
     if (activeData?.source === "skill" && activeData.skill) {
-      const targetIndex = overData?.slotIndex;
+      const targetIndex = overDataCurrent?.slotIndex;
       if (targetIndex !== undefined) {
         const skillData = activeData.skill as {
           id: string;
@@ -1062,10 +1073,10 @@ export function ActionBarPanel({
     // Reordering within action bar
     if (
       activeData?.source === "actionbar" &&
-      overData?.target === "actionbar"
+      overDataCurrent?.target === "actionbar"
     ) {
       const fromIndex = activeData.slotIndex;
-      const toIndex = overData.slotIndex;
+      const toIndex = overDataCurrent.slotIndex;
 
       if (
         fromIndex !== undefined &&
@@ -1317,7 +1328,7 @@ export function ActionBarPanel({
 
       {/* Drag Overlay for slot dragging (only when using own provider) */}
       {!useParentDndContext && (
-        <ComposableDragOverlay adjustToPointer>
+        <DragOverlay>
           {draggedSlot && (
             <div
               style={{
@@ -1337,7 +1348,7 @@ export function ActionBarPanel({
               {getSlotIcon(draggedSlot)}
             </div>
           )}
-        </ComposableDragOverlay>
+        </DragOverlay>
       )}
     </>
   );
@@ -1358,9 +1369,9 @@ export function ActionBarPanel({
         {useParentDndContext ? (
           actionBarContent
         ) : (
-          <DndProvider onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+          <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
             {actionBarContent}
-          </DndProvider>
+          </DndContext>
         )}
       </div>
 

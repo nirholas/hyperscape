@@ -4,7 +4,7 @@
  */
 
 import React from "react";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 
 export interface SliderProps {
   label: string;

@@ -9,7 +9,7 @@
 import { useState, useEffect, useRef, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { getItem } from "@hyperscape/shared";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 import type { ContextMenuState } from "../../types";
 import type { RightPanelMode } from "../../types";
 

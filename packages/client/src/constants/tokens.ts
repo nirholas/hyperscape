@@ -480,132 +480,125 @@ export const statusColors = {
  * Use these instead of hardcoding styles in individual panels.
  */
 export const panelStyles = {
-  /** Base container for all panels */
+  /** Base container for all panels - Dark theme */
   container: {
-    background:
-      "linear-gradient(135deg, rgba(20, 15, 10, 0.95) 0%, rgba(15, 10, 5, 0.98) 100%)",
-    border: "1px solid rgba(139, 69, 19, 0.5)",
+    background: "#0a0a0c",
+    border: "1px solid #2d2820",
     borderRadius: "8px",
     boxShadow:
-      "0 4px 12px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(242, 208, 138, 0.1)",
+      "0 4px 12px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(212, 168, 75, 0.1)",
   },
 
-  /** Section within a panel (like a card) */
+  /** Section within a panel (like a card) - Dark theme */
   section: {
-    background:
-      "linear-gradient(180deg, rgba(30, 25, 20, 0.9) 0%, rgba(25, 20, 15, 0.95) 100%)",
-    border: "1px solid rgba(139, 69, 19, 0.4)",
+    background: "#141418",
+    border: "1px solid #2d2820",
     borderRadius: "6px",
     boxShadow:
-      "inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 2px 4px rgba(0, 0, 0, 0.3)",
+      "inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 2px 4px rgba(0, 0, 0, 0.3)",
   },
 
-  /** Grid item (inventory slot, skill box, etc.) */
+  /** Grid item (inventory slot, skill box, etc.) - Dark theme */
   gridItem: {
-    background:
-      "linear-gradient(180deg, rgba(35, 30, 25, 0.95) 0%, rgba(25, 20, 15, 0.98) 100%)",
-    border: "1px solid rgba(100, 80, 60, 0.5)",
+    background: "#16151a",
+    border: "1px solid #2d2820",
     borderRadius: "4px",
     boxShadow:
-      "inset 1px 1px 0 rgba(80, 65, 50, 0.4), inset -1px -1px 0 rgba(20, 15, 10, 0.8)",
+      "inset 1px 1px 0 rgba(255, 255, 255, 0.03), inset -1px -1px 0 rgba(0, 0, 0, 0.3)",
   },
 
-  /** Interactive element (button, clickable item) */
+  /** Interactive element (button, clickable item) - Gold accent */
   interactive: {
-    background:
-      "linear-gradient(135deg, rgba(139, 69, 19, 0.8) 0%, rgba(101, 50, 15, 0.9) 100%)",
-    border: "1px solid rgba(242, 208, 138, 0.4)",
+    background: "linear-gradient(135deg, #d4a84b 0%, #c49530 100%)",
+    border: "1px solid #e8c55a",
     borderRadius: "6px",
     boxShadow:
-      "0 2px 4px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(242, 208, 138, 0.2)",
+      "0 2px 4px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 216, 102, 0.3)",
   },
 
   /** Hover state for interactive elements */
   interactiveHover: {
-    background:
-      "linear-gradient(135deg, rgba(159, 89, 39, 0.9) 0%, rgba(121, 70, 35, 0.95) 100%)",
+    background: "linear-gradient(135deg, #e8be5a 0%, #d4a84b 100%)",
     boxShadow:
-      "0 3px 6px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(242, 208, 138, 0.3)",
+      "0 3px 6px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 216, 102, 0.4)",
   },
 
   /** Active/selected state */
   active: {
     background:
-      "linear-gradient(135deg, rgba(34, 197, 94, 0.2) 0%, rgba(34, 197, 94, 0.1) 100%)",
-    border: "1px solid rgba(34, 197, 94, 0.6)",
-    boxShadow: "0 0 8px rgba(34, 197, 94, 0.3), 0 2px 4px rgba(0, 0, 0, 0.4)",
+      "linear-gradient(135deg, rgba(74, 222, 128, 0.2) 0%, rgba(74, 222, 128, 0.1) 100%)",
+    border: "1px solid rgba(74, 222, 128, 0.6)",
+    boxShadow: "0 0 8px rgba(74, 222, 128, 0.3), 0 2px 4px rgba(0, 0, 0, 0.4)",
   },
 
   /** Disabled state */
   disabled: {
-    background: "rgba(20, 15, 10, 0.5)",
-    border: "1px solid rgba(100, 80, 60, 0.3)",
+    background: "#080808",
+    border: "1px solid #2d2820",
     opacity: "0.6",
   },
 
-  /** Input field styling */
+  /** Input field styling - Dark theme */
   input: {
-    background: "rgba(10, 8, 6, 0.9)",
-    border: "1px solid rgba(139, 69, 19, 0.4)",
+    background: "#0c0c0e",
+    border: "1px solid #2d2820",
     borderRadius: "4px",
     boxShadow: "inset 0 2px 4px rgba(0, 0, 0, 0.4)",
   },
 
-  /** Tab styling */
+  /** Tab styling - Dark theme */
   tab: {
     inactive: {
-      background: "rgba(30, 25, 20, 0.7)",
-      border: "1px solid rgba(100, 80, 60, 0.4)",
-      color: "rgba(205, 212, 230, 0.6)",
+      background: "#141418",
+      border: "1px solid #2d2820",
+      color: "#7d7460",
     },
     active: {
-      background:
-        "linear-gradient(180deg, rgba(45, 35, 25, 0.95) 0%, rgba(35, 28, 20, 0.98) 100%)",
-      border: "1px solid rgba(242, 208, 138, 0.5)",
-      color: "#f2d08a",
+      background: "#1e1e24",
+      border: "1px solid #4a3f30",
+      color: "#d4a84b",
     },
   },
 
-  /** Divider/separator */
+  /** Divider/separator - Dark theme */
   divider: {
-    background:
-      "linear-gradient(90deg, transparent, rgba(139, 69, 19, 0.5), transparent)",
+    background: "linear-gradient(90deg, transparent, #2d2820, transparent)",
     height: "1px",
   },
 
   /** Label styling */
   label: {
-    color: "rgba(205, 212, 230, 0.7)",
+    color: "#7d7460",
     fontSize: "12px",
     fontWeight: "500",
     letterSpacing: "0.02em",
     textTransform: "uppercase" as const,
   },
 
-  /** Value/stat styling */
+  /** Value/stat styling - Gold accent */
   value: {
-    color: "#f2d08a",
+    color: "#d4a84b",
     fontSize: "14px",
     fontWeight: "600",
     textShadow: "0 1px 2px rgba(0, 0, 0, 0.8)",
   },
 
-  /** Title styling within panels */
+  /** Title styling within panels - Gold accent */
   sectionTitle: {
-    color: "#f2d08a",
+    color: "#d4a84b",
     fontSize: "13px",
     fontWeight: "600",
     letterSpacing: "0.02em",
     textShadow: "0 1px 2px rgba(0, 0, 0, 0.8)",
-    borderBottom: "1px solid rgba(139, 69, 19, 0.4)",
+    borderBottom: "1px solid #2d2820",
     paddingBottom: "8px",
     marginBottom: "12px",
   },
 
-  /** Tooltip styling */
+  /** Tooltip styling - Dark theme */
   tooltip: {
-    background: "rgba(15, 12, 10, 0.98)",
-    border: "1px solid rgba(242, 208, 138, 0.5)",
+    background: "#0a0a0c",
+    border: "1px solid #4a3f30",
     borderRadius: "6px",
     boxShadow: "0 4px 12px rgba(0, 0, 0, 0.7)",
     padding: "8px 12px",

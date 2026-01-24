@@ -13,7 +13,7 @@
  */
 
 import React, { useMemo } from "react";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 import { ORB_FADE_DURATION_MS } from "./useXPOrbState";
 import type { SkillWithProgress } from "./useXPOrbState";
 

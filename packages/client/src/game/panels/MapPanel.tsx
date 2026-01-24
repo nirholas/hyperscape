@@ -6,7 +6,8 @@
  */
 
 import React, { useMemo, useCallback, useState } from "react";
-import { WorldMap, type WorldCoordinate, type MapViewport } from "hs-kit";
+import { WorldMap } from "@/game/components/map";
+import { type WorldCoordinate, type MapViewport } from "@/game/systems";
 import type { ClientWorld } from "../../types";
 
 interface MapPanelProps {

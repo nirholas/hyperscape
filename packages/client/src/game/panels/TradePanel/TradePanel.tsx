@@ -19,16 +19,15 @@
 import { useState, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import {
-  DndProvider,
+  DndContext,
   useDraggable,
   useDroppable,
-  ComposableDragOverlay,
+  DragOverlay,
   pointerWithin,
-  useThemeStore,
   type DragStartEvent,
   type DragEndEvent,
-  type Theme,
-} from "hs-kit";
+} from "@dnd-kit/core";
+import { useThemeStore, type Theme } from "@/ui";
 import {
   getItem,
   type TradeOfferItem,
@@ -316,8 +315,11 @@ export function TradePanel({
   // Handle drag start
   const handleDragStart = useCallback((event: DragStartEvent) => {
     const { active } = event;
-    // Custom data is in active.data.data (DragItem wraps our data)
-    const customData = active.data.data as
+    // @dnd-kit: Custom data is in active.data.current.data (DragItem wraps our data)
+    const activeDataWrapper = active.data.current as
+      | { data?: Record<string, unknown> }
+      | undefined;
+    const customData = activeDataWrapper?.data as
       | {
           type: string;
           slot: number;
@@ -337,8 +339,11 @@ export function TradePanel({
 
       if (!over) return;
 
-      // Custom data is in active.data.data (DragItem wraps our data)
-      const customData = active.data.data as
+      // @dnd-kit: Custom data is in active.data.current.data (DragItem wraps our data)
+      const activeDataWrapper = active.data.current as
+        | { data?: Record<string, unknown> }
+        | undefined;
+      const customData = activeDataWrapper?.data as
         | {
             type: string;
             slot: number;
@@ -379,7 +384,7 @@ export function TradePanel({
       className="fixed inset-0 z-[10000] flex items-center justify-center"
       style={{ background: theme.colors.background.overlay }}
     >
-      <DndProvider
+      <DndContext
         collisionDetection={pointerWithin}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
@@ -591,7 +596,7 @@ export function TradePanel({
           </div>
 
           {/* Drag overlay */}
-          <ComposableDragOverlay>
+          <DragOverlay>
             {draggedItemIcon && (
               <div
                 style={{
@@ -617,9 +622,9 @@ export function TradePanel({
                 />
               </div>
             )}
-          </ComposableDragOverlay>
+          </DragOverlay>
         </div>
-      </DndProvider>
+      </DndContext>
     </div>,
     document.body,
   );

@@ -5,7 +5,7 @@
  * RS3-style bank footer displaying stats and quick-access toggles.
  */
 
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 import { TAB_INDEX_ALL } from "../constants";
 import type { BankItem } from "../types";
 

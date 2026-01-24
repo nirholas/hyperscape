@@ -18,7 +18,7 @@ import React, {
   useCallback,
   type CSSProperties,
 } from "react";
-import { useMobileLayout, useThemeStore } from "hs-kit";
+import { useMobileLayout, useThemeStore } from "@/ui";
 import {
   Backpack,
   Swords,

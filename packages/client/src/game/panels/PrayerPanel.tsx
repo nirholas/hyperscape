@@ -20,12 +20,12 @@ import React, {
   useMemo,
 } from "react";
 import { createPortal } from "react-dom";
+import { useDraggable } from "@dnd-kit/core";
 import {
   calculateCursorTooltipPosition,
-  useDraggable,
   useThemeStore,
   useMobileLayout,
-} from "hs-kit";
+} from "@/ui";
 import { zIndex, MOBILE_PRAYER } from "../../constants";
 import { useTooltipSize } from "../../hooks";
 import type { PlayerStats, ClientWorld } from "../../types";
@@ -201,12 +201,12 @@ function PrayerIcon({
       onMouseMove={onMouseMove}
       onMouseLeave={onMouseLeave}
       disabled={!isUnlocked}
-      aria-pressed={isActive}
       aria-label={`${prayer.name}${isActive ? " (Active)" : ""}${!isUnlocked ? " (Locked)" : ""}`}
       className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
       style={buttonStyle}
       {...attributes}
       {...listeners}
+      aria-pressed={isActive}
     >
       {/* Glow effect for active prayers */}
       {isActive && (

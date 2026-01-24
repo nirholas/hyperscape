@@ -20,7 +20,7 @@ import { createPortal } from "react-dom";
 import type { ClientWorld, InventorySlotItem } from "../../types";
 import { COLORS } from "../../constants";
 import { InventoryPanel } from "./InventoryPanel";
-import { useWindowStore, useThemeStore, useMobileLayout } from "hs-kit";
+import { useWindowStore, useThemeStore, useMobileLayout } from "@/ui";
 import { getItem } from "@hyperscape/shared";
 
 interface StoreItem {

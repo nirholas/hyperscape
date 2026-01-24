@@ -8,7 +8,7 @@
  */
 
 import React, { useMemo, type CSSProperties } from "react";
-import { useMobileLayout, useThemeStore } from "hs-kit";
+import { useMobileLayout, useThemeStore } from "@/ui";
 import { getMobileUISizes } from "./mobileUISizes";
 
 interface StatusValue {

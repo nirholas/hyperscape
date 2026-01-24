@@ -3,11 +3,15 @@
  *
  * Connects the hs-kit QuestLog component to the game world's quest system.
  * Displays available, active, and completed quests with filtering and sorting.
+ * Uses COLORS constants for consistent styling with other panels.
+ *
+ * When a quest is clicked, it opens the QuestDetailPanel in a separate window.
  */
 
 import React, { useState, useCallback, useMemo } from "react";
+import { useWindowStore, useQuestSelectionStore } from "@/ui";
+import { QuestLog } from "@/game/components/quest";
 import {
-  QuestLog,
   type Quest,
   type QuestState,
   type QuestCategory,
@@ -15,7 +19,8 @@ import {
   type SortDirection,
   sortQuests,
   filterQuests,
-} from "hs-kit";
+} from "@/game/systems";
+import { COLORS, panelStyles } from "../../constants";
 import type { ClientWorld } from "../../types";
 
 interface QuestsPanelProps {
@@ -38,7 +43,6 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
   const [categoryFilter, setCategoryFilter] = useState<QuestCategory[]>([]);
   const [sortBy, setSortBy] = useState<QuestSortOption>("category");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
-  const [selectedQuestId, setSelectedQuestId] = useState<string | null>(null);
 
   // Get quests from world
   // TODO: Connect to actual quest system when available
@@ -93,10 +97,6 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
   );
 
   // Quest actions
-  const handleSelectQuest = useCallback((quest: Quest | null) => {
-    setSelectedQuestId(quest?.id ?? null);
-  }, []);
-
   const handleAcceptQuest = useCallback(
     (quest: Quest) => {
       // Send accept quest request to server
@@ -129,35 +129,95 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
     [world],
   );
 
+  // Get quest selection store and window store for opening quest detail
+  const setSelectedQuest = useQuestSelectionStore((s) => s.setSelectedQuest);
+  const createWindow = useWindowStore((s) => s.createWindow);
+  const windows = useWindowStore((s) => s.windows);
+
+  // Handle quest click - open quest detail in separate window
+  const handleQuestClick = useCallback(
+    (quest: Quest) => {
+      // Set the selected quest in the store
+      setSelectedQuest(quest);
+
+      // Check if quest-detail window already exists
+      const existingWindow = windows.get("quest-detail-window");
+
+      if (existingWindow) {
+        // If window exists, just make it visible and bring to front
+        useWindowStore.getState().updateWindow("quest-detail-window", {
+          visible: true,
+        });
+        useWindowStore.getState().bringToFront("quest-detail-window");
+      } else {
+        // Create new quest detail window
+        const viewport = {
+          width: typeof window !== "undefined" ? window.innerWidth : 1920,
+          height: typeof window !== "undefined" ? window.innerHeight : 1080,
+        };
+
+        createWindow({
+          id: "quest-detail-window",
+          position: {
+            x: Math.floor(viewport.width / 2 - 200),
+            y: Math.floor(viewport.height / 2 - 250),
+          },
+          size: { width: 400, height: 500 },
+          minSize: { width: 320, height: 400 },
+          maxSize: { width: 500, height: 700 },
+          tabs: [
+            { id: "quest-detail", label: "Quest", content: "quest-detail" },
+          ],
+          transparency: 0,
+        });
+      }
+    },
+    [setSelectedQuest, createWindow, windows],
+  );
+
+  // Container style using COLORS constants for consistency
+  const containerStyle: React.CSSProperties = {
+    height: "100%",
+    background: panelStyles.container.background,
+    display: "flex",
+    flexDirection: "column",
+  };
+
   return (
-    <QuestLog
-      quests={filteredQuests}
-      questCounts={questCounts}
-      searchText={searchText}
-      onSearchChange={setSearchText}
-      sortBy={sortBy}
-      onSortChange={setSortBy}
-      sortDirection={sortDirection}
-      onSortDirectionChange={setSortDirection}
-      stateFilter={stateFilter}
-      onStateFilterChange={setStateFilter}
-      categoryFilter={categoryFilter}
-      onCategoryFilterChange={setCategoryFilter}
-      selectedQuestId={selectedQuestId}
-      onSelectQuest={handleSelectQuest}
-      onTogglePin={handleTogglePin}
-      onAcceptQuest={handleAcceptQuest}
-      onAbandonQuest={handleAbandonQuest}
-      onTrackQuest={handleTrackQuest}
-      groupByCategory
-      showSearch
-      showFilters
-      showSort
-      showHeader
-      title="Quest Log"
-      emptyMessage="No quests found. Talk to NPCs to discover new quests!"
-      style={{ height: "100%", border: "none", background: "transparent" }}
-    />
+    <div style={containerStyle}>
+      <QuestLog
+        quests={filteredQuests}
+        questCounts={questCounts}
+        searchText={searchText}
+        onSearchChange={setSearchText}
+        sortBy={sortBy}
+        onSortChange={setSortBy}
+        sortDirection={sortDirection}
+        onSortDirectionChange={setSortDirection}
+        stateFilter={stateFilter}
+        onStateFilterChange={setStateFilter}
+        categoryFilter={categoryFilter}
+        onCategoryFilterChange={setCategoryFilter}
+        onTogglePin={handleTogglePin}
+        onAcceptQuest={handleAcceptQuest}
+        onAbandonQuest={handleAbandonQuest}
+        onTrackQuest={handleTrackQuest}
+        groupByCategory
+        showSearch
+        showFilters
+        showSort
+        showHeader
+        title="Quest Log"
+        emptyMessage="No quests found. Talk to NPCs to discover new quests!"
+        useExternalPopup
+        onQuestClick={handleQuestClick}
+        style={{
+          height: "100%",
+          border: "none",
+          background: "transparent",
+        }}
+      />
+    </div>
   );
 }
 
