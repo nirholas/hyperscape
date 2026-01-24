@@ -124,6 +124,7 @@ interface ImportMetaEnv {
   readonly PUBLIC_APP_URL?: string;
   readonly PUBLIC_API_URL?: string;
   readonly PUBLIC_ELIZAOS_URL?: string;
+  readonly PUBLIC_FORCE_WEBGL?: string;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars

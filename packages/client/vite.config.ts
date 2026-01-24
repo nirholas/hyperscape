@@ -188,6 +188,9 @@ export default defineConfig(({ mode }) => {
       ),
       "process.env.TERRAIN_SEED": JSON.stringify(env.TERRAIN_SEED || "0"),
       "process.env.VITEST": "undefined", // Not in browser
+      "import.meta.env.PUBLIC_FORCE_WEBGL": JSON.stringify(
+        env.PUBLIC_FORCE_WEBGL === "true" || env.PUBLIC_FORCE_WEBGL === "1",
+      ),
 
       // Production API URLs - explicitly defined for production builds
       // These ALWAYS use production URLs when mode is "production", ignoring .env files

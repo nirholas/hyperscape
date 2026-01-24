@@ -131,9 +131,76 @@ export async function createRenderer(
       powerPreference: webgpuPowerPreference,
       forceWebGL,
     });
-    await renderer.init();
-    return renderer;
+
+    const initStartTime = performance.now();
+    const rendererType = forceWebGL ? "WebGL" : "WebGPU";
+
+    // Set up a timeout to alert after 30 seconds (only for WebGPU)
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    if (!forceWebGL) {
+      timeoutId = setTimeout(() => {
+        const elapsedSeconds = (performance.now() - initStartTime) / 1000;
+        console.error(
+          `[RendererFactory] ⚠️  WebGPU initialization has taken ${elapsedSeconds.toFixed(1)}s (>30s).`,
+        );
+        console.error(
+          `[RendererFactory] 💡 To use WebGL fallback for faster startup, add to packages/client/.env:`,
+        );
+        console.error(`[RendererFactory]    PUBLIC_FORCE_WEBGL=true`);
+        console.error(`[RendererFactory]    Then restart your dev server.`);
+      }, 30000);
+    }
+
+    try {
+      await renderer.init();
+      const initTime = performance.now() - initStartTime;
+
+      // Clear timeout if initialization completed before 30 seconds
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+
+      const initTimeSeconds = initTime / 1000;
+      if (initTimeSeconds > 1) {
+        console.log(
+          `[RendererFactory] ✅ ${rendererType} renderer initialized in ${initTime.toFixed(2)}ms (${initTimeSeconds.toFixed(2)}s)`,
+        );
+      }
+
+      return renderer;
+    } catch (error) {
+      // Clear timeout on error
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      throw error;
+    }
   };
+
+  // Check for forced WebGL fallback via environment variable
+  let forceWebGLFallback = false;
+  try {
+    // Vite exposes import.meta.env, check if PUBLIC_FORCE_WEBGL is set
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const envValue = (import.meta as { env?: { PUBLIC_FORCE_WEBGL?: string } })
+      .env?.PUBLIC_FORCE_WEBGL;
+    forceWebGLFallback = envValue === "true" || envValue === "1";
+  } catch {
+    // import.meta not available (e.g., Node.js environment)
+    forceWebGLFallback = false;
+  }
+
+  if (forceWebGLFallback) {
+    console.log(
+      `[RendererFactory] 🔧 WebGL fallback forced via PUBLIC_FORCE_WEBGL environment variable`,
+    );
+    if (!isWebGLAvailable()) {
+      throw new Error(
+        "WebGL fallback was requested but WebGL is not available in this browser.",
+      );
+    }
+    return await create(true);
+  }
 
   const supportsWebGPU = await isWebGPUAvailable();
 

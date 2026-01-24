@@ -83,6 +83,11 @@ PRIVY_APP_SECRET=your-privy-app-secret-here
 # Optional: Farcaster Frame v2 deployment
 PUBLIC_ENABLE_FARCASTER=false
 PUBLIC_APP_URL=http://localhost:5555
+
+# Optional: Force WebGL renderer (for faster startup when WebGPU is slow)
+# Set to "true" or "1" to use WebGL instead of WebGPU
+# Useful when WebGPU initialization takes >30 seconds
+PUBLIC_FORCE_WEBGL=false
 ```
 
 #### 3. Start the Server
