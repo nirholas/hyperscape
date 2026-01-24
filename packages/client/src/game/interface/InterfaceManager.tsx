@@ -66,7 +66,7 @@ type RawEquipmentData = {
   ring?: RawEquipmentSlot;
   arrows?: RawEquipmentSlot;
 };
-import { HintProvider } from "../Hint";
+import { HintProvider } from "@/ui";
 import {
   createPanelRenderer,
   getPanelConfig,

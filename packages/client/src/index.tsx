@@ -25,7 +25,7 @@ import { GameClient } from "./screens/GameClient";
 import { LoginScreen } from "./screens/LoginScreen";
 import { CharacterSelectScreen } from "./screens/CharacterSelectScreen";
 import { UsernameSelectionScreen } from "./screens/UsernameSelectionScreen";
-import { EmbeddedGameClient } from "./components/EmbeddedGameClient";
+import { EmbeddedGameClient } from "./game/EmbeddedGameClient";
 import { isEmbeddedMode } from "./types/embeddedConfig";
 import { GAME_API_URL, GAME_WS_URL } from "./lib/api-config";
 

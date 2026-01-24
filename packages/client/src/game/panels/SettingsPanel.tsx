@@ -16,8 +16,7 @@ import {
 import { isTouch } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
 import { useFullscreen } from "../../hooks/useFullscreen";
-import { ToggleSwitch } from "../../components/ToggleSwitch";
-import { Slider } from "../../components/Slider";
+import { ToggleSwitch, Slider } from "@/ui";
 import { NAME_SANITIZE_REGEX } from "../../utils/validation";
 import {
   useComplexityStore,

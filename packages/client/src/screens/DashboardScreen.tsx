@@ -1,17 +1,17 @@
 import { GAME_API_URL } from "@/lib/api-config";
 import React, { useEffect, useState } from "react";
-import { DashboardLayout } from "../components/dashboard/DashboardLayout";
-import { AgentChat } from "../components/dashboard/AgentChat";
-import { AgentViewportChat } from "../components/dashboard/AgentViewportChat";
-import { AgentSettings } from "../components/dashboard/AgentSettings";
-import { AgentLogs } from "../components/dashboard/AgentLogs";
-import { AgentMemories } from "../components/dashboard/AgentMemories";
-import { AgentTimeline } from "../components/dashboard/AgentTimeline";
-import { AgentDynamicPanel } from "../components/dashboard/AgentDynamicPanel";
-import { AgentRuns } from "../components/dashboard/AgentRuns";
-import { SystemStatus } from "../components/dashboard/SystemStatus";
-import { ViewportConfirmModal } from "../components/dashboard/ViewportConfirmModal";
-import type { Agent, AgentPanel } from "../components/dashboard/types";
+import { DashboardLayout } from "../game/dashboard/DashboardLayout";
+import { AgentChat } from "../game/dashboard/AgentChat";
+import { AgentViewportChat } from "../game/dashboard/AgentViewportChat";
+import { AgentSettings } from "../game/dashboard/AgentSettings";
+import { AgentLogs } from "../game/dashboard/AgentLogs";
+import { AgentMemories } from "../game/dashboard/AgentMemories";
+import { AgentTimeline } from "../game/dashboard/AgentTimeline";
+import { AgentDynamicPanel } from "../game/dashboard/AgentDynamicPanel";
+import { AgentRuns } from "../game/dashboard/AgentRuns";
+import { SystemStatus } from "../game/dashboard/SystemStatus";
+import { ViewportConfirmModal } from "../game/dashboard/ViewportConfirmModal";
+import type { Agent, AgentPanel } from "../game/dashboard/types";
 import {
   MessageSquare,
   Settings,
@@ -27,7 +27,7 @@ import { ELIZAOS_API } from "@/lib/api-config";
 import "./DashboardScreen.css";
 
 // Re-export types for backwards compatibility
-export type { Agent, AgentPanel } from "../components/dashboard/types";
+export type { Agent, AgentPanel } from "../game/dashboard/types";
 
 // Preference key for localStorage
 const VIEWPORT_AUTO_START_KEY = "hyperscape_viewport_auto_start";

@@ -25,7 +25,7 @@
  */
 
 import React, { forwardRef, useMemo } from "react";
-import { gameUI } from "../constants";
+import { gameUI } from "../../constants";
 
 /** Scrollbar variant types */
 export type ScrollbarVariant = "hidden" | "thin" | "thick";

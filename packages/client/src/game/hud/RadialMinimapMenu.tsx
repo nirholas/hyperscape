@@ -35,11 +35,11 @@ import type { ClientWorld } from "../../types";
 import {
   getMobileUISizes,
   type MobileUISizes,
-} from "../../components/interface/mobileUISizes";
+} from "../interface/mobileUISizes";
 import { zIndex, shadows, borderRadius } from "../../constants";
 import { Minimap } from "./Minimap";
-import { MinimapStaminaOrb } from "../../components/MinimapStaminaBar";
-import { MinimapHomeTeleportOrb } from "../../components/MinimapHomeTeleportOrb";
+import { MinimapStaminaOrb } from "./MinimapStaminaBar";
+import { MinimapHomeTeleportOrb } from "./MinimapHomeTeleportOrb";
 
 /** Radial button configuration */
 interface RadialButtonConfig {

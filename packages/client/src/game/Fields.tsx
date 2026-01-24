@@ -3,8 +3,7 @@ import { Curve, downloadFile, hashFile } from "@hyperscape/shared";
 import type { ClientWorld } from "../types";
 import { CurvePane } from "./CurvePane";
 import { CurvePreview } from "./CurvePreview";
-import { HintContext } from "./Hint";
-import { Portal } from "./Portal";
+import { HintContext, Portal } from "@/ui";
 import { useUpdate } from "../hooks/useUpdate";
 
 interface LoadingFile {

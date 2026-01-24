@@ -15,8 +15,8 @@ import { useThemeStore } from "@/ui";
 import { Entity, THREE, createRenderer } from "@hyperscape/shared";
 import type { UniversalRenderer } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
-import { MinimapStaminaOrb } from "../../components/MinimapStaminaBar";
-import { MinimapHomeTeleportOrb } from "../../components/MinimapHomeTeleportOrb";
+import { MinimapStaminaOrb } from "./MinimapStaminaBar";
+import { MinimapHomeTeleportOrb } from "./MinimapHomeTeleportOrb";
 
 // === PRE-ALLOCATED VECTORS FOR HOT PATHS ===
 // These vectors are reused in RAF loops and intervals to avoid GC pressure

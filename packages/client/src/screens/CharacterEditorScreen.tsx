@@ -8,7 +8,7 @@
 import { GAME_API_URL, GAME_WS_URL } from "@/lib/api-config";
 import React from "react";
 import { Save, X, ArrowLeft } from "lucide-react";
-import { ArrayInput } from "../components/character/ArrayInput";
+import { ArrayInput } from "../game/character/ArrayInput";
 import {
   generateCharacterTemplate,
   validateCharacter,

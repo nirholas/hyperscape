@@ -30,7 +30,7 @@ import {
   AVATAR_OPTIONS,
 } from "@hyperscape/shared";
 import React from "react";
-import { CharacterPreview } from "../components/CharacterPreview";
+import { CharacterPreview } from "../game/character/CharacterPreview";
 import { usePrivy, useCreateWallet } from "@privy-io/react-auth";
 import { useThemeStore } from "@/ui";
 import {

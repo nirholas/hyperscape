@@ -28,7 +28,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useThemeStore } from "@/ui";
-import { animation } from "../constants";
+import { animation } from "../../constants";
 
 /** Available icon names for menu buttons */
 export type MenuIconName =

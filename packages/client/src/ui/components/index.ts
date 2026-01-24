@@ -148,12 +148,18 @@ export { ComplexityPanel, type ComplexityPanelProps } from "./ComplexityPanel";
 export { UpgradePrompt, type UpgradePromptProps } from "./UpgradePrompt";
 export { LockedFeature, type LockedFeatureProps } from "./LockedFeature";
 
-// Interface manager
-export {
-  InterfaceManager,
-  InterfaceProvider,
-  type InterfaceManagerProps,
-} from "./InterfaceManager";
+// Utility components (moved from components/)
+export { Portal } from "./Portal";
+export { ScrollableArea, type ScrollableAreaProps } from "./ScrollableArea";
+export { Slider, type SliderProps } from "./Slider";
+export { ToggleSwitch, type ToggleSwitchProps } from "./ToggleSwitch";
+export { HintContext, HintProvider } from "./Hint";
+export { HandIcon } from "./Icons";
+export { MenuButton, type MenuIconName } from "./MenuButton";
+export { MouseLeftIcon } from "./MouseLeftIcon";
+export { MouseRightIcon } from "./MouseRightIcon";
+export { MouseWheelIcon } from "./MouseWheelIcon";
+// Fields moved to game/ as it depends on CurvePane/CurvePreview
 
 // Theme utilities
 export {

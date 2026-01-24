@@ -3,8 +3,8 @@ import { THREE, createRenderer } from "@hyperscape/shared";
 import type { UniversalRenderer } from "@hyperscape/shared";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRM, VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
-import { retargetAnimationToVRM } from "../utils/vrmAnimationRetarget";
-import { CDN_URL } from "../lib/api-config";
+import { retargetAnimationToVRM } from "../../utils/vrmAnimationRetarget";
+import { CDN_URL } from "../../lib/api-config";
 
 // Extended types for VRM and AnimationMixer
 interface VRMHumanoidWithRestPose {

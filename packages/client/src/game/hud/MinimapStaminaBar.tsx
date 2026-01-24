@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useId } from "react";
 import { useThemeStore } from "@/ui";
-import type { ClientWorld } from "../types";
+import type { ClientWorld } from "../../types";
 
 interface MinimapStaminaOrbProps {
   world: ClientWorld;

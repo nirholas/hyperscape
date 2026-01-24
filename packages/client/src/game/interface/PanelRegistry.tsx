@@ -27,7 +27,7 @@ import type {
 } from "../../types";
 import type { PlayerStats } from "@hyperscape/shared";
 import { Minimap } from "../../game/hud/Minimap";
-import { MenuButton, type MenuIconName } from "../MenuButton";
+import { MenuButton, type MenuIconName } from "@/ui";
 import { ChatPanel } from "../../game/panels/ChatPanel";
 import {
   ActionBarPanel,

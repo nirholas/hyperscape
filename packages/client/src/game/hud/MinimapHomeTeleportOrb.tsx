@@ -6,7 +6,7 @@
 
 import React, { useEffect, useState, useCallback, useRef, useId } from "react";
 import { HOME_TELEPORT_CONSTANTS, EventType } from "@hyperscape/shared";
-import type { ClientWorld } from "../types";
+import type { ClientWorld } from "../../types";
 
 type TeleportState = "ready" | "cooldown" | "casting";
 
