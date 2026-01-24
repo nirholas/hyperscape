@@ -128,4 +128,48 @@ export class BroadcastManager {
     }
     return undefined;
   }
+
+  /**
+   * Send message to a player AND any spectators watching that player
+   *
+   * This ensures spectators see real-time feedback like XP drops, damage numbers,
+   * and other player-specific events that would normally only go to the player.
+   *
+   * @param playerId - Target player ID (also the character ID spectators follow)
+   * @param name - Message type/name
+   * @param data - Message payload
+   * @returns Number of sockets that received the message (1 for player + N spectators)
+   */
+  sendToPlayerAndSpectators<T = unknown>(
+    playerId: string,
+    name: string,
+    data: T,
+  ): number {
+    let sentCount = 0;
+
+    for (const socket of this.sockets.values()) {
+      // Send to the player themselves
+      if (socket.player && socket.player.id === playerId) {
+        socket.send(name, data);
+        sentCount++;
+        continue;
+      }
+
+      // Send to any spectators watching this player
+      // spectatingCharacterId is set when a spectator connects to follow a character
+      const socketWithSpectator = socket as ServerSocket & {
+        isSpectator?: boolean;
+        spectatingCharacterId?: string;
+      };
+      if (
+        socketWithSpectator.isSpectator &&
+        socketWithSpectator.spectatingCharacterId === playerId
+      ) {
+        socket.send(name, data);
+        sentCount++;
+      }
+    }
+
+    return sentCount;
+  }
 }

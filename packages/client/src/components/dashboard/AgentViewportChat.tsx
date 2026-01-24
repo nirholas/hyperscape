@@ -4,6 +4,7 @@ import { Bot, Mic, Send } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
 import type { Agent } from "./types";
 import { QuickActionMenu } from "./QuickActionMenu";
+import { AgentThoughtsOverlay } from "./AgentThoughtsOverlay";
 
 interface Message {
   id: string;
@@ -418,6 +419,11 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
           </div>
         </div>
       )}
+
+      {/* Agent Thoughts Overlay (Bottom Right) */}
+      <div className="absolute bottom-24 right-4 z-10 pointer-events-auto">
+        <AgentThoughtsOverlay agent={agent} />
+      </div>
 
       {/* Message Input (Bottom) - Fixed position, pointer events enabled */}
       <div className="absolute bottom-4 left-4 right-4 z-10 pointer-events-auto">

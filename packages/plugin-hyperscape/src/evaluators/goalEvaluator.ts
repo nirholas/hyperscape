@@ -139,6 +139,17 @@ export const goalEvaluator: Evaluator = {
     } else if (goal.type === "exploration") {
       recommendations.push("EXPLORE to discover new areas");
       priorityAction = "EXPLORE";
+    } else if (goal.type === "starter_items") {
+      // For starter items goal, ALWAYS recommend LOOT_STARTER_CHEST
+      facts.push("Need to acquire starter tools from chest near spawn");
+      facts.push("** USE LOOT_STARTER_CHEST to get tools! **");
+      recommendations.push(
+        "LOOT_STARTER_CHEST - go to starter chest and loot it",
+      );
+      recommendations.push(
+        "The starter chest is at coordinates (5, -20) near spawn",
+      );
+      priorityAction = "LOOT_STARTER_CHEST";
     }
 
     // Store in state

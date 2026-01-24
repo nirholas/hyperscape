@@ -190,6 +190,8 @@ const names = [
   'syncGoal',
   // Agent goal override packet (dashboard -> plugin)
   'goalOverride',
+  // Agent thought sync packet (for dashboard thought process display)
+  'syncAgentThought',
   // Bank packets
   'bankOpen',
   'bankState',
@@ -222,6 +224,8 @@ const names = [
   'storeClose',
   // NPC interaction packets
   'npcInteract',
+  // Generic entity interaction (for chests, interactables, etc.)
+  'entityInteract',
   // Dialogue packets
   'dialogueStart',
   'dialogueNodeChange',
@@ -297,6 +301,31 @@ for (const name of names) {
 
 function capitalize(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+/**
+ * Exported packet names array for use by other packages.
+ * This is the SINGLE SOURCE OF TRUTH for packet ordering.
+ * DO NOT duplicate this list elsewhere - import it instead!
+ */
+export const PACKET_NAMES: readonly string[] = names;
+
+/**
+ * Get packet ID from packet name.
+ * Returns null if packet name is not found.
+ */
+export function getPacketId(name: string): number | null {
+  const info = byName[name];
+  return info ? info.id : null;
+}
+
+/**
+ * Get packet name from packet ID.
+ * Returns null if packet ID is not found.
+ */
+export function getPacketName(id: number): string | null {
+  const info = byId[id];
+  return info ? info.name : null;
 }
 
 export function writePacket(name: string, data: unknown): ArrayBuffer {

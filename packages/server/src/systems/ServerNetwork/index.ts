@@ -235,6 +235,20 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   /** Character ID to socket mapping for sending goal overrides */
   static characterSockets: Map<string, ServerSocket> = new Map();
 
+  /** Agent thought storage (characterId -> recent thoughts) for dashboard display */
+  static agentThoughts: Map<
+    string,
+    Array<{
+      id: string;
+      type: "situation" | "evaluation" | "thinking" | "decision";
+      content: string;
+      timestamp: number;
+    }>
+  > = new Map();
+
+  /** Maximum number of thoughts to keep per agent */
+  static MAX_THOUGHTS_PER_AGENT = 50;
+
   /** Modular managers */
   private tileMovementManager!: TileMovementManager;
   private mobTileMovementManager!: MobTileMovementManager;
@@ -1607,6 +1621,39 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       }
     };
 
+    // Agent thought sync handler - stores agent thought process for dashboard display
+    this.handlers["onSyncAgentThought"] = (_socket, data) => {
+      const thoughtData = data as {
+        characterId?: string;
+        thought: {
+          id: string;
+          type: "situation" | "evaluation" | "thinking" | "decision";
+          content: string;
+          timestamp: number;
+        };
+      };
+
+      if (thoughtData.characterId && thoughtData.thought) {
+        // Get existing thoughts or create new array
+        const thoughts =
+          ServerNetwork.agentThoughts.get(thoughtData.characterId) || [];
+
+        // Add new thought at the beginning (most recent first)
+        thoughts.unshift(thoughtData.thought);
+
+        // Limit stored thoughts
+        if (thoughts.length > ServerNetwork.MAX_THOUGHTS_PER_AGENT) {
+          thoughts.length = ServerNetwork.MAX_THOUGHTS_PER_AGENT;
+        }
+
+        ServerNetwork.agentThoughts.set(thoughtData.characterId, thoughts);
+
+        console.log(
+          `[ServerNetwork] Agent thought synced for character ${thoughtData.characterId}: [${thoughtData.thought.type}]`,
+        );
+      }
+    };
+
     // Bank handlers
     this.handlers["onBankOpen"] = (socket, data) =>
       handleBankOpen(socket, data as { bankId: string }, this.world);
@@ -1706,6 +1753,34 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.handlers["onBankDepositAllEquipment"] = (socket, data) =>
       handleBankDepositAllEquipment(socket, data, this.world);
 
+    // Also register bank handlers without "on" prefix for client compatibility
+    // (matching the pattern used for entityInteract, firemakingRequest, cookingRequest)
+    this.handlers["bankOpen"] = this.handlers["onBankOpen"];
+    this.handlers["bankDeposit"] = this.handlers["onBankDeposit"];
+    this.handlers["bankWithdraw"] = this.handlers["onBankWithdraw"];
+    this.handlers["bankDepositAll"] = this.handlers["onBankDepositAll"];
+    this.handlers["bankDepositCoins"] = this.handlers["onBankDepositCoins"];
+    this.handlers["bankWithdrawCoins"] = this.handlers["onBankWithdrawCoins"];
+    this.handlers["bankClose"] = this.handlers["onBankClose"];
+    this.handlers["bankMove"] = this.handlers["onBankMove"];
+    this.handlers["bankCreateTab"] = this.handlers["onBankCreateTab"];
+    this.handlers["bankDeleteTab"] = this.handlers["onBankDeleteTab"];
+    this.handlers["bankMoveToTab"] = this.handlers["onBankMoveToTab"];
+    this.handlers["bankWithdrawPlaceholder"] =
+      this.handlers["onBankWithdrawPlaceholder"];
+    this.handlers["bankReleasePlaceholder"] =
+      this.handlers["onBankReleasePlaceholder"];
+    this.handlers["bankReleaseAllPlaceholders"] =
+      this.handlers["onBankReleaseAllPlaceholders"];
+    this.handlers["bankToggleAlwaysPlaceholder"] =
+      this.handlers["onBankToggleAlwaysPlaceholder"];
+    this.handlers["bankWithdrawToEquipment"] =
+      this.handlers["onBankWithdrawToEquipment"];
+    this.handlers["bankDepositEquipment"] =
+      this.handlers["onBankDepositEquipment"];
+    this.handlers["bankDepositAllEquipment"] =
+      this.handlers["onBankDepositAllEquipment"];
+
     // NPC interaction handler - client clicked on NPC
     this.handlers["onNpcInteract"] = (socket, data) => {
       const playerEntity = socket.player;
@@ -1781,6 +1856,75 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
     this.handlers["onStoreClose"] = (socket, data) =>
       handleStoreClose(socket, data as { storeId: string }, this.world);
+
+    // Generic entity interaction handler - for entities like starter chests
+    this.handlers["onEntityInteract"] = async (socket, data) => {
+      const playerEntity = socket.player;
+      if (!playerEntity) {
+        console.warn(
+          "[ServerNetwork] entityInteract: no player entity on socket",
+        );
+        return;
+      }
+
+      const payload = data as {
+        entityId: string;
+        interactionType?: string;
+      };
+
+      console.log(
+        `[ServerNetwork] entityInteract received: entityId=${payload.entityId}, interactionType=${payload.interactionType}, playerId=${playerEntity.id}`,
+      );
+
+      if (!payload.entityId) {
+        console.warn("[ServerNetwork] entityInteract missing entityId");
+        return;
+      }
+
+      // Find the entity in the world
+      const entity = this.world.entities.get(payload.entityId);
+      if (!entity) {
+        console.warn(
+          `[ServerNetwork] entityInteract: entity ${payload.entityId} not found`,
+        );
+        return;
+      }
+
+      console.log(
+        `[ServerNetwork] Found entity: type=${entity.type}, name=${entity.name}`,
+      );
+
+      // Check if entity has handleInteraction method
+      const interactableEntity = entity as {
+        handleInteraction?: (data: {
+          playerId: string;
+          interactionType?: string;
+        }) => Promise<void>;
+      };
+
+      if (typeof interactableEntity.handleInteraction === "function") {
+        console.log(
+          `[ServerNetwork] Calling handleInteraction on ${entity.type} entity`,
+        );
+        try {
+          await interactableEntity.handleInteraction({
+            playerId: playerEntity.id,
+            interactionType: payload.interactionType || "interact",
+          });
+          console.log(
+            `[ServerNetwork] handleInteraction completed for ${entity.type}`,
+          );
+        } catch (err) {
+          console.error(`[ServerNetwork] Error in entity interaction: ${err}`);
+        }
+      } else {
+        console.warn(
+          `[ServerNetwork] Entity ${payload.entityId} has no handleInteraction method`,
+        );
+      }
+    };
+    // Also register without "on" prefix for client compatibility
+    this.handlers["entityInteract"] = this.handlers["onEntityInteract"];
 
     // Trade handlers
     this.handlers["onTradeRequest"] = (socket, data) =>

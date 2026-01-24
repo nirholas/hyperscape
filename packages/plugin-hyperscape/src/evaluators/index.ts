@@ -101,7 +101,7 @@ export const survivalEvaluator: Evaluator = {
     const facts: string[] = [];
     let urgency: "critical" | "warning" | "safe" = "safe";
 
-    if (healthPercent < 20) {
+    if (healthPercent < 30) {
       facts.push(`CRITICAL: Health is very low (${healthPercent.toFixed(0)}%)`);
       urgency = "critical";
     } else if (healthPercent < 50) {
@@ -142,9 +142,9 @@ export const survivalEvaluator: Evaluator = {
     // Add recommendations based on urgency
     const recommendations: string[] = [];
     if (urgency === "critical" && isAlive) {
-      if (healthPercent < 20 && threats.length > 0) {
+      if (healthPercent < 30 && threats.length > 0) {
         recommendations.push("FLEE immediately - health is critical");
-      } else if (healthPercent < 20) {
+      } else if (healthPercent < 30) {
         recommendations.push("Find food or safe area to recover");
       }
     }
