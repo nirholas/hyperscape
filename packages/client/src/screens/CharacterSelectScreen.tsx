@@ -768,6 +768,26 @@ export function CharacterSelectScreen({
             (evt.data as { characters?: Character[] })?.characters || [];
           setCharacters(list);
         }
+      } else if (method === "onEnterWorldApproved") {
+        // Server approved entering world - proceed to game
+        const payload = data as { characterId: string };
+        console.log(
+          "[CharacterSelect] ✅ Enter world approved for:",
+          payload.characterId,
+        );
+        setEnteringWorld(false);
+        // Call onPlay to transition to game
+        onPlayRef.current(payload.characterId);
+      } else if (method === "onEnterWorldRejected") {
+        // Character is already logged in on another session
+        const payload = data as { reason: string; message: string };
+        console.warn(
+          "[CharacterSelect] ⚠️ Enter world rejected:",
+          payload.reason,
+        );
+        setEnteringWorld(false);
+        setErrorMessage(payload.message);
+        // Stay on character select screen (already on confirm view, just show error)
       } else if (method === "onShowToast") {
         const toast = data as { message?: string; type?: string };
         console.error("[CharacterSelect] ❌ Server error:", toast.message);
@@ -1064,9 +1084,34 @@ export function CharacterSelectScreen({
     elizaOSAvailable,
   ]);
 
+  // State for "entering world" loading
+  const [enteringWorld, setEnteringWorld] = React.useState(false);
+
+  // Store onPlay in ref so message handler can access it
+  const onPlayRef = React.useRef(onPlay);
+  React.useEffect(() => {
+    onPlayRef.current = onPlay;
+  }, [onPlay]);
+
   const enterWorld = React.useCallback(() => {
-    onPlay(selectedCharacterId);
-  }, [selectedCharacterId, onPlay]);
+    if (!selectedCharacterId || enteringWorld) return;
+
+    const ws = preWsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      setErrorMessage("Connection lost. Please refresh the page.");
+      return;
+    }
+
+    // Set loading state and send enterWorld packet
+    // Wait for server to respond with enterWorldApproved or enterWorldRejected
+    setEnteringWorld(true);
+    setErrorMessage(null);
+
+    const packet = writePacket("enterWorld", {
+      characterId: selectedCharacterId,
+    });
+    ws.send(packet);
+  }, [selectedCharacterId, enteringWorld]);
 
   const GoldRule = ({
     className = "",
@@ -1469,12 +1514,18 @@ export function CharacterSelectScreen({
                   </div>
                 </div>
               </div>
+              {/* Error message display */}
+              {errorMessage && (
+                <div className="mt-3 mx-auto max-w-md p-3 bg-red-900/80 border border-red-500 rounded-lg text-center">
+                  <p className="text-red-200 text-sm">{errorMessage}</p>
+                </div>
+              )}
               <div className="mt-3 flex justify-center">
                 <div className="w-full max-w-md relative">
                   <div className="h-[1px] w-full bg-gradient-to-r from-transparent via-[#f2d08a]/90 to-transparent mb-1" />
                   <button
                     className="w-full px-6 py-1.5 text-center bg-transparent hover:bg-black/20 focus:outline-none transition-all rounded-sm"
-                    disabled={!selectedCharacterId}
+                    disabled={!selectedCharacterId || enteringWorld}
                     onClick={enterWorld}
                     style={{
                       color: "#f2d08a",
@@ -1482,12 +1533,15 @@ export function CharacterSelectScreen({
                         "0 0 12px rgba(242, 208, 138, 0.5), 0 0 25px rgba(242, 208, 138, 0.3)",
                       filter:
                         "drop-shadow(0 8px 20px rgba(0, 0, 0, 0.8)) drop-shadow(0 4px 10px rgba(0, 0, 0, 0.6))",
-                      opacity: selectedCharacterId ? 1 : 0.5,
-                      cursor: selectedCharacterId ? "pointer" : "not-allowed",
+                      opacity: selectedCharacterId && !enteringWorld ? 1 : 0.5,
+                      cursor:
+                        selectedCharacterId && !enteringWorld
+                          ? "pointer"
+                          : "not-allowed",
                     }}
                   >
                     <span className="font-semibold text-lg uppercase tracking-[0.2em]">
-                      Enter World
+                      {enteringWorld ? "Entering..." : "Enter World"}
                     </span>
                   </button>
                   <div className="h-[1px] w-full bg-gradient-to-r from-transparent via-[#f2d08a]/90 to-transparent mt-1" />

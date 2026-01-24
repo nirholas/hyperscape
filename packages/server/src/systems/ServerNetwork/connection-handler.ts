@@ -214,26 +214,22 @@ export class ConnectionHandler {
       // Send resource snapshot
       await this.sendResourceSnapshot(socket);
 
-      // CRITICAL FIX: Remove old socket for same account (prevents duplicate connections)
-      // This handles the CharacterSelectScreen → GameClient transition where both use the same account
-      // Always close old sockets and allow the new connection - character spawn protection is handled
-      // separately in handleEnterWorld (which checks for duplicate characterIds)
+      // Clean up stale sockets for same account (sockets that lost connection but weren't cleaned up)
+      // This handles edge cases like browser crashes or network drops where the old socket
+      // is no longer alive but wasn't properly removed
       for (const [oldSocketId, oldSocket] of this.sockets) {
         if (
           oldSocket.accountId === socket.accountId &&
           oldSocketId !== socket.id
         ) {
-          const socketAge = Date.now() - (oldSocket.createdAt || 0);
-          const hasPlayer = !!oldSocket.player;
-
-          console.log(
-            `[ConnectionHandler] 🔄 Detected reconnection for account ${socket.accountId}`,
-          );
-          console.log(
-            `[ConnectionHandler] Closing old socket ${oldSocketId} (hasPlayer: ${hasPlayer}, age: ${Math.round(socketAge / 1000)}s), replacing with new socket ${socket.id}`,
-          );
-          oldSocket.ws?.close?.();
-          this.sockets.delete(oldSocketId);
+          // Only remove if the old socket is dead (not alive)
+          if (!oldSocket.alive) {
+            console.log(
+              `[ConnectionHandler] 🧹 Cleaning up stale socket ${oldSocketId} for account ${socket.accountId}`,
+            );
+            oldSocket.ws?.close?.();
+            this.sockets.delete(oldSocketId);
+          }
         }
       }
 

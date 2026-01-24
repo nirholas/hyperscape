@@ -2833,6 +2833,24 @@ export class ClientNetwork extends SystemBase {
     });
   };
 
+  /**
+   * Handle enter world rejection (e.g., character already logged in)
+   * This triggers a redirect back to character select with an error message
+   */
+  onEnterWorldRejected = (data: { reason: string; message: string }) => {
+    console.warn(
+      "[ClientNetwork] Enter world rejected:",
+      data.reason,
+      data.message,
+    );
+    // Emit as a kick event with the duplicate_user code
+    // This will show the proper overlay and let the user know
+    this.emitTypedEvent("UI_KICK", {
+      playerId: this.id || "unknown",
+      reason: "duplicate_user",
+    });
+  };
+
   // ==== Home Teleport Handlers ====
 
   /**

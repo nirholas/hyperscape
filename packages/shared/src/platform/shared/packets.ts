@@ -186,6 +186,8 @@ const names = [
   'characterCreated',
   'characterSelected',
   'enterWorld',
+  'enterWorldApproved',  // Server -> Client: character spawn successful, proceed to game
+  'enterWorldRejected',  // Server -> Client: character already logged in
   // Agent goal sync packet (for dashboard display)
   'syncGoal',
   // Agent goal override packet (dashboard -> plugin)
