@@ -326,10 +326,29 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
   useEffect(() => {
     if (!world) return;
 
+    // Get initial state from ClientNetwork cache (if panel mounted after sync event)
+    const localPlayer = world.getPlayer();
+    if (localPlayer) {
+      const network = world.network as {
+        lastPrayerStateByPlayerId?: Record<
+          string,
+          { points: number; maxPoints: number; active: string[] }
+        >;
+      };
+      const cachedState = network?.lastPrayerStateByPlayerId?.[localPlayer.id];
+      if (cachedState) {
+        setPrayerPoints({
+          current: cachedState.points,
+          max: cachedState.maxPoints,
+        });
+        setActivePrayers(new Set(cachedState.active));
+      }
+    }
+
     const handlePrayerStateSync = (payload: unknown) => {
       const data = payload as PrayerStateSyncPayload;
-      const localPlayer = world.getPlayer();
-      if (!localPlayer || data.playerId !== localPlayer.id) return;
+      const player = world.getPlayer();
+      if (!player || data.playerId !== player.id) return;
 
       setPrayerPoints({ current: data.points, max: data.maxPoints });
       setActivePrayers(new Set(data.active));
@@ -337,8 +356,8 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
 
     const handlePrayerToggled = (payload: unknown) => {
       const data = payload as PrayerToggledEvent;
-      const localPlayer = world.getPlayer();
-      if (!localPlayer || data.playerId !== localPlayer.id) return;
+      const player = world.getPlayer();
+      if (!player || data.playerId !== player.id) return;
 
       setActivePrayers((prev) => {
         const next = new Set(prev);
@@ -358,8 +377,8 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
         points: number;
         maxPoints: number;
       };
-      const localPlayer = world.getPlayer();
-      if (!localPlayer || data.playerId !== localPlayer.id) return;
+      const player = world.getPlayer();
+      if (!player || data.playerId !== player.id) return;
 
       setPrayerPoints({ current: data.points, max: data.maxPoints });
     };

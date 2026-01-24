@@ -1994,6 +1994,14 @@ function DesktopInterfaceManager({
       const activeId = active.id as string;
       const overId = over?.id as string | undefined;
 
+      // Debug: Log all drag end events
+      console.log("[InterfaceManager] Drag end:", {
+        activeId,
+        overId,
+        activeDataType: typeof active.data,
+        hasCustomData: !!active.data?.data,
+      });
+
       // Handle inventory → equipment drops
       if (
         activeId.startsWith("inventory-") &&
@@ -2101,6 +2109,18 @@ function DesktopInterfaceManager({
             }
           | undefined;
 
+        // Debug logging to help diagnose drop issues
+        console.log("[InterfaceManager] ActionBar drop detected:", {
+          overId,
+          slotIndex,
+          activeId,
+          activeData,
+          hasSkill: !!activeData?.skill,
+          hasPrayer: !!activeData?.prayer,
+          hasItem: !!activeData?.item,
+          source: activeData?.source,
+        });
+
         // Determine which bar this drop is for (default to bar 0)
         // The drop ID format is "actionbar-drop-{slotIndex}" for bar 0
         // For other bars it would be "actionbar-{barId}-drop-{slotIndex}"
@@ -2167,6 +2187,13 @@ function DesktopInterfaceManager({
           });
           return;
         }
+
+        // Log unhandled action bar drops for debugging
+        console.log("[InterfaceManager] ⚠️ Unhandled ActionBar drop:", {
+          activeId,
+          overId,
+          activeData,
+        });
       }
 
       // Only handle tab drags for the remaining logic

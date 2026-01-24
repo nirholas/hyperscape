@@ -405,6 +405,92 @@ const DraggableSlot = memo(function DraggableSlot({
     data: { slotIndex, target: "actionbar" },
   });
 
+  // Track if drag was started to prevent click when dragging
+  const dragStartedRef = useRef(false);
+  const pointerStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTriggeredRef = useRef(false);
+
+  // Clear long-press timer
+  const clearLongPressTimer = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+
+  // Wrap pointer handlers to track drag vs click and long press
+  const wrappedListeners = useMemo(() => {
+    if (!listeners) return {};
+
+    const originalPointerDown = listeners.onPointerDown;
+
+    return {
+      ...listeners,
+      onPointerDown: (e: React.PointerEvent) => {
+        dragStartedRef.current = false;
+        longPressTriggeredRef.current = false;
+        pointerStartPosRef.current = { x: e.clientX, y: e.clientY };
+
+        // Start long-press timer for touch devices (500ms)
+        if (e.pointerType === "touch" && !isEmpty) {
+          clearLongPressTimer();
+          longPressTimerRef.current = setTimeout(() => {
+            longPressTriggeredRef.current = true;
+            // Trigger context menu on long press
+            const syntheticEvent = {
+              preventDefault: () => {},
+              clientX: e.clientX,
+              clientY: e.clientY,
+            } as React.MouseEvent;
+            onContextMenu(syntheticEvent);
+          }, 500);
+        }
+
+        originalPointerDown?.(e);
+      },
+      onPointerUp: () => {
+        clearLongPressTimer();
+      },
+      onPointerCancel: () => {
+        clearLongPressTimer();
+      },
+    };
+  }, [listeners, isEmpty, onContextMenu, clearLongPressTimer]);
+
+  // Handle click - only fire if drag didn't start and long press didn't trigger
+  const handleClick = useCallback(
+    (e: React.MouseEvent) => {
+      // Don't fire click if long-press was triggered
+      if (longPressTriggeredRef.current) {
+        longPressTriggeredRef.current = false;
+        return;
+      }
+
+      // Check if pointer moved significantly (drag activation distance is 3px)
+      if (pointerStartPosRef.current) {
+        const dx = e.clientX - pointerStartPosRef.current.x;
+        const dy = e.clientY - pointerStartPosRef.current.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        // If moved more than activation distance, this was a drag, not a click
+        if (distance > 3) {
+          return;
+        }
+      }
+
+      // Not a drag, execute the click action
+      onClick();
+    },
+    [onClick],
+  );
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      clearLongPressTimer();
+    };
+  }, [clearLongPressTimer]);
+
   // Combine refs
   const combinedRef = (node: HTMLButtonElement | null) => {
     setDragRef(node);
@@ -469,7 +555,7 @@ const DraggableSlot = memo(function DraggableSlot({
   return (
     <button
       ref={combinedRef}
-      onClick={onClick}
+      onClick={handleClick}
       onContextMenu={onContextMenu}
       onMouseEnter={onHover}
       onMouseLeave={onLeave}
@@ -481,7 +567,7 @@ const DraggableSlot = memo(function DraggableSlot({
       }
       style={slotStyle}
       {...attributes}
-      {...listeners}
+      {...wrappedListeners}
     >
       {/* Icon */}
       {!isEmpty && (

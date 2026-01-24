@@ -319,17 +319,22 @@ export function CoreUI({ world }: { world: ClientWorld }) {
     };
 
     const onPrayerPointsChanged = (raw: unknown) => {
-      const data = raw as { playerId: string; current: number; max: number };
+      // Server sends { playerId, points, maxPoints } not { current, max }
+      const data = raw as {
+        playerId: string;
+        points: number;
+        maxPoints: number;
+      };
       const localId = world.entities?.player?.id;
       if (!localId || data.playerId === localId) {
         setPlayerStats((prev) =>
           prev
             ? {
                 ...prev,
-                prayerPoints: { current: data.current, max: data.max },
+                prayerPoints: { current: data.points, max: data.maxPoints },
               }
             : ({
-                prayerPoints: { current: data.current, max: data.max },
+                prayerPoints: { current: data.points, max: data.maxPoints },
               } as PlayerStats),
         );
       }

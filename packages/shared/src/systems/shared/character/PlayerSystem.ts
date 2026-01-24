@@ -987,6 +987,18 @@ export class PlayerSystem extends SystemBase {
       return;
     }
 
+    // === MAX HEALTH CHECK ===
+    // Similar to prayer points check - notify player if already at max health
+    const player = this.players.get(data.playerId);
+    if (player && player.health.current >= player.health.max) {
+      this.emitTypedEvent(EventType.UI_MESSAGE, {
+        playerId: data.playerId,
+        message: "You're already at full health.",
+        type: "warning" as const,
+      });
+      return;
+    }
+
     // === SECURITY: Bounds checking (OWASP) ===
     const healAmount = Math.min(
       Math.max(0, Math.floor(itemData.healAmount)),
