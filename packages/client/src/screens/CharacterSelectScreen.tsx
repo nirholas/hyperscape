@@ -356,6 +356,8 @@ export function CharacterSelectScreen({
     type: "create";
     name: string;
   }>(null);
+  // Ref for synchronous double-click prevention when entering world
+  const enteringWorldRef = React.useRef(false);
   // Use primitive states instead of object to prevent unnecessary re-renders
   const [authToken, setAuthToken] = React.useState(
     localStorage.getItem("privy_auth_token") || "",
@@ -775,6 +777,7 @@ export function CharacterSelectScreen({
           "[CharacterSelect] ✅ Enter world approved for:",
           payload.characterId,
         );
+        enteringWorldRef.current = false;
         setEnteringWorld(false);
         // Call onPlay to transition to game
         onPlayRef.current(payload.characterId);
@@ -785,6 +788,7 @@ export function CharacterSelectScreen({
           "[CharacterSelect] ⚠️ Enter world rejected:",
           payload.reason,
         );
+        enteringWorldRef.current = false;
         setEnteringWorld(false);
         setErrorMessage(payload.message);
         // Stay on character select screen (already on confirm view, just show error)
@@ -1094,10 +1098,13 @@ export function CharacterSelectScreen({
   }, [onPlay]);
 
   const enterWorld = React.useCallback(() => {
-    if (!selectedCharacterId || enteringWorld) return;
+    // Use ref for synchronous check to prevent double-click race condition
+    if (!selectedCharacterId || enteringWorldRef.current) return;
+    enteringWorldRef.current = true;
 
     const ws = preWsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
+      enteringWorldRef.current = false;
       setErrorMessage("Connection lost. Please refresh the page.");
       return;
     }
@@ -1111,7 +1118,7 @@ export function CharacterSelectScreen({
       characterId: selectedCharacterId,
     });
     ws.send(packet);
-  }, [selectedCharacterId, enteringWorld]);
+  }, [selectedCharacterId]);
 
   const GoldRule = ({
     className = "",
