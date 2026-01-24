@@ -174,7 +174,7 @@ export function useDrop(config: DropConfig): DropResult {
     isOver,
     canDrop,
     relativePosition,
-    dropRect,
+    dropRect: dropRectRef.current,
     dragItem: canDrop ? dragItem : null,
     dropProps: {
       ref: setNodeRef,
