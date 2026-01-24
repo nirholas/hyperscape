@@ -606,11 +606,13 @@ export const QuestDetailPopup = memo(function QuestDetailPopup({
 interface QuestListItemProps {
   quest: Quest;
   onClick: () => void;
+  isSelected?: boolean;
 }
 
 const QuestListItem = memo(function QuestListItem({
   quest,
   onClick,
+  isSelected = false,
 }: QuestListItemProps): React.ReactElement {
   const theme = useTheme();
   const [isHovered, setIsHovered] = useState(false);
@@ -631,6 +633,17 @@ const QuestListItem = memo(function QuestListItem({
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  // Determine background color based on selection and hover state
+  const getBackgroundColor = () => {
+    if (isSelected) {
+      return theme.colors.slot.selected ?? theme.colors.accent.primary + "33";
+    }
+    if (isHovered) {
+      return theme.colors.slot.hover;
+    }
+    return "transparent";
+  };
+
   const rowStyle: CSSProperties = {
     display: "flex",
     alignItems: "center",
@@ -639,8 +652,11 @@ const QuestListItem = memo(function QuestListItem({
       ? `${theme.spacing.sm}px ${theme.spacing.sm}px`
       : `${theme.spacing.sm}px ${theme.spacing.md}px`,
     cursor: "pointer",
-    backgroundColor: isHovered ? theme.colors.slot.hover : "transparent",
+    backgroundColor: getBackgroundColor(),
     borderBottom: `1px solid ${theme.colors.border.default}`,
+    borderLeft: isSelected
+      ? `3px solid ${theme.colors.accent.primary}`
+      : "3px solid transparent",
     transition: theme.transitions.fast,
     minHeight: isMobile ? "48px" : "40px", // Touch-friendly on mobile
   };
@@ -704,6 +720,7 @@ interface CategoryGroupProps {
   category: QuestCategory;
   quests: Quest[];
   onQuestClick: (quest: Quest) => void;
+  selectedQuestId?: string | null;
   defaultCollapsed?: boolean;
 }
 
@@ -711,6 +728,7 @@ const CategoryGroup = memo(function CategoryGroup({
   category,
   quests,
   onQuestClick,
+  selectedQuestId,
   defaultCollapsed = false,
 }: CategoryGroupProps): React.ReactElement | null {
   const theme = useTheme();
@@ -805,6 +823,7 @@ const CategoryGroup = memo(function CategoryGroup({
               key={quest.id}
               quest={quest}
               onClick={() => onQuestClick(quest)}
+              isSelected={quest.id === selectedQuestId}
             />
           ))}
         </div>
@@ -873,6 +892,11 @@ export const QuestLog = memo(function QuestLog({
   // Handle quest click - open popup or call external handler
   const handleQuestClick = useCallback(
     (quest: Quest) => {
+      // Notify parent of selection change
+      if (onSelectQuest) {
+        onSelectQuest(quest);
+      }
+
       if (useExternalPopup && onQuestClick) {
         // Use external popup handler
         onQuestClick(quest);
@@ -881,7 +905,7 @@ export const QuestLog = memo(function QuestLog({
         setPopupQuest(quest);
       }
     },
-    [useExternalPopup, onQuestClick],
+    [useExternalPopup, onQuestClick, onSelectQuest],
   );
 
   // Close popup
@@ -1288,6 +1312,7 @@ export const QuestLog = memo(function QuestLog({
                     category={category}
                     quests={questsByCategory[category]}
                     onQuestClick={handleQuestClick}
+                    selectedQuestId={selectedQuestId}
                   />
                 ),
               )}
@@ -1300,6 +1325,7 @@ export const QuestLog = memo(function QuestLog({
                   key={quest.id}
                   quest={quest}
                   onClick={() => handleQuestClick(quest)}
+                  isSelected={quest.id === selectedQuestId}
                 />
               ))}
             </div>

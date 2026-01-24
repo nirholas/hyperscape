@@ -1,12 +1,6 @@
 import { useCallback, useRef, useEffect, useState } from "react";
 import { useDragStore } from "../../stores/dragStore";
-import type {
-  DropConfig,
-  DropResult,
-  DragItem,
-  Point,
-  Rect,
-} from "../../types";
+import type { DropConfig, DropResult, Point, Rect } from "../../types";
 import { dropTargetRegistry, getElementRect } from "./utils";
 
 /**
@@ -160,7 +154,6 @@ export function useDrop(config: DropConfig): DropResult {
       onDrop(dragItem, relativePosition);
     }
     // Only run when isDragging changes to false
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDragging]);
 
   // Cleanup on unmount

@@ -20,7 +20,7 @@ import {
   sortQuests,
   filterQuests,
 } from "@/game/systems";
-import { COLORS, panelStyles } from "../../constants";
+import { panelStyles } from "../../constants";
 import type { ClientWorld } from "../../types";
 
 interface QuestsPanelProps {

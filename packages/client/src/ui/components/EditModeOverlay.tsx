@@ -34,7 +34,6 @@ export function EditModeOverlay({
 }: EditModeOverlayProps): React.ReactElement {
   const theme = useTheme();
   const {
-    mode,
     toggleMode,
     showGrid,
     setShowGrid,

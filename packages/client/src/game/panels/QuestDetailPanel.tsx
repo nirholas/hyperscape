@@ -79,13 +79,6 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
     [world],
   );
 
-  const handleTrackQuest = useCallback(
-    (quest: Quest) => {
-      world.network?.send?.("questTrack", { questId: quest.id });
-    },
-    [world],
-  );
-
   const handleClose = useCallback(() => {
     setSelectedQuest(null);
     onClose?.();
@@ -304,6 +297,21 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
           )}
           {selectedQuest.title}
         </h3>
+        <button
+          onClick={handleClose}
+          style={{
+            background: "transparent",
+            border: "none",
+            color: COLORS.TEXT_MUTED,
+            fontSize: typography.fontSize.lg,
+            cursor: "pointer",
+            padding: spacing.xs,
+            lineHeight: 1,
+          }}
+          title="Close"
+        >
+          ✕
+        </button>
       </div>
 
       {/* Content */}
@@ -430,9 +438,9 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
         {selectedQuest.state === "active" && (
           <button
             style={secondaryButtonStyle}
-            onClick={() => handleTrackQuest(selectedQuest)}
+            onClick={() => handleTogglePin(selectedQuest)}
           >
-            {selectedQuest.pinned ? "Untrack" : "Track"}
+            {selectedQuest.pinned ? "Unpin" : "Pin"}
           </button>
         )}
         {canComplete && (

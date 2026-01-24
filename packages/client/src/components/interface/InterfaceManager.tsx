@@ -1013,7 +1013,6 @@ function DesktopInterfaceManager({
   const { isUnlocked, isHolding, holdProgress } = useEditMode();
   const { loadFromStorage } = usePresetStore();
   const windowStoreUpdate = useWindowStore((s) => s.updateWindow);
-  const destroyWindowFromStore = useWindowStore((s) => s.destroyWindow);
 
   // UI state - detect mobile viewport (legacy, kept for feature gating)
   const [isMobile, setIsMobile] = useState<boolean>(false);
