@@ -1523,7 +1523,14 @@ export function createPanelRenderer(
         return (
           <ScrollablePanelWrapper scrollable={config.scrollable}>
             <Suspense fallback={<PanelLoadingFallback />}>
-              <QuestDetailPanel world={world} />
+              <QuestDetailPanel
+                world={world}
+                onClose={() => {
+                  if (windowId) {
+                    useWindowStore.getState().destroyWindow(windowId);
+                  }
+                }}
+              />
             </Suspense>
           </ScrollablePanelWrapper>
         );
