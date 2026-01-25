@@ -1108,6 +1108,9 @@ export const useWindowStore = create<WindowStoreState>()(
         // This ensures windows maintain their position relative to their anchor point
         const clampedWindowsMap = new Map<string, WindowState>();
 
+        // Track stacking offsets for each anchor (for mobile->desktop transition)
+        const anchorStackOffsets = new Map<string, number>();
+
         for (const [id, windowState] of windowsMap) {
           // Get anchor from window state or determine from ID
           const anchor: WindowAnchor =
@@ -1116,15 +1119,45 @@ export const useWindowStore = create<WindowStoreState>()(
           let newPosition: { x: number; y: number };
 
           if (isMobileToDesktopTransition) {
-            // For mobile->desktop transition, use default anchor positions
+            // For mobile->desktop transition, use default anchor positions with stacking
             // Mobile positions are meaningless for desktop layout
-            newPosition = getDefaultPositionForAnchor(
+            const basePosition = getDefaultPositionForAnchor(
               windowState.size,
               anchor,
               currentViewport,
             );
+
+            // Get current stack offset for this anchor
+            const stackOffset = anchorStackOffsets.get(anchor) ?? 0;
+
+            // Apply stack offset based on anchor type
+            // For bottom anchors, stack upward; for top anchors, stack downward
+            if (anchor.startsWith("bottom")) {
+              newPosition = {
+                x: basePosition.x,
+                y: basePosition.y - stackOffset,
+              };
+            } else if (anchor.startsWith("top")) {
+              newPosition = {
+                x: basePosition.x,
+                y: basePosition.y + stackOffset,
+              };
+            } else {
+              // Center anchors - stack horizontally or use offset
+              newPosition = {
+                x: basePosition.x + stackOffset * 0.3,
+                y: basePosition.y,
+              };
+            }
+
+            // Update stack offset for next window at this anchor
+            anchorStackOffsets.set(
+              anchor,
+              stackOffset + windowState.size.height + 5,
+            );
+
             debugLog(
-              `[WindowStore] Reset window ${id} to anchor ${anchor} default position: (${newPosition.x}, ${newPosition.y})`,
+              `[WindowStore] Reset window ${id} to anchor ${anchor} position: (${newPosition.x}, ${newPosition.y})`,
             );
           } else {
             // Normal resize: preserve offset from anchor

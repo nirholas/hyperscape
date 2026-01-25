@@ -13,8 +13,8 @@ import {
   repositionWindowForViewport,
   detectNearestAnchor,
   getDefaultAnchor,
-  getDefaultPositionForAnchor,
 } from "@/ui/stores/anchorUtils";
+import { createDefaultWindows } from "./DefaultLayoutFactory";
 
 /** Mobile breakpoint threshold */
 const MOBILE_BREAKPOINT = 768;
@@ -69,34 +69,49 @@ export function useViewportResize() {
         // Update mobile state tracking
         wasMobileRef.current = nowMobile;
 
-        // On mobile <-> desktop transition, reset windows to their default anchor positions
-        // Mobile and desktop use completely different layouts, so we can't preserve offsets
+        // On mobile <-> desktop transition, reset to default layout
+        // Mobile and desktop use completely different layouts, so we reset entirely
         if (transitionedFromMobile || transitionedToMobile) {
-          const allWindows = useWindowStore.getState().getAllWindows();
-          const windowStoreUpdate = useWindowStore.getState().updateWindow;
-          const newViewport = { width: newWidth, height: newHeight };
+          if (transitionedFromMobile) {
+            // Get the default layout for the current (desktop) viewport
+            const defaultWindows = createDefaultWindows();
+            const windowStoreUpdate = useWindowStore.getState().updateWindow;
+            const allWindows = useWindowStore.getState().getAllWindows();
 
-          // For mobile->desktop transition, place each window at its default anchor position
-          // This means flush with the anchor edge (zero offset from anchor)
-          allWindows.forEach((win) => {
-            // Get anchor from window or determine from ID
-            const anchor = win.anchor ?? getDefaultAnchor(win.id);
-
-            // Get the default position for this anchor (flush with edge)
-            const newPosition = getDefaultPositionForAnchor(
-              win.size,
-              anchor,
-              newViewport,
+            // Create a map of default window positions by ID
+            const defaultPositions = new Map(
+              defaultWindows.map((w) => [
+                w.id,
+                { position: w.position, anchor: w.anchor },
+              ]),
             );
 
-            windowStoreUpdate(win.id, {
-              position: {
-                x: Math.round(newPosition.x),
-                y: Math.round(newPosition.y),
-              },
-              anchor,
+            // Update each existing window to its default position
+            allWindows.forEach((win) => {
+              const defaultWin = defaultPositions.get(win.id);
+              if (defaultWin?.position) {
+                windowStoreUpdate(win.id, {
+                  position: defaultWin.position,
+                  anchor: defaultWin.anchor ?? getDefaultAnchor(win.id),
+                });
+              } else {
+                // For windows not in default layout, use anchor-based positioning
+                const anchor = win.anchor ?? getDefaultAnchor(win.id);
+                const newViewport = { width: newWidth, height: newHeight };
+                const newPosition = repositionWindowForViewport(
+                  win.position,
+                  win.size,
+                  anchor,
+                  prevViewportRef.current,
+                  newViewport,
+                );
+                windowStoreUpdate(win.id, {
+                  position: newPosition,
+                  anchor,
+                });
+              }
             });
-          });
+          }
 
           // Update tracked viewport size
           prevViewportRef.current = { width: newWidth, height: newHeight };
