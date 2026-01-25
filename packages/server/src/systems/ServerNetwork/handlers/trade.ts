@@ -48,6 +48,7 @@ import {
 import { uuid } from "@hyperscape/shared";
 import type { DatabaseConnection } from "./common/types";
 import type { TradingSystem } from "../../TradingSystem";
+import type { PendingTradeManager } from "../PendingTradeManager";
 
 // Rate limiter for trade operations (more lenient than combat/store)
 const rateLimiter = new RateLimitService();
@@ -63,6 +64,17 @@ function getTradingSystem(world: World): TradingSystem | undefined {
   // TradingSystem is stored on world object
   const worldWithTrading = world as { tradingSystem?: TradingSystem };
   return worldWithTrading.tradingSystem;
+}
+
+/**
+ * Get PendingTradeManager from world
+ */
+function getPendingTradeManager(world: World): PendingTradeManager | undefined {
+  // PendingTradeManager is stored on world object
+  const worldWithPending = world as {
+    pendingTradeManager?: PendingTradeManager;
+  };
+  return worldWithPending.pendingTradeManager;
 }
 
 /**
@@ -415,6 +427,8 @@ function sendTradeConfirmScreen(
 
 /**
  * Handle trade request from Player A to Player B
+ *
+ * OSRS-style behavior: If not in range, player walks up to target first
  */
 export function handleTradeRequest(
   socket: ServerSocket,
@@ -455,16 +469,6 @@ export function handleTradeRequest(
     return;
   }
 
-  // Proximity check - players must be adjacent to trade (OSRS-style)
-  if (!arePlayersInTradeRange(world, playerId, targetPlayerId)) {
-    sendTradeError(
-      socket,
-      "You need to be closer to trade with that player",
-      "TOO_FAR",
-    );
-    return;
-  }
-
   // Interface blocking check - can't trade while using bank/store/dialogue
   if (hasActiveInterfaceSession(world, playerId)) {
     sendTradeError(
@@ -480,58 +484,98 @@ export function handleTradeRequest(
     return;
   }
 
-  // Get initiator info
-  const initiatorName = getPlayerName(world, playerId);
-  const initiatorLevel = getPlayerCombatLevel(world, playerId);
+  // Function to actually send the trade request (called when in range)
+  const sendTradeRequestToTarget = (): void => {
+    // Re-validate target is still online and available
+    if (!tradingSystem.isPlayerOnline(targetPlayerId)) {
+      sendTradeError(socket, "Player is not online", "PLAYER_OFFLINE");
+      return;
+    }
 
-  // Create trade request
-  const result = tradingSystem.createTradeRequest(
+    if (hasActiveInterfaceSession(world, targetPlayerId)) {
+      sendTradeError(socket, "That player is busy", "PLAYER_BUSY");
+      return;
+    }
+
+    // Get initiator info
+    const initiatorName = getPlayerName(world, playerId);
+    const initiatorLevel = getPlayerCombatLevel(world, playerId);
+
+    // Create trade request
+    const result = tradingSystem.createTradeRequest(
+      playerId,
+      initiatorName,
+      socket.id,
+      targetPlayerId,
+    );
+
+    if (!result.success) {
+      sendTradeError(socket, result.error!, result.errorCode || "UNKNOWN");
+      return;
+    }
+
+    // Send notification to target player as OSRS-style pink chat message
+    const targetSocket = getSocketByPlayerId(world, targetPlayerId);
+    if (targetSocket) {
+      // Send trade request as a clickable chat message (OSRS-style)
+      const chatMessage = {
+        id: uuid(),
+        from: "", // Empty string - no sender prefix for trade requests
+        fromId: playerId,
+        body: `${initiatorName} wishes to trade with you.`,
+        text: `${initiatorName} wishes to trade with you.`,
+        timestamp: Date.now(),
+        createdAt: new Date().toISOString(),
+        type: "trade_request" as const,
+        tradeId: result.tradeId,
+      };
+      sendToSocket(targetSocket, "chatAdded", chatMessage);
+
+      // Also send the structured trade request data for UI purposes
+      sendToSocket(targetSocket, "tradeIncoming", {
+        tradeId: result.tradeId,
+        fromPlayerId: playerId,
+        fromPlayerName: initiatorName,
+        fromPlayerLevel: initiatorLevel,
+      });
+    } else {
+      // Target socket not found - cancel the trade
+      tradingSystem.cancelTrade(result.tradeId!, "disconnected");
+      sendTradeError(socket, "Player is not available", "PLAYER_OFFLINE");
+      return;
+    }
+
+    // Send confirmation to initiator
+    sendSuccessToast(
+      socket,
+      `Trade request sent to ${getPlayerName(world, targetPlayerId)}`,
+    );
+  };
+
+  // Check if players are already in range
+  if (arePlayersInTradeRange(world, playerId, targetPlayerId)) {
+    // Already in range - send trade request immediately
+    sendTradeRequestToTarget();
+    return;
+  }
+
+  // Not in range - use PendingTradeManager to walk up to target first
+  const pendingTradeManager = getPendingTradeManager(world);
+  if (!pendingTradeManager) {
+    // Fallback: just send error if manager unavailable
+    sendTradeError(
+      socket,
+      "You need to be closer to trade with that player",
+      "TOO_FAR",
+    );
+    return;
+  }
+
+  // Queue pending trade - player will walk up to target, then send request
+  pendingTradeManager.queuePendingTrade(
     playerId,
-    initiatorName,
-    socket.id,
     targetPlayerId,
-  );
-
-  if (!result.success) {
-    sendTradeError(socket, result.error!, result.errorCode || "UNKNOWN");
-    return;
-  }
-
-  // Send notification to target player as OSRS-style pink chat message
-  const targetSocket = getSocketByPlayerId(world, targetPlayerId);
-  if (targetSocket) {
-    // Send trade request as a clickable chat message (OSRS-style)
-    const chatMessage = {
-      id: uuid(),
-      from: "", // Empty string - no sender prefix for trade requests
-      fromId: playerId,
-      body: `${initiatorName} wishes to trade with you.`,
-      text: `${initiatorName} wishes to trade with you.`,
-      timestamp: Date.now(),
-      createdAt: new Date().toISOString(),
-      type: "trade_request" as const,
-      tradeId: result.tradeId,
-    };
-    sendToSocket(targetSocket, "chatAdded", chatMessage);
-
-    // Also send the structured trade request data for UI purposes
-    sendToSocket(targetSocket, "tradeIncoming", {
-      tradeId: result.tradeId,
-      fromPlayerId: playerId,
-      fromPlayerName: initiatorName,
-      fromPlayerLevel: initiatorLevel,
-    });
-  } else {
-    // Target socket not found - cancel the trade
-    tradingSystem.cancelTrade(result.tradeId!, "disconnected");
-    sendTradeError(socket, "Player is not available", "PLAYER_OFFLINE");
-    return;
-  }
-
-  // Send confirmation to initiator
-  sendSuccessToast(
-    socket,
-    `Trade request sent to ${getPlayerName(world, targetPlayerId)}`,
+    sendTradeRequestToTarget,
   );
 }
 
