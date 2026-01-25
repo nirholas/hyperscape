@@ -20,7 +20,9 @@ interface ChatMessage {
   body: string;
   createdAt: string;
   timestamp?: number;
-  type?: "chat" | "system" | "activity" | "warning" | "news";
+  type?: "chat" | "system" | "activity" | "warning" | "news" | "trade_request";
+  /** Trade ID for trade_request messages */
+  tradeId?: string;
 }
 
 interface ChatPanelProps {
@@ -39,6 +41,9 @@ type ChatWorld = ClientWorld & {
       release?: () => void;
     };
   };
+  network?: {
+    send?: (method: string, payload?: Record<string, unknown>) => void;
+  };
 };
 
 // Color scheme for different message types
@@ -49,6 +54,7 @@ const MESSAGE_COLORS = {
   activity: COLORS.SUCCESS, // Green for activity (logins, etc.)
   warning: COLORS.ERROR, // Red for warnings
   news: "#a855f7", // Purple for news/events (no exact match in COLORS)
+  trade_request: "#FF00FF", // Pink/magenta for trade requests (OSRS-style)
   default: COLORS.TEXT_PRIMARY,
 };
 
@@ -169,10 +175,26 @@ export function ChatPanel({ world }: ChatPanelProps): React.ReactElement {
         return MESSAGE_COLORS.warning;
       case "news":
         return MESSAGE_COLORS.news;
+      case "trade_request":
+        return MESSAGE_COLORS.trade_request;
       default:
         return MESSAGE_COLORS.default;
     }
   };
+
+  // Handle clicking on a trade request message
+  const handleTradeRequestClick = useCallback(
+    (tradeId: string) => {
+      // Send trade acceptance to server
+      if (chatWorld.network?.send) {
+        chatWorld.network.send("tradeRequestRespond", {
+          tradeId,
+          accept: true,
+        });
+      }
+    },
+    [chatWorld],
+  );
 
   const tabs = [
     { id: "all" as const, icon: "📢", title: "All Messages" },
@@ -263,17 +285,28 @@ export function ChatPanel({ world }: ChatPanelProps): React.ReactElement {
           const msgType = getMessageType(msg);
           const msgColor = getMessageColor(msgType);
           const time = formatTime(msg);
+          const isTradeRequest = msgType === "trade_request" && msg.tradeId;
 
           return (
             <div
               key={msg.id}
+              onClick={
+                isTradeRequest
+                  ? () => handleTradeRequestClick(msg.tradeId!)
+                  : undefined
+              }
               style={{
                 fontSize: 11,
                 lineHeight: 1.4,
                 wordBreak: "break-word",
                 overflowWrap: "break-word",
                 whiteSpace: "pre-wrap",
+                cursor: isTradeRequest ? "pointer" : "default",
+                textDecoration: isTradeRequest ? "underline" : "none",
               }}
+              title={
+                isTradeRequest ? "Click to accept trade request" : undefined
+              }
             >
               {/* Timestamp */}
               {time && (
@@ -299,9 +332,11 @@ export function ChatPanel({ world }: ChatPanelProps): React.ReactElement {
 
               {/* Message body */}
               <span style={{ color: msgColor }}>
-                {msgType !== "chat" && msg.from && (
-                  <span style={{ fontWeight: 600 }}>{msg.from}: </span>
-                )}
+                {msgType !== "chat" &&
+                  msgType !== "trade_request" &&
+                  msg.from && (
+                    <span style={{ fontWeight: 600 }}>{msg.from}: </span>
+                  )}
                 {msg.body}
               </span>
             </div>

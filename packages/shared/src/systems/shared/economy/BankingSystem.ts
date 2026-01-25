@@ -127,9 +127,13 @@ export class BankingSystem extends SystemBase {
     this.subscribe(EventType.INVENTORY_UPDATED, (data) => {
       const typedData = data as {
         playerId: string;
-        items: Array<{ slot: number; itemId: string; quantity: number }>;
-        coins: number;
+        items?: Array<{ slot: number; itemId: string; quantity: number }>;
+        coins?: number;
       };
+      // Defensive check: some INVENTORY_UPDATED events may not include items array
+      if (!typedData.playerId || !Array.isArray(typedData.items)) {
+        return;
+      }
       const playerId = createPlayerID(typedData.playerId);
       const inventory = this.playerInventories.get(playerId) || {
         items: [],

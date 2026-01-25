@@ -19,8 +19,8 @@ import React, {
   useMemo,
   type ReactNode,
 } from "react";
-import { EventType, getItem } from "@hyperscape/shared";
-import type { PlayerStats } from "@hyperscape/shared";
+import { EventType, getItem, uuid } from "@hyperscape/shared";
+import type { PlayerStats, PlayerID } from "@hyperscape/shared";
 import {
   DndProvider,
   useWindowManager,
@@ -87,6 +87,12 @@ import { Minimap } from "../../game/hud/Minimap";
 import { QuestStartPanel } from "../../game/panels/QuestStartPanel";
 import { QuestCompletePanel } from "../../game/panels/QuestCompletePanel";
 import { XpLampPanel } from "../../game/panels/XpLampPanel";
+import { TradePanel, TradeRequestModal } from "../../game/panels/TradePanel";
+import type {
+  TradeWindowState,
+  TradeRequestModalState,
+  TradeOfferItem,
+} from "@hyperscape/shared";
 
 /** Inventory slot view item (simplified) */
 type InventorySlotViewItem = {
@@ -1199,6 +1205,28 @@ function DesktopInterfaceManager({
     }>;
   } | null>(null);
 
+  // Trade UI state
+  const [tradeState, setTradeState] = useState<TradeWindowState>({
+    isOpen: false,
+    tradeId: null,
+    screen: "offer",
+    partner: null,
+    myOffer: [],
+    myAccepted: false,
+    theirOffer: [],
+    theirAccepted: false,
+    myOfferValue: 0,
+    theirOfferValue: 0,
+    partnerFreeSlots: 28, // OSRS-style: partner's available inventory slots
+  });
+
+  const [tradeRequestState, setTradeRequestState] =
+    useState<TradeRequestModalState>({
+      visible: false,
+      tradeId: null,
+      fromPlayer: null,
+    });
+
   // World map modal state
   const [worldMapOpen, setWorldMapOpen] = useState(false);
 
@@ -1676,6 +1704,97 @@ function DesktopInterfaceManager({
           setSmithingData(null);
         }
       }
+
+      // Trade window opened
+      if (update.component === "trade") {
+        const data = update.data as {
+          isOpen: boolean;
+          tradeId: string;
+          partner: { id: string; name: string; level: number };
+          partnerFreeSlots?: number;
+        };
+        setTradeState((prev) => ({
+          ...prev,
+          isOpen: data.isOpen,
+          tradeId: data.tradeId,
+          screen: "offer" as const,
+          partner: {
+            id: data.partner.id as PlayerID,
+            name: data.partner.name,
+            level: data.partner.level,
+          },
+          myOffer: [],
+          theirOffer: [],
+          myAccepted: false,
+          theirAccepted: false,
+          myOfferValue: 0,
+          theirOfferValue: 0,
+          partnerFreeSlots: data.partnerFreeSlots ?? 28,
+        }));
+        // Close request modal when trade starts
+        setTradeRequestState((prev) => ({ ...prev, visible: false }));
+      }
+
+      // Trade state updated (items/acceptance changed)
+      if (update.component === "tradeUpdate") {
+        const data = update.data as {
+          tradeId: string;
+          myOffer: TradeOfferItem[];
+          myAccepted: boolean;
+          theirOffer: TradeOfferItem[];
+          theirAccepted: boolean;
+          partnerFreeSlots?: number;
+        };
+        setTradeState((prev) => ({
+          ...prev,
+          myOffer: data.myOffer,
+          myAccepted: data.myAccepted,
+          theirOffer: data.theirOffer,
+          theirAccepted: data.theirAccepted,
+          partnerFreeSlots: data.partnerFreeSlots ?? prev.partnerFreeSlots,
+        }));
+      }
+
+      // Trade moved to confirmation screen (OSRS two-screen flow)
+      if (update.component === "tradeConfirm") {
+        const data = update.data as {
+          tradeId: string;
+          screen: "confirm";
+          myOffer: TradeOfferItem[];
+          theirOffer: TradeOfferItem[];
+          myOfferValue: number;
+          theirOfferValue: number;
+          myAccepted: boolean;
+          theirAccepted: boolean;
+        };
+        setTradeState((prev) => ({
+          ...prev,
+          screen: data.screen,
+          myOffer: data.myOffer,
+          theirOffer: data.theirOffer,
+          myOfferValue: data.myOfferValue,
+          theirOfferValue: data.theirOfferValue,
+          myAccepted: data.myAccepted,
+          theirAccepted: data.theirAccepted,
+        }));
+      }
+
+      // Trade closed (completed or cancelled)
+      if (update.component === "tradeClose") {
+        setTradeState((prev) => ({
+          ...prev,
+          isOpen: false,
+          tradeId: null,
+          screen: "offer" as const,
+          partner: null,
+          myOffer: [],
+          theirOffer: [],
+          myOfferValue: 0,
+          theirOfferValue: 0,
+          partnerFreeSlots: 28, // Reset to full
+        }));
+        setTradeRequestState((prev) => ({ ...prev, visible: false }));
+      }
     };
 
     const onInventory = (raw: unknown) => {
@@ -1684,8 +1803,12 @@ function DesktopInterfaceManager({
         playerId: string;
         coins: number;
       };
-      setInventory(data.items);
-      setCoins(data.coins);
+      // CRITICAL: Only update if this is OUR inventory, not another player's
+      const localId = world.entities?.player?.id;
+      if (!localId || data.playerId === localId) {
+        setInventory(data.items);
+        setCoins(data.coins);
+      }
     };
 
     const onCoins = (raw: unknown) => {
@@ -2370,7 +2493,7 @@ function DesktopInterfaceManager({
             visible={true}
             onClose={() => {
               setBankData(null);
-              world?.network?.send?.("bank_close", {});
+              world?.network?.send?.("bankClose", {});
             }}
             title="Bank"
             width={900}
@@ -2387,7 +2510,7 @@ function DesktopInterfaceManager({
               coins={coins}
               onClose={() => {
                 setBankData(null);
-                world?.network?.send?.("bank_close", {});
+                world?.network?.send?.("bankClose", {});
               }}
             />
           </ModalWindow>
@@ -2583,6 +2706,96 @@ function DesktopInterfaceManager({
             itemId={xpLampData.itemId}
             slot={xpLampData.slot}
             onClose={() => setXpLampData(null)}
+          />
+        )}
+
+        {/* Trade Request Modal */}
+        {tradeRequestState.visible && tradeRequestState.fromPlayer && (
+          <TradeRequestModal
+            state={tradeRequestState}
+            onAccept={() => {
+              if (tradeRequestState.tradeId) {
+                world?.network?.send?.("tradeRequestRespond", {
+                  tradeId: tradeRequestState.tradeId,
+                  accept: true,
+                });
+              }
+            }}
+            onDecline={() => {
+              if (tradeRequestState.tradeId) {
+                world?.network?.send?.("tradeRequestRespond", {
+                  tradeId: tradeRequestState.tradeId,
+                  accept: false,
+                });
+              }
+              setTradeRequestState((prev) => ({ ...prev, visible: false }));
+            }}
+          />
+        )}
+
+        {/* Trade Panel */}
+        {tradeState.isOpen && tradeState.tradeId && (
+          <TradePanel
+            state={tradeState}
+            inventory={inventory.map((item, idx) => ({
+              slot: item.slot ?? idx,
+              itemId: item.itemId,
+              quantity: item.quantity,
+            }))}
+            onAddItem={(slot, quantity) => {
+              world?.network?.send?.("tradeAddItem", {
+                tradeId: tradeState.tradeId,
+                inventorySlot: slot,
+                quantity,
+              });
+            }}
+            onRemoveItem={(tradeSlot) => {
+              world?.network?.send?.("tradeRemoveItem", {
+                tradeId: tradeState.tradeId,
+                tradeSlot,
+              });
+            }}
+            onAccept={() => {
+              world?.network?.send?.("tradeAccept", {
+                tradeId: tradeState.tradeId,
+              });
+            }}
+            onCancel={() => {
+              world?.network?.send?.("tradeCancel", {
+                tradeId: tradeState.tradeId,
+              });
+              setTradeState((prev) => ({ ...prev, isOpen: false }));
+            }}
+            onExamineItem={(itemId) => {
+              // Show examine text in chat (OSRS-style game message)
+              const itemData = getItem(itemId);
+              const examineText =
+                itemData?.examine || `It's a ${itemData?.name || itemId}.`;
+              if (world?.chat?.add) {
+                world.chat.add({
+                  id: uuid(),
+                  from: "",
+                  body: examineText,
+                  createdAt: new Date().toISOString(),
+                  type: "system",
+                });
+              }
+            }}
+            onValueItem={(itemId) => {
+              // Show item value in chat (OSRS-style game message)
+              const itemData = getItem(itemId);
+              const value = itemData?.value || 0;
+              const valueText = `${itemData?.name || itemId}: ${value.toLocaleString()} gp`;
+              if (world?.chat?.add) {
+                world.chat.add({
+                  id: uuid(),
+                  from: "",
+                  body: valueText,
+                  createdAt: new Date().toISOString(),
+                  type: "system",
+                });
+              }
+            }}
           />
         )}
 

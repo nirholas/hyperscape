@@ -48,6 +48,7 @@ export {
   getDatabase,
   getSessionManager,
   getEntityPosition,
+  hasActiveInterfaceSession,
 } from "./helpers";
 
 // ============================================================================
