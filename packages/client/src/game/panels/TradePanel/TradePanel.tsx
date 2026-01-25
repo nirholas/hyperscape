@@ -91,6 +91,37 @@ function formatQuantity(qty: number): { text: string; color: string } {
   }
 }
 
+/**
+ * Format gold value for wealth indicator display (OSRS-style)
+ */
+function formatGoldValue(value: number): string {
+  if (value < 1000) {
+    return value.toLocaleString();
+  } else if (value < 1000000) {
+    const k = Math.floor(value / 1000);
+    const remainder = Math.floor((value % 1000) / 100);
+    return remainder > 0 ? `${k}.${remainder}K` : `${k}K`;
+  } else if (value < 1000000000) {
+    const m = Math.floor(value / 1000000);
+    const remainder = Math.floor((value % 1000000) / 100000);
+    return remainder > 0 ? `${m}.${remainder}M` : `${m}M`;
+  } else {
+    const b = Math.floor(value / 1000000000);
+    return `${b}B`;
+  }
+}
+
+/**
+ * Get color for wealth difference indicator
+ * Green = gaining value, Red = losing value, White = neutral
+ */
+function getWealthDifferenceColor(myValue: number, theirValue: number): string {
+  const diff = theirValue - myValue;
+  if (diff > 0) return "#22c55e"; // Green - gaining
+  if (diff < 0) return "#ef4444"; // Red - losing
+  return "#ffffff"; // White - equal
+}
+
 // ============================================================================
 // Sub-Components
 // ============================================================================
@@ -404,10 +435,24 @@ export function TradePanel({
               className="text-lg font-bold"
               style={{ color: theme.colors.text.accent }}
             >
-              Trading with{" "}
-              <span style={{ color: theme.colors.text.primary }}>
-                {state.partner.name}
-              </span>
+              {state.screen === "confirm" ? (
+                <>
+                  <span style={{ color: theme.colors.state.warning }}>
+                    Confirm Trade
+                  </span>
+                  {" with "}
+                  <span style={{ color: theme.colors.text.primary }}>
+                    {state.partner.name}
+                  </span>
+                </>
+              ) : (
+                <>
+                  Trading with{" "}
+                  <span style={{ color: theme.colors.text.primary }}>
+                    {state.partner.name}
+                  </span>
+                </>
+              )}
             </h2>
             <button
               onClick={onCancel}
@@ -464,12 +509,30 @@ export function TradePanel({
                         item={myOfferBySlot.get(i) || null}
                         slotIndex={i}
                         side="my"
-                        onRemove={() => onRemoveItem(i)}
+                        onRemove={
+                          state.screen === "offer"
+                            ? () => onRemoveItem(i)
+                            : undefined
+                        }
                         theme={theme}
                       />
                     ))}
                   </div>
                 </TradeDropZone>
+                {/* Wealth indicator for my offer */}
+                <div
+                  className="mt-2 px-2 py-1 rounded text-xs text-center"
+                  style={{
+                    background: theme.colors.background.tertiary,
+                    border: `1px solid ${theme.colors.border.default}`,
+                    color: theme.colors.text.secondary,
+                  }}
+                >
+                  Value:{" "}
+                  <span style={{ color: "#ffd700", fontWeight: "bold" }}>
+                    {formatGoldValue(state.myOfferValue)} gp
+                  </span>
+                </div>
               </div>
 
               {/* Divider */}
@@ -518,15 +581,85 @@ export function TradePanel({
                     />
                   ))}
                 </div>
+                {/* Wealth indicator for their offer */}
+                <div
+                  className="mt-2 px-2 py-1 rounded text-xs text-center"
+                  style={{
+                    background: theme.colors.background.tertiary,
+                    border: `1px solid ${theme.colors.border.default}`,
+                    color: theme.colors.text.secondary,
+                  }}
+                >
+                  Value:{" "}
+                  <span style={{ color: "#ffd700", fontWeight: "bold" }}>
+                    {formatGoldValue(state.theirOfferValue)} gp
+                  </span>
+                </div>
               </div>
             </div>
 
-            {/* Inventory mini-panel */}
-            <InventoryMiniPanel
-              items={inventory}
-              offeredSlots={offeredSlots}
-              theme={theme}
-            />
+            {/* Wealth transfer summary */}
+            {(state.myOfferValue > 0 || state.theirOfferValue > 0) && (
+              <div
+                className="mt-3 px-3 py-2 rounded text-sm text-center"
+                style={{
+                  background: theme.colors.background.tertiary,
+                  border: `1px solid ${theme.colors.border.decorative}`,
+                }}
+              >
+                <span style={{ color: theme.colors.text.secondary }}>
+                  Wealth transfer:{" "}
+                </span>
+                <span
+                  style={{
+                    color: getWealthDifferenceColor(
+                      state.myOfferValue,
+                      state.theirOfferValue,
+                    ),
+                    fontWeight: "bold",
+                  }}
+                >
+                  {state.theirOfferValue >= state.myOfferValue ? "+" : ""}
+                  {formatGoldValue(
+                    state.theirOfferValue - state.myOfferValue,
+                  )}{" "}
+                  gp
+                </span>
+                {Math.abs(state.theirOfferValue - state.myOfferValue) >
+                  Math.max(state.myOfferValue, state.theirOfferValue) * 0.5 &&
+                  state.myOfferValue > 0 && (
+                    <span
+                      className="ml-2"
+                      style={{ color: theme.colors.state.warning }}
+                    >
+                      ⚠️
+                    </span>
+                  )}
+              </div>
+            )}
+
+            {/* Inventory mini-panel - only show on offer screen */}
+            {state.screen === "offer" && (
+              <InventoryMiniPanel
+                items={inventory}
+                offeredSlots={offeredSlots}
+                theme={theme}
+              />
+            )}
+
+            {/* Confirmation screen message */}
+            {state.screen === "confirm" && (
+              <div
+                className="mt-3 px-3 py-2 rounded text-sm text-center"
+                style={{
+                  background: `${theme.colors.state.warning}20`,
+                  border: `1px solid ${theme.colors.state.warning}50`,
+                  color: theme.colors.state.warning,
+                }}
+              >
+                ⚠️ Please review the trade carefully before accepting
+              </div>
+            )}
 
             {/* Action buttons */}
             <div className="flex gap-3 mt-4">
@@ -557,7 +690,11 @@ export function TradePanel({
                   }
                 }}
               >
-                {state.myAccepted ? "Waiting for partner..." : "Accept Trade"}
+                {state.myAccepted
+                  ? "Waiting for partner..."
+                  : state.screen === "confirm"
+                    ? "Confirm Trade"
+                    : "Accept Trade"}
               </button>
               <button
                 onClick={onCancel}
