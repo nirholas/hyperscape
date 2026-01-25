@@ -479,15 +479,26 @@ export class TradingSystem {
 
   /**
    * Set acceptance state for a player
+   *
+   * Two-screen confirmation flow (OSRS-style):
+   * 1. On "active" (offer screen): both accept → moveToConfirming: true
+   * 2. On "confirming" (confirmation screen): both accept → bothAccepted: true
    */
   setAcceptance(
     tradeId: string,
     playerId: string,
     accepted: boolean,
-  ): TradeOperationResult & { bothAccepted?: boolean } {
+  ): TradeOperationResult & {
+    bothAccepted?: boolean;
+    moveToConfirming?: boolean;
+  } {
     const session = this.tradeSessions.get(tradeId);
 
-    if (!session || session.status !== "active") {
+    // Allow acceptance on both "active" and "confirming" screens
+    if (
+      !session ||
+      (session.status !== "active" && session.status !== "confirming")
+    ) {
       return {
         success: false,
         error: "Not in an active trade",
@@ -514,12 +525,83 @@ export class TradingSystem {
     const bothAccepted =
       session.initiator.accepted && session.recipient.accepted;
 
-    return { success: true, bothAccepted };
+    // Two-screen flow:
+    // - On offer screen (active): both accept → transition to confirmation screen
+    // - On confirmation screen (confirming): both accept → complete trade
+    if (bothAccepted && session.status === "active") {
+      return { success: true, moveToConfirming: true };
+    }
+
+    if (bothAccepted && session.status === "confirming") {
+      return { success: true, bothAccepted: true };
+    }
+
+    return { success: true };
+  }
+
+  /**
+   * Move trade to confirmation screen (OSRS two-screen flow)
+   * Resets acceptance for both players
+   */
+  moveToConfirmation(tradeId: string): TradeOperationResult {
+    const session = this.tradeSessions.get(tradeId);
+
+    if (!session || session.status !== "active") {
+      return {
+        success: false,
+        error: "Trade is not active",
+        errorCode: "INVALID_TRADE",
+      };
+    }
+
+    // Transition to confirming status
+    session.status = "confirming";
+
+    // Reset acceptance for both players - they must accept again on confirmation screen
+    session.initiator.accepted = false;
+    session.recipient.accepted = false;
+
+    // Update activity timestamp
+    session.lastActivityAt = Date.now();
+    session.expiresAt = Date.now() + TRADE_CONSTANTS.ACTIVITY_TIMEOUT_MS;
+
+    return { success: true };
+  }
+
+  /**
+   * Return to offer screen from confirmation screen (if player wants to modify)
+   * Resets acceptance for both players
+   */
+  returnToOfferScreen(tradeId: string): TradeOperationResult {
+    const session = this.tradeSessions.get(tradeId);
+
+    if (!session || session.status !== "confirming") {
+      return {
+        success: false,
+        error: "Trade is not in confirmation",
+        errorCode: "INVALID_TRADE",
+      };
+    }
+
+    // Transition back to active status
+    session.status = "active";
+
+    // Reset acceptance for both players
+    session.initiator.accepted = false;
+    session.recipient.accepted = false;
+
+    // Update activity timestamp
+    session.lastActivityAt = Date.now();
+    session.expiresAt = Date.now() + TRADE_CONSTANTS.ACTIVITY_TIMEOUT_MS;
+
+    return { success: true };
   }
 
   /**
    * Complete a trade - swap items between players
    * Returns the items each player receives (for database operations)
+   *
+   * Note: Trade must be in "confirming" status (OSRS two-screen flow)
    */
   completeTrade(tradeId: string): TradeOperationResult & {
     initiatorReceives?: TradeOfferItem[];
@@ -529,10 +611,10 @@ export class TradingSystem {
   } {
     const session = this.tradeSessions.get(tradeId);
 
-    if (!session || session.status !== "active") {
+    if (!session || session.status !== "confirming") {
       return {
         success: false,
-        error: "Trade is not active",
+        error: "Trade is not in confirmation",
         errorCode: "INVALID_TRADE",
       };
     }

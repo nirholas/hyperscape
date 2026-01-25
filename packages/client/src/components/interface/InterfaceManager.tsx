@@ -1209,11 +1209,14 @@ function DesktopInterfaceManager({
   const [tradeState, setTradeState] = useState<TradeWindowState>({
     isOpen: false,
     tradeId: null,
+    screen: "offer",
     partner: null,
     myOffer: [],
     myAccepted: false,
     theirOffer: [],
     theirAccepted: false,
+    myOfferValue: 0,
+    theirOfferValue: 0,
   });
 
   const [tradeRequestState, setTradeRequestState] =
@@ -1730,6 +1733,7 @@ function DesktopInterfaceManager({
           ...prev,
           isOpen: data.isOpen,
           tradeId: data.tradeId,
+          screen: "offer" as const,
           partner: {
             id: createPlayerID(data.partner.id),
             name: data.partner.name,
@@ -1739,6 +1743,8 @@ function DesktopInterfaceManager({
           theirOffer: [],
           myAccepted: false,
           theirAccepted: false,
+          myOfferValue: 0,
+          theirOfferValue: 0,
         }));
         // Close request modal when trade starts
         setTradeRequestState((prev) => ({ ...prev, visible: false }));
@@ -1762,15 +1768,42 @@ function DesktopInterfaceManager({
         }));
       }
 
+      // Trade moved to confirmation screen (OSRS two-screen flow)
+      if (update.component === "tradeConfirm") {
+        const data = update.data as {
+          tradeId: string;
+          screen: "confirm";
+          myOffer: TradeOfferItem[];
+          theirOffer: TradeOfferItem[];
+          myOfferValue: number;
+          theirOfferValue: number;
+          myAccepted: boolean;
+          theirAccepted: boolean;
+        };
+        setTradeState((prev) => ({
+          ...prev,
+          screen: data.screen,
+          myOffer: data.myOffer,
+          theirOffer: data.theirOffer,
+          myOfferValue: data.myOfferValue,
+          theirOfferValue: data.theirOfferValue,
+          myAccepted: data.myAccepted,
+          theirAccepted: data.theirAccepted,
+        }));
+      }
+
       // Trade closed (completed or cancelled)
       if (update.component === "tradeClose") {
         setTradeState((prev) => ({
           ...prev,
           isOpen: false,
           tradeId: null,
+          screen: "offer" as const,
           partner: null,
           myOffer: [],
           theirOffer: [],
+          myOfferValue: 0,
+          theirOfferValue: 0,
         }));
         setTradeRequestState((prev) => ({ ...prev, visible: false }));
       }

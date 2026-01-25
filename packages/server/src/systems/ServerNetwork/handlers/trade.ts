@@ -41,6 +41,8 @@ import {
   sendToSocket,
   sendSuccessToast,
   getPlayerId,
+  getEntityPosition,
+  hasActiveInterfaceSession,
 } from "./common";
 import type { DatabaseConnection } from "./common/types";
 import type { TradingSystem } from "../../TradingSystem";
@@ -121,6 +123,47 @@ function getPlayerCombatLevel(world: World, playerId: string): number {
 }
 
 /**
+ * Maximum distance in tiles for players to initiate a trade (OSRS-style)
+ * Players must be adjacent (1 tile) to trade
+ */
+const TRADE_PROXIMITY_TILES = 1;
+
+/**
+ * Calculate Chebyshev distance between two positions (tile-based)
+ * In OSRS, adjacency is measured using Chebyshev distance (allows diagonals)
+ */
+function chebyshevDistance(
+  pos1: { x: number; z: number },
+  pos2: { x: number; z: number },
+): number {
+  return Math.max(Math.abs(pos1.x - pos2.x), Math.abs(pos1.z - pos2.z));
+}
+
+/**
+ * Check if two players are within trade range
+ * Returns true if players are adjacent (within TRADE_PROXIMITY_TILES)
+ */
+function arePlayersInTradeRange(
+  world: World,
+  playerId1: string,
+  playerId2: string,
+): boolean {
+  const player1 = world.entities?.players?.get(playerId1);
+  const player2 = world.entities?.players?.get(playerId2);
+
+  if (!player1 || !player2) return false;
+
+  const pos1 = getEntityPosition(player1);
+  const pos2 = getEntityPosition(player2);
+
+  if (!pos1 || !pos2) return false;
+
+  // Convert world position to tile position (assuming 1 tile = 1 unit)
+  const distance = chebyshevDistance(pos1, pos2);
+  return distance <= TRADE_PROXIMITY_TILES;
+}
+
+/**
  * Get socket by player ID from ServerNetwork's socket map
  */
 function getSocketByPlayerId(
@@ -165,7 +208,12 @@ function sendTradeUpdate(
   tradeId: string,
 ): void {
   const session = tradingSystem.getTradeSession(tradeId);
-  if (!session || session.status !== "active") return;
+  // Allow updates in both "active" (offer screen) and "confirming" (confirmation screen)
+  if (
+    !session ||
+    (session.status !== "active" && session.status !== "confirming")
+  )
+    return;
 
   // Build offers for initiator's perspective
   const initiatorOffer: TradeOfferView = {
@@ -215,6 +263,70 @@ function sendTradeError(
   sendToSocket(socket, "tradeError", { message, code });
 }
 
+/**
+ * Calculate total value of trade offer items
+ * Used for wealth transfer indicator
+ */
+function calculateOfferValue(items: TradeOfferView["items"]): number {
+  let total = 0;
+  for (const offer of items) {
+    const itemDef = getItem(offer.itemId);
+    if (itemDef) {
+      // Use item's value (from item-types.ts) or default to 1
+      const value = itemDef.value ?? 1;
+      total += value * offer.quantity;
+    }
+  }
+  return total;
+}
+
+/**
+ * Send confirmation screen packet to both participants (OSRS two-screen flow)
+ * Includes item values for wealth transfer indicator
+ */
+function sendTradeConfirmScreen(
+  world: World,
+  tradingSystem: TradingSystem,
+  tradeId: string,
+): void {
+  const session = tradingSystem.getTradeSession(tradeId);
+  if (!session || session.status !== "confirming") return;
+
+  // Calculate offer values
+  const initiatorValue = calculateOfferValue(session.initiator.offeredItems);
+  const recipientValue = calculateOfferValue(session.recipient.offeredItems);
+
+  // Send to initiator
+  const initiatorSocket = getSocketByPlayerId(
+    world,
+    session.initiator.playerId,
+  );
+  if (initiatorSocket) {
+    sendToSocket(initiatorSocket, "tradeConfirmScreen", {
+      tradeId,
+      myOffer: session.initiator.offeredItems,
+      theirOffer: session.recipient.offeredItems,
+      myOfferValue: initiatorValue,
+      theirOfferValue: recipientValue,
+    });
+  }
+
+  // Send to recipient
+  const recipientSocket = getSocketByPlayerId(
+    world,
+    session.recipient.playerId,
+  );
+  if (recipientSocket) {
+    sendToSocket(recipientSocket, "tradeConfirmScreen", {
+      tradeId,
+      myOffer: session.recipient.offeredItems,
+      theirOffer: session.initiator.offeredItems,
+      myOfferValue: recipientValue,
+      theirOfferValue: initiatorValue,
+    });
+  }
+}
+
 // ============================================================================
 // Packet Handlers
 // ============================================================================
@@ -258,6 +370,31 @@ export function handleTradeRequest(
 
   if (!tradingSystem.isPlayerOnline(targetPlayerId)) {
     sendTradeError(socket, "Player is not online", "PLAYER_OFFLINE");
+    return;
+  }
+
+  // Proximity check - players must be adjacent to trade (OSRS-style)
+  if (!arePlayersInTradeRange(world, playerId, targetPlayerId)) {
+    sendTradeError(
+      socket,
+      "You need to be closer to trade with that player",
+      "TOO_FAR",
+    );
+    return;
+  }
+
+  // Interface blocking check - can't trade while using bank/store/dialogue
+  if (hasActiveInterfaceSession(world, playerId)) {
+    sendTradeError(
+      socket,
+      "You can't trade while using another interface",
+      "INTERFACE_OPEN",
+    );
+    return;
+  }
+
+  if (hasActiveInterfaceSession(world, targetPlayerId)) {
+    sendTradeError(socket, "That player is busy", "PLAYER_BUSY");
     return;
   }
 
@@ -638,8 +775,25 @@ export async function handleTradeAccept(
   // Send update to both players
   sendTradeUpdate(world, tradingSystem, data.tradeId);
 
-  // Check if both accepted - if so, complete the trade
-  if (result.bothAccepted) {
+  // Two-screen confirmation flow (OSRS-style):
+  // 1. On offer screen: both accept → move to confirmation screen
+  // 2. On confirmation screen: both accept → complete trade
+  if (result.moveToConfirming) {
+    // Move to confirmation screen
+    const moveResult = tradingSystem.moveToConfirmation(data.tradeId);
+    if (!moveResult.success) {
+      sendTradeError(
+        socket,
+        moveResult.error!,
+        moveResult.errorCode || "UNKNOWN",
+      );
+      return;
+    }
+
+    // Send confirmation screen packet to both players
+    sendTradeConfirmScreen(world, tradingSystem, data.tradeId);
+  } else if (result.bothAccepted) {
+    // Both accepted on confirmation screen - complete the trade
     await executeTradeSwap(tradingSystem, data.tradeId, world, db);
   }
 }

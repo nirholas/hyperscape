@@ -644,4 +644,5 @@ export enum EventType {
   TRADE_CANCELLED = "trade:cancelled",
   TRADE_ERROR = "trade:error",
   TRADE_CLOSE = "trade:close",
+  TRADE_CONFIRM_SCREEN = "trade:confirm_screen",
 }

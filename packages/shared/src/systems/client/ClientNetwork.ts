@@ -2165,6 +2165,44 @@ export class ClientNetwork extends SystemBase {
     });
   };
 
+  /**
+   * Trade moved to confirmation screen (OSRS two-screen flow)
+   */
+  onTradeConfirmScreen = (data: {
+    tradeId: string;
+    myOffer: Array<{
+      inventorySlot: number;
+      itemId: string;
+      quantity: number;
+      tradeSlot: number;
+    }>;
+    theirOffer: Array<{
+      inventorySlot: number;
+      itemId: string;
+      quantity: number;
+      tradeSlot: number;
+    }>;
+    myOfferValue: number;
+    theirOfferValue: number;
+  }) => {
+    this.world.emit(EventType.TRADE_CONFIRM_SCREEN, data);
+    // Emit UI update to switch to confirmation screen
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "tradeConfirm",
+      data: {
+        tradeId: data.tradeId,
+        screen: "confirm",
+        myOffer: data.myOffer,
+        theirOffer: data.theirOffer,
+        myOfferValue: data.myOfferValue,
+        theirOfferValue: data.theirOfferValue,
+        // Reset acceptance state for confirmation screen
+        myAccepted: false,
+        theirAccepted: false,
+      },
+    });
+  };
+
   // Trade convenience methods
   requestTrade(targetPlayerId: string) {
     this.send("tradeRequest", { targetPlayerId });
