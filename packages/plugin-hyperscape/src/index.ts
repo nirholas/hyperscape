@@ -40,6 +40,7 @@ import {
 import {
   chopTreeAction,
   catchFishAction,
+  mineRockAction,
   lightFireAction,
   cookFoodAction,
 } from "./actions/skills.js";
@@ -101,7 +102,51 @@ const configSchema = z.object({
     .string()
     .optional()
     .describe("Privy user ID for authenticated connections"),
+  HYPERSCAPE_AUTONOMY_MODE: z
+    .string()
+    .optional()
+    .default("llm")
+    .describe("Autonomy mode: 'llm' or 'scripted'"),
+  HYPERSCAPE_SCRIPTED_ROLE: z
+    .string()
+    .optional()
+    .describe("Scripted role for non-LLM bots"),
+  HYPERSCAPE_SILENT_CHAT: z
+    .string()
+    .optional()
+    .default("false")
+    .describe("Disable chat processing for silent bots"),
+  HYPERSCAPE_FLEE_HEALTH_PERCENT: z
+    .string()
+    .optional()
+    .describe("Health percent threshold for fleeing"),
+  HYPERSCAPE_MOB_LEVEL_MAX_ABOVE: z
+    .string()
+    .optional()
+    .describe("Max mob level above player to engage"),
+  HYPERSCAPE_MOB_LEVEL_MAX_BELOW: z
+    .string()
+    .optional()
+    .describe("Max mob level below player to engage"),
+  HYPERSCAPE_RESOURCE_LEVEL_MAX_ABOVE: z
+    .string()
+    .optional()
+    .describe("Max resource level above skill to gather"),
+  HYPERSCAPE_RESOURCE_LEVEL_MAX_BELOW: z
+    .string()
+    .optional()
+    .describe("Max resource level below skill to gather"),
+  HYPERSCAPE_RESOURCE_APPROACH_RANGE: z
+    .string()
+    .optional()
+    .describe("Approach range for resource gathering (units)"),
 });
+
+function normalizeEnvValue(value: string | undefined, fallback = ""): string {
+  if (!value) return fallback;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : fallback;
+}
 
 /**
  * Hyperscape Plugin for ElizaOS
@@ -118,10 +163,47 @@ export const hyperscapePlugin: Plugin = {
     "Connect ElizaOS AI agents to Hyperscape 3D multiplayer RPG worlds",
 
   config: {
-    HYPERSCAPE_SERVER_URL: process.env.HYPERSCAPE_SERVER_URL || "",
-    HYPERSCAPE_AUTO_RECONNECT: process.env.HYPERSCAPE_AUTO_RECONNECT || "true",
-    HYPERSCAPE_AUTH_TOKEN: process.env.HYPERSCAPE_AUTH_TOKEN || "",
-    HYPERSCAPE_PRIVY_USER_ID: process.env.HYPERSCAPE_PRIVY_USER_ID || "",
+    HYPERSCAPE_SERVER_URL: normalizeEnvValue(
+      process.env.HYPERSCAPE_SERVER_URL,
+      "ws://localhost:5555/ws",
+    ),
+    HYPERSCAPE_AUTO_RECONNECT: normalizeEnvValue(
+      process.env.HYPERSCAPE_AUTO_RECONNECT,
+      "true",
+    ),
+    HYPERSCAPE_AUTH_TOKEN: normalizeEnvValue(process.env.HYPERSCAPE_AUTH_TOKEN),
+    HYPERSCAPE_PRIVY_USER_ID: normalizeEnvValue(
+      process.env.HYPERSCAPE_PRIVY_USER_ID,
+    ),
+    HYPERSCAPE_AUTONOMY_MODE: normalizeEnvValue(
+      process.env.HYPERSCAPE_AUTONOMY_MODE,
+      "llm",
+    ),
+    HYPERSCAPE_SCRIPTED_ROLE: normalizeEnvValue(
+      process.env.HYPERSCAPE_SCRIPTED_ROLE,
+    ),
+    HYPERSCAPE_SILENT_CHAT: normalizeEnvValue(
+      process.env.HYPERSCAPE_SILENT_CHAT,
+      "false",
+    ),
+    HYPERSCAPE_FLEE_HEALTH_PERCENT: normalizeEnvValue(
+      process.env.HYPERSCAPE_FLEE_HEALTH_PERCENT,
+    ),
+    HYPERSCAPE_MOB_LEVEL_MAX_ABOVE: normalizeEnvValue(
+      process.env.HYPERSCAPE_MOB_LEVEL_MAX_ABOVE,
+    ),
+    HYPERSCAPE_MOB_LEVEL_MAX_BELOW: normalizeEnvValue(
+      process.env.HYPERSCAPE_MOB_LEVEL_MAX_BELOW,
+    ),
+    HYPERSCAPE_RESOURCE_LEVEL_MAX_ABOVE: normalizeEnvValue(
+      process.env.HYPERSCAPE_RESOURCE_LEVEL_MAX_ABOVE,
+    ),
+    HYPERSCAPE_RESOURCE_LEVEL_MAX_BELOW: normalizeEnvValue(
+      process.env.HYPERSCAPE_RESOURCE_LEVEL_MAX_BELOW,
+    ),
+    HYPERSCAPE_RESOURCE_APPROACH_RANGE: normalizeEnvValue(
+      process.env.HYPERSCAPE_RESOURCE_APPROACH_RANGE,
+    ),
   },
 
   async init(config: Record<string, string>, runtime: IAgentRuntime) {
@@ -220,6 +302,7 @@ export const hyperscapePlugin: Plugin = {
     // Skills
     chopTreeAction,
     catchFishAction,
+    mineRockAction,
     lightFireAction,
     cookFoodAction,
 

@@ -23,6 +23,7 @@ import {
   LocalAudioTrack,
   Room,
   RoomEvent,
+  TrackKind,
   TrackPublishOptions,
   TrackSource,
   type RemoteParticipant,
@@ -121,7 +122,7 @@ export class AgentLiveKit {
         publication: RemoteTrackPublication,
         participant: RemoteParticipant,
       ) => {
-        if (track.kind === "audio") {
+        if (track.kind === TrackKind.KIND_AUDIO) {
           this.handleIncomingAudio(track, publication, participant);
         }
       },
@@ -134,7 +135,7 @@ export class AgentLiveKit {
         _publication: RemoteTrackPublication,
         participant: RemoteParticipant,
       ) => {
-        if (track.kind !== "audio") return;
+        if (track.kind !== TrackKind.KIND_AUDIO) return;
         this.remoteAudioTracks.delete(participant.identity);
       },
     );

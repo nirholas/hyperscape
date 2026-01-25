@@ -322,7 +322,7 @@ const response = await fetch('https://api.openai.com/v1/chat/completions', {
     'Content-Type': 'application/json'
   },
   body: JSON.stringify({
-    model: 'gpt-4',
+    model: 'gpt-5',
     messages: [{ role: 'user', content: prompt }]
   })
 })

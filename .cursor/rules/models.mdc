@@ -2,7 +2,7 @@
 description: When using LLM models like OpenAI or Anthropic, for image recogntion, image generation,text generation and embeddnigs
 alwaysApply: false
 ---
-For text and image generation, as well as image desciption, use gpt-4o and gpt-4o-mini from OpenAI.
+For text and image generation, as well as image desciption, use gpt-5 and gpt-5-mini from OpenAI.
 
 For 3D item generation, remeshing, retexturing, avatar creation and rigging, we are using meshy.ai
 
@@ -13,8 +13,8 @@ Claude Opus 4 claude-opus-4-20250514
 Claude Sonnet 4	claude-sonnet-4-20250514
 
 Current OpenAI models:
-'gpt-4o'
-'gpt-4o-mini'
+'gpt-5'
+'gpt-5-mini'
 'o1-2024-12-17'
 
 Current OpenAI image models:

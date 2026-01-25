@@ -107,7 +107,7 @@ Asset Forge follows a **unidirectional data flow** pattern where data moves in a
    STAGE 1: GPT-4 ENHANCEMENT (10s)
    ├── Update: stages.promptOptimization.status = 'processing'
    ├── POST https://api.openai.com/v1/chat/completions
-   │   Model: gpt-4
+   │   Model: gpt-5
    │   Prompt: "Optimize this weapon description for 3D generation: 'A sturdy bronze sword...'"
    ├── Receive: "A sturdy bronze sword with ornate Celtic knotwork handle..."
    ├── Update: stages.promptOptimization.status = 'completed'

@@ -204,6 +204,17 @@ export function createMockHyperscapeService(
   return hyperscapeService as unknown as Service;
 }
 
+// Store for mock entities (used by getEntityById and createEntity)
+const mockEntityStore = new Map<
+  string,
+  {
+    id: string;
+    names: string[];
+    agentId: string;
+    metadata?: Record<string, unknown>;
+  }
+>();
+
 // Create real runtime instance for testing
 export function createMockRuntime(config?: TestRuntimeConfig): IAgentRuntime {
   // Legitimate cast: Test mock with minimal IAgentRuntime interface (100+ properties)
@@ -232,6 +243,24 @@ export function createMockRuntime(config?: TestRuntimeConfig): IAgentRuntime {
     getService: vi.fn().mockReturnValue({
       getWorld: vi.fn().mockReturnValue(createMockWorld()),
     }),
+    // ElizaOS entity management methods (used by ensureDashboardEntity)
+    getEntityById: vi.fn(async (entityId: string) => {
+      return mockEntityStore.get(entityId) || null;
+    }),
+    createEntity: vi.fn(
+      async (entity: {
+        id: string;
+        names: string[];
+        agentId: string;
+        metadata?: Record<string, unknown>;
+      }) => {
+        if (mockEntityStore.has(entity.id)) {
+          return false; // Entity already exists
+        }
+        mockEntityStore.set(entity.id, entity);
+        return true;
+      },
+    ),
     // Add other required properties as needed
     routes: [],
     events: {
@@ -244,6 +273,11 @@ export function createMockRuntime(config?: TestRuntimeConfig): IAgentRuntime {
   } as unknown as IAgentRuntime;
 
   return runtime;
+}
+
+// Helper to clear mock entity store between tests
+export function clearMockEntityStore(): void {
+  mockEntityStore.clear();
 }
 
 // Test helper class

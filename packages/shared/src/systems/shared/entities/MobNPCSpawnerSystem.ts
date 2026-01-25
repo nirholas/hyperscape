@@ -5,6 +5,7 @@ import type {
   NPCData,
   MobSpawnStats,
 } from "../../../types/core/core";
+import { EntityType, InteractionType } from "../../../types/entities/entities";
 import { EventType } from "../../../types/events";
 import type { World } from "../../../types/index";
 import type { EntitySpawnedEvent } from "../../../types/systems/system-interfaces";
@@ -41,6 +42,7 @@ type SpawnMobOptions = {
 export class MobNPCSpawnerSystem extends SystemBase {
   private spawnedMobs = new Map<string, string>(); // mobId -> entityId
   private spawnedMobDetails = new Map<string, SpawnedMobDetail>();
+  private entityIdToSpawnKey = new Map<string, string>();
   private spawnedBossHotspots = new Set<string>();
   private mobIdCounter = 0;
   private terrainSystem!: TerrainSystem;
@@ -154,18 +156,25 @@ export class MobNPCSpawnerSystem extends SystemBase {
 
         const npcConfig = {
           id: `npc_${npc.id}_${Date.now()}`,
-          type: "npc" as const,
+          type: EntityType.NPC,
           name: npcName, // From npcs.json
           position: { x: npc.position.x, y: spawnY, z: npc.position.z },
           rotation: { x: 0, y: 0, z: 0, w: 1 },
           scale: { x: 100, y: 100, z: 100 }, // Scale up rigged models
           visible: true,
           interactable: true,
-          interactionType: "talk",
+          interactionType: InteractionType.TALK,
           interactionDistance: 3,
           description: npcDescription, // From npcs.json
           model: modelPath, // From npcs.json
-          properties: {},
+          properties: {
+            movementComponent: null,
+            combatComponent: null,
+            healthComponent: null,
+            visualComponent: null,
+            health: { current: 1, max: 1 },
+            level: 1,
+          },
           npcType: npc.type, // From world-areas (bank, store, etc.)
           npcId: npc.id, // Manifest ID for dialogue lookup
           dialogueLines: [],
@@ -234,7 +243,7 @@ export class MobNPCSpawnerSystem extends SystemBase {
     // Build mob config from manifest data
     const mobConfig = {
       id: "default_goblin_1",
-      type: "mob" as const,
+      type: EntityType.MOB,
       name: goblinData.name,
       position: spawnPosition,
       rotation: { x: 0, y: 0, z: 0, w: 1 },
@@ -245,11 +254,21 @@ export class MobNPCSpawnerSystem extends SystemBase {
       },
       visible: true,
       interactable: true,
-      interactionType: "attack",
+      interactionType: InteractionType.ATTACK,
       interactionDistance: 10,
       description: goblinData.description,
       model: goblinData.appearance.modelPath,
-      properties: {},
+      properties: {
+        movementComponent: null,
+        combatComponent: null,
+        healthComponent: null,
+        visualComponent: null,
+        health: {
+          current: goblinData.stats.health,
+          max: goblinData.stats.health,
+        },
+        level: goblinData.stats.level,
+      },
       // MobEntity specific - from manifest
       mobType: goblinData.id,
       level: goblinData.stats.level,
@@ -317,6 +336,7 @@ export class MobNPCSpawnerSystem extends SystemBase {
   private selectMobForLevel(
     mobTypes: string[],
     targetLevel: number,
+    rng?: () => number,
   ): { mobData: NPCData; levelRange: LevelRange } | null {
     const candidates: Array<{
       mobData: NPCData;
@@ -352,7 +372,8 @@ export class MobNPCSpawnerSystem extends SystemBase {
     const closest = pool.filter(
       (candidate) => candidate.distance === minDistance,
     );
-    const pickIndex = Math.floor(Math.random() * closest.length);
+    const roll = rng ? rng() : Math.random();
+    const pickIndex = Math.floor(roll * closest.length);
     const selected = closest[pickIndex] ?? closest[0];
     return {
       mobData: selected.mobData,
@@ -362,7 +383,7 @@ export class MobNPCSpawnerSystem extends SystemBase {
 
   private selectBossForHotspot(seed: number): NPCData | null {
     const bosses = Array.from(ALL_NPCS.values()).filter(
-      (npc) => npc.category === "boss",
+      (npc) => npc.category === "boss" && npc.spawnCategory === "world",
     );
     if (bosses.length === 0) {
       return null;
@@ -410,7 +431,8 @@ export class MobNPCSpawnerSystem extends SystemBase {
 
     // Track this spawn point BEFORE spawning to prevent race conditions
     this.spawnedMobs.set(spawnKey, mobId);
-    const isBoss = options && options.isBoss === true;
+    this.entityIdToSpawnKey.set(mobId, spawnKey);
+    const isBoss = options?.isBoss === true;
     this.spawnedMobDetails.set(spawnKey, {
       spawnKey,
       mobId,
@@ -433,7 +455,7 @@ export class MobNPCSpawnerSystem extends SystemBase {
     // Build COMPLETE config from manifest data (matching original hardcoded format)
     const mobConfig = {
       id: mobId,
-      type: "mob" as const,
+      type: EntityType.MOB,
       name: `${mobData.name} (Lv${level})`,
       position: position,
       rotation: { x: 0, y: 0, z: 0, w: 1 },
@@ -444,11 +466,18 @@ export class MobNPCSpawnerSystem extends SystemBase {
       },
       visible: true,
       interactable: true,
-      interactionType: "attack",
+      interactionType: InteractionType.ATTACK,
       interactionDistance: 10,
       description: `${mobData.description} (Level ${level})`,
       model: mobData.appearance.modelPath,
-      properties: {},
+      properties: {
+        movementComponent: null,
+        combatComponent: null,
+        healthComponent: null,
+        visualComponent: null,
+        health: { current: scaled.maxHealth, max: scaled.maxHealth },
+        level: level,
+      },
       // MobEntity specific - from manifest
       mobType: mobData.id,
       level,
@@ -509,12 +538,24 @@ export class MobNPCSpawnerSystem extends SystemBase {
   // recursive re-emission loops. It only produces spawn requests via spawnMobFromData.
 
   private despawnMob(mobId: string): void {
-    const entityId = this.spawnedMobs.get(mobId);
-    if (entityId) {
-      this.emitTypedEvent(EventType.ENTITY_DEATH, { entityId });
+    const entityId = this.spawnedMobs.get(mobId) ?? mobId;
+    this.emitTypedEvent(EventType.ENTITY_DEATH, { entityId });
+    let spawnKey = this.entityIdToSpawnKey.get(mobId);
+    if (!spawnKey) {
+      for (const [key, value] of this.spawnedMobs.entries()) {
+        if (value === mobId) {
+          spawnKey = key;
+          break;
+        }
+      }
     }
-    this.spawnedMobs.delete(mobId);
-    this.spawnedMobDetails.delete(mobId);
+
+    if (spawnKey) {
+      this.spawnedMobs.delete(spawnKey);
+      this.spawnedMobDetails.delete(spawnKey);
+    }
+
+    this.entityIdToSpawnKey.delete(mobId);
   }
 
   private respawnAllMobs(): void {
@@ -524,6 +565,7 @@ export class MobNPCSpawnerSystem extends SystemBase {
     }
     this.spawnedMobs.clear();
     this.spawnedMobDetails.clear();
+    this.entityIdToSpawnKey.clear();
     this.spawnedBossHotspots.clear();
 
     // Mobs will respawn naturally as terrain tiles remain loaded
@@ -576,12 +618,18 @@ export class MobNPCSpawnerSystem extends SystemBase {
 
   /**
    * Handle terrain tile generation - spawn mobs for new tiles
+   * Only runs on server - clients receive entities via network sync
    */
   private onTileGenerated(tileData: {
     tileX: number;
     tileZ: number;
     biome: string;
   }): void {
+    // CRITICAL: Only server should spawn mobs - clients receive them via network sync
+    if (!this.world.isServer) {
+      return;
+    }
+
     const TILE_SIZE = this.terrainSystem.getTileSize();
     const tileBounds = {
       minX: tileData.tileX * TILE_SIZE,
@@ -637,6 +685,11 @@ export class MobNPCSpawnerSystem extends SystemBase {
       tileData.tileZ,
       this.BIOME_SPAWNS_PER_TILE,
     );
+    const rng = this.terrainSystem.createDeterministicRng(
+      tileData.tileX,
+      tileData.tileZ,
+      "biome-mobs",
+    );
 
     for (const spawn of spawnPositions) {
       if (!spawn.mobTypes || spawn.mobTypes.length === 0) continue;
@@ -652,6 +705,7 @@ export class MobNPCSpawnerSystem extends SystemBase {
       const selection = this.selectMobForLevel(
         spawn.mobTypes,
         difficultySample.level,
+        rng,
       );
       if (!selection) continue;
 
@@ -793,6 +847,7 @@ export class MobNPCSpawnerSystem extends SystemBase {
     // Clear all spawn tracking
     this.spawnedMobs.clear();
     this.spawnedMobDetails.clear();
+    this.entityIdToSpawnKey.clear();
     this.spawnedBossHotspots.clear();
 
     // Reset counter

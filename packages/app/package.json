@@ -11,10 +11,10 @@
     "build:debug": "CI=true tauri build --debug",
     "ios:init": "tauri ios init",
     "ios:dev": "tauri ios dev",
-    "ios:build": "tauri ios build",
+    "ios:build": "CI=true tauri ios build",
     "android:init": "tauri android init",
     "android:dev": "tauri android dev",
-    "android:build": "tauri android build",
+    "android:build": "CI=true tauri android build",
     "icon": "tauri icon src-tauri/icons/app-icon.png",
     "tauri": "tauri"
   },

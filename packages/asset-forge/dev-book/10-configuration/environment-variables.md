@@ -274,8 +274,8 @@ Both OpenAI and Meshy API keys are required in **two locations**:
 5. Add billing information (pay-as-you-go)
 
 **Models Used**:
-- GPT-4 Vision (`gpt-4-vision-preview`)
-- GPT-4 Turbo (`gpt-4-turbo-preview`)
+- GPT-4 Vision (`gpt-5-vision-preview`)
+- GPT-4 Turbo (`gpt-5-turbo-preview`)
 
 #### Meshy API Key
 

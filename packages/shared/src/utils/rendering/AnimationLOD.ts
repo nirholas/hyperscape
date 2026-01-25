@@ -4,29 +4,37 @@
  * Reduces CPU/GPU load by throttling animation updates for distant entities.
  * OSRS-style: Full animations up close, reduced/paused at distance.
  *
- * ## LOD Levels
+ * ## LOD Levels (from DISTANCE_CONSTANTS.ANIMATION_LOD)
  * - **Full**: <30m - Update every frame (60fps animation)
  * - **Half**: 30-60m - Update every other frame (30fps animation)
- * - **Quarter**: 60-100m - Update every 4th frame (15fps animation)
- * - **Paused**: >100m - Skip animation updates entirely (bind pose)
+ * - **Quarter**: 60-80m - Update every 4th frame (15fps animation)
+ * - **Frozen**: 80-100m - Completely frozen in idle pose (zero CPU work)
+ * - **Culled**: >150m - Not rendered at all (uses entity-specific RENDER distance)
  *
  * ## Performance Impact
  * - Reduces animation mixer updates by 50-80% for typical scenes
  * - Reduces VRM avatar updates (expensive bone transforms)
  * - Reduces skeleton matrix updates
+ * - Frozen state eliminates ALL skeleton CPU work for distant entities
  *
  * ## Usage
  * ```typescript
- * // In entity constructor
- * this.animLOD = new AnimationLOD();
+ * // In entity constructor - use preset for entity type
+ * this.animLOD = new AnimationLOD(ANIMATION_LOD_PRESETS.MOB);
  *
  * // In clientUpdate
  * const lod = this.animLOD.update(playerDistance, deltaTime);
+ * if (lod.shouldApplyRestPose) {
+ *   // Apply canonical idle pose once when entering freeze
+ *   this.skeleton.pose();
+ * }
  * if (lod.shouldUpdate) {
  *   this.mixer.update(lod.effectiveDelta);
  * }
  * ```
  */
+
+import { DISTANCE_CONSTANTS } from "../../constants/GameConstants";
 
 /**
  * LOD configuration for animation updates
@@ -38,8 +46,12 @@ export interface AnimationLODConfig {
   halfDistance: number;
   /** Distance for quarter-rate animation (15fps) - default 100m */
   quarterDistance: number;
-  /** Distance beyond which animations are paused - default 150m */
-  pauseDistance: number;
+  /** Distance beyond which animations are frozen in idle pose - default 100m */
+  freezeDistance: number;
+  /** Distance beyond which entity should be culled - default 150m */
+  cullDistance: number;
+  /** @deprecated Use freezeDistance instead. Kept for backward compatibility */
+  pauseDistance?: number;
 }
 
 /**
@@ -50,21 +62,89 @@ export interface AnimationLODResult {
   shouldUpdate: boolean;
   /** Effective delta time to use (may be accumulated for skipped frames) */
   effectiveDelta: number;
-  /** Current LOD level (0=full, 1=half, 2=quarter, 3=paused) */
+  /** Current LOD level (0=full, 1=half, 2=quarter, 3=frozen, 4=culled) */
   lodLevel: number;
   /** Squared distance (for additional optimizations) */
   distanceSq: number;
+  /** Whether the skeleton should be frozen (skip ALL bone updates) */
+  shouldFreeze: boolean;
+  /** Whether to apply rest/idle pose (true only on transition INTO frozen state) */
+  shouldApplyRestPose: boolean;
+  /** Whether entity should be culled (not rendered at all) */
+  shouldCull: boolean;
 }
 
+/** LOD level constants for clearer code */
+export const LOD_LEVEL = {
+  FULL: 0,
+  HALF: 1,
+  QUARTER: 2,
+  FROZEN: 3,
+  CULLED: 4,
+} as const;
+
 /**
- * Default LOD configuration
- * Tuned for typical RPG viewing distances
+ * Default LOD configuration - uses centralized DISTANCE_CONSTANTS
+ * Animation LOD values are shared across entity types for consistent behavior.
+ * The cull distance is entity-specific (use ANIMATION_LOD_PRESETS for defaults).
  */
 export const DEFAULT_ANIMATION_LOD_CONFIG: AnimationLODConfig = {
-  fullDistance: 30, // Full 60fps animation
-  halfDistance: 60, // 30fps animation
-  quarterDistance: 100, // 15fps animation
-  pauseDistance: 150, // No animation (bind pose)
+  fullDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.FULL, // 30m - Full 60fps animation
+  halfDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.HALF, // 60m - 30fps animation
+  quarterDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.QUARTER, // 80m - 15fps animation
+  freezeDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.FROZEN, // 100m - Frozen in idle pose
+  cullDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.CULLED, // 150m - Default cull distance
+};
+
+/**
+ * Entity-specific LOD presets.
+ * Animation LOD levels are shared, but cull distance matches entity render distance.
+ * This ensures entities fade out at the same distance they stop animating.
+ */
+export const ANIMATION_LOD_PRESETS = {
+  /** Mob animation LOD - cull at 150m (matches MOB render distance) */
+  MOB: {
+    fullDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.FULL,
+    halfDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.HALF,
+    quarterDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.QUARTER,
+    freezeDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.FROZEN,
+    cullDistance: DISTANCE_CONSTANTS.RENDER.MOB,
+  } as AnimationLODConfig,
+
+  /** NPC animation LOD - cull at 120m (matches NPC render distance) */
+  NPC: {
+    fullDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.FULL,
+    halfDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.HALF,
+    quarterDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.QUARTER,
+    freezeDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.FROZEN,
+    cullDistance: DISTANCE_CONSTANTS.RENDER.NPC,
+  } as AnimationLODConfig,
+
+  /** Player animation LOD - cull at 200m (matches PLAYER render distance) */
+  PLAYER: {
+    fullDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.FULL,
+    halfDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.HALF,
+    quarterDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.QUARTER,
+    freezeDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.FROZEN,
+    cullDistance: DISTANCE_CONSTANTS.RENDER.PLAYER,
+  } as AnimationLODConfig,
+} as const;
+
+/**
+ * Default result for when camera position is unavailable.
+ * Frozen constant - always update at full rate with no throttling.
+ * Used to avoid allocating a new object each frame.
+ */
+export const ANIMATION_LOD_ALWAYS_UPDATE = Object.freeze({
+  shouldUpdate: true,
+  effectiveDelta: 0, // Caller should replace with actual delta
+  lodLevel: LOD_LEVEL.FULL,
+  distanceSq: 0,
+  shouldFreeze: false,
+  shouldApplyRestPose: false,
+  shouldCull: false,
+} as const) satisfies Readonly<Omit<AnimationLODResult, "effectiveDelta">> & {
+  effectiveDelta: number;
 };
 
 /**
@@ -82,7 +162,8 @@ export class AnimationLOD {
   private fullDistanceSq: number;
   private halfDistanceSq: number;
   private quarterDistanceSq: number;
-  private pauseDistanceSq: number;
+  private freezeDistanceSq: number;
+  private cullDistanceSq: number;
 
   // Reusable result object to avoid allocations
   private readonly _result: AnimationLODResult = {
@@ -90,18 +171,27 @@ export class AnimationLOD {
     effectiveDelta: 0,
     lodLevel: 0,
     distanceSq: 0,
+    shouldFreeze: false,
+    shouldApplyRestPose: false,
+    shouldCull: false,
   };
 
   constructor(config: Partial<AnimationLODConfig> = {}) {
+    // Backward compatibility: pauseDistance -> freezeDistance
+    if (
+      config.pauseDistance !== undefined &&
+      config.freezeDistance === undefined
+    ) {
+      config.freezeDistance = config.pauseDistance;
+    }
     this.config = { ...DEFAULT_ANIMATION_LOD_CONFIG, ...config };
 
     // Pre-compute squared distances
-    this.fullDistanceSq = this.config.fullDistance * this.config.fullDistance;
-    this.halfDistanceSq = this.config.halfDistance * this.config.halfDistance;
-    this.quarterDistanceSq =
-      this.config.quarterDistance * this.config.quarterDistance;
-    this.pauseDistanceSq =
-      this.config.pauseDistance * this.config.pauseDistance;
+    this.fullDistanceSq = this.config.fullDistance ** 2;
+    this.halfDistanceSq = this.config.halfDistance ** 2;
+    this.quarterDistanceSq = this.config.quarterDistance ** 2;
+    this.freezeDistanceSq = this.config.freezeDistance ** 2;
+    this.cullDistanceSq = this.config.cullDistance ** 2;
   }
 
   /**
@@ -109,67 +199,70 @@ export class AnimationLOD {
    *
    * @param distanceSq - Squared distance to camera/player (use squared to avoid sqrt)
    * @param deltaTime - Frame delta time in seconds
-   * @returns LOD result with shouldUpdate flag and effective delta
+   * @returns LOD result with shouldUpdate flag, freeze state, and effective delta
    */
   update(distanceSq: number, deltaTime: number): AnimationLODResult {
-    // Determine LOD level based on squared distance
+    // Determine LOD level and update interval based on distance
     let lodLevel: number;
     let updateInterval: number;
 
     if (distanceSq <= this.fullDistanceSq) {
-      lodLevel = 0; // Full - every frame
+      lodLevel = LOD_LEVEL.FULL;
       updateInterval = 1;
     } else if (distanceSq <= this.halfDistanceSq) {
-      lodLevel = 1; // Half - every 2 frames
+      lodLevel = LOD_LEVEL.HALF;
       updateInterval = 2;
     } else if (distanceSq <= this.quarterDistanceSq) {
-      lodLevel = 2; // Quarter - every 4 frames
+      lodLevel = LOD_LEVEL.QUARTER;
       updateInterval = 4;
+    } else if (distanceSq <= this.freezeDistanceSq) {
+      lodLevel = LOD_LEVEL.FROZEN;
+      updateInterval = 0;
     } else {
-      lodLevel = 3; // Paused - no updates
+      lodLevel = LOD_LEVEL.CULLED;
       updateInterval = 0;
     }
 
-    // Accumulate delta time
+    // Track transition into frozen state
+    const justEnteredFreeze =
+      lodLevel === LOD_LEVEL.FROZEN && this.lastLodLevel < LOD_LEVEL.FROZEN;
+
+    // Accumulate time and frame count
     this.accumulatedDelta += deltaTime;
     this.frameCounter++;
 
-    // Reset accumulation on LOD level change (prevents time jump)
+    // Reset on LOD change to prevent time jumps
     if (lodLevel !== this.lastLodLevel) {
       this.accumulatedDelta = deltaTime;
       this.frameCounter = 0;
       this.lastLodLevel = lodLevel;
     }
 
-    // Determine if we should update this frame
+    // Calculate update decision
     let shouldUpdate: boolean;
     let effectiveDelta: number;
 
-    if (lodLevel === 3) {
-      // Paused - no updates
+    if (lodLevel >= LOD_LEVEL.FROZEN) {
       shouldUpdate = false;
       effectiveDelta = 0;
-    } else if (lodLevel === 0) {
-      // Full - update every frame with normal delta
+    } else if (lodLevel === LOD_LEVEL.FULL) {
       shouldUpdate = true;
       effectiveDelta = deltaTime;
       this.accumulatedDelta = 0;
     } else {
-      // Throttled - update on interval with accumulated delta
       shouldUpdate = this.frameCounter % updateInterval === 0;
-      if (shouldUpdate) {
-        effectiveDelta = this.accumulatedDelta;
-        this.accumulatedDelta = 0;
-      } else {
-        effectiveDelta = 0;
-      }
+      effectiveDelta = shouldUpdate ? this.accumulatedDelta : 0;
+      if (shouldUpdate) this.accumulatedDelta = 0;
     }
 
-    // Populate result (reuse object to avoid allocations)
+    // Populate reusable result object
     this._result.shouldUpdate = shouldUpdate;
     this._result.effectiveDelta = effectiveDelta;
     this._result.lodLevel = lodLevel;
     this._result.distanceSq = distanceSq;
+    this._result.shouldFreeze = lodLevel >= LOD_LEVEL.FROZEN;
+    this._result.shouldApplyRestPose = justEnteredFreeze;
+    this._result.shouldCull = lodLevel >= LOD_LEVEL.CULLED;
 
     return this._result;
   }
@@ -218,23 +311,58 @@ export class AnimationLOD {
   }
 
   /**
+   * Check if currently frozen (animation completely stopped, using rest pose)
+   */
+  isFrozen(): boolean {
+    return this.lastLodLevel >= LOD_LEVEL.FROZEN;
+  }
+
+  /**
    * Check if currently paused (at max LOD level)
+   * @deprecated Use isFrozen() instead
    */
   isPaused(): boolean {
-    return this.lastLodLevel >= 3;
+    return this.lastLodLevel >= LOD_LEVEL.FROZEN;
+  }
+
+  /**
+   * Check if should be culled (not rendered)
+   */
+  isCulled(): boolean {
+    return this.lastLodLevel >= LOD_LEVEL.CULLED;
+  }
+
+  /**
+   * Get the freeze distance squared (for external culling checks)
+   */
+  getFreezeDistanceSq(): number {
+    return this.freezeDistanceSq;
+  }
+
+  /**
+   * Get the cull distance squared (for external culling checks)
+   */
+  getCullDistanceSq(): number {
+    return this.cullDistanceSq;
   }
 
   /**
    * Update configuration (recalculates squared distances)
    */
   setConfig(config: Partial<AnimationLODConfig>): void {
-    this.config = { ...this.config, ...config };
-    this.fullDistanceSq = this.config.fullDistance * this.config.fullDistance;
-    this.halfDistanceSq = this.config.halfDistance * this.config.halfDistance;
-    this.quarterDistanceSq =
-      this.config.quarterDistance * this.config.quarterDistance;
-    this.pauseDistanceSq =
-      this.config.pauseDistance * this.config.pauseDistance;
+    // Backward compatibility: pauseDistance -> freezeDistance
+    if (
+      config.pauseDistance !== undefined &&
+      config.freezeDistance === undefined
+    ) {
+      config.freezeDistance = config.pauseDistance;
+    }
+    Object.assign(this.config, config);
+    this.fullDistanceSq = this.config.fullDistance ** 2;
+    this.halfDistanceSq = this.config.halfDistance ** 2;
+    this.quarterDistanceSq = this.config.quarterDistance ** 2;
+    this.freezeDistanceSq = this.config.freezeDistance ** 2;
+    this.cullDistanceSq = this.config.cullDistance ** 2;
   }
 }
 

@@ -26,6 +26,12 @@ import {
   type State,
 } from "@elizaos/core";
 import type { HyperscapeService } from "../services/HyperscapeService.js";
+import type {
+  Entity,
+  GoalType,
+  InventoryItem,
+  PlayerEntity,
+} from "../types.js";
 
 // Import autonomous actions directly for execution
 import {
@@ -36,13 +42,28 @@ import {
   attackEntityAction,
 } from "../actions/autonomous.js";
 import { setGoalAction, navigateToAction } from "../actions/goals.js";
-import { chopTreeAction } from "../actions/skills.js";
+import {
+  chopTreeAction,
+  catchFishAction,
+  mineRockAction,
+} from "../actions/skills.js";
+import { pickupItemAction } from "../actions/inventory.js";
 import { KNOWN_LOCATIONS } from "../providers/goalProvider.js";
+import { SCRIPTED_AUTONOMY_CONFIG } from "../config/constants.js";
 
 // Configuration
 const DEFAULT_TICK_INTERVAL = 10000; // 10 seconds between decisions
 const MIN_TICK_INTERVAL = 5000; // Minimum 5 seconds
 const MAX_TICK_INTERVAL = 30000; // Maximum 30 seconds
+
+type AutonomyMode = "llm" | "scripted";
+type ScriptedRole =
+  | "combat"
+  | "woodcutting"
+  | "fishing"
+  | "mining"
+  | "balanced";
+type ResourceSkill = "woodcutting" | "fishing" | "mining";
 
 export interface AutonomousBehaviorConfig {
   /** Interval between decision ticks in milliseconds */
@@ -51,15 +72,18 @@ export interface AutonomousBehaviorConfig {
   debug?: boolean;
   /** Actions to consider for autonomous behavior */
   allowedActions?: string[];
+  /** Autonomy mode (LLM or scripted) */
+  autonomyMode?: AutonomyMode;
 }
 
 /** Simple goal structure stored in memory */
 export interface CurrentGoal {
-  type: "combat_training" | "woodcutting" | "exploration" | "idle";
+  type: GoalType;
   description: string;
   target: number;
   progress: number;
   location?: string;
+  targetPosition?: [number, number, number];
   targetEntity?: string;
   /** For skill-based goals: which skill to train */
   targetSkill?: string;
@@ -83,6 +107,9 @@ export class AutonomousBehaviorManager {
   private tickInterval: number;
   private debug: boolean;
   private allowedActions: Set<string>;
+  private autonomyMode: AutonomyMode;
+  private scriptedRole: ScriptedRole | null = null;
+  private actionContext: { messageText?: string } | null = null;
   private lastTickTime = 0;
   private tickCount = 0;
 
@@ -103,6 +130,29 @@ export class AutonomousBehaviorManager {
     );
     this.debug = config?.debug ?? false;
 
+    const rawMode =
+      config?.autonomyMode ||
+      (String(runtime.getSetting("HYPERSCAPE_AUTONOMY_MODE") || "") as
+        | AutonomyMode
+        | "") ||
+      (SCRIPTED_AUTONOMY_CONFIG.MODE as AutonomyMode);
+    this.autonomyMode = rawMode === "scripted" ? "scripted" : "llm";
+
+    const rawRole = String(
+      runtime.getSetting("HYPERSCAPE_SCRIPTED_ROLE") ||
+        SCRIPTED_AUTONOMY_CONFIG.ROLE ||
+        "",
+    ).toLowerCase();
+    if (
+      rawRole === "combat" ||
+      rawRole === "woodcutting" ||
+      rawRole === "fishing" ||
+      rawRole === "mining" ||
+      rawRole === "balanced"
+    ) {
+      this.scriptedRole = rawRole;
+    }
+
     // Default allowed actions for autonomous behavior
     this.allowedActions = new Set(
       config?.allowedActions ?? [
@@ -119,6 +169,9 @@ export class AutonomousBehaviorManager {
         // Skills
         "CHOP_TREE",
         "CATCH_FISH",
+        "MINE_ROCK",
+        // Looting
+        "PICKUP_ITEM",
         // Idle
         "IDLE",
       ],
@@ -458,6 +511,10 @@ export class AutonomousBehaviorManager {
     _message: Memory,
     state: State,
   ): Promise<Action | null> {
+    if (this.autonomyMode === "scripted") {
+      return this.selectActionScripted(state);
+    }
+
     // Get available actions for autonomous behavior
     const availableActions = this.getAvailableActions();
 
@@ -511,6 +568,378 @@ export class AutonomousBehaviorManager {
     }
   }
 
+  private selectActionScripted(state: State): Action | null {
+    this.actionContext = null;
+
+    const service = this.service;
+    if (!service) return null;
+    const player = service.getPlayerEntity();
+    if (!player) return null;
+
+    const healthPercent = this.getHealthPercent(player);
+    const survivalAssessment = state.survivalAssessment as
+      | { urgency?: string }
+      | undefined;
+    const threats = this.getNearbyThreats(player);
+
+    const shouldFlee =
+      healthPercent <= SCRIPTED_AUTONOMY_CONFIG.FLEE_HEALTH_PERCENT &&
+      (player.inCombat ||
+        threats.length > 0 ||
+        survivalAssessment?.urgency === "critical");
+
+    if (shouldFlee) {
+      return fleeAction;
+    }
+
+    const goal = this.currentGoal;
+    const preferredGoal = this.getPreferredGoalType();
+
+    if (!goal || (preferredGoal && goal.type !== preferredGoal)) {
+      return setGoalAction;
+    }
+
+    if (this.goalPaused) {
+      return idleAction;
+    }
+
+    switch (goal.type) {
+      case "combat_training":
+        return this.selectCombatAction(player);
+      case "woodcutting":
+        return this.selectResourceAction("woodcutting", player);
+      case "fishing":
+        return this.selectResourceAction("fishing", player);
+      case "mining":
+        return this.selectResourceAction("mining", player);
+      case "exploration":
+        return exploreAction;
+      case "idle":
+        return idleAction;
+      default:
+        return exploreAction;
+    }
+  }
+
+  private getPreferredGoalType(): CurrentGoal["type"] | null {
+    switch (this.scriptedRole) {
+      case "combat":
+        return "combat_training";
+      case "woodcutting":
+        return "woodcutting";
+      case "fishing":
+        return "fishing";
+      case "mining":
+        return "mining";
+      default:
+        return null;
+    }
+  }
+
+  private selectCombatAction(player: PlayerEntity): Action {
+    const attackableMobs = this.getAttackableMobs(player);
+
+    if (attackableMobs.length > 0) {
+      return attackEntityAction;
+    }
+
+    if (this.currentGoal?.location) {
+      return navigateToAction;
+    }
+
+    return exploreAction;
+  }
+
+  private selectResourceAction(
+    skill: ResourceSkill,
+    player: PlayerEntity,
+  ): Action {
+    if (!this.hasToolForSkill(skill, player.items)) {
+      const toolItem = this.findNearbyToolItem(skill, player);
+      if (toolItem) {
+        this.actionContext = { messageText: this.getToolHint(skill) };
+        return pickupItemAction;
+      }
+
+      return exploreAction;
+    }
+
+    const resources = this.getResourceCandidates(skill, player);
+
+    if (resources.approachable.length > 0) {
+      return this.getResourceActionForSkill(skill);
+    }
+
+    if (resources.candidates.length > 0 && this.currentGoal) {
+      const target = this.getPositionArray(
+        resources.candidates[0].entity.position,
+      );
+      if (target) {
+        this.currentGoal.targetPosition = target;
+      }
+      return navigateToAction;
+    }
+
+    return exploreAction;
+  }
+
+  private getResourceActionForSkill(skill: ResourceSkill): Action {
+    if (skill === "fishing") return catchFishAction;
+    if (skill === "mining") return mineRockAction;
+    return chopTreeAction;
+  }
+
+  private getHealthPercent(player: PlayerEntity): number {
+    const current = player.health?.current ?? 100;
+    const max = player.health?.max ?? 100;
+    return max > 0 ? (current / max) * 100 : 100;
+  }
+
+  private getCombatLevel(player: PlayerEntity): number {
+    const skills = player.skills;
+    return Math.floor(
+      (skills.attack.level +
+        skills.strength.level +
+        skills.defense.level +
+        skills.constitution.level +
+        skills.ranged.level) /
+        5,
+    );
+  }
+
+  private getNearbyThreats(player: PlayerEntity): Entity[] {
+    if (!this.getPositionXZ(player.position) || !this.service) return [];
+
+    return this.service.getNearbyEntities().filter((entity) => {
+      if (!this.isMobEntity(entity)) return false;
+      if (entity.alive === false) return false;
+      const dist = this.getDistance2D(player.position, entity.position);
+      return dist !== null && dist < 15;
+    });
+  }
+
+  private getAttackableMobs(player: PlayerEntity): Entity[] {
+    if (!this.service) return [];
+
+    const combatLevel = this.getCombatLevel(player);
+    return this.service.getNearbyEntities().filter((entity) => {
+      if (!this.isMobEntity(entity)) return false;
+      if (entity.alive === false) return false;
+
+      const mobLevel = this.getMobLevel(entity);
+      if (mobLevel !== null) {
+        if (
+          mobLevel >
+            combatLevel + SCRIPTED_AUTONOMY_CONFIG.MOB_LEVEL_MAX_ABOVE ||
+          mobLevel < combatLevel - SCRIPTED_AUTONOMY_CONFIG.MOB_LEVEL_MAX_BELOW
+        ) {
+          return false;
+        }
+      }
+
+      const dist = this.getDistance2D(player.position, entity.position);
+      return dist !== null && dist <= 50;
+    });
+  }
+
+  private getResourceCandidates(
+    skill: ResourceSkill,
+    player: PlayerEntity,
+  ): {
+    candidates: Array<{ entity: Entity; distance: number }>;
+    approachable: Array<{ entity: Entity; distance: number }>;
+  } {
+    if (!this.service) {
+      return { candidates: [], approachable: [] };
+    }
+
+    const skillLevel = player.skills[skill]?.level ?? 1;
+    const maxAbove = SCRIPTED_AUTONOMY_CONFIG.RESOURCE_LEVEL_MAX_ABOVE;
+    const maxBelow = SCRIPTED_AUTONOMY_CONFIG.RESOURCE_LEVEL_MAX_BELOW;
+    const approachRange = SCRIPTED_AUTONOMY_CONFIG.RESOURCE_APPROACH_RANGE;
+
+    const resources = this.service
+      .getNearbyEntities()
+      .filter((entity) => this.isResourceForSkill(entity, skill))
+      .filter((entity) => entity.depleted !== true);
+
+    const withDistance = resources
+      .map((entity) => {
+        const dist = this.getDistance2D(player.position, entity.position);
+        return { entity, distance: dist };
+      })
+      .filter(
+        (item): item is { entity: Entity; distance: number } =>
+          typeof item.distance === "number",
+      )
+      .sort((a, b) => a.distance - b.distance);
+
+    const inBand = withDistance.filter(({ entity }) => {
+      const requiredLevel = entity.requiredLevel ?? 1;
+      if (requiredLevel > skillLevel + maxAbove) return false;
+      return requiredLevel >= skillLevel - maxBelow;
+    });
+
+    const fallback = withDistance.filter(({ entity }) => {
+      const requiredLevel = entity.requiredLevel ?? 1;
+      return requiredLevel <= skillLevel + maxAbove;
+    });
+
+    const chosen = inBand.length > 0 ? inBand : fallback;
+    const approachable = chosen.filter(
+      (item) => item.distance <= approachRange,
+    );
+
+    return { candidates: chosen, approachable };
+  }
+
+  private hasToolForSkill(
+    skill: ResourceSkill,
+    items: InventoryItem[],
+  ): boolean {
+    const toolHint = this.getToolHint(skill);
+    return items.some((item) =>
+      this.getInventoryItemName(item).includes(toolHint),
+    );
+  }
+
+  private getToolHint(skill: ResourceSkill): string {
+    if (skill === "fishing") return "fishing rod";
+    if (skill === "mining") return "pickaxe";
+    return "hatchet";
+  }
+
+  private findNearbyToolItem(
+    skill: ResourceSkill,
+    player: PlayerEntity,
+  ): Entity | null {
+    if (!this.service) return null;
+    const hint = this.getToolHint(skill);
+
+    const playerPos = player.position;
+    const items = this.service
+      .getNearbyEntities()
+      .filter((entity) => this.isGroundItem(entity));
+
+    const candidates = items
+      .map((entity) => {
+        const name = (entity.name || entity.itemId || "").toLowerCase();
+        if (!name.includes(hint)) return null;
+        const dist = this.getDistance2D(playerPos, entity.position);
+        if (dist === null) return null;
+        return { entity, distance: dist };
+      })
+      .filter(
+        (entry): entry is { entity: Entity; distance: number } =>
+          entry !== null,
+      )
+      .sort((a, b) => a.distance - b.distance);
+
+    return candidates.length > 0 ? candidates[0].entity : null;
+  }
+
+  private isGroundItem(entity: Entity): boolean {
+    const type = (entity.type || "").toLowerCase();
+    const entityType = (entity.entityType || "").toLowerCase();
+    return type === "item" || entityType === "item" || !!entity.itemId;
+  }
+
+  private getInventoryItemName(item: InventoryItem): string {
+    return (item.name || item.item?.name || item.itemId || "")
+      .toString()
+      .toLowerCase();
+  }
+
+  private isMobEntity(entity: Entity): boolean {
+    if (entity.mobType) return true;
+    const type = (entity.type || "").toLowerCase();
+    const entityType = (entity.entityType || "").toLowerCase();
+    if (type === "mob" || entityType === "mob") return true;
+    const name = entity.name?.toLowerCase() || "";
+    return /goblin|bandit|skeleton|zombie|rat|spider|wolf/i.test(name);
+  }
+
+  private isResourceForSkill(entity: Entity, skill: ResourceSkill): boolean {
+    const resourceType = (entity.resourceType || "").toLowerCase();
+    const name = entity.name?.toLowerCase() || "";
+
+    if (skill === "woodcutting") {
+      return resourceType === "tree" || name.includes("tree");
+    }
+    if (skill === "fishing") {
+      return resourceType === "fishing_spot" || name.includes("fishing spot");
+    }
+    if (skill === "mining") {
+      return (
+        resourceType === "mining_rock" ||
+        resourceType === "ore" ||
+        name.includes("rock") ||
+        name.includes("ore")
+      );
+    }
+    return false;
+  }
+
+  private getMobLevel(entity: Entity): number | null {
+    if (typeof entity.level === "number") return entity.level;
+    const name = entity.name || "";
+    const match = name.match(/lv\.?\s*(\d+)/i);
+    if (match) {
+      return parseInt(match[1], 10);
+    }
+    return null;
+  }
+
+  private getPositionXZ(
+    pos:
+      | [number, number, number]
+      | { x: number; y?: number; z: number }
+      | null
+      | undefined,
+  ): { x: number; z: number } | null {
+    if (!pos) return null;
+    if (Array.isArray(pos) && pos.length >= 3) {
+      return { x: pos[0], z: pos[2] };
+    }
+    const obj = pos as { x: number; z: number };
+    return { x: obj.x, z: obj.z };
+  }
+
+  private getPositionArray(
+    pos:
+      | [number, number, number]
+      | { x: number; y?: number; z: number }
+      | null
+      | undefined,
+  ): [number, number, number] | null {
+    if (!pos) return null;
+    if (Array.isArray(pos) && pos.length >= 3) {
+      return [pos[0], pos[1], pos[2]];
+    }
+    const obj = pos as { x: number; y?: number; z: number };
+    return [obj.x, obj.y ?? 0, obj.z];
+  }
+
+  private getDistance2D(
+    posA:
+      | [number, number, number]
+      | { x: number; y?: number; z: number }
+      | null
+      | undefined,
+    posB:
+      | [number, number, number]
+      | { x: number; y?: number; z: number }
+      | null
+      | undefined,
+  ): number | null {
+    const a = this.getPositionXZ(posA);
+    const b = this.getPositionXZ(posB);
+    if (!a || !b) return null;
+    const dx = a.x - b.x;
+    const dz = a.z - b.z;
+    return Math.sqrt(dx * dx + dz * dz);
+  }
+
   /**
    * Get available autonomous actions
    */
@@ -520,6 +949,9 @@ export class AutonomousBehaviorManager {
       navigateToAction,
       attackEntityAction,
       chopTreeAction, // For woodcutting goals
+      catchFishAction, // For fishing goals
+      mineRockAction, // For mining goals
+      pickupItemAction, // For gathering tools/items
       exploreAction,
       fleeAction,
       idleAction,
@@ -639,8 +1071,10 @@ export class AutonomousBehaviorManager {
     lines.push("3. If goal requires travel: NAVIGATE_TO the goal location");
     lines.push("4. If combat_training goal with mobs nearby: ATTACK_ENTITY");
     lines.push("5. If woodcutting goal with trees nearby: CHOP_TREE");
-    lines.push("6. If waiting for respawn/recovery: IDLE briefly");
-    lines.push("7. If goal is exploration or no targets: EXPLORE");
+    lines.push("6. If fishing goal with spots nearby: CATCH_FISH");
+    lines.push("7. If mining goal with rocks nearby: MINE_ROCK");
+    lines.push("8. If waiting for respawn/recovery: IDLE briefly");
+    lines.push("9. If goal is exploration or no targets: EXPLORE");
 
     // Compute priority action directly based on goal and nearby entities
     let priorityAction: string | null = null;
@@ -657,27 +1091,25 @@ export class AutonomousBehaviorManager {
     } else if (goal.type === "combat_training") {
       // Check for nearby mobs - flexible detection
       const mobs = nearbyEntities.filter((entity) => {
-        const entityAny = entity as unknown as Record<string, unknown>;
         const isMob =
-          "mobType" in entity ||
-          entityAny.type === "mob" ||
-          entityAny.entityType === "mob" ||
+          !!entity.mobType ||
+          entity.type === "mob" ||
+          entity.entityType === "mob" ||
           (entity.name &&
             /goblin|bandit|skeleton|zombie|rat|spider|wolf/i.test(entity.name));
-        return isMob && entityAny.alive !== false;
+        return isMob && entity.alive !== false;
       });
       if (mobs.length > 0) {
         priorityAction = "ATTACK_ENTITY";
         lines.push(`  ** ${mobs.length} attackable mob(s) nearby! **`);
       } else {
         // No mobs nearby - navigate to where mobs are (spawn area has goblins)
-        const playerPos = this.service?.getPlayerEntity()?.position || [
-          0, 0, 0,
-        ];
+        const playerPos = this.service?.getPlayerEntity()?.position;
+        const playerXZ = this.getPositionXZ(playerPos) || { x: 0, z: 0 };
         const spawnPos = [0, 0, 0]; // Goblins are at spawn
         const distToSpawn = Math.sqrt(
-          Math.pow(playerPos[0] - spawnPos[0], 2) +
-            Math.pow(playerPos[2] - spawnPos[2], 2),
+          Math.pow(playerXZ.x - spawnPos[0], 2) +
+            Math.pow(playerXZ.z - spawnPos[2], 2),
         );
 
         if (distToSpawn > 15) {
@@ -695,49 +1127,23 @@ export class AutonomousBehaviorManager {
       const APPROACH_RANGE = 20;
       const playerPos = this.service?.getPlayerEntity()?.position;
       const allTrees = nearbyEntities.filter((entity) => {
-        const entityAny = entity as unknown as Record<string, unknown>;
         const name = entity.name?.toLowerCase() || "";
+        const resourceType = (entity.resourceType || "").toLowerCase();
+        const type = (entity.type || "").toLowerCase();
         // Exclude items
         if (name.startsWith("item:")) return false;
         return (
-          entityAny.resourceType === "tree" ||
-          entityAny.type === "tree" ||
+          resourceType === "tree" ||
+          type === "tree" ||
           (entity.name && /tree/i.test(entity.name) && !name.includes("item"))
         );
       });
 
       // Filter by distance - trees within approach range
       const approachableTrees = allTrees.filter((entity) => {
-        const entityAny = entity as unknown as Record<string, unknown>;
-        const entityPos = entityAny.position as
-          | [number, number, number]
-          | { x: number; z: number }
-          | undefined;
-        if (!entityPos || !playerPos) return false;
-
-        let ex: number, ez: number;
-        if (Array.isArray(entityPos)) {
-          ex = entityPos[0];
-          ez = entityPos[2];
-        } else if (typeof entityPos === "object" && "x" in entityPos) {
-          ex = entityPos.x;
-          ez = entityPos.z;
-        } else {
-          return false;
-        }
-
-        let px: number, pz: number;
-        if (Array.isArray(playerPos)) {
-          px = playerPos[0];
-          pz = playerPos[2];
-        } else if (typeof playerPos === "object" && "x" in playerPos) {
-          px = (playerPos as { x: number; z: number }).x;
-          pz = (playerPos as { x: number; z: number }).z;
-        } else {
-          return false;
-        }
-
-        const dist = Math.sqrt((px - ex) ** 2 + (pz - ez) ** 2);
+        if (!playerPos) return false;
+        const dist = this.getDistance2D(playerPos, entity.position);
+        if (dist === null) return false;
         return dist <= APPROACH_RANGE;
       });
 
@@ -755,18 +1161,10 @@ export class AutonomousBehaviorManager {
       } else {
         // No trees anywhere - navigate to the forest where trees are
         const forestPos = KNOWN_LOCATIONS.forest?.position || [-130, 30, 400];
-        const pPos = playerPos || [0, 0, 0];
-        let fpx = 0,
-          fpz = 0;
-        if (Array.isArray(pPos)) {
-          fpx = pPos[0];
-          fpz = pPos[2];
-        } else if (typeof pPos === "object" && "x" in pPos) {
-          fpx = (pPos as { x: number; z: number }).x;
-          fpz = (pPos as { x: number; z: number }).z;
-        }
+        const playerXZ = this.getPositionXZ(playerPos) || { x: 0, z: 0 };
         const distToForest = Math.sqrt(
-          Math.pow(fpx - forestPos[0], 2) + Math.pow(fpz - forestPos[2], 2),
+          Math.pow(playerXZ.x - forestPos[0], 2) +
+            Math.pow(playerXZ.z - forestPos[2], 2),
         );
 
         if (distToForest > 15) {
@@ -778,6 +1176,45 @@ export class AutonomousBehaviorManager {
           priorityAction = "EXPLORE";
           lines.push("  At forest but no trees visible - explore nearby");
         }
+      }
+    } else if (goal.type === "fishing") {
+      const spots = nearbyEntities.filter((entity) => {
+        const resourceType = (entity.resourceType || "").toLowerCase();
+        const name = entity.name?.toLowerCase() || "";
+        return resourceType === "fishing_spot" || name.includes("fishing spot");
+      });
+
+      if (spots.length > 0) {
+        priorityAction = "CATCH_FISH";
+        lines.push(`  ** ${spots.length} fishing spot(s) nearby! **`);
+      } else if (goal.location) {
+        priorityAction = "NAVIGATE_TO";
+        lines.push("  No fishing spots nearby - navigate to goal location.");
+      } else {
+        priorityAction = "EXPLORE";
+        lines.push("  No fishing spots visible - explore nearby.");
+      }
+    } else if (goal.type === "mining") {
+      const rocks = nearbyEntities.filter((entity) => {
+        const resourceType = (entity.resourceType || "").toLowerCase();
+        const name = entity.name?.toLowerCase() || "";
+        return (
+          resourceType === "mining_rock" ||
+          resourceType === "ore" ||
+          name.includes("rock") ||
+          name.includes("ore")
+        );
+      });
+
+      if (rocks.length > 0) {
+        priorityAction = "MINE_ROCK";
+        lines.push(`  ** ${rocks.length} rock(s) nearby! **`);
+      } else if (goal.location) {
+        priorityAction = "NAVIGATE_TO";
+        lines.push("  No rocks nearby - navigate to goal location.");
+      } else {
+        priorityAction = "EXPLORE";
+        lines.push("  No rocks visible - explore nearby.");
       }
     } else if (goal.type === "exploration") {
       priorityAction = "EXPLORE";
@@ -839,9 +1276,20 @@ export class AutonomousBehaviorManager {
     logger.info(`[AutonomousBehavior] Executing action: ${action.name}`);
 
     try {
+      const actionMessage: Memory = this.actionContext?.messageText
+        ? {
+            ...message,
+            content: {
+              ...message.content,
+              text: this.actionContext.messageText,
+            },
+          }
+        : message;
+      this.actionContext = null;
+
       const result = await action.handler(
         this.runtime,
-        message,
+        actionMessage,
         state,
         undefined,
         async (content) => {
@@ -972,14 +1420,8 @@ export class AutonomousBehaviorManager {
     }
 
     // Defensive health calculation
-    const currentHealth =
-      player.health?.current ??
-      (player as unknown as { hp?: number }).hp ??
-      100;
-    const maxHealth =
-      player.health?.max ??
-      (player as unknown as { maxHp?: number }).maxHp ??
-      100;
+    const currentHealth = player.health?.current ?? 100;
+    const maxHealth = player.health?.max ?? 100;
     const healthPercent =
       maxHealth > 0 ? Math.round((currentHealth / maxHealth) * 100) : 100;
 
@@ -1009,7 +1451,7 @@ export class AutonomousBehaviorManager {
       `- In Combat: ${player.inCombat ? "Yes" : "No"}`,
       `- Nearby Entities: ${nearbyCount}`,
       "",
-      "Available actions: SET_GOAL, NAVIGATE_TO, ATTACK_ENTITY, EXPLORE, FLEE, IDLE, APPROACH_ENTITY",
+      "Available actions: SET_GOAL, NAVIGATE_TO, ATTACK_ENTITY, CHOP_TREE, CATCH_FISH, MINE_ROCK, EXPLORE, FLEE, IDLE, APPROACH_ENTITY",
       "",
       "GOAL-ORIENTED BEHAVIOR:",
       "1. You MUST have a goal. If no goal, use SET_GOAL first.",

@@ -8,6 +8,28 @@ import type { Evaluator, IAgentRuntime, Memory, State } from "@elizaos/core";
 import { logger } from "@elizaos/core";
 import type { HyperscapeService } from "../services/HyperscapeService.js";
 
+type Position3 = [number, number, number];
+type PositionLike = Position3 | { x: number; y?: number; z: number };
+
+type GoalEvaluatorState = State & {
+  goalFacts?: string[];
+  goalRecommendations?: string[];
+  priorityAction?: string;
+  hasGoal?: boolean;
+  goalType?: string;
+};
+
+function getPositionArray(
+  pos: PositionLike | null | undefined,
+): Position3 | null {
+  if (!pos) return null;
+  if (Array.isArray(pos) && pos.length >= 3) {
+    return [pos[0], pos[1], pos[2]];
+  }
+  const obj = pos as { x: number; y?: number; z: number };
+  return [obj.x, obj.y ?? 0, obj.z];
+}
+
 export const goalEvaluator: Evaluator = {
   name: "GOAL_EVALUATOR",
   description: "Evaluates goal progress and provides action recommendations",
@@ -46,10 +68,10 @@ export const goalEvaluator: Evaluator = {
       recommendations.push("PRIORITY: SET_GOAL");
 
       if (state) {
-        (state as Record<string, unknown>).goalFacts = facts;
-        (state as Record<string, unknown>).goalRecommendations =
-          recommendations;
-        (state as Record<string, unknown>).priorityAction = "SET_GOAL";
+        const mutableState = state as GoalEvaluatorState;
+        mutableState.goalFacts = facts;
+        mutableState.goalRecommendations = recommendations;
+        mutableState.priorityAction = "SET_GOAL";
       }
 
       return {
@@ -71,10 +93,10 @@ export const goalEvaluator: Evaluator = {
       behaviorManager?.clearGoal();
 
       if (state) {
-        (state as Record<string, unknown>).goalFacts = facts;
-        (state as Record<string, unknown>).goalRecommendations =
-          recommendations;
-        (state as Record<string, unknown>).priorityAction = "SET_GOAL";
+        const mutableState = state as GoalEvaluatorState;
+        mutableState.goalFacts = facts;
+        mutableState.goalRecommendations = recommendations;
+        mutableState.priorityAction = "SET_GOAL";
       }
 
       return {
@@ -91,14 +113,19 @@ export const goalEvaluator: Evaluator = {
     if (goal.type === "combat_training") {
       // Check for nearby mobs
       const nearbyEntities = service.getNearbyEntities();
-      const mobs = nearbyEntities.filter(
-        (e) =>
-          "mobType" in e &&
-          (e as { alive?: boolean }).alive !== false &&
-          e.position &&
-          Array.isArray(e.position) &&
-          e.position.length >= 3,
-      );
+      const mobs = nearbyEntities.filter((e) => {
+        const name = e.name?.toLowerCase() || "";
+        const isMob =
+          !!e.mobType ||
+          e.type === "mob" ||
+          e.entityType === "mob" ||
+          /goblin|bandit|skeleton|zombie|rat|spider|wolf/i.test(name);
+        return (
+          isMob &&
+          e.alive !== false &&
+          !!getPositionArray(e.position as PositionLike)
+        );
+      });
 
       if (mobs.length > 0) {
         const targetMob = goal.targetEntity
@@ -123,9 +150,11 @@ export const goalEvaluator: Evaluator = {
       }
     } else if (goal.type === "woodcutting") {
       const nearbyEntities = service.getNearbyEntities();
-      const trees = nearbyEntities.filter((e) =>
-        e.name?.toLowerCase().includes("tree"),
-      );
+      const trees = nearbyEntities.filter((e) => {
+        const resourceType = (e.resourceType || "").toLowerCase();
+        const name = e.name?.toLowerCase() || "";
+        return resourceType === "tree" || name.includes("tree");
+      });
 
       if (trees.length > 0) {
         facts.push(`${trees.length} trees nearby`);
@@ -136,6 +165,49 @@ export const goalEvaluator: Evaluator = {
         recommendations.push("EXPLORE to find trees");
         priorityAction = "EXPLORE";
       }
+    } else if (goal.type === "fishing") {
+      const nearbyEntities = service.getNearbyEntities();
+      const spots = nearbyEntities.filter((e) => {
+        const resourceType = (e.resourceType || "").toLowerCase();
+        const name = e.name?.toLowerCase() || "";
+        return resourceType === "fishing_spot" || name.includes("fishing spot");
+      });
+
+      if (spots.length > 0) {
+        facts.push(`${spots.length} fishing spot(s) nearby`);
+        recommendations.push("CATCH_FISH");
+        priorityAction = "CATCH_FISH";
+      } else {
+        facts.push("No fishing spots nearby");
+        recommendations.push("EXPLORE to find fishing spots");
+        priorityAction = "EXPLORE";
+      }
+    } else if (goal.type === "mining") {
+      const nearbyEntities = service.getNearbyEntities();
+      const rocks = nearbyEntities.filter((e) => {
+        const resourceType = (e.resourceType || "").toLowerCase();
+        const name = e.name?.toLowerCase() || "";
+        return (
+          resourceType === "mining_rock" ||
+          resourceType === "ore" ||
+          name.includes("rock") ||
+          name.includes("ore")
+        );
+      });
+
+      if (rocks.length > 0) {
+        facts.push(`${rocks.length} rock(s) nearby`);
+        recommendations.push("MINE_ROCK");
+        priorityAction = "MINE_ROCK";
+      } else {
+        facts.push("No rocks nearby");
+        recommendations.push("EXPLORE to find rocks");
+        priorityAction = "EXPLORE";
+      }
+    } else if (goal.type === "user_command") {
+      facts.push("User command in progress");
+      recommendations.push("IDLE while command completes");
+      priorityAction = "IDLE";
     } else if (goal.type === "exploration") {
       recommendations.push("EXPLORE to discover new areas");
       priorityAction = "EXPLORE";
@@ -143,11 +215,12 @@ export const goalEvaluator: Evaluator = {
 
     // Store in state
     if (state) {
-      (state as Record<string, unknown>).goalFacts = facts;
-      (state as Record<string, unknown>).goalRecommendations = recommendations;
-      (state as Record<string, unknown>).priorityAction = priorityAction;
-      (state as Record<string, unknown>).hasGoal = true;
-      (state as Record<string, unknown>).goalType = goal.type;
+      const mutableState = state as GoalEvaluatorState;
+      mutableState.goalFacts = facts;
+      mutableState.goalRecommendations = recommendations;
+      mutableState.priorityAction = priorityAction;
+      mutableState.hasGoal = true;
+      mutableState.goalType = goal.type;
     }
 
     logger.debug(`[GoalEvaluator] Priority: ${priorityAction}`);

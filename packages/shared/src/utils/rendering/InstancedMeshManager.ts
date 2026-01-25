@@ -38,8 +38,119 @@
  * **Referenced by:** TerrainSystem (for resource rendering)
  */
 
-import THREE from "../../extras/three/three";
+import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
+import THREE, {
+  uniform,
+  sub,
+  add,
+  mul,
+  Fn,
+  MeshStandardNodeMaterial,
+  float,
+  fract,
+  sin,
+  cos,
+  dot,
+  vec2,
+  smoothstep,
+  positionWorld,
+} from "../../extras/three/three";
 import type { World } from "../../core/World";
+import { modelCache } from "./ModelCache";
+import type {
+  MobAnimationState,
+  MobInstancedHandle,
+} from "../../types/rendering/nodes";
+import {
+  AnimationLOD,
+  ANIMATION_LOD_PRESETS,
+  type AnimationLODResult,
+  LOD_LEVEL,
+  distanceSquaredXZ,
+  getCameraPosition,
+} from "./AnimationLOD";
+
+// ============================================================================
+// MOB DISSOLVE MATERIAL TYPES
+// ============================================================================
+
+/**
+ * Uniforms for mob dissolve material - updated per-frame.
+ */
+type MobDissolveUniforms = {
+  playerPos: { value: THREE.Vector3 };
+};
+
+/**
+ * Material with dissolve uniforms attached.
+ */
+type MobDissolveMaterial = THREE.Material & {
+  _dissolveUniforms?: MobDissolveUniforms;
+};
+
+// ============================================================================
+// VAT (VERTEX ANIMATION TEXTURE) TYPES
+// ============================================================================
+// STATUS: INFRASTRUCTURE ONLY - NOT YET INTEGRATED
+//
+// The VAT system provides GPU-driven animation by baking vertex positions into
+// textures. The loader and types are implemented, but vertex shader integration
+// is not complete. Currently, all animation uses CPU-based skeletal animation.
+//
+// To enable VAT:
+// 1. Run: node scripts/bake-mob-vat.mjs --input models/goblin.glb --output assets/vat/
+// 2. Implement VAT vertex shader sampling in createDissolveMaterial()
+// 3. Add per-instance animation state/time attributes
+// 4. Call loadVATData() when loading mob models
+// ============================================================================
+
+/**
+ * VAT metadata loaded from .vat.json files.
+ * Describes the layout of animation data in the VAT texture.
+ * @internal Infrastructure - not yet integrated with runtime
+ */
+type VATMetadata = {
+  version: number;
+  modelName: string;
+  vertexCount: number;
+  totalFrames: number;
+  textureWidth: number;
+  textureHeight: number;
+  format: string; // "RGBA32F"
+  animations: Array<{
+    name: string;
+    frames: number;
+    startFrame: number;
+    duration: number;
+    loop: boolean;
+  }>;
+};
+
+/**
+ * Animation index constants for VAT.
+ * Maps to row offsets in the VAT texture.
+ * @internal Infrastructure - not yet integrated with runtime
+ */
+const VAT_ANIMATION_INDEX = {
+  IDLE: 0,
+  WALK: 1,
+  ATTACK: 2,
+  DEATH: 3,
+} as const;
+
+/**
+ * Loaded VAT data for a model, ready for GPU use.
+ * @internal Infrastructure - not yet integrated with runtime
+ */
+type VATData = {
+  metadata: VATMetadata;
+  texture: THREE.DataTexture;
+  /** Pre-computed frame offsets for each animation (in texture rows) */
+  animationOffsets: Map<
+    string,
+    { start: number; frames: number; duration: number; loop: boolean }
+  >;
+};
 
 /**
  * InstanceData - Internal tracking for a single instanced mesh type
@@ -488,5 +599,2252 @@ export class InstancedMeshManager {
       data.mesh.dispose();
     }
     this.instancedMeshes.clear();
+  }
+}
+
+// === Instanced Skinned Mesh (shared skeleton across instances) ===
+class InstancedSkinnedMesh extends THREE.InstancedMesh {
+  isSkinnedMesh = true;
+  readonly isInstancedSkinnedMesh = true;
+  skeleton: THREE.Skeleton;
+  bindMatrix: THREE.Matrix4;
+  bindMatrixInverse: THREE.Matrix4;
+  bindMode: THREE.BindMode;
+
+  constructor(
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material | THREE.Material[],
+    count: number,
+    skeleton: THREE.Skeleton,
+    bindMatrix: THREE.Matrix4,
+    bindMode: THREE.BindMode,
+  ) {
+    super(geometry, material, count);
+    this.skeleton = skeleton;
+    this.bindMatrix = new THREE.Matrix4();
+    this.bindMatrixInverse = new THREE.Matrix4();
+    this.bindMode = bindMode;
+    this.bind(this.skeleton, bindMatrix);
+  }
+
+  bind(skeleton: THREE.Skeleton, bindMatrix?: THREE.Matrix4): void {
+    this.skeleton = skeleton;
+    if (bindMatrix) {
+      this.bindMatrix.copy(bindMatrix);
+    } else {
+      this.bindMatrix.copy(this.matrixWorld);
+    }
+    this.bindMatrixInverse.copy(this.bindMatrix).invert();
+  }
+
+  override updateMatrixWorld(force?: boolean): void {
+    super.updateMatrixWorld(force ?? false);
+    if (this.bindMode === THREE.AttachedBindMode) {
+      this.bindMatrixInverse.copy(this.matrixWorld).invert();
+    }
+  }
+
+  // Skeletons are updated once per group in MobInstancedRenderer.update().
+}
+
+type MobAnimationClips = {
+  idle?: THREE.AnimationClip;
+  walk?: THREE.AnimationClip;
+};
+
+/**
+ * Rest pose data for freezing animation at distance.
+ * Stores bone matrices from idle animation frame 0 for consistent frozen appearance.
+ */
+type RestPoseData = {
+  /** Bone local matrices at rest pose (indexed by bone index) */
+  boneMatrices: THREE.Matrix4[];
+  /** Has rest pose been applied since entering frozen state? */
+  applied: boolean;
+};
+
+type MobInstancedGroup = {
+  key: string;
+  state: MobAnimationState;
+  variant: number;
+  clip?: THREE.AnimationClip;
+  mixer?: THREE.AnimationMixer;
+  action?: THREE.AnimationAction;
+  animationLOD: AnimationLOD;
+  lodDistanceSq: number;
+  lodLastUpdate: number;
+  sourceScene: THREE.Object3D;
+  skinnedMeshes: THREE.SkinnedMesh[];
+  skeletons: THREE.Skeleton[];
+  instancedMeshes: InstancedSkinnedMesh[];
+  instances: Array<{ handle: MobInstancedHandle }>;
+  instanceMap: Map<string, number>;
+  capacity: number;
+  dirty: boolean;
+  /** Rest pose data for frozen animation state */
+  restPose: RestPoseData;
+  /** Whether this group is currently frozen (no animation updates) */
+  isFrozen: boolean;
+  /** Merged geometry (if multiple skinned meshes were merged) */
+  mergedGeometry?: THREE.BufferGeometry;
+};
+
+/**
+ * Imposter render data for a model.
+ * Created once per model type and shared across all groups.
+ */
+type MobImposterModel = {
+  /** Pre-rendered imposter texture */
+  texture: THREE.Texture;
+  /** Render target that owns the texture (must be kept alive) */
+  renderTarget: THREE.WebGLRenderTarget;
+  /** Billboard geometry (plane) */
+  geometry: THREE.PlaneGeometry;
+  /** Billboard material */
+  material: THREE.MeshBasicMaterial;
+  /** Instanced mesh for all imposters of this model */
+  mesh: THREE.InstancedMesh;
+  /** Instance index map (handle ID -> index) */
+  instanceMap: Map<string, number>;
+  /** Reverse map (index -> handle ID) for O(1) swap operations */
+  reverseMap: Map<number, string>;
+  /** Current count of active imposters */
+  count: number;
+  /** Capacity of the instanced mesh */
+  capacity: number;
+  /** Width of the mob (world units) */
+  width: number;
+  /** Height of the mob (world units) */
+  height: number;
+};
+
+type MobInstancedModel = {
+  modelPath: string;
+  templateScene: THREE.Object3D;
+  clips: MobAnimationClips;
+  supportsInstancing: boolean;
+  groups: Map<string, MobInstancedGroup>;
+  /** Imposter data for billboard rendering at distance */
+  imposter: MobImposterModel | null;
+  /** Bounding box dimensions for imposter sizing */
+  boundingBox: THREE.Box3;
+};
+
+type MobInstanceRegistration = {
+  id: string;
+  modelPath: string;
+  scale: { x: number; y: number; z: number };
+  position: THREE.Vector3;
+  quaternion: THREE.Quaternion;
+  initialState: MobAnimationState;
+};
+
+const MOB_MODEL_SCALE = 100; // cm to meters (matches MobEntity)
+const DEFAULT_MOB_VARIANTS = 3; // animation phase buckets per state
+
+// Note: Imposter distances are now dynamic, initialized from shadow quality
+// See MobInstancedRenderer._imposterDistance* variables
+
+/** Imposter texture size (power of 2) */
+const IMPOSTER_TEXTURE_SIZE = 256;
+
+const mobInstancedRenderers = new WeakMap<World, MobInstancedRenderer>();
+
+/**
+ * MobInstancedRenderer - GPU instancing for animated skinned mobs.
+ *
+ * Uses a shared skeleton per animation group (idle/walk) to render many mobs in
+ * a single draw call while keeping animation smooth and GPU-efficient.
+ *
+ * ## Optimization Tiers:
+ * 1. **Full Animation** (0-30m): 60fps skeleton updates
+ * 2. **Half-rate** (30-60m): 30fps skeleton updates
+ * 3. **Quarter-rate** (60-80m): 15fps skeleton updates
+ * 4. **Frozen** (80-100m): Static idle pose, zero CPU animation work
+ * 5. **Imposter** (100-150m): 2D billboard, no 3D mesh
+ * 6. **Culled** (150m+): Not rendered
+ *
+ * ## Mesh Merging:
+ * Models with multiple SkinnedMeshes sharing the same skeleton are merged
+ * into a single geometry, reducing draw calls from N to 1 per group.
+ */
+export class MobInstancedRenderer {
+  private world: World;
+  private models = new Map<string, MobInstancedModel>();
+  private totalInstances = 0;
+  private handles = new Map<string, MobInstancedHandle>();
+  private readonly variantCount: number;
+  private readonly _tempMatrix = new THREE.Matrix4();
+  private readonly _tempScale = new THREE.Vector3();
+  private readonly _tempPos = new THREE.Vector3();
+  private readonly _tempQuat = new THREE.Quaternion();
+  private readonly _tempEuler = new THREE.Euler();
+  private readonly _tempVec3 = new THREE.Vector3();
+  private readonly _tempBox = new THREE.Box3();
+  private readonly _sharedMaterialCache = new Map<string, THREE.Material>();
+
+  // Imposter rendering
+  private _imposterRenderTarget: THREE.WebGLRenderTarget | null = null;
+  private _imposterCamera: THREE.OrthographicCamera | null = null;
+  private _imposterScene: THREE.Scene | null = null;
+
+  // Frustum culling - skip mobs outside camera view
+  private readonly _frustum = new THREE.Frustum();
+  private readonly _projScreenMatrix = new THREE.Matrix4();
+  private readonly _lastCameraMatrix = new THREE.Matrix4();
+  private readonly _boundingSphere = new THREE.Sphere();
+  // Bounding radius for mob frustum tests (accounts for typical mob size + animation range)
+  private readonly _mobBoundingRadius = 2.5; // meters
+
+  // Dynamic distances - initialized from shadow quality settings (like vegetation)
+  // These match vegetation system for consistent visual culling
+  private _distancesInitialized = false;
+  private _cullDistance = 200; // Will be set from shadow maxFar
+  private _cullDistanceSq = 200 * 200;
+  private _uncullDistance = 190; // 95% of cull distance (hysteresis)
+  private _uncullDistanceSq = 190 * 190;
+  private _fadeStartDistance = 180; // 90% of cull distance
+  private _fadeStartDistanceSq = 180 * 180;
+  private _imposterDistance = 60; // Switch to imposter before frozen state
+  private _imposterDistanceSq = 60 * 60;
+  private _imposterUncullDistance = 55; // Hysteresis for imposter transition
+  private _imposterUncullDistanceSq = 55 * 55;
+
+  // Culling timing
+  private readonly _cullIntervalMs = 100; // More frequent for smoother transitions
+  private readonly _cullMoveThresholdSq = 4 * 4; // 4m movement triggers update
+  private _lastCullTime = 0;
+  private _lastCullCameraPos = new THREE.Vector3();
+  private _hasCullCamera = false;
+  private _cullDirty = false;
+
+  private readonly _lodDistanceIntervalMs = 200;
+  private _lastLODTime = 0;
+  private _lastLODCameraPos = new THREE.Vector3();
+  private _hasLODCamera = false;
+  private _lodDirty = false;
+
+  // Track which handles are currently using imposters vs 3D
+  private readonly imposterHandles = new Set<string>();
+
+  // Track all dissolve materials for uniform updates
+  private readonly _dissolveMaterials: MobDissolveMaterial[] = [];
+  private readonly _dissolvePlayerPos = new THREE.Vector3();
+
+  // VAT (Vertex Animation Texture) cache
+  private readonly _vatCache = new Map<string, VATData | null>();
+  private readonly _vatLoadingPromises = new Map<
+    string,
+    Promise<VATData | null>
+  >();
+
+  private constructor(world: World, variants = DEFAULT_MOB_VARIANTS) {
+    this.world = world;
+    this.variantCount = Math.max(1, variants);
+    // Note: imposter renderer is lazy-initialized on first use
+    // Note: distances are lazy-initialized from shadow quality on first update
+  }
+
+  /**
+   * Initialize culling distances based on shadow quality settings.
+   * Matches vegetation system for consistent visual culling across all entities.
+   * Called lazily on first update when world.prefs is available.
+   */
+  private initializeDistances(): void {
+    if (this._distancesInitialized) return;
+
+    // Get shadow quality from world preferences (same as vegetation)
+    const shadowsLevel = (this.world.prefs?.shadows as string) || "med";
+
+    // Import shadow config (inline to avoid circular deps)
+    const csmLevels: Record<string, { maxFar: number }> = {
+      none: { maxFar: 50 },
+      low: { maxFar: 200 },
+      med: { maxFar: 350 },
+      high: { maxFar: 1000 },
+    };
+
+    const config = csmLevels[shadowsLevel] || csmLevels.med;
+    const maxFar = config.maxFar;
+
+    // Set distances to match vegetation fade behavior
+    this._cullDistance = maxFar;
+    this._cullDistanceSq = maxFar * maxFar;
+    this._fadeStartDistance = maxFar * 0.9; // Fade starts at 90% of max
+    this._fadeStartDistanceSq =
+      this._fadeStartDistance * this._fadeStartDistance;
+    this._uncullDistance = maxFar * 0.95; // Uncull at 95% for hysteresis
+    this._uncullDistanceSq = this._uncullDistance * this._uncullDistance;
+
+    // Imposter distances (before frozen state for smooth transition)
+    // Use 30% of max distance for imposter switch
+    this._imposterDistance = Math.min(60, maxFar * 0.3);
+    this._imposterDistanceSq = this._imposterDistance * this._imposterDistance;
+    this._imposterUncullDistance = this._imposterDistance * 0.9;
+    this._imposterUncullDistanceSq =
+      this._imposterUncullDistance * this._imposterUncullDistance;
+
+    this._distancesInitialized = true;
+  }
+
+  static get(world: World): MobInstancedRenderer {
+    const existing = mobInstancedRenderers.get(world);
+    if (existing) {
+      return existing;
+    }
+    const renderer = new MobInstancedRenderer(world);
+    mobInstancedRenderers.set(world, renderer);
+    return renderer;
+  }
+
+  /**
+   * Initialize the imposter rendering system.
+   * Creates render target and camera for pre-rendering mob textures.
+   */
+  private initImposterRenderer(): void {
+    // Create render target for imposter textures
+    this._imposterRenderTarget = new THREE.WebGLRenderTarget(
+      IMPOSTER_TEXTURE_SIZE,
+      IMPOSTER_TEXTURE_SIZE,
+      {
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat,
+        type: THREE.UnsignedByteType,
+        depthBuffer: true,
+        stencilBuffer: false,
+      },
+    );
+
+    // Orthographic camera for consistent imposter capture
+    this._imposterCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
+
+    // Isolated scene for imposter rendering
+    this._imposterScene = new THREE.Scene();
+    this._imposterScene.background = null;
+
+    // Lighting for imposter capture
+    const ambient = new THREE.AmbientLight(0xffffff, 0.8);
+    this._imposterScene.add(ambient);
+    const dirLight = new THREE.DirectionalLight(0xfff8f0, 0.6);
+    dirLight.position.set(0, 2, 1);
+    this._imposterScene.add(dirLight);
+  }
+
+  async registerMob(
+    registration: MobInstanceRegistration,
+  ): Promise<MobInstancedHandle | null> {
+    if (this.world.isServer || !this.world.stage?.scene) {
+      return null;
+    }
+
+    const model = await this.getOrLoadModel(registration.modelPath);
+    if (!model || !model.supportsInstancing) {
+      return null;
+    }
+
+    const variant = this.getVariantForId(registration.id);
+    const group = this.getOrCreateGroup(
+      model,
+      registration.initialState,
+      variant,
+    );
+
+    const handle: MobInstancedHandle = {
+      id: registration.id,
+      modelKey: model.modelPath,
+      state: registration.initialState,
+      variant,
+      index: -1,
+      hidden: false,
+      scale: new THREE.Vector3(
+        registration.scale.x * MOB_MODEL_SCALE,
+        registration.scale.y * MOB_MODEL_SCALE,
+        registration.scale.z * MOB_MODEL_SCALE,
+      ),
+      position: registration.position.clone(),
+      quaternion: registration.quaternion.clone(),
+      matrix: new THREE.Matrix4(),
+    };
+
+    this.addInstanceToGroup(
+      group,
+      handle,
+      registration.position,
+      registration.quaternion,
+      true,
+    );
+
+    this.handles.set(handle.id, handle);
+
+    if (this.handles.size === 1) {
+      this.world.setHot(this, true);
+    }
+
+    return handle;
+  }
+
+  updateTransform(
+    handle: MobInstancedHandle,
+    position: THREE.Vector3,
+    quaternion: THREE.Quaternion,
+  ): void {
+    const pos = handle.position;
+    const quat = handle.quaternion;
+    if (
+      pos.x === position.x &&
+      pos.y === position.y &&
+      pos.z === position.z &&
+      quat.x === quaternion.x &&
+      quat.y === quaternion.y &&
+      quat.z === quaternion.z &&
+      quat.w === quaternion.w
+    ) {
+      return;
+    }
+    pos.copy(position);
+    quat.copy(quaternion);
+    this.composeInstanceMatrix(handle, position, quaternion);
+    this._cullDirty = true;
+    this._lodDirty = true;
+    if (handle.hidden) return;
+
+    // Update depends on whether using 3D mesh or imposter
+    if (this.imposterHandles.has(handle.id)) {
+      // Imposter transform is updated in updateImposterBillboards (faces camera)
+      // Position is already stored in handle.position
+      return;
+    }
+
+    const group = this.getGroupForHandle(handle);
+    if (!group) return;
+    this.updateInstanceMatrix(group, handle.index, handle.matrix);
+  }
+
+  updateState(
+    handle: MobInstancedHandle,
+    state: MobAnimationState,
+    position: THREE.Vector3,
+    quaternion: THREE.Quaternion,
+  ): void {
+    if (handle.state === state) return;
+    const model = this.models.get(handle.modelKey);
+    if (!model) return;
+
+    // If using imposter, just update the state for when it returns to 3D
+    if (this.imposterHandles.has(handle.id)) {
+      handle.state = state;
+      handle.position.copy(position);
+      handle.quaternion.copy(quaternion);
+      return;
+    }
+
+    const oldGroup = this.getGroupForHandle(handle);
+    if (!oldGroup) return;
+
+    const newGroup = this.getOrCreateGroup(model, state, handle.variant);
+    if (oldGroup === newGroup) {
+      handle.state = state;
+      return;
+    }
+
+    handle.position.copy(position);
+    handle.quaternion.copy(quaternion);
+    this.composeInstanceMatrix(handle, position, quaternion);
+    this._cullDirty = true;
+    this._lodDirty = true;
+    this.removeInstanceFromGroup(oldGroup, handle, false);
+    handle.state = state;
+    this.addInstanceToGroup(newGroup, handle, position, quaternion, false);
+  }
+
+  setVisible(handle: MobInstancedHandle, visible: boolean): void {
+    if (handle.hidden === !visible) return;
+    const model = this.models.get(handle.modelKey);
+    if (!model) return;
+
+    if (!visible) {
+      // Hide from both 3D and imposter
+      const isImposter = this.imposterHandles.has(handle.id);
+      if (isImposter) {
+        if (model.imposter) {
+          this.removeFromImposter(model.imposter, handle);
+        }
+        this.imposterHandles.delete(handle.id);
+      } else {
+        const group = this.getGroupForHandle(handle);
+        if (group) {
+          this.removeInstanceFromGroup(group, handle, true);
+        }
+      }
+      handle.hidden = true;
+      this.cleanupIfEmpty();
+      this._lodDirty = true;
+    } else {
+      handle.hidden = false;
+      // Re-add to appropriate renderer (3D or imposter based on distance)
+      const cameraPos = getCameraPosition(this.world);
+      let useImposter = false;
+      if (cameraPos) {
+        const distSq = distanceSquaredXZ(
+          handle.position.x,
+          handle.position.z,
+          cameraPos.x,
+          cameraPos.z,
+        );
+        useImposter = distSq >= this._imposterDistanceSq;
+      }
+
+      if (useImposter && model.imposter) {
+        this.addToImposter(model.imposter, handle);
+        this.imposterHandles.add(handle.id);
+      } else {
+        const group = this.getOrCreateGroup(
+          model,
+          handle.state,
+          handle.variant,
+        );
+        this.addInstanceToGroup(
+          group,
+          handle,
+          handle.position,
+          handle.quaternion,
+          true,
+        );
+      }
+      this._lodDirty = true;
+    }
+  }
+
+  remove(handle: MobInstancedHandle): void {
+    const model = this.models.get(handle.modelKey);
+
+    // Remove from imposter if present
+    if (this.imposterHandles.has(handle.id)) {
+      if (model?.imposter) {
+        this.removeFromImposter(model.imposter, handle);
+      }
+      this.imposterHandles.delete(handle.id);
+    } else {
+      // Remove from 3D group
+      const group = this.getGroupForHandle(handle);
+      if (group) {
+        this.removeInstanceFromGroup(group, handle, true);
+      }
+    }
+
+    handle.hidden = true;
+    this.handles.delete(handle.id);
+    this.cleanupIfEmpty();
+  }
+
+  update(delta: number): void {
+    if (this.handles.size === 0) return;
+    const cameraPos = getCameraPosition(this.world);
+    const now = Date.now();
+
+    // Update dissolve shader uniforms with current player position
+    if (cameraPos) {
+      this._dissolvePlayerPos.set(cameraPos.x, 0, cameraPos.z);
+      for (const mat of this._dissolveMaterials) {
+        if (mat._dissolveUniforms) {
+          mat._dissolveUniforms.playerPos.value.copy(this._dissolvePlayerPos);
+        }
+      }
+    }
+
+    // Update culling (handles distance culling, frustum culling, and imposter transitions)
+    // Frustum change detection is handled inside updateCulling via checkFrustumNeedsUpdate
+    if (cameraPos) {
+      this.updateCulling(cameraPos.x, cameraPos.z, now);
+      this.updateImposterTransitions(cameraPos.x, cameraPos.z);
+    }
+
+    const refreshDistances = cameraPos
+      ? this.shouldRefreshLOD(cameraPos.x, cameraPos.z, now)
+      : false;
+
+    for (const model of this.models.values()) {
+      // Update imposter billboards to face camera
+      if (model.imposter && model.imposter.count > 0 && cameraPos) {
+        this.updateImposterBillboards(model.imposter, cameraPos);
+      }
+
+      for (const group of model.groups.values()) {
+        if (group.instances.length === 0) continue;
+
+        const lod = this.updateGroupLOD(
+          group,
+          cameraPos,
+          now,
+          delta,
+          refreshDistances,
+        );
+
+        // Handle freeze state transitions
+        if (lod.shouldFreeze && !group.isFrozen) {
+          // Entering frozen state - apply rest pose
+          this.applyRestPose(group);
+          group.isFrozen = true;
+        } else if (!lod.shouldFreeze && group.isFrozen) {
+          // Exiting frozen state - resume animation
+          group.isFrozen = false;
+          group.restPose.applied = false;
+        }
+
+        // Only update animation if not frozen
+        if (lod.shouldUpdate && !group.isFrozen) {
+          if (group.mixer) {
+            group.mixer.update(lod.effectiveDelta);
+          }
+          // Update skeletons only when animating
+          if (group.skeletons.length > 0) {
+            for (const skeleton of group.skeletons) {
+              const bones = skeleton.bones;
+              for (let i = 0; i < bones.length; i += 1) {
+                bones[i].updateMatrixWorld();
+              }
+              skeleton.update();
+            }
+          }
+        }
+
+        // Mark instance matrices for GPU upload
+        if (group.dirty) {
+          for (const mesh of group.instancedMeshes) {
+            mesh.instanceMatrix.needsUpdate = true;
+          }
+          group.dirty = false;
+        }
+      }
+    }
+  }
+
+  /**
+   * Apply rest pose to a group's skeletons.
+   * Called once when entering frozen state to set a consistent idle pose.
+   */
+  private applyRestPose(group: MobInstancedGroup): void {
+    if (group.restPose.applied) return;
+
+    for (const skeleton of group.skeletons) {
+      const bones = skeleton.bones;
+      const restMatrices = group.restPose.boneMatrices;
+
+      // Apply cached rest pose matrices to bones
+      for (let i = 0; i < bones.length && i < restMatrices.length; i += 1) {
+        bones[i].matrix.copy(restMatrices[i]);
+        bones[i].matrix.decompose(
+          bones[i].position,
+          bones[i].quaternion,
+          bones[i].scale,
+        );
+        bones[i].updateMatrixWorld(true);
+      }
+      skeleton.update();
+    }
+
+    group.restPose.applied = true;
+  }
+
+  /**
+   * Update imposter billboard orientations to face camera.
+   */
+  private updateImposterBillboards(
+    imposter: MobImposterModel,
+    cameraPos: { x: number; z: number },
+  ): void {
+    if (imposter.count === 0) return;
+
+    // Update each imposter to face camera (Y-axis billboard rotation only)
+    for (const [handleId, index] of imposter.instanceMap) {
+      const handle = this.handles.get(handleId);
+      if (!handle) continue;
+
+      // Calculate angle to camera (Y-axis only for vertical billboard)
+      const dx = cameraPos.x - handle.position.x;
+      const dz = cameraPos.z - handle.position.z;
+      const angle = Math.atan2(dx, dz);
+
+      // Compose billboard transform
+      this._tempQuat.setFromAxisAngle(this._tempVec3.set(0, 1, 0), angle);
+      this._tempScale.set(imposter.width, imposter.height, 1);
+
+      // Position at mob center, offset Y by half height to ground billboard
+      this._tempPos.copy(handle.position);
+      this._tempPos.y += imposter.height * 0.5;
+
+      this._tempMatrix.compose(this._tempPos, this._tempQuat, this._tempScale);
+      imposter.mesh.setMatrixAt(index, this._tempMatrix);
+    }
+
+    imposter.mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  /**
+   * Transition mobs between 3D rendering and imposters based on distance.
+   */
+  private updateImposterTransitions(cameraX: number, cameraZ: number): void {
+    const toImposter: MobInstancedHandle[] = [];
+    const to3D: MobInstancedHandle[] = [];
+
+    for (const handle of this.handles.values()) {
+      if (handle.hidden) continue;
+
+      const distSq = distanceSquaredXZ(
+        handle.position.x,
+        handle.position.z,
+        cameraX,
+        cameraZ,
+      );
+
+      const isImposter = this.imposterHandles.has(handle.id);
+
+      if (isImposter) {
+        // Currently imposter - check if should switch to 3D
+        if (distSq <= this._imposterUncullDistanceSq) {
+          to3D.push(handle);
+        }
+      } else {
+        // Currently 3D - check if should switch to imposter
+        if (distSq >= this._imposterDistanceSq) {
+          toImposter.push(handle);
+        }
+      }
+    }
+
+    // Execute transitions
+    for (const handle of toImposter) {
+      this.switchToImposter(handle);
+    }
+    for (const handle of to3D) {
+      this.switchTo3D(handle);
+    }
+  }
+
+  /**
+   * Switch a mob from 3D mesh to imposter billboard.
+   */
+  private switchToImposter(handle: MobInstancedHandle): void {
+    const model = this.models.get(handle.modelKey);
+    if (!model || !model.imposter) return;
+
+    // Hide from 3D group
+    const group = this.getGroupForHandle(handle);
+    if (group) {
+      this.removeInstanceFromGroup(group, handle, false);
+    }
+
+    // Add to imposter mesh
+    this.addToImposter(model.imposter, handle);
+    this.imposterHandles.add(handle.id);
+  }
+
+  /**
+   * Switch a mob from imposter billboard back to 3D mesh.
+   */
+  private switchTo3D(handle: MobInstancedHandle): void {
+    const model = this.models.get(handle.modelKey);
+    if (!model || !model.imposter) return;
+
+    // Remove from imposter mesh
+    this.removeFromImposter(model.imposter, handle);
+    this.imposterHandles.delete(handle.id);
+
+    // Add back to 3D group
+    const group = this.getOrCreateGroup(model, handle.state, handle.variant);
+    this.addInstanceToGroup(
+      group,
+      handle,
+      handle.position,
+      handle.quaternion,
+      false,
+    );
+  }
+
+  /**
+   * Add a handle to the imposter mesh.
+   */
+  private addToImposter(
+    imposter: MobImposterModel,
+    handle: MobInstancedHandle,
+  ): void {
+    if (imposter.count >= imposter.capacity) {
+      this.growImposterCapacity(imposter);
+    }
+
+    const index = imposter.count;
+    imposter.instanceMap.set(handle.id, index);
+    imposter.reverseMap.set(index, handle.id);
+    imposter.count++;
+    imposter.mesh.count = imposter.count;
+
+    this._tempMatrix.compose(
+      handle.position,
+      this._tempQuat.identity(),
+      this._tempScale.set(imposter.width, imposter.height, 1),
+    );
+    imposter.mesh.setMatrixAt(index, this._tempMatrix);
+    imposter.mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  /**
+   * Remove a handle from the imposter mesh.
+   */
+  private removeFromImposter(
+    imposter: MobImposterModel,
+    handle: MobInstancedHandle,
+  ): void {
+    const index = imposter.instanceMap.get(handle.id);
+    if (index === undefined) return;
+
+    const lastIndex = imposter.count - 1;
+    if (index !== lastIndex) {
+      // Swap with last instance
+      imposter.mesh.getMatrixAt(lastIndex, this._tempMatrix);
+      imposter.mesh.setMatrixAt(index, this._tempMatrix);
+
+      // Update mappings for swapped item (O(1) with reverse map)
+      const lastHandleId = imposter.reverseMap.get(lastIndex);
+      if (lastHandleId) {
+        imposter.instanceMap.set(lastHandleId, index);
+        imposter.reverseMap.set(index, lastHandleId);
+      }
+    }
+
+    imposter.instanceMap.delete(handle.id);
+    imposter.reverseMap.delete(lastIndex);
+    imposter.count--;
+    imposter.mesh.count = imposter.count;
+    imposter.mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  /**
+   * Grow imposter mesh capacity.
+   */
+  private growImposterCapacity(imposter: MobImposterModel): void {
+    const newCapacity = imposter.capacity * 2;
+    const newMesh = new THREE.InstancedMesh(
+      imposter.geometry,
+      imposter.material,
+      newCapacity,
+    );
+    newMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    newMesh.frustumCulled = false;
+    newMesh.layers.set(1);
+
+    // Copy existing matrices
+    for (let i = 0; i < imposter.count; i++) {
+      imposter.mesh.getMatrixAt(i, this._tempMatrix);
+      newMesh.setMatrixAt(i, this._tempMatrix);
+    }
+    newMesh.count = imposter.count;
+
+    // Replace in scene
+    if (imposter.mesh.parent) {
+      imposter.mesh.parent.add(newMesh);
+      imposter.mesh.parent.remove(imposter.mesh);
+    }
+    imposter.mesh.dispose();
+    imposter.mesh = newMesh;
+    imposter.capacity = newCapacity;
+  }
+
+  fixedUpdate(_delta: number): void {}
+  lateUpdate(_delta: number): void {}
+  postLateUpdate(_delta: number): void {}
+
+  /**
+   * Get statistics about the instanced renderer for debugging/monitoring.
+   */
+  getStats(): {
+    totalHandles: number;
+    activeHandles: number;
+    imposterHandles: number;
+    totalInstances: number;
+    modelCount: number;
+    groupCount: number;
+    instancedMeshCount: number;
+    totalSkeletons: number;
+    frozenGroups: number;
+  } {
+    let groupCount = 0;
+    let instancedMeshCount = 0;
+    let totalSkeletons = 0;
+    let frozenGroups = 0;
+
+    for (const model of this.models.values()) {
+      for (const group of model.groups.values()) {
+        groupCount++;
+        instancedMeshCount += group.instancedMeshes.length;
+        totalSkeletons += group.skeletons.length;
+        if (group.isFrozen) frozenGroups++;
+      }
+    }
+
+    let activeHandles = 0;
+    for (const handle of this.handles.values()) {
+      if (!handle.hidden) activeHandles++;
+    }
+
+    return {
+      totalHandles: this.handles.size,
+      activeHandles,
+      imposterHandles: this.imposterHandles.size,
+      totalInstances: this.totalInstances,
+      modelCount: this.models.size,
+      groupCount,
+      instancedMeshCount,
+      totalSkeletons,
+      frozenGroups,
+    };
+  }
+
+  private cleanupIfEmpty(): void {
+    if (this.handles.size === 0) {
+      this.world.setHot(this, false);
+    }
+  }
+
+  /**
+   * Dispose all resources used by this renderer.
+   * Call when the world is being destroyed.
+   */
+  dispose(): void {
+    // Dispose imposter render target
+    if (this._imposterRenderTarget) {
+      this._imposterRenderTarget.dispose();
+      this._imposterRenderTarget = null;
+    }
+
+    // Clear imposter scene
+    if (this._imposterScene) {
+      this._imposterScene.clear();
+      this._imposterScene = null;
+    }
+    this._imposterCamera = null;
+
+    // Dispose all models
+    for (const model of this.models.values()) {
+      // Dispose imposter
+      if (model.imposter) {
+        if (model.imposter.mesh.parent) {
+          model.imposter.mesh.parent.remove(model.imposter.mesh);
+        }
+        model.imposter.mesh.dispose();
+        model.imposter.geometry.dispose();
+        model.imposter.material.dispose();
+        // Dispose render target (which also disposes its texture)
+        model.imposter.renderTarget.dispose();
+      }
+
+      // Dispose groups
+      for (const group of model.groups.values()) {
+        // Dispose instanced meshes
+        for (const mesh of group.instancedMeshes) {
+          if (mesh.parent) {
+            mesh.parent.remove(mesh);
+          }
+          mesh.dispose();
+        }
+        // Dispose merged geometry if present
+        if (group.mergedGeometry) {
+          group.mergedGeometry.dispose();
+        }
+      }
+    }
+
+    this.models.clear();
+    this.handles.clear();
+    this.imposterHandles.clear();
+    this._sharedMaterialCache.clear();
+
+    // Clear dissolve materials (they're disposed with the meshes above)
+    this._dissolveMaterials.length = 0;
+
+    // Dispose VAT textures
+    for (const vat of this._vatCache.values()) {
+      if (vat) {
+        vat.texture.dispose();
+      }
+    }
+    this._vatCache.clear();
+    this._vatLoadingPromises.clear();
+
+    this.world.setHot(this, false);
+  }
+
+  private updateCulling(cameraX: number, cameraZ: number, now: number): void {
+    // Initialize distances on first call (needs world.prefs)
+    this.initializeDistances();
+
+    // Check if frustum needs update (camera rotated)
+    const frustumChanged = this.checkFrustumNeedsUpdate();
+
+    // Throttle culling updates unless frustum changed
+    if (now - this._lastCullTime < this._cullIntervalMs && !frustumChanged) {
+      if (this._hasCullCamera && !this._cullDirty) {
+        const dx = cameraX - this._lastCullCameraPos.x;
+        const dz = cameraZ - this._lastCullCameraPos.z;
+        if (dx * dx + dz * dz < this._cullMoveThresholdSq) return;
+      }
+    }
+
+    this._lastCullTime = now;
+    this._lastCullCameraPos.set(cameraX, 0, cameraZ);
+    this._hasCullCamera = true;
+    this._cullDirty = false;
+
+    // Update frustum planes from camera
+    this.updateFrustum();
+
+    // Batch visibility changes using distance AND frustum culling
+    for (const handle of this.handles.values()) {
+      const distSq = distanceSquaredXZ(
+        handle.position.x,
+        handle.position.z,
+        cameraX,
+        cameraZ,
+      );
+
+      // Distance culling (primary) - always cull beyond max distance
+      if (distSq >= this._cullDistanceSq) {
+        if (!handle.hidden) {
+          this.setVisible(handle, false);
+        }
+        continue;
+      }
+
+      // Frustum culling (secondary) - use bounding sphere for accurate test
+      // Center sphere at mob position with height offset, use mob bounding radius
+      this._boundingSphere.center.set(
+        handle.position.x,
+        handle.position.y + 1.2, // Center of mob (approximate waist height)
+        handle.position.z,
+      );
+      this._boundingSphere.radius = this._mobBoundingRadius;
+
+      const inFrustum = this._frustum.intersectsSphere(this._boundingSphere);
+
+      if (handle.hidden) {
+        // Hidden mob - check if should become visible
+        // Must be within uncull distance AND in frustum
+        if (distSq <= this._uncullDistanceSq && inFrustum) {
+          this.setVisible(handle, true);
+        }
+      } else {
+        // Visible mob - cull if completely outside frustum
+        // Use expanded sphere for hysteresis to prevent popping
+        this._boundingSphere.radius = this._mobBoundingRadius * 1.5;
+        const inExpandedFrustum = this._frustum.intersectsSphere(
+          this._boundingSphere,
+        );
+        if (!inExpandedFrustum) {
+          this.setVisible(handle, false);
+        }
+      }
+    }
+  }
+
+  /**
+   * Check if the camera's view matrix has changed (position or rotation).
+   * Returns true if frustum needs to be recalculated.
+   */
+  private checkFrustumNeedsUpdate(): boolean {
+    const camera = this.world.camera as THREE.PerspectiveCamera | undefined;
+    if (!camera) return false;
+
+    // CRITICAL: Use updateWorldMatrix(true, false) to ensure parent matrices are updated first
+    // updateMatrixWorld() alone does NOT update parent matrices, which can cause stale frustum
+    camera.updateWorldMatrix(true, false);
+
+    // Compare current camera matrix to last known matrix
+    if (!this._lastCameraMatrix.equals(camera.matrixWorld)) {
+      this._lastCameraMatrix.copy(camera.matrixWorld);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Update the frustum planes from the current camera.
+   */
+  private updateFrustum(): void {
+    const camera = this.world.camera as THREE.PerspectiveCamera | undefined;
+    if (!camera) return;
+
+    // CRITICAL: Compute matrixWorldInverse from matrixWorld
+    // updateMatrixWorld() does NOT update matrixWorldInverse - that's only done by renderer
+    camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+
+    // Build projection-view matrix and extract frustum planes
+    this._projScreenMatrix.multiplyMatrices(
+      camera.projectionMatrix,
+      camera.matrixWorldInverse,
+    );
+    this._frustum.setFromProjectionMatrix(this._projScreenMatrix);
+  }
+
+  private shouldRefreshLOD(
+    cameraX: number,
+    cameraZ: number,
+    now: number,
+  ): boolean {
+    // Force refresh if dirty or first camera position
+    if (this._lodDirty || !this._hasLODCamera) {
+      this._lodDirty = false;
+      this._hasLODCamera = true;
+      this._lastLODTime = now;
+      this._lastLODCameraPos.set(cameraX, 0, cameraZ);
+      return true;
+    }
+
+    // Check if camera moved or time elapsed
+    const dx = cameraX - this._lastLODCameraPos.x;
+    const dz = cameraZ - this._lastLODCameraPos.z;
+    const shouldRefresh =
+      dx * dx + dz * dz > this._cullMoveThresholdSq ||
+      now - this._lastLODTime >= this._lodDistanceIntervalMs;
+
+    if (shouldRefresh) {
+      this._lastLODTime = now;
+      this._lastLODCameraPos.set(cameraX, 0, cameraZ);
+    }
+    return shouldRefresh;
+  }
+
+  private updateGroupLOD(
+    group: MobInstancedGroup,
+    cameraPos: { x: number; z: number } | null,
+    now: number,
+    delta: number,
+    refreshDistances: boolean,
+  ): AnimationLODResult {
+    // Fallback when no camera - update at full rate
+    if (!cameraPos) {
+      return {
+        shouldUpdate: true,
+        effectiveDelta: delta,
+        lodLevel: LOD_LEVEL.FULL,
+        distanceSq: 0,
+        shouldFreeze: false,
+        shouldApplyRestPose: false,
+        shouldCull: false,
+      };
+    }
+
+    // Refresh distance to nearest instance in group
+    if (
+      refreshDistances ||
+      now - group.lodLastUpdate >= this._lodDistanceIntervalMs
+    ) {
+      let minDistSq = Number.POSITIVE_INFINITY;
+      for (const { handle } of group.instances) {
+        const distSq = distanceSquaredXZ(
+          handle.position.x,
+          handle.position.z,
+          cameraPos.x,
+          cameraPos.z,
+        );
+        if (distSq < minDistSq) minDistSq = distSq;
+      }
+      group.lodDistanceSq = Number.isFinite(minDistSq) ? minDistSq : 0;
+      group.lodLastUpdate = now;
+    }
+
+    return group.animationLOD.update(group.lodDistanceSq, delta);
+  }
+
+  private composeInstanceMatrix(
+    handle: MobInstancedHandle,
+    position: THREE.Vector3,
+    quaternion: THREE.Quaternion,
+  ): void {
+    handle.matrix.compose(position, quaternion, handle.scale);
+  }
+
+  private updateInstanceMatrix(
+    group: MobInstancedGroup,
+    index: number,
+    matrix: THREE.Matrix4,
+  ): void {
+    for (const mesh of group.instancedMeshes) {
+      mesh.setMatrixAt(index, matrix);
+    }
+    group.dirty = true;
+  }
+
+  private addInstanceToGroup(
+    group: MobInstancedGroup,
+    handle: MobInstancedHandle,
+    position: THREE.Vector3,
+    quaternion: THREE.Quaternion,
+    adjustTotal: boolean,
+  ): void {
+    this.ensureCapacity(group, group.instances.length + 1);
+    const index = group.instances.length;
+    handle.index = index;
+    handle.state = group.state;
+    handle.variant = group.variant;
+    this.composeInstanceMatrix(handle, position, quaternion);
+    group.instances.push({ handle });
+    group.instanceMap.set(handle.id, index);
+    this.updateInstanceMatrix(group, index, handle.matrix);
+    for (const mesh of group.instancedMeshes) {
+      mesh.count = group.instances.length;
+    }
+    group.dirty = true;
+    if (adjustTotal) {
+      this.totalInstances += 1;
+    }
+  }
+
+  private removeInstanceFromGroup(
+    group: MobInstancedGroup,
+    handle: MobInstancedHandle,
+    adjustTotal: boolean,
+  ): void {
+    const index = group.instanceMap.get(handle.id);
+    if (index === undefined) return;
+    const lastIndex = group.instances.length - 1;
+    if (index !== lastIndex) {
+      const lastEntry = group.instances[lastIndex];
+      group.instances[index] = lastEntry;
+      group.instanceMap.set(lastEntry.handle.id, index);
+      lastEntry.handle.index = index;
+      this.updateInstanceMatrix(group, index, lastEntry.handle.matrix);
+    }
+    group.instances.pop();
+    group.instanceMap.delete(handle.id);
+    for (const mesh of group.instancedMeshes) {
+      mesh.count = group.instances.length;
+    }
+    group.dirty = true;
+    if (adjustTotal) {
+      this.totalInstances = Math.max(0, this.totalInstances - 1);
+    }
+  }
+
+  private getGroupForHandle(
+    handle: MobInstancedHandle,
+  ): MobInstancedGroup | null {
+    const model = this.models.get(handle.modelKey);
+    if (!model) return null;
+    const key = this.getGroupKey(handle.state, handle.variant);
+    return model.groups.get(key) ?? null;
+  }
+
+  private getVariantForId(id: string): number {
+    let hash = 0;
+    for (let i = 0; i < id.length; i += 1) {
+      hash = (hash * 31 + id.charCodeAt(i)) | 0;
+    }
+    return Math.abs(hash) % this.variantCount;
+  }
+
+  private getGroupKey(state: MobAnimationState, variant: number): string {
+    return `${state}:${variant}`;
+  }
+
+  private ensureCapacity(group: MobInstancedGroup, size: number): void {
+    if (size <= group.capacity) return;
+    const newCapacity = Math.max(group.capacity * 2, size + 10);
+    const newMeshes: InstancedSkinnedMesh[] = [];
+
+    for (const mesh of group.instancedMeshes) {
+      const resized = new InstancedSkinnedMesh(
+        mesh.geometry,
+        mesh.material,
+        newCapacity,
+        mesh.skeleton,
+        mesh.bindMatrix,
+        mesh.bindMode,
+      );
+      resized.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      resized.castShadow = mesh.castShadow;
+      resized.receiveShadow = mesh.receiveShadow;
+      resized.frustumCulled = false;
+      resized.layers.mask = mesh.layers.mask;
+      resized.count = mesh.count;
+
+      // Copy existing instance matrices
+      for (let i = 0; i < mesh.count; i++) {
+        mesh.getMatrixAt(i, this._tempMatrix);
+        resized.setMatrixAt(i, this._tempMatrix);
+      }
+
+      // Swap in scene
+      if (mesh.parent) {
+        mesh.parent.add(resized);
+        mesh.parent.remove(mesh);
+      }
+      mesh.dispose();
+      newMeshes.push(resized);
+    }
+
+    group.instancedMeshes = newMeshes;
+    group.capacity = newCapacity;
+    group.dirty = true;
+  }
+
+  private createInstancedSkinnedMesh(
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material | THREE.Material[],
+    skeleton: THREE.Skeleton,
+    bindMatrix: THREE.Matrix4,
+    bindMode: THREE.BindMode,
+    castShadow: boolean,
+    receiveShadow: boolean,
+    initialCapacity = 10,
+  ): InstancedSkinnedMesh {
+    const instanced = new InstancedSkinnedMesh(
+      geometry,
+      material,
+      initialCapacity,
+      skeleton,
+      bindMatrix,
+      bindMode,
+    );
+    instanced.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    instanced.count = 0;
+    instanced.castShadow = castShadow;
+    instanced.receiveShadow = receiveShadow;
+    instanced.frustumCulled = false;
+    instanced.layers.set(1);
+    this.world.stage.scene.add(instanced);
+    return instanced;
+  }
+
+  private async getOrLoadModel(
+    modelPath: string,
+  ): Promise<MobInstancedModel | null> {
+    const cached = this.models.get(modelPath);
+    if (cached) {
+      return cached.supportsInstancing ? cached : null;
+    }
+
+    const { scene, animations } = await modelCache.loadModel(
+      modelPath,
+      this.world,
+    );
+
+    const skinnedMeshes: THREE.SkinnedMesh[] = [];
+    const nonSkinnedMeshes: THREE.Mesh[] = [];
+
+    scene.traverse((child) => {
+      if (child instanceof THREE.SkinnedMesh) {
+        skinnedMeshes.push(child);
+        return;
+      }
+      if (child instanceof THREE.Mesh) {
+        nonSkinnedMeshes.push(child);
+      }
+    });
+
+    const supportsInstancing =
+      skinnedMeshes.length > 0 && nonSkinnedMeshes.length === 0;
+
+    const clips = await this.resolveAnimationClips(modelPath, animations);
+
+    // Calculate bounding box for imposter sizing
+    const boundingBox = new THREE.Box3();
+    scene.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.geometry.computeBoundingBox();
+        const meshBox = child.geometry.boundingBox;
+        if (meshBox) {
+          meshBox.applyMatrix4(child.matrixWorld);
+          boundingBox.union(meshBox);
+        }
+      }
+    });
+
+    // Ensure we have valid bounds
+    if (boundingBox.isEmpty()) {
+      boundingBox.setFromCenterAndSize(
+        new THREE.Vector3(0, 0.5, 0),
+        new THREE.Vector3(1, 1, 1),
+      );
+    }
+
+    const model: MobInstancedModel = {
+      modelPath,
+      templateScene: scene,
+      clips,
+      supportsInstancing,
+      groups: new Map(),
+      imposter: null,
+      boundingBox,
+    };
+
+    // Create imposter for this model (only if we can render)
+    if (supportsInstancing && this.world.stage?.scene) {
+      model.imposter = this.createModelImposter(model, scene);
+    }
+
+    this.models.set(modelPath, model);
+
+    if (!supportsInstancing) {
+      console.warn(
+        `[MobInstancedRenderer] Model not instancing-ready (non-skinned meshes detected): ${modelPath}`,
+      );
+    }
+
+    return supportsInstancing ? model : null;
+  }
+
+  /**
+   * Create imposter (billboard) data for a model.
+   * Pre-renders the model at idle animation frame 0 to a texture for use at distance.
+   */
+  private createModelImposter(
+    model: MobInstancedModel,
+    scene: THREE.Object3D,
+  ): MobImposterModel | null {
+    // Calculate dimensions from bounding box
+    const size = new THREE.Vector3();
+    model.boundingBox.getSize(size);
+    const width = Math.max(size.x, size.z) * MOB_MODEL_SCALE;
+    const height = size.y * MOB_MODEL_SCALE;
+
+    // Pre-render model at idle frame 0 to texture
+    const renderResult = this.prerenderImposterTexture(
+      scene,
+      model.boundingBox,
+      model.clips.idle, // Pass idle clip for frame 0 rendering
+    );
+    if (!renderResult) {
+      console.warn(
+        `[MobInstancedRenderer] Failed to create imposter texture for ${model.modelPath}`,
+      );
+      return null;
+    }
+
+    const { texture, renderTarget } = renderResult;
+
+    // Create billboard geometry and material
+    const geometry = new THREE.PlaneGeometry(1, 1);
+    const material = new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      alphaTest: 0.1,
+      side: THREE.DoubleSide,
+      depthWrite: true,
+    });
+    this.world.setupMaterial(material);
+
+    // Create instanced mesh for billboards
+    const initialCapacity = 50;
+    const mesh = new THREE.InstancedMesh(geometry, material, initialCapacity);
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.frustumCulled = false;
+    mesh.count = 0;
+    mesh.layers.set(1);
+    this.world.stage.scene.add(mesh);
+
+    return {
+      texture,
+      renderTarget,
+      geometry,
+      material,
+      mesh,
+      instanceMap: new Map(),
+      reverseMap: new Map(),
+      count: 0,
+      capacity: initialCapacity,
+      width,
+      height,
+    };
+  }
+
+  /**
+   * Pre-render a model to a texture for use as an imposter.
+   * Creates a dedicated render target per model to avoid texture copying issues.
+   * Renders at idle animation frame 0 if an idle clip is provided.
+   * Returns null if rendering fails (no renderer, etc.)
+   */
+  private prerenderImposterTexture(
+    modelScene: THREE.Object3D,
+    boundingBox: THREE.Box3,
+    idleClip?: THREE.AnimationClip,
+  ): { texture: THREE.Texture; renderTarget: THREE.WebGLRenderTarget } | null {
+    // Get renderer from world graphics
+    const graphics = this.world.graphics as { renderer?: THREE.WebGPURenderer };
+    const renderer = graphics?.renderer;
+    if (!renderer) {
+      console.warn(
+        "[MobInstancedRenderer] Cannot create imposter: no renderer available",
+      );
+      return null;
+    }
+
+    // Lazy initialize shared imposter scene/camera
+    if (!this._imposterCamera || !this._imposterScene) {
+      this.initImposterRenderer();
+    }
+
+    const camera = this._imposterCamera;
+    const scene = this._imposterScene;
+    if (!camera || !scene) return null;
+
+    // Create a dedicated render target for THIS model's imposter
+    // This avoids the need to copy texture data (which is complex with WebGPU)
+    const modelRenderTarget = new THREE.WebGLRenderTarget(
+      IMPOSTER_TEXTURE_SIZE,
+      IMPOSTER_TEXTURE_SIZE,
+      {
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat,
+        type: THREE.UnsignedByteType,
+        depthBuffer: true,
+        stencilBuffer: false,
+      },
+    );
+
+    // Clone model for isolated rendering using SkeletonUtils for proper skeleton cloning
+    const modelClone = SkeletonUtils.clone(modelScene);
+    modelClone.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.material) {
+        const mat = child.material as THREE.Material;
+        mat.visible = true;
+      }
+    });
+    modelClone.updateMatrixWorld(true);
+
+    // Set up idle animation at frame 0 if clip is available
+    let mixer: THREE.AnimationMixer | null = null;
+    if (idleClip) {
+      // Find a skinned mesh to attach the mixer to
+      const skinnedMeshes: THREE.SkinnedMesh[] = [];
+      modelClone.traverse((child) => {
+        if (child instanceof THREE.SkinnedMesh) {
+          skinnedMeshes.push(child);
+        }
+      });
+
+      const skinnedMesh = skinnedMeshes[0];
+      if (skinnedMesh) {
+        mixer = new THREE.AnimationMixer(skinnedMesh);
+        const action = mixer.clipAction(idleClip);
+        action.enabled = true;
+        action.setEffectiveWeight(1.0);
+        action.play();
+        // Set to frame 0 (time = 0)
+        mixer.setTime(0);
+        mixer.update(0);
+        // Force skeleton update
+        skinnedMesh.skeleton.update();
+      }
+    }
+
+    // Calculate size for camera framing
+    const size = new THREE.Vector3();
+    boundingBox.getSize(size);
+    const maxDim = Math.max(size.x, size.z);
+
+    // Configure orthographic camera for front view
+    camera.left = -maxDim / 2;
+    camera.right = maxDim / 2;
+    camera.top = size.y * 0.6;
+    camera.bottom = -size.y * 0.6;
+    camera.near = 0.1;
+    camera.far = maxDim * 4;
+    camera.updateProjectionMatrix();
+
+    // Position camera in front of model
+    camera.position.set(0, size.y * 0.3, maxDim * 1.5);
+    camera.lookAt(0, size.y * 0.3, 0);
+
+    // Center model in scene
+    const center = new THREE.Vector3();
+    boundingBox.getCenter(center);
+    modelClone.position.set(-center.x, -center.y, -center.z);
+
+    scene.add(modelClone);
+
+    // Render to the dedicated render target
+    const currentRenderTarget = renderer.getRenderTarget();
+    renderer.setRenderTarget(modelRenderTarget);
+    renderer.clear();
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(currentRenderTarget);
+
+    // Remove model from scene
+    scene.remove(modelClone);
+
+    // Clean up mixer if created
+    if (mixer) {
+      mixer.stopAllAction();
+      mixer.uncacheRoot(modelClone);
+    }
+
+    // Return both texture and render target (caller must keep render target alive)
+    return {
+      texture: modelRenderTarget.texture,
+      renderTarget: modelRenderTarget,
+    };
+  }
+
+  private async resolveAnimationClips(
+    modelPath: string,
+    animations: THREE.AnimationClip[],
+  ): Promise<MobAnimationClips> {
+    const clips: MobAnimationClips = {};
+
+    // Search embedded animations first
+    for (const clip of animations) {
+      const name = clip.name.toLowerCase();
+      if (!clips.idle && name.includes("idle")) clips.idle = clip;
+      if (!clips.walk && (name.includes("walk") || name.includes("run")))
+        clips.walk = clip;
+    }
+
+    // Return early if found
+    if (clips.idle || clips.walk) {
+      clips.idle ??= clips.walk;
+      return clips;
+    }
+
+    // Try loading external animation files (optional - 404 is expected if not present)
+    const modelDir = modelPath.substring(0, modelPath.lastIndexOf("/"));
+    for (const file of ["walking.glb", "running.glb"]) {
+      try {
+        const result = await modelCache.loadModel(
+          `${modelDir}/animations/${file}`,
+          this.world,
+        );
+        const clip = result.animations?.[0];
+        if (clip) {
+          clips.walk ??= clip;
+          clips.idle ??= clip;
+        }
+      } catch (err) {
+        // Only log non-404 errors (actual problems vs expected missing files)
+        const errMsg = err instanceof Error ? err.message : String(err);
+        if (
+          !errMsg.includes("404") &&
+          !errMsg.includes("not found") &&
+          !errMsg.includes("Failed to fetch")
+        ) {
+          console.warn(
+            `[MobInstancedRenderer] Failed to load animation ${file}: ${errMsg}`,
+          );
+        }
+      }
+    }
+
+    // Fallback to first available animation
+    clips.idle ??= animations[0];
+    return clips;
+  }
+
+  // ============================================================================
+  // VAT (VERTEX ANIMATION TEXTURE) LOADING
+  // Infrastructure for GPU-driven animation. Currently loads VAT files when
+  // present; full vertex shader integration pending. Use with bake-mob-vat.mjs.
+  // ============================================================================
+
+  /**
+   * Load VAT data for a model (cached, deduped).
+   * Returns null if VAT files don't exist (falls back to skeletal animation).
+   * @internal Reserved for future VAT shader integration
+   */
+  private async loadVATData(modelPath: string): Promise<VATData | null> {
+    // Check cache first
+    const cached = this._vatCache.get(modelPath);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    // Check if already loading
+    const loading = this._vatLoadingPromises.get(modelPath);
+    if (loading) {
+      return loading;
+    }
+
+    // Start loading
+    const loadPromise = this.loadVATDataInternal(modelPath);
+    this._vatLoadingPromises.set(modelPath, loadPromise);
+
+    const result = await loadPromise;
+    this._vatCache.set(modelPath, result);
+    this._vatLoadingPromises.delete(modelPath);
+
+    return result;
+  }
+
+  /** @internal */
+  private async loadVATDataInternal(
+    modelPath: string,
+  ): Promise<VATData | null> {
+    const basePath = modelPath.replace(/\.(vrm|glb|gltf)$/i, "");
+    const metadataUrl = this.world.resolveURL(`${basePath}.vat.json`);
+    const textureUrl = this.world.resolveURL(`${basePath}.vat.bin`);
+
+    // Load metadata (404 = no VAT, which is expected for most models)
+    let metadataResponse: Response;
+    try {
+      metadataResponse = await fetch(metadataUrl);
+    } catch {
+      return null; // Network error - no VAT available
+    }
+    if (!metadataResponse.ok) return null;
+
+    const metadata: VATMetadata = await metadataResponse.json();
+
+    // Load texture (required if metadata exists)
+    let textureResponse: Response;
+    try {
+      textureResponse = await fetch(textureUrl);
+    } catch {
+      console.warn(
+        `[MobInstancedRenderer] VAT texture fetch failed: ${basePath}`,
+      );
+      return null;
+    }
+    if (!textureResponse.ok) {
+      console.warn(`[MobInstancedRenderer] VAT texture missing: ${basePath}`);
+      return null;
+    }
+
+    const textureData = new Float32Array(await textureResponse.arrayBuffer());
+
+    // Create GPU texture
+    const texture = new THREE.DataTexture(
+      textureData,
+      metadata.textureWidth,
+      metadata.textureHeight,
+      THREE.RGBAFormat,
+      THREE.FloatType,
+    );
+    texture.minFilter = THREE.NearestFilter;
+    texture.magFilter = THREE.NearestFilter;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.needsUpdate = true;
+
+    // Build animation lookup
+    const animationOffsets = new Map<
+      string,
+      { start: number; frames: number; duration: number; loop: boolean }
+    >();
+    for (const anim of metadata.animations) {
+      animationOffsets.set(anim.name, {
+        start: anim.startFrame,
+        frames: anim.frames,
+        duration: anim.duration,
+        loop: anim.loop,
+      });
+    }
+
+    console.log(
+      `[MobInstancedRenderer] VAT loaded: ${modelPath} ` +
+        `(${metadata.vertexCount}v, ${metadata.totalFrames}f, ${metadata.animations.length} anims)`,
+    );
+
+    return { metadata, texture, animationOffsets };
+  }
+
+  /** @internal Map mob state to VAT animation row offset */
+  private getVATAnimationIndex(state: MobAnimationState): number {
+    return state === "walk"
+      ? VAT_ANIMATION_INDEX.WALK
+      : VAT_ANIMATION_INDEX.IDLE;
+  }
+
+  /** @internal Dispose VAT texture for a specific model */
+  private disposeVATData(modelPath: string): void {
+    const vat = this._vatCache.get(modelPath);
+    if (vat) {
+      vat.texture.dispose();
+      this._vatCache.delete(modelPath);
+    }
+  }
+
+  private getOrCreateGroup(
+    model: MobInstancedModel,
+    state: MobAnimationState,
+    variant: number,
+  ): MobInstancedGroup {
+    const key = this.getGroupKey(state, variant);
+    const existing = model.groups.get(key);
+    if (existing) {
+      return existing;
+    }
+
+    const sourceScene = SkeletonUtils.clone(model.templateScene);
+    sourceScene.updateMatrixWorld(true);
+
+    const skinnedMeshes: THREE.SkinnedMesh[] = [];
+    sourceScene.traverse((child) => {
+      if (child instanceof THREE.SkinnedMesh) {
+        skinnedMeshes.push(child);
+      }
+    });
+
+    const clip = state === "walk" ? model.clips.walk : model.clips.idle;
+    let mixer: THREE.AnimationMixer | undefined;
+    let action: THREE.AnimationAction | undefined;
+
+    if (clip && skinnedMeshes.length > 0) {
+      mixer = new THREE.AnimationMixer(skinnedMeshes[0]);
+      action = mixer.clipAction(clip);
+      action.enabled = true;
+      action.setEffectiveWeight(1.0);
+      action.setLoop(THREE.LoopRepeat, Infinity);
+      action.play();
+      const offset =
+        clip.duration > 0 ? (variant / this.variantCount) * clip.duration : 0;
+      action.time = offset;
+      mixer.update(0);
+    }
+
+    const skeletons: THREE.Skeleton[] = [];
+    const skeletonSet = new Set<THREE.Skeleton>();
+
+    for (const skinnedMesh of skinnedMeshes) {
+      skinnedMesh.bindMode = THREE.DetachedBindMode;
+      skinnedMesh.updateMatrixWorld(true);
+      skinnedMesh.bindMatrix.copy(skinnedMesh.matrixWorld);
+      skinnedMesh.bindMatrixInverse.copy(skinnedMesh.bindMatrix).invert();
+      if (!skeletonSet.has(skinnedMesh.skeleton)) {
+        skeletonSet.add(skinnedMesh.skeleton);
+        skeletons.push(skinnedMesh.skeleton);
+      }
+    }
+
+    // Capture rest pose from idle animation frame 0 for frozen state
+    // Must use sourceScene (the cloned scene that owns these skeletons)
+    const idleClip = model.clips.idle;
+    const restPose = this.captureRestPose(idleClip, sourceScene, skeletons);
+
+    // Merge multiple skinned meshes into one if they share skeleton
+    const mergeResult = this.mergeSkinnedMeshes(skinnedMeshes);
+
+    let instancedMeshes: InstancedSkinnedMesh[];
+    let mergedGeometry: THREE.BufferGeometry | undefined;
+
+    if (mergeResult) {
+      // Merged geometry - single draw call
+      const instanced = this.createInstancedSkinnedMesh(
+        mergeResult.geometry,
+        this.cloneSkinnedMaterial(mergeResult.material),
+        mergeResult.skeleton,
+        mergeResult.bindMatrix,
+        THREE.DetachedBindMode,
+        skinnedMeshes[0]?.castShadow ?? false,
+        skinnedMeshes[0]?.receiveShadow ?? false,
+      );
+      instancedMeshes = [instanced];
+      mergedGeometry = mergeResult.geometry;
+    } else {
+      // Separate mesh per SkinnedMesh
+      instancedMeshes = skinnedMeshes.map((sm) =>
+        this.createInstancedSkinnedMesh(
+          sm.geometry,
+          this.cloneSkinnedMaterial(sm.material),
+          sm.skeleton,
+          sm.bindMatrix,
+          sm.bindMode,
+          sm.castShadow,
+          sm.receiveShadow,
+        ),
+      );
+    }
+
+    const group: MobInstancedGroup = {
+      key,
+      state,
+      variant,
+      clip,
+      mixer,
+      action,
+      animationLOD: new AnimationLOD(ANIMATION_LOD_PRESETS.MOB),
+      lodDistanceSq: 0,
+      lodLastUpdate: 0,
+      sourceScene,
+      skinnedMeshes,
+      skeletons,
+      instancedMeshes,
+      instances: [],
+      instanceMap: new Map(),
+      capacity: 10,
+      dirty: false,
+      restPose,
+      isFrozen: false,
+      mergedGeometry,
+    };
+
+    model.groups.set(key, group);
+    return group;
+  }
+
+  /**
+   * Capture rest pose (idle frame 0) for use in frozen state.
+   * Uses the provided skeleton directly (from the cloned sourceScene) to ensure consistency.
+   */
+  private captureRestPose(
+    idleClip: THREE.AnimationClip | undefined,
+    sourceScene: THREE.Object3D,
+    skeletons: THREE.Skeleton[],
+  ): RestPoseData {
+    if (skeletons.length === 0) {
+      return { boneMatrices: [], applied: false };
+    }
+
+    const skeleton = skeletons[0];
+
+    // Sample idle animation at frame 0 on the actual sourceScene that owns these skeletons
+    if (idleClip) {
+      const tempMixer = new THREE.AnimationMixer(sourceScene);
+      const action = tempMixer.clipAction(idleClip);
+      action.enabled = true;
+      action.setEffectiveWeight(1.0);
+      action.time = 0;
+      action.play();
+      tempMixer.update(0);
+
+      // Force skeleton update after animation sampling
+      for (const bone of skeleton.bones) {
+        bone.updateMatrixWorld(true);
+      }
+
+      tempMixer.stopAllAction();
+    }
+
+    // Capture bone local matrices (these are now from the animated skeleton)
+    return {
+      boneMatrices: skeleton.bones.map((bone) => bone.matrix.clone()),
+      applied: false,
+    };
+  }
+
+  /**
+   * Merge multiple SkinnedMeshes that share the same skeleton into one geometry.
+   * Returns null if merging is not possible (different skeletons, etc.)
+   */
+  private mergeSkinnedMeshes(meshes: THREE.SkinnedMesh[]): {
+    geometry: THREE.BufferGeometry;
+    material: THREE.Material;
+    skeleton: THREE.Skeleton;
+    bindMatrix: THREE.Matrix4;
+  } | null {
+    if (meshes.length <= 1) return null;
+
+    // Verify all meshes share the same skeleton
+    const skeleton = meshes[0].skeleton;
+    for (let i = 1; i < meshes.length; i++) {
+      if (meshes[i].skeleton !== skeleton) {
+        // Different skeletons - cannot merge
+        return null;
+      }
+    }
+
+    // Verify all use vertex colors only (for material merging)
+    const allVertexColor = meshes.every((mesh) => {
+      const mat = mesh.material;
+      if (Array.isArray(mat)) return false;
+      return this.isVertexColorOnlyMaterial(mat);
+    });
+    if (!allVertexColor) return null;
+
+    // Collect geometry data from all meshes
+    const allPositions: number[] = [];
+    const allNormals: number[] = [];
+    const allColors: number[] = [];
+    const allSkinIndices: number[] = [];
+    const allSkinWeights: number[] = [];
+    const allIndices: number[] = [];
+    let indexOffset = 0;
+
+    for (const mesh of meshes) {
+      const geo = mesh.geometry;
+      const positions = geo.getAttribute("position");
+      const normals = geo.getAttribute("normal");
+      const colors = geo.getAttribute("color");
+      const skinIndex = geo.getAttribute("skinIndex");
+      const skinWeight = geo.getAttribute("skinWeight");
+      const indices = geo.getIndex();
+
+      if (!positions || !skinIndex || !skinWeight) {
+        // Missing required attributes
+        return null;
+      }
+
+      const vertexCount = positions.count;
+
+      // Append positions
+      for (let i = 0; i < vertexCount; i++) {
+        allPositions.push(
+          positions.getX(i),
+          positions.getY(i),
+          positions.getZ(i),
+        );
+      }
+
+      // Append normals (or generate default)
+      if (normals) {
+        for (let i = 0; i < vertexCount; i++) {
+          allNormals.push(normals.getX(i), normals.getY(i), normals.getZ(i));
+        }
+      } else {
+        for (let i = 0; i < vertexCount; i++) {
+          allNormals.push(0, 1, 0);
+        }
+      }
+
+      // Append colors (or generate default white)
+      if (colors) {
+        for (let i = 0; i < vertexCount; i++) {
+          allColors.push(colors.getX(i), colors.getY(i), colors.getZ(i));
+        }
+      } else {
+        for (let i = 0; i < vertexCount; i++) {
+          allColors.push(1, 1, 1);
+        }
+      }
+
+      // Append skin indices (Uint16 for bone indices)
+      for (let i = 0; i < vertexCount; i++) {
+        allSkinIndices.push(
+          skinIndex.getX(i),
+          skinIndex.getY(i),
+          skinIndex.getZ(i),
+          skinIndex.getW(i),
+        );
+      }
+
+      // Append skin weights
+      for (let i = 0; i < vertexCount; i++) {
+        allSkinWeights.push(
+          skinWeight.getX(i),
+          skinWeight.getY(i),
+          skinWeight.getZ(i),
+          skinWeight.getW(i),
+        );
+      }
+
+      // Append indices with offset
+      if (indices) {
+        for (let i = 0; i < indices.count; i++) {
+          allIndices.push(indices.getX(i) + indexOffset);
+        }
+      } else {
+        // Non-indexed geometry - generate indices
+        for (let i = 0; i < vertexCount; i++) {
+          allIndices.push(i + indexOffset);
+        }
+      }
+
+      indexOffset += vertexCount;
+    }
+
+    // Create merged geometry
+    const mergedGeometry = new THREE.BufferGeometry();
+    mergedGeometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(allPositions, 3),
+    );
+    mergedGeometry.setAttribute(
+      "normal",
+      new THREE.Float32BufferAttribute(allNormals, 3),
+    );
+    mergedGeometry.setAttribute(
+      "color",
+      new THREE.Float32BufferAttribute(allColors, 3),
+    );
+    mergedGeometry.setAttribute(
+      "skinIndex",
+      new THREE.Uint16BufferAttribute(allSkinIndices, 4),
+    );
+    mergedGeometry.setAttribute(
+      "skinWeight",
+      new THREE.Float32BufferAttribute(allSkinWeights, 4),
+    );
+    mergedGeometry.setIndex(allIndices);
+
+    // Compute bounding geometry
+    mergedGeometry.computeBoundingBox();
+    mergedGeometry.computeBoundingSphere();
+
+    // Use first mesh's material as base (all are vertex color only)
+    const baseMaterial = meshes[0].material as THREE.Material;
+
+    return {
+      geometry: mergedGeometry,
+      material: baseMaterial,
+      skeleton,
+      bindMatrix: meshes[0].bindMatrix.clone(),
+    };
+  }
+
+  private cloneSkinnedMaterial(
+    material: THREE.Material | THREE.Material[],
+  ): THREE.Material | THREE.Material[] {
+    if (Array.isArray(material)) {
+      return material.map(
+        (mat) => this.cloneSkinnedMaterial(mat) as THREE.Material,
+      );
+    }
+    if (this.isVertexColorOnlyMaterial(material)) {
+      const key = this.getVertexColorMaterialKey(material);
+      const cached = this._sharedMaterialCache.get(key);
+      if (cached) {
+        return cached;
+      }
+      const shared = this.createDissolveMaterial(material);
+      shared.vertexColors = true;
+      this._sharedMaterialCache.set(key, shared);
+      return shared;
+    }
+    return this.createDissolveMaterial(material);
+  }
+
+  /**
+   * Create a dissolve-enabled material using TSL.
+   * Clones the source material's visual properties onto a NodeMaterial
+   * with GPU-driven dithered dissolve based on distance from player.
+   */
+  private createDissolveMaterial(source: THREE.Material): MobDissolveMaterial {
+    // Create TSL node material
+    const material = new MeshStandardNodeMaterial();
+
+    // Copy properties from source material
+    if (source instanceof THREE.MeshStandardMaterial) {
+      material.color.copy(source.color);
+      material.roughness = source.roughness;
+      material.metalness = source.metalness;
+      material.emissive.copy(source.emissive);
+      material.emissiveIntensity = source.emissiveIntensity;
+      material.vertexColors = source.vertexColors;
+      material.side = source.side;
+      material.transparent = false; // Cutout rendering
+      material.depthWrite = true;
+      material.opacity = 1.0;
+
+      // Copy textures if present
+      if (source.map) material.map = source.map;
+      if (source.normalMap) material.normalMap = source.normalMap;
+      if (source.emissiveMap) material.emissiveMap = source.emissiveMap;
+      if (source.roughnessMap) material.roughnessMap = source.roughnessMap;
+      if (source.metalnessMap) material.metalnessMap = source.metalnessMap;
+      if (source.aoMap) material.aoMap = source.aoMap;
+    } else {
+      // Fallback for non-standard materials
+      material.color.set(0x888888);
+      material.roughness = 0.8;
+      material.metalness = 0.0;
+    }
+
+    // Create dissolve uniforms
+    const uPlayerPos = uniform(new THREE.Vector3(0, 0, 0));
+
+    // Use dynamic fade distances from instance
+    const fadeStartSq = mul(
+      float(this._fadeStartDistance),
+      float(this._fadeStartDistance),
+    );
+    const fadeEndSq = mul(float(this._cullDistance), float(this._cullDistance));
+
+    // ========== ALPHA TEST (DITHERED DISSOLVE) ==========
+    material.alphaTestNode = Fn(() => {
+      // World position after skinning transformation
+      const worldPos = positionWorld;
+
+      // Distance calculation from world position to player (horizontal only, squared)
+      const toPlayer = sub(worldPos, uPlayerPos);
+      const distSq = add(
+        mul(toPlayer.x, toPlayer.x),
+        mul(toPlayer.z, toPlayer.z),
+      );
+
+      // Distance factor: 0.0 when close (keep), 1.0 when far (discard)
+      const distanceFade = smoothstep(fadeStartSq, fadeEndSq, distSq);
+
+      // World-space dithering for smooth per-fragment dissolve
+      const ditherScale = float(3.0);
+      const ditherInput = vec2(
+        add(mul(worldPos.x, ditherScale), mul(worldPos.y, float(0.7))),
+        add(mul(worldPos.z, ditherScale), mul(worldPos.y, float(0.5))),
+      );
+
+      // Hash function for pseudo-random dither value (0.0 - 1.0)
+      const hash1 = fract(
+        mul(sin(dot(ditherInput, vec2(12.9898, 78.233))), float(43758.5453)),
+      );
+      const hash2 = fract(
+        mul(cos(dot(ditherInput, vec2(39.346, 11.135))), float(23421.6312)),
+      );
+      const ditherValue = mul(add(hash1, hash2), float(0.5));
+
+      // Compute alpha threshold
+      // Close (distanceFade=0): threshold = ditherValue (0-1) → all kept
+      // Middle (distanceFade=0.5): threshold = 0.5-1.5 → dithered
+      // Far (distanceFade=1): threshold = 1-2 → all discarded
+      const threshold = add(ditherValue, distanceFade);
+
+      return threshold;
+    })();
+
+    // Material settings for cutout rendering
+    material.alphaTest = 0.5; // Fallback
+    material.forceSinglePass = true;
+
+    // Attach dissolve uniforms for per-frame updates
+    const dissolveMat = material as MobDissolveMaterial;
+    dissolveMat._dissolveUniforms = { playerPos: uPlayerPos };
+    this._dissolveMaterials.push(dissolveMat);
+
+    this.world.setupMaterial(material);
+    material.needsUpdate = true;
+
+    return dissolveMat;
+  }
+
+  private isVertexColorOnlyMaterial(
+    material: THREE.Material,
+  ): material is THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial {
+    if (
+      !(material instanceof THREE.MeshStandardMaterial) &&
+      !(material instanceof THREE.MeshPhysicalMaterial)
+    ) {
+      return false;
+    }
+    const standard = material as THREE.MeshStandardMaterial;
+    const hasMaps = Boolean(
+      standard.map ||
+        standard.normalMap ||
+        standard.emissiveMap ||
+        standard.roughnessMap ||
+        standard.metalnessMap ||
+        standard.alphaMap ||
+        standard.aoMap ||
+        standard.lightMap,
+    );
+    return standard.vertexColors === true && !hasMaps;
+  }
+
+  private getVertexColorMaterialKey(
+    material: THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial,
+  ): string {
+    const color = material.color.getHex();
+    const emissive = material.emissive.getHex();
+    return [
+      "vc",
+      material.type,
+      String(material.side),
+      String(material.transparent),
+      String(material.opacity),
+      String(material.alphaTest),
+      String(material.depthWrite),
+      String(material.depthTest),
+      String(material.roughness),
+      String(material.metalness),
+      String(material.emissiveIntensity),
+      String(color),
+      String(emissive),
+      String(material.fog === true),
+    ].join("|");
   }
 }

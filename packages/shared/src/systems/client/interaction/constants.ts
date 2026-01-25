@@ -67,6 +67,8 @@ export const TIMING = {
  * Visual feedback constants
  */
 export const VISUAL = {
+  /** OSRS-style: disable tile target marker */
+  TARGET_MARKER_ENABLED: false,
   /** Target marker size as fraction of tile */
   TARGET_MARKER_SCALE: 0.9,
   /** Target marker opacity */

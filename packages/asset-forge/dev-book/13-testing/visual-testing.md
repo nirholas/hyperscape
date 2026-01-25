@@ -8,7 +8,7 @@ Visual testing in Asset Forge verifies that 3D assets render correctly using a c
 2. [Three.js Scene Inspection](#threejs-scene-inspection)
 3. [Screenshot Analysis](#screenshot-analysis)
 4. [Colored Cube Proxies](#colored-cube-proxies)
-5. [LLM Verification with GPT-4o](#llm-verification-with-gpt-4o)
+5. [LLM Verification with GPT-4o](#llm-verification-with-gpt-5)
 6. [Testing Patterns](#testing-patterns)
 7. [Performance Testing](#performance-testing)
 
@@ -387,7 +387,7 @@ async function analyzeWithGPT4o(imageUrl: string, prompt: string) {
       'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
     },
     body: JSON.stringify({
-      model: 'gpt-4o',
+      model: 'gpt-5',
       messages: [{
         role: 'user',
         content: [

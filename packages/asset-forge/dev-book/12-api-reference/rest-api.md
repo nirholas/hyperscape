@@ -838,7 +838,7 @@ Content-Type: application/json
 ```
 
 **AI Model:**
-- Model: `gpt-4o-mini`
+- Model: `gpt-5-mini`
 - Temperature: 0.3 (consistent results)
 - Max tokens: 300
 - Response format: JSON object
@@ -875,7 +875,7 @@ Content-Type: application/json
 ```
 
 **AI Model:**
-- Model: `gpt-4o-mini`
+- Model: `gpt-5-mini`
 - Temperature: 0.2 (highly consistent)
 - Max tokens: 200
 - Response format: JSON object

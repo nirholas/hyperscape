@@ -125,16 +125,34 @@ export class World extends EventEmitter {
   // ============================================================================
 
   /**
-   * Maximum allowed delta time to prevent spiral of death.
-   * Caps frame time at 33ms to prevent physics instability.
+   * Maximum allowed delta time for physics accumulator to prevent spiral of death.
+   * Caps physics delta at 33ms to prevent physics instability.
+   * This ONLY affects physics - animations and movement use real delta time.
    */
-  maxDeltaTime = 1 / 30;
+  maxPhysicsDeltaTime = 1 / 30;
+
+  /**
+   * Maximum allowed delta time for animations and movement.
+   * Caps at 500ms (2 FPS minimum effective rate) to prevent huge jumps
+   * after tab unfocus or extreme lag, while still allowing real-time playback.
+   */
+  maxAnimationDeltaTime = 0.5;
 
   /**
    * Fixed timestep for physics simulation.
    * Physics runs at exactly 30 FPS for deterministic, stable simulation.
    */
   fixedDeltaTime = 1 / 30;
+
+  /**
+   * @deprecated Use maxPhysicsDeltaTime instead. Kept for backward compatibility.
+   */
+  get maxDeltaTime(): number {
+    return this.maxPhysicsDeltaTime;
+  }
+  set maxDeltaTime(value: number) {
+    this.maxPhysicsDeltaTime = value;
+  }
 
   /** Current frame number (incremented each tick) */
   frame = 0;
@@ -207,7 +225,7 @@ export class World extends EventEmitter {
     title?: string;
     desc?: string;
     image?: { url: string };
-    model?: { url: string };
+    model?: { url: string } | string | null;
     serialize?: () => unknown;
     deserialize?: (data: unknown) => void;
     on?: (event: string, callback: () => void) => void;
@@ -332,6 +350,7 @@ export class World extends EventEmitter {
     width?: number;
     height?: number;
     isWebGPU?: boolean;
+    hasRendered?: boolean;
   };
 
   /** Dev mode performance stats (FPS counter, system timing) */
@@ -668,6 +687,19 @@ export class World extends EventEmitter {
 
   /** Spawn a mob at position */
   spawnMob?(type: string, position: Position3D): unknown;
+
+  /** Get instanced renderer stats for debugging/testing */
+  getMobInstancedRendererStats?(): {
+    totalHandles: number;
+    activeHandles: number;
+    imposterHandles: number;
+    totalInstances: number;
+    modelCount: number;
+    groupCount: number;
+    instancedMeshCount: number;
+    totalSkeletons: number;
+    frozenGroups: number;
+  } | null;
 
   // ----------------------------------------------------------------------------
   // Equipment API (added by EquipmentSystem)
@@ -1099,11 +1131,18 @@ export class World extends EventEmitter {
    * Implements a fixed-timestep game loop with interpolation for smooth rendering.
    * This architecture ensures deterministic physics regardless of frame rate.
    *
+   * DUAL DELTA ARCHITECTURE:
+   * - Physics Delta (capped at 33ms): Prevents spiral of death in physics simulation
+   * - Animation Delta (capped at 500ms): Real-time playback for animations/movement
+   *
+   * This separation ensures animations and movement play at correct real-world speed
+   * even at low FPS, preventing the "slow motion then teleport" effect.
+   *
    * Loop Structure:
    * 1. preTick(): Pre-frame setup (stats, monitoring)
-   * 2. fixedUpdate(): Physics simulation at fixed 30 FPS
-   * 3. update(): Frame-rate dependent updates (rendering, input)
-   * 4. lateUpdate(): Post-update transformations
+   * 2. fixedUpdate(): Physics simulation at fixed 30 FPS (physics delta)
+   * 3. update(): Animations, movement, input (animation delta - real-time)
+   * 4. lateUpdate(): Camera, UI transformations (animation delta)
    * 5. commit(): Final rendering/network send
    * 6. postTick(): Post-frame cleanup (stats, profiling)
    *
@@ -1111,6 +1150,7 @@ export class World extends EventEmitter {
    * - Physics runs at exactly 30 FPS (fixedDeltaTime = 1/30)
    * - Multiple physics steps may run per frame if frame time is long
    * - Interpolation (alpha) smooths visual updates between physics steps
+   * - Animations/movement use real-time delta for correct playback speed
    *
    * @param time - Current time in milliseconds (from requestAnimationFrame)
    */
@@ -1120,18 +1160,23 @@ export class World extends EventEmitter {
 
     // Convert time to seconds and calculate delta
     time /= 1000;
-    let delta = time - this.time;
+    const rawDelta = time - this.time;
 
-    // Clamp delta to prevent spiral of death on lag spikes
-    if (delta < 0) delta = 0;
-    if (delta > this.maxDeltaTime) {
-      delta = this.maxDeltaTime;
-    }
+    // Animation/movement delta: real-time playback, capped at 500ms (2 FPS minimum)
+    // This ensures animations and movement run at correct real-world speed
+    // even at low frame rates, preventing the "slow motion" effect
+    const animationDelta =
+      rawDelta < 0 ? 0 : Math.min(rawDelta, this.maxAnimationDeltaTime);
+
+    // Physics delta: clamped to 33ms to prevent spiral of death
+    // Physics simulation needs smaller timesteps for stability
+    const physicsDelta =
+      rawDelta < 0 ? 0 : Math.min(rawDelta, this.maxPhysicsDeltaTime);
 
     // Update frame counter and time
     this.frame++;
     this.time = time;
-    this.accumulator += delta;
+    this.accumulator += physicsDelta;
 
     // Prepare physics (notify systems if fixed step will occur)
     const willFixedStep = this.accumulator >= this.fixedDeltaTime;
@@ -1153,17 +1198,18 @@ export class World extends EventEmitter {
     const alpha = this.accumulator / this.fixedDeltaTime;
     this.preUpdate(alpha);
 
-    // Run frame-rate dependent updates (rendering, input, animations)
-    this.update(delta, alpha);
+    // Run frame-rate dependent updates using ANIMATION delta (real-time)
+    // This ensures animations and movement play at correct speed regardless of FPS
+    this.update(animationDelta, alpha);
 
     // Clean up transforms after updates
-    this.postUpdate(delta);
+    this.postUpdate(animationDelta);
 
     // Run late updates (camera, UI that depends on transforms)
-    this.lateUpdate(delta, alpha);
+    this.lateUpdate(animationDelta, alpha);
 
     // Final transform cleanup before rendering
-    this.postLateUpdate(delta);
+    this.postLateUpdate(animationDelta);
 
     // Commit changes (render on client, send network updates on server)
     this.commit();

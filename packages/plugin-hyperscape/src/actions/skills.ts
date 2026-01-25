@@ -1,5 +1,5 @@
 /**
- * Skill actions - CHOP_TREE, CATCH_FISH, LIGHT_FIRE, COOK_FOOD
+ * Skill actions - CHOP_TREE, CATCH_FISH, MINE_ROCK, LIGHT_FIRE, COOK_FOOD
  */
 
 import type {
@@ -8,68 +8,81 @@ import type {
   Memory,
   State,
   HandlerCallback,
+  HandlerOptions,
+  JsonValue,
 } from "@elizaos/core";
 import { logger } from "@elizaos/core";
 import type { HyperscapeService } from "../services/HyperscapeService.js";
-import type { GatherResourceCommand, Entity } from "../types.js";
+import type { GatherResourceCommand, Entity, InventoryItem } from "../types.js";
 
 // Max distance to attempt gathering (server update loop requires <= 4m)
 const MAX_GATHER_DISTANCE = 4;
+type HandlerOptionsParam =
+  | HandlerOptions
+  | Record<string, JsonValue | undefined>;
+
+type Position3 = [number, number, number];
+type PositionLike = Position3 | { x: number; y?: number; z: number };
+
+function getPositionXZ(pos: PositionLike | null | undefined): {
+  x: number;
+  z: number;
+} | null {
+  if (!pos) return null;
+  if (Array.isArray(pos) && pos.length >= 3) {
+    return { x: pos[0], z: pos[2] };
+  }
+  const obj = pos as { x: number; z: number };
+  return { x: obj.x, z: obj.z };
+}
+
+function getPositionArray(
+  pos: PositionLike | null | undefined,
+): Position3 | null {
+  if (!pos) return null;
+  if (Array.isArray(pos) && pos.length >= 3) {
+    return [pos[0], pos[1], pos[2]];
+  }
+  const obj = pos as { x: number; y?: number; z: number };
+  return [obj.x, obj.y ?? 0, obj.z];
+}
 
 /**
  * Calculate 3D distance between player position and entity position
  */
 function getEntityDistance(
-  playerPos: unknown,
-  entityPos: unknown,
+  playerPos: PositionLike | null | undefined,
+  entityPos: PositionLike | null | undefined,
 ): number | null {
-  // Parse player position (array or object format)
-  let px: number, pz: number;
-  if (Array.isArray(playerPos) && playerPos.length >= 3) {
-    px = playerPos[0];
-    pz = playerPos[2];
-  } else if (playerPos && typeof playerPos === "object" && "x" in playerPos) {
-    const pos = playerPos as { x: number; z: number };
-    px = pos.x;
-    pz = pos.z;
-  } else {
-    return null;
-  }
-
-  // Parse entity position (array or object format)
-  let ex: number, ez: number;
-  if (Array.isArray(entityPos) && entityPos.length >= 3) {
-    ex = entityPos[0];
-    ez = entityPos[2];
-  } else if (entityPos && typeof entityPos === "object" && "x" in entityPos) {
-    const pos = entityPos as { x: number; z: number };
-    ex = pos.x;
-    ez = pos.z;
-  } else {
-    return null;
-  }
-
-  const dx = px - ex;
-  const dz = pz - ez;
+  const player = getPositionXZ(playerPos);
+  const entity = getPositionXZ(entityPos);
+  if (!player || !entity) return null;
+  const dx = player.x - entity.x;
+  const dz = player.z - entity.z;
   return Math.sqrt(dx * dx + dz * dz);
+}
+
+function getInventoryItemName(item: InventoryItem): string {
+  return (item.name || item.item?.name || item.itemId || "")
+    .toString()
+    .toLowerCase();
 }
 
 /**
  * Check if an entity is a tree (strict detection)
  */
 function isTree(e: Entity): boolean {
-  const entityAny = e as unknown as Record<string, unknown>;
   const name = e.name?.toLowerCase() || "";
   const id = (e.id || "").toLowerCase();
 
   // Exclude ground items (by type or ID patterns)
-  const entityType = (entityAny.type as string)?.toLowerCase() || "";
+  const entityType = (e.type || "").toLowerCase();
   if (entityType === "item" || /bow|sword|shield|axe|armor|helm/i.test(id)) {
     return false;
   }
 
   // Check for explicit tree types
-  if (entityAny.resourceType === "tree" || entityAny.type === "tree") {
+  if (e.resourceType === "tree" || e.type === "tree") {
     return true;
   }
 
@@ -82,6 +95,37 @@ function isTree(e: Entity): boolean {
   if (name.includes("tree") && !name.includes("item")) {
     return true;
   }
+
+  return false;
+}
+
+/**
+ * Check if an entity is a fishing spot
+ */
+function isFishingSpot(e: Entity): boolean {
+  const resourceType = (e.resourceType || "").toLowerCase();
+  const type = (e.type || "").toLowerCase();
+  const name = e.name?.toLowerCase() || "";
+
+  if (resourceType === "fishing_spot" || resourceType === "fish") return true;
+  if (type === "fishing_spot") return true;
+  if (name.includes("fishing spot")) return true;
+
+  return false;
+}
+
+/**
+ * Check if an entity is a mining rock
+ */
+function isMiningRock(e: Entity): boolean {
+  const resourceType = (e.resourceType || "").toLowerCase();
+  const type = (e.type || "").toLowerCase();
+  const name = e.name?.toLowerCase() || "";
+
+  if (resourceType === "mining_rock") return true;
+  if (resourceType === "ore" || resourceType === "rock") return true;
+  if (type === "mining_rock" || type === "rock") return true;
+  if (name.includes("rock") || name.includes("ore")) return true;
 
   return false;
 }
@@ -119,15 +163,7 @@ export const chopTreeAction: Action = {
     // Handle both flat (i.name) and nested (i.item.name) inventory formats
     const hasAxe =
       playerEntity.items?.some((i) => {
-        const itemAny = i as unknown as Record<string, unknown>;
-        const name = (
-          i.name ||
-          (itemAny.item as { name?: string } | undefined)?.name ||
-          itemAny.itemId ||
-          ""
-        )
-          .toString()
-          .toLowerCase();
+        const name = getInventoryItemName(i);
         return name.includes("axe") || name.includes("hatchet");
       }) ?? false;
 
@@ -136,8 +172,7 @@ export const chopTreeAction: Action = {
     const playerPos = playerEntity.position;
     const allTrees = entities.filter(isTree);
     const approachableTrees = allTrees.filter((e) => {
-      const entityAny = e as unknown as Record<string, unknown>;
-      const entityPos = entityAny.position;
+      const entityPos = e.position;
       if (!entityPos) return false;
       const dist = getEntityDistance(playerPos, entityPos);
       return dist !== null && dist <= 20; // 20m approach range
@@ -161,13 +196,8 @@ export const chopTreeAction: Action = {
       } else {
         const itemDetails = items
           .map((i) => {
-            const itemAny = i as unknown as Record<string, unknown>;
-            const name =
-              i.name ||
-              (itemAny.item as { name?: string } | undefined)?.name ||
-              itemAny.itemId ||
-              "unknown";
-            return `${name}`;
+            const name = getInventoryItemName(i) || "unknown";
+            return name;
           })
           .join(", ");
         logger.info(
@@ -182,8 +212,9 @@ export const chopTreeAction: Action = {
       const entityInfo = entities
         .slice(0, 5)
         .map((e) => {
-          const ea = e as unknown as Record<string, unknown>;
-          return `${e.name || e.id}(type=${ea.type},rt=${ea.resourceType})`;
+          const type = e.type || e.entityType || "unknown";
+          const resourceType = e.resourceType || "unknown";
+          return `${e.name || e.id}(type=${type},rt=${resourceType})`;
         })
         .join(", ");
       logger.info(`[CHOP_TREE] Nearby entities sample: ${entityInfo}`);
@@ -196,7 +227,7 @@ export const chopTreeAction: Action = {
     runtime: IAgentRuntime,
     message: Memory,
     _state?: State,
-    _options?: unknown,
+    _options?: HandlerOptionsParam,
     callback?: HandlerCallback,
   ) => {
     try {
@@ -218,8 +249,7 @@ export const chopTreeAction: Action = {
       // Get all trees with distance, sorted by nearest
       const treesWithDistance = allTrees
         .map((e) => {
-          const entityAny = e as unknown as Record<string, unknown>;
-          const entityPos = entityAny.position;
+          const entityPos = e.position;
           const dist = entityPos
             ? getEntityDistance(playerPos, entityPos)
             : null;
@@ -246,39 +276,24 @@ export const chopTreeAction: Action = {
       // If no trees within gathering range but some within approach range, walk to nearest first
       if (nearbyTrees.length === 0 && approachableTrees.length > 0) {
         const nearest = approachableTrees[0];
-        const treePos = nearest.position as
-          | [number, number, number]
-          | { x: number; y: number; z: number };
-
-        // Convert tree position to array format
-        let treeX: number, treeY: number, treeZ: number;
-        if (Array.isArray(treePos)) {
-          [treeX, treeY, treeZ] = treePos;
-        } else if (treePos && typeof treePos === "object" && "x" in treePos) {
-          treeX = treePos.x;
-          treeY = treePos.y;
-          treeZ = treePos.z;
-        } else {
+        const treePos = getPositionArray(
+          nearest.position as PositionLike | null,
+        );
+        if (!treePos) {
           logger.info("[CHOP_TREE] Handler: Could not get tree position");
           await callback?.({ text: "Could not locate tree.", error: true });
           return { success: false };
         }
+        const [treeX, treeY, treeZ] = treePos;
 
         // Get player position to find nearest cardinal adjacent tile
-        let px = 0,
-          pz = 0;
-        if (Array.isArray(playerPos)) {
-          px = playerPos[0];
-          pz = playerPos[2];
-        } else if (
-          playerPos &&
-          typeof playerPos === "object" &&
-          "x" in playerPos
-        ) {
-          const pos = playerPos as { x: number; z: number };
-          px = pos.x;
-          pz = pos.z;
+        const playerXZ = getPositionXZ(playerPos as PositionLike | null);
+        if (!playerXZ) {
+          logger.info("[CHOP_TREE] Handler: Could not get player position");
+          await callback?.({ text: "Could not locate player.", error: true });
+          return { success: false };
         }
+        const { x: px, z: pz } = playerXZ;
 
         // Server requires player to be on a CARDINAL adjacent tile (N/S/E/W, not diagonal)
         // Calculate the 4 cardinal adjacent positions and pick the nearest one to player
@@ -335,38 +350,26 @@ export const chopTreeAction: Action = {
       }
 
       // Log positions for debugging
-      const treeAny = tree as unknown as Record<string, unknown>;
-      const treePos = treeAny.position;
+      const treePos = tree.position;
       const treeDist = nearbyTrees[0]?.distance;
 
       // Get tree position for cardinal check
-      let treeX = 0,
-        treeY = 0,
-        treeZ = 0;
-      if (Array.isArray(treePos)) {
-        [treeX, treeY, treeZ] = treePos as [number, number, number];
-      } else if (treePos && typeof treePos === "object" && "x" in treePos) {
-        const pos = treePos as { x: number; y: number; z: number };
-        treeX = pos.x;
-        treeY = pos.y;
-        treeZ = pos.z;
+      const treePosArray = getPositionArray(treePos as PositionLike | null);
+      if (!treePosArray) {
+        logger.info("[CHOP_TREE] Handler: Could not get tree position");
+        await callback?.({ text: "Could not locate tree.", error: true });
+        return { success: false };
       }
+      const [treeX, treeY, treeZ] = treePosArray;
 
       // Get player position
-      let px = 0,
-        pz = 0;
-      if (Array.isArray(playerPos)) {
-        px = playerPos[0];
-        pz = playerPos[2];
-      } else if (
-        playerPos &&
-        typeof playerPos === "object" &&
-        "x" in playerPos
-      ) {
-        const pos = playerPos as { x: number; z: number };
-        px = pos.x;
-        pz = pos.z;
+      const playerXZ = getPositionXZ(playerPos as PositionLike | null);
+      if (!playerXZ) {
+        logger.info("[CHOP_TREE] Handler: Could not get player position");
+        await callback?.({ text: "Could not locate player.", error: true });
+        return { success: false };
       }
+      const { x: px, z: pz } = playerXZ;
 
       // Check if player is on a cardinal adjacent tile
       const treeTileX = Math.floor(treeX);
@@ -467,25 +470,35 @@ export const catchFishAction: Action = {
     const playerEntity = service.getPlayerEntity();
     const entities = service.getNearbyEntities() || [];
 
-    if (!service.isConnected() || !playerEntity?.alive) return false;
+    if (!service.isConnected() || !playerEntity || playerEntity.alive === false)
+      return false;
 
-    const hasRod = playerEntity.items.some((i) =>
-      i.name.toLowerCase().includes("fishing rod"),
-    );
-    const hasSpot = entities.some(
-      (e) =>
-        "resourceType" in e &&
-        (e as { resourceType: string }).resourceType === "fishing_spot",
-    );
+    const hasRod =
+      playerEntity.items?.some((i) => {
+        const name = getInventoryItemName(i);
+        return name.includes("fishing rod") || name.includes("rod");
+      }) ?? false;
 
-    return hasRod && hasSpot;
+    const fishingLevel = playerEntity.skills?.fishing?.level ?? 1;
+    const playerPos = playerEntity.position;
+    const spots = entities.filter(isFishingSpot);
+
+    const approachableSpots = spots.filter((spot) => {
+      if (spot.depleted) return false;
+      const requiredLevel = spot.requiredLevel ?? 1;
+      if (requiredLevel > fishingLevel) return false;
+      const dist = getEntityDistance(playerPos, spot.position);
+      return dist !== null && dist <= 20;
+    });
+
+    return hasRod && approachableSpots.length > 0;
   },
 
   handler: async (
     runtime: IAgentRuntime,
     _message: Memory,
     _state?: State,
-    _options?: unknown,
+    _options?: HandlerOptionsParam,
     callback?: HandlerCallback,
   ) => {
     try {
@@ -498,14 +511,100 @@ export const catchFishAction: Action = {
         };
       }
       const entities = service.getNearbyEntities();
+      const player = service.getPlayerEntity();
+      const playerPos = player?.position;
+      const fishingLevel = player?.skills?.fishing?.level ?? 1;
 
-      const fishingSpot = entities.find(
-        (e) =>
-          "resourceType" in e &&
-          (e as { resourceType: string }).resourceType === "fishing_spot",
+      // Find fishing spots and sort by distance
+      const allSpots = entities.filter(isFishingSpot).filter((spot) => {
+        if (spot.depleted) return false;
+        const requiredLevel = spot.requiredLevel ?? 1;
+        return requiredLevel <= fishingLevel;
+      });
+
+      const spotsWithDistance = allSpots
+        .map((e) => {
+          const dist = getEntityDistance(playerPos, e.position);
+          return { entity: e, distance: dist, position: e.position };
+        })
+        .filter((t) => t.distance !== null)
+        .sort((a, b) => (a.distance ?? 999) - (b.distance ?? 999));
+
+      const nearbySpots = spotsWithDistance.filter(
+        (t) => t.distance !== null && t.distance <= MAX_GATHER_DISTANCE,
+      );
+      const approachableSpots = spotsWithDistance.filter(
+        (t) => t.distance !== null && t.distance <= 20,
       );
 
-      if (!fishingSpot) {
+      if (nearbySpots.length === 0 && approachableSpots.length > 0) {
+        const nearest = approachableSpots[0];
+        const spotPos = nearest.position as
+          | [number, number, number]
+          | { x: number; y?: number; z: number };
+
+        let spotX: number, spotY: number, spotZ: number;
+        if (Array.isArray(spotPos)) {
+          [spotX, spotY, spotZ] = spotPos;
+        } else {
+          spotX = spotPos.x;
+          spotY = spotPos.y ?? 0;
+          spotZ = spotPos.z;
+        }
+
+        let px = 0,
+          pz = 0;
+        if (Array.isArray(playerPos)) {
+          px = playerPos[0];
+          pz = playerPos[2];
+        } else if (playerPos && typeof playerPos === "object") {
+          const pos = playerPos as { x?: number; z?: number };
+          px = pos.x ?? 0;
+          pz = pos.z ?? 0;
+        }
+
+        const spotTileX = Math.floor(spotX);
+        const spotTileZ = Math.floor(spotZ);
+        const cardinalPositions = [
+          { x: spotTileX, z: spotTileZ - 1, dir: "South" },
+          { x: spotTileX, z: spotTileZ + 1, dir: "North" },
+          { x: spotTileX - 1, z: spotTileZ, dir: "West" },
+          { x: spotTileX + 1, z: spotTileZ, dir: "East" },
+        ];
+
+        let nearestCardinal = cardinalPositions[0];
+        let minDist = Infinity;
+        for (const pos of cardinalPositions) {
+          const dist = Math.sqrt(
+            Math.pow(px - pos.x, 2) + Math.pow(pz - pos.z, 2),
+          );
+          if (dist < minDist) {
+            minDist = dist;
+            nearestCardinal = pos;
+          }
+        }
+
+        const targetPos: [number, number, number] = [
+          nearestCardinal.x + 0.5,
+          spotY,
+          nearestCardinal.z + 0.5,
+        ];
+
+        logger.info(
+          `[CATCH_FISH] Walking to fishing spot ${nearest.entity.name} - ` +
+            `stopping at cardinal tile [${nearestCardinal.x}, ${nearestCardinal.z}] (${nearestCardinal.dir})`,
+        );
+
+        await service.executeMove({ target: targetPos, runMode: false });
+        await callback?.({
+          text: `Walking to ${nearest.entity.name}...`,
+          action: "CATCH_FISH",
+        });
+        return { success: true, text: `Walking to ${nearest.entity.name}` };
+      }
+
+      const spot = nearbySpots[0]?.entity;
+      if (!spot) {
         await callback?.({
           text: "No fishing spot found nearby.",
           error: true,
@@ -513,8 +612,77 @@ export const catchFishAction: Action = {
         return { success: false };
       }
 
+      const spotPos = spot.position as
+        | [number, number, number]
+        | { x: number; y?: number; z: number };
+
+      let spotX = 0,
+        spotZ = 0;
+      if (Array.isArray(spotPos)) {
+        spotX = spotPos[0];
+        spotZ = spotPos[2];
+      } else {
+        spotX = spotPos.x;
+        spotZ = spotPos.z;
+      }
+
+      let px = 0,
+        pz = 0;
+      if (Array.isArray(playerPos)) {
+        px = playerPos[0];
+        pz = playerPos[2];
+      } else if (playerPos && typeof playerPos === "object") {
+        const pos = playerPos as { x?: number; z?: number };
+        px = pos.x ?? 0;
+        pz = pos.z ?? 0;
+      }
+
+      const spotTileX = Math.floor(spotX);
+      const spotTileZ = Math.floor(spotZ);
+      const playerTileX = Math.floor(px);
+      const playerTileZ = Math.floor(pz);
+
+      const isCardinalAdjacent =
+        (playerTileX === spotTileX &&
+          Math.abs(playerTileZ - spotTileZ) === 1) ||
+        (playerTileZ === spotTileZ && Math.abs(playerTileX - spotTileX) === 1);
+
+      if (!isCardinalAdjacent) {
+        const cardinalPositions = [
+          { x: spotTileX, z: spotTileZ - 1, dir: "South" },
+          { x: spotTileX, z: spotTileZ + 1, dir: "North" },
+          { x: spotTileX - 1, z: spotTileZ, dir: "West" },
+          { x: spotTileX + 1, z: spotTileZ, dir: "East" },
+        ];
+
+        let nearestCardinal = cardinalPositions[0];
+        let minDist = Infinity;
+        for (const pos of cardinalPositions) {
+          const dist = Math.sqrt(
+            Math.pow(px - pos.x, 2) + Math.pow(pz - pos.z, 2),
+          );
+          if (dist < minDist) {
+            minDist = dist;
+            nearestCardinal = pos;
+          }
+        }
+
+        const targetPos: [number, number, number] = [
+          nearestCardinal.x + 0.5,
+          Array.isArray(spotPos) ? spotPos[1] : (spotPos.y ?? 0),
+          nearestCardinal.z + 0.5,
+        ];
+
+        await service.executeMove({ target: targetPos, runMode: false });
+        await callback?.({
+          text: `Positioning to fish at ${spot.name}...`,
+          action: "CATCH_FISH",
+        });
+        return { success: true, text: `Positioning to fish at ${spot.name}` };
+      }
+
       const command: GatherResourceCommand = {
-        resourceEntityId: fishingSpot.id,
+        resourceEntityId: spot.id,
         skill: "fishing",
       };
       await service.executeGatherResource(command);
@@ -535,6 +703,248 @@ export const catchFishAction: Action = {
     [
       { name: "user", content: { text: "Catch some fish" } },
       { name: "agent", content: { text: "Fishing...", action: "CATCH_FISH" } },
+    ],
+  ],
+};
+
+export const mineRockAction: Action = {
+  name: "MINE_ROCK",
+  similes: ["MINE", "MINING", "DIG"],
+  description: "Mine a rock to gather ore. Requires a pickaxe.",
+
+  validate: async (runtime: IAgentRuntime) => {
+    const service = runtime.getService<HyperscapeService>("hyperscapeService");
+    if (!service) return false;
+    const playerEntity = service.getPlayerEntity();
+    const entities = service.getNearbyEntities() || [];
+
+    if (!service.isConnected() || !playerEntity || playerEntity.alive === false)
+      return false;
+
+    const hasPickaxe =
+      playerEntity.items?.some((i) => {
+        const name = getInventoryItemName(i);
+        return name.includes("pickaxe") || name.includes("pick");
+      }) ?? false;
+
+    const miningLevel = playerEntity.skills?.mining?.level ?? 1;
+    const playerPos = playerEntity.position;
+    const rocks = entities.filter(isMiningRock);
+
+    const approachableRocks = rocks.filter((rock) => {
+      if (rock.depleted) return false;
+      const requiredLevel = rock.requiredLevel ?? 1;
+      if (requiredLevel > miningLevel) return false;
+      const dist = getEntityDistance(playerPos, rock.position);
+      return dist !== null && dist <= 20;
+    });
+
+    return hasPickaxe && approachableRocks.length > 0;
+  },
+
+  handler: async (
+    runtime: IAgentRuntime,
+    _message: Memory,
+    _state?: State,
+    _options?: HandlerOptionsParam,
+    callback?: HandlerCallback,
+  ) => {
+    try {
+      const service =
+        runtime.getService<HyperscapeService>("hyperscapeService");
+      if (!service) {
+        return {
+          success: false,
+          error: new Error("Hyperscape service not available"),
+        };
+      }
+      const entities = service.getNearbyEntities();
+      const player = service.getPlayerEntity();
+      const playerPos = player?.position;
+      const miningLevel = player?.skills?.mining?.level ?? 1;
+
+      const allRocks = entities.filter(isMiningRock).filter((rock) => {
+        if (rock.depleted) return false;
+        const requiredLevel = rock.requiredLevel ?? 1;
+        return requiredLevel <= miningLevel;
+      });
+
+      const rocksWithDistance = allRocks
+        .map((e) => {
+          const dist = getEntityDistance(playerPos, e.position);
+          return { entity: e, distance: dist, position: e.position };
+        })
+        .filter((t) => t.distance !== null)
+        .sort((a, b) => (a.distance ?? 999) - (b.distance ?? 999));
+
+      const nearbyRocks = rocksWithDistance.filter(
+        (t) => t.distance !== null && t.distance <= MAX_GATHER_DISTANCE,
+      );
+      const approachableRocks = rocksWithDistance.filter(
+        (t) => t.distance !== null && t.distance <= 20,
+      );
+
+      if (nearbyRocks.length === 0 && approachableRocks.length > 0) {
+        const nearest = approachableRocks[0];
+        const rockPos = nearest.position as
+          | [number, number, number]
+          | { x: number; y?: number; z: number };
+
+        let rockX: number, rockY: number, rockZ: number;
+        if (Array.isArray(rockPos)) {
+          [rockX, rockY, rockZ] = rockPos;
+        } else {
+          rockX = rockPos.x;
+          rockY = rockPos.y ?? 0;
+          rockZ = rockPos.z;
+        }
+
+        let px = 0,
+          pz = 0;
+        if (Array.isArray(playerPos)) {
+          px = playerPos[0];
+          pz = playerPos[2];
+        } else if (playerPos && typeof playerPos === "object") {
+          const pos = playerPos as { x?: number; z?: number };
+          px = pos.x ?? 0;
+          pz = pos.z ?? 0;
+        }
+
+        const rockTileX = Math.floor(rockX);
+        const rockTileZ = Math.floor(rockZ);
+        const cardinalPositions = [
+          { x: rockTileX, z: rockTileZ - 1, dir: "South" },
+          { x: rockTileX, z: rockTileZ + 1, dir: "North" },
+          { x: rockTileX - 1, z: rockTileZ, dir: "West" },
+          { x: rockTileX + 1, z: rockTileZ, dir: "East" },
+        ];
+
+        let nearestCardinal = cardinalPositions[0];
+        let minDist = Infinity;
+        for (const pos of cardinalPositions) {
+          const dist = Math.sqrt(
+            Math.pow(px - pos.x, 2) + Math.pow(pz - pos.z, 2),
+          );
+          if (dist < minDist) {
+            minDist = dist;
+            nearestCardinal = pos;
+          }
+        }
+
+        const targetPos: [number, number, number] = [
+          nearestCardinal.x + 0.5,
+          rockY,
+          nearestCardinal.z + 0.5,
+        ];
+
+        await service.executeMove({ target: targetPos, runMode: false });
+        await callback?.({
+          text: `Walking to ${nearest.entity.name}...`,
+          action: "MINE_ROCK",
+        });
+        return { success: true, text: `Walking to ${nearest.entity.name}` };
+      }
+
+      const rock = nearbyRocks[0]?.entity;
+      if (!rock) {
+        await callback?.({ text: "No rock found nearby.", error: true });
+        return { success: false };
+      }
+
+      const rockPos = rock.position as
+        | [number, number, number]
+        | { x: number; y?: number; z: number };
+
+      let rockX = 0,
+        rockZ = 0;
+      if (Array.isArray(rockPos)) {
+        rockX = rockPos[0];
+        rockZ = rockPos[2];
+      } else {
+        rockX = rockPos.x;
+        rockZ = rockPos.z;
+      }
+
+      let px = 0,
+        pz = 0;
+      if (Array.isArray(playerPos)) {
+        px = playerPos[0];
+        pz = playerPos[2];
+      } else if (playerPos && typeof playerPos === "object") {
+        const pos = playerPos as { x?: number; z?: number };
+        px = pos.x ?? 0;
+        pz = pos.z ?? 0;
+      }
+
+      const rockTileX = Math.floor(rockX);
+      const rockTileZ = Math.floor(rockZ);
+      const playerTileX = Math.floor(px);
+      const playerTileZ = Math.floor(pz);
+
+      const isCardinalAdjacent =
+        (playerTileX === rockTileX &&
+          Math.abs(playerTileZ - rockTileZ) === 1) ||
+        (playerTileZ === rockTileZ && Math.abs(playerTileX - rockTileX) === 1);
+
+      if (!isCardinalAdjacent) {
+        const cardinalPositions = [
+          { x: rockTileX, z: rockTileZ - 1, dir: "South" },
+          { x: rockTileX, z: rockTileZ + 1, dir: "North" },
+          { x: rockTileX - 1, z: rockTileZ, dir: "West" },
+          { x: rockTileX + 1, z: rockTileZ, dir: "East" },
+        ];
+
+        let nearestCardinal = cardinalPositions[0];
+        let minDist = Infinity;
+        for (const pos of cardinalPositions) {
+          const dist = Math.sqrt(
+            Math.pow(px - pos.x, 2) + Math.pow(pz - pos.z, 2),
+          );
+          if (dist < minDist) {
+            minDist = dist;
+            nearestCardinal = pos;
+          }
+        }
+
+        const targetPos: [number, number, number] = [
+          nearestCardinal.x + 0.5,
+          Array.isArray(rockPos) ? rockPos[1] : (rockPos.y ?? 0),
+          nearestCardinal.z + 0.5,
+        ];
+
+        await service.executeMove({ target: targetPos, runMode: false });
+        await callback?.({
+          text: `Positioning to mine ${rock.name}...`,
+          action: "MINE_ROCK",
+        });
+        return { success: true, text: `Positioning to mine ${rock.name}` };
+      }
+
+      const command: GatherResourceCommand = {
+        resourceEntityId: rock.id,
+        skill: "mining",
+      };
+      await service.executeGatherResource(command);
+
+      await callback?.({ text: `Mining ${rock.name}`, action: "MINE_ROCK" });
+
+      return { success: true, text: `Started mining ${rock.name}` };
+    } catch (error) {
+      await callback?.({
+        text: `Failed to mine: ${error instanceof Error ? error.message : ""}`,
+        error: true,
+      });
+      return { success: false, error: error as Error };
+    }
+  },
+
+  examples: [
+    [
+      { name: "user", content: { text: "Mine that rock" } },
+      {
+        name: "agent",
+        content: { text: "Mining rock...", action: "MINE_ROCK" },
+      },
     ],
   ],
 };
@@ -565,7 +975,7 @@ export const lightFireAction: Action = {
     runtime: IAgentRuntime,
     _message: Memory,
     _state?: State,
-    _options?: unknown,
+    _options?: HandlerOptionsParam,
     callback?: HandlerCallback,
   ) => {
     try {
@@ -629,7 +1039,7 @@ export const cookFoodAction: Action = {
     runtime: IAgentRuntime,
     message: Memory,
     _state?: State,
-    _options?: unknown,
+    _options?: HandlerOptionsParam,
     callback?: HandlerCallback,
   ) => {
     try {

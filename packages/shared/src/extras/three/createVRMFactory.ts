@@ -50,6 +50,8 @@ import THREE from "./three";
 
 const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
+const _boneWorldPos = new THREE.Vector3();
+const _scenePos = new THREE.Vector3();
 
 // Pre-allocated matrices for VRM instance move() to avoid per-frame allocations
 // These are used by the create() closure for each instance
@@ -58,20 +60,13 @@ const _scaleMatrix = new THREE.Matrix4();
 const _tempMatrix1 = new THREE.Matrix4();
 const _tempMatrix2 = new THREE.Matrix4();
 
-/** How often to check avatar distance for LOD (seconds) */
-const DIST_CHECK_RATE = 1;
-
-/** Minimum update rate for close avatars (updates/second) */
-const DIST_MIN_RATE = 1 / 5;
-
-/** Maximum update rate for far avatars (updates/second) */
-const DIST_MAX_RATE = 1 / 25;
-
-/** Distance for minimum update rate (meters) */
-const DIST_MIN = 30;
-
-/** Distance for maximum update rate (meters) */
-const DIST_MAX = 60;
+// VRM Factory Animation Update Architecture:
+// All animation throttling is handled externally by AnimationLOD at the entity level.
+// This ensures consistent throttling behavior across all entity types (PlayerLocal,
+// PlayerRemote, MobEntity, NPCEntity) and avoids conflicting rate limiting.
+//
+// The VRM factory's update() function passes delta directly to the AnimationMixer
+// without any internal accumulation or rate limiting.
 
 const material = new THREE.MeshBasicMaterial();
 
@@ -442,62 +437,50 @@ export function createVRMFactory(
     // IDEA: we should use a global frame "budget" to distribute across avatars
     // https://chatgpt.com/c/4bbd469d-982e-4987-ad30-97e9c5ee6729
 
-    let elapsed = 0;
-    let rate = 0;
-    let rateCheckedAt = 999;
-    let rateCheck = true;
     let hasLoggedUpdatePipeline = false;
     // Track death animation state for future debugging/logging
     let _deathAnimationActive = false;
     let _deathUpdateLogCount = 0;
-    const update = (delta) => {
-      elapsed += delta;
-      let should = true;
-      if (rateCheck) {
-        // periodically calculate update rate based on distance to camera
-        rateCheckedAt += delta;
-        if (rateCheckedAt >= DIST_CHECK_RATE) {
-          const vrmPos = v1.setFromMatrixPosition(vrm.scene.matrix);
-          const camPos = v2.setFromMatrixPosition((hooks.camera as THREE.Camera).matrixWorld) // prettier-ignore
-          const distance = vrmPos.distanceTo(camPos);
-          const clampedDistance = Math.max(distance - DIST_MIN, 0);
-          const normalizedDistance = Math.min(clampedDistance / (DIST_MAX - DIST_MIN), 1) // prettier-ignore
-          rate = DIST_MAX_RATE + normalizedDistance * (DIST_MIN_RATE - DIST_MAX_RATE) // prettier-ignore
-          rateCheckedAt = 0;
-        }
-        should = elapsed >= rate;
+
+    /**
+     * Update animation with delta time.
+     *
+     * Animation throttling is handled externally by AnimationLOD at the entity level.
+     * This function passes delta directly to the mixer without internal accumulation
+     * or rate limiting, ensuring consistent timing across all entity types.
+     *
+     * @param delta - Delta time from AnimationLOD.effectiveDelta (may be accumulated for skipped frames)
+     */
+    const update = (delta: number) => {
+      // Skip zero delta (entity was throttled by AnimationLOD)
+      if (delta <= 0) return;
+
+      // HYBRID APPROACH - Asset Forge animation pipeline:
+
+      // Step 1: Update AnimationMixer (animates normalized bones)
+      if (mixer) {
+        mixer.update(delta);
       }
 
-      if (should) {
-        // HYBRID APPROACH - Asset Forge animation pipeline:
-
-        // Step 1: Update AnimationMixer (animates normalized bones)
-        if (mixer) {
-          mixer.update(elapsed);
-        }
-
-        // Step 2: CRITICAL - Propagate normalized bone transforms to raw bones
-        // This is where the VRM library's automatic A-pose handling happens
-        // Without this, normalized bone changes never reach the visible skeleton
-        if (_tvrm?.humanoid?.update) {
-          _tvrm.humanoid.update(elapsed);
-        } else if (!hasLoggedUpdatePipeline) {
-          hasLoggedUpdatePipeline = true;
-          console.warn(
-            `[VRM] ⚠️ humanoid.update NOT available - animations may not propagate to visible skeleton!`,
-          );
-        }
-
-        // Step 3: Update skeleton matrices for skinning
-        // Use for-loop instead of forEach to avoid callback allocation
-        const bones = skeleton.bones;
-        for (let i = 0; i < bones.length; i++) {
-          bones[i].updateMatrixWorld();
-        }
-        skeleton.update();
-
-        elapsed = 0;
+      // Step 2: CRITICAL - Propagate normalized bone transforms to raw bones
+      // This is where the VRM library's automatic A-pose handling happens
+      // Without this, normalized bone changes never reach the visible skeleton
+      if (_tvrm?.humanoid?.update) {
+        _tvrm.humanoid.update(delta);
+      } else if (!hasLoggedUpdatePipeline) {
+        hasLoggedUpdatePipeline = true;
+        console.warn(
+          `[VRM] ⚠️ humanoid.update NOT available - animations may not propagate to visible skeleton!`,
+        );
       }
+
+      // Step 3: Update skeleton matrices for skinning
+      // Use for-loop instead of forEach to avoid callback allocation
+      const bones = skeleton.bones;
+      for (let i = 0; i < bones.length; i++) {
+        bones[i].updateMatrixWorld();
+      }
+      skeleton.update();
     };
     // world.updater.add(update)
     interface EmoteData {
@@ -641,6 +624,112 @@ export function createVRMFactory(
       update(delta);
     };
 
+    /**
+     * Get the lowest bone Y position in world space after animation
+     * Checks ALL major bones to find the absolute lowest point - critical for death animations
+     * where the character lies down and spine/hips may be lower than feet
+     * @returns World-space Y coordinate of the lowest bone, or null if bones not found
+     */
+    const getLowestBoneY = (): number | null => {
+      // Check ALL bones that could be the lowest point in any pose
+      // For standing: feet/toes are lowest
+      // For lying down (death): spine/hips/head may be lowest
+      // For crouching: knees/feet may be lowest
+      const groundContactBones = [
+        // Feet and toes (standing poses)
+        "leftFoot",
+        "rightFoot",
+        "leftToes",
+        "rightToes",
+        // Legs (crouching, kneeling)
+        "leftLowerLeg",
+        "rightLowerLeg",
+        "leftUpperLeg",
+        "rightUpperLeg",
+        // Spine and torso (lying down, death)
+        "hips",
+        "spine",
+        "chest",
+        "upperChest",
+        // Head (lying face down or back)
+        "head",
+        "neck",
+        // Hands (some poses have hands touching ground)
+        "leftHand",
+        "rightHand",
+      ];
+
+      let minY: number | null = null;
+
+      for (const boneName of groundContactBones) {
+        const bone = findBone(boneName);
+        if (bone) {
+          // Get bone world position (includes VRM scene transform + animation)
+          bone.getWorldPosition(_boneWorldPos);
+          if (minY === null || _boneWorldPos.y < minY) {
+            minY = _boneWorldPos.y;
+          }
+        }
+      }
+
+      return minY;
+    };
+
+    /**
+     * Clamp avatar to ground - ensures feet touch terrain (not below, not floating)
+     * Call this AFTER update() and move() to verify ground contact
+     *
+     * CRITICAL: move() sets vrm.scene.matrix directly, so vrm.scene.position is STALE.
+     * We must extract position from matrix, not use the position property.
+     *
+     * @param groundY - Terrain height at the avatar's position
+     * @returns The Y adjustment applied (positive = lifted up, negative = pushed down)
+     */
+    const clampToGround = (groundY: number): number => {
+      const lowestY = getLowestBoneY();
+      if (lowestY === null) return 0;
+
+      // Foot mesh extends below the bone position (bones are at joint centers)
+      // Add offset so the mesh touches ground, not the bone
+      const FOOT_MESH_OFFSET = 0.1; // 10cm - foot mesh extends below bone
+
+      // Calculate target Y for the lowest bone (should be above ground by offset amount)
+      const targetBoneY = groundY + FOOT_MESH_OFFSET;
+
+      // Calculate how far the bone is from target
+      // Positive = bone above target (floating), Negative = bone below target (sinking)
+      const difference = lowestY - targetBoneY;
+
+      // Only adjust if bone is significantly off target (tolerance for floating point)
+      if (Math.abs(difference) > 0.002) {
+        // Extract current position from matrix (NOT from position property - it's stale!)
+        _scenePos.setFromMatrixPosition(vrm.scene.matrix);
+
+        // Adjust Y to bring bone to target height (offset above ground)
+        // If difference > 0 (bone too high), we subtract to push down
+        // If difference < 0 (bone too low), we subtract a negative (add) to lift up
+        _scenePos.y -= difference;
+
+        // Update the matrix with new position (setPosition modifies in place)
+        vrm.scene.matrix.setPosition(_scenePos);
+        vrm.scene.matrixWorld.setPosition(_scenePos);
+
+        // Force update all children to reflect the new position
+        vrm.scene.updateMatrixWorld(true);
+
+        // Return the adjustment made (negative of difference)
+        // Positive return = lifted up, Negative return = pushed down
+        return -difference;
+      }
+
+      return 0;
+    };
+
+    // Track the last ground adjustment to apply in move()
+    // This ensures ground clamping persists across frames without modifying node.position
+    // (modifying node.position would cause camera jitter since camera follows node.position)
+    let lastGroundAdjustment = 0;
+
     return {
       raw: vrm,
       height,
@@ -649,6 +738,22 @@ export function createVRMFactory(
       setFirstPerson,
       update: wrappedUpdate,
       getBoneTransform,
+      getLowestBoneY,
+      clampToGround,
+      /**
+       * Store a ground adjustment to be applied in subsequent move() calls.
+       * This is called AFTER clampToGround() to persist the adjustment without
+       * modifying the entity's node.position (which would cause camera jitter).
+       */
+      setGroundAdjustment(adjustment: number) {
+        lastGroundAdjustment = adjustment;
+      },
+      /**
+       * Get the current stored ground adjustment
+       */
+      getGroundAdjustment(): number {
+        return lastGroundAdjustment;
+      },
       move(_matrix: THREE.Matrix4) {
         matrix.copy(_matrix);
         // CRITICAL: Also update the VRM scene's transform to follow the player
@@ -668,6 +773,14 @@ export function createVRMFactory(
         );
         _tempMatrix2.multiplyMatrices(finalMatrix, _scaleMatrix);
 
+        // Apply stored ground adjustment to keep VRM grounded
+        // This adjustment was calculated by clampToGround() and stored via setGroundAdjustment()
+        if (Math.abs(lastGroundAdjustment) > 0.001) {
+          _scenePos.setFromMatrixPosition(_tempMatrix2);
+          _scenePos.y += lastGroundAdjustment;
+          _tempMatrix2.setPosition(_scenePos);
+        }
+
         vrm.scene.matrix.copy(_tempMatrix2);
         vrm.scene.matrixWorld.copy(_tempMatrix2);
         vrm.scene.updateMatrixWorld(true); // Force update all children
@@ -676,7 +789,9 @@ export function createVRMFactory(
         }
       },
       disableRateCheck() {
-        rateCheck = false;
+        // No-op: Rate checking has been removed from VRM factory.
+        // All animation throttling is now handled by AnimationLOD at the entity level.
+        // This method is kept for backward compatibility with existing code.
       },
       destroy() {
         if (hooks?.scene) {

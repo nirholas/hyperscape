@@ -134,17 +134,27 @@ export class SocketManager {
 
     // Clean up any socket-specific resources
     if (socket.player) {
+      const playerId = socket.player.id;
+
       // Emit typed player left event
       this.world.emit(EventType.PLAYER_LEFT, {
-        playerId: socket.player.id,
+        playerId,
       });
+
+      // Unregister from spatial registry for interest management
+      const entityManager = this.world.getSystem("entity-manager") as {
+        unregisterPlayer?: (playerId: string) => void;
+      } | null;
+      if (entityManager?.unregisterPlayer) {
+        entityManager.unregisterPlayer(playerId);
+      }
 
       // Remove player entity from world
       if (this.world.entities?.remove) {
-        this.world.entities.remove(socket.player.id);
+        this.world.entities.remove(playerId);
       }
       // Broadcast entity removal to all remaining clients
-      this.sendFn("entityRemoved", socket.player.id);
+      this.sendFn("entityRemoved", playerId);
     }
   }
 

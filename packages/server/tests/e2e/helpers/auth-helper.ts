@@ -8,7 +8,8 @@
 import jsonwebtoken from "jsonwebtoken";
 
 // Use the same JWT secret as the server (from utils.ts)
-const JWT_SECRET = process.env.JWT_SECRET || "hyperscape-dev-secret-key-12345";
+const getJwtSecret = (): string =>
+  process.env.JWT_SECRET || "hyperscape-dev-secret-key-12345";
 
 /**
  * Create a test JWT token for authenticated testing
@@ -29,7 +30,7 @@ export function createTestJWT(
       characterId,
       isAgent,
     },
-    JWT_SECRET,
+    getJwtSecret(),
   );
 }
 

@@ -17,8 +17,13 @@
  * **Runs on:** Server only (uses Node.js crypto)
  */
 
+type CryptoModule = typeof import("crypto");
+type CryptoRequire = (moduleId: "crypto") => CryptoModule;
+
+declare const require: CryptoRequire;
+
 // Lazy-loaded crypto module (Node.js only)
-let cryptoModule: typeof import("crypto") | null = null;
+let cryptoModule: CryptoModule | null = null;
 
 /**
  * Get the crypto module (lazy load to avoid client-side errors)
@@ -27,7 +32,6 @@ function getCrypto(): typeof import("crypto") | null {
   if (cryptoModule === null) {
     try {
       // Dynamic require for Node.js crypto
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
       cryptoModule = require("crypto");
     } catch {
       // Not available (running on client)

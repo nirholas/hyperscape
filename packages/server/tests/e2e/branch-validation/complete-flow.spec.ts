@@ -80,6 +80,88 @@ async function httpRequest(
   }
 }
 
+type ScriptedRole =
+  | "combat"
+  | "woodcutting"
+  | "fishing"
+  | "mining"
+  | "balanced";
+
+type CharacterCreateResponse = { character: { id: string; name: string } };
+type EmbeddedAgentStateResponse = {
+  success: boolean;
+  gameState?: { playerEntity?: { id?: string } };
+};
+type EmbeddedAgentInfoResponse = {
+  success: boolean;
+  agent?: { characterId: string; scriptedRole?: string; state?: string };
+};
+
+async function createCharacterForAgent(
+  accountId: string,
+  name: string,
+): Promise<{ id: string; name: string }> {
+  const response = await httpRequest(`${SERVER_URL}/api/characters/db`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      accountId,
+      name,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to create character: ${response.status}`);
+  }
+
+  const data = response.data as CharacterCreateResponse;
+  if (!data?.character?.id) {
+    throw new Error("Character response missing id");
+  }
+
+  return data.character;
+}
+
+async function createEmbeddedAgent(
+  characterId: string,
+  scriptedRole: ScriptedRole,
+): Promise<void> {
+  const response = await httpRequest(`${SERVER_URL}/api/embedded-agents`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      characterId,
+      autoStart: true,
+      scriptedRole,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to create embedded agent: ${response.status}`);
+  }
+}
+
+async function waitForEmbeddedAgentReady(
+  characterId: string,
+  timeoutMs: number = 20000,
+): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const response = await httpRequest(
+      `${SERVER_URL}/api/embedded-agents/${characterId}/state`,
+    );
+    if (response.ok) {
+      const data = response.data as EmbeddedAgentStateResponse;
+      if (data.gameState?.playerEntity?.id) {
+        return;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+
+  throw new Error(`Embedded agent ${characterId} did not become ready`);
+}
+
 const PACKET_IDS = {
   snapshot: 0,
   enterWorld: 56,
@@ -721,6 +803,88 @@ test.describe("Complete Flow End-to-End (plugin-work branch)", () => {
       logs.push(`[${testName}]   - All belong to same account ✓`);
       logs.push(`[${testName}]   - Each has unique ID ✓`);
       logs.push(`[${testName}]   - All mappings saved ✓`);
+
+      console.log(`[${testName}] ✅ Test PASSED`);
+    } catch (error) {
+      logs.push(
+        `[${testName}] ❌ Test error: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      console.error(`[${testName}] Test failed:`, error);
+      throw error;
+    } finally {
+      saveTestLog(testName, logs.join("\n"));
+    }
+  });
+
+  /**
+   * TEST 5: Embedded scripted agents
+   * Create scripted embedded agents for core roles and verify readiness.
+   */
+  test("Embedded scripted agents start and report state", async () => {
+    const testName = "embedded-scripted-agents";
+    const logs: string[] = [];
+
+    try {
+      logs.push(`[${testName}] Testing embedded scripted agents...`);
+      logs.push(`[${testName}] ========================================`);
+      const testUser = createTestUser();
+      await createUserInDatabase(testUser.userId);
+
+      const roles: Array<{ role: ScriptedRole; name: string }> = [
+        { role: "woodcutting", name: "Scripted Woodcutter" },
+        { role: "fishing", name: "Scripted Fisher" },
+        { role: "mining", name: "Scripted Miner" },
+        { role: "combat", name: "Scripted Slayer" },
+      ];
+
+      const createdAgents: Array<{
+        characterId: string;
+        role: ScriptedRole;
+      }> = [];
+
+      for (const entry of roles) {
+        const character = await createCharacterForAgent(
+          testUser.userId,
+          entry.name,
+        );
+        logs.push(
+          `[${testName}] ✅ Character created for ${entry.role}: ${character.id}`,
+        );
+
+        await createEmbeddedAgent(character.id, entry.role);
+        logs.push(`[${testName}] ✅ Embedded agent created for ${entry.role}`);
+
+        createdAgents.push({ characterId: character.id, role: entry.role });
+      }
+
+      for (const agent of createdAgents) {
+        await waitForEmbeddedAgentReady(agent.characterId);
+        logs.push(`[${testName}] ✅ Embedded agent ${agent.characterId} ready`);
+
+        const infoResponse = await httpRequest(
+          `${SERVER_URL}/api/embedded-agents/${agent.characterId}`,
+        );
+        expect(infoResponse.ok).toBe(true);
+        const info = infoResponse.data as EmbeddedAgentInfoResponse;
+        expect(info.agent?.scriptedRole).toBe(agent.role);
+        expect(info.agent?.state).toBe("running");
+        logs.push(
+          `[${testName}] ✅ Agent ${agent.characterId} role ${agent.role} running`,
+        );
+      }
+
+      for (const agent of createdAgents) {
+        await httpRequest(
+          `${SERVER_URL}/api/embedded-agents/${agent.characterId}`,
+          { method: "DELETE" },
+        );
+      }
+
+      logs.push(`[${testName}] ========================================`);
+      logs.push(`[${testName}] ✅ EMBEDDED SCRIPTED AGENTS VERIFIED`);
+      logs.push(`[${testName}]   - 4 scripted agents created ✓`);
+      logs.push(`[${testName}]   - All agents reached running state ✓`);
+      logs.push(`[${testName}]   - Scripted roles reported correctly ✓`);
 
       console.log(`[${testName}] ✅ Test PASSED`);
     } catch (error) {

@@ -13,6 +13,8 @@ import type {
   Memory,
   State,
   HandlerCallback,
+  HandlerOptions,
+  JsonValue,
 } from "@elizaos/core";
 import { logger, ModelType } from "@elizaos/core";
 import type { HyperscapeService } from "../services/HyperscapeService.js";
@@ -20,6 +22,63 @@ import {
   KNOWN_LOCATIONS,
   getAvailableGoals,
 } from "../providers/goalProvider.js";
+import { SCRIPTED_AUTONOMY_CONFIG } from "../config/constants.js";
+
+type HandlerOptionsParam =
+  | HandlerOptions
+  | Record<string, JsonValue | undefined>;
+type Position3 = [number, number, number];
+type PositionLike = Position3 | { x: number; y?: number; z: number };
+
+function getPositionXZ(
+  pos: PositionLike | null | undefined,
+): { x: number; z: number } | null {
+  if (!pos) return null;
+  if (Array.isArray(pos) && pos.length >= 3) {
+    return { x: pos[0], z: pos[2] };
+  }
+  const obj = pos as { x: number; z: number };
+  return { x: obj.x, z: obj.z };
+}
+
+function getPositionArray(
+  pos: PositionLike | null | undefined,
+): Position3 | null {
+  if (!pos) return null;
+  if (Array.isArray(pos) && pos.length >= 3) {
+    return [pos[0], pos[1], pos[2]];
+  }
+  const obj = pos as { x: number; y?: number; z: number };
+  return [obj.x, obj.y ?? 0, obj.z];
+}
+
+function selectScriptedGoal(
+  availableGoals: ReturnType<typeof getAvailableGoals>,
+  role: string,
+) {
+  const normalizedRole = role.toLowerCase();
+  const preferredType =
+    normalizedRole === "combat"
+      ? "combat_training"
+      : normalizedRole === "woodcutting"
+        ? "woodcutting"
+        : normalizedRole === "fishing"
+          ? "fishing"
+          : normalizedRole === "mining"
+            ? "mining"
+            : null;
+
+  if (preferredType) {
+    const preferred = availableGoals.find(
+      (goal) => goal.type === preferredType,
+    );
+    if (preferred) {
+      return preferred;
+    }
+  }
+
+  return availableGoals[0];
+}
 
 /**
  * SET_GOAL - Choose a new objective using LLM
@@ -75,7 +134,7 @@ export const setGoalAction: Action = {
     runtime: IAgentRuntime,
     _message: Memory,
     _state?: State,
-    _options?: unknown,
+    _options?: HandlerOptionsParam,
     callback?: HandlerCallback,
   ) => {
     try {
@@ -113,7 +172,19 @@ export const setGoalAction: Action = {
         )
         .join("\n");
 
-      // Use LLM to select the best goal
+      const autonomyModeSetting = String(
+        runtime.getSetting("HYPERSCAPE_AUTONOMY_MODE") ||
+          SCRIPTED_AUTONOMY_CONFIG.MODE ||
+          "",
+      ).toLowerCase();
+      const scriptedRoleSetting = String(
+        runtime.getSetting("HYPERSCAPE_SCRIPTED_ROLE") ||
+          SCRIPTED_AUTONOMY_CONFIG.ROLE ||
+          "",
+      );
+      const isScripted = autonomyModeSetting === "scripted";
+
+      // Use LLM to select the best goal (unless scripted mode is enabled)
       const selectionPrompt = `You are an AI agent playing a RuneScape-style MMORPG. You need to choose your next goal.
 
 Current Status:
@@ -134,36 +205,47 @@ Choose the goal ID that makes the most sense for your current situation. Conside
 Respond with ONLY the goal ID (e.g., "train_attack" or "explore"). Nothing else.`;
 
       let selectedGoalId: string;
+      let selectedGoal = availableGoals[0];
 
-      try {
-        const response = await runtime.useModel(ModelType.TEXT_SMALL, {
-          prompt: selectionPrompt,
-          maxTokens: 50,
-          temperature: 0.7,
-        });
+      if (isScripted) {
+        selectedGoal = selectScriptedGoal(availableGoals, scriptedRoleSetting);
+        selectedGoalId = selectedGoal.id;
+        logger.info(`[SET_GOAL] Scripted goal selected: ${selectedGoalId}`);
+      } else {
+        try {
+          const response = await runtime.useModel(ModelType.TEXT_SMALL, {
+            prompt: selectionPrompt,
+            maxTokens: 50,
+            temperature: 0.7,
+          });
 
-        // Extract goal ID from response (clean up any extra text)
-        selectedGoalId = response
-          .trim()
-          .toLowerCase()
-          .replace(/[^a-z_]/g, "");
-        logger.info(`[SET_GOAL] LLM selected goal: ${selectedGoalId}`);
-      } catch (llmError) {
-        // Fallback to highest priority goal if LLM fails
-        logger.warn(
-          `[SET_GOAL] LLM selection failed, using highest priority: ${llmError}`,
+          // Extract goal ID from response (clean up any extra text)
+          selectedGoalId = response
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z_]/g, "");
+          logger.info(`[SET_GOAL] LLM selected goal: ${selectedGoalId}`);
+        } catch (llmError) {
+          // Fallback to highest priority goal if LLM fails
+          logger.warn(
+            `[SET_GOAL] LLM selection failed, using highest priority: ${llmError}`,
+          );
+          selectedGoalId = availableGoals[0].id;
+        }
+
+        // Find the selected goal
+        const llmSelectedGoal = availableGoals.find(
+          (g) => g.id === selectedGoalId,
         );
-        selectedGoalId = availableGoals[0].id;
-      }
-
-      // Find the selected goal
-      let selectedGoal = availableGoals.find((g) => g.id === selectedGoalId);
-      if (!selectedGoal) {
-        // Fallback to highest priority if invalid selection
-        logger.warn(
-          `[SET_GOAL] Invalid goal ID "${selectedGoalId}", using highest priority`,
-        );
-        selectedGoal = availableGoals[0];
+        if (!llmSelectedGoal) {
+          // Fallback to highest priority if invalid selection
+          logger.warn(
+            `[SET_GOAL] Invalid goal ID "${selectedGoalId}", using highest priority`,
+          );
+          selectedGoal = availableGoals[0];
+        } else {
+          selectedGoal = llmSelectedGoal;
+        }
       }
 
       // Calculate progress and target for skill-based goals
@@ -282,55 +364,39 @@ export const navigateToAction: Action = {
       return false;
     }
 
-    // Handle both array [x, y, z] and object {x, y, z} position formats
-    const rawPos = player.position as unknown;
-    let playerX: number, playerZ: number;
-    if (Array.isArray(rawPos) && rawPos.length >= 3) {
-      playerX = rawPos[0];
-      playerZ = rawPos[2];
-    } else if (
-      rawPos &&
-      typeof rawPos === "object" &&
-      "x" in rawPos &&
-      "z" in rawPos
-    ) {
-      const posObj = rawPos as { x: number; z: number };
-      playerX = posObj.x;
-      playerZ = posObj.z;
-    } else {
-      logger.info(
-        `[NAVIGATE_TO] Validation failed: invalid position format: ${JSON.stringify(rawPos)}`,
-      );
+    const playerXZ = getPositionXZ(player.position as PositionLike | null);
+    if (!playerXZ) {
+      logger.info(`[NAVIGATE_TO] Validation failed: invalid position format`);
       return false;
     }
+    const { x: playerX, z: playerZ } = playerXZ;
 
     // Check if we need to navigate (not at goal location)
     const behaviorManager = service.getBehaviorManager();
     const goal = behaviorManager?.getGoal();
 
-    logger.info(`[NAVIGATE_TO] Checking goal location: ${goal?.location}`);
+    const targetPosition = goal?.targetPosition;
+    const targetLoc = goal?.location ? KNOWN_LOCATIONS[goal.location] : null;
 
-    if (!goal?.location) {
-      logger.info("[NAVIGATE_TO] Validation failed: no goal location set");
-      return false;
-    }
-
-    const targetLoc = KNOWN_LOCATIONS[goal.location];
-    if (!targetLoc) {
+    if (!targetPosition && !targetLoc) {
       logger.info(
-        `[NAVIGATE_TO] Validation failed: unknown location "${goal.location}"`,
+        "[NAVIGATE_TO] Validation failed: no goal target position or location set",
       );
       return false;
     }
 
     // Check distance
-    const dx = playerX - targetLoc.position[0];
-    const dz = playerZ - targetLoc.position[2];
+    const target = targetPosition || targetLoc?.position;
+    if (!target) return false;
+
+    const goalLocation = goal?.location;
+    const dx = playerX - target[0];
+    const dz = playerZ - target[2];
     const distance = Math.sqrt(dx * dx + dz * dz);
 
     logger.info(
       `[NAVIGATE_TO] Player at (${playerX.toFixed(0)}, ${playerZ.toFixed(0)}), ` +
-        `target "${goal.location}" at (${targetLoc.position[0]}, ${targetLoc.position[2]}), ` +
+        `target "${goalLocation ?? "custom"}" at (${target[0]}, ${target[2]}), ` +
         `distance: ${distance.toFixed(0)}`,
     );
 
@@ -342,7 +408,7 @@ export const navigateToAction: Action = {
     }
 
     logger.info(
-      `[NAVIGATE_TO] Validation passed - need to travel ${distance.toFixed(0)} units to ${goal.location}`,
+      `[NAVIGATE_TO] Validation passed - need to travel ${distance.toFixed(0)} units to ${goalLocation ?? "target"}`,
     );
     return true;
   },
@@ -351,7 +417,7 @@ export const navigateToAction: Action = {
     runtime: IAgentRuntime,
     _message: Memory,
     _state?: State,
-    _options?: unknown,
+    _options?: HandlerOptionsParam,
     callback?: HandlerCallback,
   ) => {
     try {
@@ -363,35 +429,37 @@ export const navigateToAction: Action = {
 
       const behaviorManager = service.getBehaviorManager();
       const goal = behaviorManager?.getGoal();
-      const destinationKey = goal?.location || "spawn";
-      const destination = KNOWN_LOCATIONS[destinationKey];
+      const targetPosition = goal?.targetPosition;
+      const destinationKey =
+        goal?.location || (targetPosition ? "goal_target" : "spawn");
+      const destination = goal?.location
+        ? KNOWN_LOCATIONS[destinationKey]
+        : null;
 
-      if (!destination) {
-        return { success: false, error: `Unknown location: ${destinationKey}` };
+      if (!targetPosition && !destination) {
+        return { success: false, error: "No navigation target available" };
       }
 
       // Get current player position
       const player = service.getPlayerEntity();
-      const rawPos = player?.position as unknown;
-      let playerX: number, playerY: number, playerZ: number;
-
-      if (Array.isArray(rawPos) && rawPos.length >= 3) {
-        playerX = rawPos[0];
-        playerY = rawPos[1];
-        playerZ = rawPos[2];
-      } else if (rawPos && typeof rawPos === "object" && "x" in rawPos) {
-        const posObj = rawPos as { x: number; y: number; z: number };
-        playerX = posObj.x;
-        playerY = posObj.y || 0;
-        playerZ = posObj.z;
-      } else {
+      const playerPos = getPositionArray(
+        player?.position as PositionLike | null,
+      );
+      if (!playerPos) {
         return { success: false, error: "Could not get player position" };
       }
+      const [playerX, playerY, playerZ] = playerPos;
 
       // Calculate distance to destination
-      const targetX = destination.position[0];
-      const targetY = destination.position[1];
-      const targetZ = destination.position[2];
+      const targetX = targetPosition
+        ? targetPosition[0]
+        : destination!.position[0];
+      const targetY = targetPosition
+        ? targetPosition[1]
+        : destination!.position[1];
+      const targetZ = targetPosition
+        ? targetPosition[2]
+        : destination!.position[2];
 
       const dx = targetX - playerX;
       const dz = targetZ - playerZ;
@@ -418,7 +486,10 @@ export const navigateToAction: Action = {
       } else {
         // Close enough to move directly
         moveTarget = [targetX, targetY, targetZ];
-        responseText = `Navigating to ${destinationKey}`;
+        responseText =
+          destinationKey === "goal_target"
+            ? "Navigating to goal target"
+            : `Navigating to ${destinationKey}`;
       }
 
       await service.executeMove({

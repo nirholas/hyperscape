@@ -60,6 +60,31 @@ export const GAME_CONFIG = {
   ),
 } as const;
 
+// Scripted (non-LLM) autonomy configuration
+export const SCRIPTED_AUTONOMY_CONFIG = {
+  MODE: (process.env.HYPERSCAPE_AUTONOMY_MODE || "llm").toLowerCase(),
+  ROLE: process.env.HYPERSCAPE_SCRIPTED_ROLE || "",
+  SILENT_CHAT: process.env.HYPERSCAPE_SILENT_CHAT === "true",
+  FLEE_HEALTH_PERCENT: parseFloat(
+    process.env.HYPERSCAPE_FLEE_HEALTH_PERCENT || "30",
+  ),
+  MOB_LEVEL_MAX_ABOVE: parseInt(
+    process.env.HYPERSCAPE_MOB_LEVEL_MAX_ABOVE || "3",
+  ),
+  MOB_LEVEL_MAX_BELOW: parseInt(
+    process.env.HYPERSCAPE_MOB_LEVEL_MAX_BELOW || "5",
+  ),
+  RESOURCE_LEVEL_MAX_ABOVE: parseInt(
+    process.env.HYPERSCAPE_RESOURCE_LEVEL_MAX_ABOVE || "0",
+  ),
+  RESOURCE_LEVEL_MAX_BELOW: parseInt(
+    process.env.HYPERSCAPE_RESOURCE_LEVEL_MAX_BELOW || "10",
+  ),
+  RESOURCE_APPROACH_RANGE: parseFloat(
+    process.env.HYPERSCAPE_RESOURCE_APPROACH_RANGE || "20",
+  ),
+} as const;
+
 // Voice Configuration
 export const VOICE_CONFIG = {
   SAMPLE_RATE: parseInt(process.env.VOICE_SAMPLE_RATE || "48000"),

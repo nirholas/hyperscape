@@ -62,6 +62,8 @@ export const availableActionsProvider: Provider = {
         actions.push("CHOP_TREE (woodcutting)");
       } else if (resourceType === "fishing_spot") {
         actions.push("CATCH_FISH (fishing)");
+      } else if (resourceType === "mining_rock" || resourceType === "ore") {
+        actions.push("MINE_ROCK (mining)");
       }
     });
 

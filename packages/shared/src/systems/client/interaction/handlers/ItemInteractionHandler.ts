@@ -18,12 +18,7 @@
 
 import { BaseInteractionHandler } from "./BaseInteractionHandler";
 import type { RaycastTarget, ContextMenuAction } from "../types";
-import {
-  INTERACTION_RANGE,
-  TIMING,
-  DEBUG_INTERACTIONS,
-  MESSAGE_TYPES,
-} from "../constants";
+import { INTERACTION_RANGE, TIMING, MESSAGE_TYPES } from "../constants";
 import { getItem } from "../../../../data/items";
 import {
   worldToTile,
@@ -52,12 +47,6 @@ export class ItemInteractionHandler extends BaseInteractionHandler {
       const itemId = entity.getProperty("itemId") as string | undefined;
       const quantity = entity.getProperty("quantity") as number | undefined;
       const value = entity.getProperty("value") as number | undefined;
-
-      if (DEBUG_INTERACTIONS) {
-        console.debug(
-          `[ItemHandler] Left-click pile lookup failed, using target entity: ${entity.id}`,
-        );
-      }
 
       pileItems = [
         {
@@ -106,12 +95,6 @@ export class ItemInteractionHandler extends BaseInteractionHandler {
       const itemId = entity.getProperty("itemId") as string | undefined;
       const quantity = entity.getProperty("quantity") as number | undefined;
       const value = entity.getProperty("value") as number | undefined;
-
-      if (DEBUG_INTERACTIONS) {
-        console.debug(
-          `[ItemHandler] Pile lookup failed, using target entity directly: ${entity.id}, type: ${entity.type}`,
-        );
-      }
 
       pileItems = [
         {
@@ -186,11 +169,6 @@ export class ItemInteractionHandler extends BaseInteractionHandler {
     // Verify entity exists at queue time
     const entity = this.world.entities.get(entityId);
     if (!entity) {
-      if (DEBUG_INTERACTIONS) {
-        console.debug(
-          `[ItemHandler] Entity ${entityId} not found at queue time (expected during spam-click)`,
-        );
-      }
       return;
     }
 
@@ -214,11 +192,6 @@ export class ItemInteractionHandler extends BaseInteractionHandler {
         // - Already picked up by a previous click (sync delay)
         const currentEntity = this.world.entities.get(entityId);
         if (!currentEntity) {
-          if (DEBUG_INTERACTIONS) {
-            console.debug(
-              `[ItemHandler] Entity ${entityId} not found at execute time (race condition)`,
-            );
-          }
           return;
         }
 
@@ -348,12 +321,6 @@ export class ItemInteractionHandler extends BaseInteractionHandler {
           position: pos,
         });
       }
-    }
-
-    if (DEBUG_INTERACTIONS && items.length > 0) {
-      console.debug(
-        `[ItemHandler] Found ${items.length} items at tile (${tile.x}, ${tile.z})`,
-      );
     }
 
     // Sort by drop order (newer entities have higher IDs typically, so reverse)

@@ -537,12 +537,6 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
         setTradeData((prev) => {
           if (prev.tradeId !== data.tradeId) {
             // Ignore updates for different/old trade sessions
-            console.debug(
-              "[Sidebar] Ignoring trade update for different session:",
-              data.tradeId,
-              "current:",
-              prev.tradeId,
-            );
             return prev;
           }
           return {
@@ -565,12 +559,6 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
         setTradeData((prev) => {
           if (data.tradeId && prev.tradeId && prev.tradeId !== data.tradeId) {
             // Ignore close for different trade session
-            console.debug(
-              "[Sidebar] Ignoring trade close for different session:",
-              data.tradeId,
-              "current:",
-              prev.tradeId,
-            );
             return prev;
           }
           return {
@@ -602,11 +590,6 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
         playerId: string;
         coins: number;
       };
-      console.log("[Sidebar] INVENTORY_UPDATED event received:", {
-        playerId: data.playerId,
-        itemCount: data.items?.length || 0,
-        localPlayerId: world.entities?.player?.id,
-      });
       setInventory(data.items);
       setCoins(data.coins);
     };
@@ -769,18 +752,8 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
           lp = embeddedConfig.characterId;
         }
       }
-      console.log("[Sidebar] requestInitial called:", {
-        playerId: lp,
-        hasNetwork: !!world.network,
-        cacheKeys: Object.keys(world.network?.lastInventoryByPlayerId || {}),
-      });
       if (lp) {
         const cached = world.network?.lastInventoryByPlayerId?.[lp];
-        console.log("[Sidebar] Cache lookup:", {
-          playerId: lp,
-          hasCached: !!cached,
-          cachedItemCount: cached?.items?.length || 0,
-        });
         if (cached && Array.isArray(cached.items)) {
           setInventory(cached.items);
           setCoins(cached.coins);
@@ -826,7 +799,6 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
     };
     let timeoutId: number | null = null;
     if (!requestInitial()) {
-      console.log("[Sidebar] Player not ready, scheduling retry in 400ms");
       timeoutId = window.setTimeout(() => requestInitial(), 400);
     }
     return () => {

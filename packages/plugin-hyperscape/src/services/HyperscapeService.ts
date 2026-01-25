@@ -39,6 +39,7 @@ import type {
 import { AutonomousBehaviorManager } from "../managers/autonomous-behavior-manager.js";
 import { registerEventHandlers } from "../events/handlers.js";
 import { getAvailableGoals } from "../providers/goalProvider.js";
+import { SCRIPTED_AUTONOMY_CONFIG } from "../config/constants.js";
 import {
   resolveLocation,
   parseLocationFromMessage,
@@ -320,36 +321,34 @@ export class HyperscapeService
     dashboardUuid: string,
   ): Promise<void> {
     try {
-      // Insert dashboard entity directly into entities table if it doesn't exist
+      // Check if entity already exists using ElizaOS runtime API
+      const existingEntity = await runtime.getEntityById(dashboardUuid as UUID);
+
+      if (existingEntity) {
+        logger.debug(
+          "[HyperscapePlugin] Dashboard entity already exists in database",
+        );
+        return;
+      }
+
+      // Create the dashboard entity using ElizaOS runtime API
       // This satisfies the foreign key constraint for memories.entityId
-      const db = (runtime as any).databaseAdapter?.db || (runtime as any).db;
+      const created = await runtime.createEntity({
+        id: dashboardUuid as UUID,
+        names: ["Dashboard"],
+        agentId: runtime.agentId,
+        metadata: {
+          username: "dashboard",
+          source: "hyperscape_dashboard",
+          description: "Hyperscape Dashboard User",
+        },
+      });
 
-      if (db) {
-        // Use INSERT OR IGNORE for SQLite / ON CONFLICT DO NOTHING for PostgreSQL
-        await db.run(
-          `
-          INSERT INTO entities (id, name, details, created_at)
-          VALUES (?, ?, ?, ?)
-          ON CONFLICT (id) DO NOTHING
-        `,
-          [
-            dashboardUuid,
-            "Dashboard",
-            JSON.stringify({
-              username: "dashboard",
-              source: "hyperscape_dashboard",
-              description: "Hyperscape Dashboard User",
-            }),
-            new Date().toISOString(),
-          ],
-        );
-
-        logger.info(
-          "[HyperscapePlugin] Ensured dashboard entity exists in database",
-        );
+      if (created) {
+        logger.info("[HyperscapePlugin] Created dashboard entity in database");
       } else {
         logger.warn(
-          "[HyperscapePlugin] Could not access database to create dashboard entity",
+          "[HyperscapePlugin] Failed to create dashboard entity (may already exist)",
         );
       }
     } catch (error) {
@@ -368,6 +367,19 @@ export class HyperscapeService
     if (this.chatHandlerRegistered) {
       logger.debug(
         "[HyperscapeService] Chat handler already registered, skipping",
+      );
+      return;
+    }
+
+    const silentSetting = runtime.getSetting("HYPERSCAPE_SILENT_CHAT");
+    const silentChat =
+      SCRIPTED_AUTONOMY_CONFIG.SILENT_CHAT ||
+      String(silentSetting || "").toLowerCase() === "true";
+
+    if (silentChat) {
+      this.chatHandlerRegistered = true;
+      logger.info(
+        "[HyperscapeService] Chat handler disabled (silent mode enabled)",
       );
       return;
     }
@@ -520,7 +532,7 @@ export class HyperscapeService
             if (behaviorManager) {
               const goalDescription = `User command: MOVE_TO - "go to ${resolvedLocation.name}"`;
               behaviorManager.setGoal({
-                type: "user_command" as "idle",
+                type: "user_command",
                 description: goalDescription,
                 target: 1,
                 progress: 0,
@@ -607,7 +619,7 @@ export class HyperscapeService
           if (behaviorManager) {
             const goalDescription = `User command: ${actionToInvoke.name} - "${messageText.substring(0, 50)}"`;
             behaviorManager.setGoal({
-              type: "user_command" as "idle", // Cast to valid type, shows in dashboard
+              type: "user_command", // Internal goal type for user commands
               description: goalDescription,
               target: 1,
               progress: 0,

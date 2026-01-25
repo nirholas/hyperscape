@@ -103,9 +103,9 @@ export class ContentGenerationService {
    */
   private getModel(quality: "quality" | "speed" | "balanced"): string {
     const modelMap = {
-      quality: "openai/gpt-4o",
-      speed: "openai/gpt-4o-mini",
-      balanced: "openai/gpt-4o",
+      quality: "openai/gpt-5",
+      speed: "openai/gpt-5-mini",
+      balanced: "openai/gpt-5",
     };
 
     return modelMap[quality];

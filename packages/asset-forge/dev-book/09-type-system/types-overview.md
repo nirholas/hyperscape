@@ -960,7 +960,7 @@ export interface AICreationConfig {
 const config: AICreationConfig = {
   openai: {
     apiKey: process.env.OPENAI_API_KEY!,
-    model: 'gpt-4-vision-preview',
+    model: 'gpt-5-vision-preview',
     imageServerBaseUrl: 'https://api.openai.com/v1'
   },
   meshy: {

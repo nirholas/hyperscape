@@ -368,6 +368,7 @@ describe("BotPoolManager Integration Tests", () => {
         botCount: 2,
         behavior: "idle",
         rampUpDelayMs: 10,
+        connectTimeoutMs: 1000, // Short timeout for test
       });
       await pool.start();
       const m = pool.getAggregatedMetrics();
@@ -383,6 +384,7 @@ describe("BotPoolManager Integration Tests", () => {
         botCount: 2,
         behavior: "idle",
         rampUpDelayMs: 10,
+        connectTimeoutMs: 1000, // Short timeout for test
         onBotError: () => {
           _called = true;
         },
@@ -436,6 +438,7 @@ describe("BotPoolManager Integration Tests", () => {
         botCount: 2,
         behavior: "idle",
         rampUpDelayMs: 50,
+        connectTimeoutMs: 2000, // Short timeout for test
       });
       await pool.start();
       await pool.stop();
@@ -444,6 +447,7 @@ describe("BotPoolManager Integration Tests", () => {
         botCount: 2,
         behavior: "idle",
         rampUpDelayMs: 50,
+        connectTimeoutMs: 2000, // Short timeout for test
       });
       await pool.start();
       expect(pool.running).toBe(true);

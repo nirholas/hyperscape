@@ -270,7 +270,7 @@ res.header('Access-Control-Allow-Credentials', 'true')
 **Purpose**: Prompt enhancement
 **Why**: Improves generation quality, adds details
 
-**Model**: `gpt-4`
+**Model**: `gpt-5`
 **Temperature**: 0.7
 **Max Tokens**: 200
 
@@ -283,7 +283,7 @@ res.header('Access-Control-Allow-Credentials', 'true')
 **Purpose**: Image analysis
 **Why**: Detect weapon grip points, orientation
 
-**Model**: `gpt-4o-mini`
+**Model**: `gpt-5-mini`
 **Temperature**: 0.2-0.3
 **Response Format**: JSON
 

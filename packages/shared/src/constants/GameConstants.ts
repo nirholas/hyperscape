@@ -34,8 +34,8 @@ export const PLAYER_CONSTANTS = {
 
 // === HOME TELEPORT ===
 export const HOME_TELEPORT_CONSTANTS = {
-  /** Cooldown in milliseconds (5 seconds) */
-  COOLDOWN_MS: 5 * 1000,
+  /** Cooldown in milliseconds (15 minutes) */
+  COOLDOWN_MS: 15 * 60 * 1000,
   /** Cast time in milliseconds (10 seconds - can be interrupted by movement/combat) */
   CAST_TIME_MS: 10 * 1000,
   /** Cast time in ticks (for server-side processing, 10s = ~17 ticks at 600ms/tick) */
@@ -65,6 +65,87 @@ export const WORLD_CONSTANTS = {
   BIOME_TRANSITION_SMOOTHNESS: 0.1,
   RESOURCE_SPAWN_DENSITY: 0.1,
 } as const;
+
+// === DISTANCE AND CULLING ===
+/** Distance constants for render culling, LOD, and server simulation (meters) */
+export const DISTANCE_CONSTANTS = {
+  /** Client render distances (includes fade zone before cutoff) */
+  RENDER: {
+    MOB: 150,
+    MOB_FADE_START: 130,
+    NPC: 120,
+    NPC_FADE_START: 100,
+    PLAYER: 200,
+    PLAYER_FADE_START: 180,
+    ITEM: 100,
+    ITEM_FADE_START: 80,
+    VEGETATION: 300,
+    TERRAIN: 400,
+  },
+
+  /** Server simulation distances (dormant beyond these) */
+  SIMULATION: {
+    ENTITY_UPDATE: 200,
+    NETWORK_BROADCAST: 200,
+    AI_ACTIVE: 100,
+    AI_DORMANT: 200,
+    CHUNK_ACTIVE: 256,
+    CHUNK_HYSTERESIS: 5,
+  },
+
+  /** Animation LOD tiers by distance */
+  ANIMATION_LOD: {
+    FULL: 30, // 60fps
+    HALF: 60, // 30fps
+    QUARTER: 80, // 15fps
+    FROZEN: 100, // static pose
+    CULLED: 150, // not rendered
+  },
+
+  /** Pre-computed squared distances for hot paths */
+  RENDER_SQ: {
+    MOB: 150 * 150,
+    MOB_FADE_START: 130 * 130,
+    NPC: 120 * 120,
+    NPC_FADE_START: 100 * 100,
+    PLAYER: 200 * 200,
+    PLAYER_FADE_START: 180 * 180,
+    ITEM: 100 * 100,
+    ITEM_FADE_START: 80 * 80,
+  },
+
+  SIMULATION_SQ: {
+    ENTITY_UPDATE: 200 * 200,
+    NETWORK_BROADCAST: 200 * 200,
+    AI_ACTIVE: 100 * 100,
+    AI_DORMANT: 200 * 200,
+    CHUNK_ACTIVE: 256 * 256,
+  },
+
+  ANIMATION_LOD_SQ: {
+    FULL: 30 * 30,
+    HALF: 60 * 60,
+    QUARTER: 80 * 80,
+    FROZEN: 100 * 100,
+    CULLED: 150 * 150,
+  },
+} as const;
+
+/**
+ * Helper to compute fade alpha based on distance
+ * Returns 1.0 at fadeStart, 0.0 at maxDistance, linear interpolation between
+ */
+export function computeDistanceFade(
+  distanceSq: number,
+  fadeStartSq: number,
+  maxDistanceSq: number,
+): number {
+  if (distanceSq <= fadeStartSq) return 1.0;
+  if (distanceSq >= maxDistanceSq) return 0.0;
+  // Linear interpolation: 1.0 at fadeStart, 0.0 at maxDistance
+  const t = (distanceSq - fadeStartSq) / (maxDistanceSq - fadeStartSq);
+  return 1.0 - t;
+}
 
 // === RESOURCE GATHERING ===
 // Re-export from dedicated file for backwards compatibility
@@ -332,6 +413,7 @@ export const GAME_CONSTANTS = {
   HOME_TELEPORT: HOME_TELEPORT_CONSTANTS,
   XP: XP_CONSTANTS,
   WORLD: WORLD_CONSTANTS,
+  DISTANCE: DISTANCE_CONSTANTS,
   GATHERING: GATHERING_CONSTANTS,
   MOB: MOB_CONSTANTS,
   UI: UI_CONSTANTS,

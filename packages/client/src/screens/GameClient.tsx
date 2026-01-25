@@ -16,6 +16,47 @@ interface GameClientProps {
   onSetup?: (world: InstanceType<typeof World>, config: unknown) => void;
 }
 
+type PublicRuntimeEnv = {
+  PUBLIC_CDN_URL?: string;
+  PUBLIC_WS_URL?: string;
+  PUBLIC_API_URL?: string;
+  PUBLIC_FORCE_WEBGL?: string;
+  PUBLIC_DISABLE_WEBGPU?: string;
+};
+
+type WindowWithEnv = Window & { env?: PublicRuntimeEnv; __CDN_URL?: string };
+
+const getRuntimeEnv = (): PublicRuntimeEnv | undefined => {
+  if (typeof window === "undefined") return undefined;
+  return (window as WindowWithEnv).env;
+};
+
+const normalizeEnvValue = (value?: string): string | undefined => {
+  if (!value) return undefined;
+  if (value === "undefined") return undefined;
+  return value;
+};
+
+const loadRuntimeEnv = async (): Promise<PublicRuntimeEnv | undefined> => {
+  const existing = getRuntimeEnv();
+  if (existing) return existing;
+  if (typeof document === "undefined") return undefined;
+
+  return new Promise((resolve) => {
+    const script = document.createElement("script");
+    script.src = "/env.js";
+    script.async = true;
+    const finalize = () => {
+      script.onload = null;
+      script.onerror = null;
+      resolve(getRuntimeEnv());
+    };
+    script.onload = finalize;
+    script.onerror = finalize;
+    document.head.appendChild(script);
+  });
+};
+
 export function GameClient({ wsUrl, onSetup }: GameClientProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const uiRef = useRef<HTMLDivElement>(null);
@@ -166,11 +207,17 @@ export function GameClient({ wsUrl, onSetup }: GameClientProps) {
       // Default to game server on 5555, CDN on 8080
       const finalWsUrl = wsUrl || import.meta.env.PUBLIC_WS_URL || GAME_WS_URL;
 
-      // Always use absolute CDN URL for all assets
-      const assetsUrl = `${CDN_URL}/`;
+      const runtimeEnv = await loadRuntimeEnv();
+      const runtimeCdnUrl = normalizeEnvValue(runtimeEnv?.PUBLIC_CDN_URL);
+      const buildCdnUrl = normalizeEnvValue(CDN_URL);
+      const resolvedCdnUrl =
+        runtimeCdnUrl || buildCdnUrl || `${window.location.origin}/game-assets`;
+      const assetsUrl = resolvedCdnUrl.endsWith("/")
+        ? resolvedCdnUrl
+        : `${resolvedCdnUrl}/`;
 
       // Make CDN URL available globally for PhysX loading
-      (window as Window & { __CDN_URL?: string }).__CDN_URL = CDN_URL;
+      (window as WindowWithEnv).__CDN_URL = resolvedCdnUrl;
 
       const config = {
         viewport,

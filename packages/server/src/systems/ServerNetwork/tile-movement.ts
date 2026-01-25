@@ -89,6 +89,30 @@ export class TileMovementManager {
   private readonly movementRateLimiter = getTileMovementRateLimiter();
   private readonly pathfindRateLimiter = getPathfindRateLimiter();
 
+  // Cached reference to EntityManager for spatial registry updates
+  private _entityManager: {
+    updatePlayerPosition?: (playerId: string, x: number, z: number) => void;
+  } | null = null;
+  private _entityManagerChecked = false;
+
+  /**
+   * Get EntityManager for spatial registry updates (cached lazy lookup)
+   */
+  private get entityManager() {
+    if (!this._entityManagerChecked) {
+      this._entityManager = this.world.getSystem?.("entity-manager") as {
+        updatePlayerPosition?: (playerId: string, x: number, z: number) => void;
+      } | null;
+      this._entityManagerChecked = true;
+      if (!this._entityManager?.updatePlayerPosition) {
+        console.warn(
+          "[TileMovement] EntityManager not available for spatial position tracking",
+        );
+      }
+    }
+    return this._entityManager;
+  }
+
   // ============================================================================
   // PRE-ALLOCATED BUFFERS (Zero-allocation hot path support)
   // ============================================================================
@@ -558,6 +582,13 @@ export class TileMovementManager {
       entity.position.set(worldPos.x, worldPos.y, worldPos.z);
       entity.data.position = [worldPos.x, worldPos.y, worldPos.z];
 
+      // Update player position in spatial registry for interest-based network filtering
+      this.entityManager?.updatePlayerPosition?.(
+        playerId,
+        worldPos.x,
+        worldPos.z,
+      );
+
       // OSRS-ACCURATE: Mark player as having moved this tick
       // Face direction system will skip rotation update if player moved
       // @see https://osrs-docs.com/docs/packets/outgoing/updating/masks/face-direction/
@@ -876,6 +907,13 @@ export class TileMovementManager {
         `[TileMovement] Created new state for ${playerId} at tile (${newTile.x},${newTile.z})`,
       );
     }
+
+    // Update spatial registry with new position (for interest-based filtering)
+    this.entityManager?.updatePlayerPosition?.(
+      playerId,
+      position.x,
+      position.z,
+    );
   }
 
   /**

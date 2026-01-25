@@ -73,8 +73,14 @@ import { COMBAT_CONSTANTS } from "../../constants/CombatConstants";
 import { ticksToMs } from "../../utils/game/CombatCalculations";
 import {
   AnimationLOD,
+  ANIMATION_LOD_PRESETS,
   getCameraPosition,
 } from "../../utils/rendering/AnimationLOD";
+import {
+  DistanceFadeController,
+  ENTITY_FADE_CONFIGS,
+  FadeState,
+} from "../../utils/rendering/DistanceFade";
 
 interface AvatarWithInstance {
   instance: {
@@ -152,12 +158,12 @@ export class PlayerRemote extends Entity implements HotReloadable {
   private _initialized: boolean = false;
 
   /** Animation LOD controller - throttles animation updates for distant players */
-  private readonly _animationLOD = new AnimationLOD({
-    fullDistance: 40, // Full 60fps animation within 40m (players need more detail than mobs)
-    halfDistance: 70, // 30fps animation at 40-70m
-    quarterDistance: 120, // 15fps animation at 70-120m
-    pauseDistance: 180, // No animation beyond 180m (bind pose)
-  });
+  private readonly _animationLOD = new AnimationLOD(
+    ANIMATION_LOD_PRESETS.PLAYER,
+  );
+
+  /** Distance fade controller - dissolve effect for entities near render distance */
+  private _distanceFade: DistanceFadeController | null = null;
 
   constructor(world: World, data: EntityData, local?: boolean) {
     super(world, data, local);
@@ -483,9 +489,36 @@ export class PlayerRemote extends Entity implements HotReloadable {
   }
 
   update(delta: number): void {
+    // DISTANCE FADE: Apply dissolve effect and cull distant players
+    const cameraPos = getCameraPosition(this.world);
+    if (cameraPos) {
+      // Initialize DistanceFadeController once we have a node
+      if (!this._distanceFade && this.node) {
+        this._distanceFade = new DistanceFadeController(
+          this.node,
+          ENTITY_FADE_CONFIGS.PLAYER,
+          true, // Enable shader-based dissolve
+        );
+      }
+
+      // Update fade and check if culled
+      if (this._distanceFade) {
+        const fadeResult = this._distanceFade.update(
+          cameraPos.x,
+          cameraPos.z,
+          this.node.position.x,
+          this.node.position.z,
+        );
+
+        // If culled, skip all further updates (animation, position, etc.)
+        if (fadeResult.state === FadeState.CULLED) {
+          return;
+        }
+      }
+    }
+
     // ANIMATION LOD: Calculate distance to camera once for animation throttling
     // This reduces CPU/GPU load for distant players significantly
-    const cameraPos = getCameraPosition(this.world);
     const animLODResult = cameraPos
       ? this._animationLOD.updateFromPosition(
           this.node.position.x,
@@ -606,6 +639,38 @@ export class PlayerRemote extends Entity implements HotReloadable {
       // This significantly reduces CPU/GPU load for distant players
       if (instance && instance.update && animLODResult.shouldUpdate) {
         instance.update(animLODResult.effectiveDelta);
+      }
+
+      // Post-animation ground clamping - ensures avatar's feet never go below terrain
+      // This verifies the final bone positions after animation and adjusts if needed
+      const terrain = this.world.getSystem("terrain");
+      if (
+        terrain &&
+        "getHeightAt" in terrain &&
+        instance &&
+        "clampToGround" in instance
+      ) {
+        try {
+          // Use base.position which should be the world position for remote players
+          const terrainHeight = (
+            terrain as { getHeightAt: (x: number, z: number) => number }
+          ).getHeightAt(this.base.position.x, this.base.position.z);
+          if (Number.isFinite(terrainHeight)) {
+            const groundAdjustment = (
+              instance as { clampToGround: (y: number) => number }
+            ).clampToGround(terrainHeight);
+            // Store adjustment in VRM instance (NOT position - that would cause camera jitter for spectators)
+            // The adjustment will be applied in the next move() call
+            const instanceWithAdjust = instance as {
+              setGroundAdjustment?: (adj: number) => void;
+            };
+            if (instanceWithAdjust.setGroundAdjustment) {
+              instanceWithAdjust.setGroundAdjustment(groundAdjustment);
+            }
+          }
+        } catch (_err) {
+          // Terrain tile not generated yet
+        }
       }
     }
 
@@ -893,7 +958,13 @@ export class PlayerRemote extends Entity implements HotReloadable {
     // 2. Clear timers
     if (this.chatTimer) clearTimeout(this.chatTimer);
 
-    // 3. Clean up avatar (VRM instance is added directly to world.stage.scene)
+    // 3. Clean up distance fade controller
+    if (this._distanceFade) {
+      this._distanceFade.dispose();
+      this._distanceFade = null;
+    }
+
+    // 4. Clean up avatar (VRM instance is added directly to world.stage.scene)
     // Must destroy the instance to remove from scene, not just set to undefined
     if (this.avatar) {
       this.avatar.deactivate();
@@ -905,20 +976,20 @@ export class PlayerRemote extends Entity implements HotReloadable {
       this.avatar = undefined;
     }
 
-    // 4. Deactivate visual components
+    // 5. Deactivate visual components
     this.base.deactivate();
     this.aura.deactivate();
 
-    // 5. Unregister from hot updates
+    // 6. Unregister from hot updates
     this.world.setHot(this, false);
 
-    // 6. Clean up health bar from HealthBars system
+    // 7. Clean up health bar from HealthBars system
     if (this._healthBarHandle) {
       this._healthBarHandle.destroy();
       this._healthBarHandle = null;
     }
 
-    // 7. Call parent destroy to:
+    // 8. Call parent destroy to:
     //    - Set destroyed = true
     //    - Remove node from scene
     //    - Dispose mesh/materials

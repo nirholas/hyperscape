@@ -845,8 +845,6 @@ export class AggroSystem extends SystemBase {
    * - All aggro towards the dead player should be cleared
    */
   private handlePlayerDied(playerId: string): void {
-    let mosbAffected = 0;
-
     for (const [_mobId, mobState] of this.mobStates) {
       // Check if this mob was targeting the dead player
       if (mobState.currentTarget === playerId) {
@@ -854,19 +852,12 @@ export class AggroSystem extends SystemBase {
         mobState.isChasing = false;
         mobState.currentTarget = null;
         mobState.isInCombat = false;
-        mosbAffected++;
       }
 
       // Remove from aggro targets
       if (mobState.aggroTargets.has(playerId)) {
         mobState.aggroTargets.delete(playerId);
       }
-    }
-
-    if (mosbAffected > 0) {
-      this.logger.debug(
-        `[AggroSystem] Cleared ${mosbAffected} mobs targeting dead player ${playerId}`,
-      );
     }
   }
 

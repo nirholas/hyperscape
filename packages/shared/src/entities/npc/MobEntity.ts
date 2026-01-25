@@ -89,6 +89,8 @@ import { modelCache } from "../../utils/rendering/ModelCache";
 import type {
   VRMAvatarInstance,
   LoadedAvatar,
+  MobAnimationState,
+  MobInstancedHandle,
 } from "../../types/rendering/nodes";
 import { Emotes } from "../../data/playerEmotes";
 // NOTE: Loot drops are handled by LootSystem, not MobEntity directly
@@ -105,6 +107,7 @@ import type {
   HealthBarHandle,
 } from "../../systems/client/HealthBars";
 import { COMBAT_CONSTANTS } from "../../constants/CombatConstants";
+import { DISTANCE_CONSTANTS } from "../../constants/GameConstants";
 import { ticksToMs } from "../../utils/game/CombatCalculations";
 import { AggroManager } from "../managers/AggroManager";
 import {
@@ -122,8 +125,15 @@ import { getGameRng } from "../../utils/SeededRandom";
 import { isTerrainSystem } from "../../utils/typeGuards";
 import {
   AnimationLOD,
+  ANIMATION_LOD_PRESETS,
   getCameraPosition,
 } from "../../utils/rendering/AnimationLOD";
+import {
+  DistanceFadeController,
+  ENTITY_FADE_CONFIGS,
+  FadeState,
+} from "../../utils/rendering/DistanceFade";
+import { MobInstancedRenderer } from "../../utils/rendering/InstancedMeshManager";
 import { RAYCAST_PROXY } from "../../systems/client/interaction/constants";
 
 // Polyfill ProgressEvent for Node.js server environment
@@ -186,6 +196,9 @@ export class MobEntity extends CombatantEntity {
   private _raycastProxy: THREE.Mesh | null = null;
   // Track if visibility needs to be restored after respawn position update
   private _pendingRespawnRestore = false;
+  // GPU instancing for GLB mobs
+  private _instancedRenderer: MobInstancedRenderer | null = null;
+  private _instancedHandle: MobInstancedHandle | null = null;
 
   private patrolPoints: Array<{ x: number; z: number }> = [];
   private currentPatrolIndex = 0;
@@ -234,12 +247,10 @@ export class MobEntity extends CombatantEntity {
   private readonly MAX_SPAWN_SEARCH_RADIUS = 10;
 
   /** Animation LOD controller - throttles animation updates for distant mobs */
-  private readonly _animationLOD = new AnimationLOD({
-    fullDistance: 30, // Full 60fps animation within 30m
-    halfDistance: 60, // 30fps animation at 30-60m
-    quarterDistance: 100, // 15fps animation at 60-100m
-    pauseDistance: 150, // No animation beyond 150m (bind pose)
-  });
+  private readonly _animationLOD = new AnimationLOD(ANIMATION_LOD_PRESETS.MOB);
+
+  /** Distance fade controller - dissolve effect for entities near render distance */
+  private _distanceFade: DistanceFadeController | null = null;
 
   /** Emote name to URL mapping - pre-allocated to avoid allocation in hot path */
   private readonly _emoteMap: Record<string, string> = {
@@ -591,6 +602,9 @@ export class MobEntity extends CombatantEntity {
 
     // Wire up death manager callbacks (handles visibility during death animation only)
     this.deathManager.onMeshVisibilityChange((visible) => {
+      if (this._instancedHandle && this._instancedRenderer) {
+        this._instancedRenderer.setVisible(this._instancedHandle, visible);
+      }
       if (this.mesh) {
         this.mesh.visible = visible;
       }
@@ -1131,6 +1145,24 @@ export class MobEntity extends CombatantEntity {
           return; // Mesh is set (placeholder), VRM loading continues in background
         }
 
+        // GLB instancing path - register mob for instanced rendering when supported
+        const instancedRenderer = MobInstancedRenderer.get(this.world);
+        const initialState = this.getInstancedAnimationState();
+        this.node.updateMatrixWorld(true);
+        const instancedHandle = await instancedRenderer.registerMob({
+          id: this.id,
+          modelPath: this.config.model,
+          scale: this.config.scale,
+          position: this.node.position,
+          quaternion: this.node.quaternion,
+          initialState,
+        });
+        if (instancedHandle) {
+          this._instancedRenderer = instancedRenderer;
+          this._instancedHandle = instancedHandle;
+          return;
+        }
+
         // Otherwise load as GLB (existing code path)
         const { scene, animations } = await modelCache.loadModel(
           this.config.model,
@@ -1647,6 +1679,12 @@ export class MobEntity extends CombatantEntity {
    */
   private serverUpdateCalls = 0;
 
+  /** Whether mob is in dormant state (no players nearby) */
+  private _isDormant = false;
+
+  /** Whether mob is returning to spawn as part of dormant transition */
+  private _returningToSpawnForDormant = false;
+
   protected serverUpdate(deltaTime: number): void {
     super.serverUpdate(deltaTime);
     this.serverUpdateCalls++;
@@ -1685,6 +1723,20 @@ export class MobEntity extends CombatantEntity {
       return; // Don't run AI when dead
     }
 
+    // DORMANT STATE CHECK: Skip AI updates when no players are nearby
+    // This significantly reduces server CPU for distant mobs
+    const dormantResult = this.checkDormantState();
+    if (dormantResult.isDormant) {
+      // In dormant state - skip full AI, just handle return-to-spawn if needed
+      if (dormantResult.needsReturnToSpawn) {
+        // Continue running minimal AI to return to spawn
+        // Once at spawn, we'll freeze completely
+      } else {
+        // At spawn and dormant - completely frozen, skip all updates
+        return;
+      }
+    }
+
     // Validate target is still alive before running AI (RuneScape-style: instant disengage on target death)
     if (this.config.targetPlayerId) {
       const targetPlayer = this.world.getPlayer(this.config.targetPlayerId);
@@ -1709,6 +1761,96 @@ export class MobEntity extends CombatantEntity {
 
     // Sync config.aiState with AI state machine current state
     this.config.aiState = this.aiStateMachine.getCurrentState();
+  }
+
+  /**
+   * Check if mob should be in dormant state (no players nearby)
+   * Returns whether dormant and whether mob needs to return to spawn
+   */
+  private checkDormantState(): {
+    isDormant: boolean;
+    needsReturnToSpawn: boolean;
+  } {
+    // Get EntityManager's spatial registry for efficient player distance lookup
+    const entityManager = this.world.getSystem("entity-manager") as
+      | {
+          getSpatialRegistry?: () => {
+            getNearestPlayer: (
+              x: number,
+              z: number,
+            ) => { entityId: string; distanceSq: number } | null;
+          };
+        }
+      | undefined;
+
+    if (!entityManager?.getSpatialRegistry) {
+      // No spatial registry available, keep active
+      this._isDormant = false;
+      this._returningToSpawnForDormant = false;
+      return { isDormant: false, needsReturnToSpawn: false };
+    }
+
+    const spatialRegistry = entityManager.getSpatialRegistry();
+    const nearestPlayer = spatialRegistry.getNearestPlayer(
+      this.position.x,
+      this.position.z,
+    );
+
+    if (
+      !nearestPlayer ||
+      nearestPlayer.distanceSq > DISTANCE_CONSTANTS.SIMULATION_SQ.AI_ACTIVE
+    ) {
+      // No player within active AI range - enter dormant state
+      if (!this._isDormant) {
+        // Just entered dormant state - clear combat and prepare to return
+        if (this.config.targetPlayerId) {
+          this.clearTargetAndExitCombat();
+        }
+        this._isDormant = true;
+        this._returningToSpawnForDormant = true;
+
+        // Force AI to RETURN state to go back to spawn
+        const aiContext = this.createAIContext();
+        this.aiStateMachine.forceState(MobAIState.RETURN, aiContext);
+        this.config.aiState = MobAIState.RETURN;
+      }
+
+      // Check if we've reached spawn point
+      if (this._returningToSpawnForDormant) {
+        const spawnPoint = this.config.spawnPoint;
+        const dx = this.position.x - spawnPoint.x;
+        const dz = this.position.z - spawnPoint.z;
+        const distToSpawnSq = dx * dx + dz * dz;
+
+        // Within 1 tile of spawn = arrived
+        if (distToSpawnSq < 1) {
+          this._returningToSpawnForDormant = false;
+          // Snap to spawn and set to IDLE
+          this.position.x = spawnPoint.x;
+          this.position.z = spawnPoint.z;
+          this.node.position.x = spawnPoint.x;
+          this.node.position.z = spawnPoint.z;
+          const aiContext = this.createAIContext();
+          this.aiStateMachine.forceState(MobAIState.IDLE, aiContext);
+          this.config.aiState = MobAIState.IDLE;
+          this.markNetworkDirty();
+        }
+      }
+
+      return {
+        isDormant: true,
+        needsReturnToSpawn: this._returningToSpawnForDormant,
+      };
+    } else {
+      // Player is nearby - wake up from dormant state
+      if (this._isDormant) {
+        this._isDormant = false;
+        this._returningToSpawnForDormant = false;
+        // AI will naturally resume aggro detection via AggroSystem
+      }
+
+      return { isDormant: false, needsReturnToSpawn: false };
+    }
   }
 
   /**
@@ -1856,6 +1998,56 @@ export class MobEntity extends CombatantEntity {
     }
   }
 
+  private getInstancedAnimationState(): MobAnimationState {
+    if (
+      this.config.aiState === MobAIState.WANDER ||
+      this.config.aiState === MobAIState.CHASE ||
+      this.config.aiState === MobAIState.RETURN
+    ) {
+      return "walk";
+    }
+    return "idle";
+  }
+
+  private updateInstancedRendering(): boolean {
+    if (!this._instancedHandle || !this._instancedRenderer) {
+      return false;
+    }
+
+    const targetState = this.getInstancedAnimationState();
+    if (this._instancedHandle.hidden) {
+      this._instancedHandle.state = targetState;
+      this._instancedHandle.matrix.compose(
+        this.node.position,
+        this.node.quaternion,
+        this._instancedHandle.scale,
+      );
+      return true;
+    }
+
+    this._instancedRenderer.updateTransform(
+      this._instancedHandle,
+      this.node.position,
+      this.node.quaternion,
+    );
+    if (this._instancedHandle.state !== targetState) {
+      this._instancedRenderer.updateState(
+        this._instancedHandle,
+        targetState,
+        this.node.position,
+        this.node.quaternion,
+      );
+    }
+
+    return true;
+  }
+
+  private setInstancedVisibility(visible: boolean): void {
+    if (this._instancedHandle && this._instancedRenderer) {
+      this._instancedRenderer.setVisible(this._instancedHandle, visible);
+    }
+  }
+
   /**
    * CLIENT-SIDE UPDATE
    * Handles visual updates: animations, interpolation, and rendering
@@ -1886,24 +2078,6 @@ export class MobEntity extends CombatantEntity {
   protected clientUpdate(deltaTime: number): void {
     super.clientUpdate(deltaTime);
     this.clientUpdateCalls++;
-
-    // ANIMATION LOD: Calculate distance to camera once and throttle animation updates
-    // This reduces CPU/GPU load for distant mobs significantly (50-80% savings)
-    const cameraPos = getCameraPosition(this.world);
-    const animLODResult = cameraPos
-      ? this._animationLOD.updateFromPosition(
-          this.node.position.x,
-          this.node.position.z,
-          cameraPos.x,
-          cameraPos.z,
-          deltaTime,
-        )
-      : {
-          shouldUpdate: true,
-          effectiveDelta: deltaTime,
-          lodLevel: 0,
-          distanceSq: 0,
-        };
 
     // Update health bar position (HealthBars system uses atlas + instanced mesh)
     if (this._healthBarHandle) {
@@ -1938,6 +2112,7 @@ export class MobEntity extends CombatantEntity {
         if (this.mesh && this.mesh.visible) {
           this.mesh.visible = false;
         }
+        this.setInstancedVisibility(false);
         // Hide the node (contains VRM scene)
         if (this.node && this.node.visible) {
           this.node.visible = false;
@@ -1956,6 +2131,57 @@ export class MobEntity extends CombatantEntity {
       // Not dead anymore - this is handled in modify() when state changes
       // No need for duplicate logic here
     }
+
+    // Instanced GLB path: update shared animation/transform and skip per-mesh updates
+    if (this.updateInstancedRendering()) {
+      return;
+    }
+
+    // DISTANCE FADE: Apply dissolve effect and cull distant mobs
+    // Initialize fade controller lazily (needs mesh to be loaded)
+    const cameraPos = getCameraPosition(this.world);
+    if (cameraPos) {
+      // Initialize DistanceFadeController once we have a mesh
+      if (!this._distanceFade && this.node) {
+        this._distanceFade = new DistanceFadeController(
+          this.node,
+          ENTITY_FADE_CONFIGS.MOB,
+          true, // Enable shader-based dissolve
+        );
+      }
+
+      // Update fade and check if culled
+      if (this._distanceFade) {
+        const fadeResult = this._distanceFade.update(
+          cameraPos.x,
+          cameraPos.z,
+          this.node.position.x,
+          this.node.position.z,
+        );
+
+        // If culled, skip all further updates (animation, terrain snap, etc.)
+        if (fadeResult.state === FadeState.CULLED) {
+          return;
+        }
+      }
+    }
+
+    // ANIMATION LOD: Calculate distance to camera once and throttle animation updates
+    // This reduces CPU/GPU load for distant mobs significantly (50-80% savings)
+    const animLODResult = cameraPos
+      ? this._animationLOD.updateFromPosition(
+          this.node.position.x,
+          this.node.position.z,
+          cameraPos.x,
+          cameraPos.z,
+          deltaTime,
+        )
+      : {
+          shouldUpdate: true,
+          effectiveDelta: deltaTime,
+          lodLevel: 0,
+          distanceSq: 0,
+        };
 
     // VRM path: Use avatar instance update (handles everything)
     if (this._avatarInstance) {
@@ -2056,27 +2282,30 @@ export class MobEntity extends CombatantEntity {
       this.node.updateMatrix();
       this.node.updateMatrixWorld(true);
 
+      // Get terrain height for grounding
+      const terrain = this.world.getSystem("terrain");
+      let terrainHeight = 0;
+      if (terrain && "getHeightAt" in terrain) {
+        try {
+          terrainHeight = (
+            terrain as { getHeightAt: (x: number, z: number) => number }
+          ).getHeightAt(this.node.position.x, this.node.position.z);
+          if (!Number.isFinite(terrainHeight)) {
+            terrainHeight = this.node.position.y;
+          }
+        } catch {
+          terrainHeight = this.node.position.y;
+        }
+      }
+
       // SPECIAL HANDLING FOR DEATH: Lock position, let animation play
       const deathLockedPos = this.deathManager.getLockedPosition();
       if (deathLockedPos) {
-        // Issue #244 fix: Terrain-snap death position ONCE to prevent floating death animation
+        // Issue #244 fix: Terrain-snap death position to prevent floating death animation
         // Server doesn't have terrain, so death position Y may be stale/incorrect
         if (!this._deathPositionTerrainSnapped) {
-          const terrain = this.world.getSystem("terrain");
-          if (terrain && "getHeightAt" in terrain) {
-            try {
-              const terrainHeight = (
-                terrain as { getHeightAt: (x: number, z: number) => number }
-              ).getHeightAt(deathLockedPos.x, deathLockedPos.z);
-              if (Number.isFinite(terrainHeight)) {
-                // Snap death position to ground level
-                deathLockedPos.y = terrainHeight;
-                this._deathPositionTerrainSnapped = true;
-              }
-            } catch (_err) {
-              // Terrain not ready yet, will retry next frame
-            }
-          }
+          deathLockedPos.y = terrainHeight;
+          this._deathPositionTerrainSnapped = true;
         }
 
         // Lock the node position to death position (prevents teleporting)
@@ -2085,47 +2314,43 @@ export class MobEntity extends CombatantEntity {
         this.node.updateMatrix();
         this.node.updateMatrixWorld(true);
 
-        // DON'T call move() - it causes sliding due to internal interpolation
-        // VRM scene was positioned once in modify() when entering death state
-        // Just update the animation, VRM scene stays locked
-        // NOTE: Death animations always run at full speed (no LOD throttling)
+        // Position VRM at node's terrain-snapped location, then run animation
+        this._avatarInstance.move(this.node.matrixWorld);
+
+        // Update the animation (death animations always run at full speed, no LOD throttling)
         this._avatarInstance.update(deltaTime);
+
+        // CRITICAL: Ground clamp AFTER animation runs
+        // Animation's hips Y translation elevates the character - we must counter this
+        // Store adjustment in VRM instance (NOT node.position - that would cause camera jitter)
+        const groundAdjustment =
+          this._avatarInstance.clampToGround(terrainHeight);
+        if (this._avatarInstance.setGroundAdjustment) {
+          this._avatarInstance.setGroundAdjustment(groundAdjustment);
+        }
       } else {
-        // NORMAL PATH: Use move() to sync VRM - it preserves the VRM's internal scale
-        // move() applies vrm.scene.scale to maintain height normalization
+        // NORMAL PATH (non-death)
+        // First snap entity root to terrain (node.position is stable for camera)
+        this.node.position.y = terrainHeight;
+        this.position.y = terrainHeight;
+        this.node.updateMatrix();
+        this.node.updateMatrixWorld(true);
+
+        // Position VRM at terrain-snapped location
         this._avatarInstance.move(this.node.matrixWorld);
 
         // ANIMATION LOD: Only update VRM animations when LOD allows
-        // This significantly reduces CPU/GPU load for distant mobs
         if (animLODResult.shouldUpdate) {
-          // Update VRM animations (mixer + humanoid + skeleton)
-          // Use effectiveDelta which may be accumulated from skipped frames
           this._avatarInstance.update(animLODResult.effectiveDelta);
         }
-      }
 
-      // Post-animation position locking for non-death states
-      if (this.config.aiState !== MobAIState.DEAD) {
-        // CRITICAL: Re-snap to terrain AFTER animation update to counteract root motion
-        // Animation root motion can push character down/back, so we fix position after it applies
-        const terrain = this.world.getSystem("terrain");
-        if (terrain && "getHeightAt" in terrain) {
-          try {
-            const terrainHeight = (
-              terrain as { getHeightAt: (x: number, z: number) => number }
-            ).getHeightAt(this.node.position.x, this.node.position.z);
-            if (Number.isFinite(terrainHeight)) {
-              this.node.position.y = terrainHeight;
-              this.position.y = terrainHeight;
-
-              // CRITICAL: Update matrices and call move() again to apply corrected Y position to VRM
-              this.node.updateMatrix();
-              this.node.updateMatrixWorld(true);
-              this._avatarInstance.move(this.node.matrixWorld);
-            }
-          } catch (_err) {
-            // Terrain tile not generated yet
-          }
+        // CRITICAL: Ground clamp AFTER animation runs
+        // Animation's hips Y translation may elevate/lower the character
+        // Store adjustment in VRM instance (NOT node.position - that would cause camera jitter)
+        const groundAdjustment =
+          this._avatarInstance.clampToGround(terrainHeight);
+        if (this._avatarInstance.setGroundAdjustment) {
+          this._avatarInstance.setGroundAdjustment(groundAdjustment);
         }
       }
 
@@ -2972,6 +3197,14 @@ export class MobEntity extends CombatantEntity {
       if (this.mesh && !this.mesh.visible) {
         this.mesh.visible = true;
       }
+      this.setInstancedVisibility(true);
+      if (this._instancedHandle && this._instancedRenderer) {
+        this._instancedRenderer.updateTransform(
+          this._instancedHandle,
+          this.node.position,
+          this.node.quaternion,
+        );
+      }
 
       // Update health bar now that mesh is visible again
       // This ensures the health bar shows the correct health after respawn
@@ -3002,6 +3235,12 @@ export class MobEntity extends CombatantEntity {
     // Clean up placeholder hitbox (if VRM never loaded)
     this.destroyRaycastProxy();
 
+    // Clean up distance fade controller
+    if (this._distanceFade) {
+      this._distanceFade.dispose();
+      this._distanceFade = null;
+    }
+
     // Clean up health bar handle (HealthBars system)
     if (this._healthBarHandle) {
       this._healthBarHandle.destroy();
@@ -3012,6 +3251,13 @@ export class MobEntity extends CombatantEntity {
     if (this._avatarInstance) {
       this._avatarInstance.destroy();
       this._avatarInstance = null;
+    }
+
+    // Clean up instanced mob handle (for GLB instancing)
+    if (this._instancedHandle && this._instancedRenderer) {
+      this._instancedRenderer.remove(this._instancedHandle);
+      this._instancedHandle = null;
+      this._instancedRenderer = null;
     }
 
     // Clean up animation mixer (for GLB models)

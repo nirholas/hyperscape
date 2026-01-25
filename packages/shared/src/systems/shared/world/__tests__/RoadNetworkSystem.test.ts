@@ -7,7 +7,7 @@ import { describe, it, expect } from "vitest";
 
 // ============== Constants (must match RoadNetworkSystem.ts) ==============
 const ROAD_WIDTH = 4;
-const PATH_STEP_SIZE = 12;
+const PATH_STEP_SIZE = 20;
 const _MAX_PATH_ITERATIONS = 10000;
 const EXTRA_CONNECTIONS_RATIO = 0.25;
 
@@ -31,7 +31,7 @@ const _NOISE_DISPLACEMENT_STRENGTH = 3;
 const _MIN_POINT_SPACING = 4;
 const TILE_SIZE = 100;
 const WATER_THRESHOLD = 5.4;
-const HEURISTIC_WEIGHT = 1.5;
+const HEURISTIC_WEIGHT = 2.5;
 
 // A* neighbor directions
 const DIRECTIONS = [

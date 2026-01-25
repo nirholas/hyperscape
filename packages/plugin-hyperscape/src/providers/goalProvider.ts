@@ -14,6 +14,7 @@ import type {
   ProviderResult,
 } from "@elizaos/core";
 import type { HyperscapeService } from "../services/HyperscapeService.js";
+import type { AvailableGoalType } from "../types.js";
 
 /**
  * Known locations in the game world
@@ -49,7 +50,7 @@ export const KNOWN_LOCATIONS: Record<
  */
 export interface GoalOption {
   id: string;
-  type: "combat_training" | "woodcutting" | "exploration" | "idle";
+  type: AvailableGoalType;
   description: string;
   targetSkill?: string;
   targetSkillLevel?: number;
@@ -74,6 +75,8 @@ export function getAvailableGoals(service: HyperscapeService): GoalOption[] {
   const strengthLevel = skills?.strength?.level ?? 1;
   const defenseLevel = skills?.defence?.level ?? 1;
   const woodcuttingLevel = skills?.woodcutting?.level ?? 1;
+  const fishingLevel = skills?.fishing?.level ?? 1;
+  const miningLevel = skills?.mining?.level ?? 1;
 
   // Get health status
   const healthPercent = player?.health
@@ -85,9 +88,26 @@ export function getAvailableGoals(service: HyperscapeService): GoalOption[] {
   const hasGoblins = nearbyEntities.some((e) =>
     e.name?.toLowerCase().includes("goblin"),
   );
-  const hasTrees = nearbyEntities.some((e) =>
-    e.name?.toLowerCase().includes("tree"),
-  );
+  const hasTrees = nearbyEntities.some((e) => {
+    const resourceType = e.resourceType?.toLowerCase() || "";
+    const name = e.name?.toLowerCase() || "";
+    return resourceType === "tree" || name.includes("tree");
+  });
+  const hasFishingSpots = nearbyEntities.some((e) => {
+    const resourceType = e.resourceType?.toLowerCase() || "";
+    const name = e.name?.toLowerCase() || "";
+    return resourceType === "fishing_spot" || name.includes("fishing spot");
+  });
+  const hasMiningRocks = nearbyEntities.some((e) => {
+    const resourceType = e.resourceType?.toLowerCase() || "";
+    const name = e.name?.toLowerCase() || "";
+    return (
+      resourceType === "mining_rock" ||
+      resourceType === "ore" ||
+      name.includes("rock") ||
+      name.includes("ore")
+    );
+  });
 
   // Combat training goals (only if health is decent)
   if (healthPercent >= 30) {
@@ -148,6 +168,34 @@ export function getAvailableGoals(service: HyperscapeService): GoalOption[] {
     reason: hasTrees
       ? "Trees nearby - safe way to train"
       : "Head to the western forest for woodcutting",
+  });
+
+  // Fishing goal
+  goals.push({
+    id: "train_fishing",
+    type: "fishing",
+    description: `Train fishing from ${fishingLevel} to ${fishingLevel + 2} by catching fish`,
+    targetSkill: "fishing",
+    targetSkillLevel: fishingLevel + 2,
+    targetEntity: "fishing_spot",
+    priority: hasFishingSpots ? 60 : 35,
+    reason: hasFishingSpots
+      ? "Fishing spots nearby - steady XP gains"
+      : "Look for fishing spots near water",
+  });
+
+  // Mining goal
+  goals.push({
+    id: "train_mining",
+    type: "mining",
+    description: `Train mining from ${miningLevel} to ${miningLevel + 2} by mining rocks`,
+    targetSkill: "mining",
+    targetSkillLevel: miningLevel + 2,
+    targetEntity: "mining_rock",
+    priority: hasMiningRocks ? 60 : 35,
+    reason: hasMiningRocks
+      ? "Mining rocks nearby - good for mining practice"
+      : "Search for rocks to mine",
   });
 
   // Exploration goal (good when health is low)

@@ -3,8 +3,7 @@
  * Bake grounded hip translation into Mixamo emote animations.
  *
  * - Reviews root/hips motion in GLB emotes
- * - Removes horizontal root motion (XZ)
- * - Bakes per-frame hip Y so at least one foot touches ground
+ * - Bakes per-frame hip translation so bounds touch ground
  *
  * Usage:
  *   node scripts/bake-emote-root-motion.mjs [options]
@@ -48,6 +47,8 @@ const options = {
   tolerance: parseNumberArg("--tolerance", 0.002),
   skipTokens: parseSkipTokens(),
   verify: args.includes("--verify"),
+  fromGit: args.includes("--from-git"),
+  grounding: getArgValue("--grounding") || "mesh",
 };
 
 if (options.inPlace) {
@@ -168,6 +169,7 @@ function buildNodeInfos(nodes) {
 }
 
 function getRigIndices(nodeInfos) {
+  const rootIndex = findNodeIndex(nodeInfos, ["root", ":root"]);
   const hipsIndex = findNodeIndex(nodeInfos, [
     "mixamorighips",
     "hips",
@@ -188,7 +190,94 @@ function getRigIndices(nodeInfos) {
     "mixamorigrighttoebase",
     "righttoebase",
   ]);
-  return { hipsIndex, leftFootIndex, rightFootIndex };
+  return { rootIndex, hipsIndex, leftFootIndex, rightFootIndex };
+}
+
+function buildBoneIndexSet(nodeInfos, hipsIndex) {
+  const boneIndices = new Set();
+  if (hipsIndex === null) return boneIndices;
+  const stack = [hipsIndex];
+  while (stack.length > 0) {
+    const idx = stack.pop();
+    if (boneIndices.has(idx)) continue;
+    boneIndices.add(idx);
+    for (const childIndex of nodeInfos[idx].children) {
+      stack.push(childIndex);
+    }
+  }
+  return boneIndices;
+}
+
+function buildSkinEntries(document, nodeInfos, indexByNode) {
+  const root = document.getRoot();
+  const nodes = root.listNodes();
+  const entries = [];
+
+  for (const node of nodes) {
+    const mesh = node.getMesh();
+    const skin = node.getSkin();
+    if (!mesh || !skin) continue;
+
+    const nodeIndex = indexByNode.get(node);
+    if (nodeIndex === undefined) continue;
+
+    const joints = skin.listJoints();
+    if (joints.length === 0) continue;
+
+    const jointIndices = [];
+    let valid = true;
+    for (const joint of joints) {
+      const jointIndex = indexByNode.get(joint);
+      if (jointIndex === undefined) {
+        valid = false;
+        break;
+      }
+      jointIndices.push(jointIndex);
+    }
+    if (!valid) continue;
+
+    const inverseBindMatrices = [];
+    const ibmAccessor = skin.getInverseBindMatrices();
+    if (ibmAccessor) {
+      const temp = new Array(16).fill(0);
+      for (let i = 0; i < joints.length; i++) {
+        ibmAccessor.getElement(i, temp);
+        const mat = new THREE.Matrix4();
+        mat.fromArray(temp);
+        inverseBindMatrices.push(mat);
+      }
+    } else {
+      for (let i = 0; i < joints.length; i++) {
+        inverseBindMatrices.push(new THREE.Matrix4());
+      }
+    }
+
+    const primitives = [];
+    for (const primitive of mesh.listPrimitives()) {
+      const position = primitive.getAttribute("POSITION");
+      const joints0 = primitive.getAttribute("JOINTS_0");
+      const weights0 = primitive.getAttribute("WEIGHTS_0");
+      if (!position || !joints0 || !weights0) continue;
+      primitives.push({
+        position,
+        joints: joints0,
+        weights: weights0,
+        count: position.getCount(),
+      });
+    }
+
+    if (primitives.length === 0) continue;
+
+    entries.push({
+      nodeIndex,
+      jointIndices,
+      inverseBindMatrices,
+      primitives,
+      jointMatrices: jointIndices.map(() => new THREE.Matrix4()),
+    });
+  }
+
+  return entries;
 }
 
 function findNodeIndex(nodeInfos, candidates) {
@@ -373,6 +462,11 @@ function buildChannelMap(animation) {
 
 function buildLocalTransforms(nodeInfos, channelMap, time, locals, options) {
   const ignoreTranslations = options?.ignoreTranslations === true;
+  const ignoreRootTranslation = options?.ignoreRootTranslation === true;
+  const translationMode = options?.translationMode ?? "all";
+  const zeroHipsXZ = options?.zeroHipsXZ === true;
+  const rootIndex = options?.rootIndex ?? null;
+  const hipsIndex = options?.hipsIndex ?? null;
   for (let i = 0; i < nodeInfos.length; i++) {
     const info = nodeInfos[i];
     const channels = channelMap.get(info.node);
@@ -385,8 +479,19 @@ function buildLocalTransforms(nodeInfos, channelMap, time, locals, options) {
     scale.copy(info.baseScale);
 
     if (!ignoreTranslations && channels?.translation) {
-      const data = getChannelData(channels.translation);
-      if (data) sampleVec3(data, time, translation);
+      const isRoot = rootIndex !== null && i === rootIndex;
+      const isHips = hipsIndex !== null && i === hipsIndex;
+      const allowTranslation =
+        translationMode === "all" ||
+        (translationMode === "hips-only" && isHips);
+      if (!(ignoreRootTranslation && isRoot) && allowTranslation) {
+        const data = getChannelData(channels.translation);
+        if (data) sampleVec3(data, time, translation);
+      }
+    }
+    if (zeroHipsXZ && hipsIndex !== null && i === hipsIndex) {
+      translation.x = 0;
+      translation.z = 0;
     }
     if (channels?.rotation) {
       const data = getChannelData(channels.rotation);
@@ -442,6 +547,71 @@ function createLocalBuffers(nodeCount) {
   return { translations, rotations, scales, matrices, worlds };
 }
 
+function computeSkinnedBoundsY(skinEntries, worlds) {
+  let minY = Infinity;
+  let maxY = -Infinity;
+
+  const positionElement = [0, 0, 0];
+  const jointsElement = [0, 0, 0, 0];
+  const weightsElement = [0, 0, 0, 0];
+  const jointPos = new THREE.Vector3();
+  const skinnedPos = new THREE.Vector3();
+  const weightedPos = new THREE.Vector3();
+
+  for (const entry of skinEntries) {
+    const meshWorld = worlds[entry.nodeIndex];
+
+    for (let j = 0; j < entry.jointIndices.length; j++) {
+      const jointIndex = entry.jointIndices[j];
+      entry.jointMatrices[j]
+        .copy(worlds[jointIndex])
+        .multiply(entry.inverseBindMatrices[j]);
+    }
+
+    for (const primitive of entry.primitives) {
+      for (let i = 0; i < primitive.count; i++) {
+        primitive.position.getElement(i, positionElement);
+        primitive.joints.getElement(i, jointsElement);
+        primitive.weights.getElement(i, weightsElement);
+
+        const weightSum =
+          weightsElement[0] +
+          weightsElement[1] +
+          weightsElement[2] +
+          weightsElement[3];
+        if (weightSum <= 0) continue;
+
+        const invSum = 1 / weightSum;
+        skinnedPos.set(0, 0, 0);
+
+        for (let k = 0; k < 4; k++) {
+          const weight = weightsElement[k] * invSum;
+          if (weight <= 0) continue;
+          const jointRaw = jointsElement[k];
+          const jointIdx = Math.max(
+            0,
+            Math.min(
+              entry.jointMatrices.length - 1,
+              Math.round(jointRaw),
+            ),
+          );
+          jointPos
+            .set(positionElement[0], positionElement[1], positionElement[2])
+            .applyMatrix4(entry.jointMatrices[jointIdx]);
+          skinnedPos.addScaledVector(jointPos, weight);
+        }
+
+        weightedPos.copy(skinnedPos).applyMatrix4(meshWorld);
+
+        if (weightedPos.y < minY) minY = weightedPos.y;
+        if (weightedPos.y > maxY) maxY = weightedPos.y;
+      }
+    }
+  }
+
+  return { minY, maxY };
+}
+
 function removeTranslationChannels(animation, hipsNodeNameLower) {
   const channels = animation.listChannels();
   for (const channel of channels) {
@@ -478,21 +648,31 @@ function addHipsTranslationChannel(document, animation, hipsNode, times, values)
   animation.addChannel(channel);
 }
 
-function processAnimation({
-  document,
+function measureAnimation({
   animation,
   nodeInfos,
   channelMap,
   hipsIndex,
+  rootIndex,
   footIndices,
+  boneIndices,
   sampleRate,
   tolerance,
   ignoreTranslations,
+  skinEntries,
+  useSkinnedVertices,
+  translationMode,
+  zeroHipsXZ,
+  hipsOverride,
+  timesOverride,
 }) {
-  const duration = computeDuration(animation);
-  const times = createSampleTimes(duration, sampleRate);
+  const duration = timesOverride
+    ? timesOverride[timesOverride.length - 1]
+    : computeDuration(animation);
+  const times = timesOverride || createSampleTimes(duration, sampleRate);
   const locals = createLocalBuffers(nodeInfos.length);
   const worlds = locals.worlds;
+  const footSet = new Set(footIndices);
 
   let minFootY = Infinity;
   let maxFootY = -Infinity;
@@ -501,27 +681,52 @@ function processAnimation({
   let framesAbove = 0;
   let framesBelow = 0;
 
-  const bakedValues = new Float32Array(times.length * 3);
-
   const tempPos = new THREE.Vector3();
-  const footSet = new Set(footIndices);
 
   for (let i = 0; i < times.length; i++) {
     const t = times[i];
     buildLocalTransforms(nodeInfos, channelMap, t, locals, {
       ignoreTranslations,
+      ignoreRootTranslation: true,
+      translationMode,
+      zeroHipsXZ: zeroHipsXZ === true,
+      rootIndex,
+      hipsIndex,
     });
+
+    if (hipsOverride) {
+      const base = i * 3;
+      locals.translations[hipsIndex].set(
+        hipsOverride[base],
+        hipsOverride[base + 1],
+        hipsOverride[base + 2],
+      );
+      locals.matrices[hipsIndex].compose(
+        locals.translations[hipsIndex],
+        locals.rotations[hipsIndex],
+        locals.scales[hipsIndex],
+      );
+    }
+
     buildWorldMatrices(nodeInfos, locals, worlds);
 
     let frameMinFootY = Infinity;
     let frameMinY = Infinity;
     let frameMaxY = -Infinity;
-    for (let nodeIndex = 0; nodeIndex < nodeInfos.length; nodeIndex++) {
-      tempPos.setFromMatrixPosition(worlds[nodeIndex]);
-      if (tempPos.y < frameMinY) frameMinY = tempPos.y;
-      if (tempPos.y > frameMaxY) frameMaxY = tempPos.y;
-      if (footSet.has(nodeIndex) && tempPos.y < frameMinFootY) {
-        frameMinFootY = tempPos.y;
+
+    if (useSkinnedVertices && skinEntries && skinEntries.length > 0) {
+      const bounds = computeSkinnedBoundsY(skinEntries, worlds);
+      frameMinY = bounds.minY;
+      frameMaxY = bounds.maxY;
+      frameMinFootY = bounds.minY;
+    } else {
+      for (const nodeIndex of boneIndices) {
+        tempPos.setFromMatrixPosition(worlds[nodeIndex]);
+        if (tempPos.y < frameMinY) frameMinY = tempPos.y;
+        if (tempPos.y > frameMaxY) frameMaxY = tempPos.y;
+        if (footSet.has(nodeIndex) && tempPos.y < frameMinFootY) {
+          frameMinFootY = tempPos.y;
+        }
       }
     }
 
@@ -529,27 +734,240 @@ function processAnimation({
     maxFootY = Math.max(maxFootY, frameMinFootY);
     boundsMinY = Math.min(boundsMinY, frameMinY);
     boundsMaxY = Math.max(boundsMaxY, frameMaxY);
-    if (frameMinFootY > tolerance) framesAbove += 1;
-    if (frameMinFootY < -tolerance) framesBelow += 1;
-
-    const hipsTranslation = locals.translations[hipsIndex];
-    const deltaY = -frameMinFootY;
-    const base = i * 3;
-    bakedValues[base] = 0;
-    bakedValues[base + 1] = hipsTranslation.y + deltaY;
-    bakedValues[base + 2] = 0;
+    if (frameMinY > tolerance) framesAbove += 1;
+    if (frameMinY < -tolerance) framesBelow += 1;
   }
 
   return {
     duration,
     times,
-    bakedValues,
     minFootY,
     maxFootY,
     boundsMinY,
     boundsMaxY,
     framesAbove,
     framesBelow,
+  };
+}
+
+function processAnimation({
+  document,
+  animation,
+  nodeInfos,
+  channelMap,
+  hipsIndex,
+  rootIndex,
+  footIndices,
+  boneIndices,
+  sampleRate,
+  tolerance,
+  ignoreTranslations,
+  skinEntries,
+  useSkinnedVertices,
+  translationMode,
+  zeroHipsXZ,
+}) {
+  const duration = computeDuration(animation);
+  const times = createSampleTimes(duration, sampleRate);
+  const locals = createLocalBuffers(nodeInfos.length);
+  const worlds = locals.worlds;
+
+  const bakedValues = new Float32Array(times.length * 3);
+
+  const tempPos = new THREE.Vector3();
+  const tempParentMatrix = new THREE.Matrix4();
+  const tempParentInverse = new THREE.Matrix4();
+  const tempOffset = new THREE.Vector3();
+  const footSet = new Set(footIndices);
+
+  for (let i = 0; i < times.length; i++) {
+    const t = times[i];
+    buildLocalTransforms(nodeInfos, channelMap, t, locals, {
+      ignoreTranslations,
+      ignoreRootTranslation: true,
+      translationMode,
+      zeroHipsXZ: zeroHipsXZ === true,
+      rootIndex,
+      hipsIndex,
+    });
+    buildWorldMatrices(nodeInfos, locals, worlds);
+
+    let frameMinFootY = Infinity;
+    let frameMinY = Infinity;
+    let frameMaxY = -Infinity;
+
+    if (useSkinnedVertices && skinEntries && skinEntries.length > 0) {
+      const bounds = computeSkinnedBoundsY(skinEntries, worlds);
+      frameMinY = bounds.minY;
+      frameMaxY = bounds.maxY;
+      frameMinFootY = bounds.minY;
+    } else {
+      for (const nodeIndex of boneIndices) {
+        tempPos.setFromMatrixPosition(worlds[nodeIndex]);
+        if (tempPos.y < frameMinY) frameMinY = tempPos.y;
+        if (tempPos.y > frameMaxY) frameMaxY = tempPos.y;
+        if (footSet.has(nodeIndex) && tempPos.y < frameMinFootY) {
+          frameMinFootY = tempPos.y;
+        }
+      }
+    }
+
+    const frameGroundMinY = frameMinY;
+
+    const hipsTranslation = locals.translations[hipsIndex];
+    const parentIndex = nodeInfos[hipsIndex].parentIndex;
+    if (parentIndex !== null) {
+      tempParentMatrix.copy(worlds[parentIndex]);
+      tempParentMatrix.setPosition(0, 0, 0);
+      tempParentInverse.copy(tempParentMatrix).invert();
+      tempOffset
+        .set(0, -frameGroundMinY, 0)
+        .applyMatrix4(tempParentInverse);
+    } else {
+      tempOffset.set(0, -frameGroundMinY, 0);
+    }
+    // Add the grounding offset to the original hips translation
+    // tempOffset is in local space after applyMatrix4(tempParentInverse)
+    const base = i * 3;
+    bakedValues[base] = hipsTranslation.x + tempOffset.x;
+    bakedValues[base + 1] = hipsTranslation.y + tempOffset.y;
+    bakedValues[base + 2] = hipsTranslation.z + tempOffset.z;
+  }
+
+  const correctedValues = new Float32Array(bakedValues);
+  {
+    const correctionLocals = createLocalBuffers(nodeInfos.length);
+    const correctionWorlds = correctionLocals.worlds;
+    const correctionPos = new THREE.Vector3();
+
+    for (let i = 0; i < times.length; i++) {
+      const t = times[i];
+      buildLocalTransforms(nodeInfos, channelMap, t, correctionLocals, {
+        ignoreTranslations,
+        ignoreRootTranslation: true,
+        translationMode: "all",
+        zeroHipsXZ: zeroHipsXZ === true,
+        rootIndex,
+        hipsIndex,
+      });
+
+      const base = i * 3;
+      correctionLocals.translations[hipsIndex].set(
+        correctedValues[base],
+        correctedValues[base + 1],
+        correctedValues[base + 2],
+      );
+      correctionLocals.matrices[hipsIndex].compose(
+        correctionLocals.translations[hipsIndex],
+        correctionLocals.rotations[hipsIndex],
+        correctionLocals.scales[hipsIndex],
+      );
+
+      buildWorldMatrices(nodeInfos, correctionLocals, correctionWorlds);
+
+      let frameMinY = Infinity;
+      if (useSkinnedVertices && skinEntries && skinEntries.length > 0) {
+        const bounds = computeSkinnedBoundsY(skinEntries, correctionWorlds);
+        frameMinY = bounds.minY;
+      } else {
+        for (const nodeIndex of boneIndices) {
+          correctionPos.setFromMatrixPosition(correctionWorlds[nodeIndex]);
+          if (correctionPos.y < frameMinY) frameMinY = correctionPos.y;
+        }
+      }
+
+      if (frameMinY < -tolerance || frameMinY > tolerance) {
+        const parentIndex = nodeInfos[hipsIndex].parentIndex;
+        if (parentIndex !== null) {
+          tempParentMatrix.copy(correctionWorlds[parentIndex]);
+          tempParentMatrix.setPosition(0, 0, 0);
+          tempParentInverse.copy(tempParentMatrix).invert();
+          tempOffset
+            .set(0, -frameMinY, 0)
+            .applyMatrix4(tempParentInverse);
+        } else {
+          tempOffset.set(0, -frameMinY, 0);
+        }
+        correctedValues[base] += tempOffset.x;
+        correctedValues[base + 1] += tempOffset.y;
+        correctedValues[base + 2] += tempOffset.z;
+      }
+    }
+  }
+
+    let metrics = measureAnimation({
+    animation,
+    nodeInfos,
+    channelMap,
+    hipsIndex,
+    rootIndex,
+    footIndices,
+    boneIndices,
+    sampleRate,
+    tolerance,
+    ignoreTranslations,
+    skinEntries,
+    useSkinnedVertices,
+      translationMode: "all",
+    zeroHipsXZ,
+    hipsOverride: correctedValues,
+    timesOverride: times,
+  });
+
+  if (metrics.boundsMinY < -tolerance) {
+    const parentIndex = nodeInfos[hipsIndex].parentIndex;
+    if (parentIndex !== null) {
+      tempParentMatrix.compose(
+        nodeInfos[parentIndex].baseTranslation,
+        nodeInfos[parentIndex].baseRotation,
+        nodeInfos[parentIndex].baseScale,
+      );
+      tempParentMatrix.setPosition(0, 0, 0);
+      tempParentInverse.copy(tempParentMatrix).invert();
+      tempOffset
+        .set(0, -metrics.boundsMinY, 0)
+        .applyMatrix4(tempParentInverse);
+    } else {
+      tempOffset.set(0, -metrics.boundsMinY, 0);
+    }
+
+    for (let i = 0; i < times.length; i++) {
+      const base = i * 3;
+      correctedValues[base] += tempOffset.x;
+      correctedValues[base + 1] += tempOffset.y;
+      correctedValues[base + 2] += tempOffset.z;
+    }
+
+    metrics = measureAnimation({
+      animation,
+      nodeInfos,
+      channelMap,
+      hipsIndex,
+      rootIndex,
+      footIndices,
+      boneIndices,
+      sampleRate,
+      tolerance,
+      ignoreTranslations,
+      skinEntries,
+      useSkinnedVertices,
+      translationMode: "all",
+      zeroHipsXZ,
+      hipsOverride: correctedValues,
+      timesOverride: times,
+    });
+  }
+
+  return {
+    duration,
+    times,
+    bakedValues: correctedValues,
+    minFootY: metrics.minFootY,
+    maxFootY: metrics.maxFootY,
+    boundsMinY: metrics.boundsMinY,
+    boundsMaxY: metrics.boundsMaxY,
+    framesAbove: metrics.framesAbove,
+    framesBelow: metrics.framesBelow,
   };
 }
 
@@ -629,11 +1047,18 @@ async function verifyFile(filePath, gitRoot) {
     const newRoot = newDoc.getRoot();
     const oldNodes = oldRoot.listNodes();
     const newNodes = newRoot.listNodes();
-    const { nodeInfos: oldInfos } = buildNodeInfos(oldNodes);
-    const { nodeInfos: newInfos } = buildNodeInfos(newNodes);
+    const { nodeInfos: oldInfos, indexByNode: oldIndexByNode } =
+      buildNodeInfos(oldNodes);
+    const { nodeInfos: newInfos, indexByNode: newIndexByNode } =
+      buildNodeInfos(newNodes);
+
+    const oldSkinEntries = buildSkinEntries(oldDoc, oldInfos, oldIndexByNode);
+    const newSkinEntries = buildSkinEntries(newDoc, newInfos, newIndexByNode);
 
     const oldRig = getRigIndices(oldInfos);
     const newRig = getRigIndices(newInfos);
+    const oldBoneIndices = buildBoneIndexSet(oldInfos, oldRig.hipsIndex);
+    const newBoneIndices = buildBoneIndexSet(newInfos, newRig.hipsIndex);
 
     if (
       oldRig.hipsIndex === null ||
@@ -662,28 +1087,38 @@ async function verifyFile(filePath, gitRoot) {
       const oldChannelMap = buildChannelMap(oldAnim);
       const newChannelMap = buildChannelMap(newAnim);
 
-      const oldResult = processAnimation({
-        document: oldDoc,
+      const oldResult = measureAnimation({
         animation: oldAnim,
         nodeInfos: oldInfos,
         channelMap: oldChannelMap,
         hipsIndex: oldRig.hipsIndex,
+        rootIndex: oldRig.rootIndex,
         footIndices: [oldRig.leftFootIndex, oldRig.rightFootIndex],
+        boneIndices: oldBoneIndices,
         sampleRate: options.sampleRate,
         tolerance: options.tolerance,
-        ignoreTranslations: true,
+        ignoreTranslations: false,
+        skinEntries: oldSkinEntries,
+        useSkinnedVertices: options.grounding === "mesh",
+        translationMode: "all",
+        zeroHipsXZ: false,
       });
 
-      const newResult = processAnimation({
-        document: newDoc,
+      const newResult = measureAnimation({
         animation: newAnim,
         nodeInfos: newInfos,
         channelMap: newChannelMap,
         hipsIndex: newRig.hipsIndex,
+        rootIndex: newRig.rootIndex,
         footIndices: [newRig.leftFootIndex, newRig.rightFootIndex],
+        boneIndices: newBoneIndices,
         sampleRate: options.sampleRate,
         tolerance: options.tolerance,
         ignoreTranslations: false,
+        skinEntries: newSkinEntries,
+        useSkinnedVertices: options.grounding === "mesh",
+        translationMode: "all",
+        zeroHipsXZ: false,
       });
 
       const oldTouch = Math.abs(oldResult.boundsMinY) <= options.tolerance;
@@ -693,7 +1128,9 @@ async function verifyFile(filePath, gitRoot) {
         `  anim "${oldAnim.getName() || "clip"}": old minY ${formatNumber(
           oldResult.boundsMinY,
         )} -> new minY ${formatNumber(newResult.boundsMinY)} | ` +
-          `touch old=${oldTouch} new=${newTouch}`,
+          `touch old=${oldTouch} new=${newTouch} | ` +
+          `framesAbove old=${oldResult.framesAbove} new=${newResult.framesAbove} ` +
+          `framesBelow old=${oldResult.framesBelow} new=${newResult.framesBelow}`,
       );
     }
   } catch (error) {
@@ -709,8 +1146,18 @@ async function processFile(filePath) {
   }
 
   let document;
+  const gitRoot = getGitRoot(options.inputDir);
+  const useGitSource = options.fromGit || options.verify;
+  let sourceLabel = "file";
   try {
-    document = await io.read(filePath);
+    if (useGitSource && gitRoot) {
+      const relPath = relative(gitRoot, filePath);
+      const buffer = getGitFileBuffer(gitRoot, relPath);
+      document = await io.readBinary(new Uint8Array(buffer));
+      sourceLabel = "git";
+    } else {
+      document = await io.read(filePath);
+    }
   } catch (error) {
     stats.errors += 1;
     log(`failed to read: ${filePath} (${error.message})`, "error");
@@ -726,10 +1173,12 @@ async function processFile(filePath) {
   }
 
   const nodes = root.listNodes();
-  const { nodeInfos } = buildNodeInfos(nodes);
+  const { nodeInfos, indexByNode } = buildNodeInfos(nodes);
+  const skinEntries = buildSkinEntries(document, nodeInfos, indexByNode);
 
-  const { hipsIndex, leftFootIndex, rightFootIndex } =
+  const { rootIndex, hipsIndex, leftFootIndex, rightFootIndex } =
     getRigIndices(nodeInfos);
+  const boneIndices = buildBoneIndexSet(nodeInfos, hipsIndex);
 
   if (
     hipsIndex === null ||
@@ -746,11 +1195,9 @@ async function processFile(filePath) {
 
   const footIndices = [leftFootIndex, rightFootIndex];
   const hipsNode = nodeInfos[hipsIndex].node;
-  const hipsNodeNameLower = nodeInfos[hipsIndex].name.toLowerCase();
-
   let fileBaked = false;
 
-  log(`review: ${relative(options.inputDir, filePath)}`);
+  log(`review: ${relative(options.inputDir, filePath)} (source ${sourceLabel})`);
 
   for (const animation of animations) {
     const channelMap = buildChannelMap(animation);
@@ -772,10 +1219,16 @@ async function processFile(filePath) {
       nodeInfos,
       channelMap,
       hipsIndex,
+      rootIndex,
       footIndices,
+      boneIndices,
       sampleRate: options.sampleRate,
       tolerance: options.tolerance,
       ignoreTranslations: false,
+      skinEntries,
+      useSkinnedVertices: options.grounding === "mesh",
+      translationMode: "all",
+      zeroHipsXZ: false,
     });
 
     log(
@@ -791,6 +1244,7 @@ async function processFile(filePath) {
     log(`  root range: ${summarizeRange(rootRange)}`);
 
     if (!options.dryRun) {
+      const hipsNodeNameLower = nodeInfos[hipsIndex].name.toLowerCase();
       removeTranslationChannels(animation, hipsNodeNameLower);
       addHipsTranslationChannel(
         document,
@@ -817,7 +1271,6 @@ async function processFile(filePath) {
   stats.processed += 1;
 
   if (options.verify) {
-    const gitRoot = getGitRoot(options.inputDir);
     await verifyFile(filePath, gitRoot);
   }
 }
@@ -829,6 +1282,7 @@ async function main() {
   log(`tolerance: ${options.tolerance}m`);
   if (options.dryRun) log("dry-run enabled");
   if (options.verify) log("verify enabled");
+  log(`grounding: ${options.grounding}`);
   if (options.skipTokens.length > 0) {
     log(`skip: ${options.skipTokens.join(", ")}`);
   }

@@ -11,7 +11,7 @@ This comprehensive guide covers all AI prompt templates, prompt files, loading s
 5. [Game Style Prompts](#game-style-prompts)
 6. [Weapon Detection Prompts](#weapon-detection-prompts)
 7. [Material Prompts](#material-prompts)
-8. [Prompt Enhancement Prompts](#gpt-4-enhancement-prompts)
+8. [Prompt Enhancement Prompts](#gpt-5-enhancement-prompts)
 9. [Prompt Loading System](#prompt-loading-system)
 10. [Template Syntax](#template-syntax)
 11. [Custom Prompt Creation](#custom-prompt-creation)

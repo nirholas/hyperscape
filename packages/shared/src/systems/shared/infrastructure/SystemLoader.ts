@@ -81,6 +81,7 @@ import type { AppConfig, TerrainConfig } from "../../../types/core/settings";
 import { getSystem } from "../../../utils/SystemUtils";
 import type { World } from "../../../core/World";
 import { System } from "./System";
+import { MobInstancedRenderer } from "../../../utils/rendering/InstancedMeshManager";
 
 // Helper function to check truthy values
 function isTruthy(value: string | undefined): boolean {
@@ -654,6 +655,13 @@ function setupAPI(world: World, systems: Systems): void {
     spawnMob: (type: string, position: Position3D) =>
       systems.mobNpc &&
       world.emit(EventType.MOB_NPC_SPAWN_REQUEST, { mobType: type, position }),
+    getMobInstancedRendererStats: () => {
+      // Client-side only - returns null on server
+      if (world.isServer) return null;
+      // Use the singleton renderer for this world
+      const renderer = MobInstancedRenderer.get(world);
+      return renderer.getStats();
+    },
 
     // Banking API
     getBankData: (_playerId: string, _bankId: string) => null, // Banking system doesn't expose public methods

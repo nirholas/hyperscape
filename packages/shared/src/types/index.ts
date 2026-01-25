@@ -473,7 +473,12 @@ export interface WorldOptions {
   physics?: boolean;
   renderer?: "webgpu" | "headless";
   networkRate?: number;
+  /** @deprecated Use maxPhysicsDeltaTime instead */
   maxDeltaTime?: number;
+  /** Maximum delta for physics accumulator (default: 1/30 = 33ms) */
+  maxPhysicsDeltaTime?: number;
+  /** Maximum delta for animations/movement (default: 0.5 = 500ms) */
+  maxAnimationDeltaTime?: number;
   fixedDeltaTime?: number;
   db?: SystemDatabase;
   // Client-network convenience options (optional)

@@ -15,6 +15,13 @@
  */
 
 import { describe, it, expect } from "vitest";
+import * as THREE from "three";
+import { TileInterpolator } from "../TileInterpolator";
+import {
+  TICK_DURATION_MS,
+  TILES_PER_TICK_RUN,
+  tileToWorld,
+} from "../../shared/movement/TileSystem";
 
 // Random walk constants (must match ClientInput.ts)
 const RANDOM_WALK_CONFIG = {
@@ -454,6 +461,72 @@ describe("ClientInput Random Walk", () => {
       const length = Math.sqrt(dir.dirX * dir.dirX + dir.dirZ * dir.dirZ);
       expect(length).toBeCloseTo(1, 5);
     });
+  });
+});
+
+describe("TileInterpolator Arrival Emotes", () => {
+  class TestEntity {
+    position = new THREE.Vector3();
+    data: Record<string, string | boolean> = {};
+
+    modify(update: Record<string, string | boolean>): void {
+      Object.assign(this.data, update);
+    }
+  }
+
+  it("keeps run emote until interpolation finishes", () => {
+    const interpolator = new TileInterpolator();
+    const entityId = "player-1";
+    const entity = new TestEntity();
+
+    const startTile = { x: 0, z: 0 };
+    const destTile = { x: 2, z: 0 };
+    const path = [
+      { x: 1, z: 0 },
+      { x: 2, z: 0 },
+    ];
+    const startWorld = tileToWorld(startTile);
+    const destWorld = tileToWorld(destTile);
+
+    entity.position.set(startWorld.x, startWorld.y, startWorld.z);
+
+    interpolator.onMovementStart(
+      entityId,
+      path,
+      true,
+      entity.position.clone(),
+      startTile,
+      destTile,
+      1,
+      "run",
+    );
+
+    // Movement end arrives early with arrival emote (idle)
+    interpolator.onMovementEnd(
+      entityId,
+      destTile,
+      new THREE.Vector3(destWorld.x, destWorld.y, destWorld.z),
+      1,
+      "idle",
+    );
+
+    const runSpeed = TILES_PER_TICK_RUN / (TICK_DURATION_MS / 1000);
+    const partialDelta = 0.25 / runSpeed; // Move ~0.25 tiles (still mid-path)
+
+    interpolator.update(partialDelta, (id: string) =>
+      id === entityId ? entity : undefined,
+    );
+
+    expect(entity.data.e).toBe("run");
+    expect(entity.data.tileMovementActive).toBe(true);
+
+    // Finish interpolation
+    interpolator.update(1, (id: string) =>
+      id === entityId ? entity : undefined,
+    );
+
+    expect(entity.data.e).toBe("idle");
+    expect(entity.data.tileMovementActive).toBe(false);
   });
 });
 

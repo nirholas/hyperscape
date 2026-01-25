@@ -168,8 +168,9 @@ describe("CombatAnimationManager", () => {
       animationManager.setCombatEmote("mob1", "mob", 100);
 
       // Emotes.COMBAT is the asset path with layer parameter
+      // NOTE: Uses ty=1 (Y only) NOT txyz=1 to prevent XZ sliding during attack
       expect(mob.setServerEmote).toHaveBeenCalledWith(
-        "asset://emotes/emote-punching.glb?l=0&ty=1",
+        "asset://emotes/emote-punching.glb?l=0&ty=1&tb=1",
       );
     });
 

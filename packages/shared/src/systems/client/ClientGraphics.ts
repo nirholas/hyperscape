@@ -79,6 +79,7 @@ import {
   configureShadowMaps,
   getMaxAnisotropy,
   isWebGPURenderer,
+  isWebGLForced,
   type UniversalRenderer,
   logWebGPUInfo,
   getWebGPUCapabilities,
@@ -127,6 +128,7 @@ export class ClientGraphics extends System {
   aspect: number = 0;
   worldToScreenFactor: number = 0;
   isWebGPU: boolean = true;
+  hasRendered: boolean = false;
 
   constructor(world: World) {
     super(world);
@@ -154,10 +156,13 @@ export class ClientGraphics extends System {
     this.isWebGPU = isWebGPURenderer(this.renderer);
 
     // Log backend capabilities
+    const webglForced = isWebGLForced();
     if (isWebGPURenderer(this.renderer)) {
       logWebGPUInfo(this.renderer);
       const caps = getWebGPUCapabilities(this.renderer);
       console.log("[ClientGraphics] WebGPU features:", caps.features.length);
+    } else if (webglForced) {
+      console.log("[ClientGraphics] WebGL forced via PUBLIC_FORCE_WEBGL");
     } else {
       console.warn(
         "[ClientGraphics] WebGPU unavailable (falling back to WebGL renderer)",
@@ -188,7 +193,7 @@ export class ClientGraphics extends System {
 
     // Setup post-processing with TSL
     this.usePostprocessing =
-      (this.world.prefs?.postprocessing ?? true) && this.isWebGPU;
+      (this.world.prefs?.postprocessing ?? false) && this.isWebGPU;
 
     if (this.usePostprocessing && isWebGPURenderer(this.renderer)) {
       // Get color grading settings from preferences
@@ -324,6 +329,7 @@ export class ClientGraphics extends System {
       // Render with post-processing (bloom via TSL)
       this.composer.render();
     }
+    this.hasRendered = true;
   }
 
   override commit() {

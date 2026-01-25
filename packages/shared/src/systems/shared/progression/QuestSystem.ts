@@ -27,7 +27,6 @@ import type { World } from "../../../types/index";
 import { SystemBase } from "../infrastructure/SystemBase";
 import type {
   QuestDefinition,
-  QuestManifest,
   QuestStatus,
   QuestDbStatus,
   QuestStage,
@@ -299,7 +298,7 @@ export class QuestSystem extends SystemBase implements IQuestSystem {
             `Loaded ${validCount} quest definitions from ${questsPath}`,
           );
         }
-      } catch (err) {
+      } catch (_error) {
         this.logger.warn(
           `Quest manifest not found at ${questsPath}, using empty quest list`,
         );
@@ -512,12 +511,29 @@ export class QuestSystem extends SystemBase implements IQuestSystem {
   }
 
   /**
+   * Ensure stage caches are built for a quest definition
+   */
+  private ensureStageCaches(questId: string): void {
+    if (this._stageByIdCache.has(questId)) {
+      return;
+    }
+
+    const definition = this.questDefinitions.get(questId);
+    if (!definition) {
+      return;
+    }
+
+    this.buildStageCaches(questId, definition);
+  }
+
+  /**
    * Get stage by ID using cache (O(1) instead of O(n))
    */
   private getStageById(
     questId: string,
     stageId: string,
   ): QuestStage | undefined {
+    this.ensureStageCaches(questId);
     return this._stageByIdCache.get(questId)?.get(stageId);
   }
 
@@ -525,6 +541,7 @@ export class QuestSystem extends SystemBase implements IQuestSystem {
    * Get stage index using cache (O(1) instead of O(n))
    */
   private getStageIndex(questId: string, stageId: string): number {
+    this.ensureStageCaches(questId);
     return this._stageIndexCache.get(questId)?.get(stageId) ?? -1;
   }
 
@@ -535,6 +552,7 @@ export class QuestSystem extends SystemBase implements IQuestSystem {
     questId: string,
     itemId: string,
   ): QuestStage | undefined {
+    this.ensureStageCaches(questId);
     return this._gatherStageCache.get(questId)?.get(itemId);
   }
 
@@ -545,6 +563,7 @@ export class QuestSystem extends SystemBase implements IQuestSystem {
     questId: string,
     target: string,
   ): QuestStage | undefined {
+    this.ensureStageCaches(questId);
     return this._interactStageCache.get(questId)?.get(target);
   }
 
@@ -791,47 +810,31 @@ export class QuestSystem extends SystemBase implements IQuestSystem {
       }
     }
 
-    // Debug-level logging for hot path (reduces I/O and string allocations)
-    this.logger.debug(`NPC_DIED: killedBy=${killedBy}, mobType=${mobType}`);
-
     const state = this.playerStates.get(killedBy);
     if (!state) {
-      this.logger.debug(`No player state for ${killedBy}`);
       return;
     }
 
-    this.logger.debug(
-      `Player ${killedBy} has ${state.activeQuests.size} active quests`,
-    );
-
     // Check all active quests for kill objectives
     for (const [questId, progress] of state.activeQuests) {
-      this.logger.debug(
-        `Checking quest ${questId}, stage=${progress.currentStage}`,
-      );
-
       const definition = this.questDefinitions.get(questId);
       if (!definition) {
-        this.logger.debug(`No definition for quest ${questId}`);
         continue;
       }
 
       // Use cached lookup (O(1) instead of O(n))
       const stage = this.getStageById(questId, progress.currentStage);
       if (!stage) {
-        this.logger.debug(`Stage ${progress.currentStage} not found`);
         continue;
       }
 
       if (stage.type !== "kill") {
-        this.logger.debug(`Stage ${stage.id} is ${stage.type}, not kill`);
         continue;
       }
 
       // Check if this mob matches the target
       const targetType = stage.target;
       if (!targetType || mobType !== targetType) {
-        this.logger.debug(`Target mismatch: ${mobType} vs ${targetType}`);
         continue;
       }
 

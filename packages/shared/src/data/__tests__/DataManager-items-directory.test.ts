@@ -152,7 +152,7 @@ describe.skipIf(!manifestsAvailable)(
         const consumables = Array.from(ITEMS.values()).filter(
           (item) => item.type === "consumable" && !item.id.endsWith("_noted"),
         );
-        expect(consumables.length).toBe(12);
+        expect(consumables.length).toBe(13);
       });
 
       it("has correct junk count", () => {

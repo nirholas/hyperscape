@@ -57,14 +57,14 @@ User Input (Text Description)
 
 **Purpose:** Enhance user prompts to generate better 3D assets
 
-**Model:** `gpt-4`
+**Model:** `gpt-5`
 **Endpoint:** `POST https://api.openai.com/v1/chat/completions`
 
 #### Configuration
 
 ```javascript
 {
-  model: 'gpt-4',
+  model: 'gpt-5',
   messages: [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: userPrompt }
@@ -120,7 +120,7 @@ const response = await fetch('https://api.openai.com/v1/chat/completions', {
     'Content-Type': 'application/json'
   },
   body: JSON.stringify({
-    model: 'gpt-4',
+    model: 'gpt-5',
     messages: [
       {
         role: 'system',
@@ -144,7 +144,7 @@ const response = await fetch('https://api.openai.com/v1/chat/completions', {
   "id": "chatcmpl-abc123",
   "object": "chat.completion",
   "created": 1729506000,
-  "model": "gpt-4",
+  "model": "gpt-5",
   "choices": [
     {
       "index": 0,
@@ -169,7 +169,7 @@ const response = await fetch('https://api.openai.com/v1/chat/completions', {
 ```javascript
 {
   "error": {
-    "message": "Rate limit reached for gpt-4",
+    "message": "Rate limit reached for gpt-5",
     "type": "rate_limit_error",
     "code": "rate_limit_exceeded"
   }
@@ -309,14 +309,14 @@ if (imageData.b64_json) {
 
 **Purpose:** Analyze weapon images to detect grip locations and orientation
 
-**Model:** `gpt-4o-mini`
+**Model:** `gpt-5-mini`
 **Endpoint:** `POST https://api.openai.com/v1/chat/completions`
 
 #### Grip Detection Configuration
 
 ```javascript
 {
-  model: "gpt-4o-mini",
+  model: "gpt-5-mini",
   messages: [
     {
       role: "user",
@@ -1002,7 +1002,7 @@ if (!imageUrl || !imageUrl.startsWith('http')) {
 ```json
 {
   "error": {
-    "message": "Rate limit reached for gpt-4 in organization org-xxx",
+    "message": "Rate limit reached for gpt-5 in organization org-xxx",
     "type": "rate_limit_error",
     "param": null,
     "code": "rate_limit_exceeded"

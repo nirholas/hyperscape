@@ -14,6 +14,8 @@ export interface EmbeddedAgentConfig {
   accountId: string;
   /** Agent name for display */
   name: string;
+  /** Scripted role for non-LLM bots */
+  scriptedRole?: "combat" | "woodcutting" | "fishing" | "mining" | "balanced";
   /** Path to ElizaOS character JSON file (optional) */
   characterJsonPath?: string;
   /** Inline character configuration (alternative to JSON file) */
@@ -58,6 +60,7 @@ export interface EmbeddedAgentInfo {
   characterId: string;
   accountId: string;
   name: string;
+  scriptedRole?: "combat" | "woodcutting" | "fishing" | "mining" | "balanced";
   state: AgentState;
   entityId: string | null;
   position: [number, number, number] | null;

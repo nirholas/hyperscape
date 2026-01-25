@@ -10,6 +10,39 @@
 import THREE from "../../extras/three/three";
 import { Logger } from "../Logger";
 
+type RendererEnv = {
+  PUBLIC_FORCE_WEBGL?: string;
+  PUBLIC_DISABLE_WEBGPU?: string;
+  FORCE_WEBGL?: string;
+  DISABLE_WEBGPU?: string;
+};
+
+const isTruthy = (value?: string): boolean =>
+  value === "1" || value === "true" || value === "yes" || value === "on";
+
+const getRendererEnv = (): RendererEnv | undefined => {
+  if (typeof globalThis === "undefined") return undefined;
+  return (globalThis as { env?: RendererEnv }).env;
+};
+
+export function isWebGLForced(): boolean {
+  const runtimeEnv = getRendererEnv();
+  const processEnv =
+    typeof process !== "undefined" && typeof process.env !== "undefined"
+      ? process.env
+      : undefined;
+  return (
+    isTruthy(runtimeEnv?.PUBLIC_FORCE_WEBGL) ||
+    isTruthy(runtimeEnv?.PUBLIC_DISABLE_WEBGPU) ||
+    isTruthy(runtimeEnv?.FORCE_WEBGL) ||
+    isTruthy(runtimeEnv?.DISABLE_WEBGPU) ||
+    isTruthy(processEnv?.PUBLIC_FORCE_WEBGL) ||
+    isTruthy(processEnv?.PUBLIC_DISABLE_WEBGPU) ||
+    isTruthy(processEnv?.FORCE_WEBGL) ||
+    isTruthy(processEnv?.DISABLE_WEBGPU)
+  );
+}
+
 /**
  * Renderer backend types
  */
@@ -134,6 +167,15 @@ export async function createRenderer(
     await renderer.init();
     return renderer;
   };
+
+  if (isWebGLForced()) {
+    if (!isWebGLAvailable()) {
+      throw new Error(
+        "WebGL is forced via PUBLIC_FORCE_WEBGL but is not available.",
+      );
+    }
+    return await create(true);
+  }
 
   const supportsWebGPU = await isWebGPUAvailable();
 

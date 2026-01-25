@@ -958,9 +958,6 @@ export class CombatSystem extends SystemBase {
             z: attackerPos.z,
           });
           if (!isPvPAllowed) {
-            this.logger.debug(
-              `PvP combat blocked: ${attackerId} tried to attack ${targetId} in safe zone`,
-            );
             return; // Cannot start PvP in safe zone
           }
         }
@@ -1318,12 +1315,7 @@ export class CombatSystem extends SystemBase {
 
     // 5. CRITICAL: Clear ALL attacker combat states targeting this dead entity
     //    This prevents attackers from continuing to chase/fight the respawned entity
-    const clearedAttackers = this.stateService.clearStatesTargeting(entityId);
-    if (clearedAttackers.length > 0) {
-      this.logger.debug(
-        `Cleared ${clearedAttackers.length} attacker states targeting dead ${entityType} ${entityId}`,
-      );
-    }
+    this.stateService.clearStatesTargeting(entityId);
 
     // 6. Clear face target for players who had this as pending attacker
     if (entityType === "mob") {
@@ -1363,9 +1355,6 @@ export class CombatSystem extends SystemBase {
     // 1. Clear any lingering combat state the respawned player might have
     const playerCombatState = this.stateService.getCombatData(typedPlayerId);
     if (playerCombatState) {
-      this.logger.debug(
-        `Clearing lingering combat state for respawned player ${playerId}`,
-      );
       this.stateService.removeCombatState(typedPlayerId);
       this.stateService.clearCombatStateFromEntity(playerId, "player");
     }
@@ -1375,12 +1364,7 @@ export class CombatSystem extends SystemBase {
 
     // 3. Clear any attacker states that might still be targeting this player
     //    (Safety net - handleEntityDied should have already done this)
-    const clearedAttackers = this.stateService.clearStatesTargeting(playerId);
-    if (clearedAttackers.length > 0) {
-      this.logger.debug(
-        `Cleared ${clearedAttackers.length} stale attacker states targeting respawned player ${playerId}`,
-      );
-    }
+    this.stateService.clearStatesTargeting(playerId);
 
     // 4. Clear any pending attacker reference on the player
     const playerEntity = this.world.getPlayer?.(playerId);
@@ -1837,9 +1821,6 @@ export class CombatSystem extends SystemBase {
           !zoneSystem.isPvPEnabled({ x: attackerPos.x, z: attackerPos.z })
         ) {
           // Attacker is in safe zone - end combat instead of extending
-          this.logger.debug(
-            `PvP combat timeout: ${attackerId} left PvP zone while chasing ${targetId}`,
-          );
           return; // Don't extend timeout - let combat expire
         }
       }

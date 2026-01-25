@@ -62,12 +62,29 @@ import { SystemBase } from "../infrastructure/SystemBase";
 import { getItem } from "../../../data/items";
 import { getNPCById } from "../../../data/npcs";
 import { getExternalNPC } from "../../../utils/ExternalAssetUtils";
+import { SpatialEntityRegistry } from "./SpatialEntityRegistry";
+import { DISTANCE_CONSTANTS } from "../../../constants/GameConstants";
 
 export class EntityManager extends SystemBase {
   private entities = new Map<string, Entity>();
   private entitiesNeedingUpdate = new Set<string>();
   private networkDirtyEntities = new Set<string>();
   private nextEntityId = 1;
+
+  /** Spatial partitioning registry for efficient entity queries */
+  private spatialRegistry = new SpatialEntityRegistry();
+
+  /** Broadcast distance squared for network filtering */
+  private readonly BROADCAST_DISTANCE_SQ =
+    DISTANCE_CONSTANTS.SIMULATION_SQ.NETWORK_BROADCAST;
+
+  /** Network stats for monitoring interest filtering effectiveness */
+  private networkStats = {
+    interestFilteredUpdates: 0,
+    broadcastUpdates: 0,
+    totalPlayersNotified: 0,
+    lastResetTime: Date.now(),
+  };
 
   constructor(world: World) {
     super(world, {
@@ -417,24 +434,66 @@ export class EntityManager extends SystemBase {
   }
 
   update(deltaTime: number): void {
-    // Update all entities that need updates
-    // Use for-of instead of forEach to avoid callback allocation each frame
+    // SERVER: Only update entities in active chunks (near players)
+    // CLIENT: Update all entities (client only has entities in visible range anyway)
+    if (this.world.isServer) {
+      this.updateServerEntities(deltaTime);
+    } else {
+      this.updateClientEntities(deltaTime);
+    }
+  }
+
+  /**
+   * Server-side entity update - only processes entities in active chunks
+   * This significantly reduces CPU load when players are spread out
+   */
+  private updateServerEntities(deltaTime: number): void {
+    // Get set of active entities (in chunks near players)
+    const activeEntityIds = new Set(this.spatialRegistry.getActiveEntities());
+
+    // Update entities in active chunks
+    for (const entityId of this.entitiesNeedingUpdate) {
+      const entity = this.entities.get(entityId);
+      if (!entity) continue;
+
+      // Always update players (they're the source of active chunks)
+      // Also update entities in active chunks
+      const isPlayer = entity.type === "player";
+      const isInActiveChunk = activeEntityIds.has(entityId);
+
+      if (isPlayer || isInActiveChunk) {
+        entity.update(deltaTime);
+
+        // Check if entity marked itself as dirty and needs network sync
+        if (entity.networkDirty) {
+          this.networkDirtyEntities.add(entityId);
+          entity.networkDirty = false;
+
+          // Update spatial registry with new position
+          const pos = entity.position;
+          this.spatialRegistry.updateEntityPosition(entityId, pos.x, pos.z);
+        }
+      }
+      // Entities NOT in active chunks skip their update entirely
+      // This is where the CPU savings come from
+    }
+
+    // Send network updates
+    if (this.networkDirtyEntities.size > 0) {
+      this.sendNetworkUpdates();
+    }
+  }
+
+  /**
+   * Client-side entity update - updates all entities
+   * Client only receives entities in visible range from server
+   */
+  private updateClientEntities(deltaTime: number): void {
     for (const entityId of this.entitiesNeedingUpdate) {
       const entity = this.entities.get(entityId);
       if (entity) {
         entity.update(deltaTime);
-
-        // Check if entity marked itself as dirty and needs network sync
-        if (this.world.isServer && entity.networkDirty) {
-          this.networkDirtyEntities.add(entityId);
-          entity.networkDirty = false; // Reset flag after adding to set
-        }
       }
-    }
-
-    // Send network updates
-    if (this.world.isServer && this.networkDirtyEntities.size > 0) {
-      this.sendNetworkUpdates();
     }
   }
 
@@ -540,6 +599,18 @@ export class EntityManager extends SystemBase {
     // Register with world entities system so other systems can find it
     this.world.entities.set(config.id, entity);
 
+    // Register with spatial registry (server-side only)
+    // This enables efficient spatial queries for entity updates and network filtering
+    if (this.world.isServer) {
+      this.spatialRegistry.addEntity(
+        config.id,
+        config.position.x,
+        config.position.z,
+        config.type,
+        false,
+      );
+    }
+
     // Broadcast entityAdded to all clients (server-only)
     // Single broadcast point to prevent duplicate packets
     if (this.world.isServer) {
@@ -619,6 +690,11 @@ export class EntityManager extends SystemBase {
     this.entitiesNeedingUpdate.delete(entityId);
     this.networkDirtyEntities.delete(entityId);
 
+    // Remove from spatial registry (server-side only)
+    if (this.world.isServer) {
+      this.spatialRegistry.removeEntity(entityId);
+    }
+
     // Remove from world entities system
     this.world.entities.remove(entityId);
 
@@ -646,6 +722,68 @@ export class EntityManager extends SystemBase {
   }
 
   /**
+   * Get entities near a position within broadcast distance
+   * Used for initial entity sync when a player joins or moves into a new area
+   *
+   * @param x - World X position
+   * @param z - World Z position
+   * @param radius - Optional radius override (defaults to NETWORK_BROADCAST distance)
+   * @returns Array of entities within range
+   */
+  getEntitiesNearPosition(x: number, z: number, radius?: number): Entity[] {
+    const searchRadius = radius ?? Math.sqrt(this.BROADCAST_DISTANCE_SQ);
+    const results = this.spatialRegistry.getEntitiesInRange(x, z, searchRadius);
+
+    return results
+      .map((r) => this.entities.get(r.entityId))
+      .filter((e): e is Entity => e !== undefined);
+  }
+
+  /**
+   * Get players who should receive updates about an entity at a given position
+   * Used for interest-based network filtering
+   *
+   * @param entityX - Entity world X position
+   * @param entityZ - Entity world Z position
+   * @param entityType - Optional entity type for type-specific distances
+   * @returns Array of player IDs who should receive the update
+   */
+  getInterestedPlayers(
+    entityX: number,
+    entityZ: number,
+    entityType?: string,
+  ): string[] {
+    // Get type-specific distance or default
+    let broadcastDistSq = this.BROADCAST_DISTANCE_SQ;
+    if (entityType) {
+      const typeDistances: Record<string, number> = {
+        mob: DISTANCE_CONSTANTS.RENDER_SQ.MOB,
+        npc: DISTANCE_CONSTANTS.RENDER_SQ.NPC,
+        player: DISTANCE_CONSTANTS.RENDER_SQ.PLAYER,
+        item: DISTANCE_CONSTANTS.RENDER_SQ.ITEM,
+      };
+      broadcastDistSq = typeDistances[entityType] ?? this.BROADCAST_DISTANCE_SQ;
+    }
+
+    // Get all player positions
+    const playerPositions = this.spatialRegistry.getPlayerPositions();
+    const interestedPlayers: string[] = [];
+
+    // Check each player's distance to the entity
+    for (const player of playerPositions) {
+      const dx = entityX - player.x;
+      const dz = entityZ - player.z;
+      const distSq = dx * dx + dz * dz;
+
+      if (distSq <= broadcastDistSq) {
+        interestedPlayers.push(player.entityId);
+      }
+    }
+
+    return interestedPlayers;
+  }
+
+  /**
    * Get all entities of a specific type
    */
   getEntitiesByType(type: string): Entity[] {
@@ -667,6 +805,47 @@ export class EntityManager extends SystemBase {
       const distance = entity.getDistanceTo(center);
       return distance <= range;
     });
+  }
+
+  // ========== PLAYER SPATIAL REGISTRATION ==========
+  // These methods allow ServerNetwork to register players with the spatial registry
+  // Players don't go through spawnEntity(), so they need separate registration
+
+  /**
+   * Register a player with the spatial registry
+   * Called by ServerNetwork when a player connects/spawns
+   *
+   * @param playerId - Player entity ID
+   * @param x - World X position
+   * @param z - World Z position
+   */
+  registerPlayer(playerId: string, x: number, z: number): void {
+    if (!this.world.isServer) return;
+    this.spatialRegistry.addEntity(playerId, x, z, "player", true);
+  }
+
+  /**
+   * Unregister a player from the spatial registry
+   * Called by ServerNetwork when a player disconnects
+   *
+   * @param playerId - Player entity ID
+   */
+  unregisterPlayer(playerId: string): void {
+    if (!this.world.isServer) return;
+    this.spatialRegistry.removeEntity(playerId);
+  }
+
+  /**
+   * Update a player's position in the spatial registry
+   * Called by ServerNetwork/TileMovementManager when player moves
+   *
+   * @param playerId - Player entity ID
+   * @param x - New world X position
+   * @param z - New world Z position
+   */
+  updatePlayerPosition(playerId: string, x: number, z: number): void {
+    if (!this.world.isServer) return;
+    this.spatialRegistry.updateEntityPosition(playerId, x, z);
   }
 
   private handleEntityDestroy(data: { entityId: string }): void {
@@ -966,13 +1145,14 @@ export class EntityManager extends SystemBase {
       return;
     }
 
-    // Disabled - too spammy
-    // if (this.networkDirtyEntities.size > 0) {
-    //   console.log(`[EntityManager.sendNetworkUpdates] Syncing ${this.networkDirtyEntities.size} dirty entities:`, Array.from(this.networkDirtyEntities));
-    // }
-
+    // Check for network with interest-based sending capability
     const network = this.world.network as {
       send?: (method: string, data: unknown, excludeId?: string) => void;
+      sendToPlayer?: (
+        playerId: string,
+        method: string,
+        data: unknown,
+      ) => boolean;
     };
 
     if (!network || !network.send) {
@@ -980,6 +1160,9 @@ export class EntityManager extends SystemBase {
       this.networkDirtyEntities.clear();
       return;
     }
+
+    // Use interest-based filtering if sendToPlayer is available
+    const useInterestFiltering = typeof network.sendToPlayer === "function";
 
     this.networkDirtyEntities.forEach((entityId) => {
       // CRITICAL FIX: Players are in world.players, not EntityManager.entities
@@ -989,9 +1172,6 @@ export class EntityManager extends SystemBase {
         const playerEntity = this.world.getPlayer(entityId);
         if (playerEntity) {
           entity = playerEntity;
-          console.log(
-            `[EntityManager] 📍 Found player ${entityId} in world.players (not in EntityManager.entities)`,
-          );
         }
       }
 
@@ -1000,6 +1180,12 @@ export class EntityManager extends SystemBase {
         const pos = entity.position;
         // Get rotation: prefer node.quaternion (client) but fallback to entity.rotation (server)
         const rot = entity.node?.quaternion ?? entity.rotation;
+
+        // Get interested players (only those within broadcast distance)
+        // For player entities, always broadcast to nearby players (they need to see each other)
+        const interestedPlayers = useInterestFiltering
+          ? this.getInterestedPlayers(pos.x, pos.z, entity.type)
+          : null;
 
         // Get network data from entity (includes health and other properties)
         const networkData = entity.getNetworkData();
@@ -1023,27 +1209,38 @@ export class EntityManager extends SystemBase {
           }
         }
 
-        // Send entityModified packet
-        // For dead players, skip position/rotation to keep them at death location on all clients
-        if (skipPositionBroadcast) {
-          // Dead player: Only send non-position data (emote, health, etc.)
-          // This ensures death animation plays at death location
-          network.send!("entityModified", {
-            id: entityId,
-            changes: {
-              ...networkData, // Emote, health, combat state, etc.
-            },
-          });
+        // Build the update packet
+        const updatePacket = skipPositionBroadcast
+          ? {
+              id: entityId,
+              changes: {
+                ...networkData, // Emote, health, combat state, etc.
+              },
+            }
+          : {
+              id: entityId,
+              changes: {
+                p: [pos.x, pos.y, pos.z],
+                q: rot ? [rot.x, rot.y, rot.z, rot.w] : undefined,
+                ...networkData,
+              },
+            };
+
+        // INTEREST-BASED FILTERING: Send only to nearby players
+        if (
+          interestedPlayers &&
+          interestedPlayers.length > 0 &&
+          network.sendToPlayer
+        ) {
+          for (const playerId of interestedPlayers) {
+            network.sendToPlayer(playerId, "entityModified", updatePacket);
+          }
+          this.networkStats.interestFilteredUpdates++;
+          this.networkStats.totalPlayersNotified += interestedPlayers.length;
         } else {
-          // Normal entity: Send full update with position
-          network.send!("entityModified", {
-            id: entityId,
-            changes: {
-              p: [pos.x, pos.y, pos.z],
-              q: rot ? [rot.x, rot.y, rot.z, rot.w] : undefined,
-              ...networkData,
-            },
-          });
+          // Fallback: Broadcast to all clients
+          network.send!("entityModified", updatePacket);
+          this.networkStats.broadcastUpdates++;
         }
       }
       // Entity not found - this is expected when:
@@ -1057,17 +1254,71 @@ export class EntityManager extends SystemBase {
     this.networkDirtyEntities.clear();
   }
 
+  /**
+   * Get the spatial entity registry for external queries
+   * Used by systems like InterestManager for network filtering
+   */
+  getSpatialRegistry(): SpatialEntityRegistry {
+    return this.spatialRegistry;
+  }
+
   getDebugInfo(): {
     totalEntities: number;
     entitiesByType: Record<string, number>;
     entitiesNeedingUpdate: number;
     networkDirtyEntities: number;
+    spatialStats?: {
+      totalChunks: number;
+      activeChunks: number;
+      totalEntities: number;
+      playerCount: number;
+      avgEntitiesPerChunk: number;
+    };
+    networkStats?: {
+      interestFilteredUpdates: number;
+      broadcastUpdates: number;
+      totalPlayersNotified: number;
+      interestFilteringRatio: number;
+      uptimeSeconds: number;
+    };
   } {
-    return {
+    const result: ReturnType<typeof this.getDebugInfo> = {
       totalEntities: this.entities.size,
       entitiesByType: this.getEntityTypeCount(),
       entitiesNeedingUpdate: this.entitiesNeedingUpdate.size,
       networkDirtyEntities: this.networkDirtyEntities.size,
+    };
+
+    // Add spatial registry stats (server-side only)
+    if (this.world.isServer) {
+      result.spatialStats = this.spatialRegistry.getStats();
+
+      // Add network stats to verify interest filtering effectiveness
+      const total =
+        this.networkStats.interestFilteredUpdates +
+        this.networkStats.broadcastUpdates;
+      result.networkStats = {
+        interestFilteredUpdates: this.networkStats.interestFilteredUpdates,
+        broadcastUpdates: this.networkStats.broadcastUpdates,
+        totalPlayersNotified: this.networkStats.totalPlayersNotified,
+        interestFilteringRatio:
+          total > 0 ? this.networkStats.interestFilteredUpdates / total : 0,
+        uptimeSeconds: Math.floor(
+          (Date.now() - this.networkStats.lastResetTime) / 1000,
+        ),
+      };
+    }
+
+    return result;
+  }
+
+  /** Reset network stats (useful for benchmarking) */
+  resetNetworkStats(): void {
+    this.networkStats = {
+      interestFilteredUpdates: 0,
+      broadcastUpdates: 0,
+      totalPlayersNotified: 0,
+      lastResetTime: Date.now(),
     };
   }
 
@@ -1590,6 +1841,9 @@ export class EntityManager extends SystemBase {
     // Clear tracking sets
     this.entitiesNeedingUpdate.clear();
     this.networkDirtyEntities.clear();
+
+    // Clear spatial registry
+    this.spatialRegistry.clear();
 
     // Reset entity ID counter
     this.nextEntityId = 1;

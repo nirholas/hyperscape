@@ -40,6 +40,50 @@ import {
   isRateLimitEnabled,
 } from "../infrastructure/rate-limit/rate-limit-config.js";
 
+type PublicRootInfo = {
+  root: string;
+  indexPath: string;
+  assetsPath: string;
+  source: "server-public" | "client-dist";
+};
+
+async function resolvePublicRoot(
+  config: ServerConfig,
+): Promise<PublicRootInfo> {
+  const serverPublicRoot = path.join(config.__dirname, "public");
+  const serverIndexPath = path.join(serverPublicRoot, "index.html");
+  const serverAssetsPath = path.join(serverPublicRoot, "assets");
+
+  const clientDistRoot = path.resolve(config.__dirname, "..", "client", "dist");
+  const clientDistIndex = path.join(clientDistRoot, "index.html");
+  const clientDistAssets = path.join(clientDistRoot, "assets");
+
+  if (await fs.pathExists(serverAssetsPath)) {
+    return {
+      root: serverPublicRoot,
+      indexPath: serverIndexPath,
+      assetsPath: serverAssetsPath,
+      source: "server-public",
+    };
+  }
+
+  if (await fs.pathExists(clientDistIndex)) {
+    return {
+      root: clientDistRoot,
+      indexPath: clientDistIndex,
+      assetsPath: clientDistAssets,
+      source: "client-dist",
+    };
+  }
+
+  return {
+    root: serverPublicRoot,
+    indexPath: serverIndexPath,
+    assetsPath: serverAssetsPath,
+    source: "server-public",
+  };
+}
+
 /**
  * Create and configure Fastify HTTP server
  *
@@ -192,7 +236,8 @@ async function registerIndexHtmlRoute(
   fastify: FastifyInstance,
   config: ServerConfig,
 ): Promise<void> {
-  const indexHtmlPath = path.join(config.__dirname, "public", "index.html");
+  const publicInfo = await resolvePublicRoot(config);
+  const indexHtmlPath = publicInfo.indexPath;
 
   // Check if index.html exists before registering routes
   if (!(await fs.pathExists(indexHtmlPath))) {
@@ -211,6 +256,7 @@ async function registerIndexHtmlRoute(
     console.log(
       `[HTTP] ⚠️  Public dir contents: ${JSON.stringify(publicDirContents)}`,
     );
+    console.log(`[HTTP] ⚠️  Public source: ${publicInfo.source}`);
     console.log(`[HTTP] ⚠️  config.__dirname: ${config.__dirname}`);
     console.log(`[HTTP] ⚠️  process.cwd(): ${process.cwd()}`);
 
@@ -236,6 +282,9 @@ async function registerIndexHtmlRoute(
     return;
   }
 
+  console.log(
+    `[HTTP] ✅ Serving client from ${publicInfo.source}: ${publicInfo.root}`,
+  );
   const serveIndexHtml = async (_req: FastifyRequest, reply: FastifyReply) => {
     const html = await fs.promises.readFile(indexHtmlPath, "utf-8");
 
@@ -270,9 +319,10 @@ async function registerStaticFiles(
   fastify: FastifyInstance,
   config: ServerConfig,
 ): Promise<void> {
+  const publicInfo = await resolvePublicRoot(config);
   // Serve public directory with proper caching
   await fastify.register(statics, {
-    root: path.join(config.__dirname, "public"),
+    root: publicInfo.root,
     prefix: "/",
     decorateReply: false,
     list: false,
@@ -281,22 +331,36 @@ async function registerStaticFiles(
       setStaticHeaders(res, filePath);
     },
   });
-  console.log("[HTTP] ✅ Public directory registered");
+  console.log(`[HTTP] ✅ Public directory registered (${publicInfo.source})`);
 
   // Check if client assets exist in public/assets (built frontend)
   // If they do, we DON'T want to register /assets/ for world assets as it would conflict
-  const publicAssetsPath = path.join(config.__dirname, "public", "assets");
-  const hasClientAssets = await fs.pathExists(publicAssetsPath);
+  const hasClientAssets = await fs.pathExists(publicInfo.assetsPath);
 
   if (hasClientAssets) {
     console.log(
-      `[HTTP] ✅ Client assets found in public/assets - serving from there`,
+      `[HTTP] ✅ Client assets found in ${publicInfo.assetsPath} - serving from there`,
     );
   }
 
   // Register world assets at /assets/world/ (only if assets directory exists)
   // In production, clients get assets directly from CDN (PUBLIC_CDN_URL)
   if (await fs.pathExists(config.assetsDir)) {
+    const worldAssetsDir = path.join(config.worldDir, "assets");
+    const gameAssetsRoot = (await fs.pathExists(worldAssetsDir))
+      ? worldAssetsDir
+      : config.assetsDir;
+
+    await fastify.register(statics, {
+      root: gameAssetsRoot,
+      prefix: "/game-assets/",
+      decorateReply: false,
+      setHeaders: (res, filePath) => {
+        setAssetHeaders(res, filePath);
+      },
+    });
+    console.log(`[HTTP] ✅ Registered /game-assets/ → ${gameAssetsRoot}`);
+
     await fastify.register(statics, {
       root: config.assetsDir,
       prefix: "/assets/world/",
@@ -598,12 +662,13 @@ async function registerSpaCatchAll(
   fastify: FastifyInstance,
   config: ServerConfig,
 ): Promise<void> {
-  const indexHtmlPath = path.join(config.__dirname, "public", "index.html");
+  const publicInfo = await resolvePublicRoot(config);
+  const indexHtmlPath = publicInfo.indexPath;
 
   // Check if index.html exists before registering catch-all
   if (!(await fs.pathExists(indexHtmlPath))) {
     console.log(
-      "[HTTP] ⚠️  No index.html found in public directory, skipping SPA catch-all",
+      "[HTTP] ⚠️  No index.html found for SPA catch-all, skipping route",
     );
     return;
   }
@@ -638,5 +703,7 @@ async function registerSpaCatchAll(
     },
   );
 
-  console.log("[HTTP] ✅ SPA catch-all route registered");
+  console.log(
+    `[HTTP] ✅ SPA catch-all route registered (${publicInfo.source})`,
+  );
 }

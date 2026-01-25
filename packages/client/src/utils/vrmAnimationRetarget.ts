@@ -72,6 +72,8 @@ export function retargetAnimationToVRM(
   getBoneName: (vrmBoneName: string) => string | undefined,
   _rootToHips: number = 1,
   allowHipsTranslationY: boolean = false,
+  allowHipsTranslationXYZ: boolean = false,
+  allowBoneTranslations: boolean = false,
 ): THREE.AnimationClip | null {
   if (!animationGLTF.animations || animationGLTF.animations.length === 0) {
     return null;
@@ -81,11 +83,12 @@ export function retargetAnimationToVRM(
   const scale = animationGLTF.scene.children[0]?.scale.x || 1;
   const yOffset = allowHipsTranslationY ? 0 : -0.05 / scale;
 
-  // Filter tracks - keep only root position and quaternions
+  // Filter tracks - keep only root/hips position (or all bone positions)
   clip.tracks = clip.tracks.filter((track) => {
     if (track instanceof THREE.VectorKeyframeTrack) {
       const [name, type] = track.name.split(".");
       if (type !== "position") return false;
+      if (allowBoneTranslations) return true;
       if (name === "Root") return true;
       if (name === "mixamorigHips") return true;
       return false;
@@ -150,16 +153,30 @@ export function retargetAnimationToVRM(
             track.values,
           ),
         );
-      } else if (
-        allowHipsTranslationY &&
-        track instanceof THREE.VectorKeyframeTrack &&
-        vrmBoneName === "hips"
-      ) {
+      } else if (track instanceof THREE.VectorKeyframeTrack) {
+        if (!allowHipsTranslationY && !allowBoneTranslations) {
+          return;
+        }
+        if (!vrmBoneName) {
+          return;
+        }
+        if (vrmBoneName !== "hips" && !allowBoneTranslations) {
+          return;
+        }
         const scaledValues = new Float32Array(track.values.length);
         for (let i = 0; i < track.values.length; i += 3) {
-          scaledValues[i] = 0;
-          scaledValues[i + 1] = track.values[i + 1] * _scaler;
-          scaledValues[i + 2] = 0;
+          const x = track.values[i] * _scaler;
+          const y = track.values[i + 1] * _scaler;
+          const z = track.values[i + 2] * _scaler;
+          if (vrmBoneName === "hips") {
+            scaledValues[i] = allowHipsTranslationXYZ ? x : 0;
+            scaledValues[i + 1] = y;
+            scaledValues[i + 2] = allowHipsTranslationXYZ ? z : 0;
+          } else {
+            scaledValues[i] = x;
+            scaledValues[i + 1] = y;
+            scaledValues[i + 2] = z;
+          }
         }
         retargetedTracks.push(
           new THREE.VectorKeyframeTrack(

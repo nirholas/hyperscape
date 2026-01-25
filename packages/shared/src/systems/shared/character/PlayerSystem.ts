@@ -119,6 +119,7 @@ export class PlayerSystem extends SystemBase {
   // Auto-retaliate tracking (OSRS-style combat preference)
   /** Player auto-retaliate settings (Map lookup = O(1), no allocations) */
   private playerAutoRetaliate = new Map<string, boolean>();
+  private pendingSkillUpdates = new Map<string, Skills>();
   /** Rate limiting for toggle spam prevention (OWASP) */
   private autoRetaliateLastToggle = new Map<string, number>();
   private readonly AUTO_RETALIATE_COOLDOWN_MS = 500; // Max 2 toggles/second
@@ -609,6 +610,15 @@ export class PlayerSystem extends SystemBase {
     // Add to our system using entity ID for runtime lookups
     this.players.set(data.playerId, playerData);
 
+    const pendingSkills = this.pendingSkillUpdates.get(data.playerId);
+    if (pendingSkills) {
+      this.pendingSkillUpdates.delete(data.playerId);
+      this.handleSkillsUpdate({
+        playerId: data.playerId,
+        skills: pendingSkills,
+      });
+    }
+
     // Emit player ready event
     this.emitTypedEvent(EventType.PLAYER_UPDATED, {
       playerId: data.playerId,
@@ -644,6 +654,7 @@ export class PlayerSystem extends SystemBase {
     // Clean up
     this.players.delete(data.playerId);
     this.playerLocalRefs.delete(data.playerId);
+    this.pendingSkillUpdates.delete(data.playerId);
 
     // Clean up spawn data (merged from PlayerSpawnSystem)
     this.spawnedPlayers.delete(data.playerId);
@@ -2109,10 +2120,7 @@ export class PlayerSystem extends SystemBase {
   private handleSkillsUpdate(data: { playerId: string; skills: Skills }): void {
     const player = this.players.get(data.playerId);
     if (!player) {
-      console.warn(
-        "[PlayerSystem] Player not found in handleSkillsUpdate:",
-        data.playerId,
-      );
+      this.pendingSkillUpdates.set(data.playerId, data.skills);
       return;
     }
 

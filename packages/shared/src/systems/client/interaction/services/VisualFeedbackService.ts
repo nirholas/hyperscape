@@ -2,7 +2,7 @@
  * VisualFeedbackService
  *
  * Handles visual feedback for interactions:
- * - Target marker (yellow tile indicator for movement destination)
+ * - Target marker (tile indicator for movement destination; disabled for OSRS)
  * - Click indicators (RS3-style X markers)
  * - Minimap destination sync
  *
@@ -38,7 +38,9 @@ export class VisualFeedbackService {
   initialize(): void {
     if (this.world.isServer) return;
 
-    this.createTargetMarker();
+    if (VISUAL.TARGET_MARKER_ENABLED) {
+      this.createTargetMarker();
+    }
     this.createClickIndicators();
   }
 
@@ -132,8 +134,6 @@ export class VisualFeedbackService {
    * Show target marker at position (for movement destination)
    */
   showTargetMarker(position: Position3D): void {
-    if (!this.targetMarker) return;
-
     // Snap to tile center
     const tile = worldToTile(position.x, position.z);
     const snappedPos = tileToWorld(tile);
@@ -143,12 +143,15 @@ export class VisualFeedbackService {
       this.targetPosition = new THREE.Vector3();
     }
     this.targetPosition.set(snappedPos.x, position.y, snappedPos.z);
-    this.targetMarker.position.set(snappedPos.x, 0, snappedPos.z);
 
-    // Project onto terrain
-    this.projectMarkerOntoTerrain(snappedPos.x, snappedPos.z, position.y);
+    if (this.targetMarker) {
+      this.targetMarker.position.set(snappedPos.x, 0, snappedPos.z);
 
-    this.targetMarker.visible = true;
+      // Project onto terrain
+      this.projectMarkerOntoTerrain(snappedPos.x, snappedPos.z, position.y);
+
+      this.targetMarker.visible = true;
+    }
 
     // Sync with minimap
     this.syncMinimapDestination(snappedPos.x, position.y, snappedPos.z);
@@ -227,15 +230,15 @@ export class VisualFeedbackService {
       const time = Date.now() * 0.001;
       const scale = 1 + Math.sin(time * 4) * 0.1;
       this.targetMarker.scale.set(scale, 1, scale);
+    }
 
-      // Hide when player reaches target using pre-allocated vector
-      const player = this.world.getPlayer();
-      if (player && this.targetPosition) {
-        _playerPos.set(player.position.x, player.position.y, player.position.z);
-        const distance = _playerPos.distanceTo(this.targetPosition);
-        if (distance < 0.5) {
-          this.hideTargetMarker();
-        }
+    // Hide when player reaches target using pre-allocated vector
+    const player = this.world.getPlayer();
+    if (player && this.targetPosition) {
+      _playerPos.set(player.position.x, player.position.y, player.position.z);
+      const distance = _playerPos.distanceTo(this.targetPosition);
+      if (distance < 0.5) {
+        this.hideTargetMarker();
       }
     }
   }

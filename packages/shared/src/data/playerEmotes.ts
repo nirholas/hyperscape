@@ -8,7 +8,8 @@
  * - All animations are GLB files containing skeletal animations
  * - Located in /assets/emotes/ directory
  * - Query parameter `?s=1.5` sets playback speed (1.5x faster)
- * - Query parameter `?ty=1` enables grounded hips translation (no XZ root motion)
+ * - Query parameter `?txyz=1` enables grounded hips translation (XYZ from bake)
+ * - Query parameter `?tb=1` enables bone translations (non-root)
  *
  * Usage:
  * - PlayerLocal and PlayerRemote use these for character animation
@@ -26,13 +27,13 @@
  */
 export const Emotes = {
   /** Standing idle animation */
-  IDLE: "asset://emotes/emote-idle.glb?ty=1",
+  IDLE: "asset://emotes/emote-idle.glb?txyz=1&tb=1",
 
   /** Walking animation (1.5x speed for responsiveness) */
-  WALK: "asset://emotes/emote-walk.glb?s=1.3&ty=1",
+  WALK: "asset://emotes/emote-walk.glb?s=1.3&txyz=1&tb=1",
 
   /** Running animation (1.65x speed - 10% faster to match movement) */
-  RUN: "asset://emotes/emote-run.glb?s=1.4&ty=1",
+  RUN: "asset://emotes/emote-run.glb?s=1.4&txyz=1&tb=1",
 
   /** Floating/swimming animation */
   FLOAT: "asset://emotes/emote-float.glb",
@@ -44,25 +45,27 @@ export const Emotes = {
   FLIP: "asset://emotes/emote-flip.glb?s=1.5",
 
   /** Talking/gesturing animation */
-  TALK: "asset://emotes/emote-talk.glb?ty=1",
+  TALK: "asset://emotes/emote-talk.glb?txyz=1&tb=1",
 
-  /** Combat/attack animation (punching) - plays once per attack, no loop */
-  COMBAT: "asset://emotes/emote-punching.glb?l=0&ty=1",
+  /** Combat/attack animation (punching) - plays once per attack, no loop
+   * NOTE: Uses ty=1 (Y only) NOT txyz=1 to prevent XZ sliding during attack */
+  COMBAT: "asset://emotes/emote-punching.glb?l=0&ty=1&tb=1",
 
-  /** Sword swing attack animation (used when sword is equipped) - plays once per attack, no loop */
-  SWORD_SWING: "asset://emotes/emote_sword_swing.glb?l=0&ty=1",
+  /** Sword swing attack animation (used when sword is equipped) - plays once per attack, no loop
+   * NOTE: Uses ty=1 (Y only) NOT txyz=1 to prevent XZ sliding during attack */
+  SWORD_SWING: "asset://emotes/emote_sword_swing.glb?l=0&ty=1&tb=1",
 
   /** Chopping/woodcutting animation (used when cutting trees) */
-  CHOPPING: "asset://emotes/emote_chopping.glb?ty=1",
+  CHOPPING: "asset://emotes/emote_chopping.glb?txyz=1&tb=1",
 
   /** Fishing animation (used when fishing) */
-  FISHING: "asset://emotes/emote-fishing.glb?ty=1",
+  FISHING: "asset://emotes/emote-fishing.glb?txyz=1&tb=1",
 
   /** Death animation */
-  DEATH: "asset://emotes/emote-death.glb?ty=1",
+  DEATH: "asset://emotes/emote-death.glb?txyz=1&tb=1",
 
   /** Squat/crouch animation (used for firemaking and cooking) */
-  SQUAT: "asset://emotes/emote-squat.glb?ty=1",
+  SQUAT: "asset://emotes/emote-squat.glb?txyz=1&tb=1",
 };
 
 /** Array of all emote URLs (for preloading) */

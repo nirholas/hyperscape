@@ -120,6 +120,12 @@ import type { World } from "../../core/World";
 import { Entity } from "../Entity";
 import { COMBAT_CONSTANTS } from "../../constants/CombatConstants";
 import { ticksToMs } from "../../utils/game/CombatCalculations";
+import {
+  AnimationLOD,
+  ANIMATION_LOD_ALWAYS_UPDATE,
+  ANIMATION_LOD_PRESETS,
+  getCameraPosition,
+} from "../../utils/rendering/AnimationLOD";
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -596,6 +602,11 @@ export class PlayerLocal extends Entity implements HotReloadable {
   // Add pendingMoves array
   private pendingMoves: { seq: number; pos: THREE.Vector3 }[] = [];
   private _tempVec3 = new THREE.Vector3();
+
+  /** Animation LOD controller - throttles animation updates for consistency with PlayerRemote */
+  private readonly _animationLOD = new AnimationLOD(
+    ANIMATION_LOD_PRESETS.PLAYER,
+  );
 
   // Avatar retry mechanism
   private avatarRetryInterval: NodeJS.Timeout | null = null;
@@ -2118,6 +2129,19 @@ export class PlayerLocal extends Entity implements HotReloadable {
 
     // 7. UPDATE AVATAR INSTANCE
     // Update avatar instance position from base transform
+
+    // ANIMATION LOD: Calculate distance to camera for consistent timing with PlayerRemote
+    const cameraPos = getCameraPosition(this.world);
+    const animLODResult = cameraPos
+      ? this._animationLOD.updateFromPosition(
+          this.node.position.x,
+          this.node.position.z,
+          cameraPos.x,
+          cameraPos.z,
+          delta,
+        )
+      : { ...ANIMATION_LOD_ALWAYS_UPDATE, effectiveDelta: delta };
+
     type AvatarNodeWithInstance = {
       instance?: {
         move?: (matrix: THREE.Matrix4) => void;
@@ -2128,16 +2152,41 @@ export class PlayerLocal extends Entity implements HotReloadable {
     if (avatarNode?.instance) {
       const instance = avatarNode.instance;
 
-      // Log when avatar instance is first detected
-      if (this.updateCallCount === 11 || this.updateCallCount === 12) {
-        // Avatar instance detected
-      }
-
       if (instance.move && this.base) {
         instance.move(this.base.matrixWorld);
       }
-      if (instance.update) {
-        instance.update(delta);
+
+      // ANIMATION LOD: Only update avatar animations when LOD allows
+      // Uses effectiveDelta which may be accumulated for skipped frames
+      if (instance.update && animLODResult.shouldUpdate) {
+        instance.update(animLODResult.effectiveDelta);
+      }
+
+      // Post-animation ground clamping - ensures avatar's feet never go below terrain
+      // Even though physics capsule handles movement, animations may push bones below ground
+      const terrain = this.world.getSystem("terrain");
+      if (terrain && "getHeightAt" in terrain && "clampToGround" in instance) {
+        try {
+          // CRITICAL: Use NODE world position, not base local position (which is always 0,0,0)
+          const terrainHeight = (
+            terrain as { getHeightAt: (x: number, z: number) => number }
+          ).getHeightAt(this.node.position.x, this.node.position.z);
+          if (Number.isFinite(terrainHeight)) {
+            const groundAdjustment = (
+              instance as { clampToGround: (y: number) => number }
+            ).clampToGround(terrainHeight);
+            // Store adjustment in VRM instance (NOT node.position - that would cause camera jitter)
+            // The adjustment will be applied in the next move() call
+            const instanceWithAdjust = instance as {
+              setGroundAdjustment?: (adj: number) => void;
+            };
+            if (instanceWithAdjust.setGroundAdjustment) {
+              instanceWithAdjust.setGroundAdjustment(groundAdjustment);
+            }
+          }
+        } catch (_err) {
+          // Terrain tile not generated yet
+        }
       }
     }
 

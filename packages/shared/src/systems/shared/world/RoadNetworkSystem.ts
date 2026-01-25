@@ -19,35 +19,23 @@ import { EventType } from "../../../types/events";
 import { Logger } from "../../../utils/Logger";
 import { DataManager } from "../../../data/DataManager";
 
-// Default constants - can be overridden by world-config.json
-const DEFAULT_ROAD_WIDTH = 4;
-const DEFAULT_PATH_STEP_SIZE = 20;
-const DEFAULT_MAX_PATH_ITERATIONS = 10000;
-const DEFAULT_EXTRA_CONNECTIONS_RATIO = 0.25;
-const DEFAULT_COST_BASE = 1.0;
-const DEFAULT_COST_SLOPE_MULTIPLIER = 5.0;
-const DEFAULT_COST_WATER_PENALTY = 1000;
-const DEFAULT_SMOOTHING_ITERATIONS = 2;
-const DEFAULT_NOISE_DISPLACEMENT_SCALE = 0.01;
-const DEFAULT_NOISE_DISPLACEMENT_STRENGTH = 3;
-const DEFAULT_MIN_POINT_SPACING = 4;
-const DEFAULT_HEURISTIC_WEIGHT = 2.5;
+// Default configuration values
+const DEFAULTS = {
+  roadWidth: 4,
+  pathStepSize: 20,
+  maxPathIterations: 10000,
+  extraConnectionsRatio: 0.25,
+  costBase: 1.0,
+  costSlopeMultiplier: 5.0,
+  costWaterPenalty: 1000,
+  smoothingIterations: 2,
+  noiseDisplacementScale: 0.01,
+  noiseDisplacementStrength: 3,
+  minPointSpacing: 4,
+  heuristicWeight: 2.5,
+} as const;
 
-// Runtime config values (set from world-config.json or defaults)
-let ROAD_WIDTH = DEFAULT_ROAD_WIDTH;
-let PATH_STEP_SIZE = DEFAULT_PATH_STEP_SIZE;
-let MAX_PATH_ITERATIONS = DEFAULT_MAX_PATH_ITERATIONS;
-let EXTRA_CONNECTIONS_RATIO = DEFAULT_EXTRA_CONNECTIONS_RATIO;
-let COST_BASE = DEFAULT_COST_BASE;
-let COST_SLOPE_MULTIPLIER = DEFAULT_COST_SLOPE_MULTIPLIER;
-let COST_WATER_PENALTY = DEFAULT_COST_WATER_PENALTY;
-let SMOOTHING_ITERATIONS = DEFAULT_SMOOTHING_ITERATIONS;
-let NOISE_DISPLACEMENT_SCALE = DEFAULT_NOISE_DISPLACEMENT_SCALE;
-let NOISE_DISPLACEMENT_STRENGTH = DEFAULT_NOISE_DISPLACEMENT_STRENGTH;
-let MIN_POINT_SPACING = DEFAULT_MIN_POINT_SPACING;
-let HEURISTIC_WEIGHT = DEFAULT_HEURISTIC_WEIGHT;
-
-const COST_BIOME_MULTIPLIER: Record<string, number> = {
+const DEFAULT_BIOME_COSTS: Record<string, number> = {
   plains: 1.0,
   valley: 1.0,
   forest: 1.3,
@@ -58,19 +46,71 @@ const COST_BIOME_MULTIPLIER: Record<string, number> = {
   lakes: 100,
 };
 
+/** Road configuration loaded from world-config.json (exported for testing) */
+export interface RoadConfig {
+  roadWidth: number;
+  pathStepSize: number;
+  maxPathIterations: number;
+  extraConnectionsRatio: number;
+  costBase: number;
+  costSlopeMultiplier: number;
+  costWaterPenalty: number;
+  smoothingIterations: number;
+  noiseDisplacementScale: number;
+  noiseDisplacementStrength: number;
+  minPointSpacing: number;
+  heuristicWeight: number;
+  biomeCosts: Record<string, number>;
+}
+
+/** Load road configuration from DataManager (exported for testing) */
+export function loadRoadConfig(): RoadConfig {
+  const manifest = DataManager.getWorldConfig()?.roads;
+  const biomeCosts = { ...DEFAULT_BIOME_COSTS };
+  if (manifest?.costBiomeMultipliers) {
+    Object.assign(biomeCosts, manifest.costBiomeMultipliers);
+  }
+  return {
+    roadWidth: manifest?.roadWidth ?? DEFAULTS.roadWidth,
+    pathStepSize: manifest?.pathStepSize ?? DEFAULTS.pathStepSize,
+    maxPathIterations:
+      manifest?.maxPathIterations ?? DEFAULTS.maxPathIterations,
+    extraConnectionsRatio:
+      manifest?.extraConnectionsRatio ?? DEFAULTS.extraConnectionsRatio,
+    costBase: manifest?.costBase ?? DEFAULTS.costBase,
+    costSlopeMultiplier:
+      manifest?.costSlopeMultiplier ?? DEFAULTS.costSlopeMultiplier,
+    costWaterPenalty: manifest?.costWaterPenalty ?? DEFAULTS.costWaterPenalty,
+    smoothingIterations:
+      manifest?.smoothingIterations ?? DEFAULTS.smoothingIterations,
+    noiseDisplacementScale:
+      manifest?.noiseDisplacementScale ?? DEFAULTS.noiseDisplacementScale,
+    noiseDisplacementStrength:
+      manifest?.noiseDisplacementStrength ?? DEFAULTS.noiseDisplacementStrength,
+    minPointSpacing: manifest?.minPointSpacing ?? DEFAULTS.minPointSpacing,
+    heuristicWeight: manifest?.heuristicWeight ?? DEFAULTS.heuristicWeight,
+    biomeCosts,
+  };
+}
+
+/** Generate A* pathfinding directions from step size (exported for testing) */
+export function getDirections(
+  stepSize: number,
+): Array<{ dx: number; dz: number }> {
+  return [
+    { dx: stepSize, dz: 0 },
+    { dx: -stepSize, dz: 0 },
+    { dx: 0, dz: stepSize },
+    { dx: 0, dz: -stepSize },
+    { dx: stepSize, dz: stepSize },
+    { dx: stepSize, dz: -stepSize },
+    { dx: -stepSize, dz: stepSize },
+    { dx: -stepSize, dz: -stepSize },
+  ];
+}
+
 const TILE_SIZE = 100;
 const WATER_THRESHOLD = 5.4;
-
-const DIRECTIONS = [
-  { dx: PATH_STEP_SIZE, dz: 0 },
-  { dx: -PATH_STEP_SIZE, dz: 0 },
-  { dx: 0, dz: PATH_STEP_SIZE },
-  { dx: 0, dz: -PATH_STEP_SIZE },
-  { dx: PATH_STEP_SIZE, dz: PATH_STEP_SIZE },
-  { dx: PATH_STEP_SIZE, dz: -PATH_STEP_SIZE },
-  { dx: -PATH_STEP_SIZE, dz: PATH_STEP_SIZE },
-  { dx: -PATH_STEP_SIZE, dz: -PATH_STEP_SIZE },
-];
 
 const dist2D = (x1: number, z1: number, x2: number, z2: number): number =>
   Math.sqrt((x2 - x1) ** 2 + (z2 - z1) ** 2);
@@ -172,6 +212,8 @@ export class RoadNetworkSystem extends System {
   private noise!: NoiseGenerator;
   private seed: number = 0;
   private randomState: number = 0;
+  private config!: RoadConfig;
+  private directions!: Array<{ dx: number; dz: number }>;
   private terrainSystem?: {
     getHeightAt(x: number, z: number): number;
     getBiomeAtWorldPosition?(x: number, z: number): string;
@@ -192,6 +234,8 @@ export class RoadNetworkSystem extends System {
     this.seed = worldConfig?.terrainSeed ?? 0;
     this.randomState = this.seed;
     this.noise = new NoiseGenerator(this.seed + 54321);
+    this.config = loadRoadConfig();
+    this.directions = getDirections(this.config.pathStepSize);
 
     this.terrainSystem = this.world.getSystem("terrain") as
       | {
@@ -201,36 +245,10 @@ export class RoadNetworkSystem extends System {
       | undefined;
     this.townSystem = this.world.getSystem("towns") as TownSystem | undefined;
 
-    // Load configuration from world-config.json if available
-    const configManifest = DataManager.getWorldConfig();
-    if (configManifest?.roads) {
-      const rc = configManifest.roads;
-      ROAD_WIDTH = rc.roadWidth ?? DEFAULT_ROAD_WIDTH;
-      PATH_STEP_SIZE = rc.pathStepSize ?? DEFAULT_PATH_STEP_SIZE;
-      MAX_PATH_ITERATIONS = rc.maxPathIterations ?? DEFAULT_MAX_PATH_ITERATIONS;
-      EXTRA_CONNECTIONS_RATIO =
-        rc.extraConnectionsRatio ?? DEFAULT_EXTRA_CONNECTIONS_RATIO;
-      SMOOTHING_ITERATIONS =
-        rc.smoothingIterations ?? DEFAULT_SMOOTHING_ITERATIONS;
-      NOISE_DISPLACEMENT_SCALE =
-        rc.noiseDisplacementScale ?? DEFAULT_NOISE_DISPLACEMENT_SCALE;
-      NOISE_DISPLACEMENT_STRENGTH =
-        rc.noiseDisplacementStrength ?? DEFAULT_NOISE_DISPLACEMENT_STRENGTH;
-      MIN_POINT_SPACING = rc.minPointSpacing ?? DEFAULT_MIN_POINT_SPACING;
-      COST_BASE = rc.costBase ?? DEFAULT_COST_BASE;
-      COST_SLOPE_MULTIPLIER =
-        rc.costSlopeMultiplier ?? DEFAULT_COST_SLOPE_MULTIPLIER;
-      COST_WATER_PENALTY = rc.costWaterPenalty ?? DEFAULT_COST_WATER_PENALTY;
-      HEURISTIC_WEIGHT = rc.heuristicWeight ?? DEFAULT_HEURISTIC_WEIGHT;
-
-      // Update biome cost multipliers if provided
-      if (rc.costBiomeMultipliers) {
-        Object.assign(COST_BIOME_MULTIPLIER, rc.costBiomeMultipliers);
-      }
-
+    if (DataManager.getWorldConfig()?.roads) {
       Logger.system(
         "RoadNetworkSystem",
-        `Loaded config: ${ROAD_WIDTH}m roads, ${EXTRA_CONNECTIONS_RATIO} extra connections`,
+        `Config: ${this.config.roadWidth}m roads, ${this.config.extraConnectionsRatio} extra connections`,
       );
     }
   }
@@ -400,7 +418,7 @@ export class RoadNetworkSystem extends System {
 
     return nonMstEdges.slice(
       0,
-      Math.floor(townCount * EXTRA_CONNECTIONS_RATIO),
+      Math.floor(townCount * this.config.extraConnectionsRatio),
     );
   }
 
@@ -415,7 +433,6 @@ export class RoadNetworkSystem extends System {
       toTown.position.x,
       toTown.position.z,
     );
-
     if (rawPath.length < 2) {
       Logger.systemWarn(
         "RoadNetworkSystem",
@@ -440,7 +457,7 @@ export class RoadNetworkSystem extends System {
       fromTownId: fromTown.id,
       toTownId: toTown.id,
       path: smoothedPath,
-      width: ROAD_WIDTH,
+      width: this.config.roadWidth,
       material: "dirt",
       length: totalLength,
     };
@@ -452,21 +469,26 @@ export class RoadNetworkSystem extends System {
     endX: number,
     endZ: number,
   ): RoadPathPoint[] {
-    const gridStartX = Math.round(startX / PATH_STEP_SIZE) * PATH_STEP_SIZE;
-    const gridStartZ = Math.round(startZ / PATH_STEP_SIZE) * PATH_STEP_SIZE;
-    const gridEndX = Math.round(endX / PATH_STEP_SIZE) * PATH_STEP_SIZE;
-    const gridEndZ = Math.round(endZ / PATH_STEP_SIZE) * PATH_STEP_SIZE;
+    const {
+      pathStepSize,
+      maxPathIterations,
+      costBase,
+      costWaterPenalty,
+      heuristicWeight,
+    } = this.config;
+    const gridStartX = Math.round(startX / pathStepSize) * pathStepSize;
+    const gridStartZ = Math.round(startZ / pathStepSize) * pathStepSize;
+    const gridEndX = Math.round(endX / pathStepSize) * pathStepSize;
+    const gridEndZ = Math.round(endZ / pathStepSize) * pathStepSize;
 
-    // Use binary heap for O(log n) min extraction instead of O(n) linear search
     const openHeap = new PathNodeHeap();
-    // Use Map for O(1) lookup of nodes in open set
     const openMap = new Map<string, PathNode>();
     const closedSet = new Set<string>();
 
     const startH =
       dist2D(gridStartX, gridStartZ, gridEndX, gridEndZ) *
-      COST_BASE *
-      HEURISTIC_WEIGHT;
+      costBase *
+      heuristicWeight;
     const startNode: PathNode = {
       x: gridStartX,
       z: gridStartZ,
@@ -480,25 +502,22 @@ export class RoadNetworkSystem extends System {
     openMap.set(`${gridStartX},${gridStartZ}`, startNode);
 
     let iterations = 0;
-    while (openHeap.length > 0 && iterations < MAX_PATH_ITERATIONS) {
+    while (openHeap.length > 0 && iterations < maxPathIterations) {
       iterations++;
-
-      // O(log n) extraction of minimum f-score node
       const current = openHeap.pop()!;
       const currentKey = `${current.x},${current.z}`;
       openMap.delete(currentKey);
 
-      // Check if we've reached the goal
       if (
-        Math.abs(current.x - gridEndX) <= PATH_STEP_SIZE &&
-        Math.abs(current.z - gridEndZ) <= PATH_STEP_SIZE
+        Math.abs(current.x - gridEndX) <= pathStepSize &&
+        Math.abs(current.z - gridEndZ) <= pathStepSize
       ) {
         return this.reconstructPath(current, endX, endZ);
       }
 
       closedSet.add(currentKey);
 
-      for (const dir of DIRECTIONS) {
+      for (const dir of this.directions) {
         const neighborX = current.x + dir.dx;
         const neighborZ = current.z + dir.dz;
         const neighborKey = `${neighborX},${neighborZ}`;
@@ -510,17 +529,16 @@ export class RoadNetworkSystem extends System {
           neighborX,
           neighborZ,
         );
-        if (moveCost >= COST_WATER_PENALTY) continue;
+        if (moveCost >= costWaterPenalty) continue;
 
         const tentativeG = current.g + moveCost;
         const existing = openMap.get(neighborKey);
 
         if (!existing) {
-          // New node - add to open set
           const h =
             dist2D(neighborX, neighborZ, gridEndX, gridEndZ) *
-            COST_BASE *
-            HEURISTIC_WEIGHT;
+            costBase *
+            heuristicWeight;
           const neighbor: PathNode = {
             x: neighborX,
             z: neighborZ,
@@ -533,7 +551,6 @@ export class RoadNetworkSystem extends System {
           openHeap.push(neighbor);
           openMap.set(neighborKey, neighbor);
         } else if (tentativeG < existing.g) {
-          // Better path to existing node - update it
           existing.g = tentativeG;
           existing.f = tentativeG + existing.h;
           existing.parent = current;
@@ -559,16 +576,17 @@ export class RoadNetworkSystem extends System {
 
     const fromHeight = this.terrainSystem.getHeightAt(fromX, fromZ);
     const toHeight = this.terrainSystem.getHeightAt(toX, toZ);
-    if (toHeight < WATER_THRESHOLD) return COST_WATER_PENALTY;
+    if (toHeight < WATER_THRESHOLD) return this.config.costWaterPenalty;
 
+    const { costBase, costSlopeMultiplier, biomeCosts } = this.config;
     const horizontalDistance = dist2D(fromX, fromZ, toX, toZ);
     const slope = Math.abs(toHeight - fromHeight) / horizontalDistance;
     const biome = this.terrainSystem.getBiomeAtWorldPosition?.(toX, toZ);
-    const biomeCost = biome ? (COST_BIOME_MULTIPLIER[biome] ?? 1.0) : 1.0;
+    const biomeCost = biome ? (biomeCosts[biome] ?? 1.0) : 1.0;
 
     return (
-      (horizontalDistance * COST_BASE +
-        slope * COST_SLOPE_MULTIPLIER * horizontalDistance) *
+      (horizontalDistance * costBase +
+        slope * costSlopeMultiplier * horizontalDistance) *
       biomeCost
     );
   }
@@ -605,7 +623,9 @@ export class RoadNetworkSystem extends System {
     const path: RoadPathPoint[] = [];
     const dx = endX - startX;
     const dz = endZ - startZ;
-    const steps = Math.ceil(Math.sqrt(dx * dx + dz * dz) / PATH_STEP_SIZE);
+    const steps = Math.ceil(
+      Math.sqrt(dx * dx + dz * dz) / this.config.pathStepSize,
+    );
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
       const x = startX + dx * t;
@@ -622,8 +642,14 @@ export class RoadNetworkSystem extends System {
   ): RoadPathPoint[] {
     if (rawPath.length < 3) return rawPath;
 
+    const {
+      smoothingIterations,
+      noiseDisplacementScale,
+      noiseDisplacementStrength,
+    } = this.config;
     let smoothed = [...rawPath];
-    for (let iter = 0; iter < SMOOTHING_ITERATIONS; iter++) {
+
+    for (let iter = 0; iter < smoothingIterations; iter++) {
       const newPath: RoadPathPoint[] = [smoothed[0]];
       for (let i = 0; i < smoothed.length - 1; i++) {
         const p0 = smoothed[i];
@@ -662,9 +688,9 @@ export class RoadNetworkSystem extends System {
         const perpZ = dirX / length;
         const displacement =
           this.noise.simplex2D(
-            point.x * NOISE_DISPLACEMENT_SCALE,
-            point.z * NOISE_DISPLACEMENT_SCALE,
-          ) * NOISE_DISPLACEMENT_STRENGTH;
+            point.x * noiseDisplacementScale,
+            point.z * noiseDisplacementScale,
+          ) * noiseDisplacementStrength;
         const newX = point.x + perpX * displacement;
         const newZ = point.z + perpZ * displacement;
         const newY = this.terrainSystem!.getHeightAt(newX, newZ);
@@ -683,7 +709,7 @@ export class RoadNetworkSystem extends System {
       if (
         i === displaced.length - 1 ||
         dist2D(displaced[i].x, displaced[i].z, last.x, last.z) >=
-          MIN_POINT_SPACING
+          this.config.minPointSpacing
       ) {
         finalPath.push(displaced[i]);
       }
@@ -829,7 +855,7 @@ export class RoadNetworkSystem extends System {
   }
 
   isOnRoad(x: number, z: number): boolean {
-    return this.getDistanceToNearestRoad(x, z) <= ROAD_WIDTH / 2;
+    return this.getDistanceToNearestRoad(x, z) <= this.config.roadWidth / 2;
   }
 
   private distanceToSegment(

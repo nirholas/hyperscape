@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import {
   calculateDistance3D,
   isWithinRange,
@@ -9,6 +9,7 @@ import {
   generateAvatarConfig,
   formatPhysicsData,
 } from "../utils";
+import { createMockRuntime, clearMockEntityStore } from "../types/test-mocks";
 
 describe("Hyperscape Utility Functions", () => {
   describe("calculateDistance3D", () => {
@@ -160,6 +161,108 @@ describe("Hyperscape Utility Functions", () => {
       const physicsData = { grounded: false };
       const formatted = formatPhysicsData(physicsData);
       expect(formatted).toBe("Grounded: No");
+    });
+  });
+});
+
+describe("ElizaOS Runtime Entity Management", () => {
+  beforeEach(() => {
+    clearMockEntityStore();
+  });
+
+  describe("getEntityById and createEntity", () => {
+    it("should return null for non-existent entity", async () => {
+      const runtime = createMockRuntime();
+      const entity = await runtime.getEntityById("non-existent-id");
+      expect(entity).toBeNull();
+    });
+
+    it("should create a new entity successfully", async () => {
+      const runtime = createMockRuntime();
+      const dashboardUuid = "00000000-0000-0000-0000-000000000001";
+
+      const created = await runtime.createEntity({
+        id: dashboardUuid,
+        names: ["Dashboard"],
+        agentId: runtime.agentId,
+        metadata: {
+          username: "dashboard",
+          source: "hyperscape_dashboard",
+          description: "Hyperscape Dashboard User",
+        },
+      });
+
+      expect(created).toBe(true);
+    });
+
+    it("should retrieve a created entity by ID", async () => {
+      const runtime = createMockRuntime();
+      const dashboardUuid = "00000000-0000-0000-0000-000000000001";
+
+      // Create the entity
+      await runtime.createEntity({
+        id: dashboardUuid,
+        names: ["Dashboard"],
+        agentId: runtime.agentId,
+        metadata: {
+          username: "dashboard",
+          source: "hyperscape_dashboard",
+        },
+      });
+
+      // Retrieve it
+      const entity = await runtime.getEntityById(dashboardUuid);
+      expect(entity).not.toBeNull();
+      expect(entity?.id).toBe(dashboardUuid);
+      expect(entity?.names).toContain("Dashboard");
+    });
+
+    it("should return false when creating duplicate entity", async () => {
+      const runtime = createMockRuntime();
+      const dashboardUuid = "00000000-0000-0000-0000-000000000001";
+
+      // First creation should succeed
+      const firstCreate = await runtime.createEntity({
+        id: dashboardUuid,
+        names: ["Dashboard"],
+        agentId: runtime.agentId,
+      });
+      expect(firstCreate).toBe(true);
+
+      // Second creation with same ID should fail
+      const secondCreate = await runtime.createEntity({
+        id: dashboardUuid,
+        names: ["Dashboard 2"],
+        agentId: runtime.agentId,
+      });
+      expect(secondCreate).toBe(false);
+    });
+
+    it("should follow ElizaOS entity structure", async () => {
+      const runtime = createMockRuntime();
+      const testEntity = {
+        id: "test-entity-uuid",
+        names: ["Test Entity"],
+        agentId: runtime.agentId,
+        metadata: {
+          customField: "value",
+          nested: { field: true },
+        },
+      };
+
+      await runtime.createEntity(testEntity);
+      const retrieved = await runtime.getEntityById("test-entity-uuid");
+
+      // Verify structure matches ElizaOS Entity interface
+      expect(retrieved).toMatchObject({
+        id: "test-entity-uuid",
+        names: ["Test Entity"],
+        agentId: runtime.agentId,
+        metadata: {
+          customField: "value",
+          nested: { field: true },
+        },
+      });
     });
   });
 });

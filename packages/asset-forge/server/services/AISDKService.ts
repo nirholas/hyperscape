@@ -38,17 +38,17 @@ class AISDKService {
     this.modelConfigs = {
       quality: {
         provider: "openai",
-        model: useAIGateway ? "openai/gpt-4o" : "gpt-4o",
+        model: useAIGateway ? "openai/gpt-5" : "gpt-5",
         temperature: 0.7,
       },
       speed: {
         provider: "openai",
-        model: useAIGateway ? "openai/gpt-4o-mini" : "gpt-4o-mini",
+        model: useAIGateway ? "openai/gpt-5-mini" : "gpt-5-mini",
         temperature: 0.7,
       },
       balanced: {
         provider: "openai",
-        model: useAIGateway ? "openai/gpt-4o" : "gpt-4o",
+        model: useAIGateway ? "openai/gpt-5" : "gpt-5",
         temperature: 0.5,
       },
     };

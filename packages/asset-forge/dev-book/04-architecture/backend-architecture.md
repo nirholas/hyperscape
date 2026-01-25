@@ -582,7 +582,7 @@ export class GenerationService extends EventEmitter {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: 'gpt-4',
+          model: 'gpt-5',
           messages: [
             { role: 'system', content: 'Optimize this prompt for 3D asset generation...' },
             { role: 'user', content: pipeline.config.description }
@@ -855,7 +855,7 @@ const response = await fetch('https://api.openai.com/v1/chat/completions', {
     'Content-Type': 'application/json'
   },
   body: JSON.stringify({
-    model: 'gpt-4',
+    model: 'gpt-5',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.7,
     max_tokens: 200

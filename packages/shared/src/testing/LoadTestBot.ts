@@ -129,17 +129,13 @@ export class LoadTestBot {
       throw new Error(`${this.config.name} disconnected after enterWorld`);
     }
 
-    // Wait for local player entity to be created before starting behaviors.
+    // Give the client a brief window to receive the player entity, but don't
+    // fail the connection if it arrives later (load tests can be slow).
+    const playerWaitMs = 5000;
     const startPlayerWait = Date.now();
-    while (Date.now() - startPlayerWait < 5000) {
-      if (this.clientWorld?.entities?.player) break;
+    while (Date.now() - startPlayerWait < playerWaitMs) {
+      if (this.getLocalPlayerEntity()) break;
       await new Promise((r) => setTimeout(r, 100));
-    }
-
-    if (!this.clientWorld?.entities?.player) {
-      this.metrics.disconnectReason = "Player entity not available";
-      this.metrics.isConnected = false;
-      throw new Error(`${this.config.name} player entity not available`);
     }
 
     const pos = this.getPlayerPosition();
@@ -249,9 +245,20 @@ export class LoadTestBot {
     this.metrics.lastMessageAt = Date.now();
   }
 
+  private getLocalPlayerEntity(): PlayerPositionSource | null {
+    const entities = this.clientWorld?.entities;
+    if (!entities) return null;
+    if (entities.player) return entities.player as PlayerPositionSource;
+
+    const networkId = this.getNetworkSystem()?.id;
+    if (!networkId) return null;
+    const playerFromMap = entities.players?.get(networkId);
+    if (playerFromMap) return playerFromMap as PlayerPositionSource;
+    return null;
+  }
+
   private getPlayerPosition(): Position | null {
-    const player = this.clientWorld?.entities
-      ?.player as PlayerPositionSource | null;
+    const player = this.getLocalPlayerEntity();
     if (!player) return null;
 
     if (player.node?.position) return player.node.position;

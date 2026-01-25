@@ -9,7 +9,7 @@ This document provides comprehensive links to external documentation, tools, lib
 **Official Documentation**
 - **Main Documentation**: https://platform.openai.com/docs
 - **API Reference**: https://platform.openai.com/docs/api-reference
-- **GPT-4 Guide**: https://platform.openai.com/docs/guides/gpt-4
+- **GPT-4 Guide**: https://platform.openai.com/docs/guides/gpt-5
 - **DALL-E Guide**: https://platform.openai.com/docs/guides/images
 - **Rate Limits**: https://platform.openai.com/docs/guides/rate-limits
 - **Error Codes**: https://platform.openai.com/docs/guides/error-codes

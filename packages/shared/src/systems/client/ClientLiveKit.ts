@@ -189,10 +189,11 @@ export class ClientLiveKit extends System {
     if (!player) return;
     if (track.kind === "audio") {
       const audio = this.world.audio;
-      if (!audio || !track.mediaStream) return;
+      const mediaStream = track.mediaStream;
+      if (!audio || !mediaStream) return;
       audio.ready(() => {
         const audioCtx = audio.getContext();
-        const source = audioCtx.createMediaStreamSource(track.mediaStream);
+        const source = audioCtx.createMediaStreamSource(mediaStream);
         const gainNode = audioCtx.createGain();
         const pannerNode = audioCtx.createPanner();
         pannerNode.panningModel = "HRTF";

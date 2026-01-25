@@ -75,9 +75,9 @@ export class ClientInterface extends SystemBase {
   stats: boolean = false;
   dpr: number = 1;
   shadows: string = "med";
-  postprocessing: boolean = true;
+  postprocessing: boolean = false;
   bloom: boolean = true;
-  colorGrading: string = "cinematic";
+  colorGrading: string = "none";
   colorGradingIntensity: number = 1;
   music: number = 1;
   sfx: number = 1;

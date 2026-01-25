@@ -74,8 +74,14 @@ import { EventType } from "../../types/events";
 import { Emotes } from "../../data/playerEmotes";
 import {
   AnimationLOD,
+  ANIMATION_LOD_PRESETS,
   getCameraPosition,
 } from "../../utils/rendering/AnimationLOD";
+import {
+  DistanceFadeController,
+  ENTITY_FADE_CONFIGS,
+  FadeState,
+} from "../../utils/rendering/DistanceFade";
 import { RAYCAST_PROXY } from "../../systems/client/interaction/constants";
 
 // Re-export types for external use
@@ -94,12 +100,10 @@ export class NPCEntity extends Entity {
   private _raycastProxy: THREE.Mesh | null = null;
 
   /** Animation LOD controller - throttles animation updates for distant NPCs */
-  private readonly _animationLOD = new AnimationLOD({
-    fullDistance: 25, // Full 60fps animation within 25m (NPCs need close-up detail)
-    halfDistance: 50, // 30fps animation at 25-50m
-    quarterDistance: 80, // 15fps animation at 50-80m
-    pauseDistance: 120, // No animation beyond 120m (bind pose)
-  });
+  private readonly _animationLOD = new AnimationLOD(ANIMATION_LOD_PRESETS.NPC);
+
+  /** Distance fade controller - dissolve effect for entities near render distance */
+  private _distanceFade: DistanceFadeController | null = null;
 
   async init(): Promise<void> {
     await super.init();
@@ -597,9 +601,36 @@ export class NPCEntity extends Entity {
       this._raycastProxy.position.y += RAYCAST_PROXY.Y_OFFSET;
     }
 
+    // DISTANCE FADE: Apply dissolve effect and cull distant NPCs
+    const cameraPos = getCameraPosition(this.world);
+    if (cameraPos) {
+      // Initialize DistanceFadeController once we have a node
+      if (!this._distanceFade && this.node) {
+        this._distanceFade = new DistanceFadeController(
+          this.node,
+          ENTITY_FADE_CONFIGS.NPC,
+          true, // Enable shader-based dissolve
+        );
+      }
+
+      // Update fade and check if culled
+      if (this._distanceFade) {
+        const fadeResult = this._distanceFade.update(
+          cameraPos.x,
+          cameraPos.z,
+          this.node.position.x,
+          this.node.position.z,
+        );
+
+        // If culled, skip all further updates (animation, etc.)
+        if (fadeResult.state === FadeState.CULLED) {
+          return;
+        }
+      }
+    }
+
     // ANIMATION LOD: Calculate distance to camera once and throttle animation updates
     // This reduces CPU/GPU load for distant NPCs significantly
-    const cameraPos = getCameraPosition(this.world);
     const animLODResult = cameraPos
       ? this._animationLOD.updateFromPosition(
           this.node.position.x,
@@ -713,6 +744,12 @@ export class NPCEntity extends Entity {
       this._raycastProxy.geometry.dispose();
       (this._raycastProxy.material as THREE.Material).dispose();
       this._raycastProxy = null;
+    }
+
+    // Clean up distance fade controller
+    if (this._distanceFade) {
+      this._distanceFade.dispose();
+      this._distanceFade = null;
     }
 
     // Clean up VRM avatar instance

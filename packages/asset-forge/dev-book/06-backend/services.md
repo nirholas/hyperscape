@@ -245,7 +245,7 @@ Enhances user prompts with GPT-4 for better AI generation results.
 {
   originalPrompt: "A goblin warrior",
   optimizedPrompt: "A menacing goblin warrior in T-pose with leather armor...",
-  model: "gpt-4",
+  model: "gpt-5",
   keywords: ["goblin", "warrior", "leather", "low-poly"]
 }
 ```

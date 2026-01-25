@@ -77,8 +77,8 @@ OPENAI_API_KEY=sk-your-openai-key-here
 
 **Models Used:**
 - `gpt-image-1` - Image generation (DALL-E 3)
-- `gpt-4` - Prompt enhancement
-- `gpt-4o-mini` - Grip detection (faster, cheaper)
+- `gpt-5` - Prompt enhancement
+- `gpt-5-mini` - Grip detection (faster, cheaper)
 
 **Cost Estimates:**
 - Image generation: ~$0.04 per image

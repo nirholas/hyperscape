@@ -34,6 +34,7 @@ import { PhysicsHandle } from "../../../types/systems/physics";
 import { getPhysX } from "../../../physics/PhysXManager";
 import { Layers } from "../../../physics/Layers";
 import { BIOMES } from "../../../data/world-structure";
+import { ALL_WORLD_AREAS } from "../../../data/world-areas";
 import { DataManager } from "../../../data/DataManager";
 import { WaterSystem, Environment } from "..";
 import { createTerrainMaterial, TerrainUniforms } from "./TerrainShader";
@@ -291,6 +292,14 @@ export class TerrainSystem extends System {
       state = (1664525 * state + 1013904223) >>> 0;
       return state / 0xffffffff;
     };
+  }
+
+  public createDeterministicRng(
+    tileX: number,
+    tileZ: number,
+    salt: string,
+  ): () => number {
+    return this.createTileRng(tileX, tileZ, salt);
   }
 
   /**
@@ -2969,6 +2978,18 @@ export class TerrainSystem extends System {
     return nearest;
   }
 
+  private isPositionInSafeWorldArea(worldX: number, worldZ: number): boolean {
+    for (const area of Object.values(ALL_WORLD_AREAS)) {
+      if (!area.bounds) continue;
+      if (!area.safeZone && area.difficultyLevel !== 0) continue;
+      const { minX, maxX, minZ, maxZ } = area.bounds;
+      if (worldX > minX && worldX <= maxX && worldZ > minZ && worldZ <= maxZ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private generateBossHotspots(): void {
     if (this.bossHotspots.length > 0) return;
 
@@ -2979,7 +3000,7 @@ export class TerrainSystem extends System {
       }
     }
 
-    const worldSizeMeters = this.CONFIG.WORLD_SIZE * this.CONFIG.TILE_SIZE;
+    const worldSizeMeters = this.getActiveWorldSizeMeters();
     const halfWorld = worldSizeMeters / 2;
     const step = this.CONFIG.BOSS_HOTSPOT_GRID_STEP;
     const minScalar = this.CONFIG.BOSS_HOTSPOT_MIN_SCALAR;
@@ -3003,6 +3024,23 @@ export class TerrainSystem extends System {
 
         const slope = this.calculateSlope(x, z);
         if (slope > this.CONFIG.MAX_WALKABLE_SLOPE) continue;
+
+        const townDistance = this.getNearestTownDistance(x, z);
+        if (
+          townDistance !== null &&
+          townDistance < this.CONFIG.DIFFICULTY_TOWN_FALLOFF_RADIUS
+        ) {
+          continue;
+        }
+
+        if (this.isPositionInSafeWorldArea(x, z)) {
+          continue;
+        }
+
+        const roadAvoidDistance = Math.max(10, this.CONFIG.ROAD_WIDTH * 2);
+        if (this.isPositionNearRoad(x, z, roadAvoidDistance)) {
+          continue;
+        }
 
         const noiseValue = this.noise.simplex2D(
           x * this.CONFIG.DIFFICULTY_NOISE_SCALE * 1.3 + 12.7,

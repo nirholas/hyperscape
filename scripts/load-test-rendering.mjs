@@ -121,7 +121,7 @@ async function run() {
 
   console.log(`Loading ${opts["client-url"]}...`);
   await page.goto(opts["client-url"], { waitUntil: "networkidle" });
-  await page.waitForSelector("canvas", { timeout: 30000 });
+  await page.waitForSelector("canvas", { timeout: 120000, state: "attached" });
   await new Promise((r) => setTimeout(r, 5000));
 
   console.log(`\nSpawning ${botCount} bots...\n`);

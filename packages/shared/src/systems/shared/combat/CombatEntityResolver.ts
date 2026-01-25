@@ -74,9 +74,6 @@ export class CombatEntityResolver {
     if (entityType === "player") {
       const player = this.world.entities.players.get(entityId);
       if (!player) {
-        this.logger?.debug("Player entity not found (probably disconnected)", {
-          entityId,
-        });
         return null;
       }
       return player;
@@ -88,7 +85,6 @@ export class CombatEntityResolver {
     }
     const entity = this.entityManager.getEntity(entityId);
     if (!entity) {
-      this.logger?.debug("Entity not found", { entityId });
       return null;
     }
     return entity ?? null;

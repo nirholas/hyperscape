@@ -1328,8 +1328,8 @@ Your task is to enhance the user's description to create better results with ima
         : process.env.OPENAI_API_KEY!;
 
       const modelName = useAIGateway
-        ? "openai/gpt-4o" // AI Gateway uses provider/model format
-        : "gpt-4"; // Direct OpenAI uses just the model name
+        ? "openai/gpt-5" // AI Gateway uses provider/model format
+        : "gpt-5"; // Direct OpenAI uses just the model name
 
       console.log(
         `🤖 Using ${useAIGateway ? "Vercel AI Gateway" : "direct OpenAI API"} for GPT-4 enhancement`,
@@ -1362,7 +1362,7 @@ Your task is to enhance the user's description to create better results with ima
       return {
         originalPrompt: config.description,
         optimizedPrompt,
-        model: "gpt-4",
+        model: "gpt-5",
         keywords: this.extractKeywords(optimizedPrompt),
       };
     } catch (error) {

@@ -2159,7 +2159,8 @@ export function registerAgentRoutes(
    * Request body:
    * {
    *   characterId: "character-uuid",
-   *   autoStart?: boolean  // defaults to true
+   *   autoStart?: boolean,  // defaults to true
+   *   scriptedRole?: "combat" | "woodcutting" | "fishing" | "mining" | "balanced"
    * }
    */
   fastify.post("/api/embedded-agents", async (request, reply) => {
@@ -2175,8 +2176,14 @@ export function registerAgentRoutes(
       }
 
       const body = request.body as {
-        characterId: string;
+        characterId?: string;
         autoStart?: boolean;
+        scriptedRole?:
+          | "combat"
+          | "woodcutting"
+          | "fishing"
+          | "mining"
+          | "balanced";
       };
 
       if (!body.characterId) {
@@ -2185,6 +2192,9 @@ export function registerAgentRoutes(
           error: "Missing required field: characterId",
         });
       }
+
+      // Capture characterId after validation to narrow type from string | undefined to string
+      const inputCharacterId = body.characterId;
 
       // Get character from database to retrieve accountId and name
       const databaseSystem = world.getSystem("database") as
@@ -2219,7 +2229,7 @@ export function registerAgentRoutes(
       const { eq } = await import("drizzle-orm");
 
       const character = await databaseSystem.db.query.characters.findFirst({
-        where: (chars, ops) => ops.eq(chars.id, body.characterId),
+        where: (chars, ops) => ops.eq(chars.id, inputCharacterId),
       });
 
       if (!character) {
@@ -2234,6 +2244,7 @@ export function registerAgentRoutes(
         characterId: character.id,
         accountId: character.accountId,
         name: character.name,
+        scriptedRole: body.scriptedRole,
         autoStart: body.autoStart !== false,
       });
 
@@ -2526,6 +2537,19 @@ export function registerAgentRoutes(
    *   data: { ... }  // command-specific data
    * }
    */
+  type EmbeddedAgentCommandData = {
+    target?: [number, number, number];
+    runMode?: boolean;
+    targetId?: string;
+    resourceId?: string;
+    itemId?: string;
+    quantity?: number;
+    equipSlot?: string;
+    slot?: number;
+    message?: string;
+    skill?: "woodcutting" | "fishing" | "mining" | "firemaking" | "cooking";
+  };
+
   fastify.post(
     "/api/embedded-agents/:characterId/command",
     async (request, reply) => {
@@ -2541,10 +2565,12 @@ export function registerAgentRoutes(
         }
 
         const { characterId } = request.params as { characterId: string };
-        const { command, data } = request.body as {
-          command: string;
-          data: unknown;
+        const body = request.body as {
+          command?: string;
+          data?: EmbeddedAgentCommandData;
         };
+        const command = body.command || "";
+        const data = body.data || {};
 
         if (!command) {
           return reply.status(400).send({
@@ -2553,7 +2579,7 @@ export function registerAgentRoutes(
           });
         }
 
-        await agentManager.sendCommand(characterId, command, data || {});
+        await agentManager.sendCommand(characterId, command, data);
 
         return reply.send({
           success: true,

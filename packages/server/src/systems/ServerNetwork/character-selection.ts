@@ -758,6 +758,18 @@ export async function handleEnterWorld(
   }, 30000);
 
   if (socket.player) {
+    // Register player with spatial registry for interest-based network filtering
+    const entityManager = world.getSystem?.("entity-manager") as {
+      registerPlayer?: (playerId: string, x: number, z: number) => void;
+    } | null;
+    if (entityManager?.registerPlayer) {
+      entityManager.registerPlayer(entityId, position[0], position[2]);
+    } else {
+      console.warn(
+        `[CharacterSelection] EntityManager not available for spatial registration of ${entityId}`,
+      );
+    }
+
     // CRITICAL: Load equipment from DB BEFORE emitting PLAYER_JOINED
     // This ensures EquipmentSystem receives the data via event payload (single source of truth)
     // and eliminates the race condition where two systems query the DB independently

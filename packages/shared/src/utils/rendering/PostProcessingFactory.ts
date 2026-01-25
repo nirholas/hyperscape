@@ -191,7 +191,7 @@ export async function createPostProcessing(
   console.log("[PostProcessing] LUT modules loaded");
 
   const colorGradingEnabled = options.colorGrading?.enabled ?? true;
-  let currentLUT: LUTPresetName = options.colorGrading?.lut ?? "cinematic";
+  let currentLUT: LUTPresetName = options.colorGrading?.lut ?? "none";
   const intensityUniform = uniform(options.colorGrading?.intensity ?? 1.0);
 
   console.log(
@@ -265,23 +265,19 @@ export async function createPostProcessing(
     return tex;
   }
 
-  // Create uniform for the LUT texture that we can update
+  // Create a Texture3D node we can update at runtime
   const placeholderLUT = createPlaceholderLUT();
-  const lutTextureUniform = uniform(placeholderLUT);
+  const lutTextureNode = texture3D(placeholderLUT);
   const lutSizeUniform = uniform(placeholderLUT.image.width);
 
   // Create the LUT pass node once - we'll update its uniforms
   // Cast is needed because lut3D accepts uniform nodes but types are stricter
   const lutPassNode = lut3DFn(
     outputPass,
-    texture3D(lutTextureUniform as unknown as THREE.Data3DTexture),
+    lutTextureNode,
     lutSizeUniform,
     intensityUniform,
-  ) as unknown as {
-    lutNode: { value: THREE.Data3DTexture };
-    size: { value: number };
-    intensityNode: { value: number };
-  };
+  );
 
   // Use the LUT pass as output
   postProcessing.outputNode = lutPassNode as unknown as ReturnType<typeof pass>;
@@ -299,9 +295,9 @@ export async function createPostProcessing(
       console.log(
         `[PostProcessing] LUT loaded, texture size: ${currentLUTData.texture3D.image.width}`,
       );
-      // Update the LUT pass node's properties directly
-      lutPassNode.lutNode.value = currentLUTData.texture3D;
-      lutPassNode.size.value = currentLUTData.texture3D.image.width;
+      // Update the LUT texture and size uniforms
+      lutTextureNode.value = currentLUTData.texture3D;
+      lutSizeUniform.value = currentLUTData.texture3D.image.width;
       intensityUniform.value = options.colorGrading?.intensity ?? 1.0;
       lutEnabled = true;
       console.log("[PostProcessing] LUT color grading applied");
@@ -362,9 +358,9 @@ export async function createPostProcessing(
       const lutData = await loadLUT(lutName);
       if (lutData) {
         currentLUTData = lutData;
-        // Update the existing LUT pass node's properties
-        lutPassNode.lutNode.value = lutData.texture3D;
-        lutPassNode.size.value = lutData.texture3D.image.width;
+        // Update the LUT texture and size uniforms
+        lutTextureNode.value = lutData.texture3D;
+        lutSizeUniform.value = lutData.texture3D.image.width;
         // Restore full intensity
         intensityUniform.value = options.colorGrading?.intensity ?? 1.0;
         // Enable LUT

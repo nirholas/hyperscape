@@ -11,8 +11,12 @@
  * Hyperscape server process with direct world access.
  */
 
+import { AgentRuntime, ChannelType, mergeCharacterDefaults, stringToUuid } from "@elizaos/core";
+import { hyperscapePlugin } from "@hyperscape/plugin-hyperscape";
 import type { World } from "@hyperscape/shared";
-import { EmbeddedHyperscapeService } from "./EmbeddedHyperscapeService.js";
+import type { Equipment } from "@hyperscape/plugin-hyperscape/src/types.js";
+import type { HyperscapeService } from "../../../plugin-hyperscape/src/services/HyperscapeService.js";
+import type { DatabaseSystem } from "../systems/DatabaseSystem/index.js";
 import type {
   EmbeddedAgentConfig,
   EmbeddedAgentInfo,
@@ -24,13 +28,70 @@ import type {
  */
 interface AgentInstance {
   config: EmbeddedAgentConfig;
-  service: EmbeddedHyperscapeService;
   state: AgentState;
   startedAt: number;
   lastActivity: number;
   error?: string;
-  // Will add ElizaOS runtime when implemented
-  // runtime?: AgentRuntime;
+  runtime?: AgentRuntime;
+  service?: HyperscapeService;
+}
+
+type ScriptedRole = EmbeddedAgentConfig["scriptedRole"];
+type EquipSlot = keyof Equipment;
+type GatherSkill = "woodcutting" | "fishing" | "mining" | "firemaking" | "cooking";
+
+type CommandData = {
+  target?: [number, number, number];
+  runMode?: boolean;
+  targetId?: string;
+  resourceId?: string;
+  itemId?: string;
+  quantity?: number;
+  equipSlot?: string;
+  slot?: number;
+  message?: string;
+  skill?: GatherSkill;
+};
+
+const DEV_BOT_DEFINITIONS: Array<{ name: string; role: ScriptedRole }> = [
+  { name: "Dev Woodcutter", role: "woodcutting" },
+  { name: "Dev Fisher", role: "fishing" },
+  { name: "Dev Miner", role: "mining" },
+  { name: "Dev Slayer", role: "combat" },
+];
+
+function normalizeEquipSlot(slot: string | undefined): EquipSlot | null {
+  if (!slot) return null;
+  switch (slot.toLowerCase()) {
+    case "head":
+    case "helmet":
+      return "helmet";
+    case "neck":
+    case "amulet":
+      return "amulet";
+    case "hands":
+    case "gloves":
+      return "gloves";
+    case "feet":
+    case "boots":
+      return "boots";
+    case "weapon":
+      return "weapon";
+    case "shield":
+      return "shield";
+    case "body":
+      return "body";
+    case "legs":
+      return "legs";
+    case "cape":
+      return "cape";
+    case "ring":
+      return "ring";
+    case "arrows":
+      return "arrows";
+    default:
+      return null;
+  }
 }
 
 /**
@@ -53,7 +114,7 @@ export class AgentManager {
    * @returns The agent's character ID
    */
   async createAgent(config: EmbeddedAgentConfig): Promise<string> {
-    const { characterId, accountId, name } = config;
+    const { characterId, name } = config;
 
     // Check if agent already exists
     if (this.agents.has(characterId)) {
@@ -65,18 +126,9 @@ export class AgentManager {
 
     console.log(`[AgentManager] Creating agent: ${name} (${characterId})`);
 
-    // Create the embedded service
-    const service = new EmbeddedHyperscapeService(
-      this.world,
-      characterId,
-      accountId,
-      name,
-    );
-
     // Track the agent
     const instance: AgentInstance = {
       config,
-      service,
       state: "initializing",
       startedAt: Date.now(),
       lastActivity: Date.now(),
@@ -126,8 +178,82 @@ export class AgentManager {
     instance.lastActivity = Date.now();
 
     try {
-      // Initialize the embedded service (spawns player entity)
-      await instance.service.initialize();
+      if (!instance.runtime) {
+        const wsUrl =
+          process.env.PUBLIC_WS_URL ||
+          process.env.HYPERSCAPE_SERVER_URL ||
+          "ws://localhost:5555/ws";
+        const isScripted = instance.config.scriptedRole !== undefined;
+        const role = instance.config.scriptedRole ?? "balanced";
+        const autonomyMode = isScripted ? "scripted" : "llm";
+        const silentChat = isScripted ? "true" : "false";
+
+        const character = mergeCharacterDefaults({
+          name: instance.config.name,
+          system: isScripted
+            ? "Silent scripted bot for Hyperscape."
+            : "Autonomous agent for Hyperscape.",
+          bio: [
+            isScripted
+              ? `Scripted ${role} bot running inside the Hyperscape server.`
+              : "Autonomous agent running inside the Hyperscape server.",
+          ],
+          plugins: ["@hyperscape/plugin-hyperscape"],
+          settings: {
+            secrets: {
+              HYPERSCAPE_CHARACTER_ID: instance.config.characterId,
+              HYPERSCAPE_SERVER_URL: wsUrl,
+            },
+            HYPERSCAPE_AUTONOMY_MODE: autonomyMode,
+            HYPERSCAPE_SCRIPTED_ROLE: isScripted ? role : "",
+            HYPERSCAPE_SILENT_CHAT: silentChat,
+            DISABLE_BASIC_CAPABILITIES: isScripted ? "true" : "false",
+            characterType: "ai-agent",
+          },
+        });
+
+        const runtime = new AgentRuntime({
+          character,
+          plugins: [hyperscapePlugin],
+        });
+
+        runtime.setSetting("CHECK_SHOULD_RESPOND", false);
+        runtime.setSetting("HYPERSCAPE_AUTONOMY_MODE", autonomyMode);
+        runtime.setSetting("HYPERSCAPE_SCRIPTED_ROLE", isScripted ? role : "");
+        runtime.setSetting("HYPERSCAPE_SILENT_CHAT", silentChat);
+        runtime.setSetting(
+          "HYPERSCAPE_CHARACTER_ID",
+          instance.config.characterId,
+          true,
+        );
+        runtime.setSetting("HYPERSCAPE_SERVER_URL", wsUrl);
+        runtime.setSetting("HYPERSCAPE_ACCOUNT_ID", instance.config.accountId);
+
+        await runtime.initialize({
+          allowNoDatabase: true,
+          skipMigrations: true,
+        });
+        await runtime.ensureConnection({
+          entityId: stringToUuid(`embedded-agent-${instance.config.characterId}`),
+          roomId: stringToUuid(
+            `embedded-agent-room-${instance.config.characterId}`,
+          ),
+          worldId: stringToUuid("hyperscape-world"),
+          userName: instance.config.name,
+          source: "hyperscape-embedded",
+          channelId: instance.config.characterId,
+          type: ChannelType.DM,
+        });
+
+        const service =
+          runtime.getService<HyperscapeService>("hyperscapeService");
+        if (!service) {
+          throw new Error("Hyperscape service not available in runtime");
+        }
+
+        instance.runtime = runtime;
+        instance.service = service;
+      }
 
       instance.state = "running";
       instance.lastActivity = Date.now();
@@ -136,10 +262,6 @@ export class AgentManager {
       console.log(
         `[AgentManager] ✅ Agent ${instance.config.name} is now running`,
       );
-
-      // TODO: Initialize ElizaOS AgentRuntime with EmbeddedHyperscapeService
-      // This will be implemented once we integrate the full ElizaOS runtime
-      // await this.initializeElizaRuntime(instance);
 
     } catch (err) {
       instance.state = "error";
@@ -170,7 +292,11 @@ export class AgentManager {
     );
 
     try {
-      await instance.service.stop();
+      if (instance.runtime) {
+        await instance.runtime.stop();
+      }
+      instance.runtime = undefined;
+      instance.service = undefined;
       instance.state = "stopped";
       instance.lastActivity = Date.now();
 
@@ -207,7 +333,9 @@ export class AgentManager {
       `[AgentManager] Pausing agent: ${instance.config.name} (${characterId})`,
     );
 
-    // TODO: Stop autonomous behavior without removing entity
+    if (instance.service) {
+      instance.service.setAutonomousBehaviorEnabled(false);
+    }
     instance.state = "paused";
     instance.lastActivity = Date.now();
 
@@ -236,7 +364,9 @@ export class AgentManager {
       `[AgentManager] Resuming agent: ${instance.config.name} (${characterId})`,
     );
 
-    // TODO: Resume autonomous behavior
+    if (instance.service) {
+      instance.service.setAutonomousBehaviorEnabled(true);
+    }
     instance.state = "running";
     instance.lastActivity = Date.now();
 
@@ -284,18 +414,20 @@ export class AgentManager {
       return null;
     }
 
-    const gameState = instance.service.getGameState();
+    const gameState = instance.service?.getGameState();
+    const playerEntity = gameState?.playerEntity || null;
 
     return {
       agentId: characterId,
       characterId,
       accountId: instance.config.accountId,
       name: instance.config.name,
+      scriptedRole: instance.config.scriptedRole,
       state: instance.state,
-      entityId: instance.service.getPlayerId(),
-      position: gameState?.position || null,
-      health: gameState?.health || null,
-      maxHealth: gameState?.maxHealth || null,
+      entityId: playerEntity?.id || null,
+      position: playerEntity?.position || null,
+      health: playerEntity?.health?.current ?? null,
+      maxHealth: playerEntity?.health?.max ?? null,
       startedAt: instance.startedAt,
       lastActivity: instance.lastActivity,
       error: instance.error,
@@ -346,7 +478,7 @@ export class AgentManager {
    * @param characterId - The agent's character ID
    * @returns The embedded service or null
    */
-  getAgentService(characterId: string): EmbeddedHyperscapeService | null {
+  getAgentService(characterId: string): HyperscapeService | null {
     return this.agents.get(characterId)?.service || null;
   }
 
@@ -360,7 +492,7 @@ export class AgentManager {
   async sendCommand(
     characterId: string,
     command: string,
-    data: unknown,
+    data: CommandData,
   ): Promise<void> {
     const instance = this.agents.get(characterId);
     if (!instance) {
@@ -374,54 +506,190 @@ export class AgentManager {
     instance.lastActivity = Date.now();
 
     const service = instance.service;
-    const commandData = data as Record<string, unknown>;
+    if (!service) {
+      throw new Error(`Agent ${characterId} has no active service`);
+    }
+
+    const commandData = data;
 
     switch (command) {
-      case "move":
-        await service.executeMove(
-          commandData.target as [number, number, number],
-          commandData.runMode as boolean | undefined,
+      case "move": {
+        const target = commandData.target;
+        if (!target) {
+          throw new Error("Move command requires target [x, y, z]");
+        }
+        await service.executeMove({
+          target,
+          runMode: commandData.runMode,
+        });
+        break;
+      }
+
+      case "attack": {
+        const targetId = commandData.targetId;
+        if (!targetId) {
+          throw new Error("Attack command requires targetId");
+        }
+        await service.executeAttack({ targetEntityId: targetId });
+        break;
+      }
+
+      case "gather": {
+        const resourceId = commandData.resourceId;
+        const skill = commandData.skill;
+        if (!resourceId) {
+          throw new Error("Gather command requires resourceId");
+        }
+        await service.executeGatherResource({
+          resourceEntityId: resourceId,
+          skill: skill || this.resolveGatherSkill(service, resourceId),
+        });
+        break;
+      }
+
+      case "pickup": {
+        const itemId = commandData.itemId;
+        if (!itemId) {
+          throw new Error("Pickup command requires itemId");
+        }
+        await service.executePickupItem(itemId);
+        break;
+      }
+
+      case "drop": {
+        const itemId = commandData.itemId;
+        if (!itemId) {
+          throw new Error("Drop command requires itemId");
+        }
+        await service.executeDropItem(
+          itemId,
+          commandData.quantity,
+          commandData.slot,
         );
         break;
+      }
 
-      case "attack":
-        await service.executeAttack(commandData.targetId as string);
-        break;
-
-      case "gather":
-        await service.executeGather(commandData.resourceId as string);
-        break;
-
-      case "pickup":
-        await service.executePickup(commandData.itemId as string);
-        break;
-
-      case "drop":
-        await service.executeDrop(
-          commandData.itemId as string,
-          commandData.quantity as number | undefined,
+      case "equip": {
+        const itemId = commandData.itemId;
+        if (!itemId) {
+          throw new Error("Equip command requires itemId");
+        }
+        const equipSlot = this.resolveEquipSlot(
+          service,
+          itemId,
+          commandData.equipSlot,
         );
+        await service.executeEquipItem({ itemId, equipSlot });
         break;
+      }
 
-      case "equip":
-        await service.executeEquip(commandData.itemId as string);
+      case "use": {
+        const itemId = commandData.itemId;
+        if (!itemId) {
+          throw new Error("Use command requires itemId");
+        }
+        await service.executeUseItem({
+          itemId,
+          slot: commandData.slot,
+        });
         break;
+      }
 
-      case "use":
-        await service.executeUse(commandData.itemId as string);
+      case "chat": {
+        const message = commandData.message;
+        if (!message) {
+          throw new Error("Chat command requires message");
+        }
+        await service.executeChatMessage({ message });
         break;
+      }
 
-      case "chat":
-        await service.executeChat(commandData.message as string);
+      case "stop": {
+        const target = this.getPositionArray(
+          service.getGameState().playerEntity?.position,
+        );
+        if (!target) {
+          throw new Error("Stop command requires active player position");
+        }
+        await service.executeMove({
+          target,
+          cancel: true,
+        });
         break;
-
-      case "stop":
-        await service.executeStop();
-        break;
+      }
 
       default:
         throw new Error(`Unknown command: ${command}`);
     }
+  }
+
+  private resolveGatherSkill(
+    service: HyperscapeService,
+    resourceId: string,
+  ): GatherSkill {
+    const resource = service
+      .getNearbyEntities()
+      .find((entity) => entity.id === resourceId);
+    if (!resource) return "woodcutting";
+
+    const harvestSkill = resource.harvestSkill;
+    if (harvestSkill) return harvestSkill;
+
+    const resourceType = (resource.resourceType || "").toLowerCase();
+    if (resourceType === "fishing_spot") return "fishing";
+    if (resourceType === "mining_rock" || resourceType === "ore") return "mining";
+
+    return "woodcutting";
+  }
+
+  private resolveEquipSlot(
+    service: HyperscapeService,
+    itemId: string,
+    equipSlotRaw?: string,
+  ): EquipSlot {
+    const normalized = normalizeEquipSlot(equipSlotRaw);
+    if (normalized) return normalized;
+
+    const player = service.getPlayerEntity();
+    if (!player) return "weapon";
+
+    const item = player.items.find(
+      (entry) => entry.id === itemId || entry.itemId === itemId,
+    );
+    const itemName = (
+      item?.name ||
+      item?.item?.name ||
+      item?.itemId ||
+      ""
+    ).toLowerCase();
+
+    if (itemName.includes("shield")) return "shield";
+    if (itemName.includes("helmet") || itemName.includes("helm")) return "helmet";
+    if (itemName.includes("platebody") || itemName.includes("body")) return "body";
+    if (itemName.includes("legs") || itemName.includes("platelegs"))
+      return "legs";
+    if (itemName.includes("boots")) return "boots";
+    if (itemName.includes("gloves")) return "gloves";
+    if (itemName.includes("cape")) return "cape";
+    if (itemName.includes("amulet")) return "amulet";
+    if (itemName.includes("ring")) return "ring";
+    if (itemName.includes("arrow")) return "arrows";
+
+    return "weapon";
+  }
+
+  private getPositionArray(
+    pos: [number, number, number] | { x: number; y?: number; z: number } | null | undefined,
+  ): [number, number, number] | null {
+    if (!pos) return null;
+    if (Array.isArray(pos) && pos.length >= 3) {
+      return [pos[0], pos[1], pos[2]];
+    }
+    if (typeof pos === "object") {
+      const obj = pos as { x: number; y?: number; z: number };
+      return [obj.x, obj.y ?? 0, obj.z];
+    }
+    return null;
   }
 
   /**
@@ -432,39 +700,96 @@ export class AgentManager {
     console.log("[AgentManager] Loading agents from database...");
 
     const databaseSystem = this.world.getSystem("database") as
-      | {
-          db: {
-            select: () => {
-              from: (table: unknown) => {
-                where: (condition: unknown) => Promise<
-                  Array<{
-                    id: string;
-                    accountId: string;
-                    name: string;
-                    isAgent: boolean;
-                  }>
-                >;
-              };
-            };
-          };
-        }
+      | DatabaseSystem
       | undefined;
+    const db = databaseSystem?.getDb();
 
-    if (!databaseSystem?.db) {
+    if (!db) {
       console.warn("[AgentManager] Database not available, skipping agent load");
       return;
     }
 
     try {
+      const enableDevBots = this.shouldEnableDevBots();
+      const devBotIds = new Set(
+        DEV_BOT_DEFINITIONS.map((bot) =>
+          stringToUuid(`hyperscape-dev-bot-${bot.role}`),
+        ),
+      );
+
       // Query characters marked as agents
-      const { characters } = await import("../database/schema.js");
+      const { characters, users } = await import("../database/schema.js");
       const { eq } = await import("drizzle-orm");
 
       // isAgent is stored as integer (1 = true, 0 = false) in database
-      const agentCharacters = await databaseSystem.db
+      const agentCharacters = await db
         .select()
         .from(characters)
         .where(eq(characters.isAgent, 1));
+
+      const devBots: Array<{
+        id: string;
+        accountId: string;
+        name: string;
+        role: ScriptedRole;
+      }> = [];
+
+      if (enableDevBots) {
+        const devAccountId = stringToUuid("hyperscape-dev-bots");
+        const existingUsers = await db
+          .select({ id: users.id })
+          .from(users)
+          .where(eq(users.id, devAccountId));
+
+        if (existingUsers.length === 0) {
+          await db.insert(users).values({
+            id: devAccountId,
+            name: "Dev Bots",
+            roles: "",
+            createdAt: new Date().toISOString(),
+          });
+        }
+
+        for (const bot of DEV_BOT_DEFINITIONS) {
+          const botId = stringToUuid(`hyperscape-dev-bot-${bot.role}`);
+          const existing = await db
+            .select({
+              id: characters.id,
+              accountId: characters.accountId,
+              isAgent: characters.isAgent,
+            })
+            .from(characters)
+            .where(eq(characters.id, botId));
+
+          if (existing.length === 0) {
+            await db.insert(characters).values({
+              id: botId,
+              accountId: devAccountId,
+              name: bot.name,
+              isAgent: 1,
+              createdAt: Date.now(),
+              lastLogin: Date.now(),
+            });
+          } else if (existing[0].accountId !== devAccountId) {
+            console.warn(
+              `[AgentManager] Dev bot id ${botId} belongs to a different account, skipping auto-start`,
+            );
+            continue;
+          } else if (existing[0].isAgent !== 1) {
+            await db
+              .update(characters)
+              .set({ isAgent: 1 })
+              .where(eq(characters.id, botId));
+          }
+
+          devBots.push({
+            id: botId,
+            accountId: devAccountId,
+            name: bot.name,
+            role: bot.role,
+          });
+        }
+      }
 
       console.log(
         `[AgentManager] Found ${agentCharacters.length} agent character(s) in database`,
@@ -472,6 +797,9 @@ export class AgentManager {
 
       // Create agents for each
       for (const char of agentCharacters) {
+        if (devBotIds.has(char.id)) {
+          continue;
+        }
         try {
           await this.createAgent({
             characterId: char.id,
@@ -487,6 +815,23 @@ export class AgentManager {
         }
       }
 
+      for (const bot of devBots) {
+        try {
+          await this.createAgent({
+            characterId: bot.id,
+            accountId: bot.accountId,
+            name: bot.name,
+            scriptedRole: bot.role,
+            autoStart: true,
+          });
+        } catch (err) {
+          console.error(
+            `[AgentManager] Failed to create dev bot ${bot.name}:`,
+            err instanceof Error ? err.message : String(err),
+          );
+        }
+      }
+
       console.log(
         `[AgentManager] ✅ Loaded ${this.agents.size} agent(s)`,
       );
@@ -496,6 +841,13 @@ export class AgentManager {
         err instanceof Error ? err.message : String(err),
       );
     }
+  }
+
+  private shouldEnableDevBots(): boolean {
+    const setting = (process.env.HYPERSCAPE_DEV_BOTS || "").toLowerCase();
+    if (setting === "true") return true;
+    if (setting === "false") return false;
+    return process.env.NODE_ENV === "development";
   }
 
   /**

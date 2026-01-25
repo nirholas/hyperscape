@@ -210,6 +210,16 @@ export type LevelRange = {
   max: number;
 };
 
+/**
+ * Spawn categories for NPCs that should be filtered by spawn context.
+ */
+export type NPCSpawnCategory = "world" | "instance" | "quest";
+
+/**
+ * Model archetypes for NPC appearance fallback.
+ */
+export type NPCModelArchetype = "goblin" | "human" | "thug" | "troll" | "imp";
+
 // ============== UNIFIED NPC DATA STRUCTURE ==============
 
 /**
@@ -228,6 +238,8 @@ export interface NPCDataInput {
 
   // OPTIONAL - Will be filled with defaults by normalizeNPC()
   faction?: string;
+  spawnCategory?: NPCSpawnCategory;
+  modelArchetype?: NPCModelArchetype;
   levelRange?: LevelRange;
   stats?: Partial<NPCStats>;
   combat?: Partial<NPCCombatConfig>;
@@ -398,6 +410,8 @@ export interface NPCData {
   description: string;
   category: NPCCategory; // 'mob' | 'boss' | 'neutral'
   faction: string; // Group affiliation
+  spawnCategory?: NPCSpawnCategory;
+  modelArchetype?: NPCModelArchetype;
   levelRange?: LevelRange;
 
   // ========== STATS (ALL NPCs) ==========

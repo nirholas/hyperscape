@@ -109,6 +109,28 @@ import { PlayerLocal } from "../../entities/player/PlayerLocal";
 import { TileInterpolator } from "./TileInterpolator";
 import { type TileCoord } from "../shared/movement/TileSystem"; // Internal import within shared package
 
+type ClientNetworkEnv = {
+  PUBLIC_DISABLE_NETWORK?: string;
+  DISABLE_NETWORK?: string;
+};
+
+const isTruthy = (value?: string): boolean =>
+  value === "1" || value === "true" || value === "yes" || value === "on";
+
+const isNetworkDisabled = (): boolean => {
+  const runtimeEnv = (globalThis as { env?: ClientNetworkEnv }).env;
+  const processEnv =
+    typeof process !== "undefined" && typeof process.env !== "undefined"
+      ? process.env
+      : undefined;
+  return (
+    isTruthy(runtimeEnv?.PUBLIC_DISABLE_NETWORK) ||
+    isTruthy(runtimeEnv?.DISABLE_NETWORK) ||
+    isTruthy(processEnv?.PUBLIC_DISABLE_NETWORK) ||
+    isTruthy(processEnv?.DISABLE_NETWORK)
+  );
+};
+
 const _v3_1 = new THREE.Vector3();
 const _quat_1 = new THREE.Quaternion();
 
@@ -261,6 +283,13 @@ export class ClientNetwork extends SystemBase {
     const avatar = (options as { avatar?: string }).avatar;
 
     if (!wsUrl) {
+      if (isNetworkDisabled()) {
+        this.logger.info(
+          "[ClientNetwork] Network disabled via PUBLIC_DISABLE_NETWORK",
+        );
+        this.initialized = true;
+        return;
+      }
       console.error("[ClientNetwork] No WebSocket URL provided!");
       return;
     }
@@ -320,19 +349,25 @@ export class ClientNetwork extends SystemBase {
       }
     }
 
-    // Build WebSocket URL - preserve existing params if authToken already present
-    let url: string;
-    if (urlHasAuthToken) {
-      // URL already has authToken (embedded mode) - use as-is
-      url = wsUrl;
-      this.logger.debug("Using authToken from URL (embedded mode)");
-    } else {
-      // Normal mode - add authToken from localStorage
-      url = `${wsUrl}?authToken=${authToken}`;
-      if (privyUserId) url += `&privyUserId=${encodeURIComponent(privyUserId)}`;
+    // Build WebSocket URL - preserve existing params and append safely
+    const ws = new URL(wsUrl);
+    const params = ws.searchParams;
+    if (!params.has("authToken")) {
+      params.set("authToken", authToken);
     }
-    if (name) url += `&name=${encodeURIComponent(name)}`;
-    if (avatar) url += `&avatar=${encodeURIComponent(avatar)}`;
+    if (privyUserId && !params.has("privyUserId")) {
+      params.set("privyUserId", privyUserId);
+    }
+    if (name && !params.has("name")) {
+      params.set("name", name);
+    }
+    if (avatar && !params.has("avatar")) {
+      params.set("avatar", avatar);
+    }
+    const url = ws.toString();
+    if (urlHasAuthToken) {
+      this.logger.debug("Using authToken from URL (embedded mode)");
+    }
 
     // Read embedded configuration once at initialization
     if (typeof window !== "undefined") {
@@ -3017,12 +3052,14 @@ export class ClientNetwork extends SystemBase {
       }
     }
 
-    // Apply emote from server if provided (atomic delivery with movement end)
-    // This prevents race condition where client sets "idle" before server's emote arrives
-    if (data.emote && entity) {
+    // Apply emote from server only when interpolation has fully finished
+    // Short paths can still be interpolating when movement end arrives; applying
+    // the arrival emote immediately causes skating (idle while still moving).
+    const isInterpolating = this.tileInterpolator.isInterpolating(data.id);
+    if (data.emote && entity && !isInterpolating) {
       entity.data.emote = data.emote;
       entity.modify({ e: data.emote });
-    } else if (!this.tileInterpolator.isInterpolating(data.id)) {
+    } else if (!data.emote && !isInterpolating) {
       // No emote from server and not interpolating - default to idle
       if (entity) {
         entity.data.emote = "idle";

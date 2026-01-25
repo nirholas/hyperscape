@@ -1819,8 +1819,10 @@ export class VegetationSystem extends System {
    */
   private getPlayerPosition(): THREE.Vector3 | null {
     // Use camera position for view-relative culling
-    if (this.world.camera?.position) {
-      return this._tempPosition.copy(this.world.camera.position);
+    const camera = this.world.camera;
+    if (camera) {
+      camera.getWorldPosition(this._tempPosition);
+      return this._tempPosition;
     }
 
     // Fallback to player position if no camera available
@@ -1950,9 +1952,12 @@ export class VegetationSystem extends System {
     // matrixWorldInverse is the view matrix (world->camera transform)
     // projectionMatrix * matrixWorldInverse = clip space transform
     //
-    // IMPORTANT: updateMatrixWorld() updates matrixWorld but NOT matrixWorldInverse
-    // We must explicitly compute matrixWorldInverse from matrixWorld
-    camera.updateMatrixWorld();
+    // CRITICAL: Use updateWorldMatrix(true, false) instead of updateMatrixWorld(true)
+    // - updateMatrixWorld(true) does NOT update parent matrices first
+    // - updateWorldMatrix(true, false) updates parents FIRST, then this object
+    // This ensures correct frustum when camera has parent with stale matrices
+    camera.updateProjectionMatrix();
+    camera.updateWorldMatrix(true, false);
     camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
     this._projScreenMatrix.multiplyMatrices(
       camera.projectionMatrix,

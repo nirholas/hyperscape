@@ -59,9 +59,24 @@ export class ServerLiveKit extends System {
   async getPlayerOpts(playerId: string) {
     if (!this.enabled || !this.apiKey || !this.apiSecret || !this.wsUrl)
       return null;
-    const at = new AccessToken(this.apiKey, this.apiSecret, {
-      identity: playerId,
-    });
+    const globalWithDocument = globalThis as {
+      document?: typeof globalThis extends { document: infer D } ? D : never;
+    };
+    const existingDocument = globalWithDocument.document;
+    if (existingDocument) {
+      // Hide polyfilled document so livekit-server-sdk doesn't warn in Node.js.
+      delete globalWithDocument.document;
+    }
+    let at: AccessToken;
+    try {
+      at = new AccessToken(this.apiKey, this.apiSecret, {
+        identity: playerId,
+      });
+    } finally {
+      if (existingDocument) {
+        globalWithDocument.document = existingDocument;
+      }
+    }
     const videoGrant = {
       room: this.roomId,
       roomJoin: true,

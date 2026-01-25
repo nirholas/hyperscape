@@ -88,7 +88,9 @@ export function createEmoteFactory(glb: GLBData, url: string) {
 
   const scale = (glb.scene as THREE.Scene).children[0].scale.x; // armature should be here?
   const opts = getQueryParams(url);
-  const allowHipsTranslationY = opts.ty === "1";
+  const allowHipsTranslationY = opts.ty === "1" || opts.txyz === "1";
+  const allowHipsTranslationXYZ = opts.txyz === "1";
+  const allowBoneTranslations = opts.tb === "1";
 
   // no matter what vrm/emote combo we use for some reason avatars
   // levitate roughly 5cm above ground. this is a hack but it works.
@@ -96,7 +98,7 @@ export function createEmoteFactory(glb: GLBData, url: string) {
   const yOffset = allowHipsTranslationY ? 0 : -0.05 / scale;
 
   // we only keep tracks that are:
-  // 1. the root position
+  // 1. the root/hips position (or all bone positions when enabled)
   // 2. the quaternions
   // scale and other positions are rejected.
   // NOTE: there is a risk that the first position track is not the root but
@@ -106,7 +108,10 @@ export function createEmoteFactory(glb: GLBData, url: string) {
   clip.tracks = clip.tracks.filter((track) => {
     if (track instanceof THREE.VectorKeyframeTrack) {
       const [name, type] = track.name.split(".");
-      if (type !== "position") return;
+      if (type !== "position") return false;
+      if (allowBoneTranslations) {
+        return true;
+      }
       // we need both root and hip bones
       if (name === "Root") {
         _haveRoot = true;
@@ -224,21 +229,33 @@ export function createEmoteFactory(glb: GLBData, url: string) {
               ),
             );
           } else if (track instanceof THREE.VectorKeyframeTrack) {
-            if (!allowHipsTranslationY) {
+            if (!allowHipsTranslationY && !allowBoneTranslations) {
               // Skip position tracks entirely for non-grounded clips
               // This prevents root motion (sliding, bobbing, sinking)
               return;
             }
-            if (vrmBoneName !== "hips") {
-              // Only allow vertical translation on hips
+            if (!vrmBoneName) {
+              return;
+            }
+            if (vrmBoneName !== "hips" && !allowBoneTranslations) {
+              // Only allow vertical translation on hips (unless bone translations enabled)
               return;
             }
 
             const scaledValues = new Float32Array(track.values.length);
             for (let i = 0; i < track.values.length; i += 3) {
-              scaledValues[i] = 0;
-              scaledValues[i + 1] = track.values[i + 1] * _scaler;
-              scaledValues[i + 2] = 0;
+              const x = track.values[i] * _scaler;
+              const y = track.values[i + 1] * _scaler;
+              const z = track.values[i + 2] * _scaler;
+              if (vrmBoneName === "hips") {
+                scaledValues[i] = allowHipsTranslationXYZ ? x : 0;
+                scaledValues[i + 1] = y;
+                scaledValues[i + 2] = allowHipsTranslationXYZ ? z : 0;
+              } else {
+                scaledValues[i] = x;
+                scaledValues[i + 1] = y;
+                scaledValues[i + 2] = z;
+              }
             }
 
             tracks.push(

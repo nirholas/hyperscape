@@ -2021,6 +2021,18 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   }
 
   /**
+   * Send message to a specific player by player ID
+   *
+   * Used by EntityManager for interest-based network filtering.
+   * Finds the socket for the given player ID and sends the message.
+   *
+   * @returns true if player was found and message sent, false otherwise
+   */
+  sendToPlayer<T = unknown>(playerId: string, name: string, data: T): boolean {
+    return this.broadcastManager.sendToPlayer(playerId, name, data);
+  }
+
+  /**
    * Delegate socket health checking to SocketManager
    */
   checkSockets(): void {

@@ -42,11 +42,11 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
   const [dpr, setDPR] = useState(prefs?.dpr || 1);
   const [shadows, setShadows] = useState(prefs?.shadows || "med");
   const [postprocessing, setPostprocessing] = useState(
-    prefs?.postprocessing ?? true,
+    prefs?.postprocessing ?? false,
   );
   const [bloom, setBloom] = useState(prefs?.bloom ?? true);
   const [colorGrading, setColorGrading] = useState(
-    prefs?.colorGrading || "cinematic",
+    prefs?.colorGrading || "none",
   );
   const [colorGradingIntensity, setColorGradingIntensity] = useState(
     prefs?.colorGradingIntensity ?? 1,

@@ -94,6 +94,9 @@ interface EntityMovementState {
   isMoving: boolean;
   // Current emote (walk/run/idle)
   emote: string;
+  // Emote to apply when movement finishes (e.g., idle, fishing)
+  // Stored to avoid switching away from movement emotes while still interpolating
+  pendingArrivalEmote: string | null;
   // Per-entity movement speed (tiles per server tick)
   // Defaults to TILES_PER_TICK_WALK/RUN, but can be overridden for mobs
   tilesPerTick: number | null;
@@ -290,6 +293,7 @@ export class TileInterpolator {
       state.isRunning = running;
       state.isMoving = true;
       state.emote = emote ?? (running ? "run" : "walk");
+      state.pendingArrivalEmote = null;
       state.serverConfirmedTile = { ...serverConfirmed };
       state.lastServerTick = 0;
       state.catchUpMultiplier = 1.0;
@@ -313,6 +317,7 @@ export class TileInterpolator {
         isRunning: running,
         isMoving: true,
         emote: emote ?? (running ? "run" : "walk"),
+        pendingArrivalEmote: null,
         serverConfirmedTile: { ...serverConfirmed },
         lastServerTick: 0,
         catchUpMultiplier: 1.0,
@@ -402,6 +407,7 @@ export class TileInterpolator {
         isRunning: emote === "run",
         isMoving: false,
         emote: emote,
+        pendingArrivalEmote: null,
         serverConfirmedTile: { ...serverTile },
         lastServerTick: tickNumber ?? 0,
         catchUpMultiplier: 1.0,
@@ -601,11 +607,9 @@ export class TileInterpolator {
       return;
     }
 
-    // If server sent an emote with movement end, use it immediately
-    // This prevents race condition where we set "idle" before server's emote arrives
-    if (emote) {
-      state.emote = emote;
-    }
+    // Store arrival emote so it can be applied when interpolation actually finishes
+    // This prevents switching to idle while still moving (short paths can finish fast)
+    state.pendingArrivalEmote = emote ?? null;
 
     // Update server confirmed position
     state.serverConfirmedTile = { ...tile };
@@ -632,12 +636,13 @@ export class TileInterpolator {
       state.fullPath = [];
       state.targetTileIndex = 0;
       state.isMoving = false;
-      // Only track idle state if current emote is movement-related AND no server emote provided
-      // Server emote (e.g., "fishing") takes precedence
-      if (
-        !emote &&
+      if (state.pendingArrivalEmote) {
+        state.emote = state.pendingArrivalEmote;
+        state.pendingArrivalEmote = null;
+      } else if (
         MOVEMENT_EMOTES.has(state.emote as string | undefined | null)
       ) {
+        // No arrival emote - reset to idle if we were in a movement emote
         state.emote = "idle";
       }
       state.catchUpMultiplier = 1.0;
@@ -759,7 +764,14 @@ export class TileInterpolator {
         // Only reset to idle if current emote is a movement emote
         // Don't override special emotes like "chopping", "combat", "death" etc.
         const currentEmote = entity.data?.emote || entity.data?.e;
-        if (MOVEMENT_EMOTES.has(currentEmote as string | undefined | null)) {
+        if (state.pendingArrivalEmote) {
+          state.emote = state.pendingArrivalEmote;
+          state.pendingArrivalEmote = null;
+          // Use modify() to trigger PlayerLocal's emote handling which updates avatar animation
+          entity.modify({ e: state.emote });
+        } else if (
+          MOVEMENT_EMOTES.has(currentEmote as string | undefined | null)
+        ) {
           state.emote = "idle";
           // Use modify() to trigger PlayerLocal's emote handling which updates avatar animation
           entity.modify({ e: "idle" });
@@ -906,9 +918,14 @@ export class TileInterpolator {
             state.visualPosition.z = finalWorld.z;
             const wasMoving = state.isMoving;
             state.isMoving = false;
-            // Only track idle state if current emote is movement-related
-            // (actual emote change is handled in the empty path block above)
-            if (MOVEMENT_EMOTES.has(state.emote as string | undefined | null)) {
+            if (state.pendingArrivalEmote) {
+              state.emote = state.pendingArrivalEmote;
+              state.pendingArrivalEmote = null;
+            } else if (
+              MOVEMENT_EMOTES.has(state.emote as string | undefined | null)
+            ) {
+              // Only track idle state if current emote is movement-related
+              // (actual emote change is handled in the empty path block above)
               state.emote = "idle";
             }
             state.destinationTile = null; // Clear destination as we've arrived
@@ -1118,6 +1135,7 @@ export class TileInterpolator {
       state.targetWorldPos.set(worldPos.x, position.y, worldPos.z);
       state.serverConfirmedTile = { ...newTile };
       state.isMoving = false;
+      state.pendingArrivalEmote = null;
       // Only track idle state if current emote is movement-related
       if (MOVEMENT_EMOTES.has(state.emote as string | undefined | null)) {
         state.emote = "idle";
@@ -1138,6 +1156,7 @@ export class TileInterpolator {
         isRunning: false,
         isMoving: false,
         emote: "idle",
+        pendingArrivalEmote: null,
         serverConfirmedTile: { ...newTile },
         lastServerTick: 0,
         catchUpMultiplier: 1.0,

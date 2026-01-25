@@ -148,7 +148,7 @@ Transform user descriptions into optimized prompts that produce better AI-genera
 
 ### Prompt Enhancement
 
-**Model**: `gpt-4`
+**Model**: `gpt-5`
 **Temperature**: 0.7 (creative but controlled)
 **Max Tokens**: 200 (concise enhancement)
 

@@ -12,54 +12,109 @@ import type {
   TownBuilding,
   TownSize,
   TownBuildingType,
+  TownConfigManifest,
+  TownSizeConfigManifest,
 } from "../../../types/world/world-types";
 import { NoiseGenerator } from "../../../utils/NoiseGenerator";
 import { Logger } from "../../../utils/Logger";
 import { DataManager } from "../../../data/DataManager";
 
-// Default constants - can be overridden by world-config.json
-const DEFAULT_TOWN_COUNT = 25;
-const DEFAULT_WORLD_SIZE = 10000;
-const DEFAULT_MIN_TOWN_SPACING = 800;
-const DEFAULT_FLATNESS_SAMPLE_RADIUS = 40;
-const DEFAULT_FLATNESS_SAMPLE_COUNT = 16;
-const DEFAULT_WATER_THRESHOLD = 5.4;
-const DEFAULT_OPTIMAL_WATER_DISTANCE_MIN = 30;
-const DEFAULT_OPTIMAL_WATER_DISTANCE_MAX = 150;
+// Default configuration values
+const DEFAULTS = {
+  townCount: 25,
+  worldSize: 10000,
+  minTownSpacing: 800,
+  flatnessSampleRadius: 40,
+  flatnessSampleCount: 16,
+  waterThreshold: 5.4,
+  optimalWaterDistanceMin: 30,
+  optimalWaterDistanceMax: 150,
+} as const;
 
-// Runtime config values (set from world-config.json or defaults)
-let TOWN_COUNT = DEFAULT_TOWN_COUNT;
-let WORLD_SIZE = DEFAULT_WORLD_SIZE;
-let MIN_TOWN_SPACING = DEFAULT_MIN_TOWN_SPACING;
-let FLATNESS_SAMPLE_RADIUS = DEFAULT_FLATNESS_SAMPLE_RADIUS;
-let FLATNESS_SAMPLE_COUNT = DEFAULT_FLATNESS_SAMPLE_COUNT;
-let WATER_THRESHOLD = DEFAULT_WATER_THRESHOLD;
-let OPTIMAL_WATER_DISTANCE_MIN = DEFAULT_OPTIMAL_WATER_DISTANCE_MIN;
-let OPTIMAL_WATER_DISTANCE_MAX = DEFAULT_OPTIMAL_WATER_DISTANCE_MAX;
-
-const dist2D = (x1: number, z1: number, x2: number, z2: number): number =>
-  Math.sqrt((x2 - x1) ** 2 + (z2 - z1) ** 2);
-
-const TOWN_SIZE_CONFIG: Record<
-  TownSize,
-  {
-    buildingCount: { min: number; max: number };
-    radius: number;
-    safeZoneRadius: number;
-  }
-> = {
+const DEFAULT_TOWN_SIZES: Record<TownSize, TownSizeConfig> = {
   hamlet: { buildingCount: { min: 3, max: 5 }, radius: 25, safeZoneRadius: 40 },
   village: {
     buildingCount: { min: 6, max: 10 },
     radius: 40,
     safeZoneRadius: 60,
   },
-  town: {
-    buildingCount: { min: 11, max: 16 },
-    radius: 60,
-    safeZoneRadius: 80,
-  },
+  town: { buildingCount: { min: 11, max: 16 }, radius: 60, safeZoneRadius: 80 },
 };
+
+const DEFAULT_BIOME_SUITABILITY: Record<string, number> = {
+  plains: 1.0,
+  valley: 0.95,
+  forest: 0.7,
+  tundra: 0.4,
+  desert: 0.3,
+  swamp: 0.2,
+  mountains: 0.15,
+  lakes: 0.0,
+};
+
+interface TownSizeConfig {
+  buildingCount: { min: number; max: number };
+  radius: number;
+  safeZoneRadius: number;
+}
+
+/** Town configuration loaded from world-config.json (exported for testing) */
+export interface TownConfig {
+  townCount: number;
+  worldSize: number;
+  minTownSpacing: number;
+  flatnessSampleRadius: number;
+  flatnessSampleCount: number;
+  waterThreshold: number;
+  optimalWaterDistanceMin: number;
+  optimalWaterDistanceMax: number;
+  townSizes: Record<TownSize, TownSizeConfig>;
+  biomeSuitability: Record<string, number>;
+}
+
+/** Load town configuration from DataManager (exported for testing) */
+export function loadTownConfig(): TownConfig {
+  const manifest = DataManager.getWorldConfig()?.towns;
+  const sizes = { ...DEFAULT_TOWN_SIZES };
+  const suitability = { ...DEFAULT_BIOME_SUITABILITY };
+
+  if (manifest?.townSizes) {
+    for (const key of ["hamlet", "village", "town"] as const) {
+      const src = manifest.townSizes[key];
+      if (src) {
+        sizes[key] = {
+          buildingCount: { min: src.minBuildings, max: src.maxBuildings },
+          radius: src.radius,
+          safeZoneRadius: src.safeZoneRadius,
+        };
+      }
+    }
+  }
+
+  if (manifest?.biomeSuitability) {
+    Object.assign(suitability, manifest.biomeSuitability);
+  }
+
+  return {
+    townCount: manifest?.townCount ?? DEFAULTS.townCount,
+    worldSize: DEFAULTS.worldSize,
+    minTownSpacing: manifest?.minTownSpacing ?? DEFAULTS.minTownSpacing,
+    flatnessSampleRadius:
+      manifest?.flatnessSampleRadius ?? DEFAULTS.flatnessSampleRadius,
+    flatnessSampleCount:
+      manifest?.flatnessSampleCount ?? DEFAULTS.flatnessSampleCount,
+    waterThreshold: manifest?.waterThreshold ?? DEFAULTS.waterThreshold,
+    optimalWaterDistanceMin:
+      manifest?.optimalWaterDistanceMin ?? DEFAULTS.optimalWaterDistanceMin,
+    optimalWaterDistanceMax:
+      manifest?.optimalWaterDistanceMax ?? DEFAULTS.optimalWaterDistanceMax,
+    townSizes: sizes,
+    biomeSuitability: suitability,
+  };
+}
+
+const dist2D = (x1: number, z1: number, x2: number, z2: number): number =>
+  Math.sqrt((x2 - x1) ** 2 + (z2 - z1) ** 2);
 
 const BUILDING_CONFIG: Record<
   TownBuildingType,
@@ -128,17 +183,6 @@ const NAME_SUFFIXES = [
   "crest",
 ];
 
-const BIOME_SUITABILITY: Record<string, number> = {
-  plains: 1.0,
-  valley: 0.95,
-  forest: 0.7,
-  tundra: 0.4,
-  desert: 0.3,
-  swamp: 0.2,
-  mountains: 0.15,
-  lakes: 0.0,
-};
-
 interface TownCandidate {
   x: number;
   z: number;
@@ -154,6 +198,7 @@ export class TownSystem extends System {
   private noise!: NoiseGenerator;
   private seed: number = 0;
   private randomState: number = 0;
+  private config!: TownConfig;
   private terrainSystem?: {
     getHeightAt(x: number, z: number): number;
     getBiomeAtWorldPosition?(x: number, z: number): string;
@@ -164,10 +209,7 @@ export class TownSystem extends System {
   }
 
   getDependencies() {
-    return {
-      required: ["terrain"],
-      optional: [],
-    };
+    return { required: ["terrain"], optional: [] };
   }
 
   async init(): Promise<void> {
@@ -176,6 +218,7 @@ export class TownSystem extends System {
     this.seed = worldConfig?.terrainSeed ?? 0;
     this.randomState = this.seed;
     this.noise = new NoiseGenerator(this.seed);
+    this.config = loadTownConfig();
     this.terrainSystem = this.world.getSystem("terrain") as
       | {
           getHeightAt(x: number, z: number): number;
@@ -183,67 +226,12 @@ export class TownSystem extends System {
         }
       | undefined;
 
-    // Load configuration from world-config.json if available
-    const configManifest = DataManager.getWorldConfig();
-    if (configManifest?.towns) {
-      const tc = configManifest.towns;
-      TOWN_COUNT = tc.townCount ?? DEFAULT_TOWN_COUNT;
-      MIN_TOWN_SPACING = tc.minTownSpacing ?? DEFAULT_MIN_TOWN_SPACING;
-      FLATNESS_SAMPLE_RADIUS =
-        tc.flatnessSampleRadius ?? DEFAULT_FLATNESS_SAMPLE_RADIUS;
-      FLATNESS_SAMPLE_COUNT =
-        tc.flatnessSampleCount ?? DEFAULT_FLATNESS_SAMPLE_COUNT;
-      WATER_THRESHOLD = tc.waterThreshold ?? DEFAULT_WATER_THRESHOLD;
-      OPTIMAL_WATER_DISTANCE_MIN =
-        tc.optimalWaterDistanceMin ?? DEFAULT_OPTIMAL_WATER_DISTANCE_MIN;
-      OPTIMAL_WATER_DISTANCE_MAX =
-        tc.optimalWaterDistanceMax ?? DEFAULT_OPTIMAL_WATER_DISTANCE_MAX;
-
-      // Update town size config if provided
-      if (tc.townSizes) {
-        if (tc.townSizes.hamlet) {
-          TOWN_SIZE_CONFIG.hamlet = {
-            buildingCount: {
-              min: tc.townSizes.hamlet.minBuildings,
-              max: tc.townSizes.hamlet.maxBuildings,
-            },
-            radius: tc.townSizes.hamlet.radius,
-            safeZoneRadius: tc.townSizes.hamlet.safeZoneRadius,
-          };
-        }
-        if (tc.townSizes.village) {
-          TOWN_SIZE_CONFIG.village = {
-            buildingCount: {
-              min: tc.townSizes.village.minBuildings,
-              max: tc.townSizes.village.maxBuildings,
-            },
-            radius: tc.townSizes.village.radius,
-            safeZoneRadius: tc.townSizes.village.safeZoneRadius,
-          };
-        }
-        if (tc.townSizes.town) {
-          TOWN_SIZE_CONFIG.town = {
-            buildingCount: {
-              min: tc.townSizes.town.minBuildings,
-              max: tc.townSizes.town.maxBuildings,
-            },
-            radius: tc.townSizes.town.radius,
-            safeZoneRadius: tc.townSizes.town.safeZoneRadius,
-          };
-        }
-      }
-
-      // Update biome suitability if provided
-      if (tc.biomeSuitability) {
-        Object.assign(BIOME_SUITABILITY, tc.biomeSuitability);
-      }
-
+    if (DataManager.getWorldConfig()?.towns) {
       Logger.system(
         "TownSystem",
-        `Loaded config: ${TOWN_COUNT} towns, ${MIN_TOWN_SPACING}m spacing`,
+        `Config: ${this.config.townCount} towns, ${this.config.minTownSpacing}m spacing`,
       );
     }
-
     this.initialized = true;
   }
 
@@ -258,10 +246,10 @@ export class TownSystem extends System {
       throw new Error("Town generation failed - no valid locations");
     }
 
-    if (this.towns.length < TOWN_COUNT) {
+    if (this.towns.length < this.config.townCount) {
       Logger.systemWarn(
         "TownSystem",
-        `Only ${this.towns.length}/${TOWN_COUNT} towns generated`,
+        `Only ${this.towns.length}/${this.config.townCount} towns generated`,
       );
     }
 
@@ -291,13 +279,14 @@ export class TownSystem extends System {
   private calculateFlatness(centerX: number, centerZ: number): number {
     if (!this.terrainSystem) throw new Error("terrainSystem required");
 
+    const { flatnessSampleCount, flatnessSampleRadius } = this.config;
     const heights: number[] = [];
-    const angleStep = (Math.PI * 2) / FLATNESS_SAMPLE_COUNT;
+    const angleStep = (Math.PI * 2) / flatnessSampleCount;
 
-    for (let i = 0; i < FLATNESS_SAMPLE_COUNT; i++) {
+    for (let i = 0; i < flatnessSampleCount; i++) {
       const angle = i * angleStep;
-      const sampleX = centerX + Math.cos(angle) * FLATNESS_SAMPLE_RADIUS;
-      const sampleZ = centerZ + Math.sin(angle) * FLATNESS_SAMPLE_RADIUS;
+      const sampleX = centerX + Math.cos(angle) * flatnessSampleRadius;
+      const sampleZ = centerZ + Math.sin(angle) * flatnessSampleRadius;
       heights.push(this.terrainSystem.getHeightAt(sampleX, sampleZ));
     }
     heights.push(this.terrainSystem.getHeightAt(centerX, centerZ));
@@ -305,7 +294,6 @@ export class TownSystem extends System {
     const mean = heights.reduce((a, b) => a + b, 0) / heights.length;
     const variance =
       heights.reduce((sum, h) => sum + (h - mean) ** 2, 0) / heights.length;
-
     return Math.exp(-variance / 25);
   }
 
@@ -313,29 +301,22 @@ export class TownSystem extends System {
   private calculateWaterProximity(centerX: number, centerZ: number): number {
     if (!this.terrainSystem) throw new Error("terrainSystem required");
 
+    const { waterThreshold, optimalWaterDistanceMin, optimalWaterDistanceMax } =
+      this.config;
     const centerHeight = this.terrainSystem.getHeightAt(centerX, centerZ);
-    if (centerHeight < WATER_THRESHOLD) return 0;
+    if (centerHeight < waterThreshold) return 0;
 
     let minWaterDistance = Infinity;
-    const sampleDirections = 8;
-    const maxSearchDistance = 300;
-    const searchStep = 20;
-
-    for (let dir = 0; dir < sampleDirections; dir++) {
-      const angle = (dir / sampleDirections) * Math.PI * 2;
+    for (let dir = 0; dir < 8; dir++) {
+      const angle = (dir / 8) * Math.PI * 2;
       const dx = Math.cos(angle);
       const dz = Math.sin(angle);
-
-      for (
-        let distance = searchStep;
-        distance <= maxSearchDistance;
-        distance += searchStep
-      ) {
+      for (let distance = 20; distance <= 300; distance += 20) {
         const height = this.terrainSystem.getHeightAt(
           centerX + dx * distance,
           centerZ + dz * distance,
         );
-        if (height < WATER_THRESHOLD) {
+        if (height < waterThreshold) {
           minWaterDistance = Math.min(minWaterDistance, distance);
           break;
         }
@@ -344,15 +325,15 @@ export class TownSystem extends System {
 
     if (minWaterDistance === Infinity) return 0.5;
     if (
-      minWaterDistance >= OPTIMAL_WATER_DISTANCE_MIN &&
-      minWaterDistance <= OPTIMAL_WATER_DISTANCE_MAX
+      minWaterDistance >= optimalWaterDistanceMin &&
+      minWaterDistance <= optimalWaterDistanceMax
     )
       return 1.0;
-    if (minWaterDistance < OPTIMAL_WATER_DISTANCE_MIN)
-      return minWaterDistance / OPTIMAL_WATER_DISTANCE_MIN;
+    if (minWaterDistance < optimalWaterDistanceMin)
+      return minWaterDistance / optimalWaterDistanceMin;
     return Math.max(
       0.3,
-      1.0 - (minWaterDistance - OPTIMAL_WATER_DISTANCE_MAX) / 500,
+      1.0 - (minWaterDistance - optimalWaterDistanceMax) / 500,
     );
   }
 
@@ -372,27 +353,27 @@ export class TownSystem extends System {
     z: number,
     existingTowns: TownCandidate[],
   ): boolean {
+    const minSpacing = this.config.minTownSpacing;
     return existingTowns.some(
-      (town) => dist2D(x, z, town.x, town.z) < MIN_TOWN_SPACING,
+      (town) => dist2D(x, z, town.x, town.z) < minSpacing,
     );
   }
 
   private generateTownCandidates(): TownCandidate[] {
-    const candidates: TownCandidate[] = [];
-    const halfWorld = WORLD_SIZE / 2;
-    this.resetRandom(this.seed + 12345);
-
+    const { worldSize, biomeSuitability } = this.config;
+    const halfWorld = worldSize / 2;
     const gridSize = 15;
-    const cellSize = WORLD_SIZE / gridSize;
+    const cellSize = worldSize / gridSize;
+    const candidates: TownCandidate[] = [];
+
+    this.resetRandom(this.seed + 12345);
 
     for (let gx = 0; gx < gridSize; gx++) {
       for (let gz = 0; gz < gridSize; gz++) {
         const baseX = (gx + 0.5) * cellSize - halfWorld;
         const baseZ = (gz + 0.5) * cellSize - halfWorld;
-        const jitterX = (this.random() - 0.5) * cellSize * 0.8;
-        const jitterZ = (this.random() - 0.5) * cellSize * 0.8;
-        const x = baseX + jitterX;
-        const z = baseZ + jitterZ;
+        const x = baseX + (this.random() - 0.5) * cellSize * 0.8;
+        const z = baseZ + (this.random() - 0.5) * cellSize * 0.8;
 
         if (Math.abs(x) > halfWorld - 200 || Math.abs(z) > halfWorld - 200)
           continue;
@@ -400,7 +381,7 @@ export class TownSystem extends System {
         const flatnessScore = this.calculateFlatness(x, z);
         const waterProximityScore = this.calculateWaterProximity(x, z);
         const biome = this.getBiomeAt(x, z);
-        const biomeScore = BIOME_SUITABILITY[biome] ?? 0.3;
+        const biomeScore = biomeSuitability[biome] ?? 0.3;
 
         if (waterProximityScore === 0 || biomeScore < 0.1) continue;
 
@@ -431,7 +412,7 @@ export class TownSystem extends System {
     const selectedTowns: TownCandidate[] = [];
 
     for (const candidate of sorted) {
-      if (selectedTowns.length >= TOWN_COUNT) break;
+      if (selectedTowns.length >= this.config.townCount) break;
       if (
         !this.isTooCloseToExistingTowns(candidate.x, candidate.z, selectedTowns)
       ) {
@@ -457,15 +438,11 @@ export class TownSystem extends System {
     townIndex: number,
   ): TownBuilding[] {
     const buildings: TownBuilding[] = [];
-    const config = TOWN_SIZE_CONFIG[town.size];
+    const sizeConfig = this.config.townSizes[town.size];
     this.resetRandom(this.seed + townIndex * 9973 + 100000);
 
-    const buildingCount =
-      config.buildingCount.min +
-      Math.floor(
-        this.random() *
-          (config.buildingCount.max - config.buildingCount.min + 1),
-      );
+    const { min, max } = sizeConfig.buildingCount;
+    const buildingCount = min + Math.floor(this.random() * (max - min + 1));
 
     const buildingTypes: TownBuildingType[] = ["bank", "store", "anvil"];
     if (town.size !== "hamlet") buildingTypes.push("well");
@@ -481,7 +458,7 @@ export class TownSystem extends System {
       for (let attempts = 0; attempts < 50 && !placed; attempts++) {
         const angle = this.random() * Math.PI * 2;
         const minRadius = i === 0 ? 0 : 8;
-        const maxRadius = config.radius - buildingConfig.width;
+        const maxRadius = sizeConfig.radius - buildingConfig.width;
         const radius = minRadius + this.random() * (maxRadius - minRadius);
 
         const buildingX = town.position.x + Math.cos(angle) * radius;
@@ -552,14 +529,14 @@ export class TownSystem extends System {
       const location = selectedLocations[i];
       const centerY = this.terrainSystem!.getHeightAt(location.x, location.z);
       const townSize = this.determineTownSize(location.totalScore, i);
-      const config = TOWN_SIZE_CONFIG[townSize];
+      const sizeConfig = this.config.townSizes[townSize];
 
       const town: ProceduralTown = {
         id: `town_${i}`,
         name: this.generateTownName(i),
         position: { x: location.x, y: centerY, z: location.z },
         size: townSize,
-        safeZoneRadius: config.safeZoneRadius,
+        safeZoneRadius: sizeConfig.safeZoneRadius,
         biome: location.biome,
         buildings: [],
         suitabilityScore: location.totalScore,
