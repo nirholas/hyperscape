@@ -1,8 +1,8 @@
 /**
- * FriendsPanel - Social/friends panel using design tokens
+ * FriendsPanel - Social/friends panel using theme tokens
  *
- * Clean design with proper separations matching other panels.
- * Uses COLORS and panelStyles from constants for consistency.
+ * Clean, compact design matching Quest Log and Inventory panels.
+ * Uses theme.colors.slot for consistent slot-based styling.
  */
 
 import React, { useState, useCallback, useMemo, useEffect } from "react";
@@ -15,13 +15,8 @@ import {
   Search,
   Bell,
 } from "lucide-react";
-import {
-  COLORS,
-  spacing,
-  panelStyles,
-  typography,
-  breakpoints,
-} from "../../constants";
+import { useThemeStore } from "@/ui";
+import { breakpoints } from "../../constants";
 import type { ClientWorld } from "../../types";
 
 interface FriendsPanelProps {
@@ -51,20 +46,25 @@ interface FriendRequest {
   timestamp: number;
 }
 
-// Status colors matching COLORS constant
-const STATUS_COLORS: Record<FriendStatus, string> = {
-  online: COLORS.SUCCESS,
-  away: COLORS.WARNING,
-  busy: COLORS.ERROR,
-  offline: COLORS.TEXT_MUTED,
-};
+// Status colors - will use theme colors
+const getStatusColors = (
+  theme: ReturnType<typeof useThemeStore>["theme"],
+): Record<FriendStatus, string> => ({
+  online: theme.colors.state.success,
+  away: theme.colors.state.warning,
+  busy: theme.colors.state.danger,
+  offline: theme.colors.text.muted,
+});
 
 /**
  * FriendsPanel Component
  *
- * Social panel using design tokens for consistent styling.
+ * Social panel using theme tokens for consistent styling with other panels.
  */
 export function FriendsPanel({ world }: FriendsPanelProps) {
+  const theme = useThemeStore((s) => s.theme);
+  const STATUS_COLORS = getStatusColors(theme);
+
   const [activeView, setActiveView] = useState<"friends" | "requests">(
     "friends",
   );
@@ -177,75 +177,72 @@ export function FriendsPanel({ world }: FriendsPanelProps) {
     }
   }, [world, addFriendName]);
 
-  // === Styling using COLORS constants (mobile responsive) ===
+  // === Styling using theme tokens (matching Quest Log and Inventory) ===
 
   const containerStyle: React.CSSProperties = {
     display: "flex",
     flexDirection: "column",
     height: "100%",
-    background: panelStyles.container.background,
+    background: "transparent",
   };
 
-  // Header - responsive padding
+  // Header - compact like other panels
   const headerRowStyle: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: isMobile
-      ? `${spacing.xs} ${spacing.sm}`
-      : `${spacing.sm} ${spacing.md}`,
-    background: COLORS.BG_TERTIARY,
-    borderBottom: `1px solid ${COLORS.BORDER_PRIMARY}`,
-    minHeight: isMobile ? "40px" : "44px",
+    padding: isMobile ? "4px 8px" : "4px 6px",
+    background: theme.colors.slot.filled,
+    borderBottom: `1px solid ${theme.colors.border.default}30`,
+    minHeight: isMobile ? "28px" : "26px",
   };
 
   const headerTitleStyle: React.CSSProperties = {
-    color: COLORS.ACCENT,
-    fontSize: isMobile ? typography.fontSize.xs : typography.fontSize.sm,
-    fontWeight: typography.fontWeight.semibold,
+    color: theme.colors.text.primary,
+    fontSize: isMobile ? "11px" : "10px",
+    fontWeight: 600,
   };
 
   const headerActionsStyle: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
-    gap: isMobile ? spacing["2xs"] : spacing.xs,
+    gap: "2px",
   };
 
-  // Responsive icon button sizes for touch targets
-  const iconButtonSize = isMobile ? "36px" : "28px";
+  // Compact icon button sizes
+  const iconButtonSize = isMobile ? "24px" : "20px";
   const iconButtonStyle: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     width: iconButtonSize,
     height: iconButtonSize,
-    backgroundColor: "transparent",
-    border: "none",
-    borderRadius: "2px",
-    color: COLORS.TEXT_MUTED,
+    backgroundColor: theme.colors.slot.filled,
+    border: `1px solid ${theme.colors.border.default}30`,
+    borderRadius: "3px",
+    color: theme.colors.text.muted,
     cursor: "pointer",
     padding: 0,
     position: "relative",
-    transition: "all 0.15s ease",
+    transition: "all 0.1s ease",
   };
 
   const activeIconButtonStyle: React.CSSProperties = {
     ...iconButtonStyle,
-    color: COLORS.ACCENT,
-    backgroundColor: COLORS.SELECTION,
+    color: theme.colors.accent.primary,
+    backgroundColor: `${theme.colors.accent.primary}20`,
+    borderColor: `${theme.colors.accent.primary}40`,
   };
 
-  // Search row - responsive
+  // Search row - compact
   const searchRowStyle: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
-    gap: isMobile ? spacing.xs : spacing.sm,
-    padding: isMobile
-      ? `${spacing.xs} ${spacing.sm}`
-      : `${spacing.sm} ${spacing.md}`,
-    borderBottom: `1px solid ${COLORS.BORDER_SECONDARY}`,
-    backgroundColor: COLORS.BG_OVERLAY,
-    minHeight: isMobile ? "40px" : "36px",
+    gap: "6px",
+    padding: isMobile ? "4px 8px" : "3px 6px",
+    borderBottom: `1px solid ${theme.colors.border.default}30`,
+    backgroundColor: theme.colors.slot.empty,
+    minHeight: isMobile ? "28px" : "24px",
   };
 
   const searchInputStyle: React.CSSProperties = {
@@ -253,35 +250,32 @@ export function FriendsPanel({ world }: FriendsPanelProps) {
     background: "none",
     border: "none",
     outline: "none",
-    color: COLORS.TEXT_PRIMARY,
-    fontSize: isMobile ? typography.fontSize.base : typography.fontSize.sm,
+    color: theme.colors.text.primary,
+    fontSize: isMobile ? "11px" : "10px",
   };
 
   // Content list
   const listStyle: React.CSSProperties = {
     flex: 1,
     overflowY: "auto",
-    WebkitOverflowScrolling: "touch", // Smooth scrolling on iOS
+    WebkitOverflowScrolling: "touch",
   };
 
-  // Friend row - responsive with larger touch targets on mobile
+  // Friend row - compact with hover state
   const getFriendRowStyle = (isHovered: boolean): React.CSSProperties => ({
     display: "flex",
     alignItems: "center",
-    padding: isMobile
-      ? `${spacing.sm} ${spacing.sm}`
-      : `${spacing.sm} ${spacing.md}`,
-    borderBottom: `1px solid ${COLORS.BORDER_SECONDARY}`,
-    gap: isMobile ? spacing.xs : spacing.sm,
-    backgroundColor: isHovered ? COLORS.HOVER : "transparent",
+    padding: isMobile ? "6px 8px" : "4px 8px",
+    gap: "8px",
+    backgroundColor: isHovered ? theme.colors.slot.hover : "transparent",
     cursor: "pointer",
-    transition: "background-color 0.15s ease",
-    minHeight: isMobile ? "48px" : "40px", // Touch-friendly on mobile
+    transition: "background-color 0.1s ease",
+    minHeight: isMobile ? "36px" : "28px",
   });
 
   const statusDotStyle = (status: FriendStatus): React.CSSProperties => ({
-    width: isMobile ? "10px" : "8px",
-    height: isMobile ? "10px" : "8px",
+    width: isMobile ? "8px" : "6px",
+    height: isMobile ? "8px" : "6px",
     borderRadius: "50%",
     backgroundColor: STATUS_COLORS[status],
     flexShrink: 0,
@@ -293,25 +287,24 @@ export function FriendsPanel({ world }: FriendsPanelProps) {
   };
 
   const friendNameStyle: React.CSSProperties = {
-    color: COLORS.TEXT_PRIMARY,
-    fontSize: isMobile ? typography.fontSize.base : typography.fontSize.sm,
-    fontWeight: typography.fontWeight.medium,
-    marginBottom: "2px",
+    color: theme.colors.text.primary,
+    fontSize: isMobile ? "12px" : "11px",
+    fontWeight: 500,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
   };
 
   const friendMetaStyle: React.CSSProperties = {
-    color: COLORS.TEXT_MUTED,
-    fontSize: isMobile ? typography.fontSize.sm : typography.fontSize.xs,
+    color: theme.colors.text.muted,
+    fontSize: isMobile ? "10px" : "9px",
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
   };
 
-  // Action buttons - larger on mobile for touch
-  const actionButtonSize = isMobile ? "36px" : "24px";
+  // Action buttons - compact
+  const actionButtonSize = isMobile ? "24px" : "18px";
   const actionButtonStyle: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
@@ -321,20 +314,20 @@ export function FriendsPanel({ world }: FriendsPanelProps) {
     backgroundColor: "transparent",
     border: "none",
     borderRadius: "2px",
-    color: COLORS.TEXT_MUTED,
+    color: theme.colors.text.muted,
     cursor: "pointer",
     padding: 0,
-    transition: "color 0.15s ease",
+    transition: "color 0.1s ease",
   };
 
   const acceptButtonStyle: React.CSSProperties = {
     ...actionButtonStyle,
-    color: COLORS.SUCCESS,
+    color: theme.colors.state.success,
   };
 
   const declineButtonStyle: React.CSSProperties = {
     ...actionButtonStyle,
-    color: COLORS.ERROR,
+    color: theme.colors.state.danger,
   };
 
   const emptyStyle: React.CSSProperties = {
@@ -343,45 +336,41 @@ export function FriendsPanel({ world }: FriendsPanelProps) {
     alignItems: "center",
     justifyContent: "center",
     textAlign: "center",
-    color: COLORS.TEXT_MUTED,
-    padding: isMobile
-      ? `${spacing.lg} ${spacing.sm}`
-      : `${spacing.xl} ${spacing.md}`,
-    fontSize: isMobile ? typography.fontSize.base : typography.fontSize.sm,
+    color: theme.colors.text.muted,
+    padding: isMobile ? "24px 8px" : "20px 8px",
+    fontSize: isMobile ? "11px" : "10px",
     flex: 1,
   };
 
-  // Add friend input area - responsive
+  // Add friend input area - compact
   const addInputRowStyle: React.CSSProperties = {
     display: "flex",
-    gap: spacing.xs,
-    padding: isMobile
-      ? `${spacing.xs} ${spacing.sm}`
-      : `${spacing.sm} ${spacing.md}`,
-    borderBottom: `1px solid ${COLORS.BORDER_SECONDARY}`,
-    backgroundColor: COLORS.BG_OVERLAY,
+    gap: "4px",
+    padding: isMobile ? "4px 8px" : "3px 6px",
+    borderBottom: `1px solid ${theme.colors.border.default}30`,
+    backgroundColor: theme.colors.slot.empty,
   };
 
   const addInputStyle: React.CSSProperties = {
-    ...panelStyles.input,
     flex: 1,
-    padding: isMobile
-      ? `${spacing.sm} ${spacing.sm}`
-      : `${spacing.xs} ${spacing.sm}`,
-    color: COLORS.TEXT_PRIMARY,
-    fontSize: isMobile ? typography.fontSize.base : typography.fontSize.sm,
+    padding: isMobile ? "4px 6px" : "3px 6px",
+    background: theme.colors.slot.filled,
+    border: `1px solid ${theme.colors.border.default}30`,
+    borderRadius: "3px",
+    color: theme.colors.text.primary,
+    fontSize: isMobile ? "11px" : "10px",
     outline: "none",
   };
 
   // Request badge
   const badgeStyle: React.CSSProperties = {
     position: "absolute",
-    top: isMobile ? "4px" : "2px",
-    right: isMobile ? "4px" : "2px",
-    width: isMobile ? "10px" : "8px",
-    height: isMobile ? "10px" : "8px",
+    top: "1px",
+    right: "1px",
+    width: "6px",
+    height: "6px",
     borderRadius: "50%",
-    backgroundColor: COLORS.ERROR,
+    backgroundColor: theme.colors.state.danger,
   };
 
   return (
@@ -401,7 +390,7 @@ export function FriendsPanel({ world }: FriendsPanelProps) {
             }}
             title="Search"
           >
-            <Search size={isMobile ? 20 : 16} />
+            <Search size={isMobile ? 14 : 12} />
           </button>
           {/* Requests toggle */}
           <button
@@ -415,7 +404,7 @@ export function FriendsPanel({ world }: FriendsPanelProps) {
             }
             title="Friend Requests"
           >
-            <Bell size={isMobile ? 20 : 16} />
+            <Bell size={isMobile ? 14 : 12} />
             {requests.length > 0 && <div style={badgeStyle} />}
           </button>
           {/* Add friend */}
@@ -424,7 +413,7 @@ export function FriendsPanel({ world }: FriendsPanelProps) {
             onClick={() => setShowAddFriend(!showAddFriend)}
             title="Add Friend"
           >
-            <UserPlus size={isMobile ? 20 : 16} />
+            <UserPlus size={isMobile ? 14 : 12} />
           </button>
         </div>
       </div>
@@ -432,7 +421,7 @@ export function FriendsPanel({ world }: FriendsPanelProps) {
       {/* Search row */}
       {showSearch && (
         <div style={searchRowStyle}>
-          <Search size={isMobile ? 18 : 14} color={COLORS.TEXT_MUTED} />
+          <Search size={isMobile ? 12 : 10} color={theme.colors.text.muted} />
           <input
             type="text"
             placeholder="Search friends..."
@@ -443,7 +432,7 @@ export function FriendsPanel({ world }: FriendsPanelProps) {
           />
           {searchText && (
             <button style={actionButtonStyle} onClick={() => setSearchText("")}>
-              <X size={isMobile ? 18 : 14} />
+              <X size={isMobile ? 12 : 10} />
             </button>
           )}
         </div>
@@ -466,7 +455,7 @@ export function FriendsPanel({ world }: FriendsPanelProps) {
             onClick={handleAddFriend}
             title="Add"
           >
-            <Check size={isMobile ? 20 : 16} />
+            <Check size={isMobile ? 14 : 12} />
           </button>
           <button
             style={declineButtonStyle}
@@ -476,7 +465,7 @@ export function FriendsPanel({ world }: FriendsPanelProps) {
             }}
             title="Cancel"
           >
-            <X size={isMobile ? 20 : 16} />
+            <X size={isMobile ? 14 : 12} />
           </button>
         </div>
       )}
@@ -488,9 +477,9 @@ export function FriendsPanel({ world }: FriendsPanelProps) {
             {sortedFriends.length === 0 ? (
               <div style={emptyStyle}>
                 <Users
-                  size={isMobile ? 48 : 40}
-                  color={COLORS.TEXT_MUTED}
-                  style={{ opacity: 0.3, marginBottom: spacing.sm }}
+                  size={isMobile ? 32 : 28}
+                  color={theme.colors.text.muted}
+                  style={{ opacity: 0.3, marginBottom: "8px" }}
                 />
                 <div>
                   {searchText
@@ -534,7 +523,7 @@ export function FriendsPanel({ world }: FriendsPanelProps) {
                           }}
                           title="Message"
                         >
-                          <MessageCircle size={isMobile ? 18 : 14} />
+                          <MessageCircle size={isMobile ? 12 : 10} />
                         </button>
                       )}
                       <button
@@ -545,7 +534,7 @@ export function FriendsPanel({ world }: FriendsPanelProps) {
                         }}
                         title="Remove"
                       >
-                        <X size={isMobile ? 18 : 14} />
+                        <X size={isMobile ? 12 : 10} />
                       </button>
                     </>
                   )}
@@ -560,9 +549,9 @@ export function FriendsPanel({ world }: FriendsPanelProps) {
             {requests.length === 0 ? (
               <div style={emptyStyle}>
                 <Bell
-                  size={isMobile ? 48 : 40}
-                  color={COLORS.TEXT_MUTED}
-                  style={{ opacity: 0.3, marginBottom: spacing.sm }}
+                  size={isMobile ? 32 : 28}
+                  color={theme.colors.text.muted}
+                  style={{ opacity: 0.3, marginBottom: "8px" }}
                 />
                 <div>No pending requests</div>
               </div>
@@ -588,14 +577,14 @@ export function FriendsPanel({ world }: FriendsPanelProps) {
                     onClick={() => handleAcceptRequest(request)}
                     title="Accept"
                   >
-                    <Check size={isMobile ? 20 : 16} />
+                    <Check size={isMobile ? 14 : 12} />
                   </button>
                   <button
                     style={declineButtonStyle}
                     onClick={() => handleDeclineRequest(request)}
                     title="Decline"
                   >
-                    <X size={isMobile ? 20 : 16} />
+                    <X size={isMobile ? 14 : 12} />
                   </button>
                 </div>
               ))

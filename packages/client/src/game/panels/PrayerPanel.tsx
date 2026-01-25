@@ -37,17 +37,17 @@ import {
   prayerDataProvider,
 } from "@hyperscape/shared";
 
-// Prayer panel layout constants
-const PRAYER_ICON_SIZE = 36;
-const PRAYER_GAP = 3;
-const PANEL_PADDING = 6;
-const GRID_PADDING = 4;
-const HEADER_HEIGHT = 60; // Prayer points header + bar
-const FOOTER_HEIGHT = 40; // Active prayers footer
+// Prayer panel layout constants - compact sizing
+const PRAYER_ICON_SIZE = 36; // Compact icon size
+const PRAYER_GAP = 2; // Tight gap
+const PANEL_PADDING = 3; // Minimal container padding
+const GRID_PADDING = 3; // Minimal grid padding
+const HEADER_HEIGHT = 44; // Compact prayer points header + bar
+const FOOTER_HEIGHT = 28; // Compact active prayers footer
 
 /**
  * Calculate number of columns based on available width
- * Prefers 5 columns (OSRS style) but adapts for narrower windows
+ * Prefers 6 columns by default, adapts for narrower windows
  */
 function calculateColumns(containerWidth: number): number {
   const availableWidth = containerWidth - PANEL_PADDING * 2 - GRID_PADDING * 2;
@@ -55,8 +55,8 @@ function calculateColumns(containerWidth: number): number {
   // Each column needs: icon size + gap (except last column)
   const colWidth = PRAYER_ICON_SIZE + PRAYER_GAP;
   const maxCols = Math.floor((availableWidth + PRAYER_GAP) / colWidth);
-  // Clamp between 2-5 columns
-  return Math.max(2, Math.min(5, maxCols));
+  // Clamp between 2-6 columns
+  return Math.max(2, Math.min(6, maxCols));
 }
 
 /**
@@ -77,7 +77,8 @@ function calculateLayoutDimensions(cols: number, prayerCount: number) {
 // Default prayer count for dimension calculations
 const DEFAULT_PRAYER_COUNT = 30;
 
-// Calculate default dimensions for 5 columns (OSRS style)
+// Calculate default dimensions for various column layouts
+const default6Col = calculateLayoutDimensions(6, DEFAULT_PRAYER_COUNT);
 const default5Col = calculateLayoutDimensions(5, DEFAULT_PRAYER_COUNT);
 const default4Col = calculateLayoutDimensions(4, DEFAULT_PRAYER_COUNT);
 const default3Col = calculateLayoutDimensions(3, DEFAULT_PRAYER_COUNT);
@@ -87,19 +88,20 @@ const default2Col = calculateLayoutDimensions(2, DEFAULT_PRAYER_COUNT);
 export const PRAYER_PANEL_DIMENSIONS = {
   // Minimum size: 2 columns
   minWidth: default2Col.width,
-  minHeight: 220,
-  // Preferred size: 5 columns (OSRS style)
-  defaultWidth: default5Col.width,
-  defaultHeight: default5Col.height,
+  minHeight: 180,
+  // Preferred size: 6 columns (compact layout)
+  defaultWidth: default6Col.width,
+  defaultHeight: default6Col.height,
   // Max size: wider for horizontal layouts
   maxWidth: 400,
-  maxHeight: 500,
+  maxHeight: 450,
   // Layout breakpoints
   layouts: {
     twoCol: default2Col,
     threeCol: default3Col,
     fourCol: default4Col,
     fiveCol: default5Col,
+    sixCol: default6Col,
   },
   // Icon sizing
   iconSize: PRAYER_ICON_SIZE,
@@ -146,8 +148,8 @@ function PrayerIcon({
   const isUnlocked = playerLevel >= prayer.level;
   const isActive = prayer.active;
 
-  // Use mobile or desktop icon size
-  const iconSize = isMobile ? MOBILE_PRAYER.iconSize : 36;
+  // Use mobile or desktop icon size - compact on desktop
+  const iconSize = isMobile ? MOBILE_PRAYER.iconSize : PRAYER_ICON_SIZE;
 
   // Make prayer draggable for action bar
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -174,8 +176,8 @@ function PrayerIcon({
         ? `radial-gradient(ellipse at center, ${theme.colors.accent.secondary}4D 0%, ${theme.colors.slot.selected} 70%)`
         : theme.colors.slot.filled,
       border: isActive
-        ? `2px solid ${theme.colors.accent.secondary}B3`
-        : `1px solid ${theme.colors.border.default}`,
+        ? `1px solid ${theme.colors.accent.secondary}B3`
+        : `1px solid ${theme.colors.border.default}40`,
       borderRadius: isMobile ? 4 : 2,
       cursor: isUnlocked ? (isDragging ? "grabbing" : "grab") : "not-allowed",
       display: "flex",
@@ -183,10 +185,10 @@ function PrayerIcon({
       justifyContent: "center",
       position: "relative",
       overflow: "hidden",
-      transition: "all 0.2s ease",
+      transition: "all 0.15s ease",
       boxShadow: isActive
-        ? `0 0 ${isMobile ? 16 : 12}px ${theme.colors.accent.secondary}80, inset 0 0 ${isMobile ? 20 : 15}px ${theme.colors.accent.secondary}33`
-        : "inset 0 1px 3px rgba(0, 0, 0, 0.5)",
+        ? `0 0 ${isMobile ? 12 : 8}px ${theme.colors.accent.secondary}80, inset 0 0 ${isMobile ? 16 : 10}px ${theme.colors.accent.secondary}33`
+        : "inset 0 1px 2px rgba(0, 0, 0, 0.4)",
       opacity: isDragging ? 0.5 : 1,
       touchAction: "none",
     }),
@@ -224,15 +226,15 @@ function PrayerIcon({
       {/* Prayer icon */}
       <span
         style={{
-          // Mobile: larger icon text (24px), Desktop: 18px
-          fontSize: isMobile ? 24 : 18,
+          // Mobile: larger icon text (22px), Desktop: 16px for compact look
+          fontSize: isMobile ? 22 : 16,
           filter: isUnlocked
             ? isActive
-              ? `drop-shadow(0 0 ${isMobile ? 8 : 6}px ${theme.colors.accent.secondary}CC) brightness(1.3)`
+              ? `drop-shadow(0 0 ${isMobile ? 6 : 4}px ${theme.colors.accent.secondary}CC) brightness(1.3)`
               : "none"
             : "grayscale(100%) brightness(0.4)",
           opacity: isUnlocked ? 1 : 0.5,
-          transition: "all 0.2s ease",
+          transition: "all 0.15s ease",
           zIndex: 1,
         }}
       >
@@ -244,9 +246,9 @@ function PrayerIcon({
         <div
           style={{
             position: "absolute",
-            bottom: 2,
-            right: 2,
-            fontSize: 8,
+            bottom: 1,
+            right: 1,
+            fontSize: 7,
             color: theme.colors.state.danger,
             fontWeight: "bold",
           }}
@@ -478,40 +480,40 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
       ref={containerRef}
       className="flex flex-col h-full"
       style={{
-        background: `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
-        padding: PANEL_PADDING,
+        background: "transparent",
+        padding: shouldUseMobileUI ? 4 : 3,
       }}
     >
-      {/* Prayer Points Header */}
+      {/* Prayer Points Header - Compact */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "6px 8px",
-          marginBottom: 6,
-          background: theme.colors.background.overlay,
-          borderRadius: 4,
-          border: `1px solid ${theme.colors.border.default}`,
+          padding: shouldUseMobileUI ? "4px 6px" : "3px 6px",
+          marginBottom: 4,
+          background: theme.colors.slot.filled,
+          borderRadius: 3,
+          border: `1px solid ${theme.colors.border.default}30`,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 20 }}>✨</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: shouldUseMobileUI ? 16 : 14 }}>✨</span>
           <div>
             <div
               style={{
-                fontSize: 10,
+                fontSize: shouldUseMobileUI ? 9 : 8,
                 color: theme.colors.text.muted,
                 textTransform: "uppercase",
-                letterSpacing: 1,
+                letterSpacing: 0.5,
               }}
             >
               Prayer Points
             </div>
             <div
               style={{
-                fontSize: 16,
-                fontWeight: 700,
+                fontSize: shouldUseMobileUI ? 13 : 11,
+                fontWeight: 600,
                 color: theme.colors.status.prayer,
               }}
             >
@@ -525,7 +527,7 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
           <div style={{ textAlign: "right" }}>
             <div
               style={{
-                fontSize: 9,
+                fontSize: 8,
                 color: theme.colors.state.danger,
                 textTransform: "uppercase",
                 opacity: 0.7,
@@ -535,7 +537,7 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
             </div>
             <div
               style={{
-                fontSize: 12,
+                fontSize: 10,
                 color: theme.colors.state.danger,
                 fontWeight: 600,
               }}
@@ -546,15 +548,15 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
         )}
       </div>
 
-      {/* Prayer Points Bar - Mobile: thicker (14px), Desktop: 6px */}
+      {/* Prayer Points Bar - Compact */}
       <div
         style={{
-          height: shouldUseMobileUI ? MOBILE_PRAYER.barHeight : 6,
-          background: theme.colors.status.prayerBackground,
-          borderRadius: shouldUseMobileUI ? 7 : 3,
-          marginBottom: 8,
+          height: shouldUseMobileUI ? 10 : 4,
+          background: theme.colors.slot.empty,
+          borderRadius: shouldUseMobileUI ? 5 : 2,
+          marginBottom: 4,
           overflow: "hidden",
-          border: `1px solid ${theme.colors.border.default}`,
+          border: `1px solid ${theme.colors.border.default}30`,
         }}
       >
         <div
@@ -566,7 +568,7 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
             transition: "width 0.3s ease",
             boxShadow:
               totalDrain > 0
-                ? `0 0 8px ${theme.colors.status.prayer}80`
+                ? `0 0 6px ${theme.colors.status.prayer}80`
                 : "none",
           }}
         />
@@ -585,15 +587,15 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
         <div
           style={{
             display: "grid",
-            // Mobile: larger icons (48px) with more gap, Desktop: standard (36px)
+            // Mobile: larger icons (48px) with more gap, Desktop: compact
             gridTemplateColumns: shouldUseMobileUI
               ? `repeat(${gridColumns}, ${MOBILE_PRAYER.iconSize}px)`
               : `repeat(${gridColumns}, ${PRAYER_ICON_SIZE}px)`,
             gap: shouldUseMobileUI ? MOBILE_PRAYER.gap : PRAYER_GAP,
             padding: GRID_PADDING,
             background: theme.colors.slot.empty,
-            borderRadius: 4,
-            border: `1px solid ${theme.colors.border.default}`,
+            borderRadius: 3,
+            border: `1px solid ${theme.colors.border.default}30`,
             justifyContent: "center",
           }}
         >
@@ -615,20 +617,25 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
         </div>
       </div>
 
-      {/* Quick Prayers Toggle */}
+      {/* Quick Prayers Toggle - Compact */}
       <div
         style={{
-          marginTop: 6,
-          padding: "6px 8px",
-          background: theme.colors.background.overlay,
-          borderRadius: 4,
-          border: `1px solid ${theme.colors.border.default}`,
+          marginTop: 4,
+          padding: shouldUseMobileUI ? "4px 6px" : "3px 6px",
+          background: theme.colors.slot.filled,
+          borderRadius: 3,
+          border: `1px solid ${theme.colors.border.default}30`,
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
         }}
       >
-        <span style={{ fontSize: 10, color: theme.colors.text.muted }}>
+        <span
+          style={{
+            fontSize: shouldUseMobileUI ? 10 : 9,
+            color: theme.colors.text.muted,
+          }}
+        >
           Active: {activePrayers.size} prayer
           {activePrayers.size !== 1 ? "s" : ""}
         </span>
@@ -636,13 +643,13 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
           onClick={deactivateAll}
           className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
           style={{
-            padding: "3px 8px",
-            fontSize: 10,
+            padding: shouldUseMobileUI ? "3px 8px" : "2px 6px",
+            fontSize: shouldUseMobileUI ? 10 : 9,
             background:
               activePrayers.size > 0
-                ? `${theme.colors.state.danger}33`
+                ? `${theme.colors.state.danger}20`
                 : theme.colors.slot.disabled,
-            border: `1px solid ${theme.colors.state.danger}66`,
+            border: `1px solid ${activePrayers.size > 0 ? theme.colors.state.danger : theme.colors.border.default}40`,
             borderRadius: 3,
             color:
               activePrayers.size > 0

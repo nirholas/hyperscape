@@ -145,8 +145,22 @@ function getResponsivePanelSizing(panelId: string, viewport: PanelSize) {
   };
 }
 
+/** Default grid size for snapping (matches editStore default) */
+const DEFAULT_GRID_SIZE = 8;
+
+/**
+ * Snap a value to the grid
+ */
+function snapToGrid(
+  value: number,
+  gridSize: number = DEFAULT_GRID_SIZE,
+): number {
+  return Math.round(value / gridSize) * gridSize;
+}
+
 /**
  * Clamp a position to ensure the window stays within viewport bounds.
+ * Also snaps the position to the grid for consistent alignment.
  */
 function clampPosition(
   x: number,
@@ -156,12 +170,18 @@ function clampPosition(
   viewport: { width: number; height: number },
 ): { x: number; y: number } {
   const minVisiblePx = 50;
+  // First clamp to viewport, then snap to grid
+  const clampedX = Math.max(
+    0,
+    Math.min(x, viewport.width - Math.min(width, minVisiblePx)),
+  );
+  const clampedY = Math.max(
+    0,
+    Math.min(y, viewport.height - Math.min(height, minVisiblePx)),
+  );
   return {
-    x: Math.max(0, Math.min(x, viewport.width - Math.min(width, minVisiblePx))),
-    y: Math.max(
-      0,
-      Math.min(y, viewport.height - Math.min(height, minVisiblePx)),
-    ),
+    x: snapToGrid(clampedX),
+    y: snapToGrid(clampedY),
   };
 }
 
@@ -1082,6 +1102,15 @@ function DesktopInterfaceManager({
             needsUpdate = true;
           }
 
+          // Snap to grid for consistency
+          const snappedX = snapToGrid(newX);
+          const snappedY = snapToGrid(newY);
+          if (snappedX !== newX || snappedY !== newY) {
+            newX = snappedX;
+            newY = snappedY;
+            needsUpdate = true;
+          }
+
           if (needsUpdate) {
             windowStoreUpdate(win.id, {
               position: { x: newX, y: newY },
@@ -1401,8 +1430,10 @@ function DesktopInterfaceManager({
         createWindow({
           id: "menubar-window",
           position: {
-            x: Math.floor(viewport.width / 2 - MENUBAR_DIMENSIONS.width / 2),
-            y: 10,
+            x: snapToGrid(
+              Math.floor(viewport.width / 2 - MENUBAR_DIMENSIONS.width / 2),
+            ),
+            y: snapToGrid(10),
           },
           size: {
             width: MENUBAR_DIMENSIONS.width + MENUBAR_DIMENSIONS.padding * 2,
@@ -1911,16 +1942,18 @@ function DesktopInterfaceManager({
             : { width: 1920, height: 1080 };
         const panelSizing = getResponsivePanelSizing(panelId, viewport);
 
-        // Position new windows with slight offset to avoid stacking
-        const offset = windows.length * 30;
+        // Position new windows with slight offset to avoid stacking (snapped to grid)
+        const offset = snapToGrid(windows.length * 30);
         const newWindowConfig: WindowConfig = {
           id: `panel-${panelId}-${Date.now()}`,
           position: {
-            x: Math.max(
-              20,
-              viewport.width - panelSizing.size.width - 20 - offset,
+            x: snapToGrid(
+              Math.max(
+                20,
+                viewport.width - panelSizing.size.width - 20 - offset,
+              ),
             ),
-            y: Math.max(20, 100 + offset),
+            y: snapToGrid(Math.max(20, 100 + offset)),
           },
           size: panelSizing.size,
           minSize: panelSizing.minSize,
@@ -2325,12 +2358,13 @@ function DesktopInterfaceManager({
                 createWindow({
                   id: `actionbar-${nextId}-window`,
                   position: {
-                    x: 100 + nextId * 50,
-                    y:
+                    x: snapToGrid(100 + nextId * 50),
+                    y: snapToGrid(
                       viewport.height -
-                      actionbarSizing.size.height -
-                      10 -
-                      nextId * 60,
+                        actionbarSizing.size.height -
+                        10 -
+                        nextId * 60,
+                    ),
                   },
                   size: actionbarSizing.size,
                   minSize: actionbarSizing.minSize,

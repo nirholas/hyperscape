@@ -7,6 +7,7 @@ import type {
   TabConfig,
   Size,
 } from "../types";
+import { useEditStore } from "./editStore";
 
 /** Whether to log debug messages (disabled in production) */
 const DEBUG =
@@ -57,8 +58,19 @@ const DEFAULT_WINDOW_CONFIG: Required<Omit<WindowConfig, "id" | "tabs">> & {
 };
 
 /**
+ * Snap a value to the edit mode grid.
+ * Gets grid size from editStore for consistency across all window positioning.
+ */
+function snapToGrid(value: number): number {
+  const gridSize = useEditStore.getState().gridSize;
+  if (gridSize <= 0) return value;
+  return Math.round(value / gridSize) * gridSize;
+}
+
+/**
  * Clamp a window's position to ensure it stays within the viewport.
  * Ensures at least 50px of the window is visible on each edge.
+ * Also snaps the final position to the edit mode grid for consistent alignment.
  */
 function clampToViewport(
   position: { x: number; y: number },
@@ -77,19 +89,20 @@ function clampToViewport(
 
   const minVisiblePx = 50; // At least 50px of window must be visible
 
+  // First clamp to viewport bounds
+  const clampedX = Math.max(
+    minVisiblePx - size.width,
+    Math.min(position.x, viewport.width - minVisiblePx),
+  );
+  const clampedY = Math.max(
+    0, // Don't allow windows above viewport
+    Math.min(position.y, viewport.height - minVisiblePx),
+  );
+
+  // Then snap to grid for consistent alignment
   return {
-    // Ensure window doesn't go too far left (at least minVisiblePx visible on right)
-    // and doesn't go too far right (at least minVisiblePx visible on left)
-    x: Math.max(
-      minVisiblePx - size.width,
-      Math.min(position.x, viewport.width - minVisiblePx),
-    ),
-    // Ensure window doesn't go too far up (at least minVisiblePx visible on bottom)
-    // and doesn't go too far down (at least minVisiblePx visible on top)
-    y: Math.max(
-      0, // Don't allow windows above viewport
-      Math.min(position.y, viewport.height - minVisiblePx),
-    ),
+    x: snapToGrid(clampedX),
+    y: snapToGrid(clampedY),
   };
 }
 
