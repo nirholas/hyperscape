@@ -4,14 +4,15 @@
 
 import type { ClientWorld } from "../../../types";
 
-/** Action bar slot content - can be an item, skill, spell, or prayer */
+/** Action bar slot content - can be an item, skill, spell, prayer, or combat style */
 export interface ActionBarSlotContent {
-  type: "item" | "skill" | "spell" | "prayer" | "empty";
+  type: "item" | "skill" | "spell" | "prayer" | "combatstyle" | "empty";
   id: string;
   itemId?: string;
   skillId?: string;
   spellId?: string;
   prayerId?: string;
+  combatStyleId?: string;
   quantity?: number;
   icon?: string;
   label?: string;
@@ -71,6 +72,11 @@ export interface InventoryDragData {
     name: string;
     icon: string;
     level: number;
+  };
+  combatStyle?: {
+    id: string;
+    label: string;
+    color: string;
   };
 }
 

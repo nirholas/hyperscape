@@ -44,9 +44,12 @@ export const ActionBarSlot = memo(function ActionBarSlot({
   const theme = useTheme();
   const isEmpty = slot.type === "empty";
   const isPrayer = slot.type === "prayer";
+  const isCombatStyle = slot.type === "combatstyle";
   const isItem = slot.type === "item";
   // RS3 behavior: Items are dimmed when not available in inventory
   const isUnavailable = isItem && !isAvailable;
+  // Combat styles and prayers both have active states
+  const hasActiveState = isPrayer || isCombatStyle;
 
   const {
     attributes,
@@ -155,7 +158,7 @@ export const ActionBarSlot = memo(function ActionBarSlot({
       height: slotSize,
       background: isEmpty
         ? theme.colors.background.primary
-        : isPrayer && isActive
+        : hasActiveState && isActive
           ? `radial-gradient(ellipse at center, ${theme.colors.accent.primary}4D 0%, ${theme.colors.background.secondary} 70%)`
           : isOver
             ? `linear-gradient(180deg, ${theme.colors.accent.secondary}33 0%, ${theme.colors.background.primary} 100%)`
@@ -166,7 +169,7 @@ export const ActionBarSlot = memo(function ActionBarSlot({
         ? `1px solid ${theme.colors.border.default}66`
         : isUnavailable
           ? `1px solid ${theme.colors.state.danger}40`
-          : isPrayer && isActive
+          : hasActiveState && isActive
             ? `1px solid ${theme.colors.accent.primary}B3`
             : isOver
               ? `2px solid ${theme.colors.accent.primary}B3`
@@ -187,7 +190,7 @@ export const ActionBarSlot = memo(function ActionBarSlot({
         "transform 0.15s ease, opacity 0.15s ease, background 0.15s ease, border 0.15s ease",
       touchAction: "none",
       boxShadow:
-        isPrayer && isActive
+        hasActiveState && isActive
           ? `0 0 12px ${theme.colors.accent.primary}80, inset 0 0 15px ${theme.colors.accent.primary}33`
           : isOver
             ? `0 0 8px ${theme.colors.accent.primary}66`
@@ -195,7 +198,7 @@ export const ActionBarSlot = memo(function ActionBarSlot({
     }),
     [
       isEmpty,
-      isPrayer,
+      hasActiveState,
       isActive,
       isOver,
       isHovered,

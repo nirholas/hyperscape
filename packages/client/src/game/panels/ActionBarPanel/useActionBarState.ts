@@ -80,6 +80,7 @@ export interface UseActionBarStateResult {
   slots: ActionBarSlotContent[];
   hoveredSlot: number | null;
   activePrayers: Set<string>;
+  activeAttackStyle: string | null;
   isLocked: boolean;
   keyboardShortcuts: string[];
   /** RS3-style: Map of itemId -> quantity in inventory */
@@ -121,6 +122,9 @@ export function useActionBarState({
   );
   const [hoveredSlot, setHoveredSlot] = useState<number | null>(null);
   const [activePrayers, setActivePrayers] = useState<Set<string>>(new Set());
+  const [activeAttackStyle, setActiveAttackStyle] = useState<string | null>(
+    null,
+  );
   const [isLocked, setIsLocked] = useState<boolean>(() => loadLockState(barId));
   // RS3-style: Track inventory items for availability display
   const [inventoryItems, setInventoryItems] = useState<Map<string, number>>(
@@ -223,6 +227,46 @@ export function useActionBarState({
     return () => {
       world.off(EventType.PRAYER_STATE_SYNC, handlePrayerStateSync);
       world.off(EventType.PRAYER_TOGGLED, handlePrayerToggled);
+    };
+  }, [world]);
+
+  // Listen for attack style changes
+  useEffect(() => {
+    if (!world) return;
+
+    const handleAttackStyleUpdate = (payload: unknown) => {
+      const data = payload as { playerId: string; style: string };
+      const localPlayer = world.getPlayer();
+      if (!localPlayer || data.playerId !== localPlayer.id) return;
+      setActiveAttackStyle(data.style);
+    };
+
+    const handleAttackStyleChanged = (payload: unknown) => {
+      const data = payload as { playerId: string; newStyle: string };
+      const localPlayer = world.getPlayer();
+      if (!localPlayer || data.playerId !== localPlayer.id) return;
+      setActiveAttackStyle(data.newStyle);
+    };
+
+    // Initialize from network cache if available
+    const localPlayer = world.getPlayer();
+    if (localPlayer) {
+      const networkCache = world.network as {
+        lastAttackStyleByPlayerId?: Record<string, string>;
+      };
+      const cachedStyle =
+        networkCache?.lastAttackStyleByPlayerId?.[localPlayer.id];
+      if (cachedStyle) {
+        setActiveAttackStyle(cachedStyle);
+      }
+    }
+
+    world.on(EventType.UI_ATTACK_STYLE_UPDATE, handleAttackStyleUpdate);
+    world.on(EventType.UI_ATTACK_STYLE_CHANGED, handleAttackStyleChanged);
+
+    return () => {
+      world.off(EventType.UI_ATTACK_STYLE_UPDATE, handleAttackStyleUpdate);
+      world.off(EventType.UI_ATTACK_STYLE_CHANGED, handleAttackStyleChanged);
     };
   }, [world]);
 
@@ -396,6 +440,21 @@ export function useActionBarState({
             slot.prayerId,
           );
         }
+      } else if (slot.type === "combatstyle" && slot.combatStyleId) {
+        // Change attack style when combat style slot is clicked
+        const player = world.getPlayer();
+        if (!player) return;
+
+        const actions = world.getSystem("actions") as {
+          actionMethods?: {
+            changeAttackStyle?: (playerId: string, style: string) => void;
+          };
+        } | null;
+
+        actions?.actionMethods?.changeAttackStyle?.(
+          player.id,
+          slot.combatStyleId,
+        );
       }
     },
     [world],
@@ -479,6 +538,7 @@ export function useActionBarState({
     slots,
     hoveredSlot,
     activePrayers,
+    activeAttackStyle,
     isLocked,
     keyboardShortcuts,
     inventoryItems,

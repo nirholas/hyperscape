@@ -161,6 +161,25 @@ export function useActionBarDragDrop({
         return;
       }
 
+      // Handle drop from combat style panel
+      if (activeData?.source === "combatstyle" && activeData.combatStyle) {
+        if (targetSlotIndex !== undefined) {
+          const styleData = activeData.combatStyle;
+          const newSlot: ActionBarSlotContent = {
+            type: "combatstyle",
+            id: `combatstyle-${styleData.id}-${Date.now()}`,
+            combatStyleId: styleData.id,
+            label: styleData.label,
+          };
+          setSlots((prev) => {
+            const newSlots = [...prev];
+            newSlots[targetSlotIndex] = newSlot;
+            return newSlots;
+          });
+        }
+        return;
+      }
+
       // Reordering within action bar
       if (activeData?.source === "actionbar" && targetSlotIndex !== undefined) {
         const fromIndex = activeData.slotIndex;

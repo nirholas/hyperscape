@@ -74,6 +74,7 @@ export function ActionBarPanel({
     slots,
     hoveredSlot,
     activePrayers,
+    activeAttackStyle,
     isLocked,
     keyboardShortcuts,
     setSlots,
@@ -228,7 +229,9 @@ export function ActionBarPanel({
                 isActive={
                   slot.type === "prayer" && slot.prayerId
                     ? activePrayers.has(slot.prayerId)
-                    : false
+                    : slot.type === "combatstyle" && slot.combatStyleId
+                      ? activeAttackStyle === slot.combatStyleId
+                      : false
                 }
                 isLocked={isLocked}
                 isAvailable={itemAvailability.available}

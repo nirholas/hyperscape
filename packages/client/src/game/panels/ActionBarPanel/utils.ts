@@ -202,6 +202,17 @@ export function getSlotIcon(slot: ActionBarSlotContent): string {
   }
   if (slot.type === "spell") return "✨";
   if (slot.type === "prayer") return slot.icon || "✨";
+
+  if (slot.type === "combatstyle" && slot.combatStyleId) {
+    // Combat style icons
+    const styleId = slot.combatStyleId.toLowerCase();
+    if (styleId === "accurate") return "🎯";
+    if (styleId === "aggressive") return "⚔️";
+    if (styleId === "defensive") return "🛡️";
+    if (styleId === "controlled") return "⚖️";
+    return "⚔️";
+  }
+
   return "?";
 }
 

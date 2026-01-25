@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
+import { useDraggable } from "@dnd-kit/core";
 import { useThemeStore, useMobileLayout } from "@/ui";
 import { EventType, getAvailableStyles, WeaponType } from "@hyperscape/shared";
 import type {
@@ -156,6 +157,138 @@ const StatIcon = ({
         </svg>
       );
   }
+};
+
+/** Individual combat style info */
+interface CombatStyleInfo {
+  id: string;
+  label: string;
+  xp: string;
+  color: string;
+  bgColor: string;
+}
+
+/** Draggable combat style button component */
+const DraggableCombatStyleButton = ({
+  style: styleInfo,
+  isActive,
+  disabled,
+  isMobile,
+  onClick,
+  themeColors,
+}: {
+  style: CombatStyleInfo;
+  isActive: boolean;
+  disabled: boolean;
+  isMobile: boolean;
+  onClick: () => void;
+  themeColors: {
+    slot: { filled: string };
+    border: { default: string };
+    text: { secondary: string; muted: string };
+  };
+}) => {
+  // Track pointer position to distinguish clicks from drags
+  const pointerStartPosRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Make combat style draggable for action bar
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: `combatstyle-${styleInfo.id}`,
+    data: {
+      combatStyle: {
+        id: styleInfo.id,
+        label: styleInfo.label,
+        color: styleInfo.color,
+      },
+      source: "combatstyle",
+    },
+    disabled,
+  });
+
+  // Wrap drag listeners to track pointer start position for click vs drag detection
+  const wrappedListeners = useMemo(() => {
+    if (!listeners) return {};
+    const originalPointerDown = listeners.onPointerDown;
+    return {
+      ...listeners,
+      onPointerDown: (e: React.PointerEvent) => {
+        pointerStartPosRef.current = { x: e.clientX, y: e.clientY };
+        originalPointerDown?.(e);
+      },
+    };
+  }, [listeners]);
+
+  // Handle pointer up - only trigger click if it wasn't a drag
+  const handlePointerUp = (e: React.PointerEvent) => {
+    if (disabled) return;
+
+    const startPos = pointerStartPosRef.current;
+    if (!startPos) {
+      onClick();
+      return;
+    }
+
+    // Calculate distance moved
+    const dx = e.clientX - startPos.x;
+    const dy = e.clientY - startPos.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    // Only trigger click if we didn't drag (threshold of 8px matches dnd-kit)
+    if (distance < 8) {
+      onClick();
+    }
+
+    pointerStartPosRef.current = null;
+  };
+
+  return (
+    <button
+      ref={setNodeRef}
+      {...attributes}
+      {...wrappedListeners}
+      onPointerUp={handlePointerUp}
+      disabled={disabled}
+      aria-pressed={isActive}
+      className="style-btn focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/50"
+      style={{
+        padding: isMobile ? "6px 4px" : "5px 3px",
+        cursor: disabled ? "not-allowed" : isDragging ? "grabbing" : "grab",
+        transition: "all 0.1s ease",
+        fontSize: isMobile ? "10px" : "9px",
+        fontWeight: isActive ? 600 : 500,
+        background: isActive ? styleInfo.bgColor : themeColors.slot.filled,
+        border: isActive
+          ? `1px solid ${styleInfo.color}50`
+          : `1px solid ${themeColors.border.default}30`,
+        borderRadius: "4px",
+        color: isActive ? styleInfo.color : themeColors.text.secondary,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "2px",
+        touchAction: "manipulation",
+        opacity: disabled ? 0.5 : isDragging ? 0.7 : 1,
+        transform: isDragging ? "scale(1.05)" : "scale(1)",
+      }}
+    >
+      <StyleIcon
+        style={styleInfo.id}
+        size={isMobile ? 14 : 12}
+        color={isActive ? styleInfo.color : themeColors.text.muted}
+      />
+      <span style={{ fontWeight: 600, lineHeight: 1 }}>{styleInfo.label}</span>
+      <span
+        style={{
+          fontSize: isMobile ? "8px" : "7px",
+          opacity: 0.6,
+          color: isActive ? styleInfo.color : themeColors.text.muted,
+        }}
+      >
+        +{styleInfo.xp}
+      </span>
+    </button>
+  );
 };
 
 /** Combat stats row with SVG icons - compact */
@@ -772,7 +905,7 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
         isMobile={shouldUseMobileUI}
       />
 
-      {/* Attack Styles - Compact 2x2 grid */}
+      {/* Attack Styles - Compact 2x2 grid, draggable to action bar */}
       <div
         style={{
           display: "grid",
@@ -780,54 +913,24 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
           gap: shouldUseMobileUI ? "4px" : "3px",
         }}
       >
-        {styles.map((s) => {
-          const isActive = style === s.id;
-          return (
-            <button
-              key={s.id}
-              onClick={() => changeStyle(s.id)}
-              disabled={cooldown > 0}
-              aria-pressed={isActive}
-              className="style-btn focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/50"
-              style={{
-                padding: shouldUseMobileUI ? "6px 4px" : "5px 3px",
-                cursor: cooldown > 0 ? "not-allowed" : "pointer",
-                transition: "all 0.1s ease",
-                fontSize: shouldUseMobileUI ? "10px" : "9px",
-                fontWeight: isActive ? 600 : 500,
-                background: isActive ? s.bgColor : theme.colors.slot.filled,
-                border: isActive
-                  ? `1px solid ${s.color}50`
-                  : `1px solid ${theme.colors.border.default}30`,
-                borderRadius: "4px",
-                color: isActive ? s.color : theme.colors.text.secondary,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "2px",
-                touchAction: "manipulation",
-                opacity: cooldown > 0 ? 0.5 : 1,
-              }}
-            >
-              <StyleIcon
-                style={s.id}
-                size={shouldUseMobileUI ? 14 : 12}
-                color={isActive ? s.color : theme.colors.text.muted}
-              />
-              <span style={{ fontWeight: 600, lineHeight: 1 }}>{s.label}</span>
-              <span
-                style={{
-                  fontSize: shouldUseMobileUI ? "8px" : "7px",
-                  opacity: 0.6,
-                  color: isActive ? s.color : theme.colors.text.muted,
-                }}
-              >
-                +{s.xp}
-              </span>
-            </button>
-          );
-        })}
+        {styles.map((s) => (
+          <DraggableCombatStyleButton
+            key={s.id}
+            style={s}
+            isActive={style === s.id}
+            disabled={cooldown > 0}
+            isMobile={shouldUseMobileUI}
+            onClick={() => changeStyle(s.id)}
+            themeColors={{
+              slot: { filled: theme.colors.slot.filled },
+              border: { default: theme.colors.border.default },
+              text: {
+                secondary: theme.colors.text.secondary,
+                muted: theme.colors.text.muted,
+              },
+            }}
+          />
+        ))}
       </div>
 
       {cooldown > 0 && (
