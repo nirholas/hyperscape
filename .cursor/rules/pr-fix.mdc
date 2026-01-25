@@ -1,0 +1,170 @@
+---
+description: Fix PR issues identified in the review - address suggestions, resolve comments, and prepare PR for merge
+alwaysApply: false
+---
+
+# PR Fix Command
+
+When the user invokes this command, help fix issues identified in a PR review.
+
+## Usage
+
+The user will invoke this after running `/pr-review`:
+- `/pr-fix` - Fix all issues from the last review
+- `/pr-fix <specific issue>` - Fix a specific issue mentioned in the review
+
+## Workflow
+
+### 1. Confirm Context
+
+Check that we have PR review context from a previous `/pr-review` command. If not, ask the user to run `/pr-review` first or provide the PR number.
+
+### 2. Verify Branch
+
+Ensure we're on the correct PR branch:
+
+```bash
+git branch --show-current
+gh pr view --json headRefName --jq '.headRefName'
+```
+
+If not on the PR branch, switch to it:
+
+```bash
+gh pr checkout <PR_NUMBER>
+```
+
+### 3. Categorize Fixes
+
+Organize the fixes by priority:
+
+#### Priority 1: Blockers (Must Fix)
+- Critical bugs
+- Security issues
+- Breaking changes
+- Unresolved review comments that block approval
+
+#### Priority 2: Required Changes
+- Code style violations
+- Missing tests
+- Type safety issues
+- Unaddressed reviewer requests
+
+#### Priority 3: Improvements
+- Performance optimizations
+- Code cleanup suggestions
+- Documentation updates
+
+### 4. Address Issues
+
+For each issue:
+
+1. **Read the relevant files** using the Read tool
+2. **Make the fix** using appropriate edit tools
+3. **Verify the fix** by checking lints and running related tests
+4. **Track progress** using TodoWrite if there are multiple fixes
+
+### 5. Respond to Review Comments
+
+For each unresolved review comment:
+
+1. Make the requested change
+2. Reply to the comment via gh CLI:
+
+```bash
+# Reply to a review comment
+gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments/<COMMENT_ID>/replies \
+  -f body="Fixed in <commit_sha>. <brief explanation>"
+```
+
+### 6. Commit Changes
+
+Group related fixes into logical commits:
+
+```bash
+git add <files>
+git commit -m "$(cat <<'EOF'
+fix: <concise description of what was fixed>
+
+- <detail 1>
+- <detail 2>
+
+Addresses review feedback from @<reviewer>
+EOF
+)"
+```
+
+Follow project commit conventions:
+- Use conventional commit prefixes (fix:, feat:, refactor:, etc.)
+- Reference the review comment or issue if applicable
+- Keep commits atomic and focused
+
+### 7. Push and Update PR
+
+```bash
+# Push the fixes
+git push
+
+# If there were review comments addressed, add a summary comment
+gh pr comment <PR_NUMBER> --body "$(cat <<'EOF'
+## Fixes Applied
+
+### Addressed Review Comments
+- <list of comments addressed>
+
+### Additional Changes
+- <any other improvements made>
+
+Ready for re-review.
+EOF
+)"
+```
+
+### 8. Re-verify Status
+
+After all fixes are applied:
+
+```bash
+# Check if there are still unresolved conversations
+gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments --jq '[.[] | select(.in_reply_to_id == null)] | length'
+
+# Check PR status
+gh pr view <PR_NUMBER> --json reviewDecision,mergeable,state
+```
+
+### 9. Summary Report
+
+Provide a summary of what was fixed:
+
+```markdown
+## PR Fixes Applied
+
+### Changes Made
+1. <Fix 1>: <file(s) modified>
+2. <Fix 2>: <file(s) modified>
+...
+
+### Commits Created
+- `<sha>` - <message>
+- `<sha>` - <message>
+
+### Review Comments Addressed
+- @<reviewer>: "<comment summary>" → Fixed
+- @<reviewer>: "<comment summary>" → Fixed
+
+### Remaining Items
+- <Any items that couldn't be auto-fixed and need manual attention>
+
+### Next Steps
+<Recommendation: ready for re-review, needs discussion, etc.>
+```
+
+## Interactive Mode
+
+If the user wants to review each fix before applying:
+
+1. Present the proposed change
+2. Wait for confirmation
+3. Apply or skip based on user response
+
+Use the AskQuestion tool to get confirmation on larger or riskier changes.

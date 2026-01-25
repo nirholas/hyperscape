@@ -26,6 +26,10 @@ import {
   type AltarEntityConfig,
 } from "../../../entities/world/AltarEntity";
 import {
+  StarterChestEntity,
+  type StarterChestEntityConfig,
+} from "../../../entities/world/StarterChestEntity";
+import {
   RangeEntity,
   type RangeEntityConfig,
 } from "../../../entities/world/RangeEntity";
@@ -269,10 +273,12 @@ export class EntityManager extends SystemBase {
   }
 
   /**
-   * Start method - called after init, spawns world objects
+   * Start method - called after init
+   * Note: Stations are now spawned by StationSpawnerSystem from world-areas.json
    */
   async start(): Promise<void> {
     // Server spawns static world objects (banks, etc.)
+    // Note: Some stations are also spawned by StationSpawnerSystem from world-areas.json
     if (this.world.isServer) {
       await this.spawnWorldObjects();
     }
@@ -405,31 +411,33 @@ export class EntityManager extends SystemBase {
       console.error("[EntityManager] Error spawning altar:", err);
     }
 
-    // Spawn cooking range near fisherman NPC (at -15, -15)
-    let rangeY = 40;
+    // Spawn starter chest near spawn point (for new player tools)
+    let starterChestY = 40;
     if (terrain?.getHeightAt) {
-      const height = terrain.getHeightAt(-17, -13);
+      const height = terrain.getHeightAt(5, -20);
       if (height !== null && height !== undefined && Number.isFinite(height)) {
-        rangeY = (height as number) + 0.1;
+        starterChestY = (height as number) + 0.1;
       }
     }
 
-    const rangeConfig: RangeEntityConfig = {
-      id: "range_spawn_1",
-      name: "Cooking Range",
-      position: { x: -17, y: rangeY, z: -13 },
+    const starterChestConfig: StarterChestEntityConfig = {
+      id: "starter_chest_spawn",
+      name: "Starter Chest",
+      position: { x: 5, y: starterChestY, z: -20 },
+      description: "A chest containing starter equipment for new adventurers.",
+      interactionDistance: 2,
     };
 
     try {
       await this.spawnEntity({
-        ...rangeConfig,
-        type: EntityType.RANGE,
+        ...starterChestConfig,
+        type: EntityType.STARTER_CHEST,
       } as unknown as EntityConfig);
       console.log(
-        `[EntityManager] Spawned cooking range at (-17, ${rangeY}, -13)`,
+        `[EntityManager] Spawned starter chest at (5, ${starterChestY}, -20)`,
       );
     } catch (err) {
-      console.error("[EntityManager] Error spawning cooking range:", err);
+      console.error("[EntityManager] Error spawning starter chest:", err);
     }
   }
 
@@ -580,6 +588,13 @@ export class EntityManager extends SystemBase {
       case EntityType.ALTAR:
       case "altar":
         entity = new AltarEntity(this.world, config as AltarEntityConfig);
+        break;
+      case EntityType.STARTER_CHEST:
+      case "starter_chest":
+        entity = new StarterChestEntity(
+          this.world,
+          config as StarterChestEntityConfig,
+        );
         break;
       case EntityType.RANGE:
       case "range":

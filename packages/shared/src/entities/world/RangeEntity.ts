@@ -32,6 +32,7 @@ import {
 import { EventType } from "../../types/events";
 import { PROCESSING_CONSTANTS } from "../../constants/ProcessingConstants";
 import { stationDataProvider } from "../../data/StationDataProvider";
+import { modelCache } from "../../utils/rendering/ModelCache";
 import { CollisionFlag } from "../../systems/shared/movement/CollisionFlags";
 import {
   worldToTile,
@@ -177,12 +178,69 @@ export class RangeEntity extends InteractableEntity {
       return;
     }
 
-    // Create a red box for the range (placeholder, 1 tile size)
+    // Get station data from manifest
+    const stationData = stationDataProvider.getStationData("range");
+    const modelPath = stationData?.model ?? null;
+    const modelScale = stationData?.modelScale ?? 1.0;
+    const modelYOffset = stationData?.modelYOffset ?? 0;
+
+    // Try to load 3D model first
+    if (modelPath && this.world.loader) {
+      try {
+        const { scene } = await modelCache.loadModel(modelPath, this.world);
+
+        this.mesh = scene;
+        this.mesh.name = `Range_${this.id}`;
+
+        // Scale the model from manifest
+        this.mesh.scale.set(modelScale, modelScale, modelScale);
+
+        // Offset Y position so model base sits on ground
+        this.mesh.position.y = modelYOffset;
+
+        // Enable shadows and set layer for raycasting
+        this.mesh.layers.set(1);
+        this.mesh.traverse((child) => {
+          child.layers.set(1);
+          if (child instanceof THREE.Mesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+          }
+        });
+
+        // Set up userData for interaction detection
+        this.mesh.userData = {
+          type: "range",
+          entityId: this.id,
+          name: this.displayName,
+          interactable: true,
+          burnReduction: this.burnReduction,
+        };
+
+        // Add to node
+        if (this.node) {
+          this.node.add(this.mesh);
+          this.node.userData.type = "range";
+          this.node.userData.entityId = this.id;
+          this.node.userData.interactable = true;
+        }
+
+        return;
+      } catch (error) {
+        console.warn(
+          `[RangeEntity] Failed to load range model, using placeholder:`,
+          error,
+        );
+      }
+    }
+
+    // FALLBACK: Create a red box for the range (placeholder, 1 tile size)
     const boxHeight = 0.8;
     const geometry = new THREE.BoxGeometry(0.9, boxHeight, 0.9);
-    // Use MeshBasicMaterial so color shows regardless of lighting
-    const material = new THREE.MeshBasicMaterial({
+    const material = new THREE.MeshStandardMaterial({
       color: 0xcc3333, // Red (placeholder)
+      roughness: 0.5,
+      metalness: 0.3,
     });
 
     const mesh = new THREE.Mesh(geometry, material);

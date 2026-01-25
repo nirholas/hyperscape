@@ -5,7 +5,8 @@
  * RS3-style bank footer displaying stats and quick-access toggles.
  */
 
-import { TAB_INDEX_ALL, BANK_THEME } from "../constants";
+import { useThemeStore } from "hs-kit";
+import { TAB_INDEX_ALL } from "../constants";
 import type { BankItem } from "../types";
 
 export interface BankFooterProps {
@@ -33,15 +34,16 @@ export function BankFooter({
   onTogglePlaceholder,
   onReleaseAllPlaceholders,
 }: BankFooterProps) {
+  const theme = useThemeStore((s) => s.theme);
   const placeholderCount = items.filter((i) => i.quantity === 0).length;
 
   return (
     <div
       className="mx-3 mb-2 mt-1 px-3 py-1.5 flex justify-between items-center text-xs rounded"
       style={{
-        background: BANK_THEME.PANEL_BG_DARK,
-        border: `1px solid ${BANK_THEME.PANEL_BORDER}`,
-        color: BANK_THEME.TEXT_GOLD_DIM,
+        background: theme.colors.background.secondary,
+        border: `1px solid ${theme.colors.border.decorative}`,
+        color: theme.colors.text.secondary,
       }}
     >
       <div className="flex items-center gap-3">
@@ -64,7 +66,7 @@ export function BankFooter({
         <div
           className="flex rounded overflow-hidden"
           style={{
-            border: `1px solid ${BANK_THEME.PANEL_BORDER}`,
+            border: `1px solid ${theme.colors.border.decorative}`,
           }}
         >
           <button
@@ -72,10 +74,12 @@ export function BankFooter({
             className="px-2 py-0.5 text-[10px] font-bold transition-all"
             style={{
               background: !withdrawAsNote
-                ? "rgba(139, 69, 19, 0.7)"
-                : "rgba(0, 0, 0, 0.3)",
-              color: !withdrawAsNote ? "#f2d08a" : "rgba(255,255,255,0.4)",
-              borderRight: `1px solid ${BANK_THEME.PANEL_BORDER}`,
+                ? theme.colors.border.decorative
+                : theme.colors.background.overlay,
+              color: !withdrawAsNote
+                ? theme.colors.accent.primary
+                : theme.colors.text.muted,
+              borderRight: `1px solid ${theme.colors.border.decorative}`,
             }}
             title="Withdraw items as-is (1 slot per item)"
           >
@@ -86,9 +90,11 @@ export function BankFooter({
             className="px-2 py-0.5 text-[10px] font-bold transition-all"
             style={{
               background: withdrawAsNote
-                ? "rgba(139, 69, 19, 0.7)"
-                : "rgba(0, 0, 0, 0.3)",
-              color: withdrawAsNote ? "#f2d08a" : "rgba(255,255,255,0.4)",
+                ? theme.colors.border.decorative
+                : theme.colors.background.overlay,
+              color: withdrawAsNote
+                ? theme.colors.accent.primary
+                : theme.colors.text.muted,
             }}
             title="Withdraw items as bank notes (stackable, all fit in 1 slot)"
           >
@@ -108,15 +114,17 @@ export function BankFooter({
             type="checkbox"
             checked={alwaysSetPlaceholder}
             onChange={onTogglePlaceholder}
-            className="w-3.5 h-3.5 rounded cursor-pointer accent-amber-600"
+            className="w-3.5 h-3.5 rounded cursor-pointer"
             style={{
-              accentColor: "#d97706",
+              accentColor: theme.colors.accent.primary,
             }}
           />
           <span
             className="text-[10px] font-medium"
             style={{
-              color: alwaysSetPlaceholder ? "#f2d08a" : "rgba(255,255,255,0.5)",
+              color: alwaysSetPlaceholder
+                ? theme.colors.accent.primary
+                : theme.colors.text.muted,
             }}
           >
             Always placeholder
@@ -128,15 +136,15 @@ export function BankFooter({
             onClick={onReleaseAllPlaceholders}
             className="px-2 py-0.5 rounded text-[10px] font-medium transition-all"
             style={{
-              background: "rgba(180, 100, 100, 0.5)",
-              color: "rgba(255,255,255,0.8)",
-              border: "1px solid rgba(180, 100, 100, 0.6)",
+              background: `${theme.colors.state.danger}80`,
+              color: theme.colors.text.primary,
+              border: `1px solid ${theme.colors.state.danger}99`,
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = "rgba(180, 100, 100, 0.7)";
+              e.currentTarget.style.background = `${theme.colors.state.danger}b3`;
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = "rgba(180, 100, 100, 0.5)";
+              e.currentTarget.style.background = `${theme.colors.state.danger}80`;
             }}
             title="Release all placeholders"
           >

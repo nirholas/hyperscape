@@ -6,11 +6,14 @@
  * - New abilities unlocked
  * - New areas accessible
  * - New activities available
+ *
+ * Uses hs-kit theme system for consistent styling.
  */
 
-import styled from "styled-components";
+import { useThemeStore } from "hs-kit";
 import { getUnlocksAtLevel } from "@hyperscape/shared";
 import type { SkillUnlock, UnlockType } from "@hyperscape/shared";
+import type { CSSProperties } from "react";
 
 // === ICONS FOR UNLOCK TYPES ===
 
@@ -22,65 +25,21 @@ const UNLOCK_TYPE_ICONS: Record<UnlockType, string> = {
   activity: "🎯",
 };
 
-// === STYLED COMPONENTS ===
-
-const Container = styled.div`
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  margin-top: 8px;
-  padding-top: 12px;
-  border-top: 1px solid rgba(255, 215, 0, 0.3);
-  width: 100%;
-`;
-
-const Title = styled.div`
-  font-size: 12px;
-  color: rgba(255, 215, 0, 0.8);
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  margin-bottom: 4px;
-`;
-
-const UnlockList = styled.ul`
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: 100%;
-`;
-
-const UnlockItem = styled.li`
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  color: #ffffff;
-  background: rgba(255, 255, 255, 0.05);
-  padding: 6px 12px;
-  border-radius: 4px;
-  border-left: 3px solid #4ecdc4;
-`;
-
-const UnlockIcon = styled.span`
-  font-size: 16px;
-`;
-
-const UnlockText = styled.span`
-  flex: 1;
-`;
-
 // === COMPONENT ===
 
 interface UnlocksSectionProps {
   skill: string;
   level: number;
+  /** Optional accent color override (defaults to theme accent) */
+  accentColor?: string;
 }
 
-export function UnlocksSection({ skill, level }: UnlocksSectionProps) {
+export function UnlocksSection({
+  skill,
+  level,
+  accentColor,
+}: UnlocksSectionProps) {
+  const theme = useThemeStore((s) => s.theme);
   const unlocks = getUnlocksAtLevel(skill, level);
 
   // Don't render if no unlocks at this level
@@ -88,17 +47,68 @@ export function UnlocksSection({ skill, level }: UnlocksSectionProps) {
     return null;
   }
 
+  const accent = accentColor || theme.colors.accent.primary;
+
+  const containerStyle: CSSProperties = {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: theme.spacing.xs,
+    marginTop: theme.spacing.sm,
+    paddingTop: theme.spacing.md,
+    borderTop: `1px solid ${accent}40`,
+    width: "100%",
+  };
+
+  const titleStyle: CSSProperties = {
+    fontSize: theme.typography.fontSize.xs,
+    color: `${accent}cc`,
+    textTransform: "uppercase",
+    letterSpacing: "1px",
+    marginBottom: theme.spacing.xs,
+  };
+
+  const listStyle: CSSProperties = {
+    listStyle: "none",
+    margin: 0,
+    padding: 0,
+    display: "flex",
+    flexDirection: "column",
+    gap: theme.spacing.xs,
+    width: "100%",
+  };
+
+  const itemStyle: CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: theme.spacing.sm,
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.primary,
+    background: theme.colors.background.tertiary,
+    padding: `${theme.spacing.xs}px ${theme.spacing.md}px`,
+    borderRadius: theme.borderRadius.sm,
+    borderLeft: `3px solid ${theme.colors.state.info}`,
+  };
+
+  const iconStyle: CSSProperties = {
+    fontSize: theme.typography.fontSize.base,
+  };
+
+  const textStyle: CSSProperties = {
+    flex: 1,
+  };
+
   return (
-    <Container>
-      <Title>New Unlocks</Title>
-      <UnlockList>
+    <div style={containerStyle}>
+      <div style={titleStyle}>New Unlocks</div>
+      <ul style={listStyle}>
         {unlocks.map((unlock: SkillUnlock, index: number) => (
-          <UnlockItem key={`${unlock.level}-${index}`}>
-            <UnlockIcon>{UNLOCK_TYPE_ICONS[unlock.type]}</UnlockIcon>
-            <UnlockText>{unlock.description}</UnlockText>
-          </UnlockItem>
+          <li key={`${unlock.level}-${index}`} style={itemStyle}>
+            <span style={iconStyle}>{UNLOCK_TYPE_ICONS[unlock.type]}</span>
+            <span style={textStyle}>{unlock.description}</span>
+          </li>
         ))}
-      </UnlockList>
-    </Container>
+      </ul>
+    </div>
   );
 }

@@ -15,27 +15,7 @@
  */
 
 import { useCallback } from "react";
-
-// ============================================================================
-// Hoisted Styles (prevents object recreation on each render)
-// ============================================================================
-
-const COIN_POUCH_STYLES = {
-  container: {
-    background:
-      "linear-gradient(180deg, rgba(45, 40, 35, 0.95) 0%, rgba(30, 25, 22, 0.98) 100%)",
-    borderColor: "rgba(120, 100, 60, 0.5)",
-    boxShadow:
-      "inset 0 1px 0 rgba(150, 130, 80, 0.2), 0 1px 2px rgba(0, 0, 0, 0.3)",
-  },
-  label: {
-    color: "rgba(210, 190, 130, 0.9)",
-  },
-  balance: {
-    color: "#fbbf24",
-    textShadow: "0 1px 2px rgba(0, 0, 0, 0.8)",
-  },
-} as const;
+import { useThemeStore } from "hs-kit";
 
 // ============================================================================
 // Props Interface
@@ -53,6 +33,8 @@ interface CoinPouchProps {
 // ============================================================================
 
 export function CoinPouch({ coins, onWithdrawClick }: CoinPouchProps) {
+  const theme = useThemeStore((s) => s.theme);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter" || e.key === " ") {
@@ -68,7 +50,12 @@ export function CoinPouch({ coins, onWithdrawClick }: CoinPouchProps) {
       role="button"
       tabIndex={0}
       className="border rounded flex items-center justify-between py-1 px-2 cursor-pointer hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-yellow-500/50 transition-all"
-      style={COIN_POUCH_STYLES.container}
+      style={{
+        background: `linear-gradient(180deg, ${theme.colors.background.tertiary} 0%, ${theme.colors.background.secondary} 100%)`,
+        borderColor: theme.colors.border.default,
+        boxShadow:
+          "inset 0 1px 0 rgba(150, 130, 80, 0.2), 0 1px 2px rgba(0, 0, 0, 0.3)",
+      }}
       onClick={onWithdrawClick}
       onKeyDown={handleKeyDown}
       aria-label={`Money pouch: ${coins.toLocaleString()} coins. Press Enter to withdraw.`}
@@ -76,11 +63,20 @@ export function CoinPouch({ coins, onWithdrawClick }: CoinPouchProps) {
     >
       <div className="flex items-center gap-1.5">
         <span className="text-base">💰</span>
-        <span className="font-medium text-xs" style={COIN_POUCH_STYLES.label}>
+        <span
+          className="font-medium text-xs"
+          style={{ color: theme.colors.text.secondary }}
+        >
           Coins
         </span>
       </div>
-      <span className="font-bold text-xs" style={COIN_POUCH_STYLES.balance}>
+      <span
+        className="font-bold text-xs"
+        style={{
+          color: theme.colors.accent.secondary,
+          textShadow: "0 1px 2px rgba(0, 0, 0, 0.8)",
+        }}
+      >
         {coins.toLocaleString()}
       </span>
     </div>

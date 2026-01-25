@@ -125,6 +125,18 @@ export interface ServerStats {
 // ============================================================================
 
 /**
+ * Chat message type - determines styling and filtering
+ */
+export type ChatMessageType =
+  | "chat"
+  | "system"
+  | "activity"
+  | "warning"
+  | "news"
+  | "trade"
+  | "private";
+
+/**
  * Chat message data structure
  *
  * Represents a chat message sent by a player in the game world.
@@ -136,4 +148,6 @@ export interface ChatMessage {
   message: string;
   timestamp: number;
   channel?: string;
+  /** Message type for client-side filtering and styling */
+  type?: ChatMessageType;
 }

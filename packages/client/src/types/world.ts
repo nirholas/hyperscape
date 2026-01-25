@@ -108,8 +108,8 @@ export interface WorldPreferences {
   actions: boolean;
   stats: boolean;
   touchAction?: boolean;
-  on: (event: string, handler: Function) => void;
-  off: (event: string, handler: Function) => void;
+  on: <T = unknown>(event: string, handler: (data: T) => void) => void;
+  off: <T = unknown>(event: string, handler: (data: T) => void) => void;
   setDPR: (value: number) => void;
   setShadows: (value: string) => void;
   setPostprocessing: (value: boolean) => void;

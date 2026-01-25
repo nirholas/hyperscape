@@ -3,7 +3,8 @@
  */
 
 export { CoreUI } from "./CoreUI";
-export { Sidebar } from "./Sidebar";
+// Sidebar replaced by InterfaceManager from components/interface
+export { InterfaceManager } from "../components/interface/InterfaceManager";
 
 // Re-export from subfolders
 export * from "./hud";

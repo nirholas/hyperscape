@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { COLORS } from "../../constants";
+import { useThemeStore } from "hs-kit";
 import type {
   ClientWorld,
   PlayerStats,
@@ -103,6 +103,7 @@ export function DashboardPanel({
   coins,
   onOpenWindow,
 }: DashboardPanelProps) {
+  const theme = useThemeStore((s) => s.theme);
   const [activeTab, setActiveTab] = useState<TabType>("account");
   const [isMobile, setIsMobile] = useState(false);
 
@@ -132,10 +133,9 @@ export function DashboardPanel({
         <div
           className="flex-1 flex flex-col overflow-hidden"
           style={{
-            background:
-              "linear-gradient(135deg, rgba(20, 20, 30, 0.95) 0%, rgba(25, 20, 35, 0.92) 100%)",
+            background: `linear-gradient(135deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
             borderRadius: "8px",
-            border: "1px solid rgba(242, 208, 138, 0.35)",
+            border: `1px solid ${theme.colors.accent.primary}35`,
             boxShadow: "0 2px 4px rgba(0, 0, 0, 0.5)",
             minHeight: "350px",
             minWidth: 0,
@@ -145,9 +145,8 @@ export function DashboardPanel({
           <div
             className="flex items-center justify-between border-b px-2 py-1.5"
             style={{
-              borderBottom: "1px solid rgba(242, 208, 138, 0.2)",
-              background:
-                "linear-gradient(180deg, rgba(30, 20, 10, 0.6) 0%, rgba(20, 15, 10, 0.4) 100%)",
+              borderBottom: `1px solid ${theme.colors.accent.primary}20`,
+              background: `linear-gradient(180deg, ${theme.colors.background.tertiary} 0%, ${theme.colors.background.secondary} 100%)`,
               borderTopLeftRadius: "8px",
               borderTopRightRadius: "8px",
             }}
@@ -157,7 +156,7 @@ export function DashboardPanel({
               <span
                 className="font-semibold uppercase tracking-wider text-xs"
                 style={{
-                  color: COLORS.ACCENT,
+                  color: theme.colors.accent.primary,
                   textShadow: "0 1px 2px rgba(0, 0, 0, 0.8)",
                 }}
               >
@@ -168,10 +167,9 @@ export function DashboardPanel({
               onClick={handlePopOut}
               className="rounded transition-all duration-200 hover:scale-105 active:scale-95 px-1.5 py-1"
               style={{
-                background:
-                  "linear-gradient(135deg, rgba(242, 208, 138, 0.15) 0%, rgba(242, 208, 138, 0.08) 100%)",
-                border: "1px solid rgba(242, 208, 138, 0.3)",
-                color: "rgba(242, 208, 138, 0.9)",
+                background: `linear-gradient(135deg, ${theme.colors.accent.primary}15 0%, ${theme.colors.accent.primary}08 100%)`,
+                border: `1px solid ${theme.colors.accent.primary}30`,
+                color: theme.colors.text.secondary,
                 fontSize: "10px",
                 boxShadow: "0 1px 2px rgba(0, 0, 0, 0.5)",
               }}
@@ -195,9 +193,7 @@ export function DashboardPanel({
             {activeTab === "combat" && (
               <CombatPanel world={world} stats={stats} equipment={equipment} />
             )}
-            {activeTab === "skills" && (
-              <SkillsPanel world={world} stats={stats} />
-            )}
+            {activeTab === "skills" && <SkillsPanel stats={stats} />}
             {activeTab === "inventory" && (
               <InventoryPanel
                 items={inventory}
@@ -209,11 +205,7 @@ export function DashboardPanel({
               />
             )}
             {activeTab === "equipment" && (
-              <EquipmentPanel
-                equipment={equipment}
-                stats={stats}
-                world={world}
-              />
+              <EquipmentPanel equipment={equipment} world={world} />
             )}
             {activeTab === "settings" && <SettingsPanel world={world} />}
           </div>
@@ -227,9 +219,7 @@ export function DashboardPanel({
           {activeTab === "combat" && (
             <CombatPanel world={world} stats={stats} equipment={equipment} />
           )}
-          {activeTab === "skills" && (
-            <SkillsPanel world={world} stats={stats} />
-          )}
+          {activeTab === "skills" && <SkillsPanel stats={stats} />}
           {activeTab === "inventory" && (
             <InventoryPanel
               items={inventory}
@@ -241,7 +231,7 @@ export function DashboardPanel({
             />
           )}
           {activeTab === "equipment" && (
-            <EquipmentPanel equipment={equipment} stats={stats} world={world} />
+            <EquipmentPanel equipment={equipment} world={world} />
           )}
           {activeTab === "settings" && <SettingsPanel world={world} />}
         </div>
@@ -267,16 +257,16 @@ export function DashboardPanel({
               padding: isMobile ? "4px 2px" : "8px 6px",
               background:
                 activeTab === tab.id
-                  ? "linear-gradient(135deg, rgba(242, 208, 138, 0.25) 0%, rgba(242, 208, 138, 0.15) 100%)"
-                  : "linear-gradient(135deg, rgba(20, 20, 30, 0.95) 0%, rgba(25, 20, 35, 0.92) 100%)",
+                  ? `linear-gradient(135deg, ${theme.colors.accent.primary}25 0%, ${theme.colors.accent.primary}15 100%)`
+                  : `linear-gradient(135deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
               border: isMobile ? "1px solid" : "2px solid",
               borderColor:
                 activeTab === tab.id
-                  ? "rgba(242, 208, 138, 0.7)"
-                  : "rgba(242, 208, 138, 0.25)",
+                  ? `${theme.colors.accent.primary}70`
+                  : `${theme.colors.accent.primary}25`,
               boxShadow:
                 activeTab === tab.id
-                  ? "0 0 12px rgba(242, 208, 138, 0.3), 0 2px 6px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(242, 208, 138, 0.2)"
+                  ? `0 0 12px ${theme.colors.accent.primary}30, 0 2px 6px rgba(0, 0, 0, 0.6), inset 0 1px 0 ${theme.colors.accent.primary}20`
                   : "0 1px 3px rgba(0, 0, 0, 0.5)",
               cursor: "pointer",
               minHeight: isMobile ? "30px" : "50px",
@@ -288,10 +278,8 @@ export function DashboardPanel({
               <div
                 className={`absolute left-0 top-0 bottom-0 ${isMobile ? "w-1" : "w-1.5"}`}
                 style={{
-                  background:
-                    "linear-gradient(180deg, #fbbf24 0%, #f59e0b 50%, ${COLORS.ACCENT} 100%)",
-                  boxShadow:
-                    "0 0 12px rgba(251, 191, 36, 0.8), inset 0 0 4px rgba(255, 255, 255, 0.3)",
+                  background: `linear-gradient(180deg, ${theme.colors.accent.secondary} 0%, ${theme.colors.accent.primary} 50%, ${theme.colors.accent.hover} 100%)`,
+                  boxShadow: `0 0 12px ${theme.colors.accent.secondary}80, inset 0 0 4px rgba(255, 255, 255, 0.3)`,
                 }}
               />
             )}
@@ -302,7 +290,7 @@ export function DashboardPanel({
               style={{
                 filter:
                   activeTab === tab.id
-                    ? "drop-shadow(0 2px 6px rgba(242, 208, 138, 0.6))"
+                    ? `drop-shadow(0 2px 6px ${theme.colors.accent.primary}60)`
                     : "drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8))",
               }}
             >
@@ -316,11 +304,11 @@ export function DashboardPanel({
                 style={{
                   color:
                     activeTab === tab.id
-                      ? "#fbbf24"
-                      : "rgba(242, 208, 138, 0.65)",
+                      ? theme.colors.accent.secondary
+                      : theme.colors.text.secondary,
                   textShadow:
                     activeTab === tab.id
-                      ? "0 1px 3px rgba(0, 0, 0, 0.9), 0 0 8px rgba(251, 191, 36, 0.4)"
+                      ? `0 1px 3px rgba(0, 0, 0, 0.9), 0 0 8px ${theme.colors.accent.secondary}40`
                       : "0 1px 2px rgba(0, 0, 0, 0.8)",
                   wordBreak: "break-word",
                   maxWidth: "100%",
@@ -337,8 +325,8 @@ export function DashboardPanel({
               style={{
                 background:
                   activeTab === tab.id
-                    ? "radial-gradient(circle at center, rgba(251, 191, 36, 0.15) 0%, transparent 70%)"
-                    : "radial-gradient(circle at center, rgba(242, 208, 138, 0.08) 0%, transparent 70%)",
+                    ? `radial-gradient(circle at center, ${theme.colors.accent.secondary}15 0%, transparent 70%)`
+                    : `radial-gradient(circle at center, ${theme.colors.accent.primary}08 0%, transparent 70%)`,
               }}
             />
           </button>

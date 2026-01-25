@@ -1,12 +1,74 @@
-import { useEffect, useState, useMemo } from "react";
-import { COLORS } from "../../constants";
+import React, { useEffect, useState, useMemo } from "react";
+import { useThemeStore, useMobileLayout } from "hs-kit";
 import { EventType, getAvailableStyles, WeaponType } from "@hyperscape/shared";
+import { MOBILE_COMBAT } from "../../constants";
 import type {
   ClientWorld,
   PlayerStats,
   PlayerEquipmentItems,
   PlayerHealth,
 } from "../../types";
+
+/** Memoized combat stats row component - the component itself is memoized, so no need for useMemo on the array */
+const CombatStatsRow = React.memo(function CombatStatsRow({
+  attackLevel,
+  strengthLevel,
+  defenseLevel,
+}: {
+  attackLevel: number;
+  strengthLevel: number;
+  defenseLevel: number;
+}) {
+  const theme = useThemeStore((s) => s.theme);
+  // Plain array - React.memo on the component handles render optimization
+  const stats = [
+    { label: "Atk", value: attackLevel },
+    { label: "Str", value: strengthLevel },
+    { label: "Def", value: defenseLevel },
+  ];
+
+  return (
+    <div
+      className="rounded"
+      style={{
+        background: theme.colors.background.tertiary,
+        border: `1px solid ${theme.colors.border.default}`,
+        padding: `${theme.spacing.xs}px`,
+      }}
+    >
+      <div className="flex gap-1">
+        {stats.map((stat) => (
+          <div
+            key={stat.label}
+            className="flex-1 text-center rounded"
+            style={{
+              background: theme.colors.background.overlay,
+              padding: `${theme.spacing.xs}px`,
+            }}
+          >
+            <div
+              style={{
+                fontSize: theme.typography.fontSize.xs,
+                color: theme.colors.text.muted,
+              }}
+            >
+              {stat.label}
+            </div>
+            <div
+              style={{
+                fontSize: theme.typography.fontSize.sm,
+                color: theme.colors.accent.primary,
+                fontWeight: theme.typography.fontWeight.semibold,
+              }}
+            >
+              {stat.value}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+});
 
 // Event data interfaces for type-safe event handling
 interface StyleUpdateEvent {
@@ -76,6 +138,8 @@ const combatStyleCache = new Map<string, string>();
 const autoRetaliateCache = new Map<string, boolean>();
 
 export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
+  const theme = useThemeStore((s) => s.theme);
+  const { shouldUseMobileUI } = useMobileLayout();
   // Initialize from cache if available, otherwise default to "accurate"
   // Check order: module cache > network cache > default
   const [style, setStyle] = useState<string>(() => {
@@ -332,210 +396,317 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
     : 0;
 
   return (
-    <div className="flex flex-col gap-1.5">
-      {/* Player Health Bar */}
-      <div className="flex flex-col gap-0.5">
-        <div
-          className="flex items-center justify-between text-[10px]"
-          style={{ color: COLORS.ACCENT }}
-        >
-          <span className="font-semibold">Hitpoints</span>
-          <span>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "8px",
+        padding: "4px",
+      }}
+    >
+      {/* Health Bar - Compact */}
+      <div
+        className="rounded"
+        style={{
+          background: theme.colors.background.secondary,
+          border: inCombat
+            ? `1px solid ${theme.colors.state.danger}99`
+            : `1px solid ${theme.colors.border.default}`,
+          padding: `${theme.spacing.sm}px`,
+          transition: theme.transitions.normal,
+          boxShadow: inCombat
+            ? `0 0 8px ${theme.colors.state.danger}4d`
+            : "none",
+        }}
+      >
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center gap-2">
+            <span
+              style={{
+                fontSize: theme.typography.fontSize.xs,
+                color: theme.colors.accent.primary,
+                fontWeight: theme.typography.fontWeight.semibold,
+              }}
+            >
+              HP
+            </span>
+            {inCombat && (
+              <span
+                style={{
+                  fontSize: theme.typography.fontSize.xs,
+                  color: theme.colors.state.danger,
+                  fontWeight: theme.typography.fontWeight.semibold,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  animation: "pulse 1.5s ease-in-out infinite",
+                }}
+              >
+                In Combat
+              </span>
+            )}
+          </div>
+          <span
+            style={{
+              fontSize: theme.typography.fontSize.xs,
+              color: theme.colors.accent.primary,
+            }}
+          >
             {health.current}/{health.max}
           </span>
         </div>
-        <div className="w-full bg-black/50 rounded-full h-2.5 border border-white/20 overflow-hidden">
+        {/* Inline CSS animation for in-combat pulse */}
+        {inCombat && (
+          <style>{`
+            @keyframes pulse {
+              0%, 100% { opacity: 1; }
+              50% { opacity: 0.5; }
+            }
+          `}</style>
+        )}
+        <div
+          style={{
+            width: "100%",
+            // Mobile: thicker bar (16px), Desktop: 8px
+            height: shouldUseMobileUI
+              ? `${MOBILE_COMBAT.healthBarHeight}px`
+              : "8px",
+            background: theme.colors.background.overlay,
+            borderRadius: `${theme.borderRadius.md}px`,
+            overflow: "hidden",
+          }}
+        >
           <div
-            className="h-full transition-all duration-300 rounded-full"
             style={{
+              height: "100%",
               width: `${healthPercent}%`,
+              borderRadius: `${theme.borderRadius.md}px`,
+              transition: theme.transitions.normal,
               background:
                 healthPercent > 50
-                  ? "linear-gradient(90deg, #22c55e, #16a34a)"
+                  ? `linear-gradient(90deg, ${theme.colors.state.success}, ${theme.colors.status.energy})`
                   : healthPercent > 25
-                    ? "linear-gradient(90deg, #f59e0b, #d97706)"
-                    : "linear-gradient(90deg, #ef4444, #dc2626)",
+                    ? `linear-gradient(90deg, ${theme.colors.state.warning}, ${theme.colors.status.adrenaline})`
+                    : `linear-gradient(90deg, ${theme.colors.state.danger}, ${theme.colors.status.hp})`,
             }}
           />
         </div>
+
+        {/* Combat Level inline */}
+        <div
+          className="flex items-center justify-between mt-2"
+          style={{
+            paddingTop: `${theme.spacing.xs}px`,
+            borderTop: `1px solid ${theme.colors.border.default}`,
+          }}
+        >
+          <span
+            style={{
+              fontSize: theme.typography.fontSize.xs,
+              color: theme.colors.text.muted,
+            }}
+          >
+            Combat Lvl
+          </span>
+          <span
+            style={{
+              fontSize: theme.typography.fontSize.xs,
+              color: theme.colors.accent.primary,
+              fontWeight: theme.typography.fontWeight.semibold,
+            }}
+          >
+            {combatLevel}
+          </span>
+        </div>
       </div>
 
-      {/* Combat Status */}
-      {inCombat && (
-        <div
-          className="bg-red-900/30 border border-red-500/50 rounded-md p-1 flex items-center gap-1"
-          style={{ color: "#fca5a5" }}
-        >
-          <span className="text-[10px] font-semibold">⚔️ In Combat</span>
-        </div>
-      )}
-
-      {/* Target Info (when in combat with a target) */}
+      {/* Target Info (when in combat) */}
       {targetName && targetHealth && (
-        <div className="flex flex-col gap-0.5 bg-red-900/20 border border-red-500/30 rounded-md p-1">
-          <div
-            className="flex items-center justify-between text-[9px]"
-            style={{ color: "#fca5a5" }}
-          >
-            <span className="font-semibold">Target: {targetName}</span>
-            <span>
+        <div
+          className="rounded"
+          style={{
+            background: `${theme.colors.state.danger}33`,
+            border: `1px solid ${theme.colors.state.danger}4d`,
+            padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
+          }}
+        >
+          <div className="flex items-center justify-between mb-1">
+            <span
+              style={{
+                fontSize: theme.typography.fontSize.xs,
+                color: theme.colors.state.danger,
+                fontWeight: theme.typography.fontWeight.medium,
+              }}
+            >
+              {targetName}
+            </span>
+            <span
+              style={{
+                fontSize: theme.typography.fontSize.xs,
+                color: theme.colors.state.danger,
+              }}
+            >
               {targetHealth.current}/{targetHealth.max}
             </span>
           </div>
-          <div className="w-full bg-black/50 rounded-full h-2 border border-red-500/30 overflow-hidden">
+          <div
+            style={{
+              width: "100%",
+              // Mobile: thicker bar (12px), Desktop: 6px
+              height: shouldUseMobileUI
+                ? `${MOBILE_COMBAT.targetBarHeight}px`
+                : "6px",
+              background: theme.colors.background.overlay,
+              borderRadius: `${theme.borderRadius.sm}px`,
+              overflow: "hidden",
+            }}
+          >
             <div
-              className="h-full transition-all duration-300 rounded-full"
               style={{
+                height: "100%",
                 width: `${targetHealthPercent}%`,
-                background: "linear-gradient(90deg, #ef4444, #dc2626)",
+                borderRadius: `${theme.borderRadius.sm}px`,
+                transition: theme.transitions.normal,
+                background: `linear-gradient(90deg, ${theme.colors.state.danger}, ${theme.colors.status.hp})`,
               }}
             />
           </div>
         </div>
       )}
 
-      {/* Combat Stats */}
-      <div className="grid grid-cols-3 gap-1">
-        <div
-          className="bg-black/35 rounded-md p-1 flex flex-col items-center justify-center"
-          style={{
-            borderWidth: "1px",
-            borderStyle: "solid",
-            borderColor: "rgba(242, 208, 138, 0.3)",
-          }}
-        >
-          <div className="text-[9px] text-gray-400">Attack</div>
-          <div
-            className="font-semibold text-xs"
-            style={{ color: COLORS.ACCENT }}
-          >
-            {attackLevel}
-          </div>
-        </div>
-        <div
-          className="bg-black/35 rounded-md p-1 flex flex-col items-center justify-center"
-          style={{
-            borderWidth: "1px",
-            borderStyle: "solid",
-            borderColor: "rgba(242, 208, 138, 0.3)",
-          }}
-        >
-          <div className="text-[9px] text-gray-400">Strength</div>
-          <div
-            className="font-semibold text-xs"
-            style={{ color: COLORS.ACCENT }}
-          >
-            {strengthLevel}
-          </div>
-        </div>
-        <div
-          className="bg-black/35 rounded-md p-1 flex flex-col items-center justify-center"
-          style={{
-            borderWidth: "1px",
-            borderStyle: "solid",
-            borderColor: "rgba(242, 208, 138, 0.3)",
-          }}
-        >
-          <div className="text-[9px] text-gray-400">Defense</div>
-          <div
-            className="font-semibold text-xs"
-            style={{ color: COLORS.ACCENT }}
-          >
-            {defenseLevel}
-          </div>
-        </div>
-      </div>
+      {/* Combat Stats - Compact Row */}
+      <CombatStatsRow
+        attackLevel={attackLevel}
+        strengthLevel={strengthLevel}
+        defenseLevel={defenseLevel}
+      />
 
-      {/* Combat Level */}
+      {/* Attack Style - Compact */}
       <div
-        className="bg-black/35 rounded-md p-1 flex items-center justify-between text-[10px]"
+        className="rounded"
         style={{
-          borderWidth: "1px",
-          borderStyle: "solid",
-          borderColor: "rgba(242, 208, 138, 0.3)",
-          color: COLORS.ACCENT,
+          background: theme.colors.background.secondary,
+          border: `1px solid ${theme.colors.border.default}`,
+          padding: `${theme.spacing.xs}px`,
         }}
       >
-        <div className="font-semibold">Combat level</div>
-        <div>{combatLevel}</div>
-      </div>
-
-      {/* Attack Style */}
-      <div
-        className="font-semibold mt-0.5 text-[10px]"
-        style={{ color: COLORS.ACCENT }}
-      >
-        Attack style
-      </div>
-      <div
-        className={`grid gap-1 ${styles.length === 4 ? "grid-cols-2" : "grid-cols-3"}`}
-      >
-        {styles.map((s) => (
-          <button
-            key={s.id}
-            onClick={() => changeStyle(s.id)}
-            disabled={cooldown > 0}
-            className="rounded-md py-1 px-1 cursor-pointer transition-all text-[10px] hover:brightness-110"
+        <div
+          style={{
+            fontSize: theme.typography.fontSize.xs,
+            color: theme.colors.text.muted,
+            marginBottom: `${theme.spacing.xs}px`,
+          }}
+        >
+          Attack Style
+        </div>
+        <div className="flex flex-col gap-1">
+          {styles.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => changeStyle(s.id)}
+              disabled={cooldown > 0}
+              aria-pressed={style === s.id}
+              aria-label={`${s.label} - trains ${s.xp}`}
+              className="rounded attack-style-btn focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+              style={{
+                padding: `${theme.spacing.sm}px ${theme.spacing.md}px`,
+                // Mobile: larger buttons (52px), Desktop: 44px minimum
+                minHeight: shouldUseMobileUI
+                  ? MOBILE_COMBAT.styleButtonHeight
+                  : 44,
+                cursor: cooldown > 0 ? "not-allowed" : "pointer",
+                transition: theme.transitions.fast,
+                fontSize: shouldUseMobileUI
+                  ? theme.typography.fontSize.base
+                  : theme.typography.fontSize.sm,
+                fontWeight:
+                  style === s.id
+                    ? theme.typography.fontWeight.semibold
+                    : theme.typography.fontWeight.normal,
+                background:
+                  style === s.id
+                    ? `${theme.colors.state.success}33`
+                    : theme.colors.background.overlay,
+                border:
+                  style === s.id
+                    ? `2px solid ${theme.colors.state.success}80`
+                    : `1px solid ${theme.colors.border.default}`,
+                color:
+                  style === s.id
+                    ? theme.colors.state.success
+                    : theme.colors.text.secondary,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                touchAction: "manipulation",
+                // Mobile: stronger highlight for active style
+                boxShadow:
+                  style === s.id && shouldUseMobileUI
+                    ? `0 0 8px ${theme.colors.state.success}40`
+                    : "none",
+              }}
+            >
+              <span>{s.label}</span>
+              <span
+                style={{ fontSize: theme.typography.fontSize.xs, opacity: 0.6 }}
+              >
+                +{s.xp}
+              </span>
+            </button>
+          ))}
+        </div>
+        {cooldown > 0 && (
+          <div
             style={{
-              backgroundColor:
-                style === s.id
-                  ? "rgba(242, 208, 138, 0.2)"
-                  : "rgba(0, 0, 0, 0.35)",
-              borderWidth: "1px",
-              borderStyle: "solid",
-              borderColor:
-                style === s.id
-                  ? "rgba(242, 208, 138, 0.8)"
-                  : "rgba(242, 208, 138, 0.3)",
-              color: style === s.id ? COLORS.ACCENT : "#d1d5db",
-              fontWeight: style === s.id ? "bold" : "normal",
+              fontSize: theme.typography.fontSize.xs,
+              color: theme.colors.text.muted,
+              marginTop: `${theme.spacing.xs}px`,
             }}
           >
-            {s.label}
-          </button>
-        ))}
+            Cooldown: {Math.ceil(cooldown / 1000)}s
+          </div>
+        )}
       </div>
-      {/* Show which skill is being trained */}
-      <div className="text-[9px] text-gray-400 italic">
-        Training:{" "}
-        {styles.find((s) => s.id === style)?.xp ??
-          allStyles.find((s) => s.id === style)?.xp ??
-          "Attack"}{" "}
-        + Hitpoints
-      </div>
-      {cooldown > 0 && (
-        <div
-          className="text-[9px]"
-          style={{ color: "rgba(242, 208, 138, 0.6)" }}
-        >
-          Style change available in {Math.ceil(cooldown / 1000)}s
-        </div>
-      )}
 
-      {/* Auto Retaliate Toggle (OSRS-style) */}
+      {/* Auto Retaliate - Touch-friendly Toggle */}
       <button
         onClick={toggleAutoRetaliate}
-        className="mt-1 w-full rounded-md py-1.5 px-2 cursor-pointer transition-all text-[10px] hover:brightness-110 flex items-center justify-between"
+        className="rounded"
         style={{
-          backgroundColor: autoRetaliate
-            ? "rgba(34, 197, 94, 0.2)"
-            : "rgba(0, 0, 0, 0.35)",
-          borderWidth: "1px",
-          borderStyle: "solid",
-          borderColor: autoRetaliate
-            ? "rgba(34, 197, 94, 0.8)"
-            : "rgba(242, 208, 138, 0.3)",
-          color: autoRetaliate ? "#86efac" : "#d1d5db",
+          padding: `${theme.spacing.sm}px ${theme.spacing.md}px`,
+          minHeight: 44, // Touch-friendly minimum
+          cursor: "pointer",
+          transition: theme.transitions.fast,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          fontSize: theme.typography.fontSize.sm,
+          touchAction: "manipulation",
+          background: autoRetaliate
+            ? `${theme.colors.state.success}26`
+            : theme.colors.background.secondary,
+          border: autoRetaliate
+            ? `1px solid ${theme.colors.state.success}4d`
+            : `1px solid ${theme.colors.border.default}`,
+          color: autoRetaliate
+            ? theme.colors.state.success
+            : theme.colors.text.muted,
         }}
       >
-        <span className="font-semibold">Auto Retaliate</span>
+        <span style={{ fontWeight: theme.typography.fontWeight.medium }}>
+          Auto Retaliate
+        </span>
         <span
-          className="px-1.5 py-0.5 rounded text-[9px] font-bold"
           style={{
-            backgroundColor: autoRetaliate
-              ? "rgba(34, 197, 94, 0.3)"
-              : "rgba(239, 68, 68, 0.3)",
-            color: autoRetaliate ? "#86efac" : "#fca5a5",
+            padding: `2px ${theme.spacing.xs}px`,
+            borderRadius: `${theme.borderRadius.sm}px`,
+            fontSize: theme.typography.fontSize.xs,
+            fontWeight: theme.typography.fontWeight.semibold,
+            background: autoRetaliate
+              ? `${theme.colors.state.success}4d`
+              : `${theme.colors.state.danger}33`,
+            color: autoRetaliate
+              ? theme.colors.state.success
+              : theme.colors.state.danger,
           }}
         >
           {autoRetaliate ? "ON" : "OFF"}

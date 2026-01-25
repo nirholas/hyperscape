@@ -436,6 +436,7 @@ export interface XPDrop {
     | "defense"
     | "constitution"
     | "ranged"
+    | "magic"
     | "prayer"
     | "woodcutting"
     | "mining"

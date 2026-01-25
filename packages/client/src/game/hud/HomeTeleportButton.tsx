@@ -10,8 +10,8 @@ import React, {
   useMemo,
   useRef,
 } from "react";
+import { useThemeStore } from "hs-kit";
 import { HOME_TELEPORT_CONSTANTS, EventType } from "@hyperscape/shared";
-import { COLORS } from "../../constants";
 import type { ClientWorld } from "../../types";
 
 type TeleportState = "ready" | "cooldown" | "casting";
@@ -24,6 +24,7 @@ const formatTime = (ms: number): string => {
 };
 
 export function HomeTeleportButton({ world }: { world: ClientWorld }) {
+  const theme = useThemeStore((s) => s.theme);
   const [state, setState] = useState<TeleportState>("ready");
   const [cooldownRemaining, setCooldownRemaining] = useState(0);
   const [castProgress, setCastProgress] = useState(0);
@@ -148,15 +149,15 @@ export function HomeTeleportButton({ world }: { world: ClientWorld }) {
   const styles = useMemo(() => {
     const size = isMobile ? 48 : 56;
     const bg = isDisabled
-      ? "linear-gradient(135deg, rgba(40,35,30,0.85), rgba(30,25,20,0.9))"
+      ? `linear-gradient(135deg, ${theme.colors.background.tertiary}, ${theme.colors.background.secondary})`
       : isCasting
-        ? "linear-gradient(135deg, rgba(60,100,180,0.9), rgba(40,70,140,0.95))"
-        : "linear-gradient(135deg, rgba(60,50,35,0.9), rgba(40,35,25,0.95))";
+        ? `linear-gradient(135deg, ${theme.colors.status.prayer}, ${theme.colors.status.prayerBackground})`
+        : `linear-gradient(135deg, ${theme.colors.background.tertiary}, ${theme.colors.background.primary})`;
     const border = isDisabled
-      ? "rgba(100,80,50,0.4)"
+      ? theme.colors.border.default
       : isCasting
-        ? "rgba(100,150,220,0.7)"
-        : "rgba(139,69,19,0.7)";
+        ? theme.colors.accent.primary
+        : theme.colors.border.decorative;
 
     return {
       container: {
@@ -166,13 +167,13 @@ export function HomeTeleportButton({ world }: { world: ClientWorld }) {
       button: {
         width: size,
         height: size,
-        borderRadius: 12,
+        borderRadius: theme.borderRadius.xl,
         background: bg,
-        backdropFilter: "blur(8px)",
+        backdropFilter: `blur(${theme.glass.blur}px)`,
         border: `2px solid ${border}`,
         boxShadow: isDisabled
-          ? "0 2px 6px rgba(0,0,0,0.4), inset 0 1px 0 rgba(242,208,138,0.1)"
-          : "0 4px 12px rgba(0,0,0,0.6), 0 2px 6px rgba(139,69,19,0.4), inset 0 1px 0 rgba(242,208,138,0.2)",
+          ? `${theme.shadows.sm}, inset 0 1px 0 ${theme.colors.accent.secondary}20`
+          : `${theme.shadows.lg}, inset 0 1px 0 ${theme.colors.accent.secondary}33`,
         cursor: isDisabled ? "not-allowed" : "pointer",
         display: "flex",
         flexDirection: "column" as const,
@@ -180,7 +181,7 @@ export function HomeTeleportButton({ world }: { world: ClientWorld }) {
         justifyContent: "center",
         position: "relative" as const,
         overflow: "hidden",
-        transition: "all 0.2s ease",
+        transition: theme.transitions.normal,
       } as React.CSSProperties,
       icon: {
         fontSize: isMobile ? "1.25rem" : "1.5rem",
@@ -189,8 +190,10 @@ export function HomeTeleportButton({ world }: { world: ClientWorld }) {
       } as React.CSSProperties,
       label: {
         fontSize: isMobile ? "0.7rem" : "0.8rem",
-        color: isDisabled ? "rgba(242,208,138,0.5)" : COLORS.ACCENT,
-        fontWeight: 600,
+        color: isDisabled
+          ? `${theme.colors.accent.secondary}80`
+          : theme.colors.accent.primary,
+        fontWeight: theme.typography.fontWeight.semibold,
         textShadow: "0 1px 2px rgba(0,0,0,0.8)",
         marginTop: 2,
       } as React.CSSProperties,
@@ -200,12 +203,12 @@ export function HomeTeleportButton({ world }: { world: ClientWorld }) {
         left: 0,
         width: `${castProgress}%`,
         height: 4,
-        background: "linear-gradient(90deg, #60a5fa, #3b82f6)",
-        borderRadius: "0 0 10px 10px",
+        background: `linear-gradient(90deg, ${theme.colors.state.info}, ${theme.colors.accent.primary})`,
+        borderRadius: `0 0 ${theme.borderRadius.lg}px ${theme.borderRadius.lg}px`,
         transition: "width 0.05s linear",
       } as React.CSSProperties,
     };
-  }, [isMobile, isDisabled, isCasting, castProgress]);
+  }, [theme, isMobile, isDisabled, isCasting, castProgress]);
 
   const label =
     state === "cooldown"

@@ -138,6 +138,8 @@ export class Environment extends System {
   // Set to true on: viewport resize, camera near/far change, CSM config change
   private needsFrustumUpdate: boolean = true;
   private csmFrustumWarningShown: boolean = false; // Prevent log spam while camera initializes
+  private csmNeedsAttach: boolean = false; // True until CSM shadowNode is attached to light
+  private csmDeferredLogged: boolean = false; // Only log deferred message once
 
   // Ambient lighting for day/night cycle (non-shadow casting)
   private hemisphereLight: THREE.HemisphereLight | null = null;
@@ -675,6 +677,19 @@ export class Environment extends System {
       this.csmShadowNode.updateFrustums();
       this.needsFrustumUpdate = false;
       this.csmFrustumWarningShown = false;
+      this.csmDeferredLogged = false; // Reset so future issues can be logged
+
+      // After successful frustum init, attach shadowNode to light
+      // We defer this because CSM shader will crash if frustums aren't initialized
+      if (this.csmNeedsAttach && this.sunLight) {
+        (
+          this.sunLight.shadow as THREE.DirectionalLightShadow & {
+            shadowNode?: InstanceType<typeof CSMShadowNode>;
+          }
+        ).shadowNode = this.csmShadowNode;
+        this.csmNeedsAttach = false;
+        console.log("[Environment] CSM shadowNode attached to light");
+      }
     } catch (err) {
       // CSMShadowNode.updateFrustums() can fail if camera projection isn't ready yet
       // Will retry on next commit() - this is expected during startup

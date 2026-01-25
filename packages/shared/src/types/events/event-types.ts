@@ -335,6 +335,9 @@ export enum EventType {
   STORE_TRANSACTION = "store:transaction",
   STORE_PLAYER_COINS = "store:player_coins",
 
+  // Starter Chest System
+  STARTER_CHEST_LOOTED = "starter_chest:looted",
+
   // Dialogue System
   DIALOGUE_START = "dialogue:start",
   DIALOGUE_NODE_CHANGE = "dialogue:node_change",
@@ -623,6 +626,9 @@ export enum EventType {
   ENTITY_MODIFIED = "entityModified",
   ENTITY_INTERACT_REQUEST = "entity:interact_request",
   AGGRO_FORCE_TRIGGER = "aggro:force-trigger",
+
+  // Action Bar System
+  ACTION_BAR_SLOT_UPDATE = "actionbar:slot:update",
 
   // Trading System
   TRADE_REQUEST = "trade:request",

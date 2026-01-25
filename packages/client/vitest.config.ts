@@ -1,9 +1,8 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
-import path from "path";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react() as never],
   test: {
     globals: true,
     environment: "jsdom",
@@ -23,11 +22,8 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      // Mock the shared package with our test mock
-      "@hyperscape/shared": path.resolve(
-        __dirname,
-        "tests/mocks/hyperscape-shared.ts",
-      ),
+      // Use actual shared package - per project rules, no mocks allowed
+      // Tests should use real Hyperscape instances with Playwright
     },
   },
 });

@@ -20,9 +20,29 @@ import { logger, ModelType } from "@elizaos/core";
 import type { HyperscapeService } from "../services/HyperscapeService.js";
 import {
   KNOWN_LOCATIONS,
-  getAvailableGoals,
+  getCombatReadiness,
 } from "../providers/goalProvider.js";
 import { SCRIPTED_AUTONOMY_CONFIG } from "../config/constants.js";
+import {
+  goalTemplatesProvider,
+  type ScoredGoalTemplate,
+} from "../providers/goalTemplatesProvider.js";
+import {
+  possibilitiesProvider,
+  type PossibilitiesData,
+} from "../providers/possibilitiesProvider.js";
+import {
+  guardrailsProvider,
+  type GuardrailsData,
+} from "../providers/guardrailsProvider.js";
+import {
+  hasAxe as detectHasAxe,
+  hasPickaxe as detectHasPickaxe,
+  hasFishingEquipment,
+  hasWeapon,
+  hasCombatCapableItem,
+  hasFood as detectHasFood,
+} from "../utils/item-detection.js";
 
 type HandlerOptionsParam =
   | HandlerOptions
@@ -149,10 +169,57 @@ export const setGoalAction: Action = {
         return { success: false, error: "Behavior manager not available" };
       }
 
-      // Get available goals based on current state
-      const availableGoals = getAvailableGoals(service);
-      if (availableGoals.length === 0) {
-        return { success: false, error: "No goals available" };
+      // Call providers directly to get their data (more reliable than composed state)
+      const emptyState = {} as State;
+
+      // Get goal templates directly from provider
+      const goalTemplatesResult = await goalTemplatesProvider.get(
+        runtime,
+        message,
+        emptyState,
+      );
+      const goalTemplatesData = goalTemplatesResult?.data as
+        | {
+            templates?: ScoredGoalTemplate[];
+            topTemplates?: ScoredGoalTemplate[];
+          }
+        | undefined;
+
+      // Get possibilities data directly from provider
+      const possibilitiesResult = await possibilitiesProvider.get(
+        runtime,
+        message,
+        emptyState,
+      );
+      const possibilitiesData = possibilitiesResult?.data as
+        | PossibilitiesData
+        | undefined;
+
+      // Get guardrails data directly from provider
+      const guardrailsResult = await guardrailsProvider.get(
+        runtime,
+        message,
+        emptyState,
+      );
+      const guardrailsData = guardrailsResult?.data as
+        | GuardrailsData
+        | undefined;
+
+      logger.info(
+        `[SET_GOAL] Provider results - templates: ${goalTemplatesData?.templates?.length || 0}, topTemplates: ${goalTemplatesData?.topTemplates?.length || 0}`,
+      );
+
+      // Get top goal templates (already scored and sorted by goalTemplatesProvider)
+      const allTemplates = goalTemplatesData?.templates || [];
+      const goalTemplates = goalTemplatesData?.topTemplates || allTemplates;
+
+      if (goalTemplates.length === 0) {
+        logger.warn("[SET_GOAL] No goal templates available from provider");
+        await callback?.({
+          text: "🤔 I don't have any goals available right now. Something may be wrong with my goal system.",
+          action: "SET_GOAL",
+        });
+        return { success: false, error: "No goal templates available" };
       }
 
       // Get player state for context
@@ -163,14 +230,132 @@ export const setGoalAction: Action = {
       const skills = player?.skills as
         | Record<string, { level: number; xp: number }>
         | undefined;
+      const combatReadiness = getCombatReadiness(service);
 
-      // Format goals for LLM selection
-      const goalsText = availableGoals
+      // Get inventory info for thought process using centralized item detection
+      const items = player?.items || [];
+      const hasAxe = detectHasAxe(player);
+      const hasPickaxe = detectHasPickaxe(player);
+      const hasFishingEquip = hasFishingEquipment(player);
+      const playerHasWeapon = hasWeapon(player);
+      const hasCombatItem = hasCombatCapableItem(player);
+      const hasFood =
+        detectHasFood(player) || possibilitiesData?.hasFood || false;
+
+      // Build situation assessment for chat
+      const equipmentStatus: string[] = [];
+      if (hasAxe) equipmentStatus.push("axe");
+      if (hasPickaxe) equipmentStatus.push("pickaxe");
+      if (hasFishingEquip) equipmentStatus.push("fishing gear");
+      if (playerHasWeapon) {
+        equipmentStatus.push(`weapon (${player?.equipment?.weapon})`);
+      } else if (hasCombatItem) {
+        // Has combat-capable item but not equipped
+        equipmentStatus.push("combat item (can equip axe/pickaxe)");
+      }
+
+      const missingEquipment: string[] = [];
+      if (!hasAxe) missingEquipment.push("axe");
+      if (!hasPickaxe) missingEquipment.push("pickaxe");
+      if (!hasFishingEquip) missingEquipment.push("fishing equipment");
+      if (!playerHasWeapon && !hasCombatItem) missingEquipment.push("weapon");
+      if (!hasFood) missingEquipment.push("food");
+
+      // Send thought process message - Situation Assessment
+      const situationMsg = `🧠 **Assessing my situation...**
+
+**Health:** ${healthPercent}%
+**Combat Readiness:** ${combatReadiness.score}%${combatReadiness.factors.length > 0 ? ` (Issues: ${combatReadiness.factors.join(", ")})` : " ✓"}
+**Equipment I have:** ${equipmentStatus.length > 0 ? equipmentStatus.join(", ") : "None!"}
+**Missing:** ${missingEquipment.length > 0 ? missingEquipment.join(", ") : "Nothing - fully equipped!"}
+**Inventory:** ${items.length}/28 slots used`;
+
+      await callback?.({ text: situationMsg, action: "SET_GOAL" });
+
+      // Sync thought to server for dashboard display
+      service.syncAgentThought("situation", situationMsg);
+
+      // Build context from possibilities provider
+      let possibilitiesText = "";
+      if (possibilitiesData) {
+        const craftableCount =
+          (possibilitiesData.craftable?.smelting?.length || 0) +
+          (possibilitiesData.craftable?.smithing?.length || 0) +
+          (possibilitiesData.craftable?.cooking?.length || 0);
+        const gatherableCount = possibilitiesData.gatherable?.length || 0;
+        const combatTargets =
+          possibilitiesData.combat?.attackableTargets?.length || 0;
+
+        possibilitiesText = `
+What You Can Do NOW:
+- Craftable items: ${craftableCount} recipes available
+- Gatherable resources: ${gatherableCount} nearby
+- Combat targets: ${combatTargets} enemies nearby
+- Has food: ${possibilitiesData.hasFood ? "Yes" : "No"}
+- Inventory slots free: ${possibilitiesData.inventorySlotsFree}`;
+      }
+
+      // Build guardrails context
+      let guardrailsText = "";
+      if (guardrailsData) {
+        const criticalWarnings =
+          guardrailsData.activeWarnings?.filter(
+            (w) => w.level === "critical",
+          ) || [];
+        const blockedActions = guardrailsData.blockedActions || [];
+
+        if (criticalWarnings.length > 0) {
+          guardrailsText +=
+            "\n\nCRITICAL WARNINGS:\n" +
+            criticalWarnings.map((w) => `- ${w.message}`).join("\n");
+        }
+        if (blockedActions.length > 0) {
+          guardrailsText +=
+            "\n\nBLOCKED ACTIONS:\n" +
+            blockedActions.map((b) => `- ${b.action}: ${b.reason}`).join("\n");
+        }
+      }
+
+      // Identify blocked goals for thought process
+      const blockedGoals = allTemplates.filter((g) => !g.applicable);
+      const applicableGoals = goalTemplates.filter((g) => g.applicable);
+
+      // Send thought process message - Available Goals
+      let goalsMsg = `🎯 **Evaluating possible goals...**\n\n`;
+
+      if (blockedGoals.length > 0) {
+        goalsMsg += `**❌ Blocked goals (missing requirements):**\n`;
+        for (const g of blockedGoals.slice(0, 4)) {
+          goalsMsg += `- ${g.name}: ${g.reason}\n`;
+        }
+        goalsMsg += `\n`;
+      }
+
+      if (applicableGoals.length > 0) {
+        goalsMsg += `**✓ Available goals (sorted by score):**\n`;
+        for (const g of applicableGoals.slice(0, 5)) {
+          goalsMsg += `- **${g.name}** (score: ${g.score}) - ${g.reason}\n`;
+        }
+      } else {
+        goalsMsg += `**⚠️ No goals currently available!** I may need to explore or acquire basic tools first.`;
+      }
+
+      await callback?.({ text: goalsMsg, action: "SET_GOAL" });
+
+      // Sync thought to server for dashboard display
+      service.syncAgentThought("evaluation", goalsMsg);
+
+      // Format goal templates for LLM selection
+      const goalsText = goalTemplates
+        .slice(0, 5) // Top 5 recommended goals
         .map(
           (g, i) =>
-            `${i + 1}. ${g.id}: ${g.description} (priority: ${g.priority}, reason: ${g.reason})`,
+            `${i + 1}. ${g.id}: ${g.name} - ${g.description}
+   Type: ${g.type}, Score: ${g.score}
+   Why recommended: ${g.reason}
+   Steps: ${g.steps.slice(0, 2).join(", ")}...`,
         )
-        .join("\n");
+        .join("\n\n");
 
       const autonomyModeSetting = String(
         runtime.getSetting("HYPERSCAPE_AUTONOMY_MODE") ||
@@ -184,46 +369,58 @@ export const setGoalAction: Action = {
       );
       const isScripted = autonomyModeSetting === "scripted";
 
-      // Use LLM to select the best goal (unless scripted mode is enabled)
-      const selectionPrompt = `You are an AI agent playing a RuneScape-style MMORPG. You need to choose your next goal.
+      // Build intelligent LLM prompt with full context (unless scripted mode is enabled)
+      const selectionPrompt = `You are an AI agent playing a RuneScape-style MMORPG. Choose your next goal intelligently.
 
-Current Status:
+CURRENT STATUS:
 - Health: ${healthPercent}%
-- Attack Level: ${skills?.attack?.level ?? 1}
-- Strength Level: ${skills?.strength?.level ?? 1}
-- Defence Level: ${skills?.defence?.level ?? 1}
-- Woodcutting Level: ${skills?.woodcutting?.level ?? 1}
+- Combat Readiness: ${combatReadiness.score}%${combatReadiness.factors.length > 0 ? ` (Issues: ${combatReadiness.factors.join(", ")})` : ""}
+- Attack: ${skills?.attack?.level ?? 1}, Strength: ${skills?.strength?.level ?? 1}, Defence: ${skills?.defence?.level ?? 1}
+- Woodcutting: ${skills?.woodcutting?.level ?? 1}, Mining: ${skills?.mining?.level ?? 1}, Smithing: ${skills?.smithing?.level ?? 1}
+- Cooking: ${skills?.cooking?.level ?? 1}, Fishing: ${skills?.fishing?.level ?? 1}, Firemaking: ${skills?.firemaking?.level ?? 1}
+${possibilitiesText}${guardrailsText}
 
-Available Goals:
+RECOMMENDED GOALS (sorted by suitability):
 ${goalsText}
 
-Choose the goal ID that makes the most sense for your current situation. Consider:
-- If health is low, prioritize safety (exploration or rest)
-- If health is good, train combat skills
-- Balance your skill training (don't always train the same skill)
+DECISION RULES:
+1. If combat readiness < 50% or no weapon/food, DON'T choose combat goals
+2. Prefer goals that use what you already have in inventory
+3. Prefer nearby resources over distant ones
+4. If no crafting materials, choose gathering goals first
+5. Balance skill training - don't always pick the same type
 
-Respond with ONLY the goal ID (e.g., "train_attack" or "explore"). Nothing else.`;
+Choose the goal ID that makes the most sense. Respond with ONLY the goal ID (e.g., "woodcutting_basics" or "combat_training_goblins"). Nothing else.`;
+
+      // Send thinking message
+      const thinkingMsg = "💭 **Making my decision...**";
+      await callback?.({ text: thinkingMsg, action: "SET_GOAL" });
+
+      // Sync thought to server for dashboard display
+      service.syncAgentThought("thinking", thinkingMsg);
 
       let selectedGoalId: string;
       let selectedGoal = availableGoals[0];
+      let selectionMethod = "LLM";
 
       if (isScripted) {
         selectedGoal = selectScriptedGoal(availableGoals, scriptedRoleSetting);
         selectedGoalId = selectedGoal.id;
+        selectionMethod = "scripted";
         logger.info(`[SET_GOAL] Scripted goal selected: ${selectedGoalId}`);
       } else {
         try {
           const response = await runtime.useModel(ModelType.TEXT_SMALL, {
             prompt: selectionPrompt,
             maxTokens: 50,
-            temperature: 0.7,
+            temperature: 0.5, // Lower temperature for more consistent decisions
           });
 
           // Extract goal ID from response (clean up any extra text)
           selectedGoalId = response
             .trim()
             .toLowerCase()
-            .replace(/[^a-z_]/g, "");
+            .replace(/[^a-z_0-9]/g, "");
           logger.info(`[SET_GOAL] LLM selected goal: ${selectedGoalId}`);
         } catch (llmError) {
           // Fallback to highest priority goal if LLM fails
@@ -231,56 +428,164 @@ Respond with ONLY the goal ID (e.g., "train_attack" or "explore"). Nothing else.
             `[SET_GOAL] LLM selection failed, using highest priority: ${llmError}`,
           );
           selectedGoalId = availableGoals[0].id;
+          selectionMethod = "fallback (highest score)";
         }
 
         // Find the selected goal
-        const llmSelectedGoal = availableGoals.find(
+        let llmSelectedGoal = availableGoals.find(
           (g) => g.id === selectedGoalId,
         );
         if (!llmSelectedGoal) {
-          // Fallback to highest priority if invalid selection
-          logger.warn(
-            `[SET_GOAL] Invalid goal ID "${selectedGoalId}", using highest priority`,
+          // Try partial match
+          llmSelectedGoal = availableGoals.find(
+            (g) =>
+              g.id.includes(selectedGoalId) || selectedGoalId.includes(g.id),
           );
-          selectedGoal = availableGoals[0];
+          if (!llmSelectedGoal) {
+            // Fallback to highest priority if invalid selection
+            logger.warn(
+              `[SET_GOAL] Invalid goal ID "${selectedGoalId}", using highest priority`,
+            );
+            selectedGoal = availableGoals[0];
+            selectionMethod = "fallback (invalid selection corrected)";
+          } else {
+            selectedGoal = llmSelectedGoal;
+          }
         } else {
           selectedGoal = llmSelectedGoal;
         }
       }
 
-      // Calculate progress and target for skill-based goals
-      let progress = 0;
-      let target = 10;
+      // Map template type to CurrentGoal type (combat -> combat_training)
+      const templateTypeToGoalType: Record<
+        string,
+        | "combat_training"
+        | "woodcutting"
+        | "mining"
+        | "smithing"
+        | "fishing"
+        | "firemaking"
+        | "cooking"
+        | "exploration"
+        | "idle"
+        | "starter_items"
+      > = {
+        combat: "combat_training",
+        woodcutting: "woodcutting",
+        mining: "mining",
+        smithing: "smithing",
+        fishing: "fishing",
+        firemaking: "firemaking",
+        cooking: "cooking",
+        exploration: "exploration",
+        starter_items: "starter_items",
+      };
+      const goalType =
+        templateTypeToGoalType[selectedGoal.type] || "exploration";
 
-      if (selectedGoal.targetSkill && selectedGoal.targetSkillLevel) {
-        // For skill goals: progress = current level, target = target level
-        const currentLevel = skills?.[selectedGoal.targetSkill]?.level ?? 1;
+      // Calculate target based on goal type
+      let target = 10;
+      let progress = 0;
+      let targetSkill: string | undefined;
+      let targetSkillLevel: number | undefined;
+      let targetEntity: string | undefined;
+      let location: string | undefined;
+
+      // Parse goal template to extract skill info
+      if (selectedGoal.type === "woodcutting") {
+        targetSkill = "woodcutting";
+        const currentLevel = skills?.woodcutting?.level ?? 1;
+        targetSkillLevel = currentLevel + 2;
         progress = currentLevel;
-        target = selectedGoal.targetSkillLevel;
+        target = targetSkillLevel;
+        targetEntity = "tree";
+        location = "forest";
+      } else if (selectedGoal.type === "mining") {
+        targetSkill = "mining";
+        const currentLevel = skills?.mining?.level ?? 1;
+        targetSkillLevel = currentLevel + 2;
+        progress = currentLevel;
+        target = targetSkillLevel;
+        targetEntity = "rock";
+        location = "mine";
+      } else if (selectedGoal.type === "combat") {
+        targetSkill = "attack"; // Default to attack
+        const currentLevel = skills?.attack?.level ?? 1;
+        targetSkillLevel = currentLevel + 2;
+        progress = currentLevel;
+        target = targetSkillLevel;
+        targetEntity = "goblin";
+        location = "spawn";
+      } else if (selectedGoal.type === "smithing") {
+        targetSkill = "smithing";
+        const currentLevel = skills?.smithing?.level ?? 1;
+        targetSkillLevel = currentLevel + 2;
+        progress = currentLevel;
+        target = targetSkillLevel;
+      } else if (selectedGoal.type === "fishing") {
+        targetSkill = "fishing";
+        const currentLevel = skills?.fishing?.level ?? 1;
+        targetSkillLevel = currentLevel + 2;
+        progress = currentLevel;
+        target = targetSkillLevel;
+        targetEntity = "fishing_spot";
+        location = "fishing";
+      } else if (selectedGoal.type === "cooking") {
+        targetSkill = "cooking";
+        const currentLevel = skills?.cooking?.level ?? 1;
+        targetSkillLevel = currentLevel + 2;
+        progress = currentLevel;
+        target = targetSkillLevel;
+      } else if (selectedGoal.type === "firemaking") {
+        targetSkill = "firemaking";
+        const currentLevel = skills?.firemaking?.level ?? 1;
+        targetSkillLevel = currentLevel + 2;
+        progress = currentLevel;
+        target = targetSkillLevel;
       } else if (selectedGoal.type === "exploration") {
         progress = 0;
         target = 3; // 3 exploration steps
-      } else if (selectedGoal.type === "idle") {
-        progress = 0;
-        target = 1; // Just rest once
       }
 
       // Set the goal in the behavior manager
       behaviorManager.setGoal({
-        type: selectedGoal.type,
+        type: goalType,
         description: selectedGoal.description,
         target,
         progress,
-        location: selectedGoal.location,
-        targetEntity: selectedGoal.targetEntity,
-        targetSkill: selectedGoal.targetSkill,
-        targetSkillLevel: selectedGoal.targetSkillLevel,
+        location,
+        targetEntity,
+        targetSkill,
+        targetSkillLevel,
         startedAt: Date.now(),
       });
 
-      const responseText = `Goal selected: ${selectedGoal.description} (${selectedGoal.reason})`;
-      await callback?.({ text: responseText, action: "SET_GOAL" });
+      // Build decision message with reasoning
+      let decisionMsg = `✅ **Decision: ${selectedGoal.name}** (via ${selectionMethod})\n\n`;
+      decisionMsg += `**Why:** ${selectedGoal.reason}\n`;
+      decisionMsg += `**What I'll do:** ${selectedGoal.description}\n`;
 
+      if (targetSkill && targetSkillLevel) {
+        decisionMsg += `**Target:** Train ${targetSkill} to level ${targetSkillLevel}\n`;
+      }
+      if (location) {
+        decisionMsg += `**Location:** ${location}\n`;
+      }
+      if (targetEntity) {
+        decisionMsg += `**Interact with:** ${targetEntity}\n`;
+      }
+
+      decisionMsg += `\n**Next steps:**\n`;
+      for (const step of selectedGoal.steps.slice(0, 3)) {
+        decisionMsg += `- ${step}\n`;
+      }
+
+      await callback?.({ text: decisionMsg, action: "SET_GOAL" });
+
+      // Sync thought to server for dashboard display
+      service.syncAgentThought("decision", decisionMsg);
+
+      const responseText = `Goal selected: ${selectedGoal.name} - ${selectedGoal.description}`;
       logger.info(`[SET_GOAL] ${responseText}`);
 
       return {
@@ -291,8 +596,8 @@ Respond with ONLY the goal ID (e.g., "train_attack" or "explore"). Nothing else.
           goalId: selectedGoal.id,
           goalType: selectedGoal.type,
           target,
-          targetSkill: selectedGoal.targetSkill,
-          targetSkillLevel: selectedGoal.targetSkillLevel,
+          targetSkill,
+          targetSkillLevel,
         },
       };
     } catch (error) {
@@ -375,28 +680,44 @@ export const navigateToAction: Action = {
     const behaviorManager = service.getBehaviorManager();
     const goal = behaviorManager?.getGoal();
 
-    const targetPosition = goal?.targetPosition;
-    const targetLoc = goal?.location ? KNOWN_LOCATIONS[goal.location] : null;
+    logger.info(
+      `[NAVIGATE_TO] Checking goal - location: ${goal?.location}, targetPosition: ${goal?.targetPosition ? `(${goal.targetPosition[0]}, ${goal.targetPosition[2]})` : "none"}`,
+    );
 
-    if (!targetPosition && !targetLoc) {
+    // Get target position - prefer dynamic targetPosition over KNOWN_LOCATIONS
+    let targetPos: [number, number, number] | null = null;
+    let targetName = "unknown";
+
+    if (goal?.targetPosition) {
+      // Use dynamically discovered position
+      targetPos = goal.targetPosition;
+      targetName = goal.location || "dynamic target";
+      logger.info(`[NAVIGATE_TO] Using dynamic position for ${targetName}`);
+    } else if (goal?.location) {
+      // Fall back to KNOWN_LOCATIONS
+      const targetLoc = KNOWN_LOCATIONS[goal.location];
+      if (targetLoc) {
+        targetPos = targetLoc.position;
+        targetName = goal.location;
+        logger.info(`[NAVIGATE_TO] Using KNOWN_LOCATIONS for ${targetName}`);
+      }
+    }
+
+    if (!targetPos) {
       logger.info(
-        "[NAVIGATE_TO] Validation failed: no goal target position or location set",
+        "[NAVIGATE_TO] Validation failed: no target position available",
       );
       return false;
     }
 
     // Check distance
-    const target = targetPosition || targetLoc?.position;
-    if (!target) return false;
-
-    const goalLocation = goal?.location;
-    const dx = playerX - target[0];
-    const dz = playerZ - target[2];
+    const dx = playerX - targetPos[0];
+    const dz = playerZ - targetPos[2];
     const distance = Math.sqrt(dx * dx + dz * dz);
 
     logger.info(
       `[NAVIGATE_TO] Player at (${playerX.toFixed(0)}, ${playerZ.toFixed(0)}), ` +
-        `target "${goalLocation ?? "custom"}" at (${target[0]}, ${target[2]}), ` +
+        `target "${targetName}" at (${targetPos[0].toFixed(0)}, ${targetPos[2].toFixed(0)}), ` +
         `distance: ${distance.toFixed(0)}`,
     );
 
@@ -408,7 +729,7 @@ export const navigateToAction: Action = {
     }
 
     logger.info(
-      `[NAVIGATE_TO] Validation passed - need to travel ${distance.toFixed(0)} units to ${goalLocation ?? "target"}`,
+      `[NAVIGATE_TO] Validation passed - need to travel ${distance.toFixed(0)} units to ${targetName}`,
     );
     return true;
   },
@@ -429,15 +750,27 @@ export const navigateToAction: Action = {
 
       const behaviorManager = service.getBehaviorManager();
       const goal = behaviorManager?.getGoal();
-      const targetPosition = goal?.targetPosition;
-      const destinationKey =
-        goal?.location || (targetPosition ? "goal_target" : "spawn");
-      const destination = goal?.location
-        ? KNOWN_LOCATIONS[destinationKey]
-        : null;
+      const destinationKey = goal?.location || "spawn";
 
-      if (!targetPosition && !destination) {
-        return { success: false, error: "No navigation target available" };
+      // Get target position - prefer dynamic targetPosition over KNOWN_LOCATIONS
+      let targetPos: [number, number, number] | null = null;
+
+      if (goal?.targetPosition) {
+        // Use dynamically discovered position
+        targetPos = goal.targetPosition;
+        logger.info(
+          `[NAVIGATE_TO] Handler using dynamic position for ${destinationKey}`,
+        );
+      } else {
+        // Fall back to KNOWN_LOCATIONS
+        const destination = KNOWN_LOCATIONS[destinationKey];
+        if (destination) {
+          targetPos = destination.position;
+        }
+      }
+
+      if (!targetPos) {
+        return { success: false, error: `Unknown location: ${destinationKey}` };
       }
 
       // Get current player position
@@ -451,15 +784,9 @@ export const navigateToAction: Action = {
       const [playerX, playerY, playerZ] = playerPos;
 
       // Calculate distance to destination
-      const targetX = targetPosition
-        ? targetPosition[0]
-        : destination!.position[0];
-      const targetY = targetPosition
-        ? targetPosition[1]
-        : destination!.position[1];
-      const targetZ = targetPosition
-        ? targetPosition[2]
-        : destination!.position[2];
+      const targetX = targetPos[0];
+      const targetY = targetPos[1];
+      const targetZ = targetPos[2];
 
       const dx = targetX - playerX;
       const dz = targetZ - playerZ;

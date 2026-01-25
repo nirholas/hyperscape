@@ -7,12 +7,14 @@ import React, { useEffect, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { useLoginToMiniApp } from "@privy-io/react-auth/farcaster";
 import miniappSdk from "@farcaster/miniapp-sdk";
+import { useThemeStore } from "hs-kit";
 
 interface LoginScreenProps {
   onAuthenticated: () => void;
 }
 
 export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
+  const theme = useThemeStore((s) => s.theme);
   const { ready, authenticated, login } = usePrivy();
   const { initLoginToMiniApp, loginToMiniApp } = useLoginToMiniApp();
   const [isFarcasterContext, setIsFarcasterContext] = useState(false);
@@ -75,13 +77,13 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
           .login-screen {
             position: fixed;
             inset: 0;
-            background: linear-gradient(rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.4)),
+            background: linear-gradient(${theme.colors.background.overlay}, ${theme.colors.background.overlay}),
                         url('/images/app_background.png') center/cover no-repeat;
-            background-color: #0a0a0f;
+            background-color: ${theme.colors.background.primary};
             display: flex;
             align-items: center;
             justify-content: center;
-            color: white;
+            color: ${theme.colors.text.primary};
             font-family: 'Cinzel', serif, system-ui, -apple-system, sans-serif;
           }
           .login-content {
@@ -97,23 +99,23 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
             width: 350px;
             height: auto;
             margin: 2rem auto 0;
-            filter: drop-shadow(0 0 30px rgba(212, 175, 55, 0.6))
-                    drop-shadow(0 0 60px rgba(212, 175, 55, 0.4));
+            filter: drop-shadow(0 0 30px ${theme.colors.accent.primary}99)
+                    drop-shadow(0 0 60px ${theme.colors.accent.primary}66);
           }
           .login-bottom {
             margin-bottom: 4rem;
           }
           .login-subtitle {
             font-size: 1.1rem;
-            color: rgba(255, 255, 255, 0.8);
+            color: ${theme.colors.text.secondary};
             margin-bottom: 2rem;
             letter-spacing: 0.05em;
           }
           .loading-spinner {
             width: 40px;
             height: 40px;
-            border: 4px solid rgba(212, 175, 55, 0.2);
-            border-top-color: #d4af37;
+            border: 4px solid ${theme.colors.accent.primary}33;
+            border-top-color: ${theme.colors.accent.primary};
             border-radius: 50%;
             animation: spin 1s linear infinite;
             margin: 0 auto;
@@ -141,13 +143,13 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
           .login-screen {
             position: fixed;
             inset: 0;
-            background: linear-gradient(rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.4)),
+            background: linear-gradient(${theme.colors.background.overlay}, ${theme.colors.background.overlay}),
                         url('/images/app_background.png') center/cover no-repeat;
-            background-color: #0a0a0f;
+            background-color: ${theme.colors.background.primary};
             display: flex;
             align-items: center;
             justify-content: center;
-            color: white;
+            color: ${theme.colors.text.primary};
             font-family: 'Cinzel', serif, system-ui, -apple-system, sans-serif;
           }
           .login-content {
@@ -163,17 +165,17 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
             width: 400px;
             height: auto;
             margin: 2rem auto 1.5rem;
-            filter: drop-shadow(0 0 35px rgba(212, 175, 55, 0.7))
-                    drop-shadow(0 0 70px rgba(212, 175, 55, 0.5));
+            filter: drop-shadow(0 0 35px ${theme.colors.accent.primary}b3)
+                    drop-shadow(0 0 70px ${theme.colors.accent.primary}80);
           }
           .login-tagline {
             font-size: 1.2rem;
-            color: rgba(242, 208, 138, 0.9);
+            color: ${theme.colors.text.accent};
             letter-spacing: 0.15em;
             font-weight: 300;
             text-transform: uppercase;
-            text-shadow: 0 0 10px rgba(242, 208, 138, 0.3),
-                         0 0 20px rgba(242, 208, 138, 0.2);
+            text-shadow: 0 0 10px ${theme.colors.accent.secondary}4d,
+                         0 0 20px ${theme.colors.accent.secondary}33;
             margin-bottom: 0;
           }
           .login-bottom {
@@ -181,7 +183,7 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
           }
           .login-subtitle {
             font-size: 1.2rem;
-            color: rgba(255, 255, 255, 0.8);
+            color: ${theme.colors.text.secondary};
             margin-bottom: 2rem;
             letter-spacing: 0.05em;
           }
@@ -200,14 +202,14 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
             height: 1px;
             background: linear-gradient(90deg,
               transparent 0%,
-              rgba(242, 208, 138, 0.1) 5%,
-              rgba(242, 208, 138, 0.6) 30%,
-              rgba(242, 208, 138, 0.9) 50%,
-              rgba(242, 208, 138, 0.6) 70%,
-              rgba(242, 208, 138, 0.1) 95%,
+              ${theme.colors.accent.secondary}1a 5%,
+              ${theme.colors.accent.secondary}99 30%,
+              ${theme.colors.accent.secondary}e6 50%,
+              ${theme.colors.accent.secondary}99 70%,
+              ${theme.colors.accent.secondary}1a 95%,
               transparent 100%);
-            box-shadow: 0 0 8px rgba(242, 208, 138, 0.4),
-                        0 0 15px rgba(242, 208, 138, 0.2);
+            box-shadow: 0 0 8px ${theme.colors.accent.secondary}66,
+                        0 0 15px ${theme.colors.accent.secondary}33;
             transition: all 0.3s ease;
             pointer-events: none;
           }
@@ -241,9 +243,9 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
             transform: translateY(-50%) translateX(-100%);
             background: linear-gradient(90deg,
               transparent 0%,
-              rgba(242, 208, 138, 0) 30%,
-              rgba(242, 208, 138, 0.15) 50%,
-              rgba(242, 208, 138, 0) 70%,
+              ${theme.colors.accent.secondary}00 30%,
+              ${theme.colors.accent.secondary}26 50%,
+              ${theme.colors.accent.secondary}00 70%,
               transparent 100%);
             opacity: 0;
             transition: all 0.6s ease;
@@ -253,7 +255,7 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
           .login-button {
             background: transparent;
             border: none;
-            color: #f2d08a;
+            color: ${theme.colors.text.accent};
             padding: 0.75rem 2rem;
             font-size: 1.4rem;
             font-weight: 400;
@@ -263,37 +265,37 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
             text-transform: capitalize;
             position: relative;
             font-family: 'Cinzel', serif, system-ui, -apple-system, sans-serif;
-            text-shadow: 0 0 12px rgba(242, 208, 138, 0.5),
-                         0 0 25px rgba(242, 208, 138, 0.3);
+            text-shadow: 0 0 12px ${theme.colors.accent.secondary}80,
+                         0 0 25px ${theme.colors.accent.secondary}4d;
             z-index: 3;
             filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.8))
                     drop-shadow(0 4px 10px rgba(0, 0, 0, 0.6));
             min-width: 350px;
           }
           .login-button:hover {
-            color: #f5dca8;
-            text-shadow: 0 0 18px rgba(242, 208, 138, 0.7),
-                         0 0 35px rgba(242, 208, 138, 0.5);
+            color: ${theme.colors.accent.hover};
+            text-shadow: 0 0 18px ${theme.colors.accent.secondary}b3,
+                         0 0 35px ${theme.colors.accent.secondary}80;
             transform: scale(1.03);
           }
           .login-button:active {
             transform: scale(0.98);
-            color: #ffeac3;
-            text-shadow: 0 0 25px rgba(242, 208, 138, 0.9),
-                         0 0 50px rgba(242, 208, 138, 0.6);
+            color: ${theme.colors.accent.secondary};
+            text-shadow: 0 0 25px ${theme.colors.accent.secondary}e6,
+                         0 0 50px ${theme.colors.accent.secondary}99;
           }
           .login-button-wrapper:hover::before,
           .login-button-wrapper:hover::after {
             background: linear-gradient(90deg,
               transparent 0%,
-              rgba(242, 208, 138, 0.15) 5%,
-              rgba(242, 208, 138, 0.7) 30%,
-              rgba(242, 208, 138, 1) 50%,
-              rgba(242, 208, 138, 0.7) 70%,
-              rgba(242, 208, 138, 0.15) 95%,
+              ${theme.colors.accent.secondary}26 5%,
+              ${theme.colors.accent.secondary}b3 30%,
+              ${theme.colors.accent.secondary} 50%,
+              ${theme.colors.accent.secondary}b3 70%,
+              ${theme.colors.accent.secondary}26 95%,
               transparent 100%);
-            box-shadow: 0 0 12px rgba(242, 208, 138, 0.5),
-                        0 0 20px rgba(242, 208, 138, 0.3);
+            box-shadow: 0 0 12px ${theme.colors.accent.secondary}80,
+                        0 0 20px ${theme.colors.accent.secondary}4d;
           }
           .login-button-wrapper:hover .login-button-highlight {
             opacity: 1;
@@ -303,8 +305,8 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
             opacity: 1;
             transform: translateY(-50%) translateX(0);
             background: radial-gradient(ellipse at center,
-              rgba(242, 208, 138, 0.3) 0%,
-              rgba(242, 208, 138, 0.15) 50%,
+              ${theme.colors.accent.secondary}4d 0%,
+              ${theme.colors.accent.secondary}26 50%,
               transparent 100%);
           }
           .farcaster-badge {
@@ -357,13 +359,13 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
         .login-screen {
           position: fixed;
           inset: 0;
-          background: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)),
+          background: linear-gradient(${theme.colors.background.overlay}, ${theme.colors.background.overlay}),
                       url('/images/app_background.png') center/cover no-repeat;
-          background-color: #0a0a0f;
+          background-color: ${theme.colors.background.primary};
           display: flex;
           align-items: center;
           justify-content: center;
-          color: white;
+          color: ${theme.colors.text.primary};
           font-family: 'Cinzel', serif, system-ui, -apple-system, sans-serif;
         }
         .login-content {
@@ -379,23 +381,23 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
           width: 350px;
           height: auto;
           margin: 2rem auto 0;
-          filter: drop-shadow(0 0 30px rgba(212, 175, 55, 0.6))
-                  drop-shadow(0 0 60px rgba(212, 175, 55, 0.4));
+          filter: drop-shadow(0 0 30px ${theme.colors.accent.primary}99)
+                  drop-shadow(0 0 60px ${theme.colors.accent.primary}66);
         }
         .login-bottom {
           margin-bottom: 4rem;
         }
         .login-subtitle {
           font-size: 1.1rem;
-          color: rgba(255, 255, 255, 0.8);
+          color: ${theme.colors.text.secondary};
           margin-bottom: 2rem;
           letter-spacing: 0.05em;
         }
         .loading-spinner {
           width: 40px;
           height: 40px;
-          border: 4px solid rgba(212, 175, 55, 0.2);
-          border-top-color: #d4af37;
+          border: 4px solid ${theme.colors.accent.primary}33;
+          border-top-color: ${theme.colors.accent.primary};
           border-radius: 50%;
           animation: spin 1s linear infinite;
           margin: 0 auto;

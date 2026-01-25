@@ -330,4 +330,40 @@ export class CharacterRepository extends BaseRepository {
       throw error;
     }
   }
+
+  /**
+   * Update character name
+   *
+   * Updates the display name for a character.
+   * Caller should validate the name before calling this method.
+   *
+   * @param characterId - The character ID to update
+   * @param name - New display name
+   * @returns true if character was updated, false if not found
+   */
+  async updateCharacterName(
+    characterId: string,
+    name: string,
+  ): Promise<boolean> {
+    this.ensureDatabase();
+
+    try {
+      const result = await this.db
+        .update(schema.characters)
+        .set({ name })
+        .where(eq(schema.characters.id, characterId));
+
+      // Check if any rows were affected
+      const updated =
+        result && (result as unknown as { rowCount?: number }).rowCount !== 0;
+
+      return updated;
+    } catch (error) {
+      console.error(
+        "[CharacterRepository] Error updating character name:",
+        error,
+      );
+      throw error;
+    }
+  }
 }

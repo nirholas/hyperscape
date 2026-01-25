@@ -3,11 +3,13 @@
  *
  * Right-click context menu for bank items with withdraw/deposit options.
  * RS3-style: Shows different options for placeholders (qty=0) vs items.
+ * Uses hs-kit theme system for consistent styling.
  */
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { getItem } from "@hyperscape/shared";
+import { useThemeStore } from "hs-kit";
 import type { ContextMenuState } from "../../types";
 import type { RightPanelMode } from "../../types";
 
@@ -24,8 +26,10 @@ export function ContextMenu({
   onClose,
   rightPanelMode,
 }: ContextMenuProps) {
+  const theme = useThemeStore((s) => s.theme);
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [customAmount, setCustomAmount] = useState("");
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // RS3-style: Items with qty=0 are placeholders
@@ -66,37 +70,65 @@ export function ContextMenu({
   // IMPORTANT: Check visibility FIRST before any rendering
   if (!menu.visible) return null;
 
+  // Clamp menu position to viewport boundaries
+  const menuWidth = 200;
+  const menuHeight = 250;
+  const padding = 8;
+
+  let adjustedX = menu.x;
+  let adjustedY = menu.y;
+
+  if (adjustedX + menuWidth + padding > window.innerWidth) {
+    adjustedX = Math.max(padding, window.innerWidth - menuWidth - padding);
+  }
+  if (adjustedY + menuHeight + padding > window.innerHeight) {
+    adjustedY = Math.max(padding, window.innerHeight - menuHeight - padding);
+  }
+  adjustedX = Math.max(padding, adjustedX);
+  adjustedY = Math.max(padding, adjustedY);
+
+  const menuContainerStyle: CSSProperties = {
+    background: `linear-gradient(135deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+    border: `1px solid ${theme.colors.border.default}`,
+    borderRadius: theme.borderRadius.md,
+    boxShadow: theme.shadows.lg,
+    padding: `${theme.spacing.xs}px 0`,
+    display: "inline-block",
+  };
+
+  const menuItemStyle = (isHovered: boolean): CSSProperties => ({
+    display: "block",
+    width: "100%",
+    padding: `${theme.spacing.xs}px ${theme.spacing.md}px`,
+    textAlign: "left",
+    fontSize: theme.typography.fontSize.xs,
+    color: isHovered ? theme.colors.text.primary : theme.colors.text.secondary,
+    background: isHovered ? theme.colors.background.tertiary : "transparent",
+    border: "none",
+    cursor: "pointer",
+    transition: "all 0.15s ease",
+    whiteSpace: "nowrap",
+  });
+
   // RS3-style: Handle placeholder-only context menu (qty=0 bank items)
   if (isPlaceholder) {
     return createPortal(
       <div
         ref={menuRef}
-        className="fixed z-[10000] pointer-events-auto"
-        style={{ left: menu.x, top: menu.y, width: "auto" }}
+        style={{
+          position: "fixed",
+          left: adjustedX,
+          top: adjustedY,
+          width: "auto",
+          zIndex: 10000,
+          pointerEvents: "auto",
+        }}
       >
-        <div
-          className="rounded shadow-xl py-1 inline-block"
-          style={{
-            background:
-              "linear-gradient(135deg, rgba(30, 25, 20, 0.98) 0%, rgba(20, 15, 10, 0.98) 100%)",
-            border: "1px solid rgba(139, 69, 19, 0.8)",
-            boxShadow: "0 4px 12px rgba(0, 0, 0, 0.8)",
-          }}
-        >
+        <div style={menuContainerStyle}>
           <button
-            className="block px-3 py-1 text-left text-xs transition-colors whitespace-nowrap"
-            style={{
-              color: "rgba(242, 208, 138, 0.9)",
-              background: "transparent",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "rgba(139, 69, 19, 0.4)";
-              e.currentTarget.style.color = "#fff";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "transparent";
-              e.currentTarget.style.color = "rgba(242, 208, 138, 0.9)";
-            }}
+            style={menuItemStyle(hoveredIndex === 0)}
+            onMouseEnter={() => setHoveredIndex(0)}
+            onMouseLeave={() => setHoveredIndex(null)}
             onClick={(e) => {
               e.stopPropagation();
               onAction("releasePlaceholder", 0);
@@ -115,17 +147,10 @@ export function ContextMenu({
     [];
 
   // RS3-style: "Equip" option position depends on rightPanelMode
-  // Equipment tab open: Equip at TOP (left-click equips)
-  // Inventory tab open: Equip at BOTTOM (left-click withdraws to inventory)
   const canEquip = menu.type === "bank" && isEquipable && menu.quantity > 0;
 
-  // Add "Equip" at TOP only if equipment tab is open
   if (canEquip && rightPanelMode === "equipment") {
-    menuOptions.push({
-      label: "Equip",
-      amount: 1,
-      action: "equip",
-    });
+    menuOptions.push({ label: "Equip", amount: 1, action: "equip" });
   }
 
   // Standard withdraw/deposit options
@@ -157,17 +182,10 @@ export function ContextMenu({
     },
   );
 
-  // Add "Equip" at BOTTOM if inventory tab is open (still available, just not default)
   if (canEquip && rightPanelMode === "inventory") {
-    menuOptions.push({
-      label: "Equip",
-      amount: 1,
-      action: "equip",
-    });
+    menuOptions.push({ label: "Equip", amount: 1, action: "equip" });
   }
 
-  // RS3-style: Add "Withdraw-Placeholder" option for bank items with qty > 0
-  // This withdraws all and leaves a qty=0 placeholder regardless of toggle
   if (menu.type === "bank" && menu.quantity > 0) {
     menuOptions.push({
       label: "Withdraw-Placeholder",
@@ -179,24 +197,18 @@ export function ContextMenu({
   return createPortal(
     <div
       ref={menuRef}
-      className="fixed z-[10000] pointer-events-auto"
       style={{
-        left: menu.x,
-        top: menu.y,
+        position: "fixed",
+        left: adjustedX,
+        top: adjustedY,
         width: "auto",
+        zIndex: 10000,
+        pointerEvents: "auto",
       }}
     >
-      <div
-        className="rounded shadow-xl py-1 inline-block"
-        style={{
-          background:
-            "linear-gradient(135deg, rgba(30, 25, 20, 0.98) 0%, rgba(20, 15, 10, 0.98) 100%)",
-          border: "1px solid rgba(139, 69, 19, 0.8)",
-          boxShadow: "0 4px 12px rgba(0, 0, 0, 0.8)",
-        }}
-      >
+      <div style={menuContainerStyle}>
         {showCustomInput ? (
-          <div className="px-2 py-2">
+          <div style={{ padding: theme.spacing.sm }}>
             <input
               type="number"
               min="1"
@@ -208,32 +220,51 @@ export function ContextMenu({
                 if (e.key === "Escape") onClose();
               }}
               autoFocus
-              className="w-full px-2 py-1 text-sm rounded"
               style={{
-                background: "rgba(0, 0, 0, 0.5)",
-                border: "1px solid rgba(139, 69, 19, 0.6)",
-                color: "#fff",
+                width: "100%",
+                padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
+                fontSize: theme.typography.fontSize.sm,
+                borderRadius: theme.borderRadius.sm,
+                background: theme.colors.background.tertiary,
+                border: `1px solid ${theme.colors.border.default}`,
+                color: theme.colors.text.primary,
                 outline: "none",
               }}
               placeholder={`1-${menu.quantity}`}
             />
-            <div className="flex gap-1 mt-1">
+            <div
+              style={{
+                display: "flex",
+                gap: theme.spacing.xs,
+                marginTop: theme.spacing.xs,
+              }}
+            >
               <button
                 onClick={handleCustomSubmit}
-                className="flex-1 px-2 py-1 text-xs rounded"
                 style={{
-                  background: "rgba(100, 150, 100, 0.6)",
-                  color: "#fff",
+                  flex: 1,
+                  padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
+                  fontSize: theme.typography.fontSize.xs,
+                  borderRadius: theme.borderRadius.sm,
+                  background: `${theme.colors.state.success}99`,
+                  color: theme.colors.text.primary,
+                  border: "none",
+                  cursor: "pointer",
                 }}
               >
                 OK
               </button>
               <button
                 onClick={onClose}
-                className="flex-1 px-2 py-1 text-xs rounded"
                 style={{
-                  background: "rgba(150, 100, 100, 0.6)",
-                  color: "#fff",
+                  flex: 1,
+                  padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
+                  fontSize: theme.typography.fontSize.xs,
+                  borderRadius: theme.borderRadius.sm,
+                  background: `${theme.colors.state.danger}99`,
+                  color: theme.colors.text.primary,
+                  border: "none",
+                  cursor: "pointer",
                 }}
               >
                 Cancel
@@ -244,19 +275,9 @@ export function ContextMenu({
           menuOptions.map((option, idx) => (
             <button
               key={idx}
-              className="block px-3 py-1 text-left text-xs transition-colors whitespace-nowrap"
-              style={{
-                color: "rgba(242, 208, 138, 0.9)",
-                background: "transparent",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "rgba(139, 69, 19, 0.4)";
-                e.currentTarget.style.color = "#fff";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "transparent";
-                e.currentTarget.style.color = "rgba(242, 208, 138, 0.9)";
-              }}
+              style={menuItemStyle(hoveredIndex === idx)}
+              onMouseEnter={() => setHoveredIndex(idx)}
+              onMouseLeave={() => setHoveredIndex(null)}
               onClick={(e) => {
                 e.stopPropagation();
                 if (option.amount === -1) {

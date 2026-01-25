@@ -1,0 +1,143 @@
+---
+description: Review a GitHub PR - switches to branch, reviews commits, file changes, and comments to determine merge readiness
+alwaysApply: false
+---
+
+# GitHub PR Review Command
+
+When the user invokes this command, perform a comprehensive PR review.
+
+## Usage
+
+The user will provide a PR number or URL like:
+- `/pr-review 123`
+- `/pr-review https://github.com/owner/repo/pull/123`
+
+## Workflow
+
+### 1. Extract PR Information
+
+Parse the PR number from the user's input. If a URL is provided, extract the PR number from it.
+
+### 2. Fetch PR Details
+
+Run these commands in parallel to gather PR context:
+
+```bash
+# Get PR details including base/head branch
+gh pr view <PR_NUMBER> --json number,title,body,state,author,baseRefName,headRefName,mergeable,reviewDecision,isDraft
+
+# Get PR diff stats
+gh pr diff <PR_NUMBER> --stat
+
+# Get all commits in the PR
+gh pr view <PR_NUMBER> --json commits --jq '.commits[] | "\(.oid[:7]) \(.messageHeadline)"'
+
+# Get all review comments
+gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments --jq '.[] | {user: .user.login, body: .body, path: .path, line: .line, created_at: .created_at}'
+
+# Get PR reviews (approvals, change requests)
+gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/reviews --jq '.[] | {user: .user.login, state: .state, body: .body}'
+
+# Get issue comments (general discussion)
+gh pr view <PR_NUMBER> --json comments --jq '.comments[] | {author: .author.login, body: .body, createdAt: .createdAt}'
+```
+
+### 3. Switch to PR Branch
+
+Check if already on the correct branch, if not switch:
+
+```bash
+# Get current branch
+git branch --show-current
+
+# If not on PR branch, checkout
+gh pr checkout <PR_NUMBER>
+```
+
+### 4. Analyze Changes
+
+Read the actual file changes:
+
+```bash
+# Get the full diff
+gh pr diff <PR_NUMBER>
+```
+
+Use the Read tool to examine modified files in detail when needed.
+
+### 5. Review Checklist
+
+Evaluate the PR against these criteria:
+
+#### Code Quality
+- [ ] Code follows project conventions and style guides
+- [ ] No `any` types in TypeScript (per project rules)
+- [ ] Proper error handling
+- [ ] No hardcoded values that should be configurable
+- [ ] Clean separation of concerns
+
+#### Testing
+- [ ] Tests are included for new functionality
+- [ ] All existing tests pass
+- [ ] Tests use real implementations (no mocks per project rules)
+
+#### Documentation
+- [ ] Code changes are self-documenting or have comments
+- [ ] README updated if needed for significant changes
+
+#### PR Hygiene
+- [ ] Commits are logically organized
+- [ ] Commit messages are clear and descriptive
+- [ ] No unrelated changes bundled in
+
+#### Review Comments
+- [ ] All review comments have been addressed
+- [ ] No unresolved conversations
+- [ ] Reviewer concerns have been acknowledged
+
+### 6. Generate Review Report
+
+Provide a structured report:
+
+```markdown
+## PR Review: #<NUMBER> - <TITLE>
+
+### Summary
+<Brief description of what this PR does>
+
+### Changes Overview
+- **Files Changed**: X
+- **Additions**: +Y lines
+- **Deletions**: -Z lines
+- **Commits**: N
+
+### Code Review Findings
+
+#### Issues (Must Fix)
+- <List critical issues that block merge>
+
+#### Suggestions (Should Consider)
+- <List improvements that would enhance the PR>
+
+#### Notes (Optional)
+- <List minor observations>
+
+### Review Comments Status
+- **Resolved**: X comments
+- **Pending**: Y comments
+- <List any pending comments that need attention>
+
+### Merge Readiness
+
+**Status**: READY TO MERGE | NEEDS CHANGES | BLOCKED
+
+**Blockers** (if any):
+1. <List what needs to be addressed>
+
+**Recommendation**: <Final recommendation with reasoning>
+```
+
+### 7. Save Review Context
+
+After completing the review, inform the user they can use `/pr-fix` to address any issues found. The review findings will be used as context for fixes.

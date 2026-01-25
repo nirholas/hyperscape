@@ -21,6 +21,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { getItem } from "@hyperscape/shared";
+import { useThemeStore, useMobileLayout } from "hs-kit";
 
 // Types
 import type {
@@ -39,7 +40,6 @@ import {
   BANK_SCROLL_HEIGHT,
   SLOT_INDEX_APPEND_ZONE,
   TAB_INDEX_ALL,
-  BANK_THEME,
 } from "./BankPanel/constants";
 
 // Utils
@@ -76,8 +76,19 @@ export function BankPanel({
   inventory,
   equipment, // RS3-style equipment view
   coins,
-  onClose,
+  onClose: _onClose, // Handled by ModalWindow wrapper, kept for interface compatibility
 }: BankPanelProps) {
+  const theme = useThemeStore((s) => s.theme);
+  const { shouldUseMobileUI } = useMobileLayout();
+
+  // Responsive slot sizes - smaller on mobile
+  const responsiveSlotSize = shouldUseMobileUI ? 36 : BANK_SLOT_SIZE;
+  const responsiveGap = shouldUseMobileUI ? 4 : BANK_GAP;
+  const responsiveSlotsPerRow = shouldUseMobileUI ? 6 : BANK_SLOTS_PER_ROW;
+  const responsiveScrollHeight = shouldUseMobileUI
+    ? 5 * (responsiveSlotSize + responsiveGap) // 5 rows on mobile
+    : BANK_SCROLL_HEIGHT;
+
   // RS3-style right panel view mode (inventory vs equipment)
   type RightPanelMode = "inventory" | "equipment";
   const [rightPanelMode, setRightPanelMode] =
@@ -360,34 +371,8 @@ export function BankPanel({
   // ========== RENDER ==========
 
   return (
-    <div
-      className="fixed z-[9999] pointer-events-auto"
-      style={{
-        top: "50%",
-        left: "50%",
-        transform: "translate(-50%, -50%)",
-      }}
-      onClick={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
-    >
-      {/* Custom scrollbar styles */}
-      <style>{`
-        .bank-scrollbar::-webkit-scrollbar {
-          width: 8px;
-        }
-        .bank-scrollbar::-webkit-scrollbar-track {
-          background: rgba(0, 0, 0, 0.3);
-          border-radius: 4px;
-        }
-        .bank-scrollbar::-webkit-scrollbar-thumb {
-          background: rgba(139, 69, 19, 0.6);
-          border-radius: 4px;
-        }
-        .bank-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: rgba(139, 69, 19, 0.8);
-        }
-      `}</style>
-
+    <>
+      {/* Modals are rendered via portal, outside main layout */}
       <ContextMenu
         menu={contextMenu}
         onAction={handleContextMenuAction}
@@ -406,53 +391,32 @@ export function BankPanel({
         onClose={() => setConfirmModal((prev) => ({ ...prev, visible: false }))}
       />
 
-      <div className="flex gap-2">
-        {/* Bank Panel - Left Side */}
+      {/* Main content - responsive flex layout (column on mobile, row on desktop) */}
+      <div
+        className="flex gap-2"
+        style={{
+          flexDirection: shouldUseMobileUI ? "column" : "row",
+          maxWidth: "100%",
+          maxHeight: shouldUseMobileUI ? "80vh" : undefined,
+          overflow: shouldUseMobileUI ? "auto" : undefined,
+        }}
+      >
+        {/* Bank Panel - Left Side (top on mobile) */}
         <div
-          className="flex flex-col rounded-lg"
+          className="flex flex-col rounded-lg flex-1"
           style={{
-            background:
-              "linear-gradient(135deg, rgba(20, 15, 10, 0.98) 0%, rgba(15, 10, 5, 0.98) 100%)",
-            border: `2px solid ${BANK_THEME.PANEL_BORDER}`,
-            boxShadow: `0 10px 30px rgba(0, 0, 0, 0.8), inset 0 2px 4px ${BANK_THEME.PANEL_BORDER_LIGHT}`,
-            minHeight: `${BANK_SCROLL_HEIGHT + 180}px`,
-            width: `${BANK_SLOTS_PER_ROW * (BANK_SLOT_SIZE + BANK_GAP) + 32}px`,
+            background: `linear-gradient(135deg, ${theme.colors.background.primary}fa 0%, ${theme.colors.background.secondary}fa 100%)`,
+            border: `2px solid ${theme.colors.border.decorative}`,
+            boxShadow: `0 10px 30px rgba(0, 0, 0, 0.8), inset 0 2px 4px ${theme.colors.border.default}`,
+            minHeight: shouldUseMobileUI
+              ? undefined
+              : `${BANK_SCROLL_HEIGHT + 120}px`,
+            width: shouldUseMobileUI
+              ? "100%"
+              : `${responsiveSlotsPerRow * (responsiveSlotSize + responsiveGap) + 32}px`,
+            maxWidth: "100%",
           }}
         >
-          {/* Header */}
-          <div
-            className="flex justify-between items-center px-4 py-2 rounded-t-lg"
-            style={{
-              background:
-                "linear-gradient(180deg, rgba(139, 69, 19, 0.4) 0%, rgba(139, 69, 19, 0.2) 100%)",
-              borderBottom: `1px solid ${BANK_THEME.PANEL_BORDER}`,
-            }}
-          >
-            <h2
-              className="text-lg font-bold flex items-center gap-2"
-              style={{ color: BANK_THEME.TEXT_GOLD }}
-            >
-              <span>🏦</span>
-              <span>Bank</span>
-            </h2>
-            <button
-              onClick={onClose}
-              className="w-7 h-7 flex items-center justify-center rounded text-sm font-bold transition-colors"
-              style={{
-                background: "rgba(180, 50, 50, 0.8)",
-                color: "#fff",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "rgba(220, 60, 60, 0.9)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "rgba(180, 50, 50, 0.8)";
-              }}
-            >
-              ✕
-            </button>
-          </div>
-
           {/* Tab Bar */}
           <BankTabBar
             tabs={tabs}
@@ -471,13 +435,13 @@ export function BankPanel({
 
           {/* Scrollable Item Grid */}
           <div
-            className="mx-3 mt-1 p-3 overflow-y-auto overflow-x-hidden bank-scrollbar flex-1 rounded"
+            className="mx-2 mt-1 p-2 overflow-y-auto overflow-x-hidden scrollbar-thick-brown flex-1 rounded"
             style={{
-              maxHeight: `${BANK_SCROLL_HEIGHT}px`,
-              scrollbarWidth: "thin",
-              scrollbarColor: `${BANK_THEME.PANEL_BORDER} rgba(0, 0, 0, 0.3)`,
-              background: "rgba(0, 0, 0, 0.2)",
-              border: `1px solid ${BANK_THEME.PANEL_BORDER}`,
+              maxHeight: shouldUseMobileUI
+                ? `${responsiveScrollHeight}px`
+                : `${BANK_SCROLL_HEIGHT}px`,
+              background: theme.colors.background.overlay,
+              border: `1px solid ${theme.colors.border.decorative}`,
             }}
           >
             {/* "All" tab view with grouped headers */}
@@ -511,7 +475,7 @@ export function BankPanel({
                         className="flex items-center gap-2 mb-1 pb-0.5 transition-colors"
                         style={{
                           background: isHeaderDropTarget
-                            ? "rgba(100, 200, 255, 0.15)"
+                            ? `${theme.colors.accent.primary}26`
                             : "transparent",
                           padding: "1px 2px",
                         }}
@@ -552,8 +516,8 @@ export function BankPanel({
                           className="text-[10px] font-bold"
                           style={{
                             color: isHeaderDropTarget
-                              ? "#fff"
-                              : BANK_THEME.TEXT_GOLD,
+                              ? theme.colors.text.primary
+                              : theme.colors.accent.primary,
                           }}
                         >
                           {tabLabel}
@@ -563,8 +527,8 @@ export function BankPanel({
                           style={{
                             height: isHeaderDropTarget ? "2px" : "1px",
                             background: isHeaderDropTarget
-                              ? "rgba(100, 200, 255, 0.8)"
-                              : BANK_THEME.PANEL_BORDER_LIGHT,
+                              ? `${theme.colors.accent.primary}cc`
+                              : theme.colors.border.default,
                             transition: "all 0.15s ease",
                           }}
                         />
@@ -572,8 +536,8 @@ export function BankPanel({
                           className="text-[9px]"
                           style={{
                             color: isHeaderDropTarget
-                              ? "rgba(255,255,255,0.7)"
-                              : `${BANK_THEME.TEXT_GOLD}88`,
+                              ? `${theme.colors.text.primary}b3`
+                              : theme.colors.text.muted,
                           }}
                         >
                           {isHeaderDropTarget
@@ -584,9 +548,10 @@ export function BankPanel({
 
                       {/* Items grid for this tab */}
                       <div
-                        className="grid gap-2"
+                        className="grid"
                         style={{
-                          gridTemplateColumns: `repeat(${BANK_SLOTS_PER_ROW}, ${BANK_SLOT_SIZE}px)`,
+                          gridTemplateColumns: `repeat(${responsiveSlotsPerRow}, ${responsiveSlotSize}px)`,
+                          gap: `${responsiveGap}px`,
                         }}
                       >
                         {tabItems.map((item) => {
@@ -644,6 +609,7 @@ export function BankPanel({
                               showFaintGuide={showFaintGuide}
                               dropColor={dropColor}
                               guideColor={guideColor}
+                              slotSize={responsiveSlotSize}
                               onDragStart={handleSlotDragStart}
                               onDragOver={handleSlotDragOver}
                               onDragLeave={handleSlotDragLeave}
@@ -662,23 +628,23 @@ export function BankPanel({
                           <div
                             className="rounded flex items-center justify-center relative"
                             style={{
-                              width: BANK_SLOT_SIZE,
-                              height: BANK_SLOT_SIZE,
+                              width: responsiveSlotSize,
+                              height: responsiveSlotSize,
                               background:
                                 hoveredSlot === SLOT_INDEX_APPEND_ZONE &&
                                 hoveredTabIndex === tabIdx
-                                  ? `linear-gradient(135deg, rgba(${draggedTabIndex !== tabIdx ? "100, 255, 150" : "100, 200, 255"}, 0.35) 0%, rgba(${draggedTabIndex !== tabIdx ? "100, 255, 150" : "100, 200, 255"}, 0.2) 100%)`
-                                  : "linear-gradient(135deg, rgba(242, 208, 138, 0.05) 0%, rgba(242, 208, 138, 0.02) 100%)",
+                                  ? `linear-gradient(135deg, ${draggedTabIndex !== tabIdx ? theme.colors.state.success : theme.colors.accent.primary}59 0%, ${draggedTabIndex !== tabIdx ? theme.colors.state.success : theme.colors.accent.primary}33 100%)`
+                                  : `linear-gradient(135deg, ${theme.colors.accent.primary}0d 0%, ${theme.colors.accent.primary}05 100%)`,
                               border:
                                 hoveredSlot === SLOT_INDEX_APPEND_ZONE &&
                                 hoveredTabIndex === tabIdx
-                                  ? `2px dashed rgba(${draggedTabIndex !== tabIdx ? "100, 255, 150" : "100, 200, 255"}, 0.9)`
-                                  : "2px dashed rgba(242, 208, 138, 0.2)",
+                                  ? `2px dashed ${draggedTabIndex !== tabIdx ? theme.colors.state.success : theme.colors.accent.primary}e6`
+                                  : `2px dashed ${theme.colors.accent.primary}33`,
                               transition: "all 0.15s ease",
                               boxShadow:
                                 hoveredSlot === SLOT_INDEX_APPEND_ZONE &&
                                 hoveredTabIndex === tabIdx
-                                  ? `0 0 12px rgba(${draggedTabIndex !== tabIdx ? "100, 255, 150" : "100, 200, 255"}, 0.5)`
+                                  ? `0 0 12px ${draggedTabIndex !== tabIdx ? theme.colors.state.success : theme.colors.accent.primary}80`
                                   : "none",
                             }}
                             onDragOver={(e) => {
@@ -735,8 +701,10 @@ export function BankPanel({
                                 color:
                                   hoveredSlot === SLOT_INDEX_APPEND_ZONE &&
                                   hoveredTabIndex === tabIdx
-                                    ? `rgba(${draggedTabIndex !== tabIdx ? "100, 255, 150" : "100, 200, 255"}, 1)`
-                                    : "rgba(242, 208, 138, 0.3)",
+                                    ? draggedTabIndex !== tabIdx
+                                      ? theme.colors.state.success
+                                      : theme.colors.accent.primary
+                                    : theme.colors.text.muted,
                               }}
                             >
                               +
@@ -751,9 +719,10 @@ export function BankPanel({
             ) : (
               /* Single tab view - flat grid with improved UX */
               <div
-                className="grid gap-2"
+                className="grid"
                 style={{
-                  gridTemplateColumns: `repeat(${BANK_SLOTS_PER_ROW}, ${BANK_SLOT_SIZE}px)`,
+                  gridTemplateColumns: `repeat(${responsiveSlotsPerRow}, ${responsiveSlotSize}px)`,
+                  gap: `${responsiveGap}px`,
                 }}
               >
                 {filteredItems.map((item) => {
@@ -795,6 +764,7 @@ export function BankPanel({
                       showFaintGuide={showFaintGuide}
                       dropColor={dropColor}
                       guideColor={guideColor}
+                      slotSize={responsiveSlotSize}
                       onDragStart={handleSlotDragStart}
                       onDragOver={handleSlotDragOver}
                       onDragLeave={handleSlotDragLeave}
@@ -813,20 +783,20 @@ export function BankPanel({
                   <div
                     className="rounded flex items-center justify-center relative"
                     style={{
-                      width: BANK_SLOT_SIZE,
-                      height: BANK_SLOT_SIZE,
+                      width: responsiveSlotSize,
+                      height: responsiveSlotSize,
                       background:
                         hoveredSlot === SLOT_INDEX_APPEND_ZONE
-                          ? "linear-gradient(135deg, rgba(100, 200, 255, 0.35) 0%, rgba(100, 200, 255, 0.2) 100%)"
-                          : "linear-gradient(135deg, rgba(242, 208, 138, 0.05) 0%, rgba(242, 208, 138, 0.02) 100%)",
+                          ? `linear-gradient(135deg, ${theme.colors.accent.primary}59 0%, ${theme.colors.accent.primary}33 100%)`
+                          : `linear-gradient(135deg, ${theme.colors.accent.primary}0d 0%, ${theme.colors.accent.primary}05 100%)`,
                       border:
                         hoveredSlot === SLOT_INDEX_APPEND_ZONE
-                          ? "2px dashed rgba(100, 200, 255, 0.9)"
-                          : "2px dashed rgba(242, 208, 138, 0.2)",
+                          ? `2px dashed ${theme.colors.accent.primary}e6`
+                          : `2px dashed ${theme.colors.accent.primary}33`,
                       transition: "all 0.15s ease",
                       boxShadow:
                         hoveredSlot === SLOT_INDEX_APPEND_ZONE
-                          ? "0 0 12px rgba(100, 200, 255, 0.5)"
+                          ? `0 0 12px ${theme.colors.accent.primary}80`
                           : "none",
                     }}
                     onDragOver={(e) => {
@@ -870,8 +840,8 @@ export function BankPanel({
                       style={{
                         color:
                           hoveredSlot === SLOT_INDEX_APPEND_ZONE
-                            ? "rgba(100, 200, 255, 1)"
-                            : "rgba(242, 208, 138, 0.3)",
+                            ? theme.colors.accent.primary
+                            : theme.colors.text.muted,
                       }}
                     >
                       +
@@ -911,6 +881,6 @@ export function BankPanel({
           onDepositAllEquipment={handleDepositAllEquipment}
         />
       </div>
-    </div>
+    </>
   );
 }

@@ -19,18 +19,16 @@
 import { useState, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import {
-  DndContext,
-  DragEndEvent,
-  DragOverlay,
-  DragStartEvent,
+  DndProvider,
   useDraggable,
   useDroppable,
-  MouseSensor,
-  TouchSensor,
-  useSensor,
-  useSensors,
+  ComposableDragOverlay,
   pointerWithin,
-} from "@dnd-kit/core";
+  useThemeStore,
+  type DragStartEvent,
+  type DragEndEvent,
+  type Theme,
+} from "hs-kit";
 import {
   getItem,
   type TradeOfferItem,
@@ -65,11 +63,13 @@ interface TradeSlotProps {
   side: "my" | "their";
   onRemove?: () => void;
   isDragging?: boolean;
+  theme: Theme;
 }
 
 interface DraggableInventoryItemProps {
   item: { slot: number; itemId: string; quantity: number };
   index: number;
+  theme: Theme;
 }
 
 // ============================================================================
@@ -104,6 +104,7 @@ function TradeSlot({
   side,
   onRemove,
   isDragging,
+  theme,
 }: TradeSlotProps) {
   const { setNodeRef, isOver } = useDroppable({
     id: `trade-${side}-${slotIndex}`,
@@ -122,10 +123,12 @@ function TradeSlot({
       style={{
         width: "36px",
         height: "36px",
-        background: isOver ? "rgba(46, 204, 113, 0.3)" : "rgba(0, 0, 0, 0.3)",
+        background: isOver
+          ? `${theme.colors.state.success}30`
+          : theme.colors.background.tertiary,
         border: isOver
-          ? "1px solid rgba(46, 204, 113, 0.8)"
-          : "1px solid rgba(139, 69, 19, 0.4)",
+          ? `1px solid ${theme.colors.state.success}CC`
+          : `1px solid ${theme.colors.border.default}`,
         borderRadius: "4px",
         opacity: isDragging ? 0.5 : 1,
         cursor: item && side === "my" ? "pointer" : "default",
@@ -174,6 +177,7 @@ function TradeSlot({
 function DraggableInventoryItem({
   item,
   index: _index,
+  theme,
 }: DraggableInventoryItemProps) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `inventory-${item.slot}`,
@@ -193,8 +197,8 @@ function DraggableInventoryItem({
       style={{
         width: "36px",
         height: "36px",
-        background: "rgba(0, 0, 0, 0.3)",
-        border: "1px solid rgba(139, 69, 19, 0.4)",
+        background: theme.colors.background.tertiary,
+        border: `1px solid ${theme.colors.border.default}`,
         borderRadius: "4px",
         opacity: isDragging ? 0.5 : 1,
         cursor: "grab",
@@ -238,9 +242,11 @@ function DraggableInventoryItem({
 function InventoryMiniPanel({
   items,
   offeredSlots,
+  theme,
 }: {
   items: Array<{ slot: number; itemId: string; quantity: number }>;
   offeredSlots: Set<number>;
+  theme: Theme;
 }) {
   // Filter out items already offered
   const availableItems = items.filter((item) => !offeredSlots.has(item.slot));
@@ -249,7 +255,7 @@ function InventoryMiniPanel({
     <div className="mt-3">
       <h4
         className="text-xs font-bold mb-2"
-        style={{ color: "rgba(242, 208, 138, 0.8)" }}
+        style={{ color: theme.colors.text.secondary }}
       >
         Your Inventory (drag to trade)
       </h4>
@@ -257,8 +263,8 @@ function InventoryMiniPanel({
         className="grid gap-1 p-2 rounded"
         style={{
           gridTemplateColumns: "repeat(7, 36px)",
-          background: "rgba(0, 0, 0, 0.2)",
-          border: "1px solid rgba(139, 69, 19, 0.3)",
+          background: theme.colors.background.tertiary,
+          border: `1px solid ${theme.colors.border.default}`,
           maxHeight: "120px",
           overflowY: "auto",
         }}
@@ -268,12 +274,13 @@ function InventoryMiniPanel({
             key={item.slot}
             item={item}
             index={item.slot}
+            theme={theme}
           />
         ))}
         {availableItems.length === 0 && (
           <p
             className="col-span-7 text-center text-xs py-2"
-            style={{ color: "rgba(255, 255, 255, 0.5)" }}
+            style={{ color: theme.colors.text.muted }}
           >
             No items to trade
           </p>
@@ -295,19 +302,11 @@ export function TradePanel({
   onAccept,
   onCancel,
 }: TradePanelProps) {
+  const theme = useThemeStore((s) => s.theme);
   const [draggedItem, setDraggedItem] = useState<{
     slot: number;
     itemId: string;
   } | null>(null);
-
-  // Sensors for drag and drop
-  const mouseSensor = useSensor(MouseSensor, {
-    activationConstraint: { distance: 5 },
-  });
-  const touchSensor = useSensor(TouchSensor, {
-    activationConstraint: { delay: 100, tolerance: 5 },
-  });
-  const sensors = useSensors(mouseSensor, touchSensor);
 
   // Get set of inventory slots already offered
   const offeredSlots = useMemo(() => {
@@ -317,13 +316,16 @@ export function TradePanel({
   // Handle drag start
   const handleDragStart = useCallback((event: DragStartEvent) => {
     const { active } = event;
-    const data = active.data.current as {
-      type: string;
-      slot: number;
-      itemId: string;
-    };
-    if (data?.type === "inventory") {
-      setDraggedItem({ slot: data.slot, itemId: data.itemId });
+    // Custom data is in active.data.data (DragItem wraps our data)
+    const customData = active.data.data as
+      | {
+          type: string;
+          slot: number;
+          itemId: string;
+        }
+      | undefined;
+    if (customData?.type === "inventory") {
+      setDraggedItem({ slot: customData.slot, itemId: customData.itemId });
     }
   }, []);
 
@@ -335,17 +337,20 @@ export function TradePanel({
 
       if (!over) return;
 
-      const activeData = active.data.current as {
-        type: string;
-        slot: number;
-        itemId: string;
-      };
+      // Custom data is in active.data.data (DragItem wraps our data)
+      const customData = active.data.data as
+        | {
+            type: string;
+            slot: number;
+            itemId: string;
+          }
+        | undefined;
 
       // Dropping inventory item onto trade area
-      if (activeData?.type === "inventory") {
+      if (customData?.type === "inventory") {
         const overId = over.id as string;
         if (overId.startsWith("trade-my-") || overId === "trade-my-drop-zone") {
-          onAddItem(activeData.slot);
+          onAddItem(customData.slot);
         }
       }
     },
@@ -372,10 +377,9 @@ export function TradePanel({
   return createPortal(
     <div
       className="fixed inset-0 z-[10000] flex items-center justify-center"
-      style={{ background: "rgba(0, 0, 0, 0.6)" }}
+      style={{ background: theme.colors.background.overlay }}
     >
-      <DndContext
-        sensors={sensors}
+      <DndProvider
         collisionDetection={pointerWithin}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
@@ -383,9 +387,8 @@ export function TradePanel({
         <div
           className="rounded-lg shadow-xl"
           style={{
-            background:
-              "linear-gradient(135deg, rgba(30, 25, 20, 0.98) 0%, rgba(20, 15, 10, 0.98) 100%)",
-            border: "2px solid rgba(139, 69, 19, 0.8)",
+            background: `linear-gradient(135deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+            border: `2px solid ${theme.colors.border.decorative}`,
             width: "480px",
           }}
         >
@@ -393,26 +396,28 @@ export function TradePanel({
           <div
             className="px-4 py-3 rounded-t-lg flex items-center justify-between"
             style={{
-              background: "rgba(0, 0, 0, 0.3)",
-              borderBottom: "1px solid rgba(139, 69, 19, 0.5)",
+              background: theme.colors.background.tertiary,
+              borderBottom: `1px solid ${theme.colors.border.decorative}`,
             }}
           >
             <h2
               className="text-lg font-bold"
-              style={{ color: "rgba(242, 208, 138, 0.95)" }}
+              style={{ color: theme.colors.text.accent }}
             >
               Trading with{" "}
-              <span style={{ color: "#ffffff" }}>{state.partner.name}</span>
+              <span style={{ color: theme.colors.text.primary }}>
+                {state.partner.name}
+              </span>
             </h2>
             <button
               onClick={onCancel}
               className="text-xl font-bold px-2 rounded transition-colors"
-              style={{ color: "rgba(255, 255, 255, 0.6)" }}
+              style={{ color: theme.colors.text.muted }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.color = "rgba(255, 255, 255, 1)";
+                e.currentTarget.style.color = theme.colors.text.primary;
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.color = "rgba(255, 255, 255, 0.6)";
+                e.currentTarget.style.color = theme.colors.text.muted;
               }}
             >
               ×
@@ -427,7 +432,7 @@ export function TradePanel({
                 <div className="flex items-center justify-between mb-2">
                   <h3
                     className="text-sm font-bold"
-                    style={{ color: "rgba(242, 208, 138, 0.9)" }}
+                    style={{ color: theme.colors.text.accent }}
                   >
                     Your Offer
                   </h3>
@@ -435,22 +440,22 @@ export function TradePanel({
                     <span
                       className="text-xs px-2 py-0.5 rounded"
                       style={{
-                        background: "rgba(46, 204, 113, 0.3)",
-                        color: "#2ecc71",
-                        border: "1px solid rgba(46, 204, 113, 0.5)",
+                        background: `${theme.colors.state.success}30`,
+                        color: theme.colors.state.success,
+                        border: `1px solid ${theme.colors.state.success}50`,
                       }}
                     >
                       Accepted
                     </span>
                   )}
                 </div>
-                <TradeDropZone id="trade-my-drop-zone">
+                <TradeDropZone id="trade-my-drop-zone" theme={theme}>
                   <div
                     className="grid gap-1 p-2 rounded"
                     style={{
                       gridTemplateColumns: `repeat(${TRADE_GRID_COLS}, 36px)`,
-                      background: "rgba(0, 0, 0, 0.2)",
-                      border: "1px solid rgba(139, 69, 19, 0.4)",
+                      background: theme.colors.background.tertiary,
+                      border: `1px solid ${theme.colors.border.default}`,
                     }}
                   >
                     {Array.from({ length: TRADE_SLOTS }).map((_, i) => (
@@ -460,6 +465,7 @@ export function TradePanel({
                         slotIndex={i}
                         side="my"
                         onRemove={() => onRemoveItem(i)}
+                        theme={theme}
                       />
                     ))}
                   </div>
@@ -469,7 +475,7 @@ export function TradePanel({
               {/* Divider */}
               <div
                 className="w-px"
-                style={{ background: "rgba(139, 69, 19, 0.4)" }}
+                style={{ background: theme.colors.border.default }}
               />
 
               {/* Their offer */}
@@ -477,7 +483,7 @@ export function TradePanel({
                 <div className="flex items-center justify-between mb-2">
                   <h3
                     className="text-sm font-bold"
-                    style={{ color: "rgba(242, 208, 138, 0.9)" }}
+                    style={{ color: theme.colors.text.accent }}
                   >
                     {state.partner.name}'s Offer
                   </h3>
@@ -485,9 +491,9 @@ export function TradePanel({
                     <span
                       className="text-xs px-2 py-0.5 rounded"
                       style={{
-                        background: "rgba(46, 204, 113, 0.3)",
-                        color: "#2ecc71",
-                        border: "1px solid rgba(46, 204, 113, 0.5)",
+                        background: `${theme.colors.state.success}30`,
+                        color: theme.colors.state.success,
+                        border: `1px solid ${theme.colors.state.success}50`,
                       }}
                     >
                       Accepted
@@ -498,8 +504,8 @@ export function TradePanel({
                   className="grid gap-1 p-2 rounded"
                   style={{
                     gridTemplateColumns: `repeat(${TRADE_GRID_COLS}, 36px)`,
-                    background: "rgba(0, 0, 0, 0.2)",
-                    border: "1px solid rgba(139, 69, 19, 0.4)",
+                    background: theme.colors.background.tertiary,
+                    border: `1px solid ${theme.colors.border.default}`,
                   }}
                 >
                   {Array.from({ length: TRADE_SLOTS }).map((_, i) => (
@@ -508,6 +514,7 @@ export function TradePanel({
                       item={theirOfferBySlot.get(i) || null}
                       slotIndex={i}
                       side="their"
+                      theme={theme}
                     />
                   ))}
                 </div>
@@ -515,7 +522,11 @@ export function TradePanel({
             </div>
 
             {/* Inventory mini-panel */}
-            <InventoryMiniPanel items={inventory} offeredSlots={offeredSlots} />
+            <InventoryMiniPanel
+              items={inventory}
+              offeredSlots={offeredSlots}
+              theme={theme}
+            />
 
             {/* Action buttons */}
             <div className="flex gap-3 mt-4">
@@ -525,26 +536,24 @@ export function TradePanel({
                 className="flex-1 py-2.5 rounded text-sm font-bold transition-all"
                 style={{
                   background: state.myAccepted
-                    ? "rgba(100, 100, 100, 0.5)"
-                    : "linear-gradient(135deg, rgba(46, 204, 113, 0.8) 0%, rgba(39, 174, 96, 0.8) 100%)",
-                  color: "#fff",
+                    ? theme.colors.background.tertiary
+                    : `linear-gradient(135deg, ${theme.colors.state.success}CC 0%, ${theme.colors.state.success}AA 100%)`,
+                  color: theme.colors.text.primary,
                   border: state.myAccepted
-                    ? "1px solid rgba(100, 100, 100, 0.6)"
-                    : "1px solid rgba(46, 204, 113, 0.9)",
+                    ? `1px solid ${theme.colors.border.default}`
+                    : `1px solid ${theme.colors.state.success}`,
                   textShadow: "0 1px 2px rgba(0,0,0,0.5)",
                   opacity: state.myAccepted ? 0.7 : 1,
                   cursor: state.myAccepted ? "default" : "pointer",
                 }}
                 onMouseEnter={(e) => {
                   if (!state.myAccepted) {
-                    e.currentTarget.style.background =
-                      "linear-gradient(135deg, rgba(46, 204, 113, 1) 0%, rgba(39, 174, 96, 1) 100%)";
+                    e.currentTarget.style.background = `linear-gradient(135deg, ${theme.colors.state.success} 0%, ${theme.colors.state.success}CC 100%)`;
                   }
                 }}
                 onMouseLeave={(e) => {
                   if (!state.myAccepted) {
-                    e.currentTarget.style.background =
-                      "linear-gradient(135deg, rgba(46, 204, 113, 0.8) 0%, rgba(39, 174, 96, 0.8) 100%)";
+                    e.currentTarget.style.background = `linear-gradient(135deg, ${theme.colors.state.success}CC 0%, ${theme.colors.state.success}AA 100%)`;
                   }
                 }}
               >
@@ -554,19 +563,16 @@ export function TradePanel({
                 onClick={onCancel}
                 className="flex-1 py-2.5 rounded text-sm font-bold transition-all"
                 style={{
-                  background:
-                    "linear-gradient(135deg, rgba(192, 57, 43, 0.8) 0%, rgba(169, 50, 38, 0.8) 100%)",
-                  color: "#fff",
-                  border: "1px solid rgba(192, 57, 43, 0.9)",
+                  background: `linear-gradient(135deg, ${theme.colors.state.danger}CC 0%, ${theme.colors.state.danger}AA 100%)`,
+                  color: theme.colors.text.primary,
+                  border: `1px solid ${theme.colors.state.danger}`,
                   textShadow: "0 1px 2px rgba(0,0,0,0.5)",
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background =
-                    "linear-gradient(135deg, rgba(192, 57, 43, 1) 0%, rgba(169, 50, 38, 1) 100%)";
+                  e.currentTarget.style.background = `linear-gradient(135deg, ${theme.colors.state.danger} 0%, ${theme.colors.state.danger}CC 100%)`;
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background =
-                    "linear-gradient(135deg, rgba(192, 57, 43, 0.8) 0%, rgba(169, 50, 38, 0.8) 100%)";
+                  e.currentTarget.style.background = `linear-gradient(135deg, ${theme.colors.state.danger}CC 0%, ${theme.colors.state.danger}AA 100%)`;
                 }}
               >
                 Cancel
@@ -577,7 +583,7 @@ export function TradePanel({
             {state.myAccepted && state.theirAccepted && (
               <p
                 className="text-center text-sm mt-3"
-                style={{ color: "#2ecc71" }}
+                style={{ color: theme.colors.state.success }}
               >
                 Both players accepted - completing trade...
               </p>
@@ -585,14 +591,14 @@ export function TradePanel({
           </div>
 
           {/* Drag overlay */}
-          <DragOverlay>
+          <ComposableDragOverlay>
             {draggedItemIcon && (
               <div
                 style={{
                   width: "36px",
                   height: "36px",
-                  background: "rgba(0, 0, 0, 0.8)",
-                  border: "1px solid rgba(139, 69, 19, 0.8)",
+                  background: theme.colors.background.primary,
+                  border: `1px solid ${theme.colors.border.decorative}`,
                   borderRadius: "4px",
                   display: "flex",
                   alignItems: "center",
@@ -611,9 +617,9 @@ export function TradePanel({
                 />
               </div>
             )}
-          </DragOverlay>
+          </ComposableDragOverlay>
         </div>
-      </DndContext>
+      </DndProvider>
     </div>,
     document.body,
   );
@@ -625,9 +631,11 @@ export function TradePanel({
 function TradeDropZone({
   id,
   children,
+  theme,
 }: {
   id: string;
   children: React.ReactNode;
+  theme: Theme;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
 
@@ -637,7 +645,7 @@ function TradeDropZone({
       style={{
         borderRadius: "4px",
         transition: "box-shadow 0.15s",
-        boxShadow: isOver ? "0 0 8px rgba(46, 204, 113, 0.5)" : "none",
+        boxShadow: isOver ? `0 0 8px ${theme.colors.state.success}80` : "none",
       }}
     >
       {children}

@@ -2,45 +2,14 @@
  * Client Utility Functions
  *
  * This module provides core utility functions for the Hyperscape client application:
- * - className composition for React components (cls)
  * - Device detection for touch vs. pointer interfaces (isTouch)
  * - File hashing for content verification and deduplication (hashFile)
+ *
+ * Note: For className composition, use `cls` from `./classnames.ts` instead.
  *
  * These utilities are used throughout the client package by React components,
  * file upload handlers, and responsive UI logic.
  */
-
-/**
- * Conditionally joins class names together for React className props
- *
- * Accepts both strings and objects where keys are class names and values are booleans.
- * Only includes classes when their boolean value is truthy.
- *
- * @param args - Array of class name strings or conditional objects
- * @returns A space-separated string of class names
- *
- * @example
- * cls('btn', 'primary') // => ' btn primary'
- * cls('btn', { 'active': true, 'disabled': false }) // => ' btn active'
- * cls({ 'hidden': isHidden, 'visible': !isHidden }) // => ' hidden' or ' visible'
- */
-export function cls(...args: (string | Record<string, unknown>)[]) {
-  let str = "";
-  for (const arg of args) {
-    // Check if arg has string methods
-    if ((arg as string).charAt) {
-      str += " " + (arg as string);
-    } else {
-      // Must be an object - strong type assumption based on signature
-      const obj = arg as Record<string, unknown>;
-      for (const key in obj) {
-        const value = obj[key];
-        if (value) str += " " + key;
-      }
-    }
-  }
-  return str;
-}
 
 /**
  * Detects if the device primarily uses touch input

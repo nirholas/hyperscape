@@ -20,6 +20,7 @@ export interface Skills {
   defense: SkillData;
   constitution: SkillData;
   ranged: SkillData;
+  magic: SkillData;
   prayer: SkillData;
   woodcutting: SkillData;
   mining: SkillData;

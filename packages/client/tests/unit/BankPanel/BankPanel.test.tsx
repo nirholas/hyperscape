@@ -131,26 +131,8 @@ describe("BankPanel", () => {
   // ========================================================================
 
   describe("basic rendering", () => {
-    it("renders bank panel with header", () => {
-      render(<BankPanel {...defaultProps} />);
-
-      expect(screen.getByText("Bank")).toBeInTheDocument();
-      expect(screen.getByText("🏦")).toBeInTheDocument();
-    });
-
-    it("renders close button", () => {
-      render(<BankPanel {...defaultProps} />);
-
-      expect(screen.getByText("✕")).toBeInTheDocument();
-    });
-
-    it("calls onClose when close button clicked", () => {
-      render(<BankPanel {...defaultProps} />);
-
-      fireEvent.click(screen.getByText("✕"));
-
-      expect(mockOnClose).toHaveBeenCalled();
-    });
+    // Note: Header ("Bank", "🏦", close button) is provided by ModalWindow wrapper in production
+    // BankPanel now renders only the content without its own header
 
     it("renders bank items in grid", () => {
       render(<BankPanel {...defaultProps} />);
@@ -704,7 +686,8 @@ describe("BankPanel", () => {
     it("handles empty bank", () => {
       render(<BankPanel {...defaultProps} items={[]} />);
 
-      expect(screen.getByText("Bank")).toBeInTheDocument();
+      // Header is provided by ModalWindow wrapper, so we check footer and inventory panel
+      expect(screen.getByText("Inventory")).toBeInTheDocument();
       // Footer format: "0 items • 0/480 slots"
       expect(screen.getByText(/0\/480 slots/)).toBeInTheDocument();
     });
@@ -761,7 +744,8 @@ describe("BankPanel", () => {
         </div>,
       );
 
-      fireEvent.click(screen.getByText("Bank"));
+      // Click on inventory text (part of the right panel)
+      fireEvent.click(screen.getByText("Inventory"));
 
       expect(outerClickHandler).not.toHaveBeenCalled();
     });
@@ -774,7 +758,8 @@ describe("BankPanel", () => {
         </div>,
       );
 
-      fireEvent.mouseDown(screen.getByText("Bank"));
+      // Mousedown on inventory text (part of the right panel)
+      fireEvent.mouseDown(screen.getByText("Inventory"));
 
       expect(outerMouseDownHandler).not.toHaveBeenCalled();
     });

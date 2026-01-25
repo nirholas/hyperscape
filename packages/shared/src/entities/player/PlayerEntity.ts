@@ -341,6 +341,7 @@ export class PlayerEntity extends CombatantEntity {
         defense: defaultSkill,
         constitution: { level: 10, xp: 0 }, // Higher starting constitution
         ranged: defaultSkill,
+        magic: defaultSkill,
         prayer: defaultSkill,
         woodcutting: defaultSkill,
         mining: defaultSkill,

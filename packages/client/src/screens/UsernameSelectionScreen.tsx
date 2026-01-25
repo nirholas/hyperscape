@@ -14,6 +14,7 @@
 import React from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { GAME_API_URL } from "@/lib/api-config";
+import { useThemeStore } from "hs-kit";
 
 interface UsernameSelectionScreenProps {
   onUsernameSelected: (username: string) => void;
@@ -22,6 +23,7 @@ interface UsernameSelectionScreenProps {
 export function UsernameSelectionScreen({
   onUsernameSelected,
 }: UsernameSelectionScreenProps) {
+  const theme = useThemeStore((s) => s.theme);
   const [username, setUsername] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
@@ -108,7 +110,10 @@ export function UsernameSelectionScreen({
 
   const GoldRule = ({ thick = false }: { thick?: boolean }) => (
     <div
-      className={`${thick ? "h-[2px]" : "h-px"} w-full bg-gradient-to-r from-transparent via-[#f2d08a]/90 to-transparent`}
+      className={`${thick ? "h-[2px]" : "h-px"} w-full`}
+      style={{
+        background: `linear-gradient(to right, transparent, ${theme.colors.text.accent}e6, transparent)`,
+      }}
     />
   );
 
@@ -138,13 +143,22 @@ export function UsernameSelectionScreen({
 
           {/* Welcome Message */}
           <div className="mb-6 text-center">
-            <h2 className="text-2xl font-bold text-[#f2d08a] mb-2">
+            <h2
+              className="text-2xl font-bold mb-2"
+              style={{ color: theme.colors.text.accent }}
+            >
               Welcome to Hyperscape!
             </h2>
-            <p className="text-[#e8ebf4]/80 text-sm">
+            <p
+              className="text-sm"
+              style={{ color: theme.colors.text.secondary }}
+            >
               Choose a username for your account
             </p>
-            <p className="text-[#e8ebf4]/60 text-xs mt-2">
+            <p
+              className="text-xs mt-2"
+              style={{ color: theme.colors.text.muted }}
+            >
               This username represents your account and main HD wallet.
               <br />
               You'll create characters under this username.
@@ -153,18 +167,40 @@ export function UsernameSelectionScreen({
 
           {/* Error Message */}
           {error && (
-            <div className="mb-4 rounded bg-red-900/30 border border-red-500/50 p-3">
+            <div
+              className="mb-4 rounded p-3"
+              style={{
+                backgroundColor: `${theme.colors.state.danger}1a`,
+                border: `1px solid ${theme.colors.state.danger}80`,
+              }}
+            >
               <div className="flex items-center gap-2">
-                <span className="text-red-400 text-lg">⚠️</span>
-                <span className="text-red-200 text-sm">{error}</span>
+                <span
+                  className="text-lg"
+                  style={{ color: theme.colors.state.danger }}
+                >
+                  ⚠️
+                </span>
+                <span
+                  className="text-sm"
+                  style={{ color: theme.colors.text.primary }}
+                >
+                  {error}
+                </span>
               </div>
             </div>
           )}
 
           {/* Username Input Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="rounded bg-black/40 border border-[#f2d08a]/30 p-6">
-              <label className="block text-[#f2d08a] text-sm font-semibold mb-3">
+            <div
+              className="rounded bg-black/40 p-6"
+              style={{ border: `1px solid ${theme.colors.text.accent}4d` }}
+            >
+              <label
+                className="block text-sm font-semibold mb-3"
+                style={{ color: theme.colors.text.accent }}
+              >
                 Username
               </label>
               <input
@@ -176,11 +212,18 @@ export function UsernameSelectionScreen({
                 }}
                 placeholder="Enter username (3-16 characters)"
                 maxLength={16}
-                className="w-full bg-black/60 border border-white/20 rounded px-4 py-3 text-white outline-none focus:border-[#f2d08a]/60 transition-colors"
+                className="w-full bg-black/60 rounded px-4 py-3 outline-none transition-colors"
+                style={{
+                  color: theme.colors.text.primary,
+                  border: `1px solid ${theme.colors.border.default}`,
+                }}
                 autoFocus
                 disabled={isSubmitting}
               />
-              <div className="mt-2 text-[#e8ebf4]/60 text-xs">
+              <div
+                className="mt-2 text-xs"
+                style={{ color: theme.colors.text.muted }}
+              >
                 • 3-16 characters
                 <br />
                 • Letters, numbers, and underscores only
@@ -199,19 +242,34 @@ export function UsernameSelectionScreen({
                   !ready ||
                   !authenticated
                 }
-                className={`w-full px-6 py-4 text-center rounded-sm transition-all ${
-                  isSubmitting ||
-                  username.trim().length < 3 ||
-                  !ready ||
-                  !authenticated
-                    ? "bg-black/40 text-[#e8ebf4]/40 cursor-not-allowed"
-                    : "bg-black/60 hover:bg-black/80 text-[#f2d08a] cursor-pointer"
-                } border border-[#f2d08a]/30`}
+                className="w-full px-6 py-4 text-center rounded-sm transition-all"
                 style={{
+                  backgroundColor:
+                    isSubmitting ||
+                    username.trim().length < 3 ||
+                    !ready ||
+                    !authenticated
+                      ? "rgba(0,0,0,0.4)"
+                      : "rgba(0,0,0,0.6)",
+                  color:
+                    isSubmitting ||
+                    username.trim().length < 3 ||
+                    !ready ||
+                    !authenticated
+                      ? theme.colors.text.disabled
+                      : theme.colors.text.accent,
+                  cursor:
+                    isSubmitting ||
+                    username.trim().length < 3 ||
+                    !ready ||
+                    !authenticated
+                      ? "not-allowed"
+                      : "pointer",
+                  border: `1px solid ${theme.colors.text.accent}4d`,
                   textShadow:
                     isSubmitting || username.trim().length < 3
                       ? "none"
-                      : "0 0 12px rgba(242, 208, 138, 0.5)",
+                      : `0 0 12px ${theme.colors.accent.secondary}80`,
                 }}
               >
                 <span className="font-semibold text-lg uppercase tracking-[0.2em]">
@@ -223,19 +281,46 @@ export function UsernameSelectionScreen({
           </form>
 
           {/* Info Box */}
-          <div className="mt-6 rounded bg-[#f2d08a]/10 border border-[#f2d08a]/30 p-4">
+          <div
+            className="mt-6 rounded p-4"
+            style={{
+              backgroundColor: `${theme.colors.text.accent}1a`,
+              border: `1px solid ${theme.colors.text.accent}4d`,
+            }}
+          >
             <div className="flex items-start gap-3">
-              <span className="text-[#f2d08a] text-xl">💡</span>
+              <span
+                className="text-xl"
+                style={{ color: theme.colors.text.accent }}
+              >
+                💡
+              </span>
               <div className="flex-1">
-                <div className="text-[#f2d08a] font-semibold text-sm mb-1">
+                <div
+                  className="font-semibold text-sm mb-1"
+                  style={{ color: theme.colors.text.accent }}
+                >
                   Account Structure
                 </div>
-                <div className="text-[#e8ebf4]/70 text-xs leading-relaxed">
+                <div
+                  className="text-xs leading-relaxed"
+                  style={{ color: theme.colors.text.secondary }}
+                >
                   Your{" "}
-                  <span className="text-[#f2d08a] font-medium">username</span>{" "}
+                  <span
+                    className="font-medium"
+                    style={{ color: theme.colors.text.accent }}
+                  >
+                    username
+                  </span>{" "}
                   is your permanent account identity linked to your main HD
                   wallet (index 0).{" "}
-                  <span className="text-[#f2d08a] font-medium">Characters</span>{" "}
+                  <span
+                    className="font-medium"
+                    style={{ color: theme.colors.text.accent }}
+                  >
+                    Characters
+                  </span>{" "}
                   are created under your username, each with their own wallet
                   (indices 1, 2, 3, etc.).
                 </div>

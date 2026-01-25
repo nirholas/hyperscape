@@ -156,26 +156,38 @@ class ErrorReportingService {
     const baseUrl = GAME_API_URL;
     const endpoint = `${baseUrl}/api${this.endpoint}`;
 
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        ...errorData,
-        userId: this.userId,
-        sessionId: this.sessionId,
-        timestamp: new Date().toISOString(),
-      }),
-    });
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...errorData,
+          userId: this.userId,
+          sessionId: this.sessionId,
+          timestamp: new Date().toISOString(),
+        }),
+      });
 
-    if (!response.ok) {
-      throw new Error(
-        `Failed to report error: ${response.status} ${response.statusText}`,
+      if (!response.ok) {
+        // Log to console but don't throw - prevents cascading errors
+        console.warn(
+          `[ErrorReporting] Failed to report error: ${response.status} ${response.statusText}`,
+        );
+        return null;
+      }
+
+      return response.json();
+    } catch (error) {
+      // Silently fail if error reporting itself fails
+      // This prevents cascading errors during startup or when backend is unavailable
+      console.warn(
+        "[ErrorReporting] Could not send error to backend (server may be starting):",
+        error instanceof Error ? error.message : error,
       );
+      return null;
     }
-
-    return response.json();
   }
 
   /**

@@ -17,6 +17,7 @@ import ReactDOM from "react-dom/client";
 import { ErrorBoundary } from "./lib/ErrorBoundary";
 import "./index.css";
 import { PrivyAuthProvider } from "./auth/PrivyAuthProvider";
+import { SolanaWalletProvider } from "./auth/SolanaWalletProvider";
 import { playerTokenManager } from "./auth/PlayerTokenManager";
 import { privyAuthManager } from "./auth/PrivyAuthManager";
 import { injectFarcasterMetaTags } from "./lib/farcaster-frame-config";
@@ -52,11 +53,10 @@ declare global {
 }
 
 if (!globalThis.setImmediate) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (globalThis as any).setImmediate = (
+  globalThis.setImmediate = ((
     cb: (...args: unknown[]) => void,
     ...args: unknown[]
-  ) => setTimeout(cb, 0, ...args);
+  ) => setTimeout(cb, 0, ...args)) as unknown as typeof setImmediate;
 }
 
 // Parse URL parameters for embedded configuration
@@ -570,9 +570,11 @@ async function mountApp() {
       );
       root.render(
         <ErrorBoundary>
-          <PrivyAuthProvider>
-            <DashboardScreen />
-          </PrivyAuthProvider>
+          <SolanaWalletProvider>
+            <PrivyAuthProvider>
+              <DashboardScreen />
+            </PrivyAuthProvider>
+          </SolanaWalletProvider>
         </ErrorBoundary>,
       );
     } else if (page === "character-editor") {
@@ -581,9 +583,11 @@ async function mountApp() {
       );
       root.render(
         <ErrorBoundary>
-          <PrivyAuthProvider>
-            <CharacterEditorScreen />
-          </PrivyAuthProvider>
+          <SolanaWalletProvider>
+            <PrivyAuthProvider>
+              <CharacterEditorScreen />
+            </PrivyAuthProvider>
+          </SolanaWalletProvider>
         </ErrorBoundary>,
       );
     } else if (page === "admin") {
@@ -597,9 +601,11 @@ async function mountApp() {
       // Normal mode - render full app with auth
       root.render(
         <ErrorBoundary>
-          <PrivyAuthProvider>
-            <App />
-          </PrivyAuthProvider>
+          <SolanaWalletProvider>
+            <PrivyAuthProvider>
+              <App />
+            </PrivyAuthProvider>
+          </SolanaWalletProvider>
         </ErrorBoundary>,
       );
     }

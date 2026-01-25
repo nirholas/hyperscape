@@ -50,3 +50,12 @@ export type {
   ChangeEventHandler,
   SelectOption,
 } from "./ui";
+
+// Player state types
+export type {
+  RawEquipmentSlot,
+  RawEquipmentData,
+  InventorySlotViewItem,
+  NetworkEventName,
+} from "./player";
+export { NetworkEvents } from "./player";

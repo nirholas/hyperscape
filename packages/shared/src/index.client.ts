@@ -154,6 +154,13 @@ export type {
   SkillUnlocksManifest,
 } from "./data/skill-unlocks";
 
+// Export prayer data provider for UI panels
+export { prayerDataProvider } from "./data/PrayerDataProvider";
+export type {
+  PrayerDefinition,
+  PrayerCategory,
+} from "./data/PrayerDataProvider";
+
 // Export CLIENT system classes only (NO SERVER SYSTEMS)
 export { Entities } from "./systems/shared";
 export { Physics } from "./systems/shared";

@@ -9,12 +9,14 @@
  * Extracted from XPProgressOrb for Single Responsibility Principle (SRP)
  */
 
-import styled, { keyframes } from "styled-components";
+import React, { useMemo } from "react";
+import { useThemeStore } from "hs-kit";
 import { SKILL_ICONS } from "@hyperscape/shared";
 import type { GroupedXPDrop } from "./useXPOrbState";
 
-// Floating XP drop animation - plain text rising up
-const floatUpAnimation = keyframes`
+// Animation keyframes as CSS string for injection
+const keyframesStyle = `
+@keyframes floatUpAnimation {
   0% {
     top: 33vh;
     opacity: 1;
@@ -26,50 +28,63 @@ const floatUpAnimation = keyframes`
     top: 80px;
     opacity: 0;
   }
+}
 `;
 
-// Floating XP drop element - plain text, no background
-// RS3 style: multiple skill icons grouped together with total XP
-const FloatingXP = styled.div`
-  position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 999;
-  pointer-events: none;
-  animation: ${floatUpAnimation} 1.5s ease-out forwards;
-
-  display: flex;
-  align-items: center;
-  gap: 2px;
-
-  color: #ffd700;
-  font-size: 20px;
-  font-weight: bold;
-  text-shadow:
-    -1px -1px 0 #000,
-    1px -1px 0 #000,
-    -1px 1px 0 #000,
-    1px 1px 0 #000,
-    0 0 8px rgba(0, 0, 0, 0.8);
-  white-space: nowrap;
-`;
-
-const FloatingXPIcons = styled.span`
-  display: flex;
-  align-items: center;
-  gap: 1px;
-  font-size: 18px;
-`;
-
-const FloatingXPAmount = styled.span`
-  margin-left: 4px;
-`;
+// Inject keyframes once
+if (typeof document !== "undefined") {
+  const styleId = "floating-xp-keyframes";
+  if (!document.getElementById(styleId)) {
+    const style = document.createElement("style");
+    style.id = styleId;
+    style.textContent = keyframesStyle;
+    document.head.appendChild(style);
+  }
+}
 
 interface FloatingXPDropsProps {
   drops: GroupedXPDrop[];
 }
 
 export function FloatingXPDrops({ drops }: FloatingXPDropsProps) {
+  const theme = useThemeStore((s) => s.theme);
+
+  // Memoize styles to avoid recalculating on every render
+  const styles = useMemo(
+    () => ({
+      floatingXP: {
+        position: "fixed" as const,
+        left: "50%",
+        transform: "translateX(-50%)",
+        zIndex: 999,
+        pointerEvents: "none" as const,
+        animation: "floatUpAnimation 1.5s ease-out forwards",
+        display: "flex",
+        alignItems: "center",
+        gap: 2,
+        color: theme.colors.accent.secondary,
+        fontSize: 20,
+        fontWeight: theme.typography.fontWeight.bold,
+        textShadow: `-1px -1px 0 #000,
+          1px -1px 0 #000,
+          -1px 1px 0 #000,
+          1px 1px 0 #000,
+          0 0 8px rgba(0, 0, 0, 0.8)`,
+        whiteSpace: "nowrap" as const,
+      },
+      floatingXPIcons: {
+        display: "flex",
+        alignItems: "center",
+        gap: 1,
+        fontSize: 18,
+      },
+      floatingXPAmount: {
+        marginLeft: 4,
+      },
+    }),
+    [theme],
+  );
+
   if (drops.length === 0) {
     return null;
   }
@@ -77,15 +92,17 @@ export function FloatingXPDrops({ drops }: FloatingXPDropsProps) {
   return (
     <>
       {drops.map((drop) => (
-        <FloatingXP key={drop.id}>
-          <FloatingXPIcons>
+        <div key={drop.id} style={styles.floatingXP}>
+          <span style={styles.floatingXPIcons}>
             {drop.skills.map((s, i) => {
               const dropIcon = SKILL_ICONS[s.skill.toLowerCase()] || "\u2B50";
               return <span key={`${drop.id}-${s.skill}-${i}`}>{dropIcon}</span>;
             })}
-          </FloatingXPIcons>
-          <FloatingXPAmount>+{Math.floor(drop.totalAmount)}</FloatingXPAmount>
-        </FloatingXP>
+          </span>
+          <span style={styles.floatingXPAmount}>
+            +{Math.floor(drop.totalAmount)}
+          </span>
+        </div>
       ))}
     </>
   );

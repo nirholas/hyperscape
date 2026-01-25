@@ -141,6 +141,65 @@ export class InventorySystem extends SystemBase {
     this.subscribe(EventType.INVENTORY_CHECK, (data: InventoryCheckEvent) => {
       this.handleInventoryCheck(data);
     });
+
+    // Subscribe to starter chest looted event
+    this.subscribe(
+      EventType.STARTER_CHEST_LOOTED,
+      (data: {
+        playerId: string;
+        items: Array<{ itemId: string; quantity: number }>;
+      }) => {
+        this.handleStarterChestLooted(data);
+      },
+    );
+  }
+
+  /**
+   * Handle starter chest looted event - add starter items to player inventory
+   */
+  private handleStarterChestLooted(data: {
+    playerId: string;
+    items: Array<{ itemId: string; quantity: number }>;
+  }): void {
+    console.log(
+      `[InventorySystem] STARTER_CHEST_LOOTED event received: playerId=${data.playerId}, items=${data.items?.length}`,
+    );
+
+    const { playerId, items } = data;
+
+    if (!playerId || !items || items.length === 0) {
+      Logger.systemError(
+        "InventorySystem",
+        "handleStarterChestLooted: invalid data",
+        new Error("handleStarterChestLooted: invalid data"),
+      );
+      return;
+    }
+
+    console.log(
+      `[InventorySystem] Adding ${items.length} starter items to player ${playerId}`,
+    );
+
+    // Add each starter item to the player's inventory
+    for (const item of items) {
+      const itemData = getItem(item.itemId);
+      if (!itemData) {
+        console.warn(
+          `[InventorySystem] Starter item not found: ${item.itemId}`,
+        );
+        continue;
+      }
+
+      this.addItem({
+        playerId,
+        itemId: createItemID(item.itemId),
+        quantity: item.quantity,
+      });
+    }
+
+    console.log(
+      `[InventorySystem] Starter items added successfully for player ${playerId}`,
+    );
   }
 
   start(): void {

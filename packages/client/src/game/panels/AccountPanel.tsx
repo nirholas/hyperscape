@@ -1,10 +1,11 @@
 /**
  * Account Management Panel
- * Shows login status, user info, and account controls
+ * Compact account status card - full management in Settings > Account tab
  */
 
 import React, { useEffect, useState } from "react";
-import { COLORS } from "../../constants";
+import { useThemeStore } from "hs-kit";
+import { EventType } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
 import { privyAuthManager } from "../../auth/PrivyAuthManager";
 
@@ -13,399 +14,325 @@ interface AccountPanelProps {
 }
 
 export function AccountPanel({ world }: AccountPanelProps) {
+  const theme = useThemeStore((s) => s.theme);
   const [authState, setAuthState] = useState(privyAuthManager.getState());
   const [playerName, setPlayerName] = useState("");
-  const [isEditingName, setIsEditingName] = useState(false);
-  const [tempName, setTempName] = useState("");
+  const [characterWallet, setCharacterWallet] = useState<string | undefined>();
 
-  // Subscribe to auth state changes
   useEffect(() => {
     const unsubscribe = privyAuthManager.subscribe(setAuthState);
     return unsubscribe;
   }, []);
 
-  // Get player name and wallet from world
-  const [characterWallet, setCharacterWallet] = useState<string | undefined>();
-
   useEffect(() => {
     const player = world.entities?.player;
     if (player?.name) {
       setPlayerName(player.name);
-      setTempName(player.name);
     }
-    // Get wallet from player entity data
     if (player?.data?.wallet) {
       setCharacterWallet(player.data.wallet as string);
     }
   }, [world]);
 
-  const handleLogout = async () => {
-    // Use global Privy logout
-    const windowWithLogout = window as typeof window & {
-      privyLogout: () => void;
-    };
-    await windowWithLogout.privyLogout();
-
-    // Clear auth state
-    privyAuthManager.clearAuth();
-
-    // Reload page after logout
-    setTimeout(() => {
-      window.location.reload();
-    }, 500);
-  };
-
-  const handleNameChange = () => {
-    if (tempName && tempName !== playerName) {
-      const player = world.entities?.player;
-      if (player) {
-        player.name = tempName;
-        setPlayerName(tempName);
-        setIsEditingName(false);
-
-        // Send name update to server
-        world.network?.send?.("chat", {
-          type: "system",
-          message: `Changed name to ${tempName}`,
-        });
-      }
-    } else {
-      setIsEditingName(false);
-      setTempName(playerName);
-    }
-  };
-
-  // Get user info from authState (works with or without Privy)
   const authenticated = authState.isAuthenticated;
-  const userId = authState.privyUserId;
-  // Use character's HD wallet if available, otherwise fall back to Privy main wallet
   const mainWalletAddress = (
     authState.user as { wallet?: { address?: string } }
   )?.wallet?.address;
   const displayWallet = characterWallet || mainWalletAddress;
   const farcasterFid = authState.farcasterFid;
-  const email = (authState.user as { email?: { address?: string } })?.email
-    ?.address;
+
+  const truncate = (str: string, startLen: number, endLen: number) => {
+    if (str.length <= startLen + endLen + 3) return str;
+    return `${str.substring(0, startLen)}...${str.slice(-endLen)}`;
+  };
+
+  // Cloud feature count for summary
+  const cloudFeatures = [
+    { enabled: authenticated },
+    { enabled: authenticated },
+    { enabled: authenticated },
+  ];
+  const enabledCount = cloudFeatures.filter((f) => f.enabled).length;
 
   return (
-    <div className="h-full overflow-y-auto noscrollbar p-1">
-      {/* Bento Grid Layout */}
-      <div
-        className="grid gap-1.5 auto-rows-min"
-        style={{
-          gridTemplateColumns: "repeat(6, 1fr)",
-        }}
-      >
-        {/* Hero Card - Character & Status (Spans 6 columns, tall) */}
+    <div
+      className="h-full overflow-y-auto noscrollbar"
+      style={{ padding: "4px" }}
+    >
+      <div className="flex flex-col gap-3">
+        {/* Profile Summary Card */}
         <div
-          className="relative overflow-hidden rounded-lg p-2.5"
+          className="rounded-lg relative overflow-hidden"
           style={{
-            gridColumn: "span 6",
-            background:
-              "linear-gradient(135deg, rgba(20, 15, 10, 0.85) 0%, rgba(25, 20, 15, 0.75) 100%)",
-            borderColor: authenticated
-              ? "rgba(34, 197, 94, 0.4)"
-              : "rgba(242, 208, 138, 0.3)",
-            border: "1px solid",
-            boxShadow: authenticated
-              ? "0 0 20px rgba(34, 197, 94, 0.15), inset 0 1px 0 rgba(242, 208, 138, 0.1)"
-              : "inset 0 1px 0 rgba(242, 208, 138, 0.1)",
+            background: `linear-gradient(135deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+            border: authenticated
+              ? `1px solid ${theme.colors.state.success}40`
+              : `1px solid ${theme.colors.border.decorative}`,
           }}
         >
-          {/* Decorative corner accent */}
-          <div
-            className="absolute top-0 right-0 w-20 h-20 rounded-full blur-2xl opacity-20"
-            style={{
-              background: authenticated ? "#22c55e" : COLORS.ACCENT,
-              transform: "translate(40%, -40%)",
-            }}
-          />
+          {/* Status glow */}
+          {authenticated && (
+            <div
+              className="absolute top-0 right-0 w-24 h-24 rounded-full blur-3xl"
+              style={{
+                background: theme.colors.state.success,
+                opacity: 0.1,
+                transform: "translate(30%, -30%)",
+              }}
+            />
+          )}
 
-          <div className="relative z-10">
-            <div className="flex items-start justify-between mb-2">
+          <div className="relative z-10 p-3">
+            {/* Header */}
+            <div className="flex items-center gap-3 mb-3">
+              {/* Avatar */}
+              <div
+                className="w-12 h-12 rounded-full flex items-center justify-center"
+                style={{
+                  background: authenticated
+                    ? `linear-gradient(135deg, ${theme.colors.state.success}25 0%, ${theme.colors.state.success}10 100%)`
+                    : `linear-gradient(135deg, ${theme.colors.border.decorative}30 0%, ${theme.colors.border.decorative}20 100%)`,
+                  border: authenticated
+                    ? `2px solid ${theme.colors.state.success}50`
+                    : `2px solid ${theme.colors.border.decorative}`,
+                }}
+              >
+                <span style={{ fontSize: "22px" }}>
+                  {authenticated ? "👤" : "👻"}
+                </span>
+              </div>
+
               <div className="flex-1">
+                {/* Status */}
                 <div className="flex items-center gap-1.5 mb-1">
                   <div
-                    className="w-1.5 h-1.5 rounded-full animate-pulse"
+                    className="w-2 h-2 rounded-full"
                     style={{
-                      backgroundColor: authenticated ? "#22c55e" : "#9ca3af",
+                      background: authenticated
+                        ? theme.colors.state.success
+                        : theme.colors.state.warning,
+                      boxShadow: authenticated
+                        ? `0 0 8px ${theme.colors.state.success}80`
+                        : `0 0 8px ${theme.colors.state.warning}80`,
                     }}
                   />
                   <span
-                    className="text-[8px] uppercase tracking-widest"
-                    style={{ color: "rgba(242, 208, 138, 0.5)" }}
+                    className="text-[10px] font-medium"
+                    style={{
+                      color: authenticated
+                        ? theme.colors.state.success
+                        : theme.colors.state.warning,
+                    }}
                   >
-                    {authenticated ? "Connected" : "Guest"}
+                    {authenticated ? "Connected" : "Guest Mode"}
                   </span>
                 </div>
+
+                {/* Name */}
                 <div
-                  className="text-base font-bold mb-0.5"
-                  style={{
-                    color: COLORS.ACCENT,
-                    textShadow: "0 2px 4px rgba(0, 0, 0, 0.8)",
-                  }}
+                  className="text-[15px] font-bold"
+                  style={{ color: theme.colors.accent.primary }}
                 >
                   {playerName || "Adventurer"}
                 </div>
-                {authenticated && email && (
-                  <div
-                    className="text-[8px] font-mono"
-                    style={{ color: "rgba(242, 208, 138, 0.5)" }}
-                  >
-                    {email}
-                  </div>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <button
-                  onClick={() => setIsEditingName(true)}
-                  className="rounded px-1.5 py-1 cursor-pointer transition-all text-[9px]"
-                  style={{
-                    backgroundColor: "rgba(242, 208, 138, 0.1)",
-                    border: "1px solid rgba(242, 208, 138, 0.25)",
-                    color: "rgba(242, 208, 138, 0.8)",
-                  }}
-                >
-                  ✎ Edit
-                </button>
-                {authenticated && (
-                  <button
-                    onClick={handleLogout}
-                    className="rounded px-1.5 py-1 cursor-pointer transition-all text-[9px] whitespace-nowrap"
-                    style={{
-                      backgroundColor: "rgba(220, 38, 38, 0.15)",
-                      border: "1px solid rgba(220, 38, 38, 0.35)",
-                      color: "#fca5a5",
-                    }}
-                  >
-                    Sign Out
-                  </button>
-                )}
               </div>
             </div>
 
-            {/* Edit Mode */}
-            {isEditingName && (
-              <div className="flex gap-1 mt-2">
-                <input
-                  type="text"
-                  value={tempName}
-                  onChange={(e) => setTempName(e.target.value)}
-                  className="flex-1 text-[10px] py-1 px-1.5 bg-white/5 rounded focus:outline-none"
-                  style={{
-                    borderWidth: "1px",
-                    borderStyle: "solid",
-                    borderColor: "rgba(242, 208, 138, 0.3)",
-                    color: COLORS.ACCENT,
-                  }}
-                  placeholder="Enter name..."
-                  maxLength={20}
-                  autoFocus
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleNameChange();
-                    if (e.key === "Escape") {
-                      setIsEditingName(false);
-                      setTempName(playerName);
-                    }
-                  }}
-                />
-                <button
-                  onClick={handleNameChange}
-                  className="text-[9px] rounded px-2 py-1 cursor-pointer transition-all"
-                  style={{
-                    backgroundColor: "rgba(34, 197, 94, 0.15)",
-                    border: "1px solid rgba(34, 197, 94, 0.3)",
-                    color: "#22c55e",
-                  }}
+            {/* Quick Info */}
+            {authenticated && displayWallet && (
+              <div
+                className="flex items-center justify-between p-2 rounded"
+                style={{
+                  background: theme.colors.background.tertiary,
+                  border: `1px solid ${theme.colors.border.default}`,
+                }}
+              >
+                <span
+                  className="text-[9px]"
+                  style={{ color: `${theme.colors.state.success}80` }}
                 >
-                  ✓
-                </button>
-                <button
-                  onClick={() => {
-                    setIsEditingName(false);
-                    setTempName(playerName);
-                  }}
-                  className="text-[9px] rounded px-2 py-1 cursor-pointer transition-all"
-                  style={{
-                    backgroundColor: "rgba(107, 114, 128, 0.15)",
-                    border: "1px solid rgba(107, 114, 128, 0.3)",
-                    color: "#9ca3af",
-                  }}
+                  Wallet
+                </span>
+                <span
+                  className="text-[10px] font-mono"
+                  style={{ color: `${theme.colors.state.success}CC` }}
                 >
-                  ✕
-                </button>
+                  {truncate(displayWallet, 6, 4)}
+                </span>
               </div>
             )}
           </div>
         </div>
 
-        {/* Account Details Row - User ID & Wallet (2x1 layout) */}
-        {authenticated && userId && (
-          <div
-            className="rounded-lg p-1.5"
-            style={{
-              gridColumn: "span 3",
-              background:
-                "linear-gradient(135deg, rgba(242, 208, 138, 0.08) 0%, rgba(139, 69, 19, 0.08) 100%)",
-              border: "1px solid rgba(242, 208, 138, 0.2)",
-            }}
-          >
-            <div
-              className="text-[7px] uppercase tracking-wide mb-0.5"
-              style={{ color: "rgba(242, 208, 138, 0.4)" }}
+        {/* Cloud Status Summary */}
+        <div
+          className="rounded-lg p-3"
+          style={{
+            background: theme.colors.background.secondary,
+            border: `1px solid ${theme.colors.border.default}`,
+          }}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span
+              className="text-[10px] font-semibold"
+              style={{ color: theme.colors.accent.primary }}
             >
-              User ID
-            </div>
-            <div
-              className="font-mono text-[9px]"
-              style={{ color: "rgba(242, 208, 138, 0.85)" }}
+              Cloud Features
+            </span>
+            <span
+              className="text-[9px] px-2 py-0.5 rounded-full"
+              style={{
+                background: authenticated
+                  ? `${theme.colors.state.success}20`
+                  : theme.colors.background.tertiary,
+                border: authenticated
+                  ? `1px solid ${theme.colors.state.success}40`
+                  : `1px solid ${theme.colors.border.default}`,
+                color: authenticated
+                  ? theme.colors.state.success
+                  : theme.colors.text.muted,
+              }}
             >
-              {userId.substring(0, 10)}...
-            </div>
+              {enabledCount}/3 Active
+            </span>
           </div>
-        )}
 
-        {authenticated && displayWallet && (
-          <div
-            className="rounded-lg p-1.5"
-            style={{
-              gridColumn: "span 3",
-              background:
-                "linear-gradient(135deg, rgba(34, 197, 94, 0.08) 0%, rgba(34, 197, 94, 0.04) 100%)",
-              border: "1px solid rgba(34, 197, 94, 0.2)",
-            }}
-          >
-            <div
-              className="text-[7px] uppercase tracking-wide mb-0.5"
-              style={{ color: "rgba(34, 197, 94, 0.5)" }}
-            >
-              💎 {characterWallet ? "Character Wallet" : "Wallet"}
-            </div>
-            <div
-              className="font-mono text-[9px]"
-              style={{ color: "rgba(34, 197, 94, 0.9)" }}
-              title={displayWallet}
-            >
-              {displayWallet.substring(0, 8)}...
-              {displayWallet.substring(displayWallet.length - 6)}
-            </div>
+          <div className="flex gap-2">
+            {[
+              { icon: "🔄", label: "Sync" },
+              { icon: "☁️", label: "Backup" },
+              { icon: "🔐", label: "Recovery" },
+            ].map((feature) => (
+              <div
+                key={feature.label}
+                className="flex-1 flex flex-col items-center py-2 rounded"
+                style={{
+                  background: authenticated
+                    ? `${theme.colors.state.success}10`
+                    : theme.colors.background.tertiary,
+                  border: authenticated
+                    ? `1px solid ${theme.colors.state.success}25`
+                    : `1px solid ${theme.colors.border.default}`,
+                  opacity: authenticated ? 1 : 0.5,
+                }}
+              >
+                <span style={{ fontSize: "14px" }}>{feature.icon}</span>
+                <span
+                  className="text-[8px] mt-1"
+                  style={{
+                    color: authenticated
+                      ? theme.colors.accent.primary
+                      : theme.colors.text.muted,
+                  }}
+                >
+                  {feature.label}
+                </span>
+              </div>
+            ))}
           </div>
-        )}
+        </div>
 
-        {/* Farcaster Card */}
-        {authenticated && farcasterFid && (
+        {/* Social Badge */}
+        {farcasterFid && (
           <div
-            className="rounded-lg p-1.5"
+            className="flex items-center gap-2 p-2.5 rounded-lg"
             style={{
-              gridColumn: "span 6",
               background:
                 "linear-gradient(135deg, rgba(168, 85, 247, 0.12) 0%, rgba(168, 85, 247, 0.06) 100%)",
               border: "1px solid rgba(168, 85, 247, 0.3)",
             }}
           >
             <div
-              className="text-[7px] uppercase tracking-wide mb-0.5"
-              style={{ color: "rgba(168, 85, 247, 0.5)" }}
+              className="w-7 h-7 rounded-lg flex items-center justify-center"
+              style={{
+                background: "rgba(168, 85, 247, 0.2)",
+                border: "1px solid rgba(168, 85, 247, 0.4)",
+              }}
             >
-              🎭 Farcaster
+              <span style={{ fontSize: "12px" }}>🟣</span>
             </div>
-            <div
-              className="font-mono text-[9px]"
-              style={{ color: "rgba(168, 85, 247, 0.95)" }}
-            >
-              FID {farcasterFid}
-            </div>
-          </div>
-        )}
-
-        {/* Benefits Grid - 2x2 */}
-        {[
-          { label: "Sync", enabled: authenticated, icon: "🔄", col: "span 3" },
-          {
-            label: "Persistent",
-            enabled: authenticated,
-            icon: "💾",
-            col: "span 3",
-          },
-          {
-            label: "Recovery",
-            enabled: authenticated,
-            icon: "🔐",
-            col: "span 3",
-          },
-          {
-            label: "Social",
-            enabled: !!farcasterFid,
-            icon: "🌐",
-            col: "span 3",
-          },
-        ].map((feature, i) => (
-          <div
-            key={i}
-            className="rounded-lg p-1.5 transition-all"
-            style={{
-              gridColumn: feature.col,
-              background: feature.enabled
-                ? "linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(34, 197, 94, 0.05) 100%)"
-                : "linear-gradient(135deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.2) 100%)",
-              border: `1px solid ${feature.enabled ? "rgba(34, 197, 94, 0.25)" : "rgba(242, 208, 138, 0.1)"}`,
-              opacity: feature.enabled ? 1 : 0.5,
-            }}
-          >
-            <div className="flex items-center gap-1">
-              <span className="text-[10px]">{feature.icon}</span>
-              <span
-                className="text-[8px] flex-1"
-                style={{
-                  color: feature.enabled
-                    ? "rgba(242, 208, 138, 0.9)"
-                    : "rgba(242, 208, 138, 0.4)",
-                }}
+            <div className="flex-1">
+              <div
+                className="text-[10px] font-medium"
+                style={{ color: "#c084fc" }}
               >
-                {feature.label}
-              </span>
-              <span
-                className="text-[9px]"
-                style={{ color: feature.enabled ? "#22c55e" : "#6b7280" }}
+                Farcaster Connected
+              </div>
+              <div
+                className="text-[8px]"
+                style={{ color: "rgba(168, 85, 247, 0.7)" }}
               >
-                {feature.enabled ? "✓" : "○"}
-              </span>
-            </div>
-          </div>
-        ))}
-
-        {/* Guest Warning */}
-        {!authenticated && (
-          <div
-            className="rounded-lg p-2"
-            style={{
-              gridColumn: "span 6",
-              background:
-                "linear-gradient(135deg, rgba(251, 191, 36, 0.12) 0%, rgba(251, 191, 36, 0.06) 100%)",
-              border: "1px solid rgba(251, 191, 36, 0.3)",
-            }}
-          >
-            <div className="flex items-start gap-1.5">
-              <span className="text-xs">⚠️</span>
-              <div className="flex-1">
-                <div
-                  className="text-[9px] font-semibold mb-0.5"
-                  style={{ color: "rgba(251, 191, 36, 0.9)" }}
-                >
-                  Guest Mode Active
-                </div>
-                <div
-                  className="text-[7px]"
-                  style={{ color: "rgba(242, 208, 138, 0.6)" }}
-                >
-                  Progress won't be saved. Configure Privy in .env for
-                  authentication.
-                </div>
+                FID #{farcasterFid}
               </div>
             </div>
           </div>
         )}
+
+        {/* Guest Warning */}
+        {!authenticated && (
+          <div
+            className="rounded-lg p-3 flex items-start gap-2.5"
+            style={{
+              background: `linear-gradient(135deg, ${theme.colors.state.warning}12 0%, ${theme.colors.state.warning}06 100%)`,
+              border: `1px solid ${theme.colors.state.warning}30`,
+            }}
+          >
+            <div
+              className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+              style={{
+                background: `${theme.colors.state.warning}20`,
+                border: `1px solid ${theme.colors.state.warning}35`,
+              }}
+            >
+              <span style={{ fontSize: "12px" }}>⚠️</span>
+            </div>
+            <div>
+              <div
+                className="text-[10px] font-semibold mb-0.5"
+                style={{ color: theme.colors.state.warning }}
+              >
+                Playing as Guest
+              </div>
+              <div
+                className="text-[8px] leading-relaxed"
+                style={{ color: `${theme.colors.state.warning}BB` }}
+              >
+                Progress not saved. Sign in for cloud sync and recovery.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Settings Link */}
+        <div
+          className="rounded-lg p-2.5 flex items-center justify-between cursor-pointer transition-all hover:opacity-90"
+          style={{
+            background: theme.colors.background.secondary,
+            border: `1px solid ${theme.colors.border.default}`,
+          }}
+          onClick={() => {
+            // Set pending tab for SettingsPanel to pick up
+            sessionStorage.setItem("settings-initial-tab", "account");
+            // Open settings panel using the proper event
+            world.emit?.(EventType.UI_OPEN_PANE, { pane: "settings" });
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <span style={{ fontSize: "12px" }}>⚙️</span>
+            <span
+              className="text-[10px]"
+              style={{ color: theme.colors.text.secondary }}
+            >
+              Full Account Settings
+            </span>
+          </div>
+          <span
+            className="text-[10px]"
+            style={{ color: theme.colors.text.muted }}
+          >
+            →
+          </span>
+        </div>
       </div>
     </div>
   );

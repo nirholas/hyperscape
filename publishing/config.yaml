@@ -1,0 +1,122 @@
+# Solana dApp Store Publishing Configuration
+# See: https://github.com/solana-mobile/dapp-publishing
+
+# Publisher Information
+publisher:
+  # The Solana wallet address that will own this publisher account
+  # This address will receive the Publisher NFT and must sign all releases
+  address: "" # TODO: Fill with your Solana wallet address
+  
+  # Publisher name as it will appear in the dApp Store
+  name: "Hyperscape"
+  
+  # Publisher website
+  website: "https://hyperscape.club"
+  
+  # Contact email for the publisher
+  email: "" # TODO: Fill with contact email
+
+# App Information
+app:
+  # Package name must match AndroidManifest.xml
+  android_package: "com.hyperscape.game"
+  
+  # App name as it will appear in the dApp Store
+  name: "Hyperscape"
+  
+  # Short description (max 80 characters)
+  short_description: "An AI-native MMORPG built on Solana"
+  
+  # Long description (max 4000 characters)
+  long_description: |
+    Hyperscape is an AI-native MMORPG that combines classic RuneScape-style gameplay
+    with cutting-edge AI technology and blockchain integration.
+    
+    Features:
+    • Persistent 3D world with real-time multiplayer
+    • AI-powered NPCs and dynamic quests
+    • Solana wallet integration for true ownership
+    • Voice chat with spatial audio
+    • Cross-platform play (Web, Android, iOS)
+    
+    Built on Solana, Hyperscape leverages the speed and low costs of the blockchain
+    to enable true digital ownership of in-game items and characters.
+    
+    Connect your Solana wallet to get started!
+  
+  # Category (games, defi, nft, social, utility, other)
+  category: "games"
+  
+  # Content rating
+  # everyone, everyone_10_plus, teen, mature_17_plus, adults_only
+  content_rating: "teen"
+  
+  # Countries where the app is available (ISO 3166-1 alpha-2 codes)
+  # Empty array means all countries
+  countries: []
+  
+  # Locales supported by the app
+  locales:
+    - "en"
+
+# Release Configuration
+release:
+  # Version code (must be incremented for each release)
+  version_code: 1
+  
+  # Version name (shown to users)
+  version_name: "0.13.0"
+  
+  # Release notes for this version
+  release_notes: |
+    Initial release for Solana Saga!
+    
+    New features:
+    • Mobile Wallet Adapter (MWA) support
+    • Optimized mobile UI
+    • Seed Vault integration for secure wallet access
+  
+  # Minimum Android SDK version
+  min_sdk: 33
+  
+  # Target Android SDK version
+  target_sdk: 34
+
+# Asset Paths (relative to publishing/ directory)
+assets:
+  # App icon (512x512 PNG)
+  icon: "assets/icon_512.png"
+  
+  # Banner/Hero image (1200x600 PNG)
+  banner: "assets/banner.png"
+  
+  # Screenshots (at least 4 required, max 8)
+  # Minimum dimensions: 320x480 or 480x320
+  # Maximum dimensions: 3840x2160
+  screenshots:
+    - "assets/screenshot_1.png"
+    - "assets/screenshot_2.png"
+    - "assets/screenshot_3.png"
+    - "assets/screenshot_4.png"
+  
+  # APK or AAB file path (relative to publishing/ directory)
+  apk: "hyperscape-release.apk"
+
+# Solana Configuration
+solana:
+  # Network to publish on (mainnet-beta, devnet)
+  network: "mainnet-beta"
+  
+  # RPC endpoint (leave empty to use default)
+  rpc_url: ""
+
+# Build Configuration
+build:
+  # Path to the keystore file for signing releases
+  keystore_path: "hyperscape-release.keystore"
+  
+  # Keystore alias
+  keystore_alias: "hyperscape"
+  
+  # Whether to use the GitHub Actions workflow for building
+  use_ci: true

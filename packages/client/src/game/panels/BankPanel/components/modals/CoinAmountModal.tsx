@@ -2,10 +2,11 @@
  * Coin Amount Modal Component
  *
  * Modal for entering coin deposit/withdraw amounts with quick buttons.
+ * Uses hs-kit ModalWindow and theme system for consistent styling.
  */
 
-import { useState, useEffect, useRef } from "react";
-import { createPortal } from "react-dom";
+import { useState, useEffect, useRef, type CSSProperties } from "react";
+import { ModalWindow, useThemeStore } from "hs-kit";
 import type { CoinModalState } from "../../types";
 import { formatQuantity } from "../../utils";
 
@@ -20,6 +21,7 @@ export function CoinAmountModal({
   onConfirm,
   onClose,
 }: CoinAmountModalProps) {
+  const theme = useThemeStore((s) => s.theme);
   const [amount, setAmount] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -51,86 +53,101 @@ export function CoinAmountModal({
   const actionLabel = modal.action === "deposit" ? "Deposit" : "Withdraw";
   const actionColor =
     modal.action === "deposit"
-      ? "rgba(100, 180, 100, 0.8)"
-      : "rgba(180, 150, 100, 0.8)";
+      ? theme.colors.state.success
+      : theme.colors.state.warning;
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[10001] flex items-center justify-center"
-      style={{ background: "rgba(0, 0, 0, 0.5)" }}
-      onClick={onClose}
+  const buttonStyle: CSSProperties = {
+    padding: `${theme.spacing.sm}px`,
+    borderRadius: theme.borderRadius.md,
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: theme.typography.fontWeight.bold,
+    cursor: "pointer",
+    transition: "all 0.2s ease",
+    color: theme.colors.text.primary,
+    border: `1px solid ${theme.colors.border.default}`,
+  };
+
+  const activeButtonStyle: CSSProperties = {
+    ...buttonStyle,
+    background: `${actionColor}cc`,
+  };
+
+  const disabledButtonStyle: CSSProperties = {
+    ...buttonStyle,
+    background: theme.colors.background.tertiary,
+    opacity: 0.3,
+    cursor: "not-allowed",
+  };
+
+  return (
+    <ModalWindow
+      visible={modal.visible}
+      onClose={onClose}
+      title={`${actionLabel} Coins`}
+      width={300}
+      showCloseButton={false}
     >
-      <div
-        className="rounded-lg p-4 shadow-xl"
-        style={{
-          background:
-            "linear-gradient(135deg, rgba(30, 25, 20, 0.98) 0%, rgba(20, 15, 10, 0.98) 100%)",
-          border: "2px solid rgba(139, 69, 19, 0.8)",
-          minWidth: "280px",
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3
-          className="text-lg font-bold mb-3 text-center"
-          style={{ color: "rgba(242, 208, 138, 0.9)" }}
-        >
-          {actionLabel} Coins
-        </h3>
-
+      <div style={{ padding: theme.spacing.sm }}>
         {/* Quick amounts */}
-        <div className="grid grid-cols-4 gap-2 mb-3">
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(4, 1fr)",
+            gap: theme.spacing.sm,
+            marginBottom: theme.spacing.md,
+          }}
+        >
           {[1, 10, 100, 1000].map((qty) => (
             <button
               key={qty}
               onClick={() => handleQuickAmount(qty)}
               disabled={modal.maxAmount < qty}
-              className="py-2 rounded text-sm font-bold transition-colors disabled:opacity-30"
-              style={{
-                background:
-                  modal.maxAmount >= qty
-                    ? actionColor
-                    : "rgba(50, 50, 50, 0.5)",
-                color: "#fff",
-                border: "1px solid rgba(139, 69, 19, 0.6)",
-              }}
+              style={
+                modal.maxAmount >= qty ? activeButtonStyle : disabledButtonStyle
+              }
             >
               {qty >= 1000 ? `${qty / 1000}K` : qty}
             </button>
           ))}
         </div>
 
-        <div className="grid grid-cols-2 gap-2 mb-3">
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(2, 1fr)",
+            gap: theme.spacing.sm,
+            marginBottom: theme.spacing.md,
+          }}
+        >
           <button
             onClick={() => handleQuickAmount(Math.floor(modal.maxAmount / 2))}
             disabled={modal.maxAmount < 2}
-            className="py-2 rounded text-sm font-bold transition-colors disabled:opacity-30"
-            style={{
-              background: actionColor,
-              color: "#fff",
-              border: "1px solid rgba(139, 69, 19, 0.6)",
-            }}
+            style={
+              modal.maxAmount >= 2 ? activeButtonStyle : disabledButtonStyle
+            }
           >
             Half ({formatQuantity(Math.floor(modal.maxAmount / 2))})
           </button>
           <button
             onClick={() => handleQuickAmount(modal.maxAmount)}
             disabled={modal.maxAmount < 1}
-            className="py-2 rounded text-sm font-bold transition-colors disabled:opacity-30"
-            style={{
-              background: actionColor,
-              color: "#fff",
-              border: "1px solid rgba(139, 69, 19, 0.6)",
-            }}
+            style={
+              modal.maxAmount >= 1 ? activeButtonStyle : disabledButtonStyle
+            }
           >
             All ({formatQuantity(modal.maxAmount)})
           </button>
         </div>
 
         {/* Custom amount input */}
-        <div className="mb-3">
+        <div style={{ marginBottom: theme.spacing.md }}>
           <label
-            className="text-xs mb-1 block"
-            style={{ color: "rgba(242, 208, 138, 0.7)" }}
+            style={{
+              display: "block",
+              fontSize: theme.typography.fontSize.xs,
+              color: theme.colors.text.secondary,
+              marginBottom: theme.spacing.xs,
+            }}
           >
             Custom amount (max: {modal.maxAmount.toLocaleString()})
           </label>
@@ -145,11 +162,14 @@ export function CoinAmountModal({
               if (e.key === "Enter") handleSubmit();
               if (e.key === "Escape") onClose();
             }}
-            className="w-full px-3 py-2 rounded text-sm"
             style={{
-              background: "rgba(0, 0, 0, 0.5)",
-              border: "1px solid rgba(139, 69, 19, 0.6)",
-              color: "#fff",
+              width: "100%",
+              padding: `${theme.spacing.sm}px ${theme.spacing.md}px`,
+              borderRadius: theme.borderRadius.md,
+              fontSize: theme.typography.fontSize.sm,
+              background: theme.colors.background.tertiary,
+              border: `1px solid ${theme.colors.border.default}`,
+              color: theme.colors.text.primary,
               outline: "none",
             }}
             placeholder="Enter amount..."
@@ -157,7 +177,7 @@ export function CoinAmountModal({
         </div>
 
         {/* Action buttons */}
-        <div className="flex gap-2">
+        <div style={{ display: "flex", gap: theme.spacing.sm }}>
           <button
             onClick={handleSubmit}
             disabled={
@@ -165,29 +185,37 @@ export function CoinAmountModal({
               parseInt(amount, 10) <= 0 ||
               parseInt(amount, 10) > modal.maxAmount
             }
-            className="flex-1 py-2 rounded text-sm font-bold transition-colors disabled:opacity-30"
             style={{
-              background: actionColor,
-              color: "#fff",
-              border: "1px solid rgba(139, 69, 19, 0.6)",
+              ...buttonStyle,
+              flex: 1,
+              background:
+                amount &&
+                parseInt(amount, 10) > 0 &&
+                parseInt(amount, 10) <= modal.maxAmount
+                  ? `${actionColor}cc`
+                  : theme.colors.background.tertiary,
+              opacity:
+                amount &&
+                parseInt(amount, 10) > 0 &&
+                parseInt(amount, 10) <= modal.maxAmount
+                  ? 1
+                  : 0.3,
             }}
           >
             {actionLabel}
           </button>
           <button
             onClick={onClose}
-            className="flex-1 py-2 rounded text-sm font-bold transition-colors"
             style={{
-              background: "rgba(100, 100, 100, 0.5)",
-              color: "#fff",
-              border: "1px solid rgba(139, 69, 19, 0.6)",
+              ...buttonStyle,
+              flex: 1,
+              background: theme.colors.background.tertiary,
             }}
           >
             Cancel
           </button>
         </div>
       </div>
-    </div>,
-    document.body,
+    </ModalWindow>
   );
 }

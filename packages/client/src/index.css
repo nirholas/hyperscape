@@ -35,6 +35,239 @@
   -webkit-backdrop-filter: grayscale(100%);
 }
 
+/* Animation keyframes for HUD components */
+@keyframes progress-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+@keyframes context-menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-progress-pulse {
+  animation: progress-pulse 1.5s ease-in-out infinite;
+}
+
+.animate-context-menu-in {
+  animation: context-menu-in 0.15s ease-out;
+}
+
+/* Mobile panel slide animations */
+@keyframes slideInFromRight {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideInFromLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideInFromBottom {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-in-right {
+  animation: slideInFromRight 0.2s ease-out;
+}
+
+.animate-slide-in-left {
+  animation: slideInFromLeft 0.2s ease-out;
+}
+
+.animate-slide-in-bottom {
+  animation: slideInFromBottom 0.2s ease-out;
+}
+
+/* Reduced motion support for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  .animate-progress-pulse {
+    animation: none;
+    opacity: 1;
+  }
+
+  .animate-context-menu-in {
+    animation: none;
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  .animate-slide-in-right {
+    animation: none;
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  .animate-slide-in-left {
+    animation: none;
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  .animate-slide-in-bottom {
+    animation: none;
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/**
+ * Accessibility - Colorblind Mode Support
+ * 
+ * These CSS custom property overrides are applied via data attributes
+ * on the document root element. Set via accessibility settings UI.
+ * 
+ * @see development-docs/updates/07-comprehensive-design-patterns.md
+ */
+
+/* Protanopia (Red-Blind) Mode */
+[data-colorblind="protanopia"] {
+  /* Replace red/green distinctions with blue/orange */
+  --color-health-full: #42A5F5;
+  --color-health-medium: #FFA726;
+  --color-health-low: #FF9800;
+  --color-health-critical: #FFA726;
+  --color-success: #2196F3;
+  --color-danger: #FF9800;
+  --color-error: #FF9800;
+  --color-hp: #42A5F5;
+  --color-energy: #2196F3;
+}
+
+/* Deuteranopia (Green-Blind) Mode */
+[data-colorblind="deuteranopia"] {
+  /* Replace green with yellow/blue */
+  --color-health-full: #42A5F5;
+  --color-health-medium: #FFD54F;
+  --color-success: #FFD54F;
+  --color-energy: #42A5F5;
+  --color-hp: #42A5F5;
+}
+
+/* Tritanopia (Blue-Blind) Mode */
+[data-colorblind="tritanopia"] {
+  /* Replace blue with green/yellow */
+  --color-mana: #66BB6A;
+  --color-prayer: #66BB6A;
+  --color-info: #FFD54F;
+  --color-primary: #26A69A;
+  --color-link: #26A69A;
+}
+
+/**
+ * High Contrast Mode
+ * 
+ * Increases contrast for users with low vision.
+ * WCAG 2.2 AAA compliant (7:1 contrast ratio).
+ */
+[data-contrast="high"] {
+  /* Maximum contrast backgrounds */
+  --bg-primary: #000000;
+  --bg-secondary: #0a0a0a;
+  --bg-tertiary: #141414;
+  --bg-overlay: rgba(0, 0, 0, 0.95);
+  
+  /* Maximum contrast text */
+  --text-primary: #FFFFFF;
+  --text-secondary: #E0E0E0;
+  --text-muted: #BDBDBD;
+  --text-disabled: #757575;
+  
+  /* High contrast borders */
+  --border-default: #FFFFFF;
+  --border-hover: #FFFFFF;
+  --border-active: #FFFFFF;
+  --border-focus: #FFFF00;
+  
+  /* Enhanced focus indicators */
+  --focus-ring-color: #FFFF00;
+  --focus-ring-width: 3px;
+  --focus-ring-offset: 2px;
+}
+
+/* High contrast mode - enhanced focus rings */
+[data-contrast="high"] *:focus-visible {
+  outline: 3px solid #FFFF00 !important;
+  outline-offset: 2px !important;
+}
+
+/**
+ * Reduced Motion Mode
+ * 
+ * Disables non-essential animations for users with vestibular disorders.
+ */
+[data-reduced-motion="true"],
+[data-reduced-motion="true"] * {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+
+/* Preserve essential animations like loading spinners */
+[data-reduced-motion="true"] .essential-animation {
+  animation-duration: inherit !important;
+  transition-duration: inherit !important;
+}
+
+/**
+ * Keyboard Navigation Mode
+ * 
+ * Enhanced focus indicators for keyboard users.
+ */
+[data-keyboard-nav="true"] *:focus-visible {
+  outline: 2px solid var(--focus-visible-outline, var(--color-accent-primary, #c9a54a)) !important;
+  outline-offset: 2px !important;
+}
+
+[data-keyboard-nav="true"] button:focus-visible,
+[data-keyboard-nav="true"] [role="button"]:focus-visible {
+  box-shadow: 0 0 0 3px var(--color-accent-primary, #c9a54a) !important;
+}
+
+/**
+ * Font Scale Support
+ * 
+ * Apply font-scale variable to text elements.
+ */
+:root {
+  --font-scale: 1;
+}
+
+/* Base font sizes (can be overridden by accessibility store) */
+.text-xs { font-size: var(--font-size-xs, 10px); }
+.text-sm { font-size: var(--font-size-sm, 12px); }
+.text-base { font-size: var(--font-size-base, 14px); }
+.text-lg { font-size: var(--font-size-lg, 16px); }
+.text-xl { font-size: var(--font-size-xl, 20px); }
+.text-xxl { font-size: var(--font-size-xxl, 24px); }
+
 /* Privy Modal Styling - Golden Border and Glow */
 #privy-dialog-container iframe[id*="privy"],
 #privy-modal {
@@ -75,27 +308,101 @@ div[data-privy-backdrop] {
   -webkit-backdrop-filter: blur(8px) !important;
 }
 
-/* Custom scrollbar styling */
+/* ===========================================
+ * UNIFIED SCROLLBAR SYSTEM
+ *
+ * Three variants available:
+ * - noscrollbar: Hidden scrollbar (see line 24)
+ * - scrollbar-thin: 6px gold scrollbar (default for content panels)
+ * - scrollbar-thin-brown: 6px brown scrollbar (alternative)
+ * - scrollbar-thick-gold: 8px gold scrollbar (for grids)
+ * - scrollbar-thick-brown: 8px brown scrollbar (for bank/store)
+ *
+ * Colors from design tokens (gameUI.scrollbar in tokens.ts):
+ * - Gold: rgba(242, 208, 138, 0.5) / rgba(242, 208, 138, 0.8)
+ * - Brown: rgba(139, 69, 19, 0.6) / rgba(139, 69, 19, 0.8)
+ * =========================================== */
+
+/* Thin Gold Scrollbar (6px) - Default for most panels */
 .scrollbar-thin {
   scrollbar-width: thin;
   scrollbar-color: rgba(242, 208, 138, 0.5) transparent;
 }
-
 .scrollbar-thin::-webkit-scrollbar {
   width: 6px;
 }
-
 .scrollbar-thin::-webkit-scrollbar-track {
   background: transparent;
   border-radius: 3px;
 }
-
 .scrollbar-thin::-webkit-scrollbar-thumb {
   background-color: rgba(242, 208, 138, 0.5);
   border-radius: 3px;
   border: none;
 }
-
 .scrollbar-thin::-webkit-scrollbar-thumb:hover {
   background-color: rgba(242, 208, 138, 0.8);
+}
+
+/* Thin Brown Scrollbar (6px) - Alternative for brown-themed panels */
+.scrollbar-thin-brown {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(139, 69, 19, 0.6) rgba(0, 0, 0, 0.3);
+}
+.scrollbar-thin-brown::-webkit-scrollbar {
+  width: 6px;
+}
+.scrollbar-thin-brown::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 3px;
+}
+.scrollbar-thin-brown::-webkit-scrollbar-thumb {
+  background-color: rgba(139, 69, 19, 0.6);
+  border-radius: 3px;
+  border: none;
+}
+.scrollbar-thin-brown::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(139, 69, 19, 0.8);
+}
+
+/* Thick Gold Scrollbar (8px) - For inventory/bank grids with gold theme */
+.scrollbar-thick-gold {
+  scrollbar-width: auto;
+  scrollbar-color: rgba(242, 208, 138, 0.5) transparent;
+}
+.scrollbar-thick-gold::-webkit-scrollbar {
+  width: 8px;
+}
+.scrollbar-thick-gold::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 4px;
+}
+.scrollbar-thick-gold::-webkit-scrollbar-thumb {
+  background-color: rgba(242, 208, 138, 0.5);
+  border-radius: 4px;
+  border: none;
+}
+.scrollbar-thick-gold::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(242, 208, 138, 0.8);
+}
+
+/* Thick Brown Scrollbar (8px) - For bank/store panels */
+.scrollbar-thick-brown {
+  scrollbar-width: auto;
+  scrollbar-color: rgba(139, 69, 19, 0.6) rgba(0, 0, 0, 0.3);
+}
+.scrollbar-thick-brown::-webkit-scrollbar {
+  width: 8px;
+}
+.scrollbar-thick-brown::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+}
+.scrollbar-thick-brown::-webkit-scrollbar-thumb {
+  background-color: rgba(139, 69, 19, 0.6);
+  border-radius: 4px;
+  border: none;
+}
+.scrollbar-thick-brown::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(139, 69, 19, 0.8);
 }

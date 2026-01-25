@@ -1,6 +1,13 @@
 import { MessageSquareIcon } from "lucide-react";
-import { COLORS, GRADIENTS } from "../../constants";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useThemeStore } from "hs-kit";
+import { GRADIENTS, typography } from "../../constants";
+import React, {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useMemo,
+} from "react";
 
 import { ControlPriorities, EventType, isTouch } from "@hyperscape/shared";
 import type { ClientWorld, InventorySlotItem } from "../../types";
@@ -9,8 +16,31 @@ import { ActionPanel } from "../panels/ActionPanel";
 import { cls } from "../../utils/classnames";
 import { useChatContext } from "./ChatContext";
 
-const CHAT_HEADER_FONT = "'Inter', system-ui, sans-serif";
-const CHAT_ACCENT_COLOR = COLORS.CHAT_ACCENT;
+const CHAT_HEADER_FONT = typography.fontFamily.body;
+
+/**
+ * Module-level chat button style constant (without color - applied dynamically).
+ * isTouch is a module-level constant from @hyperscape/shared that doesn't change at runtime,
+ * so this style can be computed once at module load time.
+ */
+const CHAT_BUTTON_BASE_STYLE: Omit<React.CSSProperties, "color"> = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: "0.6rem",
+  background:
+    "linear-gradient(135deg, rgba(30, 20, 10, 0.9) 0%, rgba(20, 15, 10, 0.95) 100%)",
+  borderRadius: 9999,
+  padding: isTouch ? "0.55rem 1.2rem" : "0.65rem 1.4rem",
+  fontFamily: CHAT_HEADER_FONT,
+  letterSpacing: "0.16em",
+  textTransform: "uppercase",
+  fontSize: isTouch ? "0.68rem" : "0.76rem",
+  boxShadow:
+    "0 4px 12px rgba(0, 0, 0, 0.7), 0 2px 6px rgba(139, 69, 19, 0.4), inset 0 1px 0 rgba(242, 208, 138, 0.2), inset 0 -1px 0 rgba(0, 0, 0, 0.5)",
+  textShadow: "0 1px 2px rgba(0, 0, 0, 0.8), 0 0 6px rgba(242, 208, 138, 0.3)",
+  pointerEvents: "auto",
+};
 
 // Local type definitions
 interface ChatMessage {
@@ -46,6 +76,7 @@ type ChatWorld = ClientWorld & {
   };
   network: {
     id: string;
+    send?: (method: string, payload?: Record<string, unknown>) => void;
     lastInventoryByPlayerId?: Record<
       string,
       { items: InventorySlotItem[]; coins: number }
@@ -54,6 +85,7 @@ type ChatWorld = ClientWorld & {
 };
 
 export function Chat({ world }: { world: ChatWorld }) {
+  const theme = useThemeStore((s) => s.theme);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const chatPanelRef = useRef<HTMLDivElement | null>(null);
   const touchStartYRef = useRef<number | null>(null);
@@ -67,6 +99,14 @@ export function Chat({ world }: { world: ChatWorld }) {
     typeof window !== "undefined" ? window.innerWidth < 768 : false,
   );
   const [inventory, setInventory] = useState<InventorySlotItem[]>([]);
+
+  // Shared handler for ActionPanel item moves
+  const handleItemMove = useCallback(
+    (fromSlot: number, toSlot: number) => {
+      world?.network?.send?.("moveItem", { fromSlot, toSlot });
+    },
+    [world],
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -225,7 +265,7 @@ export function Chat({ world }: { world: ChatWorld }) {
     }
   };
 
-  const panelWidth = isTouch ? 386 : 720;
+  const panelWidth = isTouch ? 386 : 550; // Desktop: clearly extends past action panel
   const dividerGradient =
     "linear-gradient(90deg, rgba(242,208,138,0), rgba(242,208,138,0.4) 14%, rgba(255,215,128,0.95) 50%, rgba(242,208,138,0.4) 86%, rgba(242,208,138,0))";
 
@@ -265,6 +305,11 @@ export function Chat({ world }: { world: ChatWorld }) {
     borderTopRightRadius: "12px",
     borderTop: "2px solid rgba(139, 69, 19, 0.6)",
     borderRight: "2px solid rgba(139, 69, 19, 0.6)",
+    borderBottom: "none", // Flush with bottom of screen
+    borderLeft: "none", // Flush with left of screen
+    // Override box-shadow to remove the inset bottom shadow
+    boxShadow:
+      "0 -4px 16px rgba(0, 0, 0, 0.5), 0 4px 16px rgba(139, 69, 19, 0.3), inset 0 1px 0 rgba(242, 208, 138, 0.15)",
   };
   const mobilePanelStyle: React.CSSProperties = {
     ...basePanelStyle,
@@ -272,26 +317,11 @@ export function Chat({ world }: { world: ChatWorld }) {
     maxWidth: "100%",
   };
 
+  // Build button style from base + theme color
   const chatButtonStyle: React.CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "0.6rem",
-    background:
-      "linear-gradient(135deg, rgba(30, 20, 10, 0.9) 0%, rgba(20, 15, 10, 0.95) 100%)",
-    border: "2px solid rgba(139, 69, 19, 0.7)",
-    borderRadius: 9999,
-    padding: isTouch ? "0.55rem 1.2rem" : "0.65rem 1.4rem",
-    color: CHAT_ACCENT_COLOR,
-    fontFamily: CHAT_HEADER_FONT,
-    letterSpacing: "0.16em",
-    textTransform: "uppercase",
-    fontSize: isTouch ? "0.68rem" : "0.76rem",
-    boxShadow:
-      "0 4px 12px rgba(0, 0, 0, 0.7), 0 2px 6px rgba(139, 69, 19, 0.4), inset 0 1px 0 rgba(242, 208, 138, 0.2), inset 0 -1px 0 rgba(0, 0, 0, 0.5)",
-    textShadow:
-      "0 1px 2px rgba(0, 0, 0, 0.8), 0 0 6px rgba(242, 208, 138, 0.3)",
-    pointerEvents: "auto",
+    ...CHAT_BUTTON_BASE_STYLE,
+    color: theme.colors.accent.primary,
+    border: `2px solid ${theme.colors.border.decorative}`,
   };
 
   const closeButtonStyle: React.CSSProperties = {
@@ -303,7 +333,7 @@ export function Chat({ world }: { world: ChatWorld }) {
     justifyContent: "center",
     background: "transparent",
     border: "none",
-    color: CHAT_ACCENT_COLOR,
+    color: theme.colors.accent.primary,
     boxShadow: "none",
     cursor: "pointer",
     flexShrink: 0,
@@ -415,11 +445,14 @@ export function Chat({ world }: { world: ChatWorld }) {
         <span
           key={tab}
           style={{
-            color: index === 0 ? CHAT_ACCENT_COLOR : "rgba(205, 212, 230, 0.5)",
+            color:
+              index === 0
+                ? theme.colors.accent.primary
+                : theme.colors.text.muted,
             position: "relative",
             textShadow:
               index === 0
-                ? "0 1px 2px rgba(0, 0, 0, 0.8), 0 0 6px rgba(242, 208, 138, 0.3)"
+                ? `0 1px 2px rgba(0, 0, 0, 0.8), 0 0 6px ${theme.colors.accent.primary}4d`
                 : "0 1px 2px rgba(0, 0, 0, 0.6)",
           }}
         >
@@ -434,9 +467,8 @@ export function Chat({ world }: { world: ChatWorld }) {
                 width: "80%",
                 height: 1,
                 borderRadius: 999,
-                background:
-                  "linear-gradient(90deg, transparent, rgba(247,217,140,0.85), transparent)",
-                boxShadow: "0 0 4px rgba(242, 208, 138, 0.4)",
+                background: `linear-gradient(90deg, transparent, ${theme.colors.accent.primary}d9, transparent)`,
+                boxShadow: `0 0 4px ${theme.colors.accent.primary}66`,
               }}
             />
           )}
@@ -535,6 +567,48 @@ export function Chat({ world }: { world: ChatWorld }) {
     </>
   );
 
+  // Desktop chat button - memoized BEFORE mobile check to ensure consistent hook order
+  // React requires hooks to be called in the same order on every render
+  const desktopChatButton = useMemo(
+    () => (
+      <button
+        type="button"
+        style={{
+          ...chatButtonStyle,
+          padding: "0 10px",
+          height: "32px",
+          borderRadius: "5px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: "5px",
+        }}
+        className="transition-transform duration-150 hover:scale-[1.03] active:scale-95 focus:outline-none"
+        onClick={() => {
+          if (collapsed) {
+            setCollapsed(false);
+            setActive(true);
+          } else {
+            setCollapsed(true);
+            setActive(false);
+          }
+        }}
+      >
+        <MessageSquareIcon size={14} />
+        <span
+          style={{
+            fontSize: "11px",
+            fontWeight: 600,
+            color: theme.colors.accent.primary,
+          }}
+        >
+          Chat
+        </span>
+      </button>
+    ),
+    [collapsed, setCollapsed, setActive, chatButtonStyle],
+  );
+
   if (isMobileLayout) {
     if (collapsed) {
       return (
@@ -546,12 +620,12 @@ export function Chat({ world }: { world: ChatWorld }) {
                 hidden: !chatVisible,
               })}
               style={{
-                left: `calc(env(safe-area-inset-left) + 16px)`,
-                bottom: `calc(env(safe-area-inset-bottom) + 16px)`,
+                left: `calc(env(safe-area-inset-left) + 8px)`,
+                bottom: `calc(env(safe-area-inset-bottom) + 6px)`,
               }}
             >
               <div className="pointer-events-auto">
-                <ActionPanel items={inventory} />
+                <ActionPanel items={inventory} onItemMove={handleItemMove} />
               </div>
             </div>
           )}
@@ -563,8 +637,8 @@ export function Chat({ world }: { world: ChatWorld }) {
                 hidden: !chatVisible,
               })}
               style={{
-                right: `calc(env(safe-area-inset-right) + 16px)`,
-                bottom: `calc(env(safe-area-inset-bottom) + 16px)`,
+                right: `calc(env(safe-area-inset-right) + 8px)`,
+                bottom: `calc(env(safe-area-inset-bottom) + 10px)`,
               }}
               onTouchStart={(event) => {
                 touchStartYRef.current = event.touches[0].clientY;
@@ -585,11 +659,13 @@ export function Chat({ world }: { world: ChatWorld }) {
                 type="button"
                 style={{
                   ...chatButtonStyle,
-                  padding: "0.65rem",
-                  borderRadius: 9999,
+                  padding: "0 14px",
+                  height: "36px", // Compact height aligned with action panel
+                  borderRadius: "6px",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
+                  gap: "6px",
                 }}
                 className="pointer-events-auto transition-transform duration-150 hover:scale-[1.04] active:scale-95 focus:outline-none"
                 onClick={() => {
@@ -597,7 +673,16 @@ export function Chat({ world }: { world: ChatWorld }) {
                   setActive(true);
                 }}
               >
-                <MessageSquareIcon size={20} />
+                <MessageSquareIcon size={16} />
+                <span
+                  style={{
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    color: theme.colors.accent.primary,
+                  }}
+                >
+                  Chat
+                </span>
               </button>
             </div>
           )}
@@ -617,8 +702,52 @@ export function Chat({ world }: { world: ChatWorld }) {
             }}
           >
             <div className="pointer-events-auto">
-              <ActionPanel items={inventory} />
+              <ActionPanel items={inventory} onItemMove={handleItemMove} />
             </div>
+          </div>
+        )}
+
+        {/* Chat Button - Always visible, positioned above chat panel */}
+        {!hasOpenWindows && (
+          <div
+            className={cls("fixed pointer-events-none z-[961]", {
+              hidden: !chatVisible,
+            })}
+            style={{
+              right: `calc(env(safe-area-inset-right) + 8px)`,
+              bottom: `calc(env(safe-area-inset-bottom) + ${(chatPanelRef.current?.offsetHeight ?? 200) + 10}px)`,
+            }}
+          >
+            <button
+              type="button"
+              style={{
+                ...chatButtonStyle,
+                padding: "0 14px",
+                height: "36px",
+                borderRadius: "6px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "6px",
+              }}
+              className="pointer-events-auto transition-transform duration-150 hover:scale-[1.04] active:scale-95 focus:outline-none"
+              onClick={() => {
+                setCollapsed(true);
+                setActive(false);
+                updateMobileOffset(true);
+              }}
+            >
+              <MessageSquareIcon size={16} />
+              <span
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  color: theme.colors.accent.primary,
+                }}
+              >
+                Chat
+              </span>
+            </button>
           </div>
         )}
 
@@ -672,34 +801,23 @@ export function Chat({ world }: { world: ChatWorld }) {
           className="flex items-center pointer-events-auto"
           style={{ gap: "clamp(0.5rem, 1vw, 0.625rem)" }}
         >
-          <button
-            type="button"
-            style={{
-              ...chatButtonStyle,
-              padding: isTouch ? "0.65rem" : "0.75rem",
-            }}
-            className="transition-transform duration-150 hover:scale-[1.03] active:scale-95 focus:outline-none"
-            onClick={() => {
-              setCollapsed(false);
-              setActive(true);
-            }}
-          >
-            <MessageSquareIcon size={isTouch ? 20 : 24} />
-          </button>
-          <ActionPanel items={inventory} />
+          {desktopChatButton}
+          <ActionPanel items={inventory} onItemMove={handleItemMove} />
         </div>
       ) : (
         <div className="pointer-events-auto relative z-[10]">
-          {/* Action Panel - Absolutely positioned above chat, left-aligned with padding */}
+          {/* Chat Button + Action Panel - Absolutely positioned above chat */}
           <div
-            className="absolute pointer-events-auto"
+            className="absolute pointer-events-auto flex items-center"
             style={{
               bottom: "100%",
               marginBottom: "clamp(0.5rem, 1vw, 0.625rem)",
               left: "clamp(0.5rem, 1vw, 0.75rem)",
+              gap: "clamp(0.5rem, 1vw, 0.625rem)",
             }}
           >
-            <ActionPanel items={inventory} />
+            {desktopChatButton}
+            <ActionPanel items={inventory} onItemMove={handleItemMove} />
           </div>
 
           {/* Chat Panel */}
@@ -792,11 +910,13 @@ function Messages({
 }
 
 function Message({ msg }: { msg: ChatMessage }) {
+  const theme = useThemeStore((s) => s.theme);
+
   return (
     <div
       className="message text-[0.75rem] leading-[1.35]"
       style={{
-        color: "rgba(232, 235, 244, 0.92)",
+        color: theme.colors.text.primary,
         fontFamily: "'Inter', system-ui, sans-serif",
         textShadow: "0 1px 2px rgba(0,0,0,0.75)",
       }}
@@ -806,7 +926,7 @@ function Message({ msg }: { msg: ChatMessage }) {
           className="message-from mr-1.5 uppercase tracking-[0.16em]"
           style={{
             fontFamily: CHAT_HEADER_FONT,
-            color: CHAT_ACCENT_COLOR,
+            color: theme.colors.accent.primary,
             fontSize: "0.65rem",
             letterSpacing: "0.18em",
           }}

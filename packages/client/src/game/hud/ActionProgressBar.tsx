@@ -3,7 +3,8 @@
  * Shows gathering/action progress to the player
  */
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
+import { useThemeStore } from "hs-kit";
 import { EventType } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
 
@@ -16,6 +17,7 @@ interface ActionProgress {
 }
 
 export function ActionProgressBar({ world }: { world: ClientWorld }) {
+  const theme = useThemeStore((s) => s.theme);
   const [currentAction, setCurrentAction] = useState<ActionProgress | null>(
     null,
   );
@@ -126,48 +128,104 @@ export function ActionProgressBar({ world }: { world: ClientWorld }) {
     return () => clearInterval(interval);
   }, [currentAction?.startTime]);
 
+  // Memoize styles to avoid recalculating on every render
+  const styles = useMemo(
+    () => ({
+      container: {
+        width: 320,
+        maxWidth: "90vw",
+        position: "fixed" as const,
+        left: "50%",
+        transform: "translateX(-50%)",
+        bottom: "calc(15% + env(safe-area-inset-bottom))",
+        pointerEvents: "none" as const,
+        zIndex: theme.zIndex.overlay,
+      },
+      label: {
+        textAlign: "center" as const,
+        color: theme.colors.text.primary,
+        fontSize: theme.typography.fontSize.sm,
+        fontFamily: theme.typography.fontFamily.body,
+        fontWeight: theme.typography.fontWeight.semibold,
+        marginBottom: theme.spacing.sm,
+        textShadow: "0 2px 4px rgba(0, 0, 0, 0.8)",
+      },
+      barContainer: {
+        height: theme.spacing.xl,
+        background: theme.colors.background.secondary,
+        border: `2px solid ${theme.colors.border.default}`,
+        borderRadius: theme.borderRadius.xl,
+        overflow: "hidden" as const,
+        position: "relative" as const,
+        boxShadow: theme.shadows.lg,
+      },
+      barFill: {
+        height: "100%",
+        background: theme.colors.status.energy,
+        borderRadius: theme.borderRadius.xl - 4,
+        transition: "width 50ms linear",
+        position: "relative" as const,
+        overflow: "hidden" as const,
+        boxShadow: `inset 0 1px 0 rgba(255, 255, 255, 0.3)`,
+      },
+      shine: {
+        position: "absolute" as const,
+        top: 0,
+        left: 0,
+        right: 0,
+        height: "50%",
+        background:
+          "linear-gradient(to bottom, rgba(255, 255, 255, 0.4), transparent)",
+        borderRadius: `${theme.borderRadius.xl}px ${theme.borderRadius.xl}px 0 0`,
+      },
+      percentage: {
+        position: "absolute" as const,
+        top: "50%",
+        left: "50%",
+        transform: "translate(-50%, -50%)",
+        color: theme.colors.text.primary,
+        fontSize: theme.typography.fontSize.xs,
+        fontFamily: theme.typography.fontFamily.body,
+        fontWeight: theme.typography.fontWeight.bold,
+        pointerEvents: "none" as const,
+        textShadow: "0 1px 2px rgba(0, 0, 0, 0.8)",
+      },
+    }),
+    [theme],
+  );
+
   if (!currentAction) return null;
 
   const percentage = Math.floor(currentAction.progress * 100);
 
   return (
-    <div
-      className="w-[320px] max-w-[90vw] fixed left-1/2 -translate-x-1/2 pointer-events-none z-[999]"
-      style={{
-        bottom: "calc(15% + env(safe-area-inset-bottom))",
-      }}
-    >
-      <div
-        className="text-center text-white text-sm font-semibold mb-2 animate-pulse"
-        style={{ textShadow: "0 2px 4px rgba(0, 0, 0, 0.8)" }}
-      >
-        <span className="inline-block mr-1">🪓</span>
+    <div style={styles.container}>
+      {/* Action label */}
+      <div style={styles.label} className="animate-progress-pulse">
+        <span
+          style={{ display: "inline-block", marginRight: theme.spacing.xs }}
+          aria-hidden="true"
+        >
+          🪓
+        </span>
         {currentAction.action} {currentAction.resourceName}...
       </div>
 
-      <div className="h-6 bg-black/60 border-2 border-white/30 rounded-xl overflow-hidden relative">
+      {/* Progress bar container */}
+      <div style={styles.barContainer}>
+        {/* Progress fill */}
         <div
-          className="h-full rounded-[10px] transition-[width] duration-[50ms] linear relative overflow-hidden"
           style={{
+            ...styles.barFill,
             width: `${percentage}%`,
-            background: "linear-gradient(90deg, #4CAF50, #8BC34A)",
-            boxShadow: "inset 0 2px 4px rgba(255, 255, 255, 0.3)",
           }}
         >
-          <div
-            className="absolute top-0 left-0 right-0 h-1/2"
-            style={{
-              background:
-                "linear-gradient(to bottom, rgba(255, 255, 255, 0.4), transparent)",
-            }}
-          />
+          {/* Shine highlight */}
+          <div style={styles.shine} />
         </div>
-        <div
-          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white text-xs font-bold pointer-events-none"
-          style={{ textShadow: "0 1px 2px rgba(0, 0, 0, 0.8)" }}
-        >
-          {percentage}%
-        </div>
+
+        {/* Percentage label */}
+        <div style={styles.percentage}>{percentage}%</div>
       </div>
     </div>
   );

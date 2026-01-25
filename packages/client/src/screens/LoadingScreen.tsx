@@ -5,7 +5,7 @@
  */
 
 import React, { useEffect, useState } from "react";
-import { COLORS } from "../constants";
+import { useThemeStore } from "hs-kit";
 
 import { World } from "@hyperscape/shared";
 import { EventType } from "@hyperscape/shared";
@@ -17,6 +17,7 @@ export function LoadingScreen({
   world: World;
   message?: string;
 }) {
+  const theme = useThemeStore((s) => s.theme);
   const [progress, setProgress] = useState(3); // Start at 3% to show immediate feedback
   const [loadingStage, setLoadingStage] = useState(
     message || "Initializing...",
@@ -132,15 +133,15 @@ export function LoadingScreen({
         .loading-logo {
           width: 400px;
           height: auto;
-          filter: drop-shadow(0 0 20px rgba(242, 208, 138, 0.6)) drop-shadow(0 0 40px rgba(242, 208, 138, 0.4));
+          filter: drop-shadow(0 0 20px ${theme.colors.accent.secondary}99) drop-shadow(0 0 40px ${theme.colors.accent.secondary}66);
           animation: logoGlow 3s ease-in-out infinite;
         }
         @keyframes logoGlow {
           0%, 100% {
-            filter: drop-shadow(0 0 20px rgba(242, 208, 138, 0.6)) drop-shadow(0 0 40px rgba(242, 208, 138, 0.4));
+            filter: drop-shadow(0 0 20px ${theme.colors.accent.secondary}99) drop-shadow(0 0 40px ${theme.colors.accent.secondary}66);
           }
           50% {
-            filter: drop-shadow(0 0 30px rgba(242, 208, 138, 0.8)) drop-shadow(0 0 60px rgba(242, 208, 138, 0.6));
+            filter: drop-shadow(0 0 30px ${theme.colors.accent.secondary}cc) drop-shadow(0 0 60px ${theme.colors.accent.secondary}99);
           }
         }
         .loading-center-progress {
@@ -176,12 +177,12 @@ export function LoadingScreen({
           margin: 0 0 0.5rem;
         }
         .loading-desc {
-          color: rgba(255, 255, 255, 0.9);
+          color: ${theme.colors.text.primary};
           font-size: 1rem;
           margin: 0 0 20px;
         }
         .loading-stage {
-          color: rgba(255, 255, 255, 0.7);
+          color: ${theme.colors.text.secondary};
           font-size: 0.875rem;
           margin: 0;
           font-weight: 500;
@@ -196,7 +197,7 @@ export function LoadingScreen({
           width: 100%;
         }
         .loading-percentage {
-          color: rgba(255, 255, 255, 0.9);
+          color: ${theme.colors.text.primary};
           font-size: 0.875rem;
           font-weight: 600;
           text-align: center;
@@ -223,12 +224,12 @@ export function LoadingScreen({
           bottom: 0;
           width: ${Math.max(progress, 0)}%;
           min-width: ${progress > 0 ? "10px" : "0"};
-          background: linear-gradient(90deg, ${COLORS.ACCENT}, #ffd700, ${COLORS.ACCENT});
+          background: linear-gradient(90deg, ${theme.colors.accent.primary}, ${theme.colors.accent.secondary}, ${theme.colors.accent.primary});
           background-size: 200% 100%;
           animation: shimmer 1.5s infinite;
           border-radius: 5px;
           transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-          box-shadow: 0 0 15px rgba(242, 208, 138, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+          box-shadow: 0 0 15px ${theme.colors.accent.secondary}cc, inset 0 1px 0 rgba(255, 255, 255, 0.3);
         }
         .loading-bar::after {
           content: '';

@@ -15,11 +15,13 @@ export interface WindowConfig {
     mobile: number;
     tablet: number;
     desktop: number;
+    ultrawide?: number;
   };
   position: {
     mobile: { x: number; y: number };
     tablet: { x: number; y: number };
     desktop: { x: number; y: number };
+    ultrawide?: { x: number; y: number };
   };
   fullscreen?: {
     mobile?: boolean;

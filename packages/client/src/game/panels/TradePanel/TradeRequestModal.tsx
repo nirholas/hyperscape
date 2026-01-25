@@ -5,10 +5,11 @@
  * Shows the requesting player's name and combat level with
  * Accept/Decline buttons.
  *
- * Design follows OSRS/RS3 style with dark fantasy theme.
+ * Uses ModalWindow from hs-kit for consistent styling and behavior.
  */
 
-import { createPortal } from "react-dom";
+import { useCallback, useState, type CSSProperties } from "react";
+import { ModalWindow, useThemeStore } from "hs-kit";
 import type { TradeRequestModalState } from "@hyperscape/shared";
 
 interface TradeRequestModalProps {
@@ -22,107 +23,115 @@ export function TradeRequestModal({
   onAccept,
   onDecline,
 }: TradeRequestModalProps) {
+  const theme = useThemeStore((s) => s.theme);
+  const [acceptHover, setAcceptHover] = useState(false);
+  const [declineHover, setDeclineHover] = useState(false);
+
+  const handleClose = useCallback(() => {
+    onDecline();
+  }, [onDecline]);
+
   if (!state.visible || !state.fromPlayer) return null;
 
   const { name, level } = state.fromPlayer;
 
-  // Use yellow for trade requests since combat isn't involved
-  const levelColor = "#ffff00";
+  const playerInfoStyle: CSSProperties = {
+    background: theme.colors.background.tertiary,
+    border: `1px solid ${theme.colors.border.default}`,
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing.md,
+    textAlign: "center",
+    marginBottom: theme.spacing.lg,
+  };
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[10001] flex items-center justify-center"
-      style={{ background: "rgba(0, 0, 0, 0.6)" }}
-      onClick={onDecline}
+  const baseButtonStyle: CSSProperties = {
+    flex: 1,
+    padding: `${theme.spacing.sm}px ${theme.spacing.md}px`,
+    borderRadius: theme.borderRadius.md,
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: theme.typography.fontWeight.bold,
+    cursor: "pointer",
+    transition: "all 0.2s ease",
+    textShadow: "0 1px 2px rgba(0,0,0,0.5)",
+  };
+
+  const acceptButtonStyle: CSSProperties = {
+    ...baseButtonStyle,
+    background: acceptHover
+      ? theme.colors.state.success
+      : `${theme.colors.state.success}cc`,
+    color: "#fff",
+    border: `1px solid ${theme.colors.state.success}`,
+    transform: acceptHover ? "translateY(-1px)" : "none",
+  };
+
+  const declineButtonStyle: CSSProperties = {
+    ...baseButtonStyle,
+    background: declineHover
+      ? theme.colors.state.danger
+      : `${theme.colors.state.danger}cc`,
+    color: "#fff",
+    border: `1px solid ${theme.colors.state.danger}`,
+    transform: declineHover ? "translateY(-1px)" : "none",
+  };
+
+  return (
+    <ModalWindow
+      visible={state.visible}
+      onClose={handleClose}
+      title="Trade Request"
+      width={360}
+      showCloseButton={false}
     >
-      <div
-        className="rounded-lg p-5 shadow-xl"
-        style={{
-          background:
-            "linear-gradient(135deg, rgba(30, 25, 20, 0.98) 0%, rgba(20, 15, 10, 0.98) 100%)",
-          border: "2px solid rgba(139, 69, 19, 0.8)",
-          minWidth: "320px",
-          maxWidth: "400px",
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <h3
-          className="text-lg font-bold mb-4 text-center"
-          style={{ color: "rgba(242, 208, 138, 0.95)" }}
-        >
-          Trade Request
-        </h3>
-
+      <div style={{ padding: theme.spacing.sm }}>
         {/* Player info */}
-        <div
-          className="mb-5 p-3 rounded text-center"
-          style={{
-            background: "rgba(0, 0, 0, 0.3)",
-            border: "1px solid rgba(139, 69, 19, 0.4)",
-          }}
-        >
+        <div style={playerInfoStyle}>
           <p
-            className="text-base mb-1"
-            style={{ color: "rgba(255, 255, 255, 0.9)" }}
+            style={{
+              fontSize: theme.typography.fontSize.base,
+              color: theme.colors.text.primary,
+              marginBottom: theme.spacing.xs,
+            }}
           >
-            <span style={{ color: "#ffffff", fontWeight: "bold" }}>{name}</span>
-            <span style={{ color: "rgba(255, 255, 255, 0.7)" }}> (Level: </span>
-            <span style={{ color: levelColor, fontWeight: "bold" }}>
+            <span style={{ fontWeight: theme.typography.fontWeight.bold }}>
+              {name}
+            </span>
+            <span style={{ color: theme.colors.text.muted }}> (Level: </span>
+            <span
+              style={{
+                color: theme.colors.accent.primary,
+                fontWeight: theme.typography.fontWeight.bold,
+              }}
+            >
               {level}
             </span>
-            <span style={{ color: "rgba(255, 255, 255, 0.7)" }}>)</span>
+            <span style={{ color: theme.colors.text.muted }}>)</span>
           </p>
-          <p className="text-sm" style={{ color: "rgba(255, 255, 255, 0.7)" }}>
+          <p
+            style={{
+              fontSize: theme.typography.fontSize.sm,
+              color: theme.colors.text.secondary,
+            }}
+          >
             wishes to trade with you
           </p>
         </div>
 
         {/* Buttons */}
-        <div className="flex gap-3">
+        <div style={{ display: "flex", gap: theme.spacing.md }}>
           <button
             onClick={onAccept}
-            className="flex-1 py-2.5 rounded text-sm font-bold transition-all"
-            style={{
-              background:
-                "linear-gradient(135deg, rgba(46, 204, 113, 0.8) 0%, rgba(39, 174, 96, 0.8) 100%)",
-              color: "#fff",
-              border: "1px solid rgba(46, 204, 113, 0.9)",
-              textShadow: "0 1px 2px rgba(0,0,0,0.5)",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background =
-                "linear-gradient(135deg, rgba(46, 204, 113, 1) 0%, rgba(39, 174, 96, 1) 100%)";
-              e.currentTarget.style.transform = "translateY(-1px)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background =
-                "linear-gradient(135deg, rgba(46, 204, 113, 0.8) 0%, rgba(39, 174, 96, 0.8) 100%)";
-              e.currentTarget.style.transform = "translateY(0)";
-            }}
+            style={acceptButtonStyle}
+            onMouseEnter={() => setAcceptHover(true)}
+            onMouseLeave={() => setAcceptHover(false)}
           >
             Accept
           </button>
           <button
             onClick={onDecline}
-            className="flex-1 py-2.5 rounded text-sm font-bold transition-all"
-            style={{
-              background:
-                "linear-gradient(135deg, rgba(192, 57, 43, 0.8) 0%, rgba(169, 50, 38, 0.8) 100%)",
-              color: "#fff",
-              border: "1px solid rgba(192, 57, 43, 0.9)",
-              textShadow: "0 1px 2px rgba(0,0,0,0.5)",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background =
-                "linear-gradient(135deg, rgba(192, 57, 43, 1) 0%, rgba(169, 50, 38, 1) 100%)";
-              e.currentTarget.style.transform = "translateY(-1px)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background =
-                "linear-gradient(135deg, rgba(192, 57, 43, 0.8) 0%, rgba(169, 50, 38, 0.8) 100%)";
-              e.currentTarget.style.transform = "translateY(0)";
-            }}
+            style={declineButtonStyle}
+            onMouseEnter={() => setDeclineHover(true)}
+            onMouseLeave={() => setDeclineHover(false)}
           >
             Decline
           </button>
@@ -130,13 +139,16 @@ export function TradeRequestModal({
 
         {/* Timeout hint */}
         <p
-          className="text-xs mt-3 text-center"
-          style={{ color: "rgba(255, 255, 255, 0.4)" }}
+          style={{
+            fontSize: theme.typography.fontSize.xs,
+            color: theme.colors.text.muted,
+            textAlign: "center",
+            marginTop: theme.spacing.md,
+          }}
         >
           Request expires in 30 seconds
         </p>
       </div>
-    </div>,
-    document.body,
+    </ModalWindow>
   );
 }

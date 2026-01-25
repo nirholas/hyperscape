@@ -838,6 +838,104 @@ export const characterTemplates = pgTable(
 );
 
 /**
+ * Layout Presets Table - User interface layout presets
+ *
+ * Stores UI layout configurations for players (RS3-style NIS presets).
+ * Each user can have up to 4 preset slots for different activities.
+ *
+ * Key columns:
+ * - `userId` - References users.id (CASCADE DELETE)
+ * - `slotIndex` - Preset slot (0-3)
+ * - `name` - User-defined preset name
+ * - `layoutData` - JSON string containing window positions, tabs, etc.
+ * - `resolution` - JSON object with original resolution for scaling
+ * - `shared` - Whether this preset is publicly shareable
+ *
+ * Design notes:
+ * - Max 4 presets per user (slot 0-3)
+ * - Unique constraint on (userId, slotIndex)
+ * - CASCADE DELETE ensures cleanup when user is deleted
+ * - layoutData stores serialized WindowState[] from hs-kit
+ */
+export const layoutPresets = pgTable(
+  "layout_presets",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    slotIndex: integer("slotIndex").notNull(),
+    name: text("name").notNull(),
+    layoutData: text("layoutData").notNull(), // JSON: WindowState[]
+    resolution: text("resolution"), // JSON: { width, height }
+    shared: integer("shared").default(0).notNull(), // 0=private, 1=shared
+    // Community sharing columns
+    shareCode: text("shareCode").unique(), // Unique share code for loading
+    description: text("description"), // Optional description
+    category: text("category").default("custom"), // Preset category
+    tags: text("tags").default("[]"), // JSON array of tags
+    usageCount: integer("usageCount").default(0), // Times this preset was loaded
+    rating: real("rating"), // Average rating (0-5)
+    ratingCount: integer("ratingCount").default(0), // Number of ratings
+    ratingSum: integer("ratingSum").default(0), // Sum of all ratings
+    createdAt: bigint("createdAt", { mode: "number" })
+      .notNull()
+      .default(sql`(EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT`),
+    updatedAt: bigint("updatedAt", { mode: "number" })
+      .notNull()
+      .default(sql`(EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT`),
+  },
+  (table) => ({
+    uniqueUserSlot: unique().on(table.userId, table.slotIndex),
+    userIdx: index("idx_layout_presets_user").on(table.userId),
+    sharedIdx: index("idx_layout_presets_shared").on(table.shared),
+    shareCodeIdx: index("idx_layout_presets_share_code").on(table.shareCode),
+    communityIdx: index("idx_layout_presets_community").on(
+      table.shared,
+      table.usageCount,
+      table.rating,
+    ),
+  }),
+);
+
+/**
+ * Action Bar Storage Table - Persistent action bar configurations
+ *
+ * Stores action bar slot configurations for characters.
+ * Each character can have multiple action bars (barId 0-3).
+ *
+ * Key columns:
+ * - `playerId` - References characters.id (CASCADE DELETE)
+ * - `barId` - Action bar index (0-3, with 0 being the main bar)
+ * - `slotCount` - Number of visible slots (4-9)
+ * - `slotsData` - JSON array of slot contents
+ *
+ * Design notes:
+ * - slotsData stores ActionBarSlotContent[] as JSON
+ * - Unique constraint on (playerId, barId)
+ * - CASCADE DELETE ensures cleanup when character is deleted
+ */
+export const actionBarStorage = pgTable(
+  "action_bar_storage",
+  {
+    id: serial("id").primaryKey(),
+    playerId: text("playerId")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    barId: integer("barId").default(0).notNull(),
+    slotCount: integer("slotCount").default(7).notNull(),
+    slotsData: text("slotsData").notNull(), // JSON: ActionBarSlotContent[]
+    updatedAt: bigint("updatedAt", { mode: "number" })
+      .notNull()
+      .default(sql`(EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT`),
+  },
+  (table) => ({
+    uniquePlayerBar: unique().on(table.playerId, table.barId),
+    playerIdx: index("idx_action_bar_storage_player").on(table.playerId),
+  }),
+);
+
+/**
  * User Bans Table - Tracks banned users
  *
  * Stores ban records for users who have been banned by moderators or admins.
@@ -908,6 +1006,7 @@ export const charactersRelations = relations(characters, ({ many }) => ({
   bankStorage: many(bankStorage),
   bankTabs: many(bankTabs),
   bankPlaceholders: many(bankPlaceholders),
+  actionBars: many(actionBarStorage),
   sessions: many(playerSessions),
   chunkActivities: many(chunkActivity),
   npcKills: many(npcKills),
@@ -964,6 +1063,16 @@ export const bankPlaceholdersRelations = relations(
   }),
 );
 
+export const actionBarStorageRelations = relations(
+  actionBarStorage,
+  ({ one }) => ({
+    character: one(characters, {
+      fields: [actionBarStorage.playerId],
+      references: [characters.id],
+    }),
+  }),
+);
+
 export const playerSessionsRelations = relations(playerSessions, ({ one }) => ({
   character: one(characters, {
     fields: [playerSessions.playerId],
@@ -992,6 +1101,13 @@ export const playerDeathsRelations = relations(playerDeaths, ({ one }) => ({
   }),
 }));
 
+export const layoutPresetsRelations = relations(layoutPresets, ({ one }) => ({
+  user: one(users, {
+    fields: [layoutPresets.userId],
+    references: [users.id],
+  }),
+}));
+
 export const userBansRelations = relations(userBans, ({ one }) => ({
   bannedUser: one(users, {
     fields: [userBans.bannedUserId],
@@ -1001,6 +1117,10 @@ export const userBansRelations = relations(userBans, ({ one }) => ({
     fields: [userBans.bannedByUserId],
     references: [users.id],
   }),
+}));
+
+export const usersRelations = relations(users, ({ many }) => ({
+  layoutPresets: many(layoutPresets),
 }));
 
 // ============================================================================

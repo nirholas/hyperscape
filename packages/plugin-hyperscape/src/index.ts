@@ -26,6 +26,9 @@ import { skillsProvider } from "./providers/skills.js";
 import { equipmentProvider } from "./providers/equipment.js";
 import { availableActionsProvider } from "./providers/availableActions.js";
 import { goalProvider } from "./providers/goalProvider.js";
+import { possibilitiesProvider } from "./providers/possibilitiesProvider.js";
+import { goalTemplatesProvider } from "./providers/goalTemplatesProvider.js";
+import { guardrailsProvider } from "./providers/guardrailsProvider.js";
 
 // Actions
 import {
@@ -58,6 +61,7 @@ import {
   idleAction,
   approachEntityAction,
   attackEntityAction as autonomousAttackAction,
+  lootStarterChestAction,
 } from "./actions/autonomous.js";
 import { setGoalAction, navigateToAction } from "./actions/goals.js";
 
@@ -256,6 +260,9 @@ export const hyperscapePlugin: Plugin = {
     skillsProvider, // Skill levels and XP
     equipmentProvider, // Equipped items
     availableActionsProvider, // Context-aware available actions
+    possibilitiesProvider, // What actions are currently possible (LLM context)
+    goalTemplatesProvider, // Structured goal templates for beginners
+    guardrailsProvider, // Safety constraints and warnings
   ],
 
   // Evaluators assess game state for autonomous decision making
@@ -289,6 +296,7 @@ export const hyperscapePlugin: Plugin = {
     fleeAction, // Run away from danger
     idleAction, // Stand still and observe
     approachEntityAction, // Move towards a specific entity
+    lootStarterChestAction, // Loot starter chest for basic tools
 
     // Movement
     moveToAction,

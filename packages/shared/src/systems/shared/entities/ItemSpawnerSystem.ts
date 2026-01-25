@@ -122,11 +122,8 @@ export class ItemSpawnerSystem extends SystemBase {
       // Spawn world treasure items (equipment and resources)
       await this.spawnTreasureItems();
 
-      // Spawn chest loot items (valuable equipment)
-      await this.spawnChestLootItems();
-
-      // Spawn resource items
-      await this.spawnResourceItems();
+      // Note: spawnChestLootItems() and spawnResourceItems() removed
+      // These were hardcoded test spawns - items now come from loot drops only
     };
 
     // Start checking after a small initial delay
@@ -140,11 +137,8 @@ export class ItemSpawnerSystem extends SystemBase {
     // Spawn world treasure items (equipment and resources)
     await this.spawnTreasureItems();
 
-    // Spawn chest loot items (valuable equipment)
-    await this.spawnChestLootItems();
-
-    // Spawn resource items (logs, fish in appropriate locations)
-    await this.spawnResourceItems();
+    // Note: spawnChestLootItems() and spawnResourceItems() removed
+    // These were hardcoded test spawns - items now come from loot drops only
   }
 
   private async spawnTreasureItems(): Promise<void> {
@@ -273,17 +267,8 @@ export class ItemSpawnerSystem extends SystemBase {
   private async spawnResourceItems(): Promise<void> {
     // Spawn resources close to origin for easy visual verification
     // Y values will be grounded to terrain
+    // Note: Starter tools are now obtained from the Starter Chest near spawn
     const resourceSpawns = [
-      // Tools for gathering skills (near anvil/furnace area at -12 to -15, 15)
-      { itemId: "bronze_hatchet", x: -10, y: 0, z: 15 },
-      { itemId: "bronze_pickaxe", x: -11, y: 0, z: 15 },
-
-      // Additional tools and items near anvil/furnace for bots to pick up
-      { itemId: "bronze_hatchet", x: -9, y: 0, z: 16 },
-      { itemId: "bronze_hatchet", x: -8, y: 0, z: 15 },
-      { itemId: "bronze_pickaxe", x: -12, y: 0, z: 16 },
-      { itemId: "bronze_pickaxe", x: -13, y: 0, z: 15 },
-
       // Logs near origin (original spawns)
       { itemId: "logs", x: 2, y: 0, z: 2 },
       { itemId: "oak_logs", x: 3, y: 0, z: 2 },

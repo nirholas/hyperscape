@@ -2,9 +2,11 @@
  * Confirm Modal Component
  *
  * Generic confirmation modal for destructive actions (e.g., delete tab).
+ * Uses hs-kit ModalWindow and theme system for consistent styling.
  */
 
-import { createPortal } from "react-dom";
+import { useState, type CSSProperties } from "react";
+import { ModalWindow, useThemeStore } from "hs-kit";
 import type { ConfirmModalState } from "../../types";
 
 interface ConfirmModalProps {
@@ -13,80 +15,77 @@ interface ConfirmModalProps {
 }
 
 export function ConfirmModal({ modal, onClose }: ConfirmModalProps) {
+  const theme = useThemeStore((s) => s.theme);
+  const [deleteHover, setDeleteHover] = useState(false);
+  const [cancelHover, setCancelHover] = useState(false);
+
   if (!modal.visible) return null;
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[10001] flex items-center justify-center"
-      style={{ background: "rgba(0, 0, 0, 0.5)" }}
-      onClick={onClose}
-    >
-      <div
-        className="rounded-lg p-4 shadow-xl"
-        style={{
-          background:
-            "linear-gradient(135deg, rgba(30, 25, 20, 0.98) 0%, rgba(20, 15, 10, 0.98) 100%)",
-          border: "2px solid rgba(139, 69, 19, 0.8)",
-          minWidth: "280px",
-          maxWidth: "360px",
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3
-          className="text-lg font-bold mb-3 text-center"
-          style={{ color: "rgba(242, 208, 138, 0.9)" }}
-        >
-          {modal.title}
-        </h3>
+  const buttonStyle: CSSProperties = {
+    flex: 1,
+    padding: `${theme.spacing.sm}px`,
+    borderRadius: theme.borderRadius.md,
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: theme.typography.fontWeight.bold,
+    cursor: "pointer",
+    transition: "all 0.2s ease",
+    color: theme.colors.text.primary,
+  };
 
+  return (
+    <ModalWindow
+      visible={modal.visible}
+      onClose={onClose}
+      title={modal.title}
+      width={320}
+      showCloseButton={false}
+    >
+      <div style={{ padding: theme.spacing.sm }}>
         <p
-          className="text-sm mb-4 text-center"
-          style={{ color: "rgba(255, 255, 255, 0.8)" }}
+          style={{
+            fontSize: theme.typography.fontSize.sm,
+            color: theme.colors.text.secondary,
+            textAlign: "center",
+            marginBottom: theme.spacing.lg,
+          }}
         >
           {modal.message}
         </p>
 
-        <div className="flex gap-2">
+        <div style={{ display: "flex", gap: theme.spacing.sm }}>
           <button
             onClick={() => {
               modal.onConfirm();
               onClose();
             }}
-            className="flex-1 py-2 rounded text-sm font-bold transition-colors"
             style={{
-              background: "rgba(180, 100, 100, 0.7)",
-              color: "#fff",
-              border: "1px solid rgba(180, 100, 100, 0.8)",
+              ...buttonStyle,
+              background: deleteHover
+                ? theme.colors.state.danger
+                : `${theme.colors.state.danger}b3`,
+              border: `1px solid ${theme.colors.state.danger}`,
             }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "rgba(200, 80, 80, 0.9)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "rgba(180, 100, 100, 0.7)";
-            }}
+            onMouseEnter={() => setDeleteHover(true)}
+            onMouseLeave={() => setDeleteHover(false)}
           >
             Delete
           </button>
           <button
             onClick={onClose}
-            className="flex-1 py-2 rounded text-sm font-bold transition-colors"
             style={{
-              background: "rgba(100, 100, 100, 0.5)",
-              color: "#fff",
-              border: "1px solid rgba(139, 69, 19, 0.6)",
+              ...buttonStyle,
+              background: cancelHover
+                ? theme.colors.background.secondary
+                : theme.colors.background.tertiary,
+              border: `1px solid ${theme.colors.border.default}`,
             }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "rgba(120, 120, 120, 0.6)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "rgba(100, 100, 100, 0.5)";
-            }}
+            onMouseEnter={() => setCancelHover(true)}
+            onMouseLeave={() => setCancelHover(false)}
           >
             Cancel
           </button>
         </div>
       </div>
-    </div>,
-    document.body,
+    </ModalWindow>
   );
 }

@@ -186,10 +186,14 @@ const names = [
   'characterCreated',
   'characterSelected',
   'enterWorld',
+  'enterWorldApproved',  // Server -> Client: character spawn successful, proceed to game
+  'enterWorldRejected',  // Server -> Client: character already logged in
   // Agent goal sync packet (for dashboard display)
   'syncGoal',
   // Agent goal override packet (dashboard -> plugin)
   'goalOverride',
+  // Agent thought sync packet (for dashboard thought process display)
+  'syncAgentThought',
   // Bank packets
   'bankOpen',
   'bankState',
@@ -222,6 +226,8 @@ const names = [
   'storeClose',
   // NPC interaction packets
   'npcInteract',
+  // Generic entity interaction (for chests, interactables, etc.)
+  'entityInteract',
   // Dialogue packets
   'dialogueStart',
   'dialogueNodeChange',
@@ -277,6 +283,13 @@ const names = [
   'tradeCompleted',      // Server -> Client: trade successful, items swapped
   'tradeCancelled',      // Server -> Client: trade cancelled (disconnect, decline, etc.)
   'tradeError',          // Server -> Client: trade operation failed with reason
+  // Skill/Spell ability packets
+  'useSkill',            // Client -> Server: activate a skill ability
+  'castSpell',           // Client -> Server: cast a spell (optionally on target)
+  'skillActivated',      // Server -> Client: skill activation acknowledged
+  'spellCast',           // Server -> Client: spell cast acknowledged
+  'abilityCooldown',     // Server -> Client: ability cooldown update (skill or spell)
+  'abilityFailed',       // Server -> Client: ability failed (cooldown, level, resources, etc.)
 ]
 
 const byName: Record<string, PacketInfo> = {};
@@ -297,6 +310,31 @@ for (const name of names) {
 
 function capitalize(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+/**
+ * Exported packet names array for use by other packages.
+ * This is the SINGLE SOURCE OF TRUTH for packet ordering.
+ * DO NOT duplicate this list elsewhere - import it instead!
+ */
+export const PACKET_NAMES: readonly string[] = names;
+
+/**
+ * Get packet ID from packet name.
+ * Returns null if packet name is not found.
+ */
+export function getPacketId(name: string): number | null {
+  const info = byName[name];
+  return info ? info.id : null;
+}
+
+/**
+ * Get packet name from packet ID.
+ * Returns null if packet ID is not found.
+ */
+export function getPacketName(id: number): string | null {
+  const info = byId[id];
+  return info ? info.name : null;
 }
 
 export function writePacket(name: string, data: unknown): ArrayBuffer {

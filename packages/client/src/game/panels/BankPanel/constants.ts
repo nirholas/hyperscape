@@ -75,22 +75,11 @@ export const BANK_THEME = Object.freeze({
 });
 
 // ============================================================================
-// SCROLLBAR STYLES (injected via <style> tag)
+// SCROLLBAR STYLES
 // ============================================================================
+// NOTE: Bank uses the unified scrollbar system from index.css
+// Use className="scrollbar-thick-brown" instead of "bank-scrollbar"
+// The old BANK_SCROLLBAR_STYLES is kept for backwards compatibility but is deprecated.
 
-export const BANK_SCROLLBAR_STYLES = `
-  .bank-scrollbar::-webkit-scrollbar {
-    width: 8px;
-  }
-  .bank-scrollbar::-webkit-scrollbar-track {
-    background: rgba(0, 0, 0, 0.3);
-    border-radius: 4px;
-  }
-  .bank-scrollbar::-webkit-scrollbar-thumb {
-    background: rgba(139, 69, 19, 0.6);
-    border-radius: 4px;
-  }
-  .bank-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: rgba(139, 69, 19, 0.8);
-  }
-`;
+/** @deprecated Use className="scrollbar-thick-brown" from the unified scrollbar system */
+export const BANK_SCROLLBAR_STYLES = ``;

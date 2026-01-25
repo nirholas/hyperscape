@@ -11,7 +11,7 @@
 
 import React, { useState, useMemo } from "react";
 import type { ClientWorld } from "../../types";
-import { COLORS } from "../../constants";
+import { useThemeStore } from "hs-kit";
 
 interface SmithingRecipe {
   itemId: string;
@@ -111,6 +111,7 @@ export function SmithingPanel({
   world,
   onClose,
 }: SmithingPanelProps) {
+  const theme = useThemeStore((s) => s.theme);
   const [selectedRecipe, setSelectedRecipe] = useState<SmithingRecipe | null>(
     null,
   );
@@ -199,9 +200,8 @@ export function SmithingPanel({
       <div
         className="rounded-lg shadow-2xl border"
         style={{
-          background:
-            "linear-gradient(135deg, rgba(20, 15, 10, 0.98) 0%, rgba(15, 10, 5, 0.98) 100%)",
-          borderColor: "rgba(139, 69, 19, 0.7)",
+          background: `linear-gradient(135deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+          borderColor: theme.colors.border.decorative,
           minWidth: "380px",
           maxWidth: "480px",
           maxHeight: "80vh",
@@ -211,16 +211,15 @@ export function SmithingPanel({
         <div
           className="flex items-center justify-between px-3 py-2 border-b"
           style={{
-            background:
-              "linear-gradient(to bottom, rgba(139, 69, 19, 0.3), rgba(100, 50, 20, 0.2))",
-            borderColor: "rgba(139, 69, 19, 0.5)",
+            background: `linear-gradient(to bottom, ${theme.colors.border.decorative}30, ${theme.colors.border.decorative}20)`,
+            borderColor: theme.colors.border.decorative,
           }}
         >
           <div className="flex items-center gap-2">
             <span className="text-lg">🔨</span>
             <span
               className="font-semibold text-sm"
-              style={{ color: COLORS.ACCENT }}
+              style={{ color: theme.colors.accent.primary }}
             >
               Smithing
             </span>
@@ -228,7 +227,7 @@ export function SmithingPanel({
           <button
             onClick={onClose}
             className="w-6 h-6 flex items-center justify-center rounded hover:bg-red-900/50 transition-colors"
-            style={{ color: COLORS.ACCENT }}
+            style={{ color: theme.colors.accent.primary }}
           >
             ×
           </button>
@@ -242,7 +241,7 @@ export function SmithingPanel({
           {availableRecipes.length === 0 ? (
             <div
               className="text-center py-4 text-sm"
-              style={{ color: "rgba(242, 208, 138, 0.7)" }}
+              style={{ color: theme.colors.text.secondary }}
             >
               You don't have the bars to smith anything.
             </div>
@@ -253,7 +252,7 @@ export function SmithingPanel({
                   {/* Category Header */}
                   <div
                     className="text-xs font-semibold uppercase tracking-wider mb-1.5 px-1"
-                    style={{ color: "rgba(242, 208, 138, 0.6)" }}
+                    style={{ color: theme.colors.text.muted }}
                   >
                     {category}
                   </div>
@@ -272,12 +271,12 @@ export function SmithingPanel({
                         style={{
                           background:
                             selectedRecipe?.itemId === recipe.itemId
-                              ? "rgba(242, 208, 138, 0.15)"
-                              : "rgba(0, 0, 0, 0.3)",
+                              ? `${theme.colors.accent.primary}15`
+                              : theme.colors.background.tertiary,
                           borderColor:
                             selectedRecipe?.itemId === recipe.itemId
-                              ? "rgba(242, 208, 138, 0.5)"
-                              : "rgba(139, 69, 19, 0.3)",
+                              ? `${theme.colors.accent.primary}50`
+                              : theme.colors.border.default,
                         }}
                       >
                         {/* Item Icon */}
@@ -289,13 +288,13 @@ export function SmithingPanel({
                         <div className="flex-1 min-w-0">
                           <div
                             className="font-medium text-xs truncate"
-                            style={{ color: COLORS.ACCENT }}
+                            style={{ color: theme.colors.accent.primary }}
                           >
                             {recipe.name || formatItemName(recipe.itemId)}
                           </div>
                           <div
                             className="text-[9px] flex items-center gap-1"
-                            style={{ color: "rgba(242, 208, 138, 0.5)" }}
+                            style={{ color: theme.colors.text.muted }}
                           >
                             <span>{getBarIcon(recipe.barType)}</span>
                             <span>×{recipe.barsRequired}</span>
@@ -311,7 +310,12 @@ export function SmithingPanel({
 
               {/* Selected Recipe Details & Quantity */}
               {selectedRecipe && (
-                <div className="mt-2 pt-3 border-t border-[rgba(139,69,19,0.3)]">
+                <div
+                  className="mt-2 pt-3"
+                  style={{
+                    borderTop: `1px solid ${theme.colors.border.default}`,
+                  }}
+                >
                   {/* Recipe Details */}
                   <div className="flex items-center gap-3 mb-3">
                     <span className="text-2xl">
@@ -323,14 +327,14 @@ export function SmithingPanel({
                     <div>
                       <div
                         className="font-semibold text-sm"
-                        style={{ color: COLORS.ACCENT }}
+                        style={{ color: theme.colors.accent.primary }}
                       >
                         {selectedRecipe.name ||
                           formatItemName(selectedRecipe.itemId)}
                       </div>
                       <div
                         className="text-xs"
-                        style={{ color: "rgba(242, 208, 138, 0.7)" }}
+                        style={{ color: theme.colors.text.secondary }}
                       >
                         {selectedRecipe.barsRequired}×{" "}
                         {formatItemName(selectedRecipe.barType)} |{" "}
@@ -342,7 +346,7 @@ export function SmithingPanel({
                   {/* Quantity Selection */}
                   <div
                     className="text-xs mb-2"
-                    style={{ color: "rgba(242, 208, 138, 0.8)" }}
+                    style={{ color: theme.colors.text.secondary }}
                   >
                     How many?
                   </div>
@@ -355,9 +359,9 @@ export function SmithingPanel({
                         onChange={(e) => setCustomQuantity(e.target.value)}
                         className="flex-1 px-2 py-1 rounded text-sm"
                         style={{
-                          background: "rgba(0, 0, 0, 0.5)",
-                          border: "1px solid rgba(139, 69, 19, 0.5)",
-                          color: COLORS.ACCENT,
+                          background: theme.colors.background.tertiary,
+                          border: `1px solid ${theme.colors.border.default}`,
+                          color: theme.colors.accent.primary,
                         }}
                         placeholder={`Amount (last: ${lastCustomQuantity})`}
                         autoFocus
@@ -370,9 +374,9 @@ export function SmithingPanel({
                         onClick={handleCustomQuantitySubmit}
                         className="px-3 py-1 rounded text-sm font-medium transition-colors"
                         style={{
-                          background: "rgba(34, 197, 94, 0.3)",
-                          border: "1px solid rgba(34, 197, 94, 0.5)",
-                          color: "#22c55e",
+                          background: `${theme.colors.state.success}30`,
+                          border: `1px solid ${theme.colors.state.success}50`,
+                          color: theme.colors.state.success,
                         }}
                       >
                         OK
@@ -386,9 +390,9 @@ export function SmithingPanel({
                           onClick={() => handleSmith(selectedRecipe, qty)}
                           className="flex-1 px-2 py-1.5 rounded text-xs font-medium transition-colors hover:brightness-110"
                           style={{
-                            background: "rgba(242, 208, 138, 0.2)",
-                            border: "1px solid rgba(242, 208, 138, 0.3)",
-                            color: COLORS.ACCENT,
+                            background: `${theme.colors.accent.primary}20`,
+                            border: `1px solid ${theme.colors.accent.primary}30`,
+                            color: theme.colors.accent.primary,
                           }}
                         >
                           {qty}
@@ -398,9 +402,9 @@ export function SmithingPanel({
                         onClick={() => handleSmith(selectedRecipe, 28)}
                         className="flex-1 px-2 py-1.5 rounded text-xs font-medium transition-colors hover:brightness-110"
                         style={{
-                          background: "rgba(242, 208, 138, 0.2)",
-                          border: "1px solid rgba(242, 208, 138, 0.3)",
-                          color: COLORS.ACCENT,
+                          background: `${theme.colors.accent.primary}20`,
+                          border: `1px solid ${theme.colors.accent.primary}30`,
+                          color: theme.colors.accent.primary,
                         }}
                       >
                         All
@@ -409,9 +413,9 @@ export function SmithingPanel({
                         onClick={() => setShowQuantityInput(true)}
                         className="flex-1 px-2 py-1.5 rounded text-xs font-medium transition-colors hover:brightness-110"
                         style={{
-                          background: "rgba(242, 208, 138, 0.2)",
-                          border: "1px solid rgba(242, 208, 138, 0.3)",
-                          color: COLORS.ACCENT,
+                          background: `${theme.colors.accent.primary}20`,
+                          border: `1px solid ${theme.colors.accent.primary}30`,
+                          color: theme.colors.accent.primary,
                         }}
                       >
                         X

@@ -12,8 +12,8 @@
  */
 
 import React, { memo } from "react";
+import { useThemeStore } from "hs-kit";
 import type { BankItem } from "../types";
-import { BANK_SLOT_SIZE, BANK_THEME } from "../constants";
 import { formatItemName, formatQuantity, getItemIcon } from "../utils";
 
 /**
@@ -30,6 +30,8 @@ export interface BankSlotItemProps {
   showFaintGuide: boolean;
   dropColor: string;
   guideColor: string;
+  /** Slot size in pixels - responsive based on mobile/desktop */
+  slotSize?: number;
   onDragStart: (slotIndex: number, tabIndex: number) => void;
   onDragOver: (e: React.DragEvent, slotIndex: number, tabIndex: number) => void;
   onDragLeave: () => void;
@@ -55,6 +57,7 @@ export const BankSlotItem = memo(function BankSlotItem({
   showFaintGuide,
   dropColor,
   guideColor,
+  slotSize = 42, // Default to desktop size
   onDragStart,
   onDragOver,
   onDragLeave,
@@ -63,24 +66,25 @@ export const BankSlotItem = memo(function BankSlotItem({
   onClick,
   onContextMenu,
 }: BankSlotItemProps) {
+  const theme = useThemeStore((s) => s.theme);
   const isPlaceholder = item.quantity === 0;
 
   return (
     <div
       className="rounded flex items-center justify-center relative cursor-grab active:cursor-grabbing"
       style={{
-        width: BANK_SLOT_SIZE,
-        height: BANK_SLOT_SIZE,
+        width: slotSize,
+        height: slotSize,
         background: showSwapHighlight
           ? `linear-gradient(135deg, rgba(${dropColor}, 0.35) 0%, rgba(${dropColor}, 0.2) 100%)`
           : isPlaceholder
-            ? "linear-gradient(135deg, rgba(50, 45, 40, 0.4) 0%, rgba(40, 35, 30, 0.4) 100%)"
-            : "linear-gradient(135deg, rgba(242, 208, 138, 0.1) 0%, rgba(242, 208, 138, 0.05) 100%)",
+            ? `linear-gradient(135deg, ${theme.colors.background.tertiary}66 0%, ${theme.colors.background.secondary}66 100%)`
+            : `linear-gradient(135deg, ${theme.colors.slot.filled} 0%, ${theme.colors.slot.empty} 100%)`,
         border: showSwapHighlight
           ? `2px solid rgba(${dropColor}, 0.9)`
           : isPlaceholder
-            ? "1px dashed rgba(242, 208, 138, 0.2)"
-            : `1px solid ${BANK_THEME.SLOT_BORDER_HIGHLIGHT}`,
+            ? `1px dashed ${theme.colors.border.default}33`
+            : `1px solid ${theme.colors.border.hover}`,
         transform: isDragging ? "scale(0.9)" : "scale(1)",
         opacity: isDragging ? 0.4 : isPlaceholder ? 0.6 : 1,
         transition:
@@ -136,10 +140,10 @@ export const BankSlotItem = memo(function BankSlotItem({
           style={{
             color:
               item.quantity >= 10000000
-                ? "#00ff00"
+                ? theme.colors.state.success
                 : item.quantity >= 100000
-                  ? "#ffffff"
-                  : "#ffff00",
+                  ? theme.colors.text.primary
+                  : theme.colors.state.warning,
             textShadow: "1px 1px 1px black, -1px -1px 1px black",
           }}
         >

@@ -17,6 +17,7 @@ import {
   TerrainSystem,
   World,
   EventType,
+  DeathState,
   // Tile movement utilities
   TILES_PER_TICK_WALK,
   TILES_PER_TICK_RUN,
@@ -263,6 +264,12 @@ export class TileMovementManager {
   handleMoveRequest(socket: ServerSocket, data: unknown): void {
     const playerEntity = socket.player;
     if (!playerEntity) {
+      return;
+    }
+
+    // Death lock: Dead players cannot move
+    const deathState = playerEntity.data?.deathState;
+    if (deathState === DeathState.DYING || deathState === DeathState.DEAD) {
       return;
     }
 
@@ -1030,6 +1037,12 @@ export class TileMovementManager {
   ): void {
     const entity = this.world.entities.get(playerId);
     if (!entity) {
+      return;
+    }
+
+    // Death lock: Dead players cannot move
+    const deathState = entity.data?.deathState;
+    if (deathState === DeathState.DYING || deathState === DeathState.DEAD) {
       return;
     }
 

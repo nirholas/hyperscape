@@ -373,7 +373,6 @@ export const CharacterPreview: React.FC<CharacterPreviewProps> = ({
       isMounted = false;
       window.removeEventListener("resize", handleResize);
       resizeObserver.disconnect();
-      // eslint-disable-next-line no-undef
       cancelAnimationFrame(frameIdRef.current);
 
       // 1. Stop animations first

@@ -62,9 +62,11 @@ export interface NetworkEvent {
 export type CombatStyle = "attack" | "strength" | "defense" | "ranged";
 
 // Inventory item structure
+// Items have 'name' (display name) and optionally 'itemId' (item type identifier)
 export interface InventoryItem {
   id: string;
   name: string;
+  itemId?: string;
   quantity: number;
   slot?: number;
   itemId?: string;
@@ -232,7 +234,7 @@ export interface ChatMessageCommand {
 
 export interface GatherResourceCommand {
   resourceEntityId: string;
-  skill: "woodcutting" | "fishing" | "mining" | "firemaking" | "cooking";
+  skill: "woodcutting" | "mining" | "fishing" | "firemaking" | "cooking";
 }
 
 export interface BankCommand {

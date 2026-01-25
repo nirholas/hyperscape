@@ -105,6 +105,7 @@ export function DialoguePanel({
           onClick={onClose}
           className="bg-transparent border-none text-gray-400 hover:text-white cursor-pointer text-xl leading-none"
           title="Close dialogue"
+          aria-label="Close dialogue"
         >
           x
         </button>
@@ -129,6 +130,7 @@ export function DialoguePanel({
               key={index}
               onClick={() => handleResponseClick(index, response)}
               className="w-full text-left py-2 px-4 rounded cursor-pointer transition-all"
+              aria-label={`Response ${index + 1}: ${response.text}`}
               style={{
                 background: "rgba(201, 162, 39, 0.1)",
                 border: "1px solid rgba(201, 162, 39, 0.3)",
@@ -150,6 +152,7 @@ export function DialoguePanel({
           <button
             onClick={handleContinue}
             className="w-full py-2 px-4 rounded cursor-pointer transition-all"
+            aria-label="Continue dialogue"
             style={{
               background: "rgba(201, 162, 39, 0.2)",
               border: "1px solid #c9a227",

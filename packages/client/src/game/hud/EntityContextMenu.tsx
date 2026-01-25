@@ -183,9 +183,27 @@ export function EntityContextMenu({ world: _world }: EntityContextMenuProps) {
   if (!menu.visible || !menu.target) return null;
 
   // Calculate position to keep menu in viewport
+  const menuWidth = 280; // maxWidth
+  const menuHeight = 300; // maxHeight
+  const padding = 8;
+
+  let adjustedX = menu.position.x;
+  let adjustedY = menu.position.y;
+
+  // Clamp to viewport boundaries
+  if (adjustedX + menuWidth + padding > window.innerWidth) {
+    adjustedX = Math.max(padding, window.innerWidth - menuWidth - padding);
+  }
+  if (adjustedY + menuHeight + padding > window.innerHeight) {
+    adjustedY = Math.max(padding, window.innerHeight - menuHeight - padding);
+  }
+  // Also clamp to left/top edges
+  adjustedX = Math.max(padding, adjustedX);
+  adjustedY = Math.max(padding, adjustedY);
+
   const menuStyle: React.CSSProperties = {
-    left: `${menu.position.x}px`,
-    top: `${menu.position.y}px`,
+    left: `${adjustedX}px`,
+    top: `${adjustedY}px`,
     minWidth: "160px",
     maxWidth: "280px",
     maxHeight: "300px", // Limit height for large piles

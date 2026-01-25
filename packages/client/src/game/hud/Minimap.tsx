@@ -4,10 +4,19 @@
  * Shows player position, nearby entities, and terrain on a 2D minimap.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useMemo,
+} from "react";
+import { useThemeStore } from "hs-kit";
 import { Entity, THREE, createRenderer } from "@hyperscape/shared";
 import type { UniversalRenderer } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
+import { MinimapStaminaOrb } from "../../components/MinimapStaminaBar";
+import { MinimapHomeTeleportOrb } from "../../components/MinimapHomeTeleportOrb";
 
 // === PRE-ALLOCATED VECTORS FOR HOT PATHS ===
 // These vectors are reused in RAF loops and intervals to avoid GC pressure
@@ -26,9 +35,77 @@ const _tempUnprojectVec = new THREE.Vector3();
 
 interface EntityPip {
   id: string;
-  type: "player" | "enemy" | "building" | "item" | "resource";
+  type: "player" | "enemy" | "building" | "item" | "resource" | "quest";
   position: THREE.Vector3;
   color: string;
+  /** Whether this pip is actively selected/tracked (for pulse animation) */
+  isActive?: boolean;
+  /** Shape variant for special rendering */
+  icon?: "star" | "circle" | "diamond";
+  /** Group member index for color assignment (-1 or undefined = not in group) */
+  groupIndex?: number;
+}
+
+/** Color palette for group members (up to 8 unique) */
+const GROUP_COLORS = [
+  "#4CAF50", // Green - party leader
+  "#2196F3", // Blue
+  "#9C27B0", // Purple
+  "#FF9800", // Orange
+  "#00BCD4", // Cyan
+  "#E91E63", // Pink
+  "#CDDC39", // Lime
+  "#607D8B", // Blue-grey
+];
+
+/**
+ * Draw a star shape on canvas for quest markers
+ */
+function drawStar(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  outerRadius: number,
+  innerRadius: number,
+  points: number = 5,
+): void {
+  const step = Math.PI / points;
+  ctx.beginPath();
+  for (let i = 0; i < 2 * points; i++) {
+    const radius = i % 2 === 0 ? outerRadius : innerRadius;
+    const angle = i * step - Math.PI / 2;
+    const x = cx + radius * Math.cos(angle);
+    const y = cy + radius * Math.sin(angle);
+    if (i === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  ctx.closePath();
+}
+
+/**
+ * Draw a diamond shape on canvas
+ */
+function drawDiamond(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+): void {
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - size); // Top
+  ctx.lineTo(cx + size, cy); // Right
+  ctx.lineTo(cx, cy + size); // Bottom
+  ctx.lineTo(cx - size, cy); // Left
+  ctx.closePath();
+}
+
+/** Drag handle props passed from Window component for edit mode dragging */
+interface DragHandleProps {
+  onPointerDown: (e: React.PointerEvent) => void;
+  style: React.CSSProperties;
 }
 
 type MinimapDebugWindow = Window & {
@@ -48,18 +125,49 @@ interface MinimapProps {
   style?: React.CSSProperties;
   onCompassClick?: () => void;
   isVisible?: boolean;
+  /** If true, minimap can be resized by dragging corners */
+  resizable?: boolean;
+  /** Callback when size changes */
+  onSizeChange?: (width: number, height: number) => void;
+  /** Minimum size when resizable */
+  minSize?: number;
+  /** Maximum size when resizable */
+  maxSize?: number;
+  /** If true, removes decorative border/shadow for embedding in panels */
+  embedded?: boolean;
+  /** If true, minimap can be collapsed to a corner icon */
+  collapsible?: boolean;
+  /** Initial collapsed state */
+  defaultCollapsed?: boolean;
+  /** Callback when collapse state changes */
+  onCollapseChange?: (collapsed: boolean) => void;
+  /** Drag handle props for edit mode (passed from Window component) */
+  dragHandleProps?: DragHandleProps;
+  /** Whether edit mode is unlocked (shows drag border) */
+  isUnlocked?: boolean;
 }
 
 export function Minimap({
   world,
-  width = 200,
-  height = 200,
+  width: initialWidth = 200,
+  height: initialHeight = 200,
   zoom = 50,
   className = "",
   style = {},
   onCompassClick,
   isVisible = true,
+  resizable = true,
+  onSizeChange,
+  minSize = 120,
+  maxSize,
+  embedded = false,
+  collapsible = false,
+  defaultCollapsed = false,
+  onCollapseChange,
+  dragHandleProps,
+  isUnlocked = false,
 }: MinimapProps) {
+  const theme = useThemeStore((s) => s.theme);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -71,6 +179,43 @@ export function Minimap({
   const [isTouchDevice, setIsTouchDevice] = useState<boolean>(false);
   const entityCacheRef = useRef<Map<string, EntityPip>>(new Map());
   const rendererInitializedRef = useRef<boolean>(false);
+
+  // Collapsed state for collapsible minimap
+  const [isCollapsed, setIsCollapsed] = useState(defaultCollapsed);
+
+  // Handle collapse toggle
+  const toggleCollapse = useCallback(() => {
+    setIsCollapsed((prev) => {
+      const newValue = !prev;
+      onCollapseChange?.(newValue);
+      return newValue;
+    });
+  }, [onCollapseChange]);
+
+  // Current size state (for resizing)
+  const [currentWidth, setCurrentWidth] = useState(initialWidth);
+  const [currentHeight, setCurrentHeight] = useState(initialHeight);
+  const width = currentWidth;
+  const height = currentHeight;
+
+  // Resize state
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeStartRef = useRef<{
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  } | null>(null);
+
+  // Calculate extent based on size - larger size = more visible area (not scaled)
+  // Use the average of width/height to determine extent
+  const sizeBasedExtent = useMemo(() => {
+    // Base extent at 200px is the initial zoom value
+    // When size increases, we reveal more map (increase extent proportionally)
+    const baseSize = 200;
+    const avgSize = (width + height) / 2;
+    return zoom * (avgSize / baseSize);
+  }, [width, height, zoom]);
 
   // Minimap zoom state (orthographic half-extent in world units)
   const debugWindow =
@@ -84,15 +229,23 @@ export function Minimap({
       ? debugWindow.__HYPERSCAPE_MINIMAP_EXTENT__
       : null;
   const MIN_EXTENT = 20;
-  const MAX_EXTENT = Math.max(debugMaxExtent ?? 200, MIN_EXTENT);
+  const MAX_EXTENT = Math.max(debugMaxExtent ?? 1000, MIN_EXTENT); // Default to 1000 to support larger sizes
   const clampExtent = useCallback(
     (value: number) => Math.max(MIN_EXTENT, Math.min(MAX_EXTENT, value)),
     [MAX_EXTENT],
   );
-  const initialExtent = debugExtent !== null ? clampExtent(debugExtent) : zoom;
+  const initialExtent =
+    debugExtent !== null
+      ? clampExtent(debugExtent)
+      : clampExtent(sizeBasedExtent);
   const [extent, setExtent] = useState<number>(initialExtent);
   const extentRef = useRef<number>(extent); // Ref for synchronous access in render loop
   const STEP_EXTENT = 10;
+
+  // Update extent when size changes (reveals more map)
+  useEffect(() => {
+    setExtent(sizeBasedExtent);
+  }, [sizeBasedExtent]);
 
   // Rotation: follow main camera yaw (RS3-like) with North toggle
   const [rotateWithCamera] = useState<boolean>(true);
@@ -730,7 +883,9 @@ export function Minimap({
               switch (pip.type) {
                 case "player":
                   // RS3-style: simple dot for player, no arrow
-                  radius = 4;
+                  // Use group color if in a group
+                  radius =
+                    pip.groupIndex !== undefined && pip.groupIndex >= 0 ? 5 : 4;
                   borderWidth = 1;
                   break;
                 case "enemy":
@@ -753,10 +908,34 @@ export function Minimap({
                   borderColor = "#ffffff";
                   borderWidth = 1;
                   break;
+                case "quest":
+                  // Quest markers are larger and more visible
+                  radius = pip.isActive ? 7 : 5;
+                  borderColor = "#000000";
+                  borderWidth = 1;
+                  break;
+              }
+
+              // Determine pip color (group members use GROUP_COLORS)
+              let pipColor = pip.color;
+              if (
+                pip.type === "player" &&
+                pip.groupIndex !== undefined &&
+                pip.groupIndex >= 0
+              ) {
+                pipColor = GROUP_COLORS[pip.groupIndex % GROUP_COLORS.length];
+              }
+
+              // Apply pulse animation for active pips (quests, etc.)
+              let pulseScale = 1;
+              if (pip.isActive) {
+                // Create pulsing effect using time
+                const pulseTime = Date.now() / 500; // 500ms per cycle
+                pulseScale = 1 + 0.15 * Math.sin(pulseTime * Math.PI * 2);
               }
 
               // Draw pip
-              ctx.fillStyle = pip.color;
+              ctx.fillStyle = pipColor;
               ctx.beginPath();
 
               // Draw different shapes for different types
@@ -766,6 +945,30 @@ export function Minimap({
                 ctx.strokeStyle = borderColor;
                 ctx.lineWidth = borderWidth;
                 ctx.strokeRect(x - radius, y - radius, radius * 2, radius * 2);
+              } else if (pip.type === "quest" || pip.icon === "star") {
+                // Star for quest markers
+                const scaledRadius = radius * pulseScale;
+                drawStar(ctx, x, y, scaledRadius, scaledRadius * 0.5, 5);
+                ctx.fill();
+                ctx.strokeStyle = borderColor;
+                ctx.lineWidth = borderWidth;
+                ctx.stroke();
+
+                // Add glow effect for active quests
+                if (pip.isActive) {
+                  ctx.save();
+                  ctx.shadowColor = pipColor;
+                  ctx.shadowBlur = 8;
+                  ctx.fill();
+                  ctx.restore();
+                }
+              } else if (pip.icon === "diamond") {
+                // Diamond shape
+                drawDiamond(ctx, x, y, radius);
+                ctx.fill();
+                ctx.strokeStyle = borderColor;
+                ctx.lineWidth = borderWidth;
+                ctx.stroke();
               } else {
                 // Circle for everything else
                 ctx.arc(x, y, radius, 0, 2 * Math.PI);
@@ -977,24 +1180,144 @@ export function Minimap({
     };
   }, [handleWheel]);
 
+  // Resize handlers for corner drag
+  const handleResizeStart = useCallback(
+    (e: React.PointerEvent, corner: "se" | "sw" | "ne" | "nw") => {
+      if (!resizable) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      setIsResizing(true);
+      resizeStartRef.current = {
+        x: e.clientX,
+        y: e.clientY,
+        w: width,
+        h: height,
+      };
+
+      const handleMove = (moveEvent: PointerEvent) => {
+        if (!resizeStartRef.current) return;
+
+        const dx = moveEvent.clientX - resizeStartRef.current.x;
+        const dy = moveEvent.clientY - resizeStartRef.current.y;
+
+        let newW = resizeStartRef.current.w;
+
+        // Calculate new size based on corner being dragged
+        // For square minimap, use the larger dimension change
+        if (corner === "se") {
+          const delta = Math.max(dx, dy);
+          newW = resizeStartRef.current.w + delta;
+        } else if (corner === "sw") {
+          const delta = Math.max(-dx, dy);
+          newW = resizeStartRef.current.w + delta;
+        } else if (corner === "ne") {
+          const delta = Math.max(dx, -dy);
+          newW = resizeStartRef.current.w + delta;
+        } else if (corner === "nw") {
+          const delta = Math.max(-dx, -dy);
+          newW = resizeStartRef.current.w + delta;
+        }
+
+        // Keep it square and clamp to bounds (use newW since minimap is always square)
+        // If maxSize is not specified, allow unlimited resizing (use very large number)
+        const effectiveMaxSize = maxSize ?? 9999;
+        const size = Math.max(
+          minSize,
+          Math.min(effectiveMaxSize, Math.round(newW / 8) * 8),
+        );
+        setCurrentWidth(size);
+        setCurrentHeight(size);
+      };
+
+      const handleUp = () => {
+        setIsResizing(false);
+        resizeStartRef.current = null;
+        onSizeChange?.(currentWidth, currentHeight);
+        window.removeEventListener("pointermove", handleMove);
+        window.removeEventListener("pointerup", handleUp);
+      };
+
+      window.addEventListener("pointermove", handleMove);
+      window.addEventListener("pointerup", handleUp);
+    },
+    [
+      resizable,
+      width,
+      height,
+      minSize,
+      maxSize,
+      currentWidth,
+      currentHeight,
+      onSizeChange,
+    ],
+  );
+
+  // Render collapsed state as a 32x32 icon
+  if (collapsible && isCollapsed) {
+    return (
+      <div
+        className={`minimap-collapsed cursor-pointer select-none ${className}`}
+        style={{
+          width: 32,
+          height: 32,
+          borderRadius: "50%",
+          border: `2px solid ${theme.colors.border.decorative}`,
+          backgroundColor: theme.colors.background.glass,
+          boxShadow: `${theme.shadows.md}, inset 0 1px 0 rgba(255, 255, 255, 0.1)`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          ...style,
+        }}
+        onClick={toggleCollapse}
+        title="Expand Minimap (Tab)"
+      >
+        {/* Player direction arrow in collapsed state */}
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 18 18"
+          style={{
+            transform: `rotate(${yawDeg}deg)`,
+            transition: "transform 0.1s ease-out",
+          }}
+        >
+          <polygon
+            points="9,2 14,14 9,11 4,14"
+            fill={theme.colors.accent.primary}
+            stroke={theme.colors.text.primary}
+            strokeWidth="1"
+          />
+        </svg>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={containerRef}
-      className={`minimap border-2 border-white/30 rounded-full overflow-visible bg-black/80 relative touch-none select-none ${className}`}
+      className={`minimap overflow-hidden relative touch-none select-none ${embedded ? "" : "rounded-lg"} ${className}`}
       style={{
         width,
         height,
         WebkitUserSelect: "none",
         WebkitTouchCallout: "none",
+        ...(embedded
+          ? {}
+          : {
+              border: `2px solid ${theme.colors.border.decorative}`,
+              boxShadow: `${theme.shadows.lg}, inset 0 1px 0 rgba(255, 255, 255, 0.1)`,
+            }),
         ...style,
       }}
       onMouseDown={(e) => {
+        // Only prevent default to avoid text selection, don't stop propagation
+        // as it blocks resize handles from receiving events
         e.preventDefault();
-        e.stopPropagation();
       }}
       onContextMenu={(e) => {
         e.preventDefault();
-        e.stopPropagation();
       }}
     >
       {/* 3D canvas */}
@@ -1002,14 +1325,14 @@ export function Minimap({
         ref={canvasRef}
         width={width}
         height={height}
-        className="absolute inset-0 block w-full h-full z-0 rounded-full overflow-hidden"
+        className="absolute inset-0 block w-full h-full z-0"
       />
       {/* 2D overlay for pips */}
       <canvas
         ref={overlayCanvasRef}
         width={width}
         height={height}
-        className="absolute inset-0 block w-full h-full pointer-events-auto cursor-crosshair z-[1] rounded-full overflow-hidden"
+        className="absolute inset-0 block w-full h-full pointer-events-auto cursor-crosshair z-[1]"
         onClick={onOverlayClick}
         onMouseDown={(e) => {
           e.preventDefault();
@@ -1078,6 +1401,108 @@ export function Minimap({
               E
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Resize handles (SE corner only for simplicity) */}
+      {resizable && (
+        <div
+          className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize z-20 pointer-events-auto"
+          style={{
+            background: `linear-gradient(135deg, transparent 50%, ${theme.colors.border.decorative} 50%)`,
+          }}
+          onPointerDown={(e) => handleResizeStart(e, "se")}
+        />
+      )}
+
+      {/* Resize indicator overlay when resizing */}
+      {isResizing && (
+        <div className="absolute inset-0 border-2 border-yellow-400/50 rounded-lg pointer-events-none z-30" />
+      )}
+
+      {/* Edit mode drag overlay - makes the entire minimap content draggable */}
+      {/* This is positioned INSIDE the edges so resize handles remain accessible */}
+      {/* Corners (12px) and edges (8px) are reserved for resize, interior is for drag */}
+      {isUnlocked && dragHandleProps && (
+        <div
+          className="absolute cursor-move pointer-events-auto"
+          style={{
+            zIndex: 50,
+            // Inset from all edges to leave room for resize handles
+            // Edges are 8px wide, corners are 12px
+            top: 10,
+            left: 10,
+            right: 10,
+            bottom: 10,
+            // Subtle visual feedback for drag area
+            background: "rgba(100, 180, 255, 0.08)",
+            border: "1px dashed rgba(100, 180, 255, 0.4)",
+            borderRadius: 4,
+          }}
+          onPointerDown={dragHandleProps.onPointerDown}
+          title="Drag to move minimap"
+        />
+      )}
+
+      {/* Collapse button (top-right) - only shown when collapsible */}
+      {collapsible && (
+        <button
+          className="absolute z-20 pointer-events-auto cursor-pointer"
+          style={{
+            top: 4,
+            right: 4,
+            width: 20,
+            height: 20,
+            borderRadius: theme.borderRadius.sm,
+            border: `1px solid ${theme.colors.border.default}`,
+            backgroundColor: theme.colors.background.glass,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 12,
+            color: theme.colors.text.secondary,
+            padding: 0,
+          }}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleCollapse();
+          }}
+          title="Collapse Minimap (Tab)"
+        >
+          −
+        </button>
+      )}
+
+      {/* Home Teleport Orb - bottom left corner (hidden when embedded) */}
+      {!embedded && (
+        <div
+          className="absolute z-20 pointer-events-auto"
+          style={{
+            bottom: 6,
+            left: 6,
+          }}
+        >
+          <MinimapHomeTeleportOrb
+            world={world}
+            size={Math.max(36, Math.min(48, width * 0.2))}
+          />
+        </div>
+      )}
+
+      {/* Stamina Orb - bottom right corner (hidden when embedded) */}
+      {!embedded && (
+        <div
+          className="absolute z-20 pointer-events-auto"
+          style={{
+            bottom: 6,
+            right: 6,
+          }}
+        >
+          <MinimapStaminaOrb
+            world={world}
+            size={Math.max(36, Math.min(48, width * 0.2))}
+          />
         </div>
       )}
     </div>

@@ -26,6 +26,7 @@ import {
 } from "../InteractableEntity";
 import { EventType } from "../../types/events";
 import { stationDataProvider } from "../../data/StationDataProvider";
+import { modelCache } from "../../utils/rendering/ModelCache";
 import { CollisionFlag } from "../../systems/shared/movement/CollisionFlags";
 import {
   worldToTile,
@@ -173,12 +174,70 @@ export class AltarEntity extends InteractableEntity {
       return;
     }
 
-    // Create a purple box for the altar (1 tile size, altar-like proportions)
+    // Get station data from manifest
+    const stationData = stationDataProvider.getStationData("altar");
+    const modelPath = stationData?.model ?? null;
+    const modelScale = stationData?.modelScale ?? 1.0;
+    const modelYOffset = stationData?.modelYOffset ?? 0;
+
+    // Try to load 3D model first
+    if (modelPath && this.world.loader) {
+      try {
+        const { scene } = await modelCache.loadModel(modelPath, this.world);
+
+        this.mesh = scene;
+        this.mesh.name = `Altar_${this.id}`;
+
+        // Scale the model from manifest
+        this.mesh.scale.set(modelScale, modelScale, modelScale);
+
+        // Offset Y position so model base sits on ground
+        this.mesh.position.y = modelYOffset;
+
+        // Enable shadows and set layer for raycasting
+        this.mesh.layers.set(1);
+        this.mesh.traverse((child) => {
+          child.layers.set(1);
+          if (child instanceof THREE.Mesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+          }
+        });
+
+        // Set up userData for interaction detection
+        this.mesh.userData = {
+          type: "altar",
+          entityId: this.id,
+          name: this.displayName,
+          interactable: true,
+          altarId: this.altarId,
+        };
+
+        // Add to node
+        if (this.node) {
+          this.node.add(this.mesh);
+          this.node.userData.type = "altar";
+          this.node.userData.entityId = this.id;
+          this.node.userData.interactable = true;
+          this.node.userData.altarId = this.altarId;
+        }
+
+        return;
+      } catch (error) {
+        console.warn(
+          `[AltarEntity] Failed to load altar model, using placeholder:`,
+          error,
+        );
+      }
+    }
+
+    // FALLBACK: Create a purple box for the altar (1 tile size, altar-like proportions)
     const boxHeight = 0.8;
     const geometry = new THREE.BoxGeometry(0.9, boxHeight, 0.9);
-    // Use MeshBasicMaterial so color shows regardless of lighting
-    const material = new THREE.MeshBasicMaterial({
+    const material = new THREE.MeshStandardMaterial({
       color: 0x9932cc, // Bright purple (DarkOrchid)
+      roughness: 0.5,
+      metalness: 0.3,
     });
 
     const mesh = new THREE.Mesh(geometry, material);

@@ -124,36 +124,57 @@
     {
       "idx": 17,
       "version": "7",
-      "when": 1768642521620,
-      "tag": "0017_add_death_recovery_columns",
+      "when": 1768639688174,
+      "tag": "0017_conscious_azazel",
       "breakpoints": true
     },
     {
       "idx": 18,
       "version": "7",
-      "when": 1768728921620,
-      "tag": "0018_add_agility_skill",
+      "when": 1768642521620,
+      "tag": "0018_add_death_recovery_columns",
       "breakpoints": true
     },
     {
       "idx": 19,
       "version": "7",
-      "when": 1768815321620,
-      "tag": "0019_add_quest_progress",
+      "when": 1768730462453,
+      "tag": "0019_greedy_sabretooth",
       "breakpoints": true
     },
     {
       "idx": 20,
       "version": "7",
-      "when": 1768901721620,
-      "tag": "0020_add_trading_activity_bans",
+      "when": 1768971688548,
+      "tag": "0020_charming_revanche",
       "breakpoints": true
     },
     {
       "idx": 21,
       "version": "7",
-      "when": 1768988121620,
-      "tag": "0021_add_quest_audit_log",
+      "when": 1768972000000,
+      "tag": "0021_add_agility_skill",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1769040031013,
+      "tag": "0022_warm_spacker_dave",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1769048132107,
+      "tag": "0023_rapid_scorpion",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1769234809693,
+      "tag": "0024_natural_luckman",
       "breakpoints": true
     }
   ]

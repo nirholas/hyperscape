@@ -45,6 +45,10 @@ import {
   parseLocationFromMessage,
 } from "../utils/location-resolver.js";
 import { AgentLiveKit } from "../systems/liveKit.js";
+import {
+  getPacketId as sharedGetPacketId,
+  getPacketName as sharedGetPacketName,
+} from "@hyperscape/shared";
 
 // msgpackr instances for binary packet encoding/decoding
 const packr = new Packr({ structuredClone: true });
@@ -1187,172 +1191,11 @@ Respond with ONLY the action name, nothing else.`;
   }
 
   /**
-   * Get packet name from packet ID (matching packets.ts)
+   * Get packet name from packet ID
+   * Delegates to shared packets.ts - the single source of truth for packet ordering
    */
   private getPacketName(id: number): string | null {
-    // CRITICAL: This list MUST exactly match packages/shared/src/platform/shared/packets.ts
-    // Any mismatch will cause packet IDs to be misinterpreted!
-    // Last synced: 2026-01-17 from packages/shared/src/platform/shared/packets.ts
-    const packetNames = [
-      "snapshot",
-      "command",
-      "chatAdded",
-      "chatCleared",
-      "entityAdded",
-      "entityModified",
-      "moveRequest",
-      "entityEvent",
-      "entityRemoved",
-      "playerTeleport",
-      "playerPush",
-      "playerSessionAvatar",
-      "settingsModified",
-      "spawnModified",
-      "kick",
-      "ping",
-      "pong",
-      // Multiplayer movement
-      "input",
-      "inputAck",
-      "correction",
-      "playerState",
-      "serverStateUpdate",
-      "deltaUpdate",
-      "compressedUpdate",
-      // Resource system packets
-      "resourceSnapshot",
-      "resourceSpawnPoints",
-      "resourceSpawned",
-      "resourceDepleted",
-      "resourceRespawned",
-      "fishingSpotMoved",
-      "resourceInteract",
-      "resourceGather",
-      "gatheringComplete",
-      // Processing packets (firemaking/cooking)
-      "firemakingRequest",
-      "cookingRequest",
-      "cookingSourceInteract",
-      "fireCreated",
-      "fireExtinguished",
-      // Smelting/Smithing packets
-      "smeltingSourceInteract",
-      "smithingSourceInteract",
-      "processingSmelting",
-      "processingSmithing",
-      "smeltingInterfaceOpen",
-      "smithingInterfaceOpen",
-      // Combat packets
-      "attackMob",
-      "attackPlayer",
-      "followPlayer",
-      "changeAttackStyle",
-      "setAutoRetaliate",
-      "autoRetaliateChanged",
-      // Item pickup packets
-      "pickupItem",
-      // Inventory action packets
-      "dropItem",
-      "moveItem",
-      "useItem",
-      "coinPouchWithdraw",
-      // Equipment packets
-      "equipItem",
-      "unequipItem",
-      // Inventory sync packets
-      "inventoryUpdated",
-      "coinsUpdated",
-      // Equipment sync packets
-      "equipmentUpdated",
-      // Skills sync packets
-      "skillsUpdated",
-      // XP drop visual feedback
-      "xpDrop",
-      // UI feedback packets
-      "showToast",
-      // Death screen packets
-      "deathScreen",
-      "deathScreenClose",
-      "requestRespawn",
-      // Death state packets
-      "playerSetDead",
-      "playerRespawned",
-      // Loot packets
-      "corpseLoot",
-      // Attack style packets
-      "attackStyleChanged",
-      "attackStyleUpdate",
-      // Combat visual feedback packets
-      "combatDamageDealt",
-      // Player state packets
-      "playerUpdated",
-      // Character selection packets
-      "characterListRequest",
-      "characterCreate",
-      "characterList",
-      "characterCreated",
-      "characterSelected",
-      "enterWorld",
-      // Agent goal sync packet
-      "syncGoal",
-      "goalOverride",
-      // Bank packets
-      "bankOpen",
-      "bankState",
-      "bankDeposit",
-      "bankDepositAll",
-      "bankWithdraw",
-      "bankDepositCoins",
-      "bankWithdrawCoins",
-      "bankClose",
-      "bankMove",
-      // Bank tab packets
-      "bankCreateTab",
-      "bankDeleteTab",
-      "bankMoveToTab",
-      "bankSelectTab",
-      // Bank placeholder packets
-      "bankWithdrawPlaceholder",
-      "bankReleasePlaceholder",
-      "bankReleaseAllPlaceholders",
-      "bankToggleAlwaysPlaceholder",
-      // Bank equipment tab packets
-      "bankWithdrawToEquipment",
-      "bankDepositEquipment",
-      "bankDepositAllEquipment",
-      // Store packets
-      "storeOpen",
-      "storeState",
-      "storeBuy",
-      "storeSell",
-      "storeClose",
-      // NPC interaction packets
-      "npcInteract",
-      // Dialogue packets
-      "dialogueStart",
-      "dialogueNodeChange",
-      "dialogueResponse",
-      "dialogueEnd",
-      "dialogueClose",
-      // Tile movement packets
-      "entityTileUpdate",
-      "tileMovementStart",
-      "tileMovementEnd",
-      // System message packets
-      "systemMessage",
-      // Player loading state packets
-      "clientReady",
-      // World time sync packets
-      "worldTimeSync",
-      // Prayer system packets
-      "prayerToggle",
-      "prayerDeactivateAll",
-      "altarPray",
-      "prayerStateSync",
-      "prayerToggled",
-      "prayerPointsChanged",
-    ];
-    return packetNames[id] || null;
+    return sharedGetPacketName(id);
   }
 
   /**
@@ -1573,6 +1416,48 @@ Respond with ONLY the action name, nothing else.`;
             `[HyperscapeService] 🎮 Player entity spawned: ${data.id} on WebSocket ${wsId}, runtime: ${this.runtime.agentId}`,
           );
 
+          // Normalize health to { current, max } format
+          // Server sends flat format: { health: number, maxHealth: number }
+          const healthData = data as {
+            health?: number | { current?: number; max?: number };
+            maxHealth?: number;
+            hp?: number;
+            maxHp?: number;
+          };
+
+          let normalizedHealth: { current: number; max: number } = {
+            current: 100,
+            max: 100,
+          };
+
+          if (typeof healthData.health === "number") {
+            // Flat format: health = current value, maxHealth = max value
+            normalizedHealth = {
+              current: healthData.health,
+              max: healthData.maxHealth ?? 100,
+            };
+          } else if (
+            typeof healthData.health === "object" &&
+            healthData.health
+          ) {
+            // Nested format: health = { current, max }
+            normalizedHealth = {
+              current: healthData.health.current ?? 100,
+              max: healthData.health.max ?? 100,
+            };
+          } else if (healthData.hp !== undefined) {
+            // Alternative format: hp/maxHp
+            normalizedHealth = {
+              current: healthData.hp,
+              max: healthData.maxHp ?? 100,
+            };
+          }
+
+          this.gameState.playerEntity.health = normalizedHealth;
+          logger.info(
+            `[HyperscapeService] 🏥 Health on spawn: ${normalizedHealth.current}/${normalizedHealth.max}`,
+          );
+
           // Normalize position to [x, y, z] array format if present
           const normalizedPos = this.normalizePosition(data.position);
           if (normalizedPos) {
@@ -1726,6 +1611,20 @@ Respond with ONLY the action name, nothing else.`;
         }
         break;
 
+      case "equipmentUpdated":
+        // Handle equipment changes (equip/unequip items)
+        if (this.gameState.playerEntity && data) {
+          const equipData = data as { playerId?: string; equipment?: unknown };
+          if (equipData.equipment) {
+            this.gameState.playerEntity.equipment =
+              equipData.equipment as typeof this.gameState.playerEntity.equipment;
+            logger.info(
+              `[HyperscapeService] ⚔️ Equipment updated: ${JSON.stringify(equipData.equipment)}`,
+            );
+          }
+        }
+        break;
+
       case "playerUpdated":
       case "playerState":
         // Handle player position/state updates
@@ -1763,13 +1662,68 @@ Respond with ONLY the action name, nothing else.`;
             }
           }
 
-          // Copy other state (health, etc), but preserve our normalized position
+          // Copy other state, but preserve our normalized position and health format
           const savedPosition = this.gameState.playerEntity.position;
-          Object.assign(this.gameState.playerEntity, data);
-          // Restore normalized position (in case raw data overwrote it)
+          const savedHealth = this.gameState.playerEntity.health;
+
+          // Parse incoming health data - server sends flat format: { health: number, maxHealth: number }
+          const healthData = data as {
+            health?: number | { current?: number; max?: number };
+            maxHealth?: number;
+            hp?: number;
+            maxHp?: number;
+          };
+
+          // Normalize health to the expected { current, max } format
+          let normalizedHealth = savedHealth || { current: 100, max: 100 };
+
+          if (typeof healthData.health === "number") {
+            // Server sends flat format: health = current value, maxHealth = max value
+            normalizedHealth = {
+              current: healthData.health,
+              max: healthData.maxHealth ?? savedHealth?.max ?? 100,
+            };
+            logger.info(
+              `[HyperscapeService] 🏥 Health update via ${packetName}: ${normalizedHealth.current}/${normalizedHealth.max}`,
+            );
+          } else if (
+            typeof healthData.health === "object" &&
+            healthData.health
+          ) {
+            // Nested format: health = { current, max }
+            normalizedHealth = {
+              current: healthData.health.current ?? savedHealth?.current ?? 100,
+              max: healthData.health.max ?? savedHealth?.max ?? 100,
+            };
+            logger.info(
+              `[HyperscapeService] 🏥 Health update via ${packetName}: ${normalizedHealth.current}/${normalizedHealth.max}`,
+            );
+          } else if (healthData.hp !== undefined) {
+            // Alternative format: hp/maxHp
+            normalizedHealth = {
+              current: healthData.hp,
+              max: healthData.maxHp ?? savedHealth?.max ?? 100,
+            };
+            logger.info(
+              `[HyperscapeService] 🏥 Health update via ${packetName}: ${normalizedHealth.current}/${normalizedHealth.max}`,
+            );
+          }
+
+          // Copy data but exclude health (we'll set it properly after)
+          const {
+            health: _h,
+            maxHealth: _mh,
+            hp: _hp,
+            maxHp: _mhp,
+            ...otherData
+          } = data as Record<string, unknown>;
+          Object.assign(this.gameState.playerEntity, otherData);
+
+          // Restore normalized position and health
           if (savedPosition) {
             this.gameState.playerEntity.position = savedPosition;
           }
+          this.gameState.playerEntity.health = normalizedHealth;
         }
         break;
 
@@ -1921,6 +1875,120 @@ Respond with ONLY the action name, nothing else.`;
               entity.position = updatedPos;
             }
           }
+        }
+        break;
+      }
+
+      case "resourceDepleted": {
+        // Resource became depleted - update entity's depleted status
+        // Packet contains: { resourceId, position, depleted: true }
+        const depletedData = data as {
+          resourceId?: string;
+          position?: [number, number, number];
+          depleted?: boolean;
+        };
+
+        if (depletedData.resourceId) {
+          // Find entity by resourceId - the entity ID should match resourceId
+          const entity = this.gameState.nearbyEntities.get(
+            depletedData.resourceId,
+          );
+          if (entity) {
+            // Set depleted flag on the entity
+            (entity as unknown as Record<string, unknown>).depleted = true;
+            logger.info(
+              `[HyperscapeService] 🌲 Resource depleted: ${entity.name || depletedData.resourceId}`,
+            );
+          } else {
+            // Entity might have a different ID format - search by matching position or name
+            for (const [id, ent] of this.gameState.nearbyEntities) {
+              const entAny = ent as unknown as Record<string, unknown>;
+              if (entAny.resourceId === depletedData.resourceId) {
+                entAny.depleted = true;
+                logger.info(
+                  `[HyperscapeService] 🌲 Resource depleted (by resourceId): ${ent.name || id}`,
+                );
+                break;
+              }
+            }
+          }
+        }
+        break;
+      }
+
+      case "resourceRespawned": {
+        // Resource respawned - update entity's depleted status
+        // Packet contains: { resourceId, position, depleted: false }
+        const respawnedData = data as {
+          resourceId?: string;
+          position?: [number, number, number];
+          depleted?: boolean;
+        };
+
+        if (respawnedData.resourceId) {
+          // Find entity by resourceId
+          const entity = this.gameState.nearbyEntities.get(
+            respawnedData.resourceId,
+          );
+          if (entity) {
+            (entity as unknown as Record<string, unknown>).depleted = false;
+            logger.info(
+              `[HyperscapeService] 🌳 Resource respawned: ${entity.name || respawnedData.resourceId}`,
+            );
+          } else {
+            // Search by resourceId property
+            for (const [id, ent] of this.gameState.nearbyEntities) {
+              const entAny = ent as unknown as Record<string, unknown>;
+              if (entAny.resourceId === respawnedData.resourceId) {
+                entAny.depleted = false;
+                logger.info(
+                  `[HyperscapeService] 🌳 Resource respawned (by resourceId): ${ent.name || id}`,
+                );
+                break;
+              }
+            }
+          }
+        }
+        break;
+      }
+
+      case "combatDamageDealt": {
+        // Combat damage dealt - track combat state (health comes from playerUpdated/playerState)
+        // Packet contains: { attackerId, targetId, damage, targetType, position }
+        // NOTE: We do NOT update health here - the server sends authoritative health via
+        // playerUpdated/playerState packets. Calculating health locally from damage can
+        // cause race conditions where 0-damage (miss) packets reset health to 100.
+        const damageData = data as {
+          attackerId?: string;
+          targetId?: string;
+          damage?: number;
+          targetType?: "player" | "mob";
+        };
+
+        // Check if we are the target taking damage
+        if (
+          damageData.targetId === this.characterId &&
+          damageData.targetType === "player" &&
+          damageData.damage !== undefined &&
+          this.gameState.playerEntity
+        ) {
+          // Mark player as in combat (this is the key state we need)
+          (
+            this.gameState.playerEntity as unknown as { inCombat: boolean }
+          ).inCombat = true;
+
+          // Log damage for debugging (health will be updated by playerUpdated/playerState)
+          const currentHealth =
+            this.gameState.playerEntity.health?.current ?? "?";
+          const maxHealth = this.gameState.playerEntity.health?.max ?? "?";
+          logger.info(
+            `[HyperscapeService] ⚔️ DAMAGE TAKEN: ${damageData.damage} damage from ${damageData.attackerId}! (current health: ${currentHealth}/${maxHealth})`,
+          );
+        } else if (damageData.attackerId === this.characterId) {
+          // We dealt damage to something
+          logger.info(
+            `[HyperscapeService] ⚔️ DAMAGE DEALT: ${damageData.damage} damage to ${damageData.targetId}`,
+          );
         }
         break;
       }
@@ -2224,173 +2292,11 @@ Respond with ONLY the action name, nothing else.`;
   }
 
   /**
-   * Get packet ID from packet name (matching packets.ts)
+   * Get packet ID from packet name
+   * Delegates to shared packets.ts - the single source of truth for packet ordering
    */
   private getPacketId(name: string): number | null {
-    // CRITICAL: This list MUST exactly match packages/shared/src/platform/shared/packets.ts
-    // Any mismatch will cause packet IDs to be misinterpreted!
-    // Last synced: 2026-01-17 from packages/shared/src/platform/shared/packets.ts
-    const packetNames = [
-      "snapshot",
-      "command",
-      "chatAdded",
-      "chatCleared",
-      "entityAdded",
-      "entityModified",
-      "moveRequest",
-      "entityEvent",
-      "entityRemoved",
-      "playerTeleport",
-      "playerPush",
-      "playerSessionAvatar",
-      "settingsModified",
-      "spawnModified",
-      "kick",
-      "ping",
-      "pong",
-      // Multiplayer movement
-      "input",
-      "inputAck",
-      "correction",
-      "playerState",
-      "serverStateUpdate",
-      "deltaUpdate",
-      "compressedUpdate",
-      // Resource system packets
-      "resourceSnapshot",
-      "resourceSpawnPoints",
-      "resourceSpawned",
-      "resourceDepleted",
-      "resourceRespawned",
-      "fishingSpotMoved",
-      "resourceInteract",
-      "resourceGather",
-      "gatheringComplete",
-      // Processing packets (firemaking/cooking)
-      "firemakingRequest",
-      "cookingRequest",
-      "cookingSourceInteract",
-      "fireCreated",
-      "fireExtinguished",
-      // Smelting/Smithing packets (must match server order!)
-      "smeltingSourceInteract",
-      "smithingSourceInteract",
-      "processingSmelting",
-      "processingSmithing",
-      "smeltingInterfaceOpen",
-      "smithingInterfaceOpen",
-      // Combat packets
-      "attackMob",
-      "attackPlayer",
-      "followPlayer",
-      "changeAttackStyle",
-      "setAutoRetaliate",
-      "autoRetaliateChanged",
-      // Item pickup packets
-      "pickupItem",
-      // Inventory action packets
-      "dropItem",
-      "moveItem",
-      "useItem",
-      "coinPouchWithdraw",
-      // Equipment packets
-      "equipItem",
-      "unequipItem",
-      // Inventory sync packets
-      "inventoryUpdated",
-      "coinsUpdated",
-      // Equipment sync packets
-      "equipmentUpdated",
-      // Skills sync packets
-      "skillsUpdated",
-      // XP drop visual feedback
-      "xpDrop",
-      // UI feedback packets
-      "showToast",
-      // Death screen packets
-      "deathScreen",
-      "deathScreenClose",
-      "requestRespawn",
-      // Death state packets
-      "playerSetDead",
-      "playerRespawned",
-      // Loot packets
-      "corpseLoot",
-      // Attack style packets
-      "attackStyleChanged",
-      "attackStyleUpdate",
-      // Combat visual feedback packets
-      "combatDamageDealt",
-      // Player state packets
-      "playerUpdated",
-      // Character selection packets
-      "characterListRequest",
-      "characterCreate",
-      "characterList",
-      "characterCreated",
-      "characterSelected",
-      "enterWorld",
-      // Agent goal sync packet
-      "syncGoal",
-      "goalOverride",
-      // Bank packets
-      "bankOpen",
-      "bankState",
-      "bankDeposit",
-      "bankDepositAll",
-      "bankWithdraw",
-      "bankDepositCoins",
-      "bankWithdrawCoins",
-      "bankClose",
-      "bankMove",
-      // Bank tab packets
-      "bankCreateTab",
-      "bankDeleteTab",
-      "bankMoveToTab",
-      "bankSelectTab",
-      // Bank placeholder packets
-      "bankWithdrawPlaceholder",
-      "bankReleasePlaceholder",
-      "bankReleaseAllPlaceholders",
-      "bankToggleAlwaysPlaceholder",
-      // Bank equipment tab packets
-      "bankWithdrawToEquipment",
-      "bankDepositEquipment",
-      "bankDepositAllEquipment",
-      // Store packets
-      "storeOpen",
-      "storeState",
-      "storeBuy",
-      "storeSell",
-      "storeClose",
-      // NPC interaction packets
-      "npcInteract",
-      // Dialogue packets
-      "dialogueStart",
-      "dialogueNodeChange",
-      "dialogueResponse",
-      "dialogueEnd",
-      "dialogueClose",
-      // Tile movement packets
-      "entityTileUpdate",
-      "tileMovementStart",
-      "tileMovementEnd",
-      // System message packets
-      "systemMessage",
-      // Player loading state packets
-      "clientReady",
-      // World time sync packets
-      "worldTimeSync",
-      // Prayer system packets
-      "prayerToggle",
-      "prayerDeactivateAll",
-      "altarPray",
-      "prayerStateSync",
-      "prayerToggled",
-      "prayerPointsChanged",
-    ];
-    const index = packetNames.indexOf(name);
-    return index >= 0 ? index : null;
+    return sharedGetPacketId(name);
   }
 
   /**
@@ -2500,6 +2406,34 @@ Respond with ONLY the action name, nothing else.`;
    */
   async executeBankAction(command: BankCommand): Promise<void> {
     this.sendCommand("bankAction", command);
+  }
+
+  /**
+   * Interact with a world entity (chest, NPC, etc.)
+   * Sends an interaction request to the server
+   */
+  interactWithEntity(entityId: string, interactionType: string): void {
+    if (!this.characterId) {
+      logger.debug("[HyperscapeService] Cannot interact: no characterId");
+      return;
+    }
+
+    const player = this.getPlayerEntity();
+    if (!player?.position) {
+      logger.debug("[HyperscapeService] Cannot interact: no player position");
+      return;
+    }
+
+    this.sendCommand("entityInteract", {
+      playerId: this.characterId,
+      entityId,
+      interactionType,
+      playerPosition: player.position,
+    });
+
+    logger.debug(
+      `[HyperscapeService] Sent entityInteract: entityId=${entityId}, type=${interactionType}`,
+    );
   }
 
   /**
@@ -2722,6 +2656,48 @@ Respond with ONLY the action name, nothing else.`;
         location: g.location,
       })),
     });
+  }
+
+  /**
+   * Sync agent thought to server for dashboard display
+   * Called to show the agent's thought process/decision making
+   *
+   * @param type - Type of thought (situation assessment, evaluation, thinking, decision)
+   * @param content - The thought content (markdown supported)
+   */
+  syncAgentThought(
+    type: "situation" | "evaluation" | "thinking" | "decision",
+    content: string,
+  ): void {
+    if (!this.characterId) {
+      logger.debug("[HyperscapeService] Cannot sync thought: no characterId");
+      return;
+    }
+
+    const thought = {
+      id: `thought-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      type,
+      content,
+      timestamp: Date.now(),
+    };
+
+    this.sendCommand("syncAgentThought", {
+      characterId: this.characterId,
+      thought,
+    });
+
+    logger.debug(`[HyperscapeService] 🧠 Synced thought: [${type}]`);
+  }
+
+  /**
+   * Sync LLM reasoning/thoughts to server for dashboard display
+   * Simplified wrapper for syncAgentThought - used by AutonomousBehaviorManager
+   *
+   * @param thinking - The LLM's reasoning/thought process
+   */
+  syncThoughtsToServer(thinking: string): void {
+    if (!thinking || !thinking.trim()) return;
+    this.syncAgentThought("thinking", thinking);
   }
 
   // ============================================

@@ -2,8 +2,9 @@
  * Components Barrel Export
  */
 
-export { GameWindow } from "./GameWindow";
-export { DraggableWindow } from "./DraggableWindow";
+// Legacy window components removed - use hs-kit Window and TabBar instead
+// export { GameWindow } from "./GameWindow";
+// export { DraggableWindow } from "./DraggableWindow";
 export { HintProvider, HintContext } from "./Hint";
 export * from "./Fields";
 export { Portal } from "./Portal";

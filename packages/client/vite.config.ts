@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
+import { VitePWA } from "vite-plugin-pwa";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -28,6 +29,117 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [
       react(),
+      // PWA plugin for installable web app on Saga and Android devices
+      VitePWA({
+        registerType: "autoUpdate",
+        includeAssets: [
+          "favicon.ico",
+          "images/logo.png",
+          "images/app-icon-512.png",
+        ],
+        manifest: {
+          name: "Hyperscape",
+          short_name: "Hyperscape",
+          description: "An AI-native MMORPG built on Solana",
+          theme_color: "#1a1a1a",
+          background_color: "#000000",
+          display: "standalone",
+          orientation: "any",
+          start_url: "/",
+          scope: "/",
+          categories: ["games", "entertainment"],
+          icons: [
+            {
+              src: "/images/app-icon-192.png",
+              sizes: "192x192",
+              type: "image/png",
+              purpose: "any maskable",
+            },
+            {
+              src: "/images/app-icon-512.png",
+              sizes: "512x512",
+              type: "image/png",
+              purpose: "any maskable",
+            },
+          ],
+          screenshots: [
+            {
+              src: "/images/screenshot-1.png",
+              sizes: "1920x1080",
+              type: "image/png",
+              form_factor: "wide",
+            },
+          ],
+          related_applications: [
+            {
+              platform: "play",
+              url: "https://hyperscape.club",
+              id: "com.hyperscape.game",
+            },
+          ],
+        },
+        workbox: {
+          // Cache game assets for offline play
+          globPatterns: ["**/*.{css,html,ico,svg,woff,woff2}"],
+          // Don't cache large assets in service worker - they'll use runtime caching
+          globIgnores: [
+            "**/*.glb",
+            "**/*.gltf",
+            "**/*.hdr",
+            "**/*.png",
+            "**/physx-js-webidl*.js",
+            "**/index-*.js", // Large main bundle
+          ],
+          // Increase file size limit (default is 2MB)
+          maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5MB
+          runtimeCaching: [
+            {
+              // Cache JS/CSS files that weren't precached
+              urlPattern: /\.(?:js|css)$/i,
+              handler: "CacheFirst",
+              options: {
+                cacheName: "hyperscape-code",
+                expiration: {
+                  maxEntries: 50,
+                  maxAgeSeconds: 60 * 60 * 24 * 7, // 7 days
+                },
+                cacheableResponse: {
+                  statuses: [0, 200],
+                },
+              },
+            },
+            {
+              // Cache images with network-first strategy
+              urlPattern: /\.(?:png|jpg|jpeg|gif|webp)$/i,
+              handler: "NetworkFirst",
+              options: {
+                cacheName: "hyperscape-images",
+                expiration: {
+                  maxEntries: 100,
+                  maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
+                },
+              },
+            },
+            {
+              urlPattern: /^https:\/\/assets\.hyperscape\.club\/.*/i,
+              handler: "CacheFirst",
+              options: {
+                cacheName: "hyperscape-cdn-assets",
+                expiration: {
+                  maxEntries: 100,
+                  maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
+                },
+                cacheableResponse: {
+                  statuses: [0, 200],
+                },
+              },
+            },
+          ],
+        },
+        devOptions: {
+          enabled: false, // Disable PWA in dev mode
+        },
+      }),
       // Watch shared package for changes and trigger full reload
       {
         name: "watch-shared-package",

@@ -5,4 +5,5 @@
 export { cls } from "./classnames";
 export { InputValidator } from "./InputValidator";
 export { SafeMathParser } from "./SafeMathParser";
+export { processRawEquipment } from "./equipment";
 export * from "./utils";

@@ -31,9 +31,12 @@ if (!info || info.v !== 1) {
 
 const paneInfo = info as PaneInfo;
 
-const debounce = (fn: Function, ms: number) => {
+const debounce = <T extends (...args: unknown[]) => void>(
+  fn: T,
+  ms: number,
+): ((...args: Parameters<T>) => void) => {
   let timeout: NodeJS.Timeout;
-  return (...args: unknown[]) => {
+  return (...args: Parameters<T>) => {
     clearTimeout(timeout);
     timeout = setTimeout(() => fn(...args), ms);
   };
@@ -41,7 +44,12 @@ const debounce = (fn: Function, ms: number) => {
 
 const persist = debounce(() => storage?.set(STORAGE_KEY, paneInfo), 300);
 
-let layer = 0;
+/**
+ * Global z-index counter for pane stacking.
+ * This is intentionally module-level - all panes share this counter
+ * so that clicking any pane brings it to the front (highest z-index).
+ */
+let globalLayerCounter = 0;
 
 export function usePane(
   id: string,
@@ -85,7 +93,7 @@ export function usePane(
       paneConfig.height = pane.offsetHeight;
     }
 
-    layer++;
+    globalLayerCounter++;
 
     // ensure pane is within screen bounds so it can't get lost
     const maxX = window.innerWidth - paneConfig.width;
@@ -99,14 +107,14 @@ export function usePane(
       pane.style.width = `${paneConfig.width}px`;
       pane.style.height = `${paneConfig.height}px`;
     }
-    pane.style.zIndex = `${layer}`;
+    pane.style.zIndex = `${globalLayerCounter}`;
 
     const head = headRef.current;
     if (!head) return;
 
     const onPanePointerDown = () => {
-      layer++;
-      pane.style.zIndex = `${layer}`;
+      globalLayerCounter++;
+      pane.style.zIndex = `${globalLayerCounter}`;
     };
 
     let moving = false;
@@ -153,5 +161,8 @@ export function usePane(
       window.removeEventListener("pointerup", onPointerUp);
       resizer.disconnect();
     };
-  }, []);
+    // Note: Dependencies intentionally empty - this effect sets up listeners once
+    // and uses refs (stable references) for DOM elements. The id is used for
+    // config lookup which should only happen on mount.
+  }, [id]);
 }

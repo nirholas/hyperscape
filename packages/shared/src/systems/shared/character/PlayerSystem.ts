@@ -969,6 +969,11 @@ export class PlayerSystem extends SystemBase {
     slot: number;
     itemData: { id: string; name: string; type: string };
   }): void {
+    // SERVER-SIDE ONLY: Food consumption is validated and processed on server
+    if (!this.world.isServer) {
+      return;
+    }
+
     // === SECURITY: Input Validation (OWASP) ===
     if (!data.playerId || typeof data.playerId !== "string") {
       Logger.systemError("PlayerSystem", "Invalid playerId in handleItemUsed");
@@ -995,6 +1000,27 @@ export class PlayerSystem extends SystemBase {
 
     // Check for healing properties
     if (!itemData.healAmount || itemData.healAmount <= 0) {
+      return;
+    }
+
+    // === MAX HEALTH CHECK ===
+    // Similar to prayer points check - notify player if already at max health
+    const player = this.players.get(data.playerId);
+    if (player) {
+      console.log("[PlayerSystem] handleItemUsed health check:", {
+        playerId: data.playerId,
+        current: player.health.current,
+        max: player.health.max,
+        isAtMax: player.health.current >= player.health.max,
+      });
+    }
+    if (player && player.health.current >= player.health.max) {
+      console.log("[PlayerSystem] Player at max health, sending UI_MESSAGE");
+      this.emitTypedEvent(EventType.UI_MESSAGE, {
+        playerId: data.playerId,
+        message: "You're already at full health.",
+        type: "warning" as const,
+      });
       return;
     }
 

@@ -10,7 +10,7 @@
 
 import React, { useState } from "react";
 import type { ClientWorld } from "../../types";
-import { COLORS } from "../../constants";
+import { useThemeStore } from "hs-kit";
 
 interface SmeltingBar {
   barItemId: string;
@@ -61,6 +61,7 @@ export function SmeltingPanel({
   world,
   onClose,
 }: SmeltingPanelProps) {
+  const theme = useThemeStore((s) => s.theme);
   const [selectedBar, setSelectedBar] = useState<SmeltingBar | null>(null);
   const [showQuantityInput, setShowQuantityInput] = useState(false);
   const [customQuantity, setCustomQuantity] = useState("");
@@ -118,9 +119,8 @@ export function SmeltingPanel({
       <div
         className="rounded-lg shadow-2xl border"
         style={{
-          background:
-            "linear-gradient(135deg, rgba(20, 15, 10, 0.98) 0%, rgba(15, 10, 5, 0.98) 100%)",
-          borderColor: "rgba(139, 69, 19, 0.7)",
+          background: `linear-gradient(135deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+          borderColor: theme.colors.border.decorative,
           minWidth: "320px",
           maxWidth: "400px",
         }}
@@ -129,16 +129,15 @@ export function SmeltingPanel({
         <div
           className="flex items-center justify-between px-3 py-2 border-b"
           style={{
-            background:
-              "linear-gradient(to bottom, rgba(139, 69, 19, 0.3), rgba(100, 50, 20, 0.2))",
-            borderColor: "rgba(139, 69, 19, 0.5)",
+            background: `linear-gradient(to bottom, ${theme.colors.border.decorative}30, ${theme.colors.border.decorative}20)`,
+            borderColor: theme.colors.border.decorative,
           }}
         >
           <div className="flex items-center gap-2">
             <span className="text-lg">🔥</span>
             <span
               className="font-semibold text-sm"
-              style={{ color: COLORS.ACCENT }}
+              style={{ color: theme.colors.accent.primary }}
             >
               Smelting
             </span>
@@ -146,7 +145,7 @@ export function SmeltingPanel({
           <button
             onClick={onClose}
             className="w-6 h-6 flex items-center justify-center rounded hover:bg-red-900/50 transition-colors"
-            style={{ color: COLORS.ACCENT }}
+            style={{ color: theme.colors.accent.primary }}
           >
             ×
           </button>
@@ -157,7 +156,7 @@ export function SmeltingPanel({
           {availableBars.length === 0 ? (
             <div
               className="text-center py-4 text-sm"
-              style={{ color: "rgba(242, 208, 138, 0.7)" }}
+              style={{ color: theme.colors.text.secondary }}
             >
               You don't have the materials to smelt anything.
             </div>
@@ -165,7 +164,7 @@ export function SmeltingPanel({
             <div className="flex flex-col gap-2">
               <div
                 className="text-xs mb-1"
-                style={{ color: "rgba(242, 208, 138, 0.8)" }}
+                style={{ color: theme.colors.text.secondary }}
               >
                 Select a bar to smelt:
               </div>
@@ -184,12 +183,12 @@ export function SmeltingPanel({
                     style={{
                       background:
                         selectedBar?.barItemId === bar.barItemId
-                          ? "rgba(242, 208, 138, 0.15)"
-                          : "rgba(0, 0, 0, 0.3)",
+                          ? `${theme.colors.accent.primary}15`
+                          : theme.colors.background.tertiary,
                       borderColor:
                         selectedBar?.barItemId === bar.barItemId
-                          ? "rgba(242, 208, 138, 0.5)"
-                          : "rgba(139, 69, 19, 0.3)",
+                          ? `${theme.colors.accent.primary}50`
+                          : theme.colors.border.default,
                     }}
                   >
                     {/* Bar Icon */}
@@ -201,13 +200,13 @@ export function SmeltingPanel({
                     <div className="flex-1 text-left">
                       <div
                         className="font-medium text-sm"
-                        style={{ color: COLORS.ACCENT }}
+                        style={{ color: theme.colors.accent.primary }}
                       >
                         {formatItemName(bar.barItemId)}
                       </div>
                       <div
                         className="text-[10px]"
-                        style={{ color: "rgba(242, 208, 138, 0.6)" }}
+                        style={{ color: theme.colors.text.muted }}
                       >
                         {formatItemName(bar.primaryOre)}
                         {bar.secondaryOre &&
@@ -220,8 +219,8 @@ export function SmeltingPanel({
                     <div
                       className="text-xs px-2 py-1 rounded"
                       style={{
-                        background: "rgba(0, 0, 0, 0.4)",
-                        color: "rgba(242, 208, 138, 0.8)",
+                        background: theme.colors.background.tertiary,
+                        color: theme.colors.text.secondary,
                       }}
                     >
                       Lv {bar.levelRequired}
@@ -232,10 +231,15 @@ export function SmeltingPanel({
 
               {/* Quantity Selection */}
               {selectedBar && (
-                <div className="mt-2 pt-2 border-t border-[rgba(139,69,19,0.3)]">
+                <div
+                  className="mt-2 pt-2"
+                  style={{
+                    borderTop: `1px solid ${theme.colors.border.default}`,
+                  }}
+                >
                   <div
                     className="text-xs mb-2"
-                    style={{ color: "rgba(242, 208, 138, 0.8)" }}
+                    style={{ color: theme.colors.text.secondary }}
                   >
                     How many?
                   </div>
@@ -248,9 +252,9 @@ export function SmeltingPanel({
                         onChange={(e) => setCustomQuantity(e.target.value)}
                         className="flex-1 px-2 py-1 rounded text-sm"
                         style={{
-                          background: "rgba(0, 0, 0, 0.5)",
-                          border: "1px solid rgba(139, 69, 19, 0.5)",
-                          color: COLORS.ACCENT,
+                          background: theme.colors.background.tertiary,
+                          border: `1px solid ${theme.colors.border.default}`,
+                          color: theme.colors.accent.primary,
                         }}
                         placeholder={`Amount (last: ${lastCustomQuantity})`}
                         autoFocus
@@ -263,9 +267,9 @@ export function SmeltingPanel({
                         onClick={handleCustomQuantitySubmit}
                         className="px-3 py-1 rounded text-sm font-medium transition-colors"
                         style={{
-                          background: "rgba(34, 197, 94, 0.3)",
-                          border: "1px solid rgba(34, 197, 94, 0.5)",
-                          color: "#22c55e",
+                          background: `${theme.colors.state.success}30`,
+                          border: `1px solid ${theme.colors.state.success}50`,
+                          color: theme.colors.state.success,
                         }}
                       >
                         OK
@@ -279,9 +283,9 @@ export function SmeltingPanel({
                           onClick={() => handleSmelt(selectedBar, qty)}
                           className="flex-1 px-2 py-1.5 rounded text-xs font-medium transition-colors hover:brightness-110"
                           style={{
-                            background: "rgba(242, 208, 138, 0.2)",
-                            border: "1px solid rgba(242, 208, 138, 0.3)",
-                            color: COLORS.ACCENT,
+                            background: `${theme.colors.accent.primary}20`,
+                            border: `1px solid ${theme.colors.accent.primary}30`,
+                            color: theme.colors.accent.primary,
                           }}
                         >
                           {qty}
@@ -291,9 +295,9 @@ export function SmeltingPanel({
                         onClick={() => handleSmelt(selectedBar, 28)}
                         className="flex-1 px-2 py-1.5 rounded text-xs font-medium transition-colors hover:brightness-110"
                         style={{
-                          background: "rgba(242, 208, 138, 0.2)",
-                          border: "1px solid rgba(242, 208, 138, 0.3)",
-                          color: COLORS.ACCENT,
+                          background: `${theme.colors.accent.primary}20`,
+                          border: `1px solid ${theme.colors.accent.primary}30`,
+                          color: theme.colors.accent.primary,
                         }}
                       >
                         All
@@ -302,9 +306,9 @@ export function SmeltingPanel({
                         onClick={() => setShowQuantityInput(true)}
                         className="flex-1 px-2 py-1.5 rounded text-xs font-medium transition-colors hover:brightness-110"
                         style={{
-                          background: "rgba(242, 208, 138, 0.2)",
-                          border: "1px solid rgba(242, 208, 138, 0.3)",
-                          color: COLORS.ACCENT,
+                          background: `${theme.colors.accent.primary}20`,
+                          border: `1px solid ${theme.colors.accent.primary}30`,
+                          color: theme.colors.accent.primary,
                         }}
                       >
                         X

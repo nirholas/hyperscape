@@ -873,6 +873,7 @@ export class ClientNetwork extends SystemBase {
   };
 
   onSystemMessage = (data: { message: string; type: string }) => {
+    console.log("[ClientNetwork] systemMessage received:", data);
     // Add system message to chat (from UI_MESSAGE events)
     // These are server-generated messages like equipment requirements, combat info, etc.
     const chatMessage: ChatMessage = {
@@ -884,6 +885,7 @@ export class ClientNetwork extends SystemBase {
       createdAt: new Date().toISOString(),
     };
     this.world.chat.add(chatMessage, false);
+    console.log("[ClientNetwork] Added message to chat:", chatMessage.body);
   };
 
   onEntityAdded = (data: EntityData) => {
@@ -2243,6 +2245,19 @@ export class ClientNetwork extends SystemBase {
     this.send("dropItem", { itemId, slot, quantity });
   }
 
+  // Prayer actions
+  togglePrayer(prayerId: string) {
+    this.send("prayerToggle", { prayerId, timestamp: Date.now() });
+  }
+
+  deactivateAllPrayers() {
+    this.send("prayerDeactivateAll", { timestamp: Date.now() });
+  }
+
+  prayAtAltar(altarId: string) {
+    this.send("altarPray", { altarId, timestamp: Date.now() });
+  }
+
   onEntityRemoved = (id: string) => {
     // Remove from interpolation tracking
     this.interpolationStates.delete(id);
@@ -2865,6 +2880,24 @@ export class ClientNetwork extends SystemBase {
     this.emitTypedEvent("UI_KICK", {
       playerId: this.id || "unknown",
       reason: code || "unknown",
+    });
+  };
+
+  /**
+   * Handle enter world rejection (e.g., character already logged in)
+   * This triggers a redirect back to character select with an error message
+   */
+  onEnterWorldRejected = (data: { reason: string; message: string }) => {
+    console.warn(
+      "[ClientNetwork] Enter world rejected:",
+      data.reason,
+      data.message,
+    );
+    // Emit as a kick event with the duplicate_user code
+    // This will show the proper overlay and let the user know
+    this.emitTypedEvent("UI_KICK", {
+      playerId: this.id || "unknown",
+      reason: "duplicate_user",
     });
   };
 

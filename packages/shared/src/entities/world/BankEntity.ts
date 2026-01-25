@@ -29,6 +29,7 @@ import {
 } from "../InteractableEntity";
 import { EventType } from "../../types/events";
 import { stationDataProvider } from "../../data/StationDataProvider";
+import { modelCache } from "../../utils/rendering/ModelCache";
 import { CollisionFlag } from "../../systems/shared/movement/CollisionFlags";
 import {
   worldToTile,
@@ -49,25 +50,36 @@ export class BankEntity extends InteractableEntity {
   /** Footprint specification for this station */
   private footprint: FootprintSpec;
 
+  /** Default interaction range for banks (in tiles) */
+  private static readonly BANK_INTERACTION_RANGE = 3;
+
   constructor(world: World, config: BankEntityConfig) {
     // Convert BankEntityConfig to InteractableConfig format
+    // Provide defaults for optional fields (like FurnaceEntity pattern)
+    const interactionDistance =
+      config.interactionDistance ?? BankEntity.BANK_INTERACTION_RANGE;
+    const description =
+      config.description ?? "A secure place to store your items.";
+
     const interactableConfig: InteractableConfig = {
       id: config.id,
-      name: config.name,
+      name: config.name || "Bank",
       type: EntityType.BANK,
       position: config.position,
-      rotation: config.rotation,
-      scale: config.scale,
-      visible: config.visible,
-      interactable: config.interactable,
+      rotation: config.rotation
+        ? { ...config.rotation }
+        : { x: 0, y: 0, z: 0, w: 1 },
+      scale: config.scale ?? { x: 1, y: 1, z: 1 },
+      visible: config.visible ?? true,
+      interactable: config.interactable ?? true,
       interactionType: InteractionType.BANK,
-      interactionDistance: config.interactionDistance,
-      description: config.description,
-      model: config.model,
+      interactionDistance: interactionDistance,
+      description: description,
+      model: config.model ?? null,
       interaction: {
         prompt: "Use Bank",
-        description: config.description,
-        range: config.interactionDistance,
+        description: description,
+        range: interactionDistance,
         cooldown: 0,
         usesRemaining: -1,
         maxUses: -1,
@@ -150,10 +162,66 @@ export class BankEntity extends InteractableEntity {
       return;
     }
 
-    // Create a black box for the bank (1 tile size, chest-like proportions)
+    // Get station data from manifest
+    const stationData = stationDataProvider.getStationData("bank");
+    const modelPath = stationData?.model ?? null;
+    const modelScale = stationData?.modelScale ?? 1.0;
+    const modelYOffset = stationData?.modelYOffset ?? 0;
+
+    // Try to load 3D model first
+    if (modelPath && this.world.loader) {
+      try {
+        const { scene } = await modelCache.loadModel(modelPath, this.world);
+
+        this.mesh = scene;
+        this.mesh.name = `Bank_${this.id}`;
+
+        // Scale the model from manifest
+        this.mesh.scale.set(modelScale, modelScale, modelScale);
+
+        // Offset Y position so model base sits on ground
+        this.mesh.position.y = modelYOffset;
+
+        // Enable shadows and set layer for raycasting
+        this.mesh.layers.set(1);
+        this.mesh.traverse((child) => {
+          child.layers.set(1);
+          if (child instanceof THREE.Mesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+          }
+        });
+
+        // Set up userData for interaction detection
+        this.mesh.userData = {
+          type: "bank",
+          entityId: this.id,
+          name: this.config.name,
+          interactable: true,
+          bankId: this.bankId,
+        };
+
+        // Add to node
+        if (this.node) {
+          this.node.add(this.mesh);
+          this.node.userData.type = "bank";
+          this.node.userData.entityId = this.id;
+          this.node.userData.interactable = true;
+          this.node.userData.bankId = this.bankId;
+        }
+
+        return;
+      } catch (error) {
+        console.warn(
+          `[BankEntity] Failed to load bank model, using placeholder:`,
+          error,
+        );
+      }
+    }
+
+    // FALLBACK: Create a black box for the bank (1 tile size, chest-like proportions)
     const boxHeight = 0.7;
     const geometry = new THREE.BoxGeometry(0.9, boxHeight, 0.9);
-    // Use MeshStandardMaterial for proper lighting (responds to sun, moon, and environment maps)
     const material = new THREE.MeshStandardMaterial({
       color: 0x111111, // Very dark black
       roughness: 0.3,

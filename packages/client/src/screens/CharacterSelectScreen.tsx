@@ -32,6 +32,7 @@ import {
 import React from "react";
 import { CharacterPreview } from "../components/CharacterPreview";
 import { usePrivy, useCreateWallet } from "@privy-io/react-auth";
+import { useThemeStore } from "hs-kit";
 import {
   ELIZAOS_API,
   GAME_API_URL,
@@ -199,12 +200,17 @@ const MusicToggleButton = () => {
 
 // Agent Dashboard Button Component
 const AgentDashboardButton = () => {
+  const theme = useThemeStore((s) => s.theme);
   return (
     <a
       href={`${window.location.origin}/?page=dashboard`}
       target="_blank"
       rel="noopener noreferrer"
-      className="fixed bottom-4 right-4 z-50 bg-black/60 hover:bg-black/80 text-[#f2d08a] rounded-lg px-4 py-2 border border-[#f2d08a]/30 hover:border-[#f2d08a]/60 transition-all flex items-center gap-2 backdrop-blur-sm shadow-lg"
+      className="fixed bottom-4 right-4 z-50 bg-black/60 hover:bg-black/80 rounded-lg px-4 py-2 transition-all flex items-center gap-2 backdrop-blur-sm shadow-lg"
+      style={{
+        color: theme.colors.text.accent,
+        border: `1px solid ${theme.colors.text.accent}4d`,
+      }}
       title="Open Agent Dashboard"
     >
       <span className="text-xl">⚔️</span>
@@ -222,6 +228,7 @@ export function CharacterSelectScreen({
   onPlay: (selectedCharacterId: string | null) => void;
   onLogout: () => void;
 }) {
+  const theme = useThemeStore((s) => s.theme);
   const [characters, setCharacters] = React.useState<Character[]>([]);
   // Sort characters alphabetically by name for display
   const sortedCharacters = React.useMemo(
@@ -356,6 +363,8 @@ export function CharacterSelectScreen({
     type: "create";
     name: string;
   }>(null);
+  // Ref for synchronous double-click prevention when entering world
+  const enteringWorldRef = React.useRef(false);
   // Use primitive states instead of object to prevent unnecessary re-renders
   const [authToken, setAuthToken] = React.useState(
     localStorage.getItem("privy_auth_token") || "",
@@ -768,6 +777,28 @@ export function CharacterSelectScreen({
             (evt.data as { characters?: Character[] })?.characters || [];
           setCharacters(list);
         }
+      } else if (method === "onEnterWorldApproved") {
+        // Server approved entering world - proceed to game
+        const payload = data as { characterId: string };
+        console.log(
+          "[CharacterSelect] ✅ Enter world approved for:",
+          payload.characterId,
+        );
+        enteringWorldRef.current = false;
+        setEnteringWorld(false);
+        // Call onPlay to transition to game
+        onPlayRef.current(payload.characterId);
+      } else if (method === "onEnterWorldRejected") {
+        // Character is already logged in on another session
+        const payload = data as { reason: string; message: string };
+        console.warn(
+          "[CharacterSelect] ⚠️ Enter world rejected:",
+          payload.reason,
+        );
+        enteringWorldRef.current = false;
+        setEnteringWorld(false);
+        setErrorMessage(payload.message);
+        // Stay on character select screen (already on confirm view, just show error)
       } else if (method === "onShowToast") {
         const toast = data as { message?: string; type?: string };
         console.error("[CharacterSelect] ❌ Server error:", toast.message);
@@ -1064,9 +1095,37 @@ export function CharacterSelectScreen({
     elizaOSAvailable,
   ]);
 
+  // State for "entering world" loading
+  const [enteringWorld, setEnteringWorld] = React.useState(false);
+
+  // Store onPlay in ref so message handler can access it
+  const onPlayRef = React.useRef(onPlay);
+  React.useEffect(() => {
+    onPlayRef.current = onPlay;
+  }, [onPlay]);
+
   const enterWorld = React.useCallback(() => {
-    onPlay(selectedCharacterId);
-  }, [selectedCharacterId, onPlay]);
+    // Use ref for synchronous check to prevent double-click race condition
+    if (!selectedCharacterId || enteringWorldRef.current) return;
+    enteringWorldRef.current = true;
+
+    const ws = preWsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      enteringWorldRef.current = false;
+      setErrorMessage("Connection lost. Please refresh the page.");
+      return;
+    }
+
+    // Set loading state and send enterWorld packet
+    // Wait for server to respond with enterWorldApproved or enterWorldRejected
+    setEnteringWorld(true);
+    setErrorMessage(null);
+
+    const packet = writePacket("enterWorld", {
+      characterId: selectedCharacterId,
+    });
+    ws.send(packet);
+  }, [selectedCharacterId]);
 
   const GoldRule = ({
     className = "",
@@ -1076,7 +1135,10 @@ export function CharacterSelectScreen({
     thick?: boolean;
   }) => (
     <div
-      className={`${thick ? "h-[2px]" : "h-px"} w-full bg-gradient-to-r from-transparent via-[#f2d08a]/90 to-transparent ${className}`}
+      className={`${thick ? "h-[2px]" : "h-px"} w-full ${className}`}
+      style={{
+        background: `linear-gradient(to right, transparent, ${theme.colors.text.accent}e6, transparent)`,
+      }}
     />
   );
 
@@ -1134,9 +1196,10 @@ export function CharacterSelectScreen({
                       <GoldRule thick className="pointer-events-none" />
                       <button
                         onClick={() => selectCharacter(c.id)}
-                        className="w-full px-4 py-3 text-center bg-black/40 hover:bg-black/50 focus:outline-none focus:ring-1 ring-yellow-400/60 rounded-sm"
+                        className="w-full px-4 py-3 text-center bg-black/40 hover:bg-black/50 focus:outline-none focus:ring-1 rounded-sm"
                         style={{
-                          color: "#f2d08a",
+                          color: theme.colors.text.accent,
+                          boxShadow: `0 0 0 1px ${theme.colors.accent.secondary}99`,
                         }}
                       >
                         <div className="flex items-center gap-2">
@@ -1145,7 +1208,10 @@ export function CharacterSelectScreen({
                             {c.name}
                           </span>
                           {c.isAgent && (
-                            <span className="text-[#60a5fa] text-xs font-medium">
+                            <span
+                              className="text-xs font-medium"
+                              style={{ color: theme.colors.state.info }}
+                            >
                               AI Agent
                             </span>
                           )}
@@ -1244,12 +1310,31 @@ export function CharacterSelectScreen({
 
                       {/* Character Type Selection */}
                       {!checkingElizaOS && (
-                        <div className="w-full rounded bg-black/60 border border-[#f2d08a]/30 p-3">
-                          <div className="text-[#f2d08a] text-sm font-semibold mb-2">
+                        <div
+                          className="w-full rounded bg-black/60 p-3"
+                          style={{
+                            border: `1px solid ${theme.colors.text.accent}4d`,
+                          }}
+                        >
+                          <div
+                            className="text-sm font-semibold mb-2"
+                            style={{ color: theme.colors.text.accent }}
+                          >
                             Character Type
                           </div>
                           <div className="flex gap-2">
-                            <label className="flex-1 flex items-center gap-2 p-2 rounded-lg border-2 border-[#f2d08a]/30 bg-black/40 cursor-pointer transition-all hover:border-[#f2d08a]/60 hover:bg-black/60">
+                            <label
+                              className="flex-1 flex items-center gap-2 p-2 rounded-lg border-2 bg-black/40 cursor-pointer transition-all hover:bg-black/60"
+                              style={{
+                                borderColor: `${theme.colors.text.accent}4d`,
+                              }}
+                              onMouseEnter={(e) =>
+                                (e.currentTarget.style.borderColor = `${theme.colors.text.accent}99`)
+                              }
+                              onMouseLeave={(e) =>
+                                (e.currentTarget.style.borderColor = `${theme.colors.text.accent}4d`)
+                              }
+                            >
                               <input
                                 type="radio"
                                 name="characterType"
@@ -1260,16 +1345,33 @@ export function CharacterSelectScreen({
                                     e.target.value as "human" | "agent",
                                   )
                                 }
-                                className="w-4 h-4 text-[#f2d08a] accent-[#f2d08a]"
+                                className="w-4 h-4"
+                                style={{
+                                  accentColor: theme.colors.text.accent,
+                                }}
                               />
                               <div className="flex-1">
-                                <div className="text-[#f2d08a] font-medium text-sm">
+                                <div
+                                  className="font-medium text-sm"
+                                  style={{ color: theme.colors.text.accent }}
+                                >
                                   🎮 Human
                                 </div>
                               </div>
                             </label>
                             {elizaOSAvailable ? (
-                              <label className="flex-1 flex items-center gap-2 p-2 rounded-lg border-2 border-[#f2d08a]/30 bg-black/40 cursor-pointer transition-all hover:border-[#f2d08a]/60 hover:bg-black/60">
+                              <label
+                                className="flex-1 flex items-center gap-2 p-2 rounded-lg border-2 bg-black/40 cursor-pointer transition-all hover:bg-black/60"
+                                style={{
+                                  borderColor: `${theme.colors.text.accent}4d`,
+                                }}
+                                onMouseEnter={(e) =>
+                                  (e.currentTarget.style.borderColor = `${theme.colors.text.accent}99`)
+                                }
+                                onMouseLeave={(e) =>
+                                  (e.currentTarget.style.borderColor = `${theme.colors.text.accent}4d`)
+                                }
+                              >
                                 <input
                                   type="radio"
                                   name="characterType"
@@ -1280,25 +1382,44 @@ export function CharacterSelectScreen({
                                       e.target.value as "human" | "agent",
                                     )
                                   }
-                                  className="w-4 h-4 text-[#f2d08a] accent-[#f2d08a]"
+                                  className="w-4 h-4"
+                                  style={{
+                                    accentColor: theme.colors.text.accent,
+                                  }}
                                 />
                                 <div className="flex-1">
-                                  <div className="text-[#f2d08a] font-medium text-sm">
+                                  <div
+                                    className="font-medium text-sm"
+                                    style={{ color: theme.colors.text.accent }}
+                                  >
                                     🤖 AI Agent
                                   </div>
                                 </div>
                               </label>
                             ) : (
-                              <div className="flex-1 flex items-center gap-2 p-2 rounded-lg border-2 border-[#8b4513]/20 bg-black/20 opacity-50">
+                              <div
+                                className="flex-1 flex items-center gap-2 p-2 rounded-lg border-2 bg-black/20 opacity-50"
+                                style={{
+                                  borderColor: `${theme.colors.border.decorative}33`,
+                                }}
+                              >
                                 <input
                                   type="radio"
                                   name="characterType"
                                   value="agent"
                                   disabled
-                                  className="w-4 h-4 text-gray-500 accent-gray-500"
+                                  className="w-4 h-4"
+                                  style={{
+                                    accentColor: theme.colors.text.disabled,
+                                  }}
                                 />
                                 <div className="flex-1">
-                                  <div className="text-[#e8ebf4]/40 font-medium text-sm">
+                                  <div
+                                    className="font-medium text-sm"
+                                    style={{
+                                      color: theme.colors.text.disabled,
+                                    }}
+                                  >
                                     🤖 AI Agent
                                   </div>
                                 </div>
@@ -1309,7 +1430,12 @@ export function CharacterSelectScreen({
                       )}
 
                       {/* 3D Preview Section - Compact height */}
-                      <div className="relative w-full h-48 bg-black/60 rounded-lg overflow-hidden border border-[#f2d08a]/30">
+                      <div
+                        className="relative w-full h-48 bg-black/60 rounded-lg overflow-hidden"
+                        style={{
+                          border: `1px solid ${theme.colors.text.accent}4d`,
+                        }}
+                      >
                         <CharacterPreview
                           vrmUrl={`${CDN_URL}${AVATAR_OPTIONS[selectedAvatarIndex].previewPath}`}
                           className="w-full h-full"
@@ -1325,11 +1451,18 @@ export function CharacterSelectScreen({
                                   AVATAR_OPTIONS.length,
                               )
                             }
-                            className="px-2 py-0.5 bg-[#f2d08a]/20 hover:bg-[#f2d08a]/30 text-[#f2d08a] rounded transition-colors text-sm"
+                            className="px-2 py-0.5 rounded transition-colors text-sm"
+                            style={{
+                              backgroundColor: `${theme.colors.text.accent}33`,
+                              color: theme.colors.text.accent,
+                            }}
                           >
                             ‹
                           </button>
-                          <span className="text-[#f2d08a] text-xs font-medium min-w-[100px] text-center">
+                          <span
+                            className="text-xs font-medium min-w-[100px] text-center"
+                            style={{ color: theme.colors.text.accent }}
+                          >
                             {AVATAR_OPTIONS[selectedAvatarIndex].name}
                           </span>
                           <button
@@ -1338,7 +1471,11 @@ export function CharacterSelectScreen({
                                 (prev) => (prev + 1) % AVATAR_OPTIONS.length,
                               )
                             }
-                            className="px-2 py-0.5 bg-[#f2d08a]/20 hover:bg-[#f2d08a]/30 text-[#f2d08a] rounded transition-colors text-sm"
+                            className="px-2 py-0.5 rounded transition-colors text-sm"
+                            style={{
+                              backgroundColor: `${theme.colors.text.accent}33`,
+                              color: theme.colors.text.accent,
+                            }}
                           >
                             ›
                           </button>
@@ -1347,7 +1484,11 @@ export function CharacterSelectScreen({
 
                       {/* Cancel Button */}
                       <button
-                        className="w-full px-4 py-2 bg-black/40 hover:bg-black/50 text-[#f2d08a] rounded border border-[#f2d08a]/30 transition-colors text-sm"
+                        className="w-full px-4 py-2 bg-black/40 hover:bg-black/50 rounded transition-colors text-sm"
+                        style={{
+                          color: theme.colors.text.accent,
+                          border: `1px solid ${theme.colors.text.accent}4d`,
+                        }}
                         onClick={() => {
                           setShowCreate(false);
                           setNewCharacterName("");
@@ -1363,12 +1504,23 @@ export function CharacterSelectScreen({
                     {characterType === "agent" &&
                       elizaOSAvailable &&
                       !checkingElizaOS && (
-                        <div className="w-1/2 rounded bg-black/60 border border-[#f2d08a]/30 p-3 h-fit">
-                          <div className="text-[#f2d08a] text-sm font-semibold mb-2">
+                        <div
+                          className="w-1/2 rounded bg-black/60 p-3 h-fit"
+                          style={{
+                            border: `1px solid ${theme.colors.text.accent}4d`,
+                          }}
+                        >
+                          <div
+                            className="text-sm font-semibold mb-2"
+                            style={{ color: theme.colors.text.accent }}
+                          >
                             Agent Archetype
                           </div>
                           {loadingTemplates ? (
-                            <div className="text-center text-[#e8ebf4]/60 text-sm py-4">
+                            <div
+                              className="text-center text-sm py-4"
+                              style={{ color: theme.colors.text.muted }}
+                            >
                               Loading templates...
                             </div>
                           ) : templates.length > 0 ? (
@@ -1377,28 +1529,45 @@ export function CharacterSelectScreen({
                                 <button
                                   key={template.id}
                                   onClick={() => setSelectedTemplate(template)}
-                                  className={`w-full p-2.5 rounded-lg border-2 transition-all text-left ${
-                                    selectedTemplate?.id === template.id
-                                      ? "border-[#f2d08a] bg-[#f2d08a]/10"
-                                      : "border-[#f2d08a]/30 bg-black/40 hover:border-[#f2d08a]/60 hover:bg-black/60"
-                                  }`}
+                                  className="w-full p-2.5 rounded-lg border-2 transition-all text-left"
+                                  style={{
+                                    borderColor:
+                                      selectedTemplate?.id === template.id
+                                        ? theme.colors.text.accent
+                                        : `${theme.colors.text.accent}4d`,
+                                    backgroundColor:
+                                      selectedTemplate?.id === template.id
+                                        ? `${theme.colors.text.accent}1a`
+                                        : "rgba(0,0,0,0.4)",
+                                  }}
                                 >
                                   <div className="flex items-center gap-2">
                                     <span className="text-xl">
                                       {template.emoji}
                                     </span>
-                                    <div className="text-[#f2d08a] font-medium text-sm">
+                                    <div
+                                      className="font-medium text-sm"
+                                      style={{
+                                        color: theme.colors.text.accent,
+                                      }}
+                                    >
                                       {template.name}
                                     </div>
                                   </div>
-                                  <div className="text-[#e8ebf4]/60 text-xs leading-relaxed mt-1 ml-7">
+                                  <div
+                                    className="text-xs leading-relaxed mt-1 ml-7"
+                                    style={{ color: theme.colors.text.muted }}
+                                  >
                                     {template.description}
                                   </div>
                                 </button>
                               ))}
                             </div>
                           ) : (
-                            <div className="text-center text-[#e8ebf4]/60 text-sm py-4">
+                            <div
+                              className="text-center text-sm py-4"
+                              style={{ color: theme.colors.text.muted }}
+                            >
                               No templates available
                             </div>
                           )}
@@ -1413,14 +1582,18 @@ export function CharacterSelectScreen({
               )}
               <div className="mt-6 flex justify-center">
                 <div className="w-full max-w-sm relative">
-                  <div className="h-[1px] w-full bg-gradient-to-r from-transparent via-[#f2d08a]/90 to-transparent mb-2" />
+                  <div
+                    className="h-[1px] w-full mb-2"
+                    style={{
+                      background: `linear-gradient(to right, transparent, ${theme.colors.text.accent}e6, transparent)`,
+                    }}
+                  />
                   <button
                     className="w-full px-6 py-3 text-center bg-transparent hover:bg-black/20 focus:outline-none transition-all rounded-sm"
                     onClick={onLogout}
                     style={{
-                      color: "#f2d08a",
-                      textShadow:
-                        "0 0 12px rgba(242, 208, 138, 0.5), 0 0 25px rgba(242, 208, 138, 0.3)",
+                      color: theme.colors.text.accent,
+                      textShadow: `0 0 12px ${theme.colors.accent.secondary}80, 0 0 25px ${theme.colors.accent.secondary}4d`,
                       filter:
                         "drop-shadow(0 8px 20px rgba(0, 0, 0, 0.8)) drop-shadow(0 4px 10px rgba(0, 0, 0, 0.6))",
                     }}
@@ -1429,7 +1602,12 @@ export function CharacterSelectScreen({
                       Sign out
                     </span>
                   </button>
-                  <div className="h-[1px] w-full bg-gradient-to-r from-transparent via-[#f2d08a]/90 to-transparent mt-2" />
+                  <div
+                    className="h-[1px] w-full mt-2"
+                    style={{
+                      background: `linear-gradient(to right, transparent, ${theme.colors.text.accent}e6, transparent)`,
+                    }}
+                  />
                 </div>
               </div>
             </div>
@@ -1454,13 +1632,16 @@ export function CharacterSelectScreen({
                     <div className="flex items-center justify-between px-5 py-4 bg-black/50 backdrop-blur">
                       <div
                         className="font-semibold text-xl"
-                        style={{ color: "#f2d08a" }}
+                        style={{ color: theme.colors.text.accent }}
                       >
                         {characters.find((c) => c.id === selectedCharacterId)
                           ?.name || "Unnamed"}
                       </div>
                       <div className="flex items-center gap-2">
-                        <div className="text-xl" style={{ color: "#f2d08a" }}>
+                        <div
+                          className="text-xl"
+                          style={{ color: theme.colors.text.accent }}
+                        >
                           ✓
                         </div>
                       </div>
@@ -1469,37 +1650,56 @@ export function CharacterSelectScreen({
                   </div>
                 </div>
               </div>
+              {/* Error message display */}
+              {errorMessage && (
+                <div className="mt-3 mx-auto max-w-md p-3 bg-red-900/80 border border-red-500 rounded-lg text-center">
+                  <p className="text-red-200 text-sm">{errorMessage}</p>
+                </div>
+              )}
               <div className="mt-3 flex justify-center">
                 <div className="w-full max-w-md relative">
-                  <div className="h-[1px] w-full bg-gradient-to-r from-transparent via-[#f2d08a]/90 to-transparent mb-1" />
+                  <div
+                    className="h-[1px] w-full mb-1"
+                    style={{
+                      background: `linear-gradient(to right, transparent, ${theme.colors.text.accent}e6, transparent)`,
+                    }}
+                  />
                   <button
                     className="w-full px-6 py-1.5 text-center bg-transparent hover:bg-black/20 focus:outline-none transition-all rounded-sm"
-                    disabled={!selectedCharacterId}
+                    disabled={!selectedCharacterId || enteringWorld}
                     onClick={enterWorld}
                     style={{
-                      color: "#f2d08a",
-                      textShadow:
-                        "0 0 12px rgba(242, 208, 138, 0.5), 0 0 25px rgba(242, 208, 138, 0.3)",
+                      color: theme.colors.text.accent,
+                      textShadow: `0 0 12px ${theme.colors.accent.secondary}80, 0 0 25px ${theme.colors.accent.secondary}4d`,
                       filter:
                         "drop-shadow(0 8px 20px rgba(0, 0, 0, 0.8)) drop-shadow(0 4px 10px rgba(0, 0, 0, 0.6))",
-                      opacity: selectedCharacterId ? 1 : 0.5,
-                      cursor: selectedCharacterId ? "pointer" : "not-allowed",
+                      opacity: selectedCharacterId && !enteringWorld ? 1 : 0.5,
+                      cursor:
+                        selectedCharacterId && !enteringWorld
+                          ? "pointer"
+                          : "not-allowed",
                     }}
                   >
                     <span className="font-semibold text-lg uppercase tracking-[0.2em]">
-                      Enter World
+                      {enteringWorld ? "Entering..." : "Enter World"}
                     </span>
                   </button>
-                  <div className="h-[1px] w-full bg-gradient-to-r from-transparent via-[#f2d08a]/90 to-transparent mt-1" />
+                  <div
+                    className="h-[1px] w-full mt-1"
+                    style={{
+                      background: `linear-gradient(to right, transparent, ${theme.colors.text.accent}e6, transparent)`,
+                    }}
+                  />
                 </div>
               </div>
               <div className="mt-3 flex justify-center">
                 <button
-                  className="px-6 py-2 bg-transparent hover:bg-black/20 focus:outline-none transition-all rounded-sm border border-[#f2d08a]/30"
+                  className="px-6 py-2 bg-transparent hover:bg-black/20 focus:outline-none transition-all rounded-sm"
                   onClick={() => setView("select")}
                   style={{
-                    color: "#f2d08a",
-                    textShadow: "0 0 8px rgba(242, 208, 138, 0.4)",
+                    color: theme.colors.text.accent,
+                    textShadow: `0 0 8px ${theme.colors.accent.secondary}66`,
+                    border: `1px solid ${theme.colors.text.accent}4d`,
                   }}
                 >
                   <span className="font-medium text-sm uppercase tracking-[0.15em]">

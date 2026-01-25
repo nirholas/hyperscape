@@ -141,7 +141,7 @@ export const AgentSummaryCard: React.FC<AgentSummaryCardProps> = ({
         }
 
         // Fetch skills if we have characterId
-        let skills = null;
+        let skills: Record<string, { level: number; xp: number }> | null = null;
         if (characterId) {
           const skillsResponse = await fetch(
             `${GAME_API_URL}/api/characters/${characterId}/skills`,

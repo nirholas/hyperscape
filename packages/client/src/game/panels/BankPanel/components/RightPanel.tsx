@@ -5,22 +5,13 @@
  * RS3-style tab switcher between backpack and worn equipment.
  */
 
-import React, { useCallback, useMemo } from "react";
+import React, { useCallback } from "react";
+import { useThemeStore, useMobileLayout } from "hs-kit";
 import type { PlayerEquipmentItems } from "@hyperscape/shared";
-import {
-  INV_SLOTS_PER_ROW,
-  INV_ROWS,
-  INV_SLOT_SIZE,
-  BANK_THEME,
-} from "../constants";
-import { isNotedItem, getItemIcon, formatItemName } from "../utils";
+import { INV_SLOTS_PER_ROW, INV_SLOT_SIZE } from "../constants";
+import { getItemIcon, formatItemName } from "../utils";
 import type { InventorySlotViewItem, RightPanelMode } from "../types";
-
-// Pre-allocated slot indices array - created once at module load, never recreated
-const INVENTORY_SLOT_INDICES = Array.from(
-  { length: INV_SLOTS_PER_ROW * INV_ROWS },
-  (_, i) => i,
-);
+import { InventoryPanel } from "../../InventoryPanel";
 
 export interface RightPanelProps {
   mode: RightPanelMode;
@@ -64,16 +55,11 @@ export function RightPanel({
   onDepositEquipment,
   onDepositAllEquipment,
 }: RightPanelProps) {
-  // O(1) lookup map - only rebuilt when inventory changes
-  const inventoryBySlot = useMemo(() => {
-    const map = new Map<number, InventorySlotViewItem>();
-    for (const item of inventory) {
-      if (item) {
-        map.set(item.slot, item);
-      }
-    }
-    return map;
-  }, [inventory]);
+  const theme = useThemeStore((s) => s.theme);
+  const { shouldUseMobileUI } = useMobileLayout();
+
+  // Responsive sizing
+  const responsiveSlotSize = shouldUseMobileUI ? 34 : INV_SLOT_SIZE;
 
   /**
    * Render a single equipment slot for the paperdoll layout
@@ -90,29 +76,27 @@ export function RightPanel({
           className="w-full h-full rounded transition-all duration-200 cursor-pointer group relative"
           style={{
             background: hasItem
-              ? "linear-gradient(135deg, rgba(40, 35, 50, 0.8) 0%, rgba(30, 25, 40, 0.9) 100%)"
-              : "rgba(0, 0, 0, 0.35)",
+              ? `linear-gradient(135deg, ${theme.colors.slot.filled} 0%, ${theme.colors.slot.empty} 100%)`
+              : theme.colors.background.overlay,
             borderWidth: "2px",
             borderStyle: "solid",
             borderColor: hasItem
-              ? "rgba(242, 208, 138, 0.5)"
-              : "rgba(242, 208, 138, 0.25)",
+              ? theme.colors.border.hover
+              : theme.colors.border.default,
             boxShadow: hasItem
-              ? "0 2px 8px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(242, 208, 138, 0.1)"
+              ? `0 2px 8px rgba(0, 0, 0, 0.6), inset 0 1px 0 ${theme.colors.border.default}1a`
               : "inset 0 2px 4px rgba(0, 0, 0, 0.3)",
           }}
           onMouseEnter={(e) => {
             if (hasItem) {
-              e.currentTarget.style.borderColor = "rgba(100, 200, 100, 0.6)";
-              e.currentTarget.style.background =
-                "linear-gradient(135deg, rgba(100, 200, 100, 0.2) 0%, rgba(100, 200, 100, 0.1) 100%)";
+              e.currentTarget.style.borderColor = theme.colors.state.success;
+              e.currentTarget.style.background = `linear-gradient(135deg, ${theme.colors.state.success}33 0%, ${theme.colors.state.success}1a 100%)`;
             }
           }}
           onMouseLeave={(e) => {
             if (hasItem) {
-              e.currentTarget.style.borderColor = "rgba(242, 208, 138, 0.5)";
-              e.currentTarget.style.background =
-                "linear-gradient(135deg, rgba(40, 35, 50, 0.8) 0%, rgba(30, 25, 40, 0.9) 100%)";
+              e.currentTarget.style.borderColor = theme.colors.border.hover;
+              e.currentTarget.style.background = `linear-gradient(135deg, ${theme.colors.slot.filled} 0%, ${theme.colors.slot.empty} 100%)`;
             }
           }}
           title={
@@ -125,7 +109,7 @@ export function RightPanel({
           <div
             className="absolute top-0.5 left-1 text-[8px] font-medium uppercase tracking-wider"
             style={{
-              color: "rgba(242, 208, 138, 0.6)",
+              color: theme.colors.text.secondary,
               textShadow: "0 1px 2px rgba(0, 0, 0, 0.8)",
             }}
           >
@@ -159,7 +143,7 @@ export function RightPanel({
                   className="text-center px-0.5 mt-0.5"
                   style={{
                     fontSize: "8px",
-                    color: "rgba(242, 208, 138, 0.9)",
+                    color: theme.colors.text.secondary,
                     lineHeight: "1.1",
                     maxWidth: "100%",
                     overflow: "hidden",
@@ -175,26 +159,28 @@ export function RightPanel({
         </button>
       );
     },
-    [equipment, onDepositEquipment],
+    [equipment, onDepositEquipment, theme],
   );
 
   return (
     <div
       className="flex flex-col rounded-lg"
       style={{
-        background: BANK_THEME.PANEL_BG,
-        border: `2px solid ${BANK_THEME.PANEL_BORDER}`,
-        boxShadow: `0 10px 30px rgba(0, 0, 0, 0.5), inset 0 1px 0 ${BANK_THEME.PANEL_BORDER_LIGHT}`,
-        width: `${INV_SLOTS_PER_ROW * (INV_SLOT_SIZE + 4) + 24}px`,
+        background: theme.colors.background.primary,
+        border: `2px solid ${theme.colors.border.decorative}`,
+        boxShadow: `0 10px 30px rgba(0, 0, 0, 0.5), inset 0 1px 0 ${theme.colors.border.default}`,
+        width: shouldUseMobileUI
+          ? "100%"
+          : `${INV_SLOTS_PER_ROW * (responsiveSlotSize + 4) + 24}px`,
+        minWidth: shouldUseMobileUI ? undefined : "180px",
       }}
     >
       {/* RS3-style Tab Header with view switcher */}
       <div
         className="flex justify-between items-center px-2 py-1.5 rounded-t-lg"
         style={{
-          background:
-            "linear-gradient(180deg, rgba(139, 69, 19, 0.4) 0%, rgba(139, 69, 19, 0.2) 100%)",
-          borderBottom: `1px solid ${BANK_THEME.PANEL_BORDER}`,
+          background: `linear-gradient(180deg, ${theme.colors.border.decorative}66 0%, ${theme.colors.border.decorative}33 100%)`,
+          borderBottom: `1px solid ${theme.colors.border.decorative}`,
         }}
       >
         {/* Tab Buttons */}
@@ -205,15 +191,15 @@ export function RightPanel({
             style={{
               background:
                 mode === "inventory"
-                  ? "rgba(139, 69, 19, 0.7)"
-                  : "rgba(0, 0, 0, 0.3)",
+                  ? theme.colors.border.decorative
+                  : theme.colors.background.overlay,
               color:
                 mode === "inventory"
-                  ? BANK_THEME.TEXT_GOLD
-                  : "rgba(255,255,255,0.5)",
+                  ? theme.colors.accent.primary
+                  : theme.colors.text.muted,
               border:
                 mode === "inventory"
-                  ? `1px solid ${BANK_THEME.PANEL_BORDER_LIGHT}`
+                  ? `1px solid ${theme.colors.border.default}`
                   : "1px solid transparent",
             }}
             title="View Backpack"
@@ -226,15 +212,15 @@ export function RightPanel({
             style={{
               background:
                 mode === "equipment"
-                  ? "rgba(139, 69, 19, 0.7)"
-                  : "rgba(0, 0, 0, 0.3)",
+                  ? theme.colors.border.decorative
+                  : theme.colors.background.overlay,
               color:
                 mode === "equipment"
-                  ? BANK_THEME.TEXT_GOLD
-                  : "rgba(255,255,255,0.5)",
+                  ? theme.colors.accent.primary
+                  : theme.colors.text.muted,
               border:
                 mode === "equipment"
-                  ? `1px solid ${BANK_THEME.PANEL_BORDER_LIGHT}`
+                  ? `1px solid ${theme.colors.border.default}`
                   : "1px solid transparent",
             }}
             title="View Worn Equipment"
@@ -244,7 +230,7 @@ export function RightPanel({
         </div>
         <span
           className="text-xs font-bold"
-          style={{ color: BANK_THEME.TEXT_GOLD }}
+          style={{ color: theme.colors.accent.primary }}
         >
           {mode === "inventory" ? "Inventory" : "Equipment"}
         </span>
@@ -253,113 +239,38 @@ export function RightPanel({
       {/* Content Area - switches between inventory and equipment */}
       {mode === "inventory" ? (
         <>
-          {/* Inventory Grid */}
-          <div className="p-2 flex-1">
-            <div
-              className="grid gap-1"
-              style={{
-                gridTemplateColumns: `repeat(${INV_SLOTS_PER_ROW}, ${INV_SLOT_SIZE}px)`,
-              }}
-            >
-              {INVENTORY_SLOT_INDICES.map((idx) => {
-                const item = inventoryBySlot.get(idx);
-
-                return (
-                  <div
-                    key={idx}
-                    className={`flex items-center justify-center relative rounded ${item ? "cursor-pointer" : ""}`}
-                    style={{
-                      width: INV_SLOT_SIZE,
-                      height: INV_SLOT_SIZE,
-                      background: item
-                        ? "linear-gradient(135deg, rgba(242, 208, 138, 0.1) 0%, rgba(242, 208, 138, 0.05) 100%)"
-                        : "rgba(0, 0, 0, 0.4)",
-                      border: item
-                        ? `1px solid ${BANK_THEME.SLOT_BORDER_HIGHLIGHT}`
-                        : `1px solid ${BANK_THEME.SLOT_BORDER}`,
-                    }}
-                    title={
-                      item
-                        ? `${formatItemName(item.itemId)} x${item.quantity} - Click to deposit`
-                        : "Empty slot"
-                    }
-                    onClick={() => item && onDeposit(item.itemId, 1)}
-                    onContextMenu={(e) => {
-                      if (item) {
-                        onContextMenu(
-                          e,
-                          item.itemId,
-                          item.quantity || 1,
-                          "inventory",
-                        );
-                      }
-                    }}
-                    onMouseEnter={(e) => {
-                      if (item) {
-                        e.currentTarget.style.background =
-                          "linear-gradient(135deg, rgba(100, 200, 100, 0.2) 0%, rgba(100, 200, 100, 0.1) 100%)";
-                        e.currentTarget.style.borderColor =
-                          "rgba(100, 200, 100, 0.5)";
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (item) {
-                        e.currentTarget.style.background =
-                          "linear-gradient(135deg, rgba(242, 208, 138, 0.1) 0%, rgba(242, 208, 138, 0.05) 100%)";
-                        e.currentTarget.style.borderColor =
-                          BANK_THEME.SLOT_BORDER_HIGHLIGHT;
-                      }
-                    }}
-                  >
-                    {item && (
-                      <>
-                        <span className="text-lg select-none">
-                          {getItemIcon(item.itemId)}
-                        </span>
-                        {/* BANK NOTE SYSTEM: "N" badge for noted items */}
-                        {isNotedItem(item.itemId) && (
-                          <span
-                            className="absolute top-0 left-0.5 text-[8px] font-bold px-0.5 rounded"
-                            style={{
-                              color: "#fff",
-                              background: "rgba(139, 69, 19, 0.9)",
-                              textShadow: "0 0 2px #000",
-                            }}
-                          >
-                            N
-                          </span>
-                        )}
-                        {(item.quantity || 1) > 1 && (
-                          <span
-                            className="absolute bottom-0 right-0.5 text-[9px] font-bold"
-                            style={{
-                              color: BANK_THEME.TEXT_YELLOW,
-                              textShadow:
-                                "1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000",
-                            }}
-                          >
-                            {item.quantity}
-                          </span>
-                        )}
-                      </>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+          {/* Modern Inventory Panel in bank mode */}
+          <div
+            className="flex-1"
+            style={{ minHeight: shouldUseMobileUI ? "200px" : "280px" }}
+          >
+            <InventoryPanel
+              items={inventory}
+              coins={coins}
+              embeddedMode="bank"
+              onEmbeddedClick={(item) => onDeposit(item.itemId, 1)}
+              onEmbeddedContextMenu={(e, item) =>
+                onContextMenu(e, item.itemId, item.quantity || 1, "inventory")
+              }
+              showCoinPouch={false}
+              footerHint="Left: Deposit 1 | Right: Options"
+            />
           </div>
 
           {/* Coin Pouch Section */}
           <div
             className="mx-2 mb-2 p-2 rounded flex items-center justify-between"
             style={{
-              background: "rgba(0, 0, 0, 0.3)",
-              border: `1px solid ${BANK_THEME.PANEL_BORDER}`,
+              background: theme.colors.background.overlay,
+              border: `1px solid ${theme.colors.border.decorative}`,
             }}
           >
             <div className="flex items-center gap-2">
               <span className="text-base">💰</span>
-              <span className="text-sm font-bold" style={{ color: "#fbbf24" }}>
+              <span
+                className="text-sm font-bold"
+                style={{ color: theme.colors.accent.primary }}
+              >
                 {coins.toLocaleString()}
               </span>
             </div>
@@ -368,16 +279,16 @@ export function RightPanel({
               disabled={coins <= 0}
               className="px-2 py-1 rounded text-xs font-bold transition-colors disabled:opacity-30"
               style={{
-                background: "rgba(100, 180, 100, 0.6)",
-                color: "#fff",
-                border: `1px solid ${BANK_THEME.PANEL_BORDER}`,
+                background: `${theme.colors.state.success}99`,
+                color: theme.colors.text.primary,
+                border: `1px solid ${theme.colors.border.decorative}`,
               }}
               onMouseEnter={(e) => {
                 if (coins > 0)
-                  e.currentTarget.style.background = "rgba(100, 180, 100, 0.8)";
+                  e.currentTarget.style.background = `${theme.colors.state.success}cc`;
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = "rgba(100, 180, 100, 0.6)";
+                e.currentTarget.style.background = `${theme.colors.state.success}99`;
               }}
             >
               Deposit
@@ -390,18 +301,15 @@ export function RightPanel({
               onClick={onDepositAll}
               className="w-full py-2 rounded text-sm font-bold transition-colors"
               style={{
-                background:
-                  "linear-gradient(180deg, rgba(139, 69, 19, 0.7) 0%, rgba(139, 69, 19, 0.5) 100%)",
-                color: BANK_THEME.TEXT_GOLD,
-                border: `1px solid ${BANK_THEME.PANEL_BORDER}`,
+                background: `linear-gradient(180deg, ${theme.colors.border.decorative} 0%, ${theme.colors.border.decorative}80 100%)`,
+                color: theme.colors.accent.primary,
+                border: `1px solid ${theme.colors.border.decorative}`,
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background =
-                  "linear-gradient(180deg, rgba(139, 69, 19, 0.9) 0%, rgba(139, 69, 19, 0.7) 100%)";
+                e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.border.decorative}e6 0%, ${theme.colors.border.decorative}b3 100%)`;
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background =
-                  "linear-gradient(180deg, rgba(139, 69, 19, 0.7) 0%, rgba(139, 69, 19, 0.5) 100%)";
+                e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.border.decorative} 0%, ${theme.colors.border.decorative}80 100%)`;
               }}
             >
               Deposit Inventory
@@ -414,8 +322,7 @@ export function RightPanel({
           <div
             className="p-2 flex-1"
             style={{
-              background:
-                "linear-gradient(135deg, rgba(20, 20, 30, 0.95) 0%, rgba(25, 20, 35, 0.92) 100%)",
+              background: `linear-gradient(135deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
               borderRadius: "4px",
               margin: "4px",
             }}
@@ -455,18 +362,15 @@ export function RightPanel({
               }
               className="w-full py-2 rounded text-sm font-bold transition-colors disabled:opacity-30"
               style={{
-                background:
-                  "linear-gradient(180deg, rgba(139, 69, 19, 0.7) 0%, rgba(139, 69, 19, 0.5) 100%)",
-                color: BANK_THEME.TEXT_GOLD,
-                border: `1px solid ${BANK_THEME.PANEL_BORDER}`,
+                background: `linear-gradient(180deg, ${theme.colors.border.decorative} 0%, ${theme.colors.border.decorative}80 100%)`,
+                color: theme.colors.accent.primary,
+                border: `1px solid ${theme.colors.border.decorative}`,
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background =
-                  "linear-gradient(180deg, rgba(139, 69, 19, 0.9) 0%, rgba(139, 69, 19, 0.7) 100%)";
+                e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.border.decorative}e6 0%, ${theme.colors.border.decorative}b3 100%)`;
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background =
-                  "linear-gradient(180deg, rgba(139, 69, 19, 0.7) 0%, rgba(139, 69, 19, 0.5) 100%)";
+                e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.border.decorative} 0%, ${theme.colors.border.decorative}80 100%)`;
               }}
             >
               Deposit Worn Items

@@ -8,6 +8,7 @@ export * from "./EntityManager";
 export * from "./NPCSystem";
 export * from "./MobNPCSystem";
 export * from "./MobNPCSpawnerSystem";
+export * from "./StationSpawnerSystem";
 export * from "./ItemSpawnerSystem";
 export * from "./ResourceSystem";
 export * from "./SpatialEntityRegistry";

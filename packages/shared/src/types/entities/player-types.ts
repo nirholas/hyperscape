@@ -170,10 +170,8 @@ export class PlayerMigration {
         defense: { level: old.defenseLevel, xp: old.defenseXp },
         constitution: { level: old.constitutionLevel, xp: old.constitutionXp },
         ranged: { level: old.rangedLevel, xp: old.rangedXp },
-        prayer: {
-          level: (old as { prayerLevel?: number }).prayerLevel || 1,
-          xp: (old as { prayerXp?: number }).prayerXp || 0,
-        },
+        magic: { level: 1, xp: 0 }, // Magic skill defaults
+        prayer: { level: 1, xp: 0 }, // Prayer skill defaults
         woodcutting: {
           level: old.woodcuttingLevel || 1,
           xp: old.woodcuttingXp || 0,
@@ -285,6 +283,7 @@ export class PlayerMigration {
       defense: defaultSkill,
       constitution: { level: 10, xp: 1154 }, // Constitution starts at level 10
       ranged: defaultSkill,
+      magic: defaultSkill,
       prayer: defaultSkill,
       woodcutting: defaultSkill,
       mining: defaultSkill,
@@ -391,13 +390,6 @@ export function isPlayer(obj: unknown): obj is Player {
   );
 }
 
-// Prayer state for UI
-export interface PlayerPrayerState {
-  points: number;
-  maxPoints: number;
-  activePrayers: string[];
-}
-
 // Player stats interface for UI
 export interface PlayerStats {
   level: number;
@@ -406,7 +398,8 @@ export interface PlayerStats {
   combatLevel: number;
   equipment: PlayerEquipmentItems;
   inCombat: boolean;
-  prayer?: PlayerPrayerState;
+  /** Prayer points (current/max) for prayer system UI */
+  prayerPoints?: { current: number; max: number };
 }
 
 // Attack style state

@@ -481,16 +481,16 @@ export function FieldFile({
   const [loading, setLoading] = useState<LoadingFile | null>(null);
   const kind = fileKinds[kindName];
   if (!kind) return null; // invalid?
-  const set = async (e) => {
+  const set = async (e: React.ChangeEvent<HTMLInputElement>) => {
     // trigger input rebuild
     const n = ++nRef.current;
     update();
     // get file
-    const file = e.target.files[0];
+    const file = e.target.files?.[0];
     if (!file) return;
     // check ext
-    const ext = file.name.split(".").pop().toLowerCase();
-    if (!kind.exts.includes(ext)) {
+    const ext = file.name.split(".").pop()?.toLowerCase();
+    if (!ext || !kind.exts.includes(ext)) {
       return console.error(
         `attempted invalid file extension for ${String(kindName)}: ${ext}`,
       );
@@ -523,12 +523,12 @@ export function FieldFile({
     setLoading(null);
     onChange(newValue);
   };
-  const remove = (e) => {
+  const remove = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     onChange(null);
   };
-  const handleDownload = (e) => {
+  const handleDownload = (e: React.MouseEvent) => {
     const fileValue = value as { url?: string; name?: string } | null;
     if (e.shiftKey && fileValue?.url && world.loader) {
       e.preventDefault();

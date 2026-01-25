@@ -145,7 +145,7 @@ export class DevStats extends System {
     this.container.id = "hyperscape-dev-stats";
     this.container.style.cssText = `
       position: fixed;
-      top: 12px;
+      top: 200px;
       left: 12px;
       z-index: 99999;
       font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Monaco', monospace;

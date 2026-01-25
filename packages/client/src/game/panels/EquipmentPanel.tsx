@@ -1,7 +1,15 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { COLORS } from "../../constants";
-import { useDroppable } from "@dnd-kit/core";
+import {
+  useDroppable,
+  useDragStore,
+  calculateCursorTooltipPosition,
+  TOOLTIP_SIZE_ESTIMATES,
+  useThemeStore,
+  useMobileLayout,
+} from "hs-kit";
+import { MOBILE_EQUIPMENT } from "../../constants";
+import { useContextMenuState } from "../../hooks";
 import {
   EquipmentSlotName,
   EventType,
@@ -9,16 +17,10 @@ import {
   uuid,
   CONTEXT_MENU_COLORS,
 } from "@hyperscape/shared";
-import type {
-  PlayerEquipmentItems,
-  Item,
-  PlayerStats,
-  ClientWorld,
-} from "../../types";
+import type { PlayerEquipmentItems, Item, ClientWorld } from "../../types";
 
 interface EquipmentPanelProps {
   equipment: PlayerEquipmentItems | null;
-  stats?: PlayerStats | null;
   world?: ClientWorld;
   onItemDrop?: (item: Item, slot: keyof typeof EquipmentSlotName) => void;
 }
@@ -26,8 +28,231 @@ interface EquipmentPanelProps {
 interface EquipmentSlot {
   key: string;
   label: string;
-  icon: string;
+  icon: React.ReactNode;
   item: Item | null;
+}
+
+// ============================================================================
+// SVG Icons for Equipment Slots (Clean monochrome design)
+// ============================================================================
+
+/** Helmet/Head slot icon */
+function HelmetIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M12 2C7 2 4 6 4 10v4c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-4c0-4-3-8-8-8z" />
+      <path d="M4 12h16" />
+      <path d="M8 16v2M16 16v2" />
+    </svg>
+  );
+}
+
+/** Weapon slot icon (crossed swords) */
+function WeaponIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M14.5 17.5L3 6V3h3l11.5 11.5" />
+      <path d="M13 19l6-6" />
+      <path d="M16 16l4 4" />
+      <path d="M19 21l2-2" />
+      <path d="M9.5 6.5L21 18V21h-3L6.5 9.5" />
+    </svg>
+  );
+}
+
+/** Body/Chest armor slot icon */
+function BodyIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M6 4l-2 2v12l2 2h12l2-2V6l-2-2" />
+      <path d="M6 4h12" />
+      <path d="M9 4v3c0 1.7 1.3 3 3 3s3-1.3 3-3V4" />
+      <path d="M4 8h2M18 8h2" />
+    </svg>
+  );
+}
+
+/** Shield slot icon */
+function ShieldIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    </svg>
+  );
+}
+
+/** Legs slot icon */
+function LegsIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M6 4h12v4l-1 12H7L6 8V4z" />
+      <path d="M12 4v16" />
+      <path d="M6 8h12" />
+    </svg>
+  );
+}
+
+// ============================================================================
+// Utility Button Icons
+// ============================================================================
+
+/** Stats icon (bar chart) */
+function StatsIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M18 20V10M12 20V4M6 20v-6" />
+    </svg>
+  );
+}
+
+/** Death/Skull icon */
+function DeathIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <circle cx="12" cy="10" r="7" />
+      <circle cx="9" cy="9" r="1.5" fill="currentColor" />
+      <circle cx="15" cy="9" r="1.5" fill="currentColor" />
+      <path d="M8 17v4M12 17v4M16 17v4" />
+      <path d="M9 14c.8.7 1.9 1 3 1s2.2-.3 3-1" />
+    </svg>
+  );
+}
+
+// ============================================================================
+// Character Silhouette (OSRS-style visual anchor)
+// ============================================================================
+
+/** Character silhouette displayed behind equipment slots */
+function CharacterSilhouette({ color }: { color: string }) {
+  return (
+    <svg
+      viewBox="0 0 80 120"
+      fill={color}
+      className="h-3/4 opacity-[0.12]"
+      style={{ filter: "blur(0.5px)" }}
+    >
+      {/* Head */}
+      <circle cx="40" cy="14" r="10" />
+      {/* Neck */}
+      <rect x="36" y="24" width="8" height="6" rx="1" />
+      {/* Torso */}
+      <path d="M22 30 L58 30 L54 70 L26 70 Z" />
+      {/* Arms */}
+      <rect x="10" y="32" width="12" height="32" rx="4" />
+      <rect x="58" y="32" width="12" height="32" rx="4" />
+      {/* Legs */}
+      <rect x="27" y="70" width="11" height="38" rx="3" />
+      <rect x="42" y="70" width="11" height="38" rx="3" />
+    </svg>
+  );
+}
+
+// ============================================================================
+// Utility Button Component
+// ============================================================================
+
+interface UtilityButtonProps {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}
+
+function UtilityButton({
+  icon,
+  label,
+  onClick,
+  disabled,
+  compact,
+}: UtilityButtonProps & { compact?: boolean }) {
+  const theme = useThemeStore((s) => s.theme);
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`flex items-center justify-center rounded transition-all duration-150 hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed ${compact ? "flex-row gap-1.5 px-2 py-1.5" : "flex-col gap-1 px-3 py-2"}`}
+      title={label}
+      style={{
+        background: `${theme.colors.background.tertiary}80`,
+        border: `1px solid ${theme.colors.border.default}60`,
+      }}
+    >
+      <div
+        className={compact ? "w-4 h-4" : "w-5 h-5"}
+        style={{ color: theme.colors.accent.primary }}
+      >
+        {icon}
+      </div>
+      <span
+        style={{
+          fontSize: compact ? "10px" : theme.typography.fontSize.xs,
+          color: theme.colors.text.secondary,
+          textTransform: "uppercase",
+          letterSpacing: "0.05em",
+          fontWeight: theme.typography.fontWeight.medium,
+        }}
+      >
+        {label}
+      </span>
+    </button>
+  );
 }
 
 interface DroppableEquipmentSlotProps {
@@ -48,83 +273,170 @@ interface EquipmentHoverState {
 }
 
 /**
- * Render equipment hover tooltip content
- * Extracted for better readability and testability
+ * Render enhanced equipment hover tooltip content
+ * Shows item stats, rarity, requirements, and hints
  */
 function renderEquipmentHoverTooltip(
   hoverState: EquipmentHoverState,
+  theme: ReturnType<typeof useThemeStore.getState>["theme"],
 ): React.ReactNode {
   const item = hoverState.slot.item;
   if (!item) return null;
+
+  // Get full item data for additional info
+  const itemData = getItem(item.id);
+  const rarity = itemData?.rarity || "common";
+  const equipSlot = itemData?.equipSlot || hoverState.slot.label;
+
+  // Rarity colors (matching hs-kit RARITY_COLORS)
+  const rarityColors: Record<string, string> = {
+    common: "#9d9d9d",
+    uncommon: "#1eff00",
+    rare: "#0070dd",
+    epic: "#a335ee",
+    legendary: "#ff8000",
+    mythic: "#e6cc80",
+  };
+  const rarityColor = rarityColors[rarity] || theme.colors.accent.primary;
+
+  // Use hs-kit tooltip positioning with edge detection
+  const { left, top } = calculateCursorTooltipPosition(
+    { x: hoverState.position.x, y: hoverState.position.y },
+    TOOLTIP_SIZE_ESTIMATES.large,
+    8,
+  );
+
+  const hasBonuses =
+    item.bonuses &&
+    ((item.bonuses.attack !== undefined && item.bonuses.attack !== 0) ||
+      (item.bonuses.defense !== undefined && item.bonuses.defense !== 0) ||
+      (item.bonuses.strength !== undefined && item.bonuses.strength !== 0));
 
   return createPortal(
     <div
       className="pointer-events-none"
       style={{
         position: "fixed",
-        left: hoverState.position.x + 16,
-        top: hoverState.position.y + 16,
-        zIndex: 99999,
-        background:
-          "linear-gradient(135deg, rgba(20, 20, 30, 0.98) 0%, rgba(30, 25, 40, 0.95) 100%)",
-        border: "2px solid rgba(242, 208, 138, 0.5)",
-        borderRadius: "4px",
-        padding: "8px 12px",
-        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.8)",
-        minWidth: "150px",
-        maxWidth: "250px",
+        left,
+        top,
+        zIndex: theme.zIndex.tooltip,
+        background: `linear-gradient(180deg, ${theme.colors.background.primary} 0%, ${theme.colors.background.secondary} 100%)`,
+        border: `1px solid ${theme.colors.border.hover}`,
+        borderRadius: `${theme.borderRadius.md}px`,
+        padding: "10px 12px",
+        boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
+        minWidth: "160px",
+        maxWidth: "240px",
       }}
     >
-      {/* Item name */}
+      {/* Item name with rarity color */}
       <div
         style={{
-          color: COLORS.ACCENT,
-          fontWeight: "bold",
-          marginBottom: "6px",
-          fontSize: "13px",
+          color: rarityColor,
+          fontWeight: theme.typography.fontWeight.bold,
+          fontSize: theme.typography.fontSize.sm,
+          marginBottom: "2px",
         }}
       >
         {item.name}
       </div>
 
-      {/* Bonuses */}
-      {item.bonuses && (
-        <div style={{ fontSize: "11px" }}>
-          {item.bonuses.attack !== undefined && item.bonuses.attack !== 0 && (
-            <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
-              ⚔️ Attack:{" "}
-              <span style={{ color: "#22c55e" }}>+{item.bonuses.attack}</span>
+      {/* Item type and rarity */}
+      <div
+        style={{
+          fontSize: "10px",
+          color: theme.colors.text.muted,
+          marginBottom: hasBonuses ? "8px" : "0",
+          textTransform: "capitalize",
+        }}
+      >
+        {equipSlot} • {rarity}
+      </div>
+
+      {/* Stat bonuses */}
+      {hasBonuses && (
+        <div
+          style={{
+            fontSize: "11px",
+            borderTop: `1px solid ${theme.colors.border.default}40`,
+            paddingTop: "6px",
+            marginBottom: "6px",
+          }}
+        >
+          {item.bonuses!.attack !== undefined && item.bonuses!.attack !== 0 && (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                color: theme.colors.text.secondary,
+                marginBottom: "2px",
+              }}
+            >
+              <span>Attack</span>
+              <span style={{ color: theme.colors.state.success }}>
+                +{item.bonuses!.attack}
+              </span>
             </div>
           )}
-          {item.bonuses.defense !== undefined && item.bonuses.defense !== 0 && (
-            <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
-              🛡️ Defense:{" "}
-              <span style={{ color: "#22c55e" }}>+{item.bonuses.defense}</span>
-            </div>
-          )}
-          {item.bonuses.strength !== undefined &&
-            item.bonuses.strength !== 0 && (
-              <div style={{ color: "rgba(242, 208, 138, 0.8)" }}>
-                💪 Strength:{" "}
-                <span style={{ color: "#22c55e" }}>
-                  +{item.bonuses.strength}
+          {item.bonuses!.defense !== undefined &&
+            item.bonuses!.defense !== 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  color: theme.colors.text.secondary,
+                  marginBottom: "2px",
+                }}
+              >
+                <span>Defense</span>
+                <span style={{ color: theme.colors.state.success }}>
+                  +{item.bonuses!.defense}
+                </span>
+              </div>
+            )}
+          {item.bonuses!.strength !== undefined &&
+            item.bonuses!.strength !== 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  color: theme.colors.text.secondary,
+                }}
+              >
+                <span>Strength</span>
+                <span style={{ color: theme.colors.state.success }}>
+                  +{item.bonuses!.strength}
                 </span>
               </div>
             )}
         </div>
       )}
 
+      {/* Level requirement if any */}
+      {itemData?.requirements?.level && (
+        <div
+          style={{
+            fontSize: "10px",
+            color: theme.colors.text.muted,
+            marginBottom: "4px",
+          }}
+        >
+          Requires Level {itemData.requirements.level}
+        </div>
+      )}
+
       {/* Click hint */}
       <div
         style={{
-          fontSize: "10px",
-          color: "rgba(150, 150, 150, 0.8)",
+          fontSize: "9px",
+          color: theme.colors.text.muted,
           marginTop: "6px",
-          borderTop: "1px solid rgba(242, 208, 138, 0.2)",
           paddingTop: "6px",
+          borderTop: `1px solid ${theme.colors.border.default}30`,
+          opacity: 0.7,
         }}
       >
-        Click to unequip
+        Click to unequip • Right-click for options
       </div>
     </div>,
     document.body,
@@ -139,10 +451,41 @@ function DroppableEquipmentSlot({
   onHoverEnd,
   onContextMenuOpen,
 }: DroppableEquipmentSlotProps) {
+  const theme = useThemeStore((s) => s.theme);
+  const { shouldUseMobileUI } = useMobileLayout();
   const { isOver, setNodeRef } = useDroppable({
     id: `equipment-${slot.key}`,
     data: { slot: slot.key },
   });
+
+  // Check if the currently dragged item can be equipped in this slot
+  const dragItem = useDragStore((state) => state.item);
+  const isDragging = useDragStore((state) => state.isDragging);
+
+  // Determine if the dragged item is valid for this slot
+  const isValidDrop = useMemo(() => {
+    if (!isDragging || !dragItem?.id?.toString().startsWith("inventory-")) {
+      return false; // Not dragging an inventory item
+    }
+
+    // Get item data from drag context
+    const dragData = dragItem.data as { item?: { itemId: string } } | undefined;
+    if (!dragData?.item?.itemId) return true; // No data, assume valid (server will validate)
+
+    const itemData = getItem(dragData.item.itemId);
+    if (!itemData) return true; // Unknown item, assume valid
+
+    const itemEquipSlot = itemData.equipSlot;
+    // Map 2h weapons to weapon slot
+    const normalizedSlot = itemEquipSlot === "2h" ? "weapon" : itemEquipSlot;
+
+    // Check if item matches this slot
+    return !normalizedSlot || normalizedSlot === slot.key;
+  }, [isDragging, dragItem?.id, dragItem?.data, slot.key]);
+
+  // Is there an inventory item being dragged?
+  const isDraggingInventoryItem =
+    isDragging && dragItem?.id?.toString().startsWith("inventory-");
 
   const isEmpty = !slot.item;
 
@@ -208,78 +551,110 @@ function DroppableEquipmentSlot({
         });
         window.dispatchEvent(evt);
       }}
-      className="w-full h-full rounded transition-all duration-200 cursor-pointer group relative"
+      className="w-full h-full rounded transition-all duration-150 cursor-pointer group relative"
       style={{
-        background: isEmpty
-          ? "rgba(0, 0, 0, 0.35)"
-          : "linear-gradient(135deg, rgba(40, 35, 50, 0.8) 0%, rgba(30, 25, 40, 0.9) 100%)",
-        borderWidth: "2px",
-        borderStyle: "solid",
-        borderColor: isOver
-          ? "rgba(242, 208, 138, 0.8)"
-          : isEmpty
-            ? "rgba(242, 208, 138, 0.25)"
-            : "rgba(242, 208, 138, 0.5)",
-        boxShadow: isEmpty
-          ? "inset 0 2px 4px rgba(0, 0, 0, 0.3)"
-          : "0 2px 8px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(242, 208, 138, 0.1)",
+        // Embossed style matching inventory
+        background:
+          isOver && isValidDrop
+            ? "rgba(242, 208, 138, 0.15)"
+            : isOver && !isValidDrop
+              ? "rgba(220, 80, 80, 0.15)"
+              : isDraggingInventoryItem && isValidDrop
+                ? "rgba(242, 208, 138, 0.08)"
+                : isEmpty
+                  ? "rgba(12, 10, 8, 0.95)"
+                  : "rgba(20, 16, 12, 0.95)",
+        borderWidth: "1px",
+        borderStyle: isOver
+          ? "solid"
+          : isDraggingInventoryItem && isValidDrop
+            ? "dashed"
+            : "solid",
+        borderColor:
+          isOver && isValidDrop
+            ? "rgba(100, 180, 100, 0.7)"
+            : isOver && !isValidDrop
+              ? "rgba(180, 80, 80, 0.7)"
+              : isDraggingInventoryItem && isValidDrop
+                ? "rgba(180, 160, 100, 0.5)"
+                : "rgba(0, 0, 0, 0.4)",
+        // Embossed shadows: dark on top-left, subtle light on bottom-right
+        boxShadow:
+          isOver && isValidDrop
+            ? "inset 0 0 8px rgba(100, 180, 100, 0.3)"
+            : isOver && !isValidDrop
+              ? "inset 0 0 8px rgba(180, 80, 80, 0.3)"
+              : isEmpty
+                ? "inset 2px 2px 4px rgba(0, 0, 0, 0.6), inset -1px -1px 2px rgba(60, 50, 40, 0.1)"
+                : "inset 2px 2px 4px rgba(0, 0, 0, 0.5), inset -1px -1px 2px rgba(80, 70, 50, 0.1)",
       }}
     >
-      {/* Slot Label */}
+      {/* Slot Label - subtle, positioned at top */}
       <div
-        className="absolute top-1 left-1.5 text-[9px] font-medium uppercase tracking-wider"
+        className={`absolute left-0 right-0 text-center ${shouldUseMobileUI ? "top-1" : "top-1.5"}`}
         style={{
-          color: "rgba(242, 208, 138, 0.6)",
-          textShadow: "0 1px 2px rgba(0, 0, 0, 0.8)",
+          fontSize: shouldUseMobileUI ? "8px" : "10px",
+          fontWeight: 600,
+          color: "rgba(200, 180, 140, 0.7)",
+          textShadow: "0 1px 2px rgba(0, 0, 0, 0.9)",
+          textTransform: "uppercase",
+          letterSpacing: "0.05em",
         }}
       >
         {slot.label}
       </div>
 
       {/* Slot Content */}
-      <div className="flex flex-col items-center justify-center h-full pt-3">
+      <div
+        className={`flex flex-col items-center justify-center h-full ${shouldUseMobileUI ? "pt-2.5" : "pt-3"}`}
+      >
         {isEmpty ? (
-          <span
-            className="transition-transform duration-200 group-hover:scale-110"
+          <div
+            className="transition-all duration-150 group-hover:scale-105 group-hover:opacity-40"
             style={{
-              fontSize: "clamp(1.5rem, 3vw, 2rem)",
-              filter: "grayscale(100%) opacity(0.3)",
+              width: shouldUseMobileUI ? "20px" : "26px",
+              height: shouldUseMobileUI ? "20px" : "26px",
+              color: "rgba(180, 160, 120, 0.3)",
             }}
           >
             {slot.icon}
-          </span>
+          </div>
         ) : (
           <>
-            <span
-              className="transition-transform duration-200 group-hover:scale-110 mb-1"
+            <div
+              className="transition-transform duration-150 group-hover:scale-105"
               style={{
-                fontSize: "clamp(1.25rem, 2.5vw, 1.5rem)",
-                filter: "drop-shadow(0 2px 4px rgba(0, 0, 0, 0.8))",
+                width: shouldUseMobileUI ? "18px" : "24px",
+                height: shouldUseMobileUI ? "18px" : "24px",
+                color: "#d4b87a",
+                filter: "drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7))",
               }}
             >
               {slot.icon}
-            </span>
+            </div>
             <div
-              className="text-center px-1"
+              className="text-center px-0.5 mt-0.5"
               style={{
-                fontSize: "clamp(0.563rem, 1vw, 0.625rem)",
-                color: "rgba(242, 208, 138, 0.9)",
-                lineHeight: "1.2",
+                fontSize: shouldUseMobileUI ? "8px" : "9px",
+                color: "rgba(220, 200, 160, 0.9)",
+                fontWeight: 500,
+                lineHeight: "1.1",
                 maxWidth: "100%",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
+                textShadow: "0 1px 2px rgba(0, 0, 0, 0.8)",
               }}
             >
               {slot.item!.name}
             </div>
             {(slot.item!.quantity ?? 1) > 1 && (
               <div
-                className="absolute bottom-1 right-1.5 font-bold"
+                className="absolute bottom-0.5 right-1 font-bold"
                 style={{
-                  fontSize: "clamp(0.625rem, 1.1vw, 0.75rem)",
-                  color: COLORS.ACCENT,
-                  textShadow: "0 1px 2px rgba(0, 0, 0, 0.8)",
+                  fontSize: shouldUseMobileUI ? "8px" : "9px",
+                  color: "#d4b87a",
+                  textShadow: "0 1px 2px rgba(0, 0, 0, 0.9)",
                 }}
               >
                 {slot.item!.quantity ?? 1}
@@ -292,10 +667,9 @@ function DroppableEquipmentSlot({
       {/* Hover Glow Effect */}
       {!isEmpty && (
         <div
-          className="absolute inset-0 rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none"
+          className="absolute inset-0 rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none"
           style={{
-            background:
-              "radial-gradient(circle at center, rgba(242, 208, 138, 0.1) 0%, transparent 70%)",
+            background: `radial-gradient(circle at center, ${theme.colors.accent.primary}15 0%, transparent 70%)`,
           }}
         />
       )}
@@ -305,113 +679,85 @@ function DroppableEquipmentSlot({
 
 export function EquipmentPanel({
   equipment,
-  stats,
   world,
   onItemDrop: _onItemDrop,
 }: EquipmentPanelProps) {
+  const theme = useThemeStore((s) => s.theme);
+  const { shouldUseMobileUI } = useMobileLayout();
   // RS3-style hover tooltip state
   const [hoverState, setHoverState] = useState<EquipmentHoverState | null>(
     null,
   );
 
   // Track if context menu is open (suppress hover tooltips while open)
-  const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
+  const { isContextMenuOpen, setContextMenuOpen } = useContextMenuState();
 
-  // Track total weight for display (synced from server via PlayerLocal)
-  const [totalWeight, setTotalWeight] = useState(0);
-
-  // Subscribe to weight updates from server
-  useEffect(() => {
-    if (!world) return;
-
-    // Initialize with current weight
-    const player = world.getPlayer?.() as {
-      totalWeight?: number;
-      id?: string;
-    } | null;
-    if (player?.totalWeight !== undefined) {
-      setTotalWeight(player.totalWeight);
-    }
-
-    // Listen for weight change events
-    const handleWeightChanged = (...args: unknown[]) => {
-      const data = args[0] as { playerId: string; weight: number };
-      const localPlayer = world.getPlayer?.();
-      if (localPlayer && data.playerId === localPlayer.id) {
-        setTotalWeight(data.weight);
-      }
-    };
-
-    world.on(EventType.PLAYER_WEIGHT_CHANGED, handleWeightChanged);
-
-    return () => {
-      world.off(EventType.PLAYER_WEIGHT_CHANGED, handleWeightChanged);
-    };
-  }, [world]);
-
-  // Listen for context menu close to re-enable hover tooltips
-  useEffect(() => {
-    const handleContextMenuClose = () => {
-      setIsContextMenuOpen(false);
-    };
-
-    window.addEventListener("contextmenu:close", handleContextMenuClose);
-    window.addEventListener("contextmenu:select", handleContextMenuClose);
-
-    return () => {
-      window.removeEventListener("contextmenu:close", handleContextMenuClose);
-      window.removeEventListener("contextmenu:select", handleContextMenuClose);
-    };
-  }, []);
-
-  // Equipment slots with icons for paperdoll layout
+  // Equipment slots with SVG icons for paperdoll layout
   const slots: EquipmentSlot[] = [
     {
       key: EquipmentSlotName.HELMET,
       label: "Head",
-      icon: "⛑️",
+      icon: <HelmetIcon className="w-full h-full" />,
       item: equipment?.helmet || null,
     },
     {
       key: EquipmentSlotName.BODY,
       label: "Body",
-      icon: "🎽",
+      icon: <BodyIcon className="w-full h-full" />,
       item: equipment?.body || null,
     },
     {
       key: EquipmentSlotName.LEGS,
       label: "Legs",
-      icon: "👖",
+      icon: <LegsIcon className="w-full h-full" />,
       item: equipment?.legs || null,
     },
     {
       key: EquipmentSlotName.WEAPON,
       label: "Weapon",
-      icon: "⚔️",
+      icon: <WeaponIcon className="w-full h-full" />,
       item: equipment?.weapon || null,
     },
     {
       key: EquipmentSlotName.SHIELD,
       label: "Shield",
-      icon: "🛡️",
+      icon: <ShieldIcon className="w-full h-full" />,
       item: equipment?.shield || null,
     },
     // Arrows slot hidden for melee-only MVP
   ];
 
-  // Calculate total bonuses from equipped items (melee-only MVP)
-  const totalStats = slots.reduce(
-    (acc, slot) => {
-      if (slot.item) {
-        // Use bonuses field for equipment stat bonuses (not stats field)
-        acc.attack += slot.item.bonuses?.attack || 0;
-        acc.defense += slot.item.bonuses?.defense || 0;
-        acc.strength += slot.item.bonuses?.strength || 0;
+  // Calculate total equipment bonuses for stats display
+  const totalBonuses = useMemo(() => {
+    let attack = 0;
+    let defense = 0;
+    let strength = 0;
+
+    slots.forEach((slot) => {
+      if (slot.item?.bonuses) {
+        attack += slot.item.bonuses.attack || 0;
+        defense += slot.item.bonuses.defense || 0;
+        strength += slot.item.bonuses.strength || 0;
       }
-      return acc;
-    },
-    { attack: 0, defense: 0, strength: 0 },
-  );
+    });
+
+    return { attack, defense, strength };
+  }, [equipment]);
+
+  // Utility button handlers
+  const handleOpenStats = () => {
+    // Open the character stats panel via UI event
+    if (world) {
+      world.emit(EventType.UI_OPEN_PANE, { pane: "stats" });
+    }
+  };
+
+  const handleOpenDeath = () => {
+    // Open the items kept on death panel via UI event
+    if (world) {
+      world.emit(EventType.UI_OPEN_PANE, { pane: "death" });
+    }
+  };
 
   // RS3-style: Click immediately unequips
   const handleSlotClick = (slot: EquipmentSlot) => {
@@ -451,29 +797,8 @@ export function EquipmentPanel({
   };
 
   const handleContextMenuOpen = () => {
-    setIsContextMenuOpen(true);
+    setContextMenuOpen(true);
   };
-
-  // Get player stats with proper defaults
-  const playerLevel = stats?.level || 1;
-  // Calculate combat level using OSRS formula (melee-only MVP)
-  const combatLevel = stats?.skills
-    ? (() => {
-        const s = stats.skills;
-        const base =
-          0.25 * ((s.defense?.level || 1) + (s.constitution?.level || 10));
-        const melee =
-          0.325 * ((s.attack?.level || 1) + (s.strength?.level || 1));
-        return Math.floor(base + melee);
-      })()
-    : 1;
-  const health = {
-    current: stats?.health?.current ?? 100,
-    max: stats?.health?.max ?? 100,
-  };
-  const attackSkill = stats?.skills?.attack?.level || 1;
-  const strengthSkill = stats?.skills?.strength?.level || 1;
-  const defenseSkill = stats?.skills?.defense?.level || 1;
 
   useEffect(() => {
     const onCtxSelect = (evt: Event) => {
@@ -537,397 +862,282 @@ export function EquipmentPanel({
   // Helper to find slot by key
   const getSlot = (key: string) => slots.find((s) => s.key === key) || null;
 
-  return (
-    <>
-      <div className="flex flex-col h-full overflow-hidden">
-        {/* Main Content: Paperdoll + Stats */}
-        <div className="flex-1 flex overflow-hidden gap-1">
-          {/* Left Side: Paperdoll */}
-          <div className="flex-1 flex flex-col" style={{ minWidth: "60%" }}>
-            <div
-              className="border rounded flex-1"
-              style={{
-                background:
-                  "linear-gradient(135deg, rgba(20, 20, 30, 0.95) 0%, rgba(25, 20, 35, 0.92) 100%)",
-                borderColor: "rgba(242, 208, 138, 0.35)",
-                padding: "clamp(0.25rem, 0.8vw, 0.5rem)",
-                boxShadow: "0 2px 4px rgba(0, 0, 0, 0.5)",
-              }}
-            >
-              {/* Paperdoll Grid Layout - 3 rows for melee-only MVP */}
-              <div
-                className="grid grid-cols-3 gap-1 h-full"
-                style={{ gridTemplateRows: "repeat(3, 1fr)" }}
-              >
-                {/* Row 1: Head slot centered */}
-                <div />
-                <div className="w-full h-full">
-                  <DroppableEquipmentSlot
-                    slot={getSlot(EquipmentSlotName.HELMET)!}
-                    onSlotClick={handleSlotClick}
-                    onHoverStart={handleHoverStart}
-                    onHoverMove={handleHoverMove}
-                    onHoverEnd={handleHoverEnd}
-                    onContextMenuOpen={handleContextMenuOpen}
-                  />
-                </div>
-                <div />
-
-                {/* Row 2: Weapon, Body, Shield */}
-                <div className="w-full h-full">
-                  <DroppableEquipmentSlot
-                    slot={getSlot(EquipmentSlotName.WEAPON)!}
-                    onSlotClick={handleSlotClick}
-                    onHoverStart={handleHoverStart}
-                    onHoverMove={handleHoverMove}
-                    onHoverEnd={handleHoverEnd}
-                    onContextMenuOpen={handleContextMenuOpen}
-                  />
-                </div>
-                <div className="w-full h-full">
-                  <DroppableEquipmentSlot
-                    slot={getSlot(EquipmentSlotName.BODY)!}
-                    onSlotClick={handleSlotClick}
-                    onHoverStart={handleHoverStart}
-                    onHoverMove={handleHoverMove}
-                    onHoverEnd={handleHoverEnd}
-                    onContextMenuOpen={handleContextMenuOpen}
-                  />
-                </div>
-                <div className="w-full h-full">
-                  <DroppableEquipmentSlot
-                    slot={getSlot(EquipmentSlotName.SHIELD)!}
-                    onSlotClick={handleSlotClick}
-                    onHoverStart={handleHoverStart}
-                    onHoverMove={handleHoverMove}
-                    onHoverEnd={handleHoverEnd}
-                    onContextMenuOpen={handleContextMenuOpen}
-                  />
-                </div>
-
-                {/* Row 3: Legs centered */}
-                <div />
-                <div className="w-full h-full">
-                  <DroppableEquipmentSlot
-                    slot={getSlot(EquipmentSlotName.LEGS)!}
-                    onSlotClick={handleSlotClick}
-                    onHoverStart={handleHoverStart}
-                    onHoverMove={handleHoverMove}
-                    onHoverEnd={handleHoverEnd}
-                    onContextMenuOpen={handleContextMenuOpen}
-                  />
-                </div>
-                <div />
-                {/* Row 4: Arrows slot hidden for melee-only MVP */}
-              </div>
-            </div>
-          </div>
-
-          {/* Right Side: Stats Panel */}
-          <div className="flex flex-col gap-1" style={{ width: "40%" }}>
-            {/* Player Info Card */}
-            <div
-              className="border rounded p-1"
-              style={{
-                background:
-                  "linear-gradient(135deg, rgba(20, 20, 30, 0.95) 0%, rgba(25, 20, 35, 0.92) 100%)",
-                borderColor: "rgba(242, 208, 138, 0.35)",
-                boxShadow: "0 2px 4px rgba(0, 0, 0, 0.5)",
-              }}
-            >
-              {/* Level and CB */}
-              <div className="flex items-center justify-center mb-1 gap-1.5">
-                <div
-                  style={{
-                    fontSize: "clamp(0.625rem, 1.1vw, 0.75rem)",
-                    color: "rgba(242, 208, 138, 0.8)",
-                  }}
-                >
-                  Lvl{" "}
-                  <span className="font-bold" style={{ color: COLORS.ACCENT }}>
-                    {playerLevel}
-                  </span>
-                </div>
-                <div
-                  style={{
-                    fontSize: "clamp(0.625rem, 1.1vw, 0.75rem)",
-                    color: "rgba(242, 208, 138, 0.8)",
-                  }}
-                >
-                  CB{" "}
-                  <span className="font-bold" style={{ color: COLORS.ACCENT }}>
-                    {combatLevel}
-                  </span>
-                </div>
-              </div>
-
-              {/* Health */}
-              <div className="flex items-center mb-0.5 gap-1">
-                <span style={{ fontSize: "clamp(0.563rem, 1vw, 0.625rem)" }}>
-                  ❤️
-                </span>
-                <span
-                  style={{
-                    fontSize: "clamp(0.563rem, 1vw, 0.625rem)",
-                    color: "rgba(242, 208, 138, 0.9)",
-                    fontWeight: "bold",
-                  }}
-                >
-                  {health.current}/{health.max}
-                </span>
-              </div>
-              <div
-                className="rounded overflow-hidden"
-                style={{
-                  background: "rgba(0, 0, 0, 0.5)",
-                  height: "clamp(6px, 1.2vw, 8px)",
-                  border: "1px solid rgba(220, 38, 38, 0.3)",
-                }}
-              >
-                <div
-                  className="h-full transition-all duration-300"
-                  style={{
-                    background:
-                      "linear-gradient(90deg, rgba(220, 38, 38, 0.8) 0%, rgba(239, 68, 68, 0.9) 100%)",
-                    width: `${(health.current / health.max) * 100}%`,
-                    boxShadow: "0 0 8px rgba(220, 38, 38, 0.5)",
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* Combat Stats */}
-            <div
-              className="border rounded p-1 flex-1 overflow-y-auto noscrollbar"
-              style={{
-                background:
-                  "linear-gradient(135deg, rgba(20, 20, 30, 0.95) 0%, rgba(25, 20, 35, 0.92) 100%)",
-                borderColor: "rgba(242, 208, 138, 0.35)",
-                boxShadow: "0 2px 4px rgba(0, 0, 0, 0.5)",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: "clamp(0.563rem, 1vw, 0.625rem)",
-                  color: "rgba(242, 208, 138, 0.9)",
-                  fontWeight: "bold",
-                  marginBottom: "clamp(0.25rem, 0.5vw, 0.375rem)",
-                }}
-              >
-                Combat Stats
-              </div>
-              <div className="space-y-0.5">
-                {/* Attack */}
-                <div className="flex justify-between items-center">
-                  <div
-                    className="flex items-center"
-                    style={{ gap: "clamp(0.125rem, 0.3vw, 0.2rem)" }}
-                  >
-                    <span
-                      style={{ fontSize: "clamp(0.563rem, 1vw, 0.625rem)" }}
-                    >
-                      ⚔️
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "clamp(0.563rem, 1vw, 0.625rem)",
-                        color: "rgba(242, 208, 138, 0.8)",
-                      }}
-                    >
-                      Attack
-                    </span>
-                  </div>
-                  <div
-                    style={{
-                      fontSize: "clamp(0.563rem, 1vw, 0.625rem)",
-                      color: COLORS.ACCENT,
-                      fontWeight: "bold",
-                    }}
-                  >
-                    {attackSkill}
-                  </div>
-                </div>
-
-                {/* Strength */}
-                <div className="flex justify-between items-center">
-                  <div
-                    className="flex items-center"
-                    style={{ gap: "clamp(0.125rem, 0.3vw, 0.2rem)" }}
-                  >
-                    <span
-                      style={{ fontSize: "clamp(0.563rem, 1vw, 0.625rem)" }}
-                    >
-                      💪
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "clamp(0.563rem, 1vw, 0.625rem)",
-                        color: "rgba(242, 208, 138, 0.8)",
-                      }}
-                    >
-                      Strength
-                    </span>
-                  </div>
-                  <div
-                    style={{
-                      fontSize: "clamp(0.563rem, 1vw, 0.625rem)",
-                      color: COLORS.ACCENT,
-                      fontWeight: "bold",
-                    }}
-                  >
-                    {strengthSkill}
-                  </div>
-                </div>
-
-                {/* Defense */}
-                <div className="flex justify-between items-center">
-                  <div
-                    className="flex items-center"
-                    style={{ gap: "clamp(0.125rem, 0.3vw, 0.2rem)" }}
-                  >
-                    <span
-                      style={{ fontSize: "clamp(0.563rem, 1vw, 0.625rem)" }}
-                    >
-                      🛡️
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "clamp(0.563rem, 1vw, 0.625rem)",
-                        color: "rgba(242, 208, 138, 0.8)",
-                      }}
-                    >
-                      Defense
-                    </span>
-                  </div>
-                  <div
-                    style={{
-                      fontSize: "clamp(0.563rem, 1vw, 0.625rem)",
-                      color: COLORS.ACCENT,
-                      fontWeight: "bold",
-                    }}
-                  >
-                    {defenseSkill}
-                  </div>
-                </div>
-              </div>
-
-              {/* Equipment Bonuses Section */}
-              <div
-                style={{
-                  marginTop: "clamp(0.375rem, 0.8vw, 0.5rem)",
-                  paddingTop: "clamp(0.375rem, 0.8vw, 0.5rem)",
-                  borderTop: "1px solid rgba(242, 208, 138, 0.2)",
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: "clamp(0.563rem, 1vw, 0.625rem)",
-                    color: "rgba(242, 208, 138, 0.9)",
-                    fontWeight: "bold",
-                    marginBottom: "clamp(0.25rem, 0.5vw, 0.375rem)",
-                  }}
-                >
-                  Equipment Bonuses
-                </div>
-                <div className="space-y-0.5">
-                  <div className="flex justify-between">
-                    <span
-                      style={{
-                        fontSize: "clamp(0.563rem, 1vw, 0.625rem)",
-                        color: "rgba(242, 208, 138, 0.8)",
-                      }}
-                    >
-                      ⚔️ Attack Bonus
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "clamp(0.563rem, 1vw, 0.625rem)",
-                        color: "#22c55e",
-                        fontWeight: "bold",
-                      }}
-                    >
-                      +{totalStats.attack}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span
-                      style={{
-                        fontSize: "clamp(0.563rem, 1vw, 0.625rem)",
-                        color: "rgba(242, 208, 138, 0.8)",
-                      }}
-                    >
-                      🛡️ Defense Bonus
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "clamp(0.563rem, 1vw, 0.625rem)",
-                        color: "#22c55e",
-                        fontWeight: "bold",
-                      }}
-                    >
-                      +{totalStats.defense}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span
-                      style={{
-                        fontSize: "clamp(0.563rem, 1vw, 0.625rem)",
-                        color: "rgba(242, 208, 138, 0.8)",
-                      }}
-                    >
-                      💪 Strength Bonus
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "clamp(0.563rem, 1vw, 0.625rem)",
-                        color: "#22c55e",
-                        fontWeight: "bold",
-                      }}
-                    >
-                      +{totalStats.strength}
-                    </span>
-                  </div>
-                  {/* Ranged bonus hidden for melee-only MVP */}
-                </div>
-              </div>
-
-              {/* Weight Section */}
-              <div
-                style={{
-                  marginTop: "clamp(0.375rem, 0.8vw, 0.5rem)",
-                  paddingTop: "clamp(0.375rem, 0.8vw, 0.5rem)",
-                  borderTop: "1px solid rgba(242, 208, 138, 0.2)",
-                }}
-              >
-                <div className="flex justify-between">
-                  <span
-                    style={{
-                      fontSize: "clamp(0.563rem, 1vw, 0.625rem)",
-                      color: "rgba(242, 208, 138, 0.8)",
-                    }}
-                  >
-                    ⚖️ Total Weight
-                  </span>
-                  <span
-                    style={{
-                      fontSize: "clamp(0.563rem, 1vw, 0.625rem)",
-                      color: COLORS.ACCENT,
-                      fontWeight: "bold",
-                    }}
-                  >
-                    {totalWeight.toFixed(1)} kg
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+  // Mobile layout renders a compact 2-column grid
+  // Desktop layout renders the traditional 3x3 paperdoll
+  const renderMobileEquipmentGrid = () => (
+    <div
+      className="grid"
+      style={{
+        gridTemplateColumns: `repeat(${MOBILE_EQUIPMENT.columns}, 1fr)`,
+        gap: `${MOBILE_EQUIPMENT.gap}px`,
+        padding: `${MOBILE_EQUIPMENT.padding}px`,
+      }}
+    >
+      {/* Row 1: Weapon / Shield */}
+      <div
+        style={{
+          height: MOBILE_EQUIPMENT.slotHeight,
+          containerType: "size",
+        }}
+      >
+        <DroppableEquipmentSlot
+          slot={getSlot(EquipmentSlotName.WEAPON)!}
+          onSlotClick={handleSlotClick}
+          onHoverStart={handleHoverStart}
+          onHoverMove={handleHoverMove}
+          onHoverEnd={handleHoverEnd}
+          onContextMenuOpen={handleContextMenuOpen}
+        />
+      </div>
+      <div
+        style={{
+          height: MOBILE_EQUIPMENT.slotHeight,
+          containerType: "size",
+        }}
+      >
+        <DroppableEquipmentSlot
+          slot={getSlot(EquipmentSlotName.SHIELD)!}
+          onSlotClick={handleSlotClick}
+          onHoverStart={handleHoverStart}
+          onHoverMove={handleHoverMove}
+          onHoverEnd={handleHoverEnd}
+          onContextMenuOpen={handleContextMenuOpen}
+        />
       </div>
 
-      {/* RS3-style hover tooltip - rendered via portal */}
+      {/* Row 2: Head / Body */}
+      <div
+        style={{
+          height: MOBILE_EQUIPMENT.slotHeight,
+          containerType: "size",
+        }}
+      >
+        <DroppableEquipmentSlot
+          slot={getSlot(EquipmentSlotName.HELMET)!}
+          onSlotClick={handleSlotClick}
+          onHoverStart={handleHoverStart}
+          onHoverMove={handleHoverMove}
+          onHoverEnd={handleHoverEnd}
+          onContextMenuOpen={handleContextMenuOpen}
+        />
+      </div>
+      <div
+        style={{
+          height: MOBILE_EQUIPMENT.slotHeight,
+          containerType: "size",
+        }}
+      >
+        <DroppableEquipmentSlot
+          slot={getSlot(EquipmentSlotName.BODY)!}
+          onSlotClick={handleSlotClick}
+          onHoverStart={handleHoverStart}
+          onHoverMove={handleHoverMove}
+          onHoverEnd={handleHoverEnd}
+          onContextMenuOpen={handleContextMenuOpen}
+        />
+      </div>
+
+      {/* Row 3: Legs (full width) */}
+      <div
+        style={{
+          height: MOBILE_EQUIPMENT.slotHeight,
+          gridColumn: "span 2",
+          containerType: "size",
+        }}
+      >
+        <DroppableEquipmentSlot
+          slot={getSlot(EquipmentSlotName.LEGS)!}
+          onSlotClick={handleSlotClick}
+          onHoverStart={handleHoverStart}
+          onHoverMove={handleHoverMove}
+          onHoverEnd={handleHoverEnd}
+          onContextMenuOpen={handleContextMenuOpen}
+        />
+      </div>
+    </div>
+  );
+
+  const renderDesktopEquipmentGrid = () => (
+    <>
+      {/* Character Silhouette (OSRS-style visual anchor) - Desktop only */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <CharacterSilhouette color={theme.colors.accent.primary} />
+      </div>
+
+      {/* Paperdoll Grid Layout - 3 rows for melee-only MVP */}
+      <div
+        className="relative grid h-full"
+        style={{
+          gridTemplateColumns: "1fr 1.2fr 1fr",
+          gridTemplateRows: "1fr 1.2fr 1fr",
+          gap: `${theme.spacing.xs}px`,
+        }}
+      >
+        {/* Row 1: Head slot centered */}
+        <div />
+        <div className="w-full h-full" style={{ containerType: "size" }}>
+          <DroppableEquipmentSlot
+            slot={getSlot(EquipmentSlotName.HELMET)!}
+            onSlotClick={handleSlotClick}
+            onHoverStart={handleHoverStart}
+            onHoverMove={handleHoverMove}
+            onHoverEnd={handleHoverEnd}
+            onContextMenuOpen={handleContextMenuOpen}
+          />
+        </div>
+        <div />
+
+        {/* Row 2: Weapon, Body, Shield */}
+        <div className="w-full h-full" style={{ containerType: "size" }}>
+          <DroppableEquipmentSlot
+            slot={getSlot(EquipmentSlotName.WEAPON)!}
+            onSlotClick={handleSlotClick}
+            onHoverStart={handleHoverStart}
+            onHoverMove={handleHoverMove}
+            onHoverEnd={handleHoverEnd}
+            onContextMenuOpen={handleContextMenuOpen}
+          />
+        </div>
+        <div className="w-full h-full" style={{ containerType: "size" }}>
+          <DroppableEquipmentSlot
+            slot={getSlot(EquipmentSlotName.BODY)!}
+            onSlotClick={handleSlotClick}
+            onHoverStart={handleHoverStart}
+            onHoverMove={handleHoverMove}
+            onHoverEnd={handleHoverEnd}
+            onContextMenuOpen={handleContextMenuOpen}
+          />
+        </div>
+        <div className="w-full h-full" style={{ containerType: "size" }}>
+          <DroppableEquipmentSlot
+            slot={getSlot(EquipmentSlotName.SHIELD)!}
+            onSlotClick={handleSlotClick}
+            onHoverStart={handleHoverStart}
+            onHoverMove={handleHoverMove}
+            onHoverEnd={handleHoverEnd}
+            onContextMenuOpen={handleContextMenuOpen}
+          />
+        </div>
+
+        {/* Row 3: Legs centered */}
+        <div />
+        <div className="w-full h-full" style={{ containerType: "size" }}>
+          <DroppableEquipmentSlot
+            slot={getSlot(EquipmentSlotName.LEGS)!}
+            onSlotClick={handleSlotClick}
+            onHoverStart={handleHoverStart}
+            onHoverMove={handleHoverMove}
+            onHoverEnd={handleHoverEnd}
+            onContextMenuOpen={handleContextMenuOpen}
+          />
+        </div>
+        <div />
+      </div>
+    </>
+  );
+
+  return (
+    <>
+      <div
+        className="flex flex-col h-full overflow-hidden"
+        style={{
+          padding: shouldUseMobileUI ? "6px" : `${theme.spacing.xs}px`,
+          gap: shouldUseMobileUI ? "6px" : `${theme.spacing.xs}px`,
+        }}
+      >
+        {/* Equipment Grid Container */}
+        <div
+          className="flex-1 relative overflow-hidden"
+          style={{
+            background: theme.colors.background.primary,
+            border: "1px solid rgba(0, 0, 0, 0.5)",
+            borderRadius: `${theme.borderRadius.md}px`,
+            padding: shouldUseMobileUI ? 0 : `${theme.spacing.sm}px`,
+            // Embossed container
+            boxShadow:
+              "inset 3px 3px 6px rgba(0, 0, 0, 0.4), inset -2px -2px 4px rgba(60, 50, 40, 0.08)",
+          }}
+        >
+          {shouldUseMobileUI
+            ? renderMobileEquipmentGrid()
+            : renderDesktopEquipmentGrid()}
+        </div>
+
+        {/* Bottom section: Utility Buttons */}
+        {shouldUseMobileUI ? (
+          <div
+            className="flex items-center justify-center gap-2 px-3 py-1.5"
+            style={{
+              background: "rgba(25, 22, 18, 0.95)",
+              borderRadius: `${theme.borderRadius.sm}px`,
+              border: "1px solid rgba(0, 0, 0, 0.4)",
+              boxShadow: "inset 1px 1px 3px rgba(0, 0, 0, 0.3)",
+            }}
+          >
+            <UtilityButton
+              icon={<StatsIcon className="w-full h-full" />}
+              label="Stats"
+              onClick={handleOpenStats}
+              compact
+            />
+            <UtilityButton
+              icon={<DeathIcon className="w-full h-full" />}
+              label="Death"
+              onClick={handleOpenDeath}
+              compact
+            />
+          </div>
+        ) : (
+          <>
+            {/* Equipment Bonuses Summary - Desktop */}
+            <div
+              className="flex justify-center gap-4 py-1"
+              style={{
+                background: `linear-gradient(180deg, ${theme.colors.background.tertiary} 0%, ${theme.colors.background.secondary} 100%)`,
+                borderRadius: `${theme.borderRadius.md}px`,
+                border: `1px solid ${theme.colors.border.default}`,
+                fontSize: "11px",
+              }}
+            >
+              <span style={{ color: theme.colors.state.danger }}>
+                ⚔️ {totalBonuses.attack}
+              </span>
+              <span style={{ color: theme.colors.state.success }}>
+                🛡️ {totalBonuses.defense}
+              </span>
+              <span style={{ color: theme.colors.state.warning }}>
+                💪 {totalBonuses.strength}
+              </span>
+            </div>
+
+            {/* Utility Buttons (RS3-style) - Desktop */}
+            <div
+              className="flex justify-between px-1 py-1.5"
+              style={{
+                background: `linear-gradient(180deg, ${theme.colors.background.tertiary} 0%, ${theme.colors.background.secondary} 100%)`,
+                borderRadius: `${theme.borderRadius.md}px`,
+                border: `1px solid ${theme.colors.border.default}`,
+              }}
+            >
+              <UtilityButton
+                icon={<StatsIcon className="w-full h-full" />}
+                label="Stats"
+                onClick={handleOpenStats}
+              />
+              <UtilityButton
+                icon={<DeathIcon className="w-full h-full" />}
+                label="Death"
+                onClick={handleOpenDeath}
+              />
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Enhanced hover tooltip - rendered via portal */}
       {hoverState &&
         hoverState.slot.item &&
-        renderEquipmentHoverTooltip(hoverState)}
+        renderEquipmentHoverTooltip(hoverState, theme)}
     </>
   );
 }

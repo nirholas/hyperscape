@@ -316,6 +316,9 @@ export type {
   SkillUnlocksManifest,
 } from "./data/skill-unlocks";
 
+// Export prayer data provider for UI panels
+export { prayerDataProvider } from "./data/PrayerDataProvider";
+
 // Export world area data for server use
 export { ALL_WORLD_AREAS, STARTER_TOWNS } from "./data/world-areas";
 
@@ -834,7 +837,13 @@ export type {
   ExtendedTriggerEvent,
   OverlapHit,
 } from "./systems/shared";
-export { writePacket, readPacket } from "./platform/shared/packets";
+export {
+  writePacket,
+  readPacket,
+  getPacketId,
+  getPacketName,
+  PACKET_NAMES,
+} from "./platform/shared/packets";
 
 // Export physics utilities
 export { installThreeJSExtensions } from "./utils/physics/PhysicsUtils";

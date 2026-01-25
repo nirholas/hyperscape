@@ -1,11 +1,14 @@
 /**
  * Skill Guide Panel
  * OSRS-style popup showing skill unlocks at each level
+ *
+ * Uses ModalWindow from hs-kit for consistent styling and behavior.
  */
 
-import React, { useEffect } from "react";
-import { createPortal } from "react-dom";
+import React, { useMemo } from "react";
+import { ModalWindow, useThemeStore } from "hs-kit";
 import type { SkillUnlock } from "@hyperscape/shared";
+import type { CSSProperties } from "react";
 
 interface SkillGuidePanelProps {
   visible: boolean;
@@ -24,51 +27,52 @@ interface UnlockRowProps {
 }
 
 function UnlockRow({ unlock, isUnlocked, isNext }: UnlockRowProps) {
-  // Determine row styling based on state
-  const getRowStyle = () => {
+  const theme = useThemeStore((s) => s.theme);
+
+  const rowStyle: CSSProperties = useMemo(() => {
     if (isUnlocked) {
       return {
-        background: "rgba(34, 197, 94, 0.1)",
-        border: "1px solid rgba(34, 197, 94, 0.3)",
+        background: `${theme.colors.state.success}15`,
+        border: `1px solid ${theme.colors.state.success}50`,
         opacity: 1,
       };
     }
     if (isNext) {
       return {
-        background: "rgba(251, 191, 36, 0.15)",
-        border: "1px solid rgba(251, 191, 36, 0.5)",
+        background: `${theme.colors.state.warning}25`,
+        border: `1px solid ${theme.colors.state.warning}80`,
         opacity: 1,
       };
     }
     return {
-      background: "rgba(0, 0, 0, 0.2)",
+      background: theme.colors.background.tertiary,
       border: "1px solid transparent",
       opacity: 0.6,
     };
-  };
-
-  const rowStyle = getRowStyle();
+  }, [isUnlocked, isNext, theme]);
 
   return (
     <div
       style={{
         display: "flex",
         alignItems: "center",
-        gap: "8px",
-        padding: "8px",
-        borderRadius: "4px",
-        background: rowStyle.background,
-        border: rowStyle.border,
-        opacity: rowStyle.opacity,
+        gap: theme.spacing.sm,
+        padding: theme.spacing.sm,
+        borderRadius: theme.borderRadius.sm,
         transition: "all 0.2s ease",
+        ...rowStyle,
       }}
     >
       {/* Status Icon */}
       <span
         style={{
-          color: isUnlocked ? "#22c55e" : isNext ? "#fbbf24" : "#6b7280",
-          fontSize: "14px",
-          width: "16px",
+          color: isUnlocked
+            ? theme.colors.state.success
+            : isNext
+              ? theme.colors.state.warning
+              : theme.colors.text.muted,
+          fontSize: theme.typography.fontSize.sm,
+          width: 16,
           textAlign: "center",
         }}
       >
@@ -78,11 +82,15 @@ function UnlockRow({ unlock, isUnlocked, isNext }: UnlockRowProps) {
       {/* Level Badge */}
       <span
         style={{
-          width: "48px",
+          width: 48,
           textAlign: "center",
-          fontSize: "12px",
-          fontWeight: "bold",
-          color: isUnlocked ? "#ffff00" : isNext ? "#fbbf24" : "#9ca3af",
+          fontSize: theme.typography.fontSize.xs,
+          fontWeight: theme.typography.fontWeight.bold,
+          color: isUnlocked
+            ? theme.colors.accent.primary
+            : isNext
+              ? theme.colors.state.warning
+              : theme.colors.text.muted,
         }}
       >
         Lvl {unlock.level}
@@ -92,8 +100,12 @@ function UnlockRow({ unlock, isUnlocked, isNext }: UnlockRowProps) {
       <span
         style={{
           flex: 1,
-          fontSize: "12px",
-          color: isUnlocked ? "#ffffff" : isNext ? "#fef3c7" : "#9ca3af",
+          fontSize: theme.typography.fontSize.xs,
+          color: isUnlocked
+            ? theme.colors.text.primary
+            : isNext
+              ? theme.colors.text.secondary
+              : theme.colors.text.muted,
         }}
       >
         {unlock.description}
@@ -103,12 +115,12 @@ function UnlockRow({ unlock, isUnlocked, isNext }: UnlockRowProps) {
       {isNext && (
         <span
           style={{
-            fontSize: "9px",
+            fontSize: 9,
             padding: "2px 4px",
-            borderRadius: "3px",
-            background: "rgba(251, 191, 36, 0.3)",
-            color: "#fbbf24",
-            fontWeight: "bold",
+            borderRadius: theme.borderRadius.sm,
+            background: `${theme.colors.state.warning}40`,
+            color: theme.colors.state.warning,
+            fontWeight: theme.typography.fontWeight.bold,
           }}
         >
           NEXT
@@ -118,14 +130,17 @@ function UnlockRow({ unlock, isUnlocked, isNext }: UnlockRowProps) {
       {/* Type Badge */}
       <span
         style={{
-          fontSize: "10px",
+          fontSize: 10,
           padding: "2px 6px",
-          borderRadius: "4px",
+          borderRadius: theme.borderRadius.sm,
           background:
             unlock.type === "item"
-              ? "rgba(59, 130, 246, 0.3)"
-              : "rgba(147, 51, 234, 0.3)",
-          color: unlock.type === "item" ? "#93c5fd" : "#c4b5fd",
+              ? `${theme.colors.state.info}40`
+              : `${theme.colors.accent.secondary}40`,
+          color:
+            unlock.type === "item"
+              ? theme.colors.state.info
+              : theme.colors.accent.secondary,
         }}
       >
         {unlock.type}
@@ -143,153 +158,42 @@ export function SkillGuidePanel({
   isLoading,
   onClose,
 }: SkillGuidePanelProps) {
-  // Close on ESC key
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    if (visible) {
-      window.addEventListener("keydown", handleKeyDown);
-      return () => window.removeEventListener("keydown", handleKeyDown);
-    }
-  }, [visible, onClose]);
+  const theme = useThemeStore((s) => s.theme);
 
-  // Inject animation keyframes
-  useEffect(() => {
-    const styleId = "skill-guide-panel-animations";
-    if (document.getElementById(styleId)) return;
+  const sortedUnlocks = useMemo(
+    () => [...unlocks].sort((a, b) => a.level - b.level),
+    [unlocks],
+  );
 
-    const style = document.createElement("style");
-    style.id = styleId;
-    style.textContent = `
-      @keyframes fadeIn {
-        from { opacity: 0; }
-        to { opacity: 1; }
-      }
-      @keyframes slideUp {
-        from {
-          opacity: 0;
-          transform: translateY(20px);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
-      }
-      .skill-guide-scroll::-webkit-scrollbar {
-        width: 8px;
-      }
-      .skill-guide-scroll::-webkit-scrollbar-track {
-        background: rgba(0, 0, 0, 0.3);
-        border-radius: 4px;
-      }
-      .skill-guide-scroll::-webkit-scrollbar-thumb {
-        background: rgba(139, 69, 19, 0.6);
-        border-radius: 4px;
-      }
-      .skill-guide-scroll::-webkit-scrollbar-thumb:hover {
-        background: rgba(139, 69, 19, 0.8);
-      }
-      @keyframes spin {
-        to { transform: rotate(360deg); }
-      }
-    `;
-    document.head.appendChild(style);
-  }, []);
-
-  if (!visible) return null;
-
-  const sortedUnlocks = [...unlocks].sort((a, b) => a.level - b.level);
-  const unlockedCount = unlocks.filter((u) => u.level <= playerLevel).length;
+  const unlockedCount = useMemo(
+    () => unlocks.filter((u) => u.level <= playerLevel).length,
+    [unlocks, playerLevel],
+  );
 
   // Find the next unlock (first one above player's level)
-  const nextUnlock = sortedUnlocks.find((u) => u.level > playerLevel);
+  const nextUnlock = useMemo(
+    () => sortedUnlocks.find((u) => u.level > playerLevel),
+    [sortedUnlocks, playerLevel],
+  );
+
   const levelsToNext = nextUnlock ? nextUnlock.level - playerLevel : 0;
 
-  return createPortal(
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 9999,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
+  return (
+    <ModalWindow
+      visible={visible}
+      onClose={onClose}
+      title={`${skillIcon} ${skillLabel} Guide`}
+      width={400}
+      maxHeight="500px"
     >
-      {/* Backdrop with fade-in animation */}
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          background: "rgba(0, 0, 0, 0.5)",
-          animation: "fadeIn 0.15s ease-out",
-        }}
-        onClick={onClose}
-      />
-
-      {/* Panel with slide-up and fade-in animation */}
-      <div
-        style={{
-          position: "relative",
-          background: "rgba(20, 15, 10, 0.98)",
-          border: "2px solid rgba(139, 69, 19, 0.8)",
-          borderRadius: "8px",
-          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
-          width: "400px",
-          maxHeight: "500px",
-          display: "flex",
-          flexDirection: "column",
-          animation: "slideUp 0.2s ease-out",
-        }}
-      >
-        {/* Header */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "12px",
-            borderBottom: "1px solid rgba(139, 69, 19, 0.5)",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span style={{ fontSize: "24px" }}>{skillIcon}</span>
-            <span
-              style={{
-                color: "#c9b386",
-                fontWeight: "bold",
-                fontSize: "14px",
-              }}
-            >
-              {skillLabel} Guide
-            </span>
-          </div>
-          <button
-            onClick={onClose}
-            style={{
-              background: "none",
-              border: "none",
-              color: "#c9b386",
-              cursor: "pointer",
-              fontSize: "18px",
-              padding: "4px",
-              lineHeight: 1,
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = "#ffffff")}
-            onMouseLeave={(e) => (e.currentTarget.style.color = "#c9b386")}
-          >
-            ✕
-          </button>
-        </div>
-
+      <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
         {/* Current Level */}
         <div
           style={{
-            padding: "8px 12px",
-            fontSize: "12px",
-            color: "#c9b386",
-            borderBottom: "1px solid rgba(139, 69, 19, 0.3)",
+            padding: `${theme.spacing.sm}px ${theme.spacing.md}px`,
+            fontSize: theme.typography.fontSize.xs,
+            color: theme.colors.text.secondary,
+            borderBottom: `1px solid ${theme.colors.border.default}`,
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
@@ -297,11 +201,16 @@ export function SkillGuidePanel({
         >
           <span>
             Your Level:{" "}
-            <span style={{ color: "#ffff00", fontWeight: "bold" }}>
+            <span
+              style={{
+                color: theme.colors.accent.primary,
+                fontWeight: theme.typography.fontWeight.bold,
+              }}
+            >
               {playerLevel}
             </span>
           </span>
-          <span style={{ fontSize: "11px", color: "#9ca3af" }}>
+          <span style={{ fontSize: 11, color: theme.colors.text.muted }}>
             {unlockedCount}/{unlocks.length} unlocked
           </span>
         </div>
@@ -310,66 +219,69 @@ export function SkillGuidePanel({
         {nextUnlock && (
           <div
             style={{
-              padding: "6px 12px",
-              fontSize: "11px",
-              background: "rgba(251, 191, 36, 0.1)",
-              borderBottom: "1px solid rgba(139, 69, 19, 0.3)",
-              color: "#fbbf24",
+              padding: `${theme.spacing.xs}px ${theme.spacing.md}px`,
+              fontSize: 11,
+              background: `${theme.colors.state.warning}15`,
+              borderBottom: `1px solid ${theme.colors.border.default}`,
+              color: theme.colors.state.warning,
               display: "flex",
               alignItems: "center",
-              gap: "4px",
+              gap: theme.spacing.xs,
             }}
           >
             <span>➤</span>
             <span>
               {levelsToNext} more level{levelsToNext !== 1 ? "s" : ""} to
               unlock:{" "}
-              <span style={{ color: "#fef3c7" }}>{nextUnlock.description}</span>
+              <span style={{ color: theme.colors.text.secondary }}>
+                {nextUnlock.description}
+              </span>
             </span>
           </div>
         )}
 
         {/* Unlocks List */}
         <div
-          className="skill-guide-scroll"
           style={{
-            flex: 1,
+            maxHeight: 320,
             overflowY: "auto",
-            padding: "8px",
+            padding: theme.spacing.sm,
             display: "flex",
             flexDirection: "column",
-            gap: "4px",
+            gap: theme.spacing.xs,
           }}
         >
           {isLoading ? (
             <div
               style={{
                 textAlign: "center",
-                color: "#c9b386",
-                padding: "24px",
-                fontSize: "12px",
+                color: theme.colors.text.secondary,
+                padding: theme.spacing.xl,
+                fontSize: theme.typography.fontSize.xs,
               }}
             >
               <div
                 style={{
                   display: "inline-block",
-                  width: "20px",
-                  height: "20px",
-                  border: "2px solid rgba(139, 69, 19, 0.3)",
-                  borderTopColor: "#c9b386",
+                  width: 20,
+                  height: 20,
+                  border: `2px solid ${theme.colors.border.default}`,
+                  borderTopColor: theme.colors.accent.primary,
                   borderRadius: "50%",
                   animation: "spin 0.8s linear infinite",
                 }}
               />
-              <div style={{ marginTop: "8px" }}>Loading unlocks...</div>
+              <div style={{ marginTop: theme.spacing.sm }}>
+                Loading unlocks...
+              </div>
             </div>
           ) : sortedUnlocks.length === 0 ? (
             <div
               style={{
                 textAlign: "center",
-                color: "#9ca3af",
-                padding: "16px",
-                fontSize: "12px",
+                color: theme.colors.text.muted,
+                padding: theme.spacing.lg,
+                fontSize: theme.typography.fontSize.xs,
               }}
             >
               No unlock data available for this skill.
@@ -386,7 +298,6 @@ export function SkillGuidePanel({
           )}
         </div>
       </div>
-    </div>,
-    document.body,
+    </ModalWindow>
   );
 }

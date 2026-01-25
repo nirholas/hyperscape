@@ -719,7 +719,7 @@ export class ResourceSystem extends SystemBase {
         }
         if (h > maxHeight) maxHeight = h;
         if (h < 5.4) waterCount++;
-        if (h >= 5.4 && h <= 8.0) shoreCount++;
+        if (h >= 5.4 && h <= 20.0) shoreCount++;
       }
     }
 
@@ -733,7 +733,7 @@ export class ResourceSystem extends SystemBase {
         `[ResourceSystem] 🎣 Lowest point: (${lowestPoint.x},${lowestPoint.z})=${lowestPoint.h.toFixed(2)}m`,
       );
       console.log(
-        `[ResourceSystem] 🎣 Looking for: water < 5.4m adjacent to shore 5.4-8.0m`,
+        `[ResourceSystem] 🎣 Looking for: water < 5.4m adjacent to shore 5.4-20.0m`,
       );
     }
 
@@ -747,7 +747,7 @@ export class ResourceSystem extends SystemBase {
       {
         sampleInterval: 1, // 1m = 1 tile for tile-accurate detection
         waterThreshold: 5.4, // TerrainSystem.CONFIG.WATER_THRESHOLD
-        shoreMaxHeight: 8.0,
+        shoreMaxHeight: 20.0, // Higher to accommodate elevated island terrain
         minSpacing: 8, // Increased spacing to spread spots out more
       },
     );
@@ -2219,7 +2219,7 @@ export class ResourceSystem extends SystemBase {
       this.terrainSystem.getHeightAt.bind(this.terrainSystem),
       {
         waterThreshold: 5.4,
-        shoreMaxHeight: 8.0,
+        shoreMaxHeight: 20.0, // Higher to accommodate elevated island terrain
         minSpacing: 3, // Smaller spacing for relocation candidates
       },
     );

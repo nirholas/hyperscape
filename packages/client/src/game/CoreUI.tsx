@@ -1,5 +1,6 @@
 import { RefreshCwIcon } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
+import { useThemeStore } from "hs-kit";
 
 import type { ControlAction, EventMap } from "@hyperscape/shared";
 import {
@@ -9,9 +10,8 @@ import {
   isTouch,
   propToLabel,
 } from "@hyperscape/shared";
-import type { ClientWorld } from "../types";
+import type { ClientWorld, PlayerStats } from "../types";
 import { ActionProgressBar } from "./hud/ActionProgressBar";
-import { Chat } from "./chat/Chat";
 import { ChatProvider } from "./chat/ChatContext";
 import { EntityContextMenu } from "./hud/EntityContextMenu";
 import { HandIcon } from "../components/Icons";
@@ -19,11 +19,19 @@ import { LoadingScreen } from "../screens/LoadingScreen";
 import { MouseLeftIcon } from "../components/MouseLeftIcon";
 import { MouseRightIcon } from "../components/MouseRightIcon";
 import { MouseWheelIcon } from "../components/MouseWheelIcon";
-import { Sidebar } from "./Sidebar";
+import { InterfaceManager } from "../components/interface/InterfaceManager";
 import { StatusBars } from "./hud/StatusBars";
 import { XPProgressOrb } from "./hud/XPProgressOrb";
 import { LevelUpNotification } from "./hud/level-up";
-import { HomeTeleportButton } from "./hud/HomeTeleportButton";
+import { EscapeMenu } from "./hud/EscapeMenu";
+import {
+  COLORS,
+  spacing,
+  borderRadius,
+  shadows,
+  zIndex,
+  typography,
+} from "../constants";
 
 // Type for icon components
 type IconComponent = React.ComponentType<{ size?: number | string }>;
@@ -32,10 +40,10 @@ export function CoreUI({ world }: { world: ClientWorld }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const readyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [ready, setReady] = useState(false);
-  const [_loadingComplete, setLoadingComplete] = useState(false);
+  const [loadingComplete, setLoadingComplete] = useState(false);
   // Track system and asset progress separately to gate presentation on assets
-  const [_systemsComplete, setSystemsComplete] = useState(false);
-  const [_assetsProgress, setAssetsProgress] = useState(0);
+  const [systemsComplete, setSystemsComplete] = useState(false);
+  const [assetsProgress, setAssetsProgress] = useState(0);
 
   // Check if this is spectator mode (from embedded config)
   const isSpectatorMode = (() => {
@@ -45,13 +53,11 @@ export function CoreUI({ world }: { world: ClientWorld }) {
 
   // Presentation gating flags
   const [playerReady, setPlayerReady] = useState(() => !!world.entities.player);
-  const [_physReady, setPhysReady] = useState(false);
+  const [physReady, setPhysReady] = useState(false);
   const [terrainReady, setTerrainReady] = useState(false);
-  const [_player, setPlayer] = useState(() => world.entities.player);
+  const [player, setPlayer] = useState(() => world.entities.player);
   const [targetAvatarLoaded, setTargetAvatarLoaded] = useState(false);
-  const [ui, setUI] = useState(world.ui?.state);
-  const [_menu, setMenu] = useState(null);
-  const [_settings, _setSettings] = useState(false);
+  const [uiVisible, setUIVisible] = useState(true);
   const [disconnected, setDisconnected] = useState(false);
   const [kicked, setKicked] = useState<string | null>(null);
   const [characterFlowActive, setCharacterFlowActive] = useState(false);
@@ -60,6 +66,10 @@ export function CoreUI({ world }: { world: ClientWorld }) {
     killedBy: string;
     respawnTime: number;
   } | null>(null);
+
+  // Player stats for StatusBars (same pattern as InterfaceManager)
+  const [playerStats, setPlayerStats] = useState<PlayerStats | null>(null);
+
   useEffect(() => {
     // Get the target entity ID for spectators
     const getSpectatorTargetId = () => {
@@ -93,9 +103,9 @@ export function CoreUI({ world }: { world: ClientWorld }) {
     const handlePlayerSpawned = () => {
       // Only handle for non-spectators (spectators don't spawn local players)
       if (!isSpectatorMode) {
-        const player = world.entities?.player;
-        if (player) {
-          setPlayer(player);
+        const playerEntity = world.entities?.player;
+        if (playerEntity) {
+          setPlayer(playerEntity);
           setPlayerReady(true);
         }
       }
@@ -116,10 +126,11 @@ export function CoreUI({ world }: { world: ClientWorld }) {
         setPlayerReady(true);
       }
     };
+
     const handleUIToggle = (data: { visible: boolean }) => {
-      setUI((prev) => (prev ? { ...prev, visible: data.visible } : undefined));
+      setUIVisible(data.visible);
     };
-    const handleUIMenu = () => setMenu(null);
+
     const handleUIKick = (data: { playerId: string; reason: string }) => {
       setKicked(data.reason || "Kicked from server");
     };
@@ -145,7 +156,6 @@ export function CoreUI({ world }: { world: ClientWorld }) {
     const handlePhysicsReady = () => setPhysReady(true);
     world.on("physics:ready", handlePhysicsReady);
     world.on(EventType.UI_TOGGLE, handleUIToggle);
-    world.on(EventType.UI_MENU, handleUIMenu);
     world.on(EventType.UI_KICK, handleUIKick);
     world.on(EventType.NETWORK_DISCONNECTED, handleDisconnected);
     world.on(EventType.UI_DEATH_SCREEN, handleDeathScreen);
@@ -169,7 +179,6 @@ export function CoreUI({ world }: { world: ClientWorld }) {
       world.off(EventType.AVATAR_LOAD_COMPLETE, handleAvatarComplete);
       world.off("physics:ready", handlePhysicsReady);
       world.off(EventType.UI_TOGGLE, handleUIToggle);
-      world.off(EventType.UI_MENU, handleUIMenu);
       world.off(EventType.UI_KICK, handleUIKick);
       world.off(EventType.NETWORK_DISCONNECTED, handleDisconnected);
       world.off(EventType.UI_DEATH_SCREEN, handleDeathScreen);
@@ -235,8 +244,11 @@ export function CoreUI({ world }: { world: ClientWorld }) {
 
   // Start the 300ms delay once all presentable conditions are met
   useEffect(() => {
-    // Keep it simple: show game once the player's avatar is ready
-    const canPresent = playerReady;
+    // Show game once player's avatar is ready and physics system is initialized
+    // For spectators: also require terrain and target avatar to be ready
+    const canPresent = isSpectatorMode
+      ? playerReady && terrainReady && physReady
+      : playerReady && physReady;
     if (canPresent) {
       // Clear any existing timeout
       if (readyTimeoutRef.current) {
@@ -257,7 +269,87 @@ export function CoreUI({ world }: { world: ClientWorld }) {
         readyTimeoutRef.current = null;
       }
     };
-  }, [playerReady]);
+  }, [playerReady, physReady, isSpectatorMode, terrainReady]);
+
+  // Expose loading state for debugging and analytics
+  useEffect(() => {
+    const loadingState = {
+      ready,
+      loadingComplete,
+      systemsComplete,
+      assetsProgress,
+      playerReady,
+      physReady,
+      terrainReady,
+      playerId: player?.id || null,
+    };
+    (
+      window as Window & { __HYPERSCAPE_LOADING__?: typeof loadingState }
+    ).__HYPERSCAPE_LOADING__ = loadingState;
+  }, [
+    ready,
+    loadingComplete,
+    systemsComplete,
+    assetsProgress,
+    playerReady,
+    physReady,
+    terrainReady,
+    player,
+  ]);
+
+  // Subscribe to player stats updates (for StatusBars)
+  useEffect(() => {
+    const onUIUpdate = (raw: unknown) => {
+      const update = raw as { component: string; data: unknown };
+      if (update.component === "player") {
+        setPlayerStats(update.data as PlayerStats);
+      }
+    };
+
+    const onSkillsUpdate = (raw: unknown) => {
+      const data = raw as { playerId: string; skills: PlayerStats["skills"] };
+      const localId = world.entities?.player?.id;
+      if (!localId || data.playerId === localId) {
+        setPlayerStats((prev) =>
+          prev
+            ? { ...prev, skills: data.skills }
+            : ({ skills: data.skills } as PlayerStats),
+        );
+      }
+    };
+
+    const onPrayerPointsChanged = (raw: unknown) => {
+      // Server sends { playerId, points, maxPoints } not { current, max }
+      const data = raw as {
+        playerId: string;
+        points: number;
+        maxPoints: number;
+      };
+      const localId = world.entities?.player?.id;
+      if (!localId || data.playerId === localId) {
+        setPlayerStats((prev) =>
+          prev
+            ? {
+                ...prev,
+                prayerPoints: { current: data.points, max: data.maxPoints },
+              }
+            : ({
+                prayerPoints: { current: data.points, max: data.maxPoints },
+              } as PlayerStats),
+        );
+      }
+    };
+
+    world.on(EventType.UI_UPDATE, onUIUpdate);
+    world.on(EventType.SKILLS_UPDATED, onSkillsUpdate);
+    world.on(EventType.PRAYER_POINTS_CHANGED, onPrayerPointsChanged);
+
+    return () => {
+      world.off(EventType.UI_UPDATE, onUIUpdate);
+      world.off(EventType.SKILLS_UPDATED, onSkillsUpdate);
+      world.off(EventType.PRAYER_POINTS_CHANGED, onPrayerPointsChanged);
+    };
+  }, [world]);
 
   // Event capture removed - was blocking UI interactions
   useEffect(() => {
@@ -280,15 +372,12 @@ export function CoreUI({ world }: { world: ClientWorld }) {
       >
         {disconnected && <Disconnected />}
         {<Toast world={world} />}
-        {ready && <ActionsBlock world={world} />}
-        {ready && <StatusBars world={world} />}
-        {ready && <XPProgressOrb world={world} />}
+        {ready && uiVisible && <ActionsBlock world={world} />}
+        {ready && uiVisible && <StatusBars stats={playerStats} />}
+        {ready && uiVisible && <XPProgressOrb world={world} />}
         {ready && <LevelUpNotification world={world} />}
-        {ready && (
-          <Sidebar world={world} ui={ui || { active: false, pane: null }} />
-        )}
-        {ready && <Chat world={world as never} />}
-        {ready && <ActionProgressBar world={world} />}
+        {ready && uiVisible && <InterfaceManager world={world} />}
+        {ready && uiVisible && <ActionProgressBar world={world} />}
         {!ready && (
           <LoadingScreen
             world={world}
@@ -299,9 +388,9 @@ export function CoreUI({ world }: { world: ClientWorld }) {
         )}
         {kicked && <KickedOverlay code={kicked} />}
         {deathScreen && <DeathScreen data={deathScreen} world={world} />}
-        {ready && isTouch && <TouchBtns world={world} />}
+        {ready && uiVisible && isTouch && <TouchBtns world={world} />}
         {ready && <EntityContextMenu world={world} />}
-        {ready && !isSpectatorMode && <HomeTeleportButton world={world} />}
+        {ready && <EscapeMenu world={world} />}
         <div id="core-ui-portal" />
       </div>
     </ChatProvider>
@@ -309,6 +398,7 @@ export function CoreUI({ world }: { world: ClientWorld }) {
 }
 
 function Disconnected() {
+  const theme = useThemeStore((s) => s.theme);
   return (
     <>
       <div className="fixed top-0 left-0 w-full h-full backdrop-grayscale pointer-events-none z-[9999] opacity-0 animate-[fadeIn_3s_ease-in-out_forwards]" />
@@ -319,7 +409,12 @@ function Disconnected() {
         }
       `}</style>
       <div
-        className="disconnected-btn pointer-events-auto absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-dark-bg border border-dark-border backdrop-blur-md rounded-2xl h-11 px-4 flex items-center cursor-pointer"
+        className="disconnected-btn pointer-events-auto absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 backdrop-blur-md rounded-2xl h-11 px-4 flex items-center cursor-pointer"
+        style={{
+          backgroundColor: theme.colors.background.secondary,
+          border: `1px solid ${theme.colors.border.default}`,
+          color: theme.colors.text.primary,
+        }}
         onClick={() => window.location.reload()}
       >
         <RefreshCwIcon size={18} />
@@ -335,9 +430,13 @@ const kickMessages: Record<string, string> = {
   unknown: "You were kicked.",
 };
 function KickedOverlay({ code }: { code: string }) {
+  const theme = useThemeStore((s) => s.theme);
   return (
-    <div className="absolute inset-0 bg-black flex items-center justify-center pointer-events-auto">
-      <div className="text-white text-lg">
+    <div
+      className="absolute inset-0 flex items-center justify-center pointer-events-auto"
+      style={{ backgroundColor: theme.colors.background.primary }}
+    >
+      <div className="text-lg" style={{ color: theme.colors.text.primary }}>
         {kickMessages[code] || kickMessages.unknown}
       </div>
     </div>
@@ -351,6 +450,7 @@ function DeathScreen({
   data: { message: string; killedBy: string; respawnTime: number };
   world: ClientWorld;
 }) {
+  const theme = useThemeStore((s) => s.theme);
   // Track respawn state to prevent button spam
   const [isRespawning, setIsRespawning] = useState(false);
   // Track if respawn request timed out
@@ -432,14 +532,32 @@ function DeathScreen({
   };
 
   return (
-    <div className="absolute inset-0 bg-black/80 flex items-center justify-center pointer-events-auto z-[10000]">
-      <div className="flex flex-col items-center gap-6 max-w-md p-8 bg-dark-bg border-2 border-red-600 rounded-2xl backdrop-blur-md">
-        <div className="text-4xl font-bold text-red-500">
+    <div
+      className="absolute inset-0 flex items-center justify-center pointer-events-auto z-[10000]"
+      style={{ backgroundColor: theme.colors.background.overlay }}
+    >
+      <div
+        className="flex flex-col items-center gap-6 max-w-md p-8 rounded-2xl backdrop-blur-md"
+        style={{
+          backgroundColor: theme.colors.background.secondary,
+          border: `2px solid ${theme.colors.state.danger}`,
+        }}
+      >
+        <div
+          className="text-4xl font-bold"
+          style={{ color: theme.colors.state.danger }}
+        >
           Oh dear, you are dead!
         </div>
-        <div className="text-white text-center space-y-2">
+        <div
+          className="text-center space-y-2"
+          style={{ color: theme.colors.text.primary }}
+        >
           <p className="text-lg">
-            Killed by: <span className="text-red-400">{data.killedBy}</span>
+            Killed by:{" "}
+            <span style={{ color: theme.colors.state.danger }}>
+              {data.killedBy}
+            </span>
           </p>
           <p className="text-base opacity-90">
             You have lost your items at the death location.
@@ -449,16 +567,26 @@ function DeathScreen({
           <button
             onClick={handleRespawn}
             disabled={isRespawning}
-            className={`px-8 py-3 text-white text-lg font-bold rounded-lg transition-colors border-2 ${
-              isRespawning
-                ? "bg-gray-600 border-gray-500 cursor-not-allowed opacity-60"
-                : "bg-blue-600 hover:bg-blue-700 border-blue-400 cursor-pointer"
-            }`}
+            className="px-8 py-3 text-lg font-bold rounded-lg transition-colors border-2"
+            style={{
+              backgroundColor: isRespawning
+                ? theme.colors.text.disabled
+                : theme.colors.state.info,
+              borderColor: isRespawning
+                ? theme.colors.text.disabled
+                : theme.colors.state.info,
+              color: theme.colors.text.primary,
+              cursor: isRespawning ? "not-allowed" : "pointer",
+              opacity: isRespawning ? 0.6 : 1,
+            }}
           >
             {isRespawning ? "Respawning..." : "Click here to respawn"}
           </button>
           {respawnTimedOut && (
-            <div className="text-sm text-yellow-400 text-center max-w-sm">
+            <div
+              className="text-sm text-center max-w-sm"
+              style={{ color: theme.colors.state.warning }}
+            >
               Respawn request timed out. Please try again.
             </div>
           )}
@@ -466,18 +594,26 @@ function DeathScreen({
           <div className="text-sm text-center max-w-sm">
             {countdown > 0 ? (
               <>
-                <span className="text-gray-400">
+                <span style={{ color: theme.colors.text.muted }}>
                   Your items have been dropped at your death location.
                 </span>
                 <br />
                 <span
-                  className={`font-bold ${countdown <= 60 ? "text-red-400" : "text-yellow-400"}`}
+                  className="font-bold"
+                  style={{
+                    color:
+                      countdown <= 60
+                        ? theme.colors.state.danger
+                        : theme.colors.state.warning,
+                  }}
                 >
                   Time remaining: {formatCountdown(countdown)}
                 </span>
               </>
             ) : (
-              <span className="text-red-400">Your items have despawned!</span>
+              <span style={{ color: theme.colors.state.danger }}>
+                Your items have despawned!
+              </span>
             )}
           </div>
         </div>
@@ -558,7 +694,11 @@ function getActionIcon(
     return <ActionIcon icon={MouseWheelIcon} />;
   }
   if (buttons.has(action.type)) {
-    return <ActionPill label={propToLabel[action.type]} />;
+    return (
+      <ActionPill
+        label={propToLabel[action.type as keyof typeof propToLabel]}
+      />
+    );
   }
   return <ActionPill label="?" />;
 }
@@ -702,18 +842,25 @@ function PositionedToast({
   return (
     <div
       ref={tooltipRef}
-      className={cls(
-        "fixed px-3 py-2 bg-[rgba(11,10,21,0.92)] border border-[#3a3b49] backdrop-blur-[8px] rounded-lg text-white text-sm font-medium shadow-lg pointer-events-none z-[99999] max-w-[250px]",
-        {
-          "opacity-100 scale-100 animate-[examineTooltipIn_0.15s_ease-out]":
-            visible,
-          "opacity-0 scale-95 transition-all duration-300 ease-in-out":
-            !visible,
-        },
-      )}
+      className={cls("fixed pointer-events-none max-w-[250px]", {
+        "opacity-100 scale-100 animate-[examineTooltipIn_0.15s_ease-out]":
+          visible,
+        "opacity-0 scale-95 transition-all duration-300 ease-in-out": !visible,
+      })}
       style={{
         left: `${coords.x}px`,
         top: `${coords.y}px`,
+        padding: `${spacing.sm} ${spacing.md}`,
+        background: COLORS.BG_SOLID,
+        border: `1px solid ${COLORS.BORDER_SECONDARY}`,
+        backdropFilter: "blur(8px)",
+        borderRadius: borderRadius.lg,
+        boxShadow: shadows.panel,
+        zIndex: zIndex.tooltip,
+        color: COLORS.TEXT_PRIMARY,
+        fontSize: typography.fontSize.sm,
+        fontFamily: typography.fontFamily.body,
+        fontWeight: typography.fontWeight.medium,
       }}
     >
       {text}
@@ -729,13 +876,25 @@ function ToastMsg({ text }: { text: string }) {
   return (
     <div
       className={cls(
-        "h-[2.875rem] flex items-center justify-center px-4 bg-[rgba(11,10,21,0.85)] border border-[#2a2b39] backdrop-blur-[5px] rounded-[1.4375rem] transition-all duration-100 ease-in-out text-white text-[0.9375rem] font-medium",
+        "flex items-center justify-center transition-all duration-100 ease-in-out",
         {
           "opacity-100 translate-y-0 scale-100 animate-[toastIn_0.1s_ease-in-out]":
             visible,
           "opacity-0 translate-y-2.5 scale-90": !visible,
         },
       )}
+      style={{
+        height: spacing["4xl"],
+        padding: `0 ${spacing.lg}`,
+        background: COLORS.BG_SOLID,
+        border: `1px solid ${COLORS.BORDER_SECONDARY}`,
+        backdropFilter: "blur(5px)",
+        borderRadius: borderRadius.full,
+        color: COLORS.TEXT_PRIMARY,
+        fontSize: typography.fontSize.base,
+        fontFamily: typography.fontFamily.body,
+        fontWeight: typography.fontWeight.medium,
+      }}
     >
       {text}
     </div>
@@ -743,6 +902,7 @@ function ToastMsg({ text }: { text: string }) {
 }
 
 function TouchBtns({ world }: { world: ClientWorld }) {
+  const theme = useThemeStore((s) => s.theme);
   const [isAction, setIsAction] = useState(() => {
     const prefs = world.prefs as { touchAction?: boolean };
     return prefs?.touchAction;
@@ -766,7 +926,12 @@ function TouchBtns({ world }: { world: ClientWorld }) {
     >
       {isAction && (
         <div
-          className="pointer-events-auto w-14 h-14 flex items-center justify-center bg-[#ff4d4d] border border-[#ff6666] backdrop-blur-[5px] rounded-2xl shadow-[0_0.125rem_0.25rem_rgba(0,0,0,0.2)] cursor-pointer active:scale-95"
+          className="pointer-events-auto w-14 h-14 flex items-center justify-center backdrop-blur-[5px] rounded-2xl cursor-pointer active:scale-95"
+          style={{
+            backgroundColor: theme.colors.state.danger,
+            border: `1px solid ${theme.colors.state.danger}`,
+            boxShadow: "0 0.125rem 0.25rem rgba(0,0,0,0.2)",
+          }}
           onClick={() => {
             (
               world.controls as { action?: { onPress: () => void } }

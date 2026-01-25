@@ -20,6 +20,7 @@ packages/docs-site/build/
 packages/docs-site/docs/api/
 packages/docs-site/.docusaurus/
 packages/docs-site/node_modules/
+/development-docs/
 
 # Testing
 test-results/
@@ -39,6 +40,9 @@ test-*.png
 *.swp
 *.swo
 *~
+.agents/
+.claude/skills/
+.cursor/skills/
 
 # OS
 .DS_Store

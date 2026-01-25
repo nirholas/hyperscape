@@ -1,0 +1,77 @@
+{
+  "name": "hs-kit",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Game UI toolkit for draggable windows, tabs, and layout presets",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./styled": {
+      "types": "./dist/styled/index.d.ts",
+      "import": "./dist/styled/index.js",
+      "require": "./dist/styled/index.cjs"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "bun scripts/build.mjs --watch",
+    "build": "bun scripts/build.mjs",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint src --max-warnings 0",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "dependencies": {
+    "zustand": "^5.0.5",
+    "idb": "^8.0.1",
+    "lucide-react": "^0.469.0"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.1",
+    "@types/node": "^24.8.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "esbuild": "^0.27.0",
+    "jsdom": "^27.4.0",
+    "typescript": "^5.9.2",
+    "vitest": "^4.0.6"
+  },
+  "keywords": [
+    "ui",
+    "toolkit",
+    "game-ui",
+    "draggable",
+    "windows",
+    "tabs",
+    "presets",
+    "react"
+  ],
+  "author": "Hyperscape Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HyperscapeAI/hyperscape.git",
+    "directory": "packages/hs-kit"
+  },
+  "homepage": "https://github.com/HyperscapeAI/hyperscape/tree/main/packages/hs-kit#readme",
+  "bugs": {
+    "url": "https://github.com/HyperscapeAI/hyperscape/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

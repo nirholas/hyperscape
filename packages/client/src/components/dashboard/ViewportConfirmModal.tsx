@@ -16,20 +16,29 @@ export const ViewportConfirmModal: React.FC<ViewportConfirmModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-[#0b0a15] border-2 border-[#f2d08a]/30 rounded-lg shadow-2xl max-w-md w-full mx-4 animate-in zoom-in-95 duration-200">
+      <div
+        className="bg-[#0b0a15] border-2 border-[#f2d08a]/30 rounded-lg shadow-2xl max-w-md w-full mx-4 animate-in zoom-in-95 duration-200"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="viewport-modal-title"
+      >
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-[#8b4513]/30">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-[#f2d08a]/10 flex items-center justify-center">
               <Monitor className="text-[#f2d08a]" size={20} />
             </div>
-            <h2 className="text-xl font-bold text-[#f2d08a]">
+            <h2
+              id="viewport-modal-title"
+              className="text-xl font-bold text-[#f2d08a]"
+            >
               Start 3D Viewport?
             </h2>
           </div>
           <button
             onClick={onCancel}
             className="text-[#e8ebf4]/40 hover:text-[#f2d08a] transition-colors"
+            aria-label="Close modal"
           >
             <X size={20} />
           </button>

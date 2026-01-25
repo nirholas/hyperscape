@@ -1,0 +1,487 @@
+---
+description: Comprehensive technical super-audit - deep production readiness review across all systems
+globs:
+alwaysApply: false
+---
+
+# Super Audit Command
+
+## Objective
+
+When the user requests a "super-audit", ultrathink and conduct a comprehensive technical audit of the relevant systems and code. Rate production readiness on a 1-10 scale for each category.
+
+---
+
+## Rating Criteria (1-10 scale)
+
+### Production Quality Code
+- Readability and self-documenting code
+- Comprehensive error handling
+- Performance optimization
+- Documentation where behavior is non-obvious
+- Type safety throughout
+
+### Best Practices
+- Code organization and module boundaries
+- DRY (Don't Repeat Yourself)
+- KISS (Keep It Simple, Stupid)
+- YAGNI (You Ain't Gonna Need It)
+- Testing coverage (unit, integration, e2e)
+
+---
+
+## Established Standards Compliance
+
+### OWASP Security Standards
+- Injection prevention
+- Authentication and session management
+- Access control and authorization
+- Input validation and sanitization
+- Rate limiting and abuse prevention
+- Secure data transmission
+- Security logging and monitoring
+
+### CWE Top 25
+- Memory safety
+- Input validation
+- Authentication integrity
+- Authorization checks
+- Credential management
+- Path traversal prevention
+- Script injection prevention
+
+### SOLID Principles
+- **Single Responsibility** — one reason to change per module
+- **Open/Closed** — open for extension, closed for modification
+- **Liskov Substitution** — subtypes substitutable for base types
+- **Interface Segregation** — no forced dependency on unused interfaces
+- **Dependency Inversion** — depend on abstractions, not concretions
+
+### GRASP Principles
+- **Creator** — logical ownership of instance creation
+- **Information Expert** — responsibility assigned to the class with the data
+- **Low Coupling** — minimize dependencies between modules
+- **High Cohesion** — related functionality stays together
+- **Controller** — dedicated handlers for system events
+- **Polymorphism** — type-based behavior over conditionals
+- **Pure Fabrication** — service classes when no natural domain object fits
+- **Indirection** — intermediaries to reduce coupling
+- **Protected Variations** — stable interfaces shield against instability
+
+### Clean Code Principles
+- Meaningful, intention-revealing names
+- Small functions at single level of abstraction
+- No side effects in functions that return values
+- Command Query Separation — methods change state OR return data, not both
+- Fail Fast — errors surface immediately
+- Defensive Programming — assume all inputs are malicious or malformed
+
+### Law of Demeter
+- Objects only talk to immediate collaborators
+- No deep property chain access
+- No reaching through objects to access distant dependencies
+
+---
+
+## Memory & Allocation Hygiene
+
+- No allocations in hot paths
+- Pre-allocated reusables for frequently-used temporary objects
+- Object pooling for frequently spawned/despawned entities
+- Garbage collection pressure minimized in frame-critical code
+- Buffer and typed array reuse where applicable
+- Hot/cold data separation for cache efficiency
+
+---
+
+## TypeScript Rigor
+
+- Strict mode enabled
+- No implicit or explicit `any` without documented justification
+- Discriminated unions over type assertions
+- Immutability enforced via `readonly` where appropriate
+- Const enums for fixed identifiers and action types
+- Generic constraints on parameterized systems
+- Exhaustive switch statements with `never` checks
+- Strict linting rules enforced
+- Shared types between client/server for protocol safety
+
+---
+
+## Rendering & GPU Hygiene
+
+- Proper resource disposal for all GPU-allocated objects
+- Scene graph cleanup — no orphaned objects or dangling references
+- Draw call batching and instancing for repeated geometry
+- Shader caching — no per-frame compilation
+- Level-of-detail implementation for distant entities
+- Culling for off-screen and occluded objects
+- Texture atlasing and GPU memory budgeting
+- Render target reuse where applicable
+
+---
+
+## UI Framework Integration
+
+- Game loop fully decoupled from UI framework reconciliation
+- Refs over reactive state for mutable engine objects
+- UI layer separated from render canvas
+- No UI re-renders during active gameplay
+- Proper cleanup on component unmount
+- External state management for game state observed by UI
+
+---
+
+## Game Programming Patterns
+
+- **Object Pool** — reuse over create/destroy
+- **Flyweight** — shared intrinsic state for similar entities
+- **State Machine** — explicit states with defined transitions
+- **Double Buffer** — smooth rendering and input buffering
+- **Spatial Partition** — efficient spatial queries
+- **Component** — data-only, behavior-free components
+- **Event Queue** — decouple producers from consumers
+- **Service Locator** — controlled access when DI is overkill
+
+---
+
+## Data-Oriented Design
+
+- Cache-friendly data layouts
+- Struct-of-Arrays over Array-of-Structs where beneficial
+- Hot/cold data separation
+- Contiguous memory for iteration-heavy data
+- Minimize pointer chasing in tight loops
+
+---
+
+## ECS Discipline
+
+- Components are pure data — no methods, no behavior
+- Systems are pure logic — operate on component queries
+- Entities are identifiers only
+- Clear system execution order
+- No circular dependencies between systems
+
+---
+
+## Server Authority
+
+- Server is single source of truth for all authoritative game state
+- Client cannot directly modify any server-owned state
+- All player actions validated server-side before state mutation
+- Tick-based game loop with deterministic simulation
+- Client inputs are requests, server decides outcomes
+- Zero Trust — validate everything, trust nothing from client
+
+---
+
+## Client Responsiveness Principles
+
+### Feedback Classification
+All client-side feedback should be categorized by trust level:
+- **Cosmetic** — purely visual/audio, no server involvement
+- **Predictive** — client predicts outcome, server reconciles
+- **Speculative** — client estimates result, server provides truth
+- **Server-gated** — must await server confirmation
+
+### Instant Feedback
+- Pure visual/audio responses require no server round-trip
+- Anything not affecting authoritative state can be immediate
+- Transitions, animations, and local effects are always safe
+
+### Optimistic Prediction
+- Predict outcomes for frequently-used, latency-sensitive actions
+- Always have reconciliation path when server disagrees
+- Prediction logic must exactly mirror server logic (shared code)
+- Optimistic state must timeout if server doesn't confirm
+
+### Shadow State & Pending Transactions
+- Client maintains shadow state for optimistic updates
+- Shadow state reflects expected server confirmation
+- Each mutation tagged with transaction identifier
+- Server confirmation promotes shadow to confirmed state
+- Server rejection rolls back only that specific transaction
+- Rapid actions queue as independent pending transactions
+- UI renders from shadow state for responsiveness
+- Confirmed state is rollback target on connection loss
+
+### Batching & Rapid Input
+- Rapid inputs queued and sent in order, not dropped
+- Server processes queue in order, batch confirms/rejects
+- Client shows cumulative optimistic result of pending queue
+- Partial rejection rolls back only rejected portion
+- Rate limiting enforced server-side, client just queues
+
+### Speculative Display
+- Show calculated values while awaiting authoritative response
+- Client-side calculations must match server exactly (shared code)
+- Speculative values are for feel, not decision-making
+- Distinguish speculative from confirmed where ambiguity is harmful
+
+### Server-Gated Actions
+- Irreversible state changes await server confirmation
+- Multi-party interactions require server confirmation
+- Persistent data changes require server confirmation
+- Economic and progression outcomes are never client-trusted
+
+### Rejection Handling
+- Rollbacks should be smooth, not jarring
+- Feedback should be informative but not alarming
+- Retry automatically when appropriate
+- High rejection rates trigger anti-cheat logging
+- Distinguish latency from malicious input
+
+### Input Handling
+- Buffer inputs during cooldowns and action locks
+- Support action queuing for fluid gameplay
+- Prioritize recent input over stale queued input
+- Timestamp all inputs for lag compensation
+- Debounce rapid repeated inputs appropriately
+
+### Network Resilience
+- Degrade gracefully on packet loss
+- Surface connection quality when degraded
+- Queue inputs during brief disconnects
+- Maintain local simulation during lag spikes
+- Reconcile state when connection stabilizes
+- Avoid panic-disconnect on transient issues
+
+---
+
+## Tick System & Timing
+
+- Fixed server tick rate appropriate to game pacing
+- Actions queued and processed per-tick, not per-frame
+- Client interpolates between ticks for smooth visuals
+- Cooldowns and timers aligned to tick boundaries
+- Deterministic event ordering within each tick
+- Consistent tick timing maintained under load
+
+---
+
+## Anti-Cheat & Exploit Prevention
+
+- All gameplay-affecting calculations performed server-side
+- Movement and position validated against expected bounds
+- Action rate limiting enforced server-side
+- Sequence validation — actions must follow valid state transitions
+- Transaction atomicity — no race condition exploits
+- Input pattern analysis for automation detection
+- Cooldown enforcement independent of client timing
+- Boundary and collision validation server-side
+- Suspicious behavior flagging and logging
+
+---
+
+## Economic Integrity
+
+- Transactions are ACID-compliant
+- Server-authoritative state with client shadow copy
+- Multi-party transactions validated all sides before commit
+- Randomization seeded and executed server-side only
+- Audit logging for significant value transfers
+- No client-side identifier spoofing
+- Marketplace and exchange transaction integrity
+- Overflow and underflow protection on all values
+
+---
+
+## Persistence & Database
+
+- State saved atomically — no partial saves
+- Graceful handling of database latency
+- Idempotent operations — safe to retry
+- Proper indexing for common query patterns
+- Backup and recovery strategy defined
+- Migration strategy for schema evolution
+
+---
+
+## PostgreSQL Discipline
+
+### Connection Management
+- Connection pooling configured and tuned
+- Connection limits appropriate for expected concurrency
+- Connections released promptly — no leaks
+- Pool exhaustion handled gracefully
+
+### Transaction Discipline
+- Appropriate isolation levels for different operation types
+- Transactions kept short — no long-held locks
+- Explicit locking strategy where needed
+- Deadlock prevention patterns followed
+- Read-only transactions marked as such
+
+### Query Performance
+- Indexes exist for common query patterns
+- No N+1 query patterns
+- Query plans validated with EXPLAIN ANALYZE
+- Prepared statements for repeated queries
+- Pagination for large result sets
+- Avoid SELECT * — explicit column selection
+
+### Data Integrity
+- Foreign key constraints where relationships exist
+- Check constraints for value bounds
+- Unique constraints enforced at DB level, not just application
+- NOT NULL constraints where appropriate
+- Constraints named explicitly for clear error messages
+
+### Schema Design
+- Normalization appropriate to access patterns
+- Denormalization deliberate and documented where used
+- JSONB used appropriately — flexibility vs queryability tradeoff considered
+- Appropriate column types — no over-reliance on text
+- Enums or lookup tables for fixed value sets
+
+### Operational Readiness
+- Migrations tested and reversible
+- Vacuum and maintenance strategy considered
+- Backup and point-in-time recovery configured
+- Monitoring for slow queries, connection usage, disk space
+- Query timeout limits configured
+
+### Scaling Patterns
+- Read replicas considered if read-heavy
+- Partitioning strategy for large or time-series tables
+- Archive strategy for historical data
+- Connection pooler (e.g., PgBouncer) if high connection churn
+
+---
+
+## Distributed Systems Principles
+
+- **CAP Theorem** — explicit tradeoff decisions documented
+- **Consistency Requirements** — strong for authoritative state, eventual acceptable for non-critical
+- **Idempotency** — all operations safe to retry
+- Horizontal scaling strategy defined
+- Interest management — clients receive only relevant data
+- Bandwidth budgeting — delta compression, relevancy filtering
+- Graceful degradation under load
+- Session recovery on reconnection
+
+---
+
+## Code Organization
+
+### Core Philosophy
+Simplicity first. Complexity emerges from composition of simple parts.
+
+### Domain-Based Organization
+- Organize by domain, not by technical type
+- Each domain has consistent internal structure
+- Colocate related code — types, utils, constants with their domain
+- Avoid deep nesting
+
+### Single Responsibility
+- Files do one thing
+- Functions do one thing
+- Modules do one thing
+- Complexity through composition
+
+### Layered Architecture
+- Entry points at the top
+- Domain logic in the middle
+- Data access below domain
+- Shared infrastructure at the bottom
+- Dependencies flow downward only
+
+### Package Discipline
+- Shared code contains ONLY what both sides need
+- No side effects in shared packages
+- No platform-specific code in shared packages
+- Clear public API boundaries per package
+
+### File Hygiene
+- Consistent naming conventions
+- One major export per file
+- Index files for clean public APIs
+- Tests colocated with source
+
+### Refactoring Discipline
+- Refactor early and often
+- Extract when files grow too large
+- Extract when functions grow too complex
+- Simple foundation enables future complexity
+- Prevent legacy patterns from day one
+
+---
+
+## AI & NPC Behavior
+
+- Pathfinding efficiency and caching
+- Aggro acquisition and loss with proper boundaries
+- Lifecycle management for spawning and despawning
+- State machines with clear, defined transitions
+- Behavior trees or goal-oriented systems for complex behavior
+- Server-authoritative NPC actions
+- Proper timing and cooldown enforcement
+- Interest management for NPC updates to clients
+
+---
+
+## Manifest-Driven Data Architecture
+
+### Core Principles
+- Game data defined in data files, not hardcoded in logic
+- Code operates on data, doesn't contain data
+- Single source of truth for each data domain
+- Designers can modify game content without code changes
+
+### Schema Validation
+- All manifests validated against defined schemas
+- Validation runs at build time and load time
+- Clear error messages pointing to exact manifest location
+- Type generation from schemas for compile-time safety
+
+### Referential Integrity
+- Cross-manifest references validated (e.g., requirement references valid identifier)
+- Dangling references caught at build time, not runtime
+- Circular dependency detection where applicable
+- Required vs optional references clearly defined
+
+### Data Organization
+- Consistent manifest structure across domains
+- Logical grouping and file organization
+- Inheritance/composition for shared properties where appropriate
+- Default values defined at schema level, not scattered in code
+
+### No Magic Values
+- All identifiers, thresholds, and constants defined in manifests
+- Code references manifest data, never hardcodes values
+- Balance tuning possible without code changes
+- Feature flags and toggles data-driven
+
+### Versioning & Migration
+- Manifest schema versions tracked
+- Migration path for schema changes
+- Backward compatibility strategy defined
+- Deprecated fields handled gracefully
+
+### Development Workflow
+- Hot reloading of manifests during development where feasible
+- Manifest diffing for review
+- Validation integrated into CI pipeline
+- Tooling for manifest editing and visualization
+
+### Runtime Performance
+- Manifests parsed and indexed at load time, not on access
+- Lookup structures optimized for access patterns
+- Large manifests loaded asynchronously if needed
+- Memory footprint considered for manifest data
+
+---
+
+## Output Format
+
+For each section, provide:
+1. **Score (1-10)**
+2. **Findings** — specific issues identified
+3. **Recommendations** — actionable improvements
+4. **Priority** — Critical / High / Medium / Low
+
+At the end, provide:
+- **Overall Score**: Weighted average with justification
+- **Critical Blockers**: Issues that must be fixed before production
+- **Top 5 Priorities**: Most impactful improvements ranked

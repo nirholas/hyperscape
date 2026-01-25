@@ -215,8 +215,12 @@ export class ThreeResourceManager {
     ];
 
     textureProperties.forEach((prop) => {
-      // Access texture properties dynamically
-      const texture = material[prop] as THREE.Texture | undefined;
+      // Access texture properties dynamically - use record type for dynamic access
+      const materialRecord = material as unknown as Record<
+        string,
+        THREE.Texture | undefined
+      >;
+      const texture = materialRecord[prop];
       if (
         texture &&
         texture instanceof THREE.Texture &&

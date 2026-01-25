@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "cd ../client && bun run dev",
     "devUrl": "http://localhost:3333",
-    "beforeBuildCommand": "cd ../client && bun run build",
+    "beforeBuildCommand": "test -d ../client/dist || (cd ../client && bun run build)",
     "frontendDist": "../../client/dist"
   },
   "app": {

@@ -579,6 +579,9 @@ export class ClientInput extends SystemBase {
     type ExtendedPointerEvent = PointerEvent & { isCoreUI?: boolean };
     if ((e as ExtendedPointerEvent).isCoreUI) return;
 
+    // Skip if event originated from a modal or UI overlay
+    if (this.isEventFromModal(e)) return;
+
     // Block input if controls are disabled (spectator mode)
     if (!this._controlsEnabled) return;
 
@@ -601,6 +604,7 @@ export class ClientInput extends SystemBase {
   private onPointerMove = (e: PointerEvent) => {
     type ExtendedPointerEvent = PointerEvent & { isCoreUI?: boolean };
     if ((e as ExtendedPointerEvent).isCoreUI || !this.viewport) return;
+    if (this.isEventFromModal(e)) return;
 
     // Block input if controls are disabled (spectator mode)
     if (!this._controlsEnabled) return;
@@ -620,6 +624,7 @@ export class ClientInput extends SystemBase {
   private onPointerUp = (e: PointerEvent) => {
     type ExtendedPointerEvent = PointerEvent & { isCoreUI?: boolean };
     if ((e as ExtendedPointerEvent).isCoreUI) return;
+    if (this.isEventFromModal(e)) return;
     this.checkPointerChanges(e);
   };
 
@@ -687,6 +692,7 @@ export class ClientInput extends SystemBase {
   private onTouchStart = (e: TouchEvent) => {
     type ExtendedTouchEvent = TouchEvent & { isCoreUI?: boolean };
     if ((e as ExtendedTouchEvent).isCoreUI) return;
+    if (this.isEventFromModal(e)) return;
     // Ignore touches that begin on UI elements so mobile UI remains interactive
     const t = e.changedTouches && e.changedTouches[0];
     if (t) {
@@ -779,10 +785,41 @@ export class ClientInput extends SystemBase {
   private onScroll = (e: WheelEvent) => {
     type ExtendedWheelEvent = WheelEvent & { isCoreUI?: boolean };
     if ((e as ExtendedWheelEvent).isCoreUI) return;
+    // Skip if event originated from a modal or UI overlay
+    if (this.isEventFromModal(e)) return;
     let delta = e.shiftKey ? e.deltaX : e.deltaY;
     if (!this.isMac) delta = -delta;
     this.scroll.delta += delta;
   };
+
+  /**
+   * Check if an event originated from within a modal overlay.
+   * This prevents game interactions when clicking on modal UI elements.
+   */
+  private isEventFromModal(
+    event: PointerEvent | MouseEvent | TouchEvent,
+  ): boolean {
+    const target = event.target as HTMLElement | null;
+    if (!target) return false;
+
+    // Check if the target is inside a modal (role="dialog" or data-modal attribute)
+    const modal = target.closest('[role="dialog"], [data-modal="true"]');
+    if (modal) return true;
+
+    // Check if the target has a high z-index overlay (modal backdrop)
+    // Modals typically use z-index >= 10000
+    let el: HTMLElement | null = target;
+    while (el) {
+      const style = window.getComputedStyle(el);
+      const zIndex = parseInt(style.zIndex, 10);
+      if (!isNaN(zIndex) && zIndex >= 10000) {
+        return true;
+      }
+      el = el.parentElement;
+    }
+
+    return false;
+  }
 
   private onContextMenu = (e: Event) => {
     e.preventDefault();

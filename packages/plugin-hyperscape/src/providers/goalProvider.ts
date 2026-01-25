@@ -15,15 +15,23 @@ import type {
 } from "@elizaos/core";
 import type { HyperscapeService } from "../services/HyperscapeService.js";
 import type { AvailableGoalType } from "../types.js";
+import {
+  hasWeapon as detectHasWeapon,
+  hasCombatCapableItem,
+  hasFood as detectHasFood,
+  hasAxe as detectHasAxe,
+  hasPickaxe as detectHasPickaxe,
+} from "../utils/item-detection.js";
 
 /**
- * Known locations in the game world
- * - spawn: Central area where goblins roam (0,0,0)
- * - forest: Area with trees for woodcutting (25, 10, -15) - near spawn, within anti-cheat range
+ * Known locations in the game world (FALLBACK DEFAULTS)
  *
- * NOTE: Coordinates are based on actual resource spawns in central_haven area:
- * - Trees spawn at: (16,-10), (21,-10), (29,-18), (37,-28)
- * - Must be within 200 tiles of spawn for anti-cheat compliance
+ * These are used as fallbacks when dynamic entity lookup doesn't find
+ * the target entity nearby. The agent prefers to find actual entity
+ * positions at runtime using findNearestEntityPosition() in the behavior manager.
+ *
+ * NOTE: Coordinates are approximate and may change as the world evolves.
+ * Must be within 200 tiles of spawn for anti-cheat compliance.
  */
 export const KNOWN_LOCATIONS: Record<
   string,
@@ -43,6 +51,26 @@ export const KNOWN_LOCATIONS: Record<
     description: "Nearby grove with trees for woodcutting",
     entities: ["tree"],
   },
+  fishing: {
+    position: [-20, 0, 15],
+    description: "Fishing spot by the water - good for catching fish",
+    entities: ["fishing_spot", "fishing spot"],
+  },
+  mine: {
+    position: [40, 5, 25],
+    description: "Mining area with rocks - good for mining ore",
+    entities: ["rock", "ore"],
+  },
+  furnace: {
+    position: [15, 0, -10],
+    description: "Furnace for smelting ore into bars",
+    entities: ["furnace"],
+  },
+  anvil: {
+    position: [18, 0, -10],
+    description: "Anvil for smithing bars into weapons and armor",
+    entities: ["anvil"],
+  },
 };
 
 /**
@@ -50,7 +78,17 @@ export const KNOWN_LOCATIONS: Record<
  */
 export interface GoalOption {
   id: string;
-  type: AvailableGoalType;
+  type:
+    | "combat_training"
+    | "woodcutting"
+    | "mining"
+    | "smithing"
+    | "fishing"
+    | "firemaking"
+    | "cooking"
+    | "exploration"
+    | "idle"
+    | "starter_items";
   description: string;
   targetSkill?: string;
   targetSkillLevel?: number;
@@ -58,6 +96,77 @@ export interface GoalOption {
   location?: string;
   priority: number; // Higher = more recommended
   reason: string; // Why this goal is available/recommended
+  warning?: string; // Optional warning for low readiness
+}
+
+/**
+ * Combat readiness assessment
+ */
+export interface CombatReadiness {
+  score: number; // 0-100
+  factors: string[]; // Reasons for deductions
+  ready: boolean; // score >= 50
+}
+
+/**
+ * Assess combat readiness based on equipment, food, and health
+ * Returns a score (0-100) with detailed factors
+ */
+export function getCombatReadiness(
+  service: HyperscapeService,
+): CombatReadiness {
+  const player = service.getPlayerEntity();
+  const factors: string[] = [];
+  let score = 100;
+
+  if (!player) {
+    return { score: 0, factors: ["No player data"], ready: false };
+  }
+
+  // Check health (deduct up to 30 points for low health)
+  const healthPercent = player?.health
+    ? (player.health.current / player.health.max) * 100
+    : 100;
+
+  if (healthPercent < 30) {
+    score -= 30;
+    factors.push(`Low health (${healthPercent.toFixed(0)}%)`);
+  } else if (healthPercent < 50) {
+    score -= 15;
+    factors.push(`Health below 50% (${healthPercent.toFixed(0)}%)`);
+  }
+
+  // Check for weapon (deduct points based on combat capability)
+  // In OSRS, hatchets and pickaxes can be equipped and used as melee weapons
+  const hasWeaponEquipped = detectHasWeapon(player);
+  const hasCombatItem = hasCombatCapableItem(player);
+
+  if (!hasWeaponEquipped) {
+    if (hasCombatItem) {
+      // Has combat-capable item but not equipped - small penalty
+      score -= 10;
+      factors.push("Weapon not equipped (have axe/pickaxe that can be used)");
+    } else {
+      // No combat-capable item at all - full penalty
+      score -= 25;
+      factors.push("No weapon available");
+    }
+  }
+
+  // Check for food in inventory (deduct 20 points if no food)
+  // Use centralized item detection utility
+  const hasFood = detectHasFood(player);
+
+  if (!hasFood) {
+    score -= 20;
+    factors.push("No food in inventory");
+  }
+
+  return {
+    score: Math.max(0, score),
+    factors,
+    ready: score >= 50,
+  };
 }
 
 /**
@@ -108,10 +217,48 @@ export function getAvailableGoals(service: HyperscapeService): GoalOption[] {
       name.includes("ore")
     );
   });
+  const hasStarterChest = nearbyEntities.some(
+    (e) =>
+      (e as unknown as { type?: string }).type === "starter_chest" ||
+      e.name?.toLowerCase().includes("starter chest"),
+  );
 
-  // Combat training goals (only if health is decent)
+  // Check if player has basic tools using centralized item detection
+  const hasAxe = detectHasAxe(player);
+  const hasPickaxe = detectHasPickaxe(player);
+
+  // Starter chest goal - highest priority when player has no basic tools
+  if (hasStarterChest && !hasAxe && !hasPickaxe) {
+    goals.push({
+      id: "get_starter_items",
+      type: "starter_items",
+      description: "Search the starter chest for basic tools and food",
+      targetEntity: "starter_chest",
+      priority: 100, // Highest priority - new players need tools!
+      reason:
+        "You have no basic tools! The starter chest contains an axe, pickaxe, tinderbox, fishing net, and food to get you started.",
+    });
+  }
+
+  // Combat training goals - check readiness before recommending
+  const combatReadiness = getCombatReadiness(service);
+  const readinessMultiplier = combatReadiness.ready
+    ? combatReadiness.score / 100
+    : 0.3; // Heavily penalize if not ready
+
+  // Only add combat goals if health allows (30%+ threshold)
   if (healthPercent >= 30) {
+    // Build warning message for low readiness
+    const combatWarning = !combatReadiness.ready
+      ? `⚠️ NOT RECOMMENDED: ${combatReadiness.factors.join(", ")}`
+      : combatReadiness.factors.length > 0
+        ? `Note: ${combatReadiness.factors.join(", ")}`
+        : undefined;
+
     // Attack training
+    const attackPriority = Math.round(
+      (hasGoblins ? 80 : 60) * readinessMultiplier,
+    );
     goals.push({
       id: "train_attack",
       type: "combat_training",
@@ -120,13 +267,17 @@ export function getAvailableGoals(service: HyperscapeService): GoalOption[] {
       targetSkillLevel: attackLevel + 2,
       targetEntity: "goblin",
       location: "spawn",
-      priority: hasGoblins ? 80 : 60,
+      priority: attackPriority,
       reason: hasGoblins
-        ? "Goblins nearby - great for attack training!"
-        : "Goblins at spawn area for attack training",
+        ? `Goblins nearby - great for attack training! (Readiness: ${combatReadiness.score}%)`
+        : `Goblins at spawn area for attack training (Readiness: ${combatReadiness.score}%)`,
+      warning: combatWarning,
     });
 
     // Strength training
+    const strengthPriority = Math.round(
+      (hasGoblins ? 75 : 55) * readinessMultiplier,
+    );
     goals.push({
       id: "train_strength",
       type: "combat_training",
@@ -135,13 +286,17 @@ export function getAvailableGoals(service: HyperscapeService): GoalOption[] {
       targetSkillLevel: strengthLevel + 2,
       targetEntity: "goblin",
       location: "spawn",
-      priority: hasGoblins ? 75 : 55,
+      priority: strengthPriority,
       reason: hasGoblins
-        ? "Goblins nearby - good for strength training"
-        : "Train strength on goblins at spawn",
+        ? `Goblins nearby - good for strength training (Readiness: ${combatReadiness.score}%)`
+        : `Train strength on goblins at spawn (Readiness: ${combatReadiness.score}%)`,
+      warning: combatWarning,
     });
 
     // Defense training
+    const defencePriority = Math.round(
+      (hasGoblins ? 70 : 50) * readinessMultiplier,
+    );
     goals.push({
       id: "train_defence",
       type: "combat_training",
@@ -150,8 +305,9 @@ export function getAvailableGoals(service: HyperscapeService): GoalOption[] {
       targetSkillLevel: defenseLevel + 2,
       targetEntity: "goblin",
       location: "spawn",
-      priority: hasGoblins ? 70 : 50,
-      reason: "Train defence by taking hits from goblins",
+      priority: defencePriority,
+      reason: `Train defence by taking hits from goblins (Readiness: ${combatReadiness.score}%)`,
+      warning: combatWarning,
     });
   }
 
@@ -246,10 +402,13 @@ export const goalProvider: Provider = {
     const availableGoals = service ? getAvailableGoals(service) : [];
     const goalsText = availableGoals
       .slice(0, 5) // Show top 5 options
-      .map(
-        (g, i) =>
-          `${i + 1}. **${g.id}** (priority ${g.priority}): ${g.description}\n   _${g.reason}_`,
-      )
+      .map((g, i) => {
+        let text = `${i + 1}. **${g.id}** (priority ${g.priority}): ${g.description}\n   _${g.reason}_`;
+        if (g.warning) {
+          text += `\n   **${g.warning}**`;
+        }
+        return text;
+      })
       .join("\n");
 
     if (!goal) {
