@@ -1705,26 +1705,6 @@ function DesktopInterfaceManager({
         }
       }
 
-      // Trade request modal - DISABLED: Trade requests now appear as pink clickable chat messages (OSRS-style)
-      // The server sends trade requests via chatAdded with type="trade_request" which are rendered
-      // in Chat.tsx as clickable pink messages. Clicking accepts the trade.
-      // if (update.component === "tradeRequest") {
-      //   const data = update.data as {
-      //     visible: boolean;
-      //     tradeId: string;
-      //     fromPlayer: { id: string; name: string; level: number };
-      //   };
-      //   setTradeRequestState({
-      //     visible: data.visible,
-      //     tradeId: data.tradeId,
-      //     fromPlayer: {
-      //       id: data.fromPlayer.id as PlayerID,
-      //       name: data.fromPlayer.name,
-      //       level: data.fromPlayer.level,
-      //     },
-      //   });
-      // }
-
       // Trade window opened
       if (update.component === "trade") {
         const data = update.data as {

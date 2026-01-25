@@ -244,7 +244,7 @@ export function calculateFreeSlots(
     | undefined;
 
   if (!inventorySystem?.getInventoryData) {
-    return 10;
+    return 28; // OSRS inventory size
   }
 
   const inventoryData = inventorySystem.getInventoryData(playerId);

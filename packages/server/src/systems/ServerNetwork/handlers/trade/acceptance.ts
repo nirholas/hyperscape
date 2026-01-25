@@ -76,7 +76,13 @@ export async function handleTradeAccept(
     sendTradeConfirmScreen(world, tradingSystem, data.tradeId);
   } else if (result.bothAccepted) {
     // Both accepted on confirmation screen - complete the trade
-    await executeTradeSwap(tradingSystem, data.tradeId, world, db);
+    try {
+      await executeTradeSwap(tradingSystem, data.tradeId, world, db);
+    } catch (error) {
+      console.error("[Trade] Swap failed:", error);
+      tradingSystem.cancelTrade(data.tradeId, "server_error");
+      sendTradeError(socket, "Trade failed", "SERVER_ERROR");
+    }
   }
 }
 
