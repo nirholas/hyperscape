@@ -7,8 +7,7 @@ import {
   State,
   Character,
 } from "@elizaos/core";
-import { Entity, World } from "./core-types";
-import type { Player } from "@hyperscape/shared";
+import type { Entity, World, Player } from "./core-types";
 
 // Real test configuration interface
 export interface TestRuntimeConfig {
@@ -83,6 +82,8 @@ export function createMockWorld(overrides: Partial<World> = {}): World {
       getPlayer: vi.fn(),
       getLocalPlayer: vi.fn(),
       getPlayers: vi.fn(() => []),
+      getAll: vi.fn(() => []),
+      getAllPlayers: vi.fn(() => []),
     },
 
     events: {
@@ -116,12 +117,8 @@ export function createMockWorld(overrides: Partial<World> = {}): World {
     }),
 
     // Server/client detection
-    get isServer() {
-      return mockWorld.network.isServer || false;
-    },
-    get isClient() {
-      return mockWorld.network.isClient || true;
-    },
+    isServer: false,
+    isClient: true,
 
     // EventEmitter methods
     emit: vi.fn(),
@@ -136,29 +133,33 @@ export function createMockWorld(overrides: Partial<World> = {}): World {
 }
 
 // Create real player instance for testing
-export function createMockPlayer(config = {}): Player {
+export function createMockPlayer(config: Partial<Player> = {}): Player {
   return {
     id: "player-1",
+    type: "player",
     data: {
       id: "player-1",
       name: "Test Player",
     },
-    isPlayer: true,
-    type: "player",
-    position: { x: 0, y: 0, z: 0 },
+    node: {
+      position: { x: 0, y: 0, z: 0 } as Player["node"]["position"],
+      quaternion: { x: 0, y: 0, z: 0, w: 1 } as Player["node"]["quaternion"],
+    },
     ...config,
   } as Player;
 }
 
 // Create real entity instance for testing
-export function createMockEntity(config = {}): Entity {
+export function createMockEntity(config: Partial<Entity> = {}): Entity {
   return {
     id: generateTestUUID(),
-    name: "Test Entity",
     type: "entity",
-    isPlayer: false,
     data: {
       name: "Test Entity",
+    },
+    node: {
+      position: { x: 0, y: 0, z: 0 } as Entity["node"]["position"],
+      quaternion: { x: 0, y: 0, z: 0, w: 1 } as Entity["node"]["quaternion"],
     },
     ...config,
   } as Entity;
