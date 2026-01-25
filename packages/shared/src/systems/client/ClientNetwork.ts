@@ -543,11 +543,13 @@ export class ClientNetwork extends SystemBase {
 
       // Handle character selection and world entry (non-spectators only)
       if (isCharacterSelectMode) {
-        // Get characterId from embedded config (read at init) OR localStorage
+        // Get characterId from embedded config (read at init) OR sessionStorage
+        // NOTE: sessionStorage is per-tab, preventing cross-tab character conflicts
+        // (localStorage was causing Tab B to overwrite Tab A's character selection)
         const characterId =
           this.embeddedCharacterId ||
-          (typeof localStorage !== "undefined"
-            ? localStorage.getItem("selectedCharacterId")
+          (typeof sessionStorage !== "undefined"
+            ? sessionStorage.getItem("selectedCharacterId")
             : null);
 
         console.log("[PlayerLoading] Character select mode detected", {

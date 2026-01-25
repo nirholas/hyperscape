@@ -19,8 +19,8 @@ import React, {
   useMemo,
   type ReactNode,
 } from "react";
-import { EventType, getItem, createPlayerID } from "@hyperscape/shared";
-import type { PlayerStats } from "@hyperscape/shared";
+import { EventType, getItem } from "@hyperscape/shared";
+import type { PlayerStats, PlayerID } from "@hyperscape/shared";
 import {
   DndProvider,
   useWindowManager,
@@ -1715,7 +1715,7 @@ function DesktopInterfaceManager({
           visible: data.visible,
           tradeId: data.tradeId,
           fromPlayer: {
-            id: createPlayerID(data.fromPlayer.id),
+            id: data.fromPlayer.id as PlayerID,
             name: data.fromPlayer.name,
             level: data.fromPlayer.level,
           },
@@ -1735,7 +1735,7 @@ function DesktopInterfaceManager({
           tradeId: data.tradeId,
           screen: "offer" as const,
           partner: {
-            id: createPlayerID(data.partner.id),
+            id: data.partner.id as PlayerID,
             name: data.partner.name,
             level: data.partner.level,
           },

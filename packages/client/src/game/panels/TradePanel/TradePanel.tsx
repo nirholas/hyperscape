@@ -143,7 +143,7 @@ function TradeSlot({
   });
 
   const itemData = item ? getItem(item.itemId) : null;
-  const iconUrl = item ? getItemIcon(item.itemId) : null;
+  const itemIcon = item ? getItemIcon(item.itemId) : null;
   const quantity = item?.quantity ?? 0;
   const qtyDisplay = quantity > 1 ? formatQuantity(quantity) : null;
 
@@ -172,18 +172,17 @@ function TradeSlot({
       }}
       title={itemData?.name || ""}
     >
-      {iconUrl && (
-        <img
-          src={iconUrl}
-          alt={itemData?.name || "Item"}
+      {/* Render emoji icon as text, not as image src */}
+      {itemIcon && (
+        <span
           style={{
-            width: "32px",
-            height: "32px",
-            objectFit: "contain",
-            imageRendering: "pixelated",
+            fontSize: "20px",
+            color: "#f2d08a",
+            filter: "drop-shadow(0 2px 2px rgba(0, 0, 0, 0.6))",
           }}
-          draggable={false}
-        />
+        >
+          {itemIcon}
+        </span>
       )}
       {qtyDisplay && (
         <span
@@ -216,7 +215,7 @@ function DraggableInventoryItem({
   });
 
   const itemData = getItem(item.itemId);
-  const iconUrl = getItemIcon(item.itemId);
+  const itemIcon = getItemIcon(item.itemId);
   const qtyDisplay = item.quantity > 1 ? formatQuantity(item.quantity) : null;
 
   return (
@@ -237,18 +236,17 @@ function DraggableInventoryItem({
       }}
       title={itemData?.name || ""}
     >
-      {iconUrl && (
-        <img
-          src={iconUrl}
-          alt={itemData?.name || "Item"}
+      {/* Render emoji icon as text, not as image src */}
+      {itemIcon && (
+        <span
           style={{
-            width: "32px",
-            height: "32px",
-            objectFit: "contain",
-            imageRendering: "pixelated",
+            fontSize: "20px",
+            color: "#f2d08a",
+            filter: "drop-shadow(0 2px 2px rgba(0, 0, 0, 0.6))",
           }}
-          draggable={false}
-        />
+        >
+          {itemIcon}
+        </span>
       )}
       {qtyDisplay && (
         <span
@@ -269,6 +267,7 @@ function DraggableInventoryItem({
 
 /**
  * Inventory mini-panel for selecting items to trade
+ * OSRS style: displayed to the right of trade offers, 4x7 grid matching inventory
  */
 function InventoryMiniPanel({
   items,
@@ -282,41 +281,66 @@ function InventoryMiniPanel({
   // Filter out items already offered
   const availableItems = items.filter((item) => !offeredSlots.has(item.slot));
 
+  // Create a map for quick lookup
+  const itemsBySlot = new Map<
+    number,
+    { slot: number; itemId: string; quantity: number }
+  >();
+  availableItems.forEach((item) => itemsBySlot.set(item.slot, item));
+
   return (
-    <div className="mt-3">
+    <div className="flex flex-col">
       <h4
         className="text-xs font-bold mb-2"
         style={{ color: theme.colors.text.secondary }}
       >
-        Your Inventory (drag to trade)
+        Your Inventory
       </h4>
       <div
         className="grid gap-1 p-2 rounded"
         style={{
-          gridTemplateColumns: "repeat(7, 36px)",
+          // OSRS style: 4 columns x 7 rows = 28 slots
+          gridTemplateColumns: `repeat(${TRADE_GRID_COLS}, 36px)`,
           background: theme.colors.background.tertiary,
           border: `1px solid ${theme.colors.border.default}`,
-          maxHeight: "120px",
-          overflowY: "auto",
         }}
       >
-        {availableItems.map((item) => (
-          <DraggableInventoryItem
-            key={item.slot}
-            item={item}
-            index={item.slot}
-            theme={theme}
-          />
-        ))}
-        {availableItems.length === 0 && (
-          <p
-            className="col-span-7 text-center text-xs py-2"
-            style={{ color: theme.colors.text.muted }}
-          >
-            No items to trade
-          </p>
-        )}
+        {/* Render all 28 slots, showing items in their actual positions */}
+        {Array.from({ length: TRADE_SLOTS }).map((_, slotIndex) => {
+          const item = itemsBySlot.get(slotIndex);
+          if (item) {
+            return (
+              <DraggableInventoryItem
+                key={slotIndex}
+                item={item}
+                index={item.slot}
+                theme={theme}
+              />
+            );
+          }
+          // Empty slot
+          return (
+            <div
+              key={slotIndex}
+              className="relative flex items-center justify-center"
+              style={{
+                width: "36px",
+                height: "36px",
+                background: theme.colors.background.primary,
+                border: `1px solid ${theme.colors.border.default}`,
+                borderRadius: "4px",
+                opacity: 0.5,
+              }}
+            />
+          );
+        })}
       </div>
+      <p
+        className="text-xs mt-2 text-center"
+        style={{ color: theme.colors.text.muted }}
+      >
+        Drag items to trade
+      </p>
     </div>
   );
 }
@@ -420,7 +444,8 @@ export function TradePanel({
           style={{
             background: `linear-gradient(135deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
             border: `2px solid ${theme.colors.border.decorative}`,
-            width: "480px",
+            // OSRS layout: wider to fit inventory on right side
+            width: state.screen === "offer" ? "680px" : "480px",
           }}
         >
           {/* Header */}
@@ -469,183 +494,196 @@ export function TradePanel({
             </button>
           </div>
 
-          {/* Trade areas */}
+          {/* Trade areas - OSRS layout: offers on left, inventory on right */}
           <div className="p-4">
             <div className="flex gap-4">
-              {/* My offer */}
+              {/* Left section: Trade offers */}
               <div className="flex-1">
-                <div className="flex items-center justify-between mb-2">
-                  <h3
-                    className="text-sm font-bold"
-                    style={{ color: theme.colors.text.accent }}
-                  >
-                    Your Offer
-                  </h3>
-                  {state.myAccepted && (
-                    <span
-                      className="text-xs px-2 py-0.5 rounded"
+                <div className="flex gap-4">
+                  {/* My offer */}
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3
+                        className="text-sm font-bold"
+                        style={{ color: theme.colors.text.accent }}
+                      >
+                        Your Offer
+                      </h3>
+                      {state.myAccepted && (
+                        <span
+                          className="text-xs px-2 py-0.5 rounded"
+                          style={{
+                            background: `${theme.colors.state.success}30`,
+                            color: theme.colors.state.success,
+                            border: `1px solid ${theme.colors.state.success}50`,
+                          }}
+                        >
+                          Accepted
+                        </span>
+                      )}
+                    </div>
+                    <TradeDropZone id="trade-my-drop-zone" theme={theme}>
+                      <div
+                        className="grid gap-1 p-2 rounded"
+                        style={{
+                          gridTemplateColumns: `repeat(${TRADE_GRID_COLS}, 36px)`,
+                          background: theme.colors.background.tertiary,
+                          border: `1px solid ${theme.colors.border.default}`,
+                        }}
+                      >
+                        {Array.from({ length: TRADE_SLOTS }).map((_, i) => (
+                          <TradeSlot
+                            key={i}
+                            item={myOfferBySlot.get(i) || null}
+                            slotIndex={i}
+                            side="my"
+                            onRemove={
+                              state.screen === "offer"
+                                ? () => onRemoveItem(i)
+                                : undefined
+                            }
+                            theme={theme}
+                          />
+                        ))}
+                      </div>
+                    </TradeDropZone>
+                    {/* Wealth indicator for my offer */}
+                    <div
+                      className="mt-2 px-2 py-1 rounded text-xs text-center"
                       style={{
-                        background: `${theme.colors.state.success}30`,
-                        color: theme.colors.state.success,
-                        border: `1px solid ${theme.colors.state.success}50`,
+                        background: theme.colors.background.tertiary,
+                        border: `1px solid ${theme.colors.border.default}`,
+                        color: theme.colors.text.secondary,
                       }}
                     >
-                      Accepted
-                    </span>
-                  )}
-                </div>
-                <TradeDropZone id="trade-my-drop-zone" theme={theme}>
+                      Value:{" "}
+                      <span style={{ color: "#ffd700", fontWeight: "bold" }}>
+                        {formatGoldValue(state.myOfferValue)} gp
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Divider */}
                   <div
-                    className="grid gap-1 p-2 rounded"
+                    className="w-px"
+                    style={{ background: theme.colors.border.default }}
+                  />
+
+                  {/* Their offer */}
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3
+                        className="text-sm font-bold"
+                        style={{ color: theme.colors.text.accent }}
+                      >
+                        {state.partner.name}'s Offer
+                      </h3>
+                      {state.theirAccepted && (
+                        <span
+                          className="text-xs px-2 py-0.5 rounded"
+                          style={{
+                            background: `${theme.colors.state.success}30`,
+                            color: theme.colors.state.success,
+                            border: `1px solid ${theme.colors.state.success}50`,
+                          }}
+                        >
+                          Accepted
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      className="grid gap-1 p-2 rounded"
+                      style={{
+                        gridTemplateColumns: `repeat(${TRADE_GRID_COLS}, 36px)`,
+                        background: theme.colors.background.tertiary,
+                        border: `1px solid ${theme.colors.border.default}`,
+                      }}
+                    >
+                      {Array.from({ length: TRADE_SLOTS }).map((_, i) => (
+                        <TradeSlot
+                          key={i}
+                          item={theirOfferBySlot.get(i) || null}
+                          slotIndex={i}
+                          side="their"
+                          theme={theme}
+                        />
+                      ))}
+                    </div>
+                    {/* Wealth indicator for their offer */}
+                    <div
+                      className="mt-2 px-2 py-1 rounded text-xs text-center"
+                      style={{
+                        background: theme.colors.background.tertiary,
+                        border: `1px solid ${theme.colors.border.default}`,
+                        color: theme.colors.text.secondary,
+                      }}
+                    >
+                      Value:{" "}
+                      <span style={{ color: "#ffd700", fontWeight: "bold" }}>
+                        {formatGoldValue(state.theirOfferValue)} gp
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Wealth transfer summary - below offers */}
+                {(state.myOfferValue > 0 || state.theirOfferValue > 0) && (
+                  <div
+                    className="mt-3 px-3 py-2 rounded text-sm text-center"
                     style={{
-                      gridTemplateColumns: `repeat(${TRADE_GRID_COLS}, 36px)`,
                       background: theme.colors.background.tertiary,
-                      border: `1px solid ${theme.colors.border.default}`,
+                      border: `1px solid ${theme.colors.border.decorative}`,
                     }}
                   >
-                    {Array.from({ length: TRADE_SLOTS }).map((_, i) => (
-                      <TradeSlot
-                        key={i}
-                        item={myOfferBySlot.get(i) || null}
-                        slotIndex={i}
-                        side="my"
-                        onRemove={
-                          state.screen === "offer"
-                            ? () => onRemoveItem(i)
-                            : undefined
-                        }
-                        theme={theme}
-                      />
-                    ))}
-                  </div>
-                </TradeDropZone>
-                {/* Wealth indicator for my offer */}
-                <div
-                  className="mt-2 px-2 py-1 rounded text-xs text-center"
-                  style={{
-                    background: theme.colors.background.tertiary,
-                    border: `1px solid ${theme.colors.border.default}`,
-                    color: theme.colors.text.secondary,
-                  }}
-                >
-                  Value:{" "}
-                  <span style={{ color: "#ffd700", fontWeight: "bold" }}>
-                    {formatGoldValue(state.myOfferValue)} gp
-                  </span>
-                </div>
-              </div>
-
-              {/* Divider */}
-              <div
-                className="w-px"
-                style={{ background: theme.colors.border.default }}
-              />
-
-              {/* Their offer */}
-              <div className="flex-1">
-                <div className="flex items-center justify-between mb-2">
-                  <h3
-                    className="text-sm font-bold"
-                    style={{ color: theme.colors.text.accent }}
-                  >
-                    {state.partner.name}'s Offer
-                  </h3>
-                  {state.theirAccepted && (
+                    <span style={{ color: theme.colors.text.secondary }}>
+                      Wealth transfer:{" "}
+                    </span>
                     <span
-                      className="text-xs px-2 py-0.5 rounded"
                       style={{
-                        background: `${theme.colors.state.success}30`,
-                        color: theme.colors.state.success,
-                        border: `1px solid ${theme.colors.state.success}50`,
+                        color: getWealthDifferenceColor(
+                          state.myOfferValue,
+                          state.theirOfferValue,
+                        ),
+                        fontWeight: "bold",
                       }}
                     >
-                      Accepted
+                      {state.theirOfferValue >= state.myOfferValue ? "+" : ""}
+                      {formatGoldValue(
+                        state.theirOfferValue - state.myOfferValue,
+                      )}{" "}
+                      gp
                     </span>
-                  )}
-                </div>
-                <div
-                  className="grid gap-1 p-2 rounded"
-                  style={{
-                    gridTemplateColumns: `repeat(${TRADE_GRID_COLS}, 36px)`,
-                    background: theme.colors.background.tertiary,
-                    border: `1px solid ${theme.colors.border.default}`,
-                  }}
-                >
-                  {Array.from({ length: TRADE_SLOTS }).map((_, i) => (
-                    <TradeSlot
-                      key={i}
-                      item={theirOfferBySlot.get(i) || null}
-                      slotIndex={i}
-                      side="their"
-                      theme={theme}
-                    />
-                  ))}
-                </div>
-                {/* Wealth indicator for their offer */}
-                <div
-                  className="mt-2 px-2 py-1 rounded text-xs text-center"
-                  style={{
-                    background: theme.colors.background.tertiary,
-                    border: `1px solid ${theme.colors.border.default}`,
-                    color: theme.colors.text.secondary,
-                  }}
-                >
-                  Value:{" "}
-                  <span style={{ color: "#ffd700", fontWeight: "bold" }}>
-                    {formatGoldValue(state.theirOfferValue)} gp
-                  </span>
-                </div>
+                    {Math.abs(state.theirOfferValue - state.myOfferValue) >
+                      Math.max(state.myOfferValue, state.theirOfferValue) *
+                        0.5 &&
+                      state.myOfferValue > 0 && (
+                        <span
+                          className="ml-2"
+                          style={{ color: theme.colors.state.warning }}
+                        >
+                          ⚠️
+                        </span>
+                      )}
+                  </div>
+                )}
               </div>
+
+              {/* Right section: Inventory (OSRS style - only on offer screen) */}
+              {state.screen === "offer" && (
+                <>
+                  {/* Divider between offers and inventory */}
+                  <div
+                    className="w-px"
+                    style={{ background: theme.colors.border.default }}
+                  />
+                  <InventoryMiniPanel
+                    items={inventory}
+                    offeredSlots={offeredSlots}
+                    theme={theme}
+                  />
+                </>
+              )}
             </div>
-
-            {/* Wealth transfer summary */}
-            {(state.myOfferValue > 0 || state.theirOfferValue > 0) && (
-              <div
-                className="mt-3 px-3 py-2 rounded text-sm text-center"
-                style={{
-                  background: theme.colors.background.tertiary,
-                  border: `1px solid ${theme.colors.border.decorative}`,
-                }}
-              >
-                <span style={{ color: theme.colors.text.secondary }}>
-                  Wealth transfer:{" "}
-                </span>
-                <span
-                  style={{
-                    color: getWealthDifferenceColor(
-                      state.myOfferValue,
-                      state.theirOfferValue,
-                    ),
-                    fontWeight: "bold",
-                  }}
-                >
-                  {state.theirOfferValue >= state.myOfferValue ? "+" : ""}
-                  {formatGoldValue(
-                    state.theirOfferValue - state.myOfferValue,
-                  )}{" "}
-                  gp
-                </span>
-                {Math.abs(state.theirOfferValue - state.myOfferValue) >
-                  Math.max(state.myOfferValue, state.theirOfferValue) * 0.5 &&
-                  state.myOfferValue > 0 && (
-                    <span
-                      className="ml-2"
-                      style={{ color: theme.colors.state.warning }}
-                    >
-                      ⚠️
-                    </span>
-                  )}
-              </div>
-            )}
-
-            {/* Inventory mini-panel - only show on offer screen */}
-            {state.screen === "offer" && (
-              <InventoryMiniPanel
-                items={inventory}
-                offeredSlots={offeredSlots}
-                theme={theme}
-              />
-            )}
 
             {/* Confirmation screen message */}
             {state.screen === "confirm" && (
@@ -742,16 +780,16 @@ export function TradePanel({
                   justifyContent: "center",
                 }}
               >
-                <img
-                  src={draggedItemIcon}
-                  alt=""
+                {/* Render emoji icon as text, not as image src */}
+                <span
                   style={{
-                    width: "32px",
-                    height: "32px",
-                    objectFit: "contain",
-                    imageRendering: "pixelated",
+                    fontSize: "20px",
+                    color: "#f2d08a",
+                    filter: "drop-shadow(0 2px 2px rgba(0, 0, 0, 0.6))",
                   }}
-                />
+                >
+                  {draggedItemIcon}
+                </span>
               </div>
             )}
           </ComposableDragOverlay>

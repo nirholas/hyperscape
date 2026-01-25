@@ -905,9 +905,10 @@ async function executeTradeSwap(
   }
 
   // Validate session is still in correct state
-  if (session.status !== "active") {
+  // Two-screen flow: status is "confirming" when both accept on confirmation screen
+  if (session.status !== "active" && session.status !== "confirming") {
     console.error(
-      "[TradeHandler] Session not active for swap:",
+      "[TradeHandler] Session not in valid state for swap:",
       tradeId,
       session.status,
     );
