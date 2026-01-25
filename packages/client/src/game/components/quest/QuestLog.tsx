@@ -32,7 +32,7 @@ const SearchIcon = () => (
     <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z" />
   </svg>
 );
-import { useTheme, useAccessibilityStore } from "@/ui";
+import { useTheme, useAccessibilityStore, useMobileLayout } from "@/ui";
 import {
   type Quest,
   type QuestState,
@@ -629,6 +629,7 @@ const QuestListItem = memo(function QuestListItem({
   isSelected = false,
 }: QuestListItemProps): React.ReactElement {
   const theme = useTheme();
+  const { shouldUseMobileUI } = useMobileLayout();
   const [isHovered, setIsHovered] = useState(false);
   const progress = calculateQuestProgress(quest);
 
@@ -636,7 +637,7 @@ const QuestListItem = memo(function QuestListItem({
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: "4px 8px",
+    padding: shouldUseMobileUI ? "8px 12px" : "4px 8px",
     cursor: "pointer",
     backgroundColor: isSelected
       ? (theme.colors.slot.selected ?? `${theme.colors.accent.primary}20`)
@@ -644,12 +645,12 @@ const QuestListItem = memo(function QuestListItem({
         ? theme.colors.slot.hover
         : "transparent",
     transition: "background-color 0.1s ease",
-    minHeight: "28px",
+    minHeight: shouldUseMobileUI ? "44px" : "28px",
   };
 
   const nameStyle: CSSProperties = {
     color: STATUS_COLORS[quest.state],
-    fontSize: "11px",
+    fontSize: shouldUseMobileUI ? "14px" : "11px",
     fontWeight: 500,
     flex: 1,
     overflow: "hidden",
@@ -667,7 +668,10 @@ const QuestListItem = memo(function QuestListItem({
       <span style={nameStyle}>
         {quest.pinned && (
           <span
-            style={{ color: theme.colors.accent.primary, marginRight: "4px" }}
+            style={{
+              color: theme.colors.accent.primary,
+              marginRight: shouldUseMobileUI ? "6px" : "4px",
+            }}
           >
             ★
           </span>
@@ -678,8 +682,8 @@ const QuestListItem = memo(function QuestListItem({
         <span
           style={{
             color: theme.colors.text.muted,
-            fontSize: "9px",
-            marginLeft: "6px",
+            fontSize: shouldUseMobileUI ? "12px" : "9px",
+            marginLeft: shouldUseMobileUI ? "8px" : "6px",
           }}
         >
           {progress}%
@@ -688,8 +692,8 @@ const QuestListItem = memo(function QuestListItem({
       <span
         style={{
           color: theme.colors.text.muted,
-          marginLeft: "6px",
-          fontSize: "9px",
+          marginLeft: shouldUseMobileUI ? "8px" : "6px",
+          fontSize: shouldUseMobileUI ? "12px" : "9px",
         }}
       >
         Lv. {quest.level}
@@ -716,6 +720,7 @@ const CategoryGroup = memo(function CategoryGroup({
 }: CategoryGroupProps): React.ReactElement | null {
   const theme = useTheme();
   const { reducedMotion } = useAccessibilityStore();
+  const { shouldUseMobileUI } = useMobileLayout();
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const config = CATEGORY_CONFIG[category];
 
@@ -726,26 +731,26 @@ const CategoryGroup = memo(function CategoryGroup({
   const headerStyle: CSSProperties = {
     display: "flex",
     alignItems: "center",
-    gap: "6px",
-    padding: "5px 8px",
+    gap: shouldUseMobileUI ? "8px" : "6px",
+    padding: shouldUseMobileUI ? "8px 12px" : "5px 8px",
     cursor: "pointer",
     userSelect: "none",
     backgroundColor: theme.colors.slot.filled,
     borderBottom: `1px solid ${theme.colors.border.default}30`,
-    minHeight: "26px",
+    minHeight: shouldUseMobileUI ? "40px" : "26px",
   };
 
   const expandIconStyle: CSSProperties = {
-    width: "10px",
-    height: "10px",
+    width: shouldUseMobileUI ? "14px" : "10px",
+    height: shouldUseMobileUI ? "14px" : "10px",
     color: theme.colors.text.muted,
     transform: collapsed ? "rotate(0deg)" : "rotate(90deg)",
     transition: reducedMotion ? "none" : "transform 0.15s ease",
   };
 
   const indicatorStyle: CSSProperties = {
-    width: "6px",
-    height: "6px",
+    width: shouldUseMobileUI ? "8px" : "6px",
+    height: shouldUseMobileUI ? "8px" : "6px",
     borderRadius: "50%",
     backgroundColor: config.color,
   };
@@ -753,7 +758,7 @@ const CategoryGroup = memo(function CategoryGroup({
   const nameStyle: CSSProperties = {
     flex: 1,
     color: theme.colors.text.secondary,
-    fontSize: "10px",
+    fontSize: shouldUseMobileUI ? "13px" : "10px",
     fontWeight: 600,
     textTransform: "uppercase",
     letterSpacing: "0.3px",
@@ -830,24 +835,10 @@ export const QuestLog = memo(function QuestLog({
 }: QuestLogProps): React.ReactElement {
   const theme = useTheme();
   const { reducedMotion } = useAccessibilityStore();
+  const { shouldUseMobileUI } = useMobileLayout();
   const [popupQuest, setPopupQuest] = useState<Quest | null>(null);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [searchExpanded, setSearchExpanded] = useState(false);
-
-  // Mobile responsiveness
-  const [isMobile, setIsMobile] = useState(() =>
-    typeof window !== "undefined"
-      ? window.innerWidth < MOBILE_BREAKPOINT
-      : false,
-  );
-
-  useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
-    };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
 
   // Auto-expand search if there's text
   useEffect(() => {
@@ -940,23 +931,23 @@ export const QuestLog = memo(function QuestLog({
     ...style,
   };
 
-  // Compact header with stats and toolbar
+  // Compact header with stats and toolbar - mobile responsive
   const headerStyle: CSSProperties = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: "4px 6px",
+    padding: shouldUseMobileUI ? "6px 8px" : "4px 6px",
     backgroundColor: theme.colors.slot.filled,
     borderBottom: `1px solid ${theme.colors.border.default}30`,
-    minHeight: "26px",
-    gap: "4px",
+    minHeight: shouldUseMobileUI ? "36px" : "26px",
+    gap: shouldUseMobileUI ? "6px" : "4px",
   };
 
-  // Compact stats
+  // Compact stats - mobile responsive
   const statsStyle: CSSProperties = {
     display: "flex",
-    gap: "6px",
-    fontSize: "10px",
+    gap: shouldUseMobileUI ? "8px" : "6px",
+    fontSize: shouldUseMobileUI ? "12px" : "10px",
     color: theme.colors.text.muted,
     flex: 1,
   };
@@ -964,14 +955,14 @@ export const QuestLog = memo(function QuestLog({
   // Toolbar buttons
   const toolbarStyle: CSSProperties = {
     display: "flex",
-    gap: "3px",
+    gap: shouldUseMobileUI ? "6px" : "3px",
     alignItems: "center",
   };
 
-  // Small icon button
+  // Icon button - mobile responsive for touch targets
   const iconButtonStyle = (active: boolean): CSSProperties => ({
-    width: "20px",
-    height: "20px",
+    width: shouldUseMobileUI ? "32px" : "20px",
+    height: shouldUseMobileUI ? "32px" : "20px",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -980,57 +971,57 @@ export const QuestLog = memo(function QuestLog({
       : theme.colors.slot.filled,
     color: active ? theme.colors.background.primary : theme.colors.text.muted,
     border: `1px solid ${active ? theme.colors.accent.primary : theme.colors.border.default}30`,
-    borderRadius: "3px",
+    borderRadius: shouldUseMobileUI ? "4px" : "3px",
     cursor: "pointer",
     padding: 0,
     transition: reducedMotion ? "none" : "all 0.1s ease",
   });
 
-  // Collapsible search
+  // Collapsible search - mobile responsive
   const searchContainerStyle: CSSProperties = {
-    padding: "4px 6px",
+    padding: shouldUseMobileUI ? "6px 8px" : "4px 6px",
     borderBottom: `1px solid ${theme.colors.border.default}30`,
     display: searchExpanded ? "block" : "none",
   };
 
   const searchInputStyle: CSSProperties = {
     width: "100%",
-    padding: "4px 8px",
+    padding: shouldUseMobileUI ? "8px 12px" : "4px 8px",
     backgroundColor: theme.colors.slot.empty,
     border: `1px solid ${theme.colors.border.default}30`,
-    borderRadius: "3px",
+    borderRadius: shouldUseMobileUI ? "4px" : "3px",
     color: theme.colors.text.primary,
-    fontSize: "10px",
+    fontSize: shouldUseMobileUI ? "14px" : "10px",
     outline: "none",
   };
 
-  // Collapsible filters - compact
+  // Collapsible filters - compact, mobile responsive
   const filtersContainerStyle: CSSProperties = {
-    padding: "4px 6px",
+    padding: shouldUseMobileUI ? "6px 8px" : "4px 6px",
     borderBottom: `1px solid ${theme.colors.border.default}30`,
     display: filtersExpanded ? "flex" : "none",
     flexDirection: "column",
-    gap: "3px",
+    gap: shouldUseMobileUI ? "6px" : "3px",
     backgroundColor: theme.colors.slot.filled,
   };
 
-  // Compact filter row
+  // Compact filter row - mobile responsive
   const filterRowStyle: CSSProperties = {
     display: "flex",
     alignItems: "center",
-    gap: "3px",
+    gap: shouldUseMobileUI ? "6px" : "3px",
     flexWrap: "wrap",
   };
 
-  // Smaller filter chips
+  // Filter chips - mobile responsive for touch targets
   const getFilterChipStyle = (active: boolean): CSSProperties => ({
-    padding: "2px 5px",
-    borderRadius: "3px",
+    padding: shouldUseMobileUI ? "6px 10px" : "2px 5px",
+    borderRadius: shouldUseMobileUI ? "4px" : "3px",
     backgroundColor: active
       ? theme.colors.accent.primary
       : theme.colors.slot.empty,
     color: active ? theme.colors.background.primary : theme.colors.text.muted,
-    fontSize: "9px",
+    fontSize: shouldUseMobileUI ? "12px" : "9px",
     fontWeight: 500,
     cursor: "pointer",
     border: active ? "none" : `1px solid ${theme.colors.border.default}30`,
@@ -1046,12 +1037,12 @@ export const QuestLog = memo(function QuestLog({
     WebkitOverflowScrolling: "touch",
   };
 
-  // Empty state
+  // Empty state - mobile responsive
   const emptyStyle: CSSProperties = {
-    padding: "16px",
+    padding: shouldUseMobileUI ? "24px" : "16px",
     textAlign: "center",
     color: theme.colors.text.muted,
-    fontSize: "11px",
+    fontSize: shouldUseMobileUI ? "14px" : "11px",
   };
 
   // Sort options
@@ -1083,9 +1074,9 @@ export const QuestLog = memo(function QuestLog({
             <span
               style={{
                 color: theme.colors.text.secondary,
-                fontSize: "10px",
+                fontSize: shouldUseMobileUI ? "13px" : "10px",
                 fontWeight: 600,
-                marginRight: "6px",
+                marginRight: shouldUseMobileUI ? "8px" : "6px",
               }}
             >
               {title}
@@ -1139,12 +1130,12 @@ export const QuestLog = memo(function QuestLog({
                       onSortChange(e.target.value as QuestSortOption)
                     }
                     style={{
-                      padding: "2px 4px",
+                      padding: shouldUseMobileUI ? "6px 8px" : "2px 4px",
                       backgroundColor: theme.colors.slot.empty,
                       border: `1px solid ${theme.colors.border.default}30`,
-                      borderRadius: "3px",
+                      borderRadius: shouldUseMobileUI ? "4px" : "3px",
                       color: theme.colors.text.muted,
-                      fontSize: "9px",
+                      fontSize: shouldUseMobileUI ? "12px" : "9px",
                       cursor: "pointer",
                       outline: "none",
                     }}
@@ -1159,8 +1150,8 @@ export const QuestLog = memo(function QuestLog({
                     <button
                       style={{
                         ...iconButtonStyle(false),
-                        width: "18px",
-                        height: "18px",
+                        width: shouldUseMobileUI ? "28px" : "18px",
+                        height: shouldUseMobileUI ? "28px" : "18px",
                       }}
                       onClick={() =>
                         onSortDirectionChange(

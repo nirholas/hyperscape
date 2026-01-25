@@ -315,10 +315,6 @@ export function StatusBars({
     (prayerPoints.current / Math.max(1, prayerPoints.max)) * 100,
   );
 
-  // Adaptive sizing for bar mode
-  const gap = Math.max(4, size.height * 0.08);
-  const padding = Math.max(4, size.height * 0.1);
-
   // Orb size based on container
   const orbSize = ORB_SIZE_PRESETS[config.sizePreset];
 

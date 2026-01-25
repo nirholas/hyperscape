@@ -15,7 +15,7 @@ import {
   Search,
   Bell,
 } from "lucide-react";
-import { useThemeStore } from "@/ui";
+import { useThemeStore, type Theme } from "@/ui";
 import { breakpoints } from "../../constants";
 import type { ClientWorld } from "../../types";
 
@@ -47,9 +47,7 @@ interface FriendRequest {
 }
 
 // Status colors - will use theme colors
-const getStatusColors = (
-  theme: ReturnType<typeof useThemeStore>["theme"],
-): Record<FriendStatus, string> => ({
+const getStatusColors = (theme: Theme): Record<FriendStatus, string> => ({
   online: theme.colors.state.success,
   away: theme.colors.state.warning,
   busy: theme.colors.state.danger,
