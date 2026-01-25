@@ -29,18 +29,18 @@ export const COLORS = {
   // BACKGROUND COLORS (Dark Theme)
   // ===========================================
 
-  /** Primary panel background - Slightly cooler black */
-  BG_PRIMARY: "#0a0a0c",
-  /** Secondary/darker background - Dark with hint of blue */
-  BG_SECONDARY: "#141418",
+  /** Primary panel background - Dark with slight warmth */
+  BG_PRIMARY: "#121214",
+  /** Secondary/darker background - Slightly lighter */
+  BG_SECONDARY: "#1a1a1e",
   /** Tertiary/accent background - Elevated surface */
-  BG_TERTIARY: "#1e1e24",
+  BG_TERTIARY: "#242428",
   /** Solid dark background */
-  BG_SOLID: "#0a0a0c",
+  BG_SOLID: "#121214",
   /** Elevated surface */
-  BG_ELEVATED: "#1e1e24",
+  BG_ELEVATED: "#242428",
   /** Overlay/inset background */
-  BG_OVERLAY: "rgba(0, 0, 0, 0.8)",
+  BG_OVERLAY: "rgba(0, 0, 0, 0.75)",
 
   // ===========================================
   // BORDER COLORS
@@ -96,11 +96,11 @@ export const COLORS = {
   // ===========================================
 
   /** Hover overlay */
-  HOVER: "#24222a",
+  HOVER: "#2a2a30",
   /** Active/pressed overlay */
   ACTIVE: "#3d3830",
   /** Disabled overlay */
-  DISABLED: "#080808",
+  DISABLED: "#0e0e0e",
   /** Selection highlight */
   SELECTION: "#3d3830",
 } as const;
@@ -110,10 +110,10 @@ export const COLORS = {
  */
 export const GRADIENTS = {
   /** Panel background gradient - Dark theme */
-  PANEL: "linear-gradient(135deg, #0a0a0c 0%, #141418 50%, #0a0a0c 100%)",
+  PANEL: "linear-gradient(135deg, #121214 0%, #1a1a1e 50%, #121214 100%)",
 
   /** Header gradient - Dark theme */
-  HEADER: "linear-gradient(180deg, #1e1e24 0%, #141418 100%)",
+  HEADER: "linear-gradient(180deg, #242428 0%, #1a1a1e 100%)",
 
   /** Button gradient - Gold accent */
   BUTTON: "linear-gradient(135deg, #d4a84b 0%, #c49530 100%)",

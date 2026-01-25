@@ -130,86 +130,73 @@ export function useDrop(config: DropConfig): DropResult {
     return () => observer.disconnect();
   }, [id, disabled, isDragging]);
 
-  // Track enter/leave for callbacks
-  const wasOverRef = useRef(false);
-  // Save state for drop detection - must be captured BEFORE drag ends
-  const savedDragItemRef = useRef(dragItem);
-  const savedPositionRef = useRef(relativePosition);
-  const savedCanDropRef = useRef(canDrop);
-  const savedWasOverRef = useRef(false); // Separate ref for drop detection
-  // Track if we were dragging to detect drag end
-  const wasDraggingRef = useRef(false);
+  // Track state for drop detection - saved while dragging, used after drag ends
+  const savedStateRef = useRef<{
+    item: typeof dragItem;
+    position: typeof relativePosition;
+    canDrop: boolean;
+    wasOver: boolean;
+  }>({ item: null, position: null, canDrop: false, wasOver: false });
 
-  // Update saved refs while dragging - capture ALL state needed for drop
+  // Track previous isDragging to detect drag end transition
+  const prevIsDraggingRef = useRef(false);
+
+  // Save state while dragging and handle enter/leave callbacks
   useEffect(() => {
     if (isDragging && dragItem) {
-      savedDragItemRef.current = dragItem;
-      savedPositionRef.current = relativePosition;
-      savedCanDropRef.current = canDrop;
-      // Save wasOver for drop detection (before other effects can reset it)
+      // Save state for drop detection
+      savedStateRef.current.item = dragItem;
+      savedStateRef.current.position = relativePosition;
+      savedStateRef.current.canDrop = canDrop;
+
+      // Track wasOver state
       if (isOver && canDrop) {
-        savedWasOverRef.current = true;
-      } else if (!isOver) {
-        savedWasOverRef.current = false;
+        if (!savedStateRef.current.wasOver) {
+          onDragEnter?.(dragItem);
+        }
+        savedStateRef.current.wasOver = true;
+      } else if (!isOver && savedStateRef.current.wasOver) {
+        onDragLeave?.(dragItem);
+        savedStateRef.current.wasOver = false;
       }
-    }
-    wasDraggingRef.current = isDragging;
-  }, [isDragging, dragItem, relativePosition, canDrop, isOver]);
 
-  // Handle enter/leave callbacks during drag
-  useEffect(() => {
-    // Only process enter/leave while actively dragging
-    if (!isDragging || !dragItem || !canDrop) {
-      return;
-    }
-
-    if (isOver && !wasOverRef.current) {
-      // Just entered
-      onDragEnter?.(dragItem);
-      wasOverRef.current = true;
-    } else if (!isOver && wasOverRef.current) {
-      // Just left
-      onDragLeave?.(dragItem);
-      wasOverRef.current = false;
-    } else if (isOver && relativePosition) {
-      // Dragging over
-      onDragOver?.(dragItem, relativePosition);
+      // Fire dragOver callback
+      if (isOver && relativePosition) {
+        onDragOver?.(dragItem, relativePosition);
+      }
     }
   }, [
     isDragging,
-    isOver,
     dragItem,
-    canDrop,
     relativePosition,
+    canDrop,
+    isOver,
     onDragEnter,
     onDragLeave,
     onDragOver,
   ]);
 
   // Handle drop when drag ends
-  // Use savedWasOverRef because wasOverRef gets reset by enter/leave effect
   useEffect(() => {
-    // Detect transition from dragging to not dragging
-    if (
-      !isDragging &&
-      wasDraggingRef.current &&
-      savedWasOverRef.current &&
-      savedDragItemRef.current &&
-      savedCanDropRef.current
-    ) {
-      const item = savedDragItemRef.current;
-      const pos = savedPositionRef.current || { x: 0, y: 0 };
-      onDrop(item, pos);
+    const wasDragging = prevIsDraggingRef.current;
+    const justEnded = !isDragging && wasDragging;
+    const saved = savedStateRef.current;
+
+    if (justEnded && saved.wasOver && saved.item && saved.canDrop) {
+      onDrop(saved.item, saved.position || { x: 0, y: 0 });
     }
-    // Always clear refs when drag ends (whether dropped here or not)
-    if (!isDragging && wasDraggingRef.current) {
-      savedDragItemRef.current = null;
-      savedPositionRef.current = null;
-      savedCanDropRef.current = false;
-      savedWasOverRef.current = false;
-      wasOverRef.current = false;
-      wasDraggingRef.current = false;
+
+    // Clear saved state when drag ends
+    if (justEnded) {
+      savedStateRef.current = {
+        item: null,
+        position: null,
+        canDrop: false,
+        wasOver: false,
+      };
     }
+
+    prevIsDraggingRef.current = isDragging;
   }, [isDragging, onDrop]);
 
   // Cleanup on unmount
