@@ -2889,6 +2889,15 @@ export class ClientNetwork extends SystemBase {
   };
 
   /**
+   * Handle enter world approval
+   * This is a no-op since CharacterSelectScreen handles the actual transition.
+   * Handler exists to suppress "No handler for packet" warnings.
+   */
+  onEnterWorldApproved = (_data: { characterId: string }) => {
+    // Handled by CharacterSelectScreen - this is just to prevent warning logs
+  };
+
+  /**
    * Handle enter world rejection (e.g., character already logged in)
    * This triggers a redirect back to character select with an error message
    */
