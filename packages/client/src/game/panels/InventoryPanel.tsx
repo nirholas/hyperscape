@@ -265,6 +265,7 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
       ref={setNodeRef}
       {...attributes}
       {...listeners}
+      data-testid="inventory-slot"
       className="relative border rounded transition-all duration-100 group w-full h-full"
       onClick={(e) => {
         // Embedded mode: simple click to deposit/sell

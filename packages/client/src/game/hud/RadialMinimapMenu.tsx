@@ -500,12 +500,14 @@ export function RadialMinimapMenu({
       {/* Minimap */}
       <div style={minimapWrapperStyle}>
         {/* Minimap canvas - size accounts for container border */}
+        {/* Use a larger canvas that will be clipped to circle - this ensures the minimap fills the radial container */}
+        {/* Zoom is reduced to ~20 so content fills the circular view (compensates for corner clipping) */}
         <div style={minimapContainerStyle}>
           <Minimap
             world={world}
-            width={diameter - 4}
-            height={diameter - 4}
-            zoom={40}
+            width={diameter}
+            height={diameter}
+            zoom={20}
             embedded={true}
             resizable={false}
             isVisible={true}

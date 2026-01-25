@@ -383,6 +383,7 @@ export const TabBar = memo(function TabBar({
         {isUnlocked && onCloseWindow && (
           <button
             style={actionButtonStyle}
+            data-close-button
             onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
               e.stopPropagation();
               onCloseWindow();

@@ -1050,6 +1050,7 @@ function MenuBarPanel({
             active={false}
             onClick={() => onPanelClick?.(button.panelId)}
             size={buttonSize}
+            panelId={button.panelId}
           />
         ))}
       </div>

@@ -189,6 +189,22 @@ export const ChatMessage = memo(function ChatMessage({
     [message.role, theme],
   );
 
+  // SECURITY: Sanitize usernames to prevent XSS attacks
+  // Usernames may come from untrusted sources and could contain malicious content
+  const safeUsername = useMemo(
+    () =>
+      message.username ? InputValidator.sanitizeHtml(message.username) : "",
+    [message.username],
+  );
+
+  const safeTargetUsername = useMemo(
+    () =>
+      message.targetUsername
+        ? InputValidator.sanitizeHtml(message.targetUsername)
+        : "",
+    [message.targetUsername],
+  );
+
   const handleUsernameClick = useCallback(() => {
     if (onUsernameClick && message.username) {
       onUsernameClick(message.username);
@@ -263,7 +279,7 @@ export const ChatMessage = memo(function ChatMessage({
             [{formatTimestamp(message.timestamp, timestampFormat)}]
           </span>
         )}
-        <span style={usernameStyle}>{message.username}:</span>
+        <span style={usernameStyle}>{safeUsername}:</span>
         <span style={contentStyle}>
           {parseContent(message.content, onLinkClick, linkStyle)}
         </span>
@@ -273,9 +289,9 @@ export const ChatMessage = memo(function ChatMessage({
 
   // Render whisper
   if (message.type === "whisper") {
-    const prefix = message.targetUsername
-      ? `To [${message.targetUsername}]`
-      : `From [${message.username}]`;
+    const prefix = safeTargetUsername
+      ? `To [${safeTargetUsername}]`
+      : `From [${safeUsername}]`;
     return (
       <div className={className} style={containerStyle}>
         {showTimestamp && (
@@ -316,7 +332,7 @@ export const ChatMessage = memo(function ChatMessage({
               : undefined
           }
         >
-          {message.username}:
+          {safeUsername}:
         </span>
         <span style={contentStyle}>
           {parseContent(message.content, onLinkClick, linkStyle)}
@@ -350,7 +366,7 @@ export const ChatMessage = memo(function ChatMessage({
               : undefined
           }
         >
-          {message.username}:
+          {safeUsername}:
         </span>
         <span style={contentStyle}>
           {parseContent(message.content, onLinkClick, linkStyle)}
@@ -382,7 +398,7 @@ export const ChatMessage = memo(function ChatMessage({
             : undefined
         }
       >
-        {message.username}:
+        {safeUsername}:
       </span>
       <span style={contentStyle}>
         {parseContent(message.content, onLinkClick, linkStyle)}

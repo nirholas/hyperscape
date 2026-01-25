@@ -88,6 +88,8 @@ interface MenuButtonProps {
   onClick: () => void;
   /** Size variant */
   size?: "compact" | "small" | "normal";
+  /** Panel ID for test selectors (optional) */
+  panelId?: string;
 }
 
 export function MenuButton({
@@ -96,6 +98,7 @@ export function MenuButton({
   active,
   onClick,
   size = "normal",
+  panelId,
 }: MenuButtonProps) {
   const theme = useThemeStore((s) => s.theme);
   const config = SIZE_CONFIG[size];
@@ -126,6 +129,7 @@ export function MenuButton({
     <button
       onClick={onClick}
       title={label}
+      data-panel-id={panelId}
       className="focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:scale-110"
       style={{
         width: config.size,

@@ -204,6 +204,7 @@ export const ChatInput = memo(function ChatInput({
         onFocus={onFocus}
         onBlur={onBlur}
         aria-label="Chat input"
+        data-testid="chat-input"
         autoComplete="off"
         spellCheck="false"
       />

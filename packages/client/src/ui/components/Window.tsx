@@ -590,6 +590,7 @@ export const Window = memo(function Window({
       style={containerStyle}
       onClick={bringToFront}
       data-window-id={windowId}
+      data-panel={windowId}
     >
       {/* No title bar - TabBar serves as the header with drag functionality */}
       <div style={contentStyle}>

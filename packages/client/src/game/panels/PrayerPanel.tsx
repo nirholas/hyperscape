@@ -275,12 +275,15 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
   const [hoveredPrayer, setHoveredPrayer] = useState<PrayerUI | null>(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [activePrayers, setActivePrayers] = useState<Set<string>>(new Set());
-  const [prayerPoints, setPrayerPoints] = useState({ current: 1, max: 1 });
   const [containerWidth, setContainerWidth] = useState(
     PRAYER_PANEL_DIMENSIONS.defaultWidth,
   );
   const prayerTooltipRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Use prayer points directly from stats prop (same pattern as StatusBars)
+  // This ensures a single source of truth - no local state that can get out of sync
+  const prayerPoints = stats?.prayerPoints ?? { current: 0, max: 1 };
 
   const prayerTooltipSize = useTooltipSize(hoveredPrayer, prayerTooltipRef, {
     width: 200,
@@ -324,11 +327,13 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
   // Get prayer definitions from manifest-loaded provider (includes proper conflict data)
   const prayerDefinitions = useMemo(() => getPrayerDefinitions(), []);
 
-  // Sync with server prayer state
+  // Sync active prayers with server prayer state
+  // Note: Prayer POINTS now come from stats prop (single source of truth)
+  // Only active prayers need local state since they come from prayer-specific events
   useEffect(() => {
     if (!world) return;
 
-    // Get initial state from ClientNetwork cache (if panel mounted after sync event)
+    // Get initial active prayers from ClientNetwork cache (if panel mounted after sync event)
     const localPlayer = world.getPlayer();
     if (localPlayer) {
       const network = world.network as {
@@ -339,10 +344,6 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
       };
       const cachedState = network?.lastPrayerStateByPlayerId?.[localPlayer.id];
       if (cachedState) {
-        setPrayerPoints({
-          current: cachedState.points,
-          max: cachedState.maxPoints,
-        });
         setActivePrayers(new Set(cachedState.active));
       }
     }
@@ -352,7 +353,7 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
       const player = world.getPlayer();
       if (!player || data.playerId !== player.id) return;
 
-      setPrayerPoints({ current: data.points, max: data.maxPoints });
+      // Only update active prayers - points come from stats prop
       setActivePrayers(new Set(data.active));
     };
 
@@ -370,41 +371,17 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
         }
         return next;
       });
-      setPrayerPoints((prev) => ({ ...prev, current: data.points }));
-    };
-
-    const handlePrayerPointsChanged = (payload: unknown) => {
-      const data = payload as {
-        playerId: string;
-        points: number;
-        maxPoints: number;
-      };
-      const player = world.getPlayer();
-      if (!player || data.playerId !== player.id) return;
-
-      setPrayerPoints({ current: data.points, max: data.maxPoints });
+      // Note: Prayer points update will come through stats prop via PRAYER_POINTS_CHANGED -> CoreUI -> stats
     };
 
     world.on(EventType.PRAYER_STATE_SYNC, handlePrayerStateSync);
     world.on(EventType.PRAYER_TOGGLED, handlePrayerToggled);
-    world.on(EventType.PRAYER_POINTS_CHANGED, handlePrayerPointsChanged);
 
     return () => {
       world.off(EventType.PRAYER_STATE_SYNC, handlePrayerStateSync);
       world.off(EventType.PRAYER_TOGGLED, handlePrayerToggled);
-      world.off(EventType.PRAYER_POINTS_CHANGED, handlePrayerPointsChanged);
     };
   }, [world]);
-
-  // Sync from stats prop as fallback
-  useEffect(() => {
-    if (stats?.prayerPoints) {
-      setPrayerPoints({
-        current: stats.prayerPoints.current,
-        max: stats.prayerPoints.max,
-      });
-    }
-  }, [stats?.prayerPoints]);
 
   // Convert prayer definitions to UI prayers with active state
   const prayers: PrayerUI[] = useMemo(() => {
