@@ -19,617 +19,22 @@
  * - Two-screen confirmation flow
  */
 
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { useThemeStore, type Theme } from "hs-kit";
-import {
-  getItem,
-  type TradeOfferItem,
-  type TradeWindowState,
-} from "@hyperscape/shared";
-import { getItemIcon } from "../utils/item-display";
+import { useThemeStore } from "hs-kit";
+import type { TradeOfferItem } from "@hyperscape/shared";
 
-// ============================================================================
-// Constants
-// ============================================================================
-
-const TRADE_GRID_COLS = 4;
-const TRADE_GRID_ROWS = 7;
-const TRADE_SLOTS = TRADE_GRID_COLS * TRADE_GRID_ROWS; // 28 slots
-
-// ============================================================================
-// Types
-// ============================================================================
-
-interface TradePanelProps {
-  state: TradeWindowState;
-  inventory: Array<{ slot: number; itemId: string; quantity: number }>;
-  onAddItem: (inventorySlot: number, quantity?: number) => void;
-  onRemoveItem: (tradeSlot: number) => void;
-  onAccept: () => void;
-  onCancel: () => void;
-}
-
-interface TradeSlotProps {
-  item: TradeOfferItem | null;
-  slotIndex: number;
-  side: "my" | "their";
-  onRemove?: () => void;
-  theme: Theme;
-  isRemoved?: boolean; // For red flashing exclamation
-}
-
-interface InventoryItemProps {
-  item: { slot: number; itemId: string; quantity: number };
-  theme: Theme;
-  onLeftClick: () => void;
-  onRightClick: (e: React.MouseEvent) => void;
-}
-
-interface ContextMenuData {
-  x: number;
-  y: number;
-  item: { slot: number; itemId: string; quantity: number };
-}
-
-interface QuantityPromptData {
-  item: { slot: number; itemId: string; quantity: number };
-}
-
-type ContextMenuState = ContextMenuData | null;
-type QuantityPromptState = QuantityPromptData | null;
-
-interface RemovedItemIndicator {
-  slot: number;
-  side: "my" | "their";
-  timestamp: number;
-}
-
-// ============================================================================
-// Utility Functions
-// ============================================================================
-
-/**
- * Format quantity for OSRS-style display
- */
-function formatQuantity(qty: number): { text: string; color: string } {
-  if (qty < 100000) {
-    return { text: qty.toLocaleString(), color: "rgba(255, 255, 255, 0.95)" };
-  } else if (qty < 10000000) {
-    const k = Math.floor(qty / 1000);
-    return { text: `${k}K`, color: "rgba(0, 255, 128, 0.95)" };
-  } else {
-    const m = Math.floor(qty / 1000000);
-    return { text: `${m}M`, color: "rgba(0, 255, 128, 0.95)" };
-  }
-}
-
-/**
- * Format gold value for wealth indicator display (OSRS-style)
- */
-function formatGoldValue(value: number): string {
-  if (value < 1000) {
-    return value.toLocaleString();
-  } else if (value < 1000000) {
-    const k = Math.floor(value / 1000);
-    const remainder = Math.floor((value % 1000) / 100);
-    return remainder > 0 ? `${k}.${remainder}K` : `${k}K`;
-  } else if (value < 1000000000) {
-    const m = Math.floor(value / 1000000);
-    const remainder = Math.floor((value % 1000000) / 100000);
-    return remainder > 0 ? `${m}.${remainder}M` : `${m}M`;
-  } else {
-    const b = Math.floor(value / 1000000000);
-    return `${b}B`;
-  }
-}
-
-/**
- * Get color for wealth difference indicator
- * Green = gaining value, Red = losing value, White = neutral
- */
-function getWealthDifferenceColor(myValue: number, theirValue: number): string {
-  const diff = theirValue - myValue;
-  if (diff > 0) return "#22c55e"; // Green - gaining
-  if (diff < 0) return "#ef4444"; // Red - losing
-  return "#ffffff"; // White - equal
-}
-
-/**
- * Parse quantity input with K/M notation
- * Examples: "10k" -> 10000, "1.5m" -> 1500000, "500" -> 500
- */
-function parseQuantityInput(input: string): number {
-  const normalized = input.toLowerCase().trim();
-  const match = normalized.match(/^(\d+\.?\d*)(k|m)?$/);
-  if (!match) return 0;
-
-  let value = parseFloat(match[1]);
-  if (match[2] === "k") value *= 1000;
-  if (match[2] === "m") value *= 1000000;
-  return Math.floor(value);
-}
-
-// ============================================================================
-// Sub-Components
-// ============================================================================
-
-/**
- * Individual trade slot displaying an item or empty slot
- * Shows red flashing exclamation when item was recently removed (anti-scam)
- */
-function TradeSlot({
-  item,
-  slotIndex,
-  side,
-  onRemove,
-  theme,
-  isRemoved,
-}: TradeSlotProps) {
-  const itemData = item ? getItem(item.itemId) : null;
-  const itemIcon = item ? getItemIcon(item.itemId) : null;
-  const quantity = item?.quantity ?? 0;
-  const qtyDisplay = quantity > 1 ? formatQuantity(quantity) : null;
-
-  return (
-    <div
-      className="relative flex items-center justify-center"
-      style={{
-        width: "36px",
-        height: "36px",
-        background: isRemoved
-          ? "rgba(239, 68, 68, 0.3)"
-          : theme.colors.background.tertiary,
-        border: isRemoved
-          ? "2px solid #ef4444"
-          : `1px solid ${theme.colors.border.default}`,
-        borderRadius: "4px",
-        cursor: item && side === "my" ? "pointer" : "default",
-        transition: "background 0.15s, border-color 0.15s",
-        animation: isRemoved ? "pulse 0.5s ease-in-out infinite" : "none",
-      }}
-      onClick={() => {
-        if (item && side === "my" && onRemove) {
-          onRemove();
-        }
-      }}
-      title={itemData?.name || ""}
-    >
-      {/* Red flashing exclamation for removed items */}
-      {isRemoved && !item && (
-        <span
-          style={{
-            fontSize: "24px",
-            color: "#ef4444",
-            fontWeight: "bold",
-            textShadow: "0 0 8px rgba(239, 68, 68, 0.8)",
-          }}
-        >
-          !
-        </span>
-      )}
-      {/* Render emoji icon as text */}
-      {itemIcon && (
-        <span
-          style={{
-            fontSize: "20px",
-            color: "#f2d08a",
-            filter: "drop-shadow(0 2px 2px rgba(0, 0, 0, 0.6))",
-          }}
-        >
-          {itemIcon}
-        </span>
-      )}
-      {qtyDisplay && (
-        <span
-          className="absolute bottom-0 right-0.5 text-xs font-bold"
-          style={{
-            color: qtyDisplay.color,
-            textShadow:
-              "1px 1px 0 #000, -1px 1px 0 #000, 1px -1px 0 #000, -1px -1px 0 #000",
-            fontSize: "10px",
-          }}
-        >
-          {qtyDisplay.text}
-        </span>
-      )}
-    </div>
-  );
-}
-
-/**
- * Clickable inventory item for OSRS-style trade panel
- * Left-click: add 1 to trade
- * Right-click: show context menu
- */
-function InventoryItem({
-  item,
-  theme,
-  onLeftClick,
-  onRightClick,
-}: InventoryItemProps) {
-  const itemData = getItem(item.itemId);
-  const itemIcon = getItemIcon(item.itemId);
-  const qtyDisplay = item.quantity > 1 ? formatQuantity(item.quantity) : null;
-
-  return (
-    <div
-      className="relative flex items-center justify-center hover:brightness-110"
-      style={{
-        width: "36px",
-        height: "36px",
-        background: theme.colors.background.tertiary,
-        border: `1px solid ${theme.colors.border.default}`,
-        borderRadius: "4px",
-        cursor: "pointer",
-        transition: "filter 0.1s",
-      }}
-      title={`${itemData?.name || item.itemId} (Left-click: Offer 1, Right-click: Options)`}
-      onClick={(e) => {
-        e.preventDefault();
-        onLeftClick();
-      }}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        onRightClick(e);
-      }}
-    >
-      {/* Render emoji icon as text */}
-      {itemIcon && (
-        <span
-          style={{
-            fontSize: "20px",
-            color: "#f2d08a",
-            filter: "drop-shadow(0 2px 2px rgba(0, 0, 0, 0.6))",
-          }}
-        >
-          {itemIcon}
-        </span>
-      )}
-      {qtyDisplay && (
-        <span
-          className="absolute bottom-0 right-0.5 text-xs font-bold"
-          style={{
-            color: qtyDisplay.color,
-            textShadow:
-              "1px 1px 0 #000, -1px 1px 0 #000, 1px -1px 0 #000, -1px -1px 0 #000",
-            fontSize: "10px",
-          }}
-        >
-          {qtyDisplay.text}
-        </span>
-      )}
-    </div>
-  );
-}
-
-/**
- * OSRS-style context menu for trade inventory items
- */
-function TradeContextMenu({
-  x,
-  y,
-  item,
-  theme,
-  onOffer,
-  onClose,
-}: {
-  x: number;
-  y: number;
-  item: { slot: number; itemId: string; quantity: number };
-  theme: Theme;
-  onOffer: (quantity: number | "x" | "all" | "value" | "examine") => void;
-  onClose: () => void;
-}) {
-  const menuRef = useRef<HTMLDivElement>(null);
-  const itemData = getItem(item.itemId);
-  const itemName = itemData?.name || item.itemId;
-
-  // Close on click outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    };
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    document.addEventListener("keydown", handleEscape);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [onClose]);
-
-  // Adjust position to stay within viewport
-  const adjustedX = Math.min(x, window.innerWidth - 160);
-  const adjustedY = Math.min(y, window.innerHeight - 280);
-
-  const menuOptions = [
-    { label: `Offer ${itemName}`, action: () => onOffer(1) },
-    { label: "Offer-5", action: () => onOffer(5) },
-    { label: "Offer-10", action: () => onOffer(10) },
-    { label: "Offer-X", action: () => onOffer("x") },
-    { label: "Offer-All", action: () => onOffer("all") },
-    { label: "Value", action: () => onOffer("value") },
-    { label: "Examine", action: () => onOffer("examine") },
-  ];
-
-  return createPortal(
-    <div
-      ref={menuRef}
-      style={{
-        position: "fixed",
-        left: adjustedX,
-        top: adjustedY,
-        zIndex: 99999,
-        background: "rgba(0, 0, 0, 0.95)",
-        border: "1px solid rgba(100, 80, 60, 0.8)",
-        borderRadius: "2px",
-        padding: "2px 0",
-        minWidth: "150px",
-        boxShadow: "2px 2px 8px rgba(0, 0, 0, 0.5)",
-      }}
-    >
-      {/* Header with item name */}
-      <div
-        style={{
-          padding: "4px 8px",
-          color: "#ff9900",
-          fontWeight: "bold",
-          fontSize: "12px",
-          borderBottom: "1px solid rgba(100, 80, 60, 0.5)",
-        }}
-      >
-        {itemName}
-      </div>
-      {menuOptions.map((option, i) => (
-        <div
-          key={i}
-          onClick={() => {
-            option.action();
-            onClose();
-          }}
-          style={{
-            padding: "4px 8px",
-            color: i === 0 ? "#ffff00" : "#ffffff",
-            fontSize: "12px",
-            cursor: "pointer",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "transparent";
-          }}
-        >
-          {option.label}
-        </div>
-      ))}
-    </div>,
-    document.body,
-  );
-}
-
-/**
- * Quantity prompt modal for Offer-X
- */
-function QuantityPrompt({
-  item,
-  theme,
-  onConfirm,
-  onCancel,
-}: {
-  item: { slot: number; itemId: string; quantity: number };
-  theme: Theme;
-  onConfirm: (quantity: number) => void;
-  onCancel: () => void;
-}) {
-  const [inputValue, setInputValue] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-  const itemData = getItem(item.itemId);
-  const itemName = itemData?.name || item.itemId;
-
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  const handleSubmit = () => {
-    const qty = parseQuantityInput(inputValue);
-    if (qty > 0) {
-      const finalQty = Math.min(qty, item.quantity);
-      onConfirm(finalQty);
-    }
-  };
-
-  return createPortal(
-    <div
-      className="fixed inset-0 flex items-center justify-center"
-      style={{ zIndex: 100000, background: "rgba(0, 0, 0, 0.5)" }}
-      onClick={onCancel}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: theme.colors.background.secondary,
-          border: `2px solid ${theme.colors.border.decorative}`,
-          borderRadius: "8px",
-          padding: "16px",
-          minWidth: "280px",
-        }}
-      >
-        <h3
-          style={{
-            color: theme.colors.text.accent,
-            fontWeight: "bold",
-            marginBottom: "12px",
-            fontSize: "14px",
-          }}
-        >
-          How many would you like to offer?
-        </h3>
-        <p
-          style={{
-            color: theme.colors.text.secondary,
-            fontSize: "12px",
-            marginBottom: "8px",
-          }}
-        >
-          {itemName} (max: {item.quantity.toLocaleString()})
-        </p>
-        <input
-          ref={inputRef}
-          type="text"
-          value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") handleSubmit();
-            if (e.key === "Escape") onCancel();
-          }}
-          placeholder="e.g. 10, 1k, 1.5m"
-          style={{
-            width: "100%",
-            padding: "8px",
-            background: theme.colors.background.primary,
-            border: `1px solid ${theme.colors.border.default}`,
-            borderRadius: "4px",
-            color: theme.colors.text.primary,
-            fontSize: "14px",
-            marginBottom: "12px",
-          }}
-        />
-        <div className="flex gap-2">
-          <button
-            onClick={handleSubmit}
-            style={{
-              flex: 1,
-              padding: "8px",
-              background: theme.colors.state.success,
-              color: "white",
-              border: "none",
-              borderRadius: "4px",
-              cursor: "pointer",
-              fontWeight: "bold",
-            }}
-          >
-            Confirm
-          </button>
-          <button
-            onClick={onCancel}
-            style={{
-              flex: 1,
-              padding: "8px",
-              background: theme.colors.state.danger,
-              color: "white",
-              border: "none",
-              borderRadius: "4px",
-              cursor: "pointer",
-              fontWeight: "bold",
-            }}
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body,
-  );
-}
-
-/**
- * Inventory mini-panel for selecting items to trade
- * OSRS style: displayed to the right of trade offers, 4x7 grid matching inventory
- * Left-click: add 1 item, Right-click: context menu
- */
-function InventoryMiniPanel({
-  items,
-  offeredSlots,
-  theme,
-  onItemLeftClick,
-  onItemRightClick,
-}: {
-  items: Array<{ slot: number; itemId: string; quantity: number }>;
-  offeredSlots: Set<number>;
-  theme: Theme;
-  onItemLeftClick: (item: {
-    slot: number;
-    itemId: string;
-    quantity: number;
-  }) => void;
-  onItemRightClick: (
-    e: React.MouseEvent,
-    item: { slot: number; itemId: string; quantity: number },
-  ) => void;
-}) {
-  // Filter out items already offered
-  const availableItems = items.filter((item) => !offeredSlots.has(item.slot));
-
-  // Create a map for quick lookup
-  const itemsBySlot = new Map<
-    number,
-    { slot: number; itemId: string; quantity: number }
-  >();
-  availableItems.forEach((item) => itemsBySlot.set(item.slot, item));
-
-  return (
-    <div className="flex flex-col">
-      <h4
-        className="text-xs font-bold mb-2"
-        style={{ color: theme.colors.text.secondary }}
-      >
-        Your Inventory
-      </h4>
-      <div
-        className="grid gap-1 p-2 rounded"
-        style={{
-          // OSRS style: 4 columns x 7 rows = 28 slots
-          gridTemplateColumns: `repeat(${TRADE_GRID_COLS}, 36px)`,
-          background: theme.colors.background.tertiary,
-          border: `1px solid ${theme.colors.border.default}`,
-        }}
-      >
-        {/* Render all 28 slots, showing items in their actual positions */}
-        {Array.from({ length: TRADE_SLOTS }).map((_, slotIndex) => {
-          const item = itemsBySlot.get(slotIndex);
-          if (item) {
-            return (
-              <InventoryItem
-                key={slotIndex}
-                item={item}
-                theme={theme}
-                onLeftClick={() => onItemLeftClick(item)}
-                onRightClick={(e) => onItemRightClick(e, item)}
-              />
-            );
-          }
-          // Empty slot
-          return (
-            <div
-              key={slotIndex}
-              className="relative flex items-center justify-center"
-              style={{
-                width: "36px",
-                height: "36px",
-                background: theme.colors.background.primary,
-                border: `1px solid ${theme.colors.border.default}`,
-                borderRadius: "4px",
-                opacity: 0.5,
-              }}
-            />
-          );
-        })}
-      </div>
-      <p
-        className="text-xs mt-2 text-center"
-        style={{ color: theme.colors.text.muted }}
-      >
-        Left-click: Offer 1 | Right-click: Options
-      </p>
-    </div>
-  );
-}
+// Import from split modules
+import type {
+  TradePanelProps,
+  ContextMenuState,
+  QuantityPromptState,
+} from "./types";
+import { TRADE_GRID_COLS, TRADE_SLOTS } from "./constants";
+import { formatGoldValue, getWealthDifferenceColor } from "./utils";
+import { TradeSlot, InventoryMiniPanel } from "./components";
+import { TradeContextMenu, QuantityPrompt } from "./modals";
+import { useRemovedItemTracking } from "./hooks";
 
 // ============================================================================
 // Main Component
@@ -642,6 +47,8 @@ export function TradePanel({
   onRemoveItem,
   onAccept,
   onCancel,
+  onExamineItem,
+  onValueItem,
 }: TradePanelProps) {
   const theme = useThemeStore((s) => s.theme);
 
@@ -652,67 +59,14 @@ export function TradePanel({
   const [quantityPrompt, setQuantityPrompt] =
     useState<QuantityPromptState>(null);
 
-  // Track removed items for red flashing exclamation (anti-scam feature)
-  const [removedItems, setRemovedItems] = useState<RemovedItemIndicator[]>([]);
-
-  // Track previous offers to detect removals
-  const prevMyOfferRef = useRef<TradeOfferItem[]>([]);
-  const prevTheirOfferRef = useRef<TradeOfferItem[]>([]);
+  // Track removed items for anti-scam feature
+  const { myRemovedSlots, theirRemovedSlots, hasRecentRemovals } =
+    useRemovedItemTracking(state.myOffer, state.theirOffer);
 
   // Get set of inventory slots already offered
   const offeredSlots = useMemo(() => {
     return new Set(state.myOffer.map((item) => item.inventorySlot));
   }, [state.myOffer]);
-
-  // Detect removed items and show red exclamation
-  useEffect(() => {
-    const prevMyOffer = prevMyOfferRef.current;
-    const prevTheirOffer = prevTheirOfferRef.current;
-
-    // Check for removed items in my offer
-    for (const prevItem of prevMyOffer) {
-      const stillExists = state.myOffer.some(
-        (item) => item.tradeSlot === prevItem.tradeSlot,
-      );
-      if (!stillExists) {
-        setRemovedItems((prev) => [
-          ...prev,
-          { slot: prevItem.tradeSlot, side: "my", timestamp: Date.now() },
-        ]);
-      }
-    }
-
-    // Check for removed items in their offer
-    for (const prevItem of prevTheirOffer) {
-      const stillExists = state.theirOffer.some(
-        (item) => item.tradeSlot === prevItem.tradeSlot,
-      );
-      if (!stillExists) {
-        setRemovedItems((prev) => [
-          ...prev,
-          { slot: prevItem.tradeSlot, side: "their", timestamp: Date.now() },
-        ]);
-      }
-    }
-
-    // Update refs
-    prevMyOfferRef.current = [...state.myOffer];
-    prevTheirOfferRef.current = [...state.theirOffer];
-  }, [state.myOffer, state.theirOffer]);
-
-  // Clear removed item indicators after 5 seconds
-  useEffect(() => {
-    if (removedItems.length === 0) return;
-
-    const timer = setInterval(() => {
-      const now = Date.now();
-      setRemovedItems((prev) =>
-        prev.filter((item) => now - item.timestamp < 5000),
-      );
-    }, 500);
-
-    return () => clearInterval(timer);
-  }, [removedItems.length]);
 
   // Handle left-click on inventory item (add 1)
   const handleInventoryLeftClick = useCallback(
@@ -745,25 +99,22 @@ export function TradePanel({
       } else if (quantity === "all") {
         onAddItem(item.slot, item.quantity);
       } else if (quantity === "value") {
-        // Show item value (could emit to chat or show tooltip)
-        const itemData = getItem(item.itemId);
-        const value = itemData?.value || 0;
-        console.log(
-          `${itemData?.name || item.itemId}: ${value.toLocaleString()} gp`,
-        );
+        // Use callback if provided, otherwise fallback behavior
+        if (onValueItem) {
+          onValueItem(item.itemId);
+        }
       } else if (quantity === "examine") {
-        // Show item examine text
-        const itemData = getItem(item.itemId);
-        console.log(
-          itemData?.examine || `It's a ${itemData?.name || item.itemId}.`,
-        );
+        // Use callback if provided, otherwise fallback behavior
+        if (onExamineItem) {
+          onExamineItem(item.itemId);
+        }
       } else {
         // Numeric quantity
         const qty = Math.min(quantity, item.quantity);
         onAddItem(item.slot, qty);
       }
     },
-    [contextMenu, onAddItem],
+    [contextMenu, onAddItem, onExamineItem, onValueItem],
   );
 
   // Handle quantity prompt confirm
@@ -776,18 +127,10 @@ export function TradePanel({
     [quantityPrompt, onAddItem],
   );
 
-  // Check if there are recent removals (for accept warning)
-  const hasRecentRemovals = removedItems.length > 0;
-
   // Handle accept with warning if items were removed
   const handleAcceptWithWarning = useCallback(() => {
-    if (hasRecentRemovals) {
-      // Could show a confirmation dialog here
-      // For now, just proceed with the accept
-      console.warn("Trade modified - items were removed!");
-    }
     onAccept();
-  }, [hasRecentRemovals, onAccept]);
+  }, [onAccept]);
 
   if (!state.isOpen || !state.partner) return null;
 
@@ -801,14 +144,6 @@ export function TradePanel({
   for (const item of state.theirOffer) {
     theirOfferBySlot.set(item.tradeSlot, item);
   }
-
-  // Get removed slots for red exclamation display
-  const myRemovedSlots = new Set(
-    removedItems.filter((r) => r.side === "my").map((r) => r.slot),
-  );
-  const theirRemovedSlots = new Set(
-    removedItems.filter((r) => r.side === "their").map((r) => r.slot),
-  );
 
   return createPortal(
     <div

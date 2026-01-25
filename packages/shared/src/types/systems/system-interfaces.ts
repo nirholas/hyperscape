@@ -352,6 +352,96 @@ export interface BankingSystem extends System {
   playerBanks: Map<string, unknown>;
 }
 
+/**
+ * Trading system result type
+ */
+export interface TradeOperationResult {
+  success: boolean;
+  error?: string;
+  errorCode?: string;
+}
+
+/**
+ * TradingSystem - Server-authoritative player-to-player trading
+ *
+ * Manages trade sessions between players with full validation,
+ * atomic item swaps, and proper cleanup on disconnection.
+ *
+ * Trade Flow:
+ * 1. Player A requests trade with Player B
+ * 2. Player B receives request notification
+ * 3. Player B accepts/declines
+ * 4. If accepted, trade window opens for both
+ * 5. Players add/remove items from their offers
+ * 6. Both players must accept the final offer
+ * 7. Server atomically swaps items between inventories
+ */
+export interface TradingSystem extends System {
+  // Trade Lifecycle
+  createTradeRequest(
+    initiatorId: string,
+    initiatorName: string,
+    initiatorSocketId: string,
+    recipientId: string,
+  ): TradeOperationResult & { tradeId?: string };
+
+  respondToTradeRequest(
+    tradeId: string,
+    recipientId: string,
+    recipientName: string,
+    recipientSocketId: string,
+    accept: boolean,
+  ): TradeOperationResult;
+
+  // Trade Operations
+  addItemToTrade(
+    tradeId: string,
+    playerId: string,
+    inventorySlot: number,
+    itemId: string,
+    quantity: number,
+  ): TradeOperationResult;
+
+  removeItemFromTrade(
+    tradeId: string,
+    playerId: string,
+    tradeSlot: number,
+  ): TradeOperationResult;
+
+  setAcceptance(
+    tradeId: string,
+    playerId: string,
+    accepted: boolean,
+  ): TradeOperationResult & {
+    bothAccepted?: boolean;
+    moveToConfirming?: boolean;
+  };
+
+  moveToConfirmation(tradeId: string): TradeOperationResult;
+  returnToOfferScreen(tradeId: string): TradeOperationResult;
+
+  completeTrade(tradeId: string): TradeOperationResult & {
+    initiatorReceives?: unknown[];
+    recipientReceives?: unknown[];
+    initiatorId?: string;
+    recipientId?: string;
+  };
+
+  cancelTrade(
+    tradeId: string,
+    reason: string,
+    cancelledBy?: string,
+  ): TradeOperationResult;
+
+  // Queries
+  getTradeSession(tradeId: string): unknown | undefined;
+  getPlayerTrade(playerId: string): unknown | undefined;
+  getPlayerTradeId(playerId: string): string | undefined;
+  isPlayerInTrade(playerId: string): boolean;
+  getTradePartner(playerId: string): unknown | undefined;
+  isPlayerOnline(playerId: string): boolean;
+}
+
 export interface XPSystem extends System {
   getSkillLevel(playerId: string, skill: string): number;
   getSkillData(playerId: string, skill: string): unknown;

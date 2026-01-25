@@ -19,7 +19,7 @@ import React, {
   useMemo,
   type ReactNode,
 } from "react";
-import { EventType, getItem } from "@hyperscape/shared";
+import { EventType, getItem, uuid } from "@hyperscape/shared";
 import type { PlayerStats, PlayerID } from "@hyperscape/shared";
 import {
   DndProvider,
@@ -2785,6 +2785,36 @@ function DesktopInterfaceManager({
                 tradeId: tradeState.tradeId,
               });
               setTradeState((prev) => ({ ...prev, isOpen: false }));
+            }}
+            onExamineItem={(itemId) => {
+              // Show examine text in chat (OSRS-style game message)
+              const itemData = getItem(itemId);
+              const examineText =
+                itemData?.examine || `It's a ${itemData?.name || itemId}.`;
+              if (world?.chat?.add) {
+                world.chat.add({
+                  id: uuid(),
+                  from: "",
+                  body: examineText,
+                  createdAt: new Date().toISOString(),
+                  type: "system",
+                });
+              }
+            }}
+            onValueItem={(itemId) => {
+              // Show item value in chat (OSRS-style game message)
+              const itemData = getItem(itemId);
+              const value = itemData?.value || 0;
+              const valueText = `${itemData?.name || itemId}: ${value.toLocaleString()} gp`;
+              if (world?.chat?.add) {
+                world.chat.add({
+                  id: uuid(),
+                  from: "",
+                  body: valueText,
+                  createdAt: new Date().toISOString(),
+                  type: "system",
+                });
+              }
             }}
           />
         )}
