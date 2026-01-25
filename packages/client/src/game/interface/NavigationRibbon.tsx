@@ -177,7 +177,7 @@ export function NavigationRibbon({
   const bringToFront = useWindowStore((s) => s.bringToFront);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
 
-  // Auto-collapse the ribbon after inactivity using hs-kit hook
+  // Auto-collapse the ribbon after inactivity using auto-collapse hook
   const { isCollapsed, containerProps, expand, collapse, isPending } =
     useAutoCollapse({
       collapseDelay: 5000, // 5 seconds of inactivity

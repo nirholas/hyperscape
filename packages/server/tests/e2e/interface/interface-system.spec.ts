@@ -1,13 +1,13 @@
 import { test, expect, type Page } from "@playwright/test";
 
 /**
- * hs-kit Interface System E2E Tests
+ * interface Interface System E2E Tests
  *
  * These tests verify the customizable interface system functionality
  * using real Playwright browser interactions.
  */
 
-test.describe("hs-kit Interface System", () => {
+test.describe("interface Interface System", () => {
   test.beforeEach(async ({ page }) => {
     // Navigate to the game client
     await page.goto("http://localhost:3333");
@@ -129,7 +129,7 @@ test.describe("hs-kit Interface System", () => {
 
       // Take screenshot for visual verification
       await page.screenshot({
-        path: "logs/hs-kit-edit-mode-grid.png",
+        path: "logs/interface-edit-mode-grid.png",
         fullPage: true,
       });
 
@@ -238,7 +238,7 @@ test.describe("hs-kit Interface System", () => {
     test("should capture interface state screenshots", async ({ page }) => {
       // Capture normal state
       await page.screenshot({
-        path: "logs/hs-kit-normal-state.png",
+        path: "logs/interface-normal-state.png",
         fullPage: true,
       });
 
@@ -247,7 +247,7 @@ test.describe("hs-kit Interface System", () => {
       await page.waitForTimeout(500);
 
       await page.screenshot({
-        path: "logs/hs-kit-edit-mode.png",
+        path: "logs/interface-edit-mode.png",
         fullPage: true,
       });
 
@@ -629,7 +629,7 @@ test.describe("Edit Mode Collision Visual Tests", () => {
   });
 });
 
-test.describe("hs-kit Performance", () => {
+test.describe("interface Performance", () => {
   test("should render without significant frame drops", async ({ page }) => {
     await page.goto("http://localhost:3333");
     await page.waitForTimeout(5000);
@@ -704,7 +704,7 @@ test.describe("Window Resize Functionality", () => {
         }
 
         await page.screenshot({
-          path: "logs/hs-kit-window-resize-result.png",
+          path: "logs/interface-window-resize-result.png",
           fullPage: true,
         });
       }
@@ -892,7 +892,7 @@ test.describe("Tab Split and Merge Operations", () => {
         const finalWindowCount = await windows.count();
 
         await page.screenshot({
-          path: "logs/hs-kit-tab-split-result.png",
+          path: "logs/interface-tab-split-result.png",
           fullPage: true,
         });
 
@@ -941,7 +941,7 @@ test.describe("Tab Split and Merge Operations", () => {
         await page.waitForTimeout(500);
 
         await page.screenshot({
-          path: "logs/hs-kit-tab-merge-result.png",
+          path: "logs/interface-tab-merge-result.png",
           fullPage: true,
         });
 
@@ -972,7 +972,7 @@ test.describe("Tab Split and Merge Operations", () => {
 
       if (menuVisible) {
         await page.screenshot({
-          path: "logs/hs-kit-tab-context-menu.png",
+          path: "logs/interface-tab-context-menu.png",
           fullPage: true,
         });
 
@@ -1018,7 +1018,7 @@ test.describe("Tab Split and Merge Operations", () => {
         await page.waitForTimeout(300);
 
         await page.screenshot({
-          path: "logs/hs-kit-tab-reorder.png",
+          path: "logs/interface-tab-reorder.png",
           fullPage: true,
         });
 
@@ -1035,7 +1035,7 @@ test.describe("Tab Split and Merge Operations", () => {
 // ============================================================================
 
 test.describe("Layout Persistence Across Sessions", () => {
-  const LAYOUT_TEST_KEY = "hs-kit-layout-test";
+  const LAYOUT_TEST_KEY = "hyperscape-layout-test";
 
   test("should persist window positions to localStorage", async ({ page }) => {
     await page.goto("http://localhost:3333");
@@ -1065,7 +1065,7 @@ test.describe("Layout Persistence Across Sessions", () => {
 
         // Check localStorage for saved layout
         const savedLayout = await page.evaluate(() => {
-          return localStorage.getItem("hs-kit-window-layout");
+          return localStorage.getItem("hyperscape-window-layout");
         });
 
         expect(savedLayout).not.toBeNull();
@@ -1103,7 +1103,7 @@ test.describe("Layout Persistence Across Sessions", () => {
 
       // Take screenshot before reload
       await page.screenshot({
-        path: "logs/hs-kit-layout-before-reload.png",
+        path: "logs/interface-layout-before-reload.png",
         fullPage: true,
       });
 
@@ -1118,7 +1118,7 @@ test.describe("Layout Persistence Across Sessions", () => {
       const positionAfterReload = await windowAfterReload.boundingBox();
 
       await page.screenshot({
-        path: "logs/hs-kit-layout-after-reload.png",
+        path: "logs/interface-layout-after-reload.png",
         fullPage: true,
       });
 
@@ -1175,7 +1175,7 @@ test.describe("Layout Persistence Across Sessions", () => {
 
         // Check localStorage
         const savedLayout = await page.evaluate(() => {
-          const layout = localStorage.getItem("hs-kit-window-layout");
+          const layout = localStorage.getItem("hyperscape-window-layout");
           return layout ? JSON.parse(layout) : null;
         });
 
@@ -1229,7 +1229,7 @@ test.describe("Layout Persistence Across Sessions", () => {
 
           // Verify preset was saved
           const presets = await page.evaluate(() => {
-            const presetsStr = localStorage.getItem("hs-kit-presets");
+            const presetsStr = localStorage.getItem("hyperscape-presets");
             return presetsStr ? JSON.parse(presetsStr) : null;
           });
 
@@ -1240,7 +1240,7 @@ test.describe("Layout Persistence Across Sessions", () => {
           }
 
           await page.screenshot({
-            path: "logs/hs-kit-preset-saved.png",
+            path: "logs/interface-preset-saved.png",
             fullPage: true,
           });
         }
@@ -1282,7 +1282,7 @@ test.describe("Layout Persistence Across Sessions", () => {
       }
 
       await page.screenshot({
-        path: "logs/hs-kit-layout-reset.png",
+        path: "logs/interface-layout-reset.png",
         fullPage: true,
       });
     }
@@ -1330,7 +1330,7 @@ test.describe("Edit Mode Toggle (L Key)", () => {
     expect(hasEditIndicator || hasGridOverlay).toBe(true);
 
     await page.screenshot({
-      path: "logs/hs-kit-edit-mode-entered.png",
+      path: "logs/interface-edit-mode-entered.png",
       fullPage: true,
     });
   });
@@ -1348,7 +1348,7 @@ test.describe("Edit Mode Toggle (L Key)", () => {
 
     // Edit mode should be locked again
     await page.screenshot({
-      path: "logs/hs-kit-edit-mode-exited.png",
+      path: "logs/interface-edit-mode-exited.png",
       fullPage: true,
     });
   });
@@ -1364,7 +1364,7 @@ test.describe("Edit Mode Toggle (L Key)", () => {
 
     // Edit mode should be locked
     await page.screenshot({
-      path: "logs/hs-kit-edit-mode-escape.png",
+      path: "logs/interface-edit-mode-escape.png",
       fullPage: true,
     });
   });
@@ -1383,7 +1383,7 @@ test.describe("Edit Mode Toggle (L Key)", () => {
     const gridToggle = page.locator('button:has-text("Grid")');
 
     await page.screenshot({
-      path: "logs/hs-kit-edit-mode-toolbar.png",
+      path: "logs/interface-edit-mode-toolbar.png",
       fullPage: true,
     });
 
@@ -1432,7 +1432,7 @@ test.describe("Edit Mode Toggle (L Key)", () => {
     console.log(`Grid elements found: ${gridCount}`);
 
     await page.screenshot({
-      path: "logs/hs-kit-edit-mode-grid-detailed.png",
+      path: "logs/interface-edit-mode-grid-detailed.png",
       fullPage: true,
     });
 
@@ -1445,7 +1445,7 @@ test.describe("Edit Mode Toggle (L Key)", () => {
 // Mobile Touch Interactions Tests
 // ============================================================================
 
-test.describe("Mobile Touch Interactions for hs-kit", () => {
+test.describe("Mobile Touch Interactions for interface", () => {
   const MOBILE_VIEWPORT = { width: 393, height: 852 }; // iPhone 14 Pro
 
   test.beforeEach(async ({ page }) => {
@@ -1487,7 +1487,7 @@ test.describe("Mobile Touch Interactions for hs-kit", () => {
         }
 
         await page.screenshot({
-          path: "logs/hs-kit-touch-drag-window.png",
+          path: "logs/interface-touch-drag-window.png",
           fullPage: true,
         });
       }
@@ -1528,7 +1528,7 @@ test.describe("Mobile Touch Interactions for hs-kit", () => {
         }
 
         await page.screenshot({
-          path: "logs/hs-kit-touch-resize-window.png",
+          path: "logs/interface-touch-resize-window.png",
           fullPage: true,
         });
       }
@@ -1554,7 +1554,7 @@ test.describe("Mobile Touch Interactions for hs-kit", () => {
         await page.waitForTimeout(200);
 
         await page.screenshot({
-          path: "logs/hs-kit-touch-switch-tab.png",
+          path: "logs/interface-touch-switch-tab.png",
           fullPage: true,
         });
       }
@@ -1587,7 +1587,7 @@ test.describe("Mobile Touch Interactions for hs-kit", () => {
         const menuVisible = await contextMenu.isVisible().catch(() => false);
 
         await page.screenshot({
-          path: "logs/hs-kit-touch-longpress-tab.png",
+          path: "logs/interface-touch-longpress-tab.png",
           fullPage: true,
         });
 
@@ -1624,7 +1624,7 @@ test.describe("Mobile Touch Interactions for hs-kit", () => {
         const afterDoubleTap = await window.boundingBox();
 
         await page.screenshot({
-          path: "logs/hs-kit-touch-double-tap-maximize.png",
+          path: "logs/interface-touch-double-tap-maximize.png",
           fullPage: true,
         });
 
@@ -1669,7 +1669,7 @@ test.describe("Mobile Touch Interactions for hs-kit", () => {
         const finalScroll = await panel.evaluate((el) => el.scrollTop);
 
         await page.screenshot({
-          path: "logs/hs-kit-touch-scroll.png",
+          path: "logs/interface-touch-scroll.png",
           fullPage: true,
         });
 
@@ -1689,7 +1689,7 @@ test.describe("Mobile Touch Interactions for hs-kit", () => {
 
       if (minimapBox) {
         await page.screenshot({
-          path: "logs/hs-kit-touch-minimap-before-pinch.png",
+          path: "logs/interface-touch-minimap-before-pinch.png",
           fullPage: true,
         });
 

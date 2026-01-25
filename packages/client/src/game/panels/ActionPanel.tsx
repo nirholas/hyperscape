@@ -257,7 +257,7 @@ export function ActionPanel({
   });
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Note: hs-kit handles sensors internally with useDraggable
+  // Note: Drag sensors are handled internally with useDraggable
 
   useEffect(() => {
     const handleResize = () => {

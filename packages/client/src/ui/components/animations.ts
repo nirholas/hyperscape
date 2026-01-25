@@ -1,7 +1,7 @@
 /**
  * Animation Library
  *
- * Standard animation definitions for hs-kit components.
+ * Standard animation definitions for UI components.
  * Based on RS3/MMO interface design patterns.
  *
  * @packageDocumentation

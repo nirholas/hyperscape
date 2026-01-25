@@ -7,7 +7,7 @@
  * - New areas accessible
  * - New activities available
  *
- * Uses hs-kit theme system for consistent styling.
+ * Uses theme system for consistent styling.
  */
 
 import { useThemeStore } from "@/ui";

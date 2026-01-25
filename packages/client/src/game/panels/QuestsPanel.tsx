@@ -1,7 +1,7 @@
 /**
  * QuestsPanel - Quest Log panel for the game interface
  *
- * Connects the hs-kit QuestLog component to the game world's quest system.
+ * Connects the QuestLog component to the game world's quest system.
  * Displays available, active, and completed quests with filtering and sorting.
  * Uses COLORS constants for consistent styling with other panels.
  *

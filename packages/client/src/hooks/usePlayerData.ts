@@ -10,8 +10,8 @@
 import { useState, useEffect } from "react";
 import { EventType, getItem } from "@hyperscape/shared";
 import type { PlayerStats } from "@hyperscape/shared";
-import type { ClientWorld, PlayerEquipmentItems } from "../../../types";
-import type { RawEquipmentData, InventorySlotViewItem } from "../../types";
+import type { ClientWorld, PlayerEquipmentItems } from "../types";
+import type { RawEquipmentData, InventorySlotViewItem } from "../game/types";
 
 /**
  * Hook return type for player data

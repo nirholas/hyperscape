@@ -2,7 +2,7 @@
  * MapPanel - World Map panel for the game interface
  *
  * Displays the full world map with player position, POI markers,
- * and navigation controls using the hs-kit WorldMap component.
+ * and navigation controls using the WorldMap component.
  */
 
 import React, { useMemo, useCallback, useState } from "react";
@@ -178,7 +178,7 @@ export function MapPanel({ world }: MapPanelProps) {
  * MapMarker Component
  *
  * Simple marker for the world map.
- * TODO: Move to hs-kit as a proper component
+ * TODO: Move to UI components as a proper component
  */
 interface MapMarkerProps {
   type: "player" | "waypoint" | "poi" | "npc";

@@ -1,13 +1,13 @@
 import type { LayoutPreset } from "../../types";
 
 /**
- * IndexedDB persistence layer for hs-kit
+ * IndexedDB persistence layer for Hyperscape UI
  *
  * This module provides low-level access to the IndexedDB storage.
  * For most use cases, use the usePresets hook instead.
  */
 
-const DB_NAME = "hs-kit";
+const DB_NAME = "hyperscape";
 const DB_VERSION = 1;
 
 /** Database stores - used to type-check store access */

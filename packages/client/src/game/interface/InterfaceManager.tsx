@@ -172,7 +172,7 @@ function clampPosition(
   };
 }
 
-// TabBar height (from hs-kit TabBar minHeight: 28)
+// TabBar height (TabBar component minHeight: 28)
 const TAB_BAR_HEIGHT = 28;
 
 /**
@@ -1285,8 +1285,8 @@ function DesktopInterfaceManager({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Hold-to-edit state comes from useEditMode hook in hs-kit
-  // hs-kit handles the L key hold logic and exposes isHolding/holdProgress for visual feedback
+  // Hold-to-edit state comes from useEditMode hook
+  // The hook handles the L key hold logic and exposes isHolding/holdProgress for visual feedback
 
   // Track if we've initialized windows
   const initializedRef = React.useRef(false);

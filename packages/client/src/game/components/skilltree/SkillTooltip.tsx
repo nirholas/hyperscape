@@ -97,9 +97,10 @@ function getStateLabel(state: SkillNodeState): string {
       return "Purchased";
     case "maxed":
       return "Maxed";
-    default:
-      return "";
   }
+  // Exhaustive check - TypeScript will error if a case is missing
+  const _exhaustive: never = state;
+  return _exhaustive;
 }
 
 function getStateColor(state: SkillNodeState, theme: Theme): string {
@@ -112,9 +113,10 @@ function getStateColor(state: SkillNodeState, theme: Theme): string {
       return theme.colors.accent.primary;
     case "maxed":
       return theme.colors.state.success;
-    default:
-      return theme.colors.text.secondary;
   }
+  // Exhaustive check - TypeScript will error if a case is missing
+  const _exhaustive: never = state;
+  return _exhaustive;
 }
 
 // ============================================================================

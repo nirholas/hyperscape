@@ -1,5 +1,5 @@
 /**
- * Theme System for hs-kit
+ * Theme System for Hyperscape UI
  *
  * Two theme variants:
  * - base: Clean, minimal dark theme

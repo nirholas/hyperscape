@@ -195,7 +195,7 @@ export const useAccessibilityStore = create<AccessibilityStoreState>()(
       },
     }),
     {
-      name: "hs-kit-accessibility",
+      name: "hyperscape-accessibility",
       partialize: (state) => ({
         colorblindMode: state.colorblindMode,
         highContrast: state.highContrast,

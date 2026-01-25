@@ -855,7 +855,7 @@ export const characterTemplates = pgTable(
  * - Max 4 presets per user (slot 0-3)
  * - Unique constraint on (userId, slotIndex)
  * - CASCADE DELETE ensures cleanup when user is deleted
- * - layoutData stores serialized WindowState[] from hs-kit
+ * - layoutData stores serialized WindowState[] from the UI system
  */
 export const layoutPresets = pgTable(
   "layout_presets",

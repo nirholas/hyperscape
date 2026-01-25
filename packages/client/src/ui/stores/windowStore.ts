@@ -154,7 +154,7 @@ export interface WindowStoreState {
 }
 
 /** Storage key for window layout persistence */
-const STORAGE_KEY = "hs-kit-window-layout";
+const STORAGE_KEY = "hyperscape-window-layout";
 
 /**
  * Schema version for window layout persistence.

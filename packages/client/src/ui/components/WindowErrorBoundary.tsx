@@ -25,7 +25,7 @@ interface WindowErrorBoundaryState {
 }
 
 /**
- * Error boundary component for hs-kit windows.
+ * Error boundary component for UI windows.
  *
  * Catches JavaScript errors in child components and displays a fallback UI
  * instead of crashing the entire application.
@@ -62,7 +62,7 @@ export class WindowErrorBoundary extends Component<
       process.env?.NODE_ENV !== "production"
     ) {
       console.error(
-        `[hs-kit] Error in window "${windowId}":`,
+        `[Hyperscape UI] Error in window "${windowId}":`,
         error,
         errorInfo,
       );

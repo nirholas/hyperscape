@@ -83,7 +83,7 @@ export const useThemeStore = create<ThemeStoreState>()(
       isLight: () => false,
     }),
     {
-      name: "hs-kit-theme",
+      name: "hyperscape-theme",
       partialize: (state) => ({ themeName: state.themeName }),
       onRehydrateStorage: () => (state) => {
         if (state) {

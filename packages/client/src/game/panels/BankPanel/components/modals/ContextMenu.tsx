@@ -3,7 +3,7 @@
  *
  * Right-click context menu for bank items with withdraw/deposit options.
  * RS3-style: Shows different options for placeholders (qty=0) vs items.
- * Uses hs-kit theme system for consistent styling.
+ * Uses theme system for consistent styling.
  */
 
 import { useState, useEffect, useRef, type CSSProperties } from "react";

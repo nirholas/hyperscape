@@ -2,7 +2,7 @@
  * Virtual Grid Component
  *
  * A styled virtual grid component for efficiently rendering large inventories.
- * Integrates with ItemSlot and hs-kit theming for game inventory UIs.
+ * Integrates with ItemSlot and theming for game inventory UIs.
  *
  * @packageDocumentation
  */

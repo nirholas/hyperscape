@@ -110,6 +110,7 @@ export function useProgressiveTooltip(
   const tierTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const examineTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rafRef = useRef<number | null>(null);
+  const lastUpdateRef = useRef<number>(0);
 
   // Clear all timeouts
   const clearTimeouts = useCallback(() => {
@@ -131,11 +132,17 @@ export function useProgressiveTooltip(
     }
   }, []);
 
-  // Update hover duration
+  // Update hover duration - throttled to ~30fps to reduce re-renders
+  const THROTTLE_MS = 33; // ~30fps
   const updateHoverDuration = useCallback(() => {
     if (hoverStartRef.current) {
-      const duration = Date.now() - hoverStartRef.current;
-      setState((prev) => ({ ...prev, hoverDuration: duration }));
+      const now = Date.now();
+      // Only update state if enough time has passed (throttle to reduce GC and re-renders)
+      if (now - lastUpdateRef.current >= THROTTLE_MS) {
+        const duration = now - hoverStartRef.current;
+        setState((prev) => ({ ...prev, hoverDuration: duration }));
+        lastUpdateRef.current = now;
+      }
       rafRef.current = requestAnimationFrame(updateHoverDuration);
     }
   }, []);

@@ -5,7 +5,7 @@
  * Shows the requesting player's name and combat level with
  * Accept/Decline buttons.
  *
- * Uses ModalWindow from hs-kit for consistent styling and behavior.
+ * Uses ModalWindow for consistent styling and behavior.
  */
 
 import { useCallback, useState, type CSSProperties } from "react";

@@ -5,6 +5,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRM, VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
 import { retargetAnimationToVRM } from "../../utils/vrmAnimationRetarget";
 import { CDN_URL } from "../../lib/api-config";
+import { ThreeResourceManager } from "../../lib/ThreeResourceManager";
 
 // Extended types for VRM and AnimationMixer
 interface VRMHumanoidWithRestPose {
@@ -66,6 +67,9 @@ export const CharacterPreview: React.FC<CharacterPreviewProps> = ({
   const clockRef = useRef<THREE.Clock>(new THREE.Clock());
   const frameIdRef = useRef<number>(0);
   const rendererInitializedRef = useRef<boolean>(false);
+  // Store lights in refs for proper disposal
+  const directionalLightRef = useRef<THREE.DirectionalLight | null>(null);
+  const ambientLightRef = useRef<THREE.AmbientLight | null>(null);
 
   // Main Effect: Initialize Scene and Load VRM + Animations
   useEffect(() => {
@@ -75,13 +79,15 @@ export const CharacterPreview: React.FC<CharacterPreviewProps> = ({
     const scene = new THREE.Scene();
     sceneRef.current = scene;
 
-    // Lights
+    // Lights - stored in refs for proper disposal
     const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
     directionalLight.position.set(1, 1, 1).normalize();
     scene.add(directionalLight);
+    directionalLightRef.current = directionalLight;
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambientLight);
+    ambientLightRef.current = ambientLight;
 
     // Camera
     const camera = new THREE.PerspectiveCamera(
@@ -391,16 +397,36 @@ export const CharacterPreview: React.FC<CharacterPreviewProps> = ({
         vrmRef.current = null;
       }
 
-      // 3. Dispose renderer AFTER VRM cleanup
+      // 3. Dispose lights using ThreeResourceManager
+      if (directionalLightRef.current) {
+        ThreeResourceManager.disposeObject(directionalLightRef.current, {
+          removeFromParent: true,
+        });
+        directionalLightRef.current = null;
+      }
+      if (ambientLightRef.current) {
+        ThreeResourceManager.disposeObject(ambientLightRef.current, {
+          removeFromParent: true,
+        });
+        ambientLightRef.current = null;
+      }
+
+      // 4. Dispose renderer AFTER VRM and lights cleanup
       if (rendererRef.current && containerRef.current) {
         containerRef.current.removeChild(rendererRef.current.domElement);
-        rendererRef.current.dispose();
+        ThreeResourceManager.disposeRenderer(rendererRef.current);
         rendererRef.current = null;
         rendererInitializedRef.current = false;
       }
 
-      // 4. Clear scene reference
-      sceneRef.current = null;
+      // 5. Dispose scene and clear reference
+      if (sceneRef.current) {
+        ThreeResourceManager.disposeScene(sceneRef.current);
+        sceneRef.current = null;
+      }
+
+      // 6. Clear camera reference
+      cameraRef.current = null;
     };
   }, [vrmUrl]); // Re-run everything when vrmUrl changes
 

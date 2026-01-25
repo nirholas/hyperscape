@@ -140,9 +140,8 @@ function formatQuantity(qty: number): { text: string; color: string } {
 
 /**
  * Custom modifier to center the DragOverlay on the cursor.
- * hs-kit version - adjustToPointer on ComposableDragOverlay handles this.
+ * The ComposableDragOverlay uses adjustToPointer=true by default.
  */
-// Note: hs-kit's ComposableDragOverlay uses adjustToPointer=true by default
 // Memoized to prevent re-renders of all 28 slots when any slot changes
 const DraggableInventorySlot = memo(function DraggableInventorySlot({
   item,
@@ -676,7 +675,7 @@ interface ItemHoverState {
   position: { x: number; y: number };
 }
 
-// Tooltip positioning now uses shared calculateCursorTooltipPosition from hs-kit
+// Tooltip positioning uses shared calculateCursorTooltipPosition utility
 
 import type { Theme } from "@/ui";
 
@@ -697,7 +696,7 @@ function renderItemHoverTooltip(
       (bonuses.defense !== undefined && bonuses.defense !== 0) ||
       (bonuses.strength !== undefined && bonuses.strength !== 0));
 
-  // Use shared hs-kit tooltip positioning for consistent edge detection
+  // Use shared tooltip positioning for consistent edge detection
   // Offset of 4px keeps tooltip close to cursor while avoiding overlap
   const { left, top } = calculateCursorTooltipPosition(
     itemHover.position,
@@ -858,7 +857,7 @@ export function InventoryPanel({
   const slotItemsRef = useRef<(InventorySlotViewItem | null)[]>([]);
   slotItemsRef.current = slotItems;
 
-  // Note: hs-kit handles sensors internally with useDraggable
+  // Drag sensors are handled internally with useDraggable
   // MouseSensor: 3px threshold, TouchSensor: handled via pointer events
 
   useEffect(() => {

@@ -1420,12 +1420,16 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Prayer handlers
     this.handlers["onPrayerToggle"] = (socket, data) =>
       handlePrayerToggle(socket, data, this.world);
+    this.handlers["prayerToggle"] = this.handlers["onPrayerToggle"];
 
     this.handlers["onPrayerDeactivateAll"] = (socket, data) =>
       handlePrayerDeactivateAll(socket, data, this.world);
+    this.handlers["prayerDeactivateAll"] =
+      this.handlers["onPrayerDeactivateAll"];
 
     this.handlers["onAltarPray"] = (socket, data) =>
       handleAltarPray(socket, data, this.world);
+    this.handlers["altarPray"] = this.handlers["onAltarPray"];
 
     // Action bar handlers
     this.handlers["onActionBarSave"] = (socket, data) =>

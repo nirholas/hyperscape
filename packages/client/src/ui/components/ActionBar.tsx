@@ -522,7 +522,7 @@ export interface PanelActionDef {
 }
 
 /**
- * Create panel actions using hs-kit GameIcons
+ * Create panel actions using GameIcons
  * This is a convenience function for creating menu bar actions with Lucide icons
  *
  * @example

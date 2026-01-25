@@ -273,7 +273,7 @@ function renderEquipmentHoverTooltip(
   const rarity = itemData?.rarity || "common";
   const equipSlot = itemData?.equipSlot || hoverState.slot.label;
 
-  // Rarity colors (matching hs-kit RARITY_COLORS)
+  // Rarity colors (matching RARITY_COLORS)
   const rarityColors: Record<string, string> = {
     common: "#9d9d9d",
     uncommon: "#1eff00",
@@ -284,7 +284,7 @@ function renderEquipmentHoverTooltip(
   };
   const rarityColor = rarityColors[rarity] || theme.colors.accent.primary;
 
-  // Use hs-kit tooltip positioning with edge detection
+  // Use tooltip positioning with edge detection
   const { left, top } = calculateCursorTooltipPosition(
     { x: hoverState.position.x, y: hoverState.position.y },
     TOOLTIP_SIZE_ESTIMATES.large,

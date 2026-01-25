@@ -3,7 +3,7 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import type { EditMode, AlignmentGuide } from "../types";
 
 /** Storage key for edit mode settings */
-const STORAGE_KEY = "hs-kit-edit-settings";
+const STORAGE_KEY = "hyperscape-edit-settings";
 
 /** Edit store state and actions */
 export interface EditStoreState {

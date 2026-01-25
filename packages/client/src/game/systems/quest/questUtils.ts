@@ -488,7 +488,7 @@ export function getRewardSummary(rewards: QuestReward[]): string {
 }
 
 // ============================================================================
-// Type Adapters (shared ↔ hs-kit)
+// Type Adapters (shared ↔ client)
 // ============================================================================
 
 /**
@@ -521,7 +521,7 @@ export interface SharedQuestRewards {
 }
 
 /**
- * Convert shared QuestStatus to hs-kit QuestState
+ * Convert shared QuestStatus to client QuestState
  */
 export function statusToState(status: SharedQuestStatus): QuestState {
   switch (status) {
@@ -538,7 +538,7 @@ export function statusToState(status: SharedQuestStatus): QuestState {
 }
 
 /**
- * Convert hs-kit QuestState to shared QuestStatus
+ * Convert client QuestState to shared QuestStatus
  */
 export function stateToStatus(state: QuestState): SharedQuestStatus {
   switch (state) {
@@ -571,7 +571,7 @@ export function difficultyToLevel(difficulty: SharedQuestDifficulty): number {
 }
 
 /**
- * Convert shared QuestRewards to hs-kit QuestReward[]
+ * Convert shared QuestRewards to client QuestReward[]
  */
 export function convertRewards(rewards: SharedQuestRewards): QuestReward[] {
   const result: QuestReward[] = [];

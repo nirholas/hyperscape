@@ -9,7 +9,7 @@
 
 /**
  * Core Color Palette - Dark Theme
- * Matches hyperscapeTheme from hs-kit for consistency
+ * Matches hyperscapeTheme for consistency
  */
 export const COLORS = {
   // ===========================================

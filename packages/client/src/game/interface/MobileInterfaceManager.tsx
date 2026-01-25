@@ -26,7 +26,7 @@ import { createPanelRenderer, MODAL_PANEL_IDS } from "./PanelRegistry";
 import { RadialMinimapMenu } from "../../game/hud/RadialMinimapMenu";
 import { CompactStatusHUD } from "./CompactStatusHUD";
 import { getMobileUISizes } from "./mobileUISizes";
-import { usePlayerData, useModalPanels } from "./hooks";
+import { usePlayerData, useModalPanels } from "@/hooks";
 import { zIndex } from "../../constants";
 import { BankPanel } from "../../game/panels/BankPanel";
 import { StorePanel } from "../../game/panels/StorePanel";

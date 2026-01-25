@@ -1,7 +1,7 @@
 /**
  * Hyperscape Interface Components
  *
- * Built on hs-kit for customizable windows, tabs, and layout presets.
+ * Customizable windows, tabs, and layout presets for game UI.
  *
  * @packageDocumentation
  */
@@ -45,7 +45,7 @@ export {
   type QuestStartData,
   type QuestCompleteData,
   type XpLampData,
-} from "./hooks";
+} from "@/hooks";
 
 // Mobile interface components
 export { MobileInterfaceManager } from "./MobileInterfaceManager";

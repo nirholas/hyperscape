@@ -1,7 +1,7 @@
 /**
  * Preset Sync Hook
  *
- * Wires up the hs-kit cloud sync functionality with the Privy authentication
+ * Wires up the cloud sync functionality with Privy authentication
  * to sync UI layout presets with the server on login/save.
  *
  * @packageDocumentation
@@ -36,7 +36,7 @@ export interface PresetSyncResult extends PresetSyncState {
 }
 
 /**
- * Hook that integrates hs-kit's useCloudSync with Hyperscape authentication.
+ * Hook that integrates useCloudSync with Hyperscape authentication.
  *
  * Automatically:
  * - Pulls presets from server on initial login
@@ -80,7 +80,7 @@ export function usePresetSync(): PresetSyncResult {
     return unsubscribe;
   }, []);
 
-  // Use the cloud sync hook from hs-kit
+  // Use the cloud sync hook
   const cloudSync = useCloudSync({
     apiBaseUrl: "/api",
     userId: userId ?? "",

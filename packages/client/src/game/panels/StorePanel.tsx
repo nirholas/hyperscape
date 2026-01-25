@@ -124,7 +124,7 @@ function formatPrice(price: number): string {
 
 /**
  * Context Menu Component
- * Uses hs-kit theme system for consistent styling.
+ * Uses theme system for consistent styling.
  */
 function ContextMenu({
   menu,

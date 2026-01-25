@@ -2,7 +2,7 @@
  * Confirm Modal Component
  *
  * Generic confirmation modal for destructive actions (e.g., delete tab).
- * Uses hs-kit ModalWindow and theme system for consistent styling.
+ * Uses ModalWindow and theme system for consistent styling.
  */
 
 import { useState, type CSSProperties } from "react";

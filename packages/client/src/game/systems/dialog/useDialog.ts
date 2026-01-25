@@ -22,6 +22,7 @@ import {
   getAvailableChoices,
   interpolateText,
 } from "./dialogParser";
+import { assertNever } from "../../../utils";
 
 // ============================================================================
 // Types
@@ -462,6 +463,10 @@ export function useDialog(options: UseDialogOptions = {}): UseDialogResult {
           }
           break;
         }
+
+        default:
+          // Exhaustive check - TypeScript will error if a case is missing
+          assertNever(node);
       }
     },
     [

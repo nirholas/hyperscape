@@ -2,7 +2,7 @@
  * Skill Guide Panel
  * OSRS-style popup showing skill unlocks at each level
  *
- * Uses ModalWindow from hs-kit for consistent styling and behavior.
+ * Uses ModalWindow for consistent styling and behavior.
  */
 
 import React, { useMemo } from "react";

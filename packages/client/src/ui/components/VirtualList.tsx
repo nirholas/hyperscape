@@ -2,7 +2,7 @@
  * Virtual List Component
  *
  * A styled virtual list component for efficiently rendering large lists.
- * Integrates with hs-kit theming and provides smooth scrolling for
+ * Integrates with theming and provides smooth scrolling for
  * chat logs, item lists, and other scrollable content.
  *
  * @packageDocumentation
