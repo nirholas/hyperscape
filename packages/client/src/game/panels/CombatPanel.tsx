@@ -158,7 +158,7 @@ const StatIcon = ({
   }
 };
 
-/** Combat stats row with SVG icons */
+/** Combat stats row with SVG icons - compact */
 const CombatStatsRow = React.memo(function CombatStatsRow({
   attackLevel,
   strengthLevel,
@@ -183,25 +183,25 @@ const CombatStatsRow = React.memo(function CombatStatsRow({
 
   return (
     <div
-      className="flex items-center justify-center gap-3"
+      className="flex items-center justify-center gap-2"
       style={{
-        padding: isMobile ? "8px 12px" : "6px 10px",
-        background: theme.colors.background.secondary,
-        borderRadius: "6px",
-        border: `1px solid ${theme.colors.border.default}50`,
+        padding: isMobile ? "5px 8px" : "4px 6px",
+        background: theme.colors.slot.filled,
+        borderRadius: "4px",
+        border: `1px solid ${theme.colors.border.default}30`,
       }}
     >
       {stats.map((stat, index) => (
         <React.Fragment key={stat.key}>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1">
             <StatIcon
               stat={stat.key}
-              size={isMobile ? 16 : 14}
+              size={isMobile ? 12 : 10}
               color={stat.color}
             />
             <span
               style={{
-                fontSize: isMobile ? "15px" : "14px",
+                fontSize: isMobile ? "12px" : "11px",
                 color: stat.color,
                 fontWeight: 700,
                 fontFamily: "var(--font-mono, monospace)",
@@ -214,8 +214,8 @@ const CombatStatsRow = React.memo(function CombatStatsRow({
             <div
               style={{
                 width: "1px",
-                height: "16px",
-                background: `${theme.colors.border.default}40`,
+                height: "12px",
+                background: `${theme.colors.border.default}30`,
               }}
             />
           )}
@@ -580,10 +580,10 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
     ? Math.round((targetHealth.current / targetHealth.max) * 100)
     : 0;
 
-  // Responsive padding/sizing
+  // Responsive padding/sizing - compact for desktop
   const p = shouldUseMobileUI
-    ? { outer: 8, inner: 10, gap: 8 }
-    : { outer: 6, inner: 8, gap: 6 };
+    ? { outer: 6, inner: 8, gap: 6 }
+    : { outer: 4, inner: 6, gap: 4 };
 
   return (
     <div
@@ -601,41 +601,32 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
       {/* HP + Combat Level Row */}
       <div
         style={{
-          background: theme.colors.background.secondary,
+          background: theme.colors.slot.filled,
           border: inCombat
-            ? `1px solid ${theme.colors.state.danger}50`
-            : `1px solid ${theme.colors.border.default}40`,
-          borderRadius: "8px",
+            ? `1px solid ${theme.colors.state.danger}40`
+            : `1px solid ${theme.colors.border.default}30`,
+          borderRadius: "4px",
           padding: `${p.inner}px`,
-          boxShadow: inCombat
-            ? `0 0 12px ${theme.colors.state.danger}15`
-            : "none",
         }}
       >
         {/* HP Header Row */}
         <div
           className="flex items-center justify-between"
-          style={{ marginBottom: "6px" }}
+          style={{ marginBottom: "4px" }}
         >
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <svg
-              width={shouldUseMobileUI ? 18 : 16}
-              height={shouldUseMobileUI ? 18 : 16}
+              width={shouldUseMobileUI ? 14 : 12}
+              height={shouldUseMobileUI ? 14 : 12}
               viewBox="0 0 24 24"
-              fill={
-                healthPercent > 50
-                  ? "#22c55e"
-                  : healthPercent > 25
-                    ? "#f59e0b"
-                    : "#ef4444"
-              }
+              fill="#ef4444"
             >
               <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
             </svg>
             <span
               style={{
-                fontSize: shouldUseMobileUI ? "13px" : "12px",
-                color: theme.colors.text.primary,
+                fontSize: shouldUseMobileUI ? "11px" : "10px",
+                color: theme.colors.text.secondary,
                 fontWeight: 600,
               }}
             >
@@ -645,27 +636,19 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
               <span
                 className="combat-pulse"
                 style={{
-                  fontSize: "10px",
+                  fontSize: "9px",
                   color: theme.colors.state.danger,
                   fontWeight: 600,
-                  background: `${theme.colors.state.danger}20`,
-                  padding: "2px 6px",
-                  borderRadius: "4px",
                 }}
               >
-                IN COMBAT
+                ⚔
               </span>
             )}
           </div>
           <span
             style={{
-              fontSize: shouldUseMobileUI ? "14px" : "13px",
-              color:
-                healthPercent > 50
-                  ? theme.colors.state.success
-                  : healthPercent > 25
-                    ? theme.colors.state.warning
-                    : theme.colors.state.danger,
+              fontSize: shouldUseMobileUI ? "12px" : "11px",
+              color: theme.colors.text.primary,
               fontWeight: 700,
               fontFamily: "var(--font-mono, monospace)",
             }}
@@ -674,13 +657,13 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
           </span>
         </div>
 
-        {/* HP Bar */}
+        {/* HP Bar - Always red like OSRS */}
         <div
           style={{
             width: "100%",
-            height: shouldUseMobileUI ? "12px" : "10px",
+            height: shouldUseMobileUI ? "8px" : "6px",
             background: theme.colors.background.primary,
-            borderRadius: "5px",
+            borderRadius: "3px",
             overflow: "hidden",
             border: `1px solid ${theme.colors.border.default}30`,
           }}
@@ -689,14 +672,9 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
             style={{
               height: "100%",
               width: `${healthPercent}%`,
-              borderRadius: "4px",
+              borderRadius: "2px",
               transition: "width 0.2s ease",
-              background:
-                healthPercent > 50
-                  ? "linear-gradient(180deg, #4ade80, #22c55e)"
-                  : healthPercent > 25
-                    ? "linear-gradient(180deg, #fbbf24, #f59e0b)"
-                    : "linear-gradient(180deg, #f87171, #ef4444)",
+              background: "linear-gradient(180deg, #f87171, #dc2626)",
             }}
           />
         </div>
@@ -705,22 +683,22 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
         <div
           className="flex items-center justify-between"
           style={{
-            marginTop: "8px",
-            paddingTop: "8px",
-            borderTop: `1px solid ${theme.colors.border.default}25`,
+            marginTop: "6px",
+            paddingTop: "6px",
+            borderTop: `1px solid ${theme.colors.border.default}20`,
           }}
         >
           <span
             style={{
-              fontSize: shouldUseMobileUI ? "12px" : "11px",
-              color: theme.colors.text.secondary,
+              fontSize: shouldUseMobileUI ? "10px" : "9px",
+              color: theme.colors.text.muted,
             }}
           >
-            Combat Level
+            Combat Lvl
           </span>
           <span
             style={{
-              fontSize: shouldUseMobileUI ? "16px" : "15px",
+              fontSize: shouldUseMobileUI ? "13px" : "12px",
               color: "#f59e0b",
               fontWeight: 700,
               fontFamily: "var(--font-mono, monospace)",
@@ -794,12 +772,12 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
         isMobile={shouldUseMobileUI}
       />
 
-      {/* Attack Styles - Clean 2x2 grid */}
+      {/* Attack Styles - Compact 2x2 grid */}
       <div
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(2, 1fr)",
-          gap: shouldUseMobileUI ? "8px" : "6px",
+          gap: shouldUseMobileUI ? "4px" : "3px",
         }}
       >
         {styles.map((s) => {
@@ -810,43 +788,38 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
               onClick={() => changeStyle(s.id)}
               disabled={cooldown > 0}
               aria-pressed={isActive}
-              className="style-btn focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/50"
+              className="style-btn focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/50"
               style={{
-                padding: shouldUseMobileUI ? "12px 8px" : "10px 6px",
+                padding: shouldUseMobileUI ? "6px 4px" : "5px 3px",
                 cursor: cooldown > 0 ? "not-allowed" : "pointer",
-                transition: "all 0.15s ease",
-                fontSize: shouldUseMobileUI ? "12px" : "11px",
+                transition: "all 0.1s ease",
+                fontSize: shouldUseMobileUI ? "10px" : "9px",
                 fontWeight: isActive ? 600 : 500,
-                background: isActive
-                  ? s.bgColor
-                  : theme.colors.background.secondary,
+                background: isActive ? s.bgColor : theme.colors.slot.filled,
                 border: isActive
-                  ? `2px solid ${s.color}60`
-                  : `1px solid ${theme.colors.border.default}40`,
-                borderRadius: "8px",
+                  ? `1px solid ${s.color}50`
+                  : `1px solid ${theme.colors.border.default}30`,
+                borderRadius: "4px",
                 color: isActive ? s.color : theme.colors.text.secondary,
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
-                gap: shouldUseMobileUI ? "6px" : "4px",
+                gap: "2px",
                 touchAction: "manipulation",
                 opacity: cooldown > 0 ? 0.5 : 1,
-                boxShadow: isActive
-                  ? `0 0 12px ${s.color}20, inset 0 1px 0 ${s.color}15`
-                  : "none",
               }}
             >
               <StyleIcon
                 style={s.id}
-                size={shouldUseMobileUI ? 20 : 18}
+                size={shouldUseMobileUI ? 14 : 12}
                 color={isActive ? s.color : theme.colors.text.muted}
               />
-              <span style={{ fontWeight: 600 }}>{s.label}</span>
+              <span style={{ fontWeight: 600, lineHeight: 1 }}>{s.label}</span>
               <span
                 style={{
-                  fontSize: shouldUseMobileUI ? "10px" : "9px",
-                  opacity: 0.7,
+                  fontSize: shouldUseMobileUI ? "8px" : "7px",
+                  opacity: 0.6,
                   color: isActive ? s.color : theme.colors.text.muted,
                 }}
               >
@@ -861,51 +834,50 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
         <div
           style={{
             textAlign: "center",
-            fontSize: "11px",
+            fontSize: "9px",
             color: theme.colors.state.warning,
-            background: `${theme.colors.state.warning}12`,
-            padding: "6px 10px",
-            borderRadius: "6px",
-            border: `1px solid ${theme.colors.state.warning}25`,
+            background: `${theme.colors.state.warning}10`,
+            padding: "3px 6px",
+            borderRadius: "3px",
           }}
         >
-          ⏱️ Cooldown: {Math.ceil(cooldown / 1000)}s
+          ⏱️ {Math.ceil(cooldown / 1000)}s
         </div>
       )}
 
-      {/* Auto Retaliate - Clean toggle */}
+      {/* Auto Retaliate - Compact toggle */}
       <button
         onClick={toggleAutoRetaliate}
-        className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/50"
+        className="focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/50"
         style={{
-          padding: shouldUseMobileUI ? "10px 12px" : "8px 10px",
+          padding: shouldUseMobileUI ? "6px 8px" : "5px 6px",
           cursor: "pointer",
-          transition: "all 0.15s ease",
+          transition: "all 0.1s ease",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          fontSize: shouldUseMobileUI ? "12px" : "11px",
+          fontSize: shouldUseMobileUI ? "10px" : "9px",
           touchAction: "manipulation",
-          borderRadius: "8px",
+          borderRadius: "4px",
           background: autoRetaliate
             ? "rgba(34, 197, 94, 0.08)"
-            : theme.colors.background.secondary,
+            : theme.colors.slot.filled,
           border: autoRetaliate
-            ? "1px solid rgba(34, 197, 94, 0.3)"
-            : `1px solid ${theme.colors.border.default}40`,
+            ? "1px solid rgba(34, 197, 94, 0.25)"
+            : `1px solid ${theme.colors.border.default}30`,
           color: autoRetaliate
             ? theme.colors.state.success
-            : theme.colors.text.secondary,
+            : theme.colors.text.muted,
         }}
       >
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <svg
-            width={shouldUseMobileUI ? 16 : 14}
-            height={shouldUseMobileUI ? 16 : 14}
+            width={shouldUseMobileUI ? 12 : 10}
+            height={shouldUseMobileUI ? 12 : 10}
             viewBox="0 0 24 24"
             fill="none"
             stroke={autoRetaliate ? "#22c55e" : theme.colors.text.muted}
-            strokeWidth="2"
+            strokeWidth="2.5"
             strokeLinecap="round"
             strokeLinejoin="round"
           >
@@ -925,13 +897,13 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
         </div>
         <span
           style={{
-            padding: shouldUseMobileUI ? "4px 10px" : "3px 8px",
-            borderRadius: "4px",
-            fontSize: shouldUseMobileUI ? "11px" : "10px",
+            padding: shouldUseMobileUI ? "2px 6px" : "1px 5px",
+            borderRadius: "3px",
+            fontSize: shouldUseMobileUI ? "9px" : "8px",
             fontWeight: 700,
             background: autoRetaliate
               ? "rgba(34, 197, 94, 0.2)"
-              : "rgba(239, 68, 68, 0.15)",
+              : "rgba(239, 68, 68, 0.12)",
             color: autoRetaliate ? "#22c55e" : "#ef4444",
           }}
         >

@@ -616,7 +616,7 @@ export const QuestDetailPopup = memo(function QuestDetailPopup({
   );
 });
 
-/** Quest List Item Component - Simple row in the list */
+/** Quest List Item Component - Clean minimal row */
 interface QuestListItemProps {
   quest: Quest;
   onClick: () => void;
@@ -632,68 +632,29 @@ const QuestListItem = memo(function QuestListItem({
   const [isHovered, setIsHovered] = useState(false);
   const progress = calculateQuestProgress(quest);
 
-  // Mobile responsiveness
-  const [isMobile, setIsMobile] = useState(() =>
-    typeof window !== "undefined"
-      ? window.innerWidth < MOBILE_BREAKPOINT
-      : false,
-  );
-
-  useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
-    };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
-
-  // Determine background color based on selection and hover state
-  const getBackgroundColor = () => {
-    if (isSelected) {
-      return theme.colors.slot.selected ?? theme.colors.accent.primary + "33";
-    }
-    if (isHovered) {
-      return theme.colors.slot.hover;
-    }
-    return "transparent";
-  };
-
   const rowStyle: CSSProperties = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: isMobile
-      ? `${theme.spacing.sm}px ${theme.spacing.sm}px`
-      : `${theme.spacing.sm}px ${theme.spacing.md}px`,
+    padding: "4px 8px",
     cursor: "pointer",
-    backgroundColor: getBackgroundColor(),
-    borderBottom: `1px solid ${theme.colors.border.default}`,
-    borderLeft: isSelected
-      ? `3px solid ${theme.colors.accent.primary}`
-      : "3px solid transparent",
-    transition: theme.transitions.fast,
-    minHeight: isMobile ? "48px" : "40px", // Touch-friendly on mobile
+    backgroundColor: isSelected
+      ? (theme.colors.slot.selected ?? `${theme.colors.accent.primary}20`)
+      : isHovered
+        ? theme.colors.slot.hover
+        : "transparent",
+    transition: "background-color 0.1s ease",
+    minHeight: "28px",
   };
 
   const nameStyle: CSSProperties = {
     color: STATUS_COLORS[quest.state],
-    fontSize: isMobile
-      ? theme.typography.fontSize.base
-      : theme.typography.fontSize.sm,
-    fontWeight: theme.typography.fontWeight.medium,
+    fontSize: "11px",
+    fontWeight: 500,
     flex: 1,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
-  };
-
-  const progressStyle: CSSProperties = {
-    color: theme.colors.text.muted,
-    fontSize: isMobile
-      ? theme.typography.fontSize.sm
-      : theme.typography.fontSize.xs,
-    marginLeft: isMobile ? theme.spacing.xs : theme.spacing.sm,
-    flexShrink: 0,
   };
 
   return (
@@ -706,7 +667,7 @@ const QuestListItem = memo(function QuestListItem({
       <span style={nameStyle}>
         {quest.pinned && (
           <span
-            style={{ color: theme.colors.accent.primary, marginRight: "6px" }}
+            style={{ color: theme.colors.accent.primary, marginRight: "4px" }}
           >
             ★
           </span>
@@ -714,13 +675,21 @@ const QuestListItem = memo(function QuestListItem({
         {quest.title}
       </span>
       {quest.state === "active" && progress > 0 && progress < 100 && (
-        <span style={progressStyle}>{progress}%</span>
+        <span
+          style={{
+            color: theme.colors.text.muted,
+            fontSize: "9px",
+            marginLeft: "6px",
+          }}
+        >
+          {progress}%
+        </span>
       )}
       <span
         style={{
           color: theme.colors.text.muted,
-          marginLeft: theme.spacing.sm,
-          fontSize: theme.typography.fontSize.xs,
+          marginLeft: "6px",
+          fontSize: "9px",
         }}
       >
         Lv. {quest.level}
@@ -729,7 +698,7 @@ const QuestListItem = memo(function QuestListItem({
   );
 });
 
-/** Category Group Component */
+/** Category Group Component - Clean minimal header */
 interface CategoryGroupProps {
   category: QuestCategory;
   quests: Quest[];
@@ -750,21 +719,6 @@ const CategoryGroup = memo(function CategoryGroup({
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const config = CATEGORY_CONFIG[category];
 
-  // Mobile responsiveness
-  const [isMobile, setIsMobile] = useState(() =>
-    typeof window !== "undefined"
-      ? window.innerWidth < MOBILE_BREAKPOINT
-      : false,
-  );
-
-  useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
-    };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
-
   if (quests.length === 0) {
     return null;
   }
@@ -772,54 +726,45 @@ const CategoryGroup = memo(function CategoryGroup({
   const headerStyle: CSSProperties = {
     display: "flex",
     alignItems: "center",
-    gap: isMobile ? theme.spacing.xs : theme.spacing.sm,
-    padding: isMobile
-      ? `${theme.spacing.sm}px ${theme.spacing.sm}px`
-      : `${theme.spacing.sm}px ${theme.spacing.md}px`,
+    gap: "6px",
+    padding: "5px 8px",
     cursor: "pointer",
     userSelect: "none",
-    backgroundColor: theme.colors.background.tertiary,
-    borderBottom: `1px solid ${theme.colors.border.default}`,
-    minHeight: isMobile ? "44px" : "36px", // Touch-friendly on mobile
+    backgroundColor: theme.colors.slot.filled,
+    borderBottom: `1px solid ${theme.colors.border.default}30`,
+    minHeight: "26px",
   };
 
   const expandIconStyle: CSSProperties = {
-    width: isMobile ? "16px" : "12px",
-    height: isMobile ? "16px" : "12px",
+    width: "10px",
+    height: "10px",
     color: theme.colors.text.muted,
     transform: collapsed ? "rotate(0deg)" : "rotate(90deg)",
-    transition: reducedMotion ? "none" : "transform 0.2s ease",
+    transition: reducedMotion ? "none" : "transform 0.15s ease",
   };
 
   const indicatorStyle: CSSProperties = {
-    width: isMobile ? "10px" : "8px",
-    height: isMobile ? "10px" : "8px",
+    width: "6px",
+    height: "6px",
     borderRadius: "50%",
     backgroundColor: config.color,
   };
 
   const nameStyle: CSSProperties = {
     flex: 1,
-    color: theme.colors.accent.primary,
-    fontSize: isMobile
-      ? theme.typography.fontSize.base
-      : theme.typography.fontSize.sm,
-    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.text.secondary,
+    fontSize: "10px",
+    fontWeight: 600,
     textTransform: "uppercase",
-    letterSpacing: "0.5px",
-  };
-
-  const countStyle: CSSProperties = {
-    color: theme.colors.text.muted,
-    fontSize: theme.typography.fontSize.xs,
+    letterSpacing: "0.3px",
   };
 
   return (
     <div>
       <div style={headerStyle} onClick={() => setCollapsed(!collapsed)}>
         <svg
-          width="12"
-          height="12"
+          width="10"
+          height="10"
           viewBox="0 0 12 12"
           fill="currentColor"
           style={expandIconStyle}
@@ -828,7 +773,6 @@ const CategoryGroup = memo(function CategoryGroup({
         </svg>
         <div style={indicatorStyle} />
         <span style={nameStyle}>{config.label}</span>
-        <span style={countStyle}>{quests.length}</span>
       </div>
       {!collapsed && (
         <div>
@@ -986,11 +930,11 @@ export const QuestLog = memo(function QuestLog({
   // Check if any filters are active
   const hasActiveFilters = stateFilter.length > 0 || categoryFilter.length > 0;
 
-  // Container styles
+  // Container styles - clean minimal
   const containerStyle: CSSProperties = {
     display: "flex",
     flexDirection: "column",
-    backgroundColor: theme.colors.background.primary,
+    backgroundColor: "transparent",
     overflow: "hidden",
     height: "100%",
     ...style,
@@ -1001,18 +945,18 @@ export const QuestLog = memo(function QuestLog({
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
-    backgroundColor: theme.colors.background.secondary,
-    borderBottom: `1px solid ${theme.colors.border.default}`,
-    minHeight: "32px",
-    gap: theme.spacing.xs,
+    padding: "4px 6px",
+    backgroundColor: theme.colors.slot.filled,
+    borderBottom: `1px solid ${theme.colors.border.default}30`,
+    minHeight: "26px",
+    gap: "4px",
   };
 
   // Compact stats
   const statsStyle: CSSProperties = {
     display: "flex",
-    gap: theme.spacing.sm,
-    fontSize: theme.typography.fontSize.xs,
+    gap: "6px",
+    fontSize: "10px",
     color: theme.colors.text.muted,
     flex: 1,
   };
@@ -1020,80 +964,78 @@ export const QuestLog = memo(function QuestLog({
   // Toolbar buttons
   const toolbarStyle: CSSProperties = {
     display: "flex",
-    gap: "4px",
+    gap: "3px",
     alignItems: "center",
   };
 
   // Small icon button
   const iconButtonStyle = (active: boolean): CSSProperties => ({
-    width: "24px",
-    height: "24px",
+    width: "20px",
+    height: "20px",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: active
       ? theme.colors.accent.primary
-      : theme.colors.background.tertiary,
+      : theme.colors.slot.filled,
     color: active ? theme.colors.background.primary : theme.colors.text.muted,
-    border: `1px solid ${active ? theme.colors.accent.primary : theme.colors.border.default}`,
-    borderRadius: `${theme.borderRadius.sm}px`,
+    border: `1px solid ${active ? theme.colors.accent.primary : theme.colors.border.default}30`,
+    borderRadius: "3px",
     cursor: "pointer",
     padding: 0,
-    transition: reducedMotion ? "none" : theme.transitions.fast,
+    transition: reducedMotion ? "none" : "all 0.1s ease",
   });
 
   // Collapsible search
   const searchContainerStyle: CSSProperties = {
-    padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
-    borderBottom: `1px solid ${theme.colors.border.default}`,
+    padding: "4px 6px",
+    borderBottom: `1px solid ${theme.colors.border.default}30`,
     display: searchExpanded ? "block" : "none",
   };
 
   const searchInputStyle: CSSProperties = {
     width: "100%",
-    padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
-    backgroundColor: theme.colors.background.tertiary,
-    border: `1px solid ${theme.colors.border.default}`,
-    borderRadius: `${theme.borderRadius.sm}px`,
+    padding: "4px 8px",
+    backgroundColor: theme.colors.slot.empty,
+    border: `1px solid ${theme.colors.border.default}30`,
+    borderRadius: "3px",
     color: theme.colors.text.primary,
-    fontSize: theme.typography.fontSize.sm,
+    fontSize: "10px",
     outline: "none",
   };
 
   // Collapsible filters - compact
   const filtersContainerStyle: CSSProperties = {
-    padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
-    borderBottom: `1px solid ${theme.colors.border.default}`,
+    padding: "4px 6px",
+    borderBottom: `1px solid ${theme.colors.border.default}30`,
     display: filtersExpanded ? "flex" : "none",
     flexDirection: "column",
-    gap: theme.spacing.xs,
-    backgroundColor: theme.colors.background.secondary,
+    gap: "3px",
+    backgroundColor: theme.colors.slot.filled,
   };
 
   // Compact filter row
   const filterRowStyle: CSSProperties = {
     display: "flex",
     alignItems: "center",
-    gap: "4px",
+    gap: "3px",
     flexWrap: "wrap",
   };
 
   // Smaller filter chips
   const getFilterChipStyle = (active: boolean): CSSProperties => ({
-    padding: `2px 6px`,
-    borderRadius: `${theme.borderRadius.sm}px`,
+    padding: "2px 5px",
+    borderRadius: "3px",
     backgroundColor: active
       ? theme.colors.accent.primary
-      : theme.colors.background.tertiary,
-    color: active
-      ? theme.colors.background.primary
-      : theme.colors.text.secondary,
-    fontSize: "10px",
-    fontWeight: theme.typography.fontWeight.medium,
+      : theme.colors.slot.empty,
+    color: active ? theme.colors.background.primary : theme.colors.text.muted,
+    fontSize: "9px",
+    fontWeight: 500,
     cursor: "pointer",
-    border: active ? "none" : `1px solid ${theme.colors.border.default}`,
-    transition: reducedMotion ? "none" : theme.transitions.fast,
-    lineHeight: "1.4",
+    border: active ? "none" : `1px solid ${theme.colors.border.default}30`,
+    transition: reducedMotion ? "none" : "all 0.1s ease",
+    lineHeight: "1.3",
   });
 
   // Content area - takes remaining space
@@ -1106,10 +1048,10 @@ export const QuestLog = memo(function QuestLog({
 
   // Empty state
   const emptyStyle: CSSProperties = {
-    padding: theme.spacing.lg,
+    padding: "16px",
     textAlign: "center",
     color: theme.colors.text.muted,
-    fontSize: theme.typography.fontSize.sm,
+    fontSize: "11px",
   };
 
   // Sort options
@@ -1140,26 +1082,28 @@ export const QuestLog = memo(function QuestLog({
             {/* Title */}
             <span
               style={{
-                color: theme.colors.accent.primary,
-                fontSize: isMobile
-                  ? theme.typography.fontSize.sm
-                  : theme.typography.fontSize.xs,
-                fontWeight: theme.typography.fontWeight.semibold,
-                marginRight: theme.spacing.sm,
+                color: theme.colors.text.secondary,
+                fontSize: "10px",
+                fontWeight: 600,
+                marginRight: "6px",
               }}
             >
               {title}
             </span>
-            {/* Quest counts */}
+            {/* Quest counts - colored numbers */}
             {questCounts && (
               <div style={statsStyle}>
-                <span style={{ color: STATUS_COLORS.active }}>
+                <span style={{ color: STATUS_COLORS.active, fontWeight: 600 }}>
                   {questCounts.active}
                 </span>
-                <span style={{ color: STATUS_COLORS.available }}>
+                <span
+                  style={{ color: STATUS_COLORS.available, fontWeight: 600 }}
+                >
                   {questCounts.available}
                 </span>
-                <span style={{ color: STATUS_COLORS.completed }}>
+                <span
+                  style={{ color: STATUS_COLORS.completed, fontWeight: 600 }}
+                >
                   {questCounts.completed}
                 </span>
               </div>
@@ -1195,12 +1139,12 @@ export const QuestLog = memo(function QuestLog({
                       onSortChange(e.target.value as QuestSortOption)
                     }
                     style={{
-                      padding: isMobile ? "4px 6px" : "2px 4px",
-                      backgroundColor: theme.colors.background.tertiary,
-                      border: `1px solid ${theme.colors.border.default}`,
-                      borderRadius: `${theme.borderRadius.sm}px`,
+                      padding: "2px 4px",
+                      backgroundColor: theme.colors.slot.empty,
+                      border: `1px solid ${theme.colors.border.default}30`,
+                      borderRadius: "3px",
                       color: theme.colors.text.muted,
-                      fontSize: isMobile ? "11px" : "10px",
+                      fontSize: "9px",
                       cursor: "pointer",
                       outline: "none",
                     }}
@@ -1215,8 +1159,8 @@ export const QuestLog = memo(function QuestLog({
                     <button
                       style={{
                         ...iconButtonStyle(false),
-                        width: isMobile ? "28px" : "22px",
-                        height: isMobile ? "28px" : "22px",
+                        width: "18px",
+                        height: "18px",
                       }}
                       onClick={() =>
                         onSortDirectionChange(
@@ -1228,8 +1172,8 @@ export const QuestLog = memo(function QuestLog({
                       }
                     >
                       <svg
-                        width="10"
-                        height="10"
+                        width="8"
+                        height="8"
                         viewBox="0 0 12 12"
                         fill="currentColor"
                         style={{
@@ -1237,7 +1181,9 @@ export const QuestLog = memo(function QuestLog({
                             sortDirection === "desc"
                               ? "rotate(180deg)"
                               : "rotate(0deg)",
-                          transition: reducedMotion ? "none" : "transform 0.2s",
+                          transition: reducedMotion
+                            ? "none"
+                            : "transform 0.15s",
                         }}
                       >
                         <path d="M6 2l4 4H2l4-4z" />
