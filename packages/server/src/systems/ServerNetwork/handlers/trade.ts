@@ -28,6 +28,7 @@ import {
   EventType,
   getItem,
   type TradeOfferView,
+  type TradeOfferItem,
   isValidSlotNumber,
   isValidPlayerID,
 } from "@hyperscape/shared";
@@ -44,6 +45,7 @@ import {
   getEntityPosition,
   hasActiveInterfaceSession,
 } from "./common";
+import { uuid } from "@hyperscape/shared";
 import type { DatabaseConnection } from "./common/types";
 import type { TradingSystem } from "../../TradingSystem";
 
@@ -225,7 +227,20 @@ function sendTradeUpdate(
     accepted: session.recipient.accepted,
   };
 
+  // Calculate free slots for each player (OSRS-style indicator)
+  const initiatorFreeSlots = calculateFreeSlots(
+    world,
+    session.initiator.playerId,
+    session.initiator.offeredItems,
+  );
+  const recipientFreeSlots = calculateFreeSlots(
+    world,
+    session.recipient.playerId,
+    session.recipient.offeredItems,
+  );
+
   // Send to initiator (their offer = initiatorOffer, partner's offer = recipientOffer)
+  // Partner free slots = recipient's free slots
   const initiatorSocket = getSocketByPlayerId(
     world,
     session.initiator.playerId,
@@ -235,10 +250,12 @@ function sendTradeUpdate(
       tradeId,
       myOffer: initiatorOffer,
       theirOffer: recipientOffer,
+      partnerFreeSlots: recipientFreeSlots,
     });
   }
 
   // Send to recipient (their offer = recipientOffer, partner's offer = initiatorOffer)
+  // Partner free slots = initiator's free slots
   const recipientSocket = getSocketByPlayerId(
     world,
     session.recipient.playerId,
@@ -248,6 +265,7 @@ function sendTradeUpdate(
       tradeId,
       myOffer: recipientOffer,
       theirOffer: initiatorOffer,
+      partnerFreeSlots: initiatorFreeSlots,
     });
   }
 }
@@ -278,6 +296,70 @@ function calculateOfferValue(items: TradeOfferView["items"]): number {
     }
   }
   return total;
+}
+
+/**
+ * Calculate the number of free inventory slots for a player
+ * Takes into account items currently being offered in trade (which will be freed)
+ *
+ * @param world - The game world
+ * @param playerId - Player whose free slots to calculate
+ * @param offeredItems - Items currently offered in trade (these slots will become free)
+ * @returns Number of free inventory slots
+ */
+function calculateFreeSlots(
+  world: World,
+  playerId: string,
+  offeredItems: TradeOfferItem[],
+): number {
+  // Get player's inventory from InventorySystem
+  const inventorySystem = world.getSystem("inventory") as
+    | {
+        getInventoryData?: (playerId: string) =>
+          | {
+              items: Array<{ slotIndex: number } | null>;
+              coins: number;
+              maxSlots: number;
+            }
+          | undefined;
+      }
+    | undefined;
+
+  if (!inventorySystem?.getInventoryData) {
+    // If no inventory system or method, assume some free slots
+    return 10;
+  }
+
+  const inventoryData = inventorySystem.getInventoryData(playerId);
+  if (!inventoryData) {
+    return 28; // No inventory = all slots free
+  }
+
+  const maxSlots = inventoryData.maxSlots || 28;
+
+  // Count used slots (non-null entries with valid slotIndex)
+  const usedSlots = new Set<number>();
+  for (const item of inventoryData.items) {
+    if (item !== null && typeof item.slotIndex === "number") {
+      usedSlots.add(item.slotIndex);
+    }
+  }
+
+  // Slots being freed by offered items
+  const offeredSlots = new Set<number>();
+  for (const offer of offeredItems) {
+    offeredSlots.add(offer.inventorySlot);
+  }
+
+  // Calculate free slots: empty slots + slots that will be freed
+  let freeCount = 0;
+  for (let i = 0; i < maxSlots; i++) {
+    if (!usedSlots.has(i) || offeredSlots.has(i)) {
+      freeCount++;
+    }
+  }
+
+  return freeCount;
 }
 
 /**
@@ -415,9 +497,24 @@ export function handleTradeRequest(
     return;
   }
 
-  // Send notification to target player
+  // Send notification to target player as OSRS-style pink chat message
   const targetSocket = getSocketByPlayerId(world, targetPlayerId);
   if (targetSocket) {
+    // Send trade request as a clickable chat message (OSRS-style)
+    const chatMessage = {
+      id: uuid(),
+      from: "", // Empty string - no sender prefix for trade requests
+      fromId: playerId,
+      body: `${initiatorName} wishes to trade with you.`,
+      text: `${initiatorName} wishes to trade with you.`,
+      timestamp: Date.now(),
+      createdAt: new Date().toISOString(),
+      type: "trade_request" as const,
+      tradeId: result.tradeId,
+    };
+    sendToSocket(targetSocket, "chatAdded", chatMessage);
+
+    // Also send the structured trade request data for UI purposes
     sendToSocket(targetSocket, "tradeIncoming", {
       tradeId: result.tradeId,
       fromPlayerId: playerId,
@@ -510,22 +607,33 @@ export function handleTradeRequestRespond(
   );
   const recipientLevel = getPlayerCombatLevel(world, playerId);
 
-  // Send to initiator
+  // Calculate initial free slots for each player (OSRS-style indicator)
+  // At trade start, no items are offered yet, so pass empty arrays
+  const initiatorFreeSlots = calculateFreeSlots(
+    world,
+    session.initiator.playerId,
+    [],
+  );
+  const recipientFreeSlots = calculateFreeSlots(world, playerId, []);
+
+  // Send to initiator (partner = recipient)
   if (initiatorSocket) {
     sendToSocket(initiatorSocket, "tradeStarted", {
       tradeId: data.tradeId,
       partnerId: playerId,
       partnerName: recipientName,
       partnerLevel: recipientLevel,
+      partnerFreeSlots: recipientFreeSlots,
     });
   }
 
-  // Send to recipient
+  // Send to recipient (partner = initiator)
   sendToSocket(recipientSocket, "tradeStarted", {
     tradeId: data.tradeId,
     partnerId: session.initiator.playerId,
     partnerName: session.initiator.playerName,
     partnerLevel: initiatorLevel,
+    partnerFreeSlots: initiatorFreeSlots,
   });
 }
 
@@ -1095,14 +1203,15 @@ async function executeTradeSwap(
             initiatorTrackingSlots.add(slot);
           }
 
-          // 1. Remove items from initiator and add to recipient
+          // ===== PHASE 1: Remove/reduce ALL offered items from BOTH players first =====
+          // This must happen before inserts to avoid unique constraint violations
+
+          // Remove initiator's offered items
           for (const offer of session.initiator.offeredItems) {
-            // Reduce/remove from initiator
             const item = initiatorInventory.find(
               (i) => i.slotIndex === offer.inventorySlot,
             )!;
             if (item.quantity === offer.quantity) {
-              // Remove entirely
               await tx.execute(
                 sql`DELETE FROM inventory
                     WHERE "playerId" = ${initiatorId}
@@ -1110,7 +1219,6 @@ async function executeTradeSwap(
               );
               initiatorTrackingSlots.delete(offer.inventorySlot);
             } else {
-              // Reduce quantity
               await tx.execute(
                 sql`UPDATE inventory
                     SET quantity = ${item.quantity - offer.quantity}
@@ -1118,22 +1226,10 @@ async function executeTradeSwap(
                     AND "slotIndex" = ${offer.inventorySlot}`,
               );
             }
-
-            // Add to recipient in next free slot
-            const recipientSlot = findFreeSlotFromSet(
-              recipientTrackingSlots,
-              recipientOfferSlots,
-            );
-            await tx.execute(
-              sql`INSERT INTO inventory ("playerId", "itemId", quantity, "slotIndex", metadata)
-                  VALUES (${recipientId}, ${offer.itemId}, ${offer.quantity}, ${recipientSlot}, NULL)`,
-            );
-            recipientTrackingSlots.add(recipientSlot);
           }
 
-          // 2. Remove items from recipient and add to initiator
+          // Remove recipient's offered items
           for (const offer of session.recipient.offeredItems) {
-            // Reduce/remove from recipient
             const item = recipientInventory.find(
               (i) => i.slotIndex === offer.inventorySlot,
             )!;
@@ -1152,8 +1248,26 @@ async function executeTradeSwap(
                     AND "slotIndex" = ${offer.inventorySlot}`,
               );
             }
+          }
 
-            // Add to initiator
+          // ===== PHASE 2: Add traded items to both players =====
+          // Now slots are actually free in the database
+
+          // Add initiator's items to recipient
+          for (const offer of session.initiator.offeredItems) {
+            const recipientSlot = findFreeSlotFromSet(
+              recipientTrackingSlots,
+              recipientOfferSlots,
+            );
+            await tx.execute(
+              sql`INSERT INTO inventory ("playerId", "itemId", quantity, "slotIndex", metadata)
+                  VALUES (${recipientId}, ${offer.itemId}, ${offer.quantity}, ${recipientSlot}, NULL)`,
+            );
+            recipientTrackingSlots.add(recipientSlot);
+          }
+
+          // Add recipient's items to initiator
+          for (const offer of session.recipient.offeredItems) {
             const initiatorSlot = findFreeSlotFromSet(
               initiatorTrackingSlots,
               initiatorOfferSlots,
@@ -1216,9 +1330,10 @@ async function executeTradeSwap(
       });
     }
 
-    // Emit inventory updated events to sync UI
-    world.emit(EventType.INVENTORY_UPDATED, { playerId: initiatorId });
-    world.emit(EventType.INVENTORY_UPDATED, { playerId: recipientId });
+    // Send inventory updates directly to each player (with full data)
+    // Use INVENTORY_REQUEST event which properly fetches and sends full inventory
+    world.emit(EventType.INVENTORY_REQUEST, { playerId: initiatorId });
+    world.emit(EventType.INVENTORY_REQUEST, { playerId: recipientId });
   } catch (error) {
     // Unexpected error during trade - cancel and notify both players
     console.error("[TradeHandler] Unexpected error during trade swap:", error);

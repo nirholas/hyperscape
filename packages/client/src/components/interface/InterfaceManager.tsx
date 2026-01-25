@@ -1217,6 +1217,7 @@ function DesktopInterfaceManager({
     theirAccepted: false,
     myOfferValue: 0,
     theirOfferValue: 0,
+    partnerFreeSlots: 28, // OSRS-style: partner's available inventory slots
   });
 
   const [tradeRequestState, setTradeRequestState] =
@@ -1704,23 +1705,25 @@ function DesktopInterfaceManager({
         }
       }
 
-      // Trade request modal (incoming trade request)
-      if (update.component === "tradeRequest") {
-        const data = update.data as {
-          visible: boolean;
-          tradeId: string;
-          fromPlayer: { id: string; name: string; level: number };
-        };
-        setTradeRequestState({
-          visible: data.visible,
-          tradeId: data.tradeId,
-          fromPlayer: {
-            id: data.fromPlayer.id as PlayerID,
-            name: data.fromPlayer.name,
-            level: data.fromPlayer.level,
-          },
-        });
-      }
+      // Trade request modal - DISABLED: Trade requests now appear as pink clickable chat messages (OSRS-style)
+      // The server sends trade requests via chatAdded with type="trade_request" which are rendered
+      // in Chat.tsx as clickable pink messages. Clicking accepts the trade.
+      // if (update.component === "tradeRequest") {
+      //   const data = update.data as {
+      //     visible: boolean;
+      //     tradeId: string;
+      //     fromPlayer: { id: string; name: string; level: number };
+      //   };
+      //   setTradeRequestState({
+      //     visible: data.visible,
+      //     tradeId: data.tradeId,
+      //     fromPlayer: {
+      //       id: data.fromPlayer.id as PlayerID,
+      //       name: data.fromPlayer.name,
+      //       level: data.fromPlayer.level,
+      //     },
+      //   });
+      // }
 
       // Trade window opened
       if (update.component === "trade") {
@@ -1728,6 +1731,7 @@ function DesktopInterfaceManager({
           isOpen: boolean;
           tradeId: string;
           partner: { id: string; name: string; level: number };
+          partnerFreeSlots?: number;
         };
         setTradeState((prev) => ({
           ...prev,
@@ -1745,6 +1749,7 @@ function DesktopInterfaceManager({
           theirAccepted: false,
           myOfferValue: 0,
           theirOfferValue: 0,
+          partnerFreeSlots: data.partnerFreeSlots ?? 28,
         }));
         // Close request modal when trade starts
         setTradeRequestState((prev) => ({ ...prev, visible: false }));
@@ -1758,6 +1763,7 @@ function DesktopInterfaceManager({
           myAccepted: boolean;
           theirOffer: TradeOfferItem[];
           theirAccepted: boolean;
+          partnerFreeSlots?: number;
         };
         setTradeState((prev) => ({
           ...prev,
@@ -1765,6 +1771,7 @@ function DesktopInterfaceManager({
           myAccepted: data.myAccepted,
           theirOffer: data.theirOffer,
           theirAccepted: data.theirAccepted,
+          partnerFreeSlots: data.partnerFreeSlots ?? prev.partnerFreeSlots,
         }));
       }
 
@@ -1804,6 +1811,7 @@ function DesktopInterfaceManager({
           theirOffer: [],
           myOfferValue: 0,
           theirOfferValue: 0,
+          partnerFreeSlots: 28, // Reset to full
         }));
         setTradeRequestState((prev) => ({ ...prev, visible: false }));
       }
@@ -1815,8 +1823,12 @@ function DesktopInterfaceManager({
         playerId: string;
         coins: number;
       };
-      setInventory(data.items);
-      setCoins(data.coins);
+      // CRITICAL: Only update if this is OUR inventory, not another player's
+      const localId = world.entities?.player?.id;
+      if (!localId || data.playerId === localId) {
+        setInventory(data.items);
+        setCoins(data.coins);
+      }
     };
 
     const onCoins = (raw: unknown) => {
@@ -2501,7 +2513,7 @@ function DesktopInterfaceManager({
             visible={true}
             onClose={() => {
               setBankData(null);
-              world?.network?.send?.("bank_close", {});
+              world?.network?.send?.("bankClose", {});
             }}
             title="Bank"
             width={900}
@@ -2518,7 +2530,7 @@ function DesktopInterfaceManager({
               coins={coins}
               onClose={() => {
                 setBankData(null);
-                world?.network?.send?.("bank_close", {});
+                world?.network?.send?.("bankClose", {});
               }}
             />
           </ModalWindow>

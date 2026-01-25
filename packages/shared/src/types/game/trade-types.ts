@@ -211,6 +211,8 @@ export type TradeStartedPayload = {
   partnerName: string;
   /** Trading partner's combat level */
   partnerLevel: number;
+  /** Number of free inventory slots partner has (OSRS-style indicator) */
+  partnerFreeSlots?: number;
 };
 
 /**
@@ -233,6 +235,8 @@ export type TradeUpdatedPayload = {
   myOffer: TradeOfferView;
   /** Partner's offer */
   theirOffer: TradeOfferView;
+  /** Number of free inventory slots partner has (OSRS-style indicator) */
+  partnerFreeSlots?: number;
 };
 
 /**
@@ -323,6 +327,8 @@ export type TradeWindowState = {
   myOfferValue: number;
   /** Total value of partner's offer (for wealth transfer indicator) */
   theirOfferValue: number;
+  /** Number of free inventory slots partner has (OSRS-style indicator) */
+  partnerFreeSlots: number;
 };
 
 /**
