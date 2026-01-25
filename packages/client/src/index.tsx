@@ -473,7 +473,9 @@ function App() {
             wsUrl={wsUrl}
             onPlay={(id) => {
               if (id) {
-                localStorage.setItem("selectedCharacterId", id);
+                // Use sessionStorage (per-tab) instead of localStorage (shared across tabs)
+                // This prevents Tab B from overwriting Tab A's selected character
+                sessionStorage.setItem("selectedCharacterId", id);
               }
               setShowCharacterPage(false);
             }}

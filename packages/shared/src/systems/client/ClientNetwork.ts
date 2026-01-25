@@ -678,11 +678,13 @@ export class ClientNetwork extends SystemBase {
 
       // Handle character selection and world entry (non-spectators only)
       if (isCharacterSelectMode) {
-        // Get characterId from embedded config (read at init) OR localStorage
+        // Get characterId from embedded config (read at init) OR sessionStorage
+        // NOTE: sessionStorage is per-tab, preventing cross-tab character conflicts
+        // (localStorage was causing Tab B to overwrite Tab A's character selection)
         const characterId =
           this.embeddedCharacterId ||
-          (typeof localStorage !== "undefined"
-            ? localStorage.getItem("selectedCharacterId")
+          (typeof sessionStorage !== "undefined"
+            ? sessionStorage.getItem("selectedCharacterId")
             : null);
 
         console.log("[PlayerLoading] Character select mode detected", {
@@ -2484,6 +2486,44 @@ export class ClientNetwork extends SystemBase {
     this.send("privateMessage", { targetName, content });
   }
 
+  /**
+   * Trade moved to confirmation screen (OSRS two-screen flow)
+   */
+  onTradeConfirmScreen = (data: {
+    tradeId: string;
+    myOffer: Array<{
+      inventorySlot: number;
+      itemId: string;
+      quantity: number;
+      tradeSlot: number;
+    }>;
+    theirOffer: Array<{
+      inventorySlot: number;
+      itemId: string;
+      quantity: number;
+      tradeSlot: number;
+    }>;
+    myOfferValue: number;
+    theirOfferValue: number;
+  }) => {
+    this.world.emit(EventType.TRADE_CONFIRM_SCREEN, data);
+    // Emit UI update to switch to confirmation screen
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "tradeConfirm",
+      data: {
+        tradeId: data.tradeId,
+        screen: "confirm",
+        myOffer: data.myOffer,
+        theirOffer: data.theirOffer,
+        myOfferValue: data.myOfferValue,
+        theirOfferValue: data.theirOfferValue,
+        // Reset acceptance state for confirmation screen
+        myAccepted: false,
+        theirAccepted: false,
+      },
+    });
+  };
+
   // Trade convenience methods
   requestTrade(targetPlayerId: string) {
     this.send("tradeRequest", { targetPlayerId });
@@ -3173,6 +3213,15 @@ export class ClientNetwork extends SystemBase {
       playerId: this.id || "unknown",
       reason: code || "unknown",
     });
+  };
+
+  /**
+   * Handle enter world approval
+   * This is a no-op since CharacterSelectScreen handles the actual transition.
+   * Handler exists to suppress "No handler for packet" warnings.
+   */
+  onEnterWorldApproved = (_data: { characterId: string }) => {
+    // Handled by CharacterSelectScreen - this is just to prevent warning logs
   };
 
   /**

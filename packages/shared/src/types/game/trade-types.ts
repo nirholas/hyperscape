@@ -25,8 +25,18 @@ import type { PlayerID, ItemID, SlotNumber } from "../core/identifiers";
 
 /**
  * Trade session status
+ * - pending: Trade request sent, waiting for response
+ * - active: Trade window open, players adding/removing items (offer screen)
+ * - confirming: Both players accepted, showing confirmation screen
+ * - completed: Trade completed successfully
+ * - cancelled: Trade cancelled
  */
-export type TradeStatus = "pending" | "active" | "completed" | "cancelled";
+export type TradeStatus =
+  | "pending"
+  | "active"
+  | "confirming"
+  | "completed"
+  | "cancelled";
 
 /**
  * Reason for trade cancellation
@@ -201,6 +211,8 @@ export type TradeStartedPayload = {
   partnerName: string;
   /** Trading partner's combat level */
   partnerLevel: number;
+  /** Number of free inventory slots partner has (OSRS-style indicator) */
+  partnerFreeSlots?: number;
 };
 
 /**
@@ -223,6 +235,8 @@ export type TradeUpdatedPayload = {
   myOffer: TradeOfferView;
   /** Partner's offer */
   theirOffer: TradeOfferView;
+  /** Number of free inventory slots partner has (OSRS-style indicator) */
+  partnerFreeSlots?: number;
 };
 
 /**
@@ -268,12 +282,22 @@ export type TradeErrorPayload = {
     | "PLAYER_BUSY"
     | "PLAYER_OFFLINE"
     | "RATE_LIMITED"
-    | "SELF_TRADE";
+    | "SELF_TRADE"
+    | "UNTRADEABLE_ITEM"
+    | "TOO_FAR"
+    | "INTERFACE_OPEN";
 };
 
 // ============================================================================
 // UI State Types
 // ============================================================================
+
+/**
+ * Trade screen type for two-screen confirmation flow (OSRS-style)
+ * - offer: Main trading screen where players add/remove items
+ * - confirm: Confirmation screen showing final summary
+ */
+export type TradeScreen = "offer" | "confirm";
 
 /**
  * Trade window UI state
@@ -283,6 +307,8 @@ export type TradeWindowState = {
   isOpen: boolean;
   /** Current trade session ID */
   tradeId: string | null;
+  /** Current screen in two-screen flow */
+  screen: TradeScreen;
   /** Trading partner info */
   partner: {
     id: PlayerID;
@@ -297,6 +323,12 @@ export type TradeWindowState = {
   theirOffer: TradeOfferItem[];
   /** Partner's acceptance state */
   theirAccepted: boolean;
+  /** Total value of local player's offer (for wealth transfer indicator) */
+  myOfferValue: number;
+  /** Total value of partner's offer (for wealth transfer indicator) */
+  theirOfferValue: number;
+  /** Number of free inventory slots partner has (OSRS-style indicator) */
+  partnerFreeSlots: number;
 };
 
 /**

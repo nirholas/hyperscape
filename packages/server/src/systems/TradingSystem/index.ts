@@ -234,6 +234,13 @@ export class TradingSystem {
     // Update cooldown
     this.requestCooldowns.set(cooldownKey, now);
 
+    // Audit log
+    this.logTradeAudit("REQUEST", tradeId, {
+      initiatorId,
+      initiatorName,
+      recipientId,
+    });
+
     return { success: true, tradeId };
   }
 
@@ -286,7 +293,12 @@ export class TradingSystem {
     }
 
     if (!accept) {
-      // Recipient declined
+      // Recipient declined - audit log before cancel
+      this.logTradeAudit("DECLINE", tradeId, {
+        recipientId,
+        recipientName,
+        initiatorId: session.initiator.playerId,
+      });
       this.cancelTrade(tradeId, "declined");
       return { success: true };
     }
@@ -310,6 +322,14 @@ export class TradingSystem {
 
     // Map recipient to this trade
     this.playerTrades.set(createPlayerID(recipientId), tradeId);
+
+    // Audit log
+    this.logTradeAudit("ACCEPT", tradeId, {
+      recipientId,
+      recipientName,
+      initiatorId: session.initiator.playerId,
+      initiatorName: session.initiator.playerName,
+    });
 
     // Emit trade started event for activity logging
     this.world.emit(EventType.TRADE_STARTED, {
@@ -422,6 +442,14 @@ export class TradingSystem {
     session.lastActivityAt = Date.now();
     session.expiresAt = Date.now() + TRADE_CONSTANTS.ACTIVITY_TIMEOUT_MS;
 
+    // Audit log
+    this.logTradeAudit("ADD_ITEM", tradeId, {
+      playerId,
+      inventorySlot,
+      itemId,
+      quantity,
+    });
+
     return { success: true };
   }
 
@@ -465,6 +493,8 @@ export class TradingSystem {
       };
     }
 
+    // Capture item info before removing for audit
+    const removedItem = participant.offeredItems[itemIndex];
     participant.offeredItems.splice(itemIndex, 1);
 
     // Reset acceptance flags when offer changes
@@ -474,20 +504,39 @@ export class TradingSystem {
     session.lastActivityAt = Date.now();
     session.expiresAt = Date.now() + TRADE_CONSTANTS.ACTIVITY_TIMEOUT_MS;
 
+    // Audit log
+    this.logTradeAudit("REMOVE_ITEM", tradeId, {
+      playerId,
+      tradeSlot,
+      itemId: removedItem.itemId,
+      quantity: removedItem.quantity,
+    });
+
     return { success: true };
   }
 
   /**
    * Set acceptance state for a player
+   *
+   * Two-screen confirmation flow (OSRS-style):
+   * 1. On "active" (offer screen): both accept → moveToConfirming: true
+   * 2. On "confirming" (confirmation screen): both accept → bothAccepted: true
    */
   setAcceptance(
     tradeId: string,
     playerId: string,
     accepted: boolean,
-  ): TradeOperationResult & { bothAccepted?: boolean } {
+  ): TradeOperationResult & {
+    bothAccepted?: boolean;
+    moveToConfirming?: boolean;
+  } {
     const session = this.tradeSessions.get(tradeId);
 
-    if (!session || session.status !== "active") {
+    // Allow acceptance on both "active" and "confirming" screens
+    if (
+      !session ||
+      (session.status !== "active" && session.status !== "confirming")
+    ) {
       return {
         success: false,
         error: "Not in an active trade",
@@ -514,12 +563,83 @@ export class TradingSystem {
     const bothAccepted =
       session.initiator.accepted && session.recipient.accepted;
 
-    return { success: true, bothAccepted };
+    // Two-screen flow:
+    // - On offer screen (active): both accept → transition to confirmation screen
+    // - On confirmation screen (confirming): both accept → complete trade
+    if (bothAccepted && session.status === "active") {
+      return { success: true, moveToConfirming: true };
+    }
+
+    if (bothAccepted && session.status === "confirming") {
+      return { success: true, bothAccepted: true };
+    }
+
+    return { success: true };
+  }
+
+  /**
+   * Move trade to confirmation screen (OSRS two-screen flow)
+   * Resets acceptance for both players
+   */
+  moveToConfirmation(tradeId: string): TradeOperationResult {
+    const session = this.tradeSessions.get(tradeId);
+
+    if (!session || session.status !== "active") {
+      return {
+        success: false,
+        error: "Trade is not active",
+        errorCode: "INVALID_TRADE",
+      };
+    }
+
+    // Transition to confirming status
+    session.status = "confirming";
+
+    // Reset acceptance for both players - they must accept again on confirmation screen
+    session.initiator.accepted = false;
+    session.recipient.accepted = false;
+
+    // Update activity timestamp
+    session.lastActivityAt = Date.now();
+    session.expiresAt = Date.now() + TRADE_CONSTANTS.ACTIVITY_TIMEOUT_MS;
+
+    return { success: true };
+  }
+
+  /**
+   * Return to offer screen from confirmation screen (if player wants to modify)
+   * Resets acceptance for both players
+   */
+  returnToOfferScreen(tradeId: string): TradeOperationResult {
+    const session = this.tradeSessions.get(tradeId);
+
+    if (!session || session.status !== "confirming") {
+      return {
+        success: false,
+        error: "Trade is not in confirmation",
+        errorCode: "INVALID_TRADE",
+      };
+    }
+
+    // Transition back to active status
+    session.status = "active";
+
+    // Reset acceptance for both players
+    session.initiator.accepted = false;
+    session.recipient.accepted = false;
+
+    // Update activity timestamp
+    session.lastActivityAt = Date.now();
+    session.expiresAt = Date.now() + TRADE_CONSTANTS.ACTIVITY_TIMEOUT_MS;
+
+    return { success: true };
   }
 
   /**
    * Complete a trade - swap items between players
    * Returns the items each player receives (for database operations)
+   *
+   * Note: Trade must be in "confirming" status (OSRS two-screen flow)
    */
   completeTrade(tradeId: string): TradeOperationResult & {
     initiatorReceives?: TradeOfferItem[];
@@ -529,10 +649,10 @@ export class TradingSystem {
   } {
     const session = this.tradeSessions.get(tradeId);
 
-    if (!session || session.status !== "active") {
+    if (!session || session.status !== "confirming") {
       return {
         success: false,
-        error: "Trade is not active",
+        error: "Trade is not in confirmation",
         errorCode: "INVALID_TRADE",
       };
     }
@@ -552,6 +672,22 @@ export class TradingSystem {
     // Extract what each player receives (the other's offer)
     const initiatorReceives = [...session.recipient.offeredItems];
     const recipientReceives = [...session.initiator.offeredItems];
+
+    // Audit log with full trade details
+    this.logTradeAudit("COMPLETE", tradeId, {
+      initiatorId: session.initiator.playerId,
+      initiatorName: session.initiator.playerName,
+      recipientId: session.recipient.playerId,
+      recipientName: session.recipient.playerName,
+      initiatorGave: recipientReceives.map((i) => ({
+        itemId: i.itemId,
+        quantity: i.quantity,
+      })),
+      recipientGave: initiatorReceives.map((i) => ({
+        itemId: i.itemId,
+        quantity: i.quantity,
+      })),
+    });
 
     // Emit trade completed event for activity logging (before cleanup)
     this.world.emit(EventType.TRADE_COMPLETED, {
@@ -602,6 +738,24 @@ export class TradingSystem {
 
     // Mark as cancelled
     session.status = "cancelled";
+
+    // Audit log
+    this.logTradeAudit("CANCEL", tradeId, {
+      reason,
+      cancelledBy,
+      initiatorId: session.initiator.playerId,
+      initiatorName: session.initiator.playerName,
+      recipientId: session.recipient.playerId,
+      recipientName: session.recipient.playerName,
+      initiatorOfferedItems: session.initiator.offeredItems.map((i) => ({
+        itemId: i.itemId,
+        quantity: i.quantity,
+      })),
+      recipientOfferedItems: session.recipient.offeredItems.map((i) => ({
+        itemId: i.itemId,
+        quantity: i.quantity,
+      })),
+    });
 
     // Emit cancellation event
     this.world.emit(EventType.TRADE_CANCELLED, {
@@ -753,5 +907,53 @@ export class TradingSystem {
         this.requestCooldowns.delete(key);
       }
     }
+  }
+
+  // ============================================================================
+  // Audit Logging
+  // ============================================================================
+
+  /**
+   * Action types for trade audit logging
+   */
+  private static readonly AUDIT_ACTIONS = [
+    "REQUEST",
+    "ACCEPT",
+    "DECLINE",
+    "ADD_ITEM",
+    "REMOVE_ITEM",
+    "COMPLETE",
+    "CANCEL",
+  ] as const;
+
+  /**
+   * Log a trade action for audit trail
+   *
+   * Structured logging for security monitoring and compliance.
+   * Can be picked up by log aggregation systems (Datadog, ELK, etc.)
+   *
+   * @param action - The type of trade action
+   * @param tradeId - The trade session ID
+   * @param data - Additional data about the action
+   */
+  private logTradeAudit(
+    action: (typeof TradingSystem.AUDIT_ACTIONS)[number],
+    tradeId: string,
+    data: Record<string, unknown>,
+  ): void {
+    const timestamp = new Date().toISOString();
+    const logEntry = {
+      timestamp,
+      action,
+      tradeId,
+      ...data,
+    };
+
+    // Log to console in structured format for log aggregation
+    // Format: [TRADE_AUDIT] JSON allows easy parsing by log tools
+    console.log("[TRADE_AUDIT]", JSON.stringify(logEntry));
+
+    // Emit event for potential database logging or monitoring
+    this.world.emit("trade:audit", logEntry);
   }
 }

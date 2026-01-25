@@ -50,6 +50,10 @@ interface ChatMessage {
   body: string;
   createdAt: string;
   timestamp?: number;
+  /** Message type for different display styles (default: "chat") */
+  type?: "chat" | "system" | "trade_request";
+  /** Trade ID for trade_request messages */
+  tradeId?: string;
 }
 
 interface ControlBinding {
@@ -903,15 +907,44 @@ function Messages({
         <Message
           key={(msg as ChatMessage & { id: string }).id}
           msg={msg as ChatMessage}
+          world={world}
         />
       ))}
     </div>
   );
 }
 
-function Message({ msg }: { msg: ChatMessage }) {
+function Message({ msg, world }: { msg: ChatMessage; world: ChatWorld }) {
   const theme = useThemeStore((s) => s.theme);
 
+  // Handle trade request messages (OSRS-style pink clickable)
+  if (msg.type === "trade_request" && msg.tradeId) {
+    const handleAcceptTrade = () => {
+      // Send trade acceptance to server
+      world.network?.send?.("tradeRequestRespond", {
+        tradeId: msg.tradeId,
+        accept: true,
+      });
+    };
+
+    return (
+      <div
+        className="message text-[0.75rem] leading-[1.35] cursor-pointer hover:brightness-110"
+        style={{
+          color: "#FF00FF", // OSRS-style pink/magenta
+          fontFamily: "'Inter', system-ui, sans-serif",
+          textShadow: "0 1px 2px rgba(0,0,0,0.75)",
+          textDecoration: "underline",
+        }}
+        onClick={handleAcceptTrade}
+        title="Click to accept trade request"
+      >
+        {msg.body}
+      </div>
+    );
+  }
+
+  // Normal chat messages
   return (
     <div
       className="message text-[0.75rem] leading-[1.35]"

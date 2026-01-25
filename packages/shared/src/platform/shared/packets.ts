@@ -291,6 +291,7 @@ const names = [
   'tradeCompleted',      // Server -> Client: trade successful, items swapped
   'tradeCancelled',      // Server -> Client: trade cancelled (disconnect, decline, etc.)
   'tradeError',          // Server -> Client: trade operation failed with reason
+  'tradeConfirmScreen',  // Server -> Client: move to confirmation screen (OSRS two-screen)
   // Skill/Spell ability packets
   'useSkill',            // Client -> Server: activate a skill ability
   'castSpell',           // Client -> Server: cast a spell (optionally on target)

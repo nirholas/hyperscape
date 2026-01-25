@@ -155,6 +155,7 @@ import {
 import { PendingAttackManager } from "./PendingAttackManager";
 import { PendingGatherManager } from "./PendingGatherManager";
 import { PendingCookManager } from "./PendingCookManager";
+import { PendingTradeManager } from "./PendingTradeManager";
 import { FollowManager } from "./FollowManager";
 import { FaceDirectionManager } from "./FaceDirectionManager";
 import { handleFollowPlayer, handleChangePlayerName } from "./handlers/player";
@@ -268,6 +269,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   private pendingAttackManager!: PendingAttackManager;
   private pendingGatherManager!: PendingGatherManager;
   private pendingCookManager!: PendingCookManager;
+  private pendingTradeManager!: PendingTradeManager;
   private followManager!: FollowManager;
   private tradingSystem!: TradingSystem;
   private actionQueue!: ActionQueue;
@@ -489,6 +491,23 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.tickSystem.onTick((tickNumber) => {
       this.followManager.processTick(tickNumber);
     }, TickPriority.MOVEMENT);
+
+    // Pending trade manager - server-authoritative "walk to player and trade" system
+    // OSRS-style: if player clicks to trade someone far away, walk up first
+    this.pendingTradeManager = new PendingTradeManager(
+      this.world,
+      this.tileMovementManager,
+    );
+
+    // Register pending trade processing (same priority as movement)
+    this.tickSystem.onTick(() => {
+      this.pendingTradeManager.processTick();
+    }, TickPriority.MOVEMENT);
+
+    // Store pending trade manager on world so trade handlers can access it
+    (
+      this.world as { pendingTradeManager?: PendingTradeManager }
+    ).pendingTradeManager = this.pendingTradeManager;
 
     // Trading system - server-authoritative player-to-player trading
     // Manages trade sessions, item offers, acceptance state, and atomic swaps
@@ -819,13 +838,14 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.world as { interactionSessionManager?: InteractionSessionManager }
     ).interactionSessionManager = this.interactionSessionManager;
 
-    // Clean up interaction sessions, pending attacks, follows, gathers, cooks, and home teleport when player disconnects
+    // Clean up interaction sessions, pending attacks, follows, gathers, cooks, trades, and home teleport when player disconnects
     this.world.on(EventType.PLAYER_LEFT, (event: { playerId: string }) => {
       this.interactionSessionManager.onPlayerDisconnect(event.playerId);
       this.pendingAttackManager.onPlayerDisconnect(event.playerId);
       this.followManager.onPlayerDisconnect(event.playerId);
       this.pendingGatherManager.onPlayerDisconnect(event.playerId);
       this.pendingCookManager.onPlayerDisconnect(event.playerId);
+      this.pendingTradeManager.onPlayerDisconnect(event.playerId);
       const homeTeleportManager = getHomeTeleportManager();
       if (homeTeleportManager) {
         homeTeleportManager.onPlayerDisconnect(event.playerId);
@@ -1205,10 +1225,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Route movement and combat through action queue for OSRS-style tick processing
     // Actions are queued and processed on tick boundaries, not immediately
     this.handlers["onMoveRequest"] = (socket, data) => {
-      // Cancel any pending attack, follow, or home teleport when player moves elsewhere (OSRS behavior)
+      // Cancel any pending attack, follow, trade, or home teleport when player moves elsewhere (OSRS behavior)
       if (socket.player) {
         this.pendingAttackManager.cancelPendingAttack(socket.player.id);
         this.followManager.stopFollowing(socket.player.id);
+        this.pendingTradeManager.cancelPendingTrade(socket.player.id);
         const homeTeleportManager = getHomeTeleportManager();
         if (homeTeleportManager?.isCasting(socket.player.id)) {
           homeTeleportManager.cancelCasting(socket.player.id, "Player moved");
@@ -1232,10 +1253,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         runMode?: boolean;
       };
       if (payload.type === "click" && Array.isArray(payload.target)) {
-        // Cancel any pending attack, follow, or home teleport when player moves elsewhere (OSRS behavior)
+        // Cancel any pending attack, follow, trade, or home teleport when player moves elsewhere (OSRS behavior)
         if (socket.player) {
           this.pendingAttackManager.cancelPendingAttack(socket.player.id);
           this.followManager.stopFollowing(socket.player.id);
+          this.pendingTradeManager.cancelPendingTrade(socket.player.id);
           const homeTeleportManager = getHomeTeleportManager();
           if (homeTeleportManager?.isCasting(socket.player.id)) {
             homeTeleportManager.cancelCasting(socket.player.id, "Player moved");
@@ -2195,6 +2217,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   }
 
   override destroy(): void {
+    // Destroy trading system first - cancels all active trades and clears cleanup interval
+    if (this.tradingSystem) {
+      this.tradingSystem.destroy();
+    }
+
     this.socketManager.destroy();
     this.saveManager.destroy();
     this.interactionSessionManager.destroy();

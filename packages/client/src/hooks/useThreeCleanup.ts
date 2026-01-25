@@ -20,9 +20,6 @@ import type * as THREE from "three";
 /** Resource types that can be tracked */
 type ThreeResource = THREE.Object3D;
 
-/** Disposable resources (geometry, material, texture) */
-type DisposableResource = { dispose: () => void };
-
 /**
  * Hook for managing Three.js resource lifecycle
  *

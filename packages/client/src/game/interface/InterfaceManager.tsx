@@ -50,12 +50,8 @@ import { usePlayerData, useModalPanels } from "@/hooks";
 import { MobileInterfaceManager } from "./MobileInterfaceManager";
 import {
   createPanelRenderer,
-  getPanelConfig,
-  getDeviceType,
-  getResponsivePanelSize,
   MODAL_PANEL_IDS,
   MENUBAR_DIMENSIONS,
-  type PanelSize,
 } from "./PanelRegistry";
 import {
   useWorldMapHotkey,
@@ -75,15 +71,12 @@ import {
   type InterfaceManagerProps,
   getPanelIcon,
   snapToGrid,
-  clampPosition,
   MAX_ACTION_BARS,
-  TAB_BAR_HEIGHT,
 } from "./types";
 import {
   createDefaultWindows,
   getResponsivePanelSizing,
 } from "./DefaultLayoutFactory";
-import { useViewportResize } from "./useViewportResize";
 
 // getResponsivePanelSizing and createDefaultWindows are now imported from DefaultLayoutFactory
 
