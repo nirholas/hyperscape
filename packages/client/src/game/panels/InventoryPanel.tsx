@@ -537,30 +537,30 @@ function DraggableInventorySlot({
           : isOver
             ? "rgba(242, 208, 138, 0.5)" // Gold highlight when dragging over
             : isEmpty
-              ? "rgba(0, 0, 0, 0.4)" // Dark border for embossed empty slots
+              ? "rgba(8, 8, 10, 0.6)" // Dark border for embossed empty slots
               : isItemNoted
                 ? "rgba(140, 120, 80, 0.5)" // Subtle tan border for notes
-                : "rgba(0, 0, 0, 0.35)", // Dark border for embossed filled slots
+                : "rgba(10, 10, 12, 0.5)", // Dark border for embossed filled slots
         borderWidth: isSourceItem ? "2px" : "1px",
         borderStyle: "solid",
-        // Embossed style: darker, inset appearance
+        // Embossed style: darker, inset appearance - uses theme colors
         background: isOver
           ? "rgba(242, 208, 138, 0.15)" // Gold tint when dragging over
           : isEmpty
-            ? "rgba(8, 6, 4, 0.95)" // Very dark for empty - deep inset
+            ? "rgba(16, 16, 18, 0.95)" // Aligned with theme BG_PRIMARY
             : isItemNoted
               ? "linear-gradient(180deg, rgba(215, 200, 165, 0.95) 0%, rgba(235, 225, 195, 0.95) 100%)" // Parchment - lighter at bottom for emboss
-              : "rgba(18, 14, 10, 0.95)", // Dark flat background for items
+              : "rgba(20, 20, 22, 0.95)", // Aligned with theme BG_SECONDARY
         // Embossed shadows: dark on top/left, subtle light on bottom/right
         boxShadow: isSourceItem
           ? "0 0 8px rgba(255, 255, 255, 0.6)" // OSRS: White glow on source item
           : isOver
             ? "inset 0 0 8px rgba(242, 208, 138, 0.3)"
             : isEmpty
-              ? "inset 2px 2px 4px rgba(0, 0, 0, 0.7), inset -1px -1px 2px rgba(60, 50, 40, 0.15)" // Strong emboss for empty
+              ? "inset 2px 2px 4px rgba(0, 0, 0, 0.5), inset -1px -1px 2px rgba(40, 40, 45, 0.15)" // Strong emboss for empty
               : isItemNoted
                 ? "inset 1px 1px 3px rgba(0, 0, 0, 0.25), inset -1px -1px 1px rgba(255, 255, 255, 0.4)" // Subtle paper emboss
-                : "inset 2px 2px 4px rgba(0, 0, 0, 0.6), inset -1px -1px 2px rgba(80, 65, 45, 0.12)", // Emboss for filled
+                : "inset 2px 2px 4px rgba(0, 0, 0, 0.4), inset -1px -1px 2px rgba(50, 50, 55, 0.12)", // Emboss for filled
         // OSRS-style cursor changes during targeting mode
         cursor: isTargetingActive
           ? isSourceItem
@@ -1321,10 +1321,10 @@ export function InventoryPanel({
       <div
         className="border rounded overflow-hidden flex-1"
         style={{
-          background: theme.colors.background.primary,
-          borderColor: "rgba(0, 0, 0, 0.5)",
+          background: theme.colors.background.secondary,
+          borderColor: "rgba(10, 10, 12, 0.6)",
           // Embossed container: dark top-left edge, subtle light bottom-right
-          boxShadow: `inset 3px 3px 6px rgba(0, 0, 0, 0.5), inset -2px -2px 4px rgba(60, 50, 40, 0.1)`,
+          boxShadow: `inset 2px 2px 4px rgba(0, 0, 0, 0.4), inset -1px -1px 3px rgba(40, 40, 45, 0.08)`,
           // Container query support for responsive slot sizing
           containerType: "size",
           minHeight: 0,

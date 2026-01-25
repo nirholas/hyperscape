@@ -30,15 +30,15 @@ export const COLORS = {
   // ===========================================
 
   /** Primary panel background - Dark with slight warmth */
-  BG_PRIMARY: "#121214",
+  BG_PRIMARY: "#141416",
   /** Secondary/darker background - Slightly lighter */
-  BG_SECONDARY: "#1a1a1e",
+  BG_SECONDARY: "#18181a",
   /** Tertiary/accent background - Elevated surface */
-  BG_TERTIARY: "#242428",
+  BG_TERTIARY: "#1e1e22",
   /** Solid dark background */
-  BG_SOLID: "#121214",
+  BG_SOLID: "#141416",
   /** Elevated surface */
-  BG_ELEVATED: "#242428",
+  BG_ELEVATED: "#1e1e22",
   /** Overlay/inset background */
   BG_OVERLAY: "rgba(0, 0, 0, 0.75)",
 
@@ -96,7 +96,7 @@ export const COLORS = {
   // ===========================================
 
   /** Hover overlay */
-  HOVER: "#2a2a30",
+  HOVER: "#242428",
   /** Active/pressed overlay */
   ACTIVE: "#3d3830",
   /** Disabled overlay */
@@ -110,10 +110,10 @@ export const COLORS = {
  */
 export const GRADIENTS = {
   /** Panel background gradient - Dark theme */
-  PANEL: "linear-gradient(135deg, #121214 0%, #1a1a1e 50%, #121214 100%)",
+  PANEL: "linear-gradient(135deg, #141416 0%, #18181a 50%, #141416 100%)",
 
   /** Header gradient - Dark theme */
-  HEADER: "linear-gradient(180deg, #242428 0%, #1a1a1e 100%)",
+  HEADER: "linear-gradient(180deg, #1e1e22 0%, #18181a 100%)",
 
   /** Button gradient - Gold accent */
   BUTTON: "linear-gradient(135deg, #d4a84b 0%, #c49530 100%)",
