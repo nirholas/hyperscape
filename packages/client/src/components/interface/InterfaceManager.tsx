@@ -19,7 +19,7 @@ import React, {
   useMemo,
   type ReactNode,
 } from "react";
-import { EventType, getItem } from "@hyperscape/shared";
+import { EventType, getItem, createPlayerID } from "@hyperscape/shared";
 import type { PlayerStats } from "@hyperscape/shared";
 import {
   DndProvider,
@@ -87,6 +87,12 @@ import { Minimap } from "../../game/hud/Minimap";
 import { QuestStartPanel } from "../../game/panels/QuestStartPanel";
 import { QuestCompletePanel } from "../../game/panels/QuestCompletePanel";
 import { XpLampPanel } from "../../game/panels/XpLampPanel";
+import { TradePanel, TradeRequestModal } from "../../game/panels/TradePanel";
+import type {
+  TradeWindowState,
+  TradeRequestModalState,
+  TradeOfferItem,
+} from "@hyperscape/shared";
 
 /** Inventory slot view item (simplified) */
 type InventorySlotViewItem = {
@@ -1199,6 +1205,24 @@ function DesktopInterfaceManager({
     }>;
   } | null>(null);
 
+  // Trade UI state
+  const [tradeState, setTradeState] = useState<TradeWindowState>({
+    isOpen: false,
+    tradeId: null,
+    partner: null,
+    myOffer: [],
+    myAccepted: false,
+    theirOffer: [],
+    theirAccepted: false,
+  });
+
+  const [tradeRequestState, setTradeRequestState] =
+    useState<TradeRequestModalState>({
+      visible: false,
+      tradeId: null,
+      fromPlayer: null,
+    });
+
   // World map modal state
   const [worldMapOpen, setWorldMapOpen] = useState(false);
 
@@ -1675,6 +1699,80 @@ function DesktopInterfaceManager({
         } else {
           setSmithingData(null);
         }
+      }
+
+      // Trade request modal (incoming trade request)
+      if (update.component === "tradeRequest") {
+        const data = update.data as {
+          visible: boolean;
+          tradeId: string;
+          fromPlayer: { id: string; name: string; level: number };
+        };
+        setTradeRequestState({
+          visible: data.visible,
+          tradeId: data.tradeId,
+          fromPlayer: {
+            id: createPlayerID(data.fromPlayer.id),
+            name: data.fromPlayer.name,
+            level: data.fromPlayer.level,
+          },
+        });
+      }
+
+      // Trade window opened
+      if (update.component === "trade") {
+        const data = update.data as {
+          isOpen: boolean;
+          tradeId: string;
+          partner: { id: string; name: string; level: number };
+        };
+        setTradeState((prev) => ({
+          ...prev,
+          isOpen: data.isOpen,
+          tradeId: data.tradeId,
+          partner: {
+            id: createPlayerID(data.partner.id),
+            name: data.partner.name,
+            level: data.partner.level,
+          },
+          myOffer: [],
+          theirOffer: [],
+          myAccepted: false,
+          theirAccepted: false,
+        }));
+        // Close request modal when trade starts
+        setTradeRequestState((prev) => ({ ...prev, visible: false }));
+      }
+
+      // Trade state updated (items/acceptance changed)
+      if (update.component === "tradeUpdate") {
+        const data = update.data as {
+          tradeId: string;
+          myOffer: TradeOfferItem[];
+          myAccepted: boolean;
+          theirOffer: TradeOfferItem[];
+          theirAccepted: boolean;
+        };
+        setTradeState((prev) => ({
+          ...prev,
+          myOffer: data.myOffer,
+          myAccepted: data.myAccepted,
+          theirOffer: data.theirOffer,
+          theirAccepted: data.theirAccepted,
+        }));
+      }
+
+      // Trade closed (completed or cancelled)
+      if (update.component === "tradeClose") {
+        setTradeState((prev) => ({
+          ...prev,
+          isOpen: false,
+          tradeId: null,
+          partner: null,
+          myOffer: [],
+          theirOffer: [],
+        }));
+        setTradeRequestState((prev) => ({ ...prev, visible: false }));
       }
     };
 
@@ -2583,6 +2681,66 @@ function DesktopInterfaceManager({
             itemId={xpLampData.itemId}
             slot={xpLampData.slot}
             onClose={() => setXpLampData(null)}
+          />
+        )}
+
+        {/* Trade Request Modal */}
+        {tradeRequestState.visible && tradeRequestState.fromPlayer && (
+          <TradeRequestModal
+            state={tradeRequestState}
+            onAccept={() => {
+              if (tradeRequestState.tradeId) {
+                world?.network?.send?.("tradeRequestRespond", {
+                  tradeId: tradeRequestState.tradeId,
+                  accept: true,
+                });
+              }
+            }}
+            onDecline={() => {
+              if (tradeRequestState.tradeId) {
+                world?.network?.send?.("tradeRequestRespond", {
+                  tradeId: tradeRequestState.tradeId,
+                  accept: false,
+                });
+              }
+              setTradeRequestState((prev) => ({ ...prev, visible: false }));
+            }}
+          />
+        )}
+
+        {/* Trade Panel */}
+        {tradeState.isOpen && tradeState.tradeId && (
+          <TradePanel
+            state={tradeState}
+            inventory={inventory.map((item, idx) => ({
+              slot: item.slot ?? idx,
+              itemId: item.itemId,
+              quantity: item.quantity,
+            }))}
+            onAddItem={(slot, quantity) => {
+              world?.network?.send?.("tradeAddItem", {
+                tradeId: tradeState.tradeId,
+                inventorySlot: slot,
+                quantity,
+              });
+            }}
+            onRemoveItem={(tradeSlot) => {
+              world?.network?.send?.("tradeRemoveItem", {
+                tradeId: tradeState.tradeId,
+                tradeSlot,
+              });
+            }}
+            onAccept={() => {
+              world?.network?.send?.("tradeAccept", {
+                tradeId: tradeState.tradeId,
+              });
+            }}
+            onCancel={() => {
+              world?.network?.send?.("tradeCancel", {
+                tradeId: tradeState.tradeId,
+              });
+              setTradeState((prev) => ({ ...prev, isOpen: false }));
+            }}
           />
         )}
 

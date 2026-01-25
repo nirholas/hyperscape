@@ -450,6 +450,12 @@ export async function handleTradeAddItem(
     return;
   }
 
+  // Validate item is tradeable
+  if (itemData.tradeable === false) {
+    sendTradeError(socket, "That item cannot be traded", "UNTRADEABLE_ITEM");
+    return;
+  }
+
   // Determine quantity (for stackable items, use provided quantity or all)
   let quantity = data.quantity ?? inventoryItem.quantity;
   if (quantity <= 0 || quantity > inventoryItem.quantity) {
@@ -833,7 +839,7 @@ async function executeTradeSwap(
           const initiatorInventory = initiatorResult.rows as InventoryDBRow[];
           const recipientInventory = recipientResult.rows as InventoryDBRow[];
 
-          // Validate all offered items still exist with correct quantities
+          // Validate all offered items still exist with correct quantities and are tradeable
           for (const offer of session.initiator.offeredItems) {
             const item = initiatorInventory.find(
               (i) => i.slotIndex === offer.inventorySlot,
@@ -844,6 +850,12 @@ async function executeTradeSwap(
               item.quantity < offer.quantity
             ) {
               throw new Error("ITEM_CHANGED");
+            }
+
+            // Re-validate tradeable at swap time (item could have been modified)
+            const itemDef = getItem(offer.itemId);
+            if (!itemDef || itemDef.tradeable === false) {
+              throw new Error("UNTRADEABLE_ITEM");
             }
           }
 
@@ -857,6 +869,12 @@ async function executeTradeSwap(
               item.quantity < offer.quantity
             ) {
               throw new Error("ITEM_CHANGED");
+            }
+
+            // Re-validate tradeable at swap time
+            const itemDef = getItem(offer.itemId);
+            if (!itemDef || itemDef.tradeable === false) {
+              throw new Error("UNTRADEABLE_ITEM");
             }
           }
 
@@ -995,6 +1013,7 @@ async function executeTradeSwap(
           ITEM_CHANGED: "Items changed during trade",
           INVENTORY_FULL_INITIATOR: "Your inventory is full",
           INVENTORY_FULL_RECIPIENT: "Partner's inventory is full",
+          UNTRADEABLE_ITEM: "Trade contains untradeable items",
         },
       },
     );

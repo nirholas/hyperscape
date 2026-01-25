@@ -2137,6 +2137,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   }
 
   override destroy(): void {
+    // Destroy trading system first - cancels all active trades and clears cleanup interval
+    if (this.tradingSystem) {
+      this.tradingSystem.destroy();
+    }
+
     this.socketManager.destroy();
     this.saveManager.destroy();
     this.interactionSessionManager.destroy();

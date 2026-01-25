@@ -268,7 +268,8 @@ export type TradeErrorPayload = {
     | "PLAYER_BUSY"
     | "PLAYER_OFFLINE"
     | "RATE_LIMITED"
-    | "SELF_TRADE";
+    | "SELF_TRADE"
+    | "UNTRADEABLE_ITEM";
 };
 
 // ============================================================================
