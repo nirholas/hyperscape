@@ -204,6 +204,9 @@ function PrayerIcon({
   // Use mobile or desktop icon size - compact on desktop
   const iconSize = isMobile ? MOBILE_PRAYER.iconSize : PRAYER_ICON_SIZE;
 
+  // Track pointer position to distinguish clicks from drags
+  const pointerStartPosRef = useRef<{ x: number; y: number } | null>(null);
+
   // Make prayer draggable for action bar
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `prayer-${prayer.id}`,
@@ -218,6 +221,41 @@ function PrayerIcon({
     },
     disabled: !isUnlocked,
   });
+
+  // Wrap drag listeners to track pointer start position for click vs drag detection
+  const wrappedListeners = useMemo(() => {
+    if (!listeners) return {};
+    const originalPointerDown = listeners.onPointerDown;
+    return {
+      ...listeners,
+      onPointerDown: (e: React.PointerEvent) => {
+        pointerStartPosRef.current = { x: e.clientX, y: e.clientY };
+        originalPointerDown?.(e);
+      },
+    };
+  }, [listeners]);
+
+  // Handle click - only fire if pointer didn't move much (click, not drag)
+  const handleClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (!isUnlocked) return;
+
+      // Check if pointer moved significantly (drag activation distance is 3px)
+      if (pointerStartPosRef.current) {
+        const dx = e.clientX - pointerStartPosRef.current.x;
+        const dy = e.clientY - pointerStartPosRef.current.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        // If moved more than activation distance, this was a drag, not a click
+        if (distance > 3) {
+          return;
+        }
+      }
+
+      // Not a drag, execute the click action
+      onClick();
+    },
+    [onClick, isUnlocked],
+  );
 
   // Memoize button style to prevent recreation on every render
   const buttonStyle = useMemo(
@@ -251,7 +289,7 @@ function PrayerIcon({
   return (
     <button
       ref={setNodeRef}
-      onClick={isUnlocked ? onClick : undefined}
+      onClick={handleClick}
       onMouseEnter={onMouseEnter}
       onMouseMove={onMouseMove}
       onMouseLeave={onMouseLeave}
@@ -260,7 +298,7 @@ function PrayerIcon({
       className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
       style={buttonStyle}
       {...attributes}
-      {...listeners}
+      {...wrappedListeners}
       aria-pressed={isActive}
     >
       {/* Glow effect for active prayers */}

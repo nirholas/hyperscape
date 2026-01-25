@@ -186,7 +186,7 @@ export function CoreUI({ world }: { world: ClientWorld }) {
       world.off("character:list", handleCharacterList);
       world.off("character:selected", handleCharacterSelected);
     };
-  }, []);
+  }, [world, isSpectatorMode]);
 
   // Poll terrain readiness until ready
   useEffect(() => {
@@ -297,6 +297,9 @@ export function CoreUI({ world }: { world: ClientWorld }) {
     player,
   ]);
 
+  // Extract playerId for dependency tracking - prevents stale closures
+  const localPlayerId = world.entities?.player?.id;
+
   // Subscribe to player stats updates (for StatusBars)
   useEffect(() => {
     const onUIUpdate = (raw: unknown) => {
@@ -308,8 +311,7 @@ export function CoreUI({ world }: { world: ClientWorld }) {
 
     const onSkillsUpdate = (raw: unknown) => {
       const data = raw as { playerId: string; skills: PlayerStats["skills"] };
-      const localId = world.entities?.player?.id;
-      if (!localId || data.playerId === localId) {
+      if (!localPlayerId || data.playerId === localPlayerId) {
         setPlayerStats((prev) =>
           prev
             ? { ...prev, skills: data.skills }
@@ -325,8 +327,7 @@ export function CoreUI({ world }: { world: ClientWorld }) {
         points: number;
         maxPoints: number;
       };
-      const localId = world.entities?.player?.id;
-      if (!localId || data.playerId === localId) {
+      if (!localPlayerId || data.playerId === localPlayerId) {
         setPlayerStats((prev) =>
           prev
             ? {
@@ -348,8 +349,7 @@ export function CoreUI({ world }: { world: ClientWorld }) {
         maxPoints: number;
         active: string[];
       };
-      const localId = world.entities?.player?.id;
-      if (!localId || data.playerId === localId) {
+      if (!localPlayerId || data.playerId === localPlayerId) {
         setPlayerStats((prev) =>
           prev
             ? {
@@ -374,7 +374,7 @@ export function CoreUI({ world }: { world: ClientWorld }) {
       world.off(EventType.PRAYER_POINTS_CHANGED, onPrayerPointsChanged);
       world.off(EventType.PRAYER_STATE_SYNC, onPrayerStateSync);
     };
-  }, [world]);
+  }, [world, localPlayerId]);
 
   // Event capture removed - was blocking UI interactions
   useEffect(() => {
@@ -388,10 +388,13 @@ export function CoreUI({ world }: { world: ClientWorld }) {
     return () => {
       world.prefs?.off("change", onChange);
     };
-  }, []);
+  }, [world]);
   return (
     <ChatProvider>
-      <div
+      <main
+        id="main-content"
+        role="main"
+        aria-label="Game Interface"
         ref={ref}
         className="coreui absolute inset-0 overflow-hidden pointer-events-none"
       >
@@ -417,7 +420,7 @@ export function CoreUI({ world }: { world: ClientWorld }) {
         {ready && <EntityContextMenu world={world} />}
         {ready && <EscapeMenu world={world} />}
         <div id="core-ui-portal" />
-      </div>
+      </main>
     </ChatProvider>
   );
 }
@@ -1044,6 +1047,9 @@ function TouchBtns({ world }: { world: ClientWorld }) {
     >
       {isAction && (
         <div
+          role="button"
+          tabIndex={0}
+          aria-label="Action"
           className="pointer-events-auto w-14 h-14 flex items-center justify-center backdrop-blur-[5px] rounded-2xl cursor-pointer active:scale-95"
           style={{
             backgroundColor: theme.colors.state.danger,
@@ -1054,6 +1060,14 @@ function TouchBtns({ world }: { world: ClientWorld }) {
             (
               world.controls as { action?: { onPress: () => void } }
             )?.action?.onPress();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              (
+                world.controls as { action?: { onPress: () => void } }
+              )?.action?.onPress();
+            }
           }}
         >
           <HandIcon size={24} />

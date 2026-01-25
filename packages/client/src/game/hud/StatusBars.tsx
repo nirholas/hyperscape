@@ -447,18 +447,18 @@ export function StatusBars({
                     transition: "height 0.2s ease-out",
                   }}
                 />
-                {/* Icon */}
+                {/* Value number inside orb */}
                 <span
                   style={{
-                    fontSize: barOrbSize * 0.4,
-                    color: orb.fillColor,
-                    textShadow: `0 0 4px ${orb.fillColor}, 0 1px 1px rgba(0, 0, 0, 0.8)`,
+                    fontSize: barOrbSize * 0.38,
+                    color: "#fff",
+                    textShadow: `0 0 3px rgba(0, 0, 0, 0.9), 0 1px 2px rgba(0, 0, 0, 0.8)`,
                     zIndex: 1,
                     lineHeight: 1,
-                    filter: "brightness(1.2)",
+                    fontWeight: 700,
                   }}
                 >
-                  {orb.icon}
+                  {orb.value}
                 </span>
               </div>
             </div>
@@ -490,22 +490,6 @@ export function StatusBars({
                 }}
               />
             </div>
-
-            {/* Value label */}
-            {config.showLabels && (
-              <span
-                style={{
-                  fontSize: "9px",
-                  color: theme.colors.text.primary,
-                  fontWeight: 600,
-                  minWidth: 20,
-                  marginLeft: 4,
-                  textAlign: "right",
-                }}
-              >
-                {orb.value}
-              </span>
-            )}
           </div>
         ))}
       </div>

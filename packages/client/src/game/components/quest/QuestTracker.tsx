@@ -247,14 +247,33 @@ const TrackedQuestItem = memo(function TrackedQuestItem({
 
         {/* Expand button */}
         <div
+          role="button"
+          tabIndex={0}
+          aria-expanded={isExpanded}
+          aria-label={
+            isExpanded ? "Collapse quest details" : "Expand quest details"
+          }
           style={expandIndicatorStyle}
           onClick={(e) => {
             e.stopPropagation();
             onToggleExpand();
           }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              e.stopPropagation();
+              onToggleExpand();
+            }
+          }}
           title={isExpanded ? "Collapse" : "Expand"}
         >
-          <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor">
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 12 12"
+            fill="currentColor"
+            aria-hidden="true"
+          >
             <path d="M2 4l4 4 4-4H2z" />
           </svg>
         </div>
@@ -262,14 +281,30 @@ const TrackedQuestItem = memo(function TrackedQuestItem({
         {/* Untrack button */}
         {onUntrack && (
           <div
+            role="button"
+            tabIndex={0}
+            aria-label="Untrack quest"
             style={untrackButtonStyle}
             onClick={(e) => {
               e.stopPropagation();
               onUntrack();
             }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                e.stopPropagation();
+                onUntrack();
+              }
+            }}
             title="Untrack quest"
           >
-            <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 16 16"
+              fill="currentColor"
+              aria-hidden="true"
+            >
               <path d="M4.646 4.646a.5.5 0 01.708 0L8 7.293l2.646-2.647a.5.5 0 01.708.708L8.707 8l2.647 2.646a.5.5 0 01-.708.708L8 8.707l-2.646 2.647a.5.5 0 01-.708-.708L7.293 8 4.646 5.354a.5.5 0 010-.708z" />
             </svg>
           </div>
@@ -441,11 +476,24 @@ export const QuestTracker = memo(function QuestTracker({
   return (
     <div className={className} style={containerStyle}>
       {/* Header */}
-      <div style={headerStyle} onClick={onMinimizeToggle}>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={!minimized}
+        aria-label={`Quest Tracker: ${title}${minimized ? ", minimized" : ", expanded"}`}
+        style={headerStyle}
+        onClick={onMinimizeToggle}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onMinimizeToggle?.();
+          }
+        }}
+      >
         <span style={titleStyle}>{title}</span>
         <span style={countBadgeStyle}>{trackedQuests.length}</span>
         {showMinimize && (
-          <div style={minimizeStyle}>
+          <div style={minimizeStyle} aria-hidden="true">
             <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor">
               <path d="M2 8l4-4 4 4H2z" />
             </svg>

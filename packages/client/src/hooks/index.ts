@@ -17,7 +17,6 @@ export {
   type ContextMenuStateResult,
 } from "./useContextMenuState";
 export { useResponsiveValue, useResponsiveValues } from "./useResponsiveValue";
-export { usePlayerState, type PlayerStateResult } from "./usePlayerState";
 export {
   useModalPanels,
   type ModalPanelsResult,

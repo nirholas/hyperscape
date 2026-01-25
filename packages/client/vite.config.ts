@@ -240,7 +240,7 @@ export default defineConfig(({ mode }) => {
           manualChunks: {
             "vendor-react": ["react", "react-dom"],
             "vendor-three": ["three"],
-            "vendor-ui": ["styled-components", "lucide-react"],
+            "vendor-ui": ["lucide-react"],
           },
         },
         onwarn(warning, warn) {
@@ -374,12 +374,14 @@ export default defineConfig(({ mode }) => {
           __dirname,
           "../shared/build/framework.client.js",
         ),
+        // Ensure buffer polyfill is used consistently
+        buffer: "buffer",
       },
-      dedupe: ["three"],
+      dedupe: ["three", "buffer"],
     },
 
     optimizeDeps: {
-      include: ["three", "react", "react-dom"],
+      include: ["three", "react", "react-dom", "buffer"],
       exclude: [
         "@hyperscape/shared", // CRITICAL: Exclude from dep optimization so changes are detected
         "@playwright/test", // Exclude Playwright from optimization

@@ -12,6 +12,7 @@
 
 import React, { useState, useCallback } from "react";
 import { useTheme, useWindowStore } from "@/ui";
+import { apiClient } from "@/lib/api-client";
 
 /** Preset data returned from API */
 interface CommunityPreset {
@@ -70,25 +71,29 @@ export function LoadFromPlayer({
     setResults([]);
 
     try {
-      const response = await fetch(
-        `${apiUrl}/api/layouts/player/${encodeURIComponent(searchInput.trim())}`,
-      );
-      const data = await response.json();
+      const result = await apiClient.get<{
+        success?: boolean;
+        error?: string;
+        presets?: CommunityPreset[];
+        playerName?: string;
+      }>(`/api/layouts/player/${encodeURIComponent(searchInput.trim())}`, {
+        baseUrl: apiUrl || undefined,
+      });
 
-      if (!response.ok || !data.success) {
-        setError(data.error || "Player not found");
+      if (!result.ok || !result.data?.success) {
+        setError(result.data?.error || result.error || "Player not found");
         return;
       }
 
-      if (data.presets.length === 0) {
+      if (!result.data.presets || result.data.presets.length === 0) {
         setError("No shared presets from this player");
         return;
       }
 
       setResults(
-        data.presets.map((p: CommunityPreset) => ({
+        result.data.presets.map((p: CommunityPreset) => ({
           ...p,
-          authorName: data.playerName,
+          authorName: result.data!.playerName || "",
         })),
       );
     } catch (err) {
@@ -112,15 +117,22 @@ export function LoadFromPlayer({
     setResults([]);
 
     try {
-      const response = await fetch(`${apiUrl}/api/layouts/code/${code}`);
-      const data = await response.json();
+      const result = await apiClient.get<{
+        success?: boolean;
+        error?: string;
+        preset?: CommunityPreset;
+      }>(`/api/layouts/code/${code}`, {
+        baseUrl: apiUrl || undefined,
+      });
 
-      if (!response.ok || !data.success) {
-        setError(data.error || "Preset not found");
+      if (!result.ok || !result.data?.success) {
+        setError(result.data?.error || result.error || "Preset not found");
         return;
       }
 
-      setResults([data.preset]);
+      if (result.data.preset) {
+        setResults([result.data.preset]);
+      }
     } catch (err) {
       console.error("[LoadFromPlayer] Failed to load preset by code:", err);
       setError("Failed to load preset. Check your connection.");

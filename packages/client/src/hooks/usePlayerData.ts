@@ -57,6 +57,9 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
   const [playerStats, setPlayerStats] = useState<PlayerStats | null>(null);
   const [coins, setCoins] = useState(0);
 
+  // Extract playerId to add to dependency array - prevents stale closures
+  const playerId = world?.entities?.player?.id;
+
   useEffect(() => {
     if (!world) return;
 
@@ -78,8 +81,7 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
     // Coin updates
     const handleCoins = (data: unknown) => {
       const coinData = data as { playerId: string; coins: number };
-      const localId = world.entities?.player?.id;
-      if (!localId || coinData.playerId === localId) {
+      if (!playerId || coinData.playerId === playerId) {
         setCoins(coinData.coins);
       }
     };
@@ -132,8 +134,7 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
         playerId: string;
         skills: PlayerStats["skills"];
       };
-      const localId = world.entities?.player?.id;
-      if (!localId || skillsData.playerId === localId) {
+      if (!playerId || skillsData.playerId === playerId) {
         setPlayerStats((prev) =>
           prev
             ? { ...prev, skills: skillsData.skills }
@@ -151,8 +152,7 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
         level?: number;
         active?: string[];
       };
-      const localId = world.entities?.player?.id;
-      if (!localId || syncData.playerId === localId) {
+      if (!playerId || syncData.playerId === playerId) {
         setPlayerStats((prev) =>
           prev
             ? {
@@ -179,8 +179,7 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
         points: number;
         maxPoints: number;
       };
-      const localId = world.entities?.player?.id;
-      if (!localId || prayerData.playerId === localId) {
+      if (!playerId || prayerData.playerId === playerId) {
         setPlayerStats((prev) =>
           prev
             ? {
@@ -214,104 +213,110 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
       undefined,
     );
 
-    // Request initial data from cache
+    // Request initial data from cache - uses extracted playerId from deps
     const requestInitial = () => {
-      const lp = world.entities?.player?.id;
-      if (lp) {
-        // Get cached inventory
-        const cachedInv = world.network?.lastInventoryByPlayerId?.[lp];
-        if (cachedInv && Array.isArray(cachedInv.items)) {
-          setInventory(cachedInv.items as InventorySlotViewItem[]);
-          setCoins(cachedInv.coins || 0);
-        }
+      if (!playerId) return false;
 
-        // Get cached skills
-        const cachedSkills = world.network?.lastSkillsByPlayerId?.[lp];
-        if (cachedSkills) {
-          const skills = cachedSkills as unknown as PlayerStats["skills"];
-          setPlayerStats((prev) =>
-            prev ? { ...prev, skills } : ({ skills } as PlayerStats),
-          );
-        }
+      // Get cached inventory
+      const cachedInv = world.network?.lastInventoryByPlayerId?.[playerId];
+      if (cachedInv && Array.isArray(cachedInv.items)) {
+        setInventory(cachedInv.items as InventorySlotViewItem[]);
+        setCoins(cachedInv.coins || 0);
+      }
 
-        // Get cached equipment
-        const cachedEquipment = world.network?.lastEquipmentByPlayerId?.[lp];
-        if (cachedEquipment) {
-          const rawEq = cachedEquipment as RawEquipmentData;
-          const mappedEquipment: PlayerEquipmentItems = {
-            weapon: rawEq.weapon?.item ?? null,
-            shield: rawEq.shield?.item ?? null,
-            helmet: rawEq.helmet?.item ?? null,
-            body: rawEq.body?.item ?? null,
-            legs: rawEq.legs?.item ?? null,
-            boots: rawEq.boots?.item ?? null,
-            gloves: rawEq.gloves?.item ?? null,
-            cape: rawEq.cape?.item ?? null,
-            amulet: rawEq.amulet?.item ?? null,
-            ring: rawEq.ring?.item ?? null,
-            arrows: rawEq.arrows?.item ?? null,
-          };
-          setEquipment(mappedEquipment);
-        }
+      // Get cached skills
+      // Note: lastSkillsByPlayerId is typed as Record<string, { level: number; xp: number }>
+      // but at runtime contains Skills data. The intermediate unknown is required because
+      // TypeScript sees them as incompatible even though they're structurally similar.
+      const cachedSkills = world.network?.lastSkillsByPlayerId?.[playerId];
+      if (cachedSkills) {
+        // Runtime: cachedSkills has skill-specific keys (attack, strength, etc.)
+        const skills = cachedSkills as unknown as PlayerStats["skills"];
+        setPlayerStats((prev) =>
+          prev ? { ...prev, skills } : ({ skills } as PlayerStats),
+        );
+      }
 
-        // Get cached prayer state
-        const cachedPrayer = world.network?.lastPrayerStateByPlayerId?.[lp];
-        if (cachedPrayer) {
-          setPlayerStats((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  prayerPoints: {
-                    current: cachedPrayer.points,
-                    max: cachedPrayer.maxPoints,
-                  },
-                }
-              : ({
-                  prayerPoints: {
-                    current: cachedPrayer.points,
-                    max: cachedPrayer.maxPoints,
-                  },
-                } as PlayerStats),
-          );
-        }
+      // Get cached equipment
+      const cachedEquipment =
+        world.network?.lastEquipmentByPlayerId?.[playerId];
+      if (cachedEquipment) {
+        const rawEq = cachedEquipment as RawEquipmentData;
+        const mappedEquipment: PlayerEquipmentItems = {
+          weapon: rawEq.weapon?.item ?? null,
+          shield: rawEq.shield?.item ?? null,
+          helmet: rawEq.helmet?.item ?? null,
+          body: rawEq.body?.item ?? null,
+          legs: rawEq.legs?.item ?? null,
+          boots: rawEq.boots?.item ?? null,
+          gloves: rawEq.gloves?.item ?? null,
+          cape: rawEq.cape?.item ?? null,
+          amulet: rawEq.amulet?.item ?? null,
+          ring: rawEq.ring?.item ?? null,
+          arrows: rawEq.arrows?.item ?? null,
+        };
+        setEquipment(mappedEquipment);
+      }
 
-        // Get player entity for health/prayer
-        const playerEntity = world.entities?.player;
-        if (playerEntity) {
-          const entityData = playerEntity as unknown as {
+      // Get cached prayer state
+      const cachedPrayer = world.network?.lastPrayerStateByPlayerId?.[playerId];
+      if (cachedPrayer) {
+        setPlayerStats((prev) =>
+          prev
+            ? {
+                ...prev,
+                prayerPoints: {
+                  current: cachedPrayer.points,
+                  max: cachedPrayer.maxPoints,
+                },
+              }
+            : ({
+                prayerPoints: {
+                  current: cachedPrayer.points,
+                  max: cachedPrayer.maxPoints,
+                },
+              } as PlayerStats),
+        );
+      }
+
+      // Get player entity for health/prayer
+      // Entity has health/data properties at runtime that aren't fully exposed in the base type.
+      // The intermediate unknown is required because Entity.maxHealth is protected.
+      const playerEntity = world.entities?.player;
+      if (playerEntity) {
+        interface PlayerEntityData {
+          health?: number;
+          maxHealth?: number;
+          data?: {
             health?: number;
             maxHealth?: number;
-            data?: {
-              health?: number;
-              maxHealth?: number;
-              prayerPoints?: number;
-              maxPrayerPoints?: number;
-            };
+            prayerPoints?: number;
+            maxPrayerPoints?: number;
           };
-
-          const health = entityData.health ?? entityData.data?.health;
-          const maxHealth =
-            entityData.maxHealth ?? entityData.data?.maxHealth ?? 10;
-          const prayerPoints = entityData.data?.prayerPoints ?? 0;
-          const maxPrayerPoints = entityData.data?.maxPrayerPoints ?? 1;
-
-          if (typeof health === "number") {
-            setPlayerStats(
-              (prev) =>
-                ({
-                  ...prev,
-                  health: { current: health, max: maxHealth },
-                  prayerPoints: { current: prayerPoints, max: maxPrayerPoints },
-                }) as PlayerStats,
-            );
-          }
         }
+        const entityData = playerEntity as unknown as PlayerEntityData;
 
-        // Request fresh data from server
-        world.emit(EventType.INVENTORY_REQUEST, { playerId: lp });
-        return true;
+        const health = entityData.health ?? entityData.data?.health;
+        const maxHealth =
+          entityData.maxHealth ?? entityData.data?.maxHealth ?? 10;
+        const prayerPoints = entityData.data?.prayerPoints ?? 0;
+        const maxPrayerPoints = entityData.data?.maxPrayerPoints ?? 1;
+
+        if (typeof health === "number") {
+          setPlayerStats(
+            (prev) =>
+              ({
+                ...prev,
+                health: { current: health, max: maxHealth },
+                prayerPoints: { current: prayerPoints, max: maxPrayerPoints },
+              }) as PlayerStats,
+          );
+        }
       }
-      return false;
+
+      // Request fresh data from server
+      world.emit(EventType.INVENTORY_REQUEST, { playerId });
+      return true;
     };
 
     // Try to get initial data immediately, or retry after a short delay
@@ -361,7 +366,7 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
         undefined,
       );
     };
-  }, [world]);
+  }, [world, playerId]);
 
   return {
     inventory,

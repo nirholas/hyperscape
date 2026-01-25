@@ -29,6 +29,7 @@ import {
   usesWear,
   CONTEXT_MENU_COLORS,
 } from "@hyperscape/shared";
+import { getItemIcon } from "@/utils";
 /**
  * Minimal item type for ActionPanel - only requires the properties actually used
  * Compatible with both InventorySlotItem and InventorySlotViewItem
@@ -511,48 +512,6 @@ export function ActionPanel({
     },
     [contextMenu.targetItem, contextMenu.targetIndex, onItemAction, onItemUse],
   );
-
-  // Memoize getItemIcon to provide a stable identity for DraggableSlot
-  const getItemIcon = useCallback((itemId: string) => {
-    if (
-      itemId.includes("sword") ||
-      itemId.includes("dagger") ||
-      itemId.includes("scimitar")
-    )
-      return "⚔️";
-    if (itemId.includes("shield") || itemId.includes("defender")) return "🛡️";
-    if (
-      itemId.includes("helmet") ||
-      itemId.includes("helm") ||
-      itemId.includes("hat")
-    )
-      return "⛑️";
-    if (itemId.includes("boots") || itemId.includes("boot")) return "👢";
-    if (itemId.includes("glove") || itemId.includes("gauntlet")) return "🧤";
-    if (itemId.includes("cape") || itemId.includes("cloak")) return "🧥";
-    if (itemId.includes("amulet") || itemId.includes("necklace")) return "📿";
-    if (itemId.includes("ring")) return "💍";
-    if (itemId.includes("arrow") || itemId.includes("bolt")) return "🏹";
-    if (
-      itemId.includes("fish") ||
-      itemId.includes("lobster") ||
-      itemId.includes("shark")
-    )
-      return "🐟";
-    if (itemId.includes("log") || itemId.includes("wood")) return "🪵";
-    if (itemId.includes("ore") || itemId.includes("bar")) return "⛏️";
-    if (itemId.includes("coin")) return "💰";
-    if (itemId.includes("potion") || itemId.includes("vial")) return "🧪";
-    if (
-      itemId.includes("food") ||
-      itemId.includes("bread") ||
-      itemId.includes("meat")
-    )
-      return "🍖";
-    if (itemId.includes("axe")) return "🪓";
-    if (itemId.includes("pickaxe")) return "⛏️";
-    return itemId.substring(0, 2).toUpperCase();
-  }, []);
 
   const slotSize = isMobile ? 36 : 42;
   const gap = 3;

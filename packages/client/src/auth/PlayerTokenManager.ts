@@ -34,6 +34,7 @@
 
 import EventEmitter from "eventemitter3";
 import { GAME_API_URL } from "../lib/api-config";
+import { logger } from "../lib/logger";
 
 interface ClientPlayerToken {
   playerId: string;
@@ -80,7 +81,7 @@ export class PlayerTokenManager extends EventEmitter {
       try {
         parsedToken = JSON.parse(storedToken) as ClientPlayerToken;
       } catch (err) {
-        console.error(
+        logger.error(
           "[PlayerTokenManager] Failed to parse stored token, creating new:",
           err,
         );
@@ -94,7 +95,7 @@ export class PlayerTokenManager extends EventEmitter {
       try {
         parsedSession = JSON.parse(storedSession) as PlayerSession;
       } catch (err) {
-        console.error(
+        logger.error(
           "[PlayerTokenManager] Failed to parse stored session, starting new:",
           err,
         );

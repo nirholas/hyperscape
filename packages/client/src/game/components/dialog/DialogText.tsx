@@ -327,6 +327,20 @@ export const DialogText = memo(function DialogText({
     onClick?.();
   }, [isTyping, typewriter, onClick]);
 
+  // Handle keyboard (skip or custom handler)
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        if (isTyping) {
+          typewriter.skip();
+        }
+        onClick?.();
+      }
+    },
+    [isTyping, typewriter, onClick],
+  );
+
   // Text container style
   const containerStyle: CSSProperties = {
     fontFamily: theme.typography.fontFamily.body,
@@ -347,8 +361,20 @@ export const DialogText = memo(function DialogText({
     marginLeft: 1,
   };
 
+  const isInteractive = Boolean(onClick) || isTyping;
+
   return (
-    <div className={className} style={containerStyle} onClick={handleClick}>
+    <div
+      className={className}
+      style={containerStyle}
+      onClick={handleClick}
+      onKeyDown={isInteractive ? handleKeyDown : undefined}
+      role={isInteractive ? "button" : undefined}
+      tabIndex={isInteractive ? 0 : undefined}
+      aria-label={
+        isTyping ? "Click or press Enter to skip dialog animation" : undefined
+      }
+    >
       <style>{`
         @keyframes blink-cursor {
           0%, 100% { opacity: 1; }

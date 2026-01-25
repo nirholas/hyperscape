@@ -20,7 +20,6 @@ import React, {
   type ReactNode,
 } from "react";
 import { EventType, getItem } from "@hyperscape/shared";
-import type { PlayerStats } from "@hyperscape/shared";
 import {
   DndContext as DndKitContext,
   DragOverlay as DndKitDragOverlay,
@@ -35,48 +34,23 @@ import {
   useWindowStore,
   useTabDrag,
   useDragStore,
-  useDrop,
   usePresetHotkeys,
   useFeatureEnabled,
   initializeAccessibility,
   useMobileLayout,
-  useThemeStore,
-  useTheme,
   type WindowConfig,
   type DragEndEvent,
-  type WindowState,
-  // Styled components - import from main package to share store instances
+  // Styled components
   Window,
   TabBar,
   EditModeOverlay,
   DragOverlay,
-  ModalWindow,
 } from "@/ui";
-import { MobileInterfaceManager } from "./MobileInterfaceManager";
-import type { ClientWorld, PlayerEquipmentItems } from "../../types";
-import type { InventoryItem } from "@hyperscape/shared";
-import type { RawEquipmentData, InventorySlotViewItem } from "../types";
-/**
- * REFACTORING PLAN: Split InterfaceManager into smaller modules
- *
- * The following hooks are available in @/hooks for migration:
- * - usePlayerData: Player inventory, equipment, stats, prayer state
- * - useModalPanels: Bank, store, dialogue, smelting, smithing, loot, quest modals
- *
- * Recommended split structure:
- * 1. InterfaceManager.tsx (~500 lines) - Core orchestration, event routing
- * 2. useInterfaceState.ts - State management (inventory, equipment, coins, etc.)
- * 3. useInterfaceEvents.ts - Event subscription and handling
- * 4. InterfaceModals.tsx - Modal panel rendering (bank, store, dialogue, etc.)
- * 5. InterfacePanels.tsx - Regular panel window rendering
- *
- * Migration steps:
- * 1. Replace inline state with usePlayerData hook
- * 2. Replace modal state with useModalPanels hook
- * 3. Extract modal rendering to InterfaceModals component
- * 4. Extract panel rendering to InterfacePanels component
- */
 import { HintProvider } from "@/ui";
+import { usePlayerData, useModalPanels } from "@/hooks";
+
+// Local modules
+import { MobileInterfaceManager } from "./MobileInterfaceManager";
 import {
   createPanelRenderer,
   getPanelConfig,
@@ -86,49 +60,28 @@ import {
   MODAL_PANEL_IDS,
   type PanelSize,
 } from "./PanelRegistry";
-import { BankPanel } from "../../game/panels/BankPanel";
-import { StorePanel } from "../../game/panels/StorePanel";
-import { DialoguePanel } from "../../game/panels/DialoguePanel";
-import { SmeltingPanel } from "../../game/panels/SmeltingPanel";
-import { SmithingPanel } from "../../game/panels/SmithingPanel";
-import { StatsPanel } from "../../game/panels/StatsPanel";
-import { LootWindowPanel } from "../../game/panels/LootWindowPanel";
-import { Minimap } from "../../game/hud/Minimap";
-import { QuestStartPanel } from "../../game/panels/QuestStartPanel";
-import { QuestCompletePanel } from "../../game/panels/QuestCompletePanel";
-import { XpLampPanel } from "../../game/panels/XpLampPanel";
-
-// InventorySlotViewItem imported from ../types
-
-/** Panel ID to icon mapping for tab display */
-const PANEL_ICONS: Record<string, string> = {
-  minimap: "🗺️",
-  inventory: "🎒",
-  equipment: "🎽",
-  stats: "📊",
-  skills: "⭐",
-  prayer: "✨",
-  combat: "🗡️",
-  settings: "⚙️",
-  bank: "🏦",
-  quests: "📜",
-  map: "🗺️",
-  chat: "💬",
-  friends: "👥",
-  presets: "📐",
-  dashboard: "📈",
-  action: "⚡",
-  "actionbar-0": "⚡",
-  "actionbar-1": "⚡",
-  "actionbar-2": "⚡",
-  "actionbar-3": "⚡",
-  "actionbar-4": "⚡",
-};
-
-/** Get icon for a panel ID */
-function getPanelIcon(panelId: string): string {
-  return PANEL_ICONS[panelId] || "📋";
-}
+import {
+  useWorldMapHotkey,
+  useUIUpdateEvents,
+  useOpenPaneEvent,
+  useInterfaceUIState,
+} from "./useInterfaceEvents";
+import { InterfaceModalsRenderer } from "./InterfaceModals";
+import {
+  WindowContent,
+  DraggableContentWrapper,
+  ActionBarWrapper,
+  MenuBarWrapper,
+  MinimapWrapper,
+} from "./InterfacePanels";
+import {
+  type InterfaceManagerProps,
+  getPanelIcon,
+  snapToGrid,
+  clampPosition,
+  MAX_ACTION_BARS,
+  TAB_BAR_HEIGHT,
+} from "./types";
 
 /**
  * Get responsive panel size based on current viewport
@@ -148,49 +101,6 @@ function getResponsivePanelSizing(panelId: string, viewport: PanelSize) {
     maxSize: config.maxSize,
   };
 }
-
-/** Default grid size for snapping (matches editStore default) */
-const DEFAULT_GRID_SIZE = 8;
-
-/**
- * Snap a value to the grid
- */
-function snapToGrid(
-  value: number,
-  gridSize: number = DEFAULT_GRID_SIZE,
-): number {
-  return Math.round(value / gridSize) * gridSize;
-}
-
-/**
- * Clamp a position to ensure the window stays within viewport bounds.
- * Also snaps the position to the grid for consistent alignment.
- */
-function clampPosition(
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  viewport: { width: number; height: number },
-): { x: number; y: number } {
-  const minVisiblePx = 50;
-  // First clamp to viewport, then snap to grid
-  const clampedX = Math.max(
-    0,
-    Math.min(x, viewport.width - Math.min(width, minVisiblePx)),
-  );
-  const clampedY = Math.max(
-    0,
-    Math.min(y, viewport.height - Math.min(height, minVisiblePx)),
-  );
-  return {
-    x: snapToGrid(clampedX),
-    y: snapToGrid(clampedY),
-  };
-}
-
-// TabBar height (TabBar component minHeight: 28)
-const TAB_BAR_HEIGHT = 28;
 
 /**
  * Create default windows configuration based on current viewport
@@ -242,7 +152,6 @@ function createDefaultWindows(): WindowConfig[] {
   return [
     // === LEFT SIDE ===
     // Skills/Prayer tabbed panel - above chat
-    // Window size includes TabBar height for multi-tab windows
     {
       id: "skills-prayer-window",
       position: clampPosition(
@@ -254,7 +163,7 @@ function createDefaultWindows(): WindowConfig[] {
       ),
       size: {
         width: skillsSizing.size.width,
-        height: skillsPrayerTotalHeight, // Include TabBar height in window size
+        height: skillsPrayerTotalHeight,
       },
       minSize: {
         width: skillsSizing.minSize.width,
@@ -343,7 +252,6 @@ function createDefaultWindows(): WindowConfig[] {
       transparency: 0,
     },
     // Inventory - directly above menu bar (touching, flush with right edge)
-    // Window size includes TabBar height for multi-tab windows
     {
       id: "inventory-window",
       position: clampPosition(
@@ -355,7 +263,7 @@ function createDefaultWindows(): WindowConfig[] {
       ),
       size: {
         width: inventorySizing.size.width,
-        height: inventoryTotalHeight, // Include TabBar height in window size
+        height: inventoryTotalHeight,
       },
       minSize: {
         width: inventorySizing.minSize.width,
@@ -438,563 +346,10 @@ function createDefaultWindows(): WindowConfig[] {
 }
 
 /**
- * FullscreenWorldMap - RuneScape-style fullscreen world map overlay
- *
- * Features:
- * - Takes up entire screen with dark backdrop
- * - ESC key closes it (handled via useEffect)
- * - M key also toggles it
- * - Close button in top-right corner
- * - Player position display
- * - Zoom controls and legend
- */
-function FullscreenWorldMap({
-  world,
-  onClose,
-}: {
-  world: ClientWorld;
-  onClose: () => void;
-}): React.ReactElement {
-  const theme = useThemeStore((s) => s.theme);
-
-  // Get player position for header display
-  const player = world?.getPlayer?.();
-  const playerPos = player?.position || { x: 0, y: 0, z: 0 };
-
-  // Calculate map dimensions based on viewport
-  const [mapDimensions, setMapDimensions] = React.useState({
-    width: Math.min(window.innerWidth - 80, 1400),
-    height: Math.min(window.innerHeight - 120, 900),
-  });
-
-  // Handle ESC key to close
-  React.useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        onClose();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
-  // Update map dimensions on window resize
-  React.useEffect(() => {
-    const handleResize = () => {
-      setMapDimensions({
-        width: Math.min(window.innerWidth - 80, 1400),
-        height: Math.min(window.innerHeight - 120, 900),
-      });
-    };
-
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
-
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      data-modal="true"
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        zIndex: 10000,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: "rgba(0, 0, 0, 0.85)",
-        pointerEvents: "auto",
-        animation: "worldMapFadeIn 0.2s ease-out",
-      }}
-      onMouseDown={(e) => {
-        (e.nativeEvent as PointerEvent & { isCoreUI?: boolean }).isCoreUI =
-          true;
-      }}
-      onPointerDown={(e) => {
-        (e.nativeEvent as PointerEvent & { isCoreUI?: boolean }).isCoreUI =
-          true;
-      }}
-      onClick={(e) => {
-        // Close when clicking backdrop (not the map)
-        if (e.target === e.currentTarget) {
-          onClose();
-        }
-      }}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      }}
-    >
-      {/* Animation keyframes */}
-      <style>
-        {`
-          @keyframes worldMapFadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-          }
-          @keyframes worldMapSlideIn {
-            from { opacity: 0; transform: scale(0.95); }
-            to { opacity: 1; transform: scale(1); }
-          }
-        `}
-      </style>
-
-      {/* Map Container */}
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          background: `linear-gradient(135deg, ${theme.colors.background.primary}fa 0%, ${theme.colors.background.secondary}fa 100%)`,
-          border: `2px solid ${theme.colors.border.decorative}`,
-          borderRadius: theme.borderRadius.lg,
-          boxShadow: "0 20px 60px rgba(0, 0, 0, 0.8)",
-          overflow: "hidden",
-          animation: "worldMapSlideIn 0.2s ease-out",
-          maxWidth: "calc(100vw - 40px)",
-          maxHeight: "calc(100vh - 40px)",
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div
-          style={{
-            padding: "12px 20px",
-            background: theme.colors.background.secondary,
-            borderBottom: `1px solid ${theme.colors.border.default}`,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <span
-              style={{
-                color: theme.colors.text.primary,
-                fontSize: theme.typography.fontSize.lg,
-                fontWeight: theme.typography.fontWeight.semibold,
-              }}
-            >
-              🗺️ World Map
-            </span>
-            <span
-              style={{
-                color: theme.colors.text.secondary,
-                fontSize: theme.typography.fontSize.sm,
-              }}
-            >
-              World of Hyperia
-            </span>
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-            <span
-              style={{
-                color: theme.colors.accent.primary,
-                fontSize: theme.typography.fontSize.sm,
-                fontFamily: theme.typography.fontFamily.mono,
-              }}
-            >
-              📍 ({Math.round(playerPos.x)}, {Math.round(playerPos.z)})
-            </span>
-
-            {/* Close button */}
-            <button
-              onClick={onClose}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 32,
-                height: 32,
-                borderRadius: theme.borderRadius.md,
-                border: `1px solid ${theme.colors.border.default}`,
-                backgroundColor: theme.colors.background.tertiary,
-                color: theme.colors.text.secondary,
-                cursor: "pointer",
-                fontSize: 18,
-                transition: "all 0.15s ease",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor =
-                  theme.colors.state.danger;
-                e.currentTarget.style.color = theme.colors.text.primary;
-                e.currentTarget.style.borderColor = theme.colors.state.danger;
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor =
-                  theme.colors.background.tertiary;
-                e.currentTarget.style.color = theme.colors.text.secondary;
-                e.currentTarget.style.borderColor = theme.colors.border.default;
-              }}
-              aria-label="Close map (ESC)"
-              title="Close (ESC)"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-
-        {/* Map area - using Minimap with full size */}
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 16,
-            background: theme.colors.background.primary,
-          }}
-        >
-          <Minimap
-            world={world}
-            width={mapDimensions.width}
-            height={mapDimensions.height}
-            zoom={60}
-            embedded={true}
-            resizable={false}
-            isVisible={true}
-          />
-        </div>
-
-        {/* Footer with legend and controls hint */}
-        <div
-          style={{
-            padding: "10px 20px",
-            background: theme.colors.background.secondary,
-            borderTop: `1px solid ${theme.colors.border.default}`,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          {/* Legend */}
-          <div
-            style={{
-              display: "flex",
-              gap: 20,
-              fontSize: theme.typography.fontSize.xs,
-              color: theme.colors.text.secondary,
-            }}
-          >
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span
-                style={{
-                  width: 10,
-                  height: 10,
-                  background: "#00ff00",
-                  borderRadius: "50%",
-                  border: "1px solid white",
-                }}
-              />
-              You
-            </span>
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span
-                style={{
-                  width: 10,
-                  height: 10,
-                  background: "#ff4444",
-                  borderRadius: "50%",
-                  border: "1px solid white",
-                }}
-              />
-              Enemies
-            </span>
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span
-                style={{
-                  width: 10,
-                  height: 10,
-                  background: "#22cc55",
-                  borderRadius: "50%",
-                  border: "1px solid white",
-                }}
-              />
-              Resources
-            </span>
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span
-                style={{
-                  width: 10,
-                  height: 10,
-                  background: "#3b82f6",
-                  borderRadius: "50%",
-                  border: "1px solid white",
-                }}
-              />
-              NPCs
-            </span>
-          </div>
-
-          {/* Controls hint */}
-          <div
-            style={{
-              display: "flex",
-              gap: 16,
-              fontSize: theme.typography.fontSize.xs,
-              color: theme.colors.text.muted,
-            }}
-          >
-            <span>🖱️ Drag to pan</span>
-            <span>🔍 Scroll to zoom</span>
-            <span>📍 Click to move</span>
-            <span
-              style={{
-                padding: "2px 8px",
-                background: theme.colors.background.tertiary,
-                borderRadius: theme.borderRadius.sm,
-                color: theme.colors.text.secondary,
-              }}
-            >
-              ESC or M to close
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** Items Kept on Death Panel - Shows which items will be kept/lost on death */
-function ItemsKeptOnDeathPanel({
-  world,
-  equipment,
-  onClose: _onClose,
-}: {
-  world: ClientWorld;
-  equipment: PlayerEquipmentItems | null;
-  onClose: () => void;
-}): React.ReactElement {
-  // Get inventory items from network cache
-  const playerId = world?.entities?.player?.id;
-  const cachedInventory = playerId
-    ? world?.network?.lastInventoryByPlayerId?.[playerId]
-    : null;
-  const inventoryItems = cachedInventory?.items || [];
-
-  // Calculate most valuable items (3 kept on death by default)
-  const allItems: Array<{ name: string; value: number; source: string }> = [];
-
-  // Add inventory items
-  inventoryItems.forEach(
-    (item: { itemId: string; quantity: number; slot: number }) => {
-      const itemData = getItem(item.itemId);
-      if (itemData) {
-        allItems.push({
-          name: itemData.name,
-          value: (itemData.value || 0) * (item.quantity || 1),
-          source: "Inventory",
-        });
-      }
-    },
-  );
-
-  // Add equipment items
-  if (equipment) {
-    const slots = [
-      "helmet",
-      "body",
-      "legs",
-      "weapon",
-      "shield",
-      "boots",
-      "gloves",
-      "cape",
-      "amulet",
-      "ring",
-    ] as const;
-    slots.forEach((slot) => {
-      const item = equipment[slot];
-      if (item) {
-        const itemData = getItem(item.id);
-        allItems.push({
-          name: item.name || itemData?.name || slot,
-          value: itemData?.value || 0,
-          source: "Equipment",
-        });
-      }
-    });
-  }
-
-  // Sort by value descending
-  allItems.sort((a, b) => b.value - a.value);
-
-  // First 3 are kept, rest are lost
-  const keptItems = allItems.slice(0, 3);
-  const lostItems = allItems.slice(3);
-
-  return (
-    <div
-      data-modal="true"
-      style={{
-        padding: "16px",
-        display: "flex",
-        flexDirection: "column",
-        gap: "16px",
-        color: "rgba(242, 208, 138, 0.9)",
-        fontSize: 13,
-      }}
-    >
-      {/* Info header */}
-      <div
-        style={{
-          background: "rgba(0, 0, 0, 0.3)",
-          borderRadius: 6,
-          padding: "12px",
-          border: "1px solid rgba(139, 69, 19, 0.4)",
-        }}
-      >
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>
-          Standard Death Mechanics
-        </div>
-        <div style={{ fontSize: 11, opacity: 0.8, lineHeight: 1.4 }}>
-          On death, you will keep your <strong>3 most valuable</strong> items.
-          All other items will remain on your gravestone for 15 minutes.
-        </div>
-      </div>
-
-      {/* Items kept section */}
-      <div>
-        <div
-          style={{
-            color: "#22c55e",
-            fontWeight: 600,
-            marginBottom: 8,
-            fontSize: 12,
-            textTransform: "uppercase",
-            letterSpacing: 0.5,
-          }}
-        >
-          Items Kept ({keptItems.length})
-        </div>
-        {keptItems.length === 0 ? (
-          <div style={{ opacity: 0.5, fontSize: 12 }}>No items to keep</div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {keptItems.map((item, i) => (
-              <div
-                key={i}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: "6px 10px",
-                  background: "rgba(34, 197, 94, 0.1)",
-                  borderRadius: 4,
-                  border: "1px solid rgba(34, 197, 94, 0.3)",
-                }}
-              >
-                <span>{item.name}</span>
-                <span style={{ fontSize: 11, opacity: 0.7 }}>
-                  {item.value.toLocaleString()} gp
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Items lost section */}
-      <div>
-        <div
-          style={{
-            color: "#ef4444",
-            fontWeight: 600,
-            marginBottom: 8,
-            fontSize: 12,
-            textTransform: "uppercase",
-            letterSpacing: 0.5,
-          }}
-        >
-          Items Lost ({lostItems.length})
-        </div>
-        {lostItems.length === 0 ? (
-          <div style={{ opacity: 0.5, fontSize: 12 }}>
-            No items will be lost
-          </div>
-        ) : (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-              maxHeight: 200,
-              overflowY: "auto",
-            }}
-          >
-            {lostItems.map((item, i) => (
-              <div
-                key={i}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: "6px 10px",
-                  background: "rgba(239, 68, 68, 0.1)",
-                  borderRadius: 4,
-                  border: "1px solid rgba(239, 68, 68, 0.3)",
-                }}
-              >
-                <span>{item.name}</span>
-                <span style={{ fontSize: 11, opacity: 0.7 }}>
-                  {item.value.toLocaleString()} gp
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Total value footer */}
-      <div
-        style={{
-          borderTop: "1px solid rgba(139, 69, 19, 0.4)",
-          paddingTop: 12,
-          display: "flex",
-          justifyContent: "space-between",
-          fontSize: 12,
-        }}
-      >
-        <span style={{ opacity: 0.7 }}>Total Risked Value:</span>
-        <span style={{ color: "#ef4444", fontWeight: 600 }}>
-          {lostItems
-            .reduce((sum, item) => sum + item.value, 0)
-            .toLocaleString()}{" "}
-          gp
-        </span>
-      </div>
-    </div>
-  );
-}
-
-/** Max number of action bars allowed */
-const MAX_ACTION_BARS = 5;
-
-/** InterfaceManager Props */
-export interface InterfaceManagerProps {
-  /** The game world instance */
-  world: ClientWorld;
-  /** Children to render (typically game viewport) */
-  children?: ReactNode;
-  /** Whether the interface is enabled */
-  enabled?: boolean;
-}
-
-/**
  * Main interface manager component
  *
  * Routes to MobileInterfaceManager on mobile/touch tablet devices,
  * otherwise renders the full desktop UI with draggable windows.
- *
- * This is a thin wrapper that just handles the mobile/desktop routing.
- * The actual UI logic is in DesktopInterfaceManager or MobileInterfaceManager.
  */
 export function InterfaceManager({
   world,
@@ -1005,8 +360,6 @@ export function InterfaceManager({
   const { shouldUseMobileUI } = useMobileLayout();
 
   // Route to appropriate interface based on device type
-  // This wrapper exists to avoid the React hooks violation that would occur
-  // if we had an early return in DesktopInterfaceManager before its hooks
   if (shouldUseMobileUI) {
     return (
       <MobileInterfaceManager world={world} enabled={enabled}>
@@ -1032,8 +385,7 @@ function DesktopInterfaceManager({
   children,
   enabled = true,
 }: InterfaceManagerProps): React.ReactElement {
-  // Desktop UI implementation...
-  // Use the window manager hook which properly handles Map reactivity
+  // Window management hooks
   const { windows, createWindow } = useWindowManager();
   const { isUnlocked, isHolding, holdProgress } = useEditMode();
   const { loadFromStorage } = usePresetStore();
@@ -1048,6 +400,66 @@ function DesktopInterfaceManager({
     height: typeof window !== "undefined" ? window.innerHeight : 1080,
   });
 
+  // Player data from shared hook
+  const {
+    inventory,
+    equipment,
+    playerStats,
+    coins,
+    setPlayerStats,
+    setEquipment,
+  } = usePlayerData(world);
+
+  // Modal panel data from shared hook
+  const {
+    bankData,
+    storeData,
+    dialogueData,
+    smeltingData,
+    smithingData,
+    lootWindowData,
+    questStartData,
+    questCompleteData,
+    xpLampData,
+    setBankData,
+    setStoreData,
+    setDialogueData,
+    setSmeltingData,
+    setSmithingData,
+    setLootWindowData,
+    setQuestStartData,
+    setQuestCompleteData,
+    setXpLampData,
+  } = useModalPanels(world);
+
+  // Simple UI state for modals
+  const {
+    worldMapOpen,
+    setWorldMapOpen,
+    statsModalOpen,
+    setStatsModalOpen,
+    deathModalOpen,
+    setDeathModalOpen,
+    toggleWorldMap,
+  } = useInterfaceUIState();
+
+  // World map hotkey (M key)
+  useWorldMapHotkey(toggleWorldMap);
+
+  // UI_UPDATE event routing for legacy event path
+  useUIUpdateEvents(
+    world,
+    { setPlayerStats, setEquipment },
+    {
+      setBankData,
+      setStoreData,
+      setDialogueData,
+      setSmeltingData,
+      setSmithingData,
+    },
+  );
+
+  // Viewport resize handling
   useEffect(() => {
     let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -1152,159 +564,6 @@ function DesktopInterfaceManager({
     initializeAccessibility();
   }, []);
 
-  // Player state
-  const [inventory, setInventory] = useState<InventorySlotViewItem[]>([]);
-  const [equipment, setEquipment] = useState<PlayerEquipmentItems | null>(null);
-  const [playerStats, setPlayerStats] = useState<PlayerStats | null>(null);
-  const [coins, setCoins] = useState<number>(0);
-
-  // Modal panel state
-  const [lootWindowData, setLootWindowData] = useState<{
-    visible: boolean;
-    corpseId: string;
-    corpseName: string;
-    lootItems: InventoryItem[];
-  } | null>(null);
-
-  const [bankData, setBankData] = useState<{
-    visible: boolean;
-    items: Array<{
-      itemId: string;
-      quantity: number;
-      slot: number;
-      tabIndex: number;
-    }>;
-    tabs: Array<{ tabIndex: number; iconItemId: string | null }>;
-    alwaysSetPlaceholder: boolean;
-    maxSlots: number;
-    bankId: string;
-  } | null>(null);
-
-  const [storeData, setStoreData] = useState<{
-    visible: boolean;
-    storeId: string;
-    storeName: string;
-    buybackRate: number;
-    npcEntityId?: string;
-    items: Array<{
-      id: string;
-      itemId: string;
-      name: string;
-      price: number;
-      stockQuantity: number;
-      description?: string;
-      category?: string;
-    }>;
-  } | null>(null);
-
-  const [dialogueData, setDialogueData] = useState<{
-    visible: boolean;
-    npcId: string;
-    npcName: string;
-    text: string;
-    responses: Array<{ text: string; nextNodeId: string; effect?: string }>;
-    npcEntityId?: string;
-  } | null>(null);
-
-  const [smeltingData, setSmeltingData] = useState<{
-    visible: boolean;
-    furnaceId: string;
-    availableBars: Array<{
-      barItemId: string;
-      levelRequired: number;
-      primaryOre: string;
-      secondaryOre: string | null;
-      coalRequired: number;
-    }>;
-  } | null>(null);
-
-  const [smithingData, setSmithingData] = useState<{
-    visible: boolean;
-    anvilId: string;
-    availableRecipes: Array<{
-      itemId: string;
-      name: string;
-      barType: string;
-      barsRequired: number;
-      levelRequired: number;
-      xp: number;
-      category: string;
-    }>;
-  } | null>(null);
-
-  // World map modal state
-  const [worldMapOpen, setWorldMapOpen] = useState(false);
-
-  // Stats modal state
-  const [statsModalOpen, setStatsModalOpen] = useState(false);
-
-  // Death (Items Kept on Death) modal state
-  const [deathModalOpen, setDeathModalOpen] = useState(false);
-
-  // Quest screens state
-  const [questStartData, setQuestStartData] = useState<{
-    visible: boolean;
-    questId: string;
-    questName: string;
-    description: string;
-    difficulty: string;
-    requirements: {
-      quests: string[];
-      skills: Record<string, number>;
-      items: string[];
-    };
-    rewards: {
-      questPoints: number;
-      items: Array<{ itemId: string; quantity: number }>;
-      xp: Record<string, number>;
-    };
-  } | null>(null);
-
-  const [questCompleteData, setQuestCompleteData] = useState<{
-    visible: boolean;
-    questName: string;
-    rewards: {
-      questPoints: number;
-      items: Array<{ itemId: string; quantity: number }>;
-      xp: Record<string, number>;
-    };
-  } | null>(null);
-
-  // XP Lamp modal state
-  const [xpLampData, setXpLampData] = useState<{
-    visible: boolean;
-    itemId: string;
-    slot: number;
-    xpAmount: number;
-  } | null>(null);
-
-  // World map hotkey listener (M key)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if typing in an input field
-      const target = e.target as HTMLElement;
-      if (
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable
-      ) {
-        return;
-      }
-
-      // M key toggles world map
-      if (e.key === "m" || e.key === "M") {
-        e.preventDefault();
-        setWorldMapOpen((prev) => !prev);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
-
-  // Hold-to-edit state comes from useEditMode hook
-  // The hook handles the L key hold logic and exposes isHolding/holdProgress for visual feedback
-
   // Track if we've initialized windows
   const initializedRef = React.useRef(false);
   const [isHydrated, setIsHydrated] = useState(false);
@@ -1313,10 +572,8 @@ function DesktopInterfaceManager({
 
   // Wait for window store to hydrate from localStorage
   useEffect(() => {
-    // Check if persist has already rehydrated
     const checkHydration = () => {
       // Give the persist middleware time to hydrate
-      // This is a short delay to ensure localStorage data is loaded
       setTimeout(() => {
         setIsHydrated(true);
       }, 50);
@@ -1325,7 +582,6 @@ function DesktopInterfaceManager({
   }, []);
 
   // Detect when windows are reset to empty and recreate defaults
-  // This handles the "Default Layout" button in EditModeOverlay
   useEffect(() => {
     if (!enabled || !isHydrated) return;
 
@@ -1342,7 +598,6 @@ function DesktopInterfaceManager({
         prevCount,
         "to 0), recreating defaults...",
       );
-      // Create fresh default windows with current viewport dimensions
       const freshDefaults = createDefaultWindows();
       freshDefaults.forEach((config) => {
         createWindow(config);
@@ -1356,7 +611,6 @@ function DesktopInterfaceManager({
   }, [windows.length, enabled, isHydrated, createWindow]);
 
   // Initialize default windows on mount (after hydration)
-  // This runs once and creates windows if needed
   useEffect(() => {
     if (!isHydrated) {
       console.log("[InterfaceManager] Waiting for hydration...");
@@ -1388,11 +642,10 @@ function DesktopInterfaceManager({
 
     // Check current window state (now includes persisted windows from localStorage)
     if (currentWindows.length === 0) {
-      // No windows exist (neither from persistence nor previously created) - create defaults
+      // No windows exist - create defaults
       console.log(
         "[InterfaceManager] No persisted windows found, creating defaults...",
       );
-      // Create fresh defaults with current viewport dimensions
       const freshDefaults = createDefaultWindows();
       freshDefaults.forEach((config) => {
         const newWindow = createWindow(config);
@@ -1403,7 +656,6 @@ function DesktopInterfaceManager({
           newWindow?.visible,
         );
       });
-      // Initialize prev count ref to current count
       prevWindowsCountRef.current = freshDefaults.length;
       console.log(
         "[InterfaceManager] After creation - store has",
@@ -1418,7 +670,6 @@ function DesktopInterfaceManager({
         "persisted windows:",
         currentWindows.map((w) => w.id),
       );
-      // Initialize prev count ref so reset detection works
       prevWindowsCountRef.current = currentWindows.length;
 
       // Ensure menubar-window exists (may have been removed in older versions)
@@ -1465,7 +716,6 @@ function DesktopInterfaceManager({
       }
 
       // Safety net migration: Remove maxSize from windows that should have unlimited resizing
-      // (The windowStore's versioned migration system handles this, but this is a fallback)
       for (const win of currentWindows) {
         const shouldRemoveMaxSize =
           win.id === "minimap-window" ||
@@ -1474,7 +724,6 @@ function DesktopInterfaceManager({
           win.id.startsWith("panel-menubar-") ||
           win.id === "menubar-window";
 
-        // Ensure unlimited panels have no maxSize (safety net for edge cases)
         if (shouldRemoveMaxSize && win.maxSize !== undefined) {
           console.log(
             `[InterfaceManager] Safety net: Removing maxSize from ${win.id}`,
@@ -1516,470 +765,11 @@ function DesktopInterfaceManager({
           storeState.destroyWindow(win.id);
         }
       }
-
-      // Note: We intentionally do NOT recreate "missing" default windows here.
-      // If a user has closed a window or customized their layout, we respect that.
-      // Default windows are only created when there are NO persisted windows at all.
     }
 
     // Load presets from storage (only once on init)
     loadFromStorage();
   }, [enabled, createWindow, loadFromStorage, isHydrated]);
-
-  // Event handlers
-  useEffect(() => {
-    if (!world) return;
-
-    const onUIUpdate = (raw: unknown) => {
-      const update = raw as { component: string; data: unknown };
-
-      if (update.component === "player") {
-        setPlayerStats(update.data as PlayerStats);
-      }
-
-      if (update.component === "equipment") {
-        interface EquipmentSlot {
-          item?: unknown;
-        }
-        interface EquipmentUpdateData {
-          equipment: Record<string, EquipmentSlot | null | undefined>;
-        }
-        const data = update.data as EquipmentUpdateData;
-        const rawEq = data.equipment;
-        const mappedEquipment: PlayerEquipmentItems = {
-          weapon:
-            (rawEq.weapon?.item as PlayerEquipmentItems["weapon"]) || null,
-          shield:
-            (rawEq.shield?.item as PlayerEquipmentItems["shield"]) || null,
-          helmet:
-            (rawEq.helmet?.item as PlayerEquipmentItems["helmet"]) || null,
-          body: (rawEq.body?.item as PlayerEquipmentItems["body"]) || null,
-          legs: (rawEq.legs?.item as PlayerEquipmentItems["legs"]) || null,
-          boots: (rawEq.boots?.item as PlayerEquipmentItems["boots"]) || null,
-          gloves:
-            (rawEq.gloves?.item as PlayerEquipmentItems["gloves"]) || null,
-          cape: (rawEq.cape?.item as PlayerEquipmentItems["cape"]) || null,
-          amulet:
-            (rawEq.amulet?.item as PlayerEquipmentItems["amulet"]) || null,
-          ring: (rawEq.ring?.item as PlayerEquipmentItems["ring"]) || null,
-          arrows:
-            (rawEq.arrows?.item as PlayerEquipmentItems["arrows"]) || null,
-        };
-        setEquipment(mappedEquipment);
-      }
-
-      // Bank updates
-      if (update.component === "bank") {
-        const data = update.data as {
-          items?: Array<{
-            itemId: string;
-            quantity: number;
-            slot: number;
-            tabIndex?: number;
-          }>;
-          tabs?: Array<{ tabIndex: number; iconItemId: string | null }>;
-          alwaysSetPlaceholder?: boolean;
-          maxSlots?: number;
-          bankId?: string;
-          isOpen?: boolean;
-        };
-        if (data.isOpen === false) {
-          setBankData(null);
-        } else if (data.isOpen || data.items !== undefined) {
-          const itemsWithTabIndex = (data.items || []).map((item) => ({
-            ...item,
-            tabIndex: item.tabIndex ?? 0,
-          }));
-          setBankData((prev) => ({
-            visible: true,
-            items:
-              data.items !== undefined ? itemsWithTabIndex : prev?.items || [],
-            tabs: data.tabs !== undefined ? data.tabs : prev?.tabs || [],
-            alwaysSetPlaceholder:
-              data.alwaysSetPlaceholder ?? prev?.alwaysSetPlaceholder ?? false,
-            maxSlots: data.maxSlots ?? prev?.maxSlots ?? 480,
-            bankId: data.bankId ?? prev?.bankId ?? "spawn_bank",
-          }));
-        }
-      }
-
-      // Store updates
-      if (update.component === "store") {
-        const data = update.data as {
-          storeId: string;
-          storeName: string;
-          buybackRate: number;
-          npcEntityId?: string;
-          items: Array<{
-            id: string;
-            itemId: string;
-            name: string;
-            price: number;
-            stockQuantity: number;
-            description?: string;
-            category?: string;
-          }>;
-          isOpen?: boolean;
-        };
-        if (data.isOpen) {
-          setStoreData({
-            visible: true,
-            storeId: data.storeId,
-            storeName: data.storeName,
-            buybackRate: data.buybackRate || 0.5,
-            npcEntityId: data.npcEntityId,
-            items: data.items || [],
-          });
-        } else {
-          setStoreData(null);
-        }
-      }
-
-      // Dialogue updates
-      if (update.component === "dialogue") {
-        const data = update.data as {
-          npcId: string;
-          npcName: string;
-          text: string;
-          responses: Array<{
-            text: string;
-            nextNodeId: string;
-            effect?: string;
-          }>;
-          npcEntityId?: string;
-        };
-        setDialogueData((prev) => ({
-          visible: true,
-          npcId: data.npcId,
-          npcName: data.npcName || prev?.npcName || "NPC",
-          text: data.text,
-          responses: data.responses || [],
-          npcEntityId: data.npcEntityId || prev?.npcEntityId,
-        }));
-      }
-
-      if (update.component === "dialogueEnd") {
-        setDialogueData(null);
-      }
-
-      // Smelting updates
-      if (update.component === "smelting") {
-        const data = update.data as {
-          isOpen: boolean;
-          furnaceId?: string;
-          availableBars?: Array<{
-            barItemId: string;
-            levelRequired: number;
-            primaryOre: string;
-            secondaryOre: string | null;
-            coalRequired: number;
-          }>;
-        };
-        if (data.isOpen && data.furnaceId && data.availableBars) {
-          setSmeltingData({
-            visible: true,
-            furnaceId: data.furnaceId,
-            availableBars: data.availableBars,
-          });
-        } else {
-          setSmeltingData(null);
-        }
-      }
-
-      // Smithing updates
-      if (update.component === "smithing") {
-        const data = update.data as {
-          isOpen: boolean;
-          anvilId?: string;
-          availableRecipes?: Array<{
-            itemId: string;
-            name: string;
-            barType: string;
-            barsRequired: number;
-            levelRequired: number;
-            xp: number;
-            category: string;
-          }>;
-        };
-        if (data.isOpen && data.anvilId && data.availableRecipes) {
-          setSmithingData({
-            visible: true,
-            anvilId: data.anvilId,
-            availableRecipes: data.availableRecipes,
-          });
-        } else {
-          setSmithingData(null);
-        }
-      }
-    };
-
-    const onInventory = (raw: unknown) => {
-      const data = raw as {
-        items: InventorySlotViewItem[];
-        playerId: string;
-        coins: number;
-      };
-      setInventory(data.items);
-      setCoins(data.coins);
-    };
-
-    const onCoins = (raw: unknown) => {
-      const data = raw as { playerId: string; coins: number };
-      const localId = world.entities?.player?.id;
-      if (!localId || data.playerId === localId) {
-        setCoins(data.coins);
-      }
-    };
-
-    const onSkillsUpdate = (raw: unknown) => {
-      const data = raw as { playerId: string; skills: PlayerStats["skills"] };
-      const localId = world.entities?.player?.id;
-      if (!localId || data.playerId === localId) {
-        setPlayerStats((prev) =>
-          prev
-            ? { ...prev, skills: data.skills }
-            : ({ skills: data.skills } as PlayerStats),
-        );
-      }
-    };
-
-    // Handle prayer points changes (from potions, altars, drain, etc.)
-    const onPrayerPointsChanged = (raw: unknown) => {
-      const data = raw as {
-        playerId: string;
-        points: number;
-        maxPoints: number;
-      };
-      const localId = world.entities?.player?.id;
-      if (!localId || data.playerId === localId) {
-        setPlayerStats((prev) =>
-          prev
-            ? {
-                ...prev,
-                prayerPoints: { current: data.points, max: data.maxPoints },
-              }
-            : ({
-                prayerPoints: { current: data.points, max: data.maxPoints },
-              } as PlayerStats),
-        );
-      }
-    };
-
-    // Handle full prayer state sync (initial load, altar pray, etc.)
-    const onPrayerStateSync = (raw: unknown) => {
-      const data = raw as {
-        playerId: string;
-        points: number;
-        maxPoints: number;
-        active: string[];
-      };
-      const localId = world.entities?.player?.id;
-      if (!localId || data.playerId === localId) {
-        setPlayerStats((prev) =>
-          prev
-            ? {
-                ...prev,
-                prayerPoints: { current: data.points, max: data.maxPoints },
-              }
-            : ({
-                prayerPoints: { current: data.points, max: data.maxPoints },
-              } as PlayerStats),
-        );
-      }
-    };
-
-    const onCorpseClick = (raw: unknown) => {
-      const data = raw as {
-        corpseId: string;
-        playerId: string;
-        lootItems?: Array<{ itemId: string; quantity: number }>;
-        position: { x: number; y: number; z: number };
-      };
-      setLootWindowData({
-        visible: true,
-        corpseId: data.corpseId,
-        corpseName: "Gravestone",
-        lootItems:
-          data.lootItems?.map((item, index) => ({
-            id: `${data.corpseId}-${index}`,
-            slot: index,
-            itemId: item.itemId,
-            quantity: item.quantity,
-            metadata: null,
-          })) || [],
-      });
-    };
-
-    // Quest start confirmation handler
-    const onQuestStartConfirm = (raw: unknown) => {
-      const data = raw as {
-        questId: string;
-        questName: string;
-        description: string;
-        difficulty: string;
-        requirements: {
-          quests: string[];
-          skills: Record<string, number>;
-          items: string[];
-        };
-        rewards: {
-          questPoints: number;
-          items: Array<{ itemId: string; quantity: number }>;
-          xp: Record<string, number>;
-        };
-      };
-      setQuestStartData({
-        visible: true,
-        questId: data.questId,
-        questName: data.questName,
-        description: data.description,
-        difficulty: data.difficulty,
-        requirements: data.requirements || {
-          quests: [],
-          skills: {},
-          items: [],
-        },
-        rewards: data.rewards || { questPoints: 0, items: [], xp: {} },
-      });
-    };
-
-    // Quest completed handler
-    const onQuestCompleted = (raw: unknown) => {
-      const data = raw as {
-        playerId: string;
-        questId: string;
-        questName: string;
-        rewards: {
-          questPoints: number;
-          items: Array<{ itemId: string; quantity: number }>;
-          xp: Record<string, number>;
-        };
-      };
-      const localId = world.entities?.player?.id;
-      if (!localId || data.playerId === localId) {
-        setQuestCompleteData({
-          visible: true,
-          questName: data.questName,
-          rewards: data.rewards || { questPoints: 0, items: [], xp: {} },
-        });
-      }
-    };
-
-    // XP Lamp use request handler
-    const onXpLampUseRequest = (raw: unknown) => {
-      const data = raw as {
-        playerId: string;
-        itemId: string;
-        slot: number;
-        xpAmount: number;
-      };
-      const localId = world.entities?.player?.id;
-      if (!localId || data.playerId === localId) {
-        setXpLampData({
-          visible: true,
-          itemId: data.itemId,
-          slot: data.slot,
-          xpAmount: data.xpAmount,
-        });
-      }
-    };
-
-    world.on(EventType.UI_UPDATE, onUIUpdate);
-    world.on(EventType.INVENTORY_UPDATED, onInventory);
-    world.on(EventType.INVENTORY_UPDATE_COINS, onCoins);
-    world.on(EventType.SKILLS_UPDATED, onSkillsUpdate);
-    world.on(EventType.PRAYER_POINTS_CHANGED, onPrayerPointsChanged);
-    world.on(EventType.PRAYER_STATE_SYNC, onPrayerStateSync);
-    world.on(EventType.CORPSE_CLICK, onCorpseClick);
-    world.on(EventType.QUEST_START_CONFIRM, onQuestStartConfirm);
-    world.on(EventType.QUEST_COMPLETED, onQuestCompleted);
-    world.on(EventType.XP_LAMP_USE_REQUEST, onXpLampUseRequest);
-
-    // Request initial data
-    const requestInitial = () => {
-      const lp = world.entities?.player?.id;
-      if (lp) {
-        const cached = world.network?.lastInventoryByPlayerId?.[lp];
-        if (cached && Array.isArray(cached.items)) {
-          setInventory(cached.items);
-          setCoins(cached.coins);
-        }
-        const cachedSkills = world.network?.lastSkillsByPlayerId?.[lp];
-        if (cachedSkills) {
-          const skills = cachedSkills as unknown as PlayerStats["skills"];
-          setPlayerStats((prev) =>
-            prev ? { ...prev, skills } : ({ skills } as PlayerStats),
-          );
-        }
-        const cachedEquipment = world.network?.lastEquipmentByPlayerId?.[lp];
-        if (cachedEquipment) {
-          const rawEq = cachedEquipment as RawEquipmentData;
-          const mappedEquipment: PlayerEquipmentItems = {
-            weapon: rawEq.weapon?.item ?? null,
-            shield: rawEq.shield?.item ?? null,
-            helmet: rawEq.helmet?.item ?? null,
-            body: rawEq.body?.item ?? null,
-            legs: rawEq.legs?.item ?? null,
-            boots: rawEq.boots?.item ?? null,
-            gloves: rawEq.gloves?.item ?? null,
-            cape: rawEq.cape?.item ?? null,
-            amulet: rawEq.amulet?.item ?? null,
-            ring: rawEq.ring?.item ?? null,
-            arrows: rawEq.arrows?.item ?? null,
-          };
-          setEquipment(mappedEquipment);
-        }
-        // Load cached prayer state for status bars
-        const networkWithPrayer = world.network as {
-          lastPrayerStateByPlayerId?: Record<
-            string,
-            { points: number; maxPoints: number; active: string[] }
-          >;
-        };
-        const cachedPrayer = networkWithPrayer?.lastPrayerStateByPlayerId?.[lp];
-        if (cachedPrayer) {
-          setPlayerStats((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  prayerPoints: {
-                    current: cachedPrayer.points,
-                    max: cachedPrayer.maxPoints,
-                  },
-                }
-              : ({
-                  prayerPoints: {
-                    current: cachedPrayer.points,
-                    max: cachedPrayer.maxPoints,
-                  },
-                } as PlayerStats),
-          );
-        }
-        world.emit(EventType.INVENTORY_REQUEST, { playerId: lp });
-        return true;
-      }
-      return false;
-    };
-
-    let timeoutId: number | null = null;
-    if (!requestInitial()) {
-      timeoutId = window.setTimeout(() => requestInitial(), 400);
-    }
-
-    return () => {
-      if (timeoutId !== null) window.clearTimeout(timeoutId);
-      world.off(EventType.UI_UPDATE, onUIUpdate);
-      world.off(EventType.INVENTORY_UPDATED, onInventory);
-      world.off(EventType.INVENTORY_UPDATE_COINS, onCoins);
-      world.off(EventType.SKILLS_UPDATED, onSkillsUpdate);
-      world.off(EventType.PRAYER_POINTS_CHANGED, onPrayerPointsChanged);
-      world.off(EventType.PRAYER_STATE_SYNC, onPrayerStateSync);
-      world.off(EventType.CORPSE_CLICK, onCorpseClick);
-      world.off(EventType.QUEST_START_CONFIRM, onQuestStartConfirm);
-      world.off(EventType.QUEST_COMPLETED, onQuestCompleted);
-      world.off(EventType.XP_LAMP_USE_REQUEST, onXpLampUseRequest);
-    };
-  }, [world]);
 
   // Handle menu button click - focus existing tab or create new window
   const handleMenuClick = useCallback(
@@ -2014,7 +804,6 @@ function DesktopInterfaceManager({
         }
       } else {
         // Panel doesn't exist - create a new window for it
-        // Use responsive sizing based on current viewport
         const viewport =
           typeof window !== "undefined"
             ? { width: window.innerWidth, height: window.innerHeight }
@@ -2051,25 +840,18 @@ function DesktopInterfaceManager({
         createWindow(newWindowConfig);
       }
     },
-    [windows, windowStoreUpdate, createWindow],
+    [
+      windows,
+      windowStoreUpdate,
+      createWindow,
+      setWorldMapOpen,
+      setStatsModalOpen,
+      setDeathModalOpen,
+    ],
   );
 
   // Listen for UI_OPEN_PANE events to open panels programmatically
-  useEffect(() => {
-    if (!world) return;
-
-    const onOpenPane = (payload: unknown) => {
-      const data = payload as { pane: string };
-      if (data?.pane) {
-        handleMenuClick(data.pane);
-      }
-    };
-
-    world.on(EventType.UI_OPEN_PANE, onOpenPane);
-    return () => {
-      world.off(EventType.UI_OPEN_PANE, onOpenPane);
-    };
-  }, [world, handleMenuClick]);
+  useOpenPaneEvent(world, handleMenuClick);
 
   // Create panel renderer with current state
   const renderPanel = useMemo(
@@ -2095,8 +877,6 @@ function DesktopInterfaceManager({
     ],
   );
 
-  // Menu bar is now a window panel - see DEFAULT_WINDOWS and MenuBarPanel in PanelRegistry
-
   // Tab drag handler - create new window when tab dropped outside
   const { splitTab } = useTabDrag();
 
@@ -2115,7 +895,7 @@ function DesktopInterfaceManager({
         hasCustomData: !!activeRawData,
       });
 
-      // Handle inventory → equipment drops
+      // Handle inventory -> equipment drops
       if (
         activeId.startsWith("inventory-") &&
         overId?.startsWith("equipment-")
@@ -2127,29 +907,22 @@ function DesktopInterfaceManager({
         if (item && world) {
           const localPlayer = world.getPlayer();
           if (localPlayer) {
-            // Get item data to check if it can be equipped in this slot
             const itemData = getItem(item.itemId);
 
-            // Client-side validation for better UX (server will also validate)
             if (itemData) {
               const itemEquipSlot = itemData.equipSlot;
-
-              // Map 2h weapons to weapon slot
               const normalizedItemSlot =
                 itemEquipSlot === "2h" ? "weapon" : itemEquipSlot;
 
-              // Check if item can be equipped in this slot
-              // Allow if: exact match, or if item has no equipSlot (server will reject if invalid)
               if (normalizedItemSlot && normalizedItemSlot !== equipmentSlot) {
                 console.log(
-                  "[InterfaceManager] ❌ Item cannot be equipped in this slot:",
+                  "[InterfaceManager] Item cannot be equipped in this slot:",
                   {
                     itemId: item.itemId,
                     itemSlot: normalizedItemSlot,
                     targetSlot: equipmentSlot,
                   },
                 );
-                // Show feedback to user
                 world.emit(EventType.UI_MESSAGE, {
                   message: `Cannot equip ${itemData.name || item.itemId} in ${equipmentSlot} slot`,
                   type: "error",
@@ -2158,15 +931,11 @@ function DesktopInterfaceManager({
               }
             }
 
-            console.log(
-              "[InterfaceManager] 📦→🎽 Inventory to Equipment drop:",
-              {
-                itemId: item.itemId,
-                inventorySlot: inventoryIndex,
-                equipmentSlot,
-              },
-            );
-            // Send equip request to server
+            console.log("[InterfaceManager] Inventory to Equipment drop:", {
+              itemId: item.itemId,
+              inventorySlot: inventoryIndex,
+              equipmentSlot,
+            });
             world.network?.send("equipItem", {
               playerId: localPlayer.id,
               itemId: item.itemId,
@@ -2177,7 +946,7 @@ function DesktopInterfaceManager({
         return;
       }
 
-      // Handle inventory → inventory drops (reordering within inventory)
+      // Handle inventory -> inventory drops (reordering within inventory)
       if (
         activeId.startsWith("inventory-") &&
         (overId?.startsWith("inventory-drop-") ||
@@ -2188,15 +957,13 @@ function DesktopInterfaceManager({
           ? parseInt(overId.replace("inventory-drop-", ""), 10)
           : parseInt(overId.replace("inventory-", ""), 10);
 
-        // Don't swap with self
         if (fromSlot === toSlot) return;
 
         if (world) {
-          console.log("[InterfaceManager] 🎒→🎒 Inventory move:", {
+          console.log("[InterfaceManager] Inventory move:", {
             fromSlot,
             toSlot,
           });
-          // Send move request to server
           world.network?.send?.("moveItem", { fromSlot, toSlot });
         }
         return;
@@ -2205,7 +972,6 @@ function DesktopInterfaceManager({
       // Handle drops to action bar (skills, prayers, items)
       if (overId?.startsWith("actionbar-drop-")) {
         const slotIndex = parseInt(overId.replace("actionbar-drop-", ""), 10);
-        // Our custom DragProvider stores data directly in active.data
         const activeData = active.data as
           | {
               skill?: { id: string; name: string; icon: string; level: number };
@@ -2215,14 +981,12 @@ function DesktopInterfaceManager({
                 icon: string;
                 level: number;
               };
-              // Inventory item data has different structure
               item?: { slot: number; itemId: string; quantity: number };
               index?: number;
               source?: string;
             }
           | undefined;
 
-        // Debug logging to help diagnose drop issues
         console.log("[InterfaceManager] ActionBar drop detected:", {
           overId,
           slotIndex,
@@ -2234,14 +998,10 @@ function DesktopInterfaceManager({
           source: activeData?.source,
         });
 
-        // Determine which bar this drop is for (default to bar 0)
-        // The drop ID format is "actionbar-drop-{slotIndex}" for bar 0
-        // For other bars it would be "actionbar-{barId}-drop-{slotIndex}"
-        const barId = 0; // TODO: Parse barId from overId if multiple bars supported
+        const barId = 0;
 
         if (activeData?.source === "skill" && activeData.skill && world) {
-          // Skill → ActionBar drop
-          console.log("[InterfaceManager] 📊→⚡ Skill to ActionBar:", {
+          console.log("[InterfaceManager] Skill to ActionBar:", {
             skill: activeData.skill.name,
             slotIndex,
           });
@@ -2260,8 +1020,7 @@ function DesktopInterfaceManager({
         }
 
         if (activeData?.source === "prayer" && activeData.prayer && world) {
-          // Prayer → ActionBar drop
-          console.log("[InterfaceManager] ✨→⚡ Prayer to ActionBar:", {
+          console.log("[InterfaceManager] Prayer to ActionBar:", {
             prayer: activeData.prayer.name,
             slotIndex,
           });
@@ -2279,11 +1038,8 @@ function DesktopInterfaceManager({
           return;
         }
 
-        // Inventory items: detected by activeId starting with "inventory-"
-        // Data structure is { item: { slot, itemId, quantity }, index }
         if (activeId.startsWith("inventory-") && activeData?.item && world) {
-          // Inventory Item → ActionBar drop
-          console.log("[InterfaceManager] 🎒→⚡ Item to ActionBar:", {
+          console.log("[InterfaceManager] Item to ActionBar:", {
             itemId: activeData.item.itemId,
             slotIndex,
           });
@@ -2301,8 +1057,7 @@ function DesktopInterfaceManager({
           return;
         }
 
-        // Log unhandled action bar drops for debugging
-        console.log("[InterfaceManager] ⚠️ Unhandled ActionBar drop:", {
+        console.log("[InterfaceManager] Unhandled ActionBar drop:", {
           activeId,
           overId,
           activeData,
@@ -2310,7 +1065,6 @@ function DesktopInterfaceManager({
       }
 
       // Only handle tab drags for the remaining logic
-      // Type and sourceId are now on the active object directly (not in active.data)
       const activeItem = active as {
         id: string;
         type?: string;
@@ -2319,10 +1073,8 @@ function DesktopInterfaceManager({
       };
       if (activeItem.type !== "tab") return;
 
-      // Get source window ID from the drag item
       const sourceWindowId = activeItem.sourceId;
 
-      // Debug logging
       console.log("[InterfaceManager] Tab drag end:", {
         tabId: active.id,
         sourceWindowId,
@@ -2330,9 +1082,7 @@ function DesktopInterfaceManager({
         hasOver: Boolean(over),
       });
 
-      // If dropped on any window drop zone, the useDrop handlers will process it
       if (over && overId) {
-        // Check all window drop zone types
         if (
           overId.startsWith("tabbar-") ||
           overId.startsWith("window-header-drop-")
@@ -2346,8 +1096,6 @@ function DesktopInterfaceManager({
 
       // Tab was dropped outside of any window - create new window
       const tabId = active.id;
-
-      // Get the current pointer position from the drag store
       const dragState = useDragStore.getState();
       const currentPos = dragState.current;
 
@@ -2356,7 +1104,6 @@ function DesktopInterfaceManager({
         currentPos,
       );
 
-      // Use the current pointer position, offset slightly so window appears under cursor
       const dropPosition = {
         x: Math.max(20, Math.min(window.innerWidth - 200, currentPos.x - 100)),
         y: Math.max(20, Math.min(window.innerHeight - 200, currentPos.y - 20)),
@@ -2399,7 +1146,7 @@ function DesktopInterfaceManager({
         activeData,
       });
 
-      // Handle drag-out removal for action bar slots (dropped outside any drop zone)
+      // Handle drag-out removal for action bar slots
       if (!over) {
         if (
           activeId.startsWith("actionbar-slot-") &&
@@ -2407,15 +1154,11 @@ function DesktopInterfaceManager({
         ) {
           const slotIndex = activeData.slotIndex as number | undefined;
           if (slotIndex !== undefined && world) {
-            console.log(
-              "[InterfaceManager] @dnd-kit 🗑️ ActionBar drag-out removal:",
-              {
-                slotIndex,
-              },
-            );
-            // Emit event to clear the action bar slot
+            console.log("[InterfaceManager] ActionBar drag-out removal:", {
+              slotIndex,
+            });
             world.emit(EventType.ACTION_BAR_SLOT_UPDATE, {
-              barId: 0, // Default to bar 0
+              barId: 0,
               slotIndex,
               slot: {
                 type: "empty",
@@ -2430,7 +1173,7 @@ function DesktopInterfaceManager({
       const overId = String(over.id);
       const overData = over.data.current as Record<string, unknown> | undefined;
 
-      // Handle action bar → rubbish bin drops
+      // Handle action bar -> rubbish bin drops
       if (
         activeId.startsWith("actionbar-slot-") &&
         (overId === "actionbar-rubbish-bin" ||
@@ -2438,15 +1181,11 @@ function DesktopInterfaceManager({
       ) {
         const slotIndex = activeData?.slotIndex as number | undefined;
         if (slotIndex !== undefined && world) {
-          console.log(
-            "[InterfaceManager] @dnd-kit 🗑️ ActionBar to rubbish bin:",
-            {
-              slotIndex,
-            },
-          );
-          // Emit event to clear the action bar slot
+          console.log("[InterfaceManager] ActionBar to rubbish bin:", {
+            slotIndex,
+          });
           world.emit(EventType.ACTION_BAR_SLOT_UPDATE, {
-            barId: 0, // Default to bar 0
+            barId: 0,
             slotIndex,
             slot: {
               type: "empty",
@@ -2457,7 +1196,7 @@ function DesktopInterfaceManager({
         return;
       }
 
-      // Handle action bar → action bar reordering
+      // Handle action bar -> action bar reordering
       if (
         activeId.startsWith("actionbar-slot-") &&
         overId.startsWith("actionbar-drop-")
@@ -2472,11 +1211,10 @@ function DesktopInterfaceManager({
           fromIndex !== toIndex &&
           world
         ) {
-          console.log("[InterfaceManager] @dnd-kit 🔄 ActionBar reorder:", {
+          console.log("[InterfaceManager] ActionBar reorder:", {
             fromIndex,
             toIndex,
           });
-          // Emit event to swap action bar slots
           world.emit(EventType.ACTION_BAR_SLOT_SWAP, {
             barId: 0,
             fromIndex,
@@ -2486,7 +1224,7 @@ function DesktopInterfaceManager({
         return;
       }
 
-      // Handle inventory → action bar drops
+      // Handle inventory -> action bar drops
       if (
         activeId.startsWith("inventory-") &&
         overId.startsWith("actionbar-drop-")
@@ -2495,7 +1233,6 @@ function DesktopInterfaceManager({
         const slotMatch = overId.match(/actionbar-drop-(\d+)/);
         const slotIndex = slotMatch ? parseInt(slotMatch[1], 10) : undefined;
 
-        // Try to get item from props first, then from drag data
         const itemFromProps = inventory[inventoryIndex];
         const itemFromDragData = activeData?.item as
           | { itemId: string; quantity: number }
@@ -2503,17 +1240,13 @@ function DesktopInterfaceManager({
         const item = itemFromProps || itemFromDragData;
 
         if (item && slotIndex !== undefined && world) {
-          console.log(
-            "[InterfaceManager] @dnd-kit 📦→⚡ Inventory to ActionBar drop:",
-            {
-              itemId: item.itemId,
-              inventoryIndex,
-              slotIndex,
-            },
-          );
-          // Emit event to update the action bar slot
+          console.log("[InterfaceManager] Inventory to ActionBar drop:", {
+            itemId: item.itemId,
+            inventoryIndex,
+            slotIndex,
+          });
           world.emit(EventType.ACTION_BAR_SLOT_UPDATE, {
-            barId: 0, // Default to bar 0
+            barId: 0,
             slotIndex,
             slot: {
               type: "item",
@@ -2527,7 +1260,7 @@ function DesktopInterfaceManager({
         return;
       }
 
-      // Handle inventory → inventory drops (reordering)
+      // Handle inventory -> inventory drops (reordering)
       if (
         activeId.startsWith("inventory-") &&
         (overId.startsWith("inventory-drop-") ||
@@ -2538,21 +1271,19 @@ function DesktopInterfaceManager({
           ? parseInt(overId.replace("inventory-drop-", ""), 10)
           : parseInt(overId.replace("inventory-", ""), 10);
 
-        // Don't swap with self
         if (fromSlot === toSlot) return;
 
         if (world) {
-          console.log("[InterfaceManager] @dnd-kit 🎒→🎒 Inventory move:", {
+          console.log("[InterfaceManager] Inventory move:", {
             fromSlot,
             toSlot,
           });
-          // Send move request to server
           world.network?.send?.("moveItem", { fromSlot, toSlot });
         }
         return;
       }
 
-      // Handle prayer → action bar drops
+      // Handle prayer -> action bar drops
       if (
         activeId.startsWith("prayer-") &&
         overId.startsWith("actionbar-drop-")
@@ -2569,16 +1300,12 @@ function DesktopInterfaceManager({
           | undefined;
 
         if (prayerData && slotIndex !== undefined && world) {
-          console.log(
-            "[InterfaceManager] @dnd-kit 🙏→⚡ Prayer to ActionBar drop:",
-            {
-              prayerId: prayerData.id,
-              slotIndex,
-            },
-          );
-          // Emit event to update the action bar slot
+          console.log("[InterfaceManager] Prayer to ActionBar drop:", {
+            prayerId: prayerData.id,
+            slotIndex,
+          });
           world.emit(EventType.ACTION_BAR_SLOT_UPDATE, {
-            barId: 0, // Default to bar 0
+            barId: 0,
             slotIndex,
             slot: {
               type: "prayer",
@@ -2592,7 +1319,7 @@ function DesktopInterfaceManager({
         return;
       }
 
-      // Handle skill → action bar drops
+      // Handle skill -> action bar drops
       if (
         activeId.startsWith("skill-") &&
         overId.startsWith("actionbar-drop-")
@@ -2609,16 +1336,12 @@ function DesktopInterfaceManager({
           | undefined;
 
         if (skillData && slotIndex !== undefined && world) {
-          console.log(
-            "[InterfaceManager] @dnd-kit 📊→⚡ Skill to ActionBar drop:",
-            {
-              skillId: skillData.id,
-              slotIndex,
-            },
-          );
-          // Emit event to update the action bar slot
+          console.log("[InterfaceManager] Skill to ActionBar drop:", {
+            skillId: skillData.id,
+            slotIndex,
+          });
           world.emit(EventType.ACTION_BAR_SLOT_UPDATE, {
-            barId: 0, // Default to bar 0
+            barId: 0,
             slotIndex,
             slot: {
               type: "skill",
@@ -2632,7 +1355,7 @@ function DesktopInterfaceManager({
         return;
       }
 
-      // Handle inventory → equipment drops (with full validation)
+      // Handle inventory -> equipment drops (with full validation)
       if (
         activeId.startsWith("inventory-") &&
         overId.startsWith("equipment-")
@@ -2644,29 +1367,22 @@ function DesktopInterfaceManager({
         if (item && world) {
           const localPlayer = world.getPlayer();
           if (localPlayer) {
-            // Get item data to check if it can be equipped in this slot
             const itemData = getItem(item.itemId);
 
-            // Client-side validation for better UX (server will also validate)
             if (itemData) {
               const itemEquipSlot = itemData.equipSlot;
-
-              // Map 2h weapons to weapon slot
               const normalizedItemSlot =
                 itemEquipSlot === "2h" ? "weapon" : itemEquipSlot;
 
-              // Check if item can be equipped in this slot
-              // Allow if: exact match, or if item has no equipSlot (server will reject if invalid)
               if (normalizedItemSlot && normalizedItemSlot !== equipmentSlot) {
                 console.log(
-                  "[InterfaceManager] @dnd-kit ❌ Item cannot be equipped in this slot:",
+                  "[InterfaceManager] Item cannot be equipped in this slot:",
                   {
                     itemId: item.itemId,
                     itemSlot: normalizedItemSlot,
                     targetSlot: equipmentSlot,
                   },
                 );
-                // Show feedback to user
                 world.emit(EventType.UI_MESSAGE, {
                   message: `Cannot equip ${itemData.name || item.itemId} in ${equipmentSlot} slot`,
                   type: "error",
@@ -2675,15 +1391,11 @@ function DesktopInterfaceManager({
               }
             }
 
-            console.log(
-              "[InterfaceManager] @dnd-kit 📦→🎽 Inventory to Equipment drop:",
-              {
-                itemId: item.itemId,
-                inventorySlot: inventoryIndex,
-                equipmentSlot,
-              },
-            );
-            // Send equip request to server with equipment slot
+            console.log("[InterfaceManager] Inventory to Equipment drop:", {
+              itemId: item.itemId,
+              inventorySlot: inventoryIndex,
+              equipmentSlot,
+            });
             world.network?.send("equipItem", {
               playerId: localPlayer.id,
               itemId: item.itemId,
@@ -2707,7 +1419,6 @@ function DesktopInterfaceManager({
     return (
       <>
         {children}
-        {/* Minimal hydration loading indicator - transparent fade */}
         <div
           className="fixed inset-0 pointer-events-none z-50"
           style={{
@@ -2725,20 +1436,15 @@ function DesktopInterfaceManager({
         {/* Game content (viewport, etc.) */}
         {children}
 
-        {/* Minimap is a window panel - see DEFAULT_WINDOWS */}
-        {/* MenuBar panel with Lucide React icons provides panel shortcuts - see menubar-window */}
-
         {/* Edit mode overlay - only in advanced mode */}
         {isUnlocked &&
           editModeEnabled &&
           (() => {
-            // Count existing action bar windows
             const actionBarCount = windows.filter(
               (w) => w.id.startsWith("actionbar-") && w.id.endsWith("-window"),
             ).length;
 
             const handleAddActionBar = () => {
-              // Find next available action bar ID
               const existingIds = new Set(
                 windows
                   .filter((w) => w.id.startsWith("actionbar-"))
@@ -2752,7 +1458,6 @@ function DesktopInterfaceManager({
                 nextId++;
               }
               if (nextId < MAX_ACTION_BARS) {
-                // Use responsive sizing for action bars
                 const viewport =
                   typeof window !== "undefined"
                     ? {
@@ -2812,9 +1517,7 @@ function DesktopInterfaceManager({
           onDragStart={handleDndKitDragStart}
           onDragEnd={handleDndKitDragEnd}
         >
-          {/* Windows container - positioned for absolute windows */}
-          {/* In normal mode: z-300 (below minimap at z-998) */}
-          {/* In edit mode: z-600 (above minimap at z-200 so windows can be dragged) */}
+          {/* Windows container */}
           <div
             className="fixed inset-0 pointer-events-none"
             style={{ zIndex: isUnlocked && editModeEnabled ? 600 : 300 }}
@@ -2823,17 +1526,12 @@ function DesktopInterfaceManager({
               const visibleWindows = windows.filter((w) => w.visible);
 
               return visibleWindows.map((windowState) => {
-                // Action bar windows don't have tabs - render content directly with drag handle
                 const isActionBar = windowState.id.startsWith("actionbar-");
-                // Menu bar window - entire content is draggable (no header)
                 const isMenuBar = windowState.id === "menubar-window";
-                // Minimap window has no tab bar - just the content
                 const isMinimap = windowState.id === "minimap-window";
-                // Only show TabBar for multi-tab windows
                 const hasMultipleTabs = windowState.tabs.length > 1;
                 const showTabBar =
                   !isActionBar && !isMenuBar && !isMinimap && hasMultipleTabs;
-                // Single-tab windows need draggable content wrapper in edit mode
                 const needsDraggableWrapper =
                   !isActionBar && !isMenuBar && !isMinimap && !hasMultipleTabs;
 
@@ -2861,7 +1559,6 @@ function DesktopInterfaceManager({
                           isUnlocked={isUnlocked && editModeEnabled}
                         />
                       ) : isMinimap ? (
-                        // Minimap gets its own wrapper that passes drag props for the border drag handles
                         <MinimapWrapper
                           world={world}
                           isUnlocked={isUnlocked && editModeEnabled}
@@ -2903,12 +1600,10 @@ function DesktopInterfaceManager({
                 const { id, data } = dndKitActiveItem;
                 const slotSize = 36;
 
-                // Determine what we're dragging and get appropriate icon/content
                 let icon: React.ReactNode = "📦";
                 let label = "";
 
                 if (id.startsWith("inventory-")) {
-                  // Inventory item - get from inventory array or drag data
                   const index = parseInt(id.replace("inventory-", ""), 10);
                   const item =
                     inventory[index] ||
@@ -2919,14 +1614,12 @@ function DesktopInterfaceManager({
                     label = itemData?.name || item.itemId;
                   }
                 } else if (id.startsWith("prayer-")) {
-                  // Prayer
                   const prayerData = data?.prayer as
                     | { icon?: string; name?: string }
                     | undefined;
                   icon = prayerData?.icon || "🙏";
                   label = prayerData?.name || "";
                 } else if (id.startsWith("skill-")) {
-                  // Skill
                   const skillData = data?.skill as
                     | { icon?: string; name?: string }
                     | undefined;
@@ -2962,237 +1655,37 @@ function DesktopInterfaceManager({
         </DndKitContext>
 
         {/* Modal Panels */}
-        {lootWindowData && (
-          <LootWindowPanel
-            visible={lootWindowData.visible}
-            corpseId={lootWindowData.corpseId}
-            corpseName={lootWindowData.corpseName}
-            lootItems={lootWindowData.lootItems}
-            onClose={() => setLootWindowData(null)}
-            world={world}
-          />
-        )}
-
-        {bankData?.visible && (
-          <ModalWindow
-            visible={true}
-            onClose={() => {
-              setBankData(null);
-              world?.network?.send?.("bank_close", {});
-            }}
-            title="Bank"
-            width={900}
-            maxWidth="95vw"
-          >
-            <BankPanel
-              items={bankData.items}
-              tabs={bankData.tabs}
-              alwaysSetPlaceholder={bankData.alwaysSetPlaceholder}
-              maxSlots={bankData.maxSlots}
-              world={world}
-              inventory={inventory}
-              equipment={equipment}
-              coins={coins}
-              onClose={() => {
-                setBankData(null);
-                world?.network?.send?.("bank_close", {});
-              }}
-            />
-          </ModalWindow>
-        )}
-
-        {storeData?.visible && (
-          <ModalWindow
-            visible={true}
-            onClose={() => {
-              setStoreData(null);
-              world?.network?.send?.("store_close", {
-                storeId: storeData.storeId,
-              });
-            }}
-            title={storeData.storeName}
-            width={800}
-          >
-            <StorePanel
-              storeId={storeData.storeId}
-              storeName={storeData.storeName}
-              buybackRate={storeData.buybackRate}
-              items={storeData.items}
-              world={world}
-              inventory={inventory}
-              coins={coins}
-              npcEntityId={storeData.npcEntityId}
-              onClose={() => {
-                setStoreData(null);
-                world?.network?.send?.("store_close", {
-                  storeId: storeData.storeId,
-                });
-              }}
-            />
-          </ModalWindow>
-        )}
-
-        {dialogueData?.visible && (
-          <ModalWindow
-            visible={true}
-            onClose={() => setDialogueData(null)}
-            title={dialogueData.npcName}
-            width={500}
-            closeOnBackdropClick={false}
-          >
-            <DialoguePanel
-              visible={dialogueData.visible}
-              npcName={dialogueData.npcName}
-              npcId={dialogueData.npcId}
-              text={dialogueData.text}
-              responses={dialogueData.responses}
-              npcEntityId={dialogueData.npcEntityId}
-              world={world}
-              onSelectResponse={(_index, response) => {
-                if (!response.nextNodeId) {
-                  setDialogueData(null);
-                }
-              }}
-              onClose={() => {
-                setDialogueData(null);
-                world?.network?.send?.("dialogue_end", {
-                  npcId: dialogueData.npcId,
-                });
-              }}
-            />
-          </ModalWindow>
-        )}
-
-        {smeltingData?.visible && (
-          <ModalWindow
-            visible={true}
-            onClose={() => setSmeltingData(null)}
-            title="Smelting"
-            width={600}
-          >
-            <SmeltingPanel
-              furnaceId={smeltingData.furnaceId}
-              availableBars={smeltingData.availableBars}
-              world={world}
-              onClose={() => setSmeltingData(null)}
-            />
-          </ModalWindow>
-        )}
-
-        {smithingData?.visible && (
-          <ModalWindow
-            visible={true}
-            onClose={() => setSmithingData(null)}
-            title="Smithing"
-            width={700}
-          >
-            <SmithingPanel
-              anvilId={smithingData.anvilId}
-              availableRecipes={smithingData.availableRecipes}
-              world={world}
-              onClose={() => setSmithingData(null)}
-            />
-          </ModalWindow>
-        )}
-
-        {/* World Map - Fullscreen Overlay (RuneScape-style) */}
-        {worldMapOpen && (
-          <FullscreenWorldMap
-            world={world}
-            onClose={() => setWorldMapOpen(false)}
-          />
-        )}
-
-        {/* Stats Modal */}
-        {statsModalOpen && (
-          <ModalWindow
-            visible={true}
-            onClose={() => setStatsModalOpen(false)}
-            title="Character Stats"
-            width={520}
-            maxWidth="95vw"
-          >
-            <StatsPanel
-              stats={playerStats}
-              equipment={equipment}
-              showSilhouette={true}
-            />
-          </ModalWindow>
-        )}
-
-        {/* Items Kept on Death Modal */}
-        {deathModalOpen && (
-          <ModalWindow
-            visible={true}
-            onClose={() => setDeathModalOpen(false)}
-            title="Items Kept on Death"
-            width={400}
-            maxWidth="95vw"
-          >
-            <ItemsKeptOnDeathPanel
-              world={world}
-              equipment={equipment}
-              onClose={() => setDeathModalOpen(false)}
-            />
-          </ModalWindow>
-        )}
-
-        {/* Quest Start Panel */}
-        {questStartData?.visible && (
-          <QuestStartPanel
-            visible={true}
-            questId={questStartData.questId}
-            questName={questStartData.questName}
-            description={questStartData.description}
-            difficulty={questStartData.difficulty}
-            requirements={questStartData.requirements}
-            rewards={questStartData.rewards}
-            onAccept={() => {
-              const localPlayer = world.getPlayer?.();
-              if (localPlayer) {
-                world.emit(EventType.QUEST_START_ACCEPTED, {
-                  playerId: localPlayer.id,
-                  questId: questStartData.questId,
-                });
-              }
-              setQuestStartData(null);
-            }}
-            onDecline={() => {
-              const localPlayer = world.getPlayer?.();
-              if (localPlayer) {
-                world.emit(EventType.QUEST_START_DECLINED, {
-                  playerId: localPlayer.id,
-                  questId: questStartData.questId,
-                });
-              }
-              setQuestStartData(null);
-            }}
-          />
-        )}
-
-        {/* Quest Complete Panel */}
-        {questCompleteData?.visible && (
-          <QuestCompletePanel
-            visible={true}
-            questName={questCompleteData.questName}
-            rewards={questCompleteData.rewards}
-            world={world}
-            onClose={() => setQuestCompleteData(null)}
-          />
-        )}
-
-        {/* XP Lamp Panel */}
-        {xpLampData?.visible && (
-          <XpLampPanel
-            visible={true}
-            world={world}
-            stats={playerStats}
-            xpAmount={xpLampData.xpAmount}
-            itemId={xpLampData.itemId}
-            slot={xpLampData.slot}
-            onClose={() => setXpLampData(null)}
-          />
-        )}
+        <InterfaceModalsRenderer
+          world={world}
+          inventory={inventory}
+          equipment={equipment}
+          coins={coins}
+          playerStats={playerStats}
+          lootWindowData={lootWindowData}
+          bankData={bankData}
+          storeData={storeData}
+          dialogueData={dialogueData}
+          smeltingData={smeltingData}
+          smithingData={smithingData}
+          questStartData={questStartData}
+          questCompleteData={questCompleteData}
+          xpLampData={xpLampData}
+          worldMapOpen={worldMapOpen}
+          statsModalOpen={statsModalOpen}
+          deathModalOpen={deathModalOpen}
+          setLootWindowData={setLootWindowData}
+          setBankData={setBankData}
+          setStoreData={setStoreData}
+          setDialogueData={setDialogueData}
+          setSmeltingData={setSmeltingData}
+          setSmithingData={setSmithingData}
+          setQuestStartData={setQuestStartData}
+          setQuestCompleteData={setQuestCompleteData}
+          setXpLampData={setXpLampData}
+          setWorldMapOpen={setWorldMapOpen}
+          setStatsModalOpen={setStatsModalOpen}
+          setDeathModalOpen={setDeathModalOpen}
+        />
 
         {/* Hold-to-edit lock indicator - always shows when holding L */}
         <div
@@ -3244,7 +1737,7 @@ function DesktopInterfaceManager({
                 stroke="rgba(255, 255, 255, 0.15)"
                 strokeWidth="8"
               />
-              {/* Progress circle - no CSS transition, purely RAF-driven */}
+              {/* Progress circle */}
               <circle
                 cx="70"
                 cy="70"
@@ -3277,7 +1770,7 @@ function DesktopInterfaceManager({
                 color: "#fff",
               }}
             >
-              {/* SVG lock icon instead of emoji for smooth rendering */}
+              {/* SVG lock icon */}
               <svg
                 width="36"
                 height="36"
@@ -3326,399 +1819,6 @@ function DesktopInterfaceManager({
         </div>
       </DndProvider>
     </HintProvider>
-  );
-}
-
-/** Window content renderer */
-interface WindowContentProps {
-  activeTabIndex: number;
-  tabs: WindowState["tabs"];
-  renderPanel: (
-    panelId: string,
-    world?: ClientWorld,
-    windowId?: string,
-  ) => ReactNode;
-  windowId?: string;
-  isUnlocked?: boolean;
-}
-
-function WindowContent({
-  activeTabIndex,
-  tabs,
-  renderPanel,
-  windowId,
-}: WindowContentProps): React.ReactElement | null {
-  const activeTab = tabs[activeTabIndex];
-
-  if (!activeTab) return null;
-
-  // If content is a string (panel ID), use the renderPanel function
-  if (typeof activeTab.content === "string") {
-    const panelContent = renderPanel(activeTab.content, undefined, windowId);
-
-    // Action bars have no padding
-    const isActionBar = activeTab.content.startsWith("actionbar-");
-
-    // Container fills available space, panels handle their own scrolling
-    // Multi-tab windows use TabBar for drop zones, not the content area
-    return (
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          minHeight: 0,
-          overflow: "hidden",
-          padding: isActionBar ? 0 : 4,
-        }}
-      >
-        {panelContent}
-      </div>
-    );
-  }
-
-  // Otherwise render the content directly
-  return <>{activeTab.content}</>;
-}
-
-/** Draggable content wrapper for single-tab windows (no TabBar) */
-interface DraggableContentWrapperProps extends WindowContentProps {
-  windowId: string;
-  dragHandleProps?: {
-    onPointerDown: (e: React.PointerEvent) => void;
-    style: React.CSSProperties;
-  };
-  isUnlocked?: boolean;
-}
-
-function DraggableContentWrapper({
-  windowId,
-  activeTabIndex,
-  tabs,
-  renderPanel,
-  dragHandleProps,
-  isUnlocked,
-}: DraggableContentWrapperProps): React.ReactElement | null {
-  const activeTab = tabs[activeTabIndex];
-  const { mergeWindow, moveTab, isTabDragging, draggingSourceWindowId } =
-    useTabDrag();
-  const theme = useTheme();
-
-  // Check if a window is being dragged (for window-to-window merge)
-  const isDragging = useDragStore((s) => s.isDragging);
-  const dragItem = useDragStore((s) => s.item);
-  const isWindowDragging = isDragging && dragItem?.type === "window";
-  const draggingWindowId = isWindowDragging ? dragItem?.id : null;
-
-  // Get the dragged tab/window info for preview (icon and label)
-  const draggedTabInfo = React.useMemo(() => {
-    if (!dragItem) return null;
-    if (dragItem.type === "tab") {
-      const sourceWindowId = dragItem.sourceId;
-      if (sourceWindowId) {
-        const sourceWindow = useWindowStore
-          .getState()
-          .getWindow(sourceWindowId);
-        const tab = sourceWindow?.tabs.find((t) => t.id === dragItem.id);
-        return { label: tab?.label || dragItem.id, icon: tab?.icon };
-      }
-    } else if (dragItem.type === "window") {
-      const sourceWindow = useWindowStore.getState().getWindow(dragItem.id);
-      return {
-        label: sourceWindow?.tabs[0]?.label || dragItem.id,
-        icon: sourceWindow?.tabs[0]?.icon,
-      };
-    }
-    return null;
-  }, [dragItem]);
-
-  // Show merge zone when dragging a tab or window from another window
-  const isDraggingFromOther =
-    (isTabDragging && draggingSourceWindowId !== windowId) ||
-    (isWindowDragging && draggingWindowId !== windowId);
-  const showMergeZone = isUnlocked && isDraggingFromOther;
-
-  // Header drop zone - only the top header area accepts drops
-  const { isOver, dropProps } = useDrop({
-    id: `window-header-drop-${windowId}`,
-    accepts: ["tab", "window"],
-    disabled: !showMergeZone,
-    onDrop: (item) => {
-      if (item.type === "tab") {
-        if (item.sourceId && item.sourceId !== windowId) {
-          moveTab(item.id, windowId);
-        }
-      } else if (item.type === "window") {
-        if (item.id && item.id !== windowId) {
-          mergeWindow(item.id, windowId);
-        }
-      }
-    },
-  });
-
-  if (!activeTab) return null;
-
-  // Get panel content
-  const panelContent =
-    typeof activeTab.content === "string"
-      ? renderPanel(activeTab.content, undefined, windowId)
-      : activeTab.content;
-
-  // Header height matches TabBar
-  const headerHeight = 28;
-
-  return (
-    <div
-      style={{
-        flex: 1,
-        display: "flex",
-        flexDirection: "column",
-        minHeight: 0,
-        overflow: "hidden",
-      }}
-    >
-      {/* Header drop zone - this is where tabs can be combined */}
-      <div
-        {...dropProps}
-        {...(isUnlocked && dragHandleProps ? dragHandleProps : {})}
-        style={{
-          height: headerHeight,
-          minHeight: headerHeight,
-          display: "flex",
-          alignItems: "center",
-          backgroundColor: isOver
-            ? theme.colors.accent.primary
-            : theme.colors.background.secondary,
-          borderBottom: `1px solid ${theme.colors.border.default}`,
-          cursor: isUnlocked ? "grab" : "default",
-          transition: "background-color 0.15s ease",
-          overflow: "hidden",
-        }}
-      >
-        {/* Tab preview when hovering */}
-        {isOver && draggedTabInfo ? (
-          // Show combined tabs preview (icons only)
-          <div style={{ display: "flex", flex: 1, gap: 4, padding: "0 8px" }}>
-            {/* Current tab icon */}
-            <div
-              style={{
-                padding: "4px 8px",
-                fontSize: theme.typography.fontSize.sm,
-                color: theme.colors.text.primary,
-                backgroundColor: theme.colors.background.tertiary,
-                borderRadius: theme.borderRadius.sm,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              {activeTab.icon || activeTab.label.charAt(0)}
-            </div>
-            {/* Incoming tab icon (preview) */}
-            <div
-              style={{
-                padding: "4px 8px",
-                fontSize: theme.typography.fontSize.sm,
-                color: theme.colors.text.secondary,
-                backgroundColor: theme.colors.background.secondary,
-                borderRadius: theme.borderRadius.sm,
-                opacity: 0.8,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              {draggedTabInfo.icon || draggedTabInfo.label?.charAt(0) || "+"}
-            </div>
-          </div>
-        ) : (
-          // Normal header with current tab (icon only)
-          <div
-            style={{
-              padding: "4px 12px",
-              fontSize: theme.typography.fontSize.sm,
-              color: theme.colors.text.primary,
-              flex: 1,
-              display: "flex",
-              alignItems: "center",
-            }}
-          >
-            {activeTab.icon || activeTab.label.charAt(0)}
-          </div>
-        )}
-      </div>
-      {/* Panel content */}
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          minHeight: 0,
-          overflow: "hidden",
-        }}
-      >
-        {panelContent}
-      </div>
-    </div>
-  );
-}
-
-/** Action bar wrapper that makes the entire content area draggable */
-interface ActionBarWrapperProps extends WindowContentProps {
-  dragHandleProps?: {
-    onPointerDown: (e: React.PointerEvent) => void;
-    style: React.CSSProperties;
-  };
-  isUnlocked?: boolean;
-}
-
-function ActionBarWrapper({
-  activeTabIndex,
-  tabs,
-  renderPanel,
-  dragHandleProps,
-  isUnlocked,
-  windowId,
-}: ActionBarWrapperProps): React.ReactElement | null {
-  const activeTab = tabs[activeTabIndex];
-  if (!activeTab) return null;
-
-  const panelContent =
-    typeof activeTab.content === "string"
-      ? renderPanel(activeTab.content, undefined, windowId)
-      : activeTab.content;
-
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "flex-start",
-        justifyContent: "flex-start",
-        cursor: isUnlocked ? "move" : "default",
-        touchAction: isUnlocked ? "none" : "auto",
-        overflow: "hidden",
-      }}
-      onPointerDown={isUnlocked ? dragHandleProps?.onPointerDown : undefined}
-    >
-      {panelContent}
-    </div>
-  );
-}
-
-/** Menu bar wrapper that makes the entire content area draggable */
-interface MenuBarWrapperProps extends WindowContentProps {
-  dragHandleProps?: {
-    onPointerDown: (e: React.PointerEvent) => void;
-    style: React.CSSProperties;
-  };
-  isUnlocked?: boolean;
-}
-
-function MenuBarWrapper({
-  activeTabIndex,
-  tabs,
-  renderPanel,
-  dragHandleProps,
-  isUnlocked,
-  windowId,
-}: MenuBarWrapperProps): React.ReactElement | null {
-  const activeTab = tabs[activeTabIndex];
-  if (!activeTab) return null;
-
-  const panelContent =
-    typeof activeTab.content === "string"
-      ? renderPanel(activeTab.content, undefined, windowId)
-      : activeTab.content;
-
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "flex-start",
-        justifyContent: "flex-start",
-        cursor: isUnlocked ? "move" : "default",
-        touchAction: isUnlocked ? "none" : "auto",
-        overflow: "hidden",
-      }}
-      onPointerDown={isUnlocked ? dragHandleProps?.onPointerDown : undefined}
-    >
-      {panelContent}
-    </div>
-  );
-}
-
-/** Minimap wrapper that passes drag props to the Minimap component for edit mode dragging */
-interface MinimapWrapperProps {
-  world: ClientWorld;
-  dragHandleProps?: {
-    onPointerDown: (e: React.PointerEvent) => void;
-    style: React.CSSProperties;
-  };
-  isUnlocked?: boolean;
-}
-
-function MinimapWrapper({
-  world,
-  dragHandleProps,
-  isUnlocked,
-}: MinimapWrapperProps): React.ReactElement {
-  const containerRef = React.useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = React.useState<{
-    width: number;
-    height: number;
-  }>({ width: 200, height: 200 });
-
-  React.useEffect(() => {
-    const updateDimensions = () => {
-      if (containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect();
-        const width = Math.floor(rect.width);
-        const height = Math.floor(rect.height);
-        if (width > 10 && height > 10) {
-          setDimensions((prev) => {
-            if (prev.width !== width || prev.height !== height) {
-              return { width, height };
-            }
-            return prev;
-          });
-        }
-      }
-    };
-
-    updateDimensions();
-    const observer = new ResizeObserver(updateDimensions);
-    if (containerRef.current) {
-      observer.observe(containerRef.current);
-    }
-    return () => observer.disconnect();
-  }, []);
-
-  return (
-    <div
-      ref={containerRef}
-      style={{
-        flex: 1,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        minWidth: 0,
-        minHeight: 0,
-        overflow: "hidden",
-      }}
-    >
-      <Minimap
-        key={`minimap-${dimensions.width}-${dimensions.height}`}
-        world={world}
-        width={dimensions.width}
-        height={dimensions.height}
-        zoom={50}
-        isVisible={true}
-        resizable={false}
-        embedded={true}
-        dragHandleProps={dragHandleProps}
-        isUnlocked={isUnlocked}
-      />
-    </div>
   );
 }
 

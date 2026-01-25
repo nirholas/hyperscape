@@ -1,5 +1,5 @@
-import { GAME_API_URL } from "@/lib/api-config";
 import React, { useState, useRef, useEffect } from "react";
+import { apiClient } from "@/lib/api-client";
 import { Send, Bot, User, MoreVertical, Mic } from "lucide-react";
 import type { Agent } from "./types";
 import { QuickActionMenu } from "./QuickActionMenu";
@@ -50,33 +50,28 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agent }) => {
     setIsTyping(true);
 
     try {
-      const response = await fetch(
-        `${GAME_API_URL}/api/agents/${agent.id}/message`,
+      const result = await apiClient.post<ElizaOSResponse | ElizaOSResponse[]>(
+        `/api/agents/${agent.id}/message`,
         {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            content: userMessage.text,
-            userId: localStorage.getItem("privy_user_id") || "anonymous-user",
-          }),
+          content: userMessage.text,
+          userId: localStorage.getItem("privy_user_id") || "anonymous-user",
         },
       );
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+      if (!result.ok) {
+        throw new Error(result.error || `HTTP ${result.status}`);
       }
 
-      const data = await response.json();
       // ElizaOS returns an array of messages
-      const responses = Array.isArray(data) ? data : [data];
+      const responses = Array.isArray(result.data)
+        ? result.data
+        : [result.data];
 
-      responses.forEach((resp: ElizaOSResponse, index: number) => {
+      responses.forEach((resp: ElizaOSResponse | null, index: number) => {
         const agentMessage: Message = {
           id: (Date.now() + index).toString(),
           sender: "agent",
-          text: resp.text || resp.content || "No response",
+          text: resp?.text || resp?.content || "No response",
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, agentMessage]);
@@ -205,7 +200,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agent }) => {
             onCommandSend={(command) => {
               setInputValue(command);
               // Auto-send the command
-              setTimeout(() => {
+              setTimeout(async () => {
                 const userMessage: Message = {
                   id: Date.now().toString(),
                   sender: "user",
@@ -214,40 +209,40 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agent }) => {
                 };
                 setMessages((prev) => [...prev, userMessage]);
                 setIsTyping(true);
-                fetch(`${GAME_API_URL}/api/agents/${agent.id}/message`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
+                try {
+                  const result = await apiClient.post<
+                    ElizaOSResponse | ElizaOSResponse[]
+                  >(`/api/agents/${agent.id}/message`, {
                     content: command,
                     userId:
                       localStorage.getItem("privy_user_id") || "anonymous-user",
-                  }),
-                })
-                  .then((res) => res.json())
-                  .then((data) => {
-                    const responses = Array.isArray(data) ? data : [data];
+                  });
+
+                  if (result.ok && result.data) {
+                    const responses = Array.isArray(result.data)
+                      ? result.data
+                      : [result.data];
                     responses.forEach(
                       (
-                        resp: { text?: string; content?: string },
+                        resp: { text?: string; content?: string } | null,
                         index: number,
                       ) => {
                         const agentMessage: Message = {
                           id: (Date.now() + index).toString(),
                           sender: "agent",
-                          text: resp.text || resp.content || "Command sent",
+                          text: resp?.text || resp?.content || "Command sent",
                           timestamp: new Date(),
                         };
                         setMessages((prev) => [...prev, agentMessage]);
                       },
                     );
-                  })
-                  .catch((err) => {
-                    console.error("Failed to send command:", err);
-                  })
-                  .finally(() => {
-                    setIsTyping(false);
-                    setInputValue("");
-                  });
+                  }
+                } catch (err) {
+                  console.error("Failed to send command:", err);
+                } finally {
+                  setIsTyping(false);
+                  setInputValue("");
+                }
               }, 0);
             }}
           />

@@ -1,5 +1,9 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   plugins: [react() as never],
@@ -22,8 +26,14 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      // Path alias to match vite.config.ts
+      "@": path.resolve(__dirname, "src"),
       // Use actual shared package - per project rules, no mocks allowed
       // Tests should use real Hyperscape instances with Playwright
+      "@hyperscape/shared": path.resolve(
+        __dirname,
+        "../shared/build/framework.client.js",
+      ),
     },
   },
 });

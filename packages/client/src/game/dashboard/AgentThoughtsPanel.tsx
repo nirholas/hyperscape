@@ -1,5 +1,5 @@
-import { GAME_API_URL } from "@/lib/api-config";
 import React, { useState, useEffect, useRef } from "react";
+import { apiClient } from "@/lib/api-client";
 import { Agent } from "../../screens/DashboardScreen";
 import { ChevronDown, ChevronUp, Scroll, Clock, RefreshCw } from "lucide-react";
 
@@ -94,21 +94,21 @@ export const AgentThoughtsPanel: React.FC<AgentThoughtsPanelProps> = ({
         lastTimestampRef.current > 0
           ? `&since=${lastTimestampRef.current}`
           : "";
-      const response = await fetch(
-        `${GAME_API_URL}/api/agents/${agent.id}/thoughts?limit=${MAX_THOUGHTS_DISPLAYED}${sinceParam}`,
+      const result = await apiClient.get<{ thoughts?: AgentThought[] }>(
+        `/api/agents/${agent.id}/thoughts?limit=${MAX_THOUGHTS_DISPLAYED}${sinceParam}`,
       );
 
-      if (!response.ok) {
-        if (response.status === 503) {
+      if (!result.ok) {
+        if (result.status === 503) {
           setError("Service not ready");
           return;
         }
-        throw new Error(`Failed: ${response.status}`);
+        throw new Error(`Failed: ${result.error || result.status}`);
       }
 
-      const data = await response.json();
+      const data = result.data;
 
-      if (data.thoughts && data.thoughts.length > 0) {
+      if (data?.thoughts && data.thoughts.length > 0) {
         lastTimestampRef.current = data.thoughts[0].timestamp;
 
         // Check if there's a new thought
@@ -123,7 +123,7 @@ export const AgentThoughtsPanel: React.FC<AgentThoughtsPanelProps> = ({
 
         setThoughts((prev) => {
           const existingIds = new Set(prev.map((t) => t.id));
-          const newThoughts = data.thoughts.filter(
+          const newThoughts = data.thoughts!.filter(
             (t: AgentThought) => !existingIds.has(t.id),
           );
 
@@ -131,7 +131,7 @@ export const AgentThoughtsPanel: React.FC<AgentThoughtsPanelProps> = ({
             return [...newThoughts, ...prev].slice(0, MAX_THOUGHTS_DISPLAYED);
           }
 
-          return data.thoughts.slice(0, MAX_THOUGHTS_DISPLAYED);
+          return data.thoughts!.slice(0, MAX_THOUGHTS_DISPLAYED);
         });
       }
 

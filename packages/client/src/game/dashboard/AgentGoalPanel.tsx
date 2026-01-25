@@ -1,5 +1,5 @@
-import { GAME_API_URL } from "@/lib/api-config";
 import React, { useState, useEffect } from "react";
+import { apiClient } from "@/lib/api-client";
 import type { Agent } from "./types";
 import {
   ChevronDown,
@@ -27,45 +27,6 @@ const GOAL_POLL_INTERVAL_MS = 10000; // Poll every 10 seconds to avoid rate limi
 const MAX_RECENT_GOALS = 5; // Maximum number of recent goals to track
 const MIN_ELAPSED_MS_FOR_ESTIMATE = 5000; // Minimum elapsed time before showing time estimate
 const MIN_PROGRESS_FOR_ESTIMATE = 1; // Minimum progress percentage for time estimate
-const MAX_RETRY_ATTEMPTS = 3; // Maximum retry attempts for failed requests
-const RETRY_DELAY_MS = 1000; // Base delay between retries (exponential backoff)
-
-/**
- * Fetch with retry logic and exponential backoff
- */
-async function fetchWithRetry(
-  url: string,
-  options?: RequestInit,
-  maxRetries = MAX_RETRY_ATTEMPTS,
-): Promise<Response> {
-  let lastError: Error | null = null;
-
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      const response = await fetch(url, options);
-      if (response.ok || response.status === 503) {
-        // Return on success or service unavailable (handled by caller)
-        return response;
-      }
-      // Don't retry on client errors (4xx)
-      if (response.status >= 400 && response.status < 500) {
-        return response;
-      }
-      lastError = new Error(`HTTP ${response.status}`);
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-    }
-
-    // Exponential backoff before retry
-    if (attempt < maxRetries - 1) {
-      await new Promise((resolve) =>
-        setTimeout(resolve, RETRY_DELAY_MS * Math.pow(2, attempt)),
-      );
-    }
-  }
-
-  throw lastError || new Error("Request failed after retries");
-}
 
 interface Goal {
   type: string;
@@ -140,23 +101,25 @@ export const AgentGoalPanel: React.FC<AgentGoalPanelProps> = ({
 
   const fetchGoal = async () => {
     try {
-      // Call Hyperscape server API with retry logic
-      const response = await fetchWithRetry(
-        `${GAME_API_URL}/api/agents/${agent.id}/goal`,
-      );
+      // Call Hyperscape server API
+      const result = await apiClient.get<{
+        goal?: Goal;
+        availableGoals?: AvailableGoal[];
+        goalsPaused?: boolean;
+      }>(`/api/agents/${agent.id}/goal`);
 
-      if (!response.ok) {
-        if (response.status === 503) {
+      if (!result.ok) {
+        if (result.status === 503) {
           setError("Service not ready");
           return;
         }
-        throw new Error(`Failed: ${response.status}`);
+        throw new Error(`Failed: ${result.error || result.status}`);
       }
 
-      const data = await response.json();
+      const data = result.data;
 
       // Track goal changes for history
-      if (data.goal && lastGoalType && lastGoalType !== data.goal.type) {
+      if (data?.goal && lastGoalType && lastGoalType !== data.goal.type) {
         // Previous goal completed or changed
         setRecentGoals((prev) => {
           const newGoal: RecentGoal = {
@@ -169,13 +132,13 @@ export const AgentGoalPanel: React.FC<AgentGoalPanelProps> = ({
         });
       }
 
-      if (data.goal) {
+      if (data?.goal) {
         setLastGoalType(data.goal.type);
       }
 
-      setGoal(data.goal);
-      setAvailableGoals(data.availableGoals || []);
-      setGoalsPaused(data.goalsPaused || false);
+      setGoal(data?.goal || null);
+      setAvailableGoals(data?.availableGoals || []);
+      setGoalsPaused(data?.goalsPaused || false);
       setError(null);
     } catch (err) {
       console.error("[AgentGoalPanel] Error fetching goal:", err);
@@ -190,18 +153,13 @@ export const AgentGoalPanel: React.FC<AgentGoalPanelProps> = ({
 
     setSettingGoal(true);
     try {
-      const response = await fetch(
-        `${GAME_API_URL}/api/agents/${agent.id}/goal`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ goalId: selectedGoalId }),
-        },
+      const result = await apiClient.post<{ error?: string }>(
+        `/api/agents/${agent.id}/goal`,
+        { goalId: selectedGoalId },
       );
 
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || "Failed to set goal");
+      if (!result.ok) {
+        throw new Error(result.error || "Failed to set goal");
       }
 
       // Success - close selector and refresh
@@ -218,14 +176,12 @@ export const AgentGoalPanel: React.FC<AgentGoalPanelProps> = ({
 
   const handleUnlockGoal = async () => {
     try {
-      const response = await fetch(
-        `${GAME_API_URL}/api/agents/${agent.id}/goal/unlock`,
-        { method: "POST" },
+      const result = await apiClient.post<{ error?: string }>(
+        `/api/agents/${agent.id}/goal/unlock`,
       );
 
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || "Failed to unlock goal");
+      if (!result.ok) {
+        throw new Error(result.error || "Failed to unlock goal");
       }
 
       await fetchGoal();
@@ -237,14 +193,12 @@ export const AgentGoalPanel: React.FC<AgentGoalPanelProps> = ({
 
   const handleStopGoal = async () => {
     try {
-      const response = await fetch(
-        `${GAME_API_URL}/api/agents/${agent.id}/goal/stop`,
-        { method: "POST" },
+      const result = await apiClient.post<{ error?: string }>(
+        `/api/agents/${agent.id}/goal/stop`,
       );
 
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || "Failed to stop goal");
+      if (!result.ok) {
+        throw new Error(result.error || "Failed to stop goal");
       }
 
       await fetchGoal();
@@ -256,14 +210,12 @@ export const AgentGoalPanel: React.FC<AgentGoalPanelProps> = ({
 
   const handleResumeGoal = async () => {
     try {
-      const response = await fetch(
-        `${GAME_API_URL}/api/agents/${agent.id}/goal/resume`,
-        { method: "POST" },
+      const result = await apiClient.post<{ error?: string }>(
+        `/api/agents/${agent.id}/goal/resume`,
       );
 
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || "Failed to resume goals");
+      if (!result.ok) {
+        throw new Error(result.error || "Failed to resume goals");
       }
 
       await fetchGoal();

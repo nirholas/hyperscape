@@ -1,5 +1,5 @@
-import { GAME_API_URL } from "@/lib/api-config";
 import React, { useState, useEffect, useRef } from "react";
+import { apiClient } from "@/lib/api-client";
 import type { Agent } from "./types";
 import {
   ChevronDown,
@@ -44,6 +44,17 @@ interface AgentActivityPanelProps {
   isViewportActive: boolean;
 }
 
+/** Window extension for exposing addAgentActivity to parent components */
+type WindowWithAgentActivity = Window &
+  typeof globalThis & {
+    addAgentActivity?: (
+      type: ActivityEvent["type"],
+      description: string,
+      xpGained?: number,
+      details?: ActivityEvent["details"],
+    ) => void;
+  };
+
 export const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
   agent,
   isViewportActive,
@@ -83,32 +94,30 @@ export const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
   const fetchActivity = async () => {
     try {
       // Try to fetch activity from the server
-      const response = await fetch(
-        `${GAME_API_URL}/api/agents/${agent.id}/activity`,
-      );
+      const result = await apiClient.get<{
+        recentActions?: {
+          type: string;
+          description: string;
+          xpGained?: number;
+          timestamp: number;
+        }[];
+        sessionStats?: SessionStats;
+      }>(`/api/agents/${agent.id}/activity`);
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data.recentActions) {
+      if (result.ok && result.data) {
+        if (result.data.recentActions) {
           // Map server actions to our format
-          const newActivities = data.recentActions.map(
-            (action: {
-              type: string;
-              description: string;
-              xpGained?: number;
-              timestamp: number;
-            }) => ({
-              id: `server-${action.timestamp}`,
-              type: action.type,
-              description: action.description,
-              xpGained: action.xpGained,
-              timestamp: action.timestamp,
-            }),
-          );
+          const newActivities = result.data.recentActions.map((action) => ({
+            id: `server-${action.timestamp}`,
+            type: action.type as ActivityEvent["type"],
+            description: action.description,
+            xpGained: action.xpGained,
+            timestamp: action.timestamp,
+          }));
           setActivities(newActivities);
         }
-        if (data.sessionStats) {
-          setSessionStats(data.sessionStats);
+        if (result.data.sessionStats) {
+          setSessionStats(result.data.sessionStats);
         }
         setError(null);
       }
@@ -169,9 +178,8 @@ export const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
 
   // Expose addActivity via ref for parent components
   // This would be used when we integrate with WebSocket events
-  (
-    window as unknown as { addAgentActivity?: typeof addActivity }
-  ).addAgentActivity = addActivity;
+  // Window extension is declared globally in embeddedConfig.ts
+  (window as WindowWithAgentActivity).addAgentActivity = addActivity;
 
   // Don't show if agent is inactive
   if (agent.status !== "active") {

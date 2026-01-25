@@ -34,3 +34,4 @@ export {
   type RetryOptions,
   type RetryResult,
 } from "./retry";
+export { logger } from "./logger";

@@ -287,12 +287,31 @@ export const MapLegend = memo(function MapLegend({
       <div
         style={headerStyle}
         onClick={handleHeaderClick}
+        onKeyDown={
+          collapsible
+            ? (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  handleHeaderClick();
+                }
+              }
+            : undefined
+        }
         role={collapsible ? "button" : undefined}
         aria-expanded={collapsible ? !collapsed : undefined}
+        aria-label={
+          collapsible
+            ? `${title}${collapsed ? ", collapsed" : ", expanded"}`
+            : undefined
+        }
         tabIndex={collapsible ? 0 : undefined}
       >
         <span style={titleStyle}>{title}</span>
-        {collapsible && <span style={collapseIconStyle}>▼</span>}
+        {collapsible && (
+          <span style={collapseIconStyle} aria-hidden="true">
+            ▼
+          </span>
+        )}
       </div>
 
       {/* Content */}

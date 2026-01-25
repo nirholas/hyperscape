@@ -224,9 +224,12 @@ export function GameClient({ wsUrl, onSetup }: GameClientProps) {
         }
       `}</style>
       <div
+        id="game-canvas"
         className="App__viewport"
         ref={viewportRef}
         data-component="viewport"
+        aria-label="Game Canvas"
+        role="application"
       >
         <div className="App__ui" ref={uiRef} data-component="ui">
           <CoreUI world={world} />

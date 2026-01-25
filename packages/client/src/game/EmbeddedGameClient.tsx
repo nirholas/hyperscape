@@ -11,6 +11,7 @@ import type { EmbeddedViewportConfig } from "../types/embeddedConfig";
 import { getEmbeddedConfig, getQualityPreset } from "../types/embeddedConfig";
 import type { World } from "@hyperscape/shared";
 import { EventType } from "@hyperscape/shared";
+import { logger } from "../lib/logger";
 
 /** Cleanup function type returned by setup functions */
 type CleanupFn = () => void;
@@ -36,7 +37,7 @@ function disablePlayerControls(world: World) {
     return true;
   }
 
-  console.warn(
+  logger.warn(
     "[EmbeddedGameClient] Could not disable controls - client-input system not found or missing disable method",
   );
   return false;
@@ -66,7 +67,7 @@ function setupSpectatorCamera(
   // 2. The client-input system may not be fully initialized
   // 3. Spectators are read-only viewers by design
   if (config.mode === "spectator") {
-    console.log(
+    logger.log(
       "[EmbeddedGameClient] Spectator mode - player controls not applicable (no local player)",
     );
   }
@@ -74,7 +75,7 @@ function setupSpectatorCamera(
   const targetEntityId = config.followEntity || config.characterId;
 
   if (!targetEntityId) {
-    console.warn("[EmbeddedGameClient] No entity to follow specified");
+    logger.warn("[EmbeddedGameClient] No entity to follow specified");
     return () => {
       isCleanedUp = true;
       timeoutIds.forEach(clearTimeout);
@@ -291,9 +292,7 @@ export function EmbeddedGameClient() {
 
     if (!embeddedConfig) {
       setError("No embedded configuration found");
-      console.error(
-        "[EmbeddedGameClient] Missing window.__HYPERSCAPE_CONFIG__",
-      );
+      logger.error("[EmbeddedGameClient] Missing window.__HYPERSCAPE_CONFIG__");
       return;
     }
 
@@ -301,7 +300,7 @@ export function EmbeddedGameClient() {
     // Server verifies the token and checks character ownership for security
     if (!embeddedConfig.authToken) {
       setError("Authentication required - please log in to view this viewport");
-      console.error("[EmbeddedGameClient] Missing authToken in config");
+      logger.error("[EmbeddedGameClient] Missing authToken in config");
       return;
     }
 
@@ -368,12 +367,14 @@ export function EmbeddedGameClient() {
     );
   }
 
-  // Build WebSocket URL with authentication
-  // SECURITY: authToken is always required - server verifies identity server-side
+  // Build WebSocket URL WITHOUT authentication token in URL
+  // SECURITY: authToken is NOT included in URL (leaks via logs, browser history, referrer headers)
+  // Instead, ClientNetwork sends authentication as first message after connection opens
+  // The auth credentials are passed via window.__HYPERSCAPE_CONFIG__ which ClientNetwork reads
   const wsUrl =
     config.mode === "spectator"
-      ? `${config.wsUrl}?mode=spectator&authToken=${encodeURIComponent(config.authToken)}&followEntity=${encodeURIComponent(config.followEntity || config.characterId || "")}&characterId=${encodeURIComponent(config.characterId || "")}&privyUserId=${encodeURIComponent(config.privyUserId || "")}`
-      : `${config.wsUrl}?authToken=${encodeURIComponent(config.authToken)}`;
+      ? `${config.wsUrl}?mode=spectator&followEntity=${encodeURIComponent(config.followEntity || config.characterId || "")}&characterId=${encodeURIComponent(config.characterId || "")}`
+      : config.wsUrl;
 
   return (
     <div

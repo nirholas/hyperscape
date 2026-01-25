@@ -589,8 +589,11 @@ export const Window = memo(function Window({
       className={className}
       style={containerStyle}
       onClick={bringToFront}
+      onFocus={bringToFront}
       data-window-id={windowId}
       data-panel={windowId}
+      role="dialog"
+      aria-label={`Window: ${windowId}`}
     >
       {/* No title bar - TabBar serves as the header with drag functionality */}
       <div style={contentStyle}>

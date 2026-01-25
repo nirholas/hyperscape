@@ -47,6 +47,52 @@ export {
   type XpLampData,
 } from "@/hooks";
 
+// Interface event hooks
+export {
+  useWorldMapHotkey,
+  useUIUpdateEvents,
+  useOpenPaneEvent,
+  useInterfaceUIState,
+} from "./useInterfaceEvents";
+
+// Interface modals
+export {
+  FullscreenWorldMap,
+  ItemsKeptOnDeathPanel,
+  InterfaceModalsRenderer,
+  type InterfaceModalsRendererProps,
+} from "./InterfaceModals";
+
+// Interface panels (window content helpers)
+export {
+  WindowContent,
+  DraggableContentWrapper,
+  ActionBarWrapper,
+  MenuBarWrapper,
+  MinimapWrapper,
+} from "./InterfacePanels";
+
+// Interface types
+export {
+  PANEL_ICONS,
+  getPanelIcon,
+  MAX_ACTION_BARS,
+  DEFAULT_GRID_SIZE,
+  TAB_BAR_HEIGHT,
+  snapToGrid,
+  clampPosition,
+  type InterfaceManagerProps,
+  type PanelRenderer,
+  type DragHandleProps,
+  type WindowContentProps,
+  type DraggableContentWrapperProps,
+  type ActionBarWrapperProps,
+  type MenuBarWrapperProps,
+  type MinimapWrapperProps,
+  type InterfaceUIState,
+  type InterfaceUIStateSetters,
+} from "./types";
+
 // Mobile interface components
 export { MobileInterfaceManager } from "./MobileInterfaceManager";
 export { CompactStatusHUD } from "./CompactStatusHUD";

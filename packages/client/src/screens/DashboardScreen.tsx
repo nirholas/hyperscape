@@ -1,5 +1,5 @@
-import { GAME_API_URL } from "@/lib/api-config";
 import React, { useEffect, useState, useRef } from "react";
+import { apiClient } from "@/lib/api-client";
 import { DashboardLayout } from "../game/dashboard/DashboardLayout";
 import { AgentChat } from "../game/dashboard/AgentChat";
 import { AgentViewportChat } from "../game/dashboard/AgentViewportChat";
@@ -86,20 +86,20 @@ export const DashboardScreen: React.FC = () => {
 
       if (userAccountId) {
         try {
-          const mappingResponse = await fetch(
-            `${GAME_API_URL}/api/agents/mappings/${userAccountId}`,
+          const mappingResult = await apiClient.get<{ agentIds?: string[] }>(
+            `/api/agents/mappings/${userAccountId}`,
           );
 
-          if (mappingResponse.ok) {
-            const mappingData = await mappingResponse.json();
-            userAgentIds = mappingData.agentIds || [];
+          if (mappingResult.ok && mappingResult.data) {
+            userAgentIds = mappingResult.data.agentIds || [];
             console.log(
               `[Dashboard] Found ${userAgentIds.length} agent mapping(s) for user ${userAccountId}`,
               userAgentIds,
             );
           } else {
             console.warn(
-              "[Dashboard] Failed to fetch agent mappings from Hyperscape",
+              "[Dashboard] Failed to fetch agent mappings from Hyperscape:",
+              mappingResult.error,
             );
           }
         } catch (err) {
@@ -273,17 +273,19 @@ export const DashboardScreen: React.FC = () => {
         `[Dashboard] 📋 Fetching mapping data for rollback protection...`,
       );
       try {
-        const getMappingResponse = await fetch(
-          `${GAME_API_URL}/api/agents/mappings/${agentId}`,
-        );
+        const getMappingResult = await apiClient.get<{
+          agentId?: string;
+          accountId?: string;
+          characterId?: string;
+          agentName?: string;
+        }>(`/api/agents/mappings/${agentId}`);
 
-        if (getMappingResponse.ok) {
-          const mappingData = await getMappingResponse.json();
+        if (getMappingResult.ok && getMappingResult.data) {
           deletedMapping = {
-            agentId: mappingData.agentId || agentId,
-            accountId: mappingData.accountId || userAccountId || "",
-            characterId: mappingData.characterId || "",
-            agentName: mappingData.agentName || "Unknown Agent",
+            agentId: getMappingResult.data.agentId || agentId,
+            accountId: getMappingResult.data.accountId || userAccountId || "",
+            characterId: getMappingResult.data.characterId || "",
+            agentName: getMappingResult.data.agentName || "Unknown Agent",
           };
           console.log(
             `[Dashboard] ✅ Mapping data cached for rollback:`,
@@ -291,7 +293,7 @@ export const DashboardScreen: React.FC = () => {
           );
         } else {
           console.warn(
-            `[Dashboard] ⚠️  Could not fetch mapping data (HTTP ${getMappingResponse.status}) - proceeding without rollback protection`,
+            `[Dashboard] ⚠️  Could not fetch mapping data (${getMappingResult.error || getMappingResult.status}) - proceeding without rollback protection`,
           );
         }
       } catch (fetchError) {
@@ -306,16 +308,13 @@ export const DashboardScreen: React.FC = () => {
       console.log(
         `[Dashboard] 🗑️  Step 1/2: Deleting mapping from Hyperscape database...`,
       );
-      const mappingResponse = await fetch(
-        `${GAME_API_URL}/api/agents/mappings/${agentId}`,
-        {
-          method: "DELETE",
-        },
+      const mappingDeleteResult = await apiClient.delete(
+        `/api/agents/mappings/${agentId}`,
       );
 
-      if (!mappingResponse.ok) {
+      if (!mappingDeleteResult.ok) {
         throw new Error(
-          `Failed to delete agent mapping from Hyperscape: HTTP ${mappingResponse.status}`,
+          `Failed to delete agent mapping from Hyperscape: ${mappingDeleteResult.error || mappingDeleteResult.status}`,
         );
       }
 
@@ -360,22 +359,18 @@ export const DashboardScreen: React.FC = () => {
         );
 
         try {
-          const rollbackResponse = await fetch(
-            `${GAME_API_URL}/api/agents/mappings`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(deletedMapping),
-            },
+          const rollbackResult = await apiClient.post(
+            "/api/agents/mappings",
+            deletedMapping,
           );
 
-          if (rollbackResponse.ok) {
+          if (rollbackResult.ok) {
             console.log(
               `[Dashboard] ✅ Mapping rollback successful - agent restored in dashboard`,
             );
           } else {
             console.error(
-              `[Dashboard] ❌ Mapping rollback failed: HTTP ${rollbackResponse.status} - ghost agent may appear`,
+              `[Dashboard] ❌ Mapping rollback failed: ${rollbackResult.error || rollbackResult.status} - ghost agent may appear`,
             );
           }
         } catch (rollbackError) {

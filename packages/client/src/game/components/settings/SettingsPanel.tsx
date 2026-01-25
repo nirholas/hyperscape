@@ -574,7 +574,14 @@ function ProfileModal({
   };
 
   return (
-    <div style={overlayStyle} onClick={onClose}>
+    <div
+      style={overlayStyle}
+      onClick={onClose}
+      onKeyDown={(e) => e.key === "Escape" && onClose()}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Settings Profiles"
+    >
       <div style={modalStyle} onClick={(e) => e.stopPropagation()}>
         <div style={headerStyle}>
           <h3

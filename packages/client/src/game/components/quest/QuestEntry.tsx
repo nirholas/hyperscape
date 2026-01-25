@@ -126,6 +126,23 @@ export const QuestEntry = memo(function QuestEntry({
     [onClick, quest, compact, toggleExpanded],
   );
 
+  // Handle keyboard on header
+  const handleHeaderKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (onClick) {
+          onClick(quest);
+        }
+        if (!compact) {
+          toggleExpanded();
+        }
+      }
+    },
+    [onClick, quest, compact, toggleExpanded],
+  );
+
   // Handle pin button click
   const handlePinClick = useCallback(
     (e: React.MouseEvent) => {
@@ -380,7 +397,16 @@ export const QuestEntry = memo(function QuestEntry({
   return (
     <div className={className} style={containerStyle}>
       {/* Header */}
-      <div style={headerStyle} onClick={handleHeaderClick}>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={!compact ? isExpanded : undefined}
+        aria-controls={!compact ? `quest-content-${quest.id}` : undefined}
+        aria-label={`Quest: ${quest.title}${!compact ? (isExpanded ? ", expanded" : ", collapsed") : ""}`}
+        style={headerStyle}
+        onClick={handleHeaderClick}
+        onKeyDown={handleHeaderKeyDown}
+      >
         {/* Expand indicator (non-compact) */}
         {!compact && (
           <div style={expandIndicatorStyle}>
@@ -453,7 +479,7 @@ export const QuestEntry = memo(function QuestEntry({
 
       {/* Expanded content */}
       {isExpanded && !compact && (
-        <div style={contentStyle}>
+        <div id={`quest-content-${quest.id}`} style={contentStyle}>
           {/* Description */}
           <p style={descriptionStyle}>{quest.description}</p>
 

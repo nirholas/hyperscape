@@ -5,9 +5,10 @@
  * Similar to the native ElizaOS character creation UI
  */
 
-import { GAME_API_URL, GAME_WS_URL } from "@/lib/api-config";
+import { GAME_WS_URL } from "@/lib/api-config";
 import React from "react";
 import { Save, X, ArrowLeft } from "lucide-react";
+import { apiClient } from "@/lib/api-client";
 import { ArrayInput } from "../game/character/ArrayInput";
 import {
   generateCharacterTemplate,
@@ -41,31 +42,28 @@ async function generateJWTWithRetry(
         `[CharacterEditor] JWT generation attempt ${attempt}/${maxRetries}...`,
       );
 
-      const credResponse = await fetch(
-        `${GAME_API_URL}/api/agents/credentials`,
+      const credResult = await apiClient.post<{ authToken: string }>(
+        "/api/agents/credentials",
         {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            characterId,
-            accountId,
-          }),
+          characterId,
+          accountId,
         },
       );
 
-      if (!credResponse.ok) {
-        throw new Error(`JWT generation failed: HTTP ${credResponse.status}`);
+      if (!credResult.ok || !credResult.data) {
+        throw new Error(
+          `JWT generation failed: ${credResult.error || credResult.status}`,
+        );
       }
 
-      const credentials = await credResponse.json();
-      if (!credentials.authToken) {
+      if (!credResult.data.authToken) {
         throw new Error("JWT generation failed: No token in response");
       }
 
       console.log(
         `[CharacterEditor] ✅ JWT generated successfully on attempt ${attempt}`,
       );
-      return credentials.authToken;
+      return credResult.data.authToken;
     } catch (error) {
       lastError = error as Error;
       console.warn(
@@ -436,23 +434,16 @@ export const CharacterEditorScreen: React.FC = () => {
 
           // Save agent mapping to Hyperscape database (CRITICAL - rollback if fails)
           try {
-            const mappingResponse = await fetch(
-              `${GAME_API_URL}/api/agents/mappings`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  agentId: newAgentId,
-                  accountId,
-                  characterId,
-                  agentName: character.name,
-                }),
-              },
-            );
+            const mappingResult = await apiClient.post("/api/agents/mappings", {
+              agentId: newAgentId,
+              accountId,
+              characterId,
+              agentName: character.name,
+            });
 
-            if (!mappingResponse.ok) {
+            if (!mappingResult.ok) {
               throw new Error(
-                `Failed to save agent mapping: HTTP ${mappingResponse.status}`,
+                `Failed to save agent mapping: ${mappingResult.error || mappingResult.status}`,
               );
             }
 
@@ -531,23 +522,16 @@ export const CharacterEditorScreen: React.FC = () => {
         console.log("[CharacterEditor] Updating agent mapping for:", agentId);
 
         try {
-          const mappingResponse = await fetch(
-            `${GAME_API_URL}/api/agents/mappings`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                agentId,
-                accountId,
-                characterId,
-                agentName: character.name,
-              }),
-            },
-          );
+          const mappingResult = await apiClient.post("/api/agents/mappings", {
+            agentId,
+            accountId,
+            characterId,
+            agentName: character.name,
+          });
 
-          if (!mappingResponse.ok) {
+          if (!mappingResult.ok) {
             throw new Error(
-              `Failed to update agent mapping: HTTP ${mappingResponse.status}`,
+              `Failed to update agent mapping: ${mappingResult.error || mappingResult.status}`,
             );
           }
 
@@ -615,15 +599,12 @@ export const CharacterEditorScreen: React.FC = () => {
     console.log("[CharacterEditor] 🗑️  Deleting character:", characterId);
 
     try {
-      const response = await fetch(
-        `${GAME_API_URL}/api/characters/${characterId}`,
-        {
-          method: "DELETE",
-        },
-      );
+      const result = await apiClient.delete(`/api/characters/${characterId}`);
 
-      if (!response.ok) {
-        throw new Error(`Failed to delete character: ${response.status}`);
+      if (!result.ok) {
+        throw new Error(
+          `Failed to delete character: ${result.error || result.status}`,
+        );
       }
 
       console.log("[CharacterEditor] ✅ Character deleted successfully");
@@ -648,17 +629,14 @@ export const CharacterEditorScreen: React.FC = () => {
     );
 
     try {
-      const response = await fetch(
-        `${GAME_API_URL}/api/characters/${characterId}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ isAgent: false }),
-        },
-      );
+      const result = await apiClient.patch(`/api/characters/${characterId}`, {
+        isAgent: false,
+      });
 
-      if (!response.ok) {
-        throw new Error(`Failed to convert character: ${response.status}`);
+      if (!result.ok) {
+        throw new Error(
+          `Failed to convert character: ${result.error || result.status}`,
+        );
       }
 
       console.log("[CharacterEditor] ✅ Character converted to human player");

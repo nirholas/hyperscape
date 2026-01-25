@@ -766,17 +766,31 @@ const CategoryGroup = memo(function CategoryGroup({
 
   return (
     <div>
-      <div style={headerStyle} onClick={() => setCollapsed(!collapsed)}>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={!collapsed}
+        aria-label={`${config.label} category${collapsed ? ", collapsed" : ", expanded"}`}
+        style={headerStyle}
+        onClick={() => setCollapsed(!collapsed)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setCollapsed(!collapsed);
+          }
+        }}
+      >
         <svg
           width="10"
           height="10"
           viewBox="0 0 12 12"
           fill="currentColor"
           style={expandIconStyle}
+          aria-hidden="true"
         >
           <path d="M4 2l4 4-4 4V2z" />
         </svg>
-        <div style={indicatorStyle} />
+        <div style={indicatorStyle} aria-hidden="true" />
         <span style={nameStyle}>{config.label}</span>
       </div>
       {!collapsed && (

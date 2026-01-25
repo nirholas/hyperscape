@@ -50,6 +50,17 @@ interface EntityPip {
   groupIndex?: number;
 }
 
+/** Window extension for last raycast target diagnostic (used by both world clicks and minimap) */
+type WindowWithRaycastTarget = Window &
+  typeof globalThis & {
+    __lastRaycastTarget?: {
+      x: number;
+      y: number;
+      z: number;
+      method: string;
+    };
+  };
+
 /** Color palette for group members (up to 8 unique) */
 const GROUP_COLORS = [
   "#4CAF50", // Green - party leader
@@ -1089,15 +1100,7 @@ export function Minimap({
       // Persist destination dot until arrival (no auto-fade)
       setLastDestinationWorld({ x: targetX, z: targetZ });
       // Expose same diagnostic target used by world clicks so minimap renders dot identically
-      const windowWithTarget = window as unknown as {
-        __lastRaycastTarget: {
-          x: number;
-          y: number;
-          z: number;
-          method: string;
-        };
-      };
-      windowWithTarget.__lastRaycastTarget = {
+      (window as WindowWithRaycastTarget).__lastRaycastTarget = {
         x: targetX,
         y: targetY,
         z: targetZ,
