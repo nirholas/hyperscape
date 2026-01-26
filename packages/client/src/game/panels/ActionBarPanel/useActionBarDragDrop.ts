@@ -7,6 +7,7 @@ import {
   useSensors,
   useSensor,
   PointerSensor,
+  TouchSensor,
   KeyboardSensor,
   type DragStartEvent,
   type DragEndEvent,
@@ -37,11 +38,18 @@ export function useActionBarDragDrop({
     null,
   );
 
-  // Configure sensors for accessibility
+  // Configure sensors for accessibility and mobile support
+  // PointerSensor: distance-based for mouse, TouchSensor: delay-based for mobile long-press
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
         distance: 8,
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 250, // Long-press 250ms to start drag on mobile
+        tolerance: 5,
       },
     }),
     useSensor(KeyboardSensor),

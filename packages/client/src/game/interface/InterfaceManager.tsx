@@ -19,6 +19,7 @@ import {
   DndContext as DndKitContext,
   DragOverlay as DndKitDragOverlay,
   PointerSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   type DragEndEvent as DndKitDragEndEvent,
@@ -767,12 +768,20 @@ function DesktopInterfaceManager({
     data: Record<string, unknown>;
   } | null>(null);
 
-  // Configure dnd-kit sensors with activation distance to prevent click interference
-  // Without this, dnd-kit's default sensors capture all pointer events and prevent clicks
+  // Configure dnd-kit sensors with activation constraints
+  // PointerSensor: distance-based activation for mouse/trackpad (must move 8px before drag)
+  // TouchSensor: delay-based activation for mobile (long-press 250ms to start drag)
+  // This enables mobile users to long-hold items/prayers/skills to drag them to action bar
   const dndKitSensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
         distance: 8, // Must move 8 pixels before drag starts
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 250, // Long-press 250ms to start drag on mobile
+        tolerance: 5, // Allow 5px movement during delay without cancelling
       },
     }),
   );

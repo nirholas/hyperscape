@@ -13,6 +13,7 @@ import {
   useSensors,
   useSensor,
   PointerSensor,
+  TouchSensor,
   KeyboardSensor,
   type DragEndEvent,
   type DragStartEvent,
@@ -763,11 +764,18 @@ export function InventoryPanel({
   const theme = useThemeStore((s) => s.theme);
   const { shouldUseMobileUI } = useMobileLayout();
 
-  // Configure sensors for accessibility (keyboard + pointer support)
+  // Configure sensors for accessibility and mobile support
+  // PointerSensor: distance-based for mouse, TouchSensor: delay-based for mobile long-press
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
         distance: 8, // Require 8px movement before drag starts
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 250, // Long-press 250ms to start drag on mobile
+        tolerance: 5,
       },
     }),
     useSensor(KeyboardSensor),
