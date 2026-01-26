@@ -7,10 +7,8 @@
  * - rules.ts: Toggle rules, accept rules
  * - stakes.ts: Add, remove, accept stakes
  * - confirmation.ts: Final confirmation handlers
+ * - combat.ts: Forfeit and combat-related handlers
  * - helpers.ts: Shared utilities (not exported externally)
- *
- * Future modules (to be added in later phases):
- * - combat.ts: Forfeit handler
  */
 
 // Challenge handlers
@@ -33,3 +31,6 @@ export {
 
 // Confirmation handlers
 export { handleDuelAcceptFinal } from "./confirmation";
+
+// Combat handlers
+export { handleDuelForfeit } from "./combat";

@@ -96,6 +96,7 @@ interface DuelSession {
 
   // Result
   winnerId?: string;
+  forfeitedBy?: string;
 }
 
 /**
@@ -910,6 +911,160 @@ export class DuelSystem {
   }
 
   // ============================================================================
+  // Public API - Rule Enforcement
+  // ============================================================================
+
+  /**
+   * Check if a player is in an active duel (FIGHTING state)
+   */
+  isPlayerInActiveDuel(playerId: string): boolean {
+    const session = this.getPlayerDuel(playerId);
+    return session?.state === "FIGHTING";
+  }
+
+  /**
+   * Get active duel rules for a player (null if not in active duel)
+   */
+  getPlayerDuelRules(playerId: string): DuelRules | null {
+    const session = this.getPlayerDuel(playerId);
+    if (!session || session.state !== "FIGHTING") return null;
+    return session.rules;
+  }
+
+  /**
+   * Check if a specific rule is active for a player's duel
+   */
+  isDuelRuleActive(playerId: string, rule: keyof DuelRules): boolean {
+    const rules = this.getPlayerDuelRules(playerId);
+    return rules ? rules[rule] : false;
+  }
+
+  /**
+   * Check if player can use ranged attacks (returns false if noRanged rule active)
+   */
+  canUseRanged(playerId: string): boolean {
+    return !this.isDuelRuleActive(playerId, "noRanged");
+  }
+
+  /**
+   * Check if player can use melee attacks (returns false if noMelee rule active)
+   */
+  canUseMelee(playerId: string): boolean {
+    return !this.isDuelRuleActive(playerId, "noMelee");
+  }
+
+  /**
+   * Check if player can use magic attacks (returns false if noMagic rule active)
+   */
+  canUseMagic(playerId: string): boolean {
+    return !this.isDuelRuleActive(playerId, "noMagic");
+  }
+
+  /**
+   * Check if player can use special attacks (returns false if noSpecialAttack rule active)
+   */
+  canUseSpecialAttack(playerId: string): boolean {
+    return !this.isDuelRuleActive(playerId, "noSpecialAttack");
+  }
+
+  /**
+   * Check if player can use prayer (returns false if noPrayer rule active)
+   */
+  canUsePrayer(playerId: string): boolean {
+    return !this.isDuelRuleActive(playerId, "noPrayer");
+  }
+
+  /**
+   * Check if player can use potions (returns false if noPotions rule active)
+   */
+  canUsePotions(playerId: string): boolean {
+    return !this.isDuelRuleActive(playerId, "noPotions");
+  }
+
+  /**
+   * Check if player can eat food (returns false if noFood rule active)
+   */
+  canEatFood(playerId: string): boolean {
+    return !this.isDuelRuleActive(playerId, "noFood");
+  }
+
+  /**
+   * Check if player can move (returns false if noMovement rule active)
+   */
+  canMove(playerId: string): boolean {
+    return !this.isDuelRuleActive(playerId, "noMovement");
+  }
+
+  /**
+   * Check if player can forfeit (returns false if noForfeit rule active)
+   */
+  canForfeit(playerId: string): boolean {
+    return !this.isDuelRuleActive(playerId, "noForfeit");
+  }
+
+  /**
+   * Get the opponent ID for a player in a duel
+   */
+  getDuelOpponentId(playerId: string): string | null {
+    const session = this.getPlayerDuel(playerId);
+    if (!session) return null;
+    return playerId === session.challengerId
+      ? session.targetId
+      : session.challengerId;
+  }
+
+  // ============================================================================
+  // Public API - Forfeit
+  // ============================================================================
+
+  /**
+   * Handle a player forfeiting the duel
+   */
+  forfeitDuel(playerId: string): DuelOperationResult {
+    const session = this.getPlayerDuel(playerId);
+    if (!session) {
+      return {
+        success: false,
+        error: "You're not in a duel.",
+        errorCode: DuelErrorCode.NOT_IN_DUEL,
+      };
+    }
+
+    // Must be in FIGHTING state
+    if (session.state !== "FIGHTING") {
+      return {
+        success: false,
+        error: "The duel has not started yet.",
+        errorCode: DuelErrorCode.INVALID_STATE,
+      };
+    }
+
+    // Check if noForfeit rule is active
+    if (session.rules.noForfeit) {
+      return {
+        success: false,
+        error: "You cannot forfeit - this duel is to the death!",
+        errorCode: DuelErrorCode.CANNOT_FORFEIT,
+      };
+    }
+
+    // Determine winner and loser
+    const winnerId =
+      playerId === session.challengerId
+        ? session.targetId
+        : session.challengerId;
+    const loserId = playerId;
+
+    // Mark as forfeited
+    session.forfeitedBy = playerId;
+
+    // Resolve the duel
+    this.resolveDuel(session, winnerId, loserId, "forfeit");
+
+    return { success: true };
+  }
+
+  // ============================================================================
   // Public API - Duel Start
   // ============================================================================
 
@@ -1212,9 +1367,91 @@ export class DuelSystem {
   /**
    * Process active duel (bounds checking, rule enforcement)
    */
-  private processActiveDuel(_session: DuelSession): void {
-    // TODO: Implement arena bounds checking
-    // TODO: Implement movement restriction if noMovement rule active
+  private processActiveDuel(session: DuelSession): void {
+    if (session.arenaId === null) return;
+
+    const bounds = this.arenaPool.getArenaBounds(session.arenaId);
+    if (!bounds) return;
+
+    // Check both players for arena bounds violations
+    this.enforceArenaBounds(session.challengerId, bounds);
+    this.enforceArenaBounds(session.targetId, bounds);
+
+    // If noMovement rule is active, freeze players at spawn points
+    if (session.rules.noMovement) {
+      const spawnPoints = this.arenaPool.getSpawnPoints(session.arenaId);
+      if (spawnPoints) {
+        this.enforceNoMovement(session.challengerId, spawnPoints[0]);
+        this.enforceNoMovement(session.targetId, spawnPoints[1]);
+      }
+    }
+  }
+
+  /**
+   * Enforce arena bounds - teleport player back if they leave
+   */
+  private enforceArenaBounds(
+    playerId: string,
+    bounds: { min: { x: number; z: number }; max: { x: number; z: number } },
+  ): void {
+    const player = this.world.entities.players?.get(playerId);
+    if (!player?.position) return;
+
+    const { x, z } = player.position;
+    let needsTeleport = false;
+    let newX = x;
+    let newZ = z;
+
+    // Check X bounds
+    if (x < bounds.min.x) {
+      newX = bounds.min.x + 1;
+      needsTeleport = true;
+    } else if (x > bounds.max.x) {
+      newX = bounds.max.x - 1;
+      needsTeleport = true;
+    }
+
+    // Check Z bounds
+    if (z < bounds.min.z) {
+      newZ = bounds.min.z + 1;
+      needsTeleport = true;
+    } else if (z > bounds.max.z) {
+      newZ = bounds.max.z - 1;
+      needsTeleport = true;
+    }
+
+    if (needsTeleport) {
+      this.world.emit("player:teleport", {
+        playerId,
+        position: { x: newX, y: player.position.y, z: newZ },
+        rotation: 0,
+      });
+    }
+  }
+
+  /**
+   * Enforce no movement rule - keep player at spawn point
+   */
+  private enforceNoMovement(
+    playerId: string,
+    spawnPoint: { x: number; y: number; z: number },
+  ): void {
+    const player = this.world.entities.players?.get(playerId);
+    if (!player?.position) return;
+
+    const { x, z } = player.position;
+    const tolerance = 0.5;
+
+    const dx = Math.abs(x - spawnPoint.x);
+    const dz = Math.abs(z - spawnPoint.z);
+
+    if (dx > tolerance || dz > tolerance) {
+      this.world.emit("player:teleport", {
+        playerId,
+        position: { x: spawnPoint.x, y: spawnPoint.y, z: spawnPoint.z },
+        rotation: 0,
+      });
+    }
   }
 
   /**
