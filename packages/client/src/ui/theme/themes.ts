@@ -25,6 +25,10 @@ export interface Theme {
       tertiary: string;
       overlay: string;
       glass: string;
+      /** Semi-transparent panel background (primary) - use for panel containers */
+      panelPrimary: string;
+      /** Semi-transparent panel background (secondary) - use for panel sections */
+      panelSecondary: string;
     };
     text: {
       primary: string;
@@ -200,7 +204,9 @@ export const baseTheme: Theme = {
       secondary: "#27272a", // Zinc-800
       tertiary: "#3f3f46", // Zinc-700
       overlay: "rgba(0, 0, 0, 0.7)",
-      glass: "rgba(24, 24, 27, 0.88)",
+      glass: "rgba(24, 24, 27, 0.8)",
+      panelPrimary: "rgba(24, 24, 27, 0.7)", // Semi-transparent panel background
+      panelSecondary: "rgba(39, 39, 42, 0.7)", // Semi-transparent panel section
     },
     text: {
       primary: "#fafafa", // Zinc-50
@@ -364,7 +370,9 @@ export const hyperscapeTheme: Theme = {
       secondary: "#141418", // Dark with hint of blue
       tertiary: "#1e1e24", // Elevated surface
       overlay: "rgba(0, 0, 0, 0.8)",
-      glass: "rgba(10, 10, 12, 0.92)",
+      glass: "rgba(10, 10, 12, 0.85)",
+      panelPrimary: "rgba(10, 10, 12, 0.8)", // Semi-transparent panel background
+      panelSecondary: "rgba(20, 20, 24, 0.85)", // Semi-transparent panel section
     },
     text: {
       primary: "#f5f0e8", // Warm white
@@ -487,7 +495,7 @@ export const hyperscapeTheme: Theme = {
 
   glass: {
     blur: 16,
-    opacity: 0.9,
+    opacity: 0.8,
     borderOpacity: 0.4,
   },
 

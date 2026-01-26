@@ -43,7 +43,7 @@ export function QuantityPrompt({
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: theme.colors.background.secondary,
+          background: theme.colors.background.panelSecondary,
           border: `2px solid ${theme.colors.border.decorative}`,
           borderRadius: "8px",
           padding: "16px",
@@ -82,7 +82,7 @@ export function QuantityPrompt({
           style={{
             width: "100%",
             padding: "8px",
-            background: theme.colors.background.primary,
+            background: theme.colors.background.panelPrimary,
             border: `1px solid ${theme.colors.border.default}`,
             borderRadius: "4px",
             color: theme.colors.text.primary,

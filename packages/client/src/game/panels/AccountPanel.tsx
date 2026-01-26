@@ -64,7 +64,7 @@ export function AccountPanel({ world }: AccountPanelProps) {
         <div
           className="rounded-lg relative overflow-hidden"
           style={{
-            background: `linear-gradient(135deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+            background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
             border: authenticated
               ? `1px solid ${theme.colors.state.success}40`
               : `1px solid ${theme.colors.border.decorative}`,
@@ -143,7 +143,7 @@ export function AccountPanel({ world }: AccountPanelProps) {
               <div
                 className="flex items-center justify-between p-2 rounded"
                 style={{
-                  background: theme.colors.background.tertiary,
+                  background: theme.colors.background.panelSecondary,
                   border: `1px solid ${theme.colors.border.default}`,
                 }}
               >
@@ -168,7 +168,7 @@ export function AccountPanel({ world }: AccountPanelProps) {
         <div
           className="rounded-lg p-3"
           style={{
-            background: theme.colors.background.secondary,
+            background: theme.colors.background.panelSecondary,
             border: `1px solid ${theme.colors.border.default}`,
           }}
         >
@@ -307,7 +307,7 @@ export function AccountPanel({ world }: AccountPanelProps) {
         <div
           className="rounded-lg p-2.5 flex items-center justify-between cursor-pointer transition-all hover:opacity-90"
           style={{
-            background: theme.colors.background.secondary,
+            background: theme.colors.background.panelSecondary,
             border: `1px solid ${theme.colors.border.default}`,
           }}
           onClick={() => {

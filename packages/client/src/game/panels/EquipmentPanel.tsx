@@ -1000,7 +1000,7 @@ export function EquipmentPanel({
         <div
           className="flex-1 relative overflow-hidden"
           style={{
-            background: theme.colors.background.secondary,
+            background: theme.colors.background.panelSecondary,
             border: "1px solid rgba(10, 10, 12, 0.6)",
             borderRadius: `${theme.borderRadius.md}px`,
             padding: shouldUseMobileUI ? 0 : `${theme.spacing.sm}px`,
@@ -1019,7 +1019,7 @@ export function EquipmentPanel({
           <div
             className="flex items-center justify-center gap-2 px-3 py-1.5"
             style={{
-              background: theme.colors.background.secondary,
+              background: theme.colors.background.panelSecondary,
               borderRadius: `${theme.borderRadius.sm}px`,
               border: "1px solid rgba(10, 10, 12, 0.6)",
               boxShadow: "inset 1px 1px 3px rgba(0, 0, 0, 0.3)",

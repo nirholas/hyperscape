@@ -1303,7 +1303,7 @@ export function InventoryPanel({
       <div
         className="border rounded overflow-hidden flex-1"
         style={{
-          background: theme.colors.background.secondary,
+          background: theme.colors.background.panelSecondary,
           borderColor: "rgba(10, 10, 12, 0.6)",
           // Embossed container: dark top-left edge, subtle light bottom-right
           boxShadow: `inset 2px 2px 4px rgba(0, 0, 0, 0.4), inset -1px -1px 3px rgba(40, 40, 45, 0.08)`,

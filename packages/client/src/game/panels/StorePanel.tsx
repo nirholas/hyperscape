@@ -130,7 +130,7 @@ function ContextMenu({
   ];
 
   const menuContainerStyle: CSSProperties = {
-    background: `linear-gradient(135deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+    background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
     border: `1px solid ${theme.colors.border.default}`,
     borderRadius: theme.borderRadius.md,
     boxShadow: theme.shadows.lg,

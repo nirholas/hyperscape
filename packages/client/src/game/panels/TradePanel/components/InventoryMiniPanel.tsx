@@ -40,7 +40,7 @@ export function InventoryMiniPanel({
         style={{
           // OSRS style: 4 columns x 7 rows = 28 slots
           gridTemplateColumns: `repeat(${TRADE_GRID_COLS}, 36px)`,
-          background: theme.colors.background.tertiary,
+          background: theme.colors.background.panelSecondary,
           border: `1px solid ${theme.colors.border.default}`,
         }}
       >
@@ -66,7 +66,7 @@ export function InventoryMiniPanel({
               style={{
                 width: "36px",
                 height: "36px",
-                background: theme.colors.background.primary,
+                background: theme.colors.background.panelPrimary,
                 border: `1px solid ${theme.colors.border.default}`,
                 borderRadius: "4px",
                 opacity: 0.5,

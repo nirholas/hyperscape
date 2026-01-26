@@ -795,7 +795,7 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
           style={{
             width: "100%",
             height: shouldUseMobileUI ? "6px" : "6px",
-            background: theme.colors.background.primary,
+            background: theme.colors.background.panelPrimary,
             borderRadius: "3px",
             overflow: "hidden",
             border: `1px solid ${theme.colors.border.default}30`,
@@ -880,7 +880,7 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
             style={{
               width: "100%",
               height: shouldUseMobileUI ? "6px" : "6px",
-              background: theme.colors.background.primary,
+              background: theme.colors.background.panelPrimary,
               borderRadius: "3px",
               overflow: "hidden",
             }}

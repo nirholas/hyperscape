@@ -133,7 +133,7 @@ export function DashboardPanel({
         <div
           className="flex-1 flex flex-col overflow-hidden"
           style={{
-            background: `linear-gradient(135deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+            background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
             borderRadius: "8px",
             border: `1px solid ${theme.colors.accent.primary}35`,
             boxShadow: "0 2px 4px rgba(0, 0, 0, 0.5)",
@@ -146,7 +146,7 @@ export function DashboardPanel({
             className="flex items-center justify-between border-b px-2 py-1.5"
             style={{
               borderBottom: `1px solid ${theme.colors.accent.primary}20`,
-              background: `linear-gradient(180deg, ${theme.colors.background.tertiary} 0%, ${theme.colors.background.secondary} 100%)`,
+              background: `linear-gradient(180deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
               borderTopLeftRadius: "8px",
               borderTopRightRadius: "8px",
             }}
@@ -258,7 +258,7 @@ export function DashboardPanel({
               background:
                 activeTab === tab.id
                   ? `linear-gradient(135deg, ${theme.colors.accent.primary}25 0%, ${theme.colors.accent.primary}15 100%)`
-                  : `linear-gradient(135deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+                  : `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
               border: isMobile ? "1px solid" : "2px solid",
               borderColor:
                 activeTab === tab.id

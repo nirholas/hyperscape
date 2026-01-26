@@ -247,7 +247,7 @@ function AccountTabContent({
       <div
         className="rounded-lg relative overflow-hidden"
         style={{
-          background: `linear-gradient(135deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+          background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
           border: authenticated
             ? `1px solid ${theme.colors.state.success}40`
             : `1px solid ${theme.colors.border.default}80`,
@@ -780,7 +780,7 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
       <div
         className="flex gap-1 mb-2 flex-shrink-0"
         style={{
-          background: theme.colors.background.primary,
+          background: theme.colors.background.panelPrimary,
           border: `1px solid ${theme.colors.border.default}66`,
           borderRadius: "6px",
           padding: "4px",
@@ -827,7 +827,7 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
       <div
         className="flex-1 overflow-y-auto noscrollbar"
         style={{
-          background: theme.colors.background.secondary,
+          background: theme.colors.background.panelSecondary,
           border: `1px solid ${theme.colors.border.default}66`,
           borderRadius: "6px",
           padding: "8px",
@@ -1292,7 +1292,7 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
               <div
                 className="p-2.5 rounded relative overflow-hidden"
                 style={{
-                  background: `linear-gradient(135deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+                  background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
                   border: world.graphics?.isWebGPU
                     ? `1px solid ${theme.colors.state.success}66`
                     : `1px solid ${theme.colors.state.info}66`,

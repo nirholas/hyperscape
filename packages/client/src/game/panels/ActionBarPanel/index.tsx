@@ -148,8 +148,8 @@ export function ActionBarPanel({
     minWidth: CONTROL_BUTTON_SIZE,
     minHeight: CONTROL_BUTTON_SIZE,
     background: isDisabled
-      ? theme.colors.background.primary
-      : `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+      ? theme.colors.background.panelPrimary
+      : `linear-gradient(180deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
     border: isDisabled
       ? `1px solid ${theme.colors.border.default}33`
       : `1px solid ${theme.colors.border.default}`,
@@ -227,15 +227,15 @@ export function ActionBarPanel({
             style={getControlButtonStyle(slotCount <= MIN_SLOT_COUNT)}
             onMouseEnter={(e) => {
               if (slotCount > MIN_SLOT_COUNT) {
-                e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.accent.secondary}22 0%, ${theme.colors.background.primary} 100%)`;
+                e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.accent.secondary}22 0%, ${theme.colors.background.panelPrimary} 100%)`;
                 e.currentTarget.style.borderColor = theme.colors.accent.primary;
               }
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background =
                 slotCount <= MIN_SLOT_COUNT
-                  ? theme.colors.background.primary
-                  : `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`;
+                  ? theme.colors.background.panelPrimary
+                  : `linear-gradient(180deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`;
               e.currentTarget.style.borderColor =
                 slotCount <= MIN_SLOT_COUNT
                   ? `${theme.colors.border.default}33`
@@ -258,7 +258,7 @@ export function ActionBarPanel({
             gap: SLOT_GAP,
             padding: PADDING,
             justifyContent: "center",
-            background: `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+            background: `linear-gradient(180deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
             border: `1px solid ${theme.colors.border.default}`,
             borderRadius: 0,
             boxShadow: `inset 0 2px 8px rgba(0, 0, 0, 0.5), ${theme.shadows.md}`,
@@ -289,11 +289,11 @@ export function ActionBarPanel({
                 : theme.colors.text.secondary,
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.accent.secondary}22 0%, ${theme.colors.background.primary} 100%)`;
+              e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.accent.secondary}22 0%, ${theme.colors.background.panelPrimary} 100%)`;
               e.currentTarget.style.borderColor = theme.colors.accent.primary;
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`;
+              e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`;
               e.currentTarget.style.borderColor = theme.colors.border.default;
             }}
           >
@@ -311,15 +311,15 @@ export function ActionBarPanel({
             style={getControlButtonStyle(slotCount >= MAX_SLOT_COUNT)}
             onMouseEnter={(e) => {
               if (slotCount < MAX_SLOT_COUNT) {
-                e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.accent.secondary}22 0%, ${theme.colors.background.primary} 100%)`;
+                e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.accent.secondary}22 0%, ${theme.colors.background.panelPrimary} 100%)`;
                 e.currentTarget.style.borderColor = theme.colors.accent.primary;
               }
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background =
                 slotCount >= MAX_SLOT_COUNT
-                  ? theme.colors.background.primary
-                  : `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`;
+                  ? theme.colors.background.panelPrimary
+                  : `linear-gradient(180deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`;
               e.currentTarget.style.borderColor =
                 slotCount >= MAX_SLOT_COUNT
                   ? `${theme.colors.border.default}33`
@@ -339,7 +339,7 @@ export function ActionBarPanel({
               style={{
                 width: SLOT_SIZE,
                 height: SLOT_SIZE,
-                background: `linear-gradient(180deg, ${theme.colors.accent.secondary}4D 0%, ${theme.colors.background.secondary} 100%)`,
+                background: `linear-gradient(180deg, ${theme.colors.accent.secondary}4D 0%, ${theme.colors.background.panelSecondary} 100%)`,
                 border: `2px solid ${theme.colors.accent.primary}CC`,
                 borderRadius: 0,
                 display: "flex",

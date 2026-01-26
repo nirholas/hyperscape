@@ -796,7 +796,7 @@ const ContextMenuPortal = memo(function ContextMenuPortal({
     >
       <div
         style={{
-          background: theme.colors.background.primary,
+          background: theme.colors.background.panelPrimary,
           border: `1px solid ${theme.colors.border.decorative}80`,
           borderRadius: `${theme.borderRadius.sm}px`,
           boxShadow: theme.shadows.md,

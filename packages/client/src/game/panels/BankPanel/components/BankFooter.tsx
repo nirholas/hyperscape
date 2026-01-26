@@ -41,7 +41,7 @@ export function BankFooter({
     <div
       className="mx-3 mb-2 mt-1 px-3 py-1.5 flex justify-between items-center text-xs rounded"
       style={{
-        background: theme.colors.background.secondary,
+        background: theme.colors.background.panelSecondary,
         border: `1px solid ${theme.colors.border.decorative}`,
         color: theme.colors.text.secondary,
       }}

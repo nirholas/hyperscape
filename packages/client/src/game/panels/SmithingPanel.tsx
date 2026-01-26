@@ -200,7 +200,7 @@ export function SmithingPanel({
       <div
         className="rounded-lg shadow-2xl border"
         style={{
-          background: `linear-gradient(135deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+          background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
           borderColor: theme.colors.border.decorative,
           minWidth: "380px",
           maxWidth: "480px",
@@ -359,7 +359,7 @@ export function SmithingPanel({
                         onChange={(e) => setCustomQuantity(e.target.value)}
                         className="flex-1 px-2 py-1 rounded text-sm"
                         style={{
-                          background: theme.colors.background.tertiary,
+                          background: theme.colors.background.panelSecondary,
                           border: `1px solid ${theme.colors.border.default}`,
                           color: theme.colors.accent.primary,
                         }}

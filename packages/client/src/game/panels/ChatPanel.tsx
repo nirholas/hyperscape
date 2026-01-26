@@ -312,7 +312,7 @@ export function ChatPanel({ world }: ChatPanelProps): React.ReactElement {
         display: "flex",
         flexDirection: "column",
         height: "100%",
-        backgroundColor: theme.colors.background.primary,
+        backgroundColor: theme.colors.background.panelPrimary,
         color: theme.colors.text.primary,
         fontFamily: theme.typography.fontFamily.body,
         fontSize: parseInt(theme.typography.fontSize.sm),
