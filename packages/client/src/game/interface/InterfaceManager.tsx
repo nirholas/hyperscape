@@ -29,6 +29,7 @@ import {
   DndProvider,
   useWindowManager,
   useEditMode,
+  useEditModeKeyboard,
   usePresetStore,
   useWindowStore,
   useTabDrag,
@@ -123,6 +124,10 @@ function DesktopInterfaceManager({
   children,
   enabled = true,
 }: InterfaceManagerProps): React.ReactElement {
+  // Initialize edit mode keyboard handling (ONCE at top level)
+  // This handles L key hold-to-toggle and Escape to lock
+  useEditModeKeyboard();
+
   // Window management hooks
   const { windows, createWindow } = useWindowManager();
   const { isUnlocked, isHolding, holdProgress } = useEditMode();

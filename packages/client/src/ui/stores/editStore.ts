@@ -42,6 +42,12 @@ export interface EditStoreState {
   /** The ID of the window currently being dragged */
   draggingWindowId: string | null;
 
+  // Hold-to-toggle visual state (ephemeral, not persisted)
+  /** Whether the toggle key is currently being held */
+  isHolding: boolean;
+  /** Progress of the hold (0-100) */
+  holdProgress: number;
+
   /** Toggle between locked and unlocked mode */
   toggleMode: () => void;
   /** Set specific mode */
@@ -74,6 +80,10 @@ export interface EditStoreState {
   setDraggingWindowId: (windowId: string | null) => void;
   /** Clear all active guides */
   clearGuides: () => void;
+  /** Set whether the toggle key is being held */
+  setIsHolding: (holding: boolean) => void;
+  /** Set the hold progress (0-100) */
+  setHoldProgress: (progress: number) => void;
 }
 
 /**
@@ -99,6 +109,8 @@ export const useEditStore = create<EditStoreState>()(
       resizingWindowId: null,
       activeGuides: [],
       draggingWindowId: null,
+      isHolding: false,
+      holdProgress: 0,
 
       toggleMode: () => {
         set((state) => ({
@@ -168,6 +180,14 @@ export const useEditStore = create<EditStoreState>()(
 
       clearGuides: () => {
         set({ activeGuides: [], draggingWindowId: null });
+      },
+
+      setIsHolding: (isHolding: boolean) => {
+        set({ isHolding });
+      },
+
+      setHoldProgress: (holdProgress: number) => {
+        set({ holdProgress: Math.min(100, Math.max(0, holdProgress)) });
       },
     }),
     {
