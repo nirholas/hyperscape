@@ -13,7 +13,7 @@
  *   - Bar 5: Q, W, E, R, T, Y, U, I, O, P, [, ], \
  * - Right-click context menu
  * - Multiple action bars support (up to 5)
- * - Horizontal layout only (1xN where N is slot count)
+ * - Horizontal or vertical layout orientation
  */
 
 import React, { useCallback } from "react";
@@ -71,8 +71,12 @@ export function ActionBarPanel({
   isEditMode = false,
   windowId,
   useParentDndContext = false,
+  orientation = "horizontal",
+  showShortcuts = true,
+  showControls = true,
 }: ActionBarPanelProps): React.ReactElement {
   const theme = useTheme();
+  const isVertical = orientation === "vertical";
 
   // State management
   const {
@@ -163,19 +167,58 @@ export function ActionBarPanel({
     boxShadow: `inset 0 2px 4px rgba(0, 0, 0, 0.4)`,
   });
 
-  // Action bar content
+  // Render slot with current state
+  const renderSlot = (slot: (typeof slots)[number], index: number) => {
+    const itemAvailability =
+      slot.type === "item" && slot.itemId
+        ? getItemAvailability(slot.itemId)
+        : { available: true, quantity: 0 };
+
+    return (
+      <ActionBarSlot
+        key={`${barId}-${index}`}
+        slot={slot}
+        slotIndex={index}
+        slotSize={SLOT_SIZE}
+        shortcut={
+          showShortcuts
+            ? formatKeybindForDisplay(keyboardShortcuts[index] || "")
+            : ""
+        }
+        isHovered={hoveredSlot === index}
+        isActive={
+          slot.type === "prayer" && slot.prayerId
+            ? activePrayers.has(slot.prayerId)
+            : slot.type === "combatstyle" && slot.combatStyleId
+              ? activeAttackStyle === slot.combatStyleId
+              : false
+        }
+        isLocked={isLocked}
+        isAvailable={itemAvailability.available}
+        inventoryQuantity={
+          slot.type === "item" ? itemAvailability.quantity : undefined
+        }
+        onHover={() => setHoveredSlot(index)}
+        onLeave={() => setHoveredSlot(null)}
+        onClick={() => handleUseSlot(slot, index)}
+        onContextMenu={(e) => handleContextMenu(e, slot, index)}
+      />
+    );
+  };
+
+  // Action bar content - supports horizontal and vertical layouts
   const actionBarContent = (
     <>
       <div
         style={{
           display: "flex",
-          flexDirection: "row",
+          flexDirection: isVertical ? "column" : "row",
           alignItems: "center",
           gap: CONTROL_BUTTON_GAP,
         }}
       >
-        {/* Decrease button */}
-        {isEditMode && (
+        {/* Decrease button - horizontal only, edit mode only */}
+        {!isVertical && isEditMode && showControls && (
           <button
             onClick={handleDecreaseSlots}
             disabled={slotCount <= MIN_SLOT_COUNT}
@@ -207,7 +250,11 @@ export function ActionBarPanel({
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: `repeat(${slotCount}, ${SLOT_SIZE}px)`,
+            ...(isVertical
+              ? { gridTemplateRows: `repeat(${slotCount}, ${SLOT_SIZE}px)` }
+              : {
+                  gridTemplateColumns: `repeat(${slotCount}, ${SLOT_SIZE}px)`,
+                }),
             gap: SLOT_GAP,
             padding: PADDING,
             justifyContent: "center",
@@ -217,46 +264,11 @@ export function ActionBarPanel({
             boxShadow: `inset 0 2px 8px rgba(0, 0, 0, 0.5), ${theme.shadows.md}`,
           }}
         >
-          {slots.map((slot, index) => {
-            // RS3-style: Check item availability for item slots
-            const itemAvailability =
-              slot.type === "item" && slot.itemId
-                ? getItemAvailability(slot.itemId)
-                : { available: true, quantity: 0 };
-
-            return (
-              <ActionBarSlot
-                key={`${barId}-${index}`}
-                slot={slot}
-                slotIndex={index}
-                slotSize={SLOT_SIZE}
-                shortcut={formatKeybindForDisplay(
-                  keyboardShortcuts[index] || "",
-                )}
-                isHovered={hoveredSlot === index}
-                isActive={
-                  slot.type === "prayer" && slot.prayerId
-                    ? activePrayers.has(slot.prayerId)
-                    : slot.type === "combatstyle" && slot.combatStyleId
-                      ? activeAttackStyle === slot.combatStyleId
-                      : false
-                }
-                isLocked={isLocked}
-                isAvailable={itemAvailability.available}
-                inventoryQuantity={
-                  slot.type === "item" ? itemAvailability.quantity : undefined
-                }
-                onHover={() => setHoveredSlot(index)}
-                onLeave={() => setHoveredSlot(null)}
-                onClick={() => handleUseSlot(slot, index)}
-                onContextMenu={(e) => handleContextMenu(e, slot, index)}
-              />
-            );
-          })}
+          {slots.map((slot, index) => renderSlot(slot, index))}
         </div>
 
-        {/* Rubbish bin */}
-        {!isLocked && (
+        {/* Rubbish bin - horizontal only */}
+        {!isVertical && !isLocked && showControls && (
           <RubbishBin
             onContextMenu={handleRubbishBinContextMenu}
             isDragging={draggedSlot !== null}
@@ -264,31 +276,33 @@ export function ActionBarPanel({
         )}
 
         {/* Lock button */}
-        <button
-          onClick={handleToggleLock}
-          title={isLocked ? "Unlock action bar" : "Lock action bar"}
-          className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
-          style={{
-            ...getControlButtonStyle(false),
-            opacity: isLocked ? 1 : 0.6,
-            color: isLocked
-              ? theme.colors.state.warning
-              : theme.colors.text.secondary,
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.accent.secondary}22 0%, ${theme.colors.background.primary} 100%)`;
-            e.currentTarget.style.borderColor = theme.colors.accent.primary;
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`;
-            e.currentTarget.style.borderColor = theme.colors.border.default;
-          }}
-        >
-          {isLocked ? "🔒" : "🔓"}
-        </button>
+        {showControls && (
+          <button
+            onClick={handleToggleLock}
+            title={isLocked ? "Unlock action bar" : "Lock action bar"}
+            className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+            style={{
+              ...getControlButtonStyle(false),
+              opacity: isLocked ? 1 : 0.6,
+              color: isLocked
+                ? theme.colors.state.warning
+                : theme.colors.text.secondary,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.accent.secondary}22 0%, ${theme.colors.background.primary} 100%)`;
+              e.currentTarget.style.borderColor = theme.colors.accent.primary;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`;
+              e.currentTarget.style.borderColor = theme.colors.border.default;
+            }}
+          >
+            {isLocked ? "🔒" : "🔓"}
+          </button>
+        )}
 
-        {/* Increase button */}
-        {isEditMode && (
+        {/* Increase button - horizontal only, edit mode only */}
+        {!isVertical && isEditMode && showControls && (
           <button
             onClick={handleIncreaseSlots}
             disabled={slotCount >= MAX_SLOT_COUNT}
@@ -344,17 +358,25 @@ export function ActionBarPanel({
     </>
   );
 
+  // When used in a window (has windowId), use absolute positioning to fill the window
+  // When used standalone (mobile), use inline layout
+  const wrapperStyle: React.CSSProperties = windowId
+    ? {
+        position: "absolute",
+        inset: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }
+    : {
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+      };
+
   return (
     <>
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
+      <div style={wrapperStyle}>
         {useParentDndContext ? (
           actionBarContent
         ) : (

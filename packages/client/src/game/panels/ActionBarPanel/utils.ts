@@ -82,6 +82,30 @@ export function calcHorizontalDimensions(
   };
 }
 
+/** Calculate dimensions for vertical layout (1 x slotCount) - compact, no controls */
+export function calcVerticalDimensions(
+  slotCount: number,
+  options: {
+    showControls?: boolean;
+  } = {},
+): { width: number; height: number } {
+  const { showControls = false } = options;
+
+  // Slots grid height: slots + gaps + padding
+  const slotsHeight =
+    slotCount * SLOT_SIZE + (slotCount - 1) * SLOT_GAP + PADDING * 2;
+
+  // Control buttons at bottom (lock only for vertical)
+  const controlsHeight = showControls
+    ? CONTROL_BUTTON_SIZE + CONTROL_BUTTON_GAP
+    : 0;
+
+  return {
+    width: SLOT_SIZE + PADDING * 2,
+    height: slotsHeight + controlsHeight,
+  };
+}
+
 // Default dimensions based on default slot count (7) - locked state (most common)
 const defaultDims = calcHorizontalDimensions(DEFAULT_SLOT_COUNT, {
   isLocked: true,

@@ -27,6 +27,12 @@ export interface ActionBarPanelProps {
   windowId?: string;
   /** When true, uses parent DndProvider context (for cross-panel drag-drop) */
   useParentDndContext?: boolean;
+  /** Layout orientation - horizontal (default) or vertical */
+  orientation?: "horizontal" | "vertical";
+  /** Whether to show keyboard shortcuts on slots (default: true) */
+  showShortcuts?: boolean;
+  /** Whether to show control buttons (+/-, lock) (default: true) */
+  showControls?: boolean;
 }
 
 /** Payload for action bar slot update events */
