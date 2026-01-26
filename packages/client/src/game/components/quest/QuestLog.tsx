@@ -386,13 +386,6 @@ export const QuestDetailPopup = memo(function QuestDetailPopup({
     border: `1px solid ${theme.colors.border.default}`,
   };
 
-  const dangerButtonStyle: CSSProperties = {
-    ...buttonBaseStyle,
-    background: "rgba(248, 113, 113, 0.15)",
-    color: theme.colors.state.danger,
-    border: `1px solid rgba(248, 113, 113, 0.3)`,
-  };
-
   return (
     <div
       style={overlayStyle}
