@@ -719,6 +719,30 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       }
     });
 
+    // Listen for duel equipment restrictions (unequip items in disabled slots)
+    this.world.on("duel:equipment:restrict", (event) => {
+      const { challengerId, targetId, disabledSlots } = event as {
+        duelId: string;
+        challengerId: string;
+        targetId: string;
+        disabledSlots: string[];
+      };
+
+      // Unequip items from disabled slots for both players
+      for (const playerId of [challengerId, targetId]) {
+        for (const slot of disabledSlots) {
+          this.world.emit(EventType.EQUIPMENT_UNEQUIP, {
+            playerId,
+            slot,
+          });
+        }
+      }
+
+      console.log(
+        `[Duel] Equipment restrictions applied - disabled slots: ${disabledSlots.join(", ")}`,
+      );
+    });
+
     // Listen for player teleport events (used by duel system)
     this.world.on("player:teleport", (event) => {
       const { playerId, position, rotation } = event as {

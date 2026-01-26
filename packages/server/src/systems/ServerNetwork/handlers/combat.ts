@@ -120,6 +120,10 @@ export function handleAttackPlayer(
           state: string;
         }
       | undefined;
+    canUseMelee?: (playerId: string) => boolean;
+    canUseRanged?: (playerId: string) => boolean;
+    canUseMagic?: (playerId: string) => boolean;
+    canUseSpecialAttack?: (playerId: string) => boolean;
   } | null;
 
   let isDuelCombat = false;
@@ -139,6 +143,13 @@ export function handleAttackPlayer(
 
         if (isOpponent) {
           isDuelCombat = true;
+
+          // Enforce duel combat rules (OSRS-accurate)
+          // Currently melee-only, but check the rule anyway
+          if (duelSystem.canUseMelee && !duelSystem.canUseMelee(attackerId)) {
+            sendCombatError(socket, "Melee attacks are disabled in this duel.");
+            return;
+          }
         } else {
           sendCombatError(socket, "You can only attack your duel opponent.");
           return;
