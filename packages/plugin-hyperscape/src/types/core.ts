@@ -1,8 +1,6 @@
-// Re-export core types and classes for convenience
-// World and System are classes from @hyperscape/shared
-export { World, System } from "./core-types";
-// Entity is a type alias
-export type { Entity } from "./core-types";
+// Re-export core types for convenience
+// World and System are type aliases in core-types
+export type { World, System, Entity } from "./core-types";
 export type {
   Player,
   Vector3,

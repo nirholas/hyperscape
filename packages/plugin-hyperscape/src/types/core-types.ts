@@ -1,28 +1,128 @@
 // Core types for plugin-hyperscape - imports from @hyperscape/shared and @elizaos/core
 import { Action, IAgentRuntime, Provider, Service, UUID } from "@elizaos/core";
-
-// Import classes and types from hyperscape package
-import { System, World } from "@hyperscape/shared";
-
 import type {
-  Component,
-  Events as BaseEvents,
-  Physics as BasePhysics,
-  Quaternion,
-  Vector3,
-  WorldOptions,
+  Vector3 as THREEVector3,
+  Quaternion as THREEQuaternion,
+  Object3D as THREEObject3D,
+} from "three";
+
+// Import classes from hyperscape (these are values)
+import {
+  SystemClass,
+  World as WorldClass,
+  Entity as EntityClass,
+  Entities as EntitiesClass,
+  EventBus,
+  THREE,
 } from "@hyperscape/shared";
 
-// Import Entity and Entities from the main package but alias them to avoid conflicts
-import type {
-  Entity as HyperscapeEntity,
-  Entities as HyperscapeEntities,
-} from "@hyperscape/shared";
+// Define local type aliases for THREE types
+export type Vector3 = THREEVector3;
+export type Quaternion = THREEQuaternion;
+export type Object3D = THREEObject3D;
+
+// Define World type as instance type of WorldClass
+export type World = InstanceType<typeof WorldClass>;
+
+// Define System type based on SystemClass
+export type System = InstanceType<typeof SystemClass>;
+
+// Define Entity interface locally
+export interface Entity {
+  id: string;
+  type: string;
+  data?: Record<string, unknown>;
+  node: {
+    position: Vector3;
+    quaternion: Quaternion;
+    visible?: boolean;
+    children?: unknown[];
+    parent?: unknown | null;
+  };
+  base?: {
+    position: Vector3;
+    visible?: boolean;
+    children?: unknown[];
+    parent?: unknown | null;
+  };
+  velocity?: Vector3;
+  speed?: number;
+  isMoving?: boolean;
+  targetPosition?: Vector3;
+  movementPath?: Vector3[];
+}
+
+// Define Entities interface
+export interface Entities {
+  player?: Entity;
+  players?: Map<string, Entity>;
+  items?: Map<string, Entity>;
+  get(id: string): Entity | null;
+  add(data: EntityData, local?: boolean): Entity;
+  remove(id: string): boolean;
+  getAll(): Entity[];
+  getAllPlayers(): Entity[];
+}
+
+// Define EntityData interface
+export interface EntityData {
+  id?: string;
+  type: string;
+  position?: { x: number; y: number; z: number };
+  rotation?: { x: number; y: number; z: number; w: number };
+  [key: string]: unknown;
+}
+
+// Define Component interface
+export interface Component {
+  type: string;
+  data?: Record<string, unknown>;
+}
+
+// Define Events type
+export type Events = typeof EventBus;
+
+// Define WorldOptions interface locally
+export interface WorldOptions {
+  storage?: unknown;
+  assetsDir?: string;
+  assetsUrl?: string;
+  physics?: boolean;
+  renderer?: "webgpu" | "headless";
+  networkRate?: number;
+  maxDeltaTime?: number;
+  fixedDeltaTime?: number;
+  db?: unknown;
+  wsUrl?: string;
+  name?: string;
+  avatar?: string;
+}
+
+// Define PlayerInput interface locally
+export interface PlayerInput {
+  movement: Vector3;
+  rotation: Quaternion;
+  actions: Set<string>;
+  mouse: { x: number; y: number };
+}
+
+// Define PlayerStats interface locally
+export interface PlayerStats {
+  health: number;
+  maxHealth: number;
+  mana?: number;
+  maxMana?: number;
+  stamina?: number;
+  maxStamina?: number;
+  level?: number;
+  experience?: number;
+  [key: string]: unknown;
+}
 
 // Import additional types from hyperscape shared package
 import type { PlayerInput, PlayerStats, ChatMessage } from "@hyperscape/shared";
 
-// Define missing types locally
+// Define RigidBody interface
 export interface RigidBody {
   type: "static" | "dynamic" | "kinematic";
   mass: number;
@@ -50,42 +150,15 @@ export interface ChatListener {
 // Re-export for convenience
 export type { ChatMessage };
 
-// Re-export hyperscape classes and types for plugin use
-export { System, World };
-export type {
-  Component,
-  BaseEvents as Events,
-  Quaternion,
-  Vector3,
-  WorldOptions,
-  PlayerInput,
-  PlayerStats,
-};
-
-// Re-export the aliased Entity type
-export type Entity = HyperscapeEntity & {
-  base?: {
-    position: Vector3;
-    visible?: boolean;
-    children?: unknown[];
-    parent?: unknown | null;
-  };
-};
-
-// Re-export the aliased Entities type
-export type Entities = HyperscapeEntities;
-
-// Plugin-specific Physics interface - don't extend BasePhysics to avoid conflicts
-export interface ExtendedPhysics {
+// Plugin-specific Physics interface
+export interface Physics {
   enabled: boolean;
   gravity: Vector3;
   timeStep: number;
   substeps?: number;
   world?: unknown | null;
   controllers: Map<string, CharacterController>;
-  rigidBodies: Map<string, any>;
-
-  // Physics methods from BasePhysics
+  rigidBodies: Map<string, unknown>;
   createRigidBody: (
     type: "static" | "dynamic" | "kinematic",
     position?: Vector3,
@@ -123,28 +196,8 @@ export interface ExtendedPhysics {
     layerMask?: number,
   ) => unknown | null;
   simulate: (deltaTime: number) => void;
-
-  // Additional methods
   step?: (deltaTime: number) => void;
 }
-
-// Use the extended physics type
-export type Physics = ExtendedPhysics;
-
-// Extended Player type with movement methods for plugin use
-export type Player = import("@hyperscape/shared").Player & {
-  // Movement methods for AI agent control
-  walkToward?: (
-    targetPosition: { x: number; y?: number; z: number },
-    speed?: number,
-  ) => Position;
-  walk?: (direction: { x: number; z: number }, speed?: number) => Position;
-  teleport?: (options: { position?: Position; rotationY?: number }) => void;
-  modify?: (data: { name?: string; [key: string]: unknown }) => void;
-};
-
-// Note: HyperscapeAction and HyperscapeProvider are in core-interfaces.ts
-// Import them directly from there to avoid circular dependencies
 
 // Position type (alias for Vector3 for backwards compatibility)
 export type Position = Vector3;
@@ -189,7 +242,6 @@ export interface EventSystem {
   emit: (eventName: string, data?: unknown) => void;
   on: (eventName: string, callback: (data: unknown) => void) => void;
   off: (eventName: string, callback?: (data: unknown) => void) => void;
-  // Additional array-like methods used in the service
   push?: (callback: (data: unknown) => void) => void;
   indexOf?: (callback: (data: unknown) => void) => number;
   splice?: (index: number, count: number) => void;
@@ -202,13 +254,6 @@ export interface WorldConfig extends WorldOptions {
   ui?: HTMLElement | MockElement;
   initialAuthToken?: string;
   loadPhysX?: () => Promise<unknown>;
-  name?: string;
-  avatar?: string;
-  // Explicitly include properties from WorldOptions for TypeScript resolution
-  wsUrl?: string;
-  physics?: boolean;
-  assetsUrl?: string;
-  networkRate?: number;
 }
 
 export interface MockElement {
@@ -330,7 +375,7 @@ export interface ServiceError extends Error {
   details?: unknown;
 }
 
-// Model type enum (from core-interfaces.ts)
+// Model type enum
 export enum ModelType {
   SMALL = "small",
   MEDIUM = "medium",
@@ -358,14 +403,12 @@ export interface CharacterController {
   getVelocity: () => Position;
 }
 
-// CharacterControllerOptions is defined in content-types.ts
-
 // Control and InputState types for plugin compatibility
 export interface Control {
   id: string;
   playerId: string;
   enabled: boolean;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface InputState {
@@ -383,3 +426,6 @@ export interface BaseObject {
 export interface AppearanceComponent extends Component {
   type: "appearance";
 }
+
+// Re-export the THREE namespace and classes for convenience
+export { THREE, WorldClass, EntityClass, EntitiesClass, SystemClass, EventBus };

@@ -1,11 +1,24 @@
-import { THREE, System } from "@hyperscape/shared";
+import { Object3D, Vector3 } from "three";
 import { CONTROLS_CONFIG } from "../config/constants";
-import type { World } from "@hyperscape/shared";
+import type { World } from "../types/core-types";
 
-interface ActionNode extends THREE.Object3D {
+// Define a base System class for this module
+abstract class SystemBase {
+  protected world: World;
+
+  constructor(world: World) {
+    this.world = world;
+  }
+
+  abstract init(options?: unknown): Promise<void>;
+  abstract start(): void;
+  abstract destroy(): void;
+}
+
+interface ActionNode extends Object3D {
   ctx: {
     entity: {
-      position: THREE.Vector3;
+      position: Vector3;
       data?: {
         id?: string;
       };
@@ -18,8 +31,7 @@ interface ActionNode extends THREE.Object3D {
   [key: string]: unknown;
 }
 
-export class AgentActions extends System {
-  declare world: World;
+export class AgentActions extends SystemBase {
   private nodes: ActionNode[] = [];
   private currentNode: ActionNode | null = null;
 
@@ -53,7 +65,8 @@ export class AgentActions extends System {
   }
 
   getNearby(maxDistance?: number): ActionNode[] {
-    const cameraPos = this.world.rig?.position;
+    const worldWithRig = this.world as { rig?: { position?: Vector3 } };
+    const cameraPos = worldWithRig.rig?.position;
     if (!cameraPos) {
       return [];
     }
@@ -94,7 +107,8 @@ export class AgentActions extends System {
       target = nearby[0];
     }
 
-    const control = this.world.controls;
+    const worldWithControls = this.world as { controls?: unknown };
+    const control = worldWithControls.controls;
     if (!control) {
       console.log("Controls not available");
       return;
@@ -107,7 +121,10 @@ export class AgentActions extends System {
       agentControl.setKey("keyE", true);
     }
 
-    const player = this.world.entities.player;
+    const worldWithEntities = this.world as {
+      entities?: { player?: { data?: { id?: string } } };
+    };
+    const player = worldWithEntities.entities?.player;
     if (!player) {
       console.log("Player not available");
       return;
@@ -116,7 +133,7 @@ export class AgentActions extends System {
     setTimeout(() => {
       // Assume _onTrigger exists on target if it's an action node
       target._onTrigger!({
-        playerId: player.data.id,
+        playerId: player.data?.id ?? "",
       });
       if (agentControl.setKey) {
         agentControl.setKey("keyE", false);
@@ -144,7 +161,8 @@ export class AgentActions extends System {
       keyX?: KeyState;
     }
 
-    const control = this.world.controls as ControlsWithKeys | undefined;
+    const worldWithControls = this.world as { controls?: unknown };
+    const control = worldWithControls.controls as ControlsWithKeys | undefined;
     if (!control) {
       console.log("Controls not available");
       return;
@@ -188,8 +206,6 @@ export class AgentActions extends System {
   }
 
   // Framework stubs
-  // init() {} - implemented above
-  // start() {} - implemented above
   preTick(): void {}
   preFixedUpdate(willFixedStep: boolean): void {}
   fixedUpdate(delta: number): void {}

@@ -1,23 +1,51 @@
-import {
-  THREE,
-  type PxVec3,
-  type PxTransform,
-  type PxQuat,
-} from "@hyperscape/shared";
+// Import THREE types directly from 'three' package
+import type {
+  Vector3,
+  Quaternion,
+  Matrix4,
+  Object3D,
+  Group,
+  Camera,
+  AnimationClip,
+  AnimationAction,
+  AnimationMixer as THREEAnimationMixer,
+  AnimationObjectGroup,
+  ShaderMaterial as THREEShaderMaterial,
+  Uniform,
+} from "three";
+
+// PhysX types defined locally since they may not be exported from shared
+export interface PxVec3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
+export interface PxQuat {
+  x: number;
+  y: number;
+  z: number;
+  w: number;
+}
+
+export interface PxTransform {
+  p: PxVec3;
+  q: PxQuat;
+}
 
 // THREE.js Extensions
-export interface EnhancedVector3 extends THREE.Vector3 {
+export interface EnhancedVector3 extends Vector3 {
   fromPxVec3(pxVec3: PxVec3): this;
   toPxVec3(pxVec3?: PxVec3): PxVec3;
   toPxExtVec3(pxExtVec3?: PxVec3): PxVec3;
   toPxTransform(pxTransform: PxTransform): void;
 }
 
-export interface EnhancedQuaternion extends THREE.Quaternion {
+export interface EnhancedQuaternion extends Quaternion {
   toPxTransform(pxTransform: PxTransform): void;
 }
 
-export interface EnhancedMatrix4 extends THREE.Matrix4 {
+export interface EnhancedMatrix4 extends Matrix4 {
   toPxTransform(pxTransform: PxTransform): void;
 }
 
@@ -88,14 +116,6 @@ export interface PHYSX {
   };
 }
 
-declare global {
-  namespace THREE {
-    interface Vector3 extends EnhancedVector3 {}
-    interface Quaternion extends EnhancedQuaternion {}
-    interface Matrix4 extends EnhancedMatrix4 {}
-  }
-}
-
 // D3.js types for curve manager
 export interface D3Selection<T = Element> {
   data<D>(data: D[], key?: (d: D) => string | number): D3Selection<T>;
@@ -115,10 +135,10 @@ export interface D3Selection<T = Element> {
 
 // GLTFLoader types
 export interface GLTFResult {
-  scene: THREE.Group;
-  scenes: THREE.Group[];
-  animations: THREE.AnimationClip[];
-  cameras: THREE.Camera[];
+  scene: Group;
+  scenes: Group[];
+  animations: AnimationClip[];
+  cameras: Camera[];
   asset: {
     generator?: string;
     version?: string;
@@ -159,25 +179,25 @@ export interface GLTFLoader {
 
 // Animation Mixer types
 export interface AnimationMixer
-  extends Omit<THREE.AnimationMixer, "existingAction"> {
+  extends Omit<THREEAnimationMixer, "existingAction"> {
   existingAction?:
-    | THREE.AnimationAction
+    | AnimationAction
     | ((
-        clip: THREE.AnimationClip,
-        root?: THREE.Object3D | THREE.AnimationObjectGroup,
-      ) => THREE.AnimationAction);
+        clip: AnimationClip,
+        root?: Object3D | AnimationObjectGroup,
+      ) => AnimationAction);
 }
 
 // Material shader compilation types (legacy - TSL node materials are preferred)
 export interface ShaderMaterial
-  extends Omit<THREE.ShaderMaterial, "onBeforeCompile"> {
+  extends Omit<THREEShaderMaterial, "onBeforeCompile"> {
   onBeforeCompile?: (shader: ShaderCompileParameters) => void;
 }
 
 export interface ShaderCompileParameters {
   vertexShader: string;
   fragmentShader: string;
-  uniforms: { [key: string]: THREE.Uniform };
+  uniforms: { [key: string]: Uniform };
 }
 
 export {};
