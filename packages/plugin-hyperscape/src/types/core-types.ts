@@ -128,6 +128,8 @@ export type { ChatMessage };
 // Define Player interface (entity with player-specific data)
 export interface Player extends Entity {
   type: "player";
+  /** Direct position access (alias to node.position) */
+  position: Vector3;
   data: {
     id?: string;
     name?: string;
