@@ -25,10 +25,8 @@
 import type { World } from "@hyperscape/shared";
 import {
   EventType,
-  type DuelSession,
   type DuelRules,
   type DuelState,
-  type DuelParticipant,
   type StakedItem,
   DEFAULT_DUEL_RULES,
   validateRuleCombination,
@@ -40,6 +38,65 @@ import { ArenaPoolManager } from "./ArenaPoolManager";
 // ============================================================================
 // Types
 // ============================================================================
+
+/**
+ * Equipment restrictions for a duel (which slots are disabled)
+ */
+interface EquipmentRestrictions {
+  head: boolean;
+  cape: boolean;
+  amulet: boolean;
+  weapon: boolean;
+  body: boolean;
+  shield: boolean;
+  legs: boolean;
+  gloves: boolean;
+  boots: boolean;
+  ring: boolean;
+  ammo: boolean;
+}
+
+/**
+ * Server-side duel session structure.
+ * Uses a flattened format for efficiency (vs shared type's DuelParticipant pattern).
+ */
+interface DuelSession {
+  duelId: string;
+  state: DuelState;
+
+  // Participants
+  challengerId: string;
+  challengerName: string;
+  targetId: string;
+  targetName: string;
+
+  // Rules & Restrictions
+  rules: DuelRules;
+  equipmentRestrictions: EquipmentRestrictions;
+
+  // Stakes
+  challengerStakes: StakedItem[];
+  targetStakes: StakedItem[];
+
+  // Acceptance state (per screen)
+  challengerAccepted: boolean;
+  targetAccepted: boolean;
+
+  // Arena
+  arenaId: number | null;
+
+  // Timestamps
+  createdAt: number;
+  countdownStartedAt?: number;
+  fightStartedAt?: number;
+  finishedAt?: number;
+
+  // Countdown tracking (internal)
+  lastCountdownTick?: number;
+
+  // Result
+  winnerId?: string;
+}
 
 /**
  * Active duel lookup - maps playerId to their current duel session ID
@@ -148,9 +205,11 @@ export class DuelSystem {
     // Process pending challenges (distance checks, timeouts)
     this.pendingDuels.processTick();
 
-    // Process active duels (arena bounds, combat rules)
+    // Process active duels
     for (const [_duelId, session] of this.duelSessions) {
-      if (session.state === "FIGHTING") {
+      if (session.state === "COUNTDOWN") {
+        this.processCountdown(session);
+      } else if (session.state === "FIGHTING") {
         this.processActiveDuel(session);
       }
     }
@@ -848,6 +907,167 @@ export class DuelSystem {
    */
   getArenaBounds(arenaId: number) {
     return this.arenaPool.getArenaBounds(arenaId);
+  }
+
+  // ============================================================================
+  // Public API - Duel Start
+  // ============================================================================
+
+  /**
+   * Start the duel countdown after both players confirm.
+   * This teleports players to the arena and begins the 3-2-1 countdown.
+   */
+  startDuelCountdown(duelId: string): DuelOperationResult {
+    const session = this.duelSessions.get(duelId);
+    if (!session) {
+      return {
+        success: false,
+        error: "Duel not found.",
+        errorCode: DuelErrorCode.DUEL_NOT_FOUND,
+      };
+    }
+
+    if (session.state !== "COUNTDOWN" || session.arenaId === null) {
+      return {
+        success: false,
+        error: "Duel is not in countdown state.",
+        errorCode: DuelErrorCode.INVALID_STATE,
+      };
+    }
+
+    // Teleport players to arena
+    this.teleportPlayersToArena(session);
+
+    // Apply equipment restrictions
+    this.applyEquipmentRestrictions(session);
+
+    // Mark countdown start time (if not already set)
+    if (!session.countdownStartedAt) {
+      session.countdownStartedAt = Date.now();
+    }
+
+    // Initial countdown value will be processed in processTick
+    session.lastCountdownTick = 3;
+
+    return { success: true };
+  }
+
+  // ============================================================================
+  // Private Methods - Countdown
+  // ============================================================================
+
+  /**
+   * Process countdown state for a duel session
+   */
+  private processCountdown(session: DuelSession): void {
+    if (!session.countdownStartedAt || session.arenaId === null) return;
+
+    const elapsed = Date.now() - session.countdownStartedAt;
+    const countdownSeconds = Math.floor(elapsed / 1000);
+
+    // Determine current countdown value (3, 2, 1, 0)
+    // 0-1000ms = 3, 1000-2000ms = 2, 2000-3000ms = 1, 3000+ = 0 (FIGHT!)
+    let currentCount = 3 - countdownSeconds;
+    if (currentCount < 0) currentCount = 0;
+
+    // Check if we need to send a countdown tick
+    if (
+      session.lastCountdownTick === undefined ||
+      currentCount < session.lastCountdownTick
+    ) {
+      session.lastCountdownTick = currentCount;
+
+      // Emit countdown tick to both players
+      this.world.emit("duel:countdown:tick", {
+        duelId: session.duelId,
+        count: currentCount,
+        challengerId: session.challengerId,
+        targetId: session.targetId,
+      });
+
+      // If countdown reached 0, start the fight!
+      if (currentCount === 0) {
+        this.startFight(session);
+      }
+    }
+  }
+
+  /**
+   * Start the actual fight after countdown completes
+   */
+  private startFight(session: DuelSession): void {
+    session.state = "FIGHTING";
+    session.fightStartedAt = Date.now();
+
+    // Emit fight start event
+    this.world.emit("duel:fight:start", {
+      duelId: session.duelId,
+      challengerId: session.challengerId,
+      targetId: session.targetId,
+      arenaId: session.arenaId,
+    });
+  }
+
+  /**
+   * Teleport both players to their arena spawn points
+   */
+  private teleportPlayersToArena(session: DuelSession): void {
+    if (session.arenaId === null) return;
+
+    const spawnPoints = this.arenaPool.getSpawnPoints(session.arenaId);
+    if (!spawnPoints) return;
+
+    const [spawn1, spawn2] = spawnPoints;
+
+    // Teleport challenger to spawn 1 (north)
+    this.teleportPlayer(session.challengerId, spawn1, spawn2);
+
+    // Teleport target to spawn 2 (south)
+    this.teleportPlayer(session.targetId, spawn2, spawn1);
+  }
+
+  /**
+   * Teleport a player to a position, facing toward a target position
+   */
+  private teleportPlayer(
+    playerId: string,
+    position: { x: number; y: number; z: number },
+    faceToward: { x: number; y: number; z: number },
+  ): void {
+    const player = this.world.entities.players?.get(playerId);
+    if (!player) return;
+
+    // Calculate rotation to face the opponent
+    const dx = faceToward.x - position.x;
+    const dz = faceToward.z - position.z;
+    const angle = Math.atan2(dx, dz);
+
+    // Emit teleport event for the network system to handle
+    this.world.emit("player:teleport", {
+      playerId,
+      position: { x: position.x, y: position.y, z: position.z },
+      rotation: angle,
+    });
+  }
+
+  /**
+   * Apply equipment restrictions - unequip items in disabled slots
+   */
+  private applyEquipmentRestrictions(session: DuelSession): void {
+    const restrictions = session.equipmentRestrictions;
+    const disabledSlots = (
+      Object.keys(restrictions) as Array<keyof typeof restrictions>
+    ).filter((slot) => restrictions[slot]);
+
+    if (disabledSlots.length === 0) return;
+
+    // Emit equipment restriction event for both players
+    this.world.emit("duel:equipment:restrict", {
+      duelId: session.duelId,
+      challengerId: session.challengerId,
+      targetId: session.targetId,
+      disabledSlots,
+    });
   }
 
   // ============================================================================

@@ -7,6 +7,7 @@
  * - RulesScreen: Rules negotiation screen
  * - StakesScreen: Stakes negotiation screen
  * - ConfirmScreen: Final confirmation screen
+ * - DuelCountdown: 3-2-1-FIGHT overlay
  */
 
 export {
@@ -26,3 +27,9 @@ export { RulesScreen } from "./RulesScreen";
 export { StakesScreen } from "./StakesScreen";
 
 export { ConfirmScreen } from "./ConfirmScreen";
+
+export {
+  DuelCountdown,
+  createDefaultDuelCountdownState,
+  type DuelCountdownState,
+} from "./DuelCountdown";

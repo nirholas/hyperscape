@@ -547,6 +547,76 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.duelSystem.processTick();
     }, TickPriority.MOVEMENT);
 
+    // Listen for duel countdown ticks and forward to clients
+    this.world.on("duel:countdown:tick", (event) => {
+      const { duelId, count, challengerId, targetId } = event as {
+        duelId: string;
+        count: number;
+        challengerId: string;
+        targetId: string;
+      };
+
+      const payload = { duelId, count };
+
+      const challengerSocket = this.getSocketByPlayerId(challengerId);
+      if (challengerSocket) {
+        challengerSocket.emit("duelCountdownTick", payload);
+      }
+
+      const targetSocket = this.getSocketByPlayerId(targetId);
+      if (targetSocket) {
+        targetSocket.emit("duelCountdownTick", payload);
+      }
+    });
+
+    // Listen for duel fight start and forward to clients
+    this.world.on("duel:fight:start", (event) => {
+      const { duelId, challengerId, targetId, arenaId } = event as {
+        duelId: string;
+        challengerId: string;
+        targetId: string;
+        arenaId: number;
+      };
+
+      const payload = { duelId, arenaId };
+
+      const challengerSocket = this.getSocketByPlayerId(challengerId);
+      if (challengerSocket) {
+        challengerSocket.emit("duelFightStart", payload);
+      }
+
+      const targetSocket = this.getSocketByPlayerId(targetId);
+      if (targetSocket) {
+        targetSocket.emit("duelFightStart", payload);
+      }
+    });
+
+    // Listen for player teleport events (used by duel system)
+    this.world.on("player:teleport", (event) => {
+      const { playerId, position, rotation } = event as {
+        playerId: string;
+        position: { x: number; y: number; z: number };
+        rotation: number;
+      };
+
+      // Update player position on server
+      const player = this.world.entities.players?.get(playerId);
+      if (player?.position) {
+        player.position.x = position.x;
+        player.position.y = position.y;
+        player.position.z = position.z;
+      }
+
+      // Update tile movement manager for the new position
+      this.tileMovementManager.setPlayerPosition(playerId, position);
+
+      // Send teleport to client
+      const socket = this.getSocketByPlayerId(playerId);
+      if (socket) {
+        socket.emit("playerTeleport", { playerId, position, rotation });
+      }
+    });
+
     // OSRS-accurate face direction manager
     // Defers rotation until end of tick, only applies if player didn't move
     // @see https://osrs-docs.com/docs/packets/outgoing/updating/masks/face-direction/
