@@ -1736,9 +1736,12 @@ export class TerrainSystem extends System {
       for (let tz = minTileZ; tz <= maxTileZ; tz++) {
         const key = `${tx}_${tz}`;
         tileKeys.push(key);
-        const zones = this.flatZonesByTile.get(key) ?? [];
+        let zones = this.flatZonesByTile.get(key);
+        if (!zones) {
+          zones = [];
+          this.flatZonesByTile.set(key, zones);
+        }
         zones.push(zone);
-        this.flatZonesByTile.set(key, zones);
       }
     }
 

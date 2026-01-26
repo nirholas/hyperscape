@@ -109,19 +109,19 @@ export interface TerrainSystem extends System {
    * Register a flat zone for terrain flattening.
    * Used for dynamic flat zone registration (e.g., player-placed structures).
    */
-  registerFlatZone?(zone: FlatZone): void;
+  registerFlatZone(zone: FlatZone): void;
 
   /**
    * Remove a flat zone by ID.
    * Used when dynamic structures are removed.
    */
-  unregisterFlatZone?(id: string): void;
+  unregisterFlatZone(id: string): void;
 
   /**
    * Check if a position is within a flat zone.
    * Returns the zone if found, null otherwise.
    */
-  getFlatZoneAt?(worldX: number, worldZ: number): FlatZone | null;
+  getFlatZoneAt(worldX: number, worldZ: number): FlatZone | null;
 }
 
 export interface LoaderSystem extends System {
