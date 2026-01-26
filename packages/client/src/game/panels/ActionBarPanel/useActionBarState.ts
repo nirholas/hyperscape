@@ -7,7 +7,17 @@ import { useWindowStore, useEditStore } from "@/ui";
 import { useActionBarKeybindsForBar } from "../../../ui/components/ActionBar";
 import { EventType } from "@hyperscape/shared";
 import type { ClientWorld } from "../../../types";
-import type { ActionBarSlotContent, ActionBarSlotUpdatePayload } from "./types";
+import type {
+  ActionBarSlotContent,
+  ActionBarSlotUpdatePayload,
+  ActionBarSlotSwapPayload,
+  PrayerStateSyncEventPayload,
+  PrayerToggledEventPayload,
+  AttackStyleUpdateEventPayload,
+  AttackStyleChangedEventPayload,
+  ActionBarStatePayload,
+  ActionBarNetworkExtensions,
+} from "./types";
 import {
   MIN_SLOT_COUNT,
   MAX_SLOT_COUNT,
@@ -222,19 +232,13 @@ export function useActionBarState({
   useEffect(() => {
     if (!world) return;
 
-    const handlePrayerStateSync = (payload: unknown) => {
-      const data = payload as { playerId: string; active: string[] };
+    const handlePrayerStateSync = (data: PrayerStateSyncEventPayload) => {
       const localPlayer = world.getPlayer();
       if (!localPlayer || data.playerId !== localPlayer.id) return;
       setActivePrayers(new Set(data.active));
     };
 
-    const handlePrayerToggled = (payload: unknown) => {
-      const data = payload as {
-        playerId: string;
-        prayerId: string;
-        active: boolean;
-      };
+    const handlePrayerToggled = (data: PrayerToggledEventPayload) => {
       const localPlayer = world.getPlayer();
       if (!localPlayer || data.playerId !== localPlayer.id) return;
       setActivePrayers((prev) => {
@@ -261,15 +265,13 @@ export function useActionBarState({
   useEffect(() => {
     if (!world) return;
 
-    const handleAttackStyleUpdate = (payload: unknown) => {
-      const data = payload as { playerId: string; style: string };
+    const handleAttackStyleUpdate = (data: AttackStyleUpdateEventPayload) => {
       const localPlayer = world.getPlayer();
       if (!localPlayer || data.playerId !== localPlayer.id) return;
       setActiveAttackStyle(data.style);
     };
 
-    const handleAttackStyleChanged = (payload: unknown) => {
-      const data = payload as { playerId: string; newStyle: string };
+    const handleAttackStyleChanged = (data: AttackStyleChangedEventPayload) => {
       const localPlayer = world.getPlayer();
       if (!localPlayer || data.playerId !== localPlayer.id) return;
       setActiveAttackStyle(data.newStyle);
@@ -278,9 +280,7 @@ export function useActionBarState({
     // Initialize from network cache if available
     const localPlayer = world.getPlayer();
     if (localPlayer) {
-      const networkCache = world.network as {
-        lastAttackStyleByPlayerId?: Record<string, string>;
-      };
+      const networkCache = world.network as ActionBarNetworkExtensions;
       const cachedStyle =
         networkCache?.lastAttackStyleByPlayerId?.[localPlayer.id];
       if (cachedStyle) {
@@ -310,13 +310,7 @@ export function useActionBarState({
   useEffect(() => {
     if (!world) return;
 
-    const handleActionBarState = (payload: unknown) => {
-      const data = payload as {
-        barId: number;
-        slotCount: number;
-        slots: ActionBarSlotContent[];
-      };
-
+    const handleActionBarState = (data: ActionBarStatePayload) => {
       if (data.barId !== barId) return;
 
       if (Array.isArray(data.slots) && data.slots.length > 0) {
@@ -343,8 +337,7 @@ export function useActionBarState({
   useEffect(() => {
     if (!world || !useParentDndContext) return;
 
-    const handleSlotUpdate = (payload: unknown) => {
-      const data = payload as ActionBarSlotUpdatePayload;
+    const handleSlotUpdate = (data: ActionBarSlotUpdatePayload) => {
       if (data.barId !== barId) return;
 
       setSlots((prev) => {
@@ -354,12 +347,7 @@ export function useActionBarState({
       });
     };
 
-    const handleSlotSwap = (payload: unknown) => {
-      const data = payload as {
-        barId: number;
-        fromIndex: number;
-        toIndex: number;
-      };
+    const handleSlotSwap = (data: ActionBarSlotSwapPayload) => {
       if (data.barId !== barId) return;
 
       setSlots((prev) => {

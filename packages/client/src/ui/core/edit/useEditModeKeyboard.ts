@@ -75,10 +75,12 @@ export function useEditModeKeyboard(): void {
 
           // Start animation loop
           const animate = () => {
+            // Capture start time in local variable to avoid race condition
+            const startTime = holdStartTimeRef.current;
             // Stop if key was released or hold was reset
-            if (holdStartTimeRef.current === null) return;
+            if (startTime === null) return;
 
-            const elapsed = Date.now() - holdStartTimeRef.current;
+            const elapsed = Date.now() - startTime;
             const progress = Math.min((elapsed / holdDuration) * 100, 100);
             setHoldProgress(progress);
 

@@ -1069,72 +1069,72 @@ function MenuBarPanel({
     [containerSize.width, containerSize.height, buttonCount],
   );
 
-  // Track previous layout to detect changes
-  const prevLayoutRef = useRef<{ rows: number; cols: number } | null>(null);
+  // Track previous row count to detect layout changes
+  const prevRowsRef = useRef<number | null>(null);
 
-  // Update window size and constraints when layout changes
-  // This keeps the window wrapped to content while allowing smooth resizing
+  // Calculate global width bounds once (covers all possible layouts)
+  const globalMinWidth = useMemo(() => {
+    // Minimum: 3x3 grid at minimum button size
+    const minCols = Math.ceil(Math.sqrt(buttonCount));
+    const minRows = Math.ceil(buttonCount / minCols);
+    return calculateMenuBarContentSize(
+      minCols,
+      minRows,
+      MENUBAR_BUTTON_GAP,
+      MENUBAR_PADDING,
+      MENUBAR_MIN_BUTTON_SIZE,
+    ).width;
+  }, [buttonCount]);
+
+  const globalMaxWidth = useMemo(() => {
+    // Maximum: 1-row at maximum button size
+    return calculateMenuBarContentSize(
+      buttonCount,
+      1,
+      MENUBAR_BUTTON_GAP,
+      MENUBAR_PADDING,
+      MENUBAR_MAX_BUTTON_SIZE,
+    ).width;
+  }, [buttonCount]);
+
+  // Update window constraints and snap height when layout rows change
   useEffect(() => {
     if (!windowId) return;
 
     const currentRows = layout.rows;
-    const currentCols = layout.cols;
-    const isInitialMount = prevLayoutRef.current === null;
-    const layoutChanged =
-      prevLayoutRef.current?.rows !== currentRows ||
-      prevLayoutRef.current?.cols !== currentCols;
+    const isInitialMount = prevRowsRef.current === null;
+    const rowsChanged = prevRowsRef.current !== currentRows;
 
-    // Calculate exact content size for current layout
-    const contentSize = calculateMenuBarContentSize(
-      currentCols,
+    // Calculate exact content height for current layout
+    const contentHeight = calculateMenuBarContentSize(
+      layout.cols,
       currentRows,
       MENUBAR_BUTTON_GAP,
       MENUBAR_PADDING,
       layout.buttonSize,
-    );
+    ).height;
 
-    // Calculate width bounds for the NEXT possible layouts
-    // This allows the user to resize and trigger layout changes
+    // Always update height constraint to match current layout
+    // Width can vary freely within global bounds to allow layout transitions
+    updateWindow(windowId, {
+      minSize: { width: globalMinWidth, height: contentHeight },
+      maxSize: { width: globalMaxWidth, height: contentHeight },
+    });
 
-    // For 1-row layout: allow widening up to max button size, narrowing to trigger 2-row
-    // For 2-row layout: allow widening to trigger 1-row, narrowing to trigger 3-row
-    const minWidthForNextLayout =
-      currentRows < 5
-        ? calculateMenuBarContentSize(
-            Math.ceil(buttonCount / (currentRows + 1)),
-            currentRows + 1,
-            MENUBAR_BUTTON_GAP,
-            MENUBAR_PADDING,
-            MENUBAR_MAX_BUTTON_SIZE,
-          ).width
-        : contentSize.width;
+    // On row count change, also snap the window size
+    if (isInitialMount || rowsChanged) {
+      prevRowsRef.current = currentRows;
 
-    const maxWidthForNextLayout =
-      currentRows > 1
-        ? calculateMenuBarContentSize(
-            Math.ceil(buttonCount / (currentRows - 1)),
-            currentRows - 1,
-            MENUBAR_BUTTON_GAP,
-            MENUBAR_PADDING,
-            MENUBAR_MIN_BUTTON_SIZE,
-          ).width
-        : calculateMenuBarContentSize(
-            currentCols,
-            currentRows,
-            MENUBAR_BUTTON_GAP,
-            MENUBAR_PADDING,
-            MENUBAR_MAX_BUTTON_SIZE,
-          ).width;
+      const contentWidth = calculateMenuBarContentSize(
+        layout.cols,
+        currentRows,
+        MENUBAR_BUTTON_GAP,
+        MENUBAR_PADDING,
+        layout.buttonSize,
+      ).width;
 
-    // Update on initial mount or when layout changes
-    if (isInitialMount || layoutChanged) {
-      prevLayoutRef.current = { rows: currentRows, cols: currentCols };
-
-      // Set constraints and snap size to content
       updateWindow(windowId, {
-        minSize: { width: minWidthForNextLayout, height: contentSize.height },
-        maxSize: { width: maxWidthForNextLayout, height: contentSize.height },
-        size: contentSize,
+        size: { width: contentWidth, height: contentHeight },
       });
     }
   }, [
@@ -1142,7 +1142,8 @@ function MenuBarPanel({
     layout.rows,
     layout.cols,
     layout.buttonSize,
-    buttonCount,
+    globalMinWidth,
+    globalMaxWidth,
     updateWindow,
   ]);
 

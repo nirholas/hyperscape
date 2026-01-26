@@ -274,12 +274,6 @@ export class InteractionRouter extends System {
         // Valid target clicked - emit TARGETING_SELECT
         const player = this.world.getPlayer();
         if (player && this.targetingMode.sourceItem) {
-          console.log("[InteractionRouter] 🎯 World target clicked:", {
-            entityId: target.entityId,
-            entityType: target.entityType,
-            actionType: this.targetingMode.actionType,
-          });
-
           this.world.emit(EventType.TARGETING_SELECT, {
             playerId: player.id,
             sourceItemId: this.targetingMode.sourceItem.id,
@@ -290,9 +284,6 @@ export class InteractionRouter extends System {
         }
       } else {
         // Clicked empty space or invalid target - cancel targeting mode
-        console.log(
-          "[InteractionRouter] ❌ Invalid target or empty space - cancelling targeting",
-        );
         const player = this.world.getPlayer();
         if (player) {
           this.world.emit(EventType.TARGETING_CANCEL, { playerId: player.id });
@@ -709,12 +700,6 @@ export class InteractionRouter extends System {
       actionType: "firemaking" | "cooking" | "smelting" | "none";
     };
 
-    console.log("[InteractionRouter] 🎯 Targeting mode started:", {
-      sourceItem: data.sourceItem,
-      validTargetIds: data.validTargetIds.length,
-      actionType: data.actionType,
-    });
-
     this.targetingMode = {
       active: true,
       sourceItem: data.sourceItem,
@@ -732,7 +717,6 @@ export class InteractionRouter extends System {
    * Exit targeting mode after successful action.
    */
   private onTargetingComplete = (): void => {
-    console.log("[InteractionRouter] ✅ Targeting mode completed");
     this.exitTargetingMode();
   };
 
@@ -740,7 +724,6 @@ export class InteractionRouter extends System {
    * Exit targeting mode when cancelled.
    */
   private onTargetingCancel = (): void => {
-    console.log("[InteractionRouter] ❌ Targeting mode cancelled");
     this.exitTargetingMode();
   };
 
