@@ -67,7 +67,26 @@ export class PlayerInteractionHandler extends BaseInteractionHandler {
       });
     }
 
-    // 2. Trade with - Priority 1 (includes level for consistency)
+    // 2. Challenge (Duel Arena only) - Priority 1
+    const inDuelArena = this.isInDuelArenaZone();
+    if (inDuelArena) {
+      actions.push({
+        id: "challenge",
+        label: `Challenge ${target.name} (Level: ${targetLevel})`,
+        styledLabel: [
+          { text: "Challenge " },
+          { text: target.name, color: "#ffffff" },
+          { text: " (Level: " },
+          { text: `${targetLevel}`, color: levelColor },
+          { text: ")" },
+        ],
+        enabled: true,
+        priority: 1,
+        handler: () => this.challengePlayer(target),
+      });
+    }
+
+    // 3. Trade with - Priority 2 (includes level for consistency)
     actions.push({
       id: "trade",
       label: `Trade with ${target.name} (Level: ${targetLevel})`,
@@ -79,11 +98,11 @@ export class PlayerInteractionHandler extends BaseInteractionHandler {
         { text: ")" },
       ],
       enabled: true,
-      priority: 1,
+      priority: 2,
       handler: () => this.tradeWithPlayer(target),
     });
 
-    // 3. Follow - Priority 2 (includes level for consistency)
+    // 5. Follow - Priority 4 (includes level for consistency)
     actions.push({
       id: "follow",
       label: `Follow ${target.name} (Level: ${targetLevel})`,
@@ -95,16 +114,16 @@ export class PlayerInteractionHandler extends BaseInteractionHandler {
         { text: ")" },
       ],
       enabled: true,
-      priority: 2,
+      priority: 4,
       handler: () => this.followPlayer(target),
     });
 
-    // 4. Report - Priority 3
+    // 6. Report - Priority 5
     actions.push({
       id: "report",
       label: `Report ${target.name}`,
       enabled: true,
-      priority: 3,
+      priority: 5,
       handler: () => this.showExamineMessage("Report system coming soon."),
     });
 
@@ -144,6 +163,30 @@ export class PlayerInteractionHandler extends BaseInteractionHandler {
     }
 
     return zoneSystem.isPvPEnabled({ x: position.x, z: position.z });
+  }
+
+  /**
+   * Check if the LOCAL player is currently in the Duel Arena zone.
+   */
+  private isInDuelArenaZone(): boolean {
+    const player = this.getPlayer();
+    if (!player) return false;
+
+    const position = player.position;
+    if (!position) return false;
+
+    // Use ZoneDetectionSystem
+    const zoneSystem =
+      this.world.getSystem<ZoneDetectionSystem>("zone-detection");
+    if (!zoneSystem) {
+      return false;
+    }
+
+    const zoneProperties = zoneSystem.getZoneProperties({
+      x: position.x,
+      z: position.z,
+    });
+    return zoneProperties.id === "duel_arena";
   }
 
   /**
@@ -283,5 +326,24 @@ export class PlayerInteractionHandler extends BaseInteractionHandler {
     });
 
     this.addChatMessage(`Sending trade request to ${target.name}...`);
+  }
+
+  /**
+   * Send duel challenge to target player.
+   * Only available in the Duel Arena zone.
+   */
+  private challengePlayer(target: RaycastTarget): void {
+    if (!this.isInDuelArenaZone()) {
+      this.showExamineMessage(
+        "You can only challenge players in the Duel Arena.",
+      );
+      return;
+    }
+
+    this.send(MESSAGE_TYPES.DUEL_CHALLENGE, {
+      targetPlayerId: target.entityId,
+    });
+
+    this.addChatMessage(`Challenging ${target.name} to a duel...`);
   }
 }

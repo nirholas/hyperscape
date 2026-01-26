@@ -200,4 +200,6 @@ export const MESSAGE_TYPES = {
   ALTAR_PRAY: "altarPray",
   /** Request trade with another player */
   TRADE_REQUEST: "tradeRequest",
+  /** Challenge another player to a duel (Duel Arena only) */
+  DUEL_CHALLENGE: "duel:challenge",
 } as const;

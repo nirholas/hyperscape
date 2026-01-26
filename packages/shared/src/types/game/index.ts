@@ -14,3 +14,4 @@ export * from "./prayer-types";
 export * from "./quest-types";
 export * from "./trade-types";
 export * from "./social-types";
+export * from "./duel-types";

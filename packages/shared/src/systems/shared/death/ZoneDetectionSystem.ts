@@ -208,6 +208,7 @@ export class ZoneDetectionSystem extends SystemBase {
             isWilderness: isWild,
             name: area.name,
             difficultyLevel: area.difficultyLevel,
+            id: area.id,
           };
         }
       }
@@ -241,6 +242,7 @@ export class ZoneDetectionSystem extends SystemBase {
         isWilderness: isWild,
         name: zone.name || "Unknown Zone",
         difficultyLevel: zone.difficultyLevel || 0,
+        id: zone.id,
       };
     }
 
@@ -256,6 +258,7 @@ export class ZoneDetectionSystem extends SystemBase {
           isWilderness: false,
           name: town.name,
           difficultyLevel: 0,
+          id: town.id,
         };
       }
     }
