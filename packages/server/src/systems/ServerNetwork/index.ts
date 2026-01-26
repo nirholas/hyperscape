@@ -191,6 +191,10 @@ import { DuelSystem } from "../DuelSystem";
 import {
   handleDuelChallenge,
   handleDuelChallengeRespond,
+  handleDuelToggleRule,
+  handleDuelToggleEquipment,
+  handleDuelAcceptRules,
+  handleDuelCancel,
 } from "./handlers/duel";
 import { getDatabase } from "./handlers/common";
 
@@ -2191,6 +2195,27 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         data as { challengeId: string; accept: boolean },
         this.world,
       );
+
+    // Duel rules handlers
+    this.handlers["duel:toggle:rule"] = (socket, data) =>
+      handleDuelToggleRule(
+        socket,
+        data as { duelId: string; rule: string },
+        this.world,
+      );
+
+    this.handlers["duel:toggle:equipment"] = (socket, data) =>
+      handleDuelToggleEquipment(
+        socket,
+        data as { duelId: string; slot: string },
+        this.world,
+      );
+
+    this.handlers["duel:accept:rules"] = (socket, data) =>
+      handleDuelAcceptRules(socket, data as { duelId: string }, this.world);
+
+    this.handlers["duel:cancel"] = (socket, data) =>
+      handleDuelCancel(socket, data as { duelId: string }, this.world);
 
     // Friend/Social handlers
     this.handlers["onFriendRequest"] = (socket, data) =>

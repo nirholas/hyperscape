@@ -407,6 +407,58 @@ export class DuelSystem {
   }
 
   /**
+   * Toggle equipment slot restriction
+   */
+  toggleEquipmentRestriction(
+    duelId: string,
+    playerId: string,
+    slot: keyof DuelSession["equipmentRestrictions"],
+  ): DuelOperationResult {
+    const session = this.duelSessions.get(duelId);
+    if (!session) {
+      return {
+        success: false,
+        error: "Duel not found.",
+        errorCode: DuelErrorCode.DUEL_NOT_FOUND,
+      };
+    }
+
+    // Must be in RULES state
+    if (session.state !== "RULES") {
+      return {
+        success: false,
+        error: "Cannot modify equipment restrictions at this stage.",
+        errorCode: DuelErrorCode.INVALID_STATE,
+      };
+    }
+
+    // Must be a participant
+    if (playerId !== session.challengerId && playerId !== session.targetId) {
+      return {
+        success: false,
+        error: "You're not in this duel.",
+        errorCode: DuelErrorCode.NOT_PARTICIPANT,
+      };
+    }
+
+    // Toggle the restriction
+    session.equipmentRestrictions[slot] = !session.equipmentRestrictions[slot];
+
+    // Reset both players' acceptance when equipment changes
+    session.challengerAccepted = false;
+    session.targetAccepted = false;
+
+    // Emit update
+    this.world.emit("duel:equipment:updated", {
+      duelId,
+      equipmentRestrictions: session.equipmentRestrictions,
+      modifiedBy: playerId,
+    });
+
+    return { success: true };
+  }
+
+  /**
    * Accept current rules
    */
   acceptRules(duelId: string, playerId: string): DuelOperationResult {
