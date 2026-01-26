@@ -543,9 +543,14 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Store duel system on world so handlers can access it
     (this.world as { duelSystem?: DuelSystem }).duelSystem = this.duelSystem;
 
-    // Register duel system so it can be found via getSystem("duel")
+    // Register duel system in systemsByName so it can be found via getSystem("duel")
     // This is required for combat.ts to detect duel combat and bypass PvP zone checks
-    this.world.addSystem("duel", this.duelSystem);
+    // NOTE: We use systemsByName directly instead of addSystem() because DuelSystem
+    // doesn't implement the full System lifecycle interface (preTick, postTick, etc.)
+    (this.world as { systemsByName: Map<string, unknown> }).systemsByName.set(
+      "duel",
+      this.duelSystem,
+    );
 
     // Register duel system tick processing
     this.tickSystem.onTick(() => {
