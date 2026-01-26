@@ -8,7 +8,23 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { RightPanel } from "../../../../src/game/panels/BankPanel/components/RightPanel";
 import type { InventorySlotViewItem } from "../../../../src/game/panels/BankPanel/types";
-import type { PlayerEquipmentItems } from "@hyperscape/shared";
+import type { PlayerEquipmentItems, Item } from "@hyperscape/shared";
+
+// Helper to create a mock Item for testing
+function createMockItem(id: string, name: string, equipSlot?: string): Item {
+  return {
+    id,
+    name,
+    type: "weapon" as Item["type"],
+    description: `A ${name}`,
+    examine: `Examine ${name}`,
+    tradeable: true,
+    rarity: "common" as Item["rarity"],
+    modelPath: null,
+    iconPath: `/items/${id}.png`,
+    equipSlot: equipSlot as Item["equipSlot"],
+  };
+}
 
 describe("RightPanel", () => {
   const mockOnChangeMode = vi.fn();
@@ -26,10 +42,15 @@ describe("RightPanel", () => {
   ];
 
   const defaultEquipment: PlayerEquipmentItems = {
-    helmet: { id: "iron_helmet", slot: "helmet" },
+    helmet: createMockItem("iron_helmet", "Iron Helmet", "helmet"),
     body: null,
     legs: null,
-    weapon: { id: "bronze_sword", slot: "weapon" },
+    boots: null,
+    gloves: null,
+    cape: null,
+    amulet: null,
+    ring: null,
+    weapon: createMockItem("bronze_sword", "Bronze Sword", "weapon"),
     shield: null,
     arrows: null,
   };
@@ -284,6 +305,11 @@ describe("RightPanel", () => {
         helmet: null,
         body: null,
         legs: null,
+        boots: null,
+        gloves: null,
+        cape: null,
+        amulet: null,
+        ring: null,
         weapon: null,
         shield: null,
         arrows: null,
