@@ -33,6 +33,7 @@ import type {
   EquipmentSaveItem,
   ItemRow,
 } from "../network/database";
+import type { FlatZone } from "../world/terrain";
 
 // ============================================================================
 // CORE SYSTEM INTERFACES
@@ -102,6 +103,25 @@ export interface TerrainSystem extends System {
   ): { walkable: boolean; reason?: string };
   getBiomeAt(x: number, z: number): string;
   findWaterAreas(tile: unknown): unknown[];
+
+  // Flat zone methods for terrain flattening under stations
+  /**
+   * Register a flat zone for terrain flattening.
+   * Used for dynamic flat zone registration (e.g., player-placed structures).
+   */
+  registerFlatZone?(zone: FlatZone): void;
+
+  /**
+   * Remove a flat zone by ID.
+   * Used when dynamic structures are removed.
+   */
+  unregisterFlatZone?(id: string): void;
+
+  /**
+   * Check if a position is within a flat zone.
+   * Returns the zone if found, null otherwise.
+   */
+  getFlatZoneAt?(worldX: number, worldZ: number): FlatZone | null;
 }
 
 export interface LoaderSystem extends System {
