@@ -98,29 +98,16 @@ export interface WorldOptions {
   avatar?: string;
 }
 
-// Define PlayerInput interface locally
-export interface PlayerInput {
-  movement: Vector3;
-  rotation: Quaternion;
-  actions: Set<string>;
-  mouse: { x: number; y: number };
-}
+// Import types from hyperscape shared package
+import type {
+  Player,
+  PlayerInput,
+  PlayerStats,
+  ChatMessage,
+} from "@hyperscape/shared";
 
-// Define PlayerStats interface locally
-export interface PlayerStats {
-  health: number;
-  maxHealth: number;
-  mana?: number;
-  maxMana?: number;
-  stamina?: number;
-  maxStamina?: number;
-  level?: number;
-  experience?: number;
-  [key: string]: unknown;
-}
-
-// Import additional types from hyperscape shared package
-import type { PlayerInput, PlayerStats, ChatMessage } from "@hyperscape/shared";
+// Re-export for convenience
+export type { Player, PlayerInput, PlayerStats };
 
 // Define RigidBody interface
 export interface RigidBody {
