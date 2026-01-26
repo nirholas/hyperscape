@@ -25,6 +25,10 @@ import {
   World,
   type EquipmentSyncData,
 } from "@hyperscape/shared";
+import {
+  sendFriendsListSync,
+  notifyFriendsOfStatusChange,
+} from "./handlers/friends";
 
 /**
  * Create an ElizaOS agent record for a character
@@ -914,6 +918,20 @@ export async function handleEnterWorld(
       sendToFn(socket.id, "enterWorldApproved", {
         characterId: characterId || socket.player.id,
       });
+
+      // Send friends list sync to the connecting player
+      const playerId = characterId || socket.player.id;
+      try {
+        await sendFriendsListSync(socket, world, playerId);
+        // Notify this player's friends that they came online
+        await notifyFriendsOfStatusChange(playerId, "online", world);
+      } catch (friendErr) {
+        console.warn(
+          "[CharacterSelection] Failed to sync friends list:",
+          friendErr,
+        );
+        // Non-fatal - continue even if friends sync fails
+      }
     } catch (_err) {}
   }
 }

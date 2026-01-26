@@ -1,7 +1,7 @@
 /**
  * LevelUpPopup - RuneScape-style level-up notification popup
  *
- * Uses the reusable AchievementPopup from hs-kit with:
+ * Uses the reusable AchievementPopup component with:
  * - Centered modal with skill icon and level
  * - Celebration particle animation
  * - Skill unlock display (what's new at this level)
@@ -11,7 +11,7 @@
  */
 
 import { SKILL_ICONS } from "@hyperscape/shared";
-import { AchievementPopup } from "hs-kit";
+import { AchievementPopup } from "@/ui";
 import type { LevelUpEvent } from "./useLevelUpState";
 import { capitalizeSkill } from "./utils";
 import { UnlocksSection } from "./UnlocksSection";

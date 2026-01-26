@@ -1,6 +1,6 @@
 import { RefreshCwIcon } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 
 import type { ControlAction, EventMap } from "@hyperscape/shared";
 import {
@@ -14,16 +14,15 @@ import type { ClientWorld, PlayerStats } from "../types";
 import { ActionProgressBar } from "./hud/ActionProgressBar";
 import { ChatProvider } from "./chat/ChatContext";
 import { EntityContextMenu } from "./hud/EntityContextMenu";
-import { HandIcon } from "../components/Icons";
+import { HandIcon, MouseLeftIcon, MouseRightIcon, MouseWheelIcon } from "@/ui";
 import { LoadingScreen } from "../screens/LoadingScreen";
-import { MouseLeftIcon } from "../components/MouseLeftIcon";
-import { MouseRightIcon } from "../components/MouseRightIcon";
-import { MouseWheelIcon } from "../components/MouseWheelIcon";
-import { InterfaceManager } from "../components/interface/InterfaceManager";
+import { InterfaceManager } from "./interface/InterfaceManager";
 import { StatusBars } from "./hud/StatusBars";
 import { XPProgressOrb } from "./hud/XPProgressOrb";
 import { LevelUpNotification } from "./hud/level-up";
 import { EscapeMenu } from "./hud/EscapeMenu";
+import { ConnectionIndicator } from "./hud/ConnectionIndicator";
+import { NotificationContainer } from "@/ui/components";
 import {
   COLORS,
   spacing,
@@ -161,8 +160,11 @@ export function CoreUI({ world }: { world: ClientWorld }) {
     world.on(EventType.UI_DEATH_SCREEN, handleDeathScreen);
     world.on(EventType.UI_DEATH_SCREEN_CLOSE, handleDeathScreenClose);
     // Character selection flow (server-flagged)
-    world.on("character:list", () => setCharacterFlowActive(true));
-    world.on("character:selected", () => setCharacterFlowActive(false));
+    // Define named handlers for proper cleanup (anonymous functions don't work with off())
+    const handleCharacterList = (): void => setCharacterFlowActive(true);
+    const handleCharacterSelected = (): void => setCharacterFlowActive(false);
+    world.on("character:list", handleCharacterList);
+    world.on("character:selected", handleCharacterSelected);
     // If the packet arrived before UI mounted, consult network cache
     const network = world.network as { lastCharacterList?: unknown[] };
     if (network.lastCharacterList) setCharacterFlowActive(true);
@@ -183,10 +185,10 @@ export function CoreUI({ world }: { world: ClientWorld }) {
       world.off(EventType.NETWORK_DISCONNECTED, handleDisconnected);
       world.off(EventType.UI_DEATH_SCREEN, handleDeathScreen);
       world.off(EventType.UI_DEATH_SCREEN_CLOSE, handleDeathScreenClose);
-      world.off("character:list", () => setCharacterFlowActive(true));
-      world.off("character:selected", () => setCharacterFlowActive(false));
+      world.off("character:list", handleCharacterList);
+      world.off("character:selected", handleCharacterSelected);
     };
-  }, []);
+  }, [world, isSpectatorMode]);
 
   // Poll terrain readiness until ready
   useEffect(() => {
@@ -297,6 +299,9 @@ export function CoreUI({ world }: { world: ClientWorld }) {
     player,
   ]);
 
+  // Extract playerId for dependency tracking - prevents stale closures
+  const localPlayerId = world.entities?.player?.id;
+
   // Subscribe to player stats updates (for StatusBars)
   useEffect(() => {
     const onUIUpdate = (raw: unknown) => {
@@ -308,8 +313,7 @@ export function CoreUI({ world }: { world: ClientWorld }) {
 
     const onSkillsUpdate = (raw: unknown) => {
       const data = raw as { playerId: string; skills: PlayerStats["skills"] };
-      const localId = world.entities?.player?.id;
-      if (!localId || data.playerId === localId) {
+      if (!localPlayerId || data.playerId === localPlayerId) {
         setPlayerStats((prev) =>
           prev
             ? { ...prev, skills: data.skills }
@@ -325,8 +329,29 @@ export function CoreUI({ world }: { world: ClientWorld }) {
         points: number;
         maxPoints: number;
       };
-      const localId = world.entities?.player?.id;
-      if (!localId || data.playerId === localId) {
+      if (!localPlayerId || data.playerId === localPlayerId) {
+        setPlayerStats((prev) =>
+          prev
+            ? {
+                ...prev,
+                prayerPoints: { current: data.points, max: data.maxPoints },
+              }
+            : ({
+                prayerPoints: { current: data.points, max: data.maxPoints },
+              } as PlayerStats),
+        );
+      }
+    };
+
+    // Handle full prayer state sync (initial load, altar pray, etc.)
+    const onPrayerStateSync = (raw: unknown) => {
+      const data = raw as {
+        playerId: string;
+        points: number;
+        maxPoints: number;
+        active: string[];
+      };
+      if (!localPlayerId || data.playerId === localPlayerId) {
         setPlayerStats((prev) =>
           prev
             ? {
@@ -343,41 +368,43 @@ export function CoreUI({ world }: { world: ClientWorld }) {
     world.on(EventType.UI_UPDATE, onUIUpdate);
     world.on(EventType.SKILLS_UPDATED, onSkillsUpdate);
     world.on(EventType.PRAYER_POINTS_CHANGED, onPrayerPointsChanged);
+    world.on(EventType.PRAYER_STATE_SYNC, onPrayerStateSync);
 
     return () => {
       world.off(EventType.UI_UPDATE, onUIUpdate);
       world.off(EventType.SKILLS_UPDATED, onSkillsUpdate);
       world.off(EventType.PRAYER_POINTS_CHANGED, onPrayerPointsChanged);
+      world.off(EventType.PRAYER_STATE_SYNC, onPrayerStateSync);
     };
-  }, [world]);
+  }, [world, localPlayerId]);
 
-  // Event capture removed - was blocking UI interactions
-  useEffect(() => {
-    document.documentElement.style.fontSize = `${16 * (world.prefs?.ui || 1)}px`;
-    function onChange(changes: { ui?: number }) {
-      if (changes.ui) {
-        document.documentElement.style.fontSize = `${16 * (world.prefs?.ui || 1)}px`;
-      }
-    }
-    world.prefs?.on("change", onChange);
-    return () => {
-      world.prefs?.off("change", onChange);
-    };
-  }, []);
   return (
     <ChatProvider>
-      <div
+      <main
+        id="main-content"
+        role="main"
+        aria-label="Game Interface"
         ref={ref}
         className="coreui absolute inset-0 overflow-hidden pointer-events-none"
       >
         {disconnected && <Disconnected />}
         {<Toast world={world} />}
-        {ready && uiVisible && <ActionsBlock world={world} />}
-        {ready && uiVisible && <StatusBars stats={playerStats} />}
-        {ready && uiVisible && <XPProgressOrb world={world} />}
-        {ready && <LevelUpNotification world={world} />}
-        {ready && uiVisible && <InterfaceManager world={world} />}
-        {ready && uiVisible && <ActionProgressBar world={world} />}
+        {<ConnectionIndicator world={world} />}
+        {<NotificationContainer />}
+        {/* UI container */}
+        <div className="absolute inset-0 pointer-events-none">
+          {ready && uiVisible && <ActionsBlock world={world} />}
+          {ready && uiVisible && <StatusBars stats={playerStats} />}
+          {ready && uiVisible && <XPProgressOrb world={world} />}
+          {ready && <LevelUpNotification world={world} />}
+          {ready && uiVisible && <InterfaceManager world={world} />}
+          {ready && uiVisible && <ActionProgressBar world={world} />}
+          {ready && uiVisible && isTouch && <TouchBtns world={world} />}
+          {ready && <EntityContextMenu world={world} />}
+          {ready && <EscapeMenu world={world} />}
+          <div id="core-ui-portal" />
+        </div>
+        {/* Non-scaled overlays - full screen elements */}
         {!ready && (
           <LoadingScreen
             world={world}
@@ -388,17 +415,42 @@ export function CoreUI({ world }: { world: ClientWorld }) {
         )}
         {kicked && <KickedOverlay code={kicked} />}
         {deathScreen && <DeathScreen data={deathScreen} world={world} />}
-        {ready && uiVisible && isTouch && <TouchBtns world={world} />}
-        {ready && <EntityContextMenu world={world} />}
-        {ready && <EscapeMenu world={world} />}
-        <div id="core-ui-portal" />
-      </div>
+      </main>
     </ChatProvider>
   );
 }
 
 function Disconnected() {
   const theme = useThemeStore((s) => s.theme);
+  const [countdown, setCountdown] = useState(5);
+  const [isAutoReconnecting, setIsAutoReconnecting] = useState(true);
+
+  // Auto-reconnect countdown
+  useEffect(() => {
+    if (!isAutoReconnecting || countdown <= 0) return;
+
+    const timer = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          window.location.reload();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [isAutoReconnecting, countdown]);
+
+  const handleManualReconnect = () => {
+    window.location.reload();
+  };
+
+  const handleCancelAutoReconnect = () => {
+    setIsAutoReconnecting(false);
+  };
+
   return (
     <>
       <div className="fixed top-0 left-0 w-full h-full backdrop-grayscale pointer-events-none z-[9999] opacity-0 animate-[fadeIn_3s_ease-in-out_forwards]" />
@@ -407,18 +459,81 @@ function Disconnected() {
           from { opacity: 0; }
           to { opacity: 1; }
         }
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
       `}</style>
       <div
-        className="disconnected-btn pointer-events-auto absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 backdrop-blur-md rounded-2xl h-11 px-4 flex items-center cursor-pointer"
+        className="pointer-events-auto absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 backdrop-blur-md rounded-2xl p-4 flex flex-col items-center gap-3"
         style={{
           backgroundColor: theme.colors.background.secondary,
           border: `1px solid ${theme.colors.border.default}`,
           color: theme.colors.text.primary,
+          minWidth: "240px",
         }}
-        onClick={() => window.location.reload()}
       >
-        <RefreshCwIcon size={18} />
-        <span className="ml-2">Reconnect</span>
+        <div className="flex items-center gap-2">
+          <div
+            className="w-2 h-2 rounded-full"
+            style={{
+              backgroundColor: isAutoReconnecting ? "#f59e0b" : "#ef4444",
+              animation: isAutoReconnecting
+                ? "pulse 1.5s ease-in-out infinite"
+                : "none",
+            }}
+          />
+          <span className="font-medium">Connection Lost</span>
+        </div>
+
+        {isAutoReconnecting ? (
+          <>
+            <div className="text-sm opacity-70">
+              Reconnecting in {countdown}s...
+            </div>
+            <div className="flex gap-2">
+              <button
+                className="px-3 py-1.5 rounded-lg flex items-center gap-2 cursor-pointer transition-colors"
+                style={{
+                  backgroundColor:
+                    theme.colors.accent?.primary || theme.colors.border.default,
+                  color: theme.colors.text.primary,
+                }}
+                onClick={handleManualReconnect}
+              >
+                <RefreshCwIcon size={14} />
+                <span>Reconnect Now</span>
+              </button>
+              <button
+                className="px-3 py-1.5 rounded-lg cursor-pointer transition-opacity hover:opacity-80"
+                style={{
+                  backgroundColor: "transparent",
+                  border: `1px solid ${theme.colors.border.default}`,
+                  color: theme.colors.text.secondary,
+                }}
+                onClick={handleCancelAutoReconnect}
+              >
+                Cancel
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="text-sm opacity-70">Auto-reconnect cancelled</div>
+            <button
+              className="px-4 py-2 rounded-lg flex items-center gap-2 cursor-pointer transition-colors"
+              style={{
+                backgroundColor:
+                  theme.colors.accent?.primary || theme.colors.border.default,
+                color: theme.colors.text.primary,
+              }}
+              onClick={handleManualReconnect}
+            >
+              <RefreshCwIcon size={16} />
+              <span>Reconnect</span>
+            </button>
+          </>
+        )}
       </div>
     </>
   );
@@ -871,7 +986,8 @@ function PositionedToast({
 function ToastMsg({ text }: { text: string }) {
   const [visible, setVisible] = useState(true);
   useEffect(() => {
-    setTimeout(() => setVisible(false), 3000); // Show for 3 seconds
+    const timer = setTimeout(() => setVisible(false), 3000); // Show for 3 seconds
+    return () => clearTimeout(timer);
   }, []);
   return (
     <div
@@ -926,6 +1042,9 @@ function TouchBtns({ world }: { world: ClientWorld }) {
     >
       {isAction && (
         <div
+          role="button"
+          tabIndex={0}
+          aria-label="Action"
           className="pointer-events-auto w-14 h-14 flex items-center justify-center backdrop-blur-[5px] rounded-2xl cursor-pointer active:scale-95"
           style={{
             backgroundColor: theme.colors.state.danger,
@@ -936,6 +1055,14 @@ function TouchBtns({ world }: { world: ClientWorld }) {
             (
               world.controls as { action?: { onPress: () => void } }
             )?.action?.onPress();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              (
+                world.controls as { action?: { onPress: () => void } }
+              )?.action?.onPress();
+            }
           }}
         >
           <HandIcon size={24} />

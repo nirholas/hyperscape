@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useState, useMemo } from "react";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 import { EventType } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
 

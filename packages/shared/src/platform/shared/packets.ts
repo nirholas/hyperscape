@@ -134,6 +134,8 @@ const names = [
   'processingSmithing', // Client -> Server: player selected item to smith from UI
   'smeltingInterfaceOpen', // Server -> Client: show smelting interface with available bars
   'smithingInterfaceOpen', // Server -> Client: show smithing interface with available recipes
+  'smeltingClose',         // Server -> Client: close smelting interface (walked away, etc.)
+  'smithingClose',         // Server -> Client: close smithing interface (walked away, etc.)
   // Combat packets
   'attackMob',
   'attackPlayer',  // PvP attack
@@ -172,6 +174,7 @@ const names = [
   'playerRespawned',
   // Loot packets
   'corpseLoot',
+  'lootResult',            // Server -> Client: loot transaction result (success/failure)
   // Attack style packets
   'attackStyleChanged',
   'attackStyleUpdate',
@@ -179,6 +182,11 @@ const names = [
   'combatDamageDealt',
   // Player state packets
   'playerUpdated',
+  'playerNameChanged',     // Server -> Client: player name change confirmed
+  // Action bar packets
+  'actionBarSave',         // Client -> Server: save action bar configuration
+  'actionBarLoad',         // Client -> Server: load action bar configuration
+  'actionBarState',        // Server -> Client: action bar state response
   // Character selection packets (feature-flagged usage)
   'characterListRequest',
   'characterCreate',
@@ -291,6 +299,24 @@ const names = [
   'spellCast',           // Server -> Client: spell cast acknowledged
   'abilityCooldown',     // Server -> Client: ability cooldown update (skill or spell)
   'abilityFailed',       // Server -> Client: ability failed (cooldown, level, resources, etc.)
+  // Friend/Social system packets
+  'friendRequest',         // Client -> Server: send friend request by player name
+  'friendAccept',          // Client -> Server: accept friend request
+  'friendDecline',         // Client -> Server: decline friend request
+  'friendRemove',          // Client -> Server: remove friend from list
+  'friendsListSync',       // Server -> Client: full friends/requests/ignore list sync
+  'friendStatusUpdate',    // Server -> Client: friend came online/offline/location change
+  'friendRequestIncoming', // Server -> Client: new friend request received
+  'ignoreAdd',             // Client -> Server: add player to ignore list
+  'ignoreRemove',          // Client -> Server: remove player from ignore list
+  'privateMessage',        // Client -> Server: send private message to player
+  'privateMessageReceived',// Server -> Client: incoming private message
+  'privateMessageFailed',  // Server -> Client: message delivery failed (offline, ignored, etc.)
+  'socialError',           // Server -> Client: social operation error
+  // Test/Debug packets (dev only - UI visual testing, no state changes)
+  'testLevelUp',           // Server -> Client: test level up popup (visual only)
+  'testXpDrop',            // Server -> Client: test XP drop animation (visual only)
+  'testDeathScreen',       // Server -> Client: test death screen (visual only)
 ]
 
 const byName: Record<string, PacketInfo> = {};

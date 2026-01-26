@@ -21,7 +21,7 @@
 
 import { useState, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 import type { TradeOfferItem } from "@hyperscape/shared";
 
 // Import from split modules

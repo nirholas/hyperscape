@@ -1712,6 +1712,131 @@ export class InventorySystem extends SystemBase {
   }
 
   /**
+   * Check if inventory has space for a given number of slots.
+   * Used by EquipmentSystem to verify space before unequipping.
+   *
+   * @param playerId - The player ID to check
+   * @param slotsNeeded - Number of slots needed (default 1)
+   * @returns true if inventory has enough empty slots
+   */
+  hasSpace(playerId: string, slotsNeeded: number = 1): boolean {
+    const playerIdKey = toPlayerID(playerId);
+    if (!playerIdKey) return false;
+    const inventory = this.playerInventories.get(playerIdKey);
+    if (!inventory) return true; // New inventory has space
+
+    const usedSlots = inventory.items.length;
+    const emptySlots = this.MAX_INVENTORY_SLOTS - usedSlots;
+    return emptySlots >= slotsNeeded;
+  }
+
+  /**
+   * Check if a specific item exists at a specific inventory slot.
+   * Used by EquipmentSystem to verify item before equipping.
+   *
+   * @param playerId - The player ID
+   * @param itemId - The item ID to check for
+   * @param slot - The inventory slot to check
+   * @returns true if the item exists at the specified slot
+   */
+  hasItemAtSlot(playerId: string, itemId: string, slot: number): boolean {
+    const playerIdKey = toPlayerID(playerId);
+    if (!playerIdKey || !isValidItemID(itemId)) return false;
+
+    const inventory = this.playerInventories.get(playerIdKey);
+    if (!inventory) return false;
+
+    const item = inventory.items.find((i) => i.slot === slot);
+    return item !== undefined && item.itemId === itemId;
+  }
+
+  /**
+   * Directly remove an item from inventory (synchronous, returns success).
+   * Used by EquipmentSystem to ensure atomic equip operations.
+   *
+   * @param playerId - The player ID
+   * @param params - Removal parameters (itemId, quantity, optional slot)
+   * @returns true if removal succeeded, false otherwise
+   */
+  removeItemDirect(
+    playerId: string,
+    params: { itemId: string; quantity: number; slot?: number },
+  ): boolean {
+    return this.removeItem({
+      playerId,
+      itemId: params.itemId,
+      quantity: params.quantity,
+      slot: params.slot,
+    });
+  }
+
+  /**
+   * Directly add an item to inventory (synchronous, returns success).
+   * Used by EquipmentSystem to ensure atomic unequip operations.
+   *
+   * @param playerId - The player ID
+   * @param params - Add parameters (itemId, quantity)
+   * @returns true if add succeeded, false otherwise
+   */
+  addItemDirect(
+    playerId: string,
+    params: { itemId: string; quantity: number },
+  ): boolean {
+    // Check if we can add
+    if (!this.canAddItem(playerId, params.itemId, params.quantity)) {
+      return false;
+    }
+
+    const playerIdKey = toPlayerID(playerId);
+    if (!playerIdKey || !isValidItemID(params.itemId)) {
+      return false;
+    }
+
+    const inventory = this.getOrCreateInventory(playerId);
+    const itemData = getItem(params.itemId);
+    if (!itemData) {
+      return false;
+    }
+
+    // Find existing stack or empty slot
+    if (itemData.stackable) {
+      const existing = inventory.items.find((i) => i.itemId === params.itemId);
+      if (existing) {
+        existing.quantity += params.quantity;
+        this.emitInventoryUpdate(playerIdKey);
+        this.scheduleInventoryPersist(playerId);
+        return true;
+      }
+    }
+
+    // Find empty slot
+    const usedSlots = new Set(inventory.items.map((i) => i.slot));
+    let emptySlot = -1;
+    for (let i = 0; i < this.MAX_INVENTORY_SLOTS; i++) {
+      if (!usedSlots.has(i)) {
+        emptySlot = i;
+        break;
+      }
+    }
+
+    if (emptySlot === -1) {
+      return false; // No space
+    }
+
+    // Add item - use same format as other inventory add operations
+    inventory.items.push({
+      slot: emptySlot,
+      itemId: params.itemId,
+      quantity: params.quantity,
+      item: itemData,
+    });
+
+    this.emitInventoryUpdate(playerIdKey);
+    this.scheduleInventoryPersist(playerId);
+    return true;
+  }
+
+  /**
    * Check if player is in death state (DYING or DEAD).
    *
    * Used to block item additions during death processing, which prevents

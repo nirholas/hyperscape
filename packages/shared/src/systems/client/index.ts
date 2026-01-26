@@ -23,3 +23,6 @@ export { ResourceTileDebugSystem } from "./ResourceTileDebugSystem";
 
 // New interaction system (replaces legacy InteractionSystem)
 export { InteractionRouter } from "./interaction";
+
+// Social system
+export { SocialSystem } from "./SocialSystem";

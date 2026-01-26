@@ -23,6 +23,7 @@ import {
   World,
   writePacket,
 } from "@hyperscape/shared";
+import { getDatabase } from "./common";
 
 // Type definitions for database query results
 type UserRow = {
@@ -915,5 +916,580 @@ export async function handleCommand(
       body: message.trim(),
       createdAt: moment().toISOString(),
     });
+  }
+
+  // /message, /msg, /pm, /w, /whisper - Send private message to a player
+  if (
+    cmd === "message" ||
+    cmd === "msg" ||
+    cmd === "pm" ||
+    cmd === "w" ||
+    cmd === "whisper"
+  ) {
+    // Parse: /message @username content  OR  /message username content
+    const fullArgs = args.slice(1).join(" ");
+    const match = fullArgs.match(/^@?(\S+)\s+(.+)$/);
+
+    if (!match) {
+      socket.send("chatAdded", {
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: "Usage: /message @username your message",
+        createdAt: moment().toISOString(),
+      });
+      return;
+    }
+
+    const [, targetName, content] = match;
+
+    // Import and call handlePrivateMessage from friends handler
+    const { handlePrivateMessage } = await import("./friends");
+    await handlePrivateMessage(
+      socket,
+      { targetName: targetName.trim(), content: content.trim() },
+      world,
+    );
+  }
+
+  // /testfriend - Create a real friend request for testing (localhost only)
+  if (cmd === "testfriend") {
+    // Only allow on localhost/development
+    const isDev = process.env.NODE_ENV !== "production";
+    if (!isDev) {
+      socket.send("chatAdded", {
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: "This command is only available in development mode.",
+        createdAt: moment().toISOString(),
+      });
+      return;
+    }
+
+    // Use player.id (Entity's id) for consistency with getPlayerId() in friends.ts
+    // This ensures the request's toPlayerId matches what handleFriendAccept will check
+    const playerId = player.id || player.data?.id || socket.id;
+    const playerName = player.data?.name || player.name || "Player";
+
+    // Get the database to create a real entry
+    // Use getDatabase(world) which is the same pattern as friend handlers
+    const { FriendRepository } = await import(
+      "../../../database/repositories/FriendRepository"
+    );
+    const dbConn = getDatabase(world);
+
+    if (!dbConn) {
+      socket.send("chatAdded", {
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: "[Test] Database not available. Cannot create friend request.",
+        createdAt: moment().toISOString(),
+      });
+      return;
+    }
+
+    const repo = new FriendRepository(dbConn.drizzle, dbConn.pool);
+
+    try {
+      // Find another character in the database to use as the sender
+      // FK constraints require valid character IDs
+      const otherCharacter = await repo.findOtherCharacterAsync(playerId);
+
+      if (!otherCharacter) {
+        socket.send("chatAdded", {
+          id: uuid(),
+          from: null,
+          fromId: null,
+          body: "[Test] No other characters found. Create another character first to test friend requests.",
+          createdAt: moment().toISOString(),
+        });
+        return;
+      }
+
+      // Check if already friends
+      const alreadyFriends = await repo.areFriendsAsync(
+        otherCharacter.id,
+        playerId,
+      );
+      if (alreadyFriends) {
+        socket.send("chatAdded", {
+          id: uuid(),
+          from: null,
+          fromId: null,
+          body: `[Test] You are already friends with ${otherCharacter.name}. Remove them first to test again.`,
+          createdAt: moment().toISOString(),
+        });
+        return;
+      }
+
+      // Check if request already exists
+      const existingRequest = await repo.hasRequestAsync(
+        otherCharacter.id,
+        playerId,
+      );
+      if (existingRequest) {
+        socket.send("chatAdded", {
+          id: uuid(),
+          from: null,
+          fromId: null,
+          body: `[Test] Friend request from ${otherCharacter.name} already exists. Accept or decline it first.`,
+          createdAt: moment().toISOString(),
+        });
+        return;
+      }
+
+      // Create the friend request in the database using the real character
+      const createdId = await repo.createRequestAsync(
+        otherCharacter.id,
+        playerId,
+      );
+      const createdTimestamp = Date.now();
+
+      // Send friend request incoming packet to client
+      socket.send("friendRequestIncoming", {
+        id: createdId,
+        fromId: otherCharacter.id,
+        fromName: otherCharacter.name,
+        toId: playerId,
+        toName: playerName,
+        timestamp: createdTimestamp,
+      });
+
+      socket.send("chatAdded", {
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: `[Test] Friend request created from "${otherCharacter.name}" to you!`,
+        createdAt: moment().toISOString(),
+      });
+
+      console.log(
+        `[TestFriend] Created friend request from ${otherCharacter.name} (${otherCharacter.id}) to ${playerName} (${playerId}) - request ID: ${createdId}`,
+      );
+    } catch (err) {
+      console.error("[TestFriend] Error creating friend request:", err);
+      socket.send("chatAdded", {
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: `[Test] Error: ${(err as Error).message}`,
+        createdAt: moment().toISOString(),
+      });
+    }
+  }
+
+  // /testlevelup [skill] - Test level up popup (dev only)
+  // No param = random skill, or specify: /testlevelup agility
+  if (cmd === "testlevelup") {
+    const isDev = process.env.NODE_ENV !== "production";
+    if (!isDev) {
+      socket.send("chatAdded", {
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: "This command is only available in development mode.",
+        createdAt: moment().toISOString(),
+      });
+      return;
+    }
+
+    const validSkills = [
+      "attack",
+      "strength",
+      "defense",
+      "constitution",
+      "range",
+      "woodcutting",
+      "fishing",
+      "firemaking",
+      "cooking",
+      "agility",
+      "prayer",
+      "magic",
+      "mining",
+      "smithing",
+      "crafting",
+      "herblore",
+      "thieving",
+      "fletching",
+      "slayer",
+      "runecrafting",
+      "hunter",
+      "construction",
+    ];
+
+    // Pick random skill if none provided
+    const skill = arg1
+      ? arg1.toLowerCase()
+      : validSkills[Math.floor(Math.random() * validSkills.length)];
+
+    if (!validSkills.includes(skill)) {
+      socket.send("chatAdded", {
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: `[Test] Invalid skill. Valid skills: ${validSkills.slice(0, 10).join(", ")}...`,
+        createdAt: moment().toISOString(),
+      });
+      return;
+    }
+
+    // Generate random level between 2 and 99
+    const newLevel = Math.floor(Math.random() * 98) + 2;
+    const oldLevel = newLevel - 1;
+
+    // Send test level up event to client (visual only - no state changes)
+    socket.send("testLevelUp", {
+      skill,
+      oldLevel,
+      newLevel,
+    });
+
+    socket.send("chatAdded", {
+      id: uuid(),
+      from: null,
+      fromId: null,
+      body: `[Test] Level up: ${skill} (${oldLevel} -> ${newLevel})`,
+      createdAt: moment().toISOString(),
+    });
+  }
+
+  // /testquest [questname] - Test quest completion popup (dev only)
+  // No param = random quest, or specify: /testquest Dragon Slayer
+  if (cmd === "testquest") {
+    const isDev = process.env.NODE_ENV !== "production";
+    if (!isDev) {
+      socket.send("chatAdded", {
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: "This command is only available in development mode.",
+        createdAt: moment().toISOString(),
+      });
+      return;
+    }
+
+    // Sample quest names for random selection
+    const sampleQuests = [
+      "Cook's Assistant",
+      "Dragon Slayer",
+      "Goblin Diplomacy",
+      "The Restless Ghost",
+      "Romeo & Juliet",
+      "Sheep Shearer",
+      "Imp Catcher",
+      "Witch's Potion",
+      "Ernest the Chicken",
+      "Vampire Slayer",
+      "The Knight's Sword",
+      "Demon Slayer",
+      "Shield of Arrav",
+      "Lost City",
+      "Monkey Madness",
+    ];
+
+    // Join all args after command for multi-word quest names, or pick random
+    const questName =
+      args.slice(1).join(" ").trim() ||
+      sampleQuests[Math.floor(Math.random() * sampleQuests.length)];
+    const playerId = player.id || player.data?.id || socket.id;
+
+    // Random rewards based on "quest difficulty"
+    const questPoints = Math.floor(Math.random() * 5) + 1;
+    const coinReward = (Math.floor(Math.random() * 10) + 1) * 100;
+    const xpReward = (Math.floor(Math.random() * 5) + 1) * 100;
+
+    // Pick random skills for XP rewards
+    const xpSkills = [
+      "attack",
+      "strength",
+      "defense",
+      "cooking",
+      "fishing",
+      "woodcutting",
+      "mining",
+      "magic",
+      "prayer",
+    ];
+    const skill1 = xpSkills[Math.floor(Math.random() * xpSkills.length)];
+    const skill2 = xpSkills[Math.floor(Math.random() * xpSkills.length)];
+
+    // Send quest completed event to client
+    socket.send("questCompleted", {
+      playerId,
+      questId: `test-quest-${Date.now()}`,
+      questName,
+      rewards: {
+        questPoints,
+        items: [{ itemId: "coins", quantity: coinReward }],
+        xp: {
+          [skill1]: xpReward,
+          [skill2]: Math.floor(xpReward / 2),
+        },
+      },
+    });
+
+    socket.send("chatAdded", {
+      id: uuid(),
+      from: null,
+      fromId: null,
+      body: `[Test] Quest completed: "${questName}" (+${questPoints} QP)`,
+      createdAt: moment().toISOString(),
+    });
+  }
+
+  // /testtoast [type] [message] - Test toast notification (dev only)
+  // No params = random type with sample message
+  if (cmd === "testtoast") {
+    const isDev = process.env.NODE_ENV !== "production";
+    if (!isDev) {
+      socket.send("chatAdded", {
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: "This command is only available in development mode.",
+        createdAt: moment().toISOString(),
+      });
+      return;
+    }
+
+    const validTypes = ["info", "success", "warning", "error"];
+
+    // Sample messages for each type
+    const sampleMessages: Record<string, string[]> = {
+      info: [
+        "A new update is available!",
+        "Your session will expire in 5 minutes.",
+        "Daily challenges have reset.",
+      ],
+      success: [
+        "Item acquired!",
+        "Trade completed successfully.",
+        "You have unlocked a new area!",
+        "Achievement unlocked!",
+      ],
+      warning: [
+        "Your inventory is almost full.",
+        "Low prayer points!",
+        "You are under attack!",
+        "Connection unstable.",
+      ],
+      error: [
+        "Cannot equip that item.",
+        "Inventory is full.",
+        "Not enough coins.",
+        "That action is not allowed here.",
+      ],
+    };
+
+    // If type provided, use it; otherwise pick random
+    const toastType = validTypes.includes(arg1?.toLowerCase() || "")
+      ? arg1.toLowerCase()
+      : validTypes[Math.floor(Math.random() * validTypes.length)];
+
+    // If message provided, use it; otherwise pick random sample for this type
+    const typeMessages = sampleMessages[toastType];
+    const message =
+      args.slice(2).join(" ").trim() ||
+      typeMessages[Math.floor(Math.random() * typeMessages.length)];
+
+    socket.send("showToast", {
+      message,
+      type: toastType,
+    });
+
+    socket.send("chatAdded", {
+      id: uuid(),
+      from: null,
+      fromId: null,
+      body: `[Test] Toast (${toastType}): "${message}"`,
+      createdAt: moment().toISOString(),
+    });
+  }
+
+  // /testxp [skill] [amount] - Test XP drop visualization (dev only)
+  // No params = random skill and amount
+  if (cmd === "testxp") {
+    const isDev = process.env.NODE_ENV !== "production";
+    if (!isDev) {
+      socket.send("chatAdded", {
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: "This command is only available in development mode.",
+        createdAt: moment().toISOString(),
+      });
+      return;
+    }
+
+    const validSkills = [
+      "attack",
+      "strength",
+      "defense",
+      "constitution",
+      "range",
+      "woodcutting",
+      "fishing",
+      "firemaking",
+      "cooking",
+      "agility",
+      "prayer",
+      "magic",
+      "mining",
+    ];
+
+    // Pick random skill if none provided
+    const skill = arg1
+      ? arg1.toLowerCase()
+      : validSkills[Math.floor(Math.random() * validSkills.length)];
+
+    // Random amount if none provided (10-500 XP)
+    const amount = args[2]
+      ? parseInt(args[2], 10) || 100
+      : Math.floor(Math.random() * 491) + 10;
+
+    if (!validSkills.includes(skill)) {
+      socket.send("chatAdded", {
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: `[Test] Invalid skill. Valid: ${validSkills.join(", ")}`,
+        createdAt: moment().toISOString(),
+      });
+      return;
+    }
+
+    // Send test XP drop to client (visual only - no state changes)
+    socket.send("testXpDrop", {
+      skill,
+      amount,
+    });
+
+    socket.send("chatAdded", {
+      id: uuid(),
+      from: null,
+      fromId: null,
+      body: `[Test] XP drop: +${amount} ${skill}`,
+      createdAt: moment().toISOString(),
+    });
+  }
+
+  // /testdeath - Test death screen (dev only)
+  if (cmd === "testdeath") {
+    const isDev = process.env.NODE_ENV !== "production";
+    if (!isDev) {
+      socket.send("chatAdded", {
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: "This command is only available in development mode.",
+        createdAt: moment().toISOString(),
+      });
+      return;
+    }
+
+    const playerId = player.id || player.data?.id || socket.id;
+
+    // Send test death screen to client (visual only - no state changes)
+    socket.send("testDeathScreen", {
+      cause: "Test death screen",
+    });
+
+    socket.send("chatAdded", {
+      id: uuid(),
+      from: null,
+      fromId: null,
+      body: "[Test] Death screen triggered",
+      createdAt: moment().toISOString(),
+    });
+  }
+
+  // /testtrade [name] - Test trade request popup (dev only)
+  // No param = random trader name, or specify: /testtrade Bob
+  if (cmd === "testtrade") {
+    const isDev = process.env.NODE_ENV !== "production";
+    if (!isDev) {
+      socket.send("chatAdded", {
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: "This command is only available in development mode.",
+        createdAt: moment().toISOString(),
+      });
+      return;
+    }
+
+    // Sample trader names for random selection
+    const sampleTraders = [
+      "MerchantMike",
+      "TradingTom",
+      "WealthyWilliam",
+      "ShopkeepSally",
+      "BarterBob",
+      "DealerDan",
+      "VendorVicky",
+      "MarketMary",
+      "SwapperSteve",
+      "ExchangeEmma",
+    ];
+
+    // Use provided name or pick random
+    const traderName =
+      arg1 || sampleTraders[Math.floor(Math.random() * sampleTraders.length)];
+    const traderLevel = Math.floor(Math.random() * 126) + 3; // Random level 3-128
+
+    // Send test trade request packet (visual only)
+    socket.send("tradeIncoming", {
+      tradeId: `test-trade-${uuid()}`,
+      fromPlayerId: `test-player-${uuid()}`,
+      fromPlayerName: traderName,
+      fromPlayerLevel: traderLevel,
+    });
+
+    socket.send("chatAdded", {
+      id: uuid(),
+      from: null,
+      fromId: null,
+      body: `[Test] Trade request from ${traderName} (Level ${traderLevel})`,
+      createdAt: moment().toISOString(),
+    });
+  }
+
+  // /testhelp - Show all test commands (dev only)
+  if (cmd === "testhelp") {
+    const isDev = process.env.NODE_ENV !== "production";
+    if (!isDev) {
+      socket.send("chatAdded", {
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: "This command is only available in development mode.",
+        createdAt: moment().toISOString(),
+      });
+      return;
+    }
+
+    const helpMessages = [
+      "[Test Commands - all params optional, uses random defaults]",
+      "/testfriend - Friend request from another character",
+      "/testlevelup [skill] - Level up popup (random skill if omitted)",
+      "/testquest [name] - Quest complete popup (random quest if omitted)",
+      "/testtoast [type] [msg] - Toast: info/success/warning/error",
+      "/testxp [skill] [amt] - XP drop (random if omitted)",
+      "/testdeath - Death screen",
+      "/testtrade [name] - Trade request popup (random trader if omitted)",
+    ];
+
+    for (const msg of helpMessages) {
+      socket.send("chatAdded", {
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: msg,
+        createdAt: moment().toISOString(),
+      });
+    }
   }
 }

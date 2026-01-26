@@ -9,7 +9,7 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import { useThemeStore, useMobileLayout } from "hs-kit";
+import { useThemeStore, useMobileLayout } from "@/ui";
 import type { ClientWorld } from "../../types";
 import { COLORS, MOBILE_CHAT } from "../../constants";
 

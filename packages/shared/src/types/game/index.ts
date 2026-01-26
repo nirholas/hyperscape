@@ -13,3 +13,4 @@ export * from "./resource-processing-types";
 export * from "./prayer-types";
 export * from "./quest-types";
 export * from "./trade-types";
+export * from "./social-types";

@@ -14,7 +14,7 @@
 import React from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { GAME_API_URL } from "@/lib/api-config";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 
 interface UsernameSelectionScreenProps {
   onUsernameSelected: (username: string) => void;

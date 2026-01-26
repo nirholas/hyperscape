@@ -4,7 +4,7 @@
  * TypeScript interfaces for the trade panel components.
  */
 
-import type { Theme } from "hs-kit";
+import type { Theme } from "@/ui";
 import type { TradeOfferItem, TradeWindowState } from "@hyperscape/shared";
 
 // ============================================================================

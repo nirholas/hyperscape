@@ -6,7 +6,7 @@
  * @packageDocumentation
  */
 
-import { useCallback, useRef, useEffect } from "react";
+import { useCallback, useRef, useEffect, useState } from "react";
 
 /**
  * Creates a debounced version of a callback function.
@@ -76,7 +76,7 @@ export function useDebounce<T extends (...args: Parameters<T>) => void>(
  * ```
  */
 export function useDebouncedValue<T>(value: T, delay: number): T {
-  const [debouncedValue, setDebouncedValue] = React.useState(value);
+  const [debouncedValue, setDebouncedValue] = useState(value);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -90,6 +90,3 @@ export function useDebouncedValue<T>(value: T, delay: number): T {
 
   return debouncedValue;
 }
-
-// Need to import React for useState
-import * as React from "react";

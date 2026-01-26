@@ -7,10 +7,10 @@
  * - New areas accessible
  * - New activities available
  *
- * Uses hs-kit theme system for consistent styling.
+ * Uses theme system for consistent styling.
  */
 
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 import { getUnlocksAtLevel } from "@hyperscape/shared";
 import type { SkillUnlock, UnlockType } from "@hyperscape/shared";
 import type { CSSProperties } from "react";

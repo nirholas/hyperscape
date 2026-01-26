@@ -56,9 +56,18 @@
         background-color: #0b0a15;
         font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       }
+      
+      /* Skip links - hidden for now, will show when character is signed in */
+      .skip-link {
+        display: none;
+      }
     </style>
   </head>
   <body>
+    <!-- Skip Links for Accessibility -->
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+    <a href="#game-canvas" class="skip-link" style="left: 180px;">Skip to game</a>
+    
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
   </body>

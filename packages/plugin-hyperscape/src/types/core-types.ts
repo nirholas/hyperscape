@@ -119,27 +119,8 @@ export interface PlayerStats {
   [key: string]: unknown;
 }
 
-// Define Player interface locally
-export interface Player extends Entity {
-  username?: string;
-  input?: PlayerInput;
-  stats?: PlayerStats;
-  health?: {
-    current: number;
-    max: number;
-  };
-  inventory?: unknown;
-  equipment?: unknown;
-  position?: Vector3;
-  avatarUrl?: string;
-  walkToward?: (
-    targetPosition: { x: number; y?: number; z: number },
-    speed?: number,
-  ) => Position;
-  walk?: (direction: { x: number; z: number }, speed?: number) => Position;
-  teleport?: (options: { position?: Position; rotationY?: number }) => void;
-  modify?: (data: { name?: string; [key: string]: unknown }) => void;
-}
+// Import additional types from hyperscape shared package
+import type { PlayerInput, PlayerStats, ChatMessage } from "@hyperscape/shared";
 
 // Define RigidBody interface
 export interface RigidBody {
@@ -165,24 +146,9 @@ export interface ChatListener {
   (messages: ChatMessage[]): void;
 }
 
-// Define ChatMessage interface locally since it's not exported from the built package
-export interface ChatMessage {
-  id: string;
-  from: string;
-  fromId?: string;
-  userId?: string;
-  userName?: string;
-  username?: string;
-  body: string;
-  text: string;
-  message?: string; // For backward compatibility
-  timestamp: number;
-  createdAt: string;
-  avatar?: string;
-  entityId?: string;
-  playerId?: string;
-  playerName?: string;
-}
+// ChatMessage is now imported from @hyperscape/shared - no local definition needed
+// Re-export for convenience
+export type { ChatMessage };
 
 // Plugin-specific Physics interface
 export interface Physics {

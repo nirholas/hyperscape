@@ -933,20 +933,67 @@ export class EquipmentSystem extends SystemBase {
       });
     }
 
-    // Equip new item - keep itemId as string | number
-    equipmentSlot.itemId = data.itemId;
-    equipmentSlot.item = itemData;
+    // DUPLICATION FIX: Acquire transaction lock to prevent race conditions
+    const inventorySystem = this.world.getSystem<InventorySystem>("inventory");
+    if (inventorySystem && !inventorySystem.lockForTransaction(data.playerId)) {
+      // Another transaction in progress, abort to prevent duplication
+      this.sendMessage(
+        data.playerId,
+        "Please wait, another action is in progress.",
+        "warning",
+      );
+      return;
+    }
 
-    // Create visual representation
-    this.createEquipmentVisual(data.playerId, equipmentSlot);
+    try {
+      // DUPLICATION FIX: Verify item exists at inventory slot before equipping
+      if (
+        inventorySystem &&
+        data.inventorySlot !== undefined &&
+        !inventorySystem.hasItemAtSlot(
+          data.playerId,
+          String(data.itemId),
+          data.inventorySlot,
+        )
+      ) {
+        Logger.systemError(
+          "EquipmentSystem",
+          `Cannot equip: item ${data.itemId} not found at slot ${data.inventorySlot}`,
+        );
+        return;
+      }
 
-    // Remove from inventory
-    this.emitTypedEvent(EventType.INVENTORY_ITEM_REMOVED, {
-      playerId: data.playerId,
-      itemId: data.itemId,
-      quantity: 1,
-      slot: data.inventorySlot,
-    });
+      // DUPLICATION FIX: Remove from inventory FIRST, then equip
+      // This ensures if removal fails, item is not duplicated
+      const removed = inventorySystem?.removeItemDirect(data.playerId, {
+        itemId: String(data.itemId),
+        quantity: 1,
+        slot: data.inventorySlot,
+      });
+
+      if (!removed) {
+        Logger.systemError(
+          "EquipmentSystem",
+          `Cannot equip: failed to remove item ${data.itemId} from inventory`,
+        );
+        this.sendMessage(
+          data.playerId,
+          "Failed to equip item - item not in inventory.",
+          "warning",
+        );
+        return;
+      }
+
+      // Now safe to equip - item has been removed from inventory
+      equipmentSlot.itemId = data.itemId;
+      equipmentSlot.item = itemData;
+
+      // Create visual representation
+      this.createEquipmentVisual(data.playerId, equipmentSlot);
+    } finally {
+      // Always release the lock
+      inventorySystem?.unlockTransaction(data.playerId);
+    }
 
     // Update stats
     this.recalculateStats(data.playerId);
@@ -1002,29 +1049,71 @@ export class EquipmentSystem extends SystemBase {
       return;
     }
 
-    // Store item name before clearing the slot
+    // Store item info before clearing the slot
     const itemName = equipmentSlot.item.name;
     const itemIdToAdd = equipmentSlot.itemId?.toString() || "";
+    const itemData = equipmentSlot.item;
 
-    // Add back to inventory - use correct event format for InventoryItemAddedPayload
-    this.emitTypedEvent(EventType.INVENTORY_ITEM_ADDED, {
-      playerId: data.playerId,
-      item: {
-        id: `inv_${data.playerId}_${Date.now()}`,
+    // DUPLICATION FIX: Check inventory has space FIRST
+    const inventorySystem = this.world.getSystem<InventorySystem>("inventory");
+    if (inventorySystem && !inventorySystem.hasSpace(data.playerId, 1)) {
+      this.sendMessage(
+        data.playerId,
+        "Cannot unequip - inventory is full.",
+        "warning",
+      );
+      return;
+    }
+
+    // DUPLICATION FIX: Acquire transaction lock to prevent race conditions
+    if (inventorySystem && !inventorySystem.lockForTransaction(data.playerId)) {
+      this.sendMessage(
+        data.playerId,
+        "Please wait, another action is in progress.",
+        "warning",
+      );
+      return;
+    }
+
+    try {
+      // DUPLICATION FIX: Clear equipment slot FIRST, then add to inventory
+      // This ensures if add fails, item is already removed from equipment
+      // The item is "lost" temporarily but not duplicated
+
+      // Remove visual representation
+      this.removeEquipmentVisual(equipmentSlot);
+
+      // Clear equipment slot FIRST
+      equipmentSlot.itemId = null;
+      equipmentSlot.item = null;
+
+      // Now add back to inventory - use direct method for better error handling
+      const added = inventorySystem?.addItemDirect(data.playerId, {
         itemId: itemIdToAdd,
         quantity: 1,
-        slot: -1, // Let system find empty slot
-        metadata: null,
-      },
-    });
+      });
 
-    // Always proceed with unequipping (assume inventory has space)
-    // Remove visual representation
-    this.removeEquipmentVisual(equipmentSlot);
-
-    // Clear equipment slot
-    equipmentSlot.itemId = null;
-    equipmentSlot.item = null;
+      if (!added) {
+        // This should rarely happen since we checked hasSpace above
+        // But if it does, we need to restore the equipment slot
+        Logger.systemError(
+          "EquipmentSystem",
+          `Failed to add unequipped item ${itemIdToAdd} to inventory, restoring equipment`,
+        );
+        equipmentSlot.itemId = itemIdToAdd;
+        equipmentSlot.item = itemData;
+        this.createEquipmentVisual(data.playerId, equipmentSlot);
+        this.sendMessage(
+          data.playerId,
+          "Failed to unequip - inventory error.",
+          "warning",
+        );
+        return;
+      }
+    } finally {
+      // Always release the lock
+      inventorySystem?.unlockTransaction(data.playerId);
+    }
 
     // Update stats
     this.recalculateStats(data.playerId);

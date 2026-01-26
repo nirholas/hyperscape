@@ -1,4 +1,4 @@
-CREATE TABLE "quest_audit_log" (
+CREATE TABLE IF NOT EXISTS "quest_audit_log" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"playerId" text NOT NULL,
 	"questId" text NOT NULL,
@@ -10,7 +10,7 @@ CREATE TABLE "quest_audit_log" (
 	"metadata" jsonb DEFAULT '{}'::jsonb
 );
 --> statement-breakpoint
-CREATE TABLE "quest_progress" (
+CREATE TABLE IF NOT EXISTS "quest_progress" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"playerId" text NOT NULL,
 	"questId" text NOT NULL,
@@ -22,13 +22,17 @@ CREATE TABLE "quest_progress" (
 	CONSTRAINT "quest_progress_playerId_questId_unique" UNIQUE("playerId","questId")
 );
 --> statement-breakpoint
-ALTER TABLE "characters" ADD COLUMN "questPoints" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
-ALTER TABLE "quest_audit_log" ADD CONSTRAINT "quest_audit_log_playerId_characters_id_fk" FOREIGN KEY ("playerId") REFERENCES "public"."characters"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "quest_progress" ADD CONSTRAINT "quest_progress_playerId_characters_id_fk" FOREIGN KEY ("playerId") REFERENCES "public"."characters"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "idx_quest_audit_log_player" ON "quest_audit_log" USING btree ("playerId");--> statement-breakpoint
-CREATE INDEX "idx_quest_audit_log_quest" ON "quest_audit_log" USING btree ("questId");--> statement-breakpoint
-CREATE INDEX "idx_quest_audit_log_player_quest" ON "quest_audit_log" USING btree ("playerId","questId");--> statement-breakpoint
-CREATE INDEX "idx_quest_audit_log_timestamp" ON "quest_audit_log" USING btree ("timestamp");--> statement-breakpoint
-CREATE INDEX "idx_quest_audit_log_action" ON "quest_audit_log" USING btree ("action");--> statement-breakpoint
-CREATE INDEX "idx_quest_progress_player" ON "quest_progress" USING btree ("playerId");--> statement-breakpoint
-CREATE INDEX "idx_quest_progress_status" ON "quest_progress" USING btree ("playerId","status");
+ALTER TABLE "characters" ADD COLUMN IF NOT EXISTS "questPoints" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+DO $$ BEGIN
+  ALTER TABLE "quest_audit_log" ADD CONSTRAINT "quest_audit_log_playerId_characters_id_fk" FOREIGN KEY ("playerId") REFERENCES "public"."characters"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;--> statement-breakpoint
+DO $$ BEGIN
+  ALTER TABLE "quest_progress" ADD CONSTRAINT "quest_progress_playerId_characters_id_fk" FOREIGN KEY ("playerId") REFERENCES "public"."characters"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_quest_audit_log_player" ON "quest_audit_log" USING btree ("playerId");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_quest_audit_log_quest" ON "quest_audit_log" USING btree ("questId");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_quest_audit_log_player_quest" ON "quest_audit_log" USING btree ("playerId","questId");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_quest_audit_log_timestamp" ON "quest_audit_log" USING btree ("timestamp");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_quest_audit_log_action" ON "quest_audit_log" USING btree ("action");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_quest_progress_player" ON "quest_progress" USING btree ("playerId");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_quest_progress_status" ON "quest_progress" USING btree ("playerId","status");

@@ -1,17 +1,17 @@
-import { GAME_API_URL } from "@/lib/api-config";
-import React, { useEffect, useState } from "react";
-import { DashboardLayout } from "../components/dashboard/DashboardLayout";
-import { AgentChat } from "../components/dashboard/AgentChat";
-import { AgentViewportChat } from "../components/dashboard/AgentViewportChat";
-import { AgentSettings } from "../components/dashboard/AgentSettings";
-import { AgentLogs } from "../components/dashboard/AgentLogs";
-import { AgentMemories } from "../components/dashboard/AgentMemories";
-import { AgentTimeline } from "../components/dashboard/AgentTimeline";
-import { AgentDynamicPanel } from "../components/dashboard/AgentDynamicPanel";
-import { AgentRuns } from "../components/dashboard/AgentRuns";
-import { SystemStatus } from "../components/dashboard/SystemStatus";
-import { ViewportConfirmModal } from "../components/dashboard/ViewportConfirmModal";
-import type { Agent, AgentPanel } from "../components/dashboard/types";
+import React, { useEffect, useState, useRef } from "react";
+import { apiClient } from "@/lib/api-client";
+import { DashboardLayout } from "../game/dashboard/DashboardLayout";
+import { AgentChat } from "../game/dashboard/AgentChat";
+import { AgentViewportChat } from "../game/dashboard/AgentViewportChat";
+import { AgentSettings } from "../game/dashboard/AgentSettings";
+import { AgentLogs } from "../game/dashboard/AgentLogs";
+import { AgentMemories } from "../game/dashboard/AgentMemories";
+import { AgentTimeline } from "../game/dashboard/AgentTimeline";
+import { AgentDynamicPanel } from "../game/dashboard/AgentDynamicPanel";
+import { AgentRuns } from "../game/dashboard/AgentRuns";
+import { SystemStatus } from "../game/dashboard/SystemStatus";
+import { ViewportConfirmModal } from "../game/dashboard/ViewportConfirmModal";
+import type { Agent, AgentPanel } from "../game/dashboard/types";
 import {
   MessageSquare,
   Settings,
@@ -27,7 +27,7 @@ import { ELIZAOS_API } from "@/lib/api-config";
 import "./DashboardScreen.css";
 
 // Re-export types for backwards compatibility
-export type { Agent, AgentPanel } from "../components/dashboard/types";
+export type { Agent, AgentPanel } from "../game/dashboard/types";
 
 // Preference key for localStorage
 const VIEWPORT_AUTO_START_KEY = "hyperscape_viewport_auto_start";
@@ -57,6 +57,15 @@ export const DashboardScreen: React.FC = () => {
   );
   const [viewportAgentId, setViewportAgentId] = useState<string | null>(null);
 
+  // Ref to track if component is mounted (prevents state updates after unmount)
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // Get user's main account ID from Privy localStorage
   useEffect(() => {
     const accountId = localStorage.getItem("privy_user_id");
@@ -77,20 +86,20 @@ export const DashboardScreen: React.FC = () => {
 
       if (userAccountId) {
         try {
-          const mappingResponse = await fetch(
-            `${GAME_API_URL}/api/agents/mappings/${userAccountId}`,
+          const mappingResult = await apiClient.get<{ agentIds?: string[] }>(
+            `/api/agents/mappings/${userAccountId}`,
           );
 
-          if (mappingResponse.ok) {
-            const mappingData = await mappingResponse.json();
-            userAgentIds = mappingData.agentIds || [];
+          if (mappingResult.ok && mappingResult.data) {
+            userAgentIds = mappingResult.data.agentIds || [];
             console.log(
               `[Dashboard] Found ${userAgentIds.length} agent mapping(s) for user ${userAccountId}`,
               userAgentIds,
             );
           } else {
             console.warn(
-              "[Dashboard] Failed to fetch agent mappings from Hyperscape",
+              "[Dashboard] Failed to fetch agent mappings from Hyperscape:",
+              mappingResult.error,
             );
           }
         } catch (err) {
@@ -132,16 +141,21 @@ export const DashboardScreen: React.FC = () => {
           console.warn("[Dashboard] No userAccountId - showing all agents");
         }
 
-        setAgents(filteredAgents);
-        // Select first agent if none selected
-        if (!selectedAgentId && filteredAgents.length > 0) {
-          setSelectedAgentId(filteredAgents[0].id);
+        // Only update state if component is still mounted
+        if (isMountedRef.current) {
+          setAgents(filteredAgents);
+          // Select first agent if none selected
+          if (!selectedAgentId && filteredAgents.length > 0) {
+            setSelectedAgentId(filteredAgents[0].id);
+          }
         }
       }
     } catch (err) {
       console.error("Failed to load agents:", err);
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
     }
   };
 
@@ -259,17 +273,19 @@ export const DashboardScreen: React.FC = () => {
         `[Dashboard] 📋 Fetching mapping data for rollback protection...`,
       );
       try {
-        const getMappingResponse = await fetch(
-          `${GAME_API_URL}/api/agents/mappings/${agentId}`,
-        );
+        const getMappingResult = await apiClient.get<{
+          agentId?: string;
+          accountId?: string;
+          characterId?: string;
+          agentName?: string;
+        }>(`/api/agents/mappings/${agentId}`);
 
-        if (getMappingResponse.ok) {
-          const mappingData = await getMappingResponse.json();
+        if (getMappingResult.ok && getMappingResult.data) {
           deletedMapping = {
-            agentId: mappingData.agentId || agentId,
-            accountId: mappingData.accountId || userAccountId || "",
-            characterId: mappingData.characterId || "",
-            agentName: mappingData.agentName || "Unknown Agent",
+            agentId: getMappingResult.data.agentId || agentId,
+            accountId: getMappingResult.data.accountId || userAccountId || "",
+            characterId: getMappingResult.data.characterId || "",
+            agentName: getMappingResult.data.agentName || "Unknown Agent",
           };
           console.log(
             `[Dashboard] ✅ Mapping data cached for rollback:`,
@@ -277,7 +293,7 @@ export const DashboardScreen: React.FC = () => {
           );
         } else {
           console.warn(
-            `[Dashboard] ⚠️  Could not fetch mapping data (HTTP ${getMappingResponse.status}) - proceeding without rollback protection`,
+            `[Dashboard] ⚠️  Could not fetch mapping data (${getMappingResult.error || getMappingResult.status}) - proceeding without rollback protection`,
           );
         }
       } catch (fetchError) {
@@ -292,16 +308,13 @@ export const DashboardScreen: React.FC = () => {
       console.log(
         `[Dashboard] 🗑️  Step 1/2: Deleting mapping from Hyperscape database...`,
       );
-      const mappingResponse = await fetch(
-        `${GAME_API_URL}/api/agents/mappings/${agentId}`,
-        {
-          method: "DELETE",
-        },
+      const mappingDeleteResult = await apiClient.delete(
+        `/api/agents/mappings/${agentId}`,
       );
 
-      if (!mappingResponse.ok) {
+      if (!mappingDeleteResult.ok) {
         throw new Error(
-          `Failed to delete agent mapping from Hyperscape: HTTP ${mappingResponse.status}`,
+          `Failed to delete agent mapping from Hyperscape: ${mappingDeleteResult.error || mappingDeleteResult.status}`,
         );
       }
 
@@ -346,22 +359,18 @@ export const DashboardScreen: React.FC = () => {
         );
 
         try {
-          const rollbackResponse = await fetch(
-            `${GAME_API_URL}/api/agents/mappings`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(deletedMapping),
-            },
+          const rollbackResult = await apiClient.post(
+            "/api/agents/mappings",
+            deletedMapping,
           );
 
-          if (rollbackResponse.ok) {
+          if (rollbackResult.ok) {
             console.log(
               `[Dashboard] ✅ Mapping rollback successful - agent restored in dashboard`,
             );
           } else {
             console.error(
-              `[Dashboard] ❌ Mapping rollback failed: HTTP ${rollbackResponse.status} - ghost agent may appear`,
+              `[Dashboard] ❌ Mapping rollback failed: ${rollbackResult.error || rollbackResult.status} - ghost agent may appear`,
             );
           }
         } catch (rollbackError) {

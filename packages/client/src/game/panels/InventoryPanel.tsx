@@ -3,21 +3,27 @@
  * Modern MMORPG-style inventory interface with drag-and-drop functionality
  */
 
-import { useEffect, useState, useRef, useMemo, useCallback } from "react";
+import { useEffect, useState, useRef, useMemo, useCallback, memo } from "react";
 import { createPortal } from "react-dom";
 import {
-  DndProvider,
+  DndContext,
   useDraggable,
   useDroppable,
+  DragOverlay,
+  useSensors,
+  useSensor,
+  PointerSensor,
+  KeyboardSensor,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import {
   useDragStore,
-  ComposableDragOverlay,
   calculateCursorTooltipPosition,
   TOOLTIP_SIZE_ESTIMATES,
   useThemeStore,
   useMobileLayout,
-  type DragEndEvent,
-  type DragStartEvent,
-} from "hs-kit";
+} from "@/ui";
 import { useContextMenuState } from "../../hooks";
 import {
   EventType,
@@ -34,6 +40,7 @@ import {
   CONTEXT_MENU_COLORS,
   type PrimaryActionType,
 } from "@hyperscape/shared";
+import { getItemIcon } from "@/utils";
 import { dispatchInventoryAction } from "../systems/InventoryActionDispatcher";
 import type { ClientWorld, InventorySlotItem } from "../../types";
 import { CoinAmountModal } from "./BankPanel/components/modals/CoinAmountModal";
@@ -134,11 +141,10 @@ function formatQuantity(qty: number): { text: string; color: string } {
 
 /**
  * Custom modifier to center the DragOverlay on the cursor.
- * hs-kit version - adjustToPointer on ComposableDragOverlay handles this.
+ * The ComposableDragOverlay uses adjustToPointer=true by default.
  */
-// Note: hs-kit's ComposableDragOverlay uses adjustToPointer=true by default
-
-function DraggableInventorySlot({
+// Memoized to prevent re-renders of all 28 slots when any slot changes
+const DraggableInventorySlot = memo(function DraggableInventorySlot({
   item,
   index,
   onShiftClick,
@@ -167,7 +173,7 @@ function DraggableInventorySlot({
     isDragging,
   } = useDraggable({
     id: `inventory-${index}`,
-    data: { item, index },
+    data: { item, index, source: "inventory" },
     disabled: isDragDisabled,
   });
 
@@ -212,53 +218,12 @@ function DraggableInventorySlot({
     return isNotedItem(itemData);
   }, [itemData]);
 
-  // Get icon for item
-  const getItemIcon = (itemId: string) => {
-    if (
-      itemId.includes("sword") ||
-      itemId.includes("dagger") ||
-      itemId.includes("scimitar")
-    )
-      return "⚔️";
-    if (itemId.includes("shield") || itemId.includes("defender")) return "🛡️";
-    if (
-      itemId.includes("helmet") ||
-      itemId.includes("helm") ||
-      itemId.includes("hat")
-    )
-      return "⛑️";
-    if (itemId.includes("boots") || itemId.includes("boot")) return "👢";
-    if (itemId.includes("glove") || itemId.includes("gauntlet")) return "🧤";
-    if (itemId.includes("cape") || itemId.includes("cloak")) return "🧥";
-    if (itemId.includes("amulet") || itemId.includes("necklace")) return "📿";
-    if (itemId.includes("ring")) return "💍";
-    if (itemId.includes("arrow") || itemId.includes("bolt")) return "🏹";
-    if (
-      itemId.includes("fish") ||
-      itemId.includes("lobster") ||
-      itemId.includes("shark")
-    )
-      return "🐟";
-    if (itemId.includes("log") || itemId.includes("wood")) return "🪵";
-    if (itemId.includes("ore") || itemId.includes("bar")) return "⛏️";
-    if (itemId.includes("coin")) return "💰";
-    if (itemId.includes("potion") || itemId.includes("vial")) return "🧪";
-    if (
-      itemId.includes("food") ||
-      itemId.includes("bread") ||
-      itemId.includes("meat")
-    )
-      return "🍖";
-    if (itemId.includes("axe")) return "🪓";
-    if (itemId.includes("pickaxe")) return "⛏️";
-    return itemId.substring(0, 2).toUpperCase();
-  };
-
   return (
     <button
       ref={setNodeRef}
       {...attributes}
       {...listeners}
+      data-testid="inventory-slot"
       className="relative border rounded transition-all duration-100 group w-full h-full"
       onClick={(e) => {
         // Embedded mode: simple click to deposit/sell
@@ -535,30 +500,30 @@ function DraggableInventorySlot({
           : isOver
             ? "rgba(242, 208, 138, 0.5)" // Gold highlight when dragging over
             : isEmpty
-              ? "rgba(0, 0, 0, 0.4)" // Dark border for embossed empty slots
+              ? "rgba(8, 8, 10, 0.6)" // Dark border for embossed empty slots
               : isItemNoted
                 ? "rgba(140, 120, 80, 0.5)" // Subtle tan border for notes
-                : "rgba(0, 0, 0, 0.35)", // Dark border for embossed filled slots
+                : "rgba(10, 10, 12, 0.5)", // Dark border for embossed filled slots
         borderWidth: isSourceItem ? "2px" : "1px",
         borderStyle: "solid",
-        // Embossed style: darker, inset appearance
+        // Embossed style: darker, inset appearance - uses theme colors
         background: isOver
           ? "rgba(242, 208, 138, 0.15)" // Gold tint when dragging over
           : isEmpty
-            ? "rgba(8, 6, 4, 0.95)" // Very dark for empty - deep inset
+            ? "rgba(16, 16, 18, 0.95)" // Aligned with theme BG_PRIMARY
             : isItemNoted
               ? "linear-gradient(180deg, rgba(215, 200, 165, 0.95) 0%, rgba(235, 225, 195, 0.95) 100%)" // Parchment - lighter at bottom for emboss
-              : "rgba(18, 14, 10, 0.95)", // Dark flat background for items
+              : "rgba(20, 20, 22, 0.95)", // Aligned with theme BG_SECONDARY
         // Embossed shadows: dark on top/left, subtle light on bottom/right
         boxShadow: isSourceItem
           ? "0 0 8px rgba(255, 255, 255, 0.6)" // OSRS: White glow on source item
           : isOver
             ? "inset 0 0 8px rgba(242, 208, 138, 0.3)"
             : isEmpty
-              ? "inset 2px 2px 4px rgba(0, 0, 0, 0.7), inset -1px -1px 2px rgba(60, 50, 40, 0.15)" // Strong emboss for empty
+              ? "inset 2px 2px 4px rgba(0, 0, 0, 0.5), inset -1px -1px 2px rgba(40, 40, 45, 0.15)" // Strong emboss for empty
               : isItemNoted
                 ? "inset 1px 1px 3px rgba(0, 0, 0, 0.25), inset -1px -1px 1px rgba(255, 255, 255, 0.4)" // Subtle paper emboss
-                : "inset 2px 2px 4px rgba(0, 0, 0, 0.6), inset -1px -1px 2px rgba(80, 65, 45, 0.12)", // Emboss for filled
+                : "inset 2px 2px 4px rgba(0, 0, 0, 0.4), inset -1px -1px 2px rgba(50, 50, 55, 0.12)", // Emboss for filled
         // OSRS-style cursor changes during targeting mode
         cursor: isTargetingActive
           ? isSourceItem
@@ -630,7 +595,7 @@ function DraggableInventorySlot({
       )}
     </button>
   );
-}
+});
 
 /**
  * Pending move operation for rollback tracking
@@ -669,9 +634,9 @@ interface ItemHoverState {
   position: { x: number; y: number };
 }
 
-// Tooltip positioning now uses shared calculateCursorTooltipPosition from hs-kit
+// Tooltip positioning uses shared calculateCursorTooltipPosition utility
 
-import type { Theme } from "hs-kit";
+import type { Theme } from "@/ui";
 
 /**
  * Render item hover tooltip content
@@ -690,7 +655,7 @@ function renderItemHoverTooltip(
       (bonuses.defense !== undefined && bonuses.defense !== 0) ||
       (bonuses.strength !== undefined && bonuses.strength !== 0));
 
-  // Use shared hs-kit tooltip positioning for consistent edge detection
+  // Use shared tooltip positioning for consistent edge detection
   // Offset of 4px keeps tooltip close to cursor while avoiding overlap
   const { left, top } = calculateCursorTooltipPosition(
     itemHover.position,
@@ -797,6 +762,17 @@ export function InventoryPanel({
 }: InventoryPanelProps & { useParentDndContext?: boolean }) {
   const theme = useThemeStore((s) => s.theme);
   const { shouldUseMobileUI } = useMobileLayout();
+
+  // Configure sensors for accessibility (keyboard + pointer support)
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8, // Require 8px movement before drag starts
+      },
+    }),
+    useSensor(KeyboardSensor),
+  );
+
   const [activeId, setActiveId] = useState<string | null>(null);
   const [dragSlotSize, setDragSlotSize] = useState<number | null>(null);
   const [slotItems, setSlotItems] = useState<(InventorySlotViewItem | null)[]>(
@@ -840,7 +816,7 @@ export function InventoryPanel({
   const slotItemsRef = useRef<(InventorySlotViewItem | null)[]>([]);
   slotItemsRef.current = slotItems;
 
-  // Note: hs-kit handles sensors internally with useDraggable
+  // Drag sensors are handled internally with useDraggable
   // MouseSensor: 3px threshold, TouchSensor: handled via pointer events
 
   useEffect(() => {
@@ -1319,10 +1295,10 @@ export function InventoryPanel({
       <div
         className="border rounded overflow-hidden flex-1"
         style={{
-          background: theme.colors.background.primary,
-          borderColor: "rgba(0, 0, 0, 0.5)",
+          background: theme.colors.background.secondary,
+          borderColor: "rgba(10, 10, 12, 0.6)",
           // Embossed container: dark top-left edge, subtle light bottom-right
-          boxShadow: `inset 3px 3px 6px rgba(0, 0, 0, 0.5), inset -2px -2px 4px rgba(60, 50, 40, 0.1)`,
+          boxShadow: `inset 2px 2px 4px rgba(0, 0, 0, 0.4), inset -1px -1px 3px rgba(40, 40, 45, 0.08)`,
           // Container query support for responsive slot sizing
           containerType: "size",
           minHeight: 0,
@@ -1342,7 +1318,9 @@ export function InventoryPanel({
         >
           {slotItems.map((item, index) => (
             <DraggableInventorySlot
-              key={index}
+              key={
+                item?.itemId ? `${item.slot}-${item.itemId}` : `empty-${index}`
+              }
               item={item}
               index={index}
               targetingState={embeddedMode ? undefined : targetingState}
@@ -1389,7 +1367,7 @@ export function InventoryPanel({
         </div>
       )}
 
-      <ComposableDragOverlay adjustToPointer>
+      <DragOverlay>
         {activeItem
           ? (() => {
               // Get icon for drag overlay
@@ -1463,7 +1441,7 @@ export function InventoryPanel({
               );
             })()
           : null}
-      </ComposableDragOverlay>
+      </DragOverlay>
     </div>
   );
 
@@ -1473,9 +1451,13 @@ export function InventoryPanel({
       {useParentDndContext ? (
         inventoryContent
       ) : (
-        <DndProvider onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+        <DndContext
+          sensors={sensors}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+        >
           {inventoryContent}
-        </DndProvider>
+        </DndContext>
       )}
 
       {/* Coin Withdrawal Modal */}

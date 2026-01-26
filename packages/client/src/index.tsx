@@ -25,7 +25,7 @@ import { GameClient } from "./screens/GameClient";
 import { LoginScreen } from "./screens/LoginScreen";
 import { CharacterSelectScreen } from "./screens/CharacterSelectScreen";
 import { UsernameSelectionScreen } from "./screens/UsernameSelectionScreen";
-import { EmbeddedGameClient } from "./components/EmbeddedGameClient";
+import { EmbeddedGameClient } from "./game/EmbeddedGameClient";
 import { isEmbeddedMode } from "./types/embeddedConfig";
 import { GAME_API_URL, GAME_WS_URL } from "./lib/api-config";
 
@@ -37,26 +37,30 @@ import type {
 } from "./types/embeddedConfig";
 
 // Buffer polyfill for Privy (required for crypto operations in browser)
+// Must be imported and assigned BEFORE any other imports that might use it
 import { Buffer } from "buffer";
-if (!globalThis.Buffer) {
-  (globalThis as typeof globalThis & { Buffer: typeof Buffer }).Buffer = Buffer;
+(globalThis as typeof globalThis & { Buffer: typeof Buffer }).Buffer = Buffer;
+// Also ensure window.Buffer is available for libraries that check there
+if (typeof window !== "undefined") {
+  (window as Window & { Buffer: typeof Buffer }).Buffer = Buffer;
 }
 
 // setImmediate polyfill for Privy/Viem
+// Browser polyfill uses setTimeout which returns a Timeout, but libraries expect
+// the Node.js setImmediate signature. The cast is required for cross-platform compat.
 declare global {
   interface GlobalThis {
-    setImmediate?: (
-      cb: (...args: unknown[]) => void,
-      ...args: unknown[]
-    ) => number;
+    setImmediate?: typeof setImmediate;
   }
 }
 
 if (!globalThis.setImmediate) {
+  // Browser polyfill: setTimeout(cb, 0) mimics setImmediate behavior
+  // Cast required: setTimeout returns Timeout, setImmediate expects NodeJS.Immediate
   globalThis.setImmediate = ((
-    cb: (...args: unknown[]) => void,
+    callback: (...args: unknown[]) => void,
     ...args: unknown[]
-  ) => setTimeout(cb, 0, ...args)) as unknown as typeof setImmediate;
+  ) => setTimeout(callback, 0, ...args)) as unknown as typeof setImmediate;
 }
 
 // Parse URL parameters for embedded configuration
@@ -91,7 +95,10 @@ if (isEmbedded) {
   };
 
   window.__HYPERSCAPE_CONFIG__ = config;
-  console.log("[Hyperscape] Configured from URL params:", config);
+  // Use logger to safely redact authToken and other sensitive data
+  import("./lib/logger").then(({ logger }) => {
+    logger.config("[Hyperscape] Configured from URL params:", config);
+  });
 }
 
 // Set global environment flags
@@ -432,7 +439,9 @@ function App() {
   if (privyEnabled && !isAuthenticated && !authState.isAuthenticated) {
     return (
       <div ref={appRef} data-component="app-root">
-        <LoginScreen onAuthenticated={handleAuthenticated} />
+        <ErrorBoundary>
+          <LoginScreen onAuthenticated={handleAuthenticated} />
+        </ErrorBoundary>
       </div>
     );
   }
@@ -446,7 +455,11 @@ function App() {
   ) {
     return (
       <div ref={appRef} data-component="app-root">
-        <UsernameSelectionScreen onUsernameSelected={handleUsernameSelected} />
+        <ErrorBoundary>
+          <UsernameSelectionScreen
+            onUsernameSelected={handleUsernameSelected}
+          />
+        </ErrorBoundary>
       </div>
     );
   }
@@ -455,18 +468,20 @@ function App() {
   if (showCharacterPage && privyEnabled && hasUsername === true) {
     return (
       <div ref={appRef} data-component="app-root">
-        <CharacterSelectScreen
-          wsUrl={wsUrl}
-          onPlay={(id) => {
-            if (id) {
-              // Use sessionStorage (per-tab) instead of localStorage (shared across tabs)
-              // This prevents Tab B from overwriting Tab A's selected character
-              sessionStorage.setItem("selectedCharacterId", id);
-            }
-            setShowCharacterPage(false);
-          }}
-          onLogout={handleLogout}
-        />
+        <ErrorBoundary>
+          <CharacterSelectScreen
+            wsUrl={wsUrl}
+            onPlay={(id) => {
+              if (id) {
+                // Use sessionStorage (per-tab) instead of localStorage (shared across tabs)
+                // This prevents Tab B from overwriting Tab A's selected character
+                sessionStorage.setItem("selectedCharacterId", id);
+              }
+              setShowCharacterPage(false);
+            }}
+            onLogout={handleLogout}
+          />
+        </ErrorBoundary>
       </div>
     );
   }
@@ -488,7 +503,9 @@ function App() {
   // The client will automatically send enterWorld without characterId for dev mode
   return (
     <div ref={appRef} data-component="app-root">
-      <GameClient wsUrl={wsUrl} onSetup={handleSetup} />
+      <ErrorBoundary>
+        <GameClient wsUrl={wsUrl} onSetup={handleSetup} />
+      </ErrorBoundary>
     </div>
   );
 }
@@ -542,9 +559,17 @@ async function setupTauriDeepLinks(): Promise<void> {
   }
 }
 
+// Track React root instance to prevent double mounting on HMR
+let reactRoot: ReactDOM.Root | null = null;
+
 async function mountApp() {
   const rootElement = document.getElementById("root")!;
-  const root = ReactDOM.createRoot(rootElement);
+
+  // Reuse existing root if already created (prevents HMR double-mount warning)
+  if (!reactRoot) {
+    reactRoot = ReactDOM.createRoot(rootElement);
+  }
+  const root = reactRoot;
 
   // Setup Tauri deep links for OAuth
   await setupTauriDeepLinks();

@@ -175,6 +175,15 @@ import {
   handleTradeCancelAccept,
   handleTradeCancel,
 } from "./handlers/trade";
+import {
+  handleFriendRequest,
+  handleFriendAccept,
+  handleFriendDecline,
+  handleFriendRemove,
+  handleIgnoreAdd,
+  handleIgnoreRemove,
+  handlePrivateMessage,
+} from "./handlers/friends";
 import { TradingSystem } from "../TradingSystem";
 import { getDatabase } from "./handlers/common";
 
@@ -1442,19 +1451,25 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Prayer handlers
     this.handlers["onPrayerToggle"] = (socket, data) =>
       handlePrayerToggle(socket, data, this.world);
+    this.handlers["prayerToggle"] = this.handlers["onPrayerToggle"];
 
     this.handlers["onPrayerDeactivateAll"] = (socket, data) =>
       handlePrayerDeactivateAll(socket, data, this.world);
+    this.handlers["prayerDeactivateAll"] =
+      this.handlers["onPrayerDeactivateAll"];
 
     this.handlers["onAltarPray"] = (socket, data) =>
       handleAltarPray(socket, data, this.world);
+    this.handlers["altarPray"] = this.handlers["onAltarPray"];
 
     // Action bar handlers
-    this.handlers["actionBarSave"] = (socket, data) =>
+    this.handlers["onActionBarSave"] = (socket, data) =>
       handleActionBarSave(socket, data, this.world);
+    this.handlers["actionBarSave"] = this.handlers["onActionBarSave"];
 
-    this.handlers["actionBarLoad"] = (socket, data) =>
+    this.handlers["onActionBarLoad"] = (socket, data) =>
       handleActionBarLoad(socket, data, this.world);
+    this.handlers["actionBarLoad"] = this.handlers["onActionBarLoad"];
 
     // Player name change handler
     this.handlers["changePlayerName"] = (socket, data) =>
@@ -1937,10 +1952,13 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       );
 
       // Check if entity has handleInteraction method
-      const interactableEntity = entity as {
+      const interactableEntity = entity as unknown as {
         handleInteraction?: (data: {
           playerId: string;
-          interactionType?: string;
+          entityId: string;
+          interactionType: string;
+          position: { x: number; y: number; z: number };
+          playerPosition: { x: number; y: number; z: number };
         }) => Promise<void>;
       };
 
@@ -1949,9 +1967,16 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           `[ServerNetwork] Calling handleInteraction on ${entity.type} entity`,
         );
         try {
+          // Build full EntityInteractionData
+          const entityPos = entity.position ?? { x: 0, y: 0, z: 0 };
+          const playerPos = playerEntity.position ?? { x: 0, y: 0, z: 0 };
+
           await interactableEntity.handleInteraction({
             playerId: playerEntity.id,
+            entityId: payload.entityId,
             interactionType: payload.interactionType || "interact",
+            position: { x: entityPos.x, y: entityPos.y, z: entityPos.z },
+            playerPosition: { x: playerPos.x, y: playerPos.y, z: playerPos.z },
           });
           console.log(
             `[ServerNetwork] handleInteraction completed for ${entity.type}`,
@@ -2108,6 +2133,39 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
     this.handlers["tradeCancel"] = (socket, data) =>
       handleTradeCancel(socket, data as { tradeId: string }, this.world);
+
+    // Friend/Social handlers
+    this.handlers["onFriendRequest"] = (socket, data) =>
+      handleFriendRequest(socket, data as { targetName: string }, this.world);
+    this.handlers["friendRequest"] = this.handlers["onFriendRequest"];
+
+    this.handlers["onFriendAccept"] = (socket, data) =>
+      handleFriendAccept(socket, data as { requestId: string }, this.world);
+    this.handlers["friendAccept"] = this.handlers["onFriendAccept"];
+
+    this.handlers["onFriendDecline"] = (socket, data) =>
+      handleFriendDecline(socket, data as { requestId: string }, this.world);
+    this.handlers["friendDecline"] = this.handlers["onFriendDecline"];
+
+    this.handlers["onFriendRemove"] = (socket, data) =>
+      handleFriendRemove(socket, data as { friendId: string }, this.world);
+    this.handlers["friendRemove"] = this.handlers["onFriendRemove"];
+
+    this.handlers["onIgnoreAdd"] = (socket, data) =>
+      handleIgnoreAdd(socket, data as { targetName: string }, this.world);
+    this.handlers["ignoreAdd"] = this.handlers["onIgnoreAdd"];
+
+    this.handlers["onIgnoreRemove"] = (socket, data) =>
+      handleIgnoreRemove(socket, data as { ignoredId: string }, this.world);
+    this.handlers["ignoreRemove"] = this.handlers["onIgnoreRemove"];
+
+    this.handlers["onPrivateMessage"] = (socket, data) =>
+      handlePrivateMessage(
+        socket,
+        data as { targetName: string; content: string },
+        this.world,
+      );
+    this.handlers["privateMessage"] = this.handlers["onPrivateMessage"];
   }
 
   async init(options: WorldOptions): Promise<void> {

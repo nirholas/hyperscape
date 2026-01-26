@@ -263,10 +263,7 @@ export class QuestSystem extends SystemBase implements IQuestSystem {
 
       try {
         const questsData = await fs.readFile(questsPath, "utf-8");
-        const questData = JSON.parse(questsData) as Record<
-          string,
-          QuestDefinition
-        >;
+        const questData = JSON.parse(questsData) as QuestManifest;
 
         let validCount = 0;
         let invalidCount = 0;
@@ -299,7 +296,7 @@ export class QuestSystem extends SystemBase implements IQuestSystem {
             `Loaded ${validCount} quest definitions from ${questsPath}`,
           );
         }
-      } catch (err) {
+      } catch {
         this.logger.warn(
           `Quest manifest not found at ${questsPath}, using empty quest list`,
         );

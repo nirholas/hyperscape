@@ -2,11 +2,11 @@
  * Coin Amount Modal Component
  *
  * Modal for entering coin deposit/withdraw amounts with quick buttons.
- * Uses hs-kit ModalWindow and theme system for consistent styling.
+ * Uses ModalWindow and theme system for consistent styling.
  */
 
 import { useState, useEffect, useRef, type CSSProperties } from "react";
-import { ModalWindow, useThemeStore } from "hs-kit";
+import { ModalWindow, useThemeStore } from "@/ui";
 import type { CoinModalState } from "../../types";
 import { formatQuantity } from "../../utils";
 

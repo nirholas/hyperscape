@@ -185,6 +185,29 @@ export class ThreeResourceManager {
   }
 
   /**
+   * Material with optional texture properties for dynamic access
+   * Used for disposing textures from various material types
+   */
+  private static readonly TEXTURE_PROPERTIES = [
+    "map",
+    "lightMap",
+    "bumpMap",
+    "normalMap",
+    "specularMap",
+    "envMap",
+    "alphaMap",
+    "emissiveMap",
+    "displacementMap",
+    "roughnessMap",
+    "metalnessMap",
+    "aoMap",
+    "clearcoatMap",
+    "clearcoatRoughnessMap",
+    "clearcoatNormalMap",
+    "transmissionMap",
+  ] as const;
+
+  /**
    * Disposes of all textures referenced by a material
    *
    * Checks all standard texture properties (map, normalMap, roughnessMap, etc.)
@@ -195,32 +218,16 @@ export class ThreeResourceManager {
    * @internal
    */
   private static disposeMaterialTextures(material: THREE.Material): void {
-    const textureProperties = [
-      "map",
-      "lightMap",
-      "bumpMap",
-      "normalMap",
-      "specularMap",
-      "envMap",
-      "alphaMap",
-      "emissiveMap",
-      "displacementMap",
-      "roughnessMap",
-      "metalnessMap",
-      "aoMap",
-      "clearcoatMap",
-      "clearcoatRoughnessMap",
-      "clearcoatNormalMap",
-      "transmissionMap",
-    ];
+    // Type for materials with optional texture properties
+    // MeshStandardMaterial and similar have these as optional properties
+    type MaterialWithTextures = THREE.Material & {
+      [K in (typeof ThreeResourceManager.TEXTURE_PROPERTIES)[number]]?: THREE.Texture | null;
+    };
 
-    textureProperties.forEach((prop) => {
-      // Access texture properties dynamically - use record type for dynamic access
-      const materialRecord = material as unknown as Record<
-        string,
-        THREE.Texture | undefined
-      >;
-      const texture = materialRecord[prop];
+    const materialWithTextures = material as MaterialWithTextures;
+
+    for (const prop of this.TEXTURE_PROPERTIES) {
+      const texture = materialWithTextures[prop];
       if (
         texture &&
         texture instanceof THREE.Texture &&
@@ -229,7 +236,7 @@ export class ThreeResourceManager {
         texture.dispose();
         this.disposedObjects.add(texture);
       }
-    });
+    }
   }
 
   /**

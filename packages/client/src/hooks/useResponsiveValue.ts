@@ -7,7 +7,7 @@
  * @packageDocumentation
  */
 
-import { useMobileLayout } from "hs-kit";
+import { useMobileLayout } from "@/ui";
 
 /**
  * Returns the appropriate value based on whether mobile UI is active.

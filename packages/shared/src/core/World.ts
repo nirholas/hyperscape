@@ -317,6 +317,10 @@ export class World extends EventEmitter {
         canChange: boolean;
       }
     >;
+    lastPrayerStateByPlayerId?: Record<
+      string,
+      { points: number; maxPoints: number; active: string[] }
+    >;
   };
 
   /** Environment system (lighting, skybox, fog, shadows) */

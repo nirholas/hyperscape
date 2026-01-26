@@ -149,13 +149,15 @@ function lockCameraToEntity(
   } else {
     // Fallback to event emission
     // Entity has node.position, but CAMERA_SET_TARGET expects target.position
-    const target = entity.node?.position
-      ? {
-          position: entity.node.position as { x: number; y: number; z: number },
-        }
-      : (entity as unknown as {
-          position: { x: number; y: number; z: number };
-        });
+    // Some entities may have position directly (runtime), others have it under node
+    type EntityWithPosition = { position: { x: number; y: number; z: number } };
+    const nodePos = entity.node?.position as
+      | { x: number; y: number; z: number }
+      | undefined;
+    // Cast required: entity type doesn't include position but some entities have it at runtime
+    const target: EntityWithPosition = nodePos
+      ? { position: nodePos }
+      : (entity as unknown as EntityWithPosition);
 
     world.emit(EventType.CAMERA_SET_TARGET, { target });
   }

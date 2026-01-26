@@ -10,7 +10,7 @@
 
 import React, { useState } from "react";
 import type { ClientWorld } from "../../types";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 
 interface SmeltingBar {
   barItemId: string;

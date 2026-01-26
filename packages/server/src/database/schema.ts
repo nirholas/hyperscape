@@ -855,7 +855,7 @@ export const characterTemplates = pgTable(
  * - Max 4 presets per user (slot 0-3)
  * - Unique constraint on (userId, slotIndex)
  * - CASCADE DELETE ensures cleanup when user is deleted
- * - layoutData stores serialized WindowState[] from hs-kit
+ * - layoutData stores serialized WindowState[] from the UI system
  */
 export const layoutPresets = pgTable(
   "layout_presets",
@@ -1012,6 +1012,17 @@ export const charactersRelations = relations(characters, ({ many }) => ({
   npcKills: many(npcKills),
   deaths: many(playerDeaths),
   agentMappings: many(agentMappings),
+  // Social system relations
+  friendships: many(friendships, { relationName: "playerFriendships" }),
+  friendOf: many(friendships, { relationName: "friendOf" }),
+  sentFriendRequests: many(friendRequests, {
+    relationName: "sentFriendRequests",
+  }),
+  receivedFriendRequests: many(friendRequests, {
+    relationName: "receivedFriendRequests",
+  }),
+  ignoreList: many(ignoreList, { relationName: "playerIgnoreList" }),
+  ignoredBy: many(ignoreList, { relationName: "ignoredBy" }),
 }));
 
 export const agentMappingsRelations = relations(agentMappings, ({ one }) => ({
@@ -1350,6 +1361,175 @@ export const charactersActivityRelations = relations(
     receivedTrades: many(trades, { relationName: "tradeReceiver" }),
   }),
 );
+
+// ============================================================================
+// SOCIAL/FRIEND SYSTEM TABLES
+// ============================================================================
+
+/**
+ * Friendships Table - Player friend relationships
+ *
+ * Stores bidirectional friend relationships. When two players become friends,
+ * TWO rows are created (one for each direction) to enable efficient lookups.
+ *
+ * Key columns:
+ * - `playerId` - The player who owns this friend entry
+ * - `friendId` - The friend's player ID
+ * - `createdAt` - When the friendship was established
+ * - `note` - Optional nickname/note for the friend
+ *
+ * Design notes:
+ * - Bidirectional: A friendship between A and B creates rows (A, B) and (B, A)
+ * - Unique constraint prevents duplicate friendships
+ * - Indexed on both playerId and friendId for fast lookups
+ * - CASCADE DELETE ensures cleanup when character is deleted
+ * - Max 99 friends per player (enforced in application logic)
+ */
+export const friendships = pgTable(
+  "friendships",
+  {
+    id: serial("id").primaryKey(),
+    playerId: text("playerId")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    friendId: text("friendId")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    createdAt: bigint("createdAt", { mode: "number" })
+      .notNull()
+      .default(sql`(EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT`),
+    note: text("note"), // Optional friend nickname
+  },
+  (table) => ({
+    uniqueFriendship: unique().on(table.playerId, table.friendId),
+    playerIdx: index("idx_friendships_player").on(table.playerId),
+    friendIdx: index("idx_friendships_friend").on(table.friendId),
+  }),
+);
+
+/**
+ * Friend Requests Table - Pending friend requests
+ *
+ * Stores friend requests that have been sent but not yet accepted/declined.
+ * Requests automatically expire after 7 days (handled in application logic).
+ *
+ * Key columns:
+ * - `id` - Unique request UUID
+ * - `fromPlayerId` - Player who sent the request
+ * - `toPlayerId` - Player who received the request
+ * - `createdAt` - When the request was sent
+ *
+ * Design notes:
+ * - Only pending requests are stored; accepted/declined are deleted
+ * - Unique constraint prevents duplicate requests
+ * - Indexed for fast lookup by recipient (most common query)
+ * - CASCADE DELETE ensures cleanup when character is deleted
+ */
+export const friendRequests = pgTable(
+  "friend_requests",
+  {
+    id: text("id").primaryKey(), // UUID
+    fromPlayerId: text("fromPlayerId")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    toPlayerId: text("toPlayerId")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    createdAt: bigint("createdAt", { mode: "number" }).notNull(),
+  },
+  (table) => ({
+    uniqueRequest: unique().on(table.fromPlayerId, table.toPlayerId),
+    toPlayerIdx: index("idx_friend_requests_to").on(table.toPlayerId),
+    fromPlayerIdx: index("idx_friend_requests_from").on(table.fromPlayerId),
+    createdAtIdx: index("idx_friend_requests_created").on(table.createdAt),
+  }),
+);
+
+/**
+ * Ignore List Table - Blocked players
+ *
+ * Stores players that a user has blocked/ignored.
+ * Ignored players cannot send private messages or friend requests.
+ *
+ * Key columns:
+ * - `playerId` - The player who is ignoring
+ * - `ignoredPlayerId` - The player being ignored
+ * - `createdAt` - When the ignore was added
+ *
+ * Design notes:
+ * - Unidirectional: A ignoring B doesn't mean B ignores A
+ * - Unique constraint prevents duplicate entries
+ * - Indexed on playerId for fast ignore list lookups
+ * - CASCADE DELETE ensures cleanup when character is deleted
+ * - Max 99 ignored players per player (enforced in application logic)
+ */
+export const ignoreList = pgTable(
+  "ignore_list",
+  {
+    id: serial("id").primaryKey(),
+    playerId: text("playerId")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    ignoredPlayerId: text("ignoredPlayerId")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    createdAt: bigint("createdAt", { mode: "number" })
+      .notNull()
+      .default(sql`(EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT`),
+  },
+  (table) => ({
+    uniqueIgnore: unique().on(table.playerId, table.ignoredPlayerId),
+    playerIdx: index("idx_ignore_list_player").on(table.playerId),
+  }),
+);
+
+/**
+ * Friendships Relations
+ */
+export const friendshipsRelations = relations(friendships, ({ one }) => ({
+  player: one(characters, {
+    fields: [friendships.playerId],
+    references: [characters.id],
+    relationName: "playerFriendships",
+  }),
+  friend: one(characters, {
+    fields: [friendships.friendId],
+    references: [characters.id],
+    relationName: "friendOf",
+  }),
+}));
+
+/**
+ * Friend Requests Relations
+ */
+export const friendRequestsRelations = relations(friendRequests, ({ one }) => ({
+  fromPlayer: one(characters, {
+    fields: [friendRequests.fromPlayerId],
+    references: [characters.id],
+    relationName: "sentFriendRequests",
+  }),
+  toPlayer: one(characters, {
+    fields: [friendRequests.toPlayerId],
+    references: [characters.id],
+    relationName: "receivedFriendRequests",
+  }),
+}));
+
+/**
+ * Ignore List Relations
+ */
+export const ignoreListRelations = relations(ignoreList, ({ one }) => ({
+  player: one(characters, {
+    fields: [ignoreList.playerId],
+    references: [characters.id],
+    relationName: "playerIgnoreList",
+  }),
+  ignoredPlayer: one(characters, {
+    fields: [ignoreList.ignoredPlayerId],
+    references: [characters.id],
+    relationName: "ignoredBy",
+  }),
+}));
 
 /**
  * SQL template tag for raw SQL expressions

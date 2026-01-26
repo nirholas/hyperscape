@@ -81,6 +81,7 @@ export default [
         Worker: "readonly",
         Blob: "readonly",
         FormData: "readonly",
+        AbortController: "readonly",
         Image: "readonly",
         requestAnimationFrame: "readonly",
         cancelAnimationFrame: "readonly",

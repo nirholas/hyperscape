@@ -7,7 +7,7 @@
  */
 
 import { getItem } from "@hyperscape/shared";
-import { getItemIcon } from "../../utils/item-display";
+import { getItemIcon } from "@/utils";
 import { formatQuantity } from "../utils";
 import type { InventoryItemProps } from "../types";
 

@@ -31,8 +31,6 @@ import {
   BFSPathfinder,
   // Collision system
   CollisionMask,
-  // Death state
-  DeathState,
 } from "@hyperscape/shared";
 import type { TileCoord, TileMovementState } from "@hyperscape/shared";
 

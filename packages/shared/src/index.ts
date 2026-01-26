@@ -275,6 +275,21 @@ export type {
   TradeRequestModalState,
 } from "./types/game/trade-types";
 
+// Export social/friend system types
+export { SOCIAL_CONSTANTS } from "./types/game/social-types";
+export type {
+  FriendStatus,
+  Friend,
+  FriendStatusUpdateData,
+  FriendRequest,
+  IgnoredPlayer,
+  PrivateMessage,
+  PrivateChatFailReason,
+  FriendsListSyncData,
+  SocialErrorCode,
+  SocialError,
+} from "./types/game/social-types";
+
 // Export quest type guards for server validation
 export { isValidQuestId } from "./types/game/quest-types";
 

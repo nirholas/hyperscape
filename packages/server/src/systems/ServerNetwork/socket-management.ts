@@ -12,6 +12,7 @@
 
 import type { ServerSocket } from "../../shared/types";
 import { EventType, World } from "@hyperscape/shared";
+import { notifyFriendsOfStatusChange } from "./handlers/friends";
 
 const WS_PING_INTERVAL_SEC = parseInt(
   process.env.WS_PING_INTERVAL_SEC || "5",
@@ -134,17 +135,29 @@ export class SocketManager {
 
     // Clean up any socket-specific resources
     if (socket.player) {
+      const playerId = socket.player.id;
+
+      // Notify friends that this player went offline (fire and forget)
+      notifyFriendsOfStatusChange(playerId, "offline", this.world).catch(
+        (err) => {
+          console.warn(
+            "[SocketManager] Failed to notify friends of disconnect:",
+            err,
+          );
+        },
+      );
+
       // Emit typed player left event
       this.world.emit(EventType.PLAYER_LEFT, {
-        playerId: socket.player.id,
+        playerId,
       });
 
       // Remove player entity from world
       if (this.world.entities?.remove) {
-        this.world.entities.remove(socket.player.id);
+        this.world.entities.remove(playerId);
       }
       // Broadcast entity removal to all remaining clients
-      this.sendFn("entityRemoved", socket.player.id);
+      this.sendFn("entityRemoved", playerId);
     }
   }
 

@@ -130,27 +130,14 @@ export class VisualFeedbackService {
 
   /**
    * Show target marker at position (for movement destination)
+   * NOTE: 3D marker disabled per design preference, but minimap marker still shown
    */
   showTargetMarker(position: Position3D): void {
-    if (!this.targetMarker) return;
-
     // Snap to tile center
     const tile = worldToTile(position.x, position.z);
     const snappedPos = tileToWorld(tile);
 
-    // Reuse existing targetPosition or create once
-    if (!this.targetPosition) {
-      this.targetPosition = new THREE.Vector3();
-    }
-    this.targetPosition.set(snappedPos.x, position.y, snappedPos.z);
-    this.targetMarker.position.set(snappedPos.x, 0, snappedPos.z);
-
-    // Project onto terrain
-    this.projectMarkerOntoTerrain(snappedPos.x, snappedPos.z, position.y);
-
-    this.targetMarker.visible = true;
-
-    // Sync with minimap
+    // Sync with minimap (3D marker hidden, but minimap still shows destination)
     this.syncMinimapDestination(snappedPos.x, position.y, snappedPos.z);
   }
 

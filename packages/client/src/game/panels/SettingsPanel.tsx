@@ -16,17 +16,16 @@ import {
 import { isTouch } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
 import { useFullscreen } from "../../hooks/useFullscreen";
-import { ToggleSwitch } from "../../components/ToggleSwitch";
-import { Slider } from "../../components/Slider";
+import { ToggleSwitch, Slider } from "@/ui";
 import { NAME_SANITIZE_REGEX } from "../../utils/validation";
 import {
   useComplexityStore,
   useComplexityMode,
   COMPLEXITY_MODE_CONFIGS,
   useThemeStore,
-} from "hs-kit";
+  type ComplexityMode,
+} from "@/ui";
 import type { StatusBarsConfig } from "../hud/StatusBars";
-import type { ComplexityMode } from "hs-kit";
 import { privyAuthManager } from "../../auth/PrivyAuthManager";
 import {
   type GraphicsQuality,
@@ -620,7 +619,6 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
   const [music, setMusic] = useState(prefs?.music || 0.5);
   const [sfx, setSFX] = useState(prefs?.sfx || 0.5);
   const [voice, setVoice] = useState(prefs?.voice || 1);
-  const [uiScale, setUiScale] = useState(prefs?.ui || 1);
   const [statsOn, setStatsOn] = useState(prefs?.stats || false);
 
   // Status bar configuration
@@ -765,7 +763,6 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
       if (changes.music) setMusic(changes.music.value as number);
       if (changes.sfx) setSFX(changes.sfx.value as number);
       if (changes.voice) setVoice(changes.voice.value as number);
-      if (changes.ui) setUiScale(changes.ui.value as number);
       if (changes.stats) setStatsOn(changes.stats.value as boolean);
     };
     prefs?.on?.("change", onPrefsChange);
@@ -1065,22 +1062,6 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
                   </div>
                 </div>
               )}
-            </SettingsSection>
-
-            {/* UI Scale */}
-            <SettingsSection title="UI Scale">
-              <Slider
-                label="Size"
-                value={uiScale}
-                onChange={(v) => {
-                  setUiScale(v);
-                  prefs?.setUI?.(v);
-                }}
-                min={0.6}
-                max={1.6}
-                step={0.05}
-                formatValue={(v) => `${v.toFixed(2)}x`}
-              />
             </SettingsSection>
 
             {/* Interface Complexity */}

@@ -123,6 +123,7 @@ import { DialogueSystem } from "..";
 
 // Client-only visual systems
 import { DamageSplatSystem } from "../../client";
+import { SocialSystem } from "../../client";
 
 // Zone systems
 import { ZoneDetectionSystem } from "../death/ZoneDetectionSystem";
@@ -360,6 +361,13 @@ export async function registerSystems(world: World): Promise<void> {
         "[SystemLoader] Failed to register DamageSplatSystem:",
         err,
       );
+    }
+
+    // Social system - client-side friend list caching
+    try {
+      world.register("social", SocialSystem);
+    } catch (err) {
+      console.error("[SystemLoader] Failed to register SocialSystem:", err);
     }
 
     // XP Drop System - 3D version disabled, using 2D screen-space drops in XPProgressOrb

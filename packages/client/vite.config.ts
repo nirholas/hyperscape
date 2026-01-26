@@ -240,7 +240,7 @@ export default defineConfig(({ mode }) => {
           manualChunks: {
             "vendor-react": ["react", "react-dom"],
             "vendor-three": ["three"],
-            "vendor-ui": ["styled-components", "lucide-react"],
+            "vendor-ui": ["lucide-react"],
           },
         },
         onwarn(warning, warn) {
@@ -292,8 +292,13 @@ export default defineConfig(({ mode }) => {
       // Safe environment variables (no secrets, only config)
       "process.env.NODE_ENV": JSON.stringify(mode),
       "process.env.DEBUG_RPG": JSON.stringify(env.DEBUG_RPG || ""),
+      // In development, use game server for CDN if PUBLIC_CDN_URL not set
+      // Game server serves manifests at /manifests/ and assets at /assets/
       "process.env.PUBLIC_CDN_URL": JSON.stringify(
-        env.PUBLIC_CDN_URL || "http://localhost:8080",
+        env.PUBLIC_CDN_URL ||
+          (mode === "production"
+            ? "http://localhost:8080"
+            : "http://localhost:5555"),
       ),
       "process.env.PUBLIC_STARTER_ITEMS": JSON.stringify(
         env.PUBLIC_STARTER_ITEMS || "",
@@ -321,11 +326,12 @@ export default defineConfig(({ mode }) => {
             : "ws://localhost:5555/ws"),
       ),
       // CDN URL - Cloudflare R2 with custom domain
+      // In development without PUBLIC_CDN_URL, use game server which serves manifests/assets
       "import.meta.env.PUBLIC_CDN_URL": JSON.stringify(
         env.PUBLIC_CDN_URL ||
           (mode === "production"
             ? "https://assets.hyperscape.club"
-            : "http://localhost:8080"),
+            : "http://localhost:5555"),
       ),
       "import.meta.env.PUBLIC_APP_URL": JSON.stringify(
         env.PUBLIC_APP_URL ||
@@ -368,12 +374,14 @@ export default defineConfig(({ mode }) => {
           __dirname,
           "../shared/build/framework.client.js",
         ),
+        // Ensure buffer polyfill is used consistently
+        buffer: "buffer",
       },
-      dedupe: ["three"],
+      dedupe: ["three", "buffer"],
     },
 
     optimizeDeps: {
-      include: ["three", "react", "react-dom"],
+      include: ["three", "react", "react-dom", "buffer"],
       exclude: [
         "@hyperscape/shared", // CRITICAL: Exclude from dep optimization so changes are detected
         "@playwright/test", // Exclude Playwright from optimization

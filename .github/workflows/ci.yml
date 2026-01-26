@@ -87,15 +87,6 @@ jobs:
         working-directory: packages/server
         run: bun run build
 
-      - name: Build hs-kit package (if exists)
-        run: |
-          if [ -d "packages/hs-kit" ]; then
-            echo "Building hs-kit package..."
-            cd packages/hs-kit && bun run build
-          else
-            echo "hs-kit package not found, skipping..."
-          fi
-
       - name: Setup database schema
         working-directory: packages/server
         run: bunx drizzle-kit push
@@ -152,15 +143,6 @@ jobs:
       - name: Build server package
         working-directory: packages/server
         run: bun run build
-
-      - name: Build hs-kit package (if exists)
-        run: |
-          if [ -d "packages/hs-kit" ]; then
-            echo "Building hs-kit package..."
-            cd packages/hs-kit && bun run build
-          else
-            echo "hs-kit package not found, skipping..."
-          fi
 
       - name: Build client package
         working-directory: packages/client

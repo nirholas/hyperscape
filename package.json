@@ -29,7 +29,7 @@
     "assets:optimize:models": "node scripts/optimize-assets.mjs --models",
     "assets:atlas": "node scripts/atlas-materials.mjs",
     "assets:atlas:all": "node scripts/atlas-materials.mjs --dir assets --recursive",
-    "build": "bun run docs:generate && turbo run build",
+    "build": "turbo run build",
     "build:shared": "cd packages/shared && bun run build",
     "build:client": "cd packages/client && bun run build",
     "build:server": "cd packages/server && bun run build",

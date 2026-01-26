@@ -20,12 +20,12 @@ import React, {
   useMemo,
 } from "react";
 import { createPortal } from "react-dom";
+import { useDraggable } from "@dnd-kit/core";
 import {
   calculateCursorTooltipPosition,
-  useDraggable,
   useThemeStore,
   useMobileLayout,
-} from "hs-kit";
+} from "@/ui";
 import { zIndex, MOBILE_PRAYER } from "../../constants";
 import { useTooltipSize } from "../../hooks";
 import type { PlayerStats, ClientWorld } from "../../types";
@@ -37,17 +37,17 @@ import {
   prayerDataProvider,
 } from "@hyperscape/shared";
 
-// Prayer panel layout constants
-const PRAYER_ICON_SIZE = 36;
-const PRAYER_GAP = 3;
-const PANEL_PADDING = 6;
-const GRID_PADDING = 4;
-const HEADER_HEIGHT = 60; // Prayer points header + bar
-const FOOTER_HEIGHT = 40; // Active prayers footer
+// Prayer panel layout constants - compact sizing
+const PRAYER_ICON_SIZE = 36; // Compact icon size
+const PRAYER_GAP = 2; // Tight gap
+const PANEL_PADDING = 3; // Minimal container padding
+const GRID_PADDING = 3; // Minimal grid padding
+const HEADER_HEIGHT = 44; // Compact prayer points header + bar
+const FOOTER_HEIGHT = 28; // Compact active prayers footer
 
 /**
  * Calculate number of columns based on available width
- * Prefers 5 columns (OSRS style) but adapts for narrower windows
+ * Prefers 6 columns by default, adapts for narrower windows
  */
 function calculateColumns(containerWidth: number): number {
   const availableWidth = containerWidth - PANEL_PADDING * 2 - GRID_PADDING * 2;
@@ -55,8 +55,8 @@ function calculateColumns(containerWidth: number): number {
   // Each column needs: icon size + gap (except last column)
   const colWidth = PRAYER_ICON_SIZE + PRAYER_GAP;
   const maxCols = Math.floor((availableWidth + PRAYER_GAP) / colWidth);
-  // Clamp between 2-5 columns
-  return Math.max(2, Math.min(5, maxCols));
+  // Clamp between 2-6 columns
+  return Math.max(2, Math.min(6, maxCols));
 }
 
 /**
@@ -77,7 +77,8 @@ function calculateLayoutDimensions(cols: number, prayerCount: number) {
 // Default prayer count for dimension calculations
 const DEFAULT_PRAYER_COUNT = 30;
 
-// Calculate default dimensions for 5 columns (OSRS style)
+// Calculate default dimensions for various column layouts
+const default6Col = calculateLayoutDimensions(6, DEFAULT_PRAYER_COUNT);
 const default5Col = calculateLayoutDimensions(5, DEFAULT_PRAYER_COUNT);
 const default4Col = calculateLayoutDimensions(4, DEFAULT_PRAYER_COUNT);
 const default3Col = calculateLayoutDimensions(3, DEFAULT_PRAYER_COUNT);
@@ -87,19 +88,20 @@ const default2Col = calculateLayoutDimensions(2, DEFAULT_PRAYER_COUNT);
 export const PRAYER_PANEL_DIMENSIONS = {
   // Minimum size: 2 columns
   minWidth: default2Col.width,
-  minHeight: 220,
-  // Preferred size: 5 columns (OSRS style)
-  defaultWidth: default5Col.width,
-  defaultHeight: default5Col.height,
+  minHeight: 180,
+  // Preferred size: 6 columns (compact layout)
+  defaultWidth: default6Col.width,
+  defaultHeight: default6Col.height,
   // Max size: wider for horizontal layouts
   maxWidth: 400,
-  maxHeight: 500,
+  maxHeight: 450,
   // Layout breakpoints
   layouts: {
     twoCol: default2Col,
     threeCol: default3Col,
     fourCol: default4Col,
     fiveCol: default5Col,
+    sixCol: default6Col,
   },
   // Icon sizing
   iconSize: PRAYER_ICON_SIZE,
@@ -124,11 +126,65 @@ interface PrayerPanelProps {
   world: ClientWorld;
 }
 
+/**
+ * Map prayer icon IDs from manifest to display icons.
+ * Uses emoji fallbacks until actual prayer icon assets are added.
+ * Icon IDs follow pattern: prayer_{snake_case_name}
+ */
+const PRAYER_ICON_MAP: Record<string, string> = {
+  // Defense prayers
+  prayer_thick_skin: "🛡️",
+  prayer_rock_skin: "🪨",
+  prayer_steel_skin: "🔩",
+  // Strength prayers
+  prayer_burst_of_strength: "💪",
+  prayer_superhuman_strength: "⚡",
+  prayer_ultimate_strength: "🔥",
+  // Attack prayers
+  prayer_clarity_of_thought: "🎯",
+  prayer_improved_reflexes: "⚔️",
+  prayer_incredible_reflexes: "⚡",
+  // Ranged prayers
+  prayer_sharp_eye: "👁️",
+  prayer_hawk_eye: "🦅",
+  prayer_eagle_eye: "🎯",
+  // Magic prayers
+  prayer_mystic_will: "✨",
+  prayer_mystic_lore: "📖",
+  prayer_mystic_might: "🌟",
+  // Protection prayers
+  prayer_protect_from_magic: "🔮",
+  prayer_protect_from_missiles: "🏹",
+  prayer_protect_from_melee: "🗡️",
+  // Utility prayers
+  prayer_rapid_restore: "💚",
+  prayer_rapid_heal: "❤️",
+  prayer_protect_item: "🔒",
+  prayer_retribution: "💀",
+  prayer_redemption: "💖",
+  prayer_smite: "⚡",
+  prayer_preserve: "⏳",
+  // High-level prayers
+  prayer_chivalry: "🏰",
+  prayer_piety: "⚜️",
+  prayer_rigour: "🏹",
+  prayer_augury: "🌙",
+};
+
+/**
+ * Get display icon for a prayer icon ID.
+ * Returns the mapped emoji or falls back to a default prayer icon.
+ */
+function getPrayerDisplayIcon(iconId: string): string {
+  return PRAYER_ICON_MAP[iconId] ?? "✨";
+}
+
 /** Prayer icon component with OSRS-style glow effect and drag support */
 function PrayerIcon({
   prayer,
   playerLevel,
   onClick,
+  onContextMenu,
   onMouseEnter,
   onMouseMove,
   onMouseLeave,
@@ -137,6 +193,7 @@ function PrayerIcon({
   prayer: PrayerUI;
   playerLevel: number;
   onClick: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
   onMouseEnter: (e: React.MouseEvent) => void;
   onMouseMove: (e: React.MouseEvent) => void;
   onMouseLeave: () => void;
@@ -146,23 +203,62 @@ function PrayerIcon({
   const isUnlocked = playerLevel >= prayer.level;
   const isActive = prayer.active;
 
-  // Use mobile or desktop icon size
-  const iconSize = isMobile ? MOBILE_PRAYER.iconSize : 36;
+  // Use mobile or desktop icon size - compact on desktop
+  const iconSize = isMobile ? MOBILE_PRAYER.iconSize : PRAYER_ICON_SIZE;
+
+  // Track pointer position to distinguish clicks from drags
+  const pointerStartPosRef = useRef<{ x: number; y: number } | null>(null);
 
   // Make prayer draggable for action bar
+  // Pass the display icon (emoji) not the raw icon ID so it shows correctly in action bar
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `prayer-${prayer.id}`,
     data: {
       prayer: {
         id: prayer.id,
         name: prayer.name,
-        icon: prayer.icon,
+        icon: getPrayerDisplayIcon(prayer.icon),
         level: prayer.level,
       },
       source: "prayer",
     },
     disabled: !isUnlocked,
   });
+
+  // Wrap drag listeners to track pointer start position for click vs drag detection
+  const wrappedListeners = useMemo(() => {
+    if (!listeners) return {};
+    const originalPointerDown = listeners.onPointerDown;
+    return {
+      ...listeners,
+      onPointerDown: (e: React.PointerEvent) => {
+        pointerStartPosRef.current = { x: e.clientX, y: e.clientY };
+        originalPointerDown?.(e);
+      },
+    };
+  }, [listeners]);
+
+  // Handle click - only fire if pointer didn't move much (click, not drag)
+  const handleClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (!isUnlocked) return;
+
+      // Check if pointer moved significantly (drag activation distance is 3px)
+      if (pointerStartPosRef.current) {
+        const dx = e.clientX - pointerStartPosRef.current.x;
+        const dy = e.clientY - pointerStartPosRef.current.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        // If moved more than activation distance, this was a drag, not a click
+        if (distance > 3) {
+          return;
+        }
+      }
+
+      // Not a drag, execute the click action
+      onClick();
+    },
+    [onClick, isUnlocked],
+  );
 
   // Memoize button style to prevent recreation on every render
   const buttonStyle = useMemo(
@@ -174,8 +270,8 @@ function PrayerIcon({
         ? `radial-gradient(ellipse at center, ${theme.colors.accent.secondary}4D 0%, ${theme.colors.slot.selected} 70%)`
         : theme.colors.slot.filled,
       border: isActive
-        ? `2px solid ${theme.colors.accent.secondary}B3`
-        : `1px solid ${theme.colors.border.default}`,
+        ? `1px solid ${theme.colors.accent.secondary}B3`
+        : `1px solid ${theme.colors.border.default}40`,
       borderRadius: isMobile ? 4 : 2,
       cursor: isUnlocked ? (isDragging ? "grabbing" : "grab") : "not-allowed",
       display: "flex",
@@ -183,10 +279,10 @@ function PrayerIcon({
       justifyContent: "center",
       position: "relative",
       overflow: "hidden",
-      transition: "all 0.2s ease",
+      transition: "all 0.15s ease",
       boxShadow: isActive
-        ? `0 0 ${isMobile ? 16 : 12}px ${theme.colors.accent.secondary}80, inset 0 0 ${isMobile ? 20 : 15}px ${theme.colors.accent.secondary}33`
-        : "inset 0 1px 3px rgba(0, 0, 0, 0.5)",
+        ? `0 0 ${isMobile ? 12 : 8}px ${theme.colors.accent.secondary}80, inset 0 0 ${isMobile ? 16 : 10}px ${theme.colors.accent.secondary}33`
+        : "inset 0 1px 2px rgba(0, 0, 0, 0.4)",
       opacity: isDragging ? 0.5 : 1,
       touchAction: "none",
     }),
@@ -196,17 +292,18 @@ function PrayerIcon({
   return (
     <button
       ref={setNodeRef}
-      onClick={isUnlocked ? onClick : undefined}
+      onClick={handleClick}
+      onContextMenu={onContextMenu}
       onMouseEnter={onMouseEnter}
       onMouseMove={onMouseMove}
       onMouseLeave={onMouseLeave}
       disabled={!isUnlocked}
-      aria-pressed={isActive}
       aria-label={`${prayer.name}${isActive ? " (Active)" : ""}${!isUnlocked ? " (Locked)" : ""}`}
       className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
       style={buttonStyle}
       {...attributes}
-      {...listeners}
+      {...wrappedListeners}
+      aria-pressed={isActive}
     >
       {/* Glow effect for active prayers */}
       {isActive && (
@@ -224,19 +321,19 @@ function PrayerIcon({
       {/* Prayer icon */}
       <span
         style={{
-          // Mobile: larger icon text (24px), Desktop: 18px
-          fontSize: isMobile ? 24 : 18,
+          // Mobile: larger icon text (22px), Desktop: 16px for compact look
+          fontSize: isMobile ? 22 : 16,
           filter: isUnlocked
             ? isActive
-              ? `drop-shadow(0 0 ${isMobile ? 8 : 6}px ${theme.colors.accent.secondary}CC) brightness(1.3)`
+              ? `drop-shadow(0 0 ${isMobile ? 6 : 4}px ${theme.colors.accent.secondary}CC) brightness(1.3)`
               : "none"
             : "grayscale(100%) brightness(0.4)",
           opacity: isUnlocked ? 1 : 0.5,
-          transition: "all 0.2s ease",
+          transition: "all 0.15s ease",
           zIndex: 1,
         }}
       >
-        {prayer.icon}
+        {getPrayerDisplayIcon(prayer.icon)}
       </span>
 
       {/* Lock overlay for unavailable prayers */}
@@ -244,9 +341,9 @@ function PrayerIcon({
         <div
           style={{
             position: "absolute",
-            bottom: 2,
-            right: 2,
-            fontSize: 8,
+            bottom: 1,
+            right: 1,
+            fontSize: 7,
             color: theme.colors.state.danger,
             fontWeight: "bold",
           }}
@@ -267,18 +364,39 @@ function getPrayerDefinitions(): readonly PrayerDefinition[] {
   return prayerDataProvider.getAllPrayers();
 }
 
+/** Prayer context menu state */
+interface PrayerContextMenuState {
+  visible: boolean;
+  x: number;
+  y: number;
+  prayer: PrayerUI | null;
+}
+
 export function PrayerPanel({ stats, world }: PrayerPanelProps) {
   const theme = useThemeStore((s) => s.theme);
   const { shouldUseMobileUI } = useMobileLayout();
   const [hoveredPrayer, setHoveredPrayer] = useState<PrayerUI | null>(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [activePrayers, setActivePrayers] = useState<Set<string>>(new Set());
-  const [prayerPoints, setPrayerPoints] = useState({ current: 1, max: 1 });
   const [containerWidth, setContainerWidth] = useState(
     PRAYER_PANEL_DIMENSIONS.defaultWidth,
   );
+  // Track when prayer data is loaded (manifest might load after component mounts)
+  const [prayerDataVersion, setPrayerDataVersion] = useState(0);
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<PrayerContextMenuState>({
+    visible: false,
+    x: 0,
+    y: 0,
+    prayer: null,
+  });
   const prayerTooltipRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+
+  // Use prayer points directly from stats prop (same pattern as StatusBars)
+  // This ensures a single source of truth - no local state that can get out of sync
+  const prayerPoints = stats?.prayerPoints ?? { current: 0, max: 1 };
 
   const prayerTooltipSize = useTooltipSize(hoveredPrayer, prayerTooltipRef, {
     width: 200,
@@ -319,14 +437,41 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
     return calculateColumns(containerWidth);
   }, [containerWidth, shouldUseMobileUI]);
 
-  // Get prayer definitions from manifest-loaded provider (includes proper conflict data)
-  const prayerDefinitions = useMemo(() => getPrayerDefinitions(), []);
+  // Poll for prayer data availability (manifest may load after component mounts)
+  useEffect(() => {
+    const prayers = prayerDataProvider.getAllPrayers();
+    if (prayers.length > 0) {
+      // Prayers already loaded
+      setPrayerDataVersion((v) => v + 1);
+      return;
+    }
 
-  // Sync with server prayer state
+    // Poll until prayers are loaded (manifest loading is async)
+    const interval = setInterval(() => {
+      const loaded = prayerDataProvider.getAllPrayers();
+      if (loaded.length > 0) {
+        setPrayerDataVersion((v) => v + 1);
+        clearInterval(interval);
+      }
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Get prayer definitions from manifest-loaded provider (includes proper conflict data)
+  // Re-fetch when prayerDataVersion changes (after manifest loads)
+  const prayerDefinitions = useMemo(
+    () => getPrayerDefinitions(),
+    [prayerDataVersion],
+  );
+
+  // Sync active prayers with server prayer state
+  // Note: Prayer POINTS now come from stats prop (single source of truth)
+  // Only active prayers need local state since they come from prayer-specific events
   useEffect(() => {
     if (!world) return;
 
-    // Get initial state from ClientNetwork cache (if panel mounted after sync event)
+    // Get initial active prayers from ClientNetwork cache (if panel mounted after sync event)
     const localPlayer = world.getPlayer();
     if (localPlayer) {
       const network = world.network as {
@@ -337,10 +482,6 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
       };
       const cachedState = network?.lastPrayerStateByPlayerId?.[localPlayer.id];
       if (cachedState) {
-        setPrayerPoints({
-          current: cachedState.points,
-          max: cachedState.maxPoints,
-        });
         setActivePrayers(new Set(cachedState.active));
       }
     }
@@ -350,7 +491,7 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
       const player = world.getPlayer();
       if (!player || data.playerId !== player.id) return;
 
-      setPrayerPoints({ current: data.points, max: data.maxPoints });
+      // Only update active prayers - points come from stats prop
       setActivePrayers(new Set(data.active));
     };
 
@@ -368,41 +509,17 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
         }
         return next;
       });
-      setPrayerPoints((prev) => ({ ...prev, current: data.points }));
-    };
-
-    const handlePrayerPointsChanged = (payload: unknown) => {
-      const data = payload as {
-        playerId: string;
-        points: number;
-        maxPoints: number;
-      };
-      const player = world.getPlayer();
-      if (!player || data.playerId !== player.id) return;
-
-      setPrayerPoints({ current: data.points, max: data.maxPoints });
+      // Note: Prayer points update will come through stats prop via PRAYER_POINTS_CHANGED -> CoreUI -> stats
     };
 
     world.on(EventType.PRAYER_STATE_SYNC, handlePrayerStateSync);
     world.on(EventType.PRAYER_TOGGLED, handlePrayerToggled);
-    world.on(EventType.PRAYER_POINTS_CHANGED, handlePrayerPointsChanged);
 
     return () => {
       world.off(EventType.PRAYER_STATE_SYNC, handlePrayerStateSync);
       world.off(EventType.PRAYER_TOGGLED, handlePrayerToggled);
-      world.off(EventType.PRAYER_POINTS_CHANGED, handlePrayerPointsChanged);
     };
   }, [world]);
-
-  // Sync from stats prop as fallback
-  useEffect(() => {
-    if (stats?.prayerPoints) {
-      setPrayerPoints({
-        current: stats.prayerPoints.current,
-        max: stats.prayerPoints.max,
-      });
-    }
-  }, [stats?.prayerPoints]);
 
   // Convert prayer definitions to UI prayers with active state
   const prayers: PrayerUI[] = useMemo(() => {
@@ -449,6 +566,39 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
     [prayers, playerPrayerLevel, world],
   );
 
+  // Handle prayer context menu (right-click)
+  const handlePrayerContextMenu = useCallback(
+    (e: React.MouseEvent, prayer: PrayerUI) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setContextMenu({
+        visible: true,
+        x: e.clientX,
+        y: e.clientY,
+        prayer,
+      });
+    },
+    [],
+  );
+
+  // Close context menu on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        contextMenuRef.current &&
+        !contextMenuRef.current.contains(e.target as Node)
+      ) {
+        setContextMenu((prev) => ({ ...prev, visible: false }));
+      }
+    };
+    if (contextMenu.visible) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [contextMenu.visible]);
+
   // Deactivate all prayers
   const deactivateAll = useCallback(() => {
     if (activePrayers.size === 0) return;
@@ -478,40 +628,40 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
       ref={containerRef}
       className="flex flex-col h-full"
       style={{
-        background: `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
-        padding: PANEL_PADDING,
+        background: "transparent",
+        padding: shouldUseMobileUI ? 4 : 3,
       }}
     >
-      {/* Prayer Points Header */}
+      {/* Prayer Points Header - Compact */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "6px 8px",
-          marginBottom: 6,
-          background: theme.colors.background.overlay,
-          borderRadius: 4,
-          border: `1px solid ${theme.colors.border.default}`,
+          padding: shouldUseMobileUI ? "4px 6px" : "3px 6px",
+          marginBottom: 4,
+          background: theme.colors.slot.filled,
+          borderRadius: 3,
+          border: `1px solid ${theme.colors.border.default}30`,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 20 }}>✨</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: shouldUseMobileUI ? 16 : 14 }}>✨</span>
           <div>
             <div
               style={{
-                fontSize: 10,
+                fontSize: shouldUseMobileUI ? 9 : 8,
                 color: theme.colors.text.muted,
                 textTransform: "uppercase",
-                letterSpacing: 1,
+                letterSpacing: 0.5,
               }}
             >
               Prayer Points
             </div>
             <div
               style={{
-                fontSize: 16,
-                fontWeight: 700,
+                fontSize: shouldUseMobileUI ? 13 : 11,
+                fontWeight: 600,
                 color: theme.colors.status.prayer,
               }}
             >
@@ -525,7 +675,7 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
           <div style={{ textAlign: "right" }}>
             <div
               style={{
-                fontSize: 9,
+                fontSize: 8,
                 color: theme.colors.state.danger,
                 textTransform: "uppercase",
                 opacity: 0.7,
@@ -535,7 +685,7 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
             </div>
             <div
               style={{
-                fontSize: 12,
+                fontSize: 10,
                 color: theme.colors.state.danger,
                 fontWeight: 600,
               }}
@@ -546,15 +696,15 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
         )}
       </div>
 
-      {/* Prayer Points Bar - Mobile: thicker (14px), Desktop: 6px */}
+      {/* Prayer Points Bar - Compact */}
       <div
         style={{
-          height: shouldUseMobileUI ? MOBILE_PRAYER.barHeight : 6,
-          background: theme.colors.status.prayerBackground,
-          borderRadius: shouldUseMobileUI ? 7 : 3,
-          marginBottom: 8,
+          height: shouldUseMobileUI ? 10 : 4,
+          background: theme.colors.slot.empty,
+          borderRadius: shouldUseMobileUI ? 5 : 2,
+          marginBottom: 4,
           overflow: "hidden",
-          border: `1px solid ${theme.colors.border.default}`,
+          border: `1px solid ${theme.colors.border.default}30`,
         }}
       >
         <div
@@ -566,7 +716,7 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
             transition: "width 0.3s ease",
             boxShadow:
               totalDrain > 0
-                ? `0 0 8px ${theme.colors.status.prayer}80`
+                ? `0 0 6px ${theme.colors.status.prayer}80`
                 : "none",
           }}
         />
@@ -585,15 +735,15 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
         <div
           style={{
             display: "grid",
-            // Mobile: larger icons (48px) with more gap, Desktop: standard (36px)
+            // Mobile: larger icons (48px) with more gap, Desktop: compact
             gridTemplateColumns: shouldUseMobileUI
               ? `repeat(${gridColumns}, ${MOBILE_PRAYER.iconSize}px)`
               : `repeat(${gridColumns}, ${PRAYER_ICON_SIZE}px)`,
             gap: shouldUseMobileUI ? MOBILE_PRAYER.gap : PRAYER_GAP,
             padding: GRID_PADDING,
             background: theme.colors.slot.empty,
-            borderRadius: 4,
-            border: `1px solid ${theme.colors.border.default}`,
+            borderRadius: 3,
+            border: `1px solid ${theme.colors.border.default}30`,
             justifyContent: "center",
           }}
         >
@@ -603,6 +753,7 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
               prayer={prayer}
               playerLevel={playerPrayerLevel}
               onClick={() => togglePrayer(prayer.id)}
+              onContextMenu={(e) => handlePrayerContextMenu(e, prayer)}
               onMouseEnter={(e) => {
                 setHoveredPrayer(prayer);
                 setMousePos({ x: e.clientX, y: e.clientY });
@@ -615,20 +766,25 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
         </div>
       </div>
 
-      {/* Quick Prayers Toggle */}
+      {/* Quick Prayers Toggle - Compact */}
       <div
         style={{
-          marginTop: 6,
-          padding: "6px 8px",
-          background: theme.colors.background.overlay,
-          borderRadius: 4,
-          border: `1px solid ${theme.colors.border.default}`,
+          marginTop: 4,
+          padding: shouldUseMobileUI ? "4px 6px" : "3px 6px",
+          background: theme.colors.slot.filled,
+          borderRadius: 3,
+          border: `1px solid ${theme.colors.border.default}30`,
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
         }}
       >
-        <span style={{ fontSize: 10, color: theme.colors.text.muted }}>
+        <span
+          style={{
+            fontSize: shouldUseMobileUI ? 10 : 9,
+            color: theme.colors.text.muted,
+          }}
+        >
           Active: {activePrayers.size} prayer
           {activePrayers.size !== 1 ? "s" : ""}
         </span>
@@ -636,13 +792,13 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
           onClick={deactivateAll}
           className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
           style={{
-            padding: "3px 8px",
-            fontSize: 10,
+            padding: shouldUseMobileUI ? "3px 8px" : "2px 6px",
+            fontSize: shouldUseMobileUI ? 10 : 9,
             background:
               activePrayers.size > 0
-                ? `${theme.colors.state.danger}33`
+                ? `${theme.colors.state.danger}20`
                 : theme.colors.slot.disabled,
-            border: `1px solid ${theme.colors.state.danger}66`,
+            border: `1px solid ${activePrayers.size > 0 ? theme.colors.state.danger : theme.colors.border.default}40`,
             borderRadius: 3,
             color:
               activePrayers.size > 0
@@ -695,7 +851,9 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
                     marginBottom: 6,
                   }}
                 >
-                  <span style={{ fontSize: 22 }}>{hoveredPrayer.icon}</span>
+                  <span style={{ fontSize: 22 }}>
+                    {getPrayerDisplayIcon(hoveredPrayer.icon)}
+                  </span>
                   <div>
                     <div
                       style={{
@@ -776,6 +934,103 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
                     Currently Active
                   </div>
                 )}
+              </div>
+            );
+          })(),
+          document.body,
+        )}
+
+      {/* Prayer Context Menu */}
+      {contextMenu.visible &&
+        contextMenu.prayer &&
+        createPortal(
+          (() => {
+            const prayer = contextMenu.prayer!;
+            const isUnlocked = playerPrayerLevel >= prayer.level;
+            const actionText = prayer.active ? "Deactivate" : "Activate";
+
+            // Calculate position to show above cursor
+            const padding = 4;
+            const menuHeight = isUnlocked ? 64 : 40; // Approximate height
+            let top = contextMenu.y - menuHeight - padding;
+            if (top < padding) top = contextMenu.y + padding;
+            const left = Math.max(
+              padding,
+              Math.min(contextMenu.x, window.innerWidth - 120 - padding),
+            );
+
+            return (
+              <div
+                ref={contextMenuRef}
+                className="fixed z-[9999]"
+                style={{ left, top }}
+              >
+                <div
+                  style={{
+                    background: theme.colors.background.secondary,
+                    border: `1px solid ${theme.colors.border.default}`,
+                    borderRadius: 4,
+                    boxShadow: theme.shadows.lg,
+                    overflow: "hidden",
+                    minWidth: 100,
+                  }}
+                >
+                  {/* Activate/Deactivate option */}
+                  {isUnlocked && (
+                    <button
+                      onClick={() => {
+                        togglePrayer(prayer.id);
+                        setContextMenu((prev) => ({ ...prev, visible: false }));
+                      }}
+                      className="w-full text-left transition-colors duration-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-400/60"
+                      style={{
+                        padding: "4px 8px",
+                        fontSize: 10,
+                        background: "transparent",
+                        border: "none",
+                        cursor: "pointer",
+                        display: "block",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = `${theme.colors.accent.secondary}1F`;
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = "transparent";
+                      }}
+                    >
+                      <span style={{ color: "#fff" }}>{actionText} </span>
+                      <span style={{ color: theme.colors.status.prayer }}>
+                        {prayer.name}
+                      </span>
+                    </button>
+                  )}
+                  {/* Cancel option */}
+                  <button
+                    onClick={() => {
+                      setContextMenu((prev) => ({ ...prev, visible: false }));
+                    }}
+                    className="w-full text-left transition-colors duration-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-400/60"
+                    style={{
+                      padding: "4px 8px",
+                      fontSize: 10,
+                      background: "transparent",
+                      border: "none",
+                      cursor: "pointer",
+                      display: "block",
+                      borderTop: isUnlocked
+                        ? `1px solid ${theme.colors.border.default}26`
+                        : "none",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = `${theme.colors.accent.secondary}1F`;
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = "transparent";
+                    }}
+                  >
+                    <span style={{ color: "#fff" }}>Cancel</span>
+                  </button>
+                </div>
               </div>
             );
           })(),
