@@ -18,8 +18,9 @@ import {
 
 // Import canonical types from hyperscape shared package
 import type {
-  PlayerInput as SharedPlayerInput,
-  PlayerStats as SharedPlayerStats,
+  Player,
+  PlayerInput,
+  PlayerStats,
   ChatMessage,
 } from "@hyperscape/shared";
 
@@ -105,42 +106,8 @@ export interface WorldOptions {
   avatar?: string;
 }
 
-// Re-export canonical types from @hyperscape/shared
-export type PlayerInput = SharedPlayerInput;
-export type { ChatMessage };
-
-// Plugin-specific simplified PlayerStats for basic use cases
-// For full stats, use SharedPlayerStats or RPGPlayerStats from content-types
-export interface PluginPlayerStats {
-  health: number;
-  maxHealth: number;
-  mana?: number;
-  maxMana?: number;
-  stamina?: number;
-  maxStamina?: number;
-  level?: number;
-  experience?: number;
-  [key: string]: unknown;
-}
-
-// Re-export SharedPlayerStats as PlayerStats for compatibility
-export type PlayerStats = SharedPlayerStats;
-
-// Define Player interface (entity with player-specific data)
-export interface Player extends Entity {
-  type: "player";
-  /** Direct position access (alias to node.position) */
-  position: Vector3;
-  data: {
-    id?: string;
-    name?: string;
-    avatar?: string;
-    stats?: PlayerStats;
-    input?: PlayerInput;
-    wallet?: string;
-    [key: string]: unknown;
-  };
-}
+// Re-export for convenience
+export type { Player, PlayerInput, PlayerStats, ChatMessage };
 
 // Define RigidBody interface
 export interface RigidBody {
