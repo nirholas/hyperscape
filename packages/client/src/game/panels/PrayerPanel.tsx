@@ -425,14 +425,8 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
   // Calculate number of columns based on container width and mobile state
   const gridColumns = useMemo(() => {
     if (shouldUseMobileUI) {
-      // Mobile: max 4 columns with larger icons
-      const availableWidth =
-        containerWidth - PANEL_PADDING * 2 - GRID_PADDING * 2;
-      const colWidth = MOBILE_PRAYER.iconSize + MOBILE_PRAYER.gap;
-      const maxCols = Math.floor(
-        (availableWidth + MOBILE_PRAYER.gap) / colWidth,
-      );
-      return Math.max(2, Math.min(MOBILE_PRAYER.maxColumns, maxCols));
+      // Mobile: always use 4 columns for consistent layout
+      return MOBILE_PRAYER.minColumns;
     }
     return calculateColumns(containerWidth);
   }, [containerWidth, shouldUseMobileUI]);

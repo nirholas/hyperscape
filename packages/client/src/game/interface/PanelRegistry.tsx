@@ -386,15 +386,19 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
     },
   },
   // Skills - 3x4 grid of skill icons with total/combat level footer
+  // Mobile size matches Prayer panel for consistent tab switching
   skills: {
-    minSize: { width: 220, height: 280 },
+    minSize: { width: 180, height: 240 },
     preferredSize: { width: 250, height: 310 },
     maxSize: { width: 300, height: 360 },
     scrollable: false,
     resizable: true,
     scaleFactor: { min: 0.85, max: 1.15 },
     responsive: {
-      mobile: { width: 220, height: 280 },
+      mobile: {
+        width: PRAYER_PANEL_DIMENSIONS.layouts.fourCol.width,
+        height: PRAYER_PANEL_DIMENSIONS.layouts.fourCol.height,
+      },
       tablet: { width: 235, height: 295 },
       desktop: { width: 250, height: 310 },
     },
@@ -402,7 +406,7 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
       drawerType: "sheet",
       drawerHeight: "half",
       landscapePosition: "right",
-      gridColumns: 3,
+      gridColumns: 4,
     },
   },
   // Prayer - grid of prayer icons with adaptive layout
