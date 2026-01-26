@@ -16,6 +16,13 @@ import {
   THREE,
 } from "@hyperscape/shared";
 
+// Import canonical types from hyperscape shared package
+import type {
+  PlayerInput as SharedPlayerInput,
+  PlayerStats as SharedPlayerStats,
+  ChatMessage,
+} from "@hyperscape/shared";
+
 // Define local type aliases for THREE types
 export type Vector3 = THREEVector3;
 export type Quaternion = THREEQuaternion;
@@ -98,16 +105,13 @@ export interface WorldOptions {
   avatar?: string;
 }
 
-// Define PlayerInput interface locally
-export interface PlayerInput {
-  movement: Vector3;
-  rotation: Quaternion;
-  actions: Set<string>;
-  mouse: { x: number; y: number };
-}
+// Re-export canonical types from @hyperscape/shared
+export type PlayerInput = SharedPlayerInput;
+export type { ChatMessage };
 
-// Define PlayerStats interface locally
-export interface PlayerStats {
+// Plugin-specific simplified PlayerStats for basic use cases
+// For full stats, use SharedPlayerStats or RPGPlayerStats from content-types
+export interface PluginPlayerStats {
   health: number;
   maxHealth: number;
   mana?: number;
@@ -119,11 +123,8 @@ export interface PlayerStats {
   [key: string]: unknown;
 }
 
-// Import ChatMessage from hyperscape shared package
-import type { ChatMessage } from "@hyperscape/shared";
-
-// Re-export ChatMessage for convenience
-export type { ChatMessage };
+// Re-export SharedPlayerStats as PlayerStats for compatibility
+export type PlayerStats = SharedPlayerStats;
 
 // Define Player interface (entity with player-specific data)
 export interface Player extends Entity {
