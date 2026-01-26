@@ -2568,8 +2568,25 @@ export class ClientNetwork extends SystemBase {
   /**
    * Duel fight start with arena ID
    */
-  onDuelFightStart = (data: { duelId: string; arenaId: number }) => {
+  onDuelFightStart = (data: {
+    duelId: string;
+    arenaId: number;
+    opponentId?: string;
+  }) => {
     console.log("[ClientNetwork] Duel fight start:", data);
+
+    // Store active duel state on world so systems can access it
+    // This allows PlayerInteractionHandler to show Attack option during duels
+    (
+      this.world as {
+        activeDuel?: { duelId: string; arenaId: number; opponentId?: string };
+      }
+    ).activeDuel = {
+      duelId: data.duelId,
+      arenaId: data.arenaId,
+      opponentId: data.opponentId,
+    };
+
     this.world.emit(EventType.UI_UPDATE, {
       component: "duelFightStart",
       data,
@@ -2587,6 +2604,14 @@ export class ClientNetwork extends SystemBase {
     rewards?: Array<{ itemId: string; quantity: number }>;
   }) => {
     console.log("[ClientNetwork] Duel ended:", data);
+
+    // Clear active duel state from world
+    (
+      this.world as {
+        activeDuel?: { duelId: string; arenaId: number; opponentId?: string };
+      }
+    ).activeDuel = undefined;
+
     this.world.emit(EventType.UI_UPDATE, {
       component: "duelEnded",
       data,

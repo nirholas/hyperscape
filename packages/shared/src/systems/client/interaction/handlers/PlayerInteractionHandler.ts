@@ -48,9 +48,10 @@ export class PlayerInteractionHandler extends BaseInteractionHandler {
     const localPlayerLevel = this.getLocalPlayerCombatLevel();
     const levelColor = getCombatLevelColor(targetLevel, localPlayerLevel);
     const inPvPZone = this.isInPvPZone();
+    const inActiveDuel = this.isInActiveDuelWith(target.entityId);
 
-    // 1. Attack (OSRS-accurate: only APPEARS in PvP zones, not just greyed out)
-    if (inPvPZone) {
+    // 1. Attack (OSRS-accurate: only APPEARS in PvP zones OR during active duel)
+    if (inPvPZone || inActiveDuel) {
       actions.push({
         id: "attack",
         label: `Attack ${target.name} (Level: ${targetLevel})`,
@@ -199,10 +200,34 @@ export class PlayerInteractionHandler extends BaseInteractionHandler {
   }
 
   /**
+   * Check if the LOCAL player is in an active duel with the specified target.
+   * Active duel means the fight has started (FIGHTING state).
+   */
+  private isInActiveDuelWith(targetId: string): boolean {
+    const activeDuel = (
+      this.world as {
+        activeDuel?: { duelId: string; arenaId: number; opponentId?: string };
+      }
+    ).activeDuel;
+
+    if (!activeDuel) return false;
+
+    // If we have opponent ID, verify it matches
+    if (activeDuel.opponentId) {
+      return activeDuel.opponentId === targetId;
+    }
+
+    // If no opponent ID stored, we're in a duel but can't verify opponent
+    // Allow attack and let server validate
+    return true;
+  }
+
+  /**
    * Send attack request to server.
    */
   private attackPlayer(target: RaycastTarget): void {
-    if (!this.isInPvPZone()) {
+    // Allow attack if in PvP zone OR in active duel with target
+    if (!this.isInPvPZone() && !this.isInActiveDuelWith(target.entityId)) {
       this.showExamineMessage("You can't attack players here.");
       return;
     }

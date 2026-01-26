@@ -1507,59 +1507,67 @@ export class DuelSystem {
     const bounds = this.arenaPool.getArenaBounds(session.arenaId);
     if (!bounds) return;
 
+    const spawnPoints = this.arenaPool.getSpawnPoints(session.arenaId);
+    if (!spawnPoints) return;
+
     // Check both players for arena bounds violations
-    this.enforceArenaBounds(session.challengerId, bounds);
-    this.enforceArenaBounds(session.targetId, bounds);
+    // Teleport back to spawn point if they leave bounds
+    this.enforceArenaBounds(
+      session.challengerId,
+      bounds,
+      spawnPoints[0],
+      spawnPoints[1],
+    );
+    this.enforceArenaBounds(
+      session.targetId,
+      bounds,
+      spawnPoints[1],
+      spawnPoints[0],
+    );
 
     // If noMovement rule is active, freeze players at spawn points
     if (session.rules.noMovement) {
-      const spawnPoints = this.arenaPool.getSpawnPoints(session.arenaId);
-      if (spawnPoints) {
-        this.enforceNoMovement(session.challengerId, spawnPoints[0]);
-        this.enforceNoMovement(session.targetId, spawnPoints[1]);
-      }
+      this.enforceNoMovement(session.challengerId, spawnPoints[0]);
+      this.enforceNoMovement(session.targetId, spawnPoints[1]);
     }
   }
 
   /**
-   * Enforce arena bounds - teleport player back if they leave
+   * Enforce arena bounds - teleport player back to spawn if they leave
    */
   private enforceArenaBounds(
     playerId: string,
     bounds: { min: { x: number; z: number }; max: { x: number; z: number } },
+    spawnPoint: { x: number; y: number; z: number },
+    opponentSpawn: { x: number; y: number; z: number },
   ): void {
     const player = this.world.entities.players?.get(playerId);
     if (!player?.position) return;
 
     const { x, z } = player.position;
-    let needsTeleport = false;
-    let newX = x;
-    let newZ = z;
 
-    // Check X bounds
-    if (x < bounds.min.x) {
-      newX = bounds.min.x + 1;
-      needsTeleport = true;
-    } else if (x > bounds.max.x) {
-      newX = bounds.max.x - 1;
-      needsTeleport = true;
-    }
+    // Check if player is outside bounds
+    const isOutOfBounds =
+      x < bounds.min.x ||
+      x > bounds.max.x ||
+      z < bounds.min.z ||
+      z > bounds.max.z;
 
-    // Check Z bounds
-    if (z < bounds.min.z) {
-      newZ = bounds.min.z + 1;
-      needsTeleport = true;
-    } else if (z > bounds.max.z) {
-      newZ = bounds.max.z - 1;
-      needsTeleport = true;
-    }
+    if (isOutOfBounds) {
+      // Calculate rotation to face opponent
+      const dx = opponentSpawn.x - spawnPoint.x;
+      const dz = opponentSpawn.z - spawnPoint.z;
+      const rotation = Math.atan2(dx, dz);
 
-    if (needsTeleport) {
+      // Teleport back to spawn point facing opponent
       this.world.emit("player:teleport", {
         playerId,
-        position: { x: newX, y: player.position.y, z: newZ },
-        rotation: 0,
+        position: { x: spawnPoint.x, y: spawnPoint.y, z: spawnPoint.z },
+        rotation,
       });
+
+      // Clear movement state to prevent them from immediately walking out again
+      this.world.emit("player:movement:cancel", { playerId });
     }
   }
 

@@ -543,6 +543,10 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Store duel system on world so handlers can access it
     (this.world as { duelSystem?: DuelSystem }).duelSystem = this.duelSystem;
 
+    // Register duel system so it can be found via getSystem("duel")
+    // This is required for combat.ts to detect duel combat and bypass PvP zone checks
+    this.world.addSystem("duel", this.duelSystem);
+
     // Register duel system tick processing
     this.tickSystem.onTick(() => {
       this.duelSystem.processTick();
@@ -579,16 +583,24 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         arenaId: number;
       };
 
-      const payload = { duelId, arenaId };
-
+      // Send to challenger with target as their opponent
       const challengerSocket = this.getSocketByPlayerId(challengerId);
       if (challengerSocket) {
-        challengerSocket.send("duelFightStart", payload);
+        challengerSocket.send("duelFightStart", {
+          duelId,
+          arenaId,
+          opponentId: targetId,
+        });
       }
 
+      // Send to target with challenger as their opponent
       const targetSocket = this.getSocketByPlayerId(targetId);
       if (targetSocket) {
-        targetSocket.send("duelFightStart", payload);
+        targetSocket.send("duelFightStart", {
+          duelId,
+          arenaId,
+          opponentId: challengerId,
+        });
       }
     });
 
@@ -735,6 +747,22 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           rotation,
         });
       }
+
+      // Broadcast position update to all other clients so they see the teleport
+      // This is critical for duel arena - both players need to see each other teleport
+      this.broadcastManager.sendToAllExcept(
+        "entityModified",
+        { id: playerId, changes: { p: [position.x, position.y, position.z] } },
+        playerId,
+      );
+    });
+
+    // Listen for movement cancel events (used by duel system to prevent escaping arena)
+    this.world.on("player:movement:cancel", (event) => {
+      const { playerId } = event as { playerId: string };
+
+      // Clear movement state
+      this.tileMovementManager.cleanup(playerId);
     });
 
     // OSRS-accurate face direction manager
