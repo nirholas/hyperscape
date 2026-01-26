@@ -20,9 +20,33 @@ interface ChatMessage {
   body: string;
   createdAt: string;
   timestamp?: number;
-  type?: "chat" | "system" | "activity" | "warning" | "news" | "trade_request";
+  /**
+   * Message type - aligns with server types:
+   * - chat: Normal player messages
+   * - system: System messages
+   * - activity: Login/logout events
+   * - warning: Warning messages
+   * - news: News/event announcements
+   * - trade: Trade channel messages
+   * - trade_request: OSRS-style clickable trade request
+   * - private: Private/whisper messages
+   * - clan/guild: Clan chat messages
+   */
+  type?:
+    | "chat"
+    | "system"
+    | "activity"
+    | "warning"
+    | "news"
+    | "trade"
+    | "trade_request"
+    | "private"
+    | "clan"
+    | "guild";
   /** Trade ID for trade_request messages */
   tradeId?: string;
+  /** Channel for filtering (e.g., "clan", "guild", "private") */
+  channel?: string;
 }
 
 interface ChatPanelProps {
@@ -175,12 +199,91 @@ export function ChatPanel({ world }: ChatPanelProps): React.ReactElement {
         return MESSAGE_COLORS.warning;
       case "news":
         return MESSAGE_COLORS.news;
+      case "trade":
       case "trade_request":
         return MESSAGE_COLORS.trade_request;
+      case "private":
+        return "#ff66ff"; // Pink for private messages
+      case "clan":
+      case "guild":
+        return "#66ff66"; // Green for clan/guild messages
       default:
         return MESSAGE_COLORS.default;
     }
   };
+
+  // Filter messages based on active tab
+  const filterMessagesByTab = useCallback(
+    (msg: ChatMessage): boolean => {
+      const msgType = getMessageType(msg);
+      // Also check the raw type from server (may differ from inferred type)
+      const serverType = msg.type;
+      const channel = msg.channel?.toLowerCase();
+
+      switch (activeTab) {
+        case "all":
+          return true;
+
+        case "game":
+          // Game tab shows regular chat, system, activity, news, warning, and trade messages
+          // Excludes clan/guild and private messages
+          // Check both inferred type and server type
+          if (
+            serverType === "private" ||
+            serverType === "clan" ||
+            serverType === "guild" ||
+            channel === "clan" ||
+            channel === "guild" ||
+            channel === "private"
+          ) {
+            return false;
+          }
+          return (
+            msgType === "chat" ||
+            msgType === "system" ||
+            msgType === "activity" ||
+            msgType === "news" ||
+            msgType === "warning" ||
+            msgType === "trade_request" ||
+            serverType === "trade"
+          );
+
+        case "clan":
+          // Clan tab - filter by clan/guild messages
+          // Check server type, channel, and content patterns
+          return (
+            serverType === "clan" ||
+            serverType === "guild" ||
+            channel === "clan" ||
+            channel === "guild" ||
+            msg.from?.toLowerCase().includes("[clan]") ||
+            msg.body?.toLowerCase().includes("[clan]") ||
+            msg.from?.toLowerCase().includes("[guild]") ||
+            msg.body?.toLowerCase().includes("[guild]")
+          );
+
+        case "private":
+          // Private tab - filter for private/whisper messages
+          // Check server type, channel, and content patterns
+          return (
+            serverType === "private" ||
+            channel === "private" ||
+            channel === "whisper" ||
+            msg.from?.toLowerCase().includes("[pm]") ||
+            msg.body?.toLowerCase().includes("[pm]") ||
+            msg.from?.toLowerCase().includes("[whisper]") ||
+            msg.body?.toLowerCase().includes("[whisper]")
+          );
+
+        default:
+          return true;
+      }
+    },
+    [activeTab],
+  );
+
+  // Get filtered messages based on active tab
+  const filteredMessages = messages.filter(filterMessagesByTab);
 
   // Handle clicking on a trade request message
   const handleTradeRequestClick = useCallback(
@@ -281,7 +384,7 @@ export function ChatPanel({ world }: ChatPanelProps): React.ReactElement {
         }}
         className="scrollbar-thin"
       >
-        {messages.map((msg) => {
+        {filteredMessages.map((msg) => {
           const msgType = getMessageType(msg);
           const msgColor = getMessageColor(msgType);
           const time = formatTime(msg);
@@ -343,7 +446,7 @@ export function ChatPanel({ world }: ChatPanelProps): React.ReactElement {
           );
         })}
 
-        {messages.length === 0 && (
+        {filteredMessages.length === 0 && (
           <div
             style={{
               color: theme.colors.text.muted,
@@ -352,7 +455,15 @@ export function ChatPanel({ world }: ChatPanelProps): React.ReactElement {
               textAlign: "center",
             }}
           >
-            No messages yet...
+            {activeTab === "all"
+              ? "No messages yet..."
+              : activeTab === "game"
+                ? "No game messages..."
+                : activeTab === "clan"
+                  ? "No clan messages..."
+                  : activeTab === "private"
+                    ? "No private messages..."
+                    : "No messages yet..."}
           </div>
         )}
       </div>
