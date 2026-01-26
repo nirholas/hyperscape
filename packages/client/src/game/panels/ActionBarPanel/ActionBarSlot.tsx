@@ -269,7 +269,7 @@ export const ActionBarSlot = memo(function ActionBarSlot({
               : isHovered
                 ? `1px solid ${theme.colors.accent.primary}80`
                 : `1px solid ${theme.colors.border.default}`,
-      borderRadius: 4,
+      borderRadius: 0,
       cursor:
         isEmpty || isLocked ? "default" : isDragging ? "grabbing" : "grab",
       // RS3 behavior: dim unavailable items
@@ -426,7 +426,7 @@ export const RubbishBin = memo(function RubbishBin({
           : isDragging
             ? `1px dashed ${theme.colors.state.warning}80`
             : `1px solid ${theme.colors.border.default}66`,
-        borderRadius: 4,
+        borderRadius: 0,
         cursor: "default",
         opacity: isDragging ? 1 : 0.6,
         transform: isOver ? "scale(1.1)" : "scale(1)",

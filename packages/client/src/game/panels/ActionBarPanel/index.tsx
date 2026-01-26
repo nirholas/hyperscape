@@ -153,7 +153,7 @@ export function ActionBarPanel({
     border: isDisabled
       ? `1px solid ${theme.colors.border.default}33`
       : `1px solid ${theme.colors.border.default}`,
-    borderRadius: 4,
+    borderRadius: 0,
     color: isDisabled
       ? `${theme.colors.text.secondary}4D`
       : theme.colors.text.secondary,
@@ -260,7 +260,7 @@ export function ActionBarPanel({
             justifyContent: "center",
             background: `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
             border: `1px solid ${theme.colors.border.default}`,
-            borderRadius: 4,
+            borderRadius: 0,
             boxShadow: `inset 0 2px 8px rgba(0, 0, 0, 0.5), ${theme.shadows.md}`,
           }}
         >
@@ -341,7 +341,7 @@ export function ActionBarPanel({
                 height: SLOT_SIZE,
                 background: `linear-gradient(180deg, ${theme.colors.accent.secondary}4D 0%, ${theme.colors.background.secondary} 100%)`,
                 border: `2px solid ${theme.colors.accent.primary}CC`,
-                borderRadius: 4,
+                borderRadius: 0,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",

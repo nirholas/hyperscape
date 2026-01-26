@@ -14,6 +14,7 @@ import {
   restrictToWindowEdgesFully,
   snapToGridModifier,
   composeWindowModifiers,
+  getViewportSize,
   type WindowPositionModifier,
 } from "../core/drag/modifiers";
 import {

@@ -239,7 +239,7 @@ export const ContextMenuPortal = memo(function ContextMenuPortal({
         style={{
           background: theme.colors.background.secondary,
           border: `1px solid ${theme.colors.border.default}`,
-          borderRadius: 4,
+          borderRadius: 0,
           boxShadow: `inset 0 2px 8px rgba(0, 0, 0, 0.5), ${theme.shadows.md}`,
           overflow: "hidden",
           minWidth: 100,
