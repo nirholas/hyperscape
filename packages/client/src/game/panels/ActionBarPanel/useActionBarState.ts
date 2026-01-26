@@ -3,19 +3,14 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import {
-  useActionBarKeybinds,
-  useFeatureEnabled,
-  useWindowStore,
-  useEditStore,
-} from "@/ui";
+import { useWindowStore, useEditStore } from "@/ui";
+import { useActionBarKeybindsForBar } from "../../../ui/components/ActionBar";
 import { EventType } from "@hyperscape/shared";
 import type { ClientWorld } from "../../../types";
 import type { ActionBarSlotContent, ActionBarSlotUpdatePayload } from "./types";
 import {
   MIN_SLOT_COUNT,
   MAX_SLOT_COUNT,
-  DEFAULT_KEYBOARD_SHORTCUTS,
   BORDER_BUFFER,
   loadSlotCount,
   saveSlotCount,
@@ -26,6 +21,38 @@ import {
   createEmptySlots,
   calcHorizontalDimensions,
 } from "./utils";
+
+/**
+ * Parse a keybind string like "Ctrl+1" or "Shift+5" into its components
+ */
+function parseKeybind(keybind: string): {
+  key: string;
+  ctrl: boolean;
+  shift: boolean;
+  alt: boolean;
+} {
+  const parts = keybind.split("+");
+  const key = parts[parts.length - 1];
+  return {
+    key,
+    ctrl: parts.includes("Ctrl"),
+    shift: parts.includes("Shift"),
+    alt: parts.includes("Alt"),
+  };
+}
+
+/**
+ * Check if a keyboard event matches a keybind string
+ */
+function matchesKeybind(e: KeyboardEvent, keybind: string): boolean {
+  const parsed = parseKeybind(keybind);
+  return (
+    e.key === parsed.key &&
+    e.ctrlKey === parsed.ctrl &&
+    e.shiftKey === parsed.shift &&
+    e.altKey === parsed.alt
+  );
+}
 
 // Save slots to server (persistent storage)
 function saveSlotsToServer(
@@ -270,18 +297,8 @@ export function useActionBarState({
     };
   }, [world]);
 
-  // Get keybinds from keybindStore
-  const customKeybindsEnabled = useFeatureEnabled("customKeybinds");
-  const storeKeybinds = useActionBarKeybinds();
-
-  const keyboardShortcuts = useMemo(() => {
-    if (!customKeybindsEnabled) {
-      return DEFAULT_KEYBOARD_SHORTCUTS;
-    }
-    return DEFAULT_KEYBOARD_SHORTCUTS.map((defaultKey, index) => {
-      return storeKeybinds[index] || defaultKey;
-    });
-  }, [customKeybindsEnabled, storeKeybinds]);
+  // Get bar-specific keybinds (barId is 0-indexed, useActionBarKeybindsForBar expects 1-indexed)
+  const keyboardShortcuts = useActionBarKeybindsForBar(barId + 1);
 
   // Load from server on mount
   useEffect(() => {
@@ -463,6 +480,7 @@ export function useActionBarState({
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore when typing in input fields
       if (
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement
@@ -470,10 +488,16 @@ export function useActionBarState({
         return;
       }
 
-      const shortcutIndex = keyboardShortcuts.indexOf(e.key);
+      // Find matching keybind (supports modifiers like Ctrl+1, Shift+2, etc.)
+      const shortcutIndex = keyboardShortcuts.findIndex((shortcut) =>
+        matchesKeybind(e, shortcut),
+      );
+
       if (shortcutIndex !== -1 && shortcutIndex < slots.length) {
         const slot = slots[shortcutIndex];
         if (slot.type !== "empty") {
+          // Prevent default for modifier combinations to avoid browser shortcuts
+          e.preventDefault();
           handleUseSlot(slot, shortcutIndex);
         }
       }

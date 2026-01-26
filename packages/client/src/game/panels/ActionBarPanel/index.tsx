@@ -2,10 +2,15 @@
  * ActionBarPanel - A window-based action bar panel
  *
  * Features:
- * - Configurable slot count (4-9 slots, adjustable via +/- buttons)
+ * - Configurable slot count (4-12 slots, adjustable via +/- buttons)
  * - Drag items from inventory to action bar
  * - Drag skills/spells/prayers to action bar
- * - Keyboard shortcuts (1-9)
+ * - RS3-style keyboard shortcuts with modifier support:
+ *   - Bar 1: 1-9, 0, -, =, Backspace, Insert
+ *   - Bar 2: Ctrl+1-9, Ctrl+0, etc.
+ *   - Bar 3: Shift+1-9, Shift+0, etc.
+ *   - Bar 4: Alt+1-9, Alt+0, etc.
+ *   - Bar 5: Q, W, E, R, T, Y, U, I, O, P, [, ], \
  * - Right-click context menu
  * - Multiple action bars support (up to 5)
  * - Horizontal layout only (1xN where N is slot count)
@@ -57,6 +62,7 @@ import {
   MIN_SLOT_COUNT,
   MAX_SLOT_COUNT,
   getSlotIcon,
+  formatKeybindForDisplay,
 } from "./utils";
 
 export function ActionBarPanel({
@@ -224,7 +230,9 @@ export function ActionBarPanel({
                 slot={slot}
                 slotIndex={index}
                 slotSize={SLOT_SIZE}
-                shortcut={keyboardShortcuts[index] || ""}
+                shortcut={formatKeybindForDisplay(
+                  keyboardShortcuts[index] || "",
+                )}
                 isHovered={hoveredSlot === index}
                 isActive={
                   slot.type === "prayer" && slot.prayerId
