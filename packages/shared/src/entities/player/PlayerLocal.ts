@@ -1190,11 +1190,9 @@ export class PlayerLocal extends Entity implements HotReloadable {
     // Nametags disabled - OSRS pattern: names shown in right-click menu only
 
     // Register with HealthBars system
-    const healthbars = this.world.systems.find(
-      (s) =>
-        (s as { systemName?: string }).systemName === "healthbars" ||
-        s.constructor.name === "HealthBars",
-    ) as HealthBarsSystem | undefined;
+    const healthbars = this.world.getSystem?.("healthbars") as
+      | HealthBarsSystem
+      | undefined;
 
     if (healthbars) {
       const currentHealth = (this.data.health as number) || 100;

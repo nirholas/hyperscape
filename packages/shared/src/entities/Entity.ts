@@ -841,11 +841,9 @@ export class Entity implements IEntity {
    */
   protected createHealthBar(): void {
     // Try to use atlas-based HealthBars system (much more efficient)
-    const healthbars = this.world.systems?.find(
-      (s) =>
-        (s as { systemName?: string }).systemName === "healthbars" ||
-        s.constructor.name === "HealthBars",
-    ) as HealthBarsSystem | undefined;
+    const healthbars = this.world.getSystem?.("healthbars") as
+      | HealthBarsSystem
+      | undefined;
 
     if (healthbars) {
       // Atlas-based: Register with HealthBars system
