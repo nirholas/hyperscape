@@ -318,7 +318,10 @@ export function MenuBarWrapper({
 }
 
 /**
- * MinimapWrapper - Passes drag props to Minimap component for edit mode dragging
+ * MinimapWrapper - Wraps Minimap component for embedding in a panel
+ *
+ * The Minimap fills the entire container, scaling to match the larger dimension
+ * so it always fills the panel completely with no gaps.
  */
 export function MinimapWrapper({
   world,
@@ -326,30 +329,22 @@ export function MinimapWrapper({
   isUnlocked,
 }: MinimapWrapperProps): React.ReactElement {
   const containerRef = React.useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = React.useState<{
-    width: number;
-    height: number;
-  }>({ width: 200, height: 200 });
+  const [size, setSize] = React.useState(200);
 
   React.useEffect(() => {
-    const updateDimensions = () => {
+    const updateSize = () => {
       if (containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
         const width = Math.floor(rect.width);
         const height = Math.floor(rect.height);
-        if (width > 10 && height > 10) {
-          setDimensions((prev) => {
-            if (prev.width !== width || prev.height !== height) {
-              return { width, height };
-            }
-            return prev;
-          });
-        }
+        // Use the larger dimension so minimap always fills the container
+        const newSize = Math.max(width, height, 100);
+        setSize((prev) => (prev !== newSize ? newSize : prev));
       }
     };
 
-    updateDimensions();
-    const observer = new ResizeObserver(updateDimensions);
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
     if (containerRef.current) {
       observer.observe(containerRef.current);
     }
@@ -370,10 +365,10 @@ export function MinimapWrapper({
       }}
     >
       <Minimap
-        key={`minimap-${dimensions.width}-${dimensions.height}`}
+        key={`minimap-${size}`}
         world={world}
-        width={dimensions.width}
-        height={dimensions.height}
+        width={size}
+        height={size}
         zoom={50}
         isVisible={true}
         resizable={false}

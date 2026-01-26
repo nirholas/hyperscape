@@ -77,6 +77,21 @@ const SIZE_CONFIG = {
   normal: { size: 42, iconSize: 22, borderWidth: 2, strokeWidth: 1.5 },
 } as const;
 
+/** Calculate icon size relative to button size */
+function calculateIconSize(buttonSize: number): number {
+  // Icon is approximately 53% of button size, clamped to reasonable bounds
+  return Math.max(12, Math.min(32, Math.round(buttonSize * 0.53)));
+}
+
+/** Calculate stroke width relative to icon size */
+function calculateStrokeWidth(iconSize: number): number {
+  // Stroke width inversely proportional to icon size for visual balance
+  if (iconSize <= 14) return 2.25;
+  if (iconSize <= 18) return 2;
+  if (iconSize <= 22) return 1.75;
+  return 1.5;
+}
+
 interface MenuButtonProps {
   /** Icon name from the preset list */
   iconName: MenuIconName;
@@ -86,8 +101,10 @@ interface MenuButtonProps {
   active: boolean;
   /** Click handler */
   onClick: () => void;
-  /** Size variant */
+  /** Size variant (used when customSize is not provided) */
   size?: "compact" | "small" | "normal";
+  /** Custom size in pixels (overrides size preset) */
+  customSize?: number;
   /** Panel ID for test selectors (optional) */
   panelId?: string;
 }
@@ -98,10 +115,20 @@ export function MenuButton({
   active,
   onClick,
   size = "normal",
+  customSize,
   panelId,
 }: MenuButtonProps) {
   const theme = useThemeStore((s) => s.theme);
-  const config = SIZE_CONFIG[size];
+
+  // Use custom size if provided, otherwise use preset
+  const config = customSize
+    ? {
+        size: customSize,
+        iconSize: calculateIconSize(customSize),
+        borderWidth: 2,
+        strokeWidth: calculateStrokeWidth(calculateIconSize(customSize)),
+      }
+    : SIZE_CONFIG[size];
   const IconComponent = ICON_MAP[iconName];
   const [isHovered, setIsHovered] = useState(false);
   const [isPressed, setIsPressed] = useState(false);
