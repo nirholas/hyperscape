@@ -156,7 +156,7 @@ export const SETTING_CATEGORIES: CategoryDefinition[] = [
   {
     id: "interface",
     label: "Interface",
-    description: "UI scale and display options",
+    description: "Display options",
     icon: "Layout",
     order: 3,
   },
@@ -515,20 +515,6 @@ export const CONTROLS_SETTINGS: SettingDefinition[] = [
 
 /** Interface settings */
 export const INTERFACE_SETTINGS: SettingDefinition[] = [
-  {
-    id: "interface.scale",
-    category: "interface",
-    type: "slider",
-    label: "UI Scale",
-    description: "Scale of all interface elements",
-    defaultValue: 100,
-    min: 75,
-    max: 150,
-    step: 5,
-    unit: "%",
-    showValue: true,
-    keywords: ["ui", "scale", "size", "interface"],
-  },
   {
     id: "interface.chatFontSize",
     category: "interface",

@@ -17,7 +17,6 @@ import { EntityContextMenu } from "./hud/EntityContextMenu";
 import { HandIcon, MouseLeftIcon, MouseRightIcon, MouseWheelIcon } from "@/ui";
 import { LoadingScreen } from "../screens/LoadingScreen";
 import { InterfaceManager } from "./interface/InterfaceManager";
-import { clampAllWindowsToViewport } from "./interface/useViewportResize";
 import { StatusBars } from "./hud/StatusBars";
 import { XPProgressOrb } from "./hud/XPProgressOrb";
 import { LevelUpNotification } from "./hud/level-up";
@@ -379,50 +378,6 @@ export function CoreUI({ world }: { world: ClientWorld }) {
     };
   }, [world, localPlayerId]);
 
-  // UI Scale - applies transform scale to the entire UI
-  const [uiScale, setUiScale] = useState(world.prefs?.ui || 1);
-  const prevScaleRef = useRef(uiScale);
-
-  useEffect(() => {
-    // Update local state when prefs change
-    setUiScale(world.prefs?.ui || 1);
-
-    function onChange(changes: { ui?: { value: number } }) {
-      if (changes.ui) {
-        setUiScale(changes.ui.value);
-      }
-    }
-    world.prefs?.on("change", onChange);
-    return () => {
-      world.prefs?.off("change", onChange);
-    };
-  }, [world]);
-
-  // When UI scale changes, clamp all windows to the new viewport bounds
-  useEffect(() => {
-    // Skip on initial render
-    if (prevScaleRef.current === uiScale) return;
-    prevScaleRef.current = uiScale;
-
-    // Use a small delay to ensure the data-ui-scale attribute is updated first
-    const timeout = setTimeout(() => {
-      clampAllWindowsToViewport();
-    }, 50);
-
-    return () => clearTimeout(timeout);
-  }, [uiScale]);
-
-  // Calculate the scaled viewport dimensions for proper positioning
-  const scaledViewportStyle =
-    uiScale !== 1
-      ? ({
-          transform: `scale(${uiScale})`,
-          transformOrigin: "top left",
-          width: `${100 / uiScale}%`,
-          height: `${100 / uiScale}%`,
-        } as React.CSSProperties)
-      : {};
-
   return (
     <ChatProvider>
       <main
@@ -436,12 +391,8 @@ export function CoreUI({ world }: { world: ClientWorld }) {
         {<Toast world={world} />}
         {<ConnectionIndicator world={world} />}
         {<NotificationContainer />}
-        {/* Scaled UI container - contains all scalable interface elements */}
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={scaledViewportStyle}
-          data-ui-scale={uiScale}
-        >
+        {/* UI container */}
+        <div className="absolute inset-0 pointer-events-none">
           {ready && uiVisible && <ActionsBlock world={world} />}
           {ready && uiVisible && <StatusBars stats={playerStats} />}
           {ready && uiVisible && <XPProgressOrb world={world} />}

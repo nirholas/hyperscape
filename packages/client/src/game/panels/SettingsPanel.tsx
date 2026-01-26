@@ -619,7 +619,6 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
   const [music, setMusic] = useState(prefs?.music || 0.5);
   const [sfx, setSFX] = useState(prefs?.sfx || 0.5);
   const [voice, setVoice] = useState(prefs?.voice || 1);
-  const [uiScale, setUiScale] = useState(prefs?.ui || 1);
   const [statsOn, setStatsOn] = useState(prefs?.stats || false);
 
   // Status bar configuration
@@ -764,7 +763,6 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
       if (changes.music) setMusic(changes.music.value as number);
       if (changes.sfx) setSFX(changes.sfx.value as number);
       if (changes.voice) setVoice(changes.voice.value as number);
-      if (changes.ui) setUiScale(changes.ui.value as number);
       if (changes.stats) setStatsOn(changes.stats.value as boolean);
     };
     prefs?.on?.("change", onPrefsChange);
@@ -1064,27 +1062,6 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
                   </div>
                 </div>
               )}
-            </SettingsSection>
-
-            {/* UI Scale */}
-            <SettingsSection title="UI Scale">
-              <Slider
-                label="Size"
-                value={uiScale}
-                onChange={(v) => {
-                  setUiScale(v);
-                  prefs?.setUI?.(v);
-                }}
-                min={0.8}
-                max={1.2}
-                step={0.05}
-                formatValue={(v) => {
-                  const percent = Math.round((v - 1) * 100);
-                  return percent === 0
-                    ? "Default"
-                    : `${percent > 0 ? "+" : ""}${percent}%`;
-                }}
-              />
             </SettingsSection>
 
             {/* Interface Complexity */}
