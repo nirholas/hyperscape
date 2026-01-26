@@ -88,13 +88,13 @@ const default2Col = calculateLayoutDimensions(2, DEFAULT_PRAYER_COUNT);
 export const PRAYER_PANEL_DIMENSIONS = {
   // Minimum size: 2 columns
   minWidth: default2Col.width,
-  minHeight: 180,
+  minHeight: 235,
   // Preferred size: 6 columns (compact layout)
   defaultWidth: default6Col.width,
   defaultHeight: default6Col.height,
   // Max size: wider for horizontal layouts
-  maxWidth: 400,
-  maxHeight: 450,
+  maxWidth: 520,
+  maxHeight: 585,
   // Layout breakpoints
   layouts: {
     twoCol: default2Col,

@@ -331,8 +331,8 @@ export const baseTheme: Theme = {
   panel: {
     headerHeight: 32,
     borderWidth: 1,
-    minWidth: 200,
-    minHeight: 150,
+    minWidth: 260,
+    minHeight: 195,
   },
 
   slot: {
@@ -494,8 +494,8 @@ export const hyperscapeTheme: Theme = {
   panel: {
     headerHeight: 28,
     borderWidth: 1,
-    minWidth: 200,
-    minHeight: 150,
+    minWidth: 260,
+    minHeight: 195,
   },
 
   slot: {
