@@ -64,6 +64,7 @@ import THREE from "../../extras/three/three";
 import { Entity } from "../Entity";
 import { Avatar, Group, Mesh, UI, UIView, UIText } from "../../nodes";
 import { EventType } from "../../types/events";
+import { DeathState } from "../../types/entities/entities";
 import type { PlayerEffect, VRMHooks } from "../../types/systems/physics";
 import type {
   HealthBars as HealthBarsSystem,
@@ -609,8 +610,38 @@ export class PlayerRemote extends Entity implements HotReloadable {
 
     // Use server-provided emote state directly - no inference
     // The server/PlayerLocal sends the correct animation state
+    let serverEmote = this.data.emote as string | undefined;
+
+    // AAA QUALITY: Force death emote when player is in DYING state
+    // This is a safety net - if deathState is DYING, the animation MUST be death
+    // regardless of what serverEmote says (protects against race conditions)
+    const currentDeathState = (this.data as { deathState?: DeathState })
+      .deathState;
+    if (
+      currentDeathState === DeathState.DYING ||
+      currentDeathState === DeathState.DEAD
+    ) {
+      if (serverEmote !== "death") {
+        console.log(
+          `[PlayerRemote] FORCING death emote (was "${serverEmote}") because deathState=${currentDeathState} for ${this.id}`,
+        );
+        serverEmote = "death";
+        this.data.emote = "death"; // Also fix the data for consistency
+      }
+    }
+
+    // DEBUG: Log when death emote is set but we're in update()
+    if (serverEmote === "death") {
+      console.log(`[PlayerRemote] update() with death emote:`, {
+        id: this.id,
+        hasAvatar: !!this.avatar,
+        lastEmote: this.lastEmote,
+        deathUrl: Emotes.DEATH,
+        deathState: currentDeathState,
+      });
+    }
+
     if (this.avatar) {
-      const serverEmote = this.data.emote as string | undefined;
       let desiredUrl: string;
 
       if (serverEmote) {
@@ -663,8 +694,15 @@ export class PlayerRemote extends Entity implements HotReloadable {
           (this.avatar as Avatar).setEmote(desiredUrl);
         }
         this.lastEmote = desiredUrl;
+      } else if (serverEmote === "death") {
+        // DEBUG: Death emote but animation already matches
+        console.log(`[PlayerRemote] update() death emote already applied:`, {
+          id: this.id,
+          desiredUrl,
+          lastEmote: this.lastEmote,
+        });
       }
-    } else if (this.data.emote === "death") {
+    } else if (serverEmote === "death") {
       // DEBUG: Avatar not available when death emote is set
       console.warn(`[PlayerRemote] update() death emote but NO AVATAR:`, {
         id: this.id,
@@ -777,17 +815,37 @@ export class PlayerRemote extends Entity implements HotReloadable {
       this.lerpQuaternion.pushArray(data.q, this.teleport || null);
     }
     if (data.e !== undefined) {
-      // DEBUG: Log emote changes for death animation tracking
-      if (data.e === "death") {
-        console.log(`[PlayerRemote] Setting death emote:`, {
-          id: this.id,
-          oldEmote: this.data.emote,
-          newEmote: data.e,
-          hasAvatar: !!this.avatar,
-          lastEmote: this.lastEmote,
-        });
+      // AAA QUALITY: Protect death animation from being overwritten
+      // When a player is DYING, only allow "death" emote - block all others (especially "idle")
+      // This prevents race conditions where scheduled emote resets arrive after death packets
+      const currentDeathState = (this.data as { deathState?: DeathState })
+        .deathState;
+      const isCurrentlyDying =
+        currentDeathState === DeathState.DYING ||
+        currentDeathState === DeathState.DEAD;
+
+      if (isCurrentlyDying && data.e !== "death") {
+        // Player is dying - ignore non-death emote changes but continue processing other data
+        // IMPORTANT: Don't return early! Other data (position, etc.) still needs to be processed
+        console.log(
+          `[PlayerRemote] BLOCKED emote change to "${data.e}" during death for ${this.id} (deathState=${currentDeathState})`,
+        );
+        // Skip emote assignment but continue with rest of modify()
+      } else {
+        // DEBUG: Log death emote setting
+        if (data.e === "death") {
+          console.log(`[PlayerRemote] Setting death emote:`, {
+            id: this.id,
+            oldEmote: this.data.emote,
+            newEmote: data.e,
+            hasAvatar: !!this.avatar,
+            lastEmote: this.lastEmote,
+            deathState: currentDeathState,
+          });
+        }
+        // Only set emote if we're not blocking it (i.e., not dying with non-death emote)
+        this.data.emote = data.e;
       }
-      this.data.emote = data.e;
     }
     if (data.ef !== undefined) {
       this.setEffect(data.ef as string);

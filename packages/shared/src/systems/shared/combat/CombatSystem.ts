@@ -1339,7 +1339,12 @@ export class CombatSystem extends SystemBase {
     }
 
     // 7. Reset dead entity's emote if they were mid-animation
-    this.animationManager.resetEmote(entityId, entityType as "player" | "mob");
+    // SKIP for players - let the death animation play instead of resetting to idle
+    // Mobs can reset since they have different animation handling
+    if (entityType === "mob") {
+      this.animationManager.resetEmote(entityId, entityType);
+    }
+    // Player death animation is handled by PlayerDeathSystem
   }
 
   /**

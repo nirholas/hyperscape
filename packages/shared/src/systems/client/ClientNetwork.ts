@@ -89,7 +89,7 @@
  */
 
 // moment removed; use native Date
-import { emoteUrls } from "../../data/playerEmotes";
+import { emoteUrls, Emotes } from "../../data/playerEmotes";
 import THREE from "../../extras/three/three";
 import { readPacket, writePacket } from "../../platform/shared/packets";
 import { storage } from "../../platform/shared/storage";
@@ -3152,6 +3152,18 @@ export class ClientNetwork extends SystemBase {
         this.world.entities.get(data.playerId) ||
         this.world.entities.players?.get(data.playerId);
 
+      // DEBUG: Log entity lookup for death handling with timestamp
+      console.log(
+        `[ClientNetwork] onPlayerSetDead for remote player @ ${Date.now()}:`,
+        {
+          playerId: data.playerId,
+          isDead: data.isDead,
+          entityFound: !!entity,
+          entityType: entity?.constructor?.name,
+          hasDeathPosition: !!data.deathPosition,
+        },
+      );
+
       // CRITICAL FIX: Clear tileInterpolatorControlled flag so position updates work
       // This flag was blocking PlayerRemote.modify() and update() from applying positions
       if (entity?.data) {
@@ -3170,6 +3182,27 @@ export class ClientNetwork extends SystemBase {
         // AAA QUALITY: Set entity.data.deathState (single source of truth)
         if (entity?.data) {
           entity.data.deathState = DeathState.DYING;
+
+          // CRITICAL FIX: Always set death emote when player dies (duel or regular death)
+          // This ensures death animation plays even if earlier 'idle' packets arrived
+          // from CombatAnimationManager's scheduled emote resets
+          entity.data.emote = "death";
+          entity.data.e = "death";
+
+          // CRITICAL: Also directly trigger the avatar's death animation (like PlayerLocal does)
+          // Setting data.emote alone waits for update() loop - direct call is immediate
+          const entityWithAvatar = entity as {
+            avatar?: { setEmote?: (emote: string) => void };
+            lastEmote?: string;
+          };
+          if (entityWithAvatar.avatar?.setEmote) {
+            console.log(
+              `[ClientNetwork] Directly triggering death animation for ${data.playerId}`,
+            );
+            entityWithAvatar.avatar.setEmote(Emotes.DEATH);
+            entityWithAvatar.lastEmote = Emotes.DEATH;
+          }
+
           if (data.deathPosition) {
             // Handle both array [x,y,z] and object {x,y,z} formats
             if (Array.isArray(data.deathPosition)) {
@@ -3254,7 +3287,14 @@ export class ClientNetwork extends SystemBase {
           }
         } else if (entity) {
           // Fallback if no death position provided
+          console.log(
+            `[ClientNetwork] Calling entity.modify({ e: "death" }) for ${data.playerId}`,
+          );
           entity.modify({ e: "death", visible: true });
+        } else {
+          console.warn(
+            `[ClientNetwork] No entity found for death animation: ${data.playerId}`,
+          );
         }
       } else {
         // Player is respawning (isDead = false) - clear stale state
@@ -3290,6 +3330,14 @@ export class ClientNetwork extends SystemBase {
         deathLocation: data.deathLocation,
       });
     } else {
+      // DEBUG: Log respawn with timestamp
+      console.log(
+        `[ClientNetwork] onPlayerRespawned for remote player @ ${Date.now()}:`,
+        {
+          playerId: data.playerId,
+        },
+      );
+
       // SERVER-AUTHORITATIVE DEATH: Server now freezes position broadcasts during death animation
       // Client just needs to apply the spawn position when PLAYER_RESPAWNED arrives
 

@@ -516,6 +516,18 @@ export class EventBridge {
           // 1. See death animation on the dying player
           // 2. Clear tile interpolator state (allows respawn position to apply)
           this.broadcast.sendToAll("playerSetDead", data);
+
+          // CRITICAL: Also broadcast entityModified with death animation
+          // Without this, remote players won't see the death animation play
+          // (markNetworkDirty only marks for next sync cycle, not immediate)
+          if (data.isDead) {
+            this.broadcast.sendToAll("entityModified", {
+              id: data.playerId,
+              changes: {
+                e: "death",
+              },
+            });
+          }
         }
       });
 

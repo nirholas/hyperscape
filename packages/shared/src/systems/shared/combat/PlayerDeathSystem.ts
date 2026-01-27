@@ -450,11 +450,40 @@ export class PlayerDeathSystem extends SystemBase {
         `[PlayerDeathSystem] Player ${playerId} died in duel - playing death animation only (no item drops)`,
       );
 
+      // CRITICAL: Cancel any scheduled emote resets BEFORE emitting death event
+      // This prevents race conditions where a scheduled "idle" reset overwrites death animation
+      const combatSystem = this.world.getSystem?.("combat") as {
+        animationManager?: { cancelEmoteReset?: (entityId: string) => void };
+      } | null;
+      if (combatSystem?.animationManager?.cancelEmoteReset) {
+        combatSystem.animationManager.cancelEmoteReset(playerId);
+        console.log(
+          `[PlayerDeathSystem] Cancelled scheduled emote reset for duel death: ${playerId}`,
+        );
+      }
+
+      // Get death position for the death animation (same as regular death)
+      // Without this, clients don't know where to show the death animation
+      let deathPosition = this.playerPositions.get(playerId);
+      if (!deathPosition) {
+        const playerEntity = this.world.entities?.get?.(playerId);
+        if (playerEntity) {
+          const entityPos = getEntityPosition(playerEntity);
+          if (entityPos) {
+            deathPosition = { x: entityPos.x, y: entityPos.y, z: entityPos.z };
+          }
+        }
+      }
+
       // Still emit death state and play animation for duel deaths
       // DuelSystem handles stakes/respawn, but we need the visual feedback
+      // CRITICAL: Include deathPosition so clients can properly position the death animation
       this.emitTypedEvent(EventType.PLAYER_SET_DEAD, {
         playerId,
         isDead: true,
+        deathPosition: deathPosition
+          ? [deathPosition.x, deathPosition.y, deathPosition.z]
+          : undefined,
       });
 
       // Set death animation on entity
@@ -467,10 +496,17 @@ export class PlayerDeathSystem extends SystemBase {
         if (typedPlayerEntity.data) {
           typedPlayerEntity.data.e = "death";
           typedPlayerEntity.data.deathState = DeathState.DYING;
+          console.log(
+            `[PlayerDeathSystem] Set death animation for duel death: ${playerId}, e=${typedPlayerEntity.data.e}`,
+          );
         }
         if ("markNetworkDirty" in playerEntity) {
           (playerEntity as { markNetworkDirty: () => void }).markNetworkDirty();
         }
+      } else {
+        console.warn(
+          `[PlayerDeathSystem] Could not find entity to set death animation: ${playerId}`,
+        );
       }
 
       return;

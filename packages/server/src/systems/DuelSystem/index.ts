@@ -953,11 +953,16 @@ export class DuelSystem {
   // ============================================================================
 
   /**
-   * Check if a player is in an active duel (FIGHTING state)
+   * Check if a player is in an active duel (FIGHTING or FINISHED state)
+   * CRITICAL: Include FINISHED state because when a player dies:
+   * 1. DuelSystem.handlePlayerDeath() sets state to FINISHED
+   * 2. THEN PlayerDeathSystem.handlePlayerDeath() checks isPlayerInActiveDuel()
+   * Without FINISHED, PlayerDeathSystem would treat duel deaths as normal deaths
    */
   isPlayerInActiveDuel(playerId: string): boolean {
     const session = this.getPlayerDuel(playerId);
-    return session?.state === "FIGHTING";
+    // Include FINISHED state to handle the death animation window
+    return session?.state === "FIGHTING" || session?.state === "FINISHED";
   }
 
   /**
@@ -1481,7 +1486,13 @@ export class DuelSystem {
 
     // Delay the duel resolution to allow death animation to play
     // and give players time to see the outcome (OSRS-accurate behavior)
+    console.log(
+      `[DuelSystem] Starting 5-second death animation delay @ ${Date.now()}`,
+    );
     setTimeout(() => {
+      console.log(
+        `[DuelSystem] 5-second delay complete, resolving duel @ ${Date.now()}`,
+      );
       // SECURITY: Verify session still exists and hasn't been cleaned up
       // This prevents double-resolution if cancelDuel was called
       const currentSession = this.duelSessions.get(capturedDuelId);

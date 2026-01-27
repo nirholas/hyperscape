@@ -2447,6 +2447,15 @@ export class PlayerLocal extends Entity implements HotReloadable {
     if (playerWithDying.path) playerWithDying.path = null;
     if (playerWithDying.destination) playerWithDying.destination = null;
 
+    // CRITICAL: Set death animation so player sees themselves fall
+    // This triggers the avatar's death animation
+    this.data.e = "death";
+    this.data.emote = "death";
+    if (this._avatar?.setEmote) {
+      // Use Emotes.DEATH (asset URL), not the symbolic name "death"
+      this._avatar.setEmote(Emotes.DEATH);
+    }
+
     // CRITICAL: Freeze physics capsule (make it KINEMATIC = frozen, no forces applied)
     const physXGlobal = globalThis as PhysXGlobal;
     if (this.capsule && physXGlobal.PHYSX) {
