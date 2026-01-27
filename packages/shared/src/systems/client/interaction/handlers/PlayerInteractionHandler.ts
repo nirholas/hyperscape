@@ -26,12 +26,18 @@ import type { ZoneDetectionSystem } from "../../../shared/death/ZoneDetectionSys
 
 export class PlayerInteractionHandler extends BaseInteractionHandler {
   /**
-   * Left-click: No action (OSRS behavior)
+   * Left-click: Attack in active duel only (OSRS behavior)
    *
-   * Players require right-click to interact.
+   * In normal gameplay, players require right-click to interact.
+   * Exception: During active duel combat, left-click attacks your opponent.
    */
-  onLeftClick(_target: RaycastTarget): void {
-    // No-op - players need right-click menu
+  onLeftClick(target: RaycastTarget): void {
+    // Only allow left-click attack if in active duel with this specific player
+    if (this.isInActiveDuelWith(target.entityId)) {
+      this.attackPlayer(target);
+      return;
+    }
+    // Otherwise no-op - players need right-click menu
   }
 
   /**
