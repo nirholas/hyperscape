@@ -346,8 +346,9 @@ export class DuelArenaVisualsSystem extends System {
   ): void {
     const geometry = new THREE.BoxGeometry(width, WALL_HEIGHT, depth);
     const wall = new THREE.Mesh(geometry, material);
-    // Position wall on top of terrain
-    wall.position.set(x, terrainY + FLOOR_HEIGHT_OFFSET + WALL_HEIGHT / 2, z);
+    // Position wall so bottom is at terrain level (where players stand)
+    // terrainY is the flat zone height, wall center is at terrainY + WALL_HEIGHT/2
+    wall.position.set(x, terrainY + WALL_HEIGHT / 2, z);
     wall.castShadow = true;
     wall.receiveShadow = true;
 
