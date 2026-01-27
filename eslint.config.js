@@ -72,6 +72,7 @@ export default [
         CloseEvent: "readonly",
         ErrorEvent: "readonly",
         PromiseRejectionEvent: "readonly",
+        SecurityPolicyViolationEvent: "readonly",
         EventListener: "readonly",
         Node: "readonly",
         Element: "readonly",
