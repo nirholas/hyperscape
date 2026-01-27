@@ -43,6 +43,7 @@ import { SmeltingSourceInteractionHandler } from "./handlers/SmeltingSourceInter
 import { SmithingSourceInteractionHandler } from "./handlers/SmithingSourceInteractionHandler";
 import { AltarInteractionHandler } from "./handlers/AltarInteractionHandler";
 import { StarterChestInteractionHandler } from "./handlers/StarterChestInteractionHandler";
+import { ForfeitPillarInteractionHandler } from "./handlers/ForfeitPillarInteractionHandler";
 
 /**
  * Targeting mode state for "Use X on Y" interactions
@@ -168,6 +169,12 @@ export class InteractionRouter extends System {
     this.handlers.set(
       "starter_chest",
       new StarterChestInteractionHandler(this.world, this.actionQueue),
+    );
+
+    // Forfeit pillar (duel arena surrender)
+    this.handlers.set(
+      "forfeit_pillar",
+      new ForfeitPillarInteractionHandler(this.world, this.actionQueue),
     );
   }
 

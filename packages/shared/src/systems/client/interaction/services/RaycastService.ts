@@ -282,6 +282,35 @@ export class RaycastService {
             this.updateCache(screenX, screenY, result);
             return result;
           }
+
+          // Special handling for forfeit pillars (visual-only, not in world.entities)
+          if (
+            userData.type === "forfeit_pillar" &&
+            entityId.startsWith("forfeit_pillar_")
+          ) {
+            obj.getWorldPosition(_worldPos);
+
+            const result: RaycastTarget = {
+              entityId,
+              entityType: "forfeit_pillar",
+              entity: null, // Forfeit pillar is not a standard entity
+              name: userData.name || "Trapdoor",
+              position: {
+                x: _worldPos.x,
+                y: _worldPos.y,
+                z: _worldPos.z,
+              },
+              hitPoint: {
+                x: intersect.point.x,
+                y: intersect.point.y,
+                z: intersect.point.z,
+              },
+              distance: intersect.distance,
+            };
+
+            this.updateCache(screenX, screenY, result);
+            return result;
+          }
         }
 
         obj = obj.parent;
@@ -440,6 +469,8 @@ export class RaycastService {
         return "altar";
       case "starter_chest":
         return "starter_chest";
+      case "forfeit_pillar":
+        return "forfeit_pillar";
       default:
         // Default to npc for unknown interactive entities
         return "npc";

@@ -63,6 +63,12 @@ const ARENA_WALL_COLOR = 0x8b6914; // Brown walls
 const LOBBY_FLOOR_COLOR = 0xc9b896; // Lighter tan for lobby
 const HOSPITAL_FLOOR_COLOR = 0xffffff; // White hospital floor
 
+// Forfeit pillar configuration
+const FORFEIT_PILLAR_RADIUS = 0.4;
+const FORFEIT_PILLAR_HEIGHT = 1.2;
+const FORFEIT_PILLAR_COLOR = 0x8b4513; // Saddle brown (wooden trapdoor look)
+const FORFEIT_PILLAR_EMISSIVE = 0x4a2510;
+
 // ============================================================================
 // DuelArenaVisualsSystem
 // ============================================================================
@@ -191,7 +197,7 @@ export class DuelArenaVisualsSystem extends System {
     // Create hospital floor
     this.createHospitalFloor();
 
-    // Create 6 arena floors and walls
+    // Create 6 arena floors, walls, and forfeit pillars
     for (let i = 0; i < ARENA_COUNT; i++) {
       const row = Math.floor(i / 2);
       const col = i % 2;
@@ -203,6 +209,7 @@ export class DuelArenaVisualsSystem extends System {
 
       this.createArenaFloor(centerX, centerZ, i + 1);
       this.createArenaWalls(centerX, centerZ);
+      this.createForfeitPillars(centerX, centerZ, i + 1);
     }
 
     // Add to scene
@@ -473,6 +480,94 @@ export class DuelArenaVisualsSystem extends System {
     horizBar.position.set(x, floorY + 0.2, z);
     this.geometries.push(horizGeom);
     this.arenaGroup!.add(horizBar);
+  }
+
+  /**
+   * Create forfeit pillars (trapdoors) in opposite corners of an arena.
+   * Players can click these during an active duel to surrender.
+   */
+  private createForfeitPillars(
+    centerX: number,
+    centerZ: number,
+    arenaId: number,
+  ): void {
+    // Get terrain height at arena center
+    const terrainY = this.getTerrainHeight(centerX, centerZ);
+
+    // Place pillars in opposite corners (SW and NE)
+    // This ensures both players have access to a nearby forfeit option
+    const cornerOffset = {
+      x: ARENA_WIDTH / 2 - 2, // 2 units from wall
+      z: ARENA_LENGTH / 2 - 2,
+    };
+
+    // Southwest corner pillar
+    this.createForfeitPillar(
+      centerX - cornerOffset.x,
+      terrainY,
+      centerZ + cornerOffset.z,
+      `forfeit_pillar_${arenaId}_sw`,
+    );
+
+    // Northeast corner pillar
+    this.createForfeitPillar(
+      centerX + cornerOffset.x,
+      terrainY,
+      centerZ - cornerOffset.z,
+      `forfeit_pillar_${arenaId}_ne`,
+    );
+  }
+
+  /**
+   * Create a single forfeit pillar (trapdoor visual)
+   * Uses a cylinder with proper userData for raycasting
+   */
+  private createForfeitPillar(
+    x: number,
+    terrainY: number,
+    z: number,
+    entityId: string,
+  ): void {
+    // Create cylinder geometry for the pillar
+    const geometry = new THREE.CylinderGeometry(
+      FORFEIT_PILLAR_RADIUS,
+      FORFEIT_PILLAR_RADIUS,
+      FORFEIT_PILLAR_HEIGHT,
+      8, // radial segments
+    );
+
+    const material = new THREE.MeshStandardMaterial({
+      color: FORFEIT_PILLAR_COLOR,
+      emissive: FORFEIT_PILLAR_EMISSIVE,
+      emissiveIntensity: 0.2,
+      roughness: 0.8,
+    });
+
+    const pillar = new THREE.Mesh(geometry, material);
+    // Position pillar so bottom is at terrain level
+    pillar.position.set(x, terrainY + FORFEIT_PILLAR_HEIGHT / 2, z);
+    pillar.castShadow = true;
+    pillar.receiveShadow = true;
+    pillar.name = entityId;
+
+    // CRITICAL: Set userData for raycast detection
+    // This enables the interaction system to identify and route clicks
+    pillar.userData = {
+      entityId,
+      type: "forfeit_pillar",
+      name: "Trapdoor",
+    };
+
+    // Enable layer 1 for raycasting (entities are on layer 1)
+    pillar.layers.enable(1);
+
+    this.geometries.push(geometry);
+    this.materials.push(material);
+    this.arenaGroup!.add(pillar);
+
+    console.log(
+      `[DuelArenaVisualsSystem] Created forfeit pillar ${entityId} at (${x.toFixed(1)}, ${(terrainY + FORFEIT_PILLAR_HEIGHT / 2).toFixed(1)}, ${z.toFixed(1)})`,
+    );
   }
 
   /**
