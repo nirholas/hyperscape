@@ -13,12 +13,12 @@
 
 import type { World } from "@hyperscape/shared";
 import type { PendingDuelChallenge } from "@hyperscape/shared";
-
-/** Challenge timeout in milliseconds (30 seconds, OSRS-accurate) */
-const CHALLENGE_TIMEOUT_MS = 30_000;
-
-/** Maximum distance (in tiles) before challenge is auto-cancelled */
-const MAX_CHALLENGE_DISTANCE_TILES = 15;
+import {
+  CHALLENGE_TIMEOUT_TICKS,
+  CHALLENGE_CLEANUP_INTERVAL_TICKS,
+  CHALLENGE_DISTANCE_TILES,
+  ticksToMs,
+} from "./config";
 
 export class PendingDuelManager {
   /** Map of challengeId -> pending challenge data */
@@ -37,8 +37,11 @@ export class PendingDuelManager {
    * Initialize the manager and start cleanup timer
    */
   init(): void {
-    // Run cleanup every 5 seconds
-    this.cleanupInterval = setInterval(() => this.cleanupExpired(), 5000);
+    // Run cleanup every few ticks
+    this.cleanupInterval = setInterval(
+      () => this.cleanupExpired(),
+      ticksToMs(CHALLENGE_CLEANUP_INTERVAL_TICKS),
+    );
   }
 
   /**
@@ -93,7 +96,7 @@ export class PendingDuelManager {
       targetId,
       targetName,
       createdAt: Date.now(),
-      expiresAt: Date.now() + CHALLENGE_TIMEOUT_MS,
+      expiresAt: Date.now() + ticksToMs(CHALLENGE_TIMEOUT_TICKS),
     };
 
     this.pendingChallenges.set(challengeId, challenge);
@@ -275,7 +278,7 @@ export class PendingDuelManager {
         const dz = Math.abs(challengerPos.z - targetPos.z);
         const distanceTiles = Math.max(dx, dz); // Chebyshev distance
 
-        if (distanceTiles > MAX_CHALLENGE_DISTANCE_TILES) {
+        if (distanceTiles > CHALLENGE_DISTANCE_TILES) {
           this.cancelChallenge(challengeId);
           this.world.emit("duel:challenge:cancelled", {
             challengeId,

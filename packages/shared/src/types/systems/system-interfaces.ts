@@ -462,6 +462,129 @@ export interface TradingSystem extends System {
   isPlayerOnline(playerId: string): boolean;
 }
 
+/**
+ * Duel system operation result type
+ */
+export interface DuelOperationResult {
+  success: boolean;
+  error?: string;
+  errorCode?: string;
+}
+
+/**
+ * DuelSystem - Server-authoritative player-to-player dueling (OSRS-accurate)
+ *
+ * Manages duel sessions with rules negotiation, stakes, and combat enforcement.
+ *
+ * Duel Flow:
+ * 1. Player A challenges Player B (in Duel Arena zone)
+ * 2. Player B accepts/declines challenge
+ * 3. Rules screen: Both players toggle rules and accept
+ * 4. Stakes screen: Both players stake items/gold and accept
+ * 5. Confirmation screen: Read-only review, both accept
+ * 6. Teleport to arena with countdown
+ * 7. Combat with rule enforcement
+ * 8. Winner receives stakes, loser respawns at lobby
+ */
+export interface DuelSystem extends System {
+  // Tick processing (called by GameTickProcessor)
+  processTick(): void;
+
+  // Challenge Flow
+  createChallenge(
+    challengerId: string,
+    challengerName: string,
+    targetId: string,
+    targetName: string,
+  ): DuelOperationResult & { challengeId?: string };
+
+  respondToChallenge(
+    challengeId: string,
+    responderId: string,
+    accept: boolean,
+  ): DuelOperationResult & { duelId?: string };
+
+  // Session Management
+  getDuelSession(duelId: string): unknown | undefined;
+  getPlayerDuel(playerId: string): unknown | undefined;
+  getPlayerDuelId(playerId: string): string | undefined;
+  isPlayerInDuel(playerId: string): boolean;
+  cancelDuel(
+    duelId: string,
+    reason: string,
+    cancelledBy?: string,
+  ): DuelOperationResult;
+
+  // Rules
+  toggleRule(
+    duelId: string,
+    playerId: string,
+    rule: string,
+  ): DuelOperationResult;
+  toggleEquipmentRestriction(
+    duelId: string,
+    playerId: string,
+    slot: string,
+  ): DuelOperationResult;
+  acceptRules(duelId: string, playerId: string): DuelOperationResult;
+
+  // Stakes
+  addStake(
+    duelId: string,
+    playerId: string,
+    inventorySlot: number,
+    itemId: string,
+    quantity: number,
+    value: number,
+  ): DuelOperationResult;
+  removeStake(
+    duelId: string,
+    playerId: string,
+    stakeIndex: number,
+  ): DuelOperationResult;
+  acceptStakes(duelId: string, playerId: string): DuelOperationResult;
+
+  // Confirmation & Combat
+  acceptFinal(
+    duelId: string,
+    playerId: string,
+  ): DuelOperationResult & { arenaId?: number };
+  forfeitDuel(playerId: string): DuelOperationResult;
+
+  // Rule Queries (for CombatSystem integration)
+  isPlayerInActiveDuel(playerId: string): boolean;
+  getPlayerDuelRules(playerId: string): unknown | null;
+  canMove(playerId: string): boolean;
+  canForfeit(playerId: string): boolean;
+  canUseRanged(playerId: string): boolean;
+  canUseMelee(playerId: string): boolean;
+  canUseMagic(playerId: string): boolean;
+  canUseSpecialAttack(playerId: string): boolean;
+  canUsePrayer(playerId: string): boolean;
+  canUsePotions(playerId: string): boolean;
+  canEatFood(playerId: string): boolean;
+  getDuelOpponentId(playerId: string): string | null;
+
+  // Arena Management
+  reserveArena(duelId: string): number | null;
+  releaseArena(arenaId: number): void;
+  getArenaSpawnPoints(
+    arenaId: number,
+  ):
+    | [{ x: number; y: number; z: number }, { x: number; y: number; z: number }]
+    | undefined;
+  getArenaBounds(arenaId: number):
+    | {
+        min: { x: number; z: number };
+        max: { x: number; z: number };
+      }
+    | undefined;
+
+  // Disconnect Handling
+  onPlayerDisconnect(playerId: string): void;
+  onPlayerReconnect(playerId: string): void;
+}
+
 export interface XPSystem extends System {
   getSkillLevel(playerId: string, skill: string): number;
   getSkillData(playerId: string, skill: string): unknown;

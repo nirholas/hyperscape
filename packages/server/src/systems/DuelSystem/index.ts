@@ -28,88 +28,35 @@ import {
   type DuelRules,
   type DuelState,
   type StakedItem,
-  DEFAULT_DUEL_RULES,
   validateRuleCombination,
   DuelErrorCode,
   DeathState,
 } from "@hyperscape/shared";
 import { PendingDuelManager } from "./PendingDuelManager";
 import { ArenaPoolManager } from "./ArenaPoolManager";
+import {
+  DuelSessionManager,
+  type DuelSession,
+  type EquipmentRestrictions,
+} from "./DuelSessionManager";
+import { DuelCombatResolver } from "./DuelCombatResolver";
 import { AuditLogger } from "../ServerNetwork/services";
+import {
+  DISCONNECT_TIMEOUT_TICKS,
+  CLEANUP_INTERVAL_TICKS,
+  SESSION_MAX_AGE_TICKS,
+  DEATH_RESOLUTION_DELAY_TICKS,
+  POSITION_TOLERANCE,
+  ticksToMs,
+  TICK_DURATION_MS,
+} from "./config";
 
 // ============================================================================
 // Types
 // ============================================================================
 
-/**
- * Equipment restrictions for a duel (which slots are disabled)
- */
-interface EquipmentRestrictions {
-  head: boolean;
-  cape: boolean;
-  amulet: boolean;
-  weapon: boolean;
-  body: boolean;
-  shield: boolean;
-  legs: boolean;
-  gloves: boolean;
-  boots: boolean;
-  ring: boolean;
-  ammo: boolean;
-}
-
-/**
- * Server-side duel session structure.
- * Uses a flattened format for efficiency (vs shared type's DuelParticipant pattern).
- */
-interface DuelSession {
-  duelId: string;
-  state: DuelState;
-
-  // Participants
-  challengerId: string;
-  challengerName: string;
-  targetId: string;
-  targetName: string;
-
-  // Rules & Restrictions
-  rules: DuelRules;
-  equipmentRestrictions: EquipmentRestrictions;
-
-  // Stakes
-  challengerStakes: StakedItem[];
-  targetStakes: StakedItem[];
-
-  // Acceptance state (per screen)
-  challengerAccepted: boolean;
-  targetAccepted: boolean;
-
-  // Arena
-  arenaId: number | null;
-
-  // Timestamps
-  createdAt: number;
-  countdownStartedAt?: number;
-  fightStartedAt?: number;
-  finishedAt?: number;
-
-  // Countdown tracking (internal)
-  lastCountdownTick?: number;
-
-  // Result
-  winnerId?: string;
-  forfeitedBy?: string;
-}
-
-/**
- * Active duel lookup - maps playerId to their current duel session ID
- */
-type PlayerDuelMap = Map<string, string>;
-
-/**
- * All active duel sessions
- */
-type DuelSessionMap = Map<string, DuelSession>;
+// Re-export DuelSession from DuelSessionManager for external use
+export type { DuelSession, EquipmentRestrictions } from "./DuelSessionManager";
 
 /**
  * Result of a duel operation
@@ -133,11 +80,11 @@ export class DuelSystem {
   /** Manager for arena pool */
   public readonly arenaPool: ArenaPoolManager;
 
-  /** All active duel sessions by ID */
-  private duelSessions: DuelSessionMap = new Map();
+  /** Manager for duel session CRUD operations */
+  private readonly sessionManager: DuelSessionManager;
 
-  /** Player ID to their active duel session ID */
-  private playerDuels: PlayerDuelMap = new Map();
+  /** Manager for combat resolution and stake transfers */
+  private readonly combatResolver: DuelCombatResolver;
 
   /** Cleanup interval handle */
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
@@ -146,13 +93,12 @@ export class DuelSystem {
   private disconnectTimers: Map<string, ReturnType<typeof setTimeout>> =
     new Map();
 
-  /** Duration before auto-forfeit on disconnect during combat (ms) */
-  private static readonly DISCONNECT_TIMEOUT_MS = 30_000;
-
   constructor(world: World) {
     this.world = world;
     this.pendingDuels = new PendingDuelManager(world);
     this.arenaPool = new ArenaPoolManager();
+    this.sessionManager = new DuelSessionManager(world);
+    this.combatResolver = new DuelCombatResolver(world);
   }
 
   /**
@@ -165,7 +111,7 @@ export class DuelSystem {
     // Start periodic cleanup
     this.cleanupInterval = setInterval(() => {
       this.cleanupExpiredSessions();
-    }, 10_000);
+    }, ticksToMs(CLEANUP_INTERVAL_TICKS));
 
     // Subscribe to player disconnect events
     this.world.on(EventType.PLAYER_LEFT, (payload: unknown) => {
@@ -210,12 +156,11 @@ export class DuelSystem {
     this.disconnectTimers.clear();
 
     // Cancel all active duels
-    for (const [duelId] of this.duelSessions) {
+    for (const [duelId] of this.sessionManager.getAllSessions()) {
       this.cancelDuel(duelId, "server_shutdown");
     }
 
-    this.duelSessions.clear();
-    this.playerDuels.clear();
+    this.sessionManager.clearAllSessions();
     this.pendingDuels.destroy();
 
     console.log("[DuelSystem] Destroyed");
@@ -229,7 +174,7 @@ export class DuelSystem {
     this.pendingDuels.processTick();
 
     // Process active duels
-    for (const [_duelId, session] of this.duelSessions) {
+    for (const [_duelId, session] of this.sessionManager.getAllSessions()) {
       if (session.state === "COUNTDOWN") {
         this.processCountdown(session);
       } else if (session.state === "FIGHTING") {
@@ -261,7 +206,7 @@ export class DuelSystem {
     }
 
     // Check if either player is already in a duel
-    if (this.isPlayerInDuel(challengerId)) {
+    if (this.sessionManager.isPlayerInDuel(challengerId)) {
       return {
         success: false,
         error: "You're already in a duel.",
@@ -269,7 +214,7 @@ export class DuelSystem {
       };
     }
 
-    if (this.isPlayerInDuel(targetId)) {
+    if (this.sessionManager.isPlayerInDuel(targetId)) {
       return {
         success: false,
         error: "That player is already in a duel.",
@@ -361,29 +306,28 @@ export class DuelSystem {
    * Get a duel session by ID
    */
   getDuelSession(duelId: string): DuelSession | undefined {
-    return this.duelSessions.get(duelId);
+    return this.sessionManager.getSession(duelId);
   }
 
   /**
    * Get the duel session a player is currently in
    */
   getPlayerDuel(playerId: string): DuelSession | undefined {
-    const duelId = this.playerDuels.get(playerId);
-    return duelId ? this.duelSessions.get(duelId) : undefined;
+    return this.sessionManager.getPlayerSession(playerId);
   }
 
   /**
    * Get the duel ID for a player
    */
   getPlayerDuelId(playerId: string): string | undefined {
-    return this.playerDuels.get(playerId);
+    return this.sessionManager.getPlayerDuelId(playerId);
   }
 
   /**
    * Check if a player is in an active duel
    */
   isPlayerInDuel(playerId: string): boolean {
-    return this.playerDuels.has(playerId);
+    return this.sessionManager.isPlayerInDuel(playerId);
   }
 
   /**
@@ -394,7 +338,7 @@ export class DuelSystem {
     reason: string,
     cancelledBy?: string,
   ): DuelOperationResult {
-    const session = this.duelSessions.get(duelId);
+    const session = this.sessionManager.getSession(duelId);
     if (!session) {
       return {
         success: false,
@@ -404,7 +348,7 @@ export class DuelSystem {
     }
 
     // Return staked items to both players
-    this.returnStakedItems(session);
+    this.combatResolver.returnStakedItems(session);
 
     // Release arena if one was reserved
     if (session.arenaId !== null) {
@@ -412,9 +356,7 @@ export class DuelSystem {
     }
 
     // Clean up session
-    this.duelSessions.delete(duelId);
-    this.playerDuels.delete(session.challengerId);
-    this.playerDuels.delete(session.targetId);
+    this.sessionManager.deleteSession(duelId);
 
     // Emit cancel event
     this.world.emit("duel:cancelled", {
@@ -456,7 +398,7 @@ export class DuelSystem {
     playerId: string,
     rule: keyof DuelRules,
   ): DuelOperationResult {
-    const session = this.duelSessions.get(duelId);
+    const session = this.sessionManager.getSession(duelId);
     if (!session) {
       return {
         success: false,
@@ -522,7 +464,7 @@ export class DuelSystem {
     playerId: string,
     slot: keyof DuelSession["equipmentRestrictions"],
   ): DuelOperationResult {
-    const session = this.duelSessions.get(duelId);
+    const session = this.sessionManager.getSession(duelId);
     if (!session) {
       return {
         success: false,
@@ -570,7 +512,7 @@ export class DuelSystem {
    * Accept current rules
    */
   acceptRules(duelId: string, playerId: string): DuelOperationResult {
-    const session = this.duelSessions.get(duelId);
+    const session = this.sessionManager.getSession(duelId);
     if (!session) {
       return {
         success: false,
@@ -637,7 +579,7 @@ export class DuelSystem {
     quantity: number,
     value: number,
   ): DuelOperationResult {
-    const session = this.duelSessions.get(duelId);
+    const session = this.sessionManager.getSession(duelId);
     if (!session) {
       return {
         success: false,
@@ -715,7 +657,7 @@ export class DuelSystem {
     playerId: string,
     stakeIndex: number,
   ): DuelOperationResult {
-    const session = this.duelSessions.get(duelId);
+    const session = this.sessionManager.getSession(duelId);
     if (!session) {
       return {
         success: false,
@@ -780,7 +722,7 @@ export class DuelSystem {
    * Accept current stakes
    */
   acceptStakes(duelId: string, playerId: string): DuelOperationResult {
-    const session = this.duelSessions.get(duelId);
+    const session = this.sessionManager.getSession(duelId);
     if (!session) {
       return {
         success: false,
@@ -843,7 +785,7 @@ export class DuelSystem {
     duelId: string,
     playerId: string,
   ): DuelOperationResult & { arenaId?: number } {
-    const session = this.duelSessions.get(duelId);
+    const session = this.sessionManager.getSession(duelId);
     if (!session) {
       return {
         success: false,
@@ -1149,7 +1091,7 @@ export class DuelSystem {
    * This teleports players to the arena and begins the 3-2-1 countdown.
    */
   startDuelCountdown(duelId: string): DuelOperationResult {
-    const session = this.duelSessions.get(duelId);
+    const session = this.sessionManager.getSession(duelId);
     if (!session) {
       return {
         success: false,
@@ -1320,51 +1262,13 @@ export class DuelSystem {
     targetId: string,
     targetName: string,
   ): string {
-    const duelId = `duel_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-
-    const session: DuelSession = {
-      duelId,
-      state: "RULES",
+    // Delegate to session manager
+    return this.sessionManager.createSession(
       challengerId,
       challengerName,
       targetId,
       targetName,
-      rules: { ...DEFAULT_DUEL_RULES },
-      equipmentRestrictions: {
-        head: false,
-        cape: false,
-        amulet: false,
-        weapon: false,
-        body: false,
-        shield: false,
-        legs: false,
-        gloves: false,
-        boots: false,
-        ring: false,
-        ammo: false,
-      },
-      challengerStakes: [],
-      targetStakes: [],
-      challengerAccepted: false,
-      targetAccepted: false,
-      arenaId: null,
-      createdAt: Date.now(),
-    };
-
-    this.duelSessions.set(duelId, session);
-    this.playerDuels.set(challengerId, duelId);
-    this.playerDuels.set(targetId, duelId);
-
-    // Emit session created event
-    this.world.emit("duel:session:created", {
-      duelId,
-      challengerId,
-      challengerName,
-      targetId,
-      targetName,
-    });
-
-    return duelId;
+    );
   }
 
   /**
@@ -1375,10 +1279,10 @@ export class DuelSystem {
     this.pendingDuels.cancelPlayerChallenges(playerId);
 
     // Check if player is in an active duel
-    const duelId = this.playerDuels.get(playerId);
+    const duelId = this.sessionManager.getPlayerDuelId(playerId);
     if (!duelId) return;
 
-    const session = this.duelSessions.get(duelId);
+    const session = this.sessionManager.getSession(duelId);
     if (!session) return;
 
     // If in FIGHTING state, start disconnect timer instead of immediate cancel
@@ -1402,9 +1306,9 @@ export class DuelSystem {
       this.disconnectTimers.delete(playerId);
 
       // Notify both players that the disconnected player returned
-      const duelId = this.playerDuels.get(playerId);
+      const duelId = this.sessionManager.getPlayerDuelId(playerId);
       if (duelId) {
-        const session = this.duelSessions.get(duelId);
+        const session = this.sessionManager.getSession(duelId);
         if (session) {
           this.world.emit("duel:player:reconnected", {
             duelId,
@@ -1430,7 +1334,7 @@ export class DuelSystem {
       playerId,
       challengerId: session.challengerId,
       targetId: session.targetId,
-      timeoutMs: DuelSystem.DISCONNECT_TIMEOUT_MS,
+      timeoutMs: ticksToMs(DISCONNECT_TIMEOUT_TICKS),
     });
 
     // If noForfeit rule is active, instant loss (can't forfeit, so disconnect = loss)
@@ -1448,10 +1352,10 @@ export class DuelSystem {
       this.disconnectTimers.delete(playerId);
 
       // Check if duel still exists and player is still disconnected
-      const duelId = this.playerDuels.get(playerId);
+      const duelId = this.sessionManager.getPlayerDuelId(playerId);
       if (!duelId) return;
 
-      const currentSession = this.duelSessions.get(duelId);
+      const currentSession = this.sessionManager.getSession(duelId);
       if (!currentSession || currentSession.state !== "FIGHTING") return;
 
       // Auto-forfeit: disconnected player loses
@@ -1461,7 +1365,7 @@ export class DuelSystem {
           : currentSession.challengerId;
 
       this.resolveDuel(currentSession, winnerId, playerId, "forfeit");
-    }, DuelSystem.DISCONNECT_TIMEOUT_MS);
+    }, ticksToMs(DISCONNECT_TIMEOUT_TICKS));
 
     this.disconnectTimers.set(playerId, timer);
   }
@@ -1470,10 +1374,10 @@ export class DuelSystem {
    * Handle player death during duel
    */
   private handlePlayerDeath(playerId: string): void {
-    const duelId = this.playerDuels.get(playerId);
+    const duelId = this.sessionManager.getPlayerDuelId(playerId);
     if (!duelId) return;
 
-    const session = this.duelSessions.get(duelId);
+    const session = this.sessionManager.getSession(duelId);
     if (!session) return;
 
     // Only process deaths during active combat
@@ -1504,15 +1408,15 @@ export class DuelSystem {
     // Delay the duel resolution to allow death animation to play
     // and give players time to see the outcome (OSRS-accurate behavior)
     console.log(
-      `[DuelSystem] Starting 5-second death animation delay @ ${Date.now()}`,
+      `[DuelSystem] Starting ${DEATH_RESOLUTION_DELAY_TICKS}-tick death animation delay @ ${Date.now()}`,
     );
     setTimeout(() => {
       console.log(
-        `[DuelSystem] 5-second delay complete, resolving duel @ ${Date.now()}`,
+        `[DuelSystem] Death animation delay complete, resolving duel @ ${Date.now()}`,
       );
       // SECURITY: Verify session still exists and hasn't been cleaned up
       // This prevents double-resolution if cancelDuel was called
-      const currentSession = this.duelSessions.get(capturedDuelId);
+      const currentSession = this.sessionManager.getSession(capturedDuelId);
       if (!currentSession) {
         console.log(
           `[DuelSystem] Skipping resolveDuel - session ${capturedDuelId} no longer exists`,
@@ -1529,7 +1433,7 @@ export class DuelSystem {
       }
 
       this.resolveDuel(currentSession, winnerId, loserId, "death");
-    }, 5000);
+    }, ticksToMs(DEATH_RESOLUTION_DELAY_TICKS));
   }
 
   /**
@@ -1541,79 +1445,16 @@ export class DuelSystem {
     loserId: string,
     reason: "death" | "forfeit",
   ): void {
-    session.state = "FINISHED";
-    session.winnerId = winnerId;
-    session.finishedAt = Date.now();
-
-    // Calculate what each player staked
-    const winnerIsChallenger = winnerId === session.challengerId;
-    const winnerStakes = winnerIsChallenger
-      ? session.challengerStakes
-      : session.targetStakes;
-    const loserStakes = winnerIsChallenger
-      ? session.targetStakes
-      : session.challengerStakes;
-
-    const winnerName = winnerIsChallenger
-      ? session.challengerName
-      : session.targetName;
-    const loserName = winnerIsChallenger
-      ? session.targetName
-      : session.challengerName;
-
-    // Calculate total values
-    const winnerReceivesValue = loserStakes.reduce(
-      (sum, s) => sum + s.value,
-      0,
-    );
-
-    // Transfer stakes to winner
-    this.transferStakes(session, winnerId);
-
-    // Restore both players to full health (OSRS-accurate: no death penalty in duels)
-    this.restorePlayerHealth(winnerId);
-    this.restorePlayerHealth(loserId);
-
-    // Teleport both players to duel arena lobby (OSRS-accurate)
-    // Use different spawn positions so players don't overlap
-    this.teleportToLobby(winnerId, true);
-    this.teleportToLobby(loserId, false);
-
-    // Emit duel completed event with full details
-    this.world.emit("duel:completed", {
-      duelId: session.duelId,
-      winnerId,
-      winnerName,
-      loserId,
-      loserName,
-      reason,
-      forfeit: reason === "forfeit",
-      winnerReceives: loserStakes,
-      winnerReceivesValue,
-      challengerStakes: session.challengerStakes,
-      targetStakes: session.targetStakes,
-    });
-
-    // AUDIT: Log duel completion for economic tracking
-    AuditLogger.getInstance().logDuelComplete(
-      session.duelId,
-      winnerId,
-      loserId,
-      loserStakes,
-      winnerStakes,
-      winnerReceivesValue,
-      reason,
-    );
+    // Delegate to combat resolver for stake transfer, health restoration, and teleportation
+    this.combatResolver.resolveDuel(session, winnerId, loserId, reason);
 
     // Release arena
     if (session.arenaId !== null) {
       this.releaseArena(session.arenaId);
     }
 
-    // Clean up
-    this.duelSessions.delete(session.duelId);
-    this.playerDuels.delete(session.challengerId);
-    this.playerDuels.delete(session.targetId);
+    // Clean up session
+    this.sessionManager.deleteSession(session.duelId);
   }
 
   /**
@@ -1715,183 +1556,16 @@ export class DuelSystem {
   }
 
   /**
-   * Return staked items to both players (on cancel/disconnect)
-   */
-  private returnStakedItems(session: DuelSession): void {
-    // Return challenger's stakes
-    if (session.challengerStakes.length > 0) {
-      this.world.emit("duel:stakes:return", {
-        playerId: session.challengerId,
-        stakes: session.challengerStakes,
-        reason: "duel_cancelled",
-      });
-    }
-
-    // Return target's stakes
-    if (session.targetStakes.length > 0) {
-      this.world.emit("duel:stakes:return", {
-        playerId: session.targetId,
-        stakes: session.targetStakes,
-        reason: "duel_cancelled",
-      });
-    }
-  }
-
-  /**
-   * Transfer all stakes to the winner
-   */
-  private transferStakes(session: DuelSession, winnerId: string): void {
-    const loserId =
-      winnerId === session.challengerId
-        ? session.targetId
-        : session.challengerId;
-
-    // Get winner's stakes (they keep their own)
-    const winnerStakes =
-      winnerId === session.challengerId
-        ? session.challengerStakes
-        : session.targetStakes;
-
-    // Get loser's stakes (transferred to winner)
-    const loserStakes =
-      winnerId === session.challengerId
-        ? session.targetStakes
-        : session.challengerStakes;
-
-    console.log(
-      `[DuelSystem] transferStakes called - winnerId: ${winnerId}, loserId: ${loserId}`,
-    );
-    console.log(
-      `[DuelSystem] Winner stakes (${winnerStakes.length}):`,
-      JSON.stringify(winnerStakes),
-    );
-    console.log(
-      `[DuelSystem] Loser stakes (${loserStakes.length}):`,
-      JSON.stringify(loserStakes),
-    );
-
-    // Calculate total values
-    const winnerOwnValue = winnerStakes.reduce((sum, s) => sum + s.value, 0);
-    const winnerReceivesValue = loserStakes.reduce(
-      (sum, s) => sum + s.value,
-      0,
-    );
-
-    // Emit stake transfer event
-    this.world.emit("duel:stakes:transfer", {
-      winnerId,
-      loserId,
-      duelId: session.duelId,
-      winnerReceives: loserStakes,
-      winnerKeeps: winnerStakes,
-      loserLoses: loserStakes,
-      totalWinnings: winnerReceivesValue,
-      winnerOwnStakeValue: winnerOwnValue,
-    });
-
-    // Combine winner's own stakes AND loser's stakes into a single operation
-    // This prevents race conditions where both try to insert into slot 0
-    const allWinnerItems = [...winnerStakes, ...loserStakes];
-
-    if (allWinnerItems.length > 0) {
-      console.log(
-        `[DuelSystem] Emitting duel:stakes:settle for winner ${winnerId} (${winnerStakes.length} own + ${loserStakes.length} won)`,
-      );
-      this.world.emit("duel:stakes:settle", {
-        playerId: winnerId,
-        ownStakes: winnerStakes,
-        wonStakes: loserStakes,
-        fromPlayerId: loserId,
-        reason: "duel_won",
-      });
-    }
-  }
-
-  /**
-   * Teleport player to hospital spawn point (loser)
-   */
-  private teleportToHospital(playerId: string): void {
-    // Hospital spawn point - can be configured from world data
-    const hospitalSpawn = { x: 60, y: 0, z: 60 };
-
-    this.world.emit("player:teleport", {
-      playerId,
-      position: hospitalSpawn,
-      rotation: 0,
-    });
-  }
-
-  /**
-   * Teleport player to duel arena lobby (both winner and loser)
-   * Uses different spawn positions to prevent players overlapping
-   */
-  private teleportToLobby(playerId: string, isWinner: boolean): void {
-    // Use offset spawn positions so winner and loser don't overlap
-    // Winner spawns slightly west, loser spawns slightly east
-    const lobbySpawn = isWinner
-      ? { x: 102, y: 0, z: 60 }
-      : { x: 108, y: 0, z: 60 };
-
-    this.world.emit("player:teleport", {
-      playerId,
-      position: lobbySpawn,
-      rotation: 0,
-    });
-  }
-
-  /**
-   * Restore player to full health after duel (OSRS-accurate: no death in duels)
-   */
-  private restorePlayerHealth(playerId: string): void {
-    const lobbySpawn = { x: 105, y: 0, z: 60 };
-
-    // CRITICAL: Clear death state on the entity directly
-    // PlayerDeathSystem sets deathState = DYING for duel deaths, but returns early
-    // without calling the normal respawn flow. We must clear it here to re-enable movement.
-    const playerEntity = this.world.entities?.get?.(playerId);
-    if (playerEntity && "data" in playerEntity) {
-      const data = playerEntity.data as {
-        deathState?: DeathState;
-        deathPosition?: [number, number, number];
-        respawnTick?: number;
-        e?: string;
-      };
-      data.deathState = DeathState.ALIVE;
-      data.deathPosition = undefined;
-      data.respawnTick = undefined;
-      data.e = "idle";
-      if ("markNetworkDirty" in playerEntity) {
-        (playerEntity as { markNetworkDirty: () => void }).markNetworkDirty();
-      }
-    }
-
-    // Emit PLAYER_RESPAWNED to trigger health restoration in PlayerSystem
-    // This resets health to max and marks player as alive
-    this.world.emit(EventType.PLAYER_RESPAWNED, {
-      playerId,
-      spawnPosition: lobbySpawn,
-      townName: "Duel Arena",
-    });
-
-    // Also emit PLAYER_SET_DEAD to ensure death state is cleared on client
-    this.world.emit(EventType.PLAYER_SET_DEAD, {
-      playerId,
-      isDead: false,
-    });
-  }
-
-  /**
    * Clean up expired or stale sessions
    */
   private cleanupExpiredSessions(): void {
     const now = Date.now();
-    const maxSessionAge = 30 * 60 * 1000; // 30 minutes max
 
-    for (const [duelId, session] of this.duelSessions) {
+    for (const [duelId, session] of this.sessionManager.getAllSessions()) {
       // Cancel sessions stuck in non-fighting states for too long
       if (
         session.state !== "FIGHTING" &&
-        now - session.createdAt > maxSessionAge
+        now - session.createdAt > ticksToMs(SESSION_MAX_AGE_TICKS)
       ) {
         this.cancelDuel(duelId, "session_timeout");
       }
