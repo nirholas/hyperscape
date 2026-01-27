@@ -60,6 +60,20 @@ export function handleDuelChallenge(
     targetId: data.targetPlayerId,
   });
 
+  // FIRST CHECK: Zone validation before any other processing
+  // This prevents consuming rate limit tokens for invalid requests
+  if (!isInDuelArenaZone(world, playerId)) {
+    Logger.debug("DuelChallenge", "Failed: Challenger not in duel arena", {
+      playerId,
+    });
+    sendDuelError(
+      socket,
+      "You must be in the Duel Arena to challenge players.",
+      "NOT_IN_DUEL_ARENA",
+    );
+    return;
+  }
+
   const duelSystem = getDuelSystem(world);
   if (!duelSystem) {
     Logger.debug("DuelChallenge", "Failed: Duel system unavailable");
@@ -67,7 +81,7 @@ export function handleDuelChallenge(
     return;
   }
 
-  // Rate limit check
+  // Rate limit check (only after zone validation passes)
   const rateLimitOk = rateLimiter.tryOperation(playerId);
   if (!rateLimitOk) {
     Logger.debug("DuelChallenge", "Failed: Rate limited", { playerId });
@@ -95,19 +109,7 @@ export function handleDuelChallenge(
     return;
   }
 
-  // Check both players are in Duel Arena zone
-  if (!isInDuelArenaZone(world, playerId)) {
-    Logger.debug("DuelChallenge", "Failed: Challenger not in duel arena", {
-      playerId,
-    });
-    sendDuelError(
-      socket,
-      "You must be in the Duel Arena to challenge players.",
-      "NOT_IN_DUEL_ARENA",
-    );
-    return;
-  }
-
+  // Check target player is also in Duel Arena zone
   if (!isInDuelArenaZone(world, targetPlayerId)) {
     Logger.debug("DuelChallenge", "Failed: Target not in duel arena", {
       targetPlayerId,

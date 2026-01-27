@@ -76,9 +76,6 @@ export class PlayerInteractionHandler extends BaseInteractionHandler {
 
     // 2. Challenge (Duel Arena only) - Priority 1
     const inDuelArena = this.isInDuelArenaZone();
-    console.log(
-      `[PlayerInteractionHandler] Building context menu - inDuelArena: ${inDuelArena}`,
-    );
     if (inDuelArena) {
       actions.push({
         id: "challenge",
@@ -189,7 +186,6 @@ export class PlayerInteractionHandler extends BaseInteractionHandler {
     const zoneSystem =
       this.world.getSystem<ZoneDetectionSystem>("zone-detection");
     if (!zoneSystem) {
-      console.log("[PlayerInteractionHandler] No zone-detection system found");
       return false;
     }
 
@@ -197,10 +193,6 @@ export class PlayerInteractionHandler extends BaseInteractionHandler {
       x: position.x,
       z: position.z,
     });
-
-    console.log(
-      `[PlayerInteractionHandler] Player at (${position.x.toFixed(1)}, ${position.z.toFixed(1)}) - zone: ${zoneProperties.id || "unknown"}, name: ${zoneProperties.name}`,
-    );
 
     return zoneProperties.id === "duel_arena";
   }
