@@ -168,6 +168,12 @@ export class RateLimiter {
 
 /**
  * Pre-configured rate limiters for common use cases
+ *
+ * SECURITY: These client-side rate limiters prevent spam and improve UX.
+ * Server-side validation is the ultimate authority - these are for:
+ * - Reducing unnecessary network traffic
+ * - Providing immediate feedback to users
+ * - Preventing accidental rapid-fire actions
  */
 export const rateLimiters = {
   /** Chat message rate limiter: 5 messages per 10 seconds */
@@ -184,7 +190,120 @@ export const rateLimiters = {
 
   /** Login attempt rate limiter: 5 attempts per 5 minutes */
   login: new RateLimiter({ maxRequests: 5, windowMs: 300000 }),
+
+  // === COMBAT RATE LIMITERS ===
+
+  /** Attack mob rate limiter: 2 attacks per second (matches game tick rate) */
+  attackMob: new RateLimiter({ maxRequests: 2, windowMs: 1000 }),
+
+  /** Attack player (PvP) rate limiter: 2 attacks per second */
+  attackPlayer: new RateLimiter({ maxRequests: 2, windowMs: 1000 }),
+
+  /** Change attack style rate limiter: 5 changes per second */
+  attackStyle: new RateLimiter({ maxRequests: 5, windowMs: 1000 }),
+
+  /** Auto-retaliate toggle rate limiter: 3 toggles per second */
+  autoRetaliate: new RateLimiter({ maxRequests: 3, windowMs: 1000 }),
+
+  // === INVENTORY RATE LIMITERS ===
+
+  /** Item pickup rate limiter: 5 pickups per second */
+  pickupItem: new RateLimiter({ maxRequests: 5, windowMs: 1000 }),
+
+  /** Item drop rate limiter: 5 drops per second */
+  dropItem: new RateLimiter({ maxRequests: 5, windowMs: 1000 }),
+
+  /** Item move/swap rate limiter: 10 moves per second */
+  moveItem: new RateLimiter({ maxRequests: 10, windowMs: 1000 }),
+
+  /** Item use rate limiter: 5 uses per second */
+  useItem: new RateLimiter({ maxRequests: 5, windowMs: 1000 }),
+
+  /** Equip item rate limiter: 5 equips per second */
+  equipItem: new RateLimiter({ maxRequests: 5, windowMs: 1000 }),
+
+  /** Unequip item rate limiter: 5 unequips per second */
+  unequipItem: new RateLimiter({ maxRequests: 5, windowMs: 1000 }),
+
+  // === CURRENCY RATE LIMITERS ===
+
+  /** Currency withdraw rate limiter: 5 withdraws per second */
+  currencyWithdraw: new RateLimiter({ maxRequests: 5, windowMs: 1000 }),
+
+  /** Bank deposit rate limiter: 10 deposits per second */
+  bankDeposit: new RateLimiter({ maxRequests: 10, windowMs: 1000 }),
+
+  /** Bank withdraw rate limiter: 10 withdraws per second */
+  bankWithdraw: new RateLimiter({ maxRequests: 10, windowMs: 1000 }),
+
+  /** Store buy rate limiter: 10 purchases per second */
+  storeBuy: new RateLimiter({ maxRequests: 10, windowMs: 1000 }),
+
+  /** Store sell rate limiter: 10 sales per second */
+  storeSell: new RateLimiter({ maxRequests: 10, windowMs: 1000 }),
+
+  // === GATHERING RATE LIMITERS ===
+
+  /** Resource interact rate limiter: 3 interactions per second */
+  resourceInteract: new RateLimiter({ maxRequests: 3, windowMs: 1000 }),
+
+  /** Gathering request rate limiter: 2 per second */
+  gatheringRequest: new RateLimiter({ maxRequests: 2, windowMs: 1000 }),
+
+  // === PRAYER RATE LIMITERS ===
+
+  /** Prayer toggle rate limiter: 10 toggles per second */
+  prayerToggle: new RateLimiter({ maxRequests: 10, windowMs: 1000 }),
+
+  /** Prayer deactivate all rate limiter: 3 per second */
+  prayerDeactivateAll: new RateLimiter({ maxRequests: 3, windowMs: 1000 }),
+
+  // === NPC INTERACTION RATE LIMITERS ===
+
+  /** NPC interact rate limiter: 3 interactions per second */
+  npcInteract: new RateLimiter({ maxRequests: 3, windowMs: 1000 }),
+
+  /** Dialogue response rate limiter: 5 responses per second */
+  dialogueResponse: new RateLimiter({ maxRequests: 5, windowMs: 1000 }),
 };
+
+/**
+ * Helper to check rate limit and optionally show a toast message
+ *
+ * @example
+ * ```typescript
+ * if (!checkRateLimit('attackMob', world)) {
+ *   return; // Rate limited, toast already shown
+ * }
+ * world.network.send('attackMob', { targetId });
+ * ```
+ */
+export function checkRateLimit(
+  action: keyof typeof rateLimiters,
+  world?: { emit?: (event: string, data: unknown) => void } | null,
+  options: { showToast?: boolean; toastMessage?: string } = { showToast: true },
+): boolean {
+  const limiter = rateLimiters[action];
+  if (!limiter) {
+    console.warn(`[RateLimiter] Unknown action: ${action}`);
+    return true;
+  }
+
+  if (limiter.tryProceed()) {
+    return true;
+  }
+
+  // Rate limited - optionally show toast
+  if (options.showToast && world?.emit) {
+    const result = limiter.check();
+    const message =
+      options.toastMessage ||
+      `Too fast! Please wait ${Math.ceil(result.retryAfter / 1000)}s`;
+    world.emit("UI_MESSAGE", { message, type: "warning" });
+  }
+
+  return false;
+}
 
 /**
  * Decorator for rate-limited functions
