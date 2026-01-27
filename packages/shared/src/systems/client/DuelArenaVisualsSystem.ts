@@ -185,9 +185,6 @@ export class DuelArenaVisualsSystem extends System {
     this.arenaGroup = new THREE.Group();
     this.arenaGroup.name = "DuelArenaVisuals";
 
-    // Create a tall beacon so you can find the arena
-    this.createBeacon();
-
     // Create lobby floor
     this.createLobbyFloor();
 
@@ -354,39 +351,6 @@ export class DuelArenaVisualsSystem extends System {
 
     this.geometries.push(geometry);
     this.arenaGroup!.add(wall);
-  }
-
-  /**
-   * Create a tall beacon to help locate the arena (temporary debug helper)
-   */
-  private createBeacon(): void {
-    // Get terrain height at beacon position
-    const terrainY = this.getTerrainHeight(ARENA_BASE_X, ARENA_BASE_Z);
-    const beaconHeight = 30;
-
-    const geometry = new THREE.CylinderGeometry(1, 1, beaconHeight, 8);
-    const material = new THREE.MeshStandardMaterial({
-      color: 0xffff00, // Bright yellow
-      emissive: 0xffff00,
-      emissiveIntensity: 0.5,
-    });
-
-    const beacon = new THREE.Mesh(geometry, material);
-    // Position beacon starting from terrain height
-    beacon.position.set(
-      ARENA_BASE_X,
-      terrainY + beaconHeight / 2,
-      ARENA_BASE_Z,
-    );
-    beacon.name = "ArenaBeacon";
-
-    this.geometries.push(geometry);
-    this.materials.push(material);
-    this.arenaGroup!.add(beacon);
-
-    console.log(
-      `[DuelArenaVisualsSystem] Created beacon at (${ARENA_BASE_X}, ${(terrainY + beaconHeight / 2).toFixed(1)}, ${ARENA_BASE_Z}) - terrain=${terrainY.toFixed(1)}`,
-    );
   }
 
   /**
