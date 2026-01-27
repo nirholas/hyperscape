@@ -3565,6 +3565,7 @@ export class ClientNetwork extends SystemBase {
   onPlayerTeleport = (data: {
     playerId: string;
     position: [number, number, number];
+    rotation?: number;
   }) => {
     const pos = _v3_1.set(data.position[0], data.position[1], data.position[2]);
 
@@ -3572,6 +3573,15 @@ export class ClientNetwork extends SystemBase {
     const localPlayer = this.world.entities.player;
     const isLocalPlayer =
       localPlayer instanceof PlayerLocal && localPlayer.id === data.playerId;
+
+    // Convert rotation angle to quaternion if provided
+    // Server sends angle as atan2(dx, dz) - need to add PI for VRM models
+    let rotationQuat: [number, number, number, number] | undefined;
+    if (data.rotation !== undefined) {
+      const angle = data.rotation + Math.PI; // VRM 1.0+ compensation
+      const halfAngle = angle / 2;
+      rotationQuat = [0, Math.sin(halfAngle), 0, Math.cos(halfAngle)];
+    }
 
     if (isLocalPlayer) {
       // Local player teleport
@@ -3599,6 +3609,16 @@ export class ClientNetwork extends SystemBase {
       // Now teleport the player
       localPlayer.teleport(pos);
 
+      // Apply rotation if provided
+      if (rotationQuat && localPlayer.base) {
+        localPlayer.base.quaternion.set(
+          rotationQuat[0],
+          rotationQuat[1],
+          rotationQuat[2],
+          rotationQuat[3],
+        );
+      }
+
       // Emit event for UI (e.g., home teleport completion)
       this.world.emit(EventType.PLAYER_TELEPORTED, {
         playerId: data.playerId,
@@ -3625,6 +3645,28 @@ export class ClientNetwork extends SystemBase {
         // Also update node position if available
         if (remotePlayer.node) {
           remotePlayer.node.position.set(pos.x, pos.y, pos.z);
+        }
+
+        // Apply rotation if provided
+        if (rotationQuat) {
+          // Set on TileInterpolator for consistent rotation management
+          this.tileInterpolator.setCombatRotation(data.playerId, rotationQuat);
+
+          // Also set directly on entity for immediate visual update
+          if (remotePlayer.base) {
+            (
+              remotePlayer.base as {
+                quaternion?: {
+                  set: (x: number, y: number, z: number, w: number) => void;
+                };
+              }
+            ).quaternion?.set(
+              rotationQuat[0],
+              rotationQuat[1],
+              rotationQuat[2],
+              rotationQuat[3],
+            );
+          }
         }
       }
     }

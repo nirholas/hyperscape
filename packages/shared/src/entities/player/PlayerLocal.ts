@@ -2017,11 +2017,12 @@ export class PlayerLocal extends Entity implements HotReloadable {
       id: string;
     } | null = null;
 
-    // First check if WE have a combat target (player attacking mob)
+    // First check if WE have a combat target (player attacking mob or player)
     if (this.combat.combatTarget) {
-      const targetEntity = this.world.entities.items.get(
-        this.combat.combatTarget,
-      );
+      // Check both entities.items (mobs/NPCs) and entities.players (other players)
+      const targetEntity =
+        this.world.entities.items.get(this.combat.combatTarget) ||
+        this.world.entities.players?.get(this.combat.combatTarget);
       if (targetEntity?.position) {
         const dx = targetEntity.position.x - this.position.x;
         const dz = targetEntity.position.z - this.position.z;
@@ -2040,9 +2041,10 @@ export class PlayerLocal extends Entity implements HotReloadable {
     // If no combat target, check if server told us to face an attacker
     // This replaces the old client-side mob search loop
     if (!combatTarget && this._serverFaceTargetId) {
-      const targetEntity = this.world.entities.items.get(
-        this._serverFaceTargetId,
-      );
+      // Check both entities.items (mobs/NPCs) and entities.players (other players)
+      const targetEntity =
+        this.world.entities.items.get(this._serverFaceTargetId) ||
+        this.world.entities.players?.get(this._serverFaceTargetId);
       if (targetEntity?.position) {
         const dx = targetEntity.position.x - this.position.x;
         const dz = targetEntity.position.z - this.position.z;
