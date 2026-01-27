@@ -26,6 +26,7 @@ import type {
   QuestCompleteData,
   XpLampData,
   DuelData,
+  DuelResultData,
 } from "@/hooks";
 import { BankPanel } from "../panels/BankPanel";
 import { StorePanel } from "../panels/StorePanel";
@@ -38,6 +39,7 @@ import { QuestStartPanel } from "../panels/QuestStartPanel";
 import { QuestCompletePanel } from "../panels/QuestCompletePanel";
 import { XpLampPanel } from "../panels/XpLampPanel";
 import { DuelPanel } from "../panels/DuelPanel";
+import { DuelResultModal } from "../panels/DuelPanel/DuelResultModal";
 import { Minimap } from "../hud/Minimap";
 
 /**
@@ -598,6 +600,7 @@ export interface InterfaceModalsRendererProps {
   questCompleteData: QuestCompleteData | null;
   xpLampData: XpLampData | null;
   duelData: DuelData | null;
+  duelResultData: DuelResultData | null;
 
   // Simple modal states
   worldMapOpen: boolean;
@@ -621,6 +624,9 @@ export interface InterfaceModalsRendererProps {
   >;
   setXpLampData: React.Dispatch<React.SetStateAction<XpLampData | null>>;
   setDuelData: React.Dispatch<React.SetStateAction<DuelData | null>>;
+  setDuelResultData: React.Dispatch<
+    React.SetStateAction<DuelResultData | null>
+  >;
   setWorldMapOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setStatsModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setDeathModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
@@ -648,6 +654,7 @@ export function InterfaceModalsRenderer({
   questCompleteData,
   xpLampData,
   duelData,
+  duelResultData,
   worldMapOpen,
   statsModalOpen,
   deathModalOpen,
@@ -661,6 +668,7 @@ export function InterfaceModalsRenderer({
   setQuestCompleteData,
   setXpLampData,
   setDuelData,
+  setDuelResultData,
   setWorldMapOpen,
   setStatsModalOpen,
   setDeathModalOpen,
@@ -982,6 +990,23 @@ export function InterfaceModalsRenderer({
               duelId: duelData.duelId,
             });
           }}
+        />
+      )}
+
+      {/* Duel Result Modal */}
+      {duelResultData?.visible && (
+        <DuelResultModal
+          state={{
+            visible: true,
+            won: duelResultData.won,
+            opponentName: duelResultData.opponentName,
+            itemsReceived: duelResultData.itemsReceived,
+            itemsLost: duelResultData.itemsLost,
+            totalValueWon: duelResultData.totalValueWon,
+            totalValueLost: duelResultData.totalValueLost,
+            forfeit: duelResultData.forfeit,
+          }}
+          onClose={() => setDuelResultData(null)}
         />
       )}
     </>

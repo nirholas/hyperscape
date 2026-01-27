@@ -212,6 +212,26 @@ export interface DuelData {
   opponentModifiedStakes: boolean;
 }
 
+/** Duel result data structure (shown after duel completes) */
+export interface DuelResultData {
+  visible: boolean;
+  won: boolean;
+  opponentName: string;
+  itemsReceived: Array<{
+    itemId: string;
+    quantity: number;
+    value: number;
+  }>;
+  itemsLost: Array<{
+    itemId: string;
+    quantity: number;
+    value: number;
+  }>;
+  totalValueWon: number;
+  totalValueLost: number;
+  forfeit: boolean;
+}
+
 /**
  * Hook return type for modal panels
  */
@@ -227,6 +247,7 @@ export interface ModalPanelsState {
   questCompleteData: QuestCompleteData | null;
   xpLampData: XpLampData | null;
   duelData: DuelData | null;
+  duelResultData: DuelResultData | null;
 
   // Setters
   setBankData: React.Dispatch<React.SetStateAction<BankData | null>>;
@@ -245,6 +266,9 @@ export interface ModalPanelsState {
   >;
   setXpLampData: React.Dispatch<React.SetStateAction<XpLampData | null>>;
   setDuelData: React.Dispatch<React.SetStateAction<DuelData | null>>;
+  setDuelResultData: React.Dispatch<
+    React.SetStateAction<DuelResultData | null>
+  >;
 
   // Close handlers
   closeBank: () => void;
@@ -257,6 +281,7 @@ export interface ModalPanelsState {
   closeQuestComplete: () => void;
   closeXpLamp: () => void;
   closeDuel: () => void;
+  closeDuelResult: () => void;
 }
 
 // Also export as ModalPanelsResult for backwards compatibility
@@ -294,6 +319,9 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
     useState<QuestCompleteData | null>(null);
   const [xpLampData, setXpLampData] = useState<XpLampData | null>(null);
   const [duelData, setDuelData] = useState<DuelData | null>(null);
+  const [duelResultData, setDuelResultData] = useState<DuelResultData | null>(
+    null,
+  );
 
   // Close handlers
   const closeBank = useCallback(() => setBankData(null), []);
@@ -306,6 +334,7 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
   const closeQuestComplete = useCallback(() => setQuestCompleteData(null), []);
   const closeXpLamp = useCallback(() => setXpLampData(null), []);
   const closeDuel = useCallback(() => setDuelData(null), []);
+  const closeDuelResult = useCallback(() => setDuelResultData(null), []);
 
   useEffect(() => {
     if (!world) return;
@@ -705,6 +734,45 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
           return null;
         });
       }
+
+      // Duel completed - show result modal
+      // Server sends pre-computed data for each player directly
+      if (d.component === "duelCompleted") {
+        const completedData = d.data as {
+          duelId: string;
+          won: boolean;
+          opponentName: string;
+          itemsReceived: Array<{
+            itemId: string;
+            quantity: number;
+            value: number;
+          }>;
+          itemsLost: Array<{
+            itemId: string;
+            quantity: number;
+            value: number;
+          }>;
+          totalValueWon: number;
+          totalValueLost: number;
+          forfeit: boolean;
+        };
+
+        // Close the duel panel first
+        setDuelData(null);
+
+        // Use the server's pre-computed data directly
+        // Ensure arrays are never undefined to prevent React render errors
+        setDuelResultData({
+          visible: true,
+          won: completedData.won,
+          opponentName: completedData.opponentName || "Unknown",
+          itemsReceived: completedData.itemsReceived || [],
+          itemsLost: completedData.itemsLost || [],
+          totalValueWon: completedData.totalValueWon || 0,
+          totalValueLost: completedData.totalValueLost || 0,
+          forfeit: completedData.forfeit || false,
+        });
+      }
     };
 
     // Register world event listeners
@@ -805,6 +873,7 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
     questCompleteData,
     xpLampData,
     duelData,
+    duelResultData,
     setBankData,
     setStoreData,
     setDialogueData,
@@ -815,6 +884,7 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
     setQuestCompleteData,
     setXpLampData,
     setDuelData,
+    setDuelResultData,
     closeBank,
     closeStore,
     closeDialogue,
@@ -825,5 +895,6 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
     closeQuestComplete,
     closeXpLamp,
     closeDuel,
+    closeDuelResult,
   };
 }
