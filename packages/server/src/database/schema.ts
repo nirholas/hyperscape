@@ -193,6 +193,7 @@ export const characters = pgTable(
     defenseLevel: integer("defenseLevel").default(1),
     constitutionLevel: integer("constitutionLevel").default(10),
     rangedLevel: integer("rangedLevel").default(1),
+    magicLevel: integer("magicLevel").default(1),
 
     // Prayer skill
     prayerLevel: integer("prayerLevel").default(1),
@@ -212,6 +213,7 @@ export const characters = pgTable(
     defenseXp: integer("defenseXp").default(0),
     constitutionXp: integer("constitutionXp").default(1154),
     rangedXp: integer("rangedXp").default(0),
+    magicXp: integer("magicXp").default(0),
     prayerXp: integer("prayerXp").default(0),
     woodcuttingXp: integer("woodcuttingXp").default(0),
     miningXp: integer("miningXp").default(0),
@@ -246,6 +248,7 @@ export const characters = pgTable(
     // Combat preferences
     attackStyle: text("attackStyle").default("accurate"),
     autoRetaliate: integer("autoRetaliate").default(1).notNull(), // 1=ON (default), 0=OFF
+    selectedSpell: text("selectedSpell"), // Autocast spell ID (null = no autocast)
 
     lastLogin: bigint("lastLogin", { mode: "number" }).default(0),
 

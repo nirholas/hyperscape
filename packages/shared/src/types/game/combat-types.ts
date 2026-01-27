@@ -11,13 +11,95 @@ import type { CombatStyle } from "../../utils/game/CombatCalculations";
 // This includes the 4 melee styles: accurate, aggressive, defensive, controlled
 export type { CombatStyle };
 
-// Extended combat style type that includes ranged (for future use)
+// Extended combat style type that includes ranged/magic
 export type CombatStyleExtended =
   | "accurate"
   | "aggressive"
   | "defensive"
   | "controlled"
-  | "longrange";
+  | "longrange"
+  | "rapid"
+  | "autocast";
+
+/**
+ * Ranged combat styles with OSRS-accurate bonuses
+ */
+export type RangedCombatStyle = "accurate" | "rapid" | "longrange";
+
+/**
+ * Magic combat styles
+ */
+export type MagicCombatStyle = "accurate" | "longrange" | "autocast";
+
+/**
+ * Style bonus configuration - pre-allocated, frozen objects
+ */
+export interface RangedStyleBonus {
+  readonly attackBonus: number; // Invisible ranged level bonus
+  readonly speedModifier: number; // -1 for rapid
+  readonly rangeModifier: number; // +2 for longrange
+  readonly xpSplit: "ranged" | "ranged_defence";
+}
+
+export interface MagicStyleBonus {
+  readonly attackBonus: number;
+  readonly speedModifier: number;
+  readonly rangeModifier: number;
+  readonly xpSplit: "magic" | "magic_defence";
+}
+
+/**
+ * Pre-allocated frozen style bonuses (no allocations in hot path)
+ * OSRS-accurate style bonuses for ranged combat
+ */
+export const RANGED_STYLE_BONUSES: Readonly<
+  Record<RangedCombatStyle, Readonly<RangedStyleBonus>>
+> = Object.freeze({
+  accurate: Object.freeze({
+    attackBonus: 3,
+    speedModifier: 0,
+    rangeModifier: 0,
+    xpSplit: "ranged" as const,
+  }),
+  rapid: Object.freeze({
+    attackBonus: 0,
+    speedModifier: -1,
+    rangeModifier: 0,
+    xpSplit: "ranged" as const,
+  }),
+  longrange: Object.freeze({
+    attackBonus: 0,
+    speedModifier: 0,
+    rangeModifier: 2,
+    xpSplit: "ranged_defence" as const,
+  }),
+});
+
+/**
+ * Pre-allocated frozen style bonuses for magic combat
+ */
+export const MAGIC_STYLE_BONUSES: Readonly<
+  Record<MagicCombatStyle, Readonly<MagicStyleBonus>>
+> = Object.freeze({
+  accurate: Object.freeze({
+    attackBonus: 3,
+    speedModifier: 0,
+    rangeModifier: 0,
+    xpSplit: "magic" as const,
+  }),
+  longrange: Object.freeze({
+    attackBonus: 1,
+    speedModifier: 0,
+    rangeModifier: 2,
+    xpSplit: "magic_defence" as const,
+  }),
+  autocast: Object.freeze({
+    attackBonus: 0,
+    speedModifier: 0,
+    rangeModifier: 0,
+    xpSplit: "magic" as const,
+  }),
+});
 
 export interface CombatData {
   attackerId: string;

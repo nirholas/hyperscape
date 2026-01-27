@@ -37,11 +37,21 @@ export enum ItemType {
 }
 
 // Combat related enums
-// MVP: Melee-only combat. Ranged/Magic deferred for future expansion.
+/**
+ * Combat attack types. Discriminated union for exhaustive switch handling.
+ * @see https://oldschool.runescape.wiki/w/Combat
+ */
 export enum AttackType {
   MELEE = "melee",
-  // RANGED = "ranged",  // Deferred: Re-add when implementing ranged combat
-  // MAGIC = "magic",    // Deferred: Re-add when implementing magic combat
+  RANGED = "ranged",
+  MAGIC = "magic",
+}
+
+/**
+ * Type guard for AttackType validation
+ */
+export function isValidAttackType(value: string): value is AttackType {
+  return Object.values(AttackType).includes(value as AttackType);
 }
 
 // Equipment slot type enum - use this consistently

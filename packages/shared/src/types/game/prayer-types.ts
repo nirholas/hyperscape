@@ -29,10 +29,16 @@ export const PRAYER_ID_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 export type PrayerCategory = "offensive" | "defensive" | "utility";
 
 export interface PrayerBonuses {
+  // Melee bonuses
   readonly attackMultiplier?: number;
   readonly strengthMultiplier?: number;
   readonly defenseMultiplier?: number;
-  // Future: rangedMultiplier, magicMultiplier
+  // Ranged bonuses
+  readonly rangedAttackMultiplier?: number;
+  readonly rangedStrengthMultiplier?: number;
+  // Magic bonuses
+  readonly magicAttackMultiplier?: number;
+  readonly magicDefenseMultiplier?: number;
 }
 
 export interface PrayerDefinition {
@@ -118,6 +124,10 @@ export function isValidPrayerBonuses(
     "attackMultiplier",
     "strengthMultiplier",
     "defenseMultiplier",
+    "rangedAttackMultiplier",
+    "rangedStrengthMultiplier",
+    "magicAttackMultiplier",
+    "magicDefenseMultiplier",
   ]) {
     if (
       key in b &&
