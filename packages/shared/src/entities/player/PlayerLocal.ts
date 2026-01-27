@@ -818,16 +818,17 @@ export class PlayerLocal extends Entity implements HotReloadable {
     }
 
     const terrainHeight = terrain.getHeightAt(this.position.x, this.position.z);
-    const targetY = terrainHeight; // Character feet at ground level
-    const diff = targetY - this.position.y;
+    if (!Number.isFinite(terrainHeight)) return;
 
-    // Keep character at terrain level
-    if (diff > 0.01) {
-      // Below terrain - snap up immediately
-      this.position.y = targetY;
-    } else if (diff < -0.01) {
-      // Above terrain - snap down immediately (no floating)
-      this.position.y = targetY;
+    // AGGRESSIVE GROUND CLAMPING:
+    // - No tolerance when below terrain (prevents leg clipping)
+    // - Small tolerance when above (allows jumping, stairs, slopes)
+    if (this.position.y < terrainHeight) {
+      // Below terrain - snap up immediately (no tolerance for clipping)
+      this.position.y = terrainHeight;
+    } else if (this.position.y > terrainHeight + 0.5) {
+      // Significantly above terrain - snap down (prevent floating)
+      this.position.y = terrainHeight;
     }
   }
 
@@ -2204,6 +2205,10 @@ export class PlayerLocal extends Entity implements HotReloadable {
   }
 
   lateUpdate(_delta: number): void {
+    // CRITICAL: Validate terrain position every frame to prevent leg clipping
+    // This runs after TileInterpolator and other position updates
+    this.validateTerrainPosition();
+
     if (this._avatar) {
       if (this._avatar.getBoneTransform) {
         const matrix = this._avatar.getBoneTransform("head");

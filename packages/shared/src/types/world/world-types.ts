@@ -306,6 +306,32 @@ export interface WorldArea {
   };
   /** Station placements for this area (furnaces, anvils, banks, altars, ranges) */
   stations?: StationLocation[];
+  /** Flat zones for terrain flattening (e.g., arena floors) */
+  flatZones?: Array<{
+    id: string;
+    centerX: number;
+    centerZ: number;
+    width: number;
+    depth: number;
+    height?: number;
+    heightOffset?: number;
+    blendRadius: number;
+  }>;
+  /** Sub-zones within this area (e.g., lobby, hospital, arenas) */
+  subZones?: Record<
+    string,
+    {
+      name: string;
+      bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
+      safeZone: boolean;
+      spawnPoint?: { x: number; y: number; z: number };
+      duelOnly?: boolean;
+      arenaCount?: number;
+      arenaLayout?: string;
+      arenaSize?: { width: number; length: number };
+      arenaGap?: number;
+    }
+  >;
 }
 
 // ============== ZONE SPAWN POINTS ==============

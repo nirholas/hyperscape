@@ -21,6 +21,10 @@ import THREE from "../../extras/three/three";
 import { System } from "../shared/infrastructure/System";
 import type { World } from "../../core/World";
 import type { WorldOptions } from "../../types/index";
+import { getPhysX } from "../../physics/PhysXManager";
+import { Layers } from "../../physics/Layers";
+import type { Physics } from "../shared/interaction/Physics";
+import type { PxRigidStatic } from "../../types/systems/physics";
 
 // ============================================================================
 // Arena Configuration (matches ArenaPoolManager)
@@ -34,7 +38,12 @@ const ARENA_GAP = 4;
 const ARENA_COUNT = 6;
 const WALL_HEIGHT = 3;
 const WALL_THICKNESS = 0.5;
-const FLOOR_HEIGHT_OFFSET = 0.2; // How high above terrain to place floors
+const FLOOR_THICKNESS = 0.3; // BoxGeometry height for floors
+// Floor positioning relative to PROCEDURAL terrain height:
+// - heightOffset in JSON = 0.4 (where players stand above procedural terrain)
+// - Floor TOP should be at procedural + 0.4 + 0.02 (2cm above terrain mesh to prevent z-fighting)
+// - Floor CENTER = procedural + 0.4 + 0.02 - 0.15 = procedural + 0.27
+const FLOOR_HEIGHT_OFFSET = 0.27; // Floor center position above procedural terrain
 
 // Lobby configuration
 const LOBBY_CENTER_X = 105;
@@ -76,14 +85,21 @@ export class DuelArenaVisualsSystem extends System {
   /** Reference to terrain system for height queries */
   private terrainSystem: {
     getHeightAt?: (x: number, z: number) => number;
+    getProceduralHeightAt?: (x: number, z: number) => number;
   } | null = null;
+
+  /** Reference to physics system for collision bodies */
+  private physicsSystem: Physics | null = null;
+
+  /** Physics bodies for cleanup */
+  private physicsBodies: PxRigidStatic[] = [];
 
   constructor(world: World) {
     super(world);
   }
 
   /**
-   * Get terrain height at world position, with fallback
+   * Get terrain height at world position (includes flat zone adjustments)
    */
   private getTerrainHeight(x: number, z: number): number {
     if (this.terrainSystem?.getHeightAt) {
@@ -95,6 +111,23 @@ export class DuelArenaVisualsSystem extends System {
       }
     }
     return 0;
+  }
+
+  /**
+   * Get PROCEDURAL terrain height (bypasses flat zones).
+   * Used to position floors above the actual terrain mesh.
+   */
+  private getProceduralTerrainHeight(x: number, z: number): number {
+    if (this.terrainSystem?.getProceduralHeightAt) {
+      try {
+        const height = this.terrainSystem.getProceduralHeightAt(x, z);
+        return height ?? 0;
+      } catch {
+        return 0;
+      }
+    }
+    // Fallback to regular terrain height
+    return this.getTerrainHeight(x, z);
   }
 
   async init(options?: WorldOptions): Promise<void> {
@@ -123,6 +156,14 @@ export class DuelArenaVisualsSystem extends System {
     if (!this.terrainSystem?.getHeightAt) {
       console.warn(
         "[DuelArenaVisualsSystem] TerrainSystem not available, using fallback heights",
+      );
+    }
+
+    // Get physics system for collision bodies
+    this.physicsSystem = this.world.getSystem("physics") as Physics | null;
+    if (!this.physicsSystem) {
+      console.warn(
+        "[DuelArenaVisualsSystem] Physics system not available, floors will have no collision",
       );
     }
 
@@ -195,14 +236,17 @@ export class DuelArenaVisualsSystem extends System {
     centerZ: number,
     arenaId: number,
   ): void {
-    // Get terrain height at center of arena
-    const terrainY = this.getTerrainHeight(centerX, centerZ);
+    // Get PROCEDURAL terrain height (not flat zone height) to position floor above actual terrain mesh
+    const terrainY = this.getProceduralTerrainHeight(centerX, centerZ);
     const floorY = terrainY + FLOOR_HEIGHT_OFFSET;
 
+    const floorWidth = ARENA_WIDTH - 1;
+    const floorLength = ARENA_LENGTH - 1;
+
     const geometry = new THREE.BoxGeometry(
-      ARENA_WIDTH - 1,
-      0.3,
-      ARENA_LENGTH - 1,
+      floorWidth,
+      FLOOR_THICKNESS,
+      floorLength,
     );
 
     const material = new THREE.MeshStandardMaterial({
@@ -222,6 +266,16 @@ export class DuelArenaVisualsSystem extends System {
     this.geometries.push(geometry);
     this.materials.push(material);
     this.arenaGroup!.add(floor);
+
+    // Create physics collision body for the floor
+    this.createFloorCollision(
+      centerX,
+      floorY,
+      centerZ,
+      floorWidth,
+      floorLength,
+      `arena_floor_${arenaId}`,
+    );
   }
 
   /**
@@ -335,13 +389,20 @@ export class DuelArenaVisualsSystem extends System {
   }
 
   /**
-   * Create the lobby floor - snapped to terrain height
+   * Create the lobby floor - positioned above procedural terrain
    */
   private createLobbyFloor(): void {
-    const terrainY = this.getTerrainHeight(LOBBY_CENTER_X, LOBBY_CENTER_Z);
+    const terrainY = this.getProceduralTerrainHeight(
+      LOBBY_CENTER_X,
+      LOBBY_CENTER_Z,
+    );
     const floorY = terrainY + FLOOR_HEIGHT_OFFSET;
 
-    const geometry = new THREE.BoxGeometry(LOBBY_WIDTH, 0.3, LOBBY_LENGTH);
+    const geometry = new THREE.BoxGeometry(
+      LOBBY_WIDTH,
+      FLOOR_THICKNESS,
+      LOBBY_LENGTH,
+    );
 
     const material = new THREE.MeshStandardMaterial({
       color: LOBBY_FLOOR_COLOR,
@@ -360,13 +421,23 @@ export class DuelArenaVisualsSystem extends System {
     this.geometries.push(geometry);
     this.materials.push(material);
     this.arenaGroup!.add(floor);
+
+    // Create physics collision body
+    this.createFloorCollision(
+      LOBBY_CENTER_X,
+      floorY,
+      LOBBY_CENTER_Z,
+      LOBBY_WIDTH,
+      LOBBY_LENGTH,
+      "lobby_floor",
+    );
   }
 
   /**
-   * Create the hospital floor - snapped to terrain height
+   * Create the hospital floor - positioned above procedural terrain
    */
   private createHospitalFloor(): void {
-    const terrainY = this.getTerrainHeight(
+    const terrainY = this.getProceduralTerrainHeight(
       HOSPITAL_CENTER_X,
       HOSPITAL_CENTER_Z,
     );
@@ -374,7 +445,7 @@ export class DuelArenaVisualsSystem extends System {
 
     const geometry = new THREE.BoxGeometry(
       HOSPITAL_WIDTH,
-      0.3,
+      FLOOR_THICKNESS,
       HOSPITAL_LENGTH,
     );
 
@@ -398,6 +469,16 @@ export class DuelArenaVisualsSystem extends System {
     this.geometries.push(geometry);
     this.materials.push(material);
     this.arenaGroup!.add(floor);
+
+    // Create physics collision body
+    this.createFloorCollision(
+      HOSPITAL_CENTER_X,
+      floorY,
+      HOSPITAL_CENTER_Z,
+      HOSPITAL_WIDTH,
+      HOSPITAL_LENGTH,
+      "hospital_floor",
+    );
   }
 
   /**
@@ -430,6 +511,111 @@ export class DuelArenaVisualsSystem extends System {
   }
 
   /**
+   * Create a physics collision body for a floor
+   */
+  private createFloorCollision(
+    centerX: number,
+    centerY: number,
+    centerZ: number,
+    width: number,
+    length: number,
+    tag: string,
+  ): void {
+    const PHYSX = getPhysX();
+    if (!PHYSX || !this.physicsSystem) {
+      return;
+    }
+
+    // Access physics system internals (typed as unknown to avoid strict type checking)
+    const physicsInternal = this.physicsSystem as unknown as {
+      physics?: unknown;
+      scene?: unknown;
+    };
+
+    const physxCore = physicsInternal.physics as
+      | {
+          createMaterial: (sf: number, df: number, r: number) => unknown;
+          createShape: (
+            g: unknown,
+            m: unknown,
+            exclusive: boolean,
+            flags: unknown,
+          ) => unknown;
+          createRigidStatic: (t: unknown) => PxRigidStatic;
+        }
+      | undefined;
+
+    const physxScene = physicsInternal.scene as
+      | {
+          addActor: (a: unknown) => void;
+          removeActor: (a: unknown) => void;
+        }
+      | undefined;
+
+    if (!physxCore || !physxScene) {
+      return;
+    }
+
+    try {
+      // Create box geometry for the floor (half extents)
+      const halfExtents = new PHYSX.PxVec3(
+        width / 2,
+        FLOOR_THICKNESS / 2,
+        length / 2,
+      );
+      const geometry = new PHYSX.PxBoxGeometry(
+        halfExtents.x,
+        halfExtents.y,
+        halfExtents.z,
+      );
+
+      // Create material with some friction
+      const material = physxCore.createMaterial(0.6, 0.6, 0.1);
+
+      // Create shape flags for collision and scene queries
+      const flags = new PHYSX.PxShapeFlags(
+        PHYSX.PxShapeFlagEnum.eSCENE_QUERY_SHAPE |
+          PHYSX.PxShapeFlagEnum.eSIMULATION_SHAPE,
+      );
+
+      const shape = physxCore.createShape(geometry, material, true, flags) as {
+        setQueryFilterData: (f: unknown) => void;
+        setSimulationFilterData: (f: unknown) => void;
+      };
+
+      // Use environment layer so players collide with the floor
+      const layer = Layers.environment || { group: 4, mask: 31 };
+      const filterData = new PHYSX.PxFilterData(layer.group, layer.mask, 0, 0);
+      shape.setQueryFilterData(filterData);
+      shape.setSimulationFilterData(filterData);
+
+      // Create transform at the floor position
+      const transform = new PHYSX.PxTransform(
+        new PHYSX.PxVec3(centerX, centerY, centerZ),
+        new PHYSX.PxQuat(0, 0, 0, 1),
+      );
+
+      // Create static rigid body
+      const body = physxCore.createRigidStatic(transform);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      body.attachShape(shape as any);
+
+      // Add to physics scene
+      physxScene.addActor(body);
+      this.physicsBodies.push(body);
+
+      console.log(
+        `[DuelArenaVisualsSystem] Created physics collision for ${tag} at (${centerX}, ${centerY.toFixed(1)}, ${centerZ})`,
+      );
+    } catch (error) {
+      console.warn(
+        `[DuelArenaVisualsSystem] Failed to create physics collision for ${tag}:`,
+        error,
+      );
+    }
+  }
+
+  /**
    * Update (called each frame) - no-op for static geometry
    */
   update(_deltaTime: number): void {
@@ -440,6 +626,30 @@ export class DuelArenaVisualsSystem extends System {
    * Clean up all resources
    */
   destroy(): void {
+    // Remove physics bodies from scene
+    if (this.physicsSystem && this.physicsBodies.length > 0) {
+      const physicsInternal = this.physicsSystem as unknown as {
+        scene?: unknown;
+      };
+      const physxScene = physicsInternal.scene as
+        | {
+            removeActor: (a: unknown) => void;
+          }
+        | undefined;
+
+      if (physxScene) {
+        for (const body of this.physicsBodies) {
+          try {
+            physxScene.removeActor(body);
+            body.release();
+          } catch {
+            // Ignore cleanup errors
+          }
+        }
+      }
+    }
+    this.physicsBodies = [];
+
     // Remove from scene
     if (this.arenaGroup && this.world.stage?.scene) {
       this.world.stage?.scene.remove(this.arenaGroup);
@@ -459,6 +669,7 @@ export class DuelArenaVisualsSystem extends System {
 
     this.arenaGroup = null;
     this.visualsCreated = false;
+    this.physicsSystem = null;
     super.destroy();
   }
 }
