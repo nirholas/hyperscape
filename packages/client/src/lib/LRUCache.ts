@@ -185,3 +185,203 @@ export const cacheRegistry = {
   getTotalSize: () => poolRegistry.getTotalAvailable(),
   pruneAll: () => 0,
 };
+
+// ============================================================================
+// Common Pooling Utilities
+// ============================================================================
+
+/**
+ * Generic array pool for reusing temporary arrays
+ *
+ * Useful for filter/map operations that create temporary arrays frequently.
+ * Use when profiling shows GC pressure from array creation.
+ *
+ * @example
+ * ```tsx
+ * const tempArray = arrayPool.acquire<Entity>();
+ * // ... use tempArray ...
+ * arrayPool.release(tempArray);
+ * ```
+ */
+class ArrayPool {
+  private pool: unknown[][] = [];
+  private readonly maxSize: number;
+
+  constructor(maxSize: number = 50) {
+    this.maxSize = maxSize;
+  }
+
+  acquire<T>(): T[] {
+    const arr = this.pool.pop();
+    return (arr || []) as T[];
+  }
+
+  release<T>(arr: T[]): void {
+    if (this.pool.length < this.maxSize) {
+      arr.length = 0; // Clear contents
+      this.pool.push(arr);
+    }
+  }
+
+  get available(): number {
+    return this.pool.length;
+  }
+}
+
+/**
+ * Singleton array pool instance
+ */
+export const arrayPool = new ArrayPool(50);
+
+/**
+ * Event data pool for reusing event objects
+ *
+ * Reduces GC pressure when emitting many events per frame.
+ *
+ * @example
+ * ```tsx
+ * const eventData = eventDataPool.acquire();
+ * eventData.type = 'player_moved';
+ * eventData.data = { x: 10, y: 20 };
+ * world.emit(eventData.type, eventData.data);
+ * eventDataPool.release(eventData);
+ * ```
+ */
+interface PooledEventData {
+  type: string;
+  data: Record<string, unknown>;
+}
+
+class EventDataPool {
+  private pool: PooledEventData[] = [];
+  private readonly maxSize: number;
+
+  constructor(maxSize: number = 100) {
+    this.maxSize = maxSize;
+  }
+
+  acquire(): PooledEventData {
+    const event = this.pool.pop();
+    if (event) {
+      return event;
+    }
+    return { type: "", data: {} };
+  }
+
+  release(event: PooledEventData): void {
+    if (this.pool.length < this.maxSize) {
+      event.type = "";
+      // Clear data object properties
+      for (const key of Object.keys(event.data)) {
+        delete event.data[key];
+      }
+      this.pool.push(event);
+    }
+  }
+
+  get available(): number {
+    return this.pool.length;
+  }
+}
+
+/**
+ * Singleton event data pool instance
+ */
+export const eventDataPool = new EventDataPool(100);
+
+/**
+ * Position pool for {x, y, z} objects
+ *
+ * Alternative to Vector3 when Three.js types aren't needed.
+ * Lighter weight for 2D/3D position calculations.
+ */
+interface PooledPosition {
+  x: number;
+  y: number;
+  z: number;
+}
+
+class PositionPool {
+  private pool: PooledPosition[] = [];
+  private readonly maxSize: number;
+
+  constructor(maxSize: number = 200) {
+    this.maxSize = maxSize;
+  }
+
+  acquire(x = 0, y = 0, z = 0): PooledPosition {
+    const pos = this.pool.pop();
+    if (pos) {
+      pos.x = x;
+      pos.y = y;
+      pos.z = z;
+      return pos;
+    }
+    return { x, y, z };
+  }
+
+  release(pos: PooledPosition): void {
+    if (this.pool.length < this.maxSize) {
+      pos.x = 0;
+      pos.y = 0;
+      pos.z = 0;
+      this.pool.push(pos);
+    }
+  }
+
+  get available(): number {
+    return this.pool.length;
+  }
+}
+
+/**
+ * Singleton position pool instance
+ */
+export const positionPool = new PositionPool(200);
+
+/**
+ * Utility function to execute a callback with a pooled array
+ *
+ * Automatically acquires an array, passes it to the callback,
+ * and releases it after the callback completes.
+ *
+ * @example
+ * ```tsx
+ * withPooledArray<Entity>((tempArray) => {
+ *   entities.forEach(e => {
+ *     if (e.isActive) tempArray.push(e);
+ *   });
+ *   return tempArray.length;
+ * });
+ * ```
+ */
+export function withPooledArray<T, R>(callback: (arr: T[]) => R): R {
+  const arr = arrayPool.acquire<T>();
+  try {
+    return callback(arr);
+  } finally {
+    arrayPool.release(arr);
+  }
+}
+
+/**
+ * Development-only pool monitoring
+ *
+ * Logs pool statistics every N seconds to help identify pool sizing issues.
+ */
+export function startPoolMonitoring(intervalMs: number = 10000): () => void {
+  if (process.env.NODE_ENV === "production") {
+    return () => {}; // No-op in production
+  }
+
+  const intervalId = setInterval(() => {
+    console.debug("[Pool Monitor]", {
+      registry: poolRegistry.getTotalAvailable(),
+      arrays: arrayPool.available,
+      events: eventDataPool.available,
+      positions: positionPool.available,
+    });
+  }, intervalMs);
+
+  return () => clearInterval(intervalId);
+}
