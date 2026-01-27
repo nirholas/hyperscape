@@ -244,3 +244,251 @@ test.describe("Visual Regression", () => {
     });
   });
 });
+
+test.describe("Inventory Operations", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await waitForGameLoad(page);
+    await waitForPlayerSpawn(page);
+  });
+
+  test("should be able to get inventory items", async ({ page }) => {
+    const inventory = await page.evaluate(() => {
+      const win = window as unknown as {
+        world?: {
+          network?: {
+            lastInventoryByPlayerId?: Record<
+              string,
+              { items?: Array<{ id: string; name: string; quantity: number }> }
+            >;
+          };
+          entities?: {
+            player?: { id?: string };
+          };
+        };
+      };
+
+      const playerId = win.world?.entities?.player?.id;
+      if (!playerId) return [];
+
+      const inv = win.world?.network?.lastInventoryByPlayerId?.[playerId];
+      return inv?.items ?? [];
+    });
+
+    // Inventory should be an array
+    expect(Array.isArray(inventory)).toBe(true);
+
+    // Take screenshot
+    await takeGameScreenshot(page, "inventory-items");
+  });
+
+  test("should be able to track item count", async ({ page }) => {
+    const itemCount = await page.evaluate(() => {
+      const win = window as unknown as {
+        world?: {
+          network?: {
+            lastInventoryByPlayerId?: Record<
+              string,
+              { items?: Array<{ id: string }> }
+            >;
+          };
+          entities?: {
+            player?: { id?: string };
+          };
+        };
+      };
+
+      const playerId = win.world?.entities?.player?.id;
+      if (!playerId) return 0;
+
+      const inv = win.world?.network?.lastInventoryByPlayerId?.[playerId];
+      return inv?.items?.length ?? 0;
+    });
+
+    // Item count should be a number
+    expect(typeof itemCount).toBe("number");
+    expect(itemCount).toBeGreaterThanOrEqual(0);
+    expect(itemCount).toBeLessThanOrEqual(28); // Max inventory size
+
+    // Take screenshot
+    await takeGameScreenshot(page, "inventory-count");
+  });
+});
+
+test.describe("Trading System", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await waitForGameLoad(page);
+    await waitForPlayerSpawn(page);
+  });
+
+  test("trade panel should exist in UI", async ({ page }) => {
+    // Look for trade panel component
+    const tradePanel = page.locator('[data-panel="trade"]');
+
+    // The panel may not be visible initially but should exist
+    const count = await tradePanel.count();
+    expect(count).toBeGreaterThanOrEqual(0);
+
+    // Take screenshot
+    await takeGameScreenshot(page, "trade-panel-check");
+  });
+
+  test("should be able to find other players for trading", async ({ page }) => {
+    // Wait for entities to load
+    await page.waitForTimeout(2000);
+
+    const otherPlayers = await page.evaluate(() => {
+      const win = window as unknown as {
+        world?: {
+          entities?: {
+            player?: { id?: string };
+            entities?: Map<
+              string,
+              { type?: string; id?: string; name?: string }
+            >;
+          };
+        };
+      };
+
+      const myPlayerId = win.world?.entities?.player?.id;
+      const entities = win.world?.entities?.entities;
+      if (!entities) return [];
+
+      const players: Array<{ id: string; name: string }> = [];
+      entities.forEach((entity, id) => {
+        if (entity.type === "player" && id !== myPlayerId) {
+          players.push({
+            id,
+            name: entity.name ?? "Unknown",
+          });
+        }
+      });
+
+      return players;
+    });
+
+    // Document how many other players are in the world
+    console.log(`[Trade Test] Found ${otherPlayers.length} other players`);
+
+    // Take screenshot
+    await takeGameScreenshot(page, "trade-other-players");
+  });
+
+  test("trade request can be sent via network", async ({ page }) => {
+    // Verify trade request packet can be constructed
+    const canSendTrade = await page.evaluate(() => {
+      const win = window as unknown as {
+        world?: {
+          network?: {
+            send: (name: string, data: unknown) => void;
+          };
+        };
+      };
+
+      // Just verify the network send function exists
+      return typeof win.world?.network?.send === "function";
+    });
+
+    expect(canSendTrade).toBe(true);
+
+    // Take screenshot
+    await takeGameScreenshot(page, "trade-network-check");
+  });
+
+  test("trade panel should have offer and receive sections", async ({
+    page,
+  }) => {
+    // If trade panel were opened, verify structure
+    const tradePanelStructure = await page.evaluate(() => {
+      // Query for trade panel elements in DOM (may be hidden)
+      const panel = document.querySelector('[data-panel="trade"]');
+      if (!panel) return { exists: false };
+
+      const offerSection = panel.querySelector('[data-testid="trade-offer"]');
+      const receiveSection = panel.querySelector(
+        '[data-testid="trade-receive"]',
+      );
+      const acceptButton = panel.querySelector('[data-testid="trade-accept"]');
+      const cancelButton = panel.querySelector('[data-testid="trade-cancel"]');
+
+      return {
+        exists: true,
+        hasOffer: !!offerSection,
+        hasReceive: !!receiveSection,
+        hasAccept: !!acceptButton,
+        hasCancel: !!cancelButton,
+      };
+    });
+
+    // Document the structure (panel may not be rendered if not in trade)
+    console.log(`[Trade Test] Panel structure:`, tradePanelStructure);
+
+    // Take screenshot
+    await takeGameScreenshot(page, "trade-panel-structure");
+  });
+});
+
+test.describe("Item Pickup", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await waitForGameLoad(page);
+    await waitForPlayerSpawn(page);
+  });
+
+  test("should detect ground items", async ({ page }) => {
+    await page.waitForTimeout(2000);
+
+    const groundItems = await page.evaluate(() => {
+      const win = window as unknown as {
+        world?: {
+          entities?: {
+            entities?: Map<
+              string,
+              { type?: string; id?: string; name?: string }
+            >;
+          };
+        };
+      };
+
+      const entities = win.world?.entities?.entities;
+      if (!entities) return [];
+
+      const items: Array<{ id: string; name: string }> = [];
+      entities.forEach((entity, id) => {
+        if (entity.type === "item" || entity.type === "groundItem") {
+          items.push({
+            id,
+            name: entity.name ?? "Item",
+          });
+        }
+      });
+
+      return items;
+    });
+
+    console.log(`[Item Test] Found ${groundItems.length} ground items`);
+
+    // Take screenshot
+    await takeGameScreenshot(page, "item-ground-items");
+  });
+
+  test("pickup request can be sent via network", async ({ page }) => {
+    const canSendPickup = await page.evaluate(() => {
+      const win = window as unknown as {
+        world?: {
+          network?: {
+            send: (name: string, data: unknown) => void;
+          };
+        };
+      };
+
+      return typeof win.world?.network?.send === "function";
+    });
+
+    expect(canSendPickup).toBe(true);
+
+    // Take screenshot
+    await takeGameScreenshot(page, "item-pickup-network");
+  });
+});

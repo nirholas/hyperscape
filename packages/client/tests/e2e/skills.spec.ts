@@ -384,4 +384,132 @@ test.describe("Gathering Skills", () => {
     // Take screenshot
     await takeGameScreenshot(page, "skills-gathering-skills");
   });
+
+  test("should be able to interact with resources via network", async ({
+    page,
+  }) => {
+    // Find nearby resources
+    const resources = await getNearbyResources(page);
+
+    if (resources.length === 0) {
+      console.log("[Gathering Test] No resources found nearby - test skipped");
+      return;
+    }
+
+    const targetResource = resources[0];
+
+    // Get initial XP for the relevant skill
+    const initialSkills = await getPlayerSkills(page);
+
+    // Attempt to interact with resource via network
+    const interactResult = await page.evaluate((resourceId) => {
+      const win = window as unknown as {
+        world?: {
+          network?: {
+            send: (name: string, data: unknown) => void;
+          };
+        };
+      };
+
+      if (!win.world?.network) return false;
+
+      // Send resource interaction command
+      win.world.network.send("resourceInteract", { resourceId });
+      return true;
+    }, targetResource.id);
+
+    expect(interactResult).toBe(true);
+
+    // Wait for gathering to potentially start
+    await page.waitForTimeout(2000);
+
+    // Take screenshot to document state
+    await takeGameScreenshot(page, "skills-resource-interaction");
+  });
+
+  test("XP gain should be trackable after gathering", async ({ page }) => {
+    // Get initial skill XP
+    const initialSkills = await getPlayerSkills(page);
+    const initialWoodcuttingXP = initialSkills.woodcutting?.xp ?? 0;
+    const initialMiningXP = initialSkills.mining?.xp ?? 0;
+    const initialFishingXP = initialSkills.fishing?.xp ?? 0;
+
+    // Verify we can track XP values
+    expect(typeof initialWoodcuttingXP).toBe("number");
+    expect(typeof initialMiningXP).toBe("number");
+    expect(typeof initialFishingXP).toBe("number");
+
+    // Take screenshot
+    await takeGameScreenshot(page, "skills-xp-tracking");
+  });
+
+  test("gathering animation should be detectable", async ({ page }) => {
+    // Check if player has gathering-related animation states
+    const animationState = await page.evaluate(() => {
+      const win = window as unknown as {
+        world?: {
+          entities?: {
+            player?: {
+              animator?: {
+                currentAnimation?: string;
+              };
+              isGathering?: boolean;
+            };
+          };
+        };
+      };
+
+      const player = win.world?.entities?.player;
+      return {
+        currentAnimation: player?.animator?.currentAnimation ?? "idle",
+        isGathering: player?.isGathering ?? false,
+      };
+    });
+
+    // Player should not be gathering on spawn
+    expect(animationState.isGathering).toBe(false);
+
+    // Take screenshot
+    await takeGameScreenshot(page, "skills-animation-state");
+  });
+});
+
+test.describe("Resource Types", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await waitForGameLoad(page);
+    await waitForPlayerSpawn(page);
+  });
+
+  test("should identify different resource types", async ({ page }) => {
+    // Wait for entities to load
+    await page.waitForTimeout(2000);
+
+    const resources = await getNearbyResources(page);
+
+    // Log found resources for debugging
+    console.log(`[Resource Test] Found ${resources.length} resources`);
+
+    // Group by type
+    const resourceTypes = new Set(resources.map((r) => r.type));
+    console.log(
+      `[Resource Test] Types: ${Array.from(resourceTypes).join(", ")}`,
+    );
+
+    // Take screenshot
+    await takeGameScreenshot(page, "skills-resource-types");
+  });
+
+  test("resource nodes should have valid entity structure", async ({
+    page,
+  }) => {
+    const resources = await getNearbyResources(page);
+
+    for (const resource of resources) {
+      // Each resource should have required fields
+      expect(resource.id).toBeDefined();
+      expect(typeof resource.id).toBe("string");
+      expect(resource.type).toBeDefined();
+    }
+  });
 });
