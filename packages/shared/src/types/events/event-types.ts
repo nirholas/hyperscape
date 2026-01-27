@@ -189,6 +189,8 @@ export enum EventType {
   COMBAT_PROJECTILE_LAUNCHED = "combat:projectile_launched",
   COMBAT_PROJECTILE_HIT = "combat:projectile_hit",
   COMBAT_SPELL_CAST = "combat:spell_cast",
+  COMBAT_AUTOCAST_SET = "combat:autocast_set",
+  PLAYER_SET_AUTOCAST = "player:set_autocast",
   COMBAT_AMMO_CONSUMED = "combat:ammo_consumed",
   COMBAT_RUNE_CONSUMED = "combat:rune_consumed",
   COMBAT_MOB_NPC_ATTACK = "combat:mob_npc_attack",

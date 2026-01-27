@@ -299,6 +299,13 @@ export class PlayerSystem extends SystemBase {
       ),
     );
 
+    // Autocast spell selection (F2P magic combat)
+    this.subscribe(EventType.PLAYER_SET_AUTOCAST, (data) =>
+      this.handleSetAutocast(
+        data as { playerId: string; spellId: string | null },
+      ),
+    );
+
     // Listen to skills updates to trigger player UI updates
     this.subscribe<{ playerId: string; skills: Skills }>(
       EventType.SKILLS_UPDATED,
@@ -2085,6 +2092,59 @@ export class PlayerSystem extends SystemBase {
       message: `Auto retaliate: ${enabled ? "ON" : "OFF"}`,
       type: "info",
     });
+  }
+
+  /**
+   * Handle autocast spell selection
+   * Sets the player's selected spell for magic combat
+   */
+  private handleSetAutocast(data: {
+    playerId: string;
+    spellId: string | null;
+  }): void {
+    const { playerId, spellId } = data;
+
+    // Validate player exists
+    const player = this.players.get(playerId);
+    if (!player) {
+      this.logger.warn(`Set autocast rejected: unknown player ${playerId}`);
+      return;
+    }
+
+    // Update player entity data
+    if (player.data) {
+      (player.data as { selectedSpell?: string | null }).selectedSpell =
+        spellId;
+    }
+
+    // Persist to database (server-side only)
+    if (this.world.isServer && this.databaseSystem) {
+      const databaseId = PlayerIdMapper.getDatabaseId(playerId);
+      this.databaseSystem.savePlayer(databaseId, {
+        selectedSpell: spellId ?? undefined,
+      });
+    }
+
+    // Notify client of autocast change
+    this.emitTypedEvent(EventType.COMBAT_AUTOCAST_SET, {
+      playerId,
+      spellId,
+    });
+
+    // Chat message feedback
+    if (spellId) {
+      this.emitTypedEvent(EventType.UI_MESSAGE, {
+        playerId,
+        message: `Autocast set to ${spellId.replace(/_/g, " ")}`,
+        type: "info",
+      });
+    } else {
+      this.emitTypedEvent(EventType.UI_MESSAGE, {
+        playerId,
+        message: "Autocast disabled",
+        type: "info",
+      });
+    }
   }
 
   /**

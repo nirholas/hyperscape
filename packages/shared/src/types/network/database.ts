@@ -60,6 +60,9 @@ export interface PlayerRow {
   positionZ: number;
   attackStyle?: string; // Combat style preference (accurate, aggressive, defensive)
   autoRetaliate?: number; // Auto-retaliate setting: 1=ON (default), 0=OFF
+  selectedSpell?: string; // Autocast spell ID (null = no autocast)
+  magicLevel?: number; // Magic skill level (F2P)
+  magicXp?: number; // Magic skill XP (F2P)
   lastLogin: number;
   createdAt: number;
   woodcuttingLevel: number;
