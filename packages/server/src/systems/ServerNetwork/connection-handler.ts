@@ -15,12 +15,17 @@
  * Responsibilities:
  * - Validate incoming connections
  * - Check player limit
- * - Authenticate users
+ * - Authenticate users (URL param or first-message auth)
  * - Wait for terrain system to be ready
  * - Calculate grounded spawn position
  * - Create and send initial snapshot
  * - Register socket in sockets map
  * - Emit player joined event
+ *
+ * SECURITY: Supports first-message authentication pattern
+ * - If authToken is NOT in URL params, server waits for 'authenticate' packet
+ * - This prevents token exposure in server logs, browser history, referrer headers
+ * - See: handleDeferredAuthentication() for the first-message auth flow
  *
  * Usage:
  * ```typescript
@@ -35,6 +40,7 @@ import {
   EventType,
   TerrainSystem,
   writePacket,
+  readPacket,
   uuid,
 } from "@hyperscape/shared";
 import type {
@@ -160,7 +166,20 @@ export class ConnectionHandler {
       const isLoadTestBot =
         loadTestBotParam === "true" || loadTestBotParam === true;
 
-      // Authenticate user
+      // SECURITY: Check if using first-message auth pattern (no authToken in URL)
+      // This is the preferred pattern as it prevents token exposure in:
+      // - Server logs (WebSocket URLs are often logged)
+      // - Browser history
+      // - Referrer headers
+      const hasAuthTokenInUrl = Boolean(params.authToken);
+
+      if (!hasAuthTokenInUrl && !isLoadTestBot) {
+        // First-message auth: register pending connection and wait for authenticate packet
+        await this.handleDeferredAuthentication(ws, params);
+        return;
+      }
+
+      // Authenticate user (legacy: authToken in URL)
       const { user, authToken, userWithPrivy } = await authenticateUser(
         params,
         this.db,
@@ -292,6 +311,212 @@ export class ConnectionHandler {
     socket.createdAt = Date.now(); // Track creation time for reconnection grace period
 
     return socket;
+  }
+
+  /**
+   * Handle first-message authentication pattern
+   *
+   * SECURITY: This is the preferred auth pattern as it prevents token exposure in:
+   * - Server logs (WebSocket URLs are often logged)
+   * - Browser history
+   * - Referrer headers
+   *
+   * Flow:
+   * 1. Client connects without authToken in URL
+   * 2. Server waits for 'authenticate' packet
+   * 3. Client sends credentials in authenticate packet
+   * 4. Server validates and completes connection
+   * 5. Server sends authResult packet with success/failure
+   *
+   * @param ws - WebSocket connection
+   * @param params - Connection parameters (without authToken)
+   * @private
+   */
+  private async handleDeferredAuthentication(
+    ws: NodeWebSocket,
+    params: ConnectionParams,
+  ): Promise<void> {
+    const AUTH_TIMEOUT_MS = 30000; // 30 seconds to authenticate
+
+    // Set up timeout for authentication
+    const authTimeout = setTimeout(() => {
+      console.warn(
+        "[ConnectionHandler] ⏱️ Authentication timeout - closing connection",
+      );
+      const packet = writePacket("authResult", {
+        success: false,
+        error: "Authentication timeout",
+      });
+      ws.send(packet);
+      ws.close(4001, "Authentication timeout");
+    }, AUTH_TIMEOUT_MS);
+
+    // Set up message handler for authenticate packet
+    const messageHandler = async (message: ArrayBuffer | Buffer) => {
+      try {
+        // Convert Buffer to ArrayBuffer if needed
+        const buffer =
+          message instanceof ArrayBuffer
+            ? message
+            : new Uint8Array(message).buffer;
+
+        const [method, data] = readPacket(new Uint8Array(buffer));
+
+        // Only handle authenticate packet
+        if (method !== "onAuthenticate") {
+          return;
+        }
+
+        // Clear timeout since we received the auth packet
+        clearTimeout(authTimeout);
+
+        // Remove message handler
+        ws.removeListener?.("message", messageHandler);
+
+        // Extract auth credentials from packet
+        const authData = data as {
+          authToken?: string;
+          privyUserId?: string;
+          name?: string;
+          avatar?: string;
+        };
+
+        if (!authData.authToken) {
+          console.warn(
+            "[ConnectionHandler] ❌ Authenticate packet missing authToken",
+          );
+          const packet = writePacket("authResult", {
+            success: false,
+            error: "Missing authentication token",
+          });
+          ws.send(packet);
+          ws.close(4001, "Missing authentication token");
+          return;
+        }
+
+        // Merge auth data with original params
+        const authParams: ConnectionParams = {
+          ...params,
+          authToken: authData.authToken,
+          privyUserId: authData.privyUserId,
+          name: authData.name || params.name,
+          avatar: authData.avatar || params.avatar,
+        };
+
+        // Authenticate user
+        const { user, authToken, userWithPrivy } = await authenticateUser(
+          authParams,
+          this.db,
+        );
+
+        // Check if user is banned
+        const banInfo = await checkUserBan(user.id, this.db);
+        if (banInfo.isBanned) {
+          const banMessage = formatBanMessage(banInfo);
+          console.log(
+            `[ConnectionHandler] 🚫 Banned user ${user.id} (${user.name}) attempted to connect: ${banInfo.reason || "no reason"}`,
+          );
+          const packet = writePacket("authResult", {
+            success: false,
+            error: `banned: ${banMessage}`,
+          });
+          ws.send(packet);
+          ws.close(4003, "Banned");
+          return;
+        }
+
+        // Send auth success
+        const successPacket = writePacket("authResult", {
+          success: true,
+        });
+        ws.send(successPacket);
+
+        console.log(
+          `[ConnectionHandler] ✅ First-message auth successful for user ${user.id} (${user.name})`,
+        );
+
+        // Get LiveKit options if available
+        const livekit = await this.world.livekit?.getPlayerOpts?.(user.id);
+
+        // Create socket
+        const socket = this.createSocket(ws, user.id);
+
+        // Wait for terrain system
+        if (!(await this.waitForTerrain(ws))) {
+          return;
+        }
+
+        // Load character list
+        const characters = await loadCharacterList(user.id, this.world);
+
+        // Calculate spawn position
+        const spawnPosition = await this.calculateSpawnPosition(socket.id);
+
+        // Create and send snapshot
+        await this.sendSnapshot(socket, {
+          user,
+          authToken,
+          userWithPrivy,
+          livekit,
+          characters,
+          spawnPosition,
+        });
+
+        // Send resource snapshot
+        await this.sendResourceSnapshot(socket);
+
+        // Clean up stale sockets for same account
+        for (const [oldSocketId, oldSocket] of this.sockets) {
+          if (
+            oldSocket.accountId === socket.accountId &&
+            oldSocketId !== socket.id
+          ) {
+            if (!oldSocket.alive) {
+              console.log(
+                `[ConnectionHandler] 🧹 Cleaning up stale socket ${oldSocketId} for account ${socket.accountId}`,
+              );
+              oldSocket.ws?.close?.();
+              this.sockets.delete(oldSocketId);
+            }
+          }
+        }
+
+        // Register socket
+        this.sockets.set(socket.id, socket);
+
+        // Emit player joined event if player exists
+        if (socket.player) {
+          this.emitPlayerJoined(socket);
+        }
+      } catch (err) {
+        clearTimeout(authTimeout);
+        console.error(
+          "[ConnectionHandler] Error in deferred authentication:",
+          err,
+        );
+        const packet = writePacket("authResult", {
+          success: false,
+          error: "Authentication failed",
+        });
+        ws.send(packet);
+        ws.close(4001, "Authentication failed");
+      }
+    };
+
+    // Set up close handler to clean up timeout
+    const closeHandler = () => {
+      clearTimeout(authTimeout);
+      ws.removeListener?.("message", messageHandler);
+      ws.removeListener?.("close", closeHandler);
+    };
+
+    // Register handlers
+    ws.on("message", messageHandler);
+    ws.on("close", closeHandler);
+
+    console.log(
+      "[ConnectionHandler] 🔐 Waiting for first-message authentication...",
+    );
   }
 
   /**
