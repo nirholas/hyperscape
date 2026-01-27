@@ -249,7 +249,11 @@ export function createMockRuntime(config?: TestRuntimeConfig): IAgentRuntime {
 
 // Test helper class
 export class TestHelper {
-  static createScenario(config: Record<string, unknown>) {
+  static createScenario(config: Record<string, unknown>): {
+    runtime: IAgentRuntime;
+    world: World;
+    player: Player;
+  } {
     return {
       runtime: createMockRuntime(config),
       world: createMockWorld(),

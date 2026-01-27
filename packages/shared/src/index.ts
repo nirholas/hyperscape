@@ -63,6 +63,7 @@ export * from "./runtime";
 export * from "./core";
 
 // Export entity classes
+export { PlayerEntity } from "./entities/player/PlayerEntity";
 export { PlayerLocal } from "./entities/player/PlayerLocal";
 export { PlayerRemote } from "./entities/player/PlayerRemote";
 export { MobEntity } from "./entities/npc/MobEntity";
@@ -863,9 +864,8 @@ export type {
   EquipmentSaveItem,
 } from "./types/network/database";
 
-// Export entity types
+// Export entity types (PlayerEntity class is exported above, so only export other types here)
 export type {
-  PlayerEntity,
   CharacterController,
   CharacterControllerOptions,
   NetworkPacket,
