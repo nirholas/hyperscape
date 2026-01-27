@@ -9,7 +9,7 @@
 import { type World, ALL_WORLD_AREAS } from "@hyperscape/shared";
 import type { ServerSocket } from "../../../../shared/types";
 import type { DuelSystem } from "../../../DuelSystem";
-import { RateLimitService } from "../../services";
+import { Logger, RateLimitService } from "../../services";
 import { sendToSocket, getPlayerId } from "../common";
 
 // ============================================================================
@@ -105,7 +105,7 @@ export { sendToSocket, getPlayerId } from "../common";
 export function isInDuelArenaZone(world: World, playerId: string): boolean {
   const player = world.entities.players?.get(playerId);
   if (!player?.position) {
-    console.log("[DuelZone] No player or position for:", playerId);
+    Logger.debug("DuelZone", "No player or position found", { playerId });
     return false;
   }
 
@@ -114,23 +114,19 @@ export function isInDuelArenaZone(world: World, playerId: string): boolean {
   // Get duel_arena bounds from ALL_WORLD_AREAS
   const duelArena = ALL_WORLD_AREAS["duel_arena"];
   if (!duelArena?.bounds) {
-    console.log("[DuelZone] duel_arena not found in ALL_WORLD_AREAS");
+    Logger.warn("DuelZone", "duel_arena not found in ALL_WORLD_AREAS");
     return false;
   }
 
   const { minX, maxX, minZ, maxZ } = duelArena.bounds;
   const inBounds = x >= minX && x <= maxX && z >= minZ && z <= maxZ;
 
-  console.log(
-    "[DuelZone] Player",
+  Logger.debug("DuelZone", "Zone check result", {
     playerId,
-    "at position",
-    { x, z },
-    "duel_arena bounds:",
-    { minX, maxX, minZ, maxZ },
-    "inBounds:",
+    position: { x, z },
+    bounds: { minX, maxX, minZ, maxZ },
     inBounds,
-  );
+  });
 
   return inBounds;
 }
