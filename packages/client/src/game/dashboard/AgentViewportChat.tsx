@@ -234,10 +234,16 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
         setMessages((prev) => [...prev, confirmMessage]);
 
         // Tell the iframe to open the chat panel
+        // SECURITY: Use specific origin instead of "*" to prevent XSS
         if (iframeRef.current?.contentWindow) {
+          // Get the iframe's origin from its src attribute
+          const iframeSrc = iframeRef.current.src;
+          const iframeOrigin = iframeSrc
+            ? new URL(iframeSrc, window.location.origin).origin
+            : window.location.origin;
           iframeRef.current.contentWindow.postMessage(
             { type: "OPEN_CHAT" },
-            "*",
+            iframeOrigin,
           );
         }
       } else {
@@ -466,10 +472,15 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
                       };
                       setMessages((prev) => [...prev, confirmMessage]);
                       // Open chat in iframe
+                      // SECURITY: Use specific origin instead of "*"
                       if (iframeRef.current?.contentWindow) {
+                        const iframeSrc = iframeRef.current.src;
+                        const iframeOrigin = iframeSrc
+                          ? new URL(iframeSrc, window.location.origin).origin
+                          : window.location.origin;
                         iframeRef.current.contentWindow.postMessage(
                           { type: "OPEN_CHAT" },
-                          "*",
+                          iframeOrigin,
                         );
                       }
                     }

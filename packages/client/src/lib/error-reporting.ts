@@ -43,6 +43,11 @@ class ErrorReportingService {
   /** User ID (set after authentication) */
   private userId: string;
 
+  /** Stored handler references for cleanup */
+  private errorHandler: ((event: ErrorEvent) => void) | null = null;
+  private rejectionHandler: ((event: PromiseRejectionEvent) => void) | null =
+    null;
+
   /**
    * Constructs the error reporting service
    *
@@ -81,7 +86,8 @@ class ErrorReportingService {
    * @private
    */
   private setupGlobalErrorHandlers() {
-    window.addEventListener("error", (event) => {
+    // Store handler reference for cleanup
+    this.errorHandler = (event: ErrorEvent) => {
       const errorData: ErrorReport = {
         message: event.error?.message || event.message || "Unknown error",
         stack: event.error?.stack || "No stack trace available",
@@ -99,9 +105,10 @@ class ErrorReportingService {
       };
 
       this.reportError(errorData);
-    });
+    };
 
-    window.addEventListener("unhandledrejection", (event) => {
+    // Store handler reference for cleanup
+    this.rejectionHandler = (event: PromiseRejectionEvent) => {
       const errorData: ErrorReport = {
         message:
           event.reason?.toString() ||
@@ -121,7 +128,29 @@ class ErrorReportingService {
       };
 
       this.reportError(errorData);
-    });
+    };
+
+    window.addEventListener("error", this.errorHandler);
+    window.addEventListener("unhandledrejection", this.rejectionHandler);
+  }
+
+  /**
+   * Disposes of the error reporting service
+   *
+   * Removes global error handlers to prevent memory leaks.
+   * Call this when the service is no longer needed.
+   *
+   * @public
+   */
+  public dispose(): void {
+    if (this.errorHandler) {
+      window.removeEventListener("error", this.errorHandler);
+      this.errorHandler = null;
+    }
+    if (this.rejectionHandler) {
+      window.removeEventListener("unhandledrejection", this.rejectionHandler);
+      this.rejectionHandler = null;
+    }
   }
 
   /**

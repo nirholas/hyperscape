@@ -37,6 +37,41 @@ const _tempUnprojectVec = new THREE.Vector3();
 /** Pre-allocated position object for RAF loop target position - avoids GC pressure */
 const _tempTargetPos: { x: number; z: number } = { x: 0, z: 0 };
 
+// === VECTOR3 POOL FOR ENTITY PIPS ===
+// Reduces GC pressure when entities spawn/despawn frequently
+
+/** Pool of reusable Vector3 objects for entity pips */
+const _vector3Pool: THREE.Vector3[] = [];
+
+/** Maximum pool size to prevent unbounded memory growth */
+const MAX_POOL_SIZE = 200;
+
+/**
+ * Acquire a Vector3 from the pool or create a new one
+ * @param x Optional initial x coordinate
+ * @param y Optional initial y coordinate
+ * @param z Optional initial z coordinate
+ */
+function acquireVector3(x = 0, y = 0, z = 0): THREE.Vector3 {
+  const vec = _vector3Pool.pop();
+  if (vec) {
+    return vec.set(x, y, z);
+  }
+  return new THREE.Vector3(x, y, z);
+}
+
+/**
+ * Release a Vector3 back to the pool for reuse
+ * @param vec The Vector3 to release
+ */
+function releaseVector3(vec: THREE.Vector3): void {
+  if (_vector3Pool.length < MAX_POOL_SIZE) {
+    vec.set(0, 0, 0); // Reset to prevent stale data
+    _vector3Pool.push(vec);
+  }
+  // If pool is full, let GC collect it (rare case)
+}
+
 interface EntityPip {
   id: string;
   type: "player" | "enemy" | "building" | "item" | "resource" | "quest";
@@ -624,11 +659,11 @@ export function Minimap({
             entityPip.type = type;
             entityPip.color = color;
           } else {
-            // New entity, create a new Vector3
+            // New entity - acquire Vector3 from pool instead of allocating new
             entityPip = {
               id: entity.id,
               type,
-              position: new THREE.Vector3(pos.x, 0, pos.z),
+              position: acquireVector3(pos.x, 0, pos.z),
               color,
             };
             entityCacheRef.current.set(entity.id, entityPip);
@@ -639,10 +674,15 @@ export function Minimap({
       }
 
       // Clean up cache: remove entities that are no longer present
-      // This prevents stale pips from entities that despawned
+      // Release Vector3 objects back to pool when entities despawn
       const cacheKeys = entityCacheRef.current.keys();
       for (const id of cacheKeys) {
         if (!seenIds.has(id)) {
+          const removedPip = entityCacheRef.current.get(id);
+          if (removedPip) {
+            // Return Vector3 to pool for reuse
+            releaseVector3(removedPip.position);
+          }
           entityCacheRef.current.delete(id);
         }
       }

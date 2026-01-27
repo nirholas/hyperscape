@@ -10,6 +10,13 @@ import {
   propToLabel,
 } from "@hyperscape/shared";
 import type { ClientWorld, PlayerStats } from "../types";
+import {
+  isUIUpdateEvent,
+  isPlayerStatsData,
+  isSkillsUpdateEvent,
+  isPrayerPointsChangedEvent,
+  isPrayerStateSyncEvent,
+} from "../types/guards";
 import { ActionProgressBar } from "./hud/ActionProgressBar";
 import { ChatProvider } from "./chat/ChatContext";
 import { EntityContextMenu } from "./hud/EntityContextMenu";
@@ -305,49 +312,56 @@ export function CoreUI({ world }: { world: ClientWorld }) {
   // Subscribe to player stats updates (for StatusBars)
   useEffect(() => {
     const onUIUpdate = (raw: unknown) => {
-      const update = raw as { component: string; data: unknown };
-      if (update.component === "player") {
-        const newData = update.data as PlayerStats;
-        // Merge with existing state to preserve prayer data (prayer is managed separately by PrayerSystem)
+      if (!isUIUpdateEvent(raw)) {
+        console.warn("[CoreUI] Invalid UI update event:", raw);
+        return;
+      }
+      if (raw.component === "player" && isPlayerStatsData(raw.data)) {
+        // PlayerStatsData is a partial type - safe to cast since we merge with existing state
+        const newData = raw.data as unknown as Partial<PlayerStats>;
+        // Merge with existing state to preserve prayer data
         setPlayerStats((prev) =>
           prev
             ? {
+                ...prev,
                 ...newData,
-                // Preserve existing prayer data if new data doesn't include it
                 prayerPoints: newData.prayerPoints || prev.prayerPoints,
               }
-            : newData,
+            : (newData as PlayerStats),
         );
       }
     };
 
     const onSkillsUpdate = (raw: unknown) => {
-      const data = raw as { playerId: string; skills: PlayerStats["skills"] };
-      if (!localPlayerId || data.playerId === localPlayerId) {
+      if (!isSkillsUpdateEvent(raw)) {
+        console.warn("[CoreUI] Invalid skills update event:", raw);
+        return;
+      }
+      if (!localPlayerId || raw.playerId === localPlayerId) {
+        // Skills event only has skills data - merge with existing state
+        const updatedSkills = raw.skills as unknown as PlayerStats["skills"];
         setPlayerStats((prev) =>
           prev
-            ? { ...prev, skills: data.skills }
-            : ({ skills: data.skills } as PlayerStats),
+            ? { ...prev, skills: updatedSkills }
+            : ({ skills: updatedSkills } as unknown as PlayerStats),
         );
       }
     };
 
     const onPrayerPointsChanged = (raw: unknown) => {
-      // Server sends { playerId, points, maxPoints } not { current, max }
-      const data = raw as {
-        playerId: string;
-        points: number;
-        maxPoints: number;
-      };
-      if (!localPlayerId || data.playerId === localPlayerId) {
+      if (!isPrayerPointsChangedEvent(raw)) {
+        console.warn("[CoreUI] Invalid prayer points changed event:", raw);
+        return;
+      }
+      if (!localPlayerId || raw.playerId === localPlayerId) {
         setPlayerStats((prev) =>
           prev
             ? {
                 ...prev,
-                prayerPoints: { current: data.points, max: data.maxPoints },
+                prayerPoints: { current: raw.points, max: raw.maxPoints },
               }
             : ({
-                prayerPoints: { current: data.points, max: data.maxPoints },
+                prayerPoints: { current: raw.points, max: raw.maxPoints },
               } as PlayerStats),
         );
       }
@@ -355,21 +369,19 @@ export function CoreUI({ world }: { world: ClientWorld }) {
 
     // Handle full prayer state sync (initial load, altar pray, etc.)
     const onPrayerStateSync = (raw: unknown) => {
-      const data = raw as {
-        playerId: string;
-        points: number;
-        maxPoints: number;
-        active: string[];
-      };
-      if (!localPlayerId || data.playerId === localPlayerId) {
+      if (!isPrayerStateSyncEvent(raw)) {
+        console.warn("[CoreUI] Invalid prayer state sync event:", raw);
+        return;
+      }
+      if (!localPlayerId || raw.playerId === localPlayerId) {
         setPlayerStats((prev) =>
           prev
             ? {
                 ...prev,
-                prayerPoints: { current: data.points, max: data.maxPoints },
+                prayerPoints: { current: raw.points, max: raw.maxPoints },
               }
             : ({
-                prayerPoints: { current: data.points, max: data.maxPoints },
+                prayerPoints: { current: raw.points, max: raw.maxPoints },
               } as PlayerStats),
         );
       }
