@@ -15,7 +15,7 @@
  */
 
 import type { World, StakedItem } from "@hyperscape/shared";
-import { EventType, DeathState } from "@hyperscape/shared";
+import { EventType, PlayerEntity } from "@hyperscape/shared";
 import type { DuelSession } from "./DuelSessionManager";
 import { AuditLogger, Logger } from "../ServerNetwork/services";
 import {
@@ -242,22 +242,10 @@ export class DuelCombatResolver {
    * Restore player to full health after duel (OSRS-accurate: no death in duels)
    */
   private restorePlayerHealth(playerId: string): void {
-    // Clear death state on the entity directly
+    // Clear death state using PlayerEntity helper method (Law of Demeter)
     const playerEntity = this.world.entities?.get?.(playerId);
-    if (playerEntity && "data" in playerEntity) {
-      const data = playerEntity.data as {
-        deathState?: DeathState;
-        deathPosition?: [number, number, number];
-        respawnTick?: number;
-        e?: string;
-      };
-      data.deathState = DeathState.ALIVE;
-      data.deathPosition = undefined;
-      data.respawnTick = undefined;
-      data.e = "idle";
-      if ("markNetworkDirty" in playerEntity) {
-        (playerEntity as { markNetworkDirty: () => void }).markNetworkDirty();
-      }
+    if (playerEntity instanceof PlayerEntity) {
+      playerEntity.resetDeathState();
     }
 
     // Emit PLAYER_RESPAWNED to trigger health restoration in PlayerSystem

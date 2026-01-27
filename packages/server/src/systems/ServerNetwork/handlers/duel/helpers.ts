@@ -10,65 +10,7 @@ import { type World, ALL_WORLD_AREAS } from "@hyperscape/shared";
 import type { ServerSocket } from "../../../../shared/types";
 import type { DuelSystem } from "../../../DuelSystem";
 import { RateLimitService } from "../../services";
-import {
-  sendToSocket,
-  getPlayerId,
-  sendErrorToast,
-  sendSuccessToast as sendSuccessToastCommon,
-} from "../common";
-
-// ============================================================================
-// Entity Interfaces
-// ============================================================================
-
-/**
- * Player entity interface for duel handlers.
- * Defines the shape of player entities as accessed by this module.
- */
-interface DuelPlayerEntity {
-  id: string;
-  position?: { x: number; y: number; z: number };
-  name?: string;
-  characterName?: string;
-  combatLevel?: number;
-  data?: {
-    name?: string;
-    combatLevel?: number;
-  };
-  combat?: {
-    combatLevel?: number;
-  };
-}
-
-/**
- * Type guard to check if an entity has player-like properties
- */
-function isDuelPlayerEntity(entity: unknown): entity is DuelPlayerEntity {
-  return (
-    typeof entity === "object" &&
-    entity !== null &&
-    "id" in entity &&
-    typeof (entity as DuelPlayerEntity).id === "string"
-  );
-}
-
-/**
- * Server network interface for socket lookups.
- * Encapsulates the network system shape to reduce Law of Demeter violations.
- */
-interface ServerNetworkInterface {
-  broadcastManager?: {
-    getPlayerSocket: (id: string) => ServerSocket | undefined;
-  };
-  sockets?: Map<string, ServerSocket>;
-}
-
-/**
- * Type guard for server network
- */
-function isServerNetwork(system: unknown): system is ServerNetworkInterface {
-  return typeof system === "object" && system !== null;
-}
+import { sendToSocket, getPlayerId } from "../common";
 
 // ============================================================================
 // Rate Limiter
@@ -95,27 +37,18 @@ export function getDuelSystem(world: World): DuelSystem | undefined {
 
 /**
  * Get player name from world
+ * Delegates to World.getPlayerDisplayName (Law of Demeter)
  */
 export function getPlayerName(world: World, playerId: string): string {
-  const player = world.entities.players?.get(playerId);
-  if (!player || !isDuelPlayerEntity(player)) return "Unknown";
-
-  return player.name || player.data?.name || player.characterName || "Unknown";
+  return world.getPlayerDisplayName(playerId);
 }
 
 /**
  * Get player combat level from world
+ * Delegates to World.getPlayerCombatLevel (Law of Demeter)
  */
 export function getPlayerCombatLevel(world: World, playerId: string): number {
-  const player = world.entities.players?.get(playerId);
-  if (!player || !isDuelPlayerEntity(player)) return 3;
-
-  return (
-    player.combatLevel ||
-    player.data?.combatLevel ||
-    player.combat?.combatLevel ||
-    3
-  );
+  return world.getPlayerCombatLevel(playerId);
 }
 
 /**
@@ -127,29 +60,13 @@ export function isPlayerOnline(world: World, playerId: string): boolean {
 
 /**
  * Get socket by player ID
+ * Delegates to World.getPlayerSocket (Law of Demeter)
  */
 export function getSocketByPlayerId(
   world: World,
   playerId: string,
 ): ServerSocket | undefined {
-  const serverNetwork = world.getSystem("network");
-  if (!serverNetwork || !isServerNetwork(serverNetwork)) return undefined;
-
-  // Prefer broadcastManager.getPlayerSocket for direct lookup
-  if (serverNetwork.broadcastManager?.getPlayerSocket) {
-    return serverNetwork.broadcastManager.getPlayerSocket(playerId);
-  }
-
-  // Fallback to iterating sockets map
-  if (serverNetwork.sockets) {
-    for (const [, socket] of serverNetwork.sockets) {
-      if (getPlayerId(socket) === playerId) {
-        return socket;
-      }
-    }
-  }
-
-  return undefined;
+  return world.getPlayerSocket(playerId) as ServerSocket | undefined;
 }
 
 // ============================================================================
