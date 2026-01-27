@@ -19,6 +19,7 @@ export { EquipmentVisualSystem } from "./EquipmentVisualSystem";
 export { DamageSplatSystem } from "./DamageSplatSystem";
 export { DuelCountdownSplatSystem } from "./DuelCountdownSplatSystem";
 export { XPDropSystem } from "./XPDropSystem";
+export { ProjectileRenderer } from "./ProjectileRenderer";
 export { ZoneVisualsSystem } from "./ZoneVisualsSystem";
 export { ResourceTileDebugSystem } from "./ResourceTileDebugSystem";
 export { DuelArenaVisualsSystem } from "./DuelArenaVisualsSystem";
