@@ -99,12 +99,14 @@ function useStakesScreenStyles(theme: Theme, myAccepted: boolean) {
 
     const panelStyle: CSSProperties = {
       flex: 1,
+      minWidth: 0,
       background: theme.colors.background.tertiary,
       border: `1px solid ${theme.colors.border.default}`,
       borderRadius: theme.borderRadius.md,
       padding: theme.spacing.sm,
       display: "flex",
       flexDirection: "column",
+      overflow: "hidden",
     };
 
     const headerStyle: CSSProperties = {
@@ -122,6 +124,7 @@ function useStakesScreenStyles(theme: Theme, myAccepted: boolean) {
       gridTemplateColumns: `repeat(${STAKE_GRID_COLS}, 1fr)`,
       gap: 2,
       flex: 1,
+      overflow: "hidden",
     };
 
     const quantityStyle: CSSProperties = {
@@ -199,12 +202,18 @@ function useStakesScreenStyles(theme: Theme, myAccepted: boolean) {
 
     const inventoryPanelStyle: CSSProperties = {
       ...panelStyle,
-      maxWidth: 180,
+      width: 160,
+      minWidth: 160,
+      maxWidth: 160,
+      overflow: "hidden",
     };
 
     const inventoryGridStyle: CSSProperties = {
-      ...gridStyle,
+      display: "grid",
       gridTemplateColumns: `repeat(${INVENTORY_COLS}, 1fr)`,
+      gap: 2,
+      flex: 1,
+      overflow: "hidden",
     };
 
     const contextMenuStyle: CSSProperties = {
@@ -253,6 +262,8 @@ function getSlotStyle(
 ): CSSProperties {
   return {
     aspectRatio: "1",
+    minWidth: 0,
+    minHeight: 0,
     background: hasItem
       ? theme.colors.background.secondary
       : theme.colors.background.primary,
@@ -266,6 +277,7 @@ function getSlotStyle(
     position: "relative",
     fontSize: theme.typography.fontSize.xs,
     padding: 2,
+    overflow: "hidden",
   };
 }
 
