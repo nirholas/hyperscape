@@ -11,7 +11,7 @@
  */
 
 import { useMemo, type CSSProperties } from "react";
-import { useThemeStore } from "@/ui";
+import { useThemeStore, type Theme } from "@/ui";
 import { getItem, type DuelRules } from "@hyperscape/shared";
 
 // ============================================================================
@@ -107,6 +107,152 @@ const EQUIPMENT_LABELS: Record<keyof EquipmentRestrictions, string> = {
 };
 
 // ============================================================================
+// Memoized Styles Hook
+// ============================================================================
+
+function useConfirmScreenStyles(theme: Theme, myAccepted: boolean) {
+  return useMemo(() => {
+    const sectionStyle: CSSProperties = {
+      background: theme.colors.background.tertiary,
+      border: `1px solid ${theme.colors.border.default}`,
+      borderRadius: theme.borderRadius.md,
+      padding: theme.spacing.sm,
+      marginBottom: theme.spacing.sm,
+    };
+
+    const sectionHeaderStyle: CSSProperties = {
+      fontSize: theme.typography.fontSize.sm,
+      fontWeight: theme.typography.fontWeight.bold,
+      color: theme.colors.text.primary,
+      marginBottom: theme.spacing.xs,
+      borderBottom: `1px solid ${theme.colors.border.default}`,
+      paddingBottom: theme.spacing.xs,
+    };
+
+    const listStyle: CSSProperties = {
+      fontSize: theme.typography.fontSize.xs,
+      color: theme.colors.text.secondary,
+      lineHeight: 1.6,
+    };
+
+    const warningStyle: CSSProperties = {
+      fontSize: theme.typography.fontSize.xs,
+      color: theme.colors.state.warning,
+      fontStyle: "italic",
+    };
+
+    const stakeRowStyle: CSSProperties = {
+      display: "flex",
+      justifyContent: "space-between",
+      fontSize: theme.typography.fontSize.xs,
+      color: theme.colors.text.secondary,
+      padding: `${theme.spacing.xs / 2}px 0`,
+    };
+
+    const totalStyle: CSSProperties = {
+      fontSize: theme.typography.fontSize.sm,
+      fontWeight: theme.typography.fontWeight.bold,
+      color: theme.colors.accent.gold || "#ffd700",
+      textAlign: "right",
+      marginTop: theme.spacing.xs,
+    };
+
+    const acceptanceStyle: CSSProperties = {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: theme.spacing.sm,
+      background: theme.colors.background.secondary,
+      borderRadius: theme.borderRadius.sm,
+      fontSize: theme.typography.fontSize.sm,
+      marginTop: theme.spacing.sm,
+    };
+
+    const buttonContainerStyle: CSSProperties = {
+      display: "flex",
+      gap: theme.spacing.md,
+      marginTop: theme.spacing.sm,
+    };
+
+    const baseButtonStyle: CSSProperties = {
+      flex: 1,
+      padding: `${theme.spacing.sm}px ${theme.spacing.md}px`,
+      borderRadius: theme.borderRadius.md,
+      fontSize: theme.typography.fontSize.sm,
+      fontWeight: theme.typography.fontWeight.bold,
+      cursor: "pointer",
+      transition: "all 0.2s ease",
+    };
+
+    const acceptButtonStyle: CSSProperties = {
+      ...baseButtonStyle,
+      background: myAccepted
+        ? `${theme.colors.state.success}88`
+        : theme.colors.state.success,
+      color: "#fff",
+      border: `1px solid ${theme.colors.state.success}`,
+      opacity: myAccepted ? 0.7 : 1,
+    };
+
+    const cancelButtonStyle: CSSProperties = {
+      ...baseButtonStyle,
+      background: theme.colors.state.danger,
+      color: "#fff",
+      border: `1px solid ${theme.colors.state.danger}`,
+    };
+
+    const warningBannerStyle: CSSProperties = {
+      background: `${theme.colors.state.warning}22`,
+      border: `1px solid ${theme.colors.state.warning}`,
+      borderRadius: theme.borderRadius.md,
+      padding: theme.spacing.sm,
+      marginBottom: theme.spacing.sm,
+      textAlign: "center",
+      fontSize: theme.typography.fontSize.sm,
+      color: theme.colors.state.warning,
+      fontWeight: theme.typography.fontWeight.bold,
+    };
+
+    const columnsContainerStyle: CSSProperties = {
+      display: "flex",
+      gap: theme.spacing.sm,
+      flex: 1,
+    };
+
+    return {
+      sectionStyle,
+      sectionHeaderStyle,
+      listStyle,
+      warningStyle,
+      stakeRowStyle,
+      totalStyle,
+      acceptanceStyle,
+      buttonContainerStyle,
+      acceptButtonStyle,
+      cancelButtonStyle,
+      warningBannerStyle,
+      columnsContainerStyle,
+    };
+  }, [theme, myAccepted]);
+}
+
+/**
+ * Get status dot style based on accepted state
+ */
+function getStatusDotStyle(theme: Theme, accepted: boolean): CSSProperties {
+  return {
+    width: 8,
+    height: 8,
+    borderRadius: "50%",
+    background: accepted
+      ? theme.colors.state.success
+      : theme.colors.state.danger,
+    marginRight: theme.spacing.xs,
+    display: "inline-block",
+  };
+}
+
+// ============================================================================
 // Component
 // ============================================================================
 
@@ -122,6 +268,9 @@ export function ConfirmScreen({
   onCancel,
 }: ConfirmScreenProps) {
   const theme = useThemeStore((s) => s.theme);
+
+  // Memoized styles - only recalculated when theme or myAccepted changes
+  const styles = useConfirmScreenStyles(theme, myAccepted);
 
   // Get active rules
   const activeRules = useMemo(() => {
@@ -144,114 +293,13 @@ export function ConfirmScreen({
     [opponentStakes],
   );
 
-  // Styles
-  const sectionStyle: CSSProperties = {
-    background: theme.colors.background.tertiary,
-    border: `1px solid ${theme.colors.border.default}`,
-    borderRadius: theme.borderRadius.md,
-    padding: theme.spacing.sm,
-    marginBottom: theme.spacing.sm,
-  };
-
-  const sectionHeaderStyle: CSSProperties = {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: theme.typography.fontWeight.bold,
-    color: theme.colors.text.primary,
-    marginBottom: theme.spacing.xs,
-    borderBottom: `1px solid ${theme.colors.border.default}`,
-    paddingBottom: theme.spacing.xs,
-  };
-
-  const listStyle: CSSProperties = {
-    fontSize: theme.typography.fontSize.xs,
-    color: theme.colors.text.secondary,
-    lineHeight: 1.6,
-  };
-
-  const warningStyle: CSSProperties = {
-    fontSize: theme.typography.fontSize.xs,
-    color: theme.colors.state.warning,
-    fontStyle: "italic",
-  };
-
-  const stakeRowStyle: CSSProperties = {
-    display: "flex",
-    justifyContent: "space-between",
-    fontSize: theme.typography.fontSize.xs,
-    color: theme.colors.text.secondary,
-    padding: `${theme.spacing.xs / 2}px 0`,
-  };
-
-  const totalStyle: CSSProperties = {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: theme.typography.fontWeight.bold,
-    color: theme.colors.accent.gold || "#ffd700",
-    textAlign: "right",
-    marginTop: theme.spacing.xs,
-  };
-
-  const acceptanceStyle: CSSProperties = {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: theme.spacing.sm,
-    background: theme.colors.background.secondary,
-    borderRadius: theme.borderRadius.sm,
-    fontSize: theme.typography.fontSize.sm,
-    marginTop: theme.spacing.sm,
-  };
-
-  const statusDotStyle = (accepted: boolean): CSSProperties => ({
-    width: 8,
-    height: 8,
-    borderRadius: "50%",
-    background: accepted
-      ? theme.colors.state.success
-      : theme.colors.state.danger,
-    marginRight: theme.spacing.xs,
-    display: "inline-block",
-  });
-
-  const buttonContainerStyle: CSSProperties = {
-    display: "flex",
-    gap: theme.spacing.md,
-    marginTop: theme.spacing.sm,
-  };
-
-  const baseButtonStyle: CSSProperties = {
-    flex: 1,
-    padding: `${theme.spacing.sm}px ${theme.spacing.md}px`,
-    borderRadius: theme.borderRadius.md,
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: theme.typography.fontWeight.bold,
-    cursor: "pointer",
-    transition: "all 0.2s ease",
-  };
-
-  const acceptButtonStyle: CSSProperties = {
-    ...baseButtonStyle,
-    background: myAccepted
-      ? `${theme.colors.state.success}88`
-      : theme.colors.state.success,
-    color: "#fff",
-    border: `1px solid ${theme.colors.state.success}`,
-    opacity: myAccepted ? 0.7 : 1,
-  };
-
-  const cancelButtonStyle: CSSProperties = {
-    ...baseButtonStyle,
-    background: theme.colors.state.danger,
-    color: "#fff",
-    border: `1px solid ${theme.colors.state.danger}`,
-  };
-
   // Render stake item
   const renderStakeItem = (item: StakedItem) => {
     const itemData = getItem(item.itemId);
     const displayName = itemData?.name || item.itemId;
 
     return (
-      <div key={item.inventorySlot} style={stakeRowStyle}>
+      <div key={item.inventorySlot} style={styles.stakeRowStyle}>
         <span>
           {displayName}
           {item.quantity > 1 && ` x${formatQuantity(item.quantity)}`}
@@ -264,32 +312,20 @@ export function ConfirmScreen({
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* Warning Banner */}
-      <div
-        style={{
-          background: `${theme.colors.state.warning}22`,
-          border: `1px solid ${theme.colors.state.warning}`,
-          borderRadius: theme.borderRadius.md,
-          padding: theme.spacing.sm,
-          marginBottom: theme.spacing.sm,
-          textAlign: "center",
-          fontSize: theme.typography.fontSize.sm,
-          color: theme.colors.state.warning,
-          fontWeight: theme.typography.fontWeight.bold,
-        }}
-      >
+      <div style={styles.warningBannerStyle}>
         This is your final chance to review before the duel begins!
       </div>
 
-      <div style={{ display: "flex", gap: theme.spacing.sm, flex: 1 }}>
+      <div style={styles.columnsContainerStyle}>
         {/* Left Column - Rules & Equipment */}
         <div style={{ flex: 1 }}>
           {/* Active Rules */}
-          <div style={sectionStyle}>
-            <div style={sectionHeaderStyle}>Active Rules</div>
+          <div style={styles.sectionStyle}>
+            <div style={styles.sectionHeaderStyle}>Active Rules</div>
             {activeRules.length === 0 ? (
-              <div style={listStyle}>No combat restrictions</div>
+              <div style={styles.listStyle}>No combat restrictions</div>
             ) : (
-              <div style={listStyle}>
+              <div style={styles.listStyle}>
                 {activeRules.map((rule) => (
                   <div key={rule}>• {RULE_LABELS[rule]}</div>
                 ))}
@@ -298,19 +334,19 @@ export function ConfirmScreen({
           </div>
 
           {/* Disabled Equipment */}
-          <div style={sectionStyle}>
-            <div style={sectionHeaderStyle}>Disabled Equipment</div>
+          <div style={styles.sectionStyle}>
+            <div style={styles.sectionHeaderStyle}>Disabled Equipment</div>
             {disabledEquipment.length === 0 ? (
-              <div style={listStyle}>All equipment allowed</div>
+              <div style={styles.listStyle}>All equipment allowed</div>
             ) : (
-              <div style={listStyle}>
+              <div style={styles.listStyle}>
                 {disabledEquipment.map((slot) => (
                   <div key={slot}>• {EQUIPMENT_LABELS[slot]}</div>
                 ))}
               </div>
             )}
             {disabledEquipment.length > 0 && (
-              <div style={warningStyle}>
+              <div style={styles.warningStyle}>
                 Items in these slots will be unequipped before the duel.
               </div>
             )}
@@ -320,14 +356,16 @@ export function ConfirmScreen({
         {/* Right Column - Stakes */}
         <div style={{ flex: 1 }}>
           {/* You receive if you win */}
-          <div style={sectionStyle}>
-            <div style={sectionHeaderStyle}>If You Win, You Receive:</div>
+          <div style={styles.sectionStyle}>
+            <div style={styles.sectionHeaderStyle}>
+              If You Win, You Receive:
+            </div>
             {opponentStakes.length === 0 ? (
-              <div style={listStyle}>Nothing staked</div>
+              <div style={styles.listStyle}>Nothing staked</div>
             ) : (
               <>
                 {opponentStakes.map(renderStakeItem)}
-                <div style={totalStyle}>
+                <div style={styles.totalStyle}>
                   Total: {formatGoldValue(opponentTotalValue)} gp
                 </div>
               </>
@@ -335,14 +373,16 @@ export function ConfirmScreen({
           </div>
 
           {/* They receive if you lose */}
-          <div style={sectionStyle}>
-            <div style={sectionHeaderStyle}>If You Lose, They Receive:</div>
+          <div style={styles.sectionStyle}>
+            <div style={styles.sectionHeaderStyle}>
+              If You Lose, They Receive:
+            </div>
             {myStakes.length === 0 ? (
-              <div style={listStyle}>Nothing staked</div>
+              <div style={styles.listStyle}>Nothing staked</div>
             ) : (
               <>
                 {myStakes.map(renderStakeItem)}
-                <div style={totalStyle}>
+                <div style={styles.totalStyle}>
                   Total: {formatGoldValue(myTotalValue)} gp
                 </div>
               </>
@@ -352,27 +392,27 @@ export function ConfirmScreen({
       </div>
 
       {/* Acceptance Status */}
-      <div style={acceptanceStyle}>
+      <div style={styles.acceptanceStyle}>
         <span>
-          <span style={statusDotStyle(myAccepted)} />
+          <span style={getStatusDotStyle(theme, myAccepted)} />
           You: {myAccepted ? "Accepted" : "Not accepted"}
         </span>
         <span>
-          <span style={statusDotStyle(opponentAccepted)} />
+          <span style={getStatusDotStyle(theme, opponentAccepted)} />
           {opponentName}: {opponentAccepted ? "Accepted" : "Not accepted"}
         </span>
       </div>
 
       {/* Buttons */}
-      <div style={buttonContainerStyle}>
+      <div style={styles.buttonContainerStyle}>
         <button
           onClick={onAccept}
-          style={acceptButtonStyle}
+          style={styles.acceptButtonStyle}
           disabled={myAccepted}
         >
           {myAccepted ? "Waiting for opponent..." : "Accept & Start Duel"}
         </button>
-        <button onClick={onCancel} style={cancelButtonStyle}>
+        <button onClick={onCancel} style={styles.cancelButtonStyle}>
           Cancel
         </button>
       </div>

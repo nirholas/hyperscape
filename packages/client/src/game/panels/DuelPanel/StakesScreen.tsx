@@ -12,7 +12,7 @@
  */
 
 import { useState, useCallback, useMemo, type CSSProperties } from "react";
-import { useThemeStore } from "@/ui";
+import { useThemeStore, type Theme } from "@/ui";
 import { getItem } from "@hyperscape/shared";
 
 // ============================================================================
@@ -86,6 +86,206 @@ function calculateTotalValue(stakes: StakedItem[]): number {
 }
 
 // ============================================================================
+// Memoized Styles Hook
+// ============================================================================
+
+function useStakesScreenStyles(theme: Theme, myAccepted: boolean) {
+  return useMemo(() => {
+    const containerStyle: CSSProperties = {
+      display: "flex",
+      gap: theme.spacing.md,
+      height: "100%",
+    };
+
+    const panelStyle: CSSProperties = {
+      flex: 1,
+      background: theme.colors.background.tertiary,
+      border: `1px solid ${theme.colors.border.default}`,
+      borderRadius: theme.borderRadius.md,
+      padding: theme.spacing.sm,
+      display: "flex",
+      flexDirection: "column",
+    };
+
+    const headerStyle: CSSProperties = {
+      fontSize: theme.typography.fontSize.sm,
+      fontWeight: theme.typography.fontWeight.bold,
+      color: theme.colors.text.primary,
+      marginBottom: theme.spacing.xs,
+      textAlign: "center",
+      borderBottom: `1px solid ${theme.colors.border.default}`,
+      paddingBottom: theme.spacing.xs,
+    };
+
+    const gridStyle: CSSProperties = {
+      display: "grid",
+      gridTemplateColumns: `repeat(${STAKE_GRID_COLS}, 1fr)`,
+      gap: 2,
+      flex: 1,
+    };
+
+    const quantityStyle: CSSProperties = {
+      position: "absolute",
+      bottom: 2,
+      right: 2,
+      fontSize: "10px",
+      color: theme.colors.text.secondary,
+      textShadow: "0 0 2px black",
+    };
+
+    const valueStyle: CSSProperties = {
+      textAlign: "center",
+      fontSize: theme.typography.fontSize.sm,
+      color: theme.colors.accent.gold || "#ffd700",
+      marginTop: theme.spacing.xs,
+      fontWeight: theme.typography.fontWeight.bold,
+    };
+
+    const acceptanceStyle: CSSProperties = {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: theme.spacing.sm,
+      background: theme.colors.background.secondary,
+      borderRadius: theme.borderRadius.sm,
+      fontSize: theme.typography.fontSize.sm,
+      marginTop: theme.spacing.sm,
+    };
+
+    const buttonContainerStyle: CSSProperties = {
+      display: "flex",
+      gap: theme.spacing.md,
+      marginTop: theme.spacing.sm,
+    };
+
+    const baseButtonStyle: CSSProperties = {
+      flex: 1,
+      padding: `${theme.spacing.sm}px ${theme.spacing.md}px`,
+      borderRadius: theme.borderRadius.md,
+      fontSize: theme.typography.fontSize.sm,
+      fontWeight: theme.typography.fontWeight.bold,
+      cursor: "pointer",
+      transition: "all 0.2s ease",
+    };
+
+    const acceptButtonStyle: CSSProperties = {
+      ...baseButtonStyle,
+      background: myAccepted
+        ? `${theme.colors.state.success}88`
+        : theme.colors.state.success,
+      color: "#fff",
+      border: `1px solid ${theme.colors.state.success}`,
+      opacity: myAccepted ? 0.7 : 1,
+    };
+
+    const cancelButtonStyle: CSSProperties = {
+      ...baseButtonStyle,
+      background: theme.colors.state.danger,
+      color: "#fff",
+      border: `1px solid ${theme.colors.state.danger}`,
+    };
+
+    const warningBannerStyle: CSSProperties = {
+      background: `${theme.colors.state.warning}33`,
+      border: `1px solid ${theme.colors.state.warning}`,
+      borderRadius: theme.borderRadius.md,
+      padding: theme.spacing.sm,
+      marginBottom: theme.spacing.sm,
+      textAlign: "center",
+      fontSize: theme.typography.fontSize.sm,
+      color: theme.colors.state.warning,
+      fontWeight: theme.typography.fontWeight.bold,
+    };
+
+    const inventoryPanelStyle: CSSProperties = {
+      ...panelStyle,
+      maxWidth: 180,
+    };
+
+    const inventoryGridStyle: CSSProperties = {
+      ...gridStyle,
+      gridTemplateColumns: `repeat(${INVENTORY_COLS}, 1fr)`,
+    };
+
+    const contextMenuStyle: CSSProperties = {
+      background: theme.colors.background.secondary,
+      border: `1px solid ${theme.colors.border.default}`,
+      borderRadius: theme.borderRadius.md,
+      padding: theme.spacing.xs,
+      zIndex: 10001,
+      boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+    };
+
+    const contextMenuItemStyle: CSSProperties = {
+      padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
+      cursor: "pointer",
+      fontSize: theme.typography.fontSize.sm,
+      color: theme.colors.text.primary,
+    };
+
+    return {
+      containerStyle,
+      panelStyle,
+      headerStyle,
+      gridStyle,
+      quantityStyle,
+      valueStyle,
+      acceptanceStyle,
+      buttonContainerStyle,
+      acceptButtonStyle,
+      cancelButtonStyle,
+      warningBannerStyle,
+      inventoryPanelStyle,
+      inventoryGridStyle,
+      contextMenuStyle,
+      contextMenuItemStyle,
+    };
+  }, [theme, myAccepted]);
+}
+
+/**
+ * Get slot style based on item and staked state (called per item)
+ */
+function getSlotStyle(
+  theme: Theme,
+  hasItem: boolean,
+  isStaked?: boolean,
+): CSSProperties {
+  return {
+    aspectRatio: "1",
+    background: hasItem
+      ? theme.colors.background.secondary
+      : theme.colors.background.primary,
+    border: `1px solid ${isStaked ? theme.colors.accent.primary : theme.colors.border.default}`,
+    borderRadius: theme.borderRadius.sm,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: hasItem ? "pointer" : "default",
+    position: "relative",
+    fontSize: theme.typography.fontSize.xs,
+    padding: 2,
+  };
+}
+
+/**
+ * Get status dot style based on accepted state
+ */
+function getStatusDotStyle(theme: Theme, accepted: boolean): CSSProperties {
+  return {
+    width: 8,
+    height: 8,
+    borderRadius: "50%",
+    background: accepted
+      ? theme.colors.state.success
+      : theme.colors.state.danger,
+    marginRight: theme.spacing.xs,
+    display: "inline-block",
+  };
+}
+
+// ============================================================================
 // Component
 // ============================================================================
 
@@ -108,6 +308,9 @@ export function StakesScreen({
     y: number;
     item: InventoryItem;
   } | null>(null);
+
+  // Memoized styles - only recalculated when theme or myAccepted changes
+  const styles = useStakesScreenStyles(theme, myAccepted);
 
   // Calculate total values
   const myTotalValue = useMemo(() => calculateTotalValue(myStakes), [myStakes]);
@@ -184,129 +387,6 @@ export function StakesScreen({
     [contextMenu, onAddStake, closeContextMenu],
   );
 
-  // Styles
-  const containerStyle: CSSProperties = {
-    display: "flex",
-    gap: theme.spacing.md,
-    height: "100%",
-  };
-
-  const panelStyle: CSSProperties = {
-    flex: 1,
-    background: theme.colors.background.tertiary,
-    border: `1px solid ${theme.colors.border.default}`,
-    borderRadius: theme.borderRadius.md,
-    padding: theme.spacing.sm,
-    display: "flex",
-    flexDirection: "column",
-  };
-
-  const headerStyle: CSSProperties = {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: theme.typography.fontWeight.bold,
-    color: theme.colors.text.primary,
-    marginBottom: theme.spacing.xs,
-    textAlign: "center",
-    borderBottom: `1px solid ${theme.colors.border.default}`,
-    paddingBottom: theme.spacing.xs,
-  };
-
-  const gridStyle: CSSProperties = {
-    display: "grid",
-    gridTemplateColumns: `repeat(${STAKE_GRID_COLS}, 1fr)`,
-    gap: 2,
-    flex: 1,
-  };
-
-  const slotStyle = (hasItem: boolean, isStaked?: boolean): CSSProperties => ({
-    aspectRatio: "1",
-    background: hasItem
-      ? theme.colors.background.secondary
-      : theme.colors.background.primary,
-    border: `1px solid ${isStaked ? theme.colors.accent.primary : theme.colors.border.default}`,
-    borderRadius: theme.borderRadius.sm,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    cursor: hasItem ? "pointer" : "default",
-    position: "relative",
-    fontSize: theme.typography.fontSize.xs,
-    padding: 2,
-  });
-
-  const quantityStyle: CSSProperties = {
-    position: "absolute",
-    bottom: 2,
-    right: 2,
-    fontSize: "10px",
-    color: theme.colors.text.secondary,
-    textShadow: "0 0 2px black",
-  };
-
-  const valueStyle: CSSProperties = {
-    textAlign: "center",
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.accent.gold || "#ffd700",
-    marginTop: theme.spacing.xs,
-    fontWeight: theme.typography.fontWeight.bold,
-  };
-
-  const acceptanceStyle: CSSProperties = {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: theme.spacing.sm,
-    background: theme.colors.background.secondary,
-    borderRadius: theme.borderRadius.sm,
-    fontSize: theme.typography.fontSize.sm,
-    marginTop: theme.spacing.sm,
-  };
-
-  const statusDotStyle = (accepted: boolean): CSSProperties => ({
-    width: 8,
-    height: 8,
-    borderRadius: "50%",
-    background: accepted
-      ? theme.colors.state.success
-      : theme.colors.state.danger,
-    marginRight: theme.spacing.xs,
-    display: "inline-block",
-  });
-
-  const buttonContainerStyle: CSSProperties = {
-    display: "flex",
-    gap: theme.spacing.md,
-    marginTop: theme.spacing.sm,
-  };
-
-  const baseButtonStyle: CSSProperties = {
-    flex: 1,
-    padding: `${theme.spacing.sm}px ${theme.spacing.md}px`,
-    borderRadius: theme.borderRadius.md,
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: theme.typography.fontWeight.bold,
-    cursor: "pointer",
-    transition: "all 0.2s ease",
-  };
-
-  const acceptButtonStyle: CSSProperties = {
-    ...baseButtonStyle,
-    background: myAccepted
-      ? `${theme.colors.state.success}88`
-      : theme.colors.state.success,
-    color: "#fff",
-    border: `1px solid ${theme.colors.state.success}`,
-    opacity: myAccepted ? 0.7 : 1,
-  };
-
-  const cancelButtonStyle: CSSProperties = {
-    ...baseButtonStyle,
-    background: theme.colors.state.danger,
-    color: "#fff",
-    border: `1px solid ${theme.colors.state.danger}`,
-  };
-
   // Render stake item
   const renderStakeItem = (
     item: StakedItem | undefined,
@@ -314,7 +394,7 @@ export function StakesScreen({
     isMine: boolean,
   ) => {
     if (!item) {
-      return <div key={index} style={slotStyle(false)} />;
+      return <div key={index} style={getSlotStyle(theme, false)} />;
     }
 
     const itemData = getItem(item.itemId);
@@ -323,7 +403,7 @@ export function StakesScreen({
     return (
       <div
         key={index}
-        style={slotStyle(true)}
+        style={getSlotStyle(theme, true)}
         onClick={
           isMine ? () => handleRemoveStake(myStakes.indexOf(item)) : undefined
         }
@@ -335,7 +415,9 @@ export function StakesScreen({
           {displayName.substring(0, 8)}
         </span>
         {item.quantity > 1 && (
-          <span style={quantityStyle}>{formatQuantity(item.quantity)}</span>
+          <span style={styles.quantityStyle}>
+            {formatQuantity(item.quantity)}
+          </span>
         )}
       </div>
     );
@@ -347,7 +429,7 @@ export function StakesScreen({
     slotIndex: number,
   ) => {
     if (!item) {
-      return <div key={slotIndex} style={slotStyle(false)} />;
+      return <div key={slotIndex} style={getSlotStyle(theme, false)} />;
     }
 
     const isStaked = stakedSlots.has(item.slot);
@@ -357,7 +439,7 @@ export function StakesScreen({
     return (
       <div
         key={slotIndex}
-        style={slotStyle(true, isStaked)}
+        style={getSlotStyle(theme, true, isStaked)}
         onClick={() => !isStaked && handleInventoryClick(item)}
         onContextMenu={(e) => handleInventoryRightClick(e, item)}
         title={isStaked ? `${displayName} (staked)` : displayName}
@@ -368,72 +450,57 @@ export function StakesScreen({
           {displayName.substring(0, 8)}
         </span>
         {item.quantity > 1 && (
-          <span style={quantityStyle}>{formatQuantity(item.quantity)}</span>
+          <span style={styles.quantityStyle}>
+            {formatQuantity(item.quantity)}
+          </span>
         )}
       </div>
     );
-  };
-
-  const warningBannerStyle: CSSProperties = {
-    background: `${theme.colors.state.warning}33`,
-    border: `1px solid ${theme.colors.state.warning}`,
-    borderRadius: theme.borderRadius.md,
-    padding: theme.spacing.sm,
-    marginBottom: theme.spacing.sm,
-    textAlign: "center",
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.state.warning,
-    fontWeight: theme.typography.fontWeight.bold,
   };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* Anti-scam warning banners */}
       {opponentModifiedStakes && (
-        <div style={warningBannerStyle}>
+        <div style={styles.warningBannerStyle}>
           Warning: {opponentName} has modified their stakes!
         </div>
       )}
       {valueImbalanceWarning && (
-        <div style={warningBannerStyle}>{valueImbalanceWarning}</div>
+        <div style={styles.warningBannerStyle}>{valueImbalanceWarning}</div>
       )}
 
-      <div style={containerStyle}>
+      <div style={styles.containerStyle}>
         {/* My Stakes */}
-        <div style={panelStyle}>
-          <div style={headerStyle}>Your Stakes</div>
-          <div style={gridStyle}>
+        <div style={styles.panelStyle}>
+          <div style={styles.headerStyle}>Your Stakes</div>
+          <div style={styles.gridStyle}>
             {Array.from({ length: STAKE_SLOTS }).map((_, i) =>
               renderStakeItem(myStakes[i], i, true),
             )}
           </div>
-          <div style={valueStyle}>
+          <div style={styles.valueStyle}>
             Value: {formatGoldValue(myTotalValue)} gp
           </div>
         </div>
 
         {/* Opponent Stakes */}
-        <div style={panelStyle}>
-          <div style={headerStyle}>{opponentName}'s Stakes</div>
-          <div style={gridStyle}>
+        <div style={styles.panelStyle}>
+          <div style={styles.headerStyle}>{opponentName}'s Stakes</div>
+          <div style={styles.gridStyle}>
             {Array.from({ length: STAKE_SLOTS }).map((_, i) =>
               renderStakeItem(opponentStakes[i], i, false),
             )}
           </div>
-          <div style={valueStyle}>
+          <div style={styles.valueStyle}>
             Value: {formatGoldValue(opponentTotalValue)} gp
           </div>
         </div>
 
         {/* Inventory */}
-        <div style={{ ...panelStyle, maxWidth: 180 }}>
-          <div style={headerStyle}>Inventory</div>
-          <div
-            style={{
-              ...gridStyle,
-              gridTemplateColumns: `repeat(${INVENTORY_COLS}, 1fr)`,
-            }}
-          >
+        <div style={styles.inventoryPanelStyle}>
+          <div style={styles.headerStyle}>Inventory</div>
+          <div style={styles.inventoryGridStyle}>
             {Array.from({ length: INVENTORY_COLS * INVENTORY_ROWS }).map(
               (_, i) => {
                 const item = inventory.find((inv) => inv.slot === i);
@@ -445,27 +512,27 @@ export function StakesScreen({
       </div>
 
       {/* Acceptance Status */}
-      <div style={acceptanceStyle}>
+      <div style={styles.acceptanceStyle}>
         <span>
-          <span style={statusDotStyle(myAccepted)} />
+          <span style={getStatusDotStyle(theme, myAccepted)} />
           You: {myAccepted ? "Accepted" : "Not accepted"}
         </span>
         <span>
-          <span style={statusDotStyle(opponentAccepted)} />
+          <span style={getStatusDotStyle(theme, opponentAccepted)} />
           {opponentName}: {opponentAccepted ? "Accepted" : "Not accepted"}
         </span>
       </div>
 
       {/* Buttons */}
-      <div style={buttonContainerStyle}>
+      <div style={styles.buttonContainerStyle}>
         <button
           onClick={onAccept}
-          style={acceptButtonStyle}
+          style={styles.acceptButtonStyle}
           disabled={myAccepted}
         >
           {myAccepted ? "Waiting..." : "Accept Stakes"}
         </button>
-        <button onClick={onCancel} style={cancelButtonStyle}>
+        <button onClick={onCancel} style={styles.cancelButtonStyle}>
           Cancel
         </button>
       </div>
@@ -477,12 +544,7 @@ export function StakesScreen({
             position: "fixed",
             left: contextMenu.x,
             top: contextMenu.y,
-            background: theme.colors.background.secondary,
-            border: `1px solid ${theme.colors.border.default}`,
-            borderRadius: theme.borderRadius.md,
-            padding: theme.spacing.xs,
-            zIndex: 10001,
-            boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+            ...styles.contextMenuStyle,
           }}
           onMouseLeave={closeContextMenu}
         >
@@ -490,12 +552,7 @@ export function StakesScreen({
             <div
               key={qty}
               onClick={() => handleContextOption(qty as number | "all")}
-              style={{
-                padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
-                cursor: "pointer",
-                fontSize: theme.typography.fontSize.sm,
-                color: theme.colors.text.primary,
-              }}
+              style={styles.contextMenuItemStyle}
               onMouseEnter={(e) =>
                 (e.currentTarget.style.background =
                   theme.colors.background.tertiary)
