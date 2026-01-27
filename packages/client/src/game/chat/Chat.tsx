@@ -147,6 +147,7 @@ export function Chat({ world }: { world: ChatWorld }) {
   }, [world]);
 
   useEffect(() => {
+    const localPlayerId = world.entities?.player?.id;
     const onInventory = (raw: unknown) => {
       const data = raw as {
         items: InventorySlotItem[];
@@ -156,8 +157,12 @@ export function Chat({ world }: { world: ChatWorld }) {
       console.log("[Chat] INVENTORY_UPDATED event received:", {
         playerId: data.playerId,
         itemCount: data.items?.length || 0,
-        localPlayerId: world.entities?.player?.id,
+        localPlayerId,
       });
+      // Only update if this inventory belongs to the local player (prevents cross-tab updates)
+      if (localPlayerId && data.playerId && data.playerId !== localPlayerId) {
+        return;
+      }
       setInventory(data.items);
     };
     world.on(EventType.INVENTORY_UPDATED, onInventory);

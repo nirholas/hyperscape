@@ -176,10 +176,17 @@ export class DuelSystem {
       this.onPlayerDisconnect(data.playerId);
     });
 
-    // Subscribe to player death to end duel
-    this.world.on(EventType.PLAYER_DIED, (payload: unknown) => {
-      const data = payload as { playerId: string };
-      this.handlePlayerDeath(data.playerId);
+    // Subscribe to player death to end duel (ENTITY_DEATH is emitted when health reaches 0)
+    this.world.on(EventType.ENTITY_DEATH, (payload: unknown) => {
+      const data = payload as {
+        entityId: string;
+        entityType?: "player" | "mob";
+        killedBy?: string;
+      };
+      // Only handle player deaths
+      if (data.entityType === "player" || data.entityId?.includes("player")) {
+        this.handlePlayerDeath(data.entityId);
+      }
     });
 
     console.log("[DuelSystem] Initialized");
@@ -1488,11 +1495,13 @@ export class DuelSystem {
     // Transfer stakes to winner
     this.transferStakes(session, winnerId);
 
-    // Teleport loser to hospital
-    this.teleportToHospital(loserId);
+    // Restore both players to full health (OSRS-accurate: no death penalty in duels)
+    this.restorePlayerHealth(winnerId);
+    this.restorePlayerHealth(loserId);
 
-    // Teleport winner to lobby
+    // Teleport both players to duel arena lobby (OSRS-accurate)
     this.teleportToLobby(winnerId);
+    this.teleportToLobby(loserId);
 
     // Emit duel completed event with full details
     this.world.emit("duel:completed", {
@@ -1662,6 +1671,18 @@ export class DuelSystem {
         ? session.targetStakes
         : session.challengerStakes;
 
+    console.log(
+      `[DuelSystem] transferStakes called - winnerId: ${winnerId}, loserId: ${loserId}`,
+    );
+    console.log(
+      `[DuelSystem] Winner stakes (${winnerStakes.length}):`,
+      JSON.stringify(winnerStakes),
+    );
+    console.log(
+      `[DuelSystem] Loser stakes (${loserStakes.length}):`,
+      JSON.stringify(loserStakes),
+    );
+
     // Calculate total values
     const winnerOwnValue = winnerStakes.reduce((sum, s) => sum + s.value, 0);
     const winnerReceivesValue = loserStakes.reduce(
@@ -1681,22 +1702,20 @@ export class DuelSystem {
       winnerOwnStakeValue: winnerOwnValue,
     });
 
-    // Return winner's own stakes to their inventory
-    if (winnerStakes.length > 0) {
-      this.world.emit("duel:stakes:return", {
-        playerId: winnerId,
-        stakes: winnerStakes,
-        reason: "duel_won",
-      });
-    }
+    // Combine winner's own stakes AND loser's stakes into a single operation
+    // This prevents race conditions where both try to insert into slot 0
+    const allWinnerItems = [...winnerStakes, ...loserStakes];
 
-    // Give loser's stakes to winner
-    if (loserStakes.length > 0) {
-      this.world.emit("duel:stakes:award", {
+    if (allWinnerItems.length > 0) {
+      console.log(
+        `[DuelSystem] Emitting duel:stakes:settle for winner ${winnerId} (${winnerStakes.length} own + ${loserStakes.length} won)`,
+      );
+      this.world.emit("duel:stakes:settle", {
         playerId: winnerId,
-        stakes: loserStakes,
-        reason: "duel_won",
+        ownStakes: winnerStakes,
+        wonStakes: loserStakes,
         fromPlayerId: loserId,
+        reason: "duel_won",
       });
     }
   }
@@ -1716,7 +1735,7 @@ export class DuelSystem {
   }
 
   /**
-   * Teleport player to duel arena lobby (winner)
+   * Teleport player to duel arena lobby (both winner and loser)
    */
   private teleportToLobby(playerId: string): void {
     // Lobby spawn point - center of duel arena lobby area
@@ -1726,6 +1745,27 @@ export class DuelSystem {
       playerId,
       position: lobbySpawn,
       rotation: 0,
+    });
+  }
+
+  /**
+   * Restore player to full health after duel (OSRS-accurate: no death in duels)
+   */
+  private restorePlayerHealth(playerId: string): void {
+    const lobbySpawn = { x: 105, y: 0, z: 60 };
+
+    // Emit PLAYER_RESPAWNED to trigger health restoration in PlayerSystem
+    // This resets health to max and marks player as alive
+    this.world.emit(EventType.PLAYER_RESPAWNED, {
+      playerId,
+      spawnPosition: lobbySpawn,
+      townName: "Duel Arena",
+    });
+
+    // Also emit PLAYER_SET_DEAD to ensure death state is cleared
+    this.world.emit(EventType.PLAYER_SET_DEAD, {
+      playerId,
+      isDead: false,
     });
   }
 

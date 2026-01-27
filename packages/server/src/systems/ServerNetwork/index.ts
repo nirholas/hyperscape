@@ -202,6 +202,8 @@ import {
   handleDuelForfeit,
 } from "./handlers/duel";
 import { getDatabase } from "./handlers/common";
+import { sql } from "drizzle-orm";
+import { InventoryRepository } from "../../database/repositories/InventoryRepository";
 
 const defaultSpawn = '{ "position": [0, 50, 0], "quaternion": [0, 0, 0, 1] }';
 
@@ -751,6 +753,81 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
       console.log(
         `[Duel] Equipment restrictions applied - disabled slots: ${disabledSlots.join(", ")}`,
+      );
+    });
+
+    // Listen for duel stakes return (player's own items returned on cancel)
+    // Note: For duel wins, we use duel:stakes:settle to avoid race conditions
+    this.world.on("duel:stakes:return", (event) => {
+      const { playerId, stakes, reason } = event as {
+        playerId: string;
+        stakes: Array<{
+          inventorySlot: number;
+          itemId: string;
+          quantity: number;
+          value: number;
+        }>;
+        reason: string;
+      };
+
+      console.log(
+        `[Duel] Stakes return event received - playerId: ${playerId}, stakes: ${stakes?.length || 0}, reason: ${reason}`,
+      );
+
+      if (!stakes || stakes.length === 0) {
+        console.log("[Duel] No stakes to return, skipping");
+        return;
+      }
+
+      // Fire and forget - don't await in event handler
+      this.addStakedItemsToInventory(playerId, stakes, "return").catch(
+        (err) => {
+          console.error("[Duel] Error in stakes return handler:", err);
+        },
+      );
+    });
+
+    // Listen for duel stakes settle (combined: winner gets own stakes back + loser's stakes)
+    // This handles both in a single operation to avoid race conditions
+    this.world.on("duel:stakes:settle", (event) => {
+      const { playerId, ownStakes, wonStakes, fromPlayerId, reason } =
+        event as {
+          playerId: string;
+          ownStakes: Array<{
+            inventorySlot: number;
+            itemId: string;
+            quantity: number;
+            value: number;
+          }>;
+          wonStakes: Array<{
+            inventorySlot: number;
+            itemId: string;
+            quantity: number;
+            value: number;
+          }>;
+          fromPlayerId: string;
+          reason: string;
+        };
+
+      // Combine both sets of stakes into a single operation
+      const allStakes = [...(ownStakes || []), ...(wonStakes || [])];
+
+      console.log(
+        `[Duel] Stakes settle event received - winnerId: ${playerId}, fromPlayerId: ${fromPlayerId}, ownStakes: ${ownStakes?.length || 0}, wonStakes: ${wonStakes?.length || 0}, reason: ${reason}`,
+      );
+
+      if (allStakes.length === 0) {
+        console.log("[Duel] No stakes to settle, skipping");
+        return;
+      }
+
+      console.log("[Duel] All stakes to add:", JSON.stringify(allStakes));
+
+      // Fire and forget - don't await in event handler
+      this.addStakedItemsToInventory(playerId, allStakes, "award").catch(
+        (err) => {
+          console.error("[Duel] Error in stakes settle handler:", err);
+        },
       );
     });
 
@@ -2525,12 +2602,21 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     };
     this.handlers["onDuel:add:stake"] = this.handlers["duel:add:stake"];
 
-    this.handlers["duel:remove:stake"] = (socket, data) =>
+    this.handlers["duel:remove:stake"] = (socket, data) => {
+      const db = getDatabase(this.world);
+      if (!db) {
+        console.error(
+          "[ServerNetwork] Database not available for duel remove stake",
+        );
+        return;
+      }
       handleDuelRemoveStake(
         socket,
         data as { duelId: string; stakeIndex: number },
         this.world,
+        db,
       );
+    };
     this.handlers["onDuel:remove:stake"] = this.handlers["duel:remove:stake"];
 
     this.handlers["duel:accept:stakes"] = (socket, data) =>
@@ -2708,6 +2794,136 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       }
     }
     return undefined;
+  }
+
+  /**
+   * Add staked items to a player's inventory (used for duel stake returns/awards)
+   * Uses database directly to ensure items are properly persisted.
+   */
+  private async addStakedItemsToInventory(
+    playerId: string,
+    stakes: Array<{
+      inventorySlot: number;
+      itemId: string;
+      quantity: number;
+      value: number;
+    }>,
+    reason: "return" | "award",
+  ): Promise<void> {
+    // Get database from world (same pattern as getDatabase helper)
+    const serverWorld = this.world as {
+      pgPool?: import("pg").Pool;
+      drizzleDb?: import("drizzle-orm/node-postgres").NodePgDatabase<
+        typeof import("../../database/schema").default
+      >;
+    };
+
+    if (!serverWorld.drizzleDb || !serverWorld.pgPool) {
+      console.error("[Duel] Database not available for stake transfer");
+      return;
+    }
+
+    const db = {
+      drizzle: serverWorld.drizzleDb,
+      pool: serverWorld.pgPool,
+    };
+
+    try {
+      // Get inventory system for locking and reloading
+      const inventorySystem = this.world.getSystem("inventory") as
+        | {
+            lockForTransaction: (id: string) => boolean;
+            unlockTransaction: (id: string) => void;
+            reloadFromDatabase: (id: string) => Promise<void>;
+          }
+        | undefined;
+
+      // Lock inventory if system available
+      const locked = inventorySystem?.lockForTransaction?.(playerId) ?? true;
+      if (!locked) {
+        console.warn(
+          `[Duel] Could not lock inventory for ${playerId}, retrying...`,
+        );
+        // Retry after small delay
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
+      try {
+        // Get current inventory to find free slots
+        const inventoryRepo = new InventoryRepository(db.drizzle, db.pool);
+        const currentInventory =
+          await inventoryRepo.getPlayerInventoryAsync(playerId);
+        const usedSlots = new Set(
+          currentInventory.map((item) => item.slotIndex),
+        );
+
+        // Find free slots for new items
+        const findFreeSlot = (): number => {
+          for (let i = 0; i < 28; i++) {
+            if (!usedSlots.has(i)) {
+              usedSlots.add(i);
+              return i;
+            }
+          }
+          return -1; // No free slot
+        };
+
+        // Add each staked item to inventory
+        for (const stake of stakes) {
+          const freeSlot = findFreeSlot();
+          if (freeSlot === -1) {
+            console.warn(
+              `[Duel] No free slot for stake item ${stake.itemId} x${stake.quantity} for ${playerId}`,
+            );
+            // TODO: Drop item on ground or send to bank
+            continue;
+          }
+
+          // Check if item is stackable and already exists in inventory
+          const existingItem = currentInventory.find(
+            (item) => item.itemId === stake.itemId,
+          );
+          const itemData = getItem(stake.itemId);
+          const isStackable = itemData?.stackable ?? false;
+
+          if (isStackable && existingItem) {
+            // Update existing stack
+            await db.pool.query(
+              `UPDATE inventory
+               SET quantity = quantity + $1
+               WHERE "playerId" = $2 AND "slotIndex" = $3`,
+              [stake.quantity, playerId, existingItem.slotIndex],
+            );
+            console.log(
+              `[Duel] Added ${stake.quantity} ${stake.itemId} to existing stack for ${playerId} (${reason})`,
+            );
+          } else {
+            // Insert new item
+            await db.pool.query(
+              `INSERT INTO inventory ("playerId", "itemId", quantity, "slotIndex", metadata)
+               VALUES ($1, $2, $3, $4, NULL)`,
+              [playerId, stake.itemId, stake.quantity, freeSlot],
+            );
+            console.log(
+              `[Duel] Added ${stake.itemId} x${stake.quantity} to slot ${freeSlot} for ${playerId} (${reason})`,
+            );
+          }
+        }
+
+        // Reload inventory from database (this triggers client sync)
+        if (inventorySystem?.reloadFromDatabase) {
+          await inventorySystem.reloadFromDatabase(playerId);
+        }
+      } finally {
+        // Unlock inventory
+        inventorySystem?.unlockTransaction?.(playerId);
+      }
+    } catch (error) {
+      console.error(
+        `[Duel] Error adding staked items to inventory for ${playerId}:`,
+        error,
+      );
+    }
   }
 
   enqueue(socket: ServerSocket | Socket, method: string, data: unknown): void {

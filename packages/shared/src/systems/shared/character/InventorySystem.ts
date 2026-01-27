@@ -1230,24 +1230,9 @@ export class InventorySystem extends SystemBase {
       weight: totalWeight,
     });
 
-    // Broadcast to all clients if on server
-    if (this.world.isServer) {
-      const network = this.world.network as
-        | { send?: (method: string, data: unknown) => void }
-        | undefined;
-      if (network && network.send) {
-        network.send("inventoryUpdated", {
-          playerId,
-          items: inventoryUpdateData.items,
-          coins: inventoryData.coins,
-        });
-        // Also send weight update for stamina calculations
-        network.send("playerWeightUpdated", {
-          playerId,
-          weight: totalWeight,
-        });
-      }
-    }
+    // NOTE: Network broadcasting is handled by EventBridge which listens for
+    // INVENTORY_UPDATED and PLAYER_WEIGHT_CHANGED events and routes them
+    // to the specific player only (not broadcast to all clients).
   }
 
   // ========== Transaction Lock API ==========

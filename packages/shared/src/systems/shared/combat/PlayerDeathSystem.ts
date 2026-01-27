@@ -439,6 +439,19 @@ export class PlayerDeathSystem extends SystemBase {
 
     const playerId = data.entityId;
 
+    // Check if player is in an active duel - DuelSystem handles duel deaths
+    // No gravestone or item drops should occur during duels (OSRS-accurate)
+    const duelSystem = this.world.getSystem?.("duel") as {
+      isPlayerInActiveDuel?: (playerId: string) => boolean;
+    } | null;
+
+    if (duelSystem?.isPlayerInActiveDuel?.(playerId)) {
+      console.log(
+        `[PlayerDeathSystem] Skipping death processing for ${playerId} - in active duel`,
+      );
+      return;
+    }
+
     // Get player's current position - try multiple sources for robustness
     let position = this.playerPositions.get(playerId);
 

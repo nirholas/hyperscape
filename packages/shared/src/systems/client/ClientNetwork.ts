@@ -2058,9 +2058,10 @@ export class ClientNetwork extends SystemBase {
     this.lastCharacterList = data.characters || [];
     this.world.emit(EventType.CHARACTER_LIST, data);
     // Auto-select previously chosen character if available
+    // NOTE: Use sessionStorage (per-tab) to prevent cross-tab character conflicts
     const storedId =
-      typeof localStorage !== "undefined"
-        ? localStorage.getItem("selectedCharacterId")
+      typeof sessionStorage !== "undefined"
+        ? sessionStorage.getItem("selectedCharacterId")
         : null;
     if (
       storedId &&
@@ -2628,6 +2629,31 @@ export class ClientNetwork extends SystemBase {
 
     this.world.emit(EventType.UI_UPDATE, {
       component: "duelEnded",
+      data,
+    });
+  };
+
+  /**
+   * Duel completed with full results (stakes transferred)
+   */
+  onDuelCompleted = (data: {
+    duelId: string;
+    winner: boolean;
+    opponentName: string;
+    itemsReceived: Array<{ itemId: string; quantity: number }>;
+    itemsLost: Array<{ itemId: string; quantity: number }>;
+  }) => {
+    console.log("[ClientNetwork] Duel completed:", data);
+
+    // Clear active duel state from world
+    (
+      this.world as {
+        activeDuel?: { duelId: string; arenaId: number; opponentId?: string };
+      }
+    ).activeDuel = undefined;
+
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "duelCompleted",
       data,
     });
   };

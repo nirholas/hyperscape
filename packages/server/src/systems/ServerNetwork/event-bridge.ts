@@ -163,9 +163,16 @@ export class EventBridge {
    */
   private setupInventoryEvents(): void {
     try {
-      // Broadcast inventory updates to all clients
-      this.world.on(EventType.INVENTORY_UPDATED, (...args: unknown[]) => {
-        this.broadcast.sendToAll("inventoryUpdated", args[0]);
+      // Send inventory updates to specific player only (not all clients!)
+      this.world.on(EventType.INVENTORY_UPDATED, (payload: unknown) => {
+        const data = payload as {
+          playerId: string;
+          items: unknown[];
+          coins?: number;
+        };
+        if (data.playerId) {
+          this.broadcast.sendToPlayer(data.playerId, "inventoryUpdated", data);
+        }
       });
 
       // Send inventory initialization to specific player
