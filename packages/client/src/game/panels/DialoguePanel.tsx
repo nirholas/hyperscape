@@ -84,7 +84,7 @@ export function DialoguePanel({
       style={{
         width: "40rem",
         maxWidth: "90vw",
-        background: "rgba(11, 10, 21, 0.98)",
+        background: "rgba(11, 10, 21, 0.85)",
         border: "2px solid #c9a227",
         borderRadius: "0.5rem",
         padding: "1.5rem",

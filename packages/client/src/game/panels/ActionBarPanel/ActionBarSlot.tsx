@@ -256,8 +256,8 @@ export const ActionBarSlot = memo(function ActionBarSlot({
           : isOver
             ? `linear-gradient(180deg, ${theme.colors.accent.secondary}33 0%, ${theme.colors.background.primary} 100%)`
             : isHovered
-              ? `linear-gradient(180deg, ${theme.colors.accent.secondary}22 0%, ${theme.colors.background.primary} 100%)`
-              : `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+              ? `linear-gradient(180deg, ${theme.colors.accent.secondary}22 0%, ${theme.colors.background.panelPrimary} 100%)`
+              : `linear-gradient(180deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
       border: isEmpty
         ? `1px solid ${theme.colors.border.default}66`
         : isUnavailable
@@ -269,7 +269,7 @@ export const ActionBarSlot = memo(function ActionBarSlot({
               : isHovered
                 ? `1px solid ${theme.colors.accent.primary}80`
                 : `1px solid ${theme.colors.border.default}`,
-      borderRadius: 4,
+      borderRadius: 0,
       cursor:
         isEmpty || isLocked ? "default" : isDragging ? "grabbing" : "grab",
       // RS3 behavior: dim unavailable items
@@ -417,16 +417,16 @@ export const RubbishBin = memo(function RubbishBin({
         width: SLOT_SIZE,
         height: SLOT_SIZE,
         background: isOver
-          ? `radial-gradient(ellipse at center, ${theme.colors.state.danger}4D 0%, ${theme.colors.background.secondary} 70%)`
+          ? `radial-gradient(ellipse at center, ${theme.colors.state.danger}4D 0%, ${theme.colors.background.panelSecondary} 70%)`
           : isDragging
-            ? `linear-gradient(180deg, ${theme.colors.background.tertiary || theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`
-            : `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+            ? `linear-gradient(180deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`
+            : `linear-gradient(180deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
         border: isOver
           ? `2px solid ${theme.colors.state.danger}B3`
           : isDragging
             ? `1px dashed ${theme.colors.state.warning}80`
             : `1px solid ${theme.colors.border.default}66`,
-        borderRadius: 4,
+        borderRadius: 0,
         cursor: "default",
         opacity: isDragging ? 1 : 0.6,
         transform: isOver ? "scale(1.1)" : "scale(1)",

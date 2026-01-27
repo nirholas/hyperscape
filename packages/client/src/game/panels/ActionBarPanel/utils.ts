@@ -2,7 +2,9 @@
  * ActionBarPanel - Utility functions
  */
 
+import { getSkillIcon } from "@hyperscape/shared";
 import { gameUI, parseTokenToNumber } from "../../../constants";
+import { getItemIcon } from "../../../utils/itemUtils";
 import type { ActionBarSlotContent } from "./types";
 
 // Action bar configuration from design tokens
@@ -80,6 +82,30 @@ export function calcHorizontalDimensions(
   };
 }
 
+/** Calculate dimensions for vertical layout (1 x slotCount) - compact, no controls */
+export function calcVerticalDimensions(
+  slotCount: number,
+  options: {
+    showControls?: boolean;
+  } = {},
+): { width: number; height: number } {
+  const { showControls = false } = options;
+
+  // Slots grid height: slots + gaps + padding
+  const slotsHeight =
+    slotCount * SLOT_SIZE + (slotCount - 1) * SLOT_GAP + PADDING * 2;
+
+  // Control buttons at bottom (lock only for vertical)
+  const controlsHeight = showControls
+    ? CONTROL_BUTTON_SIZE + CONTROL_BUTTON_GAP
+    : 0;
+
+  return {
+    width: SLOT_SIZE + PADDING * 2,
+    height: slotsHeight + controlsHeight,
+  };
+}
+
 // Default dimensions based on default slot count (7) - locked state (most common)
 const defaultDims = calcHorizontalDimensions(DEFAULT_SLOT_COUNT, {
   isLocked: true,
@@ -133,78 +159,35 @@ export function createEmptySlots(slotCount: number): ActionBarSlotContent[] {
   }));
 }
 
-// Get icon for an action bar slot
+/**
+ * Get icon for an action bar slot
+ *
+ * Uses centralized icon functions from itemUtils and shared skill-icons
+ * to ensure consistency across all panels.
+ */
 export function getSlotIcon(slot: ActionBarSlotContent): string {
+  // Use custom icon if provided
   if (slot.icon) return slot.icon;
   if (slot.type === "empty") return "";
 
+  // Items - use centralized getItemIcon for consistency with inventory/bank panels
   if (slot.type === "item" && slot.itemId) {
-    // Use the same icon logic as before
-    const itemId = slot.itemId.toLowerCase();
-    if (
-      itemId.includes("sword") ||
-      itemId.includes("dagger") ||
-      itemId.includes("scimitar")
-    )
-      return "⚔️";
-    if (itemId.includes("shield") || itemId.includes("defender")) return "🛡️";
-    if (
-      itemId.includes("helmet") ||
-      itemId.includes("helm") ||
-      itemId.includes("hat")
-    )
-      return "⛑️";
-    if (itemId.includes("boots") || itemId.includes("boot")) return "👢";
-    if (itemId.includes("glove") || itemId.includes("gauntlet")) return "🧤";
-    if (itemId.includes("cape") || itemId.includes("cloak")) return "🧥";
-    if (itemId.includes("amulet") || itemId.includes("necklace")) return "📿";
-    if (itemId.includes("ring")) return "💍";
-    if (itemId.includes("arrow") || itemId.includes("bolt")) return "🏹";
-    if (
-      itemId.includes("fish") ||
-      itemId.includes("lobster") ||
-      itemId.includes("shark")
-    )
-      return "🐟";
-    if (itemId.includes("log") || itemId.includes("wood")) return "🪵";
-    if (itemId.includes("ore") || itemId.includes("bar")) return "⛏️";
-    if (itemId.includes("coin")) return "💰";
-    if (itemId.includes("potion") || itemId.includes("vial")) return "🧪";
-    if (
-      itemId.includes("food") ||
-      itemId.includes("bread") ||
-      itemId.includes("meat")
-    )
-      return "🍖";
-    if (itemId.includes("axe")) return "🪓";
-    if (itemId.includes("pickaxe")) return "⛏️";
-    return slot.itemId.substring(0, 2).toUpperCase();
+    return getItemIcon(slot.itemId);
   }
 
+  // Skills - use shared getSkillIcon for consistency with skills panel
   if (slot.type === "skill" && slot.skillId) {
-    // Skill-specific fallback icons
-    const skillId = slot.skillId.toLowerCase();
-    if (skillId === "attack") return "⚔️";
-    if (skillId === "strength") return "💪";
-    if (skillId === "defense" || skillId === "defence") return "🛡️";
-    if (skillId === "constitution" || skillId === "hitpoints") return "❤️";
-    if (skillId === "ranged") return "🏹";
-    if (skillId === "magic") return "✨";
-    if (skillId === "prayer") return "🙏";
-    if (skillId === "woodcutting") return "🪓";
-    if (skillId === "mining") return "⛏️";
-    if (skillId === "fishing") return "🐟";
-    if (skillId === "firemaking") return "🔥";
-    if (skillId === "cooking") return "🍖";
-    if (skillId === "smithing") return "🔨";
-    if (skillId === "agility") return "🏃";
-    return "📊";
+    return getSkillIcon(slot.skillId);
   }
-  if (slot.type === "spell") return "✨";
-  if (slot.type === "prayer") return slot.icon || "✨";
 
+  // Spells
+  if (slot.type === "spell") return "✨";
+
+  // Prayers - use custom icon if provided, otherwise default
+  if (slot.type === "prayer") return slot.icon || "🙏";
+
+  // Combat styles
   if (slot.type === "combatstyle" && slot.combatStyleId) {
-    // Combat style icons
     const styleId = slot.combatStyleId.toLowerCase();
     if (styleId === "accurate") return "🎯";
     if (styleId === "aggressive") return "⚔️";
@@ -311,4 +294,25 @@ export function saveLockState(barId: number, locked: boolean): void {
   } catch {
     // Ignore localStorage errors
   }
+}
+
+/**
+ * Format a keybind string for compact display on action bar slots
+ *
+ * Converts modifier combinations to abbreviated symbols:
+ * - "Ctrl+1" -> "^1"
+ * - "Shift+2" -> "⇧2"
+ * - "Alt+3" -> "⌥3"
+ *
+ * Simple keys are returned as-is.
+ */
+export function formatKeybindForDisplay(keybind: string): string {
+  // Keep simple keys as-is
+  if (!keybind.includes("+")) return keybind;
+
+  // Abbreviate modifiers for compact display
+  return keybind
+    .replace("Ctrl+", "^")
+    .replace("Shift+", "⇧")
+    .replace("Alt+", "⌥");
 }

@@ -14,6 +14,7 @@ import {
   useSensors,
   useSensor,
   PointerSensor,
+  TouchSensor,
   KeyboardSensor,
   type DragStartEvent,
   type DragEndEvent,
@@ -232,11 +233,18 @@ export function ActionPanel({
   const isVertical = orientation === "vertical";
   const theme = useThemeStore((s) => s.theme);
 
-  // Configure sensors for accessibility (keyboard + pointer support)
+  // Configure sensors for accessibility and mobile support
+  // PointerSensor: distance-based for mouse, TouchSensor: delay-based for mobile long-press
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
         distance: 8, // Require 8px movement before drag starts
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 250, // Long-press 250ms to start drag on mobile
+        tolerance: 5,
       },
     }),
     useSensor(KeyboardSensor),
@@ -447,25 +455,29 @@ export function ActionPanel({
         }
       }
 
-      // Drop option
-      menuItems.push({
-        id: "drop",
-        label: `Drop ${itemName}`,
-        styledLabel: [
-          { text: "Drop ", color: "#fff" },
-          { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
-        ],
-      });
+      // Drop option (only add if not already present from inventoryActions)
+      if (!menuItems.some((m) => m.id === "drop")) {
+        menuItems.push({
+          id: "drop",
+          label: `Drop ${itemName}`,
+          styledLabel: [
+            { text: "Drop ", color: "#fff" },
+            { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+          ],
+        });
+      }
 
-      // Examine
-      menuItems.push({
-        id: "examine",
-        label: `Examine ${itemName}`,
-        styledLabel: [
-          { text: "Examine ", color: "#fff" },
-          { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
-        ],
-      });
+      // Examine (only add if not already present from inventoryActions)
+      if (!menuItems.some((m) => m.id === "examine")) {
+        menuItems.push({
+          id: "examine",
+          label: `Examine ${itemName}`,
+          styledLabel: [
+            { text: "Examine ", color: "#fff" },
+            { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+          ],
+        });
+      }
 
       // Cancel
       menuItems.push({
@@ -784,7 +796,7 @@ const ContextMenuPortal = memo(function ContextMenuPortal({
     >
       <div
         style={{
-          background: theme.colors.background.primary,
+          background: theme.colors.background.panelPrimary,
           border: `1px solid ${theme.colors.border.decorative}80`,
           borderRadius: `${theme.borderRadius.sm}px`,
           boxShadow: theme.shadows.md,

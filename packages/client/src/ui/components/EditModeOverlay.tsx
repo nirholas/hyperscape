@@ -5,8 +5,74 @@ import { usePresets } from "../core/presets/usePresets";
 import { useWindowManager } from "../core/window/useWindowManager";
 import { useTheme } from "../stores/themeStore";
 import { useEditStore } from "../stores/editStore";
+import { useWindowStore } from "../stores/windowStore";
+import { useDrop } from "../core/drag/useDrop";
+import { useDragStore } from "../stores/dragStore";
 import { AlignmentGuides } from "./AlignmentGuides";
 import type { EditModeOverlayProps } from "../types";
+
+/**
+ * Delete Zone Component
+ *
+ * A drop target that appears in edit mode for deleting panels/windows.
+ * Users can drag panels onto this zone to remove them from the interface.
+ * The component is always mounted but only visible when dragging a window.
+ */
+function DeleteZone(): React.ReactElement {
+  const theme = useTheme();
+  const destroyWindow = useWindowStore((s) => s.destroyWindow);
+  const isDragging = useDragStore((s) => s.isDragging);
+  const dragItem = useDragStore((s) => s.item);
+
+  // Check if we're dragging a window (not just any item)
+  const isDraggingWindow = isDragging && dragItem?.type === "window";
+
+  // Set up drop target for windows - always registered for proper drop detection
+  const { isOver, canDrop, dropProps } = useDrop({
+    id: "delete-zone",
+    accepts: ["window"],
+    disabled: !isDraggingWindow, // Only accept drops when dragging a window
+    onDrop: (item) => {
+      // Delete the window when dropped
+      if (item.id) {
+        destroyWindow(item.id);
+      }
+    },
+  });
+
+  const isActive = isOver && canDrop;
+
+  // Always render but hide when not dragging a window
+  // This ensures the drop target is properly registered
+  return (
+    <div
+      ref={dropProps.ref as React.Ref<HTMLDivElement>}
+      data-drop-id={dropProps["data-drop-id"]}
+      style={{
+        display: isDraggingWindow ? "flex" : "none",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: theme.spacing.xs,
+        padding: `${theme.spacing.sm}px ${theme.spacing.md}px`,
+        backgroundColor: isActive
+          ? theme.colors.state.danger
+          : theme.colors.state.danger + "33",
+        border: `2px dashed ${isActive ? theme.colors.state.danger : theme.colors.state.danger + "80"}`,
+        borderRadius: theme.borderRadius.md,
+        color: isActive ? "#fff" : theme.colors.state.danger,
+        fontSize: theme.typography.fontSize.sm,
+        fontWeight: theme.typography.fontWeight.medium,
+        transition: "all 0.15s ease",
+        transform: isActive ? "scale(1.05)" : "scale(1)",
+        cursor: "pointer",
+        minWidth: 100,
+      }}
+    >
+      <span style={{ fontSize: 16 }}>🗑️</span>
+      <span>{isActive ? "Release to Delete" : "Delete"}</span>
+    </div>
+  );
+}
 
 /**
  * Grid overlay and toolbar shown during edit mode
@@ -243,6 +309,9 @@ export function EditModeOverlay({
             backgroundColor: theme.colors.border.default,
           }}
         />
+
+        {/* Delete Zone - appears when dragging a panel */}
+        <DeleteZone />
 
         {/* Add Action Bar button */}
         {onAddActionBar && actionBarCount < maxActionBars && (

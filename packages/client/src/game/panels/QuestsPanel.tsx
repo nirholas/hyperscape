@@ -5,12 +5,14 @@
  * Displays available, active, and completed quests with filtering and sorting.
  * Uses COLORS constants for consistent styling with other panels.
  *
- * When a quest is clicked, it opens the QuestDetailPanel in a separate window.
+ * Desktop: When a quest is clicked, it opens the QuestDetailPanel in a separate window.
+ * Mobile: Quest details are shown inline with a back button to return to the list.
+ * State is persisted so reopening the panel shows the last viewed quest.
  */
 
 import React, { useState, useCallback, useMemo, useEffect } from "react";
 import { EventType } from "@hyperscape/shared";
-import { useWindowStore, useQuestSelectionStore } from "@/ui";
+import { useWindowStore, useQuestSelectionStore, useMobileLayout } from "@/ui";
 import { QuestLog } from "@/game/components/quest";
 import {
   type Quest,
@@ -20,8 +22,10 @@ import {
   type SortDirection,
   sortQuests,
   filterQuests,
+  calculateQuestProgress,
+  CATEGORY_CONFIG,
 } from "@/game/systems";
-import { panelStyles } from "../../constants";
+import { panelStyles, COLORS, spacing, typography } from "../../constants";
 import type { ClientWorld } from "../../types";
 
 interface QuestsPanelProps {
@@ -30,6 +34,9 @@ interface QuestsPanelProps {
 
 /** LocalStorage key for pinned quests */
 const PINNED_QUESTS_KEY = "hyperscape_pinned_quests";
+
+/** LocalStorage key for last viewed quest (mobile state persistence) */
+const LAST_VIEWED_QUEST_KEY = "hyperscape_last_viewed_quest";
 
 /** Load pinned quest IDs from localStorage */
 function loadPinnedQuests(): Set<string> {
@@ -53,6 +60,36 @@ function savePinnedQuests(pinnedIds: Set<string>): void {
     // Ignore storage errors
   }
 }
+
+/** Load last viewed quest ID from localStorage */
+function loadLastViewedQuest(): string | null {
+  try {
+    return localStorage.getItem(LAST_VIEWED_QUEST_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Save last viewed quest ID to localStorage */
+function saveLastViewedQuest(questId: string | null): void {
+  try {
+    if (questId) {
+      localStorage.setItem(LAST_VIEWED_QUEST_KEY, questId);
+    } else {
+      localStorage.removeItem(LAST_VIEWED_QUEST_KEY);
+    }
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+// OSRS-style status colors for mobile detail view
+const STATUS_COLORS: Record<string, string> = {
+  available: COLORS.ERROR,
+  active: COLORS.WARNING,
+  completed: COLORS.SUCCESS,
+  failed: COLORS.TEXT_MUTED,
+};
 
 /** Server quest list item structure */
 interface ServerQuestListItem {
@@ -193,13 +230,382 @@ function transformServerQuestDetail(detail: ServerQuestDetail): Quest {
   };
 }
 
+/** Props for MobileQuestDetail component */
+interface MobileQuestDetailProps {
+  quest: Quest;
+  onBack: () => void;
+  onTogglePin: (quest: Quest) => void;
+  onAcceptQuest: (quest: Quest) => void;
+  world: ClientWorld;
+}
+
+/**
+ * MobileQuestDetail - Inline quest detail view for mobile
+ *
+ * Displays quest details within the same panel with a back button
+ * to return to the quest list.
+ */
+function MobileQuestDetail({
+  quest,
+  onBack,
+  onTogglePin,
+  onAcceptQuest,
+  world,
+}: MobileQuestDetailProps) {
+  const progress = calculateQuestProgress(quest);
+  const categoryConfig = CATEGORY_CONFIG[quest.category];
+  const canAccept = quest.state === "available";
+  const canComplete = quest.state === "active" && progress === 100;
+
+  const containerStyle: React.CSSProperties = {
+    height: "100%",
+    display: "flex",
+    flexDirection: "column",
+    background: COLORS.BG_PRIMARY,
+    overflow: "hidden",
+  };
+
+  const headerStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: spacing.sm,
+    padding: `${spacing.sm} ${spacing.sm}`,
+    borderBottom: `1px solid ${COLORS.BORDER_PRIMARY}`,
+    background: COLORS.BG_SECONDARY,
+    minHeight: "48px",
+  };
+
+  const backButtonStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "36px",
+    height: "36px",
+    background: "transparent",
+    border: "none",
+    color: COLORS.TEXT_SECONDARY,
+    cursor: "pointer",
+    padding: 0,
+    borderRadius: "6px",
+  };
+
+  const titleStyle: React.CSSProperties = {
+    flex: 1,
+    color: STATUS_COLORS[quest.state] || COLORS.TEXT_PRIMARY,
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.semibold,
+    margin: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  };
+
+  const contentStyle: React.CSSProperties = {
+    flex: 1,
+    overflowY: "auto",
+    padding: spacing.sm,
+    WebkitOverflowScrolling: "touch",
+  };
+
+  const sectionStyle: React.CSSProperties = {
+    marginBottom: spacing.sm,
+  };
+
+  const sectionTitleStyle: React.CSSProperties = {
+    color: COLORS.ACCENT,
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    textTransform: "uppercase",
+    letterSpacing: "0.5px",
+    marginBottom: spacing.xs,
+  };
+
+  const descriptionStyle: React.CSSProperties = {
+    color: COLORS.TEXT_SECONDARY,
+    fontSize: typography.fontSize.base,
+    lineHeight: "1.5",
+    margin: 0,
+  };
+
+  const metaRowStyle: React.CSSProperties = {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+    padding: spacing.sm,
+    background: COLORS.BG_TERTIARY,
+    borderRadius: "6px",
+    border: `1px solid ${COLORS.BORDER_PRIMARY}`,
+    fontSize: typography.fontSize.base,
+  };
+
+  const metaItemStyle: React.CSSProperties = {
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
+    minWidth: "calc(50% - 8px)",
+  };
+
+  const metaLabelStyle: React.CSSProperties = {
+    color: COLORS.TEXT_MUTED,
+    fontSize: typography.fontSize.sm,
+    textTransform: "uppercase",
+  };
+
+  const metaValueStyle: React.CSSProperties = {
+    color: COLORS.TEXT_PRIMARY,
+    fontWeight: typography.fontWeight.medium,
+  };
+
+  const progressBarContainerStyle: React.CSSProperties = {
+    height: "6px",
+    backgroundColor: COLORS.BG_TERTIARY,
+    borderRadius: "2px",
+    overflow: "hidden",
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+  };
+
+  const progressBarFillStyle: React.CSSProperties = {
+    height: "100%",
+    width: `${progress}%`,
+    backgroundColor: progress === 100 ? COLORS.SUCCESS : COLORS.ACCENT,
+    transition: "width 0.3s ease",
+  };
+
+  const objectiveStyle = (completed: boolean): React.CSSProperties => ({
+    display: "flex",
+    alignItems: "flex-start",
+    gap: spacing.xs,
+    padding: `${spacing.xs} 0`,
+    color: completed ? COLORS.SUCCESS : COLORS.TEXT_SECONDARY,
+    fontSize: typography.fontSize.base,
+    textDecoration: completed ? "line-through" : "none",
+    opacity: completed ? 0.7 : 1,
+  });
+
+  const actionsStyle: React.CSSProperties = {
+    display: "flex",
+    flexDirection: "column",
+    gap: spacing.sm,
+    padding: spacing.sm,
+    borderTop: `1px solid ${COLORS.BORDER_PRIMARY}`,
+    background: COLORS.BG_SECONDARY,
+  };
+
+  const buttonBaseStyle: React.CSSProperties = {
+    padding: `${spacing.md} ${spacing.md}`,
+    border: "none",
+    borderRadius: "6px",
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.medium,
+    cursor: "pointer",
+    transition: "all 0.15s ease",
+    minHeight: "44px",
+  };
+
+  const primaryButtonStyle: React.CSSProperties = {
+    ...buttonBaseStyle,
+    background: COLORS.ACCENT,
+    color: COLORS.BG_PRIMARY,
+  };
+
+  const secondaryButtonStyle: React.CSSProperties = {
+    ...buttonBaseStyle,
+    background: COLORS.BG_TERTIARY,
+    color: COLORS.TEXT_PRIMARY,
+    border: `1px solid ${COLORS.BORDER_PRIMARY}`,
+  };
+
+  return (
+    <div style={containerStyle}>
+      {/* Header with back button */}
+      <div style={headerStyle}>
+        <button
+          style={backButtonStyle}
+          onClick={onBack}
+          title="Back to quest list"
+        >
+          <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M11 2L5 8l6 6"
+              stroke="currentColor"
+              strokeWidth="2"
+              fill="none"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+        <h3 style={titleStyle}>
+          {quest.pinned && (
+            <span
+              style={{ color: "#ffd700", marginRight: "6px" }}
+              title="Pinned"
+            >
+              ★
+            </span>
+          )}
+          {quest.title}
+        </h3>
+      </div>
+
+      {/* Content */}
+      <div style={contentStyle} className="scrollbar-thin">
+        {/* Meta info */}
+        <div style={metaRowStyle}>
+          <div style={metaItemStyle}>
+            <span style={metaLabelStyle}>Category</span>
+            <span style={{ ...metaValueStyle, color: categoryConfig.color }}>
+              {categoryConfig.icon} {categoryConfig.label}
+            </span>
+          </div>
+          <div style={metaItemStyle}>
+            <span style={metaLabelStyle}>Level</span>
+            <span style={metaValueStyle}>{quest.level || 1}</span>
+          </div>
+          <div style={metaItemStyle}>
+            <span style={metaLabelStyle}>Status</span>
+            <span
+              style={{
+                ...metaValueStyle,
+                color: STATUS_COLORS[quest.state],
+              }}
+            >
+              {quest.state.charAt(0).toUpperCase() + quest.state.slice(1)}
+            </span>
+          </div>
+          {quest.state === "active" && (
+            <div style={metaItemStyle}>
+              <span style={metaLabelStyle}>Progress</span>
+              <span style={metaValueStyle}>{progress}%</span>
+            </div>
+          )}
+        </div>
+
+        {/* Progress bar for active quests */}
+        {quest.state === "active" && (
+          <div style={progressBarContainerStyle}>
+            <div style={progressBarFillStyle} />
+          </div>
+        )}
+
+        {/* Description */}
+        <div style={sectionStyle}>
+          <div style={sectionTitleStyle}>Description</div>
+          <p style={descriptionStyle}>{quest.description}</p>
+        </div>
+
+        {/* Objectives */}
+        {quest.objectives && quest.objectives.length > 0 && (
+          <div style={sectionStyle}>
+            <div style={sectionTitleStyle}>Objectives</div>
+            {quest.objectives.map((obj) => {
+              const isComplete = obj.current >= obj.target;
+              return (
+                <div key={obj.id} style={objectiveStyle(isComplete)}>
+                  <span>{isComplete ? "✓" : "○"}</span>
+                  <span>
+                    {obj.description}
+                    {obj.target > 1 && ` (${obj.current}/${obj.target})`}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Rewards */}
+        {quest.rewards && quest.rewards.length > 0 && (
+          <div style={sectionStyle}>
+            <div style={sectionTitleStyle}>Rewards</div>
+            {quest.rewards.map((reward, idx) => (
+              <div
+                key={idx}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: spacing.xs,
+                  padding: `${spacing.xs} 0`,
+                  color: COLORS.TEXT_SECONDARY,
+                  fontSize: typography.fontSize.base,
+                }}
+              >
+                <span>{reward.icon || "•"}</span>
+                <span>
+                  {reward.amount ? `${reward.amount} ` : ""}
+                  {reward.name}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Quest giver info */}
+        {quest.questGiver && (
+          <div style={sectionStyle}>
+            <div style={sectionTitleStyle}>Quest Giver</div>
+            <div style={descriptionStyle}>
+              {quest.questGiver}
+              {quest.questGiverLocation && (
+                <span style={{ color: COLORS.TEXT_MUTED }}>
+                  {" "}
+                  - {quest.questGiverLocation}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Action buttons */}
+      <div style={actionsStyle}>
+        {canAccept && (
+          <button
+            style={primaryButtonStyle}
+            onClick={() => onAcceptQuest(quest)}
+          >
+            Accept Quest
+          </button>
+        )}
+        {quest.state === "active" && (
+          <button
+            style={secondaryButtonStyle}
+            onClick={() => onTogglePin(quest)}
+          >
+            {quest.pinned ? "Unpin" : "Pin"}
+          </button>
+        )}
+        {canComplete && (
+          <button
+            style={primaryButtonStyle}
+            onClick={() => {
+              world.network?.send?.("questComplete", {
+                questId: quest.id,
+              });
+            }}
+          >
+            Complete Quest
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /**
  * QuestsPanel Component
  *
  * Displays the quest log with filtering, sorting, and quest management.
  * Connects to the game world for quest data and actions via network.
+ *
+ * Desktop: Opens quest details in a separate window.
+ * Mobile: Shows quest details inline with a back button.
  */
 export function QuestsPanel({ world }: QuestsPanelProps) {
+  // Mobile detection
+  const { shouldUseMobileUI } = useMobileLayout();
+
   // Filter state
   const [searchText, setSearchText] = useState("");
   const [stateFilter, setStateFilter] = useState<QuestState[]>([
@@ -216,6 +622,18 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
     new Map(),
   );
   const [loading, setLoading] = useState(true);
+
+  // Mobile inline quest viewing state
+  // When viewing a quest on mobile, this holds the quest ID
+  const [mobileViewingQuestId, setMobileViewingQuestId] = useState<
+    string | null
+  >(() => {
+    // Restore last viewed quest on mount (only if mobile)
+    if (typeof window !== "undefined") {
+      return loadLastViewedQuest();
+    }
+    return null;
+  });
 
   // Pinned quests (client-side only, persisted to localStorage)
   const [pinnedQuestIds, setPinnedQuestIds] =
@@ -243,6 +661,20 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
     window.addEventListener("questPinChanged", handlePinChange);
     return () => window.removeEventListener("questPinChanged", handlePinChange);
   }, []);
+
+  // Fetch quest detail for restored mobile viewing quest
+  useEffect(() => {
+    if (
+      shouldUseMobileUI &&
+      mobileViewingQuestId &&
+      !questDetails.has(mobileViewingQuestId)
+    ) {
+      // Fetch quest detail from server if we don't have it yet
+      world.network?.send?.("getQuestDetail", {
+        questId: mobileViewingQuestId,
+      });
+    }
+  }, [shouldUseMobileUI, mobileViewingQuestId, questDetails, world]);
 
   // Fetch quest data from server
   useEffect(() => {
@@ -407,7 +839,7 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
   const createWindow = useWindowStore((s) => s.createWindow);
   const windows = useWindowStore((s) => s.windows);
 
-  // Handle quest click - fetch details and open quest detail in separate window
+  // Handle quest click - fetch details and show inline (mobile) or open window (desktop)
   const handleQuestClick = useCallback(
     (quest: Quest) => {
       // Request quest detail from server (will update questDetails state)
@@ -419,6 +851,14 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
       const detailedQuest = questDetails.get(quest.id) || quest;
       setSelectedQuest(detailedQuest);
 
+      // Mobile: Show quest inline within this panel
+      if (shouldUseMobileUI) {
+        setMobileViewingQuestId(quest.id);
+        saveLastViewedQuest(quest.id);
+        return;
+      }
+
+      // Desktop: Open quest detail in separate window
       // Check if quest-detail window already exists
       const existingWindow = windows.get("quest-detail-window");
 
@@ -451,8 +891,22 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
         });
       }
     },
-    [setSelectedQuest, createWindow, windows, world, questDetails],
+    [
+      setSelectedQuest,
+      createWindow,
+      windows,
+      world,
+      questDetails,
+      shouldUseMobileUI,
+    ],
   );
+
+  // Handle back button on mobile - return to quest list
+  const handleMobileBack = useCallback(() => {
+    setMobileViewingQuestId(null);
+    // Don't clear localStorage - we want to remember the quest for next open
+    // User can navigate back to the quest from the list
+  }, []);
 
   // Container style using COLORS constants for consistency
   const containerStyle: React.CSSProperties = {
@@ -477,6 +931,28 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
         >
           Loading quests...
         </div>
+      </div>
+    );
+  }
+
+  // Get the quest being viewed on mobile (from merged quests which have details)
+  const mobileViewingQuest = mobileViewingQuestId
+    ? mergedQuests.find((q) => q.id === mobileViewingQuestId) ||
+      questDetails.get(mobileViewingQuestId) ||
+      allQuests.find((q) => q.id === mobileViewingQuestId)
+    : null;
+
+  // Mobile: Show quest detail inline if viewing a quest
+  if (shouldUseMobileUI && mobileViewingQuest) {
+    return (
+      <div style={containerStyle}>
+        <MobileQuestDetail
+          quest={mobileViewingQuest}
+          onBack={handleMobileBack}
+          onTogglePin={handleTogglePin}
+          onAcceptQuest={handleAcceptQuest}
+          world={world}
+        />
       </div>
     );
   }

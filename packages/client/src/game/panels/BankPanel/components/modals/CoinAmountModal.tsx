@@ -74,7 +74,7 @@ export function CoinAmountModal({
 
   const disabledButtonStyle: CSSProperties = {
     ...buttonStyle,
-    background: theme.colors.background.tertiary,
+    background: theme.colors.background.panelSecondary,
     opacity: 0.3,
     cursor: "not-allowed",
   };
@@ -167,7 +167,7 @@ export function CoinAmountModal({
               padding: `${theme.spacing.sm}px ${theme.spacing.md}px`,
               borderRadius: theme.borderRadius.md,
               fontSize: theme.typography.fontSize.sm,
-              background: theme.colors.background.tertiary,
+              background: theme.colors.background.panelSecondary,
               border: `1px solid ${theme.colors.border.default}`,
               color: theme.colors.text.primary,
               outline: "none",
@@ -209,7 +209,7 @@ export function CoinAmountModal({
             style={{
               ...buttonStyle,
               flex: 1,
-              background: theme.colors.background.tertiary,
+              background: theme.colors.background.panelSecondary,
             }}
           >
             Cancel

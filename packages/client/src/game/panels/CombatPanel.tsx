@@ -251,10 +251,10 @@ const DraggableCombatStyleButton = ({
       aria-pressed={isActive}
       className="style-btn focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/50"
       style={{
-        padding: isMobile ? "6px 4px" : "5px 3px",
+        padding: isMobile ? "5px 3px" : "5px 3px",
         cursor: disabled ? "not-allowed" : isDragging ? "grabbing" : "grab",
         transition: "all 0.1s ease",
-        fontSize: isMobile ? "10px" : "9px",
+        fontSize: isMobile ? "9px" : "9px",
         fontWeight: isActive ? 600 : 500,
         background: isActive ? styleInfo.bgColor : themeColors.slot.filled,
         border: isActive
@@ -280,7 +280,7 @@ const DraggableCombatStyleButton = ({
       <span style={{ fontWeight: 600, lineHeight: 1 }}>{styleInfo.label}</span>
       <span
         style={{
-          fontSize: isMobile ? "8px" : "7px",
+          fontSize: isMobile ? "7px" : "7px",
           opacity: 0.6,
           color: isActive ? styleInfo.color : themeColors.text.muted,
         }}
@@ -318,7 +318,7 @@ const CombatStatsRow = React.memo(function CombatStatsRow({
     <div
       className="flex items-center justify-center gap-2"
       style={{
-        padding: isMobile ? "5px 8px" : "4px 6px",
+        padding: isMobile ? "4px 6px" : "4px 6px",
         background: theme.colors.slot.filled,
         borderRadius: "4px",
         border: `1px solid ${theme.colors.border.default}30`,
@@ -713,9 +713,9 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
     ? Math.round((targetHealth.current / targetHealth.max) * 100)
     : 0;
 
-  // Responsive padding/sizing - compact for desktop
+  // Responsive padding/sizing - compact for both mobile and desktop
   const p = shouldUseMobileUI
-    ? { outer: 6, inner: 8, gap: 6 }
+    ? { outer: 4, inner: 5, gap: 4 }
     : { outer: 4, inner: 6, gap: 4 };
 
   return (
@@ -794,8 +794,8 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
         <div
           style={{
             width: "100%",
-            height: shouldUseMobileUI ? "8px" : "6px",
-            background: theme.colors.background.primary,
+            height: shouldUseMobileUI ? "6px" : "6px",
+            background: theme.colors.background.panelPrimary,
             borderRadius: "3px",
             overflow: "hidden",
             border: `1px solid ${theme.colors.border.default}30`,
@@ -879,8 +879,8 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
           <div
             style={{
               width: "100%",
-              height: shouldUseMobileUI ? "8px" : "6px",
-              background: theme.colors.background.primary,
+              height: shouldUseMobileUI ? "6px" : "6px",
+              background: theme.colors.background.panelPrimary,
               borderRadius: "3px",
               overflow: "hidden",
             }}
@@ -953,13 +953,13 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
         onClick={toggleAutoRetaliate}
         className="focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/50"
         style={{
-          padding: shouldUseMobileUI ? "6px 8px" : "5px 6px",
+          padding: shouldUseMobileUI ? "4px 6px" : "5px 6px",
           cursor: "pointer",
           transition: "all 0.1s ease",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          fontSize: shouldUseMobileUI ? "10px" : "9px",
+          fontSize: shouldUseMobileUI ? "9px" : "9px",
           touchAction: "manipulation",
           borderRadius: "4px",
           background: autoRetaliate
@@ -1000,9 +1000,9 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
         </div>
         <span
           style={{
-            padding: shouldUseMobileUI ? "2px 6px" : "1px 5px",
+            padding: shouldUseMobileUI ? "1px 5px" : "1px 5px",
             borderRadius: "3px",
-            fontSize: shouldUseMobileUI ? "9px" : "8px",
+            fontSize: shouldUseMobileUI ? "8px" : "8px",
             fontWeight: 700,
             background: autoRetaliate
               ? "rgba(34, 197, 94, 0.2)"

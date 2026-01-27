@@ -89,7 +89,7 @@ const DraggableSkillCard = memo(function DraggableSkillCard({
       background: isHovered
         ? theme.colors.slot.hover
         : theme.colors.slot.filled,
-      border: `1px solid ${isHovered ? `${theme.colors.border.hover}50` : `${theme.colors.border.default}30`}`,
+      border: `1px solid ${isHovered ? theme.colors.border.hover : theme.colors.border.default}`,
       borderRadius: "3px",
       padding: isMobile ? "4px 6px" : "3px 6px",
       minHeight: isMobile ? MOBILE_SKILLS.cardHeight : 28,

@@ -175,35 +175,6 @@ function DeathIcon({ className }: { className?: string }) {
 }
 
 // ============================================================================
-// Character Silhouette (OSRS-style visual anchor)
-// ============================================================================
-
-/** Character silhouette displayed behind equipment slots */
-function CharacterSilhouette({ color }: { color: string }) {
-  return (
-    <svg
-      viewBox="0 0 80 120"
-      fill={color}
-      className="h-3/4 opacity-[0.12]"
-      style={{ filter: "blur(0.5px)" }}
-    >
-      {/* Head */}
-      <circle cx="40" cy="14" r="10" />
-      {/* Neck */}
-      <rect x="36" y="24" width="8" height="6" rx="1" />
-      {/* Torso */}
-      <path d="M22 30 L58 30 L54 70 L26 70 Z" />
-      {/* Arms */}
-      <rect x="10" y="32" width="12" height="32" rx="4" />
-      <rect x="58" y="32" width="12" height="32" rx="4" />
-      {/* Legs */}
-      <rect x="27" y="70" width="11" height="38" rx="3" />
-      <rect x="42" y="70" width="11" height="38" rx="3" />
-    </svg>
-  );
-}
-
-// ============================================================================
 // Utility Button Component
 // ============================================================================
 
@@ -944,11 +915,6 @@ export function EquipmentPanel({
 
   const renderDesktopEquipmentGrid = () => (
     <>
-      {/* Character Silhouette (OSRS-style visual anchor) - Desktop only */}
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <CharacterSilhouette color={theme.colors.accent.primary} />
-      </div>
-
       {/* Paperdoll Grid Layout - 3 rows for melee-only MVP */}
       <div
         className="relative grid h-full"
@@ -1034,7 +1000,7 @@ export function EquipmentPanel({
         <div
           className="flex-1 relative overflow-hidden"
           style={{
-            background: theme.colors.background.secondary,
+            background: theme.colors.background.panelSecondary,
             border: "1px solid rgba(10, 10, 12, 0.6)",
             borderRadius: `${theme.borderRadius.md}px`,
             padding: shouldUseMobileUI ? 0 : `${theme.spacing.sm}px`,
@@ -1053,7 +1019,7 @@ export function EquipmentPanel({
           <div
             className="flex items-center justify-center gap-2 px-3 py-1.5"
             style={{
-              background: theme.colors.background.secondary,
+              background: theme.colors.background.panelSecondary,
               borderRadius: `${theme.borderRadius.sm}px`,
               border: "1px solid rgba(10, 10, 12, 0.6)",
               boxShadow: "inset 1px 1px 3px rgba(0, 0, 0, 0.3)",

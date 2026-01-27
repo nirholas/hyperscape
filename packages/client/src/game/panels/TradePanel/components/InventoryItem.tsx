@@ -27,7 +27,7 @@ export function InventoryItem({
       style={{
         width: "36px",
         height: "36px",
-        background: theme.colors.background.tertiary,
+        background: theme.colors.background.panelSecondary,
         border: `1px solid ${theme.colors.border.default}`,
         borderRadius: "4px",
         cursor: "pointer",

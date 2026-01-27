@@ -88,13 +88,13 @@ const default2Col = calculateLayoutDimensions(2, DEFAULT_PRAYER_COUNT);
 export const PRAYER_PANEL_DIMENSIONS = {
   // Minimum size: 2 columns
   minWidth: default2Col.width,
-  minHeight: 180,
+  minHeight: 235,
   // Preferred size: 6 columns (compact layout)
   defaultWidth: default6Col.width,
   defaultHeight: default6Col.height,
   // Max size: wider for horizontal layouts
-  maxWidth: 400,
-  maxHeight: 450,
+  maxWidth: 520,
+  maxHeight: 585,
   // Layout breakpoints
   layouts: {
     twoCol: default2Col,
@@ -425,14 +425,8 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
   // Calculate number of columns based on container width and mobile state
   const gridColumns = useMemo(() => {
     if (shouldUseMobileUI) {
-      // Mobile: max 4 columns with larger icons
-      const availableWidth =
-        containerWidth - PANEL_PADDING * 2 - GRID_PADDING * 2;
-      const colWidth = MOBILE_PRAYER.iconSize + MOBILE_PRAYER.gap;
-      const maxCols = Math.floor(
-        (availableWidth + MOBILE_PRAYER.gap) / colWidth,
-      );
-      return Math.max(2, Math.min(MOBILE_PRAYER.maxColumns, maxCols));
+      // Mobile: always use 4 columns for consistent layout
+      return MOBILE_PRAYER.minColumns;
     }
     return calculateColumns(containerWidth);
   }, [containerWidth, shouldUseMobileUI]);

@@ -389,7 +389,7 @@ export function StatsPanel({
       <div
         style={{
           padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
-          background: theme.colors.background.tertiary,
+          background: theme.colors.background.panelSecondary,
           borderRadius: `${theme.borderRadius.md}px`,
           border: `1px solid ${theme.colors.border.default}`,
         }}
@@ -542,7 +542,7 @@ export function StatsPanel({
       <div
         className="flex-1 overflow-y-auto noscrollbar"
         style={{
-          background: theme.colors.background.tertiary,
+          background: theme.colors.background.panelSecondary,
           borderRadius: `${theme.borderRadius.md}px`,
           border: `1px solid ${theme.colors.border.default}`,
           padding: `${theme.spacing.xs}px ${theme.spacing.xs}px`,
@@ -697,7 +697,7 @@ export function StatsPanel({
             flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
-            background: theme.colors.background.tertiary,
+            background: theme.colors.background.panelSecondary,
             borderRadius: `${theme.borderRadius.md}px`,
             border: `1px solid ${theme.colors.border.default}`,
             padding: "12px",

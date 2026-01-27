@@ -36,7 +36,7 @@ export function TradeRequestModal({
   const { name, level } = state.fromPlayer;
 
   const playerInfoStyle: CSSProperties = {
-    background: theme.colors.background.tertiary,
+    background: theme.colors.background.panelSecondary,
     border: `1px solid ${theme.colors.border.default}`,
     borderRadius: theme.borderRadius.md,
     padding: theme.spacing.md,

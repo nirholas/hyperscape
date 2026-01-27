@@ -76,8 +76,17 @@ export function createModifierContext(
  * Get current viewport dimensions in scaled UI space
  * When the UI is scaled via CSS transform, the effective viewport is larger/smaller
  * than the actual screen (e.g., at 1.5x scale, 1920px screen = 1280px scaled viewport)
+ * Uses clientWidth/clientHeight to exclude scrollbars for accurate snapping
  */
 export function getViewportSize(): Size {
+  if (typeof document !== "undefined" && document.documentElement) {
+    const scale = getUIScale();
+    // Use clientWidth/clientHeight to get the actual usable viewport (excludes scrollbars)
+    return {
+      width: document.documentElement.clientWidth / scale,
+      height: document.documentElement.clientHeight / scale,
+    };
+  }
   if (typeof globalThis !== "undefined" && globalThis.innerWidth) {
     const scale = getUIScale();
     return {

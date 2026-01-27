@@ -78,7 +78,7 @@ export const BankSlotItem = memo(function BankSlotItem({
         background: showSwapHighlight
           ? `linear-gradient(135deg, rgba(${dropColor}, 0.35) 0%, rgba(${dropColor}, 0.2) 100%)`
           : isPlaceholder
-            ? `linear-gradient(135deg, ${theme.colors.background.tertiary}66 0%, ${theme.colors.background.secondary}66 100%)`
+            ? `linear-gradient(135deg, ${theme.colors.background.panelSecondary}66 0%, ${theme.colors.background.panelPrimary}66 100%)`
             : `linear-gradient(135deg, ${theme.colors.slot.filled} 0%, ${theme.colors.slot.empty} 100%)`,
         border: showSwapHighlight
           ? `2px solid rgba(${dropColor}, 0.9)`

@@ -187,9 +187,10 @@ function getStatusEffectColor(effect: StatusEffect): string | null {
 }
 
 /**
- * Status Orb Component (OSRS-style circular variant)
+ * Status Orb Component (Dark fantasy themed variant)
  *
  * Features:
+ * - Dark themed orbs that match the UI aesthetic
  * - Circular fill that drains from bottom as value decreases
  * - Dynamic label color for HP (green → yellow → red)
  * - Status effect background colors (poison, venom, disease)
@@ -242,7 +243,6 @@ export const StatusOrb = memo(function StatusOrb({
   const theme = useTheme();
 
   const percent = Math.max(0, Math.min(100, (current / max) * 100));
-  const bgKey = `${type}Background` as const;
   const statusEffectBg = getStatusEffectColor(statusEffect);
 
   // Determine label color
@@ -251,61 +251,90 @@ export const StatusOrb = memo(function StatusOrb({
       ? getHpLabelColor(percent)
       : theme.colors.text.primary;
 
+  // Use muted, darker versions of status colors for the fill
+  const fillColors: Record<StatusType, { fill: string; dark: string }> = {
+    hp: { fill: "#b91c1c", dark: "#7f1d1d" }, // Darker red
+    prayer: { fill: "#0284c7", dark: "#0c4a6e" }, // Darker blue
+    adrenaline: { fill: "#b45309", dark: "#78350f" }, // Darker amber
+    energy: { fill: "#15803d", dark: "#14532d" }, // Darker green
+  };
+
+  const colors = fillColors[type];
+
+  // Outer container - dark themed ring
   const containerStyle: CSSProperties = {
     width: size,
     height: size,
     position: "relative",
     borderRadius: "50%",
-    backgroundColor: statusEffectBg || theme.colors.status[bgKey],
-    border: `2px solid ${theme.colors.status[type]}`,
-    overflow: "hidden",
+    padding: 2,
+    background: `linear-gradient(145deg, ${theme.colors.background.tertiary} 0%, ${theme.colors.background.primary} 100%)`,
+    border: `1px solid ${theme.colors.border.default}`,
+    boxShadow: `
+      0 2px 8px rgba(0, 0, 0, 0.5),
+      inset 0 1px 1px rgba(255, 255, 255, 0.05)
+    `,
     cursor: onClick ? "pointer" : "default",
-    boxShadow: theme.shadows.sm,
-    transition: "background-color 0.3s ease-out",
     ...style,
   };
 
-  // OSRS-style drain fill (fills from bottom)
+  // Inner orb container
+  const innerOrbStyle: CSSProperties = {
+    width: "100%",
+    height: "100%",
+    borderRadius: "50%",
+    position: "relative",
+    overflow: "hidden",
+    background: statusEffectBg || theme.colors.background.primary,
+    border: `1px solid rgba(0, 0, 0, 0.4)`,
+    boxShadow: `inset 0 2px 6px rgba(0, 0, 0, 0.6)`,
+  };
+
+  // Drain fill (fills from bottom)
   const fillStyle: CSSProperties = {
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
     height: `${percent}%`,
-    backgroundColor: theme.colors.status[type],
-    opacity: 0.8,
+    background: `linear-gradient(to top, ${colors.fill} 0%, ${colors.dark} 100%)`,
     transition: "height 0.3s ease-out",
-    // Add subtle gradient for depth
-    backgroundImage: `linear-gradient(to top, 
-      ${theme.colors.status[type]} 0%, 
-      ${theme.colors.status[type]}dd 60%,
-      ${theme.colors.status[type]}aa 100%)`,
+    boxShadow: `inset 0 1px 2px rgba(255, 255, 255, 0.15)`,
   };
 
-  // Icon/content layer
+  // Determine what to display
+  const showValueLabel = showValue && icon;
+
+  // Icon/content layer - positioned higher when value label is also shown
   const iconStyle: CSSProperties = {
     position: "absolute",
     inset: 0,
     display: "flex",
-    alignItems: "center",
+    alignItems: showValueLabel ? "flex-start" : "center",
     justifyContent: "center",
-    fontSize: size * 0.35,
+    paddingTop: showValueLabel ? size * 0.18 : 0,
+    fontSize: size * 0.32,
     zIndex: 1,
     pointerEvents: "none",
+    filter: "drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8))",
   };
 
   // Value label (number display)
   const valueStyle: CSSProperties = {
     position: "absolute",
-    bottom: 2,
+    bottom: size * 0.08,
     left: 0,
     right: 0,
     display: "flex",
     justifyContent: "center",
-    fontSize: size * 0.28,
+    fontSize: size * 0.26,
     fontWeight: theme.typography.fontWeight.bold,
     color: labelColor,
-    textShadow: "1px 1px 2px rgba(0,0,0,0.9), -1px -1px 1px rgba(0,0,0,0.5)",
+    textShadow: `
+      0 0 4px rgba(0, 0, 0, 1),
+      1px 1px 2px rgba(0, 0, 0, 0.9),
+      -1px -1px 1px rgba(0, 0, 0, 0.5)
+    `,
     zIndex: 2,
     pointerEvents: "none",
   };
@@ -317,8 +346,6 @@ export const StatusOrb = memo(function StatusOrb({
       ? current.toString()
       : icon;
 
-  const showValueLabel = showValue && icon;
-
   return (
     <div
       className={className}
@@ -328,14 +355,16 @@ export const StatusOrb = memo(function StatusOrb({
       role={onClick ? "button" : undefined}
       title={`${type.charAt(0).toUpperCase() + type.slice(1)}: ${current}/${max}`}
     >
-      {/* Drain fill */}
-      <div style={fillStyle} />
+      <div style={innerOrbStyle}>
+        {/* Drain fill */}
+        <div style={fillStyle} />
 
-      {/* Icon or main content */}
-      <div style={iconStyle}>{showValueLabel ? icon : displayContent}</div>
+        {/* Icon or main content */}
+        <div style={iconStyle}>{showValueLabel ? icon : displayContent}</div>
 
-      {/* Value label below icon (when both icon and value are shown) */}
-      {showValueLabel && <div style={valueStyle}>{current}</div>}
+        {/* Value label below icon (when both icon and value are shown) */}
+        {showValueLabel && <div style={valueStyle}>{current}</div>}
+      </div>
     </div>
   );
 });

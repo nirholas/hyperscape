@@ -166,7 +166,7 @@ export function RightPanel({
     <div
       className="flex flex-col rounded-lg"
       style={{
-        background: theme.colors.background.primary,
+        background: theme.colors.background.panelPrimary,
         border: `2px solid ${theme.colors.border.decorative}`,
         boxShadow: `0 10px 30px rgba(0, 0, 0, 0.5), inset 0 1px 0 ${theme.colors.border.default}`,
         width: shouldUseMobileUI
@@ -322,7 +322,7 @@ export function RightPanel({
           <div
             className="p-2 flex-1"
             style={{
-              background: `linear-gradient(135deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+              background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
               borderRadius: "4px",
               margin: "4px",
             }}

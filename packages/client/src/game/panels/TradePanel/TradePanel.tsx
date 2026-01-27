@@ -183,7 +183,7 @@ export function TradePanel({
       <div
         className="rounded-lg shadow-xl"
         style={{
-          background: `linear-gradient(135deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+          background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
           border: `2px solid ${theme.colors.border.decorative}`,
           // OSRS layout: wider to fit inventory on right side
           width: state.screen === "offer" ? "680px" : "480px",
@@ -193,7 +193,7 @@ export function TradePanel({
         <div
           className="px-4 py-3 rounded-t-lg flex items-center justify-between"
           style={{
-            background: theme.colors.background.tertiary,
+            background: theme.colors.background.panelSecondary,
             borderBottom: `1px solid ${theme.colors.border.decorative}`,
           }}
         >
@@ -267,7 +267,7 @@ export function TradePanel({
                     className="grid gap-1 p-2 rounded"
                     style={{
                       gridTemplateColumns: `repeat(${TRADE_GRID_COLS}, 36px)`,
-                      background: theme.colors.background.tertiary,
+                      background: theme.colors.background.panelSecondary,
                       border: `1px solid ${theme.colors.border.default}`,
                     }}
                   >
@@ -291,7 +291,7 @@ export function TradePanel({
                   <div
                     className="mt-2 px-2 py-1 rounded text-xs text-center"
                     style={{
-                      background: theme.colors.background.tertiary,
+                      background: theme.colors.background.panelSecondary,
                       border: `1px solid ${theme.colors.border.default}`,
                       color: theme.colors.text.secondary,
                     }}
@@ -335,7 +335,7 @@ export function TradePanel({
                     className="grid gap-1 p-2 rounded"
                     style={{
                       gridTemplateColumns: `repeat(${TRADE_GRID_COLS}, 36px)`,
-                      background: theme.colors.background.tertiary,
+                      background: theme.colors.background.panelSecondary,
                       border: `1px solid ${theme.colors.border.default}`,
                     }}
                   >
@@ -354,7 +354,7 @@ export function TradePanel({
                   <div
                     className="mt-2 px-2 py-1 rounded text-xs text-center"
                     style={{
-                      background: theme.colors.background.tertiary,
+                      background: theme.colors.background.panelSecondary,
                       border: `1px solid ${theme.colors.border.default}`,
                       color: theme.colors.text.secondary,
                     }}
@@ -371,7 +371,7 @@ export function TradePanel({
               <div
                 className="mt-3 px-3 py-2 rounded text-sm flex items-center justify-between"
                 style={{
-                  background: theme.colors.background.tertiary,
+                  background: theme.colors.background.panelSecondary,
                   border: `1px solid ${theme.colors.border.decorative}`,
                 }}
               >

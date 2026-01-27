@@ -13,6 +13,7 @@ import {
   useSensors,
   useSensor,
   PointerSensor,
+  TouchSensor,
   KeyboardSensor,
   type DragEndEvent,
   type DragStartEvent,
@@ -763,11 +764,18 @@ export function InventoryPanel({
   const theme = useThemeStore((s) => s.theme);
   const { shouldUseMobileUI } = useMobileLayout();
 
-  // Configure sensors for accessibility (keyboard + pointer support)
+  // Configure sensors for accessibility and mobile support
+  // PointerSensor: distance-based for mouse, TouchSensor: delay-based for mobile long-press
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
         distance: 8, // Require 8px movement before drag starts
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 250, // Long-press 250ms to start drag on mobile
+        tolerance: 5,
       },
     }),
     useSensor(KeyboardSensor),
@@ -1295,7 +1303,7 @@ export function InventoryPanel({
       <div
         className="border rounded overflow-hidden flex-1"
         style={{
-          background: theme.colors.background.secondary,
+          background: theme.colors.background.panelSecondary,
           borderColor: "rgba(10, 10, 12, 0.6)",
           // Embossed container: dark top-left edge, subtle light bottom-right
           boxShadow: `inset 2px 2px 4px rgba(0, 0, 0, 0.4), inset -1px -1px 3px rgba(40, 40, 45, 0.08)`,

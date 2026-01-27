@@ -1,4 +1,5 @@
 export { useEditMode } from "./useEditMode";
+export { useEditModeKeyboard } from "./useEditModeKeyboard";
 export { useGrid } from "./useGrid";
 export { useAlignmentGuides } from "./useAlignmentGuides";
 export {

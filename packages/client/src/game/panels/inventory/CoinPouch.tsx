@@ -51,7 +51,7 @@ export function CoinPouch({ coins, onWithdrawClick }: CoinPouchProps) {
       tabIndex={0}
       className="border rounded flex items-center justify-between py-1 px-2 cursor-pointer hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-yellow-500/50 transition-all"
       style={{
-        background: `linear-gradient(180deg, ${theme.colors.background.tertiary} 0%, ${theme.colors.background.secondary} 100%)`,
+        background: `linear-gradient(180deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
         borderColor: theme.colors.border.default,
         boxShadow:
           "inset 0 1px 0 rgba(150, 130, 80, 0.2), 0 1px 2px rgba(0, 0, 0, 0.3)",

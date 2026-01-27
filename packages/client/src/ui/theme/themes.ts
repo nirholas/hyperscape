@@ -25,6 +25,10 @@ export interface Theme {
       tertiary: string;
       overlay: string;
       glass: string;
+      /** Semi-transparent panel background (primary) - use for panel containers */
+      panelPrimary: string;
+      /** Semi-transparent panel background (secondary) - use for panel sections */
+      panelSecondary: string;
     };
     text: {
       primary: string;
@@ -196,26 +200,28 @@ export const baseTheme: Theme = {
 
   colors: {
     background: {
-      primary: "#18181b", // Zinc-900
-      secondary: "#27272a", // Zinc-800
-      tertiary: "#3f3f46", // Zinc-700
+      primary: "#1c1c20", // Slightly lighter base
+      secondary: "#32323a", // Much lighter for contrast
+      tertiary: "#4e4e58", // Significantly lighter for clear separation
       overlay: "rgba(0, 0, 0, 0.7)",
-      glass: "rgba(24, 24, 27, 0.88)",
+      glass: "rgba(28, 28, 32, 0.78)",
+      panelPrimary: "rgba(35, 35, 42, 0.75)", // Lighter panel background
+      panelSecondary: "rgba(58, 58, 68, 0.75)", // Much more visible panel section
     },
     text: {
       primary: "#fafafa", // Zinc-50
-      secondary: "#a1a1aa", // Zinc-400
-      muted: "#71717a", // Zinc-500
-      disabled: "#52525b", // Zinc-600
-      link: "#60a5fa", // Blue-400
-      accent: "#60a5fa",
+      secondary: "#b8b8c0", // Brighter secondary
+      muted: "#8888a0", // Lighter muted
+      disabled: "#606068", // Lighter disabled
+      link: "#70b0ff", // Brighter blue
+      accent: "#70b0ff",
     },
     border: {
-      default: "#3f3f46", // Zinc-700
-      hover: "#52525b", // Zinc-600
-      active: "#71717a", // Zinc-500
-      focus: "#60a5fa", // Blue-400
-      decorative: "#3f3f46",
+      default: "#606068", // Much lighter for visibility
+      hover: "#808090", // Lighter
+      active: "#a0a0b0", // Lighter
+      focus: "#70b0ff", // Brighter blue
+      decorative: "#606068", // Lighter for visibility
     },
     accent: {
       primary: "#3b82f6", // Blue-500
@@ -240,11 +246,11 @@ export const baseTheme: Theme = {
       energyBackground: "#14532d",
     },
     slot: {
-      empty: "#18181b",
-      filled: "#27272a",
-      hover: "#3f3f46",
-      selected: "#52525b",
-      disabled: "#121214",
+      empty: "#24242a", // Lighter for visibility
+      filled: "#38383e", // Much lighter for contrast
+      hover: "#50505a", // Lighter hover state
+      selected: "#686870", // Lighter selected state
+      disabled: "#18181c", // Slightly lighter disabled
     },
   },
 
@@ -331,8 +337,8 @@ export const baseTheme: Theme = {
   panel: {
     headerHeight: 32,
     borderWidth: 1,
-    minWidth: 200,
-    minHeight: 150,
+    minWidth: 260,
+    minHeight: 195,
   },
 
   slot: {
@@ -360,26 +366,28 @@ export const hyperscapeTheme: Theme = {
 
   colors: {
     background: {
-      primary: "#0a0a0c", // Slightly cooler black
-      secondary: "#141418", // Dark with hint of blue
-      tertiary: "#1e1e24", // Elevated surface
-      overlay: "rgba(0, 0, 0, 0.8)",
-      glass: "rgba(10, 10, 12, 0.92)",
+      primary: "#0f0f12", // Slightly lighter base
+      secondary: "#22222a", // Much lighter for contrast
+      tertiary: "#363640", // Significantly lighter for clear separation
+      overlay: "rgba(0, 0, 0, 0.75)",
+      glass: "rgba(18, 18, 22, 0.82)", // Lighter glass
+      panelPrimary: "rgba(25, 25, 32, 0.78)", // Lighter panel background
+      panelSecondary: "rgba(45, 45, 56, 0.82)", // Much more visible panel section
     },
     text: {
-      primary: "#f5f0e8", // Warm white
-      secondary: "#c4b896", // Muted gold
-      muted: "#7d7460", // Subtle brown
-      disabled: "#454545",
-      link: "#e8c55a", // Bright gold link
-      accent: "#ffd866", // Vibrant gold accent
+      primary: "#f8f4ec", // Brighter warm white
+      secondary: "#d4c8a6", // Brighter muted gold
+      muted: "#9a8d78", // Lighter subtle brown
+      disabled: "#555555",
+      link: "#f0d060", // Brighter gold link
+      accent: "#ffe080", // Brighter vibrant gold accent
     },
     border: {
-      default: "#2d2820", // Subtle brown border
-      hover: "#4a3f30", // Warmer hover
-      active: "#6b5a40", // Active state
-      focus: "#e8c55a", // Bright gold focus ring
-      decorative: "#8b6914", // Rich bronze decorative
+      default: "#4d4540", // Much lighter for visibility
+      hover: "#6a5f50", // Lighter hover
+      active: "#8b7a60", // Lighter active state
+      focus: "#f0d060", // Brighter gold focus ring
+      decorative: "#b88828", // Much brighter bronze decorative
     },
     accent: {
       primary: "#d4a84b", // Rich classic gold
@@ -404,11 +412,11 @@ export const hyperscapeTheme: Theme = {
       energyBackground: "#0d2d0d",
     },
     slot: {
-      empty: "#0c0c0e",
-      filled: "#16151a",
-      hover: "#24222a",
-      selected: "#3d3830",
-      disabled: "#080808",
+      empty: "#1a1a20", // Lighter for visibility
+      filled: "#2a2a32", // Much lighter for contrast
+      hover: "#3a3844", // Lighter hover state
+      selected: "#5a5248", // Lighter selected state
+      disabled: "#101012", // Darker disabled
     },
   },
 
@@ -487,15 +495,15 @@ export const hyperscapeTheme: Theme = {
 
   glass: {
     blur: 16,
-    opacity: 0.9,
+    opacity: 0.8,
     borderOpacity: 0.4,
   },
 
   panel: {
     headerHeight: 28,
     borderWidth: 1,
-    minWidth: 200,
-    minHeight: 150,
+    minWidth: 260,
+    minHeight: 195,
   },
 
   slot: {

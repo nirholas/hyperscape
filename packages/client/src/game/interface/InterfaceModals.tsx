@@ -748,36 +748,28 @@ export function InterfaceModalsRenderer({
         </ModalWindow>
       )}
 
-      {/* Dialogue Panel */}
+      {/* Dialogue Panel - renders with its own fixed positioning, no ModalWindow wrapper needed */}
       {dialogueData?.visible && (
-        <ModalWindow
-          visible={true}
-          onClose={() => setDialogueData(null)}
-          title={dialogueData.npcName}
-          width={500}
-          closeOnBackdropClick={false}
-        >
-          <DialoguePanel
-            visible={dialogueData.visible}
-            npcName={dialogueData.npcName}
-            npcId={dialogueData.npcId}
-            text={dialogueData.text}
-            responses={dialogueData.responses}
-            npcEntityId={dialogueData.npcEntityId}
-            world={world}
-            onSelectResponse={(_index, response) => {
-              if (!response.nextNodeId) {
-                setDialogueData(null);
-              }
-            }}
-            onClose={() => {
+        <DialoguePanel
+          visible={dialogueData.visible}
+          npcName={dialogueData.npcName}
+          npcId={dialogueData.npcId}
+          text={dialogueData.text}
+          responses={dialogueData.responses}
+          npcEntityId={dialogueData.npcEntityId}
+          world={world}
+          onSelectResponse={(_index, response) => {
+            if (!response.nextNodeId) {
               setDialogueData(null);
-              world?.network?.send?.("dialogue_end", {
-                npcId: dialogueData.npcId,
-              });
-            }}
-          />
-        </ModalWindow>
+            }
+          }}
+          onClose={() => {
+            setDialogueData(null);
+            world?.network?.send?.("dialogue_end", {
+              npcId: dialogueData.npcId,
+            });
+          }}
+        />
       )}
 
       {/* Smelting Panel */}

@@ -19,7 +19,6 @@ import React, {
   useState,
   useEffect,
   useMemo,
-  useCallback,
 } from "react";
 import type {
   ClientWorld,
@@ -40,7 +39,6 @@ import {
   AccessibilityPanel,
   useWindowStore,
   useThemeStore,
-  useEditStore,
 } from "@/ui";
 
 /** Size dimensions type */
@@ -325,16 +323,16 @@ export const MENUBAR_DIMENSIONS = {
 export const PANEL_CONFIG: Record<string, PanelConfig> = {
   // Inventory - fixed grid layout (4x7), panel handles own overflow
   inventory: {
-    minSize: { width: 200, height: 260 },
-    preferredSize: { width: 240, height: 320 },
-    maxSize: { width: 320, height: 420 },
+    minSize: { width: 260, height: 340 },
+    preferredSize: { width: 320, height: 420 },
+    maxSize: { width: 420, height: 550 },
     scrollable: false,
     resizable: true,
     scaleFactor: { min: 0.85, max: 1.15 },
     responsive: {
-      mobile: { width: 200, height: 280 },
-      tablet: { width: 220, height: 300 },
-      desktop: { width: 240, height: 320 },
+      mobile: { width: 260, height: 360 },
+      tablet: { width: 290, height: 390 },
+      desktop: { width: 320, height: 420 },
     },
     mobileLayout: {
       drawerType: "sheet",
@@ -345,16 +343,16 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
   },
   // Equipment - fixed layout, needs specific dimensions for slot arrangement
   equipment: {
-    minSize: { width: 180, height: 260 },
-    preferredSize: { width: 220, height: 320 },
-    maxSize: { width: 300, height: 420 },
+    minSize: { width: 210, height: 290 },
+    preferredSize: { width: 260, height: 360 },
+    maxSize: { width: 390, height: 550 },
     scrollable: false,
     resizable: true,
     scaleFactor: { min: 0.85, max: 1.15 },
     responsive: {
-      mobile: { width: 180, height: 280 },
-      tablet: { width: 200, height: 300 },
-      desktop: { width: 220, height: 320 },
+      mobile: { width: 215, height: 310 },
+      tablet: { width: 235, height: 340 },
+      desktop: { width: 260, height: 360 },
     },
     mobileLayout: {
       drawerType: "sheet",
@@ -366,18 +364,18 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
   // Stats - full skills display with combat, gathering, production sections
   stats: {
     // Minimum size ensures all content visible without cutoff
-    minSize: { width: 195, height: 265 },
-    preferredSize: { width: 210, height: 285 },
+    minSize: { width: 255, height: 345 },
+    preferredSize: { width: 275, height: 370 },
     // Max size allows modest expansion without oversizing
-    maxSize: { width: 250, height: 340 },
+    maxSize: { width: 325, height: 440 },
     scrollable: false, // Content fits within bounds
     resizable: true,
     // Tight scale limits for readability
     scaleFactor: { min: 0.92, max: 1.1 },
     responsive: {
-      mobile: { width: 195, height: 265 },
-      tablet: { width: 205, height: 280 },
-      desktop: { width: 210, height: 285 },
+      mobile: { width: 255, height: 345 },
+      tablet: { width: 265, height: 365 },
+      desktop: { width: 275, height: 370 },
     },
     mobileLayout: {
       drawerType: "modal",
@@ -386,23 +384,27 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
     },
   },
   // Skills - 3x4 grid of skill icons with total/combat level footer
+  // Mobile size matches Prayer panel for consistent tab switching
   skills: {
-    minSize: { width: 220, height: 280 },
-    preferredSize: { width: 250, height: 310 },
-    maxSize: { width: 300, height: 360 },
+    minSize: { width: 235, height: 310 },
+    preferredSize: { width: 325, height: 400 },
+    maxSize: { width: 390, height: 470 },
     scrollable: false,
     resizable: true,
     scaleFactor: { min: 0.85, max: 1.15 },
     responsive: {
-      mobile: { width: 220, height: 280 },
-      tablet: { width: 235, height: 295 },
-      desktop: { width: 250, height: 310 },
+      mobile: {
+        width: PRAYER_PANEL_DIMENSIONS.layouts.fourCol.width,
+        height: PRAYER_PANEL_DIMENSIONS.layouts.fourCol.height,
+      },
+      tablet: { width: 305, height: 385 },
+      desktop: { width: 325, height: 400 },
     },
     mobileLayout: {
       drawerType: "sheet",
       drawerHeight: "half",
       landscapePosition: "right",
-      gridColumns: 3,
+      gridColumns: 4,
     },
   },
   // Prayer - grid of prayer icons with adaptive layout
@@ -445,16 +447,16 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
   },
   // Combat - combat stats and style selector
   combat: {
-    minSize: { width: 180, height: 180 },
-    preferredSize: { width: 240, height: 280 },
-    maxSize: { width: 320, height: 360 },
+    minSize: { width: 235, height: 235 },
+    preferredSize: { width: 310, height: 360 },
+    maxSize: { width: 420, height: 470 },
     scrollable: false,
     resizable: true,
     scaleFactor: { min: 0.8, max: 1.2 },
     responsive: {
-      mobile: { width: 200, height: 240 },
-      tablet: { width: 220, height: 260 },
-      desktop: { width: 240, height: 280 },
+      mobile: { width: 260, height: 310 },
+      tablet: { width: 285, height: 340 },
+      desktop: { width: 310, height: 360 },
     },
     mobileLayout: {
       drawerType: "sheet",
@@ -465,16 +467,16 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
   },
   // Settings - toggles and sliders, panel handles own scrolling
   settings: {
-    minSize: { width: 220, height: 260 },
-    preferredSize: { width: 280, height: 360 },
-    maxSize: { width: 380, height: 480 },
+    minSize: { width: 290, height: 340 },
+    preferredSize: { width: 360, height: 470 },
+    maxSize: { width: 500, height: 620 },
     scrollable: false,
     resizable: true,
     scaleFactor: { min: 0.8, max: 1.15 },
     responsive: {
-      mobile: { width: 240, height: 300 },
-      tablet: { width: 260, height: 330 },
-      desktop: { width: 280, height: 360 },
+      mobile: { width: 310, height: 390 },
+      tablet: { width: 340, height: 430 },
+      desktop: { width: 360, height: 470 },
     },
     mobileLayout: {
       drawerType: "modal",
@@ -484,17 +486,17 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
   },
   // Minimap - no max size for flexible resizing, no aspect ratio for independent width/height
   minimap: {
-    minSize: { width: 180, height: 180 },
-    preferredSize: { width: 420, height: 420 },
+    minSize: { width: 235, height: 235 },
+    preferredSize: { width: 550, height: 550 },
     // No maxSize - allow unlimited resizing in edit mode
     // No aspectRatio - allow independent width/height resizing
     scrollable: false,
     resizable: true,
     scaleFactor: { min: 0.6, max: 1.2 },
     responsive: {
-      mobile: { width: 200, height: 200 },
-      tablet: { width: 320, height: 320 },
-      desktop: { width: 420, height: 420 },
+      mobile: { width: 260, height: 260 },
+      tablet: { width: 420, height: 420 },
+      desktop: { width: 550, height: 550 },
     },
     mobileLayout: {
       drawerType: "overlay",
@@ -505,16 +507,16 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
   },
   // Chat - needs width for messages, panel handles own scrolling
   chat: {
-    minSize: { width: 280, height: 280 },
-    preferredSize: { width: 400, height: 450 },
+    minSize: { width: 130, height: 195 },
+    preferredSize: { width: 520, height: 585 },
     // No maxSize - allow unlimited resizing in edit mode (like minimap)
     scrollable: false,
     resizable: true,
     // No scaleFactor - use preferredSize directly without scaling limits
     responsive: {
-      mobile: { width: 320, height: 350 },
-      tablet: { width: 380, height: 420 },
-      desktop: { width: 400, height: 450 },
+      mobile: { width: 260, height: 390 },
+      tablet: { width: 260, height: 495 },
+      desktop: { width: 520, height: 585 },
     },
     mobileLayout: {
       drawerType: "overlay",
@@ -524,16 +526,16 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
   },
   // Presets - layout management, panel handles own layout
   presets: {
-    minSize: { width: 180, height: 180 },
-    preferredSize: { width: 260, height: 300 },
-    maxSize: { width: 340, height: 400 },
+    minSize: { width: 235, height: 235 },
+    preferredSize: { width: 340, height: 390 },
+    maxSize: { width: 440, height: 520 },
     scrollable: false,
     resizable: true,
     scaleFactor: { min: 0.8, max: 1.15 },
     responsive: {
-      mobile: { width: 220, height: 260 },
-      tablet: { width: 240, height: 280 },
-      desktop: { width: 260, height: 300 },
+      mobile: { width: 285, height: 340 },
+      tablet: { width: 310, height: 365 },
+      desktop: { width: 340, height: 390 },
     },
     mobileLayout: {
       drawerType: "modal",
@@ -543,16 +545,16 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
   },
   // Accessibility settings panel
   accessibility: {
-    minSize: { width: 220, height: 300 },
-    preferredSize: { width: 280, height: 400 },
-    maxSize: { width: 360, height: 520 },
+    minSize: { width: 290, height: 390 },
+    preferredSize: { width: 360, height: 520 },
+    maxSize: { width: 470, height: 680 },
     scrollable: false,
     resizable: true,
     scaleFactor: { min: 0.85, max: 1.15 },
     responsive: {
-      mobile: { width: 250, height: 360 },
-      tablet: { width: 265, height: 380 },
-      desktop: { width: 280, height: 400 },
+      mobile: { width: 325, height: 470 },
+      tablet: { width: 345, height: 495 },
+      desktop: { width: 360, height: 520 },
     },
     mobileLayout: {
       drawerType: "modal",
@@ -591,49 +593,36 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
       },
     },
   },
-  // Menu bar - row of panel buttons with +/- controls
-  // Supports 4-9 buttons, similar to action bar functionality
-  // Uses actual calculated dimensions to prevent resizing larger than content
+  // Menu bar - responsive grid of panel buttons
+  // Buttons scale to fit container, supports various grid layouts (1-5 rows)
   menubar: {
-    // Minimum: supports both horizontal and vertical layouts with buffer for borders
-    minSize: {
-      width: MENUBAR_DIMENSIONS.minWidth,
-      height: MENUBAR_DIMENSIONS.minHeight,
-    },
-    // Default: 9 buttons in a row
-    preferredSize: {
-      width: MENUBAR_DIMENSIONS.width,
-      height: MENUBAR_DIMENSIONS.height,
-    },
-    // Maximum: 9-button horizontal layout
-    maxSize: {
-      width: MENUBAR_DIMENSIONS.maxWidth,
-      height: MENUBAR_DIMENSIONS.maxHeight,
-    },
+    // Minimum: compact grid with small buttons (reduced for flexibility)
+    minSize: { width: 70, height: 36 },
+    // Default: horizontal row of 9 buttons with slight padding for grab area
+    preferredSize: { width: 340, height: 58 },
+    // Maximum: large buttons in horizontal layout
+    maxSize: { width: 520, height: 300 },
     scrollable: false,
     resizable: true,
-    scaleFactor: { min: 0.85, max: 1.2 },
+    scaleFactor: { min: 0.7, max: 1.4 },
     responsive: {
-      mobile: { width: 280, height: MENUBAR_DIMENSIONS.height },
-      tablet: { width: 320, height: MENUBAR_DIMENSIONS.height },
-      desktop: {
-        width: MENUBAR_DIMENSIONS.width,
-        height: MENUBAR_DIMENSIONS.height,
-      },
+      mobile: { width: 180, height: 100 },
+      tablet: { width: 300, height: 58 },
+      desktop: { width: 340, height: 58 },
     },
   },
   // Bank - large grid, panel handles own scrolling
   bank: {
-    minSize: { width: 280, height: 280 },
-    preferredSize: { width: 400, height: 400 },
-    maxSize: { width: 600, height: 600 },
+    minSize: { width: 365, height: 365 },
+    preferredSize: { width: 520, height: 520 },
+    maxSize: { width: 780, height: 780 },
     scrollable: false,
     resizable: true,
     scaleFactor: { min: 0.75, max: 1.25 },
     responsive: {
-      mobile: { width: 320, height: 340 },
-      tablet: { width: 360, height: 370 },
-      desktop: { width: 400, height: 400 },
+      mobile: { width: 420, height: 440 },
+      tablet: { width: 470, height: 480 },
+      desktop: { width: 520, height: 520 },
     },
     mobileLayout: {
       drawerType: "modal",
@@ -643,16 +632,16 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
   },
   // Store - item list, panel handles own layout
   store: {
-    minSize: { width: 260, height: 280 },
-    preferredSize: { width: 320, height: 400 },
-    maxSize: { width: 450, height: 550 },
+    minSize: { width: 340, height: 365 },
+    preferredSize: { width: 420, height: 520 },
+    maxSize: { width: 585, height: 715 },
     scrollable: false,
     resizable: true,
     scaleFactor: { min: 0.8, max: 1.2 },
     responsive: {
-      mobile: { width: 280, height: 340 },
-      tablet: { width: 300, height: 370 },
-      desktop: { width: 320, height: 400 },
+      mobile: { width: 365, height: 440 },
+      tablet: { width: 390, height: 480 },
+      desktop: { width: 420, height: 520 },
     },
     mobileLayout: {
       drawerType: "modal",
@@ -662,30 +651,30 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
   },
   // Quests - quest list, panel handles own layout
   quests: {
-    minSize: { width: 200, height: 230 },
-    preferredSize: { width: 280, height: 350 },
-    maxSize: { width: 380, height: 470 },
+    minSize: { width: 260, height: 300 },
+    preferredSize: { width: 365, height: 455 },
+    maxSize: { width: 495, height: 610 },
     scrollable: false,
     resizable: true,
     scaleFactor: { min: 0.8, max: 1.2 },
     responsive: {
-      mobile: { width: 240, height: 300 },
-      tablet: { width: 260, height: 325 },
-      desktop: { width: 280, height: 350 },
+      mobile: { width: 310, height: 390 },
+      tablet: { width: 340, height: 420 },
+      desktop: { width: 365, height: 455 },
     },
   },
   // Quest Detail - separate window for quest details
   "quest-detail": {
-    minSize: { width: 320, height: 400 },
-    preferredSize: { width: 400, height: 500 },
-    maxSize: { width: 500, height: 700 },
+    minSize: { width: 420, height: 520 },
+    preferredSize: { width: 520, height: 650 },
+    maxSize: { width: 650, height: 910 },
     scrollable: true,
     resizable: true,
     scaleFactor: { min: 0.85, max: 1.15 },
     responsive: {
-      mobile: { width: 300, height: 400 },
-      tablet: { width: 350, height: 450 },
-      desktop: { width: 400, height: 500 },
+      mobile: { width: 390, height: 520 },
+      tablet: { width: 455, height: 585 },
+      desktop: { width: 520, height: 650 },
     },
     mobileLayout: {
       drawerType: "modal",
@@ -695,16 +684,16 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
   },
   // Friends - player list, panel handles own layout
   friends: {
-    minSize: { width: 180, height: 180 },
-    preferredSize: { width: 240, height: 300 },
-    maxSize: { width: 320, height: 400 },
+    minSize: { width: 235, height: 235 },
+    preferredSize: { width: 310, height: 390 },
+    maxSize: { width: 420, height: 520 },
     scrollable: false,
     resizable: true,
     scaleFactor: { min: 0.8, max: 1.2 },
     responsive: {
-      mobile: { width: 200, height: 260 },
-      tablet: { width: 220, height: 280 },
-      desktop: { width: 240, height: 300 },
+      mobile: { width: 260, height: 340 },
+      tablet: { width: 285, height: 365 },
+      desktop: { width: 310, height: 390 },
     },
     mobileLayout: {
       drawerType: "sheet",
@@ -714,17 +703,17 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
   },
   // Map - world map view
   map: {
-    minSize: { width: 280, height: 230 },
-    preferredSize: { width: 450, height: 350 },
-    maxSize: { width: 650, height: 500 },
+    minSize: { width: 365, height: 300 },
+    preferredSize: { width: 585, height: 455 },
+    maxSize: { width: 845, height: 650 },
     scrollable: false,
     resizable: true,
     scaleFactor: { min: 0.75, max: 1.3 },
     aspectRatio: 1.286, // ~16:12.5 aspect for map
     responsive: {
-      mobile: { width: 350, height: 280 },
-      tablet: { width: 400, height: 315 },
-      desktop: { width: 450, height: 350 },
+      mobile: { width: 455, height: 365 },
+      tablet: { width: 520, height: 410 },
+      desktop: { width: 585, height: 455 },
     },
     mobileLayout: {
       drawerType: "modal",
@@ -738,16 +727,16 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
 export function getPanelConfig(panelId: string): PanelConfig {
   return (
     PANEL_CONFIG[panelId] || {
-      minSize: { width: 180, height: 140 },
-      preferredSize: { width: 250, height: 200 },
-      maxSize: { width: 350, height: 300 },
+      minSize: { width: 235, height: 180 },
+      preferredSize: { width: 325, height: 260 },
+      maxSize: { width: 455, height: 390 },
       scrollable: false,
       resizable: true,
       scaleFactor: { min: 0.8, max: 1.2 },
       responsive: {
-        mobile: { width: 210, height: 170 },
-        tablet: { width: 230, height: 185 },
-        desktop: { width: 250, height: 200 },
+        mobile: { width: 275, height: 220 },
+        tablet: { width: 300, height: 240 },
+        desktop: { width: 325, height: 260 },
       },
     }
   );
@@ -927,20 +916,98 @@ const ALL_MENU_BUTTONS: Array<{
   { panelId: "settings", iconName: "settings", label: "Settings" },
 ];
 
-// Storage keys for menubar state
-const MENUBAR_LAYOUT_KEY = "menubar-layout";
+// Menubar sizing constraints
+const MENUBAR_MIN_BUTTON_SIZE = 20; // Minimum button size in pixels (reduced for compact layouts)
+const MENUBAR_MAX_BUTTON_SIZE = 32; // Maximum button size in pixels (reduced for cleaner 1-row style)
 
-// Load layout from localStorage (1, 2, or 3 rows)
-function loadMenuBarLayout(): 1 | 2 | 3 {
-  if (typeof window === "undefined") return 1;
-  try {
-    const saved = localStorage.getItem(MENUBAR_LAYOUT_KEY);
-    if (saved === "2") return 2;
-    if (saved === "3") return 3;
-  } catch {
-    /* ignore */
+/**
+ * Calculate optimal grid layout and button size based on container dimensions.
+ *
+ * Algorithm: Find the layout with fewest rows where buttons fit at minimum size.
+ * This ensures we always prefer horizontal layouts when possible, and only add
+ * rows when the width is too narrow for fewer rows.
+ */
+function calculateMenuBarLayout(
+  containerWidth: number,
+  containerHeight: number,
+  buttonCount: number,
+): {
+  cols: number;
+  rows: number;
+  buttonSize: number;
+  gap: number;
+  padding: number;
+} {
+  const padding = MENUBAR_PADDING;
+  const gap = MENUBAR_BUTTON_GAP;
+
+  // Available space after padding
+  const availableWidth = containerWidth - padding * 2 - MENUBAR_BORDER_BUFFER;
+  const availableHeight = containerHeight - padding * 2 - MENUBAR_BORDER_BUFFER;
+
+  // Try layouts from fewest rows to most - pick first that fits at min button size
+  for (let rows = 1; rows <= 5; rows++) {
+    const cols = Math.ceil(buttonCount / rows);
+
+    // Calculate max button size that fits in each dimension
+    const maxWidthButtonSize = (availableWidth - (cols - 1) * gap) / cols;
+    const maxHeightButtonSize = (availableHeight - (rows - 1) * gap) / rows;
+
+    // Use the smaller constraint
+    const buttonSize = Math.min(maxWidthButtonSize, maxHeightButtonSize);
+
+    // If buttons fit at minimum size, use this layout (fewest rows that fits)
+    if (buttonSize >= MENUBAR_MIN_BUTTON_SIZE) {
+      // Clamp to max button size for cleaner appearance
+      const clampedSize = Math.min(
+        Math.floor(buttonSize),
+        MENUBAR_MAX_BUTTON_SIZE,
+      );
+      return {
+        cols,
+        rows,
+        buttonSize: clampedSize,
+        gap,
+        padding,
+      };
+    }
   }
-  return 1;
+
+  // Fallback: use max rows (3x3 grid) with minimum button size
+  const fallbackRows = Math.ceil(Math.sqrt(buttonCount));
+  const fallbackCols = Math.ceil(buttonCount / fallbackRows);
+  return {
+    cols: fallbackCols,
+    rows: fallbackRows,
+    buttonSize: MENUBAR_MIN_BUTTON_SIZE,
+    gap,
+    padding,
+  };
+}
+
+/**
+ * Calculate the content dimensions for a given button layout
+ * Uses a fixed "canonical" button size for consistent snap points
+ */
+function calculateMenuBarContentSize(
+  cols: number,
+  rows: number,
+  gap: number,
+  padding: number,
+  buttonSize: number = 30, // Default canonical button size
+): { width: number; height: number } {
+  return {
+    width:
+      cols * buttonSize +
+      (cols - 1) * gap +
+      padding * 2 +
+      MENUBAR_BORDER_BUFFER,
+    height:
+      rows * buttonSize +
+      (rows - 1) * gap +
+      padding * 2 +
+      MENUBAR_BORDER_BUFFER,
+  };
 }
 
 /** Menu bar panel that displays all navigation buttons with snap-to-content sizing */
@@ -953,89 +1020,220 @@ function MenuBarPanel({
 }): React.ReactElement {
   const theme = useThemeStore((s) => s.theme);
   const updateWindow = useWindowStore((s) => s.updateWindow);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  // Layout: 1 = 1 row, 2 = 2 rows, 3 = 3 rows (loaded from localStorage for saved preference)
-  const layout = useMemo(() => loadMenuBarLayout(), []);
+  // Track container size
+  const [containerSize, setContainerSize] = useState({
+    width: 300,
+    height: 50,
+  });
 
   // Always show all buttons
   const buttonCount = ALL_MENU_BUTTONS.length;
 
-  // Get grid size for proper alignment
-  const gridSize = useEditStore((s) => s.gridSize);
+  // Observe container size changes
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
 
-  // Helper to snap to grid
-  const snapToGrid = useCallback(
-    (value: number) => Math.ceil(value / gridSize) * gridSize,
-    [gridSize],
+    const updateSize = () => {
+      const rect = container.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        setContainerSize((prev) => {
+          if (prev.width !== rect.width || prev.height !== rect.height) {
+            return { width: rect.width, height: rect.height };
+          }
+          return prev;
+        });
+      }
+    };
+
+    // Initial measurement
+    updateSize();
+
+    // Use ResizeObserver for responsive updates
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(container);
+
+    return () => observer.disconnect();
+  }, []);
+
+  // Calculate layout based on container size
+  const layout = useMemo(
+    () =>
+      calculateMenuBarLayout(
+        containerSize.width,
+        containerSize.height,
+        buttonCount,
+      ),
+    [containerSize.width, containerSize.height, buttonCount],
   );
 
-  // Calculate dimensions for each layout
-  const layoutDims = useMemo(() => {
-    const calc = (rows: number) => {
-      const cols = Math.ceil(buttonCount / rows);
-      return {
-        cols,
-        rows,
-        width:
-          cols * MENUBAR_BUTTON_SIZE +
-          (cols - 1) * MENUBAR_BUTTON_GAP +
-          MENUBAR_PADDING * 2,
-        height:
-          rows * MENUBAR_BUTTON_SIZE +
-          (rows - 1) * MENUBAR_BUTTON_GAP +
-          MENUBAR_PADDING * 2,
-      };
-    };
-    return {
-      1: calc(1),
-      2: calc(2),
-      3: calc(3),
-    };
+  // Track previous row count to detect layout changes
+  const prevRowsRef = useRef<number | null>(null);
+
+  // Calculate global width bounds once (covers all possible layouts)
+  const globalMinWidth = useMemo(() => {
+    // Minimum: 3x3 grid at minimum button size
+    const minCols = Math.ceil(Math.sqrt(buttonCount));
+    const minRows = Math.ceil(buttonCount / minCols);
+    return calculateMenuBarContentSize(
+      minCols,
+      minRows,
+      MENUBAR_BUTTON_GAP,
+      MENUBAR_PADDING,
+      MENUBAR_MIN_BUTTON_SIZE,
+    ).width;
   }, [buttonCount]);
 
-  // Current layout dimensions
-  const currentDims = layoutDims[layout];
+  const globalMaxWidth = useMemo(() => {
+    // Maximum: 1-row at maximum button size
+    return calculateMenuBarContentSize(
+      buttonCount,
+      1,
+      MENUBAR_BUTTON_GAP,
+      MENUBAR_PADDING,
+      MENUBAR_MAX_BUTTON_SIZE,
+    ).width;
+  }, [buttonCount]);
 
-  // Set window size to exactly match content (snap to content)
+  const globalMinHeight = useMemo(() => {
+    // Minimum: 1-row layout at minimum button size
+    return calculateMenuBarContentSize(
+      buttonCount,
+      1,
+      MENUBAR_BUTTON_GAP,
+      MENUBAR_PADDING,
+      MENUBAR_MIN_BUTTON_SIZE,
+    ).height;
+  }, [buttonCount]);
+
+  const globalMaxHeight = useMemo(() => {
+    // Maximum: max-rows layout (e.g., 3x3 for 9 buttons)
+    const maxRows = Math.ceil(Math.sqrt(buttonCount));
+    return calculateMenuBarContentSize(
+      Math.ceil(buttonCount / maxRows),
+      maxRows,
+      MENUBAR_BUTTON_GAP,
+      MENUBAR_PADDING,
+      MENUBAR_MAX_BUTTON_SIZE,
+    ).height;
+  }, [buttonCount]);
+
+  // Get current window state for position adjustments
+  const currentWindow = useWindowStore((s) => s.windows.get(windowId || ""));
+
+  // Update window constraints and snap height when layout rows change
   useEffect(() => {
     if (!windowId) return;
 
-    const width = snapToGrid(currentDims.width + MENUBAR_BORDER_BUFFER);
-    const height = snapToGrid(currentDims.height + MENUBAR_BORDER_BUFFER);
+    const currentRows = layout.rows;
+    const isInitialMount = prevRowsRef.current === null;
+    const rowsChanged = prevRowsRef.current !== currentRows;
 
-    // Lock size to content - min = max = size
+    // Calculate exact content dimensions for current layout
+    const contentHeight = calculateMenuBarContentSize(
+      layout.cols,
+      currentRows,
+      MENUBAR_BUTTON_GAP,
+      MENUBAR_PADDING,
+      layout.buttonSize,
+    ).height;
+
+    const contentWidth = calculateMenuBarContentSize(
+      layout.cols,
+      currentRows,
+      MENUBAR_BUTTON_GAP,
+      MENUBAR_PADDING,
+      layout.buttonSize,
+    ).width;
+
+    // Allow height to vary between min and max possible layouts
+    // This enables resize-triggered layout transitions
     updateWindow(windowId, {
-      minSize: { width, height },
-      maxSize: { width, height },
-      size: { width, height },
+      minSize: { width: globalMinWidth, height: globalMinHeight },
+      maxSize: { width: globalMaxWidth, height: globalMaxHeight },
     });
-  }, [windowId, currentDims, updateWindow, snapToGrid]);
 
-  // Use compact size for smaller buttons
-  const buttonSize: "compact" | "small" | "normal" = "compact";
+    // On row count change, snap the window size and reposition to keep on screen
+    if (isInitialMount || rowsChanged) {
+      prevRowsRef.current = currentRows;
+
+      // Get viewport dimensions
+      const viewport = {
+        width: typeof window !== "undefined" ? window.innerWidth : 1920,
+        height: typeof window !== "undefined" ? window.innerHeight : 1080,
+      };
+
+      // Calculate new position to keep window on screen
+      // If window was at an edge, keep it at that edge with new size
+      let newX = currentWindow?.position.x ?? 0;
+      let newY = currentWindow?.position.y ?? 0;
+      const oldWidth = currentWindow?.size.width ?? contentWidth;
+      const oldHeight = currentWindow?.size.height ?? contentHeight;
+
+      // Edge detection threshold
+      const edgeThreshold = 15;
+
+      // Check if window was at right edge - keep right edge aligned
+      const wasAtRightEdge =
+        Math.abs(newX + oldWidth - viewport.width) < edgeThreshold;
+      if (wasAtRightEdge) {
+        newX = viewport.width - contentWidth;
+      }
+
+      // Check if window was at bottom edge - keep bottom edge aligned
+      const wasAtBottomEdge =
+        Math.abs(newY + oldHeight - viewport.height) < edgeThreshold;
+      if (wasAtBottomEdge) {
+        newY = viewport.height - contentHeight;
+      }
+
+      // Clamp to viewport to ensure window stays on screen
+      newX = Math.max(0, Math.min(newX, viewport.width - contentWidth));
+      newY = Math.max(0, Math.min(newY, viewport.height - contentHeight));
+
+      updateWindow(windowId, {
+        size: { width: contentWidth, height: contentHeight },
+        position: { x: newX, y: newY },
+      });
+    }
+  }, [
+    windowId,
+    layout.rows,
+    layout.cols,
+    layout.buttonSize,
+    globalMinWidth,
+    globalMaxWidth,
+    globalMinHeight,
+    globalMaxHeight,
+    updateWindow,
+    currentWindow?.position.x,
+    currentWindow?.position.y,
+    currentWindow?.size.width,
+    currentWindow?.size.height,
+  ]);
 
   return (
     <div
+      ref={containerRef}
       style={{
         position: "absolute",
         inset: 0,
         display: "flex",
-        flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        gap: 4,
         overflow: "hidden",
       }}
     >
-      {/* Buttons container - grid layout */}
+      {/* Buttons container - fixed grid layout that fills the window */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: `repeat(${currentDims.cols}, ${MENUBAR_BUTTON_SIZE}px)`,
-          justifyContent: "center",
-          alignContent: "center",
-          padding: MENUBAR_PADDING,
-          gap: MENUBAR_BUTTON_GAP,
+          gridTemplateColumns: `repeat(${layout.cols}, ${layout.buttonSize}px)`,
+          gridTemplateRows: `repeat(${layout.rows}, ${layout.buttonSize}px)`,
+          padding: layout.padding,
+          gap: layout.gap,
           background: `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
           border: `1px solid ${theme.colors.border.default}`,
           borderRadius: 4,
@@ -1049,7 +1247,7 @@ function MenuBarPanel({
             label={button.label}
             active={false}
             onClick={() => onPanelClick?.(button.panelId)}
-            size={buttonSize}
+            customSize={layout.buttonSize}
             panelId={button.panelId}
           />
         ))}

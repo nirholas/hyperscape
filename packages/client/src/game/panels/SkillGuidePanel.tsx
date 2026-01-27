@@ -45,7 +45,7 @@ function UnlockRow({ unlock, isUnlocked, isNext }: UnlockRowProps) {
       };
     }
     return {
-      background: theme.colors.background.tertiary,
+      background: theme.colors.background.panelSecondary,
       border: "1px solid transparent",
       opacity: 0.6,
     };

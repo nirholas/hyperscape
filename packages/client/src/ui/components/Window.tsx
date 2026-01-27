@@ -14,6 +14,7 @@ import {
   restrictToWindowEdgesFully,
   snapToGridModifier,
   composeWindowModifiers,
+  getViewportSize,
   type WindowPositionModifier,
 } from "../core/drag/modifiers";
 import {
@@ -209,11 +210,9 @@ export const Window = memo(function Window({
 
       // Step 3: Snap to viewport edges when close (magnetic edge snapping)
       // Only apply edge snap if we didn't already snap to a guide on that axis
-      if (snapEnabled && typeof window !== "undefined") {
-        const viewport = {
-          width: window.innerWidth,
-          height: window.innerHeight,
-        };
+      // Use getViewportSize() for consistency with viewport restriction (accounts for UI scaling)
+      if (snapEnabled) {
+        const viewport = getViewportSize();
         const edgeThreshold = EDGE_SNAP_THRESHOLD;
 
         // Snap to left edge (only if not already guide-snapped on X)
@@ -317,11 +316,9 @@ export const Window = memo(function Window({
 
       // Step 3: Apply viewport edge snapping during drag (magnetic edges)
       // Only apply if we didn't already snap to a guide on that axis
-      if (snapEnabled && typeof window !== "undefined") {
-        const viewport = {
-          width: window.innerWidth,
-          height: window.innerHeight,
-        };
+      // Use getViewportSize() for consistency with viewport restriction (accounts for UI scaling)
+      if (snapEnabled) {
+        const viewport = getViewportSize();
         const edgeThreshold = EDGE_SNAP_THRESHOLD;
 
         // Snap to left edge (only if not already guide-snapped on X)

@@ -1,14 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback } from "react";
 import { useEditStore } from "../../stores/editStore";
 import type { EditModeResult, EditMode } from "../../types";
 
 /**
  * Hook to manage edit mode (locked/unlocked interface customization)
  *
- * Features:
- * - Configurable hold-to-toggle behavior (holdToToggle, holdDuration)
- * - Exposes hold state for visual feedback (isHolding, holdProgress)
- * - Escape key immediately locks when in edit mode
+ * This hook provides access to edit mode state and actions.
+ * Keyboard handling is done separately by useEditModeKeyboard(),
+ * which should be called once at the top level (InterfaceManager).
  *
  * @example
  * ```tsx
@@ -29,6 +28,7 @@ import type { EditModeResult, EditMode } from "../../types";
  * ```
  */
 export function useEditMode(): EditModeResult {
+  // Read state from store
   const mode = useEditStore((s) => s.mode);
   const gridSize = useEditStore((s) => s.gridSize);
   const snapEnabled = useEditStore((s) => s.snapEnabled);
@@ -38,6 +38,11 @@ export function useEditMode(): EditModeResult {
   const holdDuration = useEditStore((s) => s.holdDuration);
   const toggleKey = useEditStore((s) => s.toggleKey);
 
+  // Hold state from store (managed by useEditModeKeyboard)
+  const isHolding = useEditStore((s) => s.isHolding);
+  const holdProgress = useEditStore((s) => s.holdProgress);
+
+  // Get store actions
   const toggleModeStore = useEditStore((s) => s.toggleMode);
   const setModeStore = useEditStore((s) => s.setMode);
   const setSnapEnabledStore = useEditStore((s) => s.setSnapEnabled);
@@ -49,12 +54,6 @@ export function useEditMode(): EditModeResult {
 
   const isLocked = mode === "locked";
   const isUnlocked = mode === "unlocked";
-
-  // Hold state for visual feedback
-  const [isHolding, setIsHolding] = useState(false);
-  const [holdProgress, setHoldProgress] = useState(0); // 0-100
-  const holdStartTimeRef = useRef<number | null>(null);
-  const holdAnimationRef = useRef<number | null>(null);
 
   const toggleMode = useCallback(() => {
     toggleModeStore();
@@ -109,97 +108,9 @@ export function useEditMode(): EditModeResult {
     [setToggleKeyStore],
   );
 
-  // Reset hold state helper
-  const resetHoldState = useCallback(() => {
-    holdStartTimeRef.current = null;
-    setIsHolding(false);
-    setHoldProgress(0);
-    if (holdAnimationRef.current) {
-      cancelAnimationFrame(holdAnimationRef.current);
-      holdAnimationRef.current = null;
-    }
-  }, []);
-
-  // Keyboard shortcuts with configurable hold-to-toggle
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't handle if typing in an input
-      if (
-        e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLTextAreaElement
-      ) {
-        return;
-      }
-
-      // Toggle key handling
-      if (e.key.toLowerCase() === toggleKey) {
-        e.preventDefault();
-
-        if (holdToToggle) {
-          // Hold-to-toggle mode
-          if (holdStartTimeRef.current !== null) return; // Already holding
-
-          holdStartTimeRef.current = Date.now();
-          setIsHolding(true);
-          setHoldProgress(0);
-
-          // Start animation loop
-          const animate = () => {
-            if (holdStartTimeRef.current === null) return;
-
-            const elapsed = Date.now() - holdStartTimeRef.current;
-            const progress = Math.min((elapsed / holdDuration) * 100, 100);
-            setHoldProgress(progress);
-
-            if (progress >= 100) {
-              // Toggle edit mode
-              toggleMode();
-              resetHoldState();
-            } else {
-              holdAnimationRef.current = requestAnimationFrame(animate);
-            }
-          };
-
-          holdAnimationRef.current = requestAnimationFrame(animate);
-        } else {
-          // Instant toggle mode
-          toggleMode();
-        }
-      }
-
-      // Escape saves and locks
-      if (e.key === "Escape" && isUnlocked) {
-        setMode("locked");
-        resetHoldState();
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() === toggleKey && holdToToggle) {
-        // Cancel hold if key released before duration
-        resetHoldState();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-      if (holdAnimationRef.current) {
-        cancelAnimationFrame(holdAnimationRef.current);
-      }
-    };
-  }, [
-    toggleKey,
-    holdToToggle,
-    holdDuration,
-    toggleMode,
-    setMode,
-    isUnlocked,
-    resetHoldState,
-  ]);
+  // Note: Keyboard handling is done by useEditModeKeyboard() hook,
+  // which should be called once at the top level (InterfaceManager).
+  // This hook only provides access to state and actions.
 
   return {
     mode,

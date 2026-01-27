@@ -319,13 +319,6 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
     border: `1px solid ${COLORS.BORDER_PRIMARY}`,
   };
 
-  const dangerButtonStyle: React.CSSProperties = {
-    ...buttonBaseStyle,
-    background: "transparent",
-    color: COLORS.ERROR,
-    border: `1px solid ${COLORS.ERROR}`,
-  };
-
   return (
     <div style={containerStyle}>
       {/* Header */}

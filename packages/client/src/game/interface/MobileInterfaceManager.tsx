@@ -37,7 +37,7 @@ import { LootWindowPanel } from "../../game/panels/LootWindowPanel";
 import { QuestStartPanel } from "../../game/panels/QuestStartPanel";
 import { QuestCompletePanel } from "../../game/panels/QuestCompletePanel";
 import { XpLampPanel } from "../../game/panels/XpLampPanel";
-import { ActionPanel } from "../../game/panels/ActionPanel";
+import { ActionBarPanel } from "../../game/panels/ActionBarPanel";
 
 // Import Lucide icons
 import { X } from "lucide-react";
@@ -137,14 +137,6 @@ export function MobileInterfaceManager({
   const handlePanelClose = useCallback(() => {
     setActivePanel(null);
   }, []);
-
-  // Handle inventory item move (reordering via drag-and-drop)
-  const handleItemMove = useCallback(
-    (fromSlot: number, toSlot: number) => {
-      world?.network?.send?.("moveItem", { fromSlot, toSlot });
-    },
-    [world],
-  );
 
   // Handle menu clicks from panels
   const handleMenuClick = useCallback((panelId: string) => {
@@ -362,12 +354,14 @@ export function MobileInterfaceManager({
         />
       </div>
 
-      {/* Action Panel - inventory quick-access with vertical orientation on mobile */}
+      {/* Action Bar Panel - same as desktop but with vertical orientation on mobile */}
       <div style={actionBarStyle}>
-        <ActionPanel
-          items={inventory}
-          onItemMove={handleItemMove}
+        <ActionBarPanel
+          world={world}
+          barId={0}
           orientation={uiSizes.actionBar.orientation}
+          showShortcuts={false}
+          showControls={false}
         />
       </div>
 
@@ -613,32 +607,25 @@ export function MobileInterfaceManager({
         </ModalWindow>
       )}
 
+      {/* Dialogue Panel - renders with its own fixed positioning, no ModalWindow wrapper needed */}
       {dialogueData?.visible && (
-        <ModalWindow
+        <DialoguePanel
           visible={true}
+          world={world}
+          npcId={dialogueData.npcId}
+          npcName={dialogueData.npcName}
+          text={dialogueData.text}
+          responses={dialogueData.responses}
+          npcEntityId={dialogueData.npcEntityId}
+          onSelectResponse={(index, response) => {
+            // Send response to server - the panel handles this internally,
+            // but we can also track it here if needed
+            console.log(
+              `[MobileUI] Dialogue response selected: ${index} - ${response.text}`,
+            );
+          }}
           onClose={() => setDialogueData(null)}
-          title={dialogueData.npcName}
-          maxWidth="90vw"
-          maxHeight="80vh"
-        >
-          <DialoguePanel
-            visible={true}
-            world={world}
-            npcId={dialogueData.npcId}
-            npcName={dialogueData.npcName}
-            text={dialogueData.text}
-            responses={dialogueData.responses}
-            npcEntityId={dialogueData.npcEntityId}
-            onSelectResponse={(index, response) => {
-              // Send response to server - the panel handles this internally,
-              // but we can also track it here if needed
-              console.log(
-                `[MobileUI] Dialogue response selected: ${index} - ${response.text}`,
-              );
-            }}
-            onClose={() => setDialogueData(null)}
-          />
-        </ModalWindow>
+        />
       )}
 
       {smeltingData?.visible && (

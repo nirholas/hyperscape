@@ -36,7 +36,7 @@ export function SelectOption<T extends string>({
       onChange={(e) => onChange(e.target.value as T)}
       className={`px-2 py-1 rounded text-sm cursor-pointer ${className}`}
       style={{
-        backgroundColor: theme.colors.background.tertiary,
+        backgroundColor: theme.colors.background.panelSecondary,
         color: theme.colors.text.primary,
         border: `1px solid ${theme.colors.border.default}`,
       }}
