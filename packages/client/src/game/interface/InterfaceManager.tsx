@@ -17,7 +17,13 @@
  * @packageDocumentation
  */
 
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, {
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
 import { DndContext as DndKitContext } from "@dnd-kit/core";
 import {
   DndProvider,
@@ -108,6 +114,17 @@ function DesktopInterfaceManager({
   const { isUnlocked, isHolding, holdProgress } = useEditMode();
   const { loadFromStorage } = usePresetStore();
   const windowStoreUpdate = useWindowStore((s) => s.updateWindow);
+  const normalizeZIndices = useWindowStore((s) => s.normalizeZIndices);
+
+  // Normalize z-indices when edit mode is locked to prevent shadow overlap
+  const prevUnlockedRef = useRef(isUnlocked);
+  useEffect(() => {
+    // When transitioning from unlocked to locked, normalize all z-indices
+    if (prevUnlockedRef.current && !isUnlocked) {
+      normalizeZIndices();
+    }
+    prevUnlockedRef.current = isUnlocked;
+  }, [isUnlocked, normalizeZIndices]);
 
   // Viewport resize handling
   const { isMobile } = useViewportResize();
@@ -207,6 +224,12 @@ function DesktopInterfaceManager({
     if (prevCount > 0 && currentCount === 0) {
       const freshDefaults = createDefaultWindows();
       freshDefaults.forEach((config) => createWindow(config));
+
+      // Dispatch resize event after a brief delay to trigger re-measurement
+      // This fixes issues where panels don't render correctly after layout reset
+      requestAnimationFrame(() => {
+        window.dispatchEvent(new Event("resize"));
+      });
     }
   }, [windows.length, enabled, isHydrated, createWindow]);
 

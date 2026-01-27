@@ -386,8 +386,9 @@ export function MinimapWrapper({
         overflow: "hidden",
       }}
     >
+      {/* Note: No size-based key - component handles size changes internally */}
+      {/* Using size keys would cause remount and reset zoom state */}
       <Minimap
-        key={`minimap-${size}`}
         world={world}
         width={size}
         height={size}

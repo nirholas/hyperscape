@@ -26,7 +26,7 @@ import type {
   PlayerEquipmentItems,
 } from "../../types";
 import type { PlayerStats } from "@hyperscape/shared";
-import { Minimap } from "../../game/hud/Minimap";
+import { Minimap, MinimapOverlayControls } from "../../game/hud/Minimap";
 import { MenuButton, type MenuIconName } from "@/ui";
 import { ChatPanel } from "../../game/panels/ChatPanel";
 import {
@@ -835,7 +835,7 @@ function ScrollablePanelWrapper({
   );
 }
 
-/** Minimap panel that sizes to its container */
+/** Minimap panel that sizes to its container with overlay controls */
 function MinimapPanel({ world }: { world: ClientWorld }): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState<{
@@ -885,8 +885,10 @@ function MinimapPanel({ world }: { world: ClientWorld }): React.ReactElement {
         overflow: "hidden",
       }}
     >
+      {/* Minimap canvas - renders the map, controls hidden */}
+      {/* Note: No dimension-based key - component handles size changes internally */}
+      {/* Using dimension keys would cause remount and reset zoom state */}
       <Minimap
-        key={`minimap-${dimensions.width}-${dimensions.height}`}
         world={world}
         width={dimensions.width}
         height={dimensions.height}
@@ -894,7 +896,10 @@ function MinimapPanel({ world }: { world: ClientWorld }): React.ReactElement {
         isVisible={true}
         resizable={false}
         embedded={false}
+        hideOverlayControls={true}
       />
+      {/* Overlay controls - positioned on top, fixed size regardless of minimap size */}
+      <MinimapOverlayControls world={world} buttonSize={40} padding={6} />
     </div>
   );
 }
