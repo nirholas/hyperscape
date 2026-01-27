@@ -351,6 +351,28 @@ export function MinimapWrapper({
     return () => observer.disconnect();
   }, []);
 
+  // Don't render minimap if world is not available
+  if (!world) {
+    return (
+      <div
+        ref={containerRef}
+        style={{
+          flex: 1,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          minWidth: 0,
+          minHeight: 0,
+          overflow: "hidden",
+          color: "#666",
+          fontSize: "12px",
+        }}
+      >
+        Loading minimap...
+      </div>
+    );
+  }
+
   return (
     <div
       ref={containerRef}
