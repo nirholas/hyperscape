@@ -346,15 +346,17 @@ export class DataManager {
         level1Areas: Record<string, WorldArea>;
         level2Areas: Record<string, WorldArea>;
         level3Areas: Record<string, WorldArea>;
+        specialAreas?: Record<string, WorldArea>;
       };
 
-      // Merge all areas into ALL_WORLD_AREAS
+      // Merge all areas into ALL_WORLD_AREAS (including specialAreas like duel_arena)
       Object.assign(
         ALL_WORLD_AREAS,
         worldAreasData.starterTowns,
         worldAreasData.level1Areas,
         worldAreasData.level2Areas,
         worldAreasData.level3Areas,
+        worldAreasData.specialAreas || {},
       );
       Object.assign(STARTER_TOWNS, worldAreasData.starterTowns);
 
@@ -534,13 +536,16 @@ export class DataManager {
         level1Areas: Record<string, WorldArea>;
         level2Areas: Record<string, WorldArea>;
         level3Areas: Record<string, WorldArea>;
+        specialAreas?: Record<string, WorldArea>;
       };
+      // Merge all areas into ALL_WORLD_AREAS (including specialAreas like duel_arena)
       Object.assign(
         ALL_WORLD_AREAS,
         worldAreas.starterTowns,
         worldAreas.level1Areas,
         worldAreas.level2Areas,
         worldAreas.level3Areas,
+        worldAreas.specialAreas || {},
       );
       Object.assign(STARTER_TOWNS, worldAreas.starterTowns);
 

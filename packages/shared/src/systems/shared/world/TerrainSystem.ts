@@ -1606,6 +1606,15 @@ export class TerrainSystem extends System {
 
   /**
    * Get procedural terrain height with mountain biome boost applied.
+   * This bypasses flat zones and returns the raw procedural height.
+   * Useful for positioning objects that should sit above the terrain mesh.
+   */
+  getProceduralHeightAt(worldX: number, worldZ: number): number {
+    return this.getProceduralHeightWithBoost(worldX, worldZ);
+  }
+
+  /**
+   * Get procedural terrain height with mountain biome boost applied.
    * Extracted for reuse in flat zone blending.
    */
   private getProceduralHeightWithBoost(worldX: number, worldZ: number): number {
@@ -1850,6 +1859,17 @@ export class TerrainSystem extends System {
       `[TerrainSystem] Loading flat zones from ${areaNames.length} world areas: ${areaNames.join(", ")}`,
     );
 
+    // Debug: Check if duel_arena is in ALL_WORLD_AREAS
+    const duelArena = ALL_WORLD_AREAS["duel_arena"];
+    if (duelArena) {
+      const areaWithFlatZones = duelArena as { flatZones?: unknown[] };
+      console.log(
+        `[TerrainSystem] duel_arena found! Has flatZones: ${!!areaWithFlatZones.flatZones}, count: ${areaWithFlatZones.flatZones?.length ?? 0}`,
+      );
+    } else {
+      console.warn(`[TerrainSystem] duel_arena NOT in ALL_WORLD_AREAS!`);
+    }
+
     for (const [areaId, area] of Object.entries(ALL_WORLD_AREAS)) {
       if (!area.stations) {
         continue;
@@ -1910,6 +1930,55 @@ export class TerrainSystem extends System {
           `[TerrainSystem] Registered flat zone "${zone.id}" at (${zone.centerX}, ${zone.centerZ}) ` +
             `size ${zone.width.toFixed(1)}x${zone.depth.toFixed(1)}m, height=${zone.height.toFixed(1)}m`,
         );
+      }
+
+      // Also load explicit flatZones defined in the area config (e.g., duel arenas)
+      const areaConfig = area as {
+        flatZones?: Array<{
+          id: string;
+          centerX: number;
+          centerZ: number;
+          width: number;
+          depth: number;
+          height?: number; // Optional explicit height (if not provided, uses procedural)
+          heightOffset?: number; // Optional offset added to procedural height (e.g., floor thickness)
+          blendRadius: number;
+        }>;
+      };
+
+      if (areaConfig.flatZones) {
+        for (const zoneConfig of areaConfig.flatZones) {
+          // Calculate base height from procedural terrain
+          const proceduralHeight = this.getProceduralHeightWithBoost(
+            zoneConfig.centerX,
+            zoneConfig.centerZ,
+          );
+
+          // Use explicit height if provided, otherwise procedural + offset
+          const flatHeight =
+            zoneConfig.height !== undefined
+              ? zoneConfig.height
+              : proceduralHeight + (zoneConfig.heightOffset ?? 0);
+
+          const zone: FlatZone = {
+            id: zoneConfig.id,
+            centerX: zoneConfig.centerX,
+            centerZ: zoneConfig.centerZ,
+            width: zoneConfig.width,
+            depth: zoneConfig.depth,
+            height: flatHeight,
+            blendRadius: zoneConfig.blendRadius,
+          };
+
+          this.registerFlatZone(zone);
+          loadedCount++;
+
+          console.log(
+            `[TerrainSystem] Registered area flat zone "${zone.id}" at (${zone.centerX}, ${zone.centerZ}) ` +
+              `size ${zone.width.toFixed(1)}x${zone.depth.toFixed(1)}m, height=${zone.height.toFixed(1)}m ` +
+              `(procedural=${proceduralHeight.toFixed(1)}, offset=${zoneConfig.heightOffset ?? 0})`,
+          );
+        }
       }
     }
 

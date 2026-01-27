@@ -158,6 +158,7 @@ import { PendingAttackManager } from "./PendingAttackManager";
 import { PendingGatherManager } from "./PendingGatherManager";
 import { PendingCookManager } from "./PendingCookManager";
 import { PendingTradeManager } from "./PendingTradeManager";
+import { PendingDuelChallengeManager } from "./PendingDuelChallengeManager";
 import { FollowManager } from "./FollowManager";
 import { FaceDirectionManager } from "./FaceDirectionManager";
 import { handleFollowPlayer, handleChangePlayerName } from "./handlers/player";
@@ -187,7 +188,23 @@ import {
   handlePrivateMessage,
 } from "./handlers/friends";
 import { TradingSystem } from "../TradingSystem";
+import { DuelSystem } from "../DuelSystem";
+import {
+  handleDuelChallenge,
+  handleDuelChallengeRespond,
+  handleDuelToggleRule,
+  handleDuelToggleEquipment,
+  handleDuelAcceptRules,
+  handleDuelCancel,
+  handleDuelAddStake,
+  handleDuelRemoveStake,
+  handleDuelAcceptStakes,
+  handleDuelAcceptFinal,
+  handleDuelForfeit,
+} from "./handlers/duel";
 import { getDatabase } from "./handlers/common";
+import { sql } from "drizzle-orm";
+import { InventoryRepository } from "../../database/repositories/InventoryRepository";
 
 const defaultSpawn = '{ "position": [0, 50, 0], "quaternion": [0, 0, 0, 1] }';
 
@@ -272,8 +289,10 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   private pendingGatherManager!: PendingGatherManager;
   private pendingCookManager!: PendingCookManager;
   private pendingTradeManager!: PendingTradeManager;
+  private pendingDuelChallengeManager!: PendingDuelChallengeManager;
   private followManager!: FollowManager;
   private tradingSystem!: TradingSystem;
+  private duelSystem!: DuelSystem;
   private actionQueue!: ActionQueue;
   private tickSystem!: TickSystem;
   private socketManager!: SocketManager;
@@ -391,6 +410,16 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Mobs use this to run AI only once per tick instead of every frame
     this.tickSystem.onTick((tickNumber) => {
       this.world.currentTick = tickNumber;
+    }, TickPriority.INPUT);
+
+    // SECOND: Process duel state transitions BEFORE action queue
+    // CRITICAL: Must run before ActionQueue so COUNTDOWN→FIGHTING transition
+    // happens before movement validation (which calls canMove())
+    // Without this ordering, there's a race condition where movement requests
+    // are rejected because they see COUNTDOWN state, but state changes to
+    // FIGHTING later in the same tick
+    this.tickSystem.onTick(() => {
+      this.duelSystem.processTick();
     }, TickPriority.INPUT);
 
     // Register action queue to process inputs at INPUT priority
@@ -511,6 +540,25 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.world as { pendingTradeManager?: PendingTradeManager }
     ).pendingTradeManager = this.pendingTradeManager;
 
+    // Pending duel challenge manager - server-authoritative "walk to player and challenge" system
+    // OSRS-style: if player clicks to challenge someone far away, walk up first
+    this.pendingDuelChallengeManager = new PendingDuelChallengeManager(
+      this.world,
+      this.tileMovementManager,
+    );
+
+    // Register pending duel challenge processing (same priority as movement)
+    this.tickSystem.onTick(() => {
+      this.pendingDuelChallengeManager.processTick();
+    }, TickPriority.MOVEMENT);
+
+    // Store pending duel challenge manager on world so handlers can access it
+    (
+      this.world as {
+        pendingDuelChallengeManager?: PendingDuelChallengeManager;
+      }
+    ).pendingDuelChallengeManager = this.pendingDuelChallengeManager;
+
     // Trading system - server-authoritative player-to-player trading
     // Manages trade sessions, item offers, acceptance state, and atomic swaps
     this.tradingSystem = new TradingSystem(this.world);
@@ -519,6 +567,365 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Store trading system on world so handlers can access it
     (this.world as { tradingSystem?: TradingSystem }).tradingSystem =
       this.tradingSystem;
+
+    // Duel system - server-authoritative player-to-player dueling (OSRS-style)
+    // Manages duel sessions, rules negotiation, stakes, and combat enforcement
+    this.duelSystem = new DuelSystem(this.world);
+    this.duelSystem.init();
+
+    // Store duel system on world so handlers can access it
+    (this.world as { duelSystem?: DuelSystem }).duelSystem = this.duelSystem;
+
+    // Register duel system in systemsByName so it can be found via getSystem("duel")
+    // This is required for combat.ts to detect duel combat and bypass PvP zone checks
+    // NOTE: We use systemsByName directly instead of addSystem() because DuelSystem
+    // doesn't implement the full System lifecycle interface (preTick, postTick, etc.)
+    (this.world as { systemsByName: Map<string, unknown> }).systemsByName.set(
+      "duel",
+      this.duelSystem,
+    );
+
+    // Listen for duel countdown ticks and forward to clients
+    this.world.on("duel:countdown:tick", (event) => {
+      const { duelId, count, challengerId, targetId } = event as {
+        duelId: string;
+        count: number;
+        challengerId: string;
+        targetId: string;
+      };
+
+      // Include player IDs so client can display countdown over both players' heads
+      const payload = { duelId, count, challengerId, targetId };
+
+      const challengerSocket = this.getSocketByPlayerId(challengerId);
+      if (challengerSocket) {
+        challengerSocket.send("duelCountdownTick", payload);
+      }
+
+      const targetSocket = this.getSocketByPlayerId(targetId);
+      if (targetSocket) {
+        targetSocket.send("duelCountdownTick", payload);
+      }
+    });
+
+    // Listen for duel fight start and forward to clients
+    this.world.on("duel:fight:start", (event) => {
+      const { duelId, challengerId, targetId, arenaId, bounds } = event as {
+        duelId: string;
+        challengerId: string;
+        targetId: string;
+        arenaId: number;
+        bounds?: {
+          min: { x: number; y: number; z: number };
+          max: { x: number; y: number; z: number };
+        };
+      };
+
+      // Send to challenger with target as their opponent
+      const challengerSocket = this.getSocketByPlayerId(challengerId);
+      if (challengerSocket) {
+        challengerSocket.send("duelFightStart", {
+          duelId,
+          arenaId,
+          opponentId: targetId,
+          bounds,
+        });
+      }
+
+      // Send to target with challenger as their opponent
+      const targetSocket = this.getSocketByPlayerId(targetId);
+      if (targetSocket) {
+        targetSocket.send("duelFightStart", {
+          duelId,
+          arenaId,
+          opponentId: challengerId,
+          bounds,
+        });
+      }
+    });
+
+    // Listen for duel completion and send results to both players
+    this.world.on("duel:completed", (event) => {
+      const {
+        duelId,
+        winnerId,
+        winnerName,
+        loserId,
+        loserName,
+        reason,
+        forfeit,
+        winnerReceives,
+        winnerReceivesValue,
+        challengerStakes,
+        targetStakes,
+      } = event as {
+        duelId: string;
+        winnerId: string;
+        winnerName: string;
+        loserId: string;
+        loserName: string;
+        reason: "death" | "forfeit";
+        forfeit: boolean;
+        winnerReceives: Array<{
+          itemId: string;
+          quantity: number;
+          value: number;
+        }>;
+        winnerReceivesValue: number;
+        challengerStakes: Array<{
+          itemId: string;
+          quantity: number;
+          value: number;
+        }>;
+        targetStakes: Array<{
+          itemId: string;
+          quantity: number;
+          value: number;
+        }>;
+      };
+
+      // Calculate what the loser lost (their stakes)
+      const loserLostValue =
+        winnerId === loserId
+          ? 0
+          : winnerReceives.reduce((sum, item) => sum + item.value, 0);
+
+      // Send to winner
+      const winnerSocket = this.getSocketByPlayerId(winnerId);
+      if (winnerSocket) {
+        winnerSocket.send("duelCompleted", {
+          duelId,
+          won: true,
+          opponentName: loserName,
+          itemsReceived: winnerReceives,
+          itemsLost: [],
+          totalValueWon: winnerReceivesValue,
+          totalValueLost: 0,
+          forfeit,
+        });
+      }
+
+      // Send to loser
+      const loserSocket = this.getSocketByPlayerId(loserId);
+      if (loserSocket) {
+        loserSocket.send("duelCompleted", {
+          duelId,
+          won: false,
+          opponentName: winnerName,
+          itemsReceived: [],
+          itemsLost: winnerReceives,
+          totalValueWon: 0,
+          totalValueLost: loserLostValue,
+          forfeit,
+        });
+      }
+    });
+
+    // Listen for duel player disconnect (notify opponent)
+    this.world.on("duel:player:disconnected", (event) => {
+      const { duelId, playerId, challengerId, targetId, timeoutMs } = event as {
+        duelId: string;
+        playerId: string;
+        challengerId: string;
+        targetId: string;
+        timeoutMs: number;
+      };
+
+      // Notify the opponent that their duel partner disconnected
+      const opponentId = playerId === challengerId ? targetId : challengerId;
+      const opponentSocket = this.getSocketByPlayerId(opponentId);
+      if (opponentSocket) {
+        opponentSocket.send("duelOpponentDisconnected", {
+          duelId,
+          timeoutMs,
+        });
+      }
+    });
+
+    // Listen for duel player reconnect (notify opponent)
+    this.world.on("duel:player:reconnected", (event) => {
+      const { duelId, playerId, challengerId, targetId } = event as {
+        duelId: string;
+        playerId: string;
+        challengerId: string;
+        targetId: string;
+      };
+
+      // Notify the opponent that their duel partner reconnected
+      const opponentId = playerId === challengerId ? targetId : challengerId;
+      const opponentSocket = this.getSocketByPlayerId(opponentId);
+      if (opponentSocket) {
+        opponentSocket.send("duelOpponentReconnected", { duelId });
+      }
+    });
+
+    // Listen for duel equipment restrictions (unequip items in disabled slots)
+    this.world.on("duel:equipment:restrict", (event) => {
+      const { challengerId, targetId, disabledSlots } = event as {
+        duelId: string;
+        challengerId: string;
+        targetId: string;
+        disabledSlots: string[];
+      };
+
+      // Unequip items from disabled slots for both players
+      for (const playerId of [challengerId, targetId]) {
+        for (const slot of disabledSlots) {
+          this.world.emit(EventType.EQUIPMENT_UNEQUIP, {
+            playerId,
+            slot,
+          });
+        }
+      }
+
+      console.log(
+        `[Duel] Equipment restrictions applied - disabled slots: ${disabledSlots.join(", ")}`,
+      );
+    });
+
+    // Listen for duel stakes return (player's own items returned on cancel)
+    // Note: For duel wins, we use duel:stakes:settle to avoid race conditions
+    this.world.on("duel:stakes:return", (event) => {
+      const { playerId, stakes, reason } = event as {
+        playerId: string;
+        stakes: Array<{
+          inventorySlot: number;
+          itemId: string;
+          quantity: number;
+          value: number;
+        }>;
+        reason: string;
+      };
+
+      console.log(
+        `[Duel] Stakes return event received - playerId: ${playerId}, stakes: ${stakes?.length || 0}, reason: ${reason}`,
+      );
+
+      if (!stakes || stakes.length === 0) {
+        console.log("[Duel] No stakes to return, skipping");
+        return;
+      }
+
+      // Fire and forget - don't await in event handler
+      this.addStakedItemsToInventory(playerId, stakes, "return").catch(
+        (err) => {
+          console.error("[Duel] Error in stakes return handler:", err);
+        },
+      );
+    });
+
+    // Listen for duel stakes settle (combined: winner gets own stakes back + loser's stakes)
+    // This handles both in a single operation to avoid race conditions
+    this.world.on("duel:stakes:settle", (event) => {
+      const { playerId, ownStakes, wonStakes, fromPlayerId, reason } =
+        event as {
+          playerId: string;
+          ownStakes: Array<{
+            inventorySlot: number;
+            itemId: string;
+            quantity: number;
+            value: number;
+          }>;
+          wonStakes: Array<{
+            inventorySlot: number;
+            itemId: string;
+            quantity: number;
+            value: number;
+          }>;
+          fromPlayerId: string;
+          reason: string;
+        };
+
+      // Combine both sets of stakes into a single operation
+      const allStakes = [...(ownStakes || []), ...(wonStakes || [])];
+
+      console.log(
+        `[Duel] Stakes settle event received - winnerId: ${playerId}, fromPlayerId: ${fromPlayerId}, ownStakes: ${ownStakes?.length || 0}, wonStakes: ${wonStakes?.length || 0}, reason: ${reason}`,
+      );
+
+      if (allStakes.length === 0) {
+        console.log("[Duel] No stakes to settle, skipping");
+        return;
+      }
+
+      console.log("[Duel] All stakes to add:", JSON.stringify(allStakes));
+
+      // Fire and forget - don't await in event handler
+      this.addStakedItemsToInventory(playerId, allStakes, "award").catch(
+        (err) => {
+          console.error("[Duel] Error in stakes settle handler:", err);
+        },
+      );
+    });
+
+    // Listen for player teleport events (used by duel system)
+    this.world.on("player:teleport", (event) => {
+      const { playerId, position, rotation } = event as {
+        playerId: string;
+        position: { x: number; y: number; z: number };
+        rotation: number;
+      };
+
+      // Update player position on server
+      const player = this.world.entities.players?.get(playerId);
+      if (player?.position) {
+        player.position.x = position.x;
+        player.position.y = position.y;
+        player.position.z = position.z;
+      }
+
+      // Clear any in-progress movement by cleaning up the player's movement state
+      this.tileMovementManager.cleanup(playerId);
+
+      // CRITICAL: Sync position to TileMovementManager after teleport
+      // Without this, movement system uses stale position and player appears stuck
+      this.tileMovementManager.syncPlayerPosition(playerId, position);
+
+      // Clear any pending actions from before teleport (e.g., queued movements, combat actions)
+      // This prevents stale actions from executing after teleport
+      this.actionQueue.cleanup(playerId);
+
+      // Send teleport to the teleporting player
+      const socket = this.getSocketByPlayerId(playerId);
+      if (socket) {
+        socket.send("playerTeleport", {
+          playerId,
+          position: [position.x, position.y, position.z],
+          rotation,
+        });
+      }
+
+      // Broadcast teleport to ALL other clients so they see the teleport
+      // This is critical for duel arena - both players need to see each other teleport
+      // We send playerTeleport (not entityModified) because remote players have tile state
+      // and entityModified position updates are skipped for tile-controlled entities
+      this.broadcastManager.sendToAll(
+        "playerTeleport",
+        {
+          playerId,
+          position: [position.x, position.y, position.z],
+          rotation,
+        },
+        socket?.id,
+      );
+
+      // CRITICAL: Sync animation state after teleport to prevent T-pose
+      // Without this, remote players may show default pose until next animation change
+      this.broadcastManager.sendToAll("entityModified", {
+        id: playerId,
+        changes: {
+          e: "idle",
+        },
+      });
+    });
+
+    // Listen for movement cancel events (used by duel system to prevent escaping arena)
+    this.world.on("player:movement:cancel", (event) => {
+      const { playerId } = event as { playerId: string };
+
+      // Clear movement state
+      this.tileMovementManager.cleanup(playerId);
+    });
 
     // OSRS-accurate face direction manager
     // Defers rotation until end of tick, only applies if player didn't move
@@ -840,7 +1247,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.world as { interactionSessionManager?: InteractionSessionManager }
     ).interactionSessionManager = this.interactionSessionManager;
 
-    // Clean up interaction sessions, pending attacks, follows, gathers, cooks, trades, and home teleport when player disconnects
+    // Clean up interaction sessions, pending attacks, follows, gathers, cooks, trades, duels, and home teleport when player disconnects
     this.world.on(EventType.PLAYER_LEFT, (event: { playerId: string }) => {
       this.interactionSessionManager.onPlayerDisconnect(event.playerId);
       this.pendingAttackManager.onPlayerDisconnect(event.playerId);
@@ -848,10 +1255,17 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.pendingGatherManager.onPlayerDisconnect(event.playerId);
       this.pendingCookManager.onPlayerDisconnect(event.playerId);
       this.pendingTradeManager.onPlayerDisconnect(event.playerId);
+      this.pendingDuelChallengeManager.onPlayerDisconnect(event.playerId);
+      this.duelSystem.onPlayerDisconnect(event.playerId);
       const homeTeleportManager = getHomeTeleportManager();
       if (homeTeleportManager) {
         homeTeleportManager.onPlayerDisconnect(event.playerId);
       }
+    });
+
+    // Handle player reconnection (clears disconnect timer if active duel)
+    this.world.on(EventType.PLAYER_JOINED, (event: { playerId: string }) => {
+      this.duelSystem.onPlayerReconnect(event.playerId);
     });
 
     // Initialization manager
@@ -1232,6 +1646,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         this.pendingAttackManager.cancelPendingAttack(socket.player.id);
         this.followManager.stopFollowing(socket.player.id);
         this.pendingTradeManager.cancelPendingTrade(socket.player.id);
+        this.pendingDuelChallengeManager.cancelPendingChallenge(
+          socket.player.id,
+        );
         const homeTeleportManager = getHomeTeleportManager();
         if (homeTeleportManager?.isCasting(socket.player.id)) {
           homeTeleportManager.cancelCasting(socket.player.id, "Player moved");
@@ -2144,6 +2561,124 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.handlers["tradeCancel"] = (socket, data) =>
       handleTradeCancel(socket, data as { tradeId: string }, this.world);
 
+    // Duel handlers
+    this.handlers["onDuelChallenge"] = (socket, data) =>
+      handleDuelChallenge(
+        socket,
+        data as { targetPlayerId: string },
+        this.world,
+      );
+
+    this.handlers["duel:challenge"] = (socket, data) =>
+      handleDuelChallenge(
+        socket,
+        data as { targetPlayerId: string },
+        this.world,
+      );
+
+    // Also register with "on" prefix (packet transformation adds this)
+    this.handlers["onDuel:challenge"] = (socket, data) =>
+      handleDuelChallenge(
+        socket,
+        data as { targetPlayerId: string },
+        this.world,
+      );
+
+    this.handlers["onDuelChallengeRespond"] = (socket, data) =>
+      handleDuelChallengeRespond(
+        socket,
+        data as { challengeId: string; accept: boolean },
+        this.world,
+      );
+
+    this.handlers["duel:challenge:respond"] = (socket, data) =>
+      handleDuelChallengeRespond(
+        socket,
+        data as { challengeId: string; accept: boolean },
+        this.world,
+      );
+
+    // Also register with "on" prefix (packet transformation adds this)
+    this.handlers["onDuel:challenge:respond"] = (socket, data) =>
+      handleDuelChallengeRespond(
+        socket,
+        data as { challengeId: string; accept: boolean },
+        this.world,
+      );
+
+    // Duel rules handlers (register with both formats for packet routing)
+    this.handlers["duel:toggle:rule"] = (socket, data) =>
+      handleDuelToggleRule(
+        socket,
+        data as { duelId: string; rule: string },
+        this.world,
+      );
+    this.handlers["onDuel:toggle:rule"] = this.handlers["duel:toggle:rule"];
+
+    this.handlers["duel:toggle:equipment"] = (socket, data) =>
+      handleDuelToggleEquipment(
+        socket,
+        data as { duelId: string; slot: string },
+        this.world,
+      );
+    this.handlers["onDuel:toggle:equipment"] =
+      this.handlers["duel:toggle:equipment"];
+
+    this.handlers["duel:accept:rules"] = (socket, data) =>
+      handleDuelAcceptRules(socket, data as { duelId: string }, this.world);
+    this.handlers["onDuel:accept:rules"] = this.handlers["duel:accept:rules"];
+
+    this.handlers["duel:cancel"] = (socket, data) =>
+      handleDuelCancel(socket, data as { duelId: string }, this.world);
+    this.handlers["onDuel:cancel"] = this.handlers["duel:cancel"];
+
+    // Duel stakes handlers
+    this.handlers["duel:add:stake"] = (socket, data) => {
+      const db = getDatabase(this.world);
+      if (!db) {
+        console.error(
+          "[ServerNetwork] Database not available for duel add stake",
+        );
+        return;
+      }
+      handleDuelAddStake(
+        socket,
+        data as { duelId: string; inventorySlot: number; quantity: number },
+        this.world,
+        db,
+      );
+    };
+    this.handlers["onDuel:add:stake"] = this.handlers["duel:add:stake"];
+
+    this.handlers["duel:remove:stake"] = (socket, data) => {
+      const db = getDatabase(this.world);
+      if (!db) {
+        console.error(
+          "[ServerNetwork] Database not available for duel remove stake",
+        );
+        return;
+      }
+      handleDuelRemoveStake(
+        socket,
+        data as { duelId: string; stakeIndex: number },
+        this.world,
+        db,
+      );
+    };
+    this.handlers["onDuel:remove:stake"] = this.handlers["duel:remove:stake"];
+
+    this.handlers["duel:accept:stakes"] = (socket, data) =>
+      handleDuelAcceptStakes(socket, data as { duelId: string }, this.world);
+    this.handlers["onDuel:accept:stakes"] = this.handlers["duel:accept:stakes"];
+
+    this.handlers["duel:accept:final"] = (socket, data) =>
+      handleDuelAcceptFinal(socket, data as { duelId: string }, this.world);
+    this.handlers["onDuel:accept:final"] = this.handlers["duel:accept:final"];
+
+    this.handlers["duel:forfeit"] = (socket, data) =>
+      handleDuelForfeit(socket, data as { duelId: string }, this.world);
+    this.handlers["onDuel:forfeit"] = this.handlers["duel:forfeit"];
+
     // Friend/Social handlers
     this.handlers["onFriendRequest"] = (socket, data) =>
       handleFriendRequest(socket, data as { targetName: string }, this.world);
@@ -2232,6 +2767,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.tradingSystem.destroy();
     }
 
+    // Destroy duel system - cancels all active duels and pending challenges
+    if (this.duelSystem) {
+      this.duelSystem.destroy();
+    }
+
     this.socketManager.destroy();
     this.saveManager.destroy();
     this.interactionSessionManager.destroy();
@@ -2286,6 +2826,154 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.socketManager.checkSockets();
   }
 
+  /**
+   * Get socket by player ID
+   */
+  getSocketByPlayerId(playerId: string): ServerSocket | undefined {
+    // Try using BroadcastManager first
+    if (this.broadcastManager?.getPlayerSocket) {
+      return this.broadcastManager.getPlayerSocket(playerId);
+    }
+
+    // Fallback to searching sockets map
+    for (const [, socket] of this.sockets) {
+      if (socket.player?.id === playerId) {
+        return socket;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Add staked items to a player's inventory (used for duel stake returns/awards)
+   * Uses database directly to ensure items are properly persisted.
+   */
+  private async addStakedItemsToInventory(
+    playerId: string,
+    stakes: Array<{
+      inventorySlot: number;
+      itemId: string;
+      quantity: number;
+      value: number;
+    }>,
+    reason: "return" | "award",
+  ): Promise<void> {
+    // Get database from world (same pattern as getDatabase helper)
+    const serverWorld = this.world as {
+      pgPool?: import("pg").Pool;
+      drizzleDb?: import("drizzle-orm/node-postgres").NodePgDatabase<
+        typeof import("../../database/schema").default
+      >;
+    };
+
+    if (!serverWorld.drizzleDb || !serverWorld.pgPool) {
+      console.error("[Duel] Database not available for stake transfer");
+      return;
+    }
+
+    const db = {
+      drizzle: serverWorld.drizzleDb,
+      pool: serverWorld.pgPool,
+    };
+
+    try {
+      // Get inventory system for locking and reloading
+      const inventorySystem = this.world.getSystem("inventory") as
+        | {
+            lockForTransaction: (id: string) => boolean;
+            unlockTransaction: (id: string) => void;
+            reloadFromDatabase: (id: string) => Promise<void>;
+          }
+        | undefined;
+
+      // Lock inventory if system available
+      const locked = inventorySystem?.lockForTransaction?.(playerId) ?? true;
+      if (!locked) {
+        console.warn(
+          `[Duel] Could not lock inventory for ${playerId}, retrying...`,
+        );
+        // Retry after small delay
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
+      try {
+        // Get current inventory to find free slots
+        const inventoryRepo = new InventoryRepository(db.drizzle, db.pool);
+        const currentInventory =
+          await inventoryRepo.getPlayerInventoryAsync(playerId);
+        const usedSlots = new Set(
+          currentInventory.map((item) => item.slotIndex),
+        );
+
+        // Find free slots for new items
+        const findFreeSlot = (): number => {
+          for (let i = 0; i < 28; i++) {
+            if (!usedSlots.has(i)) {
+              usedSlots.add(i);
+              return i;
+            }
+          }
+          return -1; // No free slot
+        };
+
+        // Add each staked item to inventory
+        for (const stake of stakes) {
+          const freeSlot = findFreeSlot();
+          if (freeSlot === -1) {
+            console.warn(
+              `[Duel] No free slot for stake item ${stake.itemId} x${stake.quantity} for ${playerId}`,
+            );
+            // TODO: Drop item on ground or send to bank
+            continue;
+          }
+
+          // Check if item is stackable and already exists in inventory
+          const existingItem = currentInventory.find(
+            (item) => item.itemId === stake.itemId,
+          );
+          const itemData = getItem(stake.itemId);
+          const isStackable = itemData?.stackable ?? false;
+
+          if (isStackable && existingItem) {
+            // Update existing stack
+            await db.pool.query(
+              `UPDATE inventory
+               SET quantity = quantity + $1
+               WHERE "playerId" = $2 AND "slotIndex" = $3`,
+              [stake.quantity, playerId, existingItem.slotIndex],
+            );
+            console.log(
+              `[Duel] Added ${stake.quantity} ${stake.itemId} to existing stack for ${playerId} (${reason})`,
+            );
+          } else {
+            // Insert new item
+            await db.pool.query(
+              `INSERT INTO inventory ("playerId", "itemId", quantity, "slotIndex", metadata)
+               VALUES ($1, $2, $3, $4, NULL)`,
+              [playerId, stake.itemId, stake.quantity, freeSlot],
+            );
+            console.log(
+              `[Duel] Added ${stake.itemId} x${stake.quantity} to slot ${freeSlot} for ${playerId} (${reason})`,
+            );
+          }
+        }
+
+        // Reload inventory from database (this triggers client sync)
+        if (inventorySystem?.reloadFromDatabase) {
+          await inventorySystem.reloadFromDatabase(playerId);
+        }
+      } finally {
+        // Unlock inventory
+        inventorySystem?.unlockTransaction?.(playerId);
+      }
+    } catch (error) {
+      console.error(
+        `[Duel] Error adding staked items to inventory for ${playerId}:`,
+        error,
+      );
+    }
+  }
+
   enqueue(socket: ServerSocket | Socket, method: string, data: unknown): void {
     this.queue.push([socket as ServerSocket, method, data]);
   }
@@ -2300,6 +2988,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   flush(): void {
     while (this.queue.length) {
       const [socket, method, data] = this.queue.shift()!;
+
+      // Debug: Log duel-related packets
+      if (method.includes("duel") || method.includes("Duel")) {
+        console.log(`[ServerNetwork] Received duel packet: ${method}`, data);
+      }
 
       const handler = this.handlers[method];
       if (handler) {

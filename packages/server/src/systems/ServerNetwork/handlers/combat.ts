@@ -110,29 +110,83 @@ export function handleAttackPlayer(
     return;
   }
 
-  // Check if attacker is in PvP zone
-  const zoneSystem = world.getSystem("zone-detection") as {
-    isPvPEnabled?: (pos: { x: number; z: number }) => boolean;
+  // Check if this is a duel combat (bypasses PvP zone checks)
+  const duelSystem = world.getSystem("duel") as {
+    isPlayerInActiveDuel?: (playerId: string) => boolean;
+    getPlayerDuel?: (playerId: string) =>
+      | {
+          challengerId: string;
+          targetId: string;
+          state: string;
+        }
+      | undefined;
+    canUseMelee?: (playerId: string) => boolean;
+    canUseRanged?: (playerId: string) => boolean;
+    canUseMagic?: (playerId: string) => boolean;
+    canUseSpecialAttack?: (playerId: string) => boolean;
   } | null;
 
-  if (zoneSystem?.isPvPEnabled) {
-    const attackerPos = playerEntity.position;
-    if (
-      !attackerPos ||
-      !zoneSystem.isPvPEnabled({ x: attackerPos.x, z: attackerPos.z })
-    ) {
-      sendCombatError(socket, "You can only attack players in PvP zones.");
+  let isDuelCombat = false;
+  if (duelSystem?.isPlayerInActiveDuel && duelSystem?.getPlayerDuel) {
+    const attackerInDuel = duelSystem.isPlayerInActiveDuel(attackerId);
+    const targetInDuel = duelSystem.isPlayerInActiveDuel(targetPlayerId);
+
+    if (attackerInDuel && targetInDuel) {
+      // Both in active duels - verify they're opponents
+      const attackerDuel = duelSystem.getPlayerDuel(attackerId);
+      if (attackerDuel) {
+        const isOpponent =
+          (attackerDuel.challengerId === attackerId &&
+            attackerDuel.targetId === targetPlayerId) ||
+          (attackerDuel.targetId === attackerId &&
+            attackerDuel.challengerId === targetPlayerId);
+
+        if (isOpponent) {
+          isDuelCombat = true;
+
+          // Enforce duel combat rules (OSRS-accurate)
+          // Currently melee-only, but check the rule anyway
+          if (duelSystem.canUseMelee && !duelSystem.canUseMelee(attackerId)) {
+            sendCombatError(socket, "Melee attacks are disabled in this duel.");
+            return;
+          }
+        } else {
+          sendCombatError(socket, "You can only attack your duel opponent.");
+          return;
+        }
+      }
+    } else if (attackerInDuel) {
+      sendCombatError(socket, "You can only attack your duel opponent.");
       return;
     }
+  }
 
-    // Also check if target is in PvP zone
-    const targetPos = targetPlayer.position;
-    if (
-      !targetPos ||
-      !zoneSystem.isPvPEnabled({ x: targetPos.x, z: targetPos.z })
-    ) {
-      sendCombatError(socket, "That player is not in a PvP zone.");
-      return;
+  // Skip PvP zone checks for duel combat
+  if (!isDuelCombat) {
+    // Check if attacker is in PvP zone
+    const zoneSystem = world.getSystem("zone-detection") as {
+      isPvPEnabled?: (pos: { x: number; z: number }) => boolean;
+    } | null;
+
+    if (zoneSystem?.isPvPEnabled) {
+      const attackerPos = playerEntity.position;
+      if (
+        !attackerPos ||
+        !zoneSystem.isPvPEnabled({ x: attackerPos.x, z: attackerPos.z })
+      ) {
+        sendCombatError(socket, "You can only attack players in PvP zones.");
+        return;
+      }
+
+      // Also check if target is in PvP zone
+      const targetPos = targetPlayer.position;
+      if (
+        !targetPos ||
+        !zoneSystem.isPvPEnabled({ x: targetPos.x, z: targetPos.z })
+      ) {
+        sendCombatError(socket, "That player is not in a PvP zone.");
+        return;
+      }
     }
   }
 
@@ -146,7 +200,7 @@ export function handleAttackPlayer(
   });
 
   console.log(
-    `[Combat] Player ${attackerId} attacking player ${targetPlayerId} (PvP)`,
+    `[Combat] Player ${attackerId} attacking player ${targetPlayerId} (${isDuelCombat ? "Duel" : "PvP"})`,
   );
 }
 

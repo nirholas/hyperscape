@@ -29,6 +29,7 @@ interface ChatMessage {
    * - news: News/event announcements
    * - trade: Trade channel messages
    * - trade_request: OSRS-style clickable trade request
+   * - duel_challenge: OSRS-style clickable duel challenge
    * - private: Private/whisper messages
    * - clan/guild: Clan chat messages
    */
@@ -40,11 +41,14 @@ interface ChatMessage {
     | "news"
     | "trade"
     | "trade_request"
+    | "duel_challenge"
     | "private"
     | "clan"
     | "guild";
   /** Trade ID for trade_request messages */
   tradeId?: string;
+  /** Challenge ID for duel_challenge messages */
+  challengeId?: string;
   /** Channel for filtering (e.g., "clan", "guild", "private") */
   channel?: string;
 }
@@ -79,6 +83,7 @@ const MESSAGE_COLORS = {
   warning: COLORS.ERROR, // Red for warnings
   news: "#a855f7", // Purple for news/events (no exact match in COLORS)
   trade_request: "#FF00FF", // Pink/magenta for trade requests (OSRS-style)
+  duel_challenge: "#FF4444", // Red for duel challenges
   default: COLORS.TEXT_PRIMARY,
 };
 
@@ -202,6 +207,8 @@ export function ChatPanel({ world }: ChatPanelProps): React.ReactElement {
       case "trade":
       case "trade_request":
         return MESSAGE_COLORS.trade_request;
+      case "duel_challenge":
+        return MESSAGE_COLORS.duel_challenge;
       case "private":
         return "#ff66ff"; // Pink for private messages
       case "clan":
@@ -299,6 +306,20 @@ export function ChatPanel({ world }: ChatPanelProps): React.ReactElement {
     [chatWorld],
   );
 
+  // Handle clicking on a duel challenge message
+  const handleDuelChallengeClick = useCallback(
+    (challengeId: string) => {
+      // Send duel acceptance to server
+      if (chatWorld.network?.send) {
+        chatWorld.network.send("duel:challenge:respond", {
+          challengeId,
+          accept: true,
+        });
+      }
+    },
+    [chatWorld],
+  );
+
   const tabs = [
     { id: "all" as const, icon: "📢", title: "All Messages" },
     { id: "game" as const, icon: "🎮", title: "Game Messages" },
@@ -389,27 +410,36 @@ export function ChatPanel({ world }: ChatPanelProps): React.ReactElement {
           const msgColor = getMessageColor(msgType);
           const time = formatTime(msg);
           const isTradeRequest = msgType === "trade_request" && msg.tradeId;
+          const isDuelChallenge =
+            msgType === "duel_challenge" && msg.challengeId;
+          const isClickable = isTradeRequest || isDuelChallenge;
+
+          const handleClick = isTradeRequest
+            ? () => handleTradeRequestClick(msg.tradeId!)
+            : isDuelChallenge
+              ? () => handleDuelChallengeClick(msg.challengeId!)
+              : undefined;
+
+          const clickTitle = isTradeRequest
+            ? "Click to accept trade request"
+            : isDuelChallenge
+              ? "Click to accept duel challenge"
+              : undefined;
 
           return (
             <div
               key={msg.id}
-              onClick={
-                isTradeRequest
-                  ? () => handleTradeRequestClick(msg.tradeId!)
-                  : undefined
-              }
+              onClick={handleClick}
               style={{
                 fontSize: 11,
                 lineHeight: 1.4,
                 wordBreak: "break-word",
                 overflowWrap: "break-word",
                 whiteSpace: "pre-wrap",
-                cursor: isTradeRequest ? "pointer" : "default",
-                textDecoration: isTradeRequest ? "underline" : "none",
+                cursor: isClickable ? "pointer" : "default",
+                textDecoration: isClickable ? "underline" : "none",
               }}
-              title={
-                isTradeRequest ? "Click to accept trade request" : undefined
-              }
+              title={clickTitle}
             >
               {/* Timestamp */}
               {time && (
@@ -437,6 +467,7 @@ export function ChatPanel({ world }: ChatPanelProps): React.ReactElement {
               <span style={{ color: msgColor }}>
                 {msgType !== "chat" &&
                   msgType !== "trade_request" &&
+                  msgType !== "duel_challenge" &&
                   msg.from && (
                     <span style={{ fontWeight: 600 }}>{msg.from}: </span>
                   )}

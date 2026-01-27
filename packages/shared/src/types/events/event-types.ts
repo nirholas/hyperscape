@@ -650,4 +650,7 @@ export enum EventType {
   TRADE_ERROR = "trade:error",
   TRADE_CLOSE = "trade:close",
   TRADE_CONFIRM_SCREEN = "trade:confirm_screen",
+
+  // Duel System
+  DUEL_COUNTDOWN_TICK = "duel:countdown:tick",
 }

@@ -89,7 +89,7 @@
  */
 
 // moment removed; use native Date
-import { emoteUrls } from "../../data/playerEmotes";
+import { emoteUrls, Emotes } from "../../data/playerEmotes";
 import THREE from "../../extras/three/three";
 import { readPacket, writePacket } from "../../platform/shared/packets";
 import { storage } from "../../platform/shared/storage";
@@ -2058,9 +2058,10 @@ export class ClientNetwork extends SystemBase {
     this.lastCharacterList = data.characters || [];
     this.world.emit(EventType.CHARACTER_LIST, data);
     // Auto-select previously chosen character if available
+    // NOTE: Use sessionStorage (per-tab) to prevent cross-tab character conflicts
     const storedId =
-      typeof localStorage !== "undefined"
-        ? localStorage.getItem("selectedCharacterId")
+      typeof sessionStorage !== "undefined"
+        ? sessionStorage.getItem("selectedCharacterId")
         : null;
     if (
       storedId &&
@@ -2299,6 +2300,369 @@ export class ClientNetwork extends SystemBase {
     this.world.emit(EventType.UI_TOAST, {
       message: data.message,
       type: "error",
+    });
+  };
+
+  // --- Duel Arena packet handlers ---
+
+  /**
+   * Duel challenge sent confirmation
+   */
+  onDuelChallengeSent = (data: {
+    challengeId: string;
+    targetPlayerId: string;
+    targetPlayerName: string;
+  }) => {
+    console.log("[ClientNetwork] Duel challenge sent:", data);
+    this.world.emit(EventType.UI_TOAST, {
+      message: `Challenge sent to ${data.targetPlayerName}`,
+      type: "info",
+    });
+  };
+
+  /**
+   * Incoming duel challenge from another player
+   */
+  onDuelChallengeIncoming = (data: {
+    challengeId: string;
+    fromPlayerId: string;
+    fromPlayerName: string;
+    fromPlayerLevel: number;
+  }) => {
+    console.log("[ClientNetwork] Duel challenge incoming:", data);
+    // Emit UI update for potential modal handling
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "duelChallenge",
+      data: {
+        visible: true,
+        challengeId: data.challengeId,
+        fromPlayer: {
+          id: data.fromPlayerId,
+          name: data.fromPlayerName,
+          level: data.fromPlayerLevel,
+        },
+      },
+    });
+  };
+
+  /**
+   * Duel session started (both players accepted challenge)
+   */
+  onDuelSessionStarted = (data: {
+    duelId: string;
+    opponentId: string;
+    opponentName: string;
+    isChallenger: boolean;
+  }) => {
+    console.log("[ClientNetwork] Duel session started:", data);
+    // Emit UI update to open duel panel
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "duel",
+      data: {
+        isOpen: true,
+        duelId: data.duelId,
+        opponent: {
+          id: data.opponentId,
+          name: data.opponentName,
+        },
+        isChallenger: data.isChallenger,
+      },
+    });
+  };
+
+  /**
+   * Duel challenge was declined
+   */
+  onDuelChallengeDeclined = (data: {
+    challengeId: string;
+    declinedBy?: string;
+  }) => {
+    console.log("[ClientNetwork] Duel challenge declined:", data);
+    if (data.declinedBy) {
+      this.world.emit(EventType.UI_TOAST, {
+        message: `${data.declinedBy} declined your duel challenge.`,
+        type: "info",
+      });
+    }
+    // Close any duel challenge modal
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "duelChallenge",
+      data: { visible: false },
+    });
+  };
+
+  /**
+   * Duel operation error
+   */
+  onDuelError = (data: { message: string; code: string }) => {
+    console.log("[ClientNetwork] Duel error:", data);
+    this.world.emit(EventType.UI_TOAST, {
+      message: data.message,
+      type: "error",
+    });
+  };
+
+  /**
+   * Duel rules updated (rule toggled)
+   */
+  onDuelRulesUpdated = (data: {
+    duelId: string;
+    rules: Record<string, boolean>;
+    challengerAccepted: boolean;
+    targetAccepted: boolean;
+    modifiedBy: string;
+  }) => {
+    console.log("[ClientNetwork] Duel rules updated:", data);
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "duelRulesUpdate",
+      data,
+    });
+  };
+
+  /**
+   * Duel equipment restrictions updated
+   */
+  onDuelEquipmentUpdated = (data: {
+    duelId: string;
+    equipmentRestrictions: Record<string, boolean>;
+    challengerAccepted: boolean;
+    targetAccepted: boolean;
+    modifiedBy: string;
+  }) => {
+    console.log("[ClientNetwork] Duel equipment updated:", data);
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "duelEquipmentUpdate",
+      data,
+    });
+  };
+
+  /**
+   * Duel acceptance state updated
+   */
+  onDuelAcceptanceUpdated = (data: {
+    duelId: string;
+    challengerAccepted: boolean;
+    targetAccepted: boolean;
+    state: string;
+    movedToStakes: boolean;
+  }) => {
+    console.log("[ClientNetwork] Duel acceptance updated:", data);
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "duelAcceptanceUpdate",
+      data,
+    });
+  };
+
+  /**
+   * Duel stakes updated (add/remove stake)
+   */
+  onDuelStakesUpdated = (data: {
+    duelId: string;
+    challengerStakes: Array<{
+      inventorySlot: number;
+      itemId: string;
+      quantity: number;
+      value: number;
+    }>;
+    targetStakes: Array<{
+      inventorySlot: number;
+      itemId: string;
+      quantity: number;
+      value: number;
+    }>;
+    challengerAccepted: boolean;
+    targetAccepted: boolean;
+    modifiedBy: string;
+  }) => {
+    console.log("[ClientNetwork] Duel stakes updated:", data);
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "duelStakesUpdate",
+      data,
+    });
+  };
+
+  /**
+   * Duel state/phase changed
+   */
+  onDuelStateChanged = (data: {
+    duelId: string;
+    state: string;
+    rules?: Record<string, boolean>;
+    equipmentRestrictions?: Record<string, boolean>;
+  }) => {
+    console.log("[ClientNetwork] Duel state changed:", data);
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "duelStateChange",
+      data,
+    });
+  };
+
+  /**
+   * Duel cancelled
+   */
+  onDuelCancelled = (data: {
+    duelId: string;
+    reason: string;
+    cancelledBy?: string;
+  }) => {
+    console.log("[ClientNetwork] Duel cancelled:", data);
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "duelClose",
+      data,
+    });
+    if (data.cancelledBy) {
+      this.world.emit(EventType.UI_TOAST, {
+        message: "Duel has been cancelled.",
+        type: "info",
+      });
+    }
+  };
+
+  /**
+   * Duel countdown start (3-2-1-FIGHT!)
+   */
+  onDuelCountdownStart = (data: {
+    duelId: string;
+    countdownSeconds: number;
+    challengerPosition: { x: number; y: number; z: number };
+    targetPosition: { x: number; y: number; z: number };
+  }) => {
+    console.log("[ClientNetwork] Duel countdown start:", data);
+    // Close the duel panel
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "duelClose",
+      data: { duelId: data.duelId },
+    });
+    // Emit countdown event for UI overlay
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "duelCountdown",
+      data,
+    });
+  };
+
+  /**
+   * Duel countdown tick (3, 2, 1, 0)
+   */
+  onDuelCountdownTick = (data: {
+    duelId: string;
+    count: number;
+    challengerId: string;
+    targetId: string;
+  }) => {
+    console.log("[ClientNetwork] Duel countdown tick:", data);
+    // Update UI overlay (fullscreen countdown)
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "duelCountdownTick",
+      data,
+    });
+    // Emit for 3D countdown splat system (numbers over players' heads)
+    this.world.emit(EventType.DUEL_COUNTDOWN_TICK, data);
+  };
+
+  /**
+   * Duel fight begins (countdown finished)
+   */
+  onDuelFightBegin = (data: {
+    duelId: string;
+    challengerId: string;
+    targetId: string;
+  }) => {
+    console.log("[ClientNetwork] Duel fight begin:", data);
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "duelFightBegin",
+      data,
+    });
+  };
+
+  /**
+   * Duel fight start with arena ID and bounds
+   */
+  onDuelFightStart = (data: {
+    duelId: string;
+    arenaId: number;
+    opponentId?: string;
+    bounds?: {
+      min: { x: number; y: number; z: number };
+      max: { x: number; y: number; z: number };
+    };
+  }) => {
+    console.log("[ClientNetwork] Duel fight start:", data);
+
+    // Store active duel state on world so systems can access it
+    // This allows PlayerInteractionHandler to show Attack option during duels
+    // Bounds are used for client-side movement restriction feedback
+    (
+      this.world as {
+        activeDuel?: {
+          duelId: string;
+          arenaId: number;
+          opponentId?: string;
+          bounds?: {
+            min: { x: number; y: number; z: number };
+            max: { x: number; y: number; z: number };
+          };
+        };
+      }
+    ).activeDuel = {
+      duelId: data.duelId,
+      arenaId: data.arenaId,
+      opponentId: data.opponentId,
+      bounds: data.bounds,
+    };
+
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "duelFightStart",
+      data,
+    });
+  };
+
+  /**
+   * Duel ended (winner declared)
+   */
+  onDuelEnded = (data: {
+    duelId: string;
+    winnerId: string;
+    loserId: string;
+    reason: string;
+    rewards?: Array<{ itemId: string; quantity: number }>;
+  }) => {
+    console.log("[ClientNetwork] Duel ended:", data);
+
+    // Clear active duel state from world
+    (
+      this.world as {
+        activeDuel?: { duelId: string; arenaId: number; opponentId?: string };
+      }
+    ).activeDuel = undefined;
+
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "duelEnded",
+      data,
+    });
+  };
+
+  /**
+   * Duel completed with full results (stakes transferred)
+   */
+  onDuelCompleted = (data: {
+    duelId: string;
+    winner: boolean;
+    opponentName: string;
+    itemsReceived: Array<{ itemId: string; quantity: number }>;
+    itemsLost: Array<{ itemId: string; quantity: number }>;
+  }) => {
+    console.log("[ClientNetwork] Duel completed:", data);
+
+    // Clear active duel state from world
+    (
+      this.world as {
+        activeDuel?: { duelId: string; arenaId: number; opponentId?: string };
+      }
+    ).activeDuel = undefined;
+
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "duelCompleted",
+      data,
     });
   };
 
@@ -2788,6 +3152,18 @@ export class ClientNetwork extends SystemBase {
         this.world.entities.get(data.playerId) ||
         this.world.entities.players?.get(data.playerId);
 
+      // DEBUG: Log entity lookup for death handling with timestamp
+      console.log(
+        `[ClientNetwork] onPlayerSetDead for remote player @ ${Date.now()}:`,
+        {
+          playerId: data.playerId,
+          isDead: data.isDead,
+          entityFound: !!entity,
+          entityType: entity?.constructor?.name,
+          hasDeathPosition: !!data.deathPosition,
+        },
+      );
+
       // CRITICAL FIX: Clear tileInterpolatorControlled flag so position updates work
       // This flag was blocking PlayerRemote.modify() and update() from applying positions
       if (entity?.data) {
@@ -2806,6 +3182,27 @@ export class ClientNetwork extends SystemBase {
         // AAA QUALITY: Set entity.data.deathState (single source of truth)
         if (entity?.data) {
           entity.data.deathState = DeathState.DYING;
+
+          // CRITICAL FIX: Always set death emote when player dies (duel or regular death)
+          // This ensures death animation plays even if earlier 'idle' packets arrived
+          // from CombatAnimationManager's scheduled emote resets
+          entity.data.emote = "death";
+          entity.data.e = "death";
+
+          // CRITICAL: Also directly trigger the avatar's death animation (like PlayerLocal does)
+          // Setting data.emote alone waits for update() loop - direct call is immediate
+          const entityWithAvatar = entity as {
+            avatar?: { setEmote?: (emote: string) => void };
+            lastEmote?: string;
+          };
+          if (entityWithAvatar.avatar?.setEmote) {
+            console.log(
+              `[ClientNetwork] Directly triggering death animation for ${data.playerId}`,
+            );
+            entityWithAvatar.avatar.setEmote(Emotes.DEATH);
+            entityWithAvatar.lastEmote = Emotes.DEATH;
+          }
+
           if (data.deathPosition) {
             // Handle both array [x,y,z] and object {x,y,z} formats
             if (Array.isArray(data.deathPosition)) {
@@ -2845,6 +3242,12 @@ export class ClientNetwork extends SystemBase {
             y = pos.y;
             z = pos.z;
             posArray = [x, y, z];
+          }
+
+          // CRITICAL: Stop TileInterpolator movement to prevent position fighting
+          // This ensures the death animation plays at the correct position
+          if (this.tileInterpolator) {
+            this.tileInterpolator.stopMovement(data.playerId, { x, y, z });
           }
 
           // Apply death position and emote together
@@ -2890,7 +3293,14 @@ export class ClientNetwork extends SystemBase {
           }
         } else if (entity) {
           // Fallback if no death position provided
+          console.log(
+            `[ClientNetwork] Calling entity.modify({ e: "death" }) for ${data.playerId}`,
+          );
           entity.modify({ e: "death", visible: true });
+        } else {
+          console.warn(
+            `[ClientNetwork] No entity found for death animation: ${data.playerId}`,
+          );
         }
       } else {
         // Player is respawning (isDead = false) - clear stale state
@@ -2926,6 +3336,14 @@ export class ClientNetwork extends SystemBase {
         deathLocation: data.deathLocation,
       });
     } else {
+      // DEBUG: Log respawn with timestamp
+      console.log(
+        `[ClientNetwork] onPlayerRespawned for remote player @ ${Date.now()}:`,
+        {
+          playerId: data.playerId,
+        },
+      );
+
       // SERVER-AUTHORITATIVE DEATH: Server now freezes position broadcasts during death animation
       // Client just needs to apply the spawn position when PLAYER_RESPAWNED arrives
 
@@ -3147,15 +3565,26 @@ export class ClientNetwork extends SystemBase {
   onPlayerTeleport = (data: {
     playerId: string;
     position: [number, number, number];
+    rotation?: number;
   }) => {
-    const player = this.world.entities.player;
-    if (player instanceof PlayerLocal) {
-      const pos = _v3_1.set(
-        data.position[0],
-        data.position[1],
-        data.position[2],
-      );
+    const pos = _v3_1.set(data.position[0], data.position[1], data.position[2]);
 
+    // Check if this is the local player
+    const localPlayer = this.world.entities.player;
+    const isLocalPlayer =
+      localPlayer instanceof PlayerLocal && localPlayer.id === data.playerId;
+
+    // Convert rotation angle to quaternion if provided
+    // Server sends angle as atan2(dx, dz) - need to add PI for VRM models
+    let rotationQuat: [number, number, number, number] | undefined;
+    if (data.rotation !== undefined) {
+      const angle = data.rotation + Math.PI; // VRM 1.0+ compensation
+      const halfAngle = angle / 2;
+      rotationQuat = [0, Math.sin(halfAngle), 0, Math.cos(halfAngle)];
+    }
+
+    if (isLocalPlayer) {
+      // Local player teleport
       // CRITICAL: Reset tile interpolator state BEFORE teleporting
       // Otherwise the tile movement system will immediately pull player back
       this.tileInterpolator.syncPosition(data.playerId, {
@@ -3165,17 +3594,81 @@ export class ClientNetwork extends SystemBase {
       });
 
       // Clear the tile movement flags on player data
-      player.data.tileInterpolatorControlled = false;
-      player.data.tileMovementActive = false;
+      localPlayer.data.tileInterpolatorControlled = false;
+      localPlayer.data.tileMovementActive = false;
+
+      // Cancel any pending client-side actions (walk-to actions, interactions)
+      // This prevents stale actions from executing after teleport
+      const interactionRouter = this.world.getSystem("interaction-router") as {
+        cancelCurrentAction?: () => void;
+      } | null;
+      if (interactionRouter?.cancelCurrentAction) {
+        interactionRouter.cancelCurrentAction();
+      }
 
       // Now teleport the player
-      player.teleport(pos);
+      localPlayer.teleport(pos);
+
+      // Apply rotation if provided
+      if (rotationQuat && localPlayer.base) {
+        localPlayer.base.quaternion.set(
+          rotationQuat[0],
+          rotationQuat[1],
+          rotationQuat[2],
+          rotationQuat[3],
+        );
+      }
 
       // Emit event for UI (e.g., home teleport completion)
       this.world.emit(EventType.PLAYER_TELEPORTED, {
         playerId: data.playerId,
         position: { x: pos.x, y: pos.y, z: pos.z },
       });
+    } else {
+      // Remote player teleport - update their position so we see them move
+      const remotePlayer = this.world.entities.players?.get(data.playerId);
+      if (remotePlayer) {
+        // Reset tile interpolator state for this remote player
+        this.tileInterpolator.syncPosition(data.playerId, {
+          x: pos.x,
+          y: pos.y,
+          z: pos.z,
+        });
+
+        // Update their position directly
+        if (remotePlayer.position) {
+          remotePlayer.position.x = pos.x;
+          remotePlayer.position.y = pos.y;
+          remotePlayer.position.z = pos.z;
+        }
+
+        // Also update node position if available
+        if (remotePlayer.node) {
+          remotePlayer.node.position.set(pos.x, pos.y, pos.z);
+        }
+
+        // Apply rotation if provided
+        if (rotationQuat) {
+          // Set on TileInterpolator for consistent rotation management
+          this.tileInterpolator.setCombatRotation(data.playerId, rotationQuat);
+
+          // Also set directly on entity for immediate visual update
+          if (remotePlayer.base) {
+            (
+              remotePlayer.base as {
+                quaternion?: {
+                  set: (x: number, y: number, z: number, w: number) => void;
+                };
+              }
+            ).quaternion?.set(
+              rotationQuat[0],
+              rotationQuat[1],
+              rotationQuat[2],
+              rotationQuat[3],
+            );
+          }
+        }
+      }
     }
   };
 

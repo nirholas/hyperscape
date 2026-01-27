@@ -56,6 +56,8 @@ export interface ZoneProperties {
   isWilderness: boolean;
   name: string;
   difficultyLevel: number;
+  /** Zone identifier (e.g., "duel_arena", "central_haven") */
+  id?: string;
 }
 
 /**

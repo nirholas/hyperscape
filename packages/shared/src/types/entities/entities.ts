@@ -83,6 +83,9 @@ export enum NPCType {
   STORE = "store",
   QUEST_GIVER = "quest_giver",
   TRAINER = "trainer",
+  HEALER = "healer",
+  SCOREBOARD = "scoreboard",
+  GUIDE = "guide",
 }
 
 export enum ResourceType {

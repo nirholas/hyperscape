@@ -65,7 +65,15 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
 
     // Inventory updates
     const handleInventory = (data: unknown) => {
-      const invData = data as { items: InventorySlotViewItem[]; coins: number };
+      const invData = data as {
+        playerId: string;
+        items: InventorySlotViewItem[];
+        coins: number;
+      };
+      // Only update if this inventory belongs to the local player (prevents cross-tab updates)
+      if (playerId && invData.playerId && invData.playerId !== playerId) {
+        return;
+      }
       setInventory(invData.items || []);
       if (typeof invData.coins === "number") {
         setCoins(invData.coins);

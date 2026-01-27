@@ -76,7 +76,7 @@ import type {
   PrayerComponent,
   StatsComponent,
 } from "../../types/core/core";
-import { EntityType, InteractionType } from "../../types/entities";
+import { EntityType, InteractionType, DeathState } from "../../types/entities";
 import { clamp } from "../../utils/game/EntityUtils";
 import { CombatantEntity, type CombatantConfig } from "../CombatantEntity";
 
@@ -881,6 +881,79 @@ export class PlayerEntity extends CombatantEntity {
         });
         break;
     }
+  }
+
+  // ==========================================================================
+  // Law of Demeter Helper Methods - Death State Management
+  // ==========================================================================
+
+  /**
+   * Get the current death state
+   * Encapsulates access to entity.data.deathState
+   */
+  public getDeathState(): DeathState {
+    const data = this.data as { deathState?: DeathState };
+    return data.deathState ?? DeathState.ALIVE;
+  }
+
+  /**
+   * Set the death state and mark network dirty
+   * Encapsulates modification of entity.data.deathState
+   */
+  public setDeathState(state: DeathState): void {
+    const data = this.data as { deathState?: DeathState };
+    data.deathState = state;
+    this.markNetworkDirty();
+  }
+
+  /**
+   * Clear the death position (used after respawn)
+   * Encapsulates modification of entity.data.deathPosition and respawnTick
+   */
+  public clearDeathPosition(): void {
+    const data = this.data as {
+      deathPosition?: [number, number, number];
+      respawnTick?: number;
+    };
+    data.deathPosition = undefined;
+    data.respawnTick = undefined;
+    this.markNetworkDirty();
+  }
+
+  /**
+   * Set the current animation/emote
+   * Encapsulates modification of entity.data.e (emote field)
+   */
+  public setAnimation(animation: string): void {
+    const data = this.data as { e?: string };
+    data.e = animation;
+    this.markNetworkDirty();
+  }
+
+  /**
+   * Check if the player is currently dead or dying
+   */
+  public isDeadOrDying(): boolean {
+    const state = this.getDeathState();
+    return state === DeathState.DYING || state === DeathState.DEAD;
+  }
+
+  /**
+   * Reset death state to alive (used after duel or respawn)
+   * Combines clearing death state, position, and setting idle animation
+   */
+  public resetDeathState(): void {
+    const data = this.data as {
+      deathState?: DeathState;
+      deathPosition?: [number, number, number];
+      respawnTick?: number;
+      e?: string;
+    };
+    data.deathState = DeathState.ALIVE;
+    data.deathPosition = undefined;
+    data.respawnTick = undefined;
+    data.e = "idle";
+    this.markNetworkDirty();
   }
 
   /**

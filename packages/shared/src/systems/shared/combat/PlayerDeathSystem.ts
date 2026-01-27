@@ -422,6 +422,7 @@ export class PlayerDeathSystem extends SystemBase {
     entityId: string;
     killedBy: string;
     entityType: "player" | "mob";
+    deathPosition?: { x: number; y: number; z: number };
   }): void {
     // Only handle player deaths - mob deaths are handled by MobDeathSystem
     if (data.entityType !== "player") {
@@ -439,19 +440,85 @@ export class PlayerDeathSystem extends SystemBase {
 
     const playerId = data.entityId;
 
-    // Get player's current position - try multiple sources for robustness
-    let position = this.playerPositions.get(playerId);
-
-    if (!position) {
-      // Fallback 1: Try to get position from player entity
+    // CRITICAL: Use position from event first (captured at exact moment of death)
+    // Fall back to cache only if event doesn't include position
+    let deathPosition = data.deathPosition;
+    if (!deathPosition) {
+      deathPosition = this.playerPositions.get(playerId);
+    }
+    if (!deathPosition) {
       const playerEntity = this.world.entities?.get?.(playerId);
       if (playerEntity) {
         const entityPos = getEntityPosition(playerEntity);
         if (entityPos) {
-          position = { x: entityPos.x, y: entityPos.y, z: entityPos.z };
+          deathPosition = { x: entityPos.x, y: entityPos.y, z: entityPos.z };
         }
       }
     }
+
+    // Check if player is in an active duel - DuelSystem handles duel deaths
+    // No gravestone or item drops should occur during duels (OSRS-accurate)
+    const duelSystem = this.world.getSystem?.("duel") as {
+      isPlayerInActiveDuel?: (playerId: string) => boolean;
+    } | null;
+
+    if (duelSystem?.isPlayerInActiveDuel?.(playerId)) {
+      console.log(
+        `[PlayerDeathSystem] Player ${playerId} died in duel - playing death animation only (no item drops)`,
+      );
+
+      // CRITICAL: Cancel any scheduled emote resets BEFORE emitting death event
+      // This prevents race conditions where a scheduled "idle" reset overwrites death animation
+      const combatSystem = this.world.getSystem?.("combat") as {
+        animationManager?: { cancelEmoteReset?: (entityId: string) => void };
+      } | null;
+      if (combatSystem?.animationManager?.cancelEmoteReset) {
+        combatSystem.animationManager.cancelEmoteReset(playerId);
+        console.log(
+          `[PlayerDeathSystem] Cancelled scheduled emote reset for duel death: ${playerId}`,
+        );
+      }
+
+      // Still emit death state and play animation for duel deaths
+      // DuelSystem handles stakes/respawn, but we need the visual feedback
+      // CRITICAL: Include deathPosition so clients can properly position the death animation
+      this.emitTypedEvent(EventType.PLAYER_SET_DEAD, {
+        playerId,
+        isDead: true,
+        deathPosition: deathPosition
+          ? [deathPosition.x, deathPosition.y, deathPosition.z]
+          : undefined,
+      });
+
+      // Set death animation on entity
+      const playerEntity = this.world.entities?.get?.(playerId);
+      if (playerEntity && "data" in playerEntity) {
+        const typedPlayerEntity = playerEntity as PlayerEntityLike;
+        if (typedPlayerEntity.emote !== undefined) {
+          typedPlayerEntity.emote = "death";
+        }
+        if (typedPlayerEntity.data) {
+          typedPlayerEntity.data.e = "death";
+          typedPlayerEntity.data.deathState = DeathState.DYING;
+          console.log(
+            `[PlayerDeathSystem] Set death animation for duel death: ${playerId}, e=${typedPlayerEntity.data.e}`,
+          );
+        }
+        if ("markNetworkDirty" in playerEntity) {
+          (playerEntity as { markNetworkDirty: () => void }).markNetworkDirty();
+        }
+      } else {
+        console.warn(
+          `[PlayerDeathSystem] Could not find entity to set death animation: ${playerId}`,
+        );
+      }
+
+      return;
+    }
+
+    // Use the deathPosition already captured at the top of this function
+    // (from event data first, then fallbacks)
+    let position = deathPosition;
 
     if (!position) {
       // Fallback 2: Try to get from player system

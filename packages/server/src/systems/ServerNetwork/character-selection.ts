@@ -685,6 +685,19 @@ export async function handleEnterWorld(
     } catch {}
   }
 
+  // Check if player logged out inside a combat arena (server restart edge case)
+  // If so, teleport them to the duel arena lobby spawn point
+  const { isPositionInsideCombatArena, getDuelArenaConfig } = await import(
+    "@hyperscape/shared"
+  );
+  if (isPositionInsideCombatArena(position[0], position[2])) {
+    const lobbySpawn = getDuelArenaConfig().lobbySpawnPoint;
+    console.log(
+      `[CharacterSelection] Player ${characterId} was inside combat arena, teleporting to lobby`,
+    );
+    position = [lobbySpawn.x, lobbySpawn.y, lobbySpawn.z];
+  }
+
   // Ground to terrain
   const terrain = world.getSystem("terrain") as InstanceType<
     typeof TerrainSystem

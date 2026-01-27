@@ -162,6 +162,76 @@ export interface XpLampData {
   xpAmount: number;
 }
 
+/** Duel panel data structure */
+export interface DuelData {
+  visible: boolean;
+  duelId: string;
+  opponentId: string;
+  opponentName: string;
+  isChallenger: boolean;
+  screenState: "RULES" | "STAKES" | "CONFIRMING";
+  rules: {
+    noRanged: boolean;
+    noMelee: boolean;
+    noMagic: boolean;
+    noSpecialAttack: boolean;
+    noPrayer: boolean;
+    noPotions: boolean;
+    noFood: boolean;
+    noForfeit: boolean;
+    noMovement: boolean;
+    funWeapons: boolean;
+  };
+  equipmentRestrictions: {
+    head: boolean;
+    cape: boolean;
+    amulet: boolean;
+    weapon: boolean;
+    body: boolean;
+    shield: boolean;
+    legs: boolean;
+    gloves: boolean;
+    boots: boolean;
+    ring: boolean;
+    ammo: boolean;
+  };
+  myAccepted: boolean;
+  opponentAccepted: boolean;
+  myStakes: Array<{
+    inventorySlot: number;
+    itemId: string;
+    quantity: number;
+    value: number;
+  }>;
+  opponentStakes: Array<{
+    inventorySlot: number;
+    itemId: string;
+    quantity: number;
+    value: number;
+  }>;
+  opponentModifiedStakes: boolean;
+}
+
+/** Duel result data structure (shown after duel completes) */
+export interface DuelResultData {
+  visible: boolean;
+  won: boolean;
+  opponentName: string;
+  itemsReceived: Array<{
+    itemId: string;
+    quantity: number;
+    value: number;
+  }>;
+  itemsLost: Array<{
+    itemId: string;
+    quantity: number;
+    value: number;
+  }>;
+  totalValueWon: number;
+  totalValueLost: number;
+  forfeit: boolean;
+}
+
 /**
  * Hook return type for modal panels
  */
@@ -176,6 +246,8 @@ export interface ModalPanelsState {
   questStartData: QuestStartData | null;
   questCompleteData: QuestCompleteData | null;
   xpLampData: XpLampData | null;
+  duelData: DuelData | null;
+  duelResultData: DuelResultData | null;
 
   // Setters
   setBankData: React.Dispatch<React.SetStateAction<BankData | null>>;
@@ -193,6 +265,10 @@ export interface ModalPanelsState {
     React.SetStateAction<QuestCompleteData | null>
   >;
   setXpLampData: React.Dispatch<React.SetStateAction<XpLampData | null>>;
+  setDuelData: React.Dispatch<React.SetStateAction<DuelData | null>>;
+  setDuelResultData: React.Dispatch<
+    React.SetStateAction<DuelResultData | null>
+  >;
 
   // Close handlers
   closeBank: () => void;
@@ -204,6 +280,8 @@ export interface ModalPanelsState {
   closeQuestStart: () => void;
   closeQuestComplete: () => void;
   closeXpLamp: () => void;
+  closeDuel: () => void;
+  closeDuelResult: () => void;
 }
 
 // Also export as ModalPanelsResult for backwards compatibility
@@ -240,6 +318,10 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
   const [questCompleteData, setQuestCompleteData] =
     useState<QuestCompleteData | null>(null);
   const [xpLampData, setXpLampData] = useState<XpLampData | null>(null);
+  const [duelData, setDuelData] = useState<DuelData | null>(null);
+  const [duelResultData, setDuelResultData] = useState<DuelResultData | null>(
+    null,
+  );
 
   // Close handlers
   const closeBank = useCallback(() => setBankData(null), []);
@@ -251,6 +333,8 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
   const closeQuestStart = useCallback(() => setQuestStartData(null), []);
   const closeQuestComplete = useCallback(() => setQuestCompleteData(null), []);
   const closeXpLamp = useCallback(() => setXpLampData(null), []);
+  const closeDuel = useCallback(() => setDuelData(null), []);
+  const closeDuelResult = useCallback(() => setDuelResultData(null), []);
 
   useEffect(() => {
     if (!world) return;
@@ -398,6 +482,299 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
       }
     };
 
+    // Default duel rules/equipment for new duels
+    const defaultDuelRules = {
+      noRanged: false,
+      noMelee: false,
+      noMagic: false,
+      noSpecialAttack: false,
+      noPrayer: false,
+      noPotions: false,
+      noFood: false,
+      noForfeit: false,
+      noMovement: false,
+      funWeapons: false,
+    };
+
+    const defaultEquipmentRestrictions = {
+      head: false,
+      cape: false,
+      amulet: false,
+      weapon: false,
+      body: false,
+      shield: false,
+      legs: false,
+      gloves: false,
+      boots: false,
+      ring: false,
+      ammo: false,
+    };
+
+    // UI_UPDATE handler for duel panel
+    const handleUIUpdate = (data: unknown) => {
+      const d = data as {
+        component: string;
+        data: Record<string, unknown>;
+      };
+
+      // Duel session started - open panel with default state
+      if (d.component === "duel" && d.data?.isOpen) {
+        const duelData = d.data as {
+          duelId?: string;
+          opponent?: { id: string; name: string };
+          isChallenger?: boolean;
+        };
+        setDuelData({
+          visible: true,
+          duelId: duelData.duelId || "",
+          opponentId: duelData.opponent?.id || "",
+          opponentName: duelData.opponent?.name || "",
+          isChallenger: duelData.isChallenger || false,
+          screenState: "RULES",
+          rules: { ...defaultDuelRules },
+          equipmentRestrictions: { ...defaultEquipmentRestrictions },
+          myAccepted: false,
+          opponentAccepted: false,
+          myStakes: [],
+          opponentStakes: [],
+          opponentModifiedStakes: false,
+        });
+      }
+
+      // Duel rules updated
+      if (d.component === "duelRulesUpdate") {
+        const rulesData = d.data as {
+          duelId: string;
+          rules: Record<string, boolean>;
+          challengerAccepted: boolean;
+          targetAccepted: boolean;
+          modifiedBy: string;
+        };
+        setDuelData((prev) => {
+          if (!prev || prev.duelId !== rulesData.duelId) return prev;
+          const isChallenger = prev.isChallenger;
+          return {
+            ...prev,
+            rules: {
+              noRanged: rulesData.rules.noRanged ?? prev.rules.noRanged,
+              noMelee: rulesData.rules.noMelee ?? prev.rules.noMelee,
+              noMagic: rulesData.rules.noMagic ?? prev.rules.noMagic,
+              noSpecialAttack:
+                rulesData.rules.noSpecialAttack ?? prev.rules.noSpecialAttack,
+              noPrayer: rulesData.rules.noPrayer ?? prev.rules.noPrayer,
+              noPotions: rulesData.rules.noPotions ?? prev.rules.noPotions,
+              noFood: rulesData.rules.noFood ?? prev.rules.noFood,
+              noForfeit: rulesData.rules.noForfeit ?? prev.rules.noForfeit,
+              noMovement: rulesData.rules.noMovement ?? prev.rules.noMovement,
+              funWeapons: rulesData.rules.funWeapons ?? prev.rules.funWeapons,
+            },
+            myAccepted: isChallenger
+              ? rulesData.challengerAccepted
+              : rulesData.targetAccepted,
+            opponentAccepted: isChallenger
+              ? rulesData.targetAccepted
+              : rulesData.challengerAccepted,
+          };
+        });
+      }
+
+      // Duel equipment updated
+      if (d.component === "duelEquipmentUpdate") {
+        const equipData = d.data as {
+          duelId: string;
+          equipmentRestrictions: Record<string, boolean>;
+          challengerAccepted: boolean;
+          targetAccepted: boolean;
+          modifiedBy: string;
+        };
+        setDuelData((prev) => {
+          if (!prev || prev.duelId !== equipData.duelId) return prev;
+          const isChallenger = prev.isChallenger;
+          return {
+            ...prev,
+            equipmentRestrictions: {
+              head:
+                equipData.equipmentRestrictions.head ??
+                prev.equipmentRestrictions.head,
+              cape:
+                equipData.equipmentRestrictions.cape ??
+                prev.equipmentRestrictions.cape,
+              amulet:
+                equipData.equipmentRestrictions.amulet ??
+                prev.equipmentRestrictions.amulet,
+              weapon:
+                equipData.equipmentRestrictions.weapon ??
+                prev.equipmentRestrictions.weapon,
+              body:
+                equipData.equipmentRestrictions.body ??
+                prev.equipmentRestrictions.body,
+              shield:
+                equipData.equipmentRestrictions.shield ??
+                prev.equipmentRestrictions.shield,
+              legs:
+                equipData.equipmentRestrictions.legs ??
+                prev.equipmentRestrictions.legs,
+              gloves:
+                equipData.equipmentRestrictions.gloves ??
+                prev.equipmentRestrictions.gloves,
+              boots:
+                equipData.equipmentRestrictions.boots ??
+                prev.equipmentRestrictions.boots,
+              ring:
+                equipData.equipmentRestrictions.ring ??
+                prev.equipmentRestrictions.ring,
+              ammo:
+                equipData.equipmentRestrictions.ammo ??
+                prev.equipmentRestrictions.ammo,
+            },
+            myAccepted: isChallenger
+              ? equipData.challengerAccepted
+              : equipData.targetAccepted,
+            opponentAccepted: isChallenger
+              ? equipData.targetAccepted
+              : equipData.challengerAccepted,
+          };
+        });
+      }
+
+      // Duel acceptance updated
+      if (d.component === "duelAcceptanceUpdate") {
+        const acceptData = d.data as {
+          duelId: string;
+          challengerAccepted: boolean;
+          targetAccepted: boolean;
+          state: string;
+          movedToStakes?: boolean;
+        };
+        setDuelData((prev) => {
+          if (!prev || prev.duelId !== acceptData.duelId) return prev;
+          const isChallenger = prev.isChallenger;
+          return {
+            ...prev,
+            myAccepted: isChallenger
+              ? acceptData.challengerAccepted
+              : acceptData.targetAccepted,
+            opponentAccepted: isChallenger
+              ? acceptData.targetAccepted
+              : acceptData.challengerAccepted,
+          };
+        });
+      }
+
+      // Duel stakes updated
+      if (d.component === "duelStakesUpdate") {
+        const stakesData = d.data as {
+          duelId: string;
+          challengerStakes: Array<{
+            inventorySlot: number;
+            itemId: string;
+            quantity: number;
+            value: number;
+          }>;
+          targetStakes: Array<{
+            inventorySlot: number;
+            itemId: string;
+            quantity: number;
+            value: number;
+          }>;
+          challengerAccepted: boolean;
+          targetAccepted: boolean;
+          modifiedBy: string;
+        };
+        setDuelData((prev) => {
+          if (!prev || prev.duelId !== stakesData.duelId) return prev;
+          const isChallenger = prev.isChallenger;
+          const localPlayerId = prev.opponentId; // We need local player ID to check modifiedBy
+          const opponentModified = stakesData.modifiedBy !== localPlayerId;
+          return {
+            ...prev,
+            myStakes: isChallenger
+              ? stakesData.challengerStakes
+              : stakesData.targetStakes,
+            opponentStakes: isChallenger
+              ? stakesData.targetStakes
+              : stakesData.challengerStakes,
+            myAccepted: isChallenger
+              ? stakesData.challengerAccepted
+              : stakesData.targetAccepted,
+            opponentAccepted: isChallenger
+              ? stakesData.targetAccepted
+              : stakesData.challengerAccepted,
+            opponentModifiedStakes: opponentModified,
+          };
+        });
+      }
+
+      // Duel state changed (e.g., RULES -> STAKES -> CONFIRMING)
+      if (d.component === "duelStateChange") {
+        const stateData = d.data as {
+          duelId: string;
+          state: "RULES" | "STAKES" | "CONFIRMING";
+        };
+        setDuelData((prev) => {
+          if (!prev || prev.duelId !== stateData.duelId) return prev;
+          return {
+            ...prev,
+            screenState: stateData.state,
+            myAccepted: false,
+            opponentAccepted: false,
+          };
+        });
+      }
+
+      // Duel closed/cancelled
+      if (d.component === "duelClose" || d.component === "duelCancelled") {
+        const closeData = d.data as {
+          duelId?: string;
+        };
+        setDuelData((prev) => {
+          if (!prev) return prev;
+          // If duelId is specified, only close if it matches
+          if (closeData.duelId && prev.duelId !== closeData.duelId) return prev;
+          return null;
+        });
+      }
+
+      // Duel completed - show result modal
+      // Server sends pre-computed data for each player directly
+      if (d.component === "duelCompleted") {
+        const completedData = d.data as {
+          duelId: string;
+          won: boolean;
+          opponentName: string;
+          itemsReceived: Array<{
+            itemId: string;
+            quantity: number;
+            value: number;
+          }>;
+          itemsLost: Array<{
+            itemId: string;
+            quantity: number;
+            value: number;
+          }>;
+          totalValueWon: number;
+          totalValueLost: number;
+          forfeit: boolean;
+        };
+
+        // Close the duel panel first
+        setDuelData(null);
+
+        // Use the server's pre-computed data directly
+        // Ensure arrays are never undefined to prevent React render errors
+        setDuelResultData({
+          visible: true,
+          won: completedData.won,
+          opponentName: completedData.opponentName || "Unknown",
+          itemsReceived: completedData.itemsReceived || [],
+          itemsLost: completedData.itemsLost || [],
+          totalValueWon: completedData.totalValueWon || 0,
+          totalValueLost: completedData.totalValueLost || 0,
+          forfeit: completedData.forfeit || false,
+        });
+      }
+    };
+
     // Register world event listeners
     world.on(EventType.BANK_OPEN, handleBankOpen, undefined);
     world.on(EventType.BANK_CLOSE, handleBankClose, undefined);
@@ -411,6 +788,7 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
     world.on(EventType.QUEST_START_CONFIRM, handleQuestStartConfirm, undefined);
     world.on(EventType.QUEST_COMPLETED, handleQuestCompleted, undefined);
     world.on(EventType.XP_LAMP_USE_REQUEST, handleXpLampUseRequest, undefined);
+    world.on(EventType.UI_UPDATE, handleUIUpdate, undefined);
 
     // Register network event listeners
     if (world.network) {
@@ -473,6 +851,7 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
         undefined,
         undefined,
       );
+      world.off(EventType.UI_UPDATE, handleUIUpdate, undefined, undefined);
 
       // Unregister network event listeners
       if (world.network) {
@@ -493,6 +872,8 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
     questStartData,
     questCompleteData,
     xpLampData,
+    duelData,
+    duelResultData,
     setBankData,
     setStoreData,
     setDialogueData,
@@ -502,6 +883,8 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
     setQuestStartData,
     setQuestCompleteData,
     setXpLampData,
+    setDuelData,
+    setDuelResultData,
     closeBank,
     closeStore,
     closeDialogue,
@@ -511,5 +894,7 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
     closeQuestStart,
     closeQuestComplete,
     closeXpLamp,
+    closeDuel,
+    closeDuelResult,
   };
 }

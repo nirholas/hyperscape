@@ -251,6 +251,22 @@ export { createEmoteFactory } from "./extras/three/createEmoteFactory";
 export { createNode } from "./extras/three/createNode";
 export { glbToNodes } from "./extras/three/glbToNodes";
 export { Emotes } from "./data/playerEmotes";
+export {
+  DUEL_RULE_DEFINITIONS,
+  DUEL_RULE_LABELS,
+  EQUIPMENT_SLOT_DEFINITIONS,
+  EQUIPMENT_SLOT_LABELS,
+  EQUIPMENT_SLOTS_ORDERED,
+  VALID_DUEL_RULE_KEYS,
+  DUEL_EQUIPMENT_SLOT_KEYS,
+  isValidDuelRuleKey,
+  isValidEquipmentSlot,
+  getIncompatibleRules,
+  areRulesCompatible,
+  type DuelRuleDefinition,
+  type EquipmentSlotDefinition,
+  type DuelEquipmentSlot,
+} from "./data/duel-manifest";
 export { ControlPriorities } from "./systems/client/ControlPriorities";
 export { downloadFile } from "./utils/downloadFile";
 export { Curve } from "./extras/animation/Curve";

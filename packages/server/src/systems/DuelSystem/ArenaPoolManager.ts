@@ -1,0 +1,260 @@
+/**
+ * ArenaPoolManager
+ *
+ * Manages a pool of duel arenas for player dueling.
+ *
+ * Responsibilities:
+ * - Track which arenas are in use
+ * - Reserve arenas for new duels
+ * - Release arenas when duels complete
+ * - Provide spawn points and bounds for each arena
+ *
+ * Arena Layout (OSRS-style):
+ * - 6 rectangular arenas arranged in a 2x3 grid
+ * - Each arena has 2 spawn points (north and south)
+ * - Arena bounds used for movement clamping if noMovement rule
+ */
+
+import {
+  type Arena,
+  type ArenaSpawnPoint,
+  type ArenaBounds,
+  type ICollisionMatrix,
+  CollisionFlag,
+  getDuelArenaConfig,
+} from "@hyperscape/shared";
+
+// ============================================================================
+// Types
+// ============================================================================
+
+interface ArenaState {
+  arena: Arena;
+  currentDuelId: string | null;
+}
+
+/**
+ * Generate arena configuration for a given arena ID (1-6)
+ * Uses manifest-driven config from getDuelArenaConfig()
+ */
+function generateArenaConfig(arenaId: number): Arena {
+  const config = getDuelArenaConfig();
+
+  // Calculate row and column based on grid layout
+  const row = Math.floor((arenaId - 1) / config.columns);
+  const col = (arenaId - 1) % config.columns;
+
+  // Calculate center position
+  const centerX =
+    config.baseX +
+    col * (config.arenaWidth + config.arenaGap) +
+    config.arenaWidth / 2;
+  const centerZ =
+    config.baseZ +
+    row * (config.arenaLength + config.arenaGap) +
+    config.arenaLength / 2;
+
+  // Calculate bounds
+  const bounds: ArenaBounds = {
+    min: {
+      x: centerX - config.arenaWidth / 2,
+      y: config.baseY - 1,
+      z: centerZ - config.arenaLength / 2,
+    },
+    max: {
+      x: centerX + config.arenaWidth / 2,
+      y: config.baseY + 10,
+      z: centerZ + config.arenaLength / 2,
+    },
+  };
+
+  // Calculate spawn points (north and south)
+  const spawnPoints: [ArenaSpawnPoint, ArenaSpawnPoint] = [
+    { x: centerX, y: config.baseY, z: centerZ - config.spawnOffset }, // North spawn
+    { x: centerX, y: config.baseY, z: centerZ + config.spawnOffset }, // South spawn
+  ];
+
+  return {
+    arenaId,
+    inUse: false,
+    currentDuelId: null,
+    spawnPoints,
+    bounds,
+    center: { x: centerX, z: centerZ },
+  };
+}
+
+// ============================================================================
+// ArenaPoolManager Class
+// ============================================================================
+
+export class ArenaPoolManager {
+  /** Arena states by ID */
+  private arenas: Map<number, ArenaState> = new Map();
+
+  constructor() {
+    this.initializeArenas();
+  }
+
+  /**
+   * Initialize all arenas in the pool
+   * Uses arena count from manifest config
+   */
+  private initializeArenas(): void {
+    const config = getDuelArenaConfig();
+    for (let i = 1; i <= config.arenaCount; i++) {
+      const arena = generateArenaConfig(i);
+      this.arenas.set(i, {
+        arena,
+        currentDuelId: null,
+      });
+    }
+  }
+
+  /**
+   * Reserve an available arena for a duel
+   * @returns Arena ID if one is available, null otherwise
+   */
+  reserveArena(duelId: string): number | null {
+    for (const [arenaId, state] of this.arenas) {
+      if (!state.currentDuelId) {
+        state.currentDuelId = duelId;
+        state.arena.inUse = true;
+        state.arena.currentDuelId = duelId;
+        return arenaId;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Release an arena back to the pool
+   */
+  releaseArena(arenaId: number): boolean {
+    const state = this.arenas.get(arenaId);
+    if (!state) return false;
+
+    state.currentDuelId = null;
+    state.arena.inUse = false;
+    state.arena.currentDuelId = null;
+    return true;
+  }
+
+  /**
+   * Release arena by duel ID (when duel ends)
+   */
+  releaseArenaByDuelId(duelId: string): boolean {
+    for (const [arenaId, state] of this.arenas) {
+      if (state.currentDuelId === duelId) {
+        return this.releaseArena(arenaId);
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Get arena configuration by ID
+   */
+  getArena(arenaId: number): Arena | undefined {
+    return this.arenas.get(arenaId)?.arena;
+  }
+
+  /**
+   * Get spawn points for an arena
+   */
+  getSpawnPoints(
+    arenaId: number,
+  ): [ArenaSpawnPoint, ArenaSpawnPoint] | undefined {
+    return this.arenas.get(arenaId)?.arena.spawnPoints;
+  }
+
+  /**
+   * Get arena bounds for movement clamping
+   */
+  getArenaBounds(arenaId: number): ArenaBounds | undefined {
+    return this.arenas.get(arenaId)?.arena.bounds;
+  }
+
+  /**
+   * Get arena center position
+   */
+  getArenaCenter(arenaId: number): { x: number; z: number } | undefined {
+    return this.arenas.get(arenaId)?.arena.center;
+  }
+
+  /**
+   * Check if an arena is available
+   */
+  isArenaAvailable(arenaId: number): boolean {
+    const state = this.arenas.get(arenaId);
+    return state ? !state.currentDuelId : false;
+  }
+
+  /**
+   * Get count of available arenas
+   */
+  getAvailableCount(): number {
+    let count = 0;
+    for (const state of this.arenas.values()) {
+      if (!state.currentDuelId) count++;
+    }
+    return count;
+  }
+
+  /**
+   * Get all arena IDs
+   */
+  getAllArenaIds(): number[] {
+    return Array.from(this.arenas.keys());
+  }
+
+  /**
+   * Get the duel ID currently using an arena
+   */
+  getDuelIdForArena(arenaId: number): string | null {
+    return this.arenas.get(arenaId)?.currentDuelId ?? null;
+  }
+
+  /**
+   * Register arena wall collision for all arenas.
+   * Blocks the perimeter ring OUTSIDE the arena to prevent entry/exit.
+   * Players inside can walk up to the visual wall but not through it.
+   *
+   * @param collision - The world's collision matrix to register walls with
+   */
+  registerArenaWallCollision(collision: ICollisionMatrix): void {
+    for (const [_arenaId, state] of this.arenas) {
+      const bounds = state.arena.bounds;
+
+      // Convert bounds to tile coordinates
+      // Use round() for consistent alignment with visual walls
+      const minX = Math.round(bounds.min.x);
+      const maxX = Math.round(bounds.max.x);
+      const minZ = Math.round(bounds.min.z);
+      const maxZ = Math.round(bounds.max.z);
+
+      // Block a perimeter ring OUTSIDE the arena
+      // This lets players walk up to the visual wall but not through it
+
+      // North wall: one row north (z = minZ - 1)
+      for (let x = minX - 1; x <= maxX + 1; x++) {
+        collision.addFlags(x, minZ - 1, CollisionFlag.BLOCKED);
+      }
+
+      // South wall: one row south (z = maxZ + 1)
+      for (let x = minX - 1; x <= maxX + 1; x++) {
+        collision.addFlags(x, maxZ + 1, CollisionFlag.BLOCKED);
+      }
+
+      // West wall: one column west (x = minX - 1)
+      for (let z = minZ; z <= maxZ; z++) {
+        collision.addFlags(minX - 1, z, CollisionFlag.BLOCKED);
+      }
+
+      // East wall: one column east (x = maxX + 1)
+      for (let z = minZ; z <= maxZ; z++) {
+        collision.addFlags(maxX + 1, z, CollisionFlag.BLOCKED);
+      }
+    }
+  }
+}

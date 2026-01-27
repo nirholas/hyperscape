@@ -818,16 +818,17 @@ export class PlayerLocal extends Entity implements HotReloadable {
     }
 
     const terrainHeight = terrain.getHeightAt(this.position.x, this.position.z);
-    const targetY = terrainHeight; // Character feet at ground level
-    const diff = targetY - this.position.y;
+    if (!Number.isFinite(terrainHeight)) return;
 
-    // Keep character at terrain level
-    if (diff > 0.01) {
-      // Below terrain - snap up immediately
-      this.position.y = targetY;
-    } else if (diff < -0.01) {
-      // Above terrain - snap down immediately (no floating)
-      this.position.y = targetY;
+    // AGGRESSIVE GROUND CLAMPING:
+    // - No tolerance when below terrain (prevents leg clipping)
+    // - Small tolerance when above (allows jumping, stairs, slopes)
+    if (this.position.y < terrainHeight) {
+      // Below terrain - snap up immediately (no tolerance for clipping)
+      this.position.y = terrainHeight;
+    } else if (this.position.y > terrainHeight + 0.5) {
+      // Significantly above terrain - snap down (prevent floating)
+      this.position.y = terrainHeight;
     }
   }
 
@@ -1306,7 +1307,13 @@ export class PlayerLocal extends Entity implements HotReloadable {
     );
     this.world.on(EventType.PLAYER_SET_DEAD, (eventData) => {
       this.handlePlayerSetDead(
-        eventData as { playerId: string; isDead: boolean },
+        eventData as {
+          playerId: string;
+          isDead: boolean;
+          deathPosition?:
+            | [number, number, number]
+            | { x: number; y: number; z: number };
+        },
       );
     });
     this.world.on(EventType.PLAYER_RESPAWNED, (eventData) => {
@@ -2011,11 +2018,12 @@ export class PlayerLocal extends Entity implements HotReloadable {
       id: string;
     } | null = null;
 
-    // First check if WE have a combat target (player attacking mob)
+    // First check if WE have a combat target (player attacking mob or player)
     if (this.combat.combatTarget) {
-      const targetEntity = this.world.entities.items.get(
-        this.combat.combatTarget,
-      );
+      // Check both entities.items (mobs/NPCs) and entities.players (other players)
+      const targetEntity =
+        this.world.entities.items.get(this.combat.combatTarget) ||
+        this.world.entities.players?.get(this.combat.combatTarget);
       if (targetEntity?.position) {
         const dx = targetEntity.position.x - this.position.x;
         const dz = targetEntity.position.z - this.position.z;
@@ -2034,9 +2042,10 @@ export class PlayerLocal extends Entity implements HotReloadable {
     // If no combat target, check if server told us to face an attacker
     // This replaces the old client-side mob search loop
     if (!combatTarget && this._serverFaceTargetId) {
-      const targetEntity = this.world.entities.items.get(
-        this._serverFaceTargetId,
-      );
+      // Check both entities.items (mobs/NPCs) and entities.players (other players)
+      const targetEntity =
+        this.world.entities.items.get(this._serverFaceTargetId) ||
+        this.world.entities.players?.get(this._serverFaceTargetId);
       if (targetEntity?.position) {
         const dx = targetEntity.position.x - this.position.x;
         const dz = targetEntity.position.z - this.position.z;
@@ -2196,6 +2205,10 @@ export class PlayerLocal extends Entity implements HotReloadable {
   }
 
   lateUpdate(_delta: number): void {
+    // CRITICAL: Validate terrain position every frame to prevent leg clipping
+    // This runs after TileInterpolator and other position updates
+    this.validateTerrainPosition();
+
     if (this._avatar) {
       if (this._avatar.getBoneTransform) {
         const matrix = this._avatar.getBoneTransform("head");
@@ -2400,7 +2413,13 @@ export class PlayerLocal extends Entity implements HotReloadable {
    * Handle PLAYER_SET_DEAD event from server
    * CRITICAL: This is the entry point to death flow - blocks all input and movement
    */
-  handlePlayerSetDead(event: { playerId: string; isDead: boolean }): void {
+  handlePlayerSetDead(event: {
+    playerId: string;
+    isDead: boolean;
+    deathPosition?:
+      | [number, number, number]
+      | { x: number; y: number; z: number };
+  }): void {
     if (event.playerId !== this.data.id) return;
 
     // CRITICAL: Check if player is being set to dead or alive
@@ -2447,6 +2466,43 @@ export class PlayerLocal extends Entity implements HotReloadable {
     if (playerWithDying.path) playerWithDying.path = null;
     if (playerWithDying.destination) playerWithDying.destination = null;
 
+    // CRITICAL: Apply death position BEFORE freezing physics
+    // This ensures the player dies at the exact position the server recorded
+    if (event.deathPosition) {
+      let x: number, y: number, z: number;
+      if (Array.isArray(event.deathPosition)) {
+        [x, y, z] = event.deathPosition;
+      } else {
+        x = event.deathPosition.x;
+        y = event.deathPosition.y;
+        z = event.deathPosition.z;
+      }
+
+      // Apply position to all relevant objects (same pattern as respawn/teleport)
+      // NOTE: this.base.position is reset to (0,0,0) every frame - do NOT set it
+      // The node is the actual positioned object, base is a child at origin
+      this.position.set(x, y, z);
+      this.node.position.set(x, y, z);
+      if (this.data?.position && Array.isArray(this.data.position)) {
+        this.data.position[0] = x;
+        this.data.position[1] = y;
+        this.data.position[2] = z;
+      }
+
+      console.log(
+        `[PlayerLocal] Applied death position: (${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)})`,
+      );
+    }
+
+    // CRITICAL: Set death animation so player sees themselves fall
+    // This triggers the avatar's death animation
+    this.data.e = "death";
+    this.data.emote = "death";
+    if (this._avatar?.setEmote) {
+      // Use Emotes.DEATH (asset URL), not the symbolic name "death"
+      this._avatar.setEmote(Emotes.DEATH);
+    }
+
     // CRITICAL: Freeze physics capsule (make it KINEMATIC = frozen, no forces applied)
     const physXGlobal = globalThis as PhysXGlobal;
     if (this.capsule && physXGlobal.PHYSX) {
@@ -2457,6 +2513,27 @@ export class PlayerLocal extends Entity implements HotReloadable {
       const zeroVec = new PHYSX.PxVec3(0, 0, 0) as PxVec3;
       this.capsule.setLinearVelocity(zeroVec);
       this.capsule.setAngularVelocity(zeroVec);
+
+      // CRITICAL: Move capsule to death position BEFORE setting KINEMATIC
+      // This ensures physics body is at correct position when frozen
+      if (event.deathPosition && getPhysX()) {
+        const PHYSX_API = getPhysX()!;
+        let x: number, y: number, z: number;
+        if (Array.isArray(event.deathPosition)) {
+          [x, y, z] = event.deathPosition;
+        } else {
+          x = event.deathPosition.x;
+          y = event.deathPosition.y;
+          z = event.deathPosition.z;
+        }
+        const deathPose = new PHYSX_API.PxTransform(
+          PHYSX_API.PxIDENTITYEnum.PxIdentity,
+        );
+        deathPose.p.x = x;
+        deathPose.p.y = y;
+        deathPose.p.z = z;
+        this.capsule.setGlobalPose(deathPose);
+      }
 
       // Set to KINEMATIC mode (frozen in place, position-driven)
       this.capsule.setRigidBodyFlag(PHYSX.PxRigidBodyFlagEnum.eKINEMATIC, true);

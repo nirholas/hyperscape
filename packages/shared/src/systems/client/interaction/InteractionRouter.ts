@@ -43,6 +43,7 @@ import { SmeltingSourceInteractionHandler } from "./handlers/SmeltingSourceInter
 import { SmithingSourceInteractionHandler } from "./handlers/SmithingSourceInteractionHandler";
 import { AltarInteractionHandler } from "./handlers/AltarInteractionHandler";
 import { StarterChestInteractionHandler } from "./handlers/StarterChestInteractionHandler";
+import { ForfeitPillarInteractionHandler } from "./handlers/ForfeitPillarInteractionHandler";
 
 /**
  * Targeting mode state for "Use X on Y" interactions
@@ -169,6 +170,12 @@ export class InteractionRouter extends System {
       "starter_chest",
       new StarterChestInteractionHandler(this.world, this.actionQueue),
     );
+
+    // Forfeit pillar (duel arena surrender)
+    this.handlers.set(
+      "forfeit_pillar",
+      new ForfeitPillarInteractionHandler(this.world, this.actionQueue),
+    );
   }
 
   override start(): void {
@@ -218,6 +225,15 @@ export class InteractionRouter extends System {
 
     // Update visual feedback (animate markers)
     this.visualFeedback.update();
+  }
+
+  /**
+   * Cancel any pending client-side action (walk-to, interaction).
+   * Used when player teleports to prevent stale actions from executing.
+   */
+  cancelCurrentAction(): void {
+    this.actionQueue.cancelCurrentAction();
+    this.visualFeedback.hideTargetMarker();
   }
 
   override destroy(): void {

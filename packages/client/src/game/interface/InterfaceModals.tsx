@@ -25,6 +25,8 @@ import type {
   QuestStartData,
   QuestCompleteData,
   XpLampData,
+  DuelData,
+  DuelResultData,
 } from "@/hooks";
 import { BankPanel } from "../panels/BankPanel";
 import { StorePanel } from "../panels/StorePanel";
@@ -36,6 +38,8 @@ import { LootWindowPanel } from "../panels/LootWindowPanel";
 import { QuestStartPanel } from "../panels/QuestStartPanel";
 import { QuestCompletePanel } from "../panels/QuestCompletePanel";
 import { XpLampPanel } from "../panels/XpLampPanel";
+import { DuelPanel } from "../panels/DuelPanel";
+import { DuelResultModal } from "../panels/DuelPanel/DuelResultModal";
 import { Minimap } from "../hud/Minimap";
 
 /**
@@ -595,6 +599,8 @@ export interface InterfaceModalsRendererProps {
   questStartData: QuestStartData | null;
   questCompleteData: QuestCompleteData | null;
   xpLampData: XpLampData | null;
+  duelData: DuelData | null;
+  duelResultData: DuelResultData | null;
 
   // Simple modal states
   worldMapOpen: boolean;
@@ -617,6 +623,10 @@ export interface InterfaceModalsRendererProps {
     React.SetStateAction<QuestCompleteData | null>
   >;
   setXpLampData: React.Dispatch<React.SetStateAction<XpLampData | null>>;
+  setDuelData: React.Dispatch<React.SetStateAction<DuelData | null>>;
+  setDuelResultData: React.Dispatch<
+    React.SetStateAction<DuelResultData | null>
+  >;
   setWorldMapOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setStatsModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setDeathModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
@@ -643,6 +653,8 @@ export function InterfaceModalsRenderer({
   questStartData,
   questCompleteData,
   xpLampData,
+  duelData,
+  duelResultData,
   worldMapOpen,
   statsModalOpen,
   deathModalOpen,
@@ -655,6 +667,8 @@ export function InterfaceModalsRenderer({
   setQuestStartData,
   setQuestCompleteData,
   setXpLampData,
+  setDuelData,
+  setDuelResultData,
   setWorldMapOpen,
   setStatsModalOpen,
   setDeathModalOpen,
@@ -679,7 +693,7 @@ export function InterfaceModalsRenderer({
           visible={true}
           onClose={() => {
             setBankData(null);
-            world?.network?.send?.("bank_close", {});
+            world?.network?.send?.("bankClose", {});
           }}
           title="Bank"
           width={900}
@@ -696,7 +710,7 @@ export function InterfaceModalsRenderer({
             coins={coins}
             onClose={() => {
               setBankData(null);
-              world?.network?.send?.("bank_close", {});
+              world?.network?.send?.("bankClose", {});
             }}
           />
         </ModalWindow>
@@ -888,6 +902,103 @@ export function InterfaceModalsRenderer({
           itemId={xpLampData.itemId}
           slot={xpLampData.slot}
           onClose={() => setXpLampData(null)}
+        />
+      )}
+
+      {/* Duel Panel */}
+      {duelData?.visible && (
+        <DuelPanel
+          state={{
+            visible: true,
+            duelId: duelData.duelId,
+            screenState: duelData.screenState,
+            opponentId: duelData.opponentId,
+            opponentName: duelData.opponentName,
+            isChallenger: duelData.isChallenger,
+            rules: duelData.rules,
+            equipmentRestrictions: duelData.equipmentRestrictions,
+            myAccepted: duelData.myAccepted,
+            opponentAccepted: duelData.opponentAccepted,
+            myStakes: duelData.myStakes,
+            opponentStakes: duelData.opponentStakes,
+            myStakeValue: duelData.myStakes.reduce(
+              (sum, s) => sum + s.value,
+              0,
+            ),
+            opponentStakeValue: duelData.opponentStakes.reduce(
+              (sum, s) => sum + s.value,
+              0,
+            ),
+            opponentModifiedStakes: duelData.opponentModifiedStakes,
+          }}
+          inventory={inventory.map((item) => ({
+            slot: item.slot,
+            itemId: item.itemId,
+            quantity: item.quantity,
+          }))}
+          onToggleRule={(rule) => {
+            world?.network?.send?.("duel:toggle:rule", {
+              duelId: duelData.duelId,
+              rule,
+            });
+          }}
+          onToggleEquipment={(slot) => {
+            world?.network?.send?.("duel:toggle:equipment", {
+              duelId: duelData.duelId,
+              slot,
+            });
+          }}
+          onAcceptRules={() => {
+            world?.network?.send?.("duel:accept:rules", {
+              duelId: duelData.duelId,
+            });
+          }}
+          onAddStake={(inventorySlot, quantity) => {
+            world?.network?.send?.("duel:add:stake", {
+              duelId: duelData.duelId,
+              inventorySlot,
+              quantity,
+            });
+          }}
+          onRemoveStake={(stakeIndex) => {
+            world?.network?.send?.("duel:remove:stake", {
+              duelId: duelData.duelId,
+              stakeIndex,
+            });
+          }}
+          onAcceptStakes={() => {
+            world?.network?.send?.("duel:accept:stakes", {
+              duelId: duelData.duelId,
+            });
+          }}
+          onAcceptFinal={() => {
+            world?.network?.send?.("duel:accept:final", {
+              duelId: duelData.duelId,
+            });
+          }}
+          onCancel={() => {
+            setDuelData(null);
+            world?.network?.send?.("duel:cancel", {
+              duelId: duelData.duelId,
+            });
+          }}
+        />
+      )}
+
+      {/* Duel Result Modal */}
+      {duelResultData?.visible && (
+        <DuelResultModal
+          state={{
+            visible: true,
+            won: duelResultData.won,
+            opponentName: duelResultData.opponentName,
+            itemsReceived: duelResultData.itemsReceived,
+            itemsLost: duelResultData.itemsLost,
+            totalValueWon: duelResultData.totalValueWon,
+            totalValueLost: duelResultData.totalValueLost,
+            forfeit: duelResultData.forfeit,
+          }}
+          onClose={() => setDuelResultData(null)}
         />
       )}
     </>

@@ -97,6 +97,9 @@ interface EntityMovementState {
   // Per-entity movement speed (tiles per server tick)
   // Defaults to TILES_PER_TICK_WALK/RUN, but can be overridden for mobs
   tilesPerTick: number | null;
+  // Whether entity is in combat rotation mode (takes priority over movement facing)
+  // When true, combat rotation is maintained even during movement
+  inCombatRotation: boolean;
 
   // ========== Sync State ==========
   // Last tile confirmed by server
@@ -290,6 +293,9 @@ export class TileInterpolator {
       state.isRunning = running;
       state.isMoving = true;
       state.emote = emote ?? (running ? "run" : "walk");
+      // NOTE: Don't clear inCombatRotation here - server manages combat rotation state
+      // If we clear it, player will face movement direction until next attack tick
+      // Server will stop sending combat rotation when combat ends
       state.serverConfirmedTile = { ...serverConfirmed };
       state.lastServerTick = 0;
       state.catchUpMultiplier = 1.0;
@@ -313,6 +319,7 @@ export class TileInterpolator {
         isRunning: running,
         isMoving: true,
         emote: emote ?? (running ? "run" : "walk"),
+        inCombatRotation: false,
         serverConfirmedTile: { ...serverConfirmed },
         lastServerTick: 0,
         catchUpMultiplier: 1.0,
@@ -402,6 +409,7 @@ export class TileInterpolator {
         isRunning: emote === "run",
         isMoving: false,
         emote: emote,
+        inCombatRotation: false,
         serverConfirmedTile: { ...serverTile },
         lastServerTick: tickNumber ?? 0,
         catchUpMultiplier: 1.0,
@@ -876,22 +884,30 @@ export class TileInterpolator {
 
           // Check if there's a next tile
           if (state.targetTileIndex < state.fullPath.length) {
-            // Calculate rotation to face next tile (only update if distance is sufficient)
-            const nextTile = state.fullPath[state.targetTileIndex];
-            const nextWorld = tileToWorld(nextTile);
-            // Use pre-allocated Vector3 to avoid per-frame allocations
-            this._nextPos.set(nextWorld.x, state.visualPosition.y, nextWorld.z);
-            const nextRotation = this.calculateFacingRotation(
-              state.visualPosition,
-              this._nextPos,
-            );
-            if (nextRotation) {
-              // Only update rotation if direction changed significantly (>~16°)
-              // This prevents micro-pivots during nearly-straight movement
-              // Quaternion dot product: |dot| > 0.99 means angle < ~16°
-              const dot = Math.abs(state.targetQuaternion.dot(nextRotation));
-              if (dot < 0.99) {
-                state.targetQuaternion.copy(nextRotation);
+            // Only update movement rotation if NOT in combat rotation mode
+            // When in combat, entity should keep facing their target, not their movement direction
+            if (!state.inCombatRotation) {
+              // Calculate rotation to face next tile (only update if distance is sufficient)
+              const nextTile = state.fullPath[state.targetTileIndex];
+              const nextWorld = tileToWorld(nextTile);
+              // Use pre-allocated Vector3 to avoid per-frame allocations
+              this._nextPos.set(
+                nextWorld.x,
+                state.visualPosition.y,
+                nextWorld.z,
+              );
+              const nextRotation = this.calculateFacingRotation(
+                state.visualPosition,
+                this._nextPos,
+              );
+              if (nextRotation) {
+                // Only update rotation if direction changed significantly (>~16°)
+                // This prevents micro-pivots during nearly-straight movement
+                // Quaternion dot product: |dot| > 0.99 means angle < ~16°
+                const dot = Math.abs(state.targetQuaternion.dot(nextRotation));
+                if (dot < 0.99) {
+                  state.targetQuaternion.copy(nextRotation);
+                }
               }
             }
             // Continue loop to use remaining movement toward next tile
@@ -1039,6 +1055,34 @@ export class TileInterpolator {
   }
 
   /**
+   * Stop all movement for an entity (e.g., on death)
+   *
+   * Clears the movement path and resets to idle emote.
+   * Used when an entity dies to prevent continued movement after death.
+   *
+   * @param entityId - Entity to stop
+   * @param position - Optional position to snap to (e.g., death position)
+   */
+  stopMovement(
+    entityId: string,
+    position?: { x: number; y: number; z: number },
+  ): void {
+    const state = this.entityStates.get(entityId);
+    if (!state) return;
+
+    // Clear movement path
+    state.fullPath = [];
+    state.targetTileIndex = 0;
+    state.isMoving = false;
+
+    // Snap to position if provided
+    if (position) {
+      state.visualPosition.set(position.x, position.y, position.z);
+      state.targetWorldPos.set(position.x, position.y, position.z);
+    }
+  }
+
+  /**
    * Set combat rotation for an entity (AAA Single Source of Truth)
    *
    * When combat rotation arrives via entityModified, it should be routed here
@@ -1049,29 +1093,47 @@ export class TileInterpolator {
    * 1. Entity has TileInterpolator state
    * 2. Entity is NOT currently moving (standing still in combat)
    *
-   * When moving, movement direction takes priority (OSRS-accurate behavior).
+   * Combat rotation is now applied even during movement - the entity will
+   * face their combat target while moving (OSRS PvP behavior).
    *
    * @param entityId - Entity to update
    * @param quaternion - Combat rotation from server [x, y, z, w]
-   * @returns true if rotation was applied, false if entity is moving or has no state
+   * @returns true if rotation was applied, false if entity has no state
    */
   setCombatRotation(entityId: string, quaternion: number[]): boolean {
-    const state = this.entityStates.get(entityId);
+    let state = this.entityStates.get(entityId);
+
+    // Create minimal state if it doesn't exist (fixes first-attack rotation issue)
     if (!state) {
-      return false; // No state - caller should handle rotation directly
+      console.log(
+        `[TileInterpolator] Creating state for ${entityId} on first combat rotation`,
+      );
+      state = {
+        fullPath: [],
+        targetTileIndex: 0,
+        destinationTile: null,
+        visualPosition: new THREE.Vector3(),
+        targetWorldPos: new THREE.Vector3(),
+        quaternion: new THREE.Quaternion(),
+        targetQuaternion: new THREE.Quaternion(),
+        isRunning: false,
+        isMoving: false,
+        emote: "idle",
+        inCombatRotation: false,
+        serverConfirmedTile: { x: 0, z: 0 },
+        lastServerTick: 0,
+        catchUpMultiplier: 1.0,
+        targetCatchUpMultiplier: 1.0,
+        moveSeq: 0,
+        tilesPerTick: null,
+      };
+      this.entityStates.set(entityId, state);
     }
 
-    // Only apply combat rotation when NOT moving
-    // When moving, movement direction rotation takes priority (OSRS-accurate)
-    // CRITICAL: Must match update()'s "finished moving" condition:
-    //   fullPath.length === 0 || targetTileIndex >= fullPath.length
-    // The old check `fullPath.length > 0` was wrong because path isn't cleared after completion
-    const isActivelyMoving =
-      state.fullPath.length > 0 &&
-      state.targetTileIndex < state.fullPath.length;
-    if (isActivelyMoving) {
-      return false; // Moving - ignore combat rotation, movement direction wins
-    }
+    // CHANGED: Apply combat rotation even during movement
+    // In PvP/duels, players should face their opponent while moving
+    // The inCombatRotation flag prevents movement code from overwriting this
+    state.inCombatRotation = true;
 
     // Apply combat rotation to state - TileInterpolator.update() will apply to entity.base
     state.quaternion.set(
@@ -1088,6 +1150,17 @@ export class TileInterpolator {
     );
 
     return true; // Rotation accepted
+  }
+
+  /**
+   * Clear combat rotation mode for an entity
+   * Called when combat ends to allow movement rotation to resume
+   */
+  clearCombatRotation(entityId: string): void {
+    const state = this.entityStates.get(entityId);
+    if (state) {
+      state.inCombatRotation = false;
+    }
   }
 
   /**
@@ -1124,7 +1197,11 @@ export class TileInterpolator {
       }
       state.catchUpMultiplier = 1.0;
       state.targetCatchUpMultiplier = 1.0;
-      state.moveSeq++;
+      // CRITICAL: Reset moveSeq to 0 instead of incrementing
+      // Server cleanup() deletes state and creates new with moveSeq=0
+      // If we increment, client's moveSeq can become higher than server's
+      // causing movement packets to be ignored as "stale"
+      state.moveSeq = 0;
     } else {
       // No existing state - create fresh state at new position
       state = {
@@ -1138,6 +1215,7 @@ export class TileInterpolator {
         isRunning: false,
         isMoving: false,
         emote: "idle",
+        inCombatRotation: false,
         serverConfirmedTile: { ...newTile },
         lastServerTick: 0,
         catchUpMultiplier: 1.0,

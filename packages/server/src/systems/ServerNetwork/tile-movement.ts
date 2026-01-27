@@ -261,6 +261,14 @@ export class TileMovementManager {
       return; // Silently reject - player is dead
     }
 
+    // Duel lock: Check if player can move (frozen during countdown, or noMovement rule)
+    const duelSystem = this.world.getSystem("duel") as {
+      canMove?: (playerId: string) => boolean;
+    } | null;
+    if (duelSystem?.canMove && !duelSystem.canMove(playerId)) {
+      return; // Silently reject - player frozen in duel
+    }
+
     // Rate limit: prevent spam attacks
     if (!this.movementRateLimiter.check(playerId)) {
       return; // Silently drop - rate limiting is expected during fast clicking

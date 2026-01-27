@@ -643,6 +643,8 @@ export interface EventMap {
     lastDamageTime?: number;
     killedBy?: string;
     entityType?: "player" | "mob";
+    /** Position at time of death - prevents stale position from cache */
+    deathPosition?: { x: number; y: number; z: number };
   };
   [EventType.ENTITY_REVIVED]: { entityId: string; newHealth?: number };
   [EventType.ENTITY_UPDATED]: {

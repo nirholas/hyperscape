@@ -1434,6 +1434,109 @@ export class World extends EventEmitter {
     return this.entities.getLocalPlayer();
   }
 
+  // ============================================================================
+  // LAW OF DEMETER HELPER METHODS
+  // ============================================================================
+  // These methods encapsulate deep property chain access to reduce coupling
+  // between systems and improve testability.
+
+  /**
+   * Get a player's socket by their ID
+   *
+   * Encapsulates the network system lookup to avoid Law of Demeter violations.
+   * Returns undefined if player is not connected or network system unavailable.
+   *
+   * @param playerId - The player ID to look up
+   * @returns The player's socket or undefined if not found
+   */
+  getPlayerSocket(playerId: string): unknown | undefined {
+    const network = this.getSystem("network");
+    if (!network) return undefined;
+
+    // Check for broadcastManager.getPlayerSocket (server-side pattern)
+    const networkWithBroadcast = network as {
+      broadcastManager?: {
+        getPlayerSocket?: (id: string) => unknown;
+      };
+      sockets?: Map<string, unknown>;
+    };
+
+    if (networkWithBroadcast.broadcastManager?.getPlayerSocket) {
+      return networkWithBroadcast.broadcastManager.getPlayerSocket(playerId);
+    }
+
+    // Fallback: iterate sockets map to find by player ID
+    if (networkWithBroadcast.sockets) {
+      for (const [, socket] of networkWithBroadcast.sockets) {
+        const socketWithData = socket as { data?: { odaPlayerId?: string } };
+        if (socketWithData.data?.odaPlayerId === playerId) {
+          return socket;
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Get a player's display name by their ID
+   *
+   * Encapsulates the entity lookup with multiple fallback paths.
+   * Returns "Unknown" if player not found.
+   *
+   * @param playerId - The player ID to look up
+   * @returns The player's display name
+   */
+  getPlayerDisplayName(playerId: string): string {
+    const player = this.entities.players?.get(playerId);
+    if (!player) return "Unknown";
+
+    // Try multiple property paths for name (different entity implementations)
+    const playerWithName = player as {
+      name?: string;
+      characterName?: string;
+      playerName?: string;
+      data?: { name?: string };
+    };
+
+    return (
+      playerWithName.name ||
+      playerWithName.characterName ||
+      playerWithName.playerName ||
+      playerWithName.data?.name ||
+      "Unknown"
+    );
+  }
+
+  /**
+   * Get a player's combat level by their ID
+   *
+   * Encapsulates the entity lookup with multiple fallback paths.
+   * Returns 3 (minimum combat level) if player not found.
+   *
+   * @param playerId - The player ID to look up
+   * @returns The player's combat level
+   */
+  getPlayerCombatLevel(playerId: string): number {
+    const player = this.entities.players?.get(playerId);
+    if (!player) return 3;
+
+    // Try multiple property paths for combat level
+    // Cast through unknown to avoid protected property conflict
+    const playerWithLevel = player as unknown as {
+      combatLevel?: number;
+      data?: { combatLevel?: number };
+      combat?: { combatLevel?: number };
+    };
+
+    return (
+      playerWithLevel.combatLevel ||
+      playerWithLevel.data?.combatLevel ||
+      playerWithLevel.combat?.combatLevel ||
+      3
+    );
+  }
+
   /**
    * Get All Players
    *

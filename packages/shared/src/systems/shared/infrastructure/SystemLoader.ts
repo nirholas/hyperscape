@@ -123,7 +123,9 @@ import { DialogueSystem } from "..";
 
 // Client-only visual systems
 import { DamageSplatSystem } from "../../client";
+import { DuelCountdownSplatSystem } from "../../client";
 import { SocialSystem } from "../../client";
+import { DuelArenaVisualsSystem } from "../../client";
 
 // Zone systems
 import { ZoneDetectionSystem } from "../death/ZoneDetectionSystem";
@@ -363,11 +365,31 @@ export async function registerSystems(world: World): Promise<void> {
       );
     }
 
+    // Duel countdown splat system - 3D countdown numbers over players' heads
+    try {
+      world.register("duel-countdown-splat", DuelCountdownSplatSystem);
+    } catch (err) {
+      console.error(
+        "[SystemLoader] Failed to register DuelCountdownSplatSystem:",
+        err,
+      );
+    }
+
     // Social system - client-side friend list caching
     try {
       world.register("social", SocialSystem);
     } catch (err) {
       console.error("[SystemLoader] Failed to register SocialSystem:", err);
+    }
+
+    // Duel Arena visual system - procedural arena geometry
+    try {
+      world.register("duel-arena-visuals", DuelArenaVisualsSystem);
+    } catch (err) {
+      console.error(
+        "[SystemLoader] Failed to register DuelArenaVisualsSystem:",
+        err,
+      );
     }
 
     // XP Drop System - 3D version disabled, using 2D screen-space drops in XPProgressOrb
