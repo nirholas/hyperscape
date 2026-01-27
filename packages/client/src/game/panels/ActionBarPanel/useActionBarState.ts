@@ -2,7 +2,7 @@
  * ActionBarPanel - State management hook
  */
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useWindowStore, useEditStore } from "@/ui";
 import { useActionBarKeybindsForBar } from "../../../ui/components/ActionBar";
 import { EventType } from "@hyperscape/shared";
