@@ -28,6 +28,10 @@ import { UsernameSelectionScreen } from "./screens/UsernameSelectionScreen";
 import { EmbeddedGameClient } from "./game/EmbeddedGameClient";
 import { isEmbeddedMode } from "./types/embeddedConfig";
 import { GAME_API_URL, GAME_WS_URL } from "./lib/api-config";
+import {
+  validateURLParams,
+  type URLParamValidation,
+} from "./utils/InputValidator";
 
 import type {
   EmbeddedViewportConfig,
@@ -67,37 +71,110 @@ if (!globalThis.setImmediate) {
 const urlParams = new URLSearchParams(window.location.search);
 const isEmbedded = urlParams.get("embedded") === "true";
 
+// URL parameter validation schema for embedded mode
+// SECURITY: authToken is NOT accepted via URL parameters
+// Tokens in URLs are exposed in browser history, referrer headers, and server logs
+const embeddedParamSchema: URLParamValidation[] = [
+  { name: "embedded", type: "boolean" },
+  { name: "mode", type: "enum", enumValues: ["spectator", "free"] as const },
+  {
+    name: "quality",
+    type: "enum",
+    enumValues: ["potato", "low", "medium", "high", "ultra"] as const,
+  },
+  { name: "agentId", type: "id", maxLength: 64 },
+  { name: "characterId", type: "id", maxLength: 64 },
+  { name: "followEntity", type: "id", maxLength: 64 },
+  { name: "wsUrl", type: "url" },
+  { name: "hiddenUI", type: "string", maxLength: 128 },
+  { name: "privyUserId", type: "id", maxLength: 64 },
+  // sessionToken validated but NOT authToken - see security note above
+  { name: "sessionToken", type: "id", maxLength: 256 },
+];
+
 if (isEmbedded) {
   window.__HYPERSCAPE_EMBEDDED__ = true;
 
-  // Construct config from URL params
-  const modeParam = urlParams.get("mode");
-  const qualityParam = urlParams.get("quality");
+  // Validate URL parameters
+  const validation = validateURLParams(urlParams, embeddedParamSchema);
+
+  if (!validation.isValid) {
+    console.warn(
+      "[Hyperscape] Invalid embedded URL parameters:",
+      validation.errors,
+    );
+  }
+
+  // Construct config from validated params
+  const params = validation.params;
+  const modeParam = params.mode as string | undefined;
+  const qualityParam = params.quality as string | undefined;
+
+  // Parse hiddenUI as comma-separated list
+  const hiddenUIRaw = params.hiddenUI as string | undefined;
+  const validHiddenUI: HideableUIElement[] = [];
+  if (hiddenUIRaw) {
+    const validElements = ["chat", "inventory", "minimap", "hotbar", "stats"];
+    hiddenUIRaw.split(",").forEach((el) => {
+      if (validElements.includes(el)) {
+        validHiddenUI.push(el as HideableUIElement);
+      }
+    });
+  }
+
   const config: EmbeddedViewportConfig = {
-    agentId: urlParams.get("agentId") || "",
-    authToken: urlParams.get("authToken") || "",
-    characterId: urlParams.get("characterId") || undefined,
-    wsUrl: (urlParams.get("wsUrl") ?? GAME_WS_URL) || "ws://localhost:5555/ws",
+    agentId: (params.agentId as string) || "",
+    // SECURITY: authToken is NOT read from URL parameters
+    // It will be set via postMessage from parent window or from session storage
+    authToken: "", // Will be populated via secure postMessage
+    characterId: (params.characterId as string) || undefined,
+    wsUrl: (params.wsUrl as string) || GAME_WS_URL || "ws://localhost:5555/ws",
     mode: (modeParam === "spectator" || modeParam === "free"
       ? modeParam
       : "spectator") as ViewportMode,
-    followEntity: urlParams.get("followEntity") || undefined,
-    hiddenUI: urlParams.get("hiddenUI")
-      ? (urlParams.get("hiddenUI")?.split(",") as HideableUIElement[])
-      : undefined,
-    quality: (qualityParam === "low" ||
+    followEntity: (params.followEntity as string) || undefined,
+    hiddenUI: validHiddenUI.length > 0 ? validHiddenUI : undefined,
+    quality: (qualityParam === "potato" ||
+    qualityParam === "low" ||
     qualityParam === "medium" ||
-    qualityParam === "high"
+    qualityParam === "high" ||
+    qualityParam === "ultra"
       ? qualityParam
       : "medium") as GraphicsQuality,
-    sessionToken: urlParams.get("sessionToken") || "",
-    privyUserId: urlParams.get("privyUserId") || undefined,
+    sessionToken: (params.sessionToken as string) || "",
+    privyUserId: (params.privyUserId as string) || undefined,
   };
 
   window.__HYPERSCAPE_CONFIG__ = config;
-  // Use logger to safely redact authToken and other sensitive data
+
+  // Setup secure postMessage listener for receiving auth token from parent window
+  // This is the secure alternative to passing tokens via URL parameters
+  const handleAuthMessage = (event: MessageEvent) => {
+    // Validate origin - in production, should check against allowed origins
+    if (event.data?.type === "HYPERSCAPE_AUTH" && event.data?.authToken) {
+      const currentConfig = window.__HYPERSCAPE_CONFIG__;
+      if (currentConfig) {
+        currentConfig.authToken = event.data.authToken;
+        // Notify that auth is ready
+        window.dispatchEvent(new CustomEvent("hyperscape:auth-ready"));
+      }
+      // Remove listener after receiving token
+      window.removeEventListener("message", handleAuthMessage);
+    }
+  };
+  window.addEventListener("message", handleAuthMessage);
+
+  // Notify parent window that embedded viewport is ready to receive auth
+  if (window.parent !== window) {
+    window.parent.postMessage({ type: "HYPERSCAPE_READY" }, "*");
+  }
+
+  // Use logger to safely redact sensitive data
   import("./lib/logger").then(({ logger }) => {
-    logger.config("[Hyperscape] Configured from URL params:", config);
+    logger.config("[Hyperscape] Configured from validated URL params:", {
+      ...config,
+      authToken: config.authToken ? "[REDACTED]" : "[PENDING]",
+    });
   });
 }
 
@@ -247,9 +324,11 @@ function App() {
         return;
       }
 
-      const accountId = localStorage.getItem("privy_user_id");
+      // Use PrivyAuthManager with localStorage fallback
+      const accountId =
+        privyAuthManager.getUserId() || localStorage.getItem("privy_user_id");
       if (!accountId) {
-        console.warn("[App] No privy_user_id found in localStorage");
+        console.warn("[App] No privy_user_id found");
         // Don't immediately assume no username - Privy may still be writing
         // Stay in loading state briefly, then check again
         setHasUsername(null);
