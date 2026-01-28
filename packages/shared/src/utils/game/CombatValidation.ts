@@ -106,10 +106,16 @@ export interface AttackStyleValidation {
 }
 
 const VALID_ATTACK_STYLES = [
+  // Melee styles
   "accurate",
   "aggressive",
   "defensive",
   "controlled",
+  // Ranged styles
+  "rapid",
+  "longrange",
+  // Magic styles
+  "autocast",
 ];
 
 export function validateAttackStyleRequest(

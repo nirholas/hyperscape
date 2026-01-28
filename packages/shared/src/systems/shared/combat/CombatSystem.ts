@@ -79,9 +79,11 @@ import {
   calculateMagicDamage,
   type MagicDamageParams,
 } from "./MagicDamageCalculator";
-import type {
-  RangedCombatStyle,
-  MagicCombatStyle,
+import {
+  type RangedCombatStyle,
+  type MagicCombatStyle,
+  RANGED_STYLE_BONUSES,
+  MAGIC_STYLE_BONUSES,
 } from "../../../types/game/combat-types";
 import {
   ammunitionService,
@@ -901,8 +903,24 @@ export class CombatSystem extends SystemBase {
       return;
     }
 
-    // Get attack speed from weapon
-    const attackSpeedTicks = weapon?.attackSpeed ?? 4;
+    // Get player's ranged style for speed modifier
+    let rangedStyle: RangedCombatStyle = "accurate";
+    const playerSystem = this.world.getSystem("player") as PlayerSystem | null;
+    const styleData = playerSystem?.getPlayerAttackStyle?.(attackerId);
+    if (styleData?.id) {
+      const id = styleData.id;
+      if (id === "accurate" || id === "rapid" || id === "longrange") {
+        rangedStyle = id;
+      }
+    }
+
+    // Get attack speed from weapon with style modifier (rapid = -1 tick)
+    const baseAttackSpeed = weapon?.attackSpeed ?? 4;
+    const styleBonus = RANGED_STYLE_BONUSES[rangedStyle];
+    const attackSpeedTicks = Math.max(
+      1,
+      baseAttackSpeed + styleBonus.speedModifier,
+    );
 
     // Face target
     this.rotationManager.rotateTowardsTarget(
@@ -1265,11 +1283,22 @@ export class CombatSystem extends SystemBase {
     // Do NOT add arrowStrength separately as that would double-count it
     const rangedStrengthBonus = equipmentStats?.rangedStrength ?? arrowStrength;
 
+    // Get player's combat style for OSRS-accurate damage bonuses
+    let rangedStyle: RangedCombatStyle = "accurate";
+    const playerSystem = this.world.getSystem("player") as PlayerSystem | null;
+    const styleData = playerSystem?.getPlayerAttackStyle?.(attackerId);
+    if (styleData?.id) {
+      const id = styleData.id;
+      if (id === "accurate" || id === "rapid" || id === "longrange") {
+        rangedStyle = id;
+      }
+    }
+
     const params: RangedDamageParams = {
       rangedLevel,
       rangedAttackBonus: equipmentStats?.rangedAttack ?? 0,
       rangedStrengthBonus,
-      style: "accurate" as RangedCombatStyle,
+      style: rangedStyle,
       targetDefenseLevel,
       targetRangedDefenseBonus: targetRangedDefense,
       prayerBonuses: attackerPrayer,
@@ -1329,10 +1358,21 @@ export class CombatSystem extends SystemBase {
         ? prayerSystem?.getCombinedBonuses(String(target.id))
         : undefined;
 
+    // Get player's combat style for OSRS-accurate damage bonuses
+    let magicStyle: MagicCombatStyle = "accurate";
+    const playerSystem = this.world.getSystem("player") as PlayerSystem | null;
+    const styleData = playerSystem?.getPlayerAttackStyle?.(attackerId);
+    if (styleData?.id) {
+      const id = styleData.id;
+      if (id === "accurate" || id === "longrange" || id === "autocast") {
+        magicStyle = id;
+      }
+    }
+
     const params: MagicDamageParams = {
       magicLevel,
       magicAttackBonus: equipmentStats?.magicAttack ?? 0,
-      style: "accurate" as MagicCombatStyle,
+      style: magicStyle,
       spellBaseMaxHit: spell.baseMaxHit,
       // MagicDamageParams uses "npc" instead of "mob"
       targetType: targetType === "mob" ? "npc" : "player",

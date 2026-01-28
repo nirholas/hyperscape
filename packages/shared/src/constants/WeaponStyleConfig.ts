@@ -8,13 +8,13 @@
  */
 
 import { WeaponType } from "../types/game/item-types";
-import type { CombatStyle } from "../utils/game/CombatCalculations";
+import type { CombatStyleExtended } from "../types/game/combat-types";
 
 /**
  * Combat styles available for each weapon type.
  * OSRS-accurate: Not all weapons have all 4 styles.
  */
-export const WEAPON_STYLE_CONFIG: Record<WeaponType, CombatStyle[]> = {
+export const WEAPON_STYLE_CONFIG: Record<WeaponType, CombatStyleExtended[]> = {
   // Swords - full style selection (slash/stab versatility)
   [WeaponType.SWORD]: ["accurate", "aggressive", "defensive", "controlled"],
 
@@ -39,13 +39,19 @@ export const WEAPON_STYLE_CONFIG: Record<WeaponType, CombatStyle[]> = {
   // Unarmed - no controlled (punching)
   [WeaponType.NONE]: ["accurate", "aggressive", "defensive"],
 
-  // Ranged weapons - MVP: melee only, default to accurate
-  [WeaponType.BOW]: ["accurate"],
-  [WeaponType.CROSSBOW]: ["accurate"],
+  // Ranged weapons - OSRS-accurate styles
+  // Accurate: +3 ranged level, normal speed
+  // Rapid: no bonus, -1 tick faster attack
+  // Longrange: +2 attack range, XP split to ranged/defence
+  [WeaponType.BOW]: ["accurate", "rapid", "longrange"],
+  [WeaponType.CROSSBOW]: ["accurate", "rapid", "longrange"],
 
-  // Magic weapons - MVP: melee only, default to accurate
-  [WeaponType.STAFF]: ["accurate"],
-  [WeaponType.WAND]: ["accurate"],
+  // Magic weapons - OSRS-accurate styles
+  // Accurate: +3 magic level
+  // Longrange: +2 attack range, XP split to magic/defence
+  // Autocast: can set a spell to auto-cast
+  [WeaponType.STAFF]: ["accurate", "longrange", "autocast"],
+  [WeaponType.WAND]: ["accurate", "longrange", "autocast"],
 
   // Shield - not a weapon, but if somehow selected, default to defensive
   [WeaponType.SHIELD]: ["defensive"],
@@ -56,7 +62,9 @@ export const WEAPON_STYLE_CONFIG: Record<WeaponType, CombatStyle[]> = {
  * @param weaponType - The type of weapon equipped
  * @returns Array of available combat styles
  */
-export function getAvailableStyles(weaponType: WeaponType): CombatStyle[] {
+export function getAvailableStyles(
+  weaponType: WeaponType,
+): CombatStyleExtended[] {
   return WEAPON_STYLE_CONFIG[weaponType] ?? ["accurate"];
 }
 
@@ -68,7 +76,7 @@ export function getAvailableStyles(weaponType: WeaponType): CombatStyle[] {
  */
 export function isStyleValidForWeapon(
   weaponType: WeaponType,
-  style: CombatStyle,
+  style: CombatStyleExtended,
 ): boolean {
   const availableStyles = getAvailableStyles(weaponType);
   return availableStyles.includes(style);
@@ -80,7 +88,9 @@ export function isStyleValidForWeapon(
  * @param weaponType - The type of weapon equipped
  * @returns The default combat style for this weapon
  */
-export function getDefaultStyleForWeapon(weaponType: WeaponType): CombatStyle {
+export function getDefaultStyleForWeapon(
+  weaponType: WeaponType,
+): CombatStyleExtended {
   const availableStyles = getAvailableStyles(weaponType);
   return availableStyles[0] ?? "accurate";
 }

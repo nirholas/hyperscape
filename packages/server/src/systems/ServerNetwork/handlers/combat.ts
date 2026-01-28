@@ -24,12 +24,19 @@ import { getCombatRateLimiter } from "../services/SlidingWindowRateLimiter";
 
 /**
  * Valid attack styles (whitelist)
+ * Includes melee, ranged, and magic styles (OSRS-accurate)
  */
 const VALID_ATTACK_STYLES = new Set([
+  // Melee styles
   "accurate",
   "aggressive",
   "defensive",
   "controlled",
+  // Ranged styles
+  "rapid",
+  "longrange",
+  // Magic styles
+  "autocast",
 ]);
 
 /**

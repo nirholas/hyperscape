@@ -84,6 +84,58 @@ const StyleIcon = ({
           <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
         </svg>
       );
+    case "rapid":
+      // Lightning bolt for rapid fire
+      return (
+        <svg
+          width={size}
+          height={size}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+        </svg>
+      );
+    case "longrange":
+      // Telescope/distance icon for longrange
+      return (
+        <svg
+          width={size}
+          height={size}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M21 12h-8" />
+          <path d="m3 12 4-4v8l-4-4z" />
+          <path d="M11 8h2" />
+          <path d="M11 16h2" />
+          <path d="M16 12v.01" />
+        </svg>
+      );
+    case "autocast":
+      // Magic wand/star icon for autocast
+      return (
+        <svg
+          width={size}
+          height={size}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+        </svg>
+      );
     default:
       return null;
   }
@@ -660,6 +712,7 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
   };
 
   // All possible combat styles with their XP training info and colors
+  // Includes melee, ranged, and magic styles (OSRS-accurate)
   const allStyles: Array<{
     id: string;
     label: string;
@@ -667,6 +720,7 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
     color: string;
     bgColor: string;
   }> = [
+    // Melee styles
     {
       id: "accurate",
       label: "Accurate",
@@ -694,6 +748,29 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
       xp: "All",
       color: "#a855f7",
       bgColor: "rgba(168, 85, 247, 0.12)",
+    },
+    // Ranged styles
+    {
+      id: "rapid",
+      label: "Rapid",
+      xp: "Ranged",
+      color: "#f59e0b",
+      bgColor: "rgba(245, 158, 11, 0.12)",
+    },
+    {
+      id: "longrange",
+      label: "Longrange",
+      xp: "Rng+Def",
+      color: "#06b6d4",
+      bgColor: "rgba(6, 182, 212, 0.12)",
+    },
+    // Magic styles
+    {
+      id: "autocast",
+      label: "Autocast",
+      xp: "Magic",
+      color: "#8b5cf6",
+      bgColor: "rgba(139, 92, 246, 0.12)",
     },
   ];
 

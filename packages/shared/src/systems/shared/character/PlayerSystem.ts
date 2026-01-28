@@ -52,6 +52,7 @@ import {
   getAvailableStyles,
 } from "../../../constants/WeaponStyleConfig";
 import type { CombatStyle } from "../../../utils/game/CombatCalculations";
+import type { CombatStyleExtended } from "../../../types/game/combat-types";
 import type {
   HealthUpdateEvent,
   PlayerDeathEvent,
@@ -176,6 +177,47 @@ export class PlayerSystem extends SystemBase {
         constitution: 0,
       },
       icon: "⚖️",
+    },
+
+    // Ranged combat styles (OSRS-accurate)
+    rapid: {
+      id: "rapid",
+      name: "Rapid",
+      description: "Faster attacks. Train Ranged.",
+      xpDistribution: {
+        attack: 0,
+        strength: 0,
+        defense: 0,
+        constitution: 0,
+      },
+      icon: "⚡",
+    },
+
+    longrange: {
+      id: "longrange",
+      name: "Longrange",
+      description: "Increased range. Train Ranged and Defense.",
+      xpDistribution: {
+        attack: 0,
+        strength: 0,
+        defense: 50,
+        constitution: 0,
+      },
+      icon: "🔭",
+    },
+
+    // Magic combat styles (OSRS-accurate)
+    autocast: {
+      id: "autocast",
+      name: "Autocast",
+      description: "Automatically cast selected spell. Train Magic.",
+      xpDistribution: {
+        attack: 0,
+        strength: 0,
+        defense: 0,
+        constitution: 0,
+      },
+      icon: "✨",
     },
   };
 
@@ -1752,7 +1794,7 @@ export class PlayerSystem extends SystemBase {
       }
     }
 
-    if (!isStyleValidForWeapon(weaponType, newStyle as CombatStyle)) {
+    if (!isStyleValidForWeapon(weaponType, newStyle as CombatStyleExtended)) {
       const availableStyles = getAvailableStyles(weaponType);
       this.emitTypedEvent(EventType.UI_MESSAGE, {
         playerId,
