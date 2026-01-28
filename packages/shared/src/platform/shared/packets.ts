@@ -180,6 +180,7 @@ const names = [
   'attackStyleUpdate',
   // Combat visual feedback packets
   'combatDamageDealt',
+  'projectileLaunched',  // Server -> Client: ranged/magic projectile for visual rendering
   // Player state packets
   'playerUpdated',
   'playerNameChanged',     // Server -> Client: player name change confirmed

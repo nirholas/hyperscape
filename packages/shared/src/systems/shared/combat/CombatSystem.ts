@@ -1118,6 +1118,7 @@ export class CombatSystem extends SystemBase {
     this.projectileService.createProjectile(projectileParams);
 
     // Emit projectile created event for client visuals
+    // Delay projectile spawn to sync with casting animation (roughly halfway through)
     this.emitTypedEvent(EventType.COMBAT_PROJECTILE_LAUNCHED, {
       attackerId,
       targetId,
@@ -1125,6 +1126,7 @@ export class CombatSystem extends SystemBase {
       sourcePosition: attackerPos,
       targetPosition: targetPos,
       spellId: spell.id,
+      delayMs: 800, // Delay to match casting animation
     });
 
     // Set cooldown and enter combat

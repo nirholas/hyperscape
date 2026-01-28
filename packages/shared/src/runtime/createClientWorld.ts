@@ -260,6 +260,11 @@ export function createClientWorld() {
         await damageSplatSystem.init(worldOptions);
       }
 
+      const projectileRenderer = world.getSystem("projectile-renderer");
+      if (projectileRenderer && !projectileRenderer.isInitialized()) {
+        await projectileRenderer.init(worldOptions);
+      }
+
       // Re-expose utilities after RPG systems load (in case they were cleared)
       const anyWin = window as unknown as {
         Hyperscape?: Record<string, unknown>;

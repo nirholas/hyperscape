@@ -666,6 +666,25 @@ export class EventBridge {
         // Broadcast to all clients so everyone sees the damage splat
         this.broadcast.sendToAll("combatDamageDealt", data);
       });
+
+      // Forward projectile launched events to all clients for visual effects (arrows, spells)
+      this.world.on(
+        EventType.COMBAT_PROJECTILE_LAUNCHED,
+        (payload: unknown) => {
+          const data = payload as {
+            attackerId: string;
+            targetId: string;
+            projectileType: string;
+            sourcePosition: { x: number; y: number; z: number };
+            targetPosition: { x: number; y: number; z: number };
+            spellId?: string;
+            delayMs?: number;
+          };
+
+          // Broadcast to all clients so everyone sees the projectile
+          this.broadcast.sendToAll("projectileLaunched", data);
+        },
+      );
     } catch (_err) {
       console.error("[EventBridge] Error setting up combat events:", _err);
     }

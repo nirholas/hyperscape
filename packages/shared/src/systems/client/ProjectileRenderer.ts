@@ -48,7 +48,8 @@ interface TrailSprite {
  * Active projectile being rendered
  */
 interface ActiveProjectile {
-  sprite: THREE.Sprite;
+  /** Main visual - sprite for spells, Group for arrows */
+  sprite: THREE.Sprite | THREE.Group;
   startPos: THREE.Vector3;
   endPos: THREE.Vector3;
   startTime: number;
@@ -66,7 +67,7 @@ interface ActiveProjectile {
   trailPositions: THREE.Vector3[];
   /** Current trail position index */
   trailIndex: number;
-  /** Base rotation for arrows */
+  /** Base rotation for arrows (unused for 3D arrows) */
   baseRotation: number;
 }
 
@@ -137,6 +138,7 @@ export class ProjectileRenderer extends System {
 
   /**
    * Create arrow texture with specific visual config
+   * Draws a clear arrow shape: line shaft with triangular head
    */
   private createArrowTexture(id: string, config: ArrowVisualConfig): void {
     if (this.arrowTextures.has(id)) return;
@@ -145,58 +147,108 @@ export class ProjectileRenderer extends System {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const size = 64;
-    canvas.width = size;
-    canvas.height = size;
+    // Use larger canvas for better detail
+    const width = 128;
+    const height = 32;
+    canvas.width = width;
+    canvas.height = height;
+
+    const centerY = height / 2;
 
     // Convert colors to CSS
     const shaftColor = `#${config.shaftColor.toString(16).padStart(6, "0")}`;
     const headColor = `#${config.headColor.toString(16).padStart(6, "0")}`;
     const fletchColor = `#${config.fletchingColor.toString(16).padStart(6, "0")}`;
 
-    // Draw arrow shaft
-    ctx.fillStyle = shaftColor;
-    ctx.strokeStyle = this.darkenColor(shaftColor);
+    // Clear with transparency
+    ctx.clearRect(0, 0, width, height);
+
+    // Draw fletching (feathers at back) - small diagonal lines
+    ctx.strokeStyle = fletchColor;
     ctx.lineWidth = 2;
-
     ctx.beginPath();
-    ctx.moveTo(10, size / 2 - 2);
-    ctx.lineTo(50, size / 2 - 2);
-    ctx.lineTo(50, size / 2 + 2);
-    ctx.lineTo(10, size / 2 + 2);
-    ctx.closePath();
-    ctx.fill();
+    ctx.moveTo(8, centerY - 8);
+    ctx.lineTo(16, centerY);
+    ctx.lineTo(8, centerY + 8);
     ctx.stroke();
 
-    // Arrow head
+    // Draw arrow shaft (thick line)
+    ctx.strokeStyle = shaftColor;
+    ctx.lineWidth = 4;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(12, centerY);
+    ctx.lineTo(95, centerY);
+    ctx.stroke();
+
+    // Add darker outline to shaft for visibility
+    ctx.strokeStyle = this.darkenColor(shaftColor);
+    ctx.lineWidth = 6;
+    ctx.globalCompositeOperation = "destination-over";
+    ctx.beginPath();
+    ctx.moveTo(12, centerY);
+    ctx.lineTo(95, centerY);
+    ctx.stroke();
+    ctx.globalCompositeOperation = "source-over";
+
+    // Draw arrowhead (filled triangle pointing right)
     ctx.fillStyle = headColor;
+    ctx.strokeStyle = this.darkenColor(headColor);
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(50, size / 2 - 6);
-    ctx.lineTo(60, size / 2);
-    ctx.lineTo(50, size / 2 + 6);
+    ctx.moveTo(90, centerY - 10);
+    ctx.lineTo(120, centerY);
+    ctx.lineTo(90, centerY + 10);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
-
-    // Fletching
-    ctx.fillStyle = fletchColor;
-    ctx.beginPath();
-    ctx.moveTo(10, size / 2 - 2);
-    ctx.lineTo(4, size / 2 - 8);
-    ctx.lineTo(16, size / 2 - 2);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.moveTo(10, size / 2 + 2);
-    ctx.lineTo(4, size / 2 + 8);
-    ctx.lineTo(16, size / 2 + 2);
-    ctx.closePath();
-    ctx.fill();
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.needsUpdate = true;
     this.arrowTextures.set(id, texture);
+  }
+
+  /**
+   * Create a 3D arrow mesh (shaft + head) that can be oriented with lookAt()
+   * The arrow points along +Z axis by default
+   */
+  private create3DArrow(config: ArrowVisualConfig): THREE.Group {
+    const group = new THREE.Group();
+
+    const shaftLength = config.length * 0.7;
+    const headLength = config.length * 0.3;
+    const shaftRadius = config.width * 0.15;
+    const headRadius = config.width * 0.4;
+
+    // Convert colors
+    const shaftColor = config.shaftColor;
+    const headColor = config.headColor;
+
+    // Shaft (cylinder along Z axis)
+    const shaftGeometry = new THREE.CylinderGeometry(
+      shaftRadius,
+      shaftRadius,
+      shaftLength,
+      8,
+    );
+    // Rotate to point along Z and offset so end is at origin
+    shaftGeometry.rotateX(Math.PI / 2);
+    shaftGeometry.translate(0, 0, -shaftLength / 2 - headLength / 2);
+
+    const shaftMaterial = new THREE.MeshBasicMaterial({ color: shaftColor });
+    const shaft = new THREE.Mesh(shaftGeometry, shaftMaterial);
+    group.add(shaft);
+
+    // Arrowhead (cone pointing along +Z)
+    const headGeometry = new THREE.ConeGeometry(headRadius, headLength, 8);
+    // Rotate so cone points along +Z
+    headGeometry.rotateX(Math.PI / 2);
+
+    const headMaterial = new THREE.MeshBasicMaterial({ color: headColor });
+    const head = new THREE.Mesh(headGeometry, headMaterial);
+    group.add(head);
+
+    return group;
   }
 
   /**
@@ -319,6 +371,7 @@ export class ProjectileRenderer extends System {
       targetPosition: { x: number; y: number; z: number };
       spellId?: string;
       arrowId?: string;
+      delayMs?: number;
     };
 
     const {
@@ -329,21 +382,37 @@ export class ProjectileRenderer extends System {
       targetPosition,
       spellId,
       arrowId,
+      delayMs,
     } = payload;
 
     // Determine if this is an arrow or spell
     const isSpell = projectileType !== "arrow" && spellId;
     const type = isSpell ? "spell" : "arrow";
 
-    this.createProjectile(
-      attackerId,
-      targetId,
-      type,
-      sourcePosition,
-      targetPosition,
-      spellId,
-      arrowId,
-    );
+    // If there's a delay (e.g., for magic cast animation), wait before spawning
+    if (delayMs && delayMs > 0) {
+      setTimeout(() => {
+        this.createProjectile(
+          attackerId,
+          targetId,
+          type,
+          sourcePosition,
+          targetPosition,
+          spellId,
+          arrowId,
+        );
+      }, delayMs);
+    } else {
+      this.createProjectile(
+        attackerId,
+        targetId,
+        type,
+        sourcePosition,
+        targetPosition,
+        spellId,
+        arrowId,
+      );
+    }
   };
 
   /**
@@ -384,47 +453,6 @@ export class ProjectileRenderer extends System {
       return;
     }
 
-    // Get visual config
-    let visualConfig: SpellVisualConfig | ArrowVisualConfig;
-    let texture: THREE.Texture | null = null;
-
-    if (type === "spell" && spellId) {
-      visualConfig = getSpellVisual(spellId);
-      // Create texture if not cached
-      if (!this.spellTextures.has(spellId)) {
-        this.createSpellTexture(spellId, visualConfig as SpellVisualConfig);
-      }
-      texture = this.spellTextures.get(spellId) ?? null;
-    } else {
-      const arrowKey = arrowId ?? "default";
-      visualConfig = getArrowVisual(arrowKey);
-      // Create texture if not cached
-      if (!this.arrowTextures.has(arrowKey)) {
-        this.createArrowTexture(arrowKey, visualConfig as ArrowVisualConfig);
-      }
-      texture =
-        this.arrowTextures.get(arrowKey) ??
-        this.arrowTextures.get("default") ??
-        null;
-    }
-
-    if (!texture) {
-      return;
-    }
-
-    // Create main sprite
-    const material = new THREE.SpriteMaterial({
-      map: texture,
-      transparent: true,
-      depthTest: true,
-      blending:
-        type === "spell" ? THREE.AdditiveBlending : THREE.NormalBlending,
-    });
-
-    const sprite = new THREE.Sprite(material);
-    const size = "size" in visualConfig ? visualConfig.size : 0.4;
-    sprite.scale.set(size, type === "arrow" ? size * 0.25 : size, 1);
-
     // Calculate duration based on distance
     const dx = targetPos.x - sourcePos.x;
     const dz = targetPos.z - sourcePos.z;
@@ -438,17 +466,54 @@ export class ProjectileRenderer extends System {
     const startY = sourcePos.y + 1.2;
     const endY = targetPos.y + 1.0;
 
-    sprite.position.set(sourcePos.x, startY, sourcePos.z);
+    // Get visual config
+    let visualConfig: SpellVisualConfig | ArrowVisualConfig;
+    let projectileObject: THREE.Sprite | THREE.Group;
 
-    // Calculate base rotation for arrows
-    let baseRotation = 0;
     if (type === "arrow") {
-      baseRotation = -Math.atan2(dz, dx);
-      sprite.material.rotation = baseRotation;
+      // Create 3D arrow mesh that naturally points toward target
+      const arrowKey = arrowId ?? "default";
+      visualConfig = getArrowVisual(arrowKey);
+      const arrowConfig = visualConfig as ArrowVisualConfig;
+
+      projectileObject = this.create3DArrow(arrowConfig);
+      projectileObject.position.set(sourcePos.x, startY, sourcePos.z);
+
+      // Point arrow toward target using lookAt
+      const targetPoint = new THREE.Vector3(targetPos.x, endY, targetPos.z);
+      projectileObject.lookAt(targetPoint);
+    } else {
+      // Create spell sprite
+      visualConfig = getSpellVisual(spellId ?? "");
+      const spellConfig = visualConfig as SpellVisualConfig;
+
+      // Create texture if not cached
+      if (spellId && !this.spellTextures.has(spellId)) {
+        this.createSpellTexture(spellId, spellConfig);
+      }
+      const texture = spellId
+        ? (this.spellTextures.get(spellId) ?? null)
+        : null;
+
+      if (!texture) {
+        return;
+      }
+
+      const material = new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+        depthTest: true,
+        blending: THREE.AdditiveBlending,
+      });
+
+      const sprite = new THREE.Sprite(material);
+      sprite.scale.set(spellConfig.size, spellConfig.size, 1);
+      sprite.position.set(sourcePos.x, startY, sourcePos.z);
+      projectileObject = sprite;
     }
 
     // Add to scene
-    this.world.stage.scene.add(sprite);
+    this.world.stage.scene.add(projectileObject);
 
     // Create trail sprites for spells
     const trailSprites: TrailSprite[] = [];
@@ -474,7 +539,7 @@ export class ProjectileRenderer extends System {
         });
 
         const trailSprite = new THREE.Sprite(trailMaterial);
-        const trailSize = size * (0.3 + (i / trailLength) * 0.4);
+        const trailSize = spellConfig.size * (0.3 + (i / trailLength) * 0.4);
         trailSprite.scale.set(trailSize, trailSize, 1);
         trailSprite.position.set(sourcePos.x, startY, sourcePos.z);
         trailSprite.visible = false;
@@ -489,7 +554,7 @@ export class ProjectileRenderer extends System {
 
     // Track projectile
     this.activeProjectiles.push({
-      sprite,
+      sprite: projectileObject,
       startPos: new THREE.Vector3(sourcePos.x, startY, sourcePos.z),
       endPos: new THREE.Vector3(targetPos.x, endY, targetPos.z),
       startTime: performance.now(),
@@ -503,7 +568,7 @@ export class ProjectileRenderer extends System {
       trailSprites,
       trailPositions,
       trailIndex: 0,
-      baseRotation,
+      baseRotation: 0,
     });
   }
 
@@ -539,18 +604,14 @@ export class ProjectileRenderer extends System {
         const arcProgress = 4 * arcHeight * progress * (1 - progress);
         this._tempVec3.y += arcProgress;
 
-        // Rotate arrow to follow arc
-        if (
-          progress < 1 &&
-          proj.sprite.material instanceof THREE.SpriteMaterial
-        ) {
-          const prevY = proj.sprite.position.y;
-          const dy = this._tempVec3.y - prevY;
-          const horizontalDist = proj.endPos.clone().sub(proj.startPos);
-          horizontalDist.y = 0;
-          const horizontalSpeed = horizontalDist.length() / proj.duration;
-          const pitchAngle = Math.atan2(dy, horizontalSpeed * 16 + 0.1);
-          proj.sprite.material.rotation = proj.baseRotation - pitchAngle * 0.5;
+        // For 3D arrows, use lookAt to point toward next position
+        if (progress < 0.95 && proj.sprite instanceof THREE.Group) {
+          // Calculate look-ahead position for smooth orientation
+          const lookAhead = Math.min(progress + 0.1, 1);
+          this._tempVec3b.lerpVectors(proj.startPos, proj.endPos, lookAhead);
+          const lookAheadArc = 4 * arcHeight * lookAhead * (1 - lookAhead);
+          this._tempVec3b.y += lookAheadArc;
+          proj.sprite.lookAt(this._tempVec3b);
         }
       } else {
         // Spell effects: pulsing
@@ -577,23 +638,35 @@ export class ProjectileRenderer extends System {
       }
 
       // Fade out near end
-      if (
-        progress > 0.8 &&
-        proj.sprite.material instanceof THREE.SpriteMaterial
-      ) {
+      if (progress > 0.8) {
         const fadeProgress = (progress - 0.8) / 0.2;
-        proj.sprite.material.opacity = 1 - fadeProgress;
 
-        // Fade trail too
-        for (const trail of proj.trailSprites) {
-          if (trail.sprite.material instanceof THREE.SpriteMaterial) {
-            const baseOpacity = this.getTrailOpacity(
-              trail.index,
-              proj.trailSprites.length,
-              proj.visualConfig as SpellVisualConfig,
-            );
-            trail.sprite.material.opacity = baseOpacity * (1 - fadeProgress);
+        if (proj.sprite instanceof THREE.Sprite) {
+          // Fade sprite (spell)
+          if (proj.sprite.material instanceof THREE.SpriteMaterial) {
+            proj.sprite.material.opacity = 1 - fadeProgress;
           }
+
+          // Fade trail too
+          for (const trail of proj.trailSprites) {
+            if (trail.sprite.material instanceof THREE.SpriteMaterial) {
+              const baseOpacity = this.getTrailOpacity(
+                trail.index,
+                proj.trailSprites.length,
+                proj.visualConfig as SpellVisualConfig,
+              );
+              trail.sprite.material.opacity = baseOpacity * (1 - fadeProgress);
+            }
+          }
+        } else if (proj.sprite instanceof THREE.Group) {
+          // Fade 3D arrow by adjusting child mesh materials
+          proj.sprite.traverse((child) => {
+            if (child instanceof THREE.Mesh && child.material) {
+              const mat = child.material as THREE.MeshBasicMaterial;
+              mat.transparent = true;
+              mat.opacity = 1 - fadeProgress;
+            }
+          });
         }
       }
 

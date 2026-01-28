@@ -3497,6 +3497,19 @@ export class ClientNetwork extends SystemBase {
     this.world.emit(EventType.COMBAT_DAMAGE_DEALT, data);
   };
 
+  onProjectileLaunched = (data: {
+    attackerId: string;
+    targetId: string;
+    projectileType: string;
+    sourcePosition: { x: number; y: number; z: number };
+    targetPosition: { x: number; y: number; z: number };
+    spellId?: string;
+    delayMs?: number;
+  }) => {
+    // Forward to local event system so ProjectileRenderer can show visual effects
+    this.world.emit(EventType.COMBAT_PROJECTILE_LAUNCHED, data);
+  };
+
   onXpDrop = (data: {
     skill: string;
     xpGained: number;
