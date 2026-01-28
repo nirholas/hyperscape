@@ -193,13 +193,24 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
   const theme = useThemeStore((s) => s.theme);
   const { shouldUseMobileUI } = useMobileLayout();
   const [hoveredSkill, setHoveredSkill] = useState<Skill | null>(null);
+  const [hoveredTotalLevel, setHoveredTotalLevel] = useState(false);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const skillTooltipRef = useRef<HTMLDivElement>(null);
+  const totalLevelTooltipRef = useRef<HTMLDivElement>(null);
 
   const skillTooltipSize = useTooltipSize(hoveredSkill, skillTooltipRef, {
     width: 180,
     height: 90,
   });
+
+  const totalLevelTooltipSize = useTooltipSize(
+    hoveredTotalLevel,
+    totalLevelTooltipRef,
+    {
+      width: 140,
+      height: 50,
+    },
+  );
 
   const s: Partial<Skills> = stats?.skills ?? {};
 
@@ -217,6 +228,7 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
   });
 
   const totalLevel = skills.reduce((sum, skill) => sum + skill.level, 0);
+  const totalXP = skills.reduce((sum, skill) => sum + skill.xp, 0);
   const combatLevel = calculateCombatLevel(s);
 
   return (
@@ -272,7 +284,16 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
             flexShrink: 0,
           }}
         >
-          <div className="text-center flex-1">
+          <div
+            className="text-center flex-1"
+            style={{ cursor: "default" }}
+            onMouseEnter={(e) => {
+              setHoveredTotalLevel(true);
+              setMousePos({ x: e.clientX, y: e.clientY });
+            }}
+            onMouseMove={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
+            onMouseLeave={() => setHoveredTotalLevel(false)}
+          >
             <div
               style={{
                 fontSize: shouldUseMobileUI ? "8px" : "7px",
@@ -434,6 +455,61 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
                     />
                   </div>
                 )}
+              </div>
+            );
+          })(),
+          document.body,
+        )}
+
+      {/* Total Level XP Tooltip */}
+      {hoveredTotalLevel &&
+        createPortal(
+          (() => {
+            const tooltipSize = {
+              width: totalLevelTooltipSize.width || 140,
+              height: totalLevelTooltipSize.height || 50,
+            };
+            const { left, top } = calculateCursorTooltipPosition(
+              mousePos,
+              tooltipSize,
+            );
+
+            return (
+              <div
+                ref={totalLevelTooltipRef}
+                className="fixed pointer-events-none"
+                style={{
+                  left,
+                  top,
+                  zIndex: zIndex.tooltip,
+                  background: theme.colors.slot.filled,
+                  border: `1px solid ${theme.colors.border.default}40`,
+                  borderRadius: "3px",
+                  padding: "6px 8px",
+                  minWidth: "120px",
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "9px",
+                    color: theme.colors.text.muted,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.3px",
+                    marginBottom: "2px",
+                  }}
+                >
+                  Total XP
+                </div>
+                <div
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    color: theme.colors.text.accent,
+                  }}
+                >
+                  {totalXP.toLocaleString()}
+                </div>
               </div>
             );
           })(),
