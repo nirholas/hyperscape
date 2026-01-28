@@ -120,3 +120,11 @@ export {
 } from "./mobileStyles";
 
 export type { MobileSpacing, MobileBarHeight } from "./mobileStyles";
+
+// ===========================================
+// GAME CONSTANTS (Re-exports from @hyperscape/shared)
+// ===========================================
+// Use constants from the shared package instead of duplicating here:
+// - SKILL_DEFINITIONS from @hyperscape/shared/data/skill-icons
+// - INVENTORY_CONSTANTS, EQUIPMENT_SLOTS from @hyperscape/shared/constants/GameConstants
+// - calculateCombatLevel from @hyperscape/shared/utils/game/CombatLevelCalculator

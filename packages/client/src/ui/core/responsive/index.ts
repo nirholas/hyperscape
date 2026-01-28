@@ -32,3 +32,11 @@ export {
   type SafeAreaInsets,
   type MobileLayoutResult,
 } from "./useMobileLayout";
+
+export {
+  ViewportScaler,
+  useViewportScale,
+  getDesignResolution,
+  DESIGN_WIDTH,
+  DESIGN_HEIGHT,
+} from "./ViewportScaler";

@@ -313,6 +313,7 @@ export interface Socket {
  */
 export interface NodeWebSocket extends WebSocket {
   on(event: string, listener: Function): void;
+  removeListener?(event: string, listener: Function): void;
   ping(): void;
   terminate(): void;
 }

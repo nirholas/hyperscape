@@ -231,3 +231,84 @@ export function getUserFriendlyError(error: string | Error): string {
   const errorKey = error instanceof Error ? error.message : error;
   return ERROR_MESSAGES[errorKey] || ERROR_MESSAGES.UNKNOWN;
 }
+
+/**
+ * Show an error notification from a caught error
+ *
+ * This is a convenience function for use in catch blocks.
+ * It logs the error to console and shows a user-friendly notification.
+ *
+ * @param error - The error that was caught
+ * @param context - Optional context string (e.g., "loading inventory")
+ * @param options - Optional override options
+ *
+ * @example
+ * ```tsx
+ * try {
+ *   await loadData();
+ * } catch (error) {
+ *   showErrorNotification(error, "loading inventory");
+ * }
+ * ```
+ */
+export function showErrorNotification(
+  error: unknown,
+  context?: string,
+  options?: { silent?: boolean; title?: string },
+): void {
+  // Extract error message for logging
+  const errorMessage = error instanceof Error ? error.message : String(error);
+
+  // Log to console for debugging (always includes full error for stack trace)
+  console.error(
+    `[Error${context ? ` in ${context}` : ""}] ${errorMessage}`,
+    error instanceof Error ? error.stack : "",
+  );
+
+  // Skip notification if silent mode requested
+  if (options?.silent) {
+    return;
+  }
+
+  // Get user-friendly message (may differ from technical errorMessage)
+  const friendlyMessage = getUserFriendlyError(errorMessage);
+
+  // Show notification
+  const { showError } = useNotificationStore.getState();
+  showError(
+    context ? `${friendlyMessage} (${context})` : friendlyMessage,
+    options?.title || "Error",
+  );
+}
+
+/**
+ * Show a network error notification
+ *
+ * Specialized for network-related errors with appropriate messaging.
+ *
+ * @param error - The network error
+ * @param action - What action failed (e.g., "deposit", "withdraw")
+ */
+export function showNetworkErrorNotification(
+  error: unknown,
+  action: string,
+): void {
+  console.error(`[Network Error] ${action}:`, error);
+
+  const { showError } = useNotificationStore.getState();
+  showError(
+    `Failed to ${action}. Please check your connection and try again.`,
+    "Network Error",
+  );
+}
+
+/**
+ * Show a success notification for completed actions
+ *
+ * @param message - Success message
+ * @param title - Optional title
+ */
+export function showSuccessNotification(message: string, title?: string): void {
+  const { showSuccess } = useNotificationStore.getState();
+  showSuccess(message, title);
+}

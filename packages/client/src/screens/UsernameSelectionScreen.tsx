@@ -15,6 +15,7 @@ import React from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { GAME_API_URL } from "@/lib/api-config";
 import { useThemeStore } from "@/ui";
+import { privyAuthManager } from "@/auth/PrivyAuthManager";
 
 interface UsernameSelectionScreenProps {
   onUsernameSelected: (username: string) => void;
@@ -64,7 +65,9 @@ export function UsernameSelectionScreen({
         return;
       }
 
-      const accountId = localStorage.getItem("privy_user_id");
+      // Use PrivyAuthManager with localStorage fallback
+      const accountId =
+        privyAuthManager.getUserId() || localStorage.getItem("privy_user_id");
       if (!accountId) {
         setError("Authentication error. Please refresh the page.");
         setIsSubmitting(false);

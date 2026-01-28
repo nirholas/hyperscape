@@ -1,14 +1,21 @@
 /**
- * useViewportResize - Handle viewport resize and window repositioning
+ * useViewportResize - Handle viewport resize with proportional scaling
  *
- * Uses anchor-based positioning (like Unity/Unreal) where windows maintain
- * their position relative to a specific viewport edge/corner.
+ * Implements full screenspace scaling where windows scale both position AND size
+ * proportionally when the viewport changes. Uses anchor-based positioning
+ * (like Unity/Unreal) for edge-relative positioning.
+ *
+ * Key features:
+ * - Proportional size scaling based on viewport ratio
+ * - Anchor-based position repositioning
+ * - Min/max size constraints respected
+ * - Smooth transitions with debouncing
  *
  * @packageDocumentation
  */
 
-import { useEffect, useRef, useState, useCallback } from "react";
-import { useWindowStore } from "@/ui";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useWindowStore, useEditStore, type WindowState } from "@/ui";
 import {
   repositionWindowForViewport,
   detectNearestAnchor,
@@ -17,6 +24,15 @@ import {
 } from "@/ui/stores/anchorUtils";
 import { createDefaultWindows } from "./DefaultLayoutFactory";
 import { getUIScale } from "@/ui/core/drag/utils";
+import { getPanelConfig } from "./PanelRegistry";
+
+/**
+ * Snap a value to the grid
+ */
+function snapToGrid(value: number, gridSize: number): number {
+  if (gridSize <= 0) return value;
+  return Math.round(value / gridSize) * gridSize;
+}
 
 /** Mobile breakpoint threshold */
 const MOBILE_BREAKPOINT = 768;
@@ -34,7 +50,268 @@ function getScaledViewport(): { width: number; height: number } {
 }
 
 /**
- * Hook for handling viewport resize and window repositioning
+ * Calculate proportionally scaled size for a window
+ */
+function scaleWindowSize(
+  currentSize: { width: number; height: number },
+  oldViewport: { width: number; height: number },
+  newViewport: { width: number; height: number },
+  minSize: { width: number; height: number },
+  maxSize?: { width: number; height: number },
+): { width: number; height: number } {
+  const widthScale = newViewport.width / oldViewport.width;
+  const heightScale = newViewport.height / oldViewport.height;
+
+  let newWidth = Math.round(currentSize.width * widthScale);
+  let newHeight = Math.round(currentSize.height * heightScale);
+
+  newWidth = Math.max(minSize.width, newWidth);
+  newHeight = Math.max(minSize.height, newHeight);
+
+  if (maxSize) {
+    newWidth = Math.min(maxSize.width, newWidth);
+    newHeight = Math.min(maxSize.height, newHeight);
+  }
+
+  return { width: newWidth, height: newHeight };
+}
+
+/**
+ * Get panel ID from window tabs to look up sizing config
+ */
+function getPanelIdFromWindow(win: WindowState): string {
+  const firstTab = win.tabs[0];
+  if (!firstTab) return "default";
+  const content = firstTab.content;
+  if (typeof content === "string") return content;
+  return "default";
+}
+
+/** IDs for right column windows (need to scale together) */
+const RIGHT_COLUMN_WINDOW_IDS = [
+  "minimap-window",
+  "combat-window",
+  "skills-prayer-window",
+  "inventory-window",
+  "menubar-window",
+];
+
+/** IDs for left column windows (need to scale together) */
+const LEFT_COLUMN_WINDOW_IDS = ["quests-window", "chat-window"];
+
+/**
+ * Scale left column panels together so they fit properly.
+ * Left column stacks from bottom: Chat at bottom, Quests above it.
+ * Note: Quests is half the width of Chat, so each panel scales its own width.
+ * Returns a map of window ID -> { position, size } for updated panels.
+ * Uses grid snapping for alignment.
+ */
+function scaleLeftColumnPanels(
+  windows: WindowState[],
+  oldViewport: { width: number; height: number },
+  newViewport: { width: number; height: number },
+  gridSize: number,
+): Map<
+  string,
+  {
+    position: { x: number; y: number };
+    size: { width: number; height: number };
+  }
+> {
+  const updates = new Map<
+    string,
+    {
+      position: { x: number; y: number };
+      size: { width: number; height: number };
+    }
+  >();
+
+  // Get left column windows sorted by Y position (bottom to top for stacking)
+  const leftColumnWindows = windows
+    .filter((w) => LEFT_COLUMN_WINDOW_IDS.includes(w.id))
+    .sort((a, b) => b.position.y - a.position.y); // Sort by Y descending (bottom first)
+
+  if (leftColumnWindows.length === 0) return updates;
+
+  // Calculate scale ratios
+  const widthScale = newViewport.width / oldViewport.width;
+  const heightScale = newViewport.height / oldViewport.height;
+
+  // Left edge X position is always 0
+  const leftColumnX = 0;
+
+  // Scale each panel height and stack from bottom
+  let currentY = newViewport.height; // Start from bottom
+  for (let i = 0; i < leftColumnWindows.length; i++) {
+    const win = leftColumnWindows[i];
+    const panelId = getPanelIdFromWindow(win);
+    const config = getPanelConfig(panelId);
+
+    // Scale width proportionally (each panel keeps its own width ratio)
+    let newWidth = Math.round(win.size.width * widthScale);
+    newWidth = Math.max(config.minSize.width, newWidth);
+    newWidth = snapToGrid(newWidth, gridSize);
+
+    // Scale height proportionally
+    let newHeight = Math.round(win.size.height * heightScale);
+    newHeight = Math.max(config.minSize.height, newHeight);
+    // Snap height to grid
+    newHeight = snapToGrid(newHeight, gridSize);
+
+    // Position from bottom up
+    currentY -= newHeight;
+
+    // Ensure we don't go above viewport
+    if (currentY < 0) {
+      newHeight += currentY; // Reduce height to fit
+      newHeight = Math.max(config.minSize.height, newHeight);
+      currentY = 0;
+    }
+
+    updates.set(win.id, {
+      position: { x: leftColumnX, y: currentY },
+      size: { width: newWidth, height: newHeight },
+    });
+  }
+
+  return updates;
+}
+
+/** IDs for bottom stack (attached together, menubar at bottom) */
+const BOTTOM_STACK_WINDOW_IDS = [
+  "combat-window",
+  "skills-prayer-window",
+  "inventory-window",
+  "menubar-window",
+];
+
+/**
+ * Scale right column panels together so they fit the viewport height.
+ * Layout: Minimap (top) -> [gap] -> Bottom stack (combat, skills, inventory, menubar at bottom)
+ * Returns a map of window ID -> { position, size } for updated panels.
+ * Uses grid snapping for alignment.
+ */
+function scaleRightColumnPanels(
+  windows: WindowState[],
+  oldViewport: { width: number; height: number },
+  newViewport: { width: number; height: number },
+  gridSize: number,
+): Map<
+  string,
+  {
+    position: { x: number; y: number };
+    size: { width: number; height: number };
+  }
+> {
+  const updates = new Map<
+    string,
+    {
+      position: { x: number; y: number };
+      size: { width: number; height: number };
+    }
+  >();
+
+  // Get right column windows
+  const rightColumnWindows = windows.filter((w) =>
+    RIGHT_COLUMN_WINDOW_IDS.includes(w.id),
+  );
+  if (rightColumnWindows.length === 0) return updates;
+
+  // Separate minimap from bottom stack
+  const minimapWindow = rightColumnWindows.find(
+    (w) => w.id === "minimap-window",
+  );
+  const bottomStackWindows = rightColumnWindows
+    .filter((w) => BOTTOM_STACK_WINDOW_IDS.includes(w.id))
+    .sort((a, b) => a.position.y - b.position.y); // Sort top to bottom
+
+  // Calculate scale ratios
+  const widthScale = newViewport.width / oldViewport.width;
+  const heightScale = newViewport.height / oldViewport.height;
+
+  // Calculate new width for right column (all panels share same width)
+  const firstPanel = rightColumnWindows[0];
+  const panelConfig = getPanelConfig(getPanelIdFromWindow(firstPanel));
+  let newColumnWidth = Math.round(firstPanel.size.width * widthScale);
+  newColumnWidth = Math.max(panelConfig.minSize.width, newColumnWidth);
+  newColumnWidth = snapToGrid(newColumnWidth, gridSize);
+
+  // Right edge X position
+  const rightColumnX = newViewport.width - newColumnWidth;
+
+  // === SCALE BOTTOM STACK (attached, from bottom up) ===
+  // Stack from bottom: menubar at very bottom, then inventory, skills, combat
+  let bottomStackY = newViewport.height;
+  const bottomStackUpdates: Array<{
+    win: WindowState;
+    height: number;
+    y: number;
+  }> = [];
+
+  // Process bottom stack from bottom to top (menubar first, then inventory, etc.)
+  const bottomStackReversed = [...bottomStackWindows].reverse();
+  for (const win of bottomStackReversed) {
+    const panelId = getPanelIdFromWindow(win);
+    const config = getPanelConfig(panelId);
+
+    // Scale height proportionally
+    let newHeight = Math.round(win.size.height * heightScale);
+    newHeight = Math.max(config.minSize.height, newHeight);
+    newHeight = snapToGrid(newHeight, gridSize);
+
+    bottomStackY -= newHeight;
+    bottomStackUpdates.push({ win, height: newHeight, y: bottomStackY });
+  }
+
+  // Apply bottom stack updates
+  for (const { win, height, y } of bottomStackUpdates) {
+    updates.set(win.id, {
+      position: { x: rightColumnX, y },
+      size: { width: newColumnWidth, height },
+    });
+  }
+
+  // === SCALE MINIMAP (at top, with gap to bottom stack) ===
+  if (minimapWindow) {
+    const minimapConfig = getPanelConfig("minimap");
+
+    // Calculate gap proportionally (original gap = space between minimap bottom and combat top)
+    const originalMinimapBottom =
+      minimapWindow.position.y + minimapWindow.size.height;
+    const combatWindow = bottomStackWindows.find(
+      (w) => w.id === "combat-window",
+    );
+    const originalGap = combatWindow
+      ? combatWindow.position.y - originalMinimapBottom
+      : 20; // Default gap if combat not found
+
+    // Scale gap proportionally
+    const newGap = Math.max(10, Math.round(originalGap * heightScale));
+
+    // Combat Y in new viewport (top of bottom stack)
+    const newCombatY =
+      bottomStackY +
+      (bottomStackUpdates.find((u) => u.win.id === "combat-window")?.y ??
+        bottomStackY);
+    const actualCombatY =
+      updates.get("combat-window")?.position.y ?? bottomStackY;
+
+    // Minimap fills from top (y=0) down to gap above combat
+    let newMinimapHeight = actualCombatY - newGap;
+    newMinimapHeight = Math.max(minimapConfig.minSize.height, newMinimapHeight);
+    newMinimapHeight = snapToGrid(newMinimapHeight, gridSize);
+
+    updates.set(minimapWindow.id, {
+      position: { x: rightColumnX, y: 0 },
+      size: { width: newColumnWidth, height: newMinimapHeight },
+    });
+  }
+
+  return updates;
+}
+
+/**
+ * Hook for handling viewport resize with proportional scaling
  *
  * @returns Object with isMobile state and viewport ref
  */
@@ -46,7 +323,7 @@ export function useViewportResize() {
       : false,
   );
 
-  // Track previous viewport size for responsive repositioning
+  // Track previous viewport size for anchor-based repositioning
   const prevViewportRef = useRef<{ width: number; height: number }>({
     width: typeof window !== "undefined" ? window.innerWidth : 1920,
     height: typeof window !== "undefined" ? window.innerHeight : 1080,
@@ -59,7 +336,7 @@ export function useViewportResize() {
       : false,
   );
 
-  // Viewport resize handling
+  // Viewport resize handling with anchor-based repositioning
   useEffect(() => {
     let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -84,50 +361,28 @@ export function useViewportResize() {
         wasMobileRef.current = nowMobile;
 
         // On mobile <-> desktop transition, reset to default layout
-        // Mobile and desktop use completely different layouts, so we reset entirely
         if (transitionedFromMobile || transitionedToMobile) {
           if (transitionedFromMobile) {
-            // Get the default layout for the current (desktop) viewport
             const defaultWindows = createDefaultWindows();
             const windowStoreUpdate = useWindowStore.getState().updateWindow;
             const allWindows = useWindowStore.getState().getAllWindows();
 
-            // Create a map of default window positions by ID
-            const defaultPositions = new Map(
-              defaultWindows.map((w) => [
-                w.id,
-                { position: w.position, anchor: w.anchor },
-              ]),
+            const defaultConfigs = new Map(
+              defaultWindows.map((w) => [w.id, w]),
             );
 
-            // Update each existing window to its default position
             allWindows.forEach((win) => {
-              const defaultWin = defaultPositions.get(win.id);
-              if (defaultWin?.position) {
+              const defaultWin = defaultConfigs.get(win.id);
+              if (defaultWin) {
                 windowStoreUpdate(win.id, {
                   position: defaultWin.position,
+                  size: defaultWin.size,
                   anchor: defaultWin.anchor ?? getDefaultAnchor(win.id),
-                });
-              } else {
-                // For windows not in default layout, use anchor-based positioning
-                const anchor = win.anchor ?? getDefaultAnchor(win.id);
-                const newViewport = { width: newWidth, height: newHeight };
-                const newPosition = repositionWindowForViewport(
-                  win.position,
-                  win.size,
-                  anchor,
-                  prevViewportRef.current,
-                  newViewport,
-                );
-                windowStoreUpdate(win.id, {
-                  position: newPosition,
-                  anchor,
                 });
               }
             });
           }
 
-          // Update tracked viewport size
           prevViewportRef.current = { width: newWidth, height: newHeight };
           return;
         }
@@ -135,43 +390,173 @@ export function useViewportResize() {
         // Skip if viewport hasn't actually changed
         if (newWidth === prevWidth && newHeight === prevHeight) return;
 
-        // Get all windows and reposition them using anchor-based positioning
+        // Get all windows and reposition them using anchors
         const allWindows = useWindowStore.getState().getAllWindows();
         const windowStoreUpdate = useWindowStore.getState().updateWindow;
+
+        // Get grid settings for snapping
+        const { gridSize, snapEnabled } = useEditStore.getState();
+        const effectiveGridSize = snapEnabled ? gridSize : 0;
 
         const oldViewport = { width: prevWidth, height: prevHeight };
         const newViewport = { width: newWidth, height: newHeight };
 
-        allWindows.forEach((win) => {
-          // Use window's anchor if set, otherwise detect from position or use default
-          const anchor =
-            win.anchor ??
-            detectNearestAnchor(win.position, win.size, oldViewport) ??
-            getDefaultAnchor(win.id);
+        // Scale right column panels together (they stack vertically from top)
+        const rightColumnUpdates = scaleRightColumnPanels(
+          allWindows,
+          oldViewport,
+          newViewport,
+          effectiveGridSize,
+        );
 
-          // Reposition window using anchor-based calculation
-          const newPosition = repositionWindowForViewport(
-            win.position,
-            win.size,
-            anchor,
-            oldViewport,
-            newViewport,
-          );
+        // Scale left column panels together (they stack vertically from bottom)
+        const leftColumnUpdates = scaleLeftColumnPanels(
+          allWindows,
+          oldViewport,
+          newViewport,
+          effectiveGridSize,
+        );
 
-          // Only update if position actually changed
-          const roundedX = Math.round(newPosition.x);
-          const roundedY = Math.round(newPosition.y);
-          if (roundedX !== win.position.x || roundedY !== win.position.y) {
-            windowStoreUpdate(win.id, {
-              position: { x: roundedX, y: roundedY },
-              // Also save the anchor if it wasn't already set
-              ...(win.anchor === undefined ? { anchor } : {}),
+        // Apply right column updates
+        rightColumnUpdates.forEach((update, windowId) => {
+          const win = allWindows.find((w) => w.id === windowId);
+          if (!win) return;
+
+          const posChanged =
+            update.position.x !== win.position.x ||
+            update.position.y !== win.position.y;
+          const sizeChanged =
+            update.size.width !== win.size.width ||
+            update.size.height !== win.size.height;
+
+          if (posChanged || sizeChanged) {
+            windowStoreUpdate(windowId, {
+              position: update.position,
+              size: update.size,
             });
           }
         });
 
+        // Apply left column updates
+        leftColumnUpdates.forEach((update, windowId) => {
+          const win = allWindows.find((w) => w.id === windowId);
+          if (!win) return;
+
+          const posChanged =
+            update.position.x !== win.position.x ||
+            update.position.y !== win.position.y;
+          const sizeChanged =
+            update.size.width !== win.size.width ||
+            update.size.height !== win.size.height;
+
+          if (posChanged || sizeChanged) {
+            windowStoreUpdate(windowId, {
+              position: update.position,
+              size: update.size,
+            });
+          }
+        });
+
+        // Handle non-column windows with individual scaling
+        allWindows
+          .filter(
+            (win) =>
+              !RIGHT_COLUMN_WINDOW_IDS.includes(win.id) &&
+              !LEFT_COLUMN_WINDOW_IDS.includes(win.id),
+          )
+          .forEach((win) => {
+            // Use window's anchor if set, otherwise detect from position
+            const anchor =
+              win.anchor ??
+              detectNearestAnchor(win.position, win.size, oldViewport) ??
+              getDefaultAnchor(win.id);
+
+            // Get panel config for constraints
+            const panelId = getPanelIdFromWindow(win);
+            const panelConfig = getPanelConfig(panelId);
+
+            // Calculate new size (optional scaling)
+            const effectiveMinSize = win.minSize || panelConfig.minSize;
+            const effectiveMaxSize = win.maxSize || panelConfig.maxSize;
+
+            let newSize = scaleWindowSize(
+              win.size,
+              oldViewport,
+              newViewport,
+              effectiveMinSize,
+              effectiveMaxSize,
+            );
+
+            // Snap size to grid
+            newSize = {
+              width: snapToGrid(newSize.width, effectiveGridSize),
+              height: snapToGrid(newSize.height, effectiveGridSize),
+            };
+            // Re-apply min constraints after grid snap
+            newSize.width = Math.max(effectiveMinSize.width, newSize.width);
+            newSize.height = Math.max(effectiveMinSize.height, newSize.height);
+
+            // Reposition window using anchor-based calculation
+            const newPosition = repositionWindowForViewport(
+              win.position,
+              newSize,
+              anchor,
+              oldViewport,
+              newViewport,
+            );
+
+            // Snap position to grid (unless at edge)
+            const atRightEdge =
+              Math.abs(newPosition.x + newSize.width - newViewport.width) <
+              effectiveGridSize;
+            const atBottomEdge =
+              Math.abs(newPosition.y + newSize.height - newViewport.height) <
+              effectiveGridSize;
+
+            if (!atRightEdge) {
+              newPosition.x = snapToGrid(newPosition.x, effectiveGridSize);
+            } else {
+              // Snap to right edge exactly
+              newPosition.x = newViewport.width - newSize.width;
+            }
+
+            if (!atBottomEdge) {
+              newPosition.y = snapToGrid(newPosition.y, effectiveGridSize);
+            } else {
+              // Snap to bottom edge exactly
+              newPosition.y = newViewport.height - newSize.height;
+            }
+
+            // Clamp position to ensure window stays on screen
+            const clampedPosition = clampPositionToViewport(
+              newPosition,
+              newSize,
+              newViewport,
+            );
+
+            // Only update if something changed
+            const posChanged =
+              Math.round(clampedPosition.x) !== win.position.x ||
+              Math.round(clampedPosition.y) !== win.position.y;
+            const sizeChanged =
+              newSize.width !== win.size.width ||
+              newSize.height !== win.size.height;
+
+            if (posChanged || sizeChanged) {
+              windowStoreUpdate(win.id, {
+                position: {
+                  x: Math.round(clampedPosition.x),
+                  y: Math.round(clampedPosition.y),
+                },
+                size: newSize,
+                ...(win.anchor === undefined ? { anchor } : {}),
+              });
+            }
+          });
+
         // Update tracked viewport size
         prevViewportRef.current = { width: newWidth, height: newHeight };
+        useWindowStore.getState().setSavedViewportSize(newViewport);
       }, 100);
     };
 

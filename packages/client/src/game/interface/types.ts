@@ -125,7 +125,7 @@ export interface MenuBarWrapperProps extends WindowContentProps {
 
 /** Minimap wrapper props */
 export interface MinimapWrapperProps {
-  world: ClientWorld;
+  world: ClientWorld | null;
   dragHandleProps?: DragHandleProps;
   isUnlocked?: boolean;
 }

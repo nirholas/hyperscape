@@ -37,6 +37,30 @@ import {
   prayerDataProvider,
 } from "@hyperscape/shared";
 
+// Type guards for prayer events
+function isPrayerStateSyncPayload(
+  data: unknown,
+): data is PrayerStateSyncPayload {
+  if (typeof data !== "object" || data === null) return false;
+  const obj = data as Record<string, unknown>;
+  return (
+    typeof obj.playerId === "string" &&
+    typeof obj.points === "number" &&
+    typeof obj.maxPoints === "number" &&
+    Array.isArray(obj.active)
+  );
+}
+
+function isPrayerToggledPayload(data: unknown): data is PrayerToggledEvent {
+  if (typeof data !== "object" || data === null) return false;
+  const obj = data as Record<string, unknown>;
+  return (
+    typeof obj.playerId === "string" &&
+    typeof obj.prayerId === "string" &&
+    typeof obj.active === "boolean"
+  );
+}
+
 // Prayer panel layout constants - compact sizing
 const PRAYER_ICON_SIZE = 36; // Compact icon size
 const PRAYER_GAP = 2; // Tight gap
@@ -481,25 +505,36 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
     }
 
     const handlePrayerStateSync = (payload: unknown) => {
-      const data = payload as PrayerStateSyncPayload;
+      // Type guard for PrayerStateSyncPayload
+      if (!isPrayerStateSyncPayload(payload)) {
+        console.warn(
+          "[PrayerPanel] Invalid prayer state sync payload:",
+          payload,
+        );
+        return;
+      }
       const player = world.getPlayer();
-      if (!player || data.playerId !== player.id) return;
+      if (!player || payload.playerId !== player.id) return;
 
       // Only update active prayers - points come from stats prop
-      setActivePrayers(new Set(data.active));
+      setActivePrayers(new Set(payload.active));
     };
 
     const handlePrayerToggled = (payload: unknown) => {
-      const data = payload as PrayerToggledEvent;
+      // Type guard for PrayerToggledEvent
+      if (!isPrayerToggledPayload(payload)) {
+        console.warn("[PrayerPanel] Invalid prayer toggled payload:", payload);
+        return;
+      }
       const player = world.getPlayer();
-      if (!player || data.playerId !== player.id) return;
+      if (!player || payload.playerId !== player.id) return;
 
       setActivePrayers((prev) => {
         const next = new Set(prev);
-        if (data.active) {
-          next.add(data.prayerId);
+        if (payload.active) {
+          next.add(payload.prayerId);
         } else {
-          next.delete(data.prayerId);
+          next.delete(payload.prayerId);
         }
         return next;
       });

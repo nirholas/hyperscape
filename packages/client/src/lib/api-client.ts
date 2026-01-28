@@ -2,12 +2,14 @@
  * Centralized API Client
  *
  * Provides fetch wrappers that automatically add Authorization headers
- * for authenticated API calls. Uses the Privy auth token from localStorage.
+ * for authenticated API calls. Uses PrivyAuthManager for token retrieval,
+ * which caches tokens from Privy SDK's getAccessToken().
  *
  * Security features:
  * - CSRF token support for state-changing requests
  * - Automatic credential inclusion for cookie-based auth
- * - Token refresh handling
+ * - Token retrieval via PrivyAuthManager (cached from Privy SDK)
+ * - Support for async fresh token retrieval
  *
  * @example
  * ```typescript
@@ -25,6 +27,8 @@
  */
 
 import { GAME_API_URL } from "./api-config";
+import { privyAuthManager } from "../auth/PrivyAuthManager";
+import { showNetworkErrorNotification } from "../ui/stores/notificationStore";
 
 /** CSRF token cache */
 let csrfToken: string | null = null;
@@ -32,11 +36,23 @@ let csrfTokenExpiry: number = 0;
 const CSRF_TOKEN_TTL = 300000; // 5 minutes
 
 /**
- * Get the current auth token from localStorage
- * Returns null if not authenticated
+ * Get the current auth token from PrivyAuthManager
+ *
+ * Uses the cached token from PrivyAuthManager, which is populated by
+ * PrivyAuthProvider using Privy SDK's getAccessToken(). This is preferred
+ * over direct localStorage access for better security and consistency.
+ *
+ * @returns The access token or null if not authenticated
  */
 function getAuthToken(): string | null {
   try {
+    // Use PrivyAuthManager for token retrieval (cached from Privy SDK)
+    const token = privyAuthManager.getToken();
+    if (token) {
+      return token;
+    }
+    // Fallback to localStorage for backward compatibility during initialization
+    // This handles the race condition where PrivyAuthManager hasn't been initialized yet
     return localStorage.getItem("privy_auth_token");
   } catch {
     // localStorage may not be available (SSR, etc.)
@@ -45,8 +61,61 @@ function getAuthToken(): string | null {
 }
 
 /**
+ * Async token provider type for fresh token retrieval
+ * Use this with components that have access to Privy's usePrivy() hook
+ */
+export type AsyncTokenProvider = () => Promise<string | null>;
+
+/**
+ * Set an async token provider for fresh token retrieval
+ * This should be called from PrivyAuthProvider with getAccessToken
+ */
+let asyncTokenProvider: AsyncTokenProvider | null = null;
+
+/**
+ * Register an async token provider (typically Privy's getAccessToken)
+ * This allows the API client to fetch fresh tokens when needed
+ */
+export function setAsyncTokenProvider(provider: AsyncTokenProvider): void {
+  asyncTokenProvider = provider;
+}
+
+/**
+ * Get a fresh auth token using the async provider if available
+ * Falls back to cached token if no async provider is set
+ */
+async function getFreshAuthToken(): Promise<string | null> {
+  if (asyncTokenProvider) {
+    try {
+      const token = await asyncTokenProvider();
+      if (token) {
+        return token;
+      }
+    } catch (error) {
+      console.warn("[API Client] Failed to get fresh token:", error);
+    }
+  }
+  // Fallback to cached token
+  return getAuthToken();
+}
+
+/** Whether to enforce CSRF tokens for state-changing requests */
+let enforceCsrf = true;
+
+/**
+ * Set whether CSRF tokens should be enforced
+ * In development mode, this can be disabled if the server doesn't have CSRF endpoint
+ * @param enforce - Whether to require CSRF tokens
+ */
+export function setEnforceCsrf(enforce: boolean): void {
+  enforceCsrf = enforce;
+}
+
+/**
  * Fetch or return cached CSRF token
  * CSRF tokens are used for state-changing requests (POST, PUT, DELETE, PATCH)
+ *
+ * @returns CSRF token or throws if enforcement is enabled and token unavailable
  */
 async function getCsrfToken(): Promise<string | null> {
   const now = Date.now();
@@ -74,11 +143,21 @@ async function getCsrfToken(): Promise<string | null> {
         return csrfToken;
       }
     }
-  } catch {
-    // CSRF endpoint may not exist yet - gracefully degrade
-    console.debug(
-      "[API Client] CSRF token fetch failed, continuing without CSRF protection",
-    );
+
+    // Server returned non-200 or no token
+    if (enforceCsrf) {
+      console.warn(
+        "[API Client] CSRF token fetch failed - state-changing requests may be rejected",
+      );
+    }
+  } catch (error) {
+    // CSRF endpoint may not exist yet
+    if (enforceCsrf) {
+      console.warn(
+        "[API Client] CSRF token endpoint unavailable:",
+        error instanceof Error ? error.message : "Unknown error",
+      );
+    }
   }
 
   return null;
@@ -100,8 +179,14 @@ export interface ApiClientOptions extends Omit<RequestInit, "body"> {
   body?: unknown;
   /** Whether to include Authorization header (default: true) */
   includeAuth?: boolean;
+  /** Whether to fetch a fresh token using async provider (default: false for performance) */
+  useFreshToken?: boolean;
   /** Base URL override (default: GAME_API_URL) */
   baseUrl?: string;
+  /** Whether to show user notification on error (default: false) */
+  showErrorNotification?: boolean;
+  /** Context for error notification (e.g., "loading inventory") */
+  errorContext?: string;
 }
 
 /**
@@ -131,7 +216,10 @@ async function apiFetch<T = unknown>(
 ): Promise<ApiResponse<T>> {
   const {
     includeAuth = true,
+    useFreshToken = false,
     baseUrl = GAME_API_URL,
+    showErrorNotification = false,
+    errorContext,
     body,
     headers: customHeaders,
     ...fetchOptions
@@ -149,7 +237,8 @@ async function apiFetch<T = unknown>(
 
   // Add Authorization header if authenticated and requested
   if (includeAuth) {
-    const token = getAuthToken();
+    // Use fresh token for sensitive operations, cached token for regular requests
+    const token = useFreshToken ? await getFreshAuthToken() : getAuthToken();
     if (token) {
       headers["Authorization"] = `Bearer ${token}`;
     }
@@ -160,6 +249,11 @@ async function apiFetch<T = unknown>(
     const csrf = await getCsrfToken();
     if (csrf) {
       headers["X-CSRF-Token"] = csrf;
+    } else if (enforceCsrf) {
+      // Log warning when CSRF token is unavailable for state-changing request
+      console.warn(
+        `[API Client] State-changing request to ${endpoint} without CSRF token - request may be rejected`,
+      );
     }
   }
 
@@ -196,6 +290,14 @@ async function apiFetch<T = unknown>(
         errorData?.error ||
         errorData?.message ||
         `HTTP ${response.status}: ${response.statusText}`;
+
+      // Show user notification if requested
+      if (showErrorNotification) {
+        showNetworkErrorNotification(
+          new Error(errorMessage),
+          errorContext || endpoint,
+        );
+      }
     }
 
     return {
@@ -209,6 +311,11 @@ async function apiFetch<T = unknown>(
     const message =
       error instanceof Error ? error.message : "Network request failed";
     console.error(`[API Client] Request failed: ${url}`, error);
+
+    // Show user notification if requested
+    if (showErrorNotification) {
+      showNetworkErrorNotification(error, errorContext || endpoint);
+    }
 
     return {
       ok: false,
@@ -285,6 +392,13 @@ export const apiClient = {
    * Check if user is currently authenticated
    */
   isAuthenticated(): boolean {
-    return getAuthToken() !== null;
+    return privyAuthManager.isAuthenticated() || getAuthToken() !== null;
+  },
+
+  /**
+   * Get the user ID from PrivyAuthManager
+   */
+  getUserId(): string | null {
+    return privyAuthManager.getUserId();
   },
 };

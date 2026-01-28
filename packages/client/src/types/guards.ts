@@ -190,3 +190,208 @@ export function hasArrayProperty<K extends string>(
 ): value is Record<K, unknown[]> {
   return isObject(value) && key in value && Array.isArray(value[key]);
 }
+
+// ============================================================================
+// Prayer Event Guards
+// ============================================================================
+
+/**
+ * Type guard for prayer state sync events
+ */
+export interface PrayerStateSyncEvent {
+  playerId: string;
+  points: number;
+  maxPoints: number;
+  level?: number;
+  active?: string[];
+}
+
+export function isPrayerStateSyncEvent(
+  data: unknown,
+): data is PrayerStateSyncEvent {
+  if (!isObject(data)) return false;
+  return (
+    hasStringProperty(data, "playerId") &&
+    hasNumberProperty(data, "points") &&
+    hasNumberProperty(data, "maxPoints")
+  );
+}
+
+/**
+ * Type guard for prayer points changed events
+ */
+export interface PrayerPointsChangedEvent {
+  playerId: string;
+  points: number;
+  maxPoints: number;
+}
+
+export function isPrayerPointsChangedEvent(
+  data: unknown,
+): data is PrayerPointsChangedEvent {
+  if (!isObject(data)) return false;
+  return (
+    hasStringProperty(data, "playerId") &&
+    hasNumberProperty(data, "points") &&
+    hasNumberProperty(data, "maxPoints")
+  );
+}
+
+/**
+ * Type guard for prayer toggled events
+ */
+export interface PrayerToggledEvent {
+  playerId: string;
+  prayerId: string;
+  active: boolean;
+  points?: number;
+  maxPoints?: number;
+}
+
+export function isPrayerToggledEvent(
+  data: unknown,
+): data is PrayerToggledEvent {
+  if (!isObject(data)) return false;
+  return (
+    hasStringProperty(data, "playerId") &&
+    hasStringProperty(data, "prayerId") &&
+    "active" in data &&
+    typeof data.active === "boolean"
+  );
+}
+
+// ============================================================================
+// Player Stats Event Guards
+// ============================================================================
+
+/**
+ * Type guard for player stats data
+ */
+export interface PlayerStatsData {
+  health?: { current: number; max: number };
+  prayerPoints?: { current: number; max: number };
+  skills?: Record<string, { level: number; xp: number }>;
+}
+
+export function isPlayerStatsData(data: unknown): data is PlayerStatsData {
+  if (!isObject(data)) return false;
+  // PlayerStats has at least one of these fields
+  return "health" in data || "prayerPoints" in data || "skills" in data;
+}
+
+/**
+ * Type guard for coin update events with playerId
+ */
+export interface CoinUpdateWithPlayerEvent {
+  playerId: string;
+  coins: number;
+}
+
+export function isCoinUpdateWithPlayerEvent(
+  data: unknown,
+): data is CoinUpdateWithPlayerEvent {
+  if (!isObject(data)) return false;
+  return (
+    hasStringProperty(data, "playerId") && hasNumberProperty(data, "coins")
+  );
+}
+
+// ============================================================================
+// Quest Event Guards
+// ============================================================================
+
+/**
+ * Type guard for quest list update events
+ */
+export interface QuestListUpdateEvent {
+  quests: Array<{
+    id: string;
+    name: string;
+    status: string;
+    difficulty?: string;
+  }>;
+}
+
+export function isQuestListUpdateEvent(
+  data: unknown,
+): data is QuestListUpdateEvent {
+  if (!isObject(data)) return false;
+  return hasArrayProperty(data, "quests");
+}
+
+/**
+ * Type guard for quest detail update events
+ */
+export interface QuestDetailUpdateEvent {
+  id: string;
+  name: string;
+  description?: string;
+  objectives?: unknown[];
+  rewards?: unknown[];
+}
+
+export function isQuestDetailUpdateEvent(
+  data: unknown,
+): data is QuestDetailUpdateEvent {
+  if (!isObject(data)) return false;
+  return hasStringProperty(data, "id") && hasStringProperty(data, "name");
+}
+
+// ============================================================================
+// Combat Event Guards
+// ============================================================================
+
+/**
+ * Type guard for combat stat update events
+ */
+export interface CombatStatUpdateEvent {
+  playerId?: string;
+  combatLevel?: number;
+  attackStyle?: string;
+  attackMode?: string;
+}
+
+export function isCombatStatUpdateEvent(
+  data: unknown,
+): data is CombatStatUpdateEvent {
+  if (!isObject(data)) return false;
+  return "combatLevel" in data || "attackStyle" in data || "attackMode" in data;
+}
+
+/**
+ * Type guard for special attack update events
+ */
+export interface SpecialAttackUpdateEvent {
+  playerId?: string;
+  specialAttack: number;
+  maxSpecialAttack?: number;
+}
+
+export function isSpecialAttackUpdateEvent(
+  data: unknown,
+): data is SpecialAttackUpdateEvent {
+  if (!isObject(data)) return false;
+  return hasNumberProperty(data, "specialAttack");
+}
+
+// ============================================================================
+// Action Event Guards
+// ============================================================================
+
+/**
+ * Type guard for available actions events
+ */
+export interface AvailableActionsEvent {
+  actions: Array<{
+    id: string;
+    name: string;
+    icon?: string;
+  }>;
+}
+
+export function isAvailableActionsEvent(
+  data: unknown,
+): data is AvailableActionsEvent {
+  if (!isObject(data)) return false;
+  return hasArrayProperty(data, "actions");
+}

@@ -51,3 +51,21 @@ export {
   createMonitoredCache, // Deprecated
   cacheRegistry, // Deprecated alias for poolRegistry
 } from "./LRUCache";
+
+// Safe JSON parsing - use utils/validation.ts instead:
+// - parseJSON(text, validator) -> T | null
+// - parseJSONWithDefault(text, validator, default) -> T
+
+// Secure storage for auth tokens with expiration
+export {
+  setAuthToken,
+  getAuthToken,
+  removeAuthToken,
+  setSessionData,
+  getSessionData,
+  removeSessionData,
+  isTokenValid,
+  getTokenExpirationMs,
+  clearAllAuthData,
+  migrateToSecureStorage,
+} from "./secureStorage";

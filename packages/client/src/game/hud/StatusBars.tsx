@@ -538,7 +538,7 @@ export function StatusBars({
         gap: config.displayMode === "bars" ? 0 : compactGap,
         padding: config.displayMode === "bars" ? "4px 6px" : compactPadding,
         background: theme.colors.slot.filled,
-        borderRadius: 3,
+        borderRadius: 0,
         border: `1px solid ${theme.colors.border.default}30`,
         boxShadow: isUnlocked
           ? `0 1px 3px rgba(0,0,0,0.3), 0 0 0 1px ${theme.colors.accent.primary}40`

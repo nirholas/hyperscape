@@ -1,4 +1,5 @@
 import React, { Component, type ErrorInfo, type ReactNode } from "react";
+import { errorReportingService } from "../../lib/error-reporting";
 
 /**
  * Props for WindowErrorBoundary component
@@ -56,7 +57,13 @@ export class WindowErrorBoundary extends Component<
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
     const { onError, windowId } = this.props;
 
-    // Log error in development
+    // Report to error reporting service with window context
+    const enhancedStack = `[Window: ${windowId}]\n${errorInfo.componentStack || ""}`;
+    errorReportingService.reportReactError(error, {
+      componentStack: enhancedStack,
+    });
+
+    // Log error in development for easier debugging
     if (
       typeof process !== "undefined" &&
       process.env?.NODE_ENV !== "production"

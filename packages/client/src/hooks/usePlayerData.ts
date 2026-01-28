@@ -12,6 +12,16 @@ import { EventType, getItem } from "@hyperscape/shared";
 import type { PlayerStats } from "@hyperscape/shared";
 import type { ClientWorld, PlayerEquipmentItems } from "../types";
 import type { RawEquipmentData, InventorySlotViewItem } from "../game/types";
+import {
+  isInventoryUpdateEvent,
+  isCoinUpdateWithPlayerEvent,
+  isUIUpdateEvent,
+  isPlayerStatsData,
+  isSkillsUpdateEvent,
+  isPrayerStateSyncEvent,
+  isPrayerPointsChangedEvent,
+  isObject,
+} from "../types/guards";
 
 /**
  * Hook return type for player data
@@ -63,8 +73,15 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
   useEffect(() => {
     if (!world) return;
 
-    // Inventory updates
+    // Inventory updates - with type guard validation
     const handleInventory = (data: unknown) => {
+      if (!isInventoryUpdateEvent(data)) {
+        console.warn("[usePlayerData] Invalid inventory update event:", data);
+        return;
+      }
+      setInventory(data.items || []);
+      if (typeof data.coins === "number") {
+        setCoins(data.coins);
       const invData = data as {
         playerId: string;
         items: InventorySlotViewItem[];
@@ -79,23 +96,30 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
         setCoins(invData.coins);
       } else {
         // Calculate coins from inventory items
-        const totalCoins = (invData.items || [])
+        const totalCoins = (data.items || [])
           .filter((item) => item.itemId === "coins")
           .reduce((sum, item) => sum + item.quantity, 0);
         setCoins(totalCoins);
       }
     };
 
-    // Coin updates
+    // Coin updates - with type guard validation
     const handleCoins = (data: unknown) => {
-      const coinData = data as { playerId: string; coins: number };
-      if (!playerId || coinData.playerId === playerId) {
-        setCoins(coinData.coins);
+      if (!isCoinUpdateWithPlayerEvent(data)) {
+        console.warn("[usePlayerData] Invalid coin update event:", data);
+        return;
+      }
+      if (!playerId || data.playerId === playerId) {
+        setCoins(data.coins);
       }
     };
 
-    // Equipment updates
+    // Equipment updates - with object validation
     const handleEquipment = (data: unknown) => {
+      if (!isObject(data)) {
+        console.warn("[usePlayerData] Invalid equipment update event:", data);
+        return;
+      }
       const rawEquipment = data as RawEquipmentData;
       const processedEquipment: PlayerEquipmentItems = {
         weapon: null,
@@ -124,103 +148,112 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
     };
 
     // UI_UPDATE is the primary source for player stats
-    // Merge with existing state to preserve prayer data (prayer is managed separately by PrayerSystem)
+    // Merge with existing state to preserve prayer data
     const handleUIUpdate = (data: unknown) => {
-      const update = data as { component: string; data: unknown };
-      if (update.component === "player") {
-        const newData = update.data as PlayerStats;
+      if (!isUIUpdateEvent(data)) {
+        console.warn("[usePlayerData] Invalid UI update event:", data);
+        return;
+      }
+      if (data.component === "player" && isPlayerStatsData(data.data)) {
+        // PlayerStatsData is a partial type - safe to cast since we merge with existing state
+        const newData = data.data as unknown as Partial<PlayerStats>;
         setPlayerStats((prev) =>
           prev
             ? {
+                ...prev,
                 ...newData,
-                // Preserve existing prayer data if new data doesn't include it
                 prayerPoints: newData.prayerPoints || prev.prayerPoints,
               }
-            : newData,
+            : (newData as PlayerStats),
         );
       }
     };
 
     // Stats updates (fallback/alternative event)
-    // Merge with existing state to preserve prayer data
     const handleStats = (data: unknown) => {
-      const newData = data as PlayerStats;
+      if (!isPlayerStatsData(data)) {
+        console.warn("[usePlayerData] Invalid stats update event:", data);
+        return;
+      }
+      // PlayerStatsData is a partial type - safe to cast since we merge with existing state
+      const newData = data as unknown as Partial<PlayerStats>;
       setPlayerStats((prev) =>
         prev
           ? {
+              ...prev,
               ...newData,
-              // Preserve existing prayer data if new data doesn't include it
               prayerPoints: newData.prayerPoints || prev.prayerPoints,
             }
-          : newData,
+          : (newData as PlayerStats),
       );
     };
 
-    // Skills updates
+    // Skills updates - with type guard validation
     const handleSkillsUpdate = (data: unknown) => {
-      const skillsData = data as {
-        playerId: string;
-        skills: PlayerStats["skills"];
-      };
-      if (!playerId || skillsData.playerId === playerId) {
+      if (!isSkillsUpdateEvent(data)) {
+        console.warn("[usePlayerData] Invalid skills update event:", data);
+        return;
+      }
+      if (!playerId || data.playerId === playerId) {
+        // Skills event only has skills data - merge with existing state
+        const updatedSkills = data.skills as unknown as PlayerStats["skills"];
         setPlayerStats((prev) =>
           prev
-            ? { ...prev, skills: skillsData.skills }
-            : ({ skills: skillsData.skills } as PlayerStats),
+            ? { ...prev, skills: updatedSkills }
+            : ({ skills: updatedSkills } as unknown as PlayerStats),
         );
       }
     };
 
-    // Prayer state sync (full sync from server)
+    // Prayer state sync - with type guard validation
     const handlePrayerStateSync = (data: unknown) => {
-      const syncData = data as {
-        playerId: string;
-        points: number;
-        maxPoints: number;
-        level?: number;
-        active?: string[];
-      };
-      if (!playerId || syncData.playerId === playerId) {
+      if (!isPrayerStateSyncEvent(data)) {
+        console.warn("[usePlayerData] Invalid prayer state sync event:", data);
+        return;
+      }
+      if (!playerId || data.playerId === playerId) {
         setPlayerStats((prev) =>
           prev
             ? {
                 ...prev,
                 prayerPoints: {
-                  current: syncData.points,
-                  max: syncData.maxPoints,
+                  current: data.points,
+                  max: data.maxPoints,
                 },
               }
             : ({
                 prayerPoints: {
-                  current: syncData.points,
-                  max: syncData.maxPoints,
+                  current: data.points,
+                  max: data.maxPoints,
                 },
               } as PlayerStats),
         );
       }
     };
 
-    // Prayer points changed (from potions, altars, drain, etc.)
+    // Prayer points changed - with type guard validation
     const handlePrayerPointsChanged = (data: unknown) => {
-      const prayerData = data as {
-        playerId: string;
-        points: number;
-        maxPoints: number;
-      };
-      if (!playerId || prayerData.playerId === playerId) {
+      if (!isPrayerPointsChangedEvent(data)) {
+        console.warn(
+          "[usePlayerData] Invalid prayer points changed event:",
+          data,
+        );
+        return;
+      }
+      if (!playerId || data.playerId === playerId) {
         setPlayerStats((prev) =>
           prev
             ? {
                 ...prev,
                 prayerPoints: {
-                  current: prayerData.points,
-                  max: prayerData.maxPoints,
+                  current: data.points,
+                  max: data.maxPoints,
                 },
               }
             : ({
                 prayerPoints: {
-                  current: prayerData.points,
-                  max: prayerData.maxPoints,
+                  current: data.points,
+                  max: data.maxPoints,
                 },
               } as PlayerStats),
         );

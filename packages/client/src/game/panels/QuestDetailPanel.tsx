@@ -15,6 +15,7 @@ import {
   CATEGORY_CONFIG,
 } from "@/game/systems";
 import { COLORS, spacing, typography } from "../../constants";
+import { parseJSONWithDefault } from "../../utils/validation";
 import type { ClientWorld } from "../../types";
 
 // ============================================================================
@@ -29,18 +30,17 @@ interface QuestDetailPanelProps {
 /** LocalStorage key for pinned quests */
 const PINNED_QUESTS_KEY = "hyperscape_pinned_quests";
 
-/** Load pinned quest IDs from localStorage */
+/** Type guard for string array */
+function isStringArray(data: unknown): data is string[] {
+  return Array.isArray(data) && data.every((item) => typeof item === "string");
+}
+
+/** Load pinned quest IDs from localStorage with type validation */
 function loadPinnedQuests(): Set<string> {
-  try {
-    const stored = localStorage.getItem(PINNED_QUESTS_KEY);
-    if (stored) {
-      const ids = JSON.parse(stored) as string[];
-      return new Set(ids);
-    }
-  } catch {
-    // Ignore parse errors
-  }
-  return new Set();
+  const stored = localStorage.getItem(PINNED_QUESTS_KEY);
+  if (!stored) return new Set();
+  const ids = parseJSONWithDefault(stored, isStringArray, []);
+  return new Set(ids);
 }
 
 /** Save pinned quest IDs to localStorage */

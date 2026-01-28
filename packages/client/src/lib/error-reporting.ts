@@ -43,6 +43,11 @@ class ErrorReportingService {
   /** User ID (set after authentication) */
   private userId: string;
 
+  /** Stored handler references for cleanup */
+  private errorHandler: ((event: ErrorEvent) => void) | null = null;
+  private rejectionHandler: ((event: PromiseRejectionEvent) => void) | null =
+    null;
+
   /**
    * Constructs the error reporting service
    *
@@ -72,16 +77,22 @@ class ErrorReportingService {
     this.userId = userId;
   }
 
+  /** CSP violation handler reference for cleanup */
+  private cspHandler: ((event: SecurityPolicyViolationEvent) => void) | null =
+    null;
+
   /**
    * Sets up global error handlers for uncaught errors
    *
-   * Registers listeners for window.error and window.unhandledrejection
-   * to automatically report any uncaught exceptions or promise rejections.
+   * Registers listeners for window.error, window.unhandledrejection,
+   * and securitypolicyviolation (CSP violations) to automatically report
+   * any uncaught exceptions, promise rejections, or CSP policy violations.
    *
    * @private
    */
   private setupGlobalErrorHandlers() {
-    window.addEventListener("error", (event) => {
+    // Store handler reference for cleanup
+    this.errorHandler = (event: ErrorEvent) => {
       const errorData: ErrorReport = {
         message: event.error?.message || event.message || "Unknown error",
         stack: event.error?.stack || "No stack trace available",
@@ -99,9 +110,10 @@ class ErrorReportingService {
       };
 
       this.reportError(errorData);
-    });
+    };
 
-    window.addEventListener("unhandledrejection", (event) => {
+    // Store handler reference for cleanup
+    this.rejectionHandler = (event: PromiseRejectionEvent) => {
       const errorData: ErrorReport = {
         message:
           event.reason?.toString() ||
@@ -121,8 +133,122 @@ class ErrorReportingService {
       };
 
       this.reportError(errorData);
-    });
+    };
+
+    // CSP violation handler for security monitoring
+    this.cspHandler = (event: SecurityPolicyViolationEvent) => {
+      this.reportCSPViolation(event);
+    };
+
+    window.addEventListener("error", this.errorHandler);
+    window.addEventListener("unhandledrejection", this.rejectionHandler);
+    document.addEventListener("securitypolicyviolation", this.cspHandler);
   }
+
+  /**
+   * Disposes of the error reporting service
+   *
+   * Removes global error handlers to prevent memory leaks.
+   * Call this when the service is no longer needed.
+   *
+   * @public
+   */
+  public dispose(): void {
+    if (this.errorHandler) {
+      window.removeEventListener("error", this.errorHandler);
+      this.errorHandler = null;
+    }
+    if (this.rejectionHandler) {
+      window.removeEventListener("unhandledrejection", this.rejectionHandler);
+      this.rejectionHandler = null;
+    }
+    if (this.cspHandler) {
+      document.removeEventListener("securitypolicyviolation", this.cspHandler);
+      this.cspHandler = null;
+    }
+  }
+
+  /**
+   * Reports a Content Security Policy (CSP) violation
+   *
+   * CSP violations indicate potential XSS attacks or misconfigured policies.
+   * These are reported separately for security monitoring.
+   *
+   * @param event - The CSP violation event from the browser
+   *
+   * @remarks
+   * Common violations to watch for:
+   * - script-src violations may indicate XSS attempts
+   * - connect-src violations may indicate CSRF or data exfiltration
+   * - style-src violations are usually benign (inline styles)
+   *
+   * @public
+   */
+  public reportCSPViolation(event: SecurityPolicyViolationEvent): void {
+    // Throttle CSP reports to prevent flooding
+    // Some violations (like inline styles) can fire repeatedly
+    const violationKey = `${event.violatedDirective}:${event.blockedURI}`;
+    const now = Date.now();
+
+    // Track recent violations to prevent flooding
+    if (!this.recentCSPViolations) {
+      this.recentCSPViolations = new Map();
+    }
+
+    const lastReported = this.recentCSPViolations.get(violationKey);
+    if (lastReported && now - lastReported < 60000) {
+      // Skip if reported within last minute
+      return;
+    }
+    this.recentCSPViolations.set(violationKey, now);
+
+    // Clean up old entries
+    if (this.recentCSPViolations.size > 100) {
+      const cutoff = now - 300000; // 5 minutes
+      for (const [key, time] of this.recentCSPViolations) {
+        if (time < cutoff) {
+          this.recentCSPViolations.delete(key);
+        }
+      }
+    }
+
+    const errorData: ErrorReport = {
+      message: `CSP Violation: ${event.violatedDirective}`,
+      stack: `Blocked URI: ${event.blockedURI}\nSource: ${event.sourceFile}:${event.lineNumber}:${event.columnNumber}`,
+      url: event.documentURI,
+      userAgent: navigator.userAgent,
+      timestamp: new Date().toISOString(),
+      context: {
+        type: "csp-violation",
+        violatedDirective: event.violatedDirective,
+        effectiveDirective: event.effectiveDirective,
+        blockedURI: event.blockedURI,
+        sourceFile: event.sourceFile,
+        lineNumber: event.lineNumber,
+        columnNumber: event.columnNumber,
+        originalPolicy: event.originalPolicy,
+        disposition: event.disposition,
+        sample: event.sample, // First 40 chars of blocked content
+      },
+      componentStack: "",
+      userId: this.userId,
+      sessionId: this.sessionId,
+    };
+
+    // Log CSP violations prominently for debugging
+    console.warn(
+      `[CSP Violation] ${event.violatedDirective}: ${event.blockedURI}`,
+      {
+        source: `${event.sourceFile}:${event.lineNumber}`,
+        directive: event.effectiveDirective,
+      },
+    );
+
+    this.reportError(errorData);
+  }
+
+  /** Track recent CSP violations to prevent report flooding */
+  private recentCSPViolations: Map<string, number> | null = null;
 
   /**
    * Reports an error to the backend for logging

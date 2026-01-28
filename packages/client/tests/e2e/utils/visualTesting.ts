@@ -41,7 +41,7 @@ export const COLOR_NAMES: Record<number, string> = {
 /**
  * Pixel color information extracted from screenshot
  */
-interface PixelInfo {
+export interface PixelInfo {
   r: number;
   g: number;
   b: number;
@@ -51,9 +51,59 @@ interface PixelInfo {
 /**
  * Position of a colored entity on screen
  */
-interface ScreenPosition {
+export interface ScreenPosition {
   x: number;
   y: number;
+}
+
+/**
+ * Get pixel information at a specific screen position
+ * @param pixels - Captured pixel data from captureCanvasPixels
+ * @param x - X coordinate
+ * @param y - Y coordinate
+ * @returns Pixel color information or null if out of bounds
+ */
+export function getPixelAt(
+  pixels: { width: number; height: number; data: Uint8ClampedArray },
+  x: number,
+  y: number,
+): PixelInfo | null {
+  const { width, height, data } = pixels;
+
+  // Round coordinates and check bounds
+  const px = Math.floor(x);
+  const py = Math.floor(y);
+
+  if (px < 0 || px >= width || py < 0 || py >= height) {
+    return null;
+  }
+
+  const i = (py * width + px) * 4;
+  return {
+    r: data[i],
+    g: data[i + 1],
+    b: data[i + 2],
+    a: data[i + 3],
+  };
+}
+
+/**
+ * Check if a pixel matches a target color within tolerance
+ */
+export function pixelMatchesColor(
+  pixel: PixelInfo,
+  targetColor: number,
+  tolerance: number = 30,
+): boolean {
+  const targetR = (targetColor >> 16) & 0xff;
+  const targetG = (targetColor >> 8) & 0xff;
+  const targetB = targetColor & 0xff;
+
+  return (
+    Math.abs(pixel.r - targetR) <= tolerance &&
+    Math.abs(pixel.g - targetG) <= tolerance &&
+    Math.abs(pixel.b - targetB) <= tolerance
+  );
 }
 
 /**
@@ -450,4 +500,358 @@ export async function cleanupTestProxies(page: Page): Promise<void> {
       obj.parent?.remove(obj);
     });
   });
+}
+
+// ============================================================================
+// Visual Testing Assertions
+// ============================================================================
+
+/**
+ * Visual test assertion results
+ */
+export interface VisualAssertionResult {
+  passed: boolean;
+  message: string;
+  details?: Record<string, unknown>;
+}
+
+/**
+ * Asserts that an entity with the given color is visible on screen
+ */
+export async function assertEntityVisible(
+  page: Page,
+  color: number,
+  minPixelCount: number = 10,
+): Promise<VisualAssertionResult> {
+  const pixels = await captureCanvasPixels(page);
+  const result = detectColor(pixels, color);
+
+  if (!result.found || result.pixelCount < minPixelCount) {
+    return {
+      passed: false,
+      message: `Entity with color ${color.toString(16)} not visible (found ${result.pixelCount} pixels, need ${minPixelCount})`,
+      details: { pixelCount: result.pixelCount, color: color.toString(16) },
+    };
+  }
+
+  return {
+    passed: true,
+    message: `Entity visible with ${result.pixelCount} pixels`,
+    details: {
+      pixelCount: result.pixelCount,
+      position: result.averagePosition,
+      boundingBox: result.boundingBox,
+    },
+  };
+}
+
+/**
+ * Asserts that an entity is NOT visible on screen (e.g., after death/despawn)
+ */
+export async function assertEntityNotVisible(
+  page: Page,
+  color: number,
+  maxPixelCount: number = 5,
+): Promise<VisualAssertionResult> {
+  const pixels = await captureCanvasPixels(page);
+  const result = detectColor(pixels, color);
+
+  if (result.pixelCount > maxPixelCount) {
+    return {
+      passed: false,
+      message: `Entity with color ${color.toString(16)} still visible (found ${result.pixelCount} pixels)`,
+      details: {
+        pixelCount: result.pixelCount,
+        position: result.averagePosition,
+      },
+    };
+  }
+
+  return {
+    passed: true,
+    message: `Entity not visible (${result.pixelCount} pixels found)`,
+    details: { pixelCount: result.pixelCount },
+  };
+}
+
+/**
+ * Asserts that two entities are adjacent (within threshold distance)
+ */
+export async function assertEntitiesAdjacent(
+  page: Page,
+  color1: number,
+  color2: number,
+  threshold: number = 100,
+): Promise<VisualAssertionResult> {
+  const pixels = await captureCanvasPixels(page);
+  const result1 = detectColor(pixels, color1);
+  const result2 = detectColor(pixels, color2);
+
+  if (!result1.found) {
+    return {
+      passed: false,
+      message: `First entity (${color1.toString(16)}) not found`,
+      details: { color1: color1.toString(16), found1: false },
+    };
+  }
+
+  if (!result2.found) {
+    return {
+      passed: false,
+      message: `Second entity (${color2.toString(16)}) not found`,
+      details: { color2: color2.toString(16), found2: false },
+    };
+  }
+
+  const pos1 = result1.averagePosition!;
+  const pos2 = result2.averagePosition!;
+  const distance = getScreenDistance(pos1, pos2);
+
+  if (distance > threshold) {
+    return {
+      passed: false,
+      message: `Entities are ${distance.toFixed(1)}px apart (threshold: ${threshold}px)`,
+      details: { distance, pos1, pos2, threshold },
+    };
+  }
+
+  return {
+    passed: true,
+    message: `Entities are adjacent (${distance.toFixed(1)}px apart)`,
+    details: { distance, pos1, pos2 },
+  };
+}
+
+/**
+ * Asserts that the game screen has rendered properly
+ */
+export async function assertScreenRendered(
+  page: Page,
+): Promise<VisualAssertionResult> {
+  const pixels = await captureCanvasPixels(page);
+  const stats = analyzeScreenStats(pixels);
+
+  if (stats.isAllBlack) {
+    return {
+      passed: false,
+      message: "Screen is all black - game may not be rendering",
+      details: { stats },
+    };
+  }
+
+  if (stats.isAllWhite) {
+    return {
+      passed: false,
+      message: "Screen is all white - something may be wrong",
+      details: { stats },
+    };
+  }
+
+  if (stats.isAllOneColor) {
+    return {
+      passed: false,
+      message: `Screen is ${stats.dominantColorPercentage.toFixed(1)}% one color`,
+      details: { stats },
+    };
+  }
+
+  return {
+    passed: true,
+    message: `Screen rendered properly (${stats.uniqueColors} unique colors)`,
+    details: { stats },
+  };
+}
+
+// ============================================================================
+// Test World Setup Helpers
+// ============================================================================
+
+/**
+ * Test scenario configuration
+ */
+export interface TestScenarioConfig {
+  /** Position to place the player */
+  playerPosition?: { x: number; y: number; z: number };
+  /** Mobs to spawn with positions */
+  mobs?: Array<{
+    type: string;
+    position: { x: number; y: number; z: number };
+    health?: number;
+  }>;
+  /** Items to spawn with positions */
+  items?: Array<{
+    itemId: string;
+    position: { x: number; y: number; z: number };
+    quantity?: number;
+  }>;
+  /** Whether to set up overhead camera */
+  overheadCamera?: boolean;
+  /** Height for overhead camera */
+  cameraHeight?: number;
+}
+
+/**
+ * Sets up a test scenario with entities and camera
+ * This creates colored cube proxies for visual testing
+ */
+export async function setupTestScenario(
+  page: Page,
+  config: TestScenarioConfig,
+): Promise<void> {
+  // Set up overhead camera if requested
+  if (config.overheadCamera) {
+    await setupOverheadCamera(page, config.cameraHeight ?? 50);
+  }
+
+  // Move player if position specified
+  if (config.playerPosition) {
+    await page.evaluate((pos) => {
+      const win = window as unknown as {
+        world?: {
+          entities?: {
+            player?: {
+              mesh?: {
+                position: { x: number; y: number; z: number };
+              };
+            };
+          };
+        };
+      };
+      const playerMesh = win.world?.entities?.player?.mesh;
+      if (playerMesh) {
+        playerMesh.position.x = pos.x;
+        playerMesh.position.y = pos.y;
+        playerMesh.position.z = pos.z;
+      }
+    }, config.playerPosition);
+
+    // Add player proxy cube
+    await createProxyCubeAtPosition(
+      page,
+      "test-player",
+      PROXY_COLORS.PLAYER,
+      config.playerPosition,
+    );
+  }
+
+  // Note: Mob and item spawning would require server-side API calls
+  // For now, we add visual proxies for any existing entities
+}
+
+/**
+ * Creates a colored proxy cube at a specific position
+ */
+export async function createProxyCubeAtPosition(
+  page: Page,
+  id: string,
+  color: number,
+  position: { x: number; y: number; z: number },
+  size: number = 2,
+): Promise<void> {
+  await page.evaluate(
+    ({ cubeId, col, pos, s }) => {
+      const win = window as unknown as {
+        THREE?: {
+          BoxGeometry: new (w: number, h: number, d: number) => unknown;
+          MeshBasicMaterial: new (opts: { color: number }) => unknown;
+          Mesh: new (
+            geo: unknown,
+            mat: unknown,
+          ) => {
+            name: string;
+            userData: Record<string, unknown>;
+            position: { set: (x: number, y: number, z: number) => void };
+          };
+        };
+        world?: {
+          scene?: { add: (obj: unknown) => void };
+        };
+      };
+
+      const THREE = win.THREE;
+      const world = win.world;
+      if (!THREE || !world?.scene) return;
+
+      const geometry = new THREE.BoxGeometry(s, s, s);
+      const material = new THREE.MeshBasicMaterial({ color: col });
+      const cube = new THREE.Mesh(geometry, material);
+
+      cube.name = `test-proxy-${cubeId}`;
+      cube.userData.isTestProxy = true;
+      cube.userData.proxyId = cubeId;
+      cube.position.set(pos.x, pos.y, pos.z);
+
+      world.scene.add(cube);
+    },
+    { cubeId: id, col: color, pos: position, s: size },
+  );
+}
+
+/**
+ * Waits for the visual test to stabilize (rendering complete)
+ */
+export async function waitForRenderStable(
+  page: Page,
+  timeout: number = 2000,
+): Promise<void> {
+  // Wait for a short time to allow rendering to stabilize
+  await page.waitForTimeout(100);
+
+  // Take two screenshots and compare - if they're the same, rendering is stable
+  const startTime = Date.now();
+  let lastPixels = await captureCanvasPixels(page);
+
+  while (Date.now() - startTime < timeout) {
+    await page.waitForTimeout(100);
+    const currentPixels = await captureCanvasPixels(page);
+
+    // Simple comparison - check if pixel data is similar
+    let diffCount = 0;
+    const sampleSize = Math.min(1000, lastPixels.data.length / 4);
+    const step = Math.floor(lastPixels.data.length / 4 / sampleSize);
+
+    for (let i = 0; i < sampleSize; i++) {
+      const idx = i * step * 4;
+      if (
+        Math.abs(lastPixels.data[idx] - currentPixels.data[idx]) > 5 ||
+        Math.abs(lastPixels.data[idx + 1] - currentPixels.data[idx + 1]) > 5 ||
+        Math.abs(lastPixels.data[idx + 2] - currentPixels.data[idx + 2]) > 5
+      ) {
+        diffCount++;
+      }
+    }
+
+    // If less than 1% of sampled pixels changed, consider it stable
+    if (diffCount / sampleSize < 0.01) {
+      return;
+    }
+
+    lastPixels = currentPixels;
+  }
+}
+
+/**
+ * Captures a visual test report with screenshot and analysis
+ */
+export async function captureVisualReport(
+  page: Page,
+  testName: string,
+): Promise<{
+  screenshotPath: string;
+  stats: ScreenStats;
+  entityResults: Record<string, ColorDetectionResult>;
+}> {
+  const pixels = await captureCanvasPixels(page);
+  const stats = analyzeScreenStats(pixels);
+
+  // Detect all entity types
+  const entityResults: Record<string, ColorDetectionResult> = {};
+  for (const [name, color] of Object.entries(PROXY_COLORS)) {
+    entityResults[name] = detectColor(pixels, color);
+  }
+
+  // Save screenshot
+  const screenshotPath = await saveTestScreenshot(page, testName);
+
+  return { screenshotPath, stats, entityResults };
 }

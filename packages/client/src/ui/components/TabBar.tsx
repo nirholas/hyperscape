@@ -129,15 +129,64 @@ export const TabBar = memo(function TabBar({
     return null;
   }, [dragItem]);
 
+  // Track ref to the TabBar outer div for position calculations
+  const tabBarRef = useRef<HTMLDivElement>(null);
+
   // Accept tab AND window drops (for merging single-tab windows into multi-tab)
   const { isOver, canDrop, relativePosition, dropProps } = useDrop({
     id: `tabbar-${windowId}`,
     accepts: ["tab", "window"],
-    onDrop: (item) => {
+    onDrop: (item, dropPosition) => {
       if (item.type === "tab") {
-        // Move tab to this window
-        if (item.sourceId && item.sourceId !== windowId) {
-          moveTab(item.id, windowId);
+        // Calculate target index based on drop position
+        const container = tabsContainerRef.current;
+        const tabBar = tabBarRef.current;
+        let targetIndex = tabs.length;
+
+        if (container && tabBar && dropPosition) {
+          // dropPosition is relative to the TabBar (outer div)
+          // We need to find the position relative to the tabs container
+          const tabBarRect = tabBar.getBoundingClientRect();
+          const containerRect = container.getBoundingClientRect();
+
+          // Offset of tabs container within the TabBar
+          const containerOffsetX = containerRect.left - tabBarRect.left;
+
+          // Drop position relative to tabs container
+          const relativeX =
+            dropPosition.x - containerOffsetX + container.scrollLeft;
+
+          // Calculate which tab position we're dropping at
+          // Measure actual tab positions for accuracy
+          const tabElements = container.querySelectorAll("[data-tab]");
+          let accumulatedWidth = 0;
+
+          for (let i = 0; i < tabElements.length; i++) {
+            const tabWidth = tabElements[i].getBoundingClientRect().width;
+            const tabMidpoint = accumulatedWidth + tabWidth / 2;
+
+            if (relativeX < tabMidpoint) {
+              targetIndex = i;
+              break;
+            }
+            accumulatedWidth += tabWidth;
+          }
+        }
+
+        if (item.sourceId === windowId) {
+          // Reordering within same window
+          const fromIndex = tabs.findIndex((t) => t.id === item.id);
+          if (fromIndex !== -1 && fromIndex !== targetIndex) {
+            // Adjust index if moving forward (account for removal)
+            const adjustedIndex =
+              fromIndex < targetIndex ? targetIndex - 1 : targetIndex;
+            if (fromIndex !== adjustedIndex) {
+              moveTab(item.id, windowId, adjustedIndex);
+            }
+          }
+        } else if (item.sourceId) {
+          // Move tab from another window
+          moveTab(item.id, windowId, targetIndex);
         }
       } else if (item.type === "window") {
         // Merge entire window into this one
@@ -263,14 +312,24 @@ export const TabBar = memo(function TabBar({
     dragHandleProps?.onPointerDown(e);
   };
 
+  // Combine refs: dropProps.ref for drop target registration, tabBarRef for position calculations
+  const setTabBarRef = (node: HTMLDivElement | null) => {
+    tabBarRef.current = node;
+    // Call the dropProps ref if it exists
+    if (typeof dropProps.ref === "function") {
+      dropProps.ref(node);
+    }
+  };
+
   return (
     <div
+      ref={setTabBarRef}
       className={className}
       style={containerStyle}
       onPointerDown={handlePointerDown}
       role="tablist"
       aria-label="Window tabs"
-      {...dropProps}
+      data-drop-id={dropProps["data-drop-id"]}
     >
       {/* Drop position indicator */}
       {dropIndicatorIndex >= 0 && (

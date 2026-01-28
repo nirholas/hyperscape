@@ -357,6 +357,9 @@ const names = [
   'testLevelUp',           // Server -> Client: test level up popup (visual only)
   'testXpDrop',            // Server -> Client: test XP drop animation (visual only)
   'testDeathScreen',       // Server -> Client: test death screen (visual only)
+  // Authentication packets (first-message auth pattern for security)
+  'authenticate',          // Client -> Server: send auth credentials after connection (security: avoids token in URL)
+  'authResult',            // Server -> Client: authentication result (success/failure)
 ]
 
 const byName: Record<string, PacketInfo> = {};

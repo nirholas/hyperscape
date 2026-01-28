@@ -41,6 +41,7 @@ import { XpLampPanel } from "../panels/XpLampPanel";
 import { DuelPanel } from "../panels/DuelPanel";
 import { DuelResultModal } from "../panels/DuelPanel/DuelResultModal";
 import { Minimap } from "../hud/Minimap";
+import { MinimapOverlayControls } from "../hud/MinimapOverlayControls";
 
 /**
  * FullscreenWorldMap - RuneScape-style fullscreen world map overlay
@@ -255,17 +256,32 @@ export function FullscreenWorldMap({
             justifyContent: "center",
             padding: 16,
             background: theme.colors.background.primary,
+            overflow: "visible",
           }}
         >
-          <Minimap
-            world={world}
-            width={mapDimensions.width}
-            height={mapDimensions.height}
-            zoom={60}
-            embedded={true}
-            resizable={false}
-            isVisible={true}
-          />
+          <div
+            style={{
+              position: "relative",
+              width: mapDimensions.width,
+              height: mapDimensions.height,
+              overflow: "visible",
+            }}
+          >
+            <Minimap
+              world={world}
+              width={mapDimensions.width}
+              height={mapDimensions.height}
+              zoom={20}
+              embedded={true}
+              resizable={false}
+              isVisible={true}
+            />
+            <MinimapOverlayControls
+              world={world}
+              width={mapDimensions.width}
+              height={mapDimensions.height}
+            />
+          </div>
         </div>
 
         {/* Footer with legend and controls hint */}

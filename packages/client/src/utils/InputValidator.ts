@@ -643,3 +643,146 @@ export const sanitizeFileName = (input: string) =>
  * @see {@link InputValidator.sanitizeUrl}
  */
 export const sanitizeUrl = (input: string) => InputValidator.sanitizeUrl(input);
+
+/**
+ * Validates URL parameters to prevent injection attacks
+ *
+ * Used for embedded mode and other scenarios where URL params are used.
+ * Validates that parameters match expected formats and don't contain
+ * dangerous patterns.
+ *
+ * @public
+ */
+export interface URLParamValidation {
+  /** Parameter name */
+  name: string;
+  /** Expected type */
+  type: "string" | "boolean" | "enum" | "url" | "id";
+  /** Whether parameter is required */
+  required?: boolean;
+  /** Valid enum values (for type: 'enum') */
+  enumValues?: readonly string[];
+  /** Maximum length for string values */
+  maxLength?: number;
+  /** Pattern to match (for type: 'string' or 'id') */
+  pattern?: RegExp;
+}
+
+/**
+ * Result of URL parameter validation
+ * @public
+ */
+export interface URLParamsValidationResult {
+  /** Whether all validations passed */
+  isValid: boolean;
+  /** Validated and sanitized parameters */
+  params: Record<string, string | boolean | undefined>;
+  /** Validation errors by parameter name */
+  errors: Record<string, string>;
+}
+
+/**
+ * Validates URL parameters against a schema
+ *
+ * @param urlParams - URLSearchParams instance to validate
+ * @param schema - Validation schema for each parameter
+ * @returns Validation result with sanitized parameters
+ *
+ * @example
+ * ```typescript
+ * const result = validateURLParams(new URLSearchParams(window.location.search), [
+ *   { name: 'mode', type: 'enum', enumValues: ['spectator', 'free'] },
+ *   { name: 'agentId', type: 'id', pattern: /^[a-zA-Z0-9-]+$/ },
+ * ]);
+ * ```
+ *
+ * @public
+ */
+export function validateURLParams(
+  urlParams: URLSearchParams,
+  schema: URLParamValidation[],
+): URLParamsValidationResult {
+  const params: Record<string, string | boolean | undefined> = {};
+  const errors: Record<string, string> = {};
+  let isValid = true;
+
+  for (const rule of schema) {
+    const rawValue = urlParams.get(rule.name);
+
+    // Handle required check
+    if (rule.required && (rawValue === null || rawValue === "")) {
+      errors[rule.name] = `${rule.name} is required`;
+      isValid = false;
+      continue;
+    }
+
+    // Skip if not present and not required
+    if (rawValue === null) {
+      params[rule.name] = undefined;
+      continue;
+    }
+
+    // Validate based on type
+    switch (rule.type) {
+      case "boolean":
+        params[rule.name] = rawValue === "true";
+        break;
+
+      case "enum":
+        if (rule.enumValues && !rule.enumValues.includes(rawValue)) {
+          errors[rule.name] =
+            `${rule.name} must be one of: ${rule.enumValues.join(", ")}`;
+          isValid = false;
+        } else {
+          params[rule.name] = rawValue;
+        }
+        break;
+
+      case "url": {
+        const urlResult = InputValidator.sanitizeUrl(rawValue);
+        if (!urlResult.isValid) {
+          errors[rule.name] = `${rule.name} is not a valid URL`;
+          isValid = false;
+        } else {
+          params[rule.name] = urlResult.sanitizedValue as string;
+        }
+        break;
+      }
+
+      case "id": {
+        // IDs should be alphanumeric with dashes/underscores only
+        const idPattern = rule.pattern || /^[a-zA-Z0-9_-]+$/;
+        const maxLen = rule.maxLength || 128;
+        if (rawValue.length > maxLen) {
+          errors[rule.name] = `${rule.name} exceeds maximum length`;
+          isValid = false;
+        } else if (!idPattern.test(rawValue)) {
+          errors[rule.name] = `${rule.name} contains invalid characters`;
+          isValid = false;
+        } else {
+          params[rule.name] = rawValue;
+        }
+        break;
+      }
+
+      case "string":
+      default: {
+        // Sanitize string to remove dangerous patterns
+        const sanitized = InputValidator.sanitizeHtml(rawValue);
+        const maxLen = rule.maxLength || 1024;
+        if (sanitized.length > maxLen) {
+          errors[rule.name] = `${rule.name} exceeds maximum length`;
+          isValid = false;
+        } else if (rule.pattern && !rule.pattern.test(sanitized)) {
+          errors[rule.name] = `${rule.name} format is invalid`;
+          isValid = false;
+        } else {
+          params[rule.name] = sanitized;
+        }
+        break;
+      }
+    }
+  }
+
+  return { isValid, params, errors };
+}

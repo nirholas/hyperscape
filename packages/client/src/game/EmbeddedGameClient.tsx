@@ -296,18 +296,47 @@ export function EmbeddedGameClient() {
       return;
     }
 
-    // Auth token is REQUIRED for all modes (including spectator)
-    // Server verifies the token and checks character ownership for security
-    if (!embeddedConfig.authToken) {
-      setError("Authentication required - please log in to view this viewport");
-      logger.error("[EmbeddedGameClient] Missing authToken in config");
+    // Check if auth token is already available
+    if (embeddedConfig.authToken) {
+      setConfig(embeddedConfig);
       return;
     }
 
-    setConfig(embeddedConfig);
+    // Auth token not yet available - wait for postMessage from parent window
+    // This is the secure way to pass tokens (instead of URL parameters)
+    logger.log("[EmbeddedGameClient] Waiting for auth token via postMessage");
+
+    const handleAuthReady = () => {
+      const updatedConfig = getEmbeddedConfig();
+      if (updatedConfig?.authToken) {
+        logger.log("[EmbeddedGameClient] Auth token received via postMessage");
+        setConfig(updatedConfig);
+      } else {
+        setError("Authentication failed - no token received");
+        logger.error(
+          "[EmbeddedGameClient] Auth token still missing after auth-ready event",
+        );
+      }
+    };
+
+    // Listen for auth-ready event (fired when postMessage delivers the token)
+    window.addEventListener("hyperscape:auth-ready", handleAuthReady);
+
+    // Set a timeout - if no token received within 10 seconds, show error
+    const timeoutId = setTimeout(() => {
+      const currentConfig = getEmbeddedConfig();
+      if (!currentConfig?.authToken) {
+        setError("Authentication timeout - please try refreshing the page");
+        logger.error(
+          "[EmbeddedGameClient] Auth token timeout - no token received within 10s",
+        );
+      }
+    }, 10000);
 
     // Cleanup on unmount
     return () => {
+      window.removeEventListener("hyperscape:auth-ready", handleAuthReady);
+      clearTimeout(timeoutId);
       if (cleanupRef.current) {
         cleanupRef.current();
         cleanupRef.current = null;

@@ -4,10 +4,11 @@
  * Supports both Ethereum and Solana wallets including Mobile Wallet Adapter (MWA)
  */
 
-import React, { useEffect } from "react";
+import React, { useEffect, useCallback } from "react";
 import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
 import { toSolanaWalletConnectors } from "@privy-io/react-auth/solana";
 import { privyAuthManager } from "./PrivyAuthManager";
+import { setAsyncTokenProvider } from "../lib/api-client";
 import { logger } from "../lib/logger";
 
 interface PrivyAuthProviderProps {
@@ -19,6 +20,25 @@ interface PrivyAuthProviderProps {
  */
 function PrivyAuthHandler({ children }: { children: React.ReactNode }) {
   const { ready, authenticated, user, getAccessToken, logout } = usePrivy();
+
+  // Memoize the token provider to avoid unnecessary re-registrations
+  const tokenProvider = useCallback(async () => {
+    try {
+      return await getAccessToken();
+    } catch (error) {
+      logger.warn("[PrivyAuthHandler] Failed to get access token:", error);
+      return null;
+    }
+  }, [getAccessToken]);
+
+  // Register the async token provider for API client
+  // This allows the API client to fetch fresh tokens when needed
+  useEffect(() => {
+    if (ready && authenticated) {
+      setAsyncTokenProvider(tokenProvider);
+      logger.debug("[PrivyAuthHandler] Registered async token provider");
+    }
+  }, [ready, authenticated, tokenProvider]);
 
   // Set privySdkReady when Privy SDK finishes initializing
   // This gates auth-dependent logic in App to prevent race conditions

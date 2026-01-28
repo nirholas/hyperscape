@@ -101,7 +101,7 @@ export const useEditStore = create<EditStoreState>()(
       showGrid: true,
       showGuides: true,
       restrictToViewport: true, // Always restrict to viewport by default
-      viewportEdgeMargin: 40, // At least 40px must remain visible
+      viewportEdgeMargin: 0, // Allow windows to be flush with viewport edges
       holdToToggle: true, // Require holding key by default
       holdDuration: 250, // 0.25 second by default
       toggleKey: "l", // L key by default

@@ -35,22 +35,31 @@ export interface PrivyAuthState {
 }
 
 /**
+ * Storage type for auth tokens
+ * - 'localStorage': Persists across browser sessions, but vulnerable to XSS
+ * - 'sessionStorage': Per-tab only, cleared on tab close, more secure
+ * - 'memory': In-memory only, most secure but lost on page refresh
+ */
+export type AuthStorageType = "localStorage" | "sessionStorage" | "memory";
+
+/**
  * PrivyAuthManager - Privy authentication state management
  *
  * Manages Privy authentication state and provides methods for login/logout.
- * Stores authentication data in localStorage for persistence across page refreshes.
+ * Stores authentication data for persistence across page refreshes.
  *
  * @remarks
  * This is a singleton that manages Privy-specific authentication separately
  * from the PlayerTokenManager (which handles in-game identity).
  *
  * @security
- * SECURITY NOTE: Tokens stored in localStorage are accessible to JavaScript and
+ * SECURITY NOTE: Tokens stored in browser storage are accessible to JavaScript and
  * potentially vulnerable to XSS attacks. For enhanced security in production:
- * 1. Consider using httpOnly cookies set by the server for sensitive tokens
+ * 1. Use httpOnly cookies set by the server for sensitive tokens (requires server changes)
  * 2. Use Privy SDK's getAccessToken() for API calls instead of cached tokens
  * 3. Implement CSP headers to mitigate XSS risks
  * 4. The Privy SDK handles its own secure token storage and refresh
+ * 5. Consider using sessionStorage instead of localStorage for per-tab isolation
  *
  * Current implementation stores tokens for quick synchronous access patterns,
  * but relies on Privy SDK for actual token refresh and validation.
@@ -70,7 +79,49 @@ export class PrivyAuthManager {
 
   private listeners: Set<(state: PrivyAuthState) => void> = new Set();
 
+  /**
+   * Storage type for auth tokens
+   * Can be changed via setStorageType() before authentication
+   */
+  private storageType: AuthStorageType = "localStorage";
+
   private constructor() {}
+
+  /**
+   * Gets the appropriate storage based on configured type
+   */
+  private getStorage(): Storage | null {
+    switch (this.storageType) {
+      case "sessionStorage":
+        return typeof sessionStorage !== "undefined" ? sessionStorage : null;
+      case "localStorage":
+        return typeof localStorage !== "undefined" ? localStorage : null;
+      case "memory":
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Sets the storage type for auth tokens
+   * Must be called before authentication to take effect
+   *
+   * @param type - Storage type to use
+   *
+   * @public
+   */
+  setStorageType(type: AuthStorageType): void {
+    this.storageType = type;
+  }
+
+  /**
+   * Gets the current storage type
+   *
+   * @public
+   */
+  getStorageType(): AuthStorageType {
+    return this.storageType;
+  }
 
   /**
    * Gets the singleton instance of PrivyAuthManager
@@ -127,12 +178,21 @@ export class PrivyAuthManager {
       farcasterFid,
     });
 
-    // Store token for persistence
-    localStorage.setItem("privy_auth_token", token);
-    localStorage.setItem("privy_user_id", user.id);
-    if (farcasterFid) {
-      localStorage.setItem("farcaster_fid", farcasterFid);
+    // Store token for persistence using configured storage type
+    const storage = this.getStorage();
+    if (storage) {
+      try {
+        storage.setItem("privy_auth_token", token);
+        storage.setItem("privy_user_id", user.id);
+        if (farcasterFid) {
+          storage.setItem("farcaster_fid", farcasterFid);
+        }
+      } catch (error) {
+        // Storage may be unavailable (private browsing, quota exceeded, etc.)
+        console.warn("[PrivyAuthManager] Failed to store auth token:", error);
+      }
     }
+    // If storageType is 'memory', tokens are only kept in state (this.state)
   }
 
   /**
@@ -152,10 +212,34 @@ export class PrivyAuthManager {
       farcasterFid: null,
     });
 
-    // Clear from localStorage
-    localStorage.removeItem("privy_auth_token");
-    localStorage.removeItem("privy_user_id");
-    localStorage.removeItem("farcaster_fid");
+    // Clear from configured storage
+    const storage = this.getStorage();
+    if (storage) {
+      try {
+        storage.removeItem("privy_auth_token");
+        storage.removeItem("privy_user_id");
+        storage.removeItem("farcaster_fid");
+      } catch (error) {
+        console.warn("[PrivyAuthManager] Failed to clear auth storage:", error);
+      }
+    }
+
+    // Also clear from both storages to ensure clean logout
+    // (in case storage type was changed during session)
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.removeItem("privy_auth_token");
+        localStorage.removeItem("privy_user_id");
+        localStorage.removeItem("farcaster_fid");
+      }
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.removeItem("privy_auth_token");
+        sessionStorage.removeItem("privy_user_id");
+        sessionStorage.removeItem("farcaster_fid");
+      }
+    } catch {
+      // Ignore errors from unavailable storage
+    }
 
     // Clear CSRF token cache
     clearCsrfToken();
@@ -282,20 +366,31 @@ export class PrivyAuthManager {
    * @public
    */
   restoreFromStorage(): { token: string | null; userId: string | null } {
-    const token = localStorage.getItem("privy_auth_token");
-    const userId = localStorage.getItem("privy_user_id");
-    const fid = localStorage.getItem("farcaster_fid");
-
-    if (token && userId) {
-      this.updateState({
-        isAuthenticated: true,
-        privyUserId: userId,
-        privyToken: token,
-        farcasterFid: fid,
-      });
+    const storage = this.getStorage();
+    if (!storage) {
+      // Memory-only storage doesn't persist across page loads
+      return { token: null, userId: null };
     }
 
-    return { token, userId };
+    try {
+      const token = storage.getItem("privy_auth_token");
+      const userId = storage.getItem("privy_user_id");
+      const fid = storage.getItem("farcaster_fid");
+
+      if (token && userId) {
+        this.updateState({
+          isAuthenticated: true,
+          privyUserId: userId,
+          privyToken: token,
+          farcasterFid: fid,
+        });
+      }
+
+      return { token, userId };
+    } catch (error) {
+      console.warn("[PrivyAuthManager] Failed to restore from storage:", error);
+      return { token: null, userId: null };
+    }
   }
 }
 

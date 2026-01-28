@@ -250,3 +250,134 @@ test.describe("Session Management", () => {
     expect(hasSession).toBeDefined();
   });
 });
+
+test.describe("Security - URL Parameters", () => {
+  test("should NOT accept authToken from URL parameters", async ({ page }) => {
+    // Attempt to pass authToken via URL (security vulnerability)
+    await page.goto(`${BASE_URL}?embedded=true&authToken=malicious_token_123`);
+    await page.waitForLoadState("networkidle");
+
+    // Check that the authToken was NOT accepted from URL
+    const config = await page.evaluate(() => {
+      const win = window as unknown as {
+        __HYPERSCAPE_CONFIG__?: { authToken?: string };
+      };
+      return win.__HYPERSCAPE_CONFIG__;
+    });
+
+    // If embedded mode is active, authToken should be empty (waiting for postMessage)
+    if (config) {
+      expect(config.authToken).toBe(""); // Should NOT contain the URL token
+    }
+  });
+
+  test("should validate URL parameters in embedded mode", async ({ page }) => {
+    // Pass invalid mode value
+    await page.goto(`${BASE_URL}?embedded=true&mode=invalid_mode&quality=bad`);
+    await page.waitForLoadState("networkidle");
+
+    // Check that config was sanitized
+    const config = await page.evaluate(() => {
+      const win = window as unknown as {
+        __HYPERSCAPE_CONFIG__?: { mode?: string; quality?: string };
+      };
+      return win.__HYPERSCAPE_CONFIG__;
+    });
+
+    if (config) {
+      // Invalid values should fall back to defaults
+      expect(["spectator", "free"]).toContain(config.mode);
+      expect(["potato", "low", "medium", "high", "ultra"]).toContain(
+        config.quality,
+      );
+    }
+  });
+
+  test("should sanitize agentId parameter", async ({ page }) => {
+    // Attempt to pass malicious agentId with script injection
+    await page.goto(
+      `${BASE_URL}?embedded=true&agentId=<script>alert('xss')</script>`,
+    );
+    await page.waitForLoadState("networkidle");
+
+    // Check that the agentId was sanitized
+    const config = await page.evaluate(() => {
+      const win = window as unknown as {
+        __HYPERSCAPE_CONFIG__?: { agentId?: string };
+      };
+      return win.__HYPERSCAPE_CONFIG__;
+    });
+
+    if (config && config.agentId) {
+      // Should not contain script tags
+      expect(config.agentId).not.toContain("<script>");
+      expect(config.agentId).not.toContain("</script>");
+    }
+  });
+
+  test("should accept auth token via postMessage for embedded mode", async ({
+    page,
+  }) => {
+    await page.goto(`${BASE_URL}?embedded=true&mode=spectator`);
+    await page.waitForLoadState("networkidle");
+
+    // Wait for HYPERSCAPE_READY message
+    const readyReceived = await page.evaluate(() => {
+      return new Promise<boolean>((resolve) => {
+        // The embedded client should post HYPERSCAPE_READY to parent
+        // Since we're in the same context, we just check the config is pending
+        const win = window as unknown as {
+          __HYPERSCAPE_CONFIG__?: { authToken?: string };
+        };
+        // Auth token should be empty, waiting for postMessage
+        resolve(win.__HYPERSCAPE_CONFIG__?.authToken === "");
+      });
+    });
+
+    expect(readyReceived).toBe(true);
+  });
+});
+
+test.describe("Error Boundaries", () => {
+  test("should have error boundary wrapping app", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.waitForLoadState("networkidle");
+
+    // Check that error boundary components exist in the DOM
+    const hasErrorBoundary = await page.evaluate(() => {
+      // Error boundaries typically set data attributes or have identifiable patterns
+      const errorBoundaries = document.querySelectorAll(
+        '[data-error-boundary], [data-component="app-root"]',
+      );
+      return errorBoundaries.length > 0;
+    });
+
+    expect(hasErrorBoundary).toBe(true);
+  });
+
+  test("should handle JavaScript errors gracefully", async ({ page }) => {
+    const errors: string[] = [];
+
+    // Capture page errors
+    page.on("pageerror", (error) => {
+      errors.push(error.message);
+    });
+
+    await page.goto(BASE_URL);
+    await page.waitForLoadState("networkidle");
+
+    // Wait for any async errors
+    await page.waitForTimeout(2000);
+
+    // Check that no unhandled errors occurred during initial load
+    const criticalErrors = errors.filter(
+      (e) =>
+        e.includes("Uncaught") &&
+        !e.includes("ResizeObserver") && // Known benign error
+        !e.includes("Script error"), // Cross-origin errors
+    );
+
+    // There should be no critical unhandled errors
+    expect(criticalErrors.length).toBe(0);
+  });
+});

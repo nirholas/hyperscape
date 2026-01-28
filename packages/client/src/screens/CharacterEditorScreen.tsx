@@ -9,6 +9,7 @@ import { GAME_WS_URL } from "@/lib/api-config";
 import React from "react";
 import { Save, X, ArrowLeft } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
+import { privyAuthManager } from "@/auth/PrivyAuthManager";
 import { ArrayInput } from "../game/character/ArrayInput";
 import {
   generateCharacterTemplate,
@@ -103,7 +104,9 @@ export const CharacterEditorScreen: React.FC = () => {
 
   // Check authentication on mount
   React.useEffect(() => {
-    const accountId = localStorage.getItem("privy_user_id");
+    // Use PrivyAuthManager with localStorage fallback
+    const accountId =
+      privyAuthManager.getUserId() || localStorage.getItem("privy_user_id");
     if (!accountId) {
       console.warn(
         "[CharacterEditor] No authentication found, redirecting to login",
@@ -153,7 +156,9 @@ export const CharacterEditorScreen: React.FC = () => {
 
     // Fetch existing agent and credentials securely
     const fetchExistingAgent = async () => {
-      const accountId = localStorage.getItem("privy_user_id");
+      // Use PrivyAuthManager with localStorage fallback
+      const accountId =
+        privyAuthManager.getUserId() || localStorage.getItem("privy_user_id");
       if (!accountId) {
         console.error("[CharacterEditor] No account ID found");
         return;
@@ -351,8 +356,9 @@ export const CharacterEditorScreen: React.FC = () => {
     setErrors([]);
 
     try {
-      // Get accountId from localStorage (Privy user ID)
-      const accountId = localStorage.getItem("privy_user_id");
+      // Get accountId from PrivyAuthManager (with localStorage fallback)
+      const accountId =
+        privyAuthManager.getUserId() || localStorage.getItem("privy_user_id");
       if (!accountId) {
         throw new Error("Not authenticated - no account ID found");
       }

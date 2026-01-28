@@ -26,7 +26,6 @@ import type {
   PlayerEquipmentItems,
 } from "../../types";
 import type { PlayerStats } from "@hyperscape/shared";
-import { Minimap } from "../../game/hud/Minimap";
 import { MenuButton, type MenuIconName } from "@/ui";
 import { ChatPanel } from "../../game/panels/ChatPanel";
 import {
@@ -196,8 +195,8 @@ const MENUBAR_DEFAULT_BUTTONS = 9;
 export const MODAL_PANEL_IDS = ["map", "stats", "death"] as const;
 export type ModalPanelId = (typeof MODAL_PANEL_IDS)[number];
 const MENUBAR_BUTTON_SIZE = 30; // Size of each button (matches MenuButton compact size)
-const MENUBAR_BUTTON_GAP = 3; // Gap between buttons
-const MENUBAR_PADDING = 6; // Padding around buttons
+const MENUBAR_BUTTON_GAP = 2; // Gap between buttons
+const MENUBAR_PADDING = 2; // Padding around buttons (tight wrap)
 const MENUBAR_CONTROL_SIZE = 20; // Size of +/- control buttons
 const MENUBAR_CONTROL_GAP = 4; // Gap between controls and buttons
 
@@ -271,8 +270,8 @@ function calcMenubarGridDimensions(
   };
 }
 
-// Buffer for borders (1px each side) and box-shadow visual expansion
-const MENUBAR_BORDER_BUFFER = 4;
+// Buffer for borders (2px total)
+const MENUBAR_BORDER_BUFFER = 2;
 
 // Pre-calculate grid dimensions for min size (allows resizing to grid layout)
 const gridDims = calcMenubarGridDimensions(MENUBAR_MAX_BUTTONS, {
@@ -294,8 +293,9 @@ export const MENUBAR_DIMENSIONS = {
   ...calcMenubarHorizontalDimensions(MENUBAR_DEFAULT_BUTTONS, {
     isEditMode: false,
   }),
-  // Minimum size: grid layout (2 columns) - allows collapsing to vertical
-  minWidth: gridDims.width + MENUBAR_BORDER_BUFFER,
+  // Minimum width aligned with equipment panel (235px) for consistent right column sizing
+  // Only switches to 2-column grid layout below this width
+  minWidth: 235,
   minHeight:
     calcMenubarHorizontalDimensions(MENUBAR_MIN_BUTTONS, { isEditMode: false })
       .height + MENUBAR_BORDER_BUFFER,
@@ -322,10 +322,11 @@ export const MENUBAR_DIMENSIONS = {
  */
 export const PANEL_CONFIG: Record<string, PanelConfig> = {
   // Inventory - fixed grid layout (4x7), panel handles own overflow
+  // Min/max width aligned with skills panel for consistent right column sizing
   inventory: {
-    minSize: { width: 260, height: 340 },
+    minSize: { width: 235, height: 340 },
     preferredSize: { width: 320, height: 420 },
-    maxSize: { width: 420, height: 550 },
+    maxSize: { width: 390, height: 550 },
     scrollable: false,
     resizable: true,
     scaleFactor: { min: 0.85, max: 1.15 },
@@ -342,15 +343,16 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
     },
   },
   // Equipment - fixed layout, needs specific dimensions for slot arrangement
+  // Min/max width aligned with skills panel for consistent right column sizing
   equipment: {
-    minSize: { width: 210, height: 290 },
+    minSize: { width: 235, height: 290 },
     preferredSize: { width: 260, height: 360 },
     maxSize: { width: 390, height: 550 },
     scrollable: false,
     resizable: true,
     scaleFactor: { min: 0.85, max: 1.15 },
     responsive: {
-      mobile: { width: 215, height: 310 },
+      mobile: { width: 235, height: 310 },
       tablet: { width: 235, height: 340 },
       desktop: { width: 260, height: 360 },
     },
@@ -447,7 +449,7 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
   },
   // Combat - combat stats and style selector
   combat: {
-    minSize: { width: 235, height: 235 },
+    minSize: { width: 235, height: 280 },
     preferredSize: { width: 310, height: 360 },
     maxSize: { width: 420, height: 470 },
     scrollable: false,
@@ -484,19 +486,20 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
       landscapePosition: "modal",
     },
   },
-  // Minimap - no max size for flexible resizing, no aspect ratio for independent width/height
+  // Minimap - three-layer architecture with minimal constraints
+  // Layer 1: Fixed canvas (512x512), Layer 2: Resizable viewport, Layer 3: Overlay
   minimap: {
-    minSize: { width: 235, height: 235 },
-    preferredSize: { width: 550, height: 550 },
-    // No maxSize - allow unlimited resizing in edit mode
-    // No aspectRatio - allow independent width/height resizing
+    minSize: { width: 80, height: 80 }, // Very minimal - can go nearly as small as needed
+    preferredSize: { width: 300, height: 300 },
+    // No maxSize - allow near-fullscreen resizing
+    // No aspectRatio - width and height resize independently
     scrollable: false,
     resizable: true,
-    scaleFactor: { min: 0.6, max: 1.2 },
+    scaleFactor: { min: 0.4, max: 1.5 }, // Wide range for flexibility
     responsive: {
-      mobile: { width: 260, height: 260 },
-      tablet: { width: 420, height: 420 },
-      desktop: { width: 550, height: 550 },
+      mobile: { width: 150, height: 150 },
+      tablet: { width: 250, height: 250 },
+      desktop: { width: 300, height: 300 },
     },
     mobileLayout: {
       drawerType: "overlay",
@@ -595,20 +598,33 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
   },
   // Menu bar - responsive grid of panel buttons
   // Buttons scale to fit container, supports various grid layouts (1-5 rows)
+  // Uses content-based sizing to wrap tightly around buttons
   menubar: {
-    // Minimum: compact grid with small buttons (reduced for flexibility)
-    minSize: { width: 70, height: 36 },
-    // Default: horizontal row of 9 buttons with slight padding for grab area
-    preferredSize: { width: 340, height: 58 },
-    // Maximum: large buttons in horizontal layout
-    maxSize: { width: 520, height: 300 },
+    minSize: {
+      width: MENUBAR_DIMENSIONS.minWidth,
+      height: MENUBAR_DIMENSIONS.minHeight,
+    },
+    preferredSize: {
+      width: MENUBAR_DIMENSIONS.width,
+      height: MENUBAR_DIMENSIONS.height,
+    },
+    maxSize: {
+      width: MENUBAR_DIMENSIONS.maxWidth,
+      height: MENUBAR_DIMENSIONS.maxHeight,
+    },
     scrollable: false,
     resizable: true,
     scaleFactor: { min: 0.7, max: 1.4 },
     responsive: {
-      mobile: { width: 180, height: 100 },
-      tablet: { width: 300, height: 58 },
-      desktop: { width: 340, height: 58 },
+      mobile: { width: MENUBAR_DIMENSIONS.minWidth, height: 100 },
+      tablet: {
+        width: MENUBAR_DIMENSIONS.width,
+        height: MENUBAR_DIMENSIONS.height,
+      },
+      desktop: {
+        width: MENUBAR_DIMENSIONS.width,
+        height: MENUBAR_DIMENSIONS.height,
+      },
     },
   },
   // Bank - large grid, panel handles own scrolling
@@ -835,70 +851,6 @@ function ScrollablePanelWrapper({
   );
 }
 
-/** Minimap panel that sizes to its container */
-function MinimapPanel({ world }: { world: ClientWorld }): React.ReactElement {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState<{
-    width: number;
-    height: number;
-  }>({ width: 200, height: 200 });
-
-  useEffect(() => {
-    const updateDimensions = () => {
-      if (containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect();
-        const width = Math.floor(rect.width);
-        const height = Math.floor(rect.height);
-        if (width > 10 && height > 10) {
-          setDimensions((prev) => {
-            // Only update if dimensions actually changed
-            if (prev.width !== width || prev.height !== height) {
-              return { width, height };
-            }
-            return prev;
-          });
-        }
-      }
-    };
-
-    // Initial measurement
-    updateDimensions();
-
-    // Use ResizeObserver for responsive updates
-    const observer = new ResizeObserver(() => {
-      updateDimensions();
-    });
-    if (containerRef.current) {
-      observer.observe(containerRef.current);
-    }
-
-    return () => observer.disconnect();
-  }, []);
-
-  return (
-    <div
-      ref={containerRef}
-      style={{
-        position: "absolute",
-        // Leave small margin for Window resize handles
-        inset: 2,
-        overflow: "hidden",
-      }}
-    >
-      <Minimap
-        key={`minimap-${dimensions.width}-${dimensions.height}`}
-        world={world}
-        width={dimensions.width}
-        height={dimensions.height}
-        zoom={50}
-        isVisible={true}
-        resizable={false}
-        embedded={false}
-      />
-    </div>
-  );
-}
-
 /** All available menu bar buttons */
 const ALL_MENU_BUTTONS: Array<{
   panelId: string;
@@ -1072,22 +1024,15 @@ function MenuBarPanel({
   // Track previous row count to detect layout changes
   const prevRowsRef = useRef<number | null>(null);
 
-  // Calculate global width bounds once (covers all possible layouts)
-  const globalMinWidth = useMemo(() => {
-    // Minimum: 3x3 grid at minimum button size
-    const minCols = Math.ceil(Math.sqrt(buttonCount));
-    const minRows = Math.ceil(buttonCount / minCols);
-    return calculateMenuBarContentSize(
-      minCols,
-      minRows,
-      MENUBAR_BUTTON_GAP,
-      MENUBAR_PADDING,
-      MENUBAR_MIN_BUTTON_SIZE,
-    ).width;
-  }, [buttonCount]);
+  // Get equipment panel config to align minimum widths
+  const equipmentConfig = getPanelConfig("equipment");
+
+  // Use equipment panel's minWidth as the menubar's minWidth for consistent alignment
+  // This ensures the menubar stays in single-row mode until it matches other panel widths
+  const globalMinWidth = equipmentConfig.minSize.width;
 
   const globalMaxWidth = useMemo(() => {
-    // Maximum: 1-row at maximum button size
+    // Maximum: single-row at maximum button size
     return calculateMenuBarContentSize(
       buttonCount,
       1,
@@ -1155,7 +1100,8 @@ function MenuBarPanel({
       maxSize: { width: globalMaxWidth, height: globalMaxHeight },
     });
 
-    // On row count change, snap the window size and reposition to keep on screen
+    // Only snap the window size on initial mount or when rows change
+    // Do NOT auto-snap based on size mismatch - this prevents manual resizing
     if (isInitialMount || rowsChanged) {
       prevRowsRef.current = currentRows;
 
@@ -1534,8 +1480,9 @@ export function createPanelRenderer(
         );
 
       case "minimap":
-        // Minimap has its own container handling
-        return <MinimapPanel world={world} />;
+        // Minimap is handled by MinimapWrapper in WindowRenderer, not through renderPanel
+        // This case should not be reached for the main minimap window
+        return null;
 
       case "menubar":
         return <MenuBarPanel onPanelClick={onPanelClick} windowId={windowId} />;

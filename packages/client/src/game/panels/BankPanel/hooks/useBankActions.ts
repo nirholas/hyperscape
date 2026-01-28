@@ -9,16 +9,19 @@
 import { useCallback } from "react";
 import type { ClientWorld } from "../../../../types";
 import { TAB_INDEX_ALL } from "../constants";
+import { showNetworkErrorNotification } from "../../../../ui/stores/notificationStore";
 
 /**
- * Log network errors for debugging
- * In production, this could emit events for UI toast notifications
+ * Log network errors and show user notification
+ * Provides feedback for failed bank operations
  */
 function logNetworkError(action: string, error?: unknown): void {
   if (error) {
     console.error(`[BankActions] ${action} failed:`, error);
+    showNetworkErrorNotification(error, action.toLowerCase());
   } else {
     console.warn(`[BankActions] ${action}: Network unavailable`);
+    // Don't show notification for network unavailable - connection indicator handles this
   }
 }
 

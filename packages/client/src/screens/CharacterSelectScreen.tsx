@@ -35,6 +35,7 @@ import { usePrivy, useCreateWallet } from "@privy-io/react-auth";
 import { useThemeStore } from "@/ui";
 import { ELIZAOS_API, GAME_WS_URL, CDN_URL } from "@/lib/api-config";
 import { apiClient } from "@/lib/api-client";
+import { privyAuthManager } from "@/auth/PrivyAuthManager";
 
 type Character = {
   id: string;
@@ -101,6 +102,9 @@ const useIntroMusic = (enabled: boolean) => {
     const ctx = audioContextRef.current;
     const gainNode = gainNodeRef.current!;
 
+    // Ref to track if resumeAudio listeners are active (for cleanup)
+    let resumeAudioCleanup: (() => void) | null = null;
+
     // Load and play intro music
     const playIntroMusic = async () => {
       // Randomly select between intro tracks
@@ -113,11 +117,18 @@ const useIntroMusic = (enabled: boolean) => {
       if (ctx.state === "suspended") {
         const resumeAudio = async () => {
           await ctx.resume();
+          // Remove listeners after resuming
           document.removeEventListener("click", resumeAudio);
           document.removeEventListener("keydown", resumeAudio);
+          resumeAudioCleanup = null;
         };
         document.addEventListener("click", resumeAudio);
         document.addEventListener("keydown", resumeAudio);
+        // Store cleanup function in case component unmounts before user interaction
+        resumeAudioCleanup = () => {
+          document.removeEventListener("click", resumeAudio);
+          document.removeEventListener("keydown", resumeAudio);
+        };
       }
 
       // Load audio buffer
@@ -145,6 +156,11 @@ const useIntroMusic = (enabled: boolean) => {
 
     // Cleanup on unmount
     return () => {
+      // Clean up resume audio listeners if still attached
+      if (resumeAudioCleanup) {
+        resumeAudioCleanup();
+      }
+
       if (sourceRef.current) {
         const src = sourceRef.current;
         const ctx = audioContextRef.current!;
@@ -373,24 +389,44 @@ export function CharacterSelectScreen({
     "disconnected" | "connecting" | "connected" | "reconnecting" | "failed"
   >("disconnected");
   // Use primitive states instead of object to prevent unnecessary re-renders
+  // Initialize from PrivyAuthManager with localStorage fallback
   const [authToken, setAuthToken] = React.useState(
-    localStorage.getItem("privy_auth_token") || "",
+    privyAuthManager.getToken() ||
+      localStorage.getItem("privy_auth_token") ||
+      "",
   );
   const [privyUserId, setPrivyUserId] = React.useState(
-    localStorage.getItem("privy_user_id") || "",
+    privyAuthManager.getUserId() || localStorage.getItem("privy_user_id") || "",
   );
 
-  // Watch for Privy auth being written to localStorage before opening WS
+  // Subscribe to PrivyAuthManager state changes
+  React.useEffect(() => {
+    const unsubscribe = privyAuthManager.subscribe((state) => {
+      const newToken = state.privyToken || "";
+      const newUserId = state.privyUserId || "";
+      if (newToken && newToken !== authToken) setAuthToken(newToken);
+      if (newUserId && newUserId !== privyUserId) setPrivyUserId(newUserId);
+    });
+    return unsubscribe;
+  }, [authToken, privyUserId]);
+
+  // Watch for Privy auth being written to localStorage as fallback
   React.useEffect(() => {
     const onStorage = (e: Event) => {
       const storageEvent = e as { key?: string | null };
       if (!storageEvent.key) return;
       if (storageEvent.key === "privy_auth_token") {
-        const token = localStorage.getItem("privy_auth_token") || "";
+        const token =
+          privyAuthManager.getToken() ||
+          localStorage.getItem("privy_auth_token") ||
+          "";
         if (token !== authToken) setAuthToken(token);
       }
       if (storageEvent.key === "privy_user_id") {
-        const userId = localStorage.getItem("privy_user_id") || "";
+        const userId =
+          privyAuthManager.getUserId() ||
+          localStorage.getItem("privy_user_id") ||
+          "";
         if (userId !== privyUserId) setPrivyUserId(userId);
       }
     };
@@ -402,8 +438,15 @@ export function CharacterSelectScreen({
     if (authToken && privyUserId) return;
     let attempts = 0;
     const id = window.setInterval(() => {
-      const token = localStorage.getItem("privy_auth_token") || "";
-      const userId = localStorage.getItem("privy_user_id") || "";
+      // Check PrivyAuthManager first, then localStorage as fallback
+      const token =
+        privyAuthManager.getToken() ||
+        localStorage.getItem("privy_auth_token") ||
+        "";
+      const userId =
+        privyAuthManager.getUserId() ||
+        localStorage.getItem("privy_user_id") ||
+        "";
       if (token && userId) {
         // Only update if different (prevents unnecessary re-renders)
         if (token !== authToken) setAuthToken(token);
@@ -482,15 +525,13 @@ export function CharacterSelectScreen({
       // Don't connect if intentionally disconnected
       if (intentionalDisconnectRef.current) return;
 
-      // Build WebSocket URL with authentication
-      // SECURITY NOTE: Auth token in URL can leak via server logs, browser history,
-      // and referrer headers. Ideally should use first-message auth pattern like
-      // EmbeddedGameClient. However, this requires coordinated server changes to
-      // handle auth packets before characterListRequest. See: packages/server/src/
-      // systems/ServerNetwork/character-selection.ts handleCharacterListRequest()
-      // TODO: Migrate to first-message auth when server supports it
-      let url = `${wsUrl}?authToken=${encodeURIComponent(authToken)}`;
-      if (privyUserId) url += `&privyUserId=${encodeURIComponent(privyUserId)}`;
+      // SECURITY: First-message authentication pattern
+      // Auth token is NOT included in URL to prevent leaking via:
+      // - Server logs (WebSocket URLs are often logged)
+      // - Browser history
+      // - Referrer headers
+      // Instead, we send credentials in an 'authenticate' packet after connection opens
+      const url = wsUrl;
 
       console.log(
         "[CharacterSelect] 🔌 Creating WebSocket connection to:",
@@ -505,25 +546,69 @@ export function CharacterSelectScreen({
       preWsRef.current = ws;
       setWsReady(false);
 
+      // Track if we've received auth result
+      let authCompleted = false;
+
       // Define named handlers for proper cleanup
       const handleOpen = (): void => {
-        console.log("[CharacterSelect] ✅ WebSocket connected");
+        console.log(
+          "[CharacterSelect] 🔐 WebSocket connected, sending authentication...",
+        );
 
-        // Reset reconnection state on successful connection
-        reconnectAttemptsRef.current = 0;
-        setConnectionState("connected");
-        setWsReady(true);
+        // Send authentication as first message (secure pattern)
+        const authPacket = writePacket("authenticate", {
+          authToken,
+          privyUserId,
+        });
+        ws.send(authPacket);
+      };
 
-        // Request character list from server
-        const packet = writePacket("characterListRequest", {});
-        ws.send(packet);
-        // Flush any pending create
-        const pending = pendingActionRef.current;
-        if (pending && pending.type === "create") {
-          ws.send(writePacket("characterCreate", { name: pending.name }));
-          pendingActionRef.current = null;
+      // Handle auth result messages - need to intercept authResult before wsReady
+      const handleAuthMessage = (event: MessageEvent): void => {
+        if (authCompleted) return;
+
+        const packetResult = readPacket(event.data as ArrayBuffer);
+        if (!packetResult || packetResult.length === 0) return;
+
+        const [method, data] = packetResult;
+
+        if (method === "onAuthResult") {
+          const result = data as { success: boolean; error?: string };
+
+          // Remove auth handler since we're done with auth phase
+          ws.removeEventListener("message", handleAuthMessage);
+
+          if (result.success) {
+            console.log("[CharacterSelect] ✅ Authentication successful");
+            authCompleted = true;
+
+            // Reset reconnection state on successful auth
+            reconnectAttemptsRef.current = 0;
+            setConnectionState("connected");
+            setWsReady(true);
+
+            // Request character list from server
+            const packet = writePacket("characterListRequest", {});
+            ws.send(packet);
+
+            // Flush any pending create
+            const pending = pendingActionRef.current;
+            if (pending && pending.type === "create") {
+              ws.send(writePacket("characterCreate", { name: pending.name }));
+              pendingActionRef.current = null;
+            }
+          } else {
+            console.error(
+              "[CharacterSelect] ❌ Authentication failed:",
+              result.error,
+            );
+            setConnectionState("disconnected");
+            // Let the close handler deal with reconnection
+          }
         }
       };
+
+      ws.addEventListener("message", handleAuthMessage);
 
       const handleError = (err: Event): void => {
         console.error("[CharacterSelect] ❌ WebSocket ERROR:", err);

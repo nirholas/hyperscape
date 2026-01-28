@@ -26,7 +26,32 @@ import {
   CATEGORY_CONFIG,
 } from "@/game/systems";
 import { panelStyles, COLORS, spacing, typography } from "../../constants";
+import { parseJSONWithDefault } from "../../utils/validation";
 import type { ClientWorld } from "../../types";
+
+/** Type guard for string array */
+function isStringArray(data: unknown): data is string[] {
+  return Array.isArray(data) && data.every((item) => typeof item === "string");
+}
+
+/** Type guard for quest list update payload */
+interface QuestListPayload {
+  quests: ServerQuestListItem[];
+  questPoints: number;
+}
+
+function isQuestListPayload(data: unknown): data is QuestListPayload {
+  if (typeof data !== "object" || data === null) return false;
+  const obj = data as Record<string, unknown>;
+  return Array.isArray(obj.quests);
+}
+
+/** Type guard for quest detail payload */
+function isQuestDetailPayload(data: unknown): data is ServerQuestDetail {
+  if (typeof data !== "object" || data === null) return false;
+  const obj = data as Record<string, unknown>;
+  return typeof obj.id === "string" && typeof obj.name === "string";
+}
 
 interface QuestsPanelProps {
   world: ClientWorld;
@@ -38,18 +63,12 @@ const PINNED_QUESTS_KEY = "hyperscape_pinned_quests";
 /** LocalStorage key for last viewed quest (mobile state persistence) */
 const LAST_VIEWED_QUEST_KEY = "hyperscape_last_viewed_quest";
 
-/** Load pinned quest IDs from localStorage */
+/** Load pinned quest IDs from localStorage with type validation */
 function loadPinnedQuests(): Set<string> {
-  try {
-    const stored = localStorage.getItem(PINNED_QUESTS_KEY);
-    if (stored) {
-      const ids = JSON.parse(stored) as string[];
-      return new Set(ids);
-    }
-  } catch {
-    // Ignore parse errors
-  }
-  return new Set();
+  const stored = localStorage.getItem(PINNED_QUESTS_KEY);
+  if (!stored) return new Set();
+  const ids = parseJSONWithDefault(stored, isStringArray, []);
+  return new Set(ids);
 }
 
 /** Save pinned quest IDs to localStorage */
@@ -684,22 +703,26 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
       }
     };
 
-    // Handle quest list response
+    // Handle quest list response - with type guard validation
     const onQuestListUpdate = (data: unknown) => {
-      const payload = data as {
-        quests: ServerQuestListItem[];
-        questPoints: number;
-      };
+      if (!isQuestListPayload(data)) {
+        console.warn("[QuestsPanel] Invalid quest list update:", data);
+        setLoading(false);
+        return;
+      }
 
-      const quests = (payload.quests || []).map(transformServerQuest);
+      const quests = (data.quests || []).map(transformServerQuest);
       setAllQuests(quests);
       setLoading(false);
     };
 
-    // Handle quest detail response - merge with existing quests
+    // Handle quest detail response - with type guard validation
     const onQuestDetailUpdate = (data: unknown) => {
-      const detail = data as ServerQuestDetail;
-      const quest = transformServerQuestDetail(detail);
+      if (!isQuestDetailPayload(data)) {
+        console.warn("[QuestsPanel] Invalid quest detail update:", data);
+        return;
+      }
+      const quest = transformServerQuestDetail(data);
 
       setQuestDetails((prev) => {
         const newMap = new Map(prev);

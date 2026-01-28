@@ -3,10 +3,14 @@
  *
  * Extracted from InterfaceManager to reduce file size and improve testability.
  *
- * Default Layout:
- * - Left side: Skills/Prayer (middle), Chat (bottom)
- * - Right side: Minimap (top), Inventory/Equipment (bottom), Menu bar (bottom)
+ * Default Layout (flush, no overlaps, touching edges):
+ * - Right column: Minimap (top, large) → [gap] → Combat → Skills/Prayer → Inventory → Menubar (bottom)
+ * - Left column: Quests (above chat) → Chat/Friends/Settings (bottom-left)
  * - Bottom center: Action bar
+ *
+ * The bottom stack (combat, skills, inventory, menubar) is attached together.
+ * There is a gap between the minimap and the combat panel.
+ * All panels in the right column share a consistent width.
  *
  * @packageDocumentation
  */
@@ -18,7 +22,7 @@ import {
   getResponsivePanelSize,
   MENUBAR_DIMENSIONS,
 } from "./PanelRegistry";
-import { clampPosition, TAB_BAR_HEIGHT } from "./types";
+import { TAB_BAR_HEIGHT } from "./types";
 
 /** Panel size with optional max size */
 export interface PanelSize {
@@ -31,6 +35,15 @@ export interface Viewport {
   width: number;
   height: number;
 }
+
+/**
+ * Design resolution used as reference for proportional scaling.
+ * Layout positions and sizes are calculated relative to this resolution.
+ */
+export const DESIGN_RESOLUTION: Viewport = { width: 1920, height: 1080 };
+
+// Right column width is now derived from panel minSize (skillsConfig.minSize.width)
+// for consistent alignment across all right column panels.
 
 /**
  * Get responsive panel size based on current viewport
@@ -62,13 +75,15 @@ export function getResponsivePanelSizing(panelId: string, viewport: Viewport) {
 /**
  * Creates the default window layout configuration
  *
- * Positions windows in the standard layout:
- * - Skills/Prayer panel: left side, above chat
- * - Chat panel: bottom left corner
- * - Minimap: top right corner
- * - Inventory/Equipment: bottom right, above menu bar
- * - Menu bar: bottom right corner
- * - Action bar: bottom center
+ * Layout structure (flush, no overlaps):
+ * - Right column top: Minimap (large, fills available space)
+ * - Gap between minimap and bottom stack
+ * - Right column bottom stack (attached): Combat → Skills/Prayer → Inventory → Menubar (at bottom edge)
+ * - Left column: Quests (above chat) → Chat/Friends/Settings (bottom-left)
+ * - Bottom center: Action bar
+ *
+ * All right column panels share consistent width.
+ * The bottom stack panels touch each other, with the menubar flush to screen bottom.
  *
  * @returns Array of WindowConfig for the default layout
  */
@@ -78,278 +93,295 @@ export function createDefaultWindows(): WindowConfig[] {
       ? { width: window.innerWidth, height: window.innerHeight }
       : { width: 1920, height: 1080 };
 
-  const minimapSizing = getResponsivePanelSizing("minimap", viewport);
-  const inventorySizing = getResponsivePanelSizing("inventory", viewport);
-  const chatSizing = getResponsivePanelSizing("chat", viewport);
+  // Get panel configs for constraints
+  const minimapConfig = getPanelConfig("minimap");
+  const questsConfig = getPanelConfig("quests");
+  const skillsConfig = getPanelConfig("skills");
+  const inventoryConfig = getPanelConfig("inventory");
+  const combatConfig = getPanelConfig("combat");
+
+  // Right column width - use panel minSize for consistent alignment
+  // All right column panels share the same width (skillsConfig.minSize.width = 235)
+  const rightColumnWidth = skillsConfig.minSize.width;
+  const rightColumnX = viewport.width - rightColumnWidth;
+
+  // === RIGHT COLUMN HEIGHTS (no quests - moved to left) ===
+  // Fixed heights for specific panels (bottom stack: menubar -> inventory -> skills -> combat)
+  // Menubar height matches content - single row with tight wrapping (includes border buffer)
+  const menubarHeight = MENUBAR_DIMENSIONS.minHeight;
+  const inventoryHeight = Math.max(280, Math.round(viewport.height * 0.26)); // ~26% of viewport
+  const skillsHeight = Math.max(200, Math.round(viewport.height * 0.185)); // ~18.5% of viewport
+  const combatHeight = Math.max(
+    combatConfig.minSize.height,
+    Math.round(viewport.height * 0.15),
+  ); // ~15% of viewport
+
+  // Gap between minimap and combat stack
+  const minimapCombatGap = 20;
+
+  // === CALCULATE RIGHT COLUMN Y POSITIONS (bottom-up) ===
+  // Menubar at bottom -> Inventory -> Skills -> Combat (all attached)
+  // Gap between combat and minimap
+  // Minimap fills remaining space at top
+  const menubarY = viewport.height - menubarHeight;
+  const inventoryY = menubarY - inventoryHeight;
+  const skillsY = inventoryY - skillsHeight;
+  const combatY = skillsY - combatHeight;
+  const minimapY = 0;
+  // Minimap fills from top down to the gap above combat
+  const minimapHeight = Math.max(
+    minimapConfig.minSize.height,
+    combatY - minimapCombatGap,
+  );
+
+  // === LEFT COLUMN ===
+  // Chat at bottom, quests directly above it (attached to chat top)
+  const chatWidth = Math.max(280, Math.round(viewport.width * 0.22));
+  const questsWidth = Math.round(chatWidth / 2); // Quests is half the width of chat
+  const chatHeight = Math.max(200, Math.round(viewport.height * 0.35));
+  const questsHeight = questsConfig.minSize.height; // Use minimum height from panel config
+  const chatY = viewport.height - chatHeight;
+  const questsY = chatY - questsHeight; // Quests directly above chat
+
+  // === BOTTOM CENTER ===
   const actionbarSizing = getResponsivePanelSizing("actionbar", viewport);
-  const skillsSizing = getResponsivePanelSizing("skills", viewport);
-
-  // Menu bar dimensions (width/height already include padding)
-  // Add border buffer to match actual window size
-  const menuBarWidth = MENUBAR_DIMENSIONS.width + 4; // 4 = MENUBAR_BORDER_BUFFER
-  const menuBarHeight = MENUBAR_DIMENSIONS.height + 4;
-
-  // Calculate X positions - each panel is flush with right edge
-  const menuBarX = Math.max(0, viewport.width - menuBarWidth);
-  const inventoryX = Math.max(0, viewport.width - inventorySizing.size.width);
-  const minimapX = Math.max(0, viewport.width - minimapSizing.size.width);
-
-  // Calculate bottom positions - menu bar is flush with bottom right
-  const menuBarY = Math.max(0, viewport.height - menuBarHeight);
-
-  // Inventory sits directly above menu bar (touching)
-  const inventoryTotalHeight = inventorySizing.size.height + TAB_BAR_HEIGHT;
-  const inventoryY = Math.max(0, menuBarY - inventoryTotalHeight);
-
-  // Chat is flush with bottom left
-  const chatY = Math.max(0, viewport.height - chatSizing.size.height);
-
-  // Skills/Prayer tabbed panel positioned directly above chat (touching)
-  const skillsPrayerTotalHeight = skillsSizing.size.height + TAB_BAR_HEIGHT;
-  const skillsPrayerY = Math.max(0, chatY - skillsPrayerTotalHeight);
+  const actionBarY = viewport.height - actionbarSizing.size.height;
+  const actionBarX = Math.floor(
+    viewport.width / 2 - actionbarSizing.size.width / 2,
+  );
 
   return [
-    // === LEFT SIDE ===
-    // Skills/Prayer tabbed panel - above chat
-    createSkillsPrayerWindow(
-      skillsPrayerY,
-      skillsSizing,
-      skillsPrayerTotalHeight,
-      viewport,
-    ),
-    // Chat panel - bottom left
-    createChatWindow(chatY, chatSizing, viewport),
+    // === RIGHT COLUMN (top to bottom, flush stacking) ===
 
-    // === RIGHT SIDE ===
-    // Menu bar - bottom right
-    createMenuBarWindow(
-      menuBarX,
-      menuBarY,
-      menuBarWidth,
-      menuBarHeight,
-      viewport,
-    ),
-    // Inventory - above menu bar
-    createInventoryWindow(
-      inventoryX,
-      inventoryY,
-      inventorySizing,
-      inventoryTotalHeight,
-      viewport,
-    ),
-    // Minimap - top right
-    createMinimapWindow(minimapX, minimapSizing, viewport),
+    // Minimap - top right, flush with top and right edges
+    // Width constraints aligned with other right column panels
+    {
+      id: "minimap-window",
+      position: { x: rightColumnX, y: minimapY },
+      size: { width: rightColumnWidth, height: minimapHeight },
+      minSize: {
+        width: skillsConfig.minSize.width, // Use same min as other panels (235)
+        height: minimapConfig.minSize.height,
+      },
+      // No maxSize for minimap - it can grow to any size
+      tabs: [
+        {
+          id: "minimap",
+          label: "Minimap",
+          icon: "🗺️",
+          content: "minimap",
+          closeable: false,
+        },
+      ],
+      transparency: 0,
+      anchor: "top-right",
+    },
+
+    // Combat - above skills, part of bottom stack (gap above to minimap)
+    // Width constraints aligned with other right column panels
+    {
+      id: "combat-window",
+      position: { x: rightColumnX, y: combatY },
+      size: { width: rightColumnWidth, height: combatHeight },
+      minSize: {
+        width: skillsConfig.minSize.width, // Use same min as other panels (235)
+        height: combatConfig.minSize.height,
+      },
+      maxSize: skillsConfig.maxSize
+        ? {
+            width: skillsConfig.maxSize.width, // Use same max as other panels (390)
+            height: combatConfig.maxSize?.height || combatHeight,
+          }
+        : undefined,
+      tabs: [
+        {
+          id: "combat",
+          label: "Combat",
+          icon: "⚔️",
+          content: "combat",
+          closeable: true,
+        },
+      ],
+      transparency: 0,
+      anchor: "bottom-right",
+    },
+
+    // Skills/Prayer - directly below combat, touching
+    {
+      id: "skills-prayer-window",
+      position: { x: rightColumnX, y: skillsY },
+      size: { width: rightColumnWidth, height: skillsHeight },
+      minSize: {
+        width: skillsConfig.minSize.width,
+        height: skillsConfig.minSize.height + TAB_BAR_HEIGHT,
+      },
+      maxSize: skillsConfig.maxSize
+        ? {
+            width: skillsConfig.maxSize.width,
+            height: skillsConfig.maxSize.height + TAB_BAR_HEIGHT,
+          }
+        : undefined,
+      tabs: [
+        {
+          id: "skills",
+          label: "Skills",
+          icon: "⭐",
+          content: "skills",
+          closeable: true,
+        },
+        {
+          id: "prayer",
+          label: "Prayer",
+          icon: "✨",
+          content: "prayer",
+          closeable: true,
+        },
+      ],
+      transparency: 0,
+      anchor: "bottom-right",
+    },
+
+    // Inventory/Equipment - directly below skills, touching
+    {
+      id: "inventory-window",
+      position: { x: rightColumnX, y: inventoryY },
+      size: { width: rightColumnWidth, height: inventoryHeight },
+      minSize: {
+        width: inventoryConfig.minSize.width,
+        height: inventoryConfig.minSize.height + TAB_BAR_HEIGHT,
+      },
+      maxSize: inventoryConfig.maxSize
+        ? {
+            width: inventoryConfig.maxSize.width,
+            height: inventoryConfig.maxSize.height + TAB_BAR_HEIGHT,
+          }
+        : undefined,
+      tabs: [
+        {
+          id: "inventory",
+          label: "Inventory",
+          icon: "🎒",
+          content: "inventory",
+          closeable: true,
+        },
+        {
+          id: "equipment",
+          label: "Equipment",
+          icon: "🎽",
+          content: "equipment",
+          closeable: true,
+        },
+      ],
+      transparency: 0,
+      anchor: "bottom-right",
+    },
+
+    // Menubar - bottom right, flush with bottom and right edges
+    // Uses aligned width (235px) to match other right column panels
+    {
+      id: "menubar-window",
+      position: {
+        x: viewport.width - MENUBAR_DIMENSIONS.minWidth,
+        y: menubarY,
+      },
+      size: { width: MENUBAR_DIMENSIONS.minWidth, height: menubarHeight },
+      minSize: {
+        width: MENUBAR_DIMENSIONS.minWidth,
+        height: MENUBAR_DIMENSIONS.minHeight,
+      },
+      maxSize: {
+        width: MENUBAR_DIMENSIONS.maxWidth,
+        height: MENUBAR_DIMENSIONS.maxHeight,
+      },
+      tabs: [
+        {
+          id: "menubar",
+          label: "Menu",
+          icon: "☰",
+          content: "menubar",
+          closeable: false,
+        },
+      ],
+      transparency: 0,
+      anchor: "bottom-right",
+    },
+
+    // === LEFT COLUMN ===
+    // Quests - above chat, attached to top of chat (half width of chat)
+    {
+      id: "quests-window",
+      position: { x: 0, y: questsY },
+      size: { width: questsWidth, height: questsHeight },
+      minSize: {
+        width: questsConfig.minSize.width,
+        height: questsConfig.minSize.height,
+      },
+      maxSize: questsConfig.maxSize,
+      tabs: [
+        {
+          id: "quests",
+          label: "Quests",
+          icon: "📜",
+          content: "quests",
+          closeable: true,
+        },
+      ],
+      transparency: 0,
+      anchor: "bottom-left",
+    },
+
+    // Chat/Friends/Settings - bottom left, flush with bottom and left edges
+    {
+      id: "chat-window",
+      position: { x: 0, y: chatY },
+      size: { width: chatWidth, height: chatHeight },
+      minSize: { width: 130, height: 150 },
+      tabs: [
+        {
+          id: "chat",
+          label: "Chat",
+          icon: "💬",
+          content: "chat",
+          closeable: true,
+        },
+        {
+          id: "friends",
+          label: "Friends",
+          icon: "👥",
+          content: "friends",
+          closeable: true,
+        },
+        {
+          id: "settings",
+          label: "Settings",
+          icon: "⚙️",
+          content: "settings",
+          closeable: true,
+        },
+      ],
+      transparency: 0,
+      anchor: "bottom-left",
+    },
 
     // === BOTTOM CENTER ===
     // Action bar - bottom center
-    createActionBarWindow(actionbarSizing, viewport),
+    {
+      id: "actionbar-0-window",
+      position: { x: actionBarX, y: actionBarY },
+      size: actionbarSizing.size,
+      minSize: actionbarSizing.minSize,
+      maxSize: actionbarSizing.maxSize,
+      tabs: [
+        {
+          id: "actionbar-0",
+          label: "Action Bar",
+          icon: "⚡",
+          content: "actionbar-0",
+          closeable: false,
+        },
+      ],
+      transparency: 0,
+      anchor: "bottom-center",
+    },
   ];
-}
-
-// Helper functions for creating individual windows
-
-function createSkillsPrayerWindow(
-  y: number,
-  sizing: ReturnType<typeof getResponsivePanelSizing>,
-  totalHeight: number,
-  viewport: Viewport,
-): WindowConfig {
-  return {
-    id: "skills-prayer-window",
-    position: clampPosition(0, y, sizing.size.width, totalHeight, viewport),
-    size: { width: sizing.size.width, height: totalHeight },
-    minSize: {
-      width: sizing.minSize.width,
-      height: sizing.minSize.height + TAB_BAR_HEIGHT,
-    },
-    maxSize: sizing.maxSize
-      ? {
-          width: sizing.maxSize.width,
-          height: sizing.maxSize.height + TAB_BAR_HEIGHT,
-        }
-      : undefined,
-    tabs: [
-      {
-        id: "skills",
-        label: "Skills",
-        icon: "⭐",
-        content: "skills",
-        closeable: true,
-      },
-      {
-        id: "prayer",
-        label: "Prayer",
-        icon: "✨",
-        content: "prayer",
-        closeable: true,
-      },
-    ],
-    transparency: 0,
-    anchor: "bottom-left",
-  };
-}
-
-function createChatWindow(
-  y: number,
-  sizing: ReturnType<typeof getResponsivePanelSizing>,
-  viewport: Viewport,
-): WindowConfig {
-  return {
-    id: "chat-window",
-    position: clampPosition(
-      0,
-      y,
-      sizing.size.width,
-      sizing.size.height,
-      viewport,
-    ),
-    size: sizing.size,
-    minSize: sizing.minSize,
-    tabs: [
-      {
-        id: "chat",
-        label: "Chat",
-        icon: "💬",
-        content: "chat",
-        closeable: true,
-      },
-    ],
-    transparency: 0,
-    anchor: "bottom-left",
-  };
-}
-
-function createMenuBarWindow(
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  viewport: Viewport,
-): WindowConfig {
-  return {
-    id: "menubar-window",
-    position: clampPosition(x, y, width, height, viewport),
-    size: { width, height },
-    minSize: {
-      width: MENUBAR_DIMENSIONS.minWidth,
-      height: MENUBAR_DIMENSIONS.minHeight,
-    },
-    maxSize: {
-      width: MENUBAR_DIMENSIONS.maxWidth,
-      height: MENUBAR_DIMENSIONS.maxHeight,
-    },
-    tabs: [
-      {
-        id: "menubar",
-        label: "Menu",
-        icon: "📋",
-        content: "menubar",
-        closeable: false,
-      },
-    ],
-    transparency: 0,
-    anchor: "bottom-right",
-  };
-}
-
-function createInventoryWindow(
-  x: number,
-  y: number,
-  sizing: ReturnType<typeof getResponsivePanelSizing>,
-  totalHeight: number,
-  viewport: Viewport,
-): WindowConfig {
-  return {
-    id: "inventory-window",
-    position: clampPosition(x, y, sizing.size.width, totalHeight, viewport),
-    size: { width: sizing.size.width, height: totalHeight },
-    minSize: {
-      width: sizing.minSize.width,
-      height: sizing.minSize.height + TAB_BAR_HEIGHT,
-    },
-    maxSize: sizing.maxSize
-      ? {
-          width: sizing.maxSize.width,
-          height: sizing.maxSize.height + TAB_BAR_HEIGHT,
-        }
-      : undefined,
-    tabs: [
-      {
-        id: "inventory",
-        label: "Inventory",
-        icon: "🎒",
-        content: "inventory",
-        closeable: true,
-      },
-      {
-        id: "equipment",
-        label: "Equipment",
-        icon: "🎽",
-        content: "equipment",
-        closeable: true,
-      },
-    ],
-    transparency: 0,
-    anchor: "bottom-right",
-  };
-}
-
-function createMinimapWindow(
-  x: number,
-  sizing: ReturnType<typeof getResponsivePanelSizing>,
-  viewport: Viewport,
-): WindowConfig {
-  return {
-    id: "minimap-window",
-    position: clampPosition(
-      x,
-      0,
-      sizing.size.width,
-      sizing.size.height,
-      viewport,
-    ),
-    size: sizing.size,
-    minSize: sizing.minSize,
-    tabs: [
-      {
-        id: "minimap",
-        label: "Minimap",
-        icon: "🗺️",
-        content: "minimap",
-        closeable: false,
-      },
-    ],
-    transparency: 0,
-    anchor: "top-right",
-  };
-}
-
-function createActionBarWindow(
-  sizing: ReturnType<typeof getResponsivePanelSizing>,
-  viewport: Viewport,
-): WindowConfig {
-  return {
-    id: "actionbar-0-window",
-    position: clampPosition(
-      Math.floor(viewport.width / 2 - sizing.size.width / 2),
-      Math.max(0, viewport.height - sizing.size.height),
-      sizing.size.width,
-      sizing.size.height,
-      viewport,
-    ),
-    size: sizing.size,
-    minSize: sizing.minSize,
-    maxSize: sizing.maxSize,
-    tabs: [
-      {
-        id: "actionbar-0",
-        label: "Action Bar",
-        icon: "⚡",
-        content: "actionbar-0",
-        closeable: false,
-      },
-    ],
-    transparency: 0,
-    anchor: "bottom-center",
-  };
 }

@@ -97,3 +97,12 @@ export {
 export { MobileInterfaceManager } from "./MobileInterfaceManager";
 export { CompactStatusHUD } from "./CompactStatusHUD";
 export { getMobileUISizes } from "./mobileUISizes";
+
+// Extracted modules for InterfaceManager
+export {
+  useDragDropCoordinator,
+  type DndKitActiveItem,
+} from "./DragDropCoordinator";
+export { WindowRenderer } from "./WindowRenderer";
+export { EditModeOverlayManager, HoldToEditIndicator } from "./EditModeUI";
+export { DndKitDragOverlayRenderer } from "./DndKitOverlay";

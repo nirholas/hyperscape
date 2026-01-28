@@ -17,14 +17,31 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "json", "html"],
       include: [
+        // Game panels and systems
         "src/game/panels/**/*.{ts,tsx}",
+        "src/game/systems/**/*.{ts,tsx}",
+        "src/game/hud/**/*.{ts,tsx}",
+        "src/game/components/**/*.{ts,tsx}",
+        // Core libraries and utilities
         "src/lib/**/*.{ts,tsx}",
         "src/utils/**/*.{ts,tsx}",
         "src/hooks/**/*.{ts,tsx}",
         "src/auth/**/*.{ts,tsx}",
-        "src/game/systems/**/*.{ts,tsx}",
+        // UI framework components
+        "src/ui/components/**/*.{ts,tsx}",
+        "src/ui/controls/**/*.{ts,tsx}",
+        "src/ui/core/**/*.{ts,tsx}",
+        "src/ui/stores/**/*.{ts,tsx}",
+        // Type guards and utilities
+        "src/types/**/*.{ts,tsx}",
       ],
-      exclude: ["**/*.test.{ts,tsx}", "**/index.ts"],
+      exclude: [
+        "**/*.test.{ts,tsx}",
+        "**/index.ts",
+        // Exclude complex visual components that need E2E testing
+        "**/CharacterPreview.tsx",
+        "**/Minimap.tsx",
+      ],
       thresholds: {
         statements: 80,
         branches: 75,
