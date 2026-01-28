@@ -1380,6 +1380,9 @@ export class MobEntity extends CombatantEntity {
       performAttack: (targetId, currentTick) => {
         this.combatManager.performAttack(targetId, currentTick);
       },
+      onEnterCombatRange: (currentTick) => {
+        this.combatManager.onEnterCombatRange(currentTick);
+      },
       isInCombat: () => this.combatManager.isInCombat(),
       exitCombat: () => this.combatManager.exitCombat(),
 

@@ -62,6 +62,7 @@ function createMockContext(
     setTarget: () => {},
     canAttack: () => false,
     performAttack: () => {},
+    onEnterCombatRange: () => {},
     isInCombat: () => false,
     exitCombat: () => {},
     getSpawnPoint: () => config.spawnPoint,
@@ -91,6 +92,7 @@ function createMockContext(
       countUnoccupied: () => 0,
     }),
     isWalkable: () => true,
+    tryStepOutCardinal: () => false,
   };
 }
 

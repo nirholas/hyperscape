@@ -471,6 +471,36 @@ describe("Mob Aggro Integration", () => {
       expect(combatManager.isPendingFirstAttack()).toBe(false);
       expect(combatManager.getFirstAttackTick()).toBe(-1);
     });
+
+    it("re-entry attack timing resets before old cooldown expires (issue #572)", () => {
+      // This test verifies the fix for issue #572:
+      // When mob re-enters combat range after chasing, it should reset attack timing
+      // to use 1-tick first-attack delay, NOT wait for stale nextAttackTick
+      const combatManager = new CombatStateManager({
+        attackPower: 10,
+        attackSpeedTicks: 4,
+        attackRange: 1,
+      });
+
+      // Initial combat at tick 100
+      combatManager.onEnterCombatRange(100);
+      expect(combatManager.canAttack(101)).toBe(true);
+      combatManager.performAttack("target1", 101);
+      // nextAttackTick is now 105 (101 + 4)
+
+      // Target moves away, mob exits combat
+      combatManager.exitCombat();
+
+      // Mob re-enters combat range at tick 103 (BEFORE old cooldown of 105 would expire)
+      combatManager.onEnterCombatRange(103);
+
+      // Should NOT be able to attack on same tick (first-attack delay applies)
+      expect(combatManager.canAttack(103)).toBe(false);
+
+      // Should be able to attack on NEXT tick (104), not wait until stale 105
+      // This is the key assertion: attack at 104, not 105
+      expect(combatManager.canAttack(104)).toBe(true);
+    });
   });
 
   describe("probabilistic wandering", () => {

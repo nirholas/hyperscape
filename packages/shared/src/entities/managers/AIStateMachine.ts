@@ -44,6 +44,7 @@ export interface AIStateContext {
   // Combat (TICK-BASED, OSRS-accurate)
   canAttack(currentTick: number): boolean;
   performAttack(targetId: string, currentTick: number): void;
+  onEnterCombatRange(currentTick: number): void; // Sets up first-attack timing (1-tick delay)
   isInCombat(): boolean;
   exitCombat(): void;
 
@@ -376,8 +377,12 @@ export class ChaseState implements AIState {
 export class AttackState implements AIState {
   readonly name = MobAIState.ATTACK;
 
-  enter(_context: AIStateContext): void {
-    // No-op
+  enter(context: AIStateContext): void {
+    // OSRS-accurate: First attack is delayed 1 tick after entering combat range
+    // This sets up _pendingFirstAttack and _firstAttackTick for proper timing
+    // Critical for re-entry attacks: resets timing when mob transitions back to ATTACK state
+    const currentTick = context.getCurrentTick();
+    context.onEnterCombatRange(currentTick);
   }
 
   update(context: AIStateContext, _deltaTime: number): MobAIState | null {

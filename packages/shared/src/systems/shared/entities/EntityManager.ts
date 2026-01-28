@@ -742,6 +742,7 @@ export class EntityManager extends SystemBase {
       movementType: npcDataFromDB?.movement.type ?? "wander", // Default to wander if not specified
       aggroRange: this.getMobAggroRange(mobType),
       combatRange: this.getMobCombatRange(mobType),
+      leashRange: this.getMobLeashRange(mobType),
       wanderRadius: this.getMobWanderRadius(mobType),
       xpReward: this.getMobXPReward(mobType, level),
       lootTable: this.getMobLootTable(mobType),
@@ -1092,6 +1093,15 @@ export class EntityManager extends SystemBase {
       return 1.5; // Default: 1.5 meters melee range
     }
     return npcData.combat.combatRange;
+  }
+
+  private getMobLeashRange(mobType: string): number {
+    const npcData = getNPCById(mobType);
+    if (!npcData) {
+      return 7; // Default: 7 tiles max chase distance from spawn (OSRS-accurate)
+    }
+    // leashRange may not be defined in the manifest, fallback to default
+    return (npcData.combat as { leashRange?: number }).leashRange ?? 7;
   }
 
   private getMobXPReward(mobType: string, level: number): number {
