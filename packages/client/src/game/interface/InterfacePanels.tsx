@@ -322,7 +322,8 @@ export function MenuBarWrapper({
  * MinimapWrapper - Wraps Minimap component for embedding in a panel
  *
  * The Minimap fills the entire container, scaling to match the larger dimension
- * so it always fills the panel completely with no gaps.
+ * so it always fills the panel completely with no gaps. The overlay controls
+ * are sized to the actual container dimensions so they position correctly.
  */
 export function MinimapWrapper({
   world,
@@ -330,7 +331,13 @@ export function MinimapWrapper({
   isUnlocked,
 }: MinimapWrapperProps): React.ReactElement {
   const containerRef = React.useRef<HTMLDivElement>(null);
+  // Track minimap canvas size (square, uses larger dimension)
   const [size, setSize] = React.useState(200);
+  // Track actual container dimensions for overlay positioning
+  const [containerDimensions, setContainerDimensions] = React.useState({
+    width: 200,
+    height: 200,
+  });
 
   React.useEffect(() => {
     const updateSize = () => {
@@ -338,7 +345,16 @@ export function MinimapWrapper({
         const rect = containerRef.current.getBoundingClientRect();
         const width = Math.floor(rect.width);
         const height = Math.floor(rect.height);
-        // Use the larger dimension so minimap always fills the container
+
+        // Update container dimensions for overlay controls
+        setContainerDimensions((prev) => {
+          if (prev.width !== width || prev.height !== height) {
+            return { width, height };
+          }
+          return prev;
+        });
+
+        // Use the larger dimension so minimap canvas always fills the container
         const newSize = Math.max(width, height, 100);
         setSize((prev) => (prev !== newSize ? newSize : prev));
       }
@@ -384,10 +400,19 @@ export function MinimapWrapper({
         justifyContent: "center",
         minWidth: 0,
         minHeight: 0,
-        overflow: "hidden",
+        overflow: "visible",
+        position: "relative",
       }}
     >
-      <div style={{ position: "relative", width: size, height: size }}>
+      {/* Minimap canvas (square, centered) */}
+      <div
+        style={{
+          position: "relative",
+          width: size,
+          height: size,
+          overflow: "visible",
+        }}
+      >
         <Minimap
           key={`minimap-${size}`}
           world={world}
@@ -400,8 +425,13 @@ export function MinimapWrapper({
           dragHandleProps={dragHandleProps}
           isUnlocked={isUnlocked}
         />
-        <MinimapOverlayControls world={world} width={size} height={size} />
       </div>
+      {/* Overlay controls at container level, positioned over entire visible area */}
+      <MinimapOverlayControls
+        world={world}
+        width={containerDimensions.width}
+        height={containerDimensions.height}
+      />
     </div>
   );
 }

@@ -252,6 +252,7 @@ export function FullscreenWorldMap({
             justifyContent: "center",
             padding: 16,
             background: theme.colors.background.primary,
+            overflow: "visible",
           }}
         >
           <div
@@ -259,6 +260,7 @@ export function FullscreenWorldMap({
               position: "relative",
               width: mapDimensions.width,
               height: mapDimensions.height,
+              overflow: "visible",
             }}
           >
             <Minimap

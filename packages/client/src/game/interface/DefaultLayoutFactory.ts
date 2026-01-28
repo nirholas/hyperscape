@@ -42,11 +42,8 @@ export interface Viewport {
  */
 export const DESIGN_RESOLUTION: Viewport = { width: 1920, height: 1080 };
 
-/**
- * Right column width - fixed pixel width that looks good at all resolutions.
- * Using 220px as base which scales well.
- */
-const RIGHT_COLUMN_BASE_WIDTH = 220;
+// Right column width is now derived from panel minSize (skillsConfig.minSize.width)
+// for consistent alignment across all right column panels.
 
 /**
  * Get responsive panel size based on current viewport
@@ -103,14 +100,15 @@ export function createDefaultWindows(): WindowConfig[] {
   const inventoryConfig = getPanelConfig("inventory");
   const combatConfig = getPanelConfig("combat");
 
-  // Right column width - slightly scale with viewport but keep readable
-  const scale = Math.min(1.2, Math.max(0.9, viewport.width / 1920));
-  const rightColumnWidth = Math.round(RIGHT_COLUMN_BASE_WIDTH * scale);
+  // Right column width - use panel minSize for consistent alignment
+  // All right column panels share the same width (skillsConfig.minSize.width = 235)
+  const rightColumnWidth = skillsConfig.minSize.width;
   const rightColumnX = viewport.width - rightColumnWidth;
 
   // === RIGHT COLUMN HEIGHTS (no quests - moved to left) ===
   // Fixed heights for specific panels (bottom stack: menubar -> inventory -> skills -> combat)
-  const menubarHeight = 48;
+  // Menubar height matches content - single row with tight wrapping (includes border buffer)
+  const menubarHeight = MENUBAR_DIMENSIONS.minHeight;
   const inventoryHeight = Math.max(280, Math.round(viewport.height * 0.26)); // ~26% of viewport
   const skillsHeight = Math.max(200, Math.round(viewport.height * 0.185)); // ~18.5% of viewport
   const combatHeight = Math.max(
@@ -156,14 +154,16 @@ export function createDefaultWindows(): WindowConfig[] {
     // === RIGHT COLUMN (top to bottom, flush stacking) ===
 
     // Minimap - top right, flush with top and right edges
+    // Width constraints aligned with other right column panels
     {
       id: "minimap-window",
       position: { x: rightColumnX, y: minimapY },
       size: { width: rightColumnWidth, height: minimapHeight },
       minSize: {
-        width: minimapConfig.minSize.width,
+        width: skillsConfig.minSize.width, // Use same min as other panels (235)
         height: minimapConfig.minSize.height,
       },
+      // No maxSize for minimap - it can grow to any size
       tabs: [
         {
           id: "minimap",
@@ -178,15 +178,21 @@ export function createDefaultWindows(): WindowConfig[] {
     },
 
     // Combat - above skills, part of bottom stack (gap above to minimap)
+    // Width constraints aligned with other right column panels
     {
       id: "combat-window",
       position: { x: rightColumnX, y: combatY },
       size: { width: rightColumnWidth, height: combatHeight },
       minSize: {
-        width: combatConfig.minSize.width,
+        width: skillsConfig.minSize.width, // Use same min as other panels (235)
         height: combatConfig.minSize.height,
       },
-      maxSize: combatConfig.maxSize,
+      maxSize: skillsConfig.maxSize
+        ? {
+            width: skillsConfig.maxSize.width, // Use same max as other panels (390)
+            height: combatConfig.maxSize?.height || combatHeight,
+          }
+        : undefined,
       tabs: [
         {
           id: "combat",
@@ -271,17 +277,20 @@ export function createDefaultWindows(): WindowConfig[] {
     },
 
     // Menubar - bottom right, flush with bottom and right edges
-    // Same width as other right column panels
+    // Uses aligned width (235px) to match other right column panels
     {
       id: "menubar-window",
-      position: { x: rightColumnX, y: menubarY },
-      size: { width: rightColumnWidth, height: menubarHeight },
+      position: {
+        x: viewport.width - MENUBAR_DIMENSIONS.minWidth,
+        y: menubarY,
+      },
+      size: { width: MENUBAR_DIMENSIONS.minWidth, height: menubarHeight },
       minSize: {
-        width: rightColumnWidth,
+        width: MENUBAR_DIMENSIONS.minWidth,
         height: MENUBAR_DIMENSIONS.minHeight,
       },
       maxSize: {
-        width: rightColumnWidth,
+        width: MENUBAR_DIMENSIONS.maxWidth,
         height: MENUBAR_DIMENSIONS.maxHeight,
       },
       tabs: [

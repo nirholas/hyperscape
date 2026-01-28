@@ -37,7 +37,7 @@ export function MinimapOverlayControls({
   // Fixed control sizes - consistent UI regardless of map dimensions
   // Controls should not scale with map size, just position at corners
   const controlSize = 40;
-  const controlPadding = 8;
+  const controlPadding = 12;
 
   // Subscribe to camera updates for compass rotation
   useEffect(() => {
@@ -87,8 +87,10 @@ export function MinimapOverlayControls({
 
   return (
     <div
-      className="absolute inset-0 pointer-events-none z-10"
+      className="absolute pointer-events-none z-10"
       style={{
+        top: 0,
+        left: 0,
         width,
         height,
       }}
