@@ -137,6 +137,9 @@ export type EventCallback = (data: unknown) => void;
  * and component-based architecture. All game objects inherit from Entity.
  */
 export class Entity implements IEntity {
+  /** Enable verbose HLOD debug logging (set in browser console: Entity.HLOD_DEBUG = true) */
+  static HLOD_DEBUG = false;
+
   world: World;
   data: EntityData;
   id: string;
@@ -908,11 +911,9 @@ export class Entity implements IEntity {
    */
   protected createHealthBar(): void {
     // Try to use atlas-based HealthBars system (much more efficient)
-    const healthbars = this.world.systems?.find(
-      (s) =>
-        (s as { systemName?: string }).systemName === "healthbars" ||
-        s.constructor.name === "HealthBars",
-    ) as HealthBarsSystem | undefined;
+    const healthbars = this.world.getSystem?.("healthbars") as
+      | HealthBarsSystem
+      | undefined;
 
     if (healthbars) {
       // Atlas-based: Register with HealthBars system
@@ -1609,9 +1610,17 @@ export class Entity implements IEntity {
         impostorOptions,
       );
 
-      this.createHLODImpostorMesh(bakeResult);
+      const meshCreated = this.createHLODImpostorMesh(bakeResult);
       this.hlodState.bakeResult = bakeResult;
-      this.hlodState.impostorReady = true;
+      // Only mark as ready if mesh was actually created
+      if (meshCreated) {
+        this.hlodState.impostorReady = true;
+        console.log(`[Entity HLOD] ✅ Impostor ready for ${this.name}`);
+      } else {
+        console.warn(
+          `[Entity HLOD] ⚠️ Bake succeeded but mesh creation failed for ${this.name}`,
+        );
+      }
       this.hlodState.impostorPending = false;
     } catch (err) {
       console.warn(
@@ -1624,9 +1633,15 @@ export class Entity implements IEntity {
 
   /**
    * Create the impostor mesh from bake result
+   * @returns true if mesh was created successfully, false otherwise
    */
-  private createHLODImpostorMesh(bakeResult: ImpostorBakeResult): void {
-    if (!this.hlodState || !this.node) return;
+  private createHLODImpostorMesh(bakeResult: ImpostorBakeResult): boolean {
+    if (!this.hlodState || !this.node) {
+      console.warn(
+        `[Entity HLOD] Cannot create impostor mesh for ${this.name}: no hlodState or node`,
+      );
+      return false;
+    }
 
     const { gridSizeX, gridSizeY, atlasTexture, boundingSphere, boundingBox } =
       bakeResult;
@@ -1730,6 +1745,8 @@ export class Entity implements IEntity {
       raycastMesh.updateMatrixWorld(true);
       this.hlodState.raycastMesh = raycastMesh;
     }
+
+    return true;
   }
 
   /**
@@ -1847,6 +1864,14 @@ export class Entity implements IEntity {
 
     const { lod0Mesh, lod1Mesh, impostorMesh } = this.hlodState;
 
+    // Debug logging for LOD transitions
+    if (Entity.HLOD_DEBUG) {
+      const lodNames = ["LOD0", "LOD1", "IMPOSTOR", "CULLED"];
+      console.log(
+        `[Entity HLOD] ${this.name}: ${lodNames[from]} → ${lodNames[to]} | impostor=${!!impostorMesh}, lod1=${!!lod1Mesh}, lod0=${!!lod0Mesh}`,
+      );
+    }
+
     // Hide previous LOD
     switch (from) {
       case LODLevel.LOD0:
@@ -1883,7 +1908,20 @@ export class Entity implements IEntity {
         }
         break;
       case LODLevel.IMPOSTOR:
-        if (impostorMesh) impostorMesh.visible = true;
+        if (impostorMesh) {
+          impostorMesh.visible = true;
+        } else {
+          // Fallback: no impostor mesh available, keep best available 3D mesh visible
+          // This prevents entities from disappearing while impostor is pending/failed
+          console.warn(
+            `[Entity HLOD] No impostor mesh for ${this.name}, falling back to 3D mesh`,
+          );
+          if (lod1Mesh) {
+            lod1Mesh.visible = true;
+          } else if (lod0Mesh) {
+            lod0Mesh.visible = true;
+          }
+        }
         break;
       case LODLevel.CULLED:
         // Everything hidden - make sure both meshes are hidden
@@ -1966,6 +2004,74 @@ export class Entity implements IEntity {
    */
   isHLODReady(): boolean {
     return this.hlodState?.impostorReady ?? false;
+  }
+
+  /**
+   * Get comprehensive HLOD diagnostic information for debugging.
+   * Use this to verify LOD/impostor system is working correctly.
+   */
+  getHLODDiagnostics(): {
+    initialized: boolean;
+    modelId: string | null;
+    category: string | null;
+    currentLOD: LODLevel;
+    currentLODName: string;
+    impostorReady: boolean;
+    impostorPending: boolean;
+    hasImpostorMesh: boolean;
+    hasLod0Mesh: boolean;
+    hasLod1Mesh: boolean;
+    lodDistances: {
+      lod1: number;
+      lod2: number;
+      impostor: number;
+      fade: number;
+    } | null;
+    freezeAnimationAtLOD1: boolean;
+    usesTSL: boolean;
+  } {
+    const lodLevelNames = ["LOD0", "LOD1", "IMPOSTOR", "CULLED"];
+
+    if (!this.hlodState) {
+      return {
+        initialized: false,
+        modelId: null,
+        category: null,
+        currentLOD: LODLevel.LOD0,
+        currentLODName: "LOD0 (no HLOD)",
+        impostorReady: false,
+        impostorPending: false,
+        hasImpostorMesh: false,
+        hasLod0Mesh: !!this.mesh,
+        hasLod1Mesh: false,
+        lodDistances: null,
+        freezeAnimationAtLOD1: false,
+        usesTSL: false,
+      };
+    }
+
+    return {
+      initialized: true,
+      modelId: this.hlodState.modelId,
+      category: this.hlodState.category,
+      currentLOD: this.hlodState.currentLOD,
+      currentLODName: lodLevelNames[this.hlodState.currentLOD] ?? "UNKNOWN",
+      impostorReady: this.hlodState.impostorReady,
+      impostorPending: this.hlodState.impostorPending,
+      hasImpostorMesh: !!this.hlodState.impostorMesh,
+      hasLod0Mesh: !!this.hlodState.lod0Mesh,
+      hasLod1Mesh: !!this.hlodState.lod1Mesh,
+      lodDistances: this.hlodState.lodConfig
+        ? {
+            lod1: this.hlodState.lodConfig.lod1Distance,
+            lod2: this.hlodState.lodConfig.lod2Distance,
+            impostor: this.hlodState.lodConfig.imposterDistance,
+            fade: this.hlodState.lodConfig.fadeDistance,
+          }
+        : null,
+      freezeAnimationAtLOD1: this.hlodState.freezeAnimationAtLOD1 ?? false,
+      usesTSL: this.hlodState.usesTSL,
+    };
   }
 
   /**

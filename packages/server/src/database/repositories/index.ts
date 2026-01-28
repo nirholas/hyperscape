@@ -29,3 +29,9 @@ export type {
 } from "./QuestRepository";
 export { ActivityLogRepository } from "./ActivityLogRepository";
 export { BankRepository } from "./BankRepository";
+export { FriendRepository } from "./FriendRepository";
+export type {
+  FriendRow,
+  FriendRequestRow,
+  IgnoreRow,
+} from "./FriendRepository";

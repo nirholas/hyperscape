@@ -207,16 +207,15 @@ function LootWindowPanelContent({
       }
 
       // Check if entity has lootItems in its data
-      interface EntityWithLoot {
+      // Entity runtime data may include loot properties not in base type
+      type EntityWithLoot = typeof gravestoneEntity & {
         data?: {
           lootItems?: InventoryItem[];
           lootItemCount?: number;
-          [key: string]: unknown;
         };
         lootItems?: InventoryItem[];
-        [key: string]: unknown;
-      }
-      const entityWithLoot = gravestoneEntity as unknown as EntityWithLoot;
+      };
+      const entityWithLoot = gravestoneEntity as EntityWithLoot;
       const entityData = entityWithLoot.data;
       if (entityData?.lootItems || entityWithLoot.lootItems) {
         const serverItems: InventoryItem[] =

@@ -55,6 +55,12 @@ export interface StationManifestEntry {
   examine: string;
   /** Manual footprint override (optional - auto-detected from model if not specified) */
   footprint?: FootprintSpec;
+  /** Enable terrain flattening under this station (default: false) */
+  flattenGround?: boolean;
+  /** Extra meters around footprint to flatten (default: 0.3) */
+  flattenPadding?: number;
+  /** Meters over which to blend from flat to procedural terrain (default: 0.5) */
+  flattenBlendRadius?: number;
 }
 
 /**
@@ -104,6 +110,12 @@ export interface StationData {
   examine: string;
   /** Collision footprint - auto-calculated from model bounds * scale */
   footprint: FootprintSpec;
+  /** Enable terrain flattening under this station */
+  flattenGround: boolean;
+  /** Extra meters around footprint to flatten */
+  flattenPadding: number;
+  /** Meters over which to blend from flat to procedural terrain */
+  flattenBlendRadius: number;
 }
 
 // ============================================================================
@@ -256,6 +268,9 @@ export class StationDataProvider {
         modelYOffset: entry.modelYOffset ?? 0,
         examine: entry.examine,
         footprint,
+        flattenGround: entry.flattenGround ?? false,
+        flattenPadding: entry.flattenPadding ?? 0.3,
+        flattenBlendRadius: entry.flattenBlendRadius ?? 0.5,
       };
 
       this.stationsByType.set(entry.type, stationData);

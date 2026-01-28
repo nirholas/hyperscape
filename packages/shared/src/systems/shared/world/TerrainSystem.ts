@@ -43,7 +43,11 @@ import {
  */
 
 import type { BiomeData } from "../../../types/core/core";
-import type { ResourceNode, TerrainTile } from "../../../types/world/terrain";
+import type {
+  ResourceNode,
+  TerrainTile,
+  FlatZone,
+} from "../../../types/world/terrain";
 import { PhysicsHandle } from "../../../types/systems/physics";
 import { getPhysX } from "../../../physics/PhysXManager";
 import { Layers } from "../../../physics/Layers";
@@ -53,6 +57,8 @@ import { DataManager } from "../../../data/DataManager";
 // NOTE: Import directly to avoid circular dependency through barrel file
 import { WaterSystem } from "./WaterSystem";
 import { Environment } from "./Environment";
+import { stationDataProvider } from "../../../data/StationDataProvider";
+import { resolveFootprint } from "../../../types/game/resource-processing-types";
 import { createTerrainMaterial, TerrainUniforms } from "./TerrainShader";
 import type { RoadNetworkSystem } from "./RoadNetworkSystem";
 import type { TownSystem } from "./TownSystem";
@@ -90,6 +96,10 @@ type BossHotspot = {
 export class TerrainSystem extends System {
   private terrainTiles = new Map<string, TerrainTile>();
   private terrainContainer!: THREE.Group;
+
+  // Flat zones for terrain flattening under stations
+  private flatZones = new Map<string, FlatZone>();
+  private flatZonesByTile = new Map<string, FlatZone[]>(); // Spatial index by terrain tile
   public instancedMeshManager!: InstancedMeshManager;
   private _terrainInitialized = false;
   private _initialTilesReady = false; // Track when initial tiles are loaded
@@ -1119,14 +1129,14 @@ export class TerrainSystem extends System {
   }
 
   // World Configuration - Your Specifications
-  // OSRS-STYLE: Gentle rolling terrain, not dramatic peaks
+  // OSRS-STYLE: Rolling terrain with visible hills
   private readonly CONFIG = {
     // Core World Specs
     TILE_SIZE: 100, // 100m x 100m tiles
     WORLD_SIZE: 100, // 100x100 grid = 10km x 10km world
     TILE_RESOLUTION: 64, // 64x64 vertices per tile for smooth terrain
-    MAX_HEIGHT: 30, // 30m max height variation (OSRS-style: gentle, not dramatic)
-    WATER_THRESHOLD: 5.4, // Water appears below 5.4m (0.18 * MAX_HEIGHT)
+    MAX_HEIGHT: 50, // 50m max height variation (bumpy terrain to show flat zones)
+    WATER_THRESHOLD: 9.0, // Water appears below 9m (0.18 * MAX_HEIGHT)
 
     // Performance: Reduced draw distance
     CAMERA_FAR: 400, // Match fog far + buffer
@@ -1239,6 +1249,9 @@ export class TerrainSystem extends System {
     // Precompute boss hotspots for this world seed
     this.generateBossHotspots();
 
+    // NOTE: Flat zones are loaded later, after DataManager is ready
+    // See loadFlatZonesFromManifest() call after the DataManager wait loop
+
     // Initialize terrain material (client-side only)
     if (this.world.isClient) {
       this.initTerrainMaterial();
@@ -1326,6 +1339,9 @@ export class TerrainSystem extends System {
     console.log(
       `[TerrainSystem] DataManager initialized, ${Object.keys(BIOMES).length} biomes loaded, proceeding with terrain generation`,
     );
+
+    // Load flat zones from manifest (now that DataManager has loaded world-areas.json and stations.json)
+    this.loadFlatZonesFromManifest();
 
     // Final environment detection - use world.isServer/isClient (which check network internally)
     const isServer = this.world.isServer;
@@ -1516,6 +1532,14 @@ export class TerrainSystem extends System {
     }
 
     const _endTime = performance.now();
+
+    // Debug: Log flat zone statistics
+    console.log(
+      `[TerrainSystem] Initial tiles generated. Flat zone stats: ` +
+        `${this.flatZones.size} zones registered, ` +
+        `${this.flatZonesByTile.size} tile keys in spatial index, ` +
+        `${this._flatZoneHitCount} height lookups used flat zones`,
+    );
 
     // Mark initial tiles as ready
     this._initialTilesReady = true;
@@ -2284,12 +2308,12 @@ export class TerrainSystem extends System {
       worldZ * ridgeScale,
     );
 
-    const hillScale = 0.012;
+    const hillScale = 0.02; // Increased for more frequent hills
     const hillNoise = this.noise.fractal2D(
       worldX * hillScale,
       worldZ * hillScale,
       4,
-      0.5,
+      0.6, // Increased persistence for more pronounced hills
       2.2,
     );
 
@@ -2309,13 +2333,13 @@ export class TerrainSystem extends System {
       2.5,
     );
 
-    // Combine layers with OSRS-style tuning
+    // Combine layers - bumpy terrain to make flat zones visible
     let height = 0;
-    height += continentNoise * 0.4;
-    height += ridgeNoise * 0.1;
-    height += hillNoise * 0.12;
-    height += erosionNoise * 0.08;
-    height += detailNoise * 0.03;
+    height += continentNoise * 0.35;
+    height += ridgeNoise * 0.15;
+    height += hillNoise * 0.25; // Increased for more visible hills
+    height += erosionNoise * 0.1;
+    height += detailNoise * 0.08; // Increased for local bumps
 
     // Normalize to [0, 1] range
     height = (height + 1) * 0.5;
@@ -2436,6 +2460,30 @@ export class TerrainSystem extends System {
       this.initializeBiomeCenters();
     }
 
+    // Check flat zones first (for stations, etc.)
+    const flatHeight = this.getFlatZoneHeight(worldX, worldZ);
+    if (flatHeight !== null) {
+      return flatHeight;
+    }
+
+    // Get procedural height with mountain boost
+    return this.getProceduralHeightWithBoost(worldX, worldZ);
+  }
+
+  /**
+   * Get procedural terrain height with mountain biome boost applied.
+   * This bypasses flat zones and returns the raw procedural height.
+   * Useful for positioning objects that should sit above the terrain mesh.
+   */
+  getProceduralHeightAt(worldX: number, worldZ: number): number {
+    return this.getProceduralHeightWithBoost(worldX, worldZ);
+  }
+
+  /**
+   * Get procedural terrain height with mountain biome boost applied.
+   * Extracted for reuse in flat zone blending.
+   */
+  private getProceduralHeightWithBoost(worldX: number, worldZ: number): number {
     // Get base height (without mountain boost)
     const baseHeight = this.getBaseHeightAt(worldX, worldZ);
     let height = baseHeight / this.CONFIG.MAX_HEIGHT; // Normalize for boost calc
@@ -2616,6 +2664,347 @@ export class TerrainSystem extends System {
 
     // Fallback to expensive noise computation
     return this.getHeightAtComputed(worldX, worldZ);
+  }
+
+  // ============================================================================
+  // FLAT ZONE SYSTEM (Terrain Flattening for Stations)
+  // ============================================================================
+
+  /**
+   * Check if position is within a flat zone and return modified height.
+   * Returns null if no flat zone applies.
+   *
+   * Uses terrain tile spatial index (100m tiles) for fast lookup.
+   */
+  // Debug counter to avoid log spam
+  private _flatZoneHitCount = 0;
+  private _flatZoneLoggedZones = new Set<string>();
+
+  private getFlatZoneHeight(worldX: number, worldZ: number): number | null {
+    // Quick terrain-tile-based lookup (100m tiles)
+    const tileX = Math.floor(worldX / this.CONFIG.TILE_SIZE);
+    const tileZ = Math.floor(worldZ / this.CONFIG.TILE_SIZE);
+    const key = `${tileX}_${tileZ}`;
+
+    const zones = this.flatZonesByTile.get(key);
+    if (!zones || zones.length === 0) {
+      return null; // No flat zones overlap this terrain tile
+    }
+
+    // Check each zone that overlaps this terrain tile
+    for (const zone of zones) {
+      const dx = Math.abs(worldX - zone.centerX);
+      const dz = Math.abs(worldZ - zone.centerZ);
+
+      const halfWidth = zone.width / 2;
+      const halfDepth = zone.depth / 2;
+
+      // Inside core flat area - return exact flat height
+      if (dx <= halfWidth && dz <= halfDepth) {
+        // Debug: Log first time each zone is hit
+        if (!this._flatZoneLoggedZones.has(zone.id)) {
+          this._flatZoneLoggedZones.add(zone.id);
+          console.log(
+            `[TerrainSystem] FLAT ZONE HIT: "${zone.id}" at (${worldX.toFixed(1)}, ${worldZ.toFixed(1)}) -> height=${zone.height.toFixed(2)}`,
+          );
+        }
+        this._flatZoneHitCount++;
+        return zone.height;
+      }
+
+      // Check blend area
+      const blendHalfWidth = halfWidth + zone.blendRadius;
+      const blendHalfDepth = halfDepth + zone.blendRadius;
+
+      if (dx <= blendHalfWidth && dz <= blendHalfDepth) {
+        // Get procedural height for blending
+        const proceduralHeight = this.getProceduralHeightWithBoost(
+          worldX,
+          worldZ,
+        );
+
+        // Calculate blend factor (0 at edge of flat zone, 1 at edge of blend zone)
+        const blendX = dx > halfWidth ? (dx - halfWidth) / zone.blendRadius : 0;
+        const blendZ = dz > halfDepth ? (dz - halfDepth) / zone.blendRadius : 0;
+        const blend = Math.max(blendX, blendZ);
+
+        // Smoothstep for natural transition: t² × (3 - 2t)
+        const t = blend * blend * (3 - 2 * blend);
+
+        return zone.height + (proceduralHeight - zone.height) * t;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Register a flat zone and update spatial index.
+   * Spatial index uses terrain tiles (100m each) for efficient lookup.
+   */
+  registerFlatZone(zone: FlatZone): void {
+    this.flatZones.set(zone.id, zone);
+
+    // Calculate affected terrain tiles (100m each)
+    const totalRadius = Math.max(zone.width, zone.depth) / 2 + zone.blendRadius;
+    const minTileX = Math.floor(
+      (zone.centerX - totalRadius) / this.CONFIG.TILE_SIZE,
+    );
+    const maxTileX = Math.floor(
+      (zone.centerX + totalRadius) / this.CONFIG.TILE_SIZE,
+    );
+    const minTileZ = Math.floor(
+      (zone.centerZ - totalRadius) / this.CONFIG.TILE_SIZE,
+    );
+    const maxTileZ = Math.floor(
+      (zone.centerZ + totalRadius) / this.CONFIG.TILE_SIZE,
+    );
+
+    const tileKeys: string[] = [];
+    for (let tx = minTileX; tx <= maxTileX; tx++) {
+      for (let tz = minTileZ; tz <= maxTileZ; tz++) {
+        const key = `${tx}_${tz}`;
+        tileKeys.push(key);
+        let zones = this.flatZonesByTile.get(key);
+        if (!zones) {
+          zones = [];
+          this.flatZonesByTile.set(key, zones);
+        }
+        zones.push(zone);
+      }
+    }
+
+    console.log(
+      `[TerrainSystem] Registered flat zone "${zone.id}" -> tile keys: [${tileKeys.join(", ")}]`,
+    );
+  }
+
+  /**
+   * Remove a flat zone by ID.
+   * Used when dynamic structures are removed.
+   */
+  unregisterFlatZone(id: string): void {
+    const zone = this.flatZones.get(id);
+    if (!zone) return;
+
+    this.flatZones.delete(id);
+
+    // Remove from spatial index
+    const totalRadius = Math.max(zone.width, zone.depth) / 2 + zone.blendRadius;
+    const minTileX = Math.floor(
+      (zone.centerX - totalRadius) / this.CONFIG.TILE_SIZE,
+    );
+    const maxTileX = Math.floor(
+      (zone.centerX + totalRadius) / this.CONFIG.TILE_SIZE,
+    );
+    const minTileZ = Math.floor(
+      (zone.centerZ - totalRadius) / this.CONFIG.TILE_SIZE,
+    );
+    const maxTileZ = Math.floor(
+      (zone.centerZ + totalRadius) / this.CONFIG.TILE_SIZE,
+    );
+
+    for (let tx = minTileX; tx <= maxTileX; tx++) {
+      for (let tz = minTileZ; tz <= maxTileZ; tz++) {
+        const key = `${tx}_${tz}`;
+        const zones = this.flatZonesByTile.get(key);
+        if (zones) {
+          const filtered = zones.filter((z) => z.id !== id);
+          if (filtered.length > 0) {
+            this.flatZonesByTile.set(key, filtered);
+          } else {
+            this.flatZonesByTile.delete(key);
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Get a flat zone at a position (if any).
+   */
+  getFlatZoneAt(worldX: number, worldZ: number): FlatZone | null {
+    const tileX = Math.floor(worldX / this.CONFIG.TILE_SIZE);
+    const tileZ = Math.floor(worldZ / this.CONFIG.TILE_SIZE);
+    const key = `${tileX}_${tileZ}`;
+
+    const zones = this.flatZonesByTile.get(key);
+    if (!zones) return null;
+
+    for (const zone of zones) {
+      const dx = Math.abs(worldX - zone.centerX);
+      const dz = Math.abs(worldZ - zone.centerZ);
+      const halfWidth = zone.width / 2 + zone.blendRadius;
+      const halfDepth = zone.depth / 2 + zone.blendRadius;
+
+      if (dx <= halfWidth && dz <= halfDepth) {
+        return zone;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Load flat zones from world-areas manifest during initialization.
+   * Called before any tiles are generated.
+   *
+   * Note: Station footprints are in movement tiles (1m = 1 tile).
+   * Terrain tiles are 100m each, used only for spatial indexing.
+   */
+  private loadFlatZonesFromManifest(): void {
+    // Movement tile size (1m) - used for station footprints
+    const MOVEMENT_TILE_SIZE = 1.0;
+
+    let loadedCount = 0;
+    const areaNames = Object.keys(ALL_WORLD_AREAS);
+
+    // Debug: Check stationDataProvider state
+    console.log(
+      `[TerrainSystem] stationDataProvider ready: ${stationDataProvider.isReady()}, ` +
+        `hasBounds: ${stationDataProvider.hasBounds()}, ` +
+        `types: ${stationDataProvider.getAllStationTypes().join(", ")}`,
+    );
+
+    // Debug: Check a specific station's flattenGround value
+    const testStation = stationDataProvider.getStationData("altar");
+    if (testStation) {
+      console.log(
+        `[TerrainSystem] Test - altar station data: flattenGround=${testStation.flattenGround}, ` +
+          `padding=${testStation.flattenPadding}, blend=${testStation.flattenBlendRadius}`,
+      );
+    }
+
+    console.log(
+      `[TerrainSystem] Loading flat zones from ${areaNames.length} world areas: ${areaNames.join(", ")}`,
+    );
+
+    // Debug: Check if duel_arena is in ALL_WORLD_AREAS
+    const duelArena = ALL_WORLD_AREAS["duel_arena"];
+    if (duelArena) {
+      const areaWithFlatZones = duelArena as { flatZones?: unknown[] };
+      console.log(
+        `[TerrainSystem] duel_arena found! Has flatZones: ${!!areaWithFlatZones.flatZones}, count: ${areaWithFlatZones.flatZones?.length ?? 0}`,
+      );
+    } else {
+      console.warn(`[TerrainSystem] duel_arena NOT in ALL_WORLD_AREAS!`);
+    }
+
+    for (const [areaId, area] of Object.entries(ALL_WORLD_AREAS)) {
+      if (!area.stations) {
+        continue;
+      }
+
+      console.log(
+        `[TerrainSystem] Area "${areaId}" has ${area.stations.length} stations`,
+      );
+
+      for (const station of area.stations) {
+        const stationData = stationDataProvider.getStationData(station.type);
+
+        // Skip if station type not found or doesn't want ground flattening
+        if (!stationData) {
+          console.log(
+            `[TerrainSystem] Station "${station.id}" type "${station.type}" not found in stationDataProvider`,
+          );
+          continue;
+        }
+
+        if (!stationData.flattenGround) {
+          console.log(
+            `[TerrainSystem] Station "${station.id}" has flattenGround=false, skipping`,
+          );
+          continue;
+        }
+
+        // Get footprint from model bounds (returns movement tiles, e.g., {x: 2, z: 2})
+        const footprint = stationDataProvider.getFootprint(station.type);
+        const size = resolveFootprint(footprint);
+
+        // Calculate flat zone dimensions in world units (meters)
+        const padding = stationData.flattenPadding;
+        const blendRadius = stationData.flattenBlendRadius;
+        const width = size.x * MOVEMENT_TILE_SIZE + padding * 2;
+        const depth = size.z * MOVEMENT_TILE_SIZE + padding * 2;
+
+        // Get procedural height at station center (what terrain would be without flattening)
+        const flatHeight = this.getProceduralHeightWithBoost(
+          station.position.x,
+          station.position.z,
+        );
+
+        const zone: FlatZone = {
+          id: `station_${station.id}`,
+          centerX: station.position.x,
+          centerZ: station.position.z,
+          width,
+          depth,
+          height: flatHeight,
+          blendRadius,
+        };
+
+        this.registerFlatZone(zone);
+        loadedCount++;
+
+        console.log(
+          `[TerrainSystem] Registered flat zone "${zone.id}" at (${zone.centerX}, ${zone.centerZ}) ` +
+            `size ${zone.width.toFixed(1)}x${zone.depth.toFixed(1)}m, height=${zone.height.toFixed(1)}m`,
+        );
+      }
+
+      // Also load explicit flatZones defined in the area config (e.g., duel arenas)
+      const areaConfig = area as {
+        flatZones?: Array<{
+          id: string;
+          centerX: number;
+          centerZ: number;
+          width: number;
+          depth: number;
+          height?: number; // Optional explicit height (if not provided, uses procedural)
+          heightOffset?: number; // Optional offset added to procedural height (e.g., floor thickness)
+          blendRadius: number;
+        }>;
+      };
+
+      if (areaConfig.flatZones) {
+        for (const zoneConfig of areaConfig.flatZones) {
+          // Calculate base height from procedural terrain
+          const proceduralHeight = this.getProceduralHeightWithBoost(
+            zoneConfig.centerX,
+            zoneConfig.centerZ,
+          );
+
+          // Use explicit height if provided, otherwise procedural + offset
+          const flatHeight =
+            zoneConfig.height !== undefined
+              ? zoneConfig.height
+              : proceduralHeight + (zoneConfig.heightOffset ?? 0);
+
+          const zone: FlatZone = {
+            id: zoneConfig.id,
+            centerX: zoneConfig.centerX,
+            centerZ: zoneConfig.centerZ,
+            width: zoneConfig.width,
+            depth: zoneConfig.depth,
+            height: flatHeight,
+            blendRadius: zoneConfig.blendRadius,
+          };
+
+          this.registerFlatZone(zone);
+          loadedCount++;
+
+          console.log(
+            `[TerrainSystem] Registered area flat zone "${zone.id}" at (${zone.centerX}, ${zone.centerZ}) ` +
+              `size ${zone.width.toFixed(1)}x${zone.depth.toFixed(1)}m, height=${zone.height.toFixed(1)}m ` +
+              `(procedural=${proceduralHeight.toFixed(1)}, offset=${zoneConfig.heightOffset ?? 0})`,
+          );
+        }
+      }
+    }
+
+    console.log(
+      `[TerrainSystem] Flat zone loading complete: ${loadedCount} zones registered`,
+    );
   }
 
   /**

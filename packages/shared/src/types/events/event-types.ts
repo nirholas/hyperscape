@@ -84,6 +84,9 @@ export enum EventType {
   // Network Communication
   NETWORK_CONNECTED = "network:connected",
   NETWORK_DISCONNECTED = "network:disconnected",
+  NETWORK_RECONNECTING = "network:reconnecting",
+  NETWORK_RECONNECTED = "network:reconnected",
+  NETWORK_RECONNECT_FAILED = "network:reconnect_failed",
   NETWORK_MESSAGE_RECEIVED = "network:message:received",
   NETWORK_ENTITY_UPDATES = "network:entity_updates",
 
@@ -286,6 +289,7 @@ export enum EventType {
   QUEST_STARTED = "quest:started",
   QUEST_PROGRESSED = "quest:progressed",
   QUEST_COMPLETED = "quest:completed",
+  QUEST_ABANDONED = "quest:abandoned",
 
   // XP Lamp System
   XP_LAMP_USE_REQUEST = "xp_lamp:use_request",
@@ -629,6 +633,7 @@ export enum EventType {
 
   // Action Bar System
   ACTION_BAR_SLOT_UPDATE = "actionbar:slot:update",
+  ACTION_BAR_SLOT_SWAP = "actionbar:slot:swap",
 
   // Trading System
   TRADE_REQUEST = "trade:request",
@@ -644,4 +649,8 @@ export enum EventType {
   TRADE_CANCELLED = "trade:cancelled",
   TRADE_ERROR = "trade:error",
   TRADE_CLOSE = "trade:close",
+  TRADE_CONFIRM_SCREEN = "trade:confirm_screen",
+
+  // Duel System
+  DUEL_COUNTDOWN_TICK = "duel:countdown:tick",
 }

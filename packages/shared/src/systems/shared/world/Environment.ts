@@ -691,16 +691,14 @@ export class Environment extends System {
         this.csmNeedsAttach = false;
         console.log("[Environment] CSM shadowNode attached to light");
       }
-    } catch (err) {
+    } catch {
       // CSMShadowNode.updateFrustums() can fail if camera projection isn't ready yet
-      // Will retry on next commit() - this is expected during startup
-      // Log only on first attempt to avoid console spam
-      if (!this.csmFrustumWarningShown) {
-        console.warn(
-          "[Environment] CSM frustum update failed:",
-          err instanceof Error ? err.message : String(err),
+      // Will retry on next update() - this is expected during startup
+      if (!this.csmDeferredLogged) {
+        console.debug(
+          "[Environment] CSM frustum update deferred - camera not ready (this message will only appear once)",
         );
-        this.csmFrustumWarningShown = true;
+        this.csmDeferredLogged = true;
       }
     }
   }

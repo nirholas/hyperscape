@@ -15,6 +15,8 @@ import {
   getQuestListRateLimiter,
   getQuestDetailRateLimiter,
   getQuestAcceptRateLimiter,
+  getQuestAbandonRateLimiter,
+  getQuestCompleteRateLimiter,
 } from "../services/SlidingWindowRateLimiter";
 
 /** Logger for quest handlers */
@@ -188,5 +190,104 @@ export async function handleQuestAccept(
     logger.info(`Player ${playerId} started quest ${questId}`);
   } else {
     logger.warn(`Failed to start quest ${questId} for player ${playerId}`);
+  }
+}
+
+/**
+ * Handle quest abandon request from client
+ * Called when player clicks "Abandon Quest" button
+ */
+export async function handleQuestAbandon(
+  socket: ServerSocket,
+  data: { questId: string },
+  world: World,
+): Promise<void> {
+  const playerId = getPlayerId(socket);
+  if (!playerId) {
+    logger.warn("No playerId for questAbandon request");
+    return;
+  }
+
+  // Rate limit check
+  if (!getQuestAbandonRateLimiter().check(playerId)) {
+    logger.debug(`Rate limit exceeded for ${playerId} on questAbandon`);
+    return;
+  }
+
+  const { questId } = data;
+
+  // Validate questId format (prevents log injection and invalid lookups)
+  if (!isValidQuestId(questId)) {
+    logger.warn("Invalid or missing questId format for questAbandon");
+    return;
+  }
+
+  const questSystem = world.getSystem("quest") as QuestSystem | undefined;
+  if (!questSystem) {
+    logger.warn("QuestSystem not available");
+    return;
+  }
+
+  // Abandon the quest
+  const success = await questSystem.abandonQuest(playerId, questId);
+
+  if (success) {
+    logger.info(`Player ${playerId} abandoned quest ${questId}`);
+  } else {
+    logger.warn(`Failed to abandon quest ${questId} for player ${playerId}`);
+  }
+}
+
+/**
+ * Handle quest completion request from client
+ * Called when player clicks "Complete Quest" button for a ready_to_complete quest
+ */
+export async function handleQuestComplete(
+  socket: ServerSocket,
+  data: { questId: string },
+  world: World,
+): Promise<void> {
+  const playerId = getPlayerId(socket);
+  if (!playerId) {
+    logger.warn("No playerId for questComplete request");
+    return;
+  }
+
+  // Rate limit check
+  if (!getQuestCompleteRateLimiter().check(playerId)) {
+    logger.debug(`Rate limit exceeded for ${playerId} on questComplete`);
+    return;
+  }
+
+  const { questId } = data;
+
+  // Validate questId format (prevents log injection and invalid lookups)
+  if (!isValidQuestId(questId)) {
+    logger.warn("Invalid or missing questId format for questComplete");
+    return;
+  }
+
+  const questSystem = world.getSystem("quest") as QuestSystem | undefined;
+  if (!questSystem) {
+    logger.warn("QuestSystem not available");
+    return;
+  }
+
+  // Check if quest is ready to complete
+  const status = questSystem.getQuestStatus(playerId, questId);
+  if (status !== "ready_to_complete") {
+    logger.warn(
+      `Quest ${questId} is not ready to complete for ${playerId} (status: ${status})`,
+    );
+    return;
+  }
+
+  // Complete the quest
+  const success = await questSystem.completeQuest(playerId, questId);
+
+  if (success) {
+    logger.info(`Player ${playerId} completed quest ${questId}`);
+  } else {
+    logger.warn(`Failed to complete quest ${questId} for player ${playerId}`);
   }
 }

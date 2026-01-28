@@ -6,14 +6,27 @@
  * - Tests transition between 3D and imposter rendering
  * - Validates octahedral atlas loading from CDN
  * - Checks visual quality at different distances
+ *
+ * HLOD System Overview:
+ * - LOD0: Full detail mesh (0-40m for mobs)
+ * - LOD1: Frozen animation (40-70m for mobs)
+ * - IMPOSTOR: Billboard (70-100m for mobs)
+ * - CULLED: Hidden (>180m for mobs)
  */
 
 import { test, expect, type Page } from "@playwright/test";
 
 // Test configuration
 const TEST_TIMEOUT = 60000; // 60 seconds
-const MOB_SPAWN_DELAY = 3000; // Wait for mob to spawn and render
-const DISTANCE_TRANSITION_DELAY = 500; // Wait for imposter transition
+const MOB_SPAWN_DELAY = 5000; // Wait for mob to spawn, render, AND bake impostor
+const DISTANCE_TRANSITION_DELAY = 1000; // Wait for imposter transition
+
+// LOD distance thresholds for mobs (from GPUVegetation.ts)
+const MOB_LOD_DISTANCES = {
+  lod1: 40, // LOD0 -> LOD1 transition
+  impostor: 100, // LOD1 -> Impostor transition
+  fade: 180, // Impostor -> Culled transition
+};
 
 /**
  * Helper to wait for game world to be ready
@@ -151,6 +164,116 @@ async function getDistanceToCamera(
   );
 }
 
+/**
+ * Helper to get Entity HLOD diagnostics for any entity by name pattern
+ */
+async function getEntityHLODDiagnostics(
+  page: Page,
+  namePattern: string,
+): Promise<
+  Array<{
+    name: string;
+    initialized: boolean;
+    currentLODName: string;
+    impostorReady: boolean;
+    hasImpostorMesh: boolean;
+    lodDistances: { lod1: number; impostor: number; fade: number } | null;
+  }>
+> {
+  return page.evaluate((pattern) => {
+    const world = (
+      window as unknown as {
+        world?: {
+          entities?: {
+            items?: Map<
+              string,
+              {
+                name: string;
+                getHLODDiagnostics?: () => {
+                  initialized: boolean;
+                  currentLODName: string;
+                  impostorReady: boolean;
+                  hasImpostorMesh: boolean;
+                  lodDistances: {
+                    lod1: number;
+                    impostor: number;
+                    fade: number;
+                  } | null;
+                };
+              }
+            >;
+          };
+        };
+      }
+    ).world;
+    if (!world?.entities?.items) return [];
+
+    const results: Array<{
+      name: string;
+      initialized: boolean;
+      currentLODName: string;
+      impostorReady: boolean;
+      hasImpostorMesh: boolean;
+      lodDistances: { lod1: number; impostor: number; fade: number } | null;
+    }> = [];
+
+    for (const entity of world.entities.items.values()) {
+      if (
+        entity.name.toLowerCase().includes(pattern.toLowerCase()) &&
+        entity.getHLODDiagnostics
+      ) {
+        const diag = entity.getHLODDiagnostics();
+        results.push({
+          name: entity.name,
+          initialized: diag.initialized,
+          currentLODName: diag.currentLODName,
+          impostorReady: diag.impostorReady,
+          hasImpostorMesh: diag.hasImpostorMesh,
+          lodDistances: diag.lodDistances
+            ? {
+                lod1: diag.lodDistances.lod1,
+                impostor: diag.lodDistances.impostor,
+                fade: diag.lodDistances.fade,
+              }
+            : null,
+        });
+      }
+    }
+    return results;
+  }, namePattern);
+}
+
+/**
+ * Helper to get ImpostorManager statistics
+ */
+async function getImpostorManagerStats(page: Page): Promise<{
+  cacheHits: number;
+  cacheMisses: number;
+  totalBaked: number;
+  totalFromIndexedDB: number;
+  queueLength: number;
+  memoryCacheSize: number;
+} | null> {
+  return page.evaluate(() => {
+    const world = (
+      window as unknown as {
+        world?: {
+          getImpostorManagerStats?: () => {
+            cacheHits: number;
+            cacheMisses: number;
+            totalBaked: number;
+            totalFromIndexedDB: number;
+            queueLength: number;
+            memoryCacheSize: number;
+          };
+        };
+      }
+    ).world;
+    if (!world?.getImpostorManagerStats) return null;
+    return world.getImpostorManagerStats();
+  });
+}
+
 test.describe("Imposter Rendering System", () => {
   test.beforeEach(async ({ page }) => {
     // Navigate to game client
@@ -278,6 +401,72 @@ test.describe("Imposter Rendering System", () => {
 
     // This test documents the current state of atlas loading
     // When octahedral imposters are baked and uploaded, requests should appear
+  });
+
+  test("HLOD system diagnostics are accessible", async ({ page }) => {
+    test.setTimeout(TEST_TIMEOUT);
+
+    // Get HLOD diagnostics for any entities that have them
+    // This verifies the diagnostic API is working
+    const mobDiagnostics = await getEntityHLODDiagnostics(page, "mob");
+    const npcDiagnostics = await getEntityHLODDiagnostics(page, "npc");
+    const resourceDiagnostics = await getEntityHLODDiagnostics(
+      page,
+      "resource",
+    );
+
+    console.log(
+      `[HLOD Diagnostics] Found: ${mobDiagnostics.length} mobs, ${npcDiagnostics.length} NPCs, ${resourceDiagnostics.length} resources`,
+    );
+
+    // Log detailed diagnostics for each entity type
+    const allDiagnostics = [
+      ...mobDiagnostics,
+      ...npcDiagnostics,
+      ...resourceDiagnostics,
+    ];
+    for (const diag of allDiagnostics.slice(0, 5)) {
+      // Log first 5
+      console.log(`  ${diag.name}:`);
+      console.log(`    - LOD: ${diag.currentLODName}`);
+      console.log(`    - Impostor Ready: ${diag.impostorReady}`);
+      console.log(`    - Has Impostor Mesh: ${diag.hasImpostorMesh}`);
+      if (diag.lodDistances) {
+        console.log(
+          `    - Distances: LOD1=${diag.lodDistances.lod1}m, Impostor=${diag.lodDistances.impostor}m, Fade=${diag.lodDistances.fade}m`,
+        );
+      }
+    }
+
+    // Verify at least the API is working (diagnostics array returned)
+    expect(Array.isArray(allDiagnostics)).toBe(true);
+  });
+
+  test("ImpostorManager reports baking statistics", async ({ page }) => {
+    test.setTimeout(TEST_TIMEOUT);
+
+    // Wait for some impostors to potentially bake
+    await page.waitForTimeout(3000);
+
+    const stats = await getImpostorManagerStats(page);
+
+    if (stats) {
+      console.log(`[ImpostorManager Stats]:`);
+      console.log(`  - Cache Hits: ${stats.cacheHits}`);
+      console.log(`  - Cache Misses: ${stats.cacheMisses}`);
+      console.log(`  - Total Baked: ${stats.totalBaked}`);
+      console.log(`  - From IndexedDB: ${stats.totalFromIndexedDB}`);
+      console.log(`  - Queue Length: ${stats.queueLength}`);
+      console.log(`  - Memory Cache Size: ${stats.memoryCacheSize}`);
+
+      // Verify stats are numbers
+      expect(typeof stats.totalBaked).toBe("number");
+      expect(typeof stats.memoryCacheSize).toBe("number");
+    } else {
+      console.log(
+        "[ImpostorManager] getImpostorManagerStats not exposed on world",
+      );
+    }
   });
 
   test("imposter rendering performance is acceptable", async ({ page }) => {

@@ -1,0 +1,111 @@
+/**
+ * Trade Context Menu Component
+ *
+ * OSRS-style context menu for trade inventory items.
+ * Shows offer options (1, 5, 10, X, All) plus Value and Examine.
+ */
+
+import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
+import { getItem } from "@hyperscape/shared";
+import type { TradeContextMenuProps } from "../types";
+
+export function TradeContextMenu({
+  x,
+  y,
+  item,
+  theme: _theme,
+  onOffer,
+  onClose,
+}: TradeContextMenuProps) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const itemData = getItem(item.itemId);
+  const itemName = itemData?.name || item.itemId;
+
+  // Close on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [onClose]);
+
+  // Adjust position to stay within viewport
+  const adjustedX = Math.min(x, window.innerWidth - 160);
+  const adjustedY = Math.min(y, window.innerHeight - 280);
+
+  const menuOptions = [
+    { label: `Offer ${itemName}`, action: () => onOffer(1) },
+    { label: "Offer-5", action: () => onOffer(5) },
+    { label: "Offer-10", action: () => onOffer(10) },
+    { label: "Offer-X", action: () => onOffer("x") },
+    { label: "Offer-All", action: () => onOffer("all") },
+    { label: "Value", action: () => onOffer("value") },
+    { label: "Examine", action: () => onOffer("examine") },
+  ];
+
+  return createPortal(
+    <div
+      ref={menuRef}
+      style={{
+        position: "fixed",
+        left: adjustedX,
+        top: adjustedY,
+        zIndex: 99999,
+        background: "rgba(0, 0, 0, 0.95)",
+        border: "1px solid rgba(100, 80, 60, 0.8)",
+        borderRadius: "2px",
+        padding: "2px 0",
+        minWidth: "150px",
+        boxShadow: "2px 2px 8px rgba(0, 0, 0, 0.5)",
+      }}
+    >
+      {/* Header with item name */}
+      <div
+        style={{
+          padding: "4px 8px",
+          color: "#ff9900",
+          fontWeight: "bold",
+          fontSize: "12px",
+          borderBottom: "1px solid rgba(100, 80, 60, 0.5)",
+        }}
+      >
+        {itemName}
+      </div>
+      {menuOptions.map((option, i) => (
+        <div
+          key={i}
+          onClick={() => {
+            option.action();
+            onClose();
+          }}
+          style={{
+            padding: "4px 8px",
+            color: i === 0 ? "#ffff00" : "#ffffff",
+            fontSize: "12px",
+            cursor: "pointer",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "transparent";
+          }}
+        >
+          {option.label}
+        </div>
+      ))}
+    </div>,
+    document.body,
+  );
+}

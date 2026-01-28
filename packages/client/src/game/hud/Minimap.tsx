@@ -11,12 +11,13 @@ import React, {
   useState,
   useMemo,
 } from "react";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 import { Entity, THREE, createRenderer } from "@hyperscape/shared";
 import type { UniversalRenderer } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
-import { MinimapStaminaOrb } from "../../components/MinimapStaminaBar";
-import { MinimapHomeTeleportOrb } from "../../components/MinimapHomeTeleportOrb";
+import { MinimapStaminaOrb } from "./MinimapStaminaBar";
+import { MinimapHomeTeleportOrb } from "./MinimapHomeTeleportOrb";
+import { ThreeResourceManager } from "../../lib/ThreeResourceManager";
 
 // === PRE-ALLOCATED VECTORS FOR HOT PATHS ===
 // These vectors are reused in RAF loops and intervals to avoid GC pressure
@@ -39,6 +40,9 @@ const _mainCameraFrustum = new THREE.Frustum();
 /** Temp matrix for frustum calculation */
 const _tempMatrix = new THREE.Matrix4();
 
+/** Pre-allocated position object for RAF loop target position - avoids GC pressure */
+const _tempTargetPos: { x: number; z: number } = { x: 0, z: 0 };
+
 interface EntityPip {
   id: string;
   type: "player" | "enemy" | "building" | "item" | "resource" | "quest";
@@ -53,6 +57,17 @@ interface EntityPip {
   /** Whether entity is in main camera frustum (visible) vs just nearby */
   inFrustum?: boolean;
 }
+
+/** Window extension for last raycast target diagnostic (used by both world clicks and minimap) */
+type WindowWithRaycastTarget = Window &
+  typeof globalThis & {
+    __lastRaycastTarget?: {
+      x: number;
+      y: number;
+      z: number;
+      method: string;
+    };
+  };
 
 /** Color palette for group members (up to 8 unique) */
 const GROUP_COLORS = [
@@ -367,8 +382,8 @@ export function Minimap({
           rendererInitializedRef.current = true;
           // console.log('[Minimap] Renderer initialized successfully');
         })
-        .catch((_error) => {
-          // console.error("[Minimap] Failed to create renderer:", _error);
+        .catch((error) => {
+          console.warn("[Minimap] Failed to create renderer:", error);
           rendererRef.current = null;
           rendererInitializedRef.current = false;
         });
@@ -432,18 +447,33 @@ export function Minimap({
     }
   }, [isVisible]);
 
-  // Cleanup renderer when component is actually unmounted
+  // Cleanup renderer, camera, and scene reference when component is actually unmounted
   useEffect(() => {
     return () => {
       // Dispose renderer
       if (rendererRef.current && rendererInitializedRef.current) {
         // console.log('[Minimap] Disposing renderer on component unmount');
-        if ("dispose" in rendererRef.current) {
-          (rendererRef.current as { dispose: () => void }).dispose();
-        }
+        ThreeResourceManager.disposeRenderer(rendererRef.current);
         rendererRef.current = null;
         rendererInitializedRef.current = false;
       }
+
+      // Clear camera reference and userData
+      if (cameraRef.current) {
+        // Clear camera userData to prevent dangling references
+        if (cameraRef.current.userData) {
+          Object.keys(cameraRef.current.userData).forEach((key) => {
+            delete cameraRef.current!.userData[key];
+          });
+        }
+        cameraRef.current = null;
+      }
+
+      // Clear scene reference (we don't own it, just borrowed from world)
+      sceneRef.current = null;
+
+      // Clear entity cache to prevent memory retention
+      entityCacheRef.current.clear();
     };
   }, []);
 
@@ -734,9 +764,9 @@ export function Minimap({
     // to avoid allocations in this hot render loop
 
     const render = () => {
-      // Only render if visible
+      // Skip render loop entirely when not visible to reduce CPU usage
       if (!isVisible) {
-        rafId = requestAnimationFrame(render);
+        // Don't continue RAF when hidden - the useEffect will restart when visible
         return;
       }
 
@@ -744,15 +774,15 @@ export function Minimap({
       const cam = cameraRef.current;
 
       // --- Camera Position Update (follow player or spectated entity) ---
+      // Reuse pre-allocated _tempTargetPos to avoid GC pressure
       const player = world.entities?.player as Entity | undefined;
-      let targetPosition: { x: number; z: number } | null = null;
+      let hasTarget = false;
 
       if (player) {
         // Normal mode: follow local player
-        targetPosition = {
-          x: player.node.position.x,
-          z: player.node.position.z,
-        };
+        _tempTargetPos.x = player.node.position.x;
+        _tempTargetPos.z = player.node.position.z;
+        hasTarget = true;
       } else {
         // Spectator mode: get camera target from camera system
         const config = (
@@ -768,10 +798,9 @@ export function Minimap({
           } | null;
           const cameraInfo = cameraSystem?.getCameraInfo?.();
           if (cameraInfo?.target?.position) {
-            targetPosition = {
-              x: cameraInfo.target.position.x,
-              z: cameraInfo.target.position.z,
-            };
+            _tempTargetPos.x = cameraInfo.target.position.x;
+            _tempTargetPos.z = cameraInfo.target.position.z;
+            hasTarget = true;
           }
         }
       }
@@ -779,14 +808,17 @@ export function Minimap({
       const debugTarget =
         (window as MinimapDebugWindow).__HYPERSCAPE_MINIMAP_TARGET__ || null;
       if (debugTarget) {
-        targetPosition = { x: debugTarget.x, z: debugTarget.z };
+        _tempTargetPos.x = debugTarget.x;
+        _tempTargetPos.z = debugTarget.z;
+        hasTarget = true;
       }
 
-      if (cam && targetPosition) {
+      if (cam && hasTarget) {
         // Keep centered on target (player or spectated entity)
-        cam.position.x = targetPosition.x;
-        cam.position.z = targetPosition.z;
-        cam.lookAt(targetPosition.x, 0, targetPosition.z);
+        // Using pre-allocated _tempTargetPos to avoid GC pressure
+        cam.position.x = _tempTargetPos.x;
+        cam.position.z = _tempTargetPos.z;
+        cam.lookAt(_tempTargetPos.x, 0, _tempTargetPos.z);
 
         // Rotate minimap with main camera yaw if enabled
         if (rotateWithCameraRef.current && world.camera) {
@@ -814,8 +846,8 @@ export function Minimap({
         // Clear destination when reached (using refs for sync access)
         const destWorld = lastDestinationWorldRef.current;
         if (destWorld) {
-          const dx = destWorld.x - targetPosition.x;
-          const dz = destWorld.z - targetPosition.z;
+          const dx = destWorld.x - _tempTargetPos.x;
+          const dz = destWorld.z - _tempTargetPos.z;
           if (Math.hypot(dx, dz) < 0.6) {
             setLastDestinationWorld(null);
             setLastMinimapClickScreen(null);
@@ -827,8 +859,8 @@ export function Minimap({
           __lastRaycastTarget?: { x: number; z: number };
         };
         if (windowWithTarget.__lastRaycastTarget) {
-          const dx = windowWithTarget.__lastRaycastTarget.x - targetPosition.x;
-          const dz = windowWithTarget.__lastRaycastTarget.z - targetPosition.z;
+          const dx = windowWithTarget.__lastRaycastTarget.x - _tempTargetPos.x;
+          const dz = windowWithTarget.__lastRaycastTarget.z - _tempTargetPos.z;
           if (Math.hypot(dx, dz) < 0.6) {
             delete windowWithTarget.__lastRaycastTarget;
           }
@@ -1331,15 +1363,7 @@ export function Minimap({
       // Persist destination dot until arrival (no auto-fade)
       setLastDestinationWorld({ x: targetX, z: targetZ });
       // Expose same diagnostic target used by world clicks so minimap renders dot identically
-      const windowWithTarget = window as unknown as {
-        __lastRaycastTarget: {
-          x: number;
-          y: number;
-          z: number;
-          method: string;
-        };
-      };
-      windowWithTarget.__lastRaycastTarget = {
+      (window as WindowWithRaycastTarget).__lastRaycastTarget = {
         x: targetX,
         y: targetY,
         z: targetZ,
@@ -1508,18 +1532,12 @@ export function Minimap({
   return (
     <div
       ref={containerRef}
-      className={`minimap overflow-hidden relative touch-none select-none ${embedded ? "" : "rounded-lg"} ${className}`}
+      className={`minimap overflow-hidden relative touch-none select-none ${className}`}
       style={{
         width,
         height,
         WebkitUserSelect: "none",
         WebkitTouchCallout: "none",
-        ...(embedded
-          ? {}
-          : {
-              border: `2px solid ${theme.colors.border.decorative}`,
-              boxShadow: `${theme.shadows.lg}, inset 0 1px 0 rgba(255, 255, 255, 0.1)`,
-            }),
         ...style,
       }}
       onMouseDown={(e) => {

@@ -63,6 +63,7 @@ export * from "./runtime";
 export * from "./core";
 
 // Export entity classes
+export { PlayerEntity } from "./entities/player/PlayerEntity";
 export { PlayerLocal } from "./entities/player/PlayerLocal";
 export { PlayerRemote } from "./entities/player/PlayerRemote";
 export { MobEntity } from "./entities/npc/MobEntity";
@@ -275,6 +276,47 @@ export type {
   TradeRequestModalState,
 } from "./types/game/trade-types";
 
+// Export social/friend system types
+export { SOCIAL_CONSTANTS } from "./types/game/social-types";
+export type {
+  FriendStatus,
+  Friend,
+  FriendStatusUpdateData,
+  FriendRequest,
+  IgnoredPlayer,
+  PrivateMessage,
+  PrivateChatFailReason,
+  FriendsListSyncData,
+  SocialErrorCode,
+  SocialError,
+} from "./types/game/social-types";
+
+// Export duel arena types and utilities
+export {
+  DEFAULT_DUEL_RULES,
+  validateRuleCombination,
+  INVALID_RULE_COMBINATIONS,
+  DEFAULT_EQUIPMENT_RESTRICTIONS,
+  createDuelParticipant,
+  DUEL_CHALLENGE_TIMEOUT_MS,
+  DuelErrorCode,
+  DuelEvents,
+} from "./types/game/duel-types";
+export type {
+  DuelRules,
+  EquipmentSlotRestriction,
+  EquipmentRestrictions,
+  StakedItem,
+  DuelParticipant,
+  DuelState,
+  DuelSession,
+  ArenaSpawnPoint,
+  ArenaBounds,
+  Arena,
+  PendingDuelChallenge,
+  DuelEventName,
+} from "./types/game/duel-types";
+
 // Export quest type guards for server validation
 export { isValidQuestId } from "./types/game/quest-types";
 
@@ -296,8 +338,16 @@ export { getStoreById } from "./data/banks-stores";
 // Export avatar options for character creation
 export { AVATAR_OPTIONS } from "./data/avatars";
 
-// Export skill icons for XP displays
-export { SKILL_ICONS, getSkillIcon } from "./data/skill-icons";
+// Export skill data for UI displays
+export {
+  SKILL_ICONS,
+  getSkillIcon,
+  SKILL_DEFINITIONS,
+  getSkillDefinition,
+  getSkillsByCategory,
+  type SkillDefinition,
+  type SkillCategory,
+} from "./data/skill-icons";
 
 // Export skill unlocks for level-up notifications
 export {
@@ -432,6 +482,25 @@ export { createEmoteFactory } from "./extras/three/createEmoteFactory";
 export { createNode } from "./extras/three/createNode";
 export { glbToNodes } from "./extras/three/glbToNodes";
 export { Emotes } from "./data/playerEmotes";
+export {
+  DUEL_RULE_DEFINITIONS,
+  DUEL_RULE_LABELS,
+  EQUIPMENT_SLOT_DEFINITIONS,
+  EQUIPMENT_SLOT_LABELS,
+  EQUIPMENT_SLOTS_ORDERED,
+  VALID_DUEL_RULE_KEYS,
+  DUEL_EQUIPMENT_SLOT_KEYS,
+  isValidDuelRuleKey,
+  isValidEquipmentSlot,
+  getIncompatibleRules,
+  areRulesCompatible,
+  getDuelArenaConfig,
+  isPositionInsideCombatArena,
+  type DuelRuleDefinition,
+  type EquipmentSlotDefinition,
+  type DuelEquipmentSlot,
+  type DuelArenaConfig,
+} from "./data/duel-manifest";
 export { ControlPriorities } from "./systems/client/ControlPriorities";
 export { downloadFile } from "./utils/downloadFile";
 export * from "./utils/typeGuards";
@@ -798,9 +867,8 @@ export type {
   EquipmentSaveItem,
 } from "./types/network/database";
 
-// Export entity types
+// Export entity types (PlayerEntity class is exported above, so only export other types here)
 export type {
-  PlayerEntity,
   CharacterController,
   CharacterControllerOptions,
   NetworkPacket,

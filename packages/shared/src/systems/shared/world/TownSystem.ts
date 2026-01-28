@@ -44,8 +44,11 @@ import {
 import {
   BuildingGenerator,
   type BuildingLayout,
+  CELL_SIZE,
+  FOUNDATION_HEIGHT,
 } from "@hyperscape/procgen/building";
 import { BuildingCollisionService } from "./BuildingCollisionService";
+import type { FlatZone } from "../../../types/world/terrain";
 
 // Default configuration values
 const DEFAULTS = {
@@ -905,6 +908,10 @@ export class TownSystem extends System {
           building.rotation,
         );
 
+        // Register flat zone with TerrainSystem (like duel arena does)
+        // This ensures terrain heightmap is modified so players walk at correct height
+        this.registerBuildingFlatZone(building, generated.layout, groundY);
+
         registeredBuildings++;
       }
 
@@ -918,6 +925,63 @@ export class TownSystem extends System {
       "TownSystem",
       `Registered collision for ${registeredBuildings}/${totalBuildings} buildings`,
     );
+  }
+
+  /**
+   * Register a flat zone for a building with TerrainSystem.
+   *
+   * This is the key to making buildings walkable - same approach as duel arena:
+   * 1. Flat zones modify the terrain heightmap
+   * 2. getHeightAt() returns the flat zone height instead of procedural terrain
+   * 3. Players naturally walk at the correct elevation
+   *
+   * @param building - The building to register a flat zone for
+   * @param layout - The building's generated layout
+   * @param groundY - The ground height at the building position
+   */
+  private registerBuildingFlatZone(
+    building: TownBuilding,
+    layout: BuildingLayout,
+    groundY: number,
+  ): void {
+    if (!this.terrainSystem) return;
+
+    // Calculate building dimensions in world units
+    // Building width/depth are in cells, each cell is CELL_SIZE meters (4m)
+    const buildingWidth = layout.width * CELL_SIZE;
+    const buildingDepth = layout.depth * CELL_SIZE;
+
+    // Floor height is ground + foundation
+    // This is where players stand when inside the building
+    const floorHeight = groundY + FOUNDATION_HEIGHT;
+
+    // Create flat zone matching building footprint
+    // Add a small padding for entrance areas
+    const padding = 2; // 2m padding for entrance steps
+    const blendRadius = 3; // Smooth terrain transition over 3m
+
+    const zone: FlatZone = {
+      id: `building_${building.id}`,
+      centerX: building.position.x,
+      centerZ: building.position.z,
+      width: buildingWidth + padding * 2,
+      depth: buildingDepth + padding * 2,
+      height: floorHeight,
+      blendRadius,
+    };
+
+    // Register with TerrainSystem
+    const terrain = this.terrainSystem as {
+      registerFlatZone?: (zone: FlatZone) => void;
+    };
+    if (terrain.registerFlatZone) {
+      terrain.registerFlatZone(zone);
+      Logger.system(
+        "TownSystem",
+        `Registered flat zone for ${building.id} at (${zone.centerX.toFixed(0)}, ${zone.centerZ.toFixed(0)}) ` +
+          `size ${zone.width.toFixed(0)}x${zone.depth.toFixed(0)}m, height=${zone.height.toFixed(2)}m`,
+      );
+    }
   }
 
   /**

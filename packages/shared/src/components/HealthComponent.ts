@@ -163,11 +163,21 @@ export class HealthComponent extends Component {
       // Determine entity type for proper death handling
       const entityType = this.getEntityType();
 
+      // Capture position at moment of death to prevent stale position issues
+      const deathPosition = this.entity.position
+        ? {
+            x: this.entity.position.x,
+            y: this.entity.position.y,
+            z: this.entity.position.z,
+          }
+        : undefined;
+
       // Emit death event with complete data (fixes rare 0 HP bug)
       this.entity.world.emit(EventType.ENTITY_DEATH, {
         entityId: this.entity.id,
         killedBy: source?.id || "unknown",
         entityType: entityType,
+        deathPosition,
       });
     }
   }
@@ -189,12 +199,22 @@ export class HealthComponent extends Component {
     // Determine entity type for proper death handling
     const entityType = this.getEntityType();
 
+    // Capture position at moment of death to prevent stale position issues
+    const deathPosition = this.entity.position
+      ? {
+          x: this.entity.position.x,
+          y: this.entity.position.y,
+          z: this.entity.position.z,
+        }
+      : undefined;
+
     // Emit death event with complete data (fixes rare 0 HP bug)
     this.entity.world.emit(EventType.ENTITY_DEATH, {
       entityId: this.entity.id,
       lastDamageTime: this.lastDamageTime,
       killedBy: "unknown",
       entityType: entityType,
+      deathPosition,
     });
   }
 

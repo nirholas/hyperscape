@@ -8,9 +8,9 @@ import {
 import type {
   World,
   Player,
-  Vector3,
   TileCoord,
   WalkabilityChecker,
+  Position3D,
 } from "@hyperscape/shared";
 import { Entity } from "@hyperscape/shared";
 import { EventEmitter } from "events";
@@ -56,20 +56,28 @@ const MathUtils = {
     ),
 };
 
-interface MovablePlayer extends Entity {
+interface MovablePlayer {
   id: string;
-  node: THREE.Object3D;
+  type: string;
+  data?: Record<string, unknown>;
+  node: {
+    position: Position3D;
+    quaternion?: { x: number; y: number; z: number; w: number };
+  };
+  base?: unknown;
   isMoving?: boolean;
-  targetPosition?: Vector3;
-  movementPath?: Vector3[];
-  velocity: Vector3;
+  targetPosition?: Position3D;
+  movementPath?: Position3D[];
+  velocity: Position3D;
   speed?: number;
 }
 
 export class PlayerMovementSystem extends EventEmitter {
   private world: World;
-  private movingPlayers: Map<string, { target: Vector3; path?: Vector3[] }> =
-    new Map();
+  private movingPlayers: Map<
+    string,
+    { target: Position3D; path?: Position3D[] }
+  > = new Map();
   private lastUpdateTime: number = Date.now();
   private updateInterval: number = 50; // Network update interval in ms
   private lastNetworkUpdate: number = Date.now();
@@ -82,16 +90,22 @@ export class PlayerMovementSystem extends EventEmitter {
     this.world = world;
   }
 
-  async moveTo(playerId: string, target: Vector3): Promise<void> {
+  async moveTo(playerId: string, target: Position3D): Promise<void> {
+    const worldWithEntities = this.world as {
+      entities?: {
+        players?: Map<string, Entity>;
+        player?: Entity & { id?: string };
+      };
+    };
     const player =
-      this.world.entities.players?.get(playerId) ||
-      (playerId === this.world.entities.player?.id
-        ? this.world.entities.player
+      worldWithEntities.entities?.players?.get(playerId) ||
+      (playerId === worldWithEntities.entities?.player?.id
+        ? worldWithEntities.entities?.player
         : null);
     if (!player) return;
 
     // Find path to target
-    const path = this.findPath(player.node.position!, target);
+    const path = this.findPath(player.node.position as Position3D, target);
     if (!path) {
       throw new Error("No path found to target");
     }
@@ -112,20 +126,31 @@ export class PlayerMovementSystem extends EventEmitter {
     });
   }
 
-  startMovement(playerId: string, target: Vector3, path?: Vector3[]): void {
+  startMovement(
+    playerId: string,
+    target: Position3D,
+    path?: Position3D[],
+  ): void {
+    const worldWithEntities = this.world as {
+      entities?: {
+        players?: Map<string, Entity>;
+        player?: Entity & { id?: string };
+      };
+      network?: { send?: (event: string, data: unknown) => void };
+    };
     const player =
-      this.world.entities.players?.get(playerId) ||
-      (playerId === this.world.entities.player?.id
-        ? this.world.entities.player
+      worldWithEntities.entities?.players?.get(playerId) ||
+      (playerId === worldWithEntities.entities?.player?.id
+        ? worldWithEntities.entities?.player
         : null);
     if (!player) return;
 
     // Calculate path if not provided
     const finalPath = path ||
-      this.findPath(player.node.position!, target) || [target];
+      this.findPath(player.node.position as Position3D, target) || [target];
 
     // Set player moving (simulate with custom property)
-    const movablePlayer = player as MovablePlayer;
+    const movablePlayer = player as unknown as MovablePlayer;
     movablePlayer.isMoving = true;
     movablePlayer.targetPosition = target;
     movablePlayer.movementPath = finalPath;
@@ -135,8 +160,8 @@ export class PlayerMovementSystem extends EventEmitter {
     this.updatePlayerVelocity(movablePlayer, finalPath[0]);
 
     // Broadcast movement start via network
-    if (this.world.network.send) {
-      this.world.network.send("player:moved", {
+    if (worldWithEntities.network?.send) {
+      worldWithEntities.network.send("player:moved", {
         playerId,
         position: player.node.position,
         velocity: movablePlayer.velocity,
@@ -145,21 +170,30 @@ export class PlayerMovementSystem extends EventEmitter {
   }
 
   stopMovement(playerId: string): void {
+    const worldWithEntities = this.world as {
+      entities?: {
+        players?: Map<string, Entity>;
+        player?: Entity & { id?: string };
+      };
+      network?: { send?: (event: string, data: unknown) => void };
+    };
     const player =
-      this.world.entities.players?.get(playerId) ||
-      (playerId === this.world.entities.player?.id
-        ? this.world.entities.player
+      worldWithEntities.entities?.players?.get(playerId) ||
+      (playerId === worldWithEntities.entities?.player?.id
+        ? worldWithEntities.entities?.player
         : null);
-    if (!player) return; // Stop player movement (simulate)
-    const movablePlayer = player as MovablePlayer;
+    if (!player) return;
+
+    // Stop player movement (simulate)
+    const movablePlayer = player as unknown as MovablePlayer;
     movablePlayer.isMoving = false;
     // Reuse pre-allocated zero velocity reference (immutable, safe to share)
-    movablePlayer.velocity = _zeroVelocity as Vector3;
+    movablePlayer.velocity = _zeroVelocity as Position3D;
     this.movingPlayers.delete(playerId);
 
     // Broadcast stop via network - use pre-allocated zero velocity
-    if (this.world.network.send) {
-      this.world.network.send("player:moved", {
+    if (worldWithEntities.network?.send) {
+      worldWithEntities.network.send("player:moved", {
         playerId,
         position: player.node.position,
         velocity: _zeroVelocity,
@@ -169,13 +203,19 @@ export class PlayerMovementSystem extends EventEmitter {
 
   update(deltaTime: number): void {
     const now = Date.now();
+    const worldWithEntities = this.world as {
+      entities?: {
+        players?: Map<string, Entity>;
+        player?: Entity & { id?: string };
+      };
+    };
 
     // Update all moving players
     for (const [playerId, movement] of this.movingPlayers) {
       const player =
-        this.world.entities.players?.get(playerId) ||
-        (playerId === this.world.entities.player?.id
-          ? this.world.entities.player
+        worldWithEntities.entities?.players?.get(playerId) ||
+        (playerId === worldWithEntities.entities?.player?.id
+          ? worldWithEntities.entities?.player
           : null);
       if (!player) {
         this.movingPlayers.delete(playerId);
@@ -188,11 +228,11 @@ export class PlayerMovementSystem extends EventEmitter {
       // Check for collisions
       if (this.checkCollisions(player)) {
         // Handle collision - stop or slide
-        this.handleCollision(player as MovablePlayer, movement);
+        this.handleCollision(player as unknown as MovablePlayer, movement);
       }
 
       // Check if reached target
-      if (!(player as MovablePlayer).isMoving) {
+      if (!(player as unknown as MovablePlayer).isMoving) {
         this.movingPlayers.delete(playerId);
       }
     }
@@ -213,7 +253,7 @@ export class PlayerMovementSystem extends EventEmitter {
    *
    * @see packages/shared/src/systems/shared/movement/BFSPathfinder.ts
    */
-  findPath(start: Vector3, end: Vector3): Vector3[] | null {
+  findPath(start: Position3D, end: Position3D): Position3D[] | null {
     // Convert world coordinates to tile coordinates
     const startTile = worldToTile(start.x, start.z);
     const endTile = worldToTile(end.x, end.z);
@@ -225,7 +265,7 @@ export class PlayerMovementSystem extends EventEmitter {
     ): boolean => {
       // Convert tile back to world position for collision check
       const worldPos = tileToWorld(tile);
-      return !this.checkWorldCollision(worldPos as Vector3);
+      return !this.checkWorldCollision(worldPos as Position3D);
     };
 
     // Use shared BFSPathfinder (same as server uses for player movement)
@@ -237,48 +277,58 @@ export class PlayerMovementSystem extends EventEmitter {
     }
 
     // Convert tile path back to world coordinates
-    const worldPath: Vector3[] = tilePath.map((tile) => {
+    const worldPath: Position3D[] = tilePath.map((tile) => {
       const worldPos = tileToWorld(tile);
       return {
         x: worldPos.x,
         y: start.y, // Preserve original Y height
         z: worldPos.z,
-      } as Vector3;
+      };
     });
 
     return worldPath;
   }
 
-  private updatePlayerVelocity(player: MovablePlayer, target: Vector3): void {
+  private updatePlayerVelocity(
+    player: MovablePlayer,
+    target: Position3D,
+  ): void {
     if (!player.node.position) {
       return;
     }
 
-    const direction = MathUtils.subtract(target, player.node.position);
+    const direction = MathUtils.subtract(
+      target,
+      player.node.position as Position3D,
+    );
     const normalized = MathUtils.normalize(direction);
 
     if (player.speed) {
-      player.velocity = MathUtils.multiply(normalized, player.speed) as Vector3;
+      player.velocity = MathUtils.multiply(
+        normalized,
+        player.speed,
+      ) as Position3D;
     }
   }
 
-  private checkCollisions(player: Player): boolean {
+  private checkCollisions(player: Entity): boolean {
     // Check ahead of player
-    if (!player.node.position || !player.velocity) {
+    const movablePlayer = player as unknown as MovablePlayer;
+    if (!player.node.position || !movablePlayer.velocity) {
       return false;
     }
 
     const lookAhead = MathUtils.add(
-      player.node.position,
-      MathUtils.multiply(MathUtils.normalize(player.velocity), 0.5),
-    ) as Vector3;
+      player.node.position as Position3D,
+      MathUtils.multiply(MathUtils.normalize(movablePlayer.velocity), 0.5),
+    ) as Position3D;
 
     return this.checkWorldCollision(lookAhead);
   }
 
   private handleCollision(
     player: MovablePlayer,
-    _movement: { target: Vector3; path?: Vector3[] },
+    _movement: { target: Position3D; path?: Position3D[] },
   ): void {
     // Try to slide along obstacle
     const slideVelocity = this.calculateSlideVelocity(player);
@@ -300,7 +350,7 @@ export class PlayerMovementSystem extends EventEmitter {
     this._perpendicular2,
   ];
 
-  private calculateSlideVelocity(player: MovablePlayer): Vector3 | null {
+  private calculateSlideVelocity(player: MovablePlayer): Position3D | null {
     if (!player.velocity || !player.node.position || !player.speed) {
       return null;
     }
@@ -319,15 +369,15 @@ export class PlayerMovementSystem extends EventEmitter {
     for (let i = 0; i < this._perps.length; i++) {
       const perp = this._perps[i];
       const testPos = MathUtils.add(
-        player.node.position,
+        player.node.position as Position3D,
         MathUtils.multiply(MathUtils.normalize(perp), 0.5),
-      ) as Vector3;
+      ) as Position3D;
 
       if (!this.checkWorldCollision(testPos)) {
         return MathUtils.multiply(
           MathUtils.normalize(perp),
           player.speed * 0.7,
-        ) as Vector3;
+        ) as Position3D;
       }
     }
 
@@ -337,8 +387,8 @@ export class PlayerMovementSystem extends EventEmitter {
   // Pre-allocated network update payload to avoid allocation per update
   private readonly _networkUpdatePayload: {
     playerId: string;
-    position: THREE.Vector3 | null;
-    velocity: Vector3 | null;
+    position: Position3D | null;
+    velocity: Position3D | null;
   } = {
     playerId: "",
     position: null,
@@ -346,40 +396,54 @@ export class PlayerMovementSystem extends EventEmitter {
   };
 
   private sendNetworkUpdates(): void {
+    const worldWithNetwork = this.world as {
+      entities?: {
+        players?: Map<string, Entity>;
+        player?: Entity & { id?: string };
+      };
+      network?: { send?: (event: string, data: unknown) => void };
+    };
+
     // Send position updates for all moving players
     for (const [playerId, movement] of this.movingPlayers) {
       const player =
-        this.world.entities.players?.get(playerId) ||
-        (playerId === this.world.entities.player?.id
-          ? this.world.entities.player
+        worldWithNetwork.entities?.players?.get(playerId) ||
+        (playerId === worldWithNetwork.entities?.player?.id
+          ? worldWithNetwork.entities?.player
           : null);
       if (!player) continue;
 
       // Send via network - reuse pre-allocated payload object
-      if (this.world.network.send) {
+      if (worldWithNetwork.network?.send) {
         this._networkUpdatePayload.playerId = playerId;
-        this._networkUpdatePayload.position = player.node.position;
+        this._networkUpdatePayload.position = player.node
+          .position as Position3D;
         this._networkUpdatePayload.velocity = (
-          player as MovablePlayer
+          player as unknown as MovablePlayer
         ).velocity;
-        this.world.network.send("player:moved", this._networkUpdatePayload);
+        worldWithNetwork.network.send(
+          "player:moved",
+          this._networkUpdatePayload,
+        );
       }
     }
   }
 
   // Helper methods to simulate missing World functionality
-  private checkWorldCollision(position: Vector3): boolean {
+  private checkWorldCollision(position: Position3D): boolean {
     // Simulate basic collision detection
     // In a real implementation, this would check against world geometry
     return false;
   }
 
-  private updatePlayerPosition(player: Player, deltaTime: number): void {
+  private updatePlayerPosition(player: Entity, deltaTime: number): void {
     // Simulate player position update based on velocity
-    if (player.velocity && player.node.position) {
-      player.node.position.x += player.velocity.x * deltaTime;
-      player.node.position.y += player.velocity.y * deltaTime;
-      player.node.position.z += player.velocity.z * deltaTime;
+    const movablePlayer = player as unknown as MovablePlayer;
+    if (movablePlayer.velocity && player.node.position) {
+      const pos = player.node.position as { x: number; y: number; z: number };
+      pos.x += movablePlayer.velocity.x * deltaTime;
+      pos.y += movablePlayer.velocity.y * deltaTime;
+      pos.z += movablePlayer.velocity.z * deltaTime;
     }
   }
 }

@@ -20,8 +20,9 @@ import { createPortal } from "react-dom";
 import type { ClientWorld, InventorySlotItem } from "../../types";
 import { COLORS } from "../../constants";
 import { InventoryPanel } from "./InventoryPanel";
-import { useWindowStore, useThemeStore, useMobileLayout } from "hs-kit";
+import { useWindowStore, useThemeStore, useMobileLayout } from "@/ui";
 import { getItem } from "@hyperscape/shared";
+import { getItemIcon, formatItemName, formatPrice } from "@/utils";
 
 interface StoreItem {
   id: string;
@@ -66,65 +67,8 @@ const STORE_VISIBLE_ROWS = 5;
 const STORE_SCROLL_HEIGHT = STORE_VISIBLE_ROWS * 55;
 
 /**
- * Get icon for item based on itemId
- */
-function getItemIcon(itemId: string): string {
-  const id = itemId.toLowerCase();
-  if (id.includes("sword") || id.includes("dagger") || id.includes("scimitar"))
-    return "⚔️";
-  if (id.includes("shield") || id.includes("defender")) return "🛡️";
-  if (id.includes("helmet") || id.includes("helm") || id.includes("hat"))
-    return "⛑️";
-  if (
-    id.includes("body") ||
-    id.includes("platebody") ||
-    id.includes("chainmail")
-  )
-    return "👕";
-  if (id.includes("legs") || id.includes("platelegs")) return "👖";
-  if (id.includes("boots") || id.includes("boot")) return "👢";
-  if (id.includes("glove") || id.includes("gauntlet")) return "🧤";
-  if (id.includes("cape") || id.includes("cloak")) return "🧥";
-  if (id.includes("amulet") || id.includes("necklace")) return "📿";
-  if (id.includes("ring")) return "💍";
-  if (id.includes("arrow") || id.includes("bolt")) return "🏹";
-  if (id.includes("bow")) return "🎯";
-  if (id.includes("coins") || id.includes("gold")) return "🪙";
-  if (id.includes("fish") || id.includes("shrimp") || id.includes("lobster"))
-    return "🐟";
-  if (id.includes("log") || id.includes("wood")) return "🪵";
-  if (id.includes("ore") || id.includes("bar")) return "🪨";
-  if (id.includes("food") || id.includes("bread") || id.includes("meat"))
-    return "🍖";
-  if (id.includes("potion")) return "🧪";
-  if (id.includes("rune")) return "🔮";
-  if (id.includes("bone")) return "🦴";
-  if (id.includes("hatchet") || id.includes("axe")) return "🪓";
-  if (id.includes("pickaxe")) return "⛏️";
-  if (id.includes("fishing") || id.includes("rod")) return "🎣";
-  if (id.includes("tinderbox")) return "🔥";
-  return "📦";
-}
-
-/**
- * Format item name from itemId
- */
-function formatItemName(itemId: string): string {
-  return itemId.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
-}
-
-/**
- * Format price for display
- */
-function formatPrice(price: number): string {
-  if (price >= 1000000) return `${(price / 1000000).toFixed(1)}M`;
-  if (price >= 1000) return `${Math.floor(price / 1000)}K`;
-  return String(price);
-}
-
-/**
  * Context Menu Component
- * Uses hs-kit theme system for consistent styling.
+ * Uses theme system for consistent styling.
  */
 function ContextMenu({
   menu,
@@ -186,7 +130,7 @@ function ContextMenu({
   ];
 
   const menuContainerStyle: CSSProperties = {
-    background: `linear-gradient(135deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+    background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
     border: `1px solid ${theme.colors.border.default}`,
     borderRadius: theme.borderRadius.md,
     boxShadow: theme.shadows.lg,

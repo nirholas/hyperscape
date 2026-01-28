@@ -58,3 +58,37 @@ export async function hashFile(file: File | Blob): Promise<string> {
     .join("");
   return hash;
 }
+
+/**
+ * TypeScript exhaustiveness check helper
+ *
+ * Use in switch statements on discriminated unions to ensure all cases are handled.
+ * TypeScript will report a compile-time error if any case is missing.
+ *
+ * @param value - The value that should be of type `never` if all cases are handled
+ * @param message - Optional custom error message
+ * @throws Error if called at runtime (indicates unhandled case)
+ *
+ * @example
+ * ```typescript
+ * type Status = 'pending' | 'approved' | 'rejected';
+ *
+ * function handleStatus(status: Status): string {
+ *   switch (status) {
+ *     case 'pending':
+ *       return 'Waiting...';
+ *     case 'approved':
+ *       return 'Success!';
+ *     case 'rejected':
+ *       return 'Failed';
+ *     default:
+ *       return assertNever(status); // TypeScript error if case is missing
+ *   }
+ * }
+ * ```
+ */
+export function assertNever(value: never, message?: string): never {
+  throw new Error(
+    message ?? `Unexpected value in exhaustive check: ${JSON.stringify(value)}`,
+  );
+}

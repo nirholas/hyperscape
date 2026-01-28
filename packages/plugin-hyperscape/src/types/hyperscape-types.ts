@@ -1,12 +1,14 @@
 // Hyperscape-specific types and interfaces
-import { World, Entity, System } from "./core-types";
 import type {
+  World,
+  Entity,
+  System,
   Player,
   Vector3,
   Quaternion,
   Component,
   WorldOptions,
-} from "@hyperscape/shared";
+} from "./core-types";
 
 import type { UUID } from "@elizaos/core";
 
@@ -20,9 +22,9 @@ export interface MockWorldConfig {
   persistence?: boolean;
   assets?: string[];
   environment?: {
-    lighting?: any;
+    lighting?: unknown;
     skybox?: string;
-    terrain?: any;
+    terrain?: unknown;
   };
 }
 
@@ -47,7 +49,7 @@ export interface AgentSpawnConfig {
   rotation?: Quaternion;
   avatar?: string;
   permissions?: string[];
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 // World event types
@@ -62,7 +64,7 @@ export interface WorldEvent {
   worldId: string;
   entityId?: string;
   playerId?: UUID;
-  data?: any;
+  data?: unknown;
   timestamp: number;
 }
 
@@ -161,13 +163,13 @@ export interface EntityTemplate {
   position?: Vector3;
   rotation?: Quaternion;
   scale?: Vector3;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 // Component template
 export interface ComponentTemplate {
   type: string;
-  data: Record<string, any>;
+  data: Record<string, unknown>;
 }
 
 // Agent behavior configuration
@@ -175,14 +177,14 @@ export interface AgentBehaviorConfig {
   agentId: UUID;
   behaviors: BehaviorTemplate[];
   priorities: Record<string, number>;
-  conditions: Record<string, any>;
+  conditions: Record<string, unknown>;
 }
 
 // Behavior template
 export interface BehaviorTemplate {
   name: string;
   type: "movement" | "interaction" | "communication" | "combat" | "idle";
-  config: Record<string, any>;
+  config: Record<string, unknown>;
   triggers: string[];
   cooldown?: number;
 }

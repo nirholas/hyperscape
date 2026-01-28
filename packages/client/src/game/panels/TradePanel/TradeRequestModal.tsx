@@ -5,11 +5,11 @@
  * Shows the requesting player's name and combat level with
  * Accept/Decline buttons.
  *
- * Uses ModalWindow from hs-kit for consistent styling and behavior.
+ * Uses ModalWindow for consistent styling and behavior.
  */
 
 import { useCallback, useState, type CSSProperties } from "react";
-import { ModalWindow, useThemeStore } from "hs-kit";
+import { ModalWindow, useThemeStore } from "@/ui";
 import type { TradeRequestModalState } from "@hyperscape/shared";
 
 interface TradeRequestModalProps {
@@ -36,7 +36,7 @@ export function TradeRequestModal({
   const { name, level } = state.fromPlayer;
 
   const playerInfoStyle: CSSProperties = {
-    background: theme.colors.background.tertiary,
+    background: theme.colors.background.panelSecondary,
     border: `1px solid ${theme.colors.border.default}`,
     borderRadius: theme.borderRadius.md,
     padding: theme.spacing.md,

@@ -18,7 +18,7 @@ import React, {
   useCallback,
   type CSSProperties,
 } from "react";
-import { useMobileLayout, useThemeStore } from "hs-kit";
+import { useMobileLayout, useThemeStore } from "@/ui";
 import {
   Backpack,
   Swords,
@@ -35,11 +35,14 @@ import type { ClientWorld } from "../../types";
 import {
   getMobileUISizes,
   type MobileUISizes,
-} from "../../components/interface/mobileUISizes";
+} from "../interface/mobileUISizes";
 import { zIndex, shadows, borderRadius } from "../../constants";
 import { Minimap } from "./Minimap";
-import { MinimapStaminaOrb } from "../../components/MinimapStaminaBar";
-import { MinimapHomeTeleportOrb } from "../../components/MinimapHomeTeleportOrb";
+import { MinimapStaminaOrb } from "./MinimapStaminaBar";
+import { MinimapHomeTeleportOrb } from "./MinimapHomeTeleportOrb";
+
+/** Pre-allocated vector for compass yaw calculation - avoids GC pressure in RAF loop */
+const _tempCompassForward = new THREE.Vector3();
 
 /** Radial button configuration */
 interface RadialButtonConfig {
@@ -349,16 +352,16 @@ export function RadialMinimapMenu({
   useEffect(() => {
     if (!world?.camera) return;
 
-    const tempForward = new THREE.Vector3();
     let animationId: number;
 
     const updateYaw = () => {
       if (world.camera) {
-        world.camera.getWorldDirection(tempForward);
-        tempForward.y = 0;
-        if (tempForward.lengthSq() > 0.0001) {
-          tempForward.normalize();
-          const yaw = Math.atan2(tempForward.x, tempForward.z);
+        // Reuse pre-allocated vector to avoid GC pressure in RAF loop
+        world.camera.getWorldDirection(_tempCompassForward);
+        _tempCompassForward.y = 0;
+        if (_tempCompassForward.lengthSq() > 0.0001) {
+          _tempCompassForward.normalize();
+          const yaw = Math.atan2(_tempCompassForward.x, _tempCompassForward.z);
           const newYawDeg = THREE.MathUtils.radToDeg(yaw);
           setYawDeg((prev) =>
             Math.abs(prev - newYawDeg) > 0.5 ? newYawDeg : prev,
@@ -500,12 +503,14 @@ export function RadialMinimapMenu({
       {/* Minimap */}
       <div style={minimapWrapperStyle}>
         {/* Minimap canvas - size accounts for container border */}
+        {/* Use a larger canvas that will be clipped to circle - this ensures the minimap fills the radial container */}
+        {/* Zoom is reduced to ~20 so content fills the circular view (compensates for corner clipping) */}
         <div style={minimapContainerStyle}>
           <Minimap
             world={world}
-            width={diameter - 4}
-            height={diameter - 4}
-            zoom={40}
+            width={diameter}
+            height={diameter}
+            zoom={20}
             embedded={true}
             resizable={false}
             isVisible={true}

@@ -25,6 +25,14 @@ export { SmeltingPanel } from "./SmeltingPanel";
 export { SmithingPanel } from "./SmithingPanel";
 export { LootWindowPanel } from "./LootWindowPanel";
 export { TradePanel, TradeRequestModal } from "./TradePanel";
+export {
+  DuelChallengeModal,
+  DuelPanel,
+  createDefaultDuelPanelState,
+  type DuelChallengeModalState,
+  type DuelPanelState,
+  type DuelScreenState,
+} from "./DuelPanel";
 
 // Quest Panels
 export { QuestJournalPanel } from "./QuestJournalPanel";

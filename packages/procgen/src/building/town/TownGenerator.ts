@@ -41,38 +41,46 @@ import {
 } from "./constants";
 
 // Import grid alignment utilities from building generator
-import { snapToBuildingGrid, BUILDING_GRID_SNAP } from "../generator/constants";
+import { snapToBuildingGrid } from "../generator/constants";
 
 // ============================================================
 // CONSTANTS - Single source of truth for all dimensions
+// Grid-aligned to CELL_SIZE (4m) for proper tile alignment
 // ============================================================
 
+import { CELL_SIZE } from "../generator/constants";
+
 const TOWN_CONSTANTS = {
-  // Road dimensions
-  ROAD_WIDTH: 6,
-  ROAD_HALF_WIDTH: 3,
+  // Road dimensions (grid-aligned)
+  ROAD_WIDTH: 2 * CELL_SIZE, // 8m = 2 cells wide
+  ROAD_HALF_WIDTH: CELL_SIZE, // 4m = 1 cell
 
-  // Building placement
-  BUILDING_PADDING: 4, // Min gap between road edge and building edge
-  MAX_BUILDING_HALF_DEPTH: 6, // Largest buildings (inn, long-house)
-  LOT_WIDTH: 14, // Spacing between buildings along road
+  // Building placement (grid-aligned)
+  BUILDING_PADDING: CELL_SIZE, // 4m = 1 cell gap between road edge and building
+  MAX_BUILDING_HALF_DEPTH: 2.5 * CELL_SIZE, // 10m = half of largest building (long-house: 5 cells deep)
+  LOT_WIDTH: 4 * CELL_SIZE, // 16m = 4 cells spacing between buildings
 
-  // Computed setback: roadHalfWidth + buildingPadding + maxBuildingHalfDepth
+  // Buffer for floating point precision and grid snap alignment
+  SETBACK_BUFFER: 1, // 1m extra clearance to avoid edge cases
+
+  // Computed setback: roadHalfWidth + buildingPadding + maxBuildingHalfDepth + buffer
+  // = 4 + 4 + 10 + 1 = 19m (will be snapped to grid by snapToBuildingGrid)
   get SETBACK() {
     return (
       this.ROAD_HALF_WIDTH +
       this.BUILDING_PADDING +
-      this.MAX_BUILDING_HALF_DEPTH
+      this.MAX_BUILDING_HALF_DEPTH +
+      this.SETBACK_BUFFER
     );
-  }, // 13m
+  },
 
   // Path dimensions
-  PATH_WIDTH: 1.5,
+  PATH_WIDTH: 2, // 2m = half cell, grid-aligned
 
-  // Minimum distances
-  MIN_BUILDING_SPACING: 3, // Min gap between buildings
-  MIN_ROAD_LENGTH: 10,
-  ROAD_TRIM_PADDING: 8, // How far past last building road extends
+  // Minimum distances (grid-aligned)
+  MIN_BUILDING_SPACING: CELL_SIZE, // 4m = 1 cell gap between buildings
+  MIN_ROAD_LENGTH: 3 * CELL_SIZE, // 12m = 3 cells minimum road length
+  ROAD_TRIM_PADDING: 2 * CELL_SIZE, // 8m = 2 cells past last building
 } as const;
 
 // ============================================================
@@ -766,8 +774,34 @@ export class TownGenerator {
       const facingRight = Math.atan2(perpX, perpZ);
 
       // Leave space at ends for intersections
-      const startOffset = LOT_WIDTH * 1.5;
-      const endOffset = LOT_WIDTH * 1.5;
+      // Scale offsets based on road length to ensure we can fit buildings on shorter roads
+      const idealOffset = LOT_WIDTH * 1.5; // 24m
+      const minOffset = LOT_WIDTH * 0.5; // 8m minimum
+
+      // Calculate how much space we need and scale offsets if road is short
+      const minUsableForOneLot = LOT_WIDTH; // Need at least one lot width
+      const idealTotalOffset = idealOffset * 2;
+      const availableAfterIdeal =
+        roadLength - idealTotalOffset - minUsableForOneLot;
+
+      let startOffset: number;
+      let endOffset: number;
+
+      if (availableAfterIdeal >= 0) {
+        // Road is long enough for ideal offsets
+        startOffset = idealOffset;
+        endOffset = idealOffset;
+      } else {
+        // Scale down offsets proportionally, but keep a minimum
+        const excessNeeded = -availableAfterIdeal;
+        const offsetReduction = Math.min(
+          excessNeeded / 2,
+          idealOffset - minOffset,
+        );
+        startOffset = idealOffset - offsetReduction;
+        endOffset = idealOffset - offsetReduction;
+      }
+
       const usableLength = roadLength - startOffset - endOffset;
       const numLots = Math.floor(usableLength / LOT_WIDTH);
 

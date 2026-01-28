@@ -163,9 +163,16 @@ export class EventBridge {
    */
   private setupInventoryEvents(): void {
     try {
-      // Broadcast inventory updates to all clients
-      this.world.on(EventType.INVENTORY_UPDATED, (...args: unknown[]) => {
-        this.broadcast.sendToAll("inventoryUpdated", args[0]);
+      // Send inventory updates to specific player only (not all clients!)
+      this.world.on(EventType.INVENTORY_UPDATED, (payload: unknown) => {
+        const data = payload as {
+          playerId: string;
+          items: unknown[];
+          coins?: number;
+        };
+        if (data.playerId) {
+          this.broadcast.sendToPlayer(data.playerId, "inventoryUpdated", data);
+        }
       });
 
       // Send inventory initialization to specific player
@@ -502,13 +509,36 @@ export class EventBridge {
       // Forward player death state changes to ALL clients
       // CRITICAL: Broadcast to all so other players see death animation and position updates
       this.world.on(EventType.PLAYER_SET_DEAD, (payload: unknown) => {
-        const data = payload as { playerId: string; isDead: boolean };
+        const data = payload as {
+          playerId: string;
+          isDead: boolean;
+          deathPosition?:
+            | { x: number; y: number; z: number }
+            | [number, number, number];
+        };
 
         if (data.playerId) {
           // Broadcast to ALL players so they can:
           // 1. See death animation on the dying player
           // 2. Clear tile interpolator state (allows respawn position to apply)
-          this.broadcast.sendToAll("playerSetDead", data);
+          // CRITICAL: Include deathPosition so clients can position death animation correctly
+          this.broadcast.sendToAll("playerSetDead", {
+            playerId: data.playerId,
+            isDead: data.isDead,
+            deathPosition: data.deathPosition,
+          });
+
+          // CRITICAL: Also broadcast entityModified with death animation
+          // Without this, remote players won't see the death animation play
+          // (markNetworkDirty only marks for next sync cycle, not immediate)
+          if (data.isDead) {
+            this.broadcast.sendToAll("entityModified", {
+              id: data.playerId,
+              changes: {
+                e: "death",
+              },
+            });
+          }
         }
       });
 

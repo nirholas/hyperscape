@@ -2,11 +2,11 @@
  * Skill Guide Panel
  * OSRS-style popup showing skill unlocks at each level
  *
- * Uses ModalWindow from hs-kit for consistent styling and behavior.
+ * Uses ModalWindow for consistent styling and behavior.
  */
 
 import React, { useMemo } from "react";
-import { ModalWindow, useThemeStore } from "hs-kit";
+import { ModalWindow, useThemeStore } from "@/ui";
 import type { SkillUnlock } from "@hyperscape/shared";
 import type { CSSProperties } from "react";
 
@@ -45,7 +45,7 @@ function UnlockRow({ unlock, isUnlocked, isNext }: UnlockRowProps) {
       };
     }
     return {
-      background: theme.colors.background.tertiary,
+      background: theme.colors.background.panelSecondary,
       border: "1px solid transparent",
       opacity: 0.6,
     };

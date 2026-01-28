@@ -1,0 +1,2726 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Procedural Rock Generator</title>
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #0d1117;
+      font-family: "Inter", "SF Pro Text", system-ui, -apple-system, sans-serif;
+    }
+    #canvas {
+      width: 100vw;
+      height: 100vh;
+      display: block;
+    }
+    #ui {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      width: 320px;
+      max-height: calc(100vh - 32px);
+      overflow-y: auto;
+      padding: 14px;
+      border-radius: 10px;
+      border: 1px solid rgba(140, 160, 180, 0.25);
+      background: rgba(12, 16, 24, 0.92);
+      color: #e5e9f0;
+      backdrop-filter: blur(6px);
+    }
+    #ui::-webkit-scrollbar {
+      width: 6px;
+    }
+    #ui::-webkit-scrollbar-thumb {
+      background: rgba(140, 160, 180, 0.3);
+      border-radius: 3px;
+    }
+    #ui .title {
+      font-size: 12px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: #8bd3ff;
+      margin-bottom: 12px;
+    }
+    .section {
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(120, 140, 160, 0.15);
+    }
+    .section:last-child {
+      border-bottom: none;
+      margin-bottom: 0;
+    }
+    .section-title {
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #6b7a8a;
+      margin-bottom: 8px;
+    }
+    .control {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 8px;
+    }
+    .control label {
+      font-size: 11px;
+      color: #b2bdc7;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .control label span {
+      color: #8bd3ff;
+      font-family: monospace;
+      font-size: 10px;
+    }
+    .control.row {
+      flex-direction: row;
+      align-items: center;
+      gap: 8px;
+    }
+    select,
+    input[type="text"],
+    input[type="number"],
+    button {
+      appearance: none;
+      border: 1px solid rgba(130, 150, 170, 0.3);
+      background: #121826;
+      color: #e5e9f0;
+      padding: 6px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-family: inherit;
+    }
+    input[type="range"] {
+      width: 100%;
+      height: 4px;
+      background: rgba(130, 150, 170, 0.3);
+      border-radius: 2px;
+      appearance: none;
+      cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      background: #8bd3ff;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+    input[type="color"] {
+      width: 100%;
+      height: 28px;
+      border: 1px solid rgba(130, 150, 170, 0.3);
+      border-radius: 6px;
+      background: #121826;
+      cursor: pointer;
+      padding: 2px;
+    }
+    button {
+      cursor: pointer;
+      font-weight: 600;
+      transition: border-color 0.15s ease, transform 0.15s ease;
+      width: 100%;
+    }
+    button:hover {
+      border-color: rgba(139, 211, 255, 0.8);
+      transform: translateY(-1px);
+    }
+    button.primary {
+      background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+      border-color: #3b82f6;
+    }
+    button.export {
+      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+      border-color: #10b981;
+    }
+    .checkbox {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: #b2bdc7;
+      cursor: pointer;
+    }
+    .checkbox input {
+      width: 14px;
+      height: 14px;
+      accent-color: #8bd3ff;
+    }
+    #stats {
+      margin-top: 8px;
+      padding: 8px;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 6px;
+      font-size: 10px;
+      line-height: 1.6;
+      color: #9aa6b2;
+      font-family: monospace;
+    }
+    #stats strong {
+      color: #8bd3ff;
+    }
+    .btn-row {
+      display: flex;
+      gap: 8px;
+    }
+    .btn-row button {
+      flex: 1;
+    }
+    .presets {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .presets button {
+      width: auto;
+      padding: 4px 8px;
+      font-size: 10px;
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <div class="title">Procedural Rock Generator</div>
+    
+    <div class="section">
+      <div class="section-title">Presets</div>
+      <div class="presets">
+        <button type="button" data-preset="boulder">Boulder</button>
+        <button type="button" data-preset="pebble">Pebble</button>
+        <button type="button" data-preset="crystal">Crystal</button>
+        <button type="button" data-preset="asteroid">Asteroid</button>
+        <button type="button" data-preset="cliff">Cliff</button>
+        <button type="button" data-preset="lowpoly">Low Poly</button>
+      </div>
+      <div class="section-title" style="margin-top: 8px;">Rock Types</div>
+      <div class="presets">
+        <button type="button" data-preset="sandstone">Sandstone</button>
+        <button type="button" data-preset="limestone">Limestone</button>
+        <button type="button" data-preset="granite">Granite</button>
+        <button type="button" data-preset="marble">Marble</button>
+        <button type="button" data-preset="basalt">Basalt</button>
+        <button type="button" data-preset="slate">Slate</button>
+        <button type="button" data-preset="obsidian">Obsidian</button>
+        <button type="button" data-preset="quartzite">Quartzite</button>
+      </div>
+    </div>
+    
+    <div class="section">
+      <div class="section-title">Seed</div>
+      <div class="control row">
+        <input id="seedInput" type="text" value="rock-001" style="flex: 1" />
+        <button id="randomSeed" type="button" style="width: auto; padding: 6px 12px;">Random</button>
+      </div>
+    </div>
+    
+    <div class="section">
+      <div class="section-title">Geometry</div>
+      <div class="control">
+        <label for="baseShape">Base Shape</label>
+        <select id="baseShape">
+          <option value="icosahedron" selected>Icosahedron</option>
+          <option value="sphere">Sphere</option>
+          <option value="box">Box</option>
+          <option value="dodecahedron">Dodecahedron</option>
+          <option value="octahedron">Octahedron</option>
+        </select>
+      </div>
+      <div class="control">
+        <label>Subdivisions <span id="resolutionValue">5</span></label>
+        <input type="range" id="resolution" min="2" max="7" value="5" step="1" />
+      </div>
+    </div>
+    
+    <div class="section">
+      <div class="section-title">Shape Scale</div>
+      <div class="control">
+        <label>Scale X <span id="scaleXValue">1.00</span></label>
+        <input type="range" id="scaleX" min="0.3" max="2.0" value="1.0" step="0.05" />
+      </div>
+      <div class="control">
+        <label>Scale Y <span id="scaleYValue">0.80</span></label>
+        <input type="range" id="scaleY" min="0.3" max="2.0" value="0.8" step="0.05" />
+      </div>
+      <div class="control">
+        <label>Scale Z <span id="scaleZValue">1.00</span></label>
+        <input type="range" id="scaleZ" min="0.3" max="2.0" value="1.0" step="0.05" />
+      </div>
+    </div>
+    
+    <div class="section">
+      <div class="section-title">Noise Displacement</div>
+      <div class="control">
+        <label>Noise Scale <span id="noiseScaleValue">1.5</span></label>
+        <input type="range" id="noiseScale" min="0.5" max="5.0" value="1.5" step="0.1" />
+      </div>
+      <div class="control">
+        <label>Noise Amplitude <span id="noiseAmplitudeValue">0.25</span></label>
+        <input type="range" id="noiseAmplitude" min="0" max="1.0" value="0.25" step="0.01" />
+      </div>
+      <div class="control">
+        <label>Noise Octaves <span id="noiseOctavesValue">5</span></label>
+        <input type="range" id="noiseOctaves" min="1" max="8" value="5" step="1" />
+      </div>
+      <div class="control">
+        <label>Noise Lacunarity <span id="noiseLacunarityValue">2.0</span></label>
+        <input type="range" id="noiseLacunarity" min="1.5" max="3.0" value="2.0" step="0.1" />
+      </div>
+      <div class="control">
+        <label>Noise Persistence <span id="noisePersistenceValue">0.50</span></label>
+        <input type="range" id="noisePersistence" min="0.2" max="0.8" value="0.5" step="0.05" />
+      </div>
+    </div>
+    
+    <div class="section">
+      <div class="section-title">Edge Cracking</div>
+      <div class="control">
+        <label>Crack Depth <span id="crackDepthValue">0.04</span></label>
+        <input type="range" id="crackDepth" min="0" max="0.5" value="0.04" step="0.01" />
+      </div>
+      <div class="control">
+        <label>Crack Frequency <span id="crackFrequencyValue">3.0</span></label>
+        <input type="range" id="crackFrequency" min="1.0" max="10.0" value="3.0" step="0.5" />
+      </div>
+    </div>
+    
+    <div class="section">
+      <div class="section-title">Smoothing</div>
+      <div class="control">
+        <label>Smooth Iterations <span id="smoothIterationsValue">2</span></label>
+        <input type="range" id="smoothIterations" min="0" max="10" value="2" step="1" />
+      </div>
+      <div class="control">
+        <label>Smooth Strength <span id="smoothStrengthValue">0.50</span></label>
+        <input type="range" id="smoothStrength" min="0" max="1.0" value="0.5" step="0.05" />
+      </div>
+    </div>
+    
+    <div class="section">
+      <div class="section-title">Vertex Colors</div>
+      <div class="control">
+        <label>Base Color</label>
+        <input type="color" id="baseColor" value="#5a524a" />
+      </div>
+      <div class="control">
+        <label>Secondary Color</label>
+        <input type="color" id="secondaryColor" value="#7a6e62" />
+      </div>
+      <div class="control">
+        <label>Accent Color (Crevices)</label>
+        <input type="color" id="accentColor" value="#3d3832" />
+      </div>
+      <div class="control">
+        <label>Color Variation <span id="colorVariationValue">0.08</span></label>
+        <input type="range" id="colorVariation" min="0" max="0.5" value="0.08" step="0.01" />
+      </div>
+      <div class="control">
+        <label>Height Blend <span id="heightBlendValue">0.30</span></label>
+        <input type="range" id="heightBlend" min="0" max="1.0" value="0.30" step="0.05" />
+      </div>
+      <div class="control">
+        <label>Slope Blend <span id="slopeBlendValue">0.35</span></label>
+        <input type="range" id="slopeBlend" min="0" max="1.0" value="0.35" step="0.05" />
+      </div>
+      <div class="control">
+        <label>AO Intensity <span id="aoIntensityValue">0.25</span></label>
+        <input type="range" id="aoIntensity" min="0" max="1.0" value="0.25" step="0.05" />
+      </div>
+    </div>
+    
+    <div class="section">
+      <div class="section-title">Color Mode</div>
+      <div class="control">
+        <label for="colorMode">Mode</label>
+        <select id="colorMode">
+          <option value="vertex" selected>Vertex Colors Only</option>
+          <option value="texture">Texture Only</option>
+          <option value="blend">Blend (Texture + Vertex)</option>
+        </select>
+      </div>
+      <div class="control">
+        <label>Texture Blend <span id="textureBlendValue">0.50</span></label>
+        <input type="range" id="textureBlend" min="0" max="1.0" value="0.5" step="0.05" />
+      </div>
+    </div>
+    
+    <div class="section">
+      <div class="section-title">Procedural Texture</div>
+      <div class="control">
+        <label for="texturePattern">Pattern Type</label>
+        <select id="texturePattern">
+          <option value="noise" selected>Noise</option>
+          <option value="layered">Layered/Strata</option>
+          <option value="speckled">Speckled/Granite</option>
+          <option value="veined">Veined/Marble</option>
+          <option value="cellular">Cellular/Cracked</option>
+          <option value="flow">Flow/Molten</option>
+        </select>
+      </div>
+      <div class="control">
+        <label>Texture Scale <span id="textureScaleValue">4.0</span></label>
+        <input type="range" id="textureScale" min="1.0" max="20.0" value="4.0" step="0.5" />
+      </div>
+      <div class="control">
+        <label>Pattern Detail <span id="patternDetailValue">4</span></label>
+        <input type="range" id="patternDetail" min="1" max="8" value="4" step="1" />
+      </div>
+      <div class="control">
+        <label>Texture Contrast <span id="textureContrastValue">1.0</span></label>
+        <input type="range" id="textureContrast" min="0.5" max="2.0" value="1.0" step="0.1" />
+      </div>
+      <div class="control">
+        <label>Roughness Variation <span id="roughnessVariationValue">0.15</span></label>
+        <input type="range" id="roughnessVariation" min="0" max="0.5" value="0.15" step="0.05" />
+      </div>
+    </div>
+    
+    <div class="section">
+      <div class="section-title">Material</div>
+      <div class="control">
+        <label>Base Roughness <span id="baseRoughnessValue">0.90</span></label>
+        <input type="range" id="baseRoughness" min="0.0" max="1.0" value="0.90" step="0.05" />
+      </div>
+      <div class="control">
+        <label>Metalness <span id="metalnessValue">0.00</span></label>
+        <input type="range" id="metalness" min="0.0" max="1.0" value="0.0" step="0.05" />
+      </div>
+    </div>
+    
+    <div class="section">
+      <div class="section-title">Display</div>
+      <div class="control">
+        <label class="checkbox">
+          <input id="showWireframe" type="checkbox" />
+          Show Wireframe
+        </label>
+      </div>
+      <div class="control">
+        <label class="checkbox">
+          <input id="showGrid" type="checkbox" checked />
+          Show Grid
+        </label>
+      </div>
+      <div class="control">
+        <label class="checkbox">
+          <input id="autoRotate" type="checkbox" />
+          Auto Rotate
+        </label>
+      </div>
+      <div class="control">
+        <label class="checkbox">
+          <input id="flatShading" type="checkbox" />
+          Flat Shading
+        </label>
+      </div>
+    </div>
+    
+    <div class="section">
+      <div class="section-title">UV Mapping</div>
+      <div class="control">
+        <label for="uvMethod">UV Method</label>
+        <select id="uvMethod">
+          <option value="box" selected>Box Projection</option>
+          <option value="spherical">Spherical</option>
+          <option value="unwrap">Smart Unwrap</option>
+        </select>
+      </div>
+      <div class="control">
+        <label>Bake Resolution <span id="bakeResolutionValue">1024</span></label>
+        <select id="bakeResolution">
+          <option value="512">512</option>
+          <option value="1024" selected>1024</option>
+          <option value="2048">2048</option>
+        </select>
+      </div>
+      <div class="control">
+        <label class="checkbox">
+          <input id="useTriplanar" type="checkbox" checked />
+          True Triplanar Sampling
+        </label>
+      </div>
+    </div>
+    
+    <div class="section">
+      <div class="btn-row">
+        <button id="generateBtn" type="button" class="primary">Generate</button>
+      </div>
+      <div style="height: 8px;"></div>
+      <div class="btn-row">
+        <button id="exportGLB" type="button" class="export">Export GLB</button>
+        <button id="exportOBJ" type="button" class="export">Export OBJ</button>
+      </div>
+      <div style="height: 8px;"></div>
+      <div class="btn-row">
+        <button id="bakeTexture" type="button" class="export">Bake Texture</button>
+        <button id="exportPNG" type="button" class="export">Export PNG</button>
+      </div>
+    </div>
+    
+    <div id="stats"></div>
+    <canvas id="bakeCanvas" style="display:none;"></canvas>
+  </div>
+  <canvas id="canvas"></canvas>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module">
+    import * as THREE from "three";
+    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+    import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
+    import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
+
+    // ============================================================
+    // SIMPLEX NOISE IMPLEMENTATION
+    // ============================================================
+    class SimplexNoise {
+      constructor(seed = 0) {
+        this.p = new Uint8Array(256);
+        this.perm = new Uint8Array(512);
+        this.permMod12 = new Uint8Array(512);
+        
+        // Initialize permutation table with seed
+        for (let i = 0; i < 256; i++) {
+          this.p[i] = i;
+        }
+        
+        // Shuffle using seed
+        let s = seed;
+        for (let i = 255; i > 0; i--) {
+          s = (s * 1103515245 + 12345) & 0x7fffffff;
+          const j = s % (i + 1);
+          [this.p[i], this.p[j]] = [this.p[j], this.p[i]];
+        }
+        
+        // Extend permutation table
+        for (let i = 0; i < 512; i++) {
+          this.perm[i] = this.p[i & 255];
+          this.permMod12[i] = this.perm[i] % 12;
+        }
+        
+        // Gradients for 3D
+        this.grad3 = new Float32Array([
+          1,1,0, -1,1,0, 1,-1,0, -1,-1,0,
+          1,0,1, -1,0,1, 1,0,-1, -1,0,-1,
+          0,1,1, 0,-1,1, 0,1,-1, 0,-1,-1
+        ]);
+        
+        this.F3 = 1.0 / 3.0;
+        this.G3 = 1.0 / 6.0;
+      }
+      
+      noise3D(x, y, z) {
+        const { perm, permMod12, grad3, F3, G3 } = this;
+        
+        // Skew the input space
+        const s = (x + y + z) * F3;
+        const i = Math.floor(x + s);
+        const j = Math.floor(y + s);
+        const k = Math.floor(z + s);
+        
+        const t = (i + j + k) * G3;
+        const X0 = i - t;
+        const Y0 = j - t;
+        const Z0 = k - t;
+        
+        const x0 = x - X0;
+        const y0 = y - Y0;
+        const z0 = z - Z0;
+        
+        // Determine simplex
+        let i1, j1, k1, i2, j2, k2;
+        if (x0 >= y0) {
+          if (y0 >= z0) { i1=1; j1=0; k1=0; i2=1; j2=1; k2=0; }
+          else if (x0 >= z0) { i1=1; j1=0; k1=0; i2=1; j2=0; k2=1; }
+          else { i1=0; j1=0; k1=1; i2=1; j2=0; k2=1; }
+        } else {
+          if (y0 < z0) { i1=0; j1=0; k1=1; i2=0; j2=1; k2=1; }
+          else if (x0 < z0) { i1=0; j1=1; k1=0; i2=0; j2=1; k2=1; }
+          else { i1=0; j1=1; k1=0; i2=1; j2=1; k2=0; }
+        }
+        
+        const x1 = x0 - i1 + G3;
+        const y1 = y0 - j1 + G3;
+        const z1 = z0 - k1 + G3;
+        const x2 = x0 - i2 + 2.0 * G3;
+        const y2 = y0 - j2 + 2.0 * G3;
+        const z2 = z0 - k2 + 2.0 * G3;
+        const x3 = x0 - 1.0 + 3.0 * G3;
+        const y3 = y0 - 1.0 + 3.0 * G3;
+        const z3 = z0 - 1.0 + 3.0 * G3;
+        
+        const ii = i & 255;
+        const jj = j & 255;
+        const kk = k & 255;
+        
+        let n0 = 0, n1 = 0, n2 = 0, n3 = 0;
+        
+        let t0 = 0.6 - x0*x0 - y0*y0 - z0*z0;
+        if (t0 >= 0) {
+          const gi0 = permMod12[ii + perm[jj + perm[kk]]] * 3;
+          t0 *= t0;
+          n0 = t0 * t0 * (grad3[gi0] * x0 + grad3[gi0+1] * y0 + grad3[gi0+2] * z0);
+        }
+        
+        let t1 = 0.6 - x1*x1 - y1*y1 - z1*z1;
+        if (t1 >= 0) {
+          const gi1 = permMod12[ii + i1 + perm[jj + j1 + perm[kk + k1]]] * 3;
+          t1 *= t1;
+          n1 = t1 * t1 * (grad3[gi1] * x1 + grad3[gi1+1] * y1 + grad3[gi1+2] * z1);
+        }
+        
+        let t2 = 0.6 - x2*x2 - y2*y2 - z2*z2;
+        if (t2 >= 0) {
+          const gi2 = permMod12[ii + i2 + perm[jj + j2 + perm[kk + k2]]] * 3;
+          t2 *= t2;
+          n2 = t2 * t2 * (grad3[gi2] * x2 + grad3[gi2+1] * y2 + grad3[gi2+2] * z2);
+        }
+        
+        let t3 = 0.6 - x3*x3 - y3*y3 - z3*z3;
+        if (t3 >= 0) {
+          const gi3 = permMod12[ii + 1 + perm[jj + 1 + perm[kk + 1]]] * 3;
+          t3 *= t3;
+          n3 = t3 * t3 * (grad3[gi3] * x3 + grad3[gi3+1] * y3 + grad3[gi3+2] * z3);
+        }
+        
+        return 32.0 * (n0 + n1 + n2 + n3);
+      }
+      
+      // 2D noise (uses 3D with z=0)
+      noise2D(x, y) {
+        return this.noise3D(x, y, 0);
+      }
+      
+      // 2D Fractal Brownian Motion for textures
+      fbm2D(x, y, octaves, lacunarity, persistence) {
+        let value = 0;
+        let amplitude = 1;
+        let frequency = 1;
+        let maxValue = 0;
+        
+        for (let i = 0; i < octaves; i++) {
+          value += amplitude * this.noise2D(x * frequency, y * frequency);
+          maxValue += amplitude;
+          amplitude *= persistence;
+          frequency *= lacunarity;
+        }
+        
+        return value / maxValue;
+      }
+      
+      // Fractal Brownian Motion
+      fbm(x, y, z, octaves, lacunarity, persistence) {
+        let value = 0;
+        let amplitude = 1;
+        let frequency = 1;
+        let maxValue = 0;
+        
+        for (let i = 0; i < octaves; i++) {
+          value += amplitude * this.noise3D(x * frequency, y * frequency, z * frequency);
+          maxValue += amplitude;
+          amplitude *= persistence;
+          frequency *= lacunarity;
+        }
+        
+        return value / maxValue;
+      }
+      
+      // Ridged noise for cracks
+      ridged(x, y, z, octaves, lacunarity, persistence) {
+        let value = 0;
+        let amplitude = 1;
+        let frequency = 1;
+        let maxValue = 0;
+        
+        for (let i = 0; i < octaves; i++) {
+          const n = 1.0 - Math.abs(this.noise3D(x * frequency, y * frequency, z * frequency));
+          value += amplitude * n * n;
+          maxValue += amplitude;
+          amplitude *= persistence;
+          frequency *= lacunarity;
+        }
+        
+        return value / maxValue;
+      }
+    }
+
+    // ============================================================
+    // PRESET CONFIGURATIONS
+    // ============================================================
+    const PRESETS = {
+      boulder: {
+        baseShape: "icosahedron",
+        resolution: 5,
+        scaleX: 1.0,
+        scaleY: 0.75,
+        scaleZ: 1.1,
+        noiseScale: 1.5,
+        noiseAmplitude: 0.28,
+        noiseOctaves: 5,
+        noiseLacunarity: 2.0,
+        noisePersistence: 0.5,
+        crackDepth: 0.04,
+        crackFrequency: 3.0,
+        smoothIterations: 2,
+        smoothStrength: 0.5,
+        baseColor: "#5a524a",
+        secondaryColor: "#7a6e62",
+        accentColor: "#3d3832",
+        colorVariation: 0.08,
+        heightBlend: 0.3,
+        slopeBlend: 0.4,
+        aoIntensity: 0.3,
+        flatShading: false,
+        colorMode: 'vertex',
+        baseRoughness: 0.9,
+      },
+      pebble: {
+        baseShape: "icosahedron",
+        resolution: 5,
+        scaleX: 1.1,
+        scaleY: 0.55,
+        scaleZ: 1.0,
+        noiseScale: 2.5,
+        noiseAmplitude: 0.10,
+        noiseOctaves: 4,
+        noiseLacunarity: 2.2,
+        noisePersistence: 0.4,
+        crackDepth: 0.01,
+        crackFrequency: 5.0,
+        smoothIterations: 3,
+        smoothStrength: 0.6,
+        baseColor: "#6b6560",
+        secondaryColor: "#8a827a",
+        accentColor: "#4a4540",
+        colorVariation: 0.04,
+        heightBlend: 0.2,
+        slopeBlend: 0.2,
+        aoIntensity: 0.15,
+        flatShading: false,
+        colorMode: 'vertex',
+        baseRoughness: 0.7,
+      },
+      crystal: {
+        baseShape: "octahedron",
+        resolution: 2,
+        scaleX: 0.7,
+        scaleY: 1.5,
+        scaleZ: 0.7,
+        noiseScale: 3.0,
+        noiseAmplitude: 0.03,
+        noiseOctaves: 2,
+        noiseLacunarity: 2.0,
+        noisePersistence: 0.5,
+        crackDepth: 0.0,
+        crackFrequency: 1.0,
+        smoothIterations: 0,
+        smoothStrength: 0.0,
+        baseColor: "#4a5568",
+        secondaryColor: "#718096",
+        accentColor: "#2d3748",
+        colorVariation: 0.04,
+        heightBlend: 0.6,
+        slopeBlend: 0.1,
+        aoIntensity: 0.2,
+        flatShading: true,
+        colorMode: 'vertex',
+        baseRoughness: 0.4,
+        metalness: 0.1,
+      },
+      asteroid: {
+        baseShape: "icosahedron",
+        resolution: 5,
+        scaleX: 1.0,
+        scaleY: 0.9,
+        scaleZ: 1.0,
+        noiseScale: 2.0,
+        noiseAmplitude: 0.38,
+        noiseOctaves: 6,
+        noiseLacunarity: 2.0,
+        noisePersistence: 0.55,
+        crackDepth: 0.08,
+        crackFrequency: 2.0,
+        smoothIterations: 1,
+        smoothStrength: 0.4,
+        baseColor: "#3d3d3d",
+        secondaryColor: "#5a5a5a",
+        accentColor: "#252525",
+        colorVariation: 0.06,
+        heightBlend: 0.4,
+        slopeBlend: 0.5,
+        aoIntensity: 0.4,
+        flatShading: false,
+        colorMode: 'vertex',
+        baseRoughness: 0.95,
+      },
+      cliff: {
+        baseShape: "box",
+        resolution: 5,
+        scaleX: 1.5,
+        scaleY: 1.0,
+        scaleZ: 0.6,
+        noiseScale: 1.2,
+        noiseAmplitude: 0.28,
+        noiseOctaves: 6,
+        noiseLacunarity: 2.2,
+        noisePersistence: 0.5,
+        crackDepth: 0.06,
+        crackFrequency: 4.0,
+        smoothIterations: 1,
+        smoothStrength: 0.3,
+        baseColor: "#6b5b4f",
+        secondaryColor: "#8a7a6e",
+        accentColor: "#4a3f35",
+        colorVariation: 0.10,
+        heightBlend: 0.5,
+        slopeBlend: 0.3,
+        aoIntensity: 0.35,
+        flatShading: false,
+        colorMode: 'vertex',
+        baseRoughness: 0.9,
+      },
+      lowpoly: {
+        baseShape: "icosahedron",
+        resolution: 1,
+        scaleX: 1.0,
+        scaleY: 0.8,
+        scaleZ: 1.0,
+        noiseScale: 1.0,
+        noiseAmplitude: 0.35,
+        noiseOctaves: 2,
+        noiseLacunarity: 2.0,
+        noisePersistence: 0.5,
+        crackDepth: 0.0,
+        crackFrequency: 1.0,
+        smoothIterations: 0,
+        smoothStrength: 0.0,
+        baseColor: "#7a7064",
+        secondaryColor: "#9a8e82",
+        accentColor: "#5a5044",
+        colorVariation: 0.08,
+        heightBlend: 0.4,
+        slopeBlend: 0.3,
+        aoIntensity: 0.2,
+        flatShading: true,
+        colorMode: 'vertex',
+        baseRoughness: 0.85,
+      },
+      // ========== REAL ROCK TYPES ==========
+      sandstone: {
+        baseShape: "icosahedron",
+        resolution: 5,
+        scaleX: 1.0,
+        scaleY: 0.75,
+        scaleZ: 1.0,
+        noiseScale: 2.0,
+        noiseAmplitude: 0.18,
+        noiseOctaves: 5,
+        noiseLacunarity: 2.0,
+        noisePersistence: 0.45,
+        crackDepth: 0.03,
+        crackFrequency: 2.5,
+        smoothIterations: 2,
+        smoothStrength: 0.4,
+        baseColor: "#c4a67c",
+        secondaryColor: "#d4b896",
+        accentColor: "#a08060",
+        colorVariation: 0.12,
+        heightBlend: 0.5,
+        slopeBlend: 0.2,
+        aoIntensity: 0.25,
+        flatShading: false,
+        colorMode: 'blend',
+        textureBlend: 0.6,
+        texturePattern: "layered",
+        textureScale: 8.0,
+        patternDetail: 5,
+        textureContrast: 1.2,
+        roughnessVariation: 0.2,
+        baseRoughness: 0.95,
+        metalness: 0.0,
+      },
+      limestone: {
+        baseShape: "icosahedron",
+        resolution: 5,
+        scaleX: 1.0,
+        scaleY: 0.85,
+        scaleZ: 1.0,
+        noiseScale: 1.8,
+        noiseAmplitude: 0.2,
+        noiseOctaves: 5,
+        noiseLacunarity: 2.0,
+        noisePersistence: 0.5,
+        crackDepth: 0.04,
+        crackFrequency: 3.0,
+        smoothIterations: 2,
+        smoothStrength: 0.5,
+        baseColor: "#e8e0d0",
+        secondaryColor: "#f0ebe0",
+        accentColor: "#c8c0b0",
+        colorVariation: 0.08,
+        heightBlend: 0.3,
+        slopeBlend: 0.25,
+        aoIntensity: 0.3,
+        flatShading: false,
+        colorMode: 'blend',
+        textureBlend: 0.5,
+        texturePattern: "noise",
+        textureScale: 6.0,
+        patternDetail: 4,
+        textureContrast: 0.9,
+        roughnessVariation: 0.15,
+        baseRoughness: 0.9,
+        metalness: 0.0,
+      },
+      granite: {
+        baseShape: "icosahedron",
+        resolution: 5,
+        scaleX: 1.0,
+        scaleY: 0.9,
+        scaleZ: 1.0,
+        noiseScale: 1.5,
+        noiseAmplitude: 0.22,
+        noiseOctaves: 6,
+        noiseLacunarity: 2.2,
+        noisePersistence: 0.5,
+        crackDepth: 0.02,
+        crackFrequency: 4.0,
+        smoothIterations: 3,
+        smoothStrength: 0.5,
+        baseColor: "#8a8580",
+        secondaryColor: "#a09a95",
+        accentColor: "#605a55",
+        colorVariation: 0.15,
+        heightBlend: 0.2,
+        slopeBlend: 0.15,
+        aoIntensity: 0.2,
+        flatShading: false,
+        colorMode: 'blend',
+        textureBlend: 0.7,
+        texturePattern: "speckled",
+        textureScale: 12.0,
+        patternDetail: 6,
+        textureContrast: 1.3,
+        roughnessVariation: 0.1,
+        baseRoughness: 0.8,
+        metalness: 0.05,
+      },
+      marble: {
+        baseShape: "sphere",
+        resolution: 5,
+        scaleX: 1.0,
+        scaleY: 0.85,
+        scaleZ: 1.0,
+        noiseScale: 1.2,
+        noiseAmplitude: 0.12,
+        noiseOctaves: 4,
+        noiseLacunarity: 2.0,
+        noisePersistence: 0.5,
+        crackDepth: 0.01,
+        crackFrequency: 2.0,
+        smoothIterations: 4,
+        smoothStrength: 0.6,
+        baseColor: "#f5f5f5",
+        secondaryColor: "#ffffff",
+        accentColor: "#b0b0b0",
+        colorVariation: 0.05,
+        heightBlend: 0.15,
+        slopeBlend: 0.1,
+        aoIntensity: 0.15,
+        flatShading: false,
+        colorMode: 'texture',
+        textureBlend: 0.5,
+        texturePattern: "veined",
+        textureScale: 4.0,
+        patternDetail: 5,
+        textureContrast: 1.5,
+        roughnessVariation: 0.08,
+        baseRoughness: 0.35,
+        metalness: 0.0,
+      },
+      basalt: {
+        baseShape: "icosahedron",
+        resolution: 5,
+        scaleX: 1.0,
+        scaleY: 0.8,
+        scaleZ: 1.0,
+        noiseScale: 2.5,
+        noiseAmplitude: 0.28,
+        noiseOctaves: 5,
+        noiseLacunarity: 2.0,
+        noisePersistence: 0.5,
+        crackDepth: 0.08,
+        crackFrequency: 3.5,
+        smoothIterations: 1,
+        smoothStrength: 0.3,
+        baseColor: "#2a2a2a",
+        secondaryColor: "#3a3a3a",
+        accentColor: "#1a1a1a",
+        colorVariation: 0.05,
+        heightBlend: 0.25,
+        slopeBlend: 0.35,
+        aoIntensity: 0.35,
+        flatShading: false,
+        colorMode: 'blend',
+        textureBlend: 0.5,
+        texturePattern: "cellular",
+        textureScale: 6.0,
+        patternDetail: 4,
+        textureContrast: 1.1,
+        roughnessVariation: 0.15,
+        baseRoughness: 0.95,
+        metalness: 0.0,
+      },
+      slate: {
+        baseShape: "box",
+        resolution: 5,
+        scaleX: 1.2,
+        scaleY: 0.5,
+        scaleZ: 1.0,
+        noiseScale: 3.0,
+        noiseAmplitude: 0.15,
+        noiseOctaves: 4,
+        noiseLacunarity: 2.0,
+        noisePersistence: 0.45,
+        crackDepth: 0.05,
+        crackFrequency: 5.0,
+        smoothIterations: 1,
+        smoothStrength: 0.3,
+        baseColor: "#404550",
+        secondaryColor: "#505560",
+        accentColor: "#303540",
+        colorVariation: 0.06,
+        heightBlend: 0.4,
+        slopeBlend: 0.2,
+        aoIntensity: 0.25,
+        flatShading: false,
+        colorMode: 'blend',
+        textureBlend: 0.6,
+        texturePattern: "layered",
+        textureScale: 10.0,
+        patternDetail: 3,
+        textureContrast: 1.0,
+        roughnessVariation: 0.1,
+        baseRoughness: 0.8,
+        metalness: 0.05,
+      },
+      obsidian: {
+        baseShape: "icosahedron",
+        resolution: 5,
+        scaleX: 1.0,
+        scaleY: 0.9,
+        scaleZ: 1.0,
+        noiseScale: 1.5,
+        noiseAmplitude: 0.15,
+        noiseOctaves: 4,
+        noiseLacunarity: 2.0,
+        noisePersistence: 0.5,
+        crackDepth: 0.03,
+        crackFrequency: 2.0,
+        smoothIterations: 4,
+        smoothStrength: 0.6,
+        baseColor: "#0a0a0a",
+        secondaryColor: "#151515",
+        accentColor: "#050505",
+        colorVariation: 0.02,
+        heightBlend: 0.1,
+        slopeBlend: 0.1,
+        aoIntensity: 0.15,
+        flatShading: false,
+        colorMode: 'texture',
+        textureBlend: 0.5,
+        texturePattern: "flow",
+        textureScale: 5.0,
+        patternDetail: 5,
+        textureContrast: 1.2,
+        roughnessVariation: 0.05,
+        baseRoughness: 0.15,
+        metalness: 0.15,
+      },
+      quartzite: {
+        baseShape: "icosahedron",
+        resolution: 5,
+        scaleX: 1.0,
+        scaleY: 0.85,
+        scaleZ: 1.0,
+        noiseScale: 2.0,
+        noiseAmplitude: 0.2,
+        noiseOctaves: 5,
+        noiseLacunarity: 2.0,
+        noisePersistence: 0.5,
+        crackDepth: 0.04,
+        crackFrequency: 3.5,
+        smoothIterations: 3,
+        smoothStrength: 0.5,
+        baseColor: "#e8e0e8",
+        secondaryColor: "#f5f0f5",
+        accentColor: "#c8c0c8",
+        colorVariation: 0.08,
+        heightBlend: 0.25,
+        slopeBlend: 0.2,
+        aoIntensity: 0.2,
+        flatShading: false,
+        colorMode: 'blend',
+        textureBlend: 0.6,
+        texturePattern: "speckled",
+        textureScale: 8.0,
+        patternDetail: 5,
+        textureContrast: 1.1,
+        roughnessVariation: 0.12,
+        baseRoughness: 0.6,
+        metalness: 0.1,
+      },
+    };
+
+    // ============================================================
+    // SCENE SETUP
+    // ============================================================
+    const canvas = document.getElementById("canvas");
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0d1117);
+
+    const camera = new THREE.PerspectiveCamera(
+      50,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      200
+    );
+    camera.position.set(3, 2, 3);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.target.set(0, 0, 0);
+    controls.update();
+
+    // Lighting
+    const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambient);
+
+    const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+    sun.position.set(5, 8, 4);
+    scene.add(sun);
+
+    const fill = new THREE.DirectionalLight(0x8888ff, 0.3);
+    fill.position.set(-3, 2, -2);
+    scene.add(fill);
+
+    // Grid
+    const grid = new THREE.GridHelper(10, 20, 0x2b3a4a, 0x1c242f);
+    grid.position.y = -1;
+    scene.add(grid);
+
+    // Ground plane
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(20, 20),
+      new THREE.MeshStandardMaterial({
+        color: 0x10151c,
+        roughness: 1,
+      })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -1.01;
+    scene.add(ground);
+
+    // ============================================================
+    // STATE
+    // ============================================================
+    let currentRock = null;
+    let wireframeMesh = null;
+    let currentRockData = null; // Stores geometry, noise, params for baking
+    let bakedTexture = null;
+
+    // ============================================================
+    // UTILITY FUNCTIONS
+    // ============================================================
+    function hashSeed(text) {
+      let hash = 2166136261;
+      for (let i = 0; i < text.length; i++) {
+        hash ^= text.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+      }
+      return hash >>> 0;
+    }
+
+    function hexToRGB(hex) {
+      const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+      return result
+        ? {
+            r: parseInt(result[1], 16) / 255,
+            g: parseInt(result[2], 16) / 255,
+            b: parseInt(result[3], 16) / 255,
+          }
+        : { r: 0.5, g: 0.5, b: 0.5 };
+    }
+
+    function lerpColor(c1, c2, t) {
+      return {
+        r: c1.r + (c2.r - c1.r) * t,
+        g: c1.g + (c2.g - c1.g) * t,
+        b: c1.b + (c2.b - c1.b) * t,
+      };
+    }
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    // ============================================================
+    // PROCEDURAL TEXTURE GENERATION
+    // ============================================================
+    function generateProceduralTexture(params, noise) {
+      const {
+        texturePattern,
+        textureScale,
+        patternDetail,
+        textureContrast,
+        roughnessVariation,
+        baseRoughness,
+        baseColor,
+        secondaryColor,
+        accentColor,
+      } = params;
+      
+      const size = 512;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      
+      const roughnessCanvas = document.createElement('canvas');
+      roughnessCanvas.width = size;
+      roughnessCanvas.height = size;
+      const roughCtx = roughnessCanvas.getContext('2d');
+      
+      const col1 = hexToRGB(baseColor);
+      const col2 = hexToRGB(secondaryColor);
+      const col3 = hexToRGB(accentColor);
+      
+      const imageData = ctx.createImageData(size, size);
+      const roughnessData = roughCtx.createImageData(size, size);
+      const data = imageData.data;
+      const roughData = roughnessData.data;
+      
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const idx = (y * size + x) * 4;
+          const nx = x / size * textureScale;
+          const ny = y / size * textureScale;
+          
+          let value = 0;
+          let roughValue = 0;
+          
+          switch (texturePattern) {
+            case 'layered': {
+              // Horizontal layers like sandstone/sedimentary rock
+              let layerNoise = 0;
+              let amp = 1;
+              let freq = 1;
+              for (let i = 0; i < patternDetail; i++) {
+                layerNoise += noise.noise2D(nx * freq * 0.5, ny * freq * 3) * amp;
+                amp *= 0.5;
+                freq *= 2;
+              }
+              const layerY = ny * 4 + layerNoise * 0.5;
+              value = Math.sin(layerY * Math.PI * 2) * 0.5 + 0.5;
+              value = Math.pow(value, 0.7);
+              roughValue = value;
+              break;
+            }
+            
+            case 'speckled': {
+              // Speckled pattern like granite
+              let speckle = 0;
+              let amp = 1;
+              let freq = 1;
+              for (let i = 0; i < patternDetail; i++) {
+                const n = noise.noise2D(nx * freq, ny * freq);
+                speckle += Math.abs(n) * amp;
+                amp *= 0.5;
+                freq *= 2.2;
+              }
+              // Add larger spots
+              const spots = noise.noise2D(nx * 0.8, ny * 0.8);
+              value = speckle * 0.6 + (spots > 0.3 ? 0.3 : 0);
+              // Add small dark speckles
+              const darkSpots = noise.noise2D(nx * 15, ny * 15);
+              if (darkSpots > 0.6) value -= 0.3;
+              roughValue = 0.5 + speckle * 0.3;
+              break;
+            }
+            
+            case 'veined': {
+              // Veined pattern like marble
+              let warp = noise.fbm2D(nx, ny, patternDetail, 2, 0.5);
+              const veinX = nx + warp * 0.5;
+              const veinY = ny + warp * 0.5;
+              let vein = Math.sin((veinX + veinY) * Math.PI * 2);
+              vein = Math.abs(vein);
+              vein = Math.pow(vein, 0.3);
+              // Secondary veins
+              let vein2 = Math.sin((veinX * 1.5 - veinY * 0.8) * Math.PI * 3);
+              vein2 = Math.abs(vein2);
+              vein2 = Math.pow(vein2, 0.5);
+              value = 1 - Math.min(vein, vein2) * 0.7;
+              roughValue = value * 0.5;
+              break;
+            }
+            
+            case 'cellular': {
+              // Cellular/cracked pattern like basalt columns
+              let minDist = Infinity;
+              let secondDist = Infinity;
+              const cellSize = textureScale * 0.15;
+              const cellX = Math.floor(nx / cellSize);
+              const cellY = Math.floor(ny / cellSize);
+              for (let cy = cellY - 1; cy <= cellY + 1; cy++) {
+                for (let cx = cellX - 1; cx <= cellX + 1; cx++) {
+                  const seed = (cx * 127 + cy * 311) & 0xffff;
+                  const px = (cx + 0.5 + (Math.sin(seed) * 0.5)) * cellSize;
+                  const py = (cy + 0.5 + (Math.cos(seed * 1.3) * 0.5)) * cellSize;
+                  const dist = Math.sqrt((nx - px) ** 2 + (ny - py) ** 2);
+                  if (dist < minDist) {
+                    secondDist = minDist;
+                    minDist = dist;
+                  } else if (dist < secondDist) {
+                    secondDist = dist;
+                  }
+                }
+              }
+              const edge = secondDist - minDist;
+              value = Math.min(1, edge * 15);
+              value = Math.pow(value, 0.5);
+              roughValue = 1 - value * 0.5;
+              break;
+            }
+            
+            case 'flow': {
+              // Flow pattern like obsidian/lava rock
+              let flowWarp = noise.fbm2D(nx * 0.5, ny * 0.5, patternDetail, 2, 0.6);
+              const flowX = nx + flowWarp * 1.5;
+              const flowY = ny + flowWarp * 1.5;
+              let flow = noise.fbm2D(flowX, flowY * 0.3, patternDetail, 2, 0.5);
+              flow = flow * 0.5 + 0.5;
+              // Add subtle streaks
+              const streak = Math.sin((flowX * 2 + flow * 3) * Math.PI);
+              value = flow * 0.7 + streak * 0.15 + 0.15;
+              roughValue = 0.3 + flow * 0.3;
+              break;
+            }
+            
+            case 'noise':
+            default: {
+              // Standard FBM noise
+              value = noise.fbm2D(nx, ny, patternDetail, 2, 0.5);
+              value = value * 0.5 + 0.5;
+              roughValue = value;
+              break;
+            }
+          }
+          
+          // Apply contrast
+          value = Math.pow(clamp(value, 0, 1), 1 / textureContrast);
+          
+          // Blend colors based on value
+          let color;
+          if (value < 0.5) {
+            color = lerpColor(col3, col1, value * 2);
+          } else {
+            color = lerpColor(col1, col2, (value - 0.5) * 2);
+          }
+          
+          // Add micro detail noise
+          const micro = noise.noise2D(x * 0.1, y * 0.1) * 0.05;
+          
+          data[idx] = clamp((color.r + micro) * 255, 0, 255);
+          data[idx + 1] = clamp((color.g + micro) * 255, 0, 255);
+          data[idx + 2] = clamp((color.b + micro) * 255, 0, 255);
+          data[idx + 3] = 255;
+          
+          // Roughness map
+          const rough = baseRoughness + (roughValue - 0.5) * roughnessVariation * 2;
+          const roughByte = clamp(rough * 255, 0, 255);
+          roughData[idx] = roughByte;
+          roughData[idx + 1] = roughByte;
+          roughData[idx + 2] = roughByte;
+          roughData[idx + 3] = 255;
+        }
+      }
+      
+      ctx.putImageData(imageData, 0, 0);
+      roughCtx.putImageData(roughnessData, 0, 0);
+      
+      const colorTexture = new THREE.CanvasTexture(canvas);
+      colorTexture.wrapS = THREE.RepeatWrapping;
+      colorTexture.wrapT = THREE.RepeatWrapping;
+      colorTexture.colorSpace = THREE.SRGBColorSpace;
+      
+      const roughnessTexture = new THREE.CanvasTexture(roughnessCanvas);
+      roughnessTexture.wrapS = THREE.RepeatWrapping;
+      roughnessTexture.wrapT = THREE.RepeatWrapping;
+      
+      return { colorTexture, roughnessTexture };
+    }
+
+    // ============================================================
+    // UV UNWRAPPING
+    // ============================================================
+    function generateUVs(geometry, method, normals) {
+      const position = geometry.attributes.position;
+      const vertexCount = position.count;
+      const uvs = new Float32Array(vertexCount * 2);
+      
+      switch (method) {
+        case 'spherical': {
+          // Spherical projection
+          for (let i = 0; i < vertexCount; i++) {
+            const x = position.getX(i);
+            const y = position.getY(i);
+            const z = position.getZ(i);
+            const len = Math.sqrt(x * x + y * y + z * z) || 1;
+            const nx = x / len;
+            const ny = y / len;
+            const nz = z / len;
+            uvs[i * 2] = 0.5 + Math.atan2(nz, nx) / (2 * Math.PI);
+            uvs[i * 2 + 1] = 0.5 - Math.asin(clamp(ny, -1, 1)) / Math.PI;
+          }
+          break;
+        }
+        
+        case 'unwrap': {
+          // Simple angle-based unwrap - project each triangle individually
+          // and pack into UV space using a simple grid layout
+          const index = geometry.index;
+          const triCount = index ? index.count / 3 : vertexCount / 3;
+          
+          // Calculate triangle sizes for packing
+          const triData = [];
+          for (let t = 0; t < triCount; t++) {
+            const i0 = index ? index.getX(t * 3) : t * 3;
+            const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1;
+            const i2 = index ? index.getX(t * 3 + 2) : t * 3 + 2;
+            
+            const v0 = new THREE.Vector3(position.getX(i0), position.getY(i0), position.getZ(i0));
+            const v1 = new THREE.Vector3(position.getX(i1), position.getY(i1), position.getZ(i1));
+            const v2 = new THREE.Vector3(position.getX(i2), position.getY(i2), position.getZ(i2));
+            
+            // Triangle edge lengths
+            const e1 = v1.clone().sub(v0).length();
+            const e2 = v2.clone().sub(v0).length();
+            const e3 = v2.clone().sub(v1).length();
+            
+            triData.push({ i0, i1, i2, e1, e2, e3, area: e1 * e2 * 0.5 });
+          }
+          
+          // Simple grid packing
+          const gridSize = Math.ceil(Math.sqrt(triCount));
+          const cellSize = 1.0 / gridSize;
+          const margin = cellSize * 0.05;
+          
+          triData.forEach((tri, idx) => {
+            const gridX = idx % gridSize;
+            const gridY = Math.floor(idx / gridSize);
+            
+            const baseU = gridX * cellSize + margin;
+            const baseV = gridY * cellSize + margin;
+            const size = cellSize - margin * 2;
+            
+            // Flatten triangle into 2D
+            uvs[tri.i0 * 2] = baseU;
+            uvs[tri.i0 * 2 + 1] = baseV;
+            uvs[tri.i1 * 2] = baseU + size;
+            uvs[tri.i1 * 2 + 1] = baseV;
+            uvs[tri.i2 * 2] = baseU + size * 0.5;
+            uvs[tri.i2 * 2 + 1] = baseV + size;
+          });
+          break;
+        }
+        
+        case 'box':
+        default: {
+          // Box/triplanar projection - pick dominant axis per vertex
+          for (let i = 0; i < vertexCount; i++) {
+            const x = position.getX(i);
+            const y = position.getY(i);
+            const z = position.getZ(i);
+            const normalX = Math.abs(normals.getX(i));
+            const normalY = Math.abs(normals.getY(i));
+            const normalZ = Math.abs(normals.getZ(i));
+            
+            let u, v;
+            if (normalY > normalX && normalY > normalZ) {
+              u = x * 0.5 + 0.5;
+              v = z * 0.5 + 0.5;
+            } else if (normalX > normalZ) {
+              u = z * 0.5 + 0.5;
+              v = y * 0.5 + 0.5;
+            } else {
+              u = x * 0.5 + 0.5;
+              v = y * 0.5 + 0.5;
+            }
+            
+            uvs[i * 2] = u;
+            uvs[i * 2 + 1] = v;
+          }
+          break;
+        }
+      }
+      
+      geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+      return uvs;
+    }
+    
+    // ============================================================
+    // TEXTURE BAKING
+    // ============================================================
+    function bakeTextureToUV(geometry, params, noise, resolution) {
+      const canvas = document.getElementById('bakeCanvas');
+      canvas.width = resolution;
+      canvas.height = resolution;
+      const ctx = canvas.getContext('2d');
+      
+      const imageData = ctx.createImageData(resolution, resolution);
+      const data = imageData.data;
+      
+      // Initialize with transparent
+      for (let i = 0; i < data.length; i += 4) {
+        data[i] = 128;
+        data[i + 1] = 128;
+        data[i + 2] = 128;
+        data[i + 3] = 0;
+      }
+      
+      const position = geometry.attributes.position;
+      const normal = geometry.attributes.normal;
+      const uv = geometry.attributes.uv;
+      const index = geometry.index;
+      
+      const {
+        textureScale,
+        patternDetail,
+        textureContrast,
+        baseColor,
+        secondaryColor,
+        accentColor,
+        useTriplanar = true,
+      } = params;
+      
+      const col1 = hexToRGB(baseColor);
+      const col2 = hexToRGB(secondaryColor);
+      const col3 = hexToRGB(accentColor);
+      
+      // Sample procedural texture with triplanar blending
+      function sampleTriplanar(worldPos, worldNormal) {
+        const x = worldPos.x * textureScale;
+        const y = worldPos.y * textureScale;
+        const z = worldPos.z * textureScale;
+        
+        // Triplanar blend weights
+        let blendX = Math.abs(worldNormal.x);
+        let blendY = Math.abs(worldNormal.y);
+        let blendZ = Math.abs(worldNormal.z);
+        
+        // Sharpen the blending
+        const sharpness = 4.0;
+        blendX = Math.pow(blendX, sharpness);
+        blendY = Math.pow(blendY, sharpness);
+        blendZ = Math.pow(blendZ, sharpness);
+        
+        // Normalize
+        const sum = blendX + blendY + blendZ + 0.0001;
+        blendX /= sum;
+        blendY /= sum;
+        blendZ /= sum;
+        
+        // Sample from each projection
+        let value = 0;
+        if (useTriplanar) {
+          const valYZ = noise.fbm2D(y, z, patternDetail, 2, 0.5) * 0.5 + 0.5;
+          const valXZ = noise.fbm2D(x, z, patternDetail, 2, 0.5) * 0.5 + 0.5;
+          const valXY = noise.fbm2D(x, y, patternDetail, 2, 0.5) * 0.5 + 0.5;
+          value = valYZ * blendX + valXZ * blendY + valXY * blendZ;
+        } else {
+          // Simple 3D noise
+          value = noise.fbm(x, y, z, patternDetail, 2, 0.5) * 0.5 + 0.5;
+        }
+        
+        // Apply contrast
+        value = Math.pow(clamp(value, 0, 1), 1 / textureContrast);
+        
+        // Blend colors
+        let color;
+        if (value < 0.5) {
+          color = lerpColor(col3, col1, value * 2);
+        } else {
+          color = lerpColor(col1, col2, (value - 0.5) * 2);
+        }
+        
+        return color;
+      }
+      
+      // Rasterize each triangle
+      const triCount = index ? index.count / 3 : position.count / 3;
+      
+      for (let t = 0; t < triCount; t++) {
+        const i0 = index ? index.getX(t * 3) : t * 3;
+        const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1;
+        const i2 = index ? index.getX(t * 3 + 2) : t * 3 + 2;
+        
+        // Get UV coordinates
+        const uv0 = { x: uv.getX(i0), y: uv.getY(i0) };
+        const uv1 = { x: uv.getX(i1), y: uv.getY(i1) };
+        const uv2 = { x: uv.getX(i2), y: uv.getY(i2) };
+        
+        // Get world positions
+        const p0 = new THREE.Vector3(position.getX(i0), position.getY(i0), position.getZ(i0));
+        const p1 = new THREE.Vector3(position.getX(i1), position.getY(i1), position.getZ(i1));
+        const p2 = new THREE.Vector3(position.getX(i2), position.getY(i2), position.getZ(i2));
+        
+        // Get normals
+        const n0 = new THREE.Vector3(normal.getX(i0), normal.getY(i0), normal.getZ(i0));
+        const n1 = new THREE.Vector3(normal.getX(i1), normal.getY(i1), normal.getZ(i1));
+        const n2 = new THREE.Vector3(normal.getX(i2), normal.getY(i2), normal.getZ(i2));
+        
+        // Bounding box in UV space
+        const minU = Math.max(0, Math.floor(Math.min(uv0.x, uv1.x, uv2.x) * resolution) - 1);
+        const maxU = Math.min(resolution - 1, Math.ceil(Math.max(uv0.x, uv1.x, uv2.x) * resolution) + 1);
+        const minV = Math.max(0, Math.floor(Math.min(uv0.y, uv1.y, uv2.y) * resolution) - 1);
+        const maxV = Math.min(resolution - 1, Math.ceil(Math.max(uv0.y, uv1.y, uv2.y) * resolution) + 1);
+        
+        // Rasterize triangle
+        for (let py = minV; py <= maxV; py++) {
+          for (let px = minU; px <= maxU; px++) {
+            const u = (px + 0.5) / resolution;
+            const v = (py + 0.5) / resolution;
+            
+            // Barycentric coordinates
+            const v0x = uv2.x - uv0.x;
+            const v0y = uv2.y - uv0.y;
+            const v1x = uv1.x - uv0.x;
+            const v1y = uv1.y - uv0.y;
+            const v2x = u - uv0.x;
+            const v2y = v - uv0.y;
+            
+            const dot00 = v0x * v0x + v0y * v0y;
+            const dot01 = v0x * v1x + v0y * v1y;
+            const dot02 = v0x * v2x + v0y * v2y;
+            const dot11 = v1x * v1x + v1y * v1y;
+            const dot12 = v1x * v2x + v1y * v2y;
+            
+            const invDenom = 1 / (dot00 * dot11 - dot01 * dot01 + 0.00001);
+            const baryU = (dot11 * dot02 - dot01 * dot12) * invDenom;
+            const baryV = (dot00 * dot12 - dot01 * dot02) * invDenom;
+            const baryW = 1 - baryU - baryV;
+            
+            // Check if point is inside triangle
+            if (baryU >= -0.01 && baryV >= -0.01 && baryW >= -0.01) {
+              // Interpolate world position
+              const worldPos = new THREE.Vector3(
+                p0.x * baryW + p1.x * baryV + p2.x * baryU,
+                p0.y * baryW + p1.y * baryV + p2.y * baryU,
+                p0.z * baryW + p1.z * baryV + p2.z * baryU
+              );
+              
+              // Interpolate normal
+              const worldNormal = new THREE.Vector3(
+                n0.x * baryW + n1.x * baryV + n2.x * baryU,
+                n0.y * baryW + n1.y * baryV + n2.y * baryU,
+                n0.z * baryW + n1.z * baryV + n2.z * baryU
+              ).normalize();
+              
+              // Sample triplanar texture
+              const color = sampleTriplanar(worldPos, worldNormal);
+              
+              // Write pixel (flip V for canvas)
+              const idx = ((resolution - 1 - py) * resolution + px) * 4;
+              data[idx] = clamp(color.r * 255, 0, 255);
+              data[idx + 1] = clamp(color.g * 255, 0, 255);
+              data[idx + 2] = clamp(color.b * 255, 0, 255);
+              data[idx + 3] = 255;
+            }
+          }
+        }
+      }
+      
+      // Dilate to fill seams
+      dilateTexture(data, resolution, 3);
+      
+      ctx.putImageData(imageData, 0, 0);
+      
+      // Create Three.js texture
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.flipY = false;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      
+      return texture;
+    }
+    
+    function dilateTexture(data, resolution, iterations) {
+      // Simple dilation to fill in gaps/seams
+      for (let iter = 0; iter < iterations; iter++) {
+        const copy = new Uint8ClampedArray(data);
+        
+        for (let y = 1; y < resolution - 1; y++) {
+          for (let x = 1; x < resolution - 1; x++) {
+            const idx = (y * resolution + x) * 4;
+            
+            if (data[idx + 3] === 0) {
+              // Find neighboring pixels that are filled
+              let sumR = 0, sumG = 0, sumB = 0, count = 0;
+              
+              for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                  const nidx = ((y + dy) * resolution + (x + dx)) * 4;
+                  if (copy[nidx + 3] > 0) {
+                    sumR += copy[nidx];
+                    sumG += copy[nidx + 1];
+                    sumB += copy[nidx + 2];
+                    count++;
+                  }
+                }
+              }
+              
+              if (count > 0) {
+                data[idx] = sumR / count;
+                data[idx + 1] = sumG / count;
+                data[idx + 2] = sumB / count;
+                data[idx + 3] = 255;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // ============================================================
+    // ROCK GENERATION
+    // ============================================================
+    function createBaseGeometry(shape, subdivisions) {
+      // Subdivisions directly control geometry detail
+      // Icosahedron: 20 * 4^detail faces (detail 5 = 20,480 faces)
+      // This gives smooth results with proper vertex sharing
+      let geometry;
+      
+      const detail = Math.max(0, Math.min(7, subdivisions));
+      
+      switch (shape) {
+        case "sphere":
+          // For sphere, convert detail to segments (detail 5 ≈ 64 segments)
+          const segs = Math.max(16, Math.pow(2, detail + 2));
+          geometry = new THREE.SphereGeometry(1, segs, Math.ceil(segs * 0.75));
+          break;
+        case "box":
+          // Box with subdivisions, then spherified
+          const boxSegs = Math.max(4, Math.pow(2, detail));
+          geometry = new THREE.BoxGeometry(1.5, 1.5, 1.5, boxSegs, boxSegs, boxSegs);
+          // Spherify the box for rounder base shape
+          const boxPos = geometry.attributes.position;
+          for (let i = 0; i < boxPos.count; i++) {
+            const x = boxPos.getX(i);
+            const y = boxPos.getY(i);
+            const z = boxPos.getZ(i);
+            const len = Math.sqrt(x * x + y * y + z * z);
+            if (len > 0.001) {
+              const nx = x / len;
+              const ny = y / len;
+              const nz = z / len;
+              // Strong spherification for smooth base
+              const sphereFactor = 0.7;
+              const newX = x * (1 - sphereFactor) + nx * len * sphereFactor;
+              const newY = y * (1 - sphereFactor) + ny * len * sphereFactor;
+              const newZ = z * (1 - sphereFactor) + nz * len * sphereFactor;
+              boxPos.setXYZ(i, newX, newY, newZ);
+            }
+          }
+          break;
+        case "dodecahedron":
+          geometry = new THREE.DodecahedronGeometry(1, detail);
+          break;
+        case "octahedron":
+          geometry = new THREE.OctahedronGeometry(1, detail);
+          break;
+        case "icosahedron":
+        default:
+          // Icosahedron with high detail = smooth organic shape
+          // detail 5 = 20,480 triangles, detail 6 = 81,920 triangles
+          geometry = new THREE.IcosahedronGeometry(1, detail);
+          break;
+      }
+      
+      return geometry;
+    }
+
+    function generateRock(params) {
+      const {
+        seed,
+        baseShape,
+        resolution,
+        scaleX,
+        scaleY,
+        scaleZ,
+        noiseScale,
+        noiseAmplitude,
+        noiseOctaves,
+        noiseLacunarity,
+        noisePersistence,
+        crackDepth,
+        crackFrequency,
+        smoothIterations,
+        smoothStrength,
+        baseColor,
+        secondaryColor,
+        accentColor,
+        colorVariation,
+        heightBlend,
+        slopeBlend,
+        aoIntensity,
+        flatShading,
+        colorMode = 'vertex',
+        textureBlend = 0.5,
+        texturePattern = 'noise',
+        textureScale = 4.0,
+        patternDetail = 4,
+        textureContrast = 1.0,
+        roughnessVariation = 0.15,
+        baseRoughness = 0.9,
+        metalness = 0.0,
+        uvMethod = 'box',
+        useTriplanar = true,
+      } = params;
+
+      const seedHash = hashSeed(seed);
+      const noise = new SimplexNoise(seedHash);
+      const noise2 = new SimplexNoise(seedHash + 12345);
+      
+      // Create base geometry
+      let geometry = createBaseGeometry(baseShape, resolution);
+      
+      // Force proper vertex sharing by converting to non-indexed then merging
+      // Use very aggressive tolerance to catch all seam vertices
+      if (geometry.index) {
+        geometry = geometry.toNonIndexed();
+      }
+      // Delete any existing normals/uvs so merge only considers position
+      geometry.deleteAttribute('normal');
+      geometry.deleteAttribute('uv');
+      geometry = BufferGeometryUtils.mergeVertices(geometry, 0.0001);
+      
+      const position = geometry.attributes.position;
+      const vertexCount = position.count;
+      
+      // Apply scale and noise displacement
+      let minY = Infinity;
+      let maxY = -Infinity;
+      
+      for (let i = 0; i < vertexCount; i++) {
+        // Get original position and scale
+        let x = position.getX(i) * scaleX;
+        let y = position.getY(i) * scaleY;
+        let z = position.getZ(i) * scaleZ;
+        
+        // Get direction for displacement (from center)
+        const len = Math.sqrt(x * x + y * y + z * z);
+        if (len > 0.0001) {
+          const nx = x / len;
+          const ny = y / len;
+          const nz = z / len;
+          
+          // Main displacement noise (FBM for natural look)
+          const mainNoise = noise.fbm(
+            x * noiseScale,
+            y * noiseScale,
+            z * noiseScale,
+            noiseOctaves,
+            noiseLacunarity,
+            noisePersistence
+          );
+          
+          // Crack/crevice noise (ridged for sharp indentations)
+          let crackNoise = 0;
+          if (crackDepth > 0) {
+            crackNoise = noise2.ridged(
+              x * crackFrequency,
+              y * crackFrequency,
+              z * crackFrequency,
+              3,
+              2.0,
+              0.5
+            );
+            crackNoise = 1.0 - crackNoise;
+          }
+          
+          // Combined displacement along normal
+          const displacement = mainNoise * noiseAmplitude - crackNoise * crackDepth;
+          
+          x += nx * displacement;
+          y += ny * displacement;
+          z += nz * displacement;
+        }
+        
+        position.setXYZ(i, x, y, z);
+        
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+      }
+      
+      position.needsUpdate = true;
+      
+      // Apply Laplacian smoothing to soften extreme peaks/valleys
+      if (!flatShading && smoothIterations > 0 && smoothStrength > 0) {
+        const pos = geometry.attributes.position;
+        const idx = geometry.index;
+        const vCount = pos.count;
+        
+        // Build adjacency list from index buffer
+        const neighbors = new Array(vCount);
+        for (let i = 0; i < vCount; i++) {
+          neighbors[i] = new Set();
+        }
+        
+        if (idx) {
+          const indices = idx.array;
+          for (let i = 0; i < indices.length; i += 3) {
+            const a = indices[i];
+            const b = indices[i + 1];
+            const c = indices[i + 2];
+            neighbors[a].add(b);
+            neighbors[a].add(c);
+            neighbors[b].add(a);
+            neighbors[b].add(c);
+            neighbors[c].add(a);
+            neighbors[c].add(b);
+          }
+        }
+        
+        // Smooth iterations
+        for (let iter = 0; iter < smoothIterations; iter++) {
+          const newPositions = new Float32Array(vCount * 3);
+          
+          for (let i = 0; i < vCount; i++) {
+            const px = pos.getX(i);
+            const py = pos.getY(i);
+            const pz = pos.getZ(i);
+            
+            const neighborSet = neighbors[i];
+            if (neighborSet.size > 0) {
+              let avgX = 0, avgY = 0, avgZ = 0;
+              for (const ni of neighborSet) {
+                avgX += pos.getX(ni);
+                avgY += pos.getY(ni);
+                avgZ += pos.getZ(ni);
+              }
+              avgX /= neighborSet.size;
+              avgY /= neighborSet.size;
+              avgZ /= neighborSet.size;
+              
+              // Blend toward neighbor average
+              newPositions[i * 3] = px + (avgX - px) * smoothStrength;
+              newPositions[i * 3 + 1] = py + (avgY - py) * smoothStrength;
+              newPositions[i * 3 + 2] = pz + (avgZ - pz) * smoothStrength;
+            } else {
+              newPositions[i * 3] = px;
+              newPositions[i * 3 + 1] = py;
+              newPositions[i * 3 + 2] = pz;
+            }
+          }
+          
+          // Apply smoothed positions
+          for (let i = 0; i < vCount; i++) {
+            pos.setXYZ(i, newPositions[i * 3], newPositions[i * 3 + 1], newPositions[i * 3 + 2]);
+          }
+        }
+        pos.needsUpdate = true;
+      }
+      
+      // For flat shading, convert to non-indexed
+      if (flatShading) {
+        geometry = geometry.toNonIndexed();
+      }
+      
+      // Compute vertex normals
+      geometry.computeVertexNormals();
+      
+      // Get updated references after potential merge
+      const finalPosition = geometry.attributes.position;
+      const finalVertexCount = finalPosition.count;
+      const normals = geometry.attributes.normal;
+      
+      // Recalculate height range from final geometry
+      let finalMinY = Infinity;
+      let finalMaxY = -Infinity;
+      for (let i = 0; i < finalVertexCount; i++) {
+        const y = finalPosition.getY(i);
+        finalMinY = Math.min(finalMinY, y);
+        finalMaxY = Math.max(finalMaxY, y);
+      }
+      const heightRange = finalMaxY - finalMinY || 1;
+      
+      // Generate vertex colors
+      const colors = new Float32Array(finalVertexCount * 3);
+      
+      const col1 = hexToRGB(baseColor);
+      const col2 = hexToRGB(secondaryColor);
+      const col3 = hexToRGB(accentColor);
+      
+      for (let i = 0; i < finalVertexCount; i++) {
+        const x = finalPosition.getX(i);
+        const y = finalPosition.getY(i);
+        const z = finalPosition.getZ(i);
+        
+        // Get the smooth normal for this vertex
+        const normalY = normals.getY(i);
+        
+        // Height factor (0 at bottom, 1 at top)
+        const heightFactor = (y - finalMinY) / heightRange;
+        
+        // Slope factor based on normal (1 = horizontal/up, 0 = vertical)
+        const slopeFactor = Math.abs(normalY);
+        
+        // Start with base color, blend toward secondary based on height
+        let color = lerpColor(col1, col2, heightFactor * heightBlend);
+        
+        // Blend accent color into steep/crevice areas
+        const steepness = 1.0 - slopeFactor;
+        color = lerpColor(color, col3, steepness * slopeBlend);
+        
+        // Add subtle noise variation for natural look
+        const varNoise = noise.noise3D(x * 5, y * 5, z * 5) * colorVariation;
+        color.r = clamp(color.r + varNoise, 0, 1);
+        color.g = clamp(color.g + varNoise, 0, 1);
+        color.b = clamp(color.b + varNoise, 0, 1);
+        
+        // Simple AO: vertices closer to center appear darker
+        const lenFromCenter = Math.sqrt(x * x + y * y + z * z);
+        const avgRadius = (scaleX + scaleY + scaleZ) / 3;
+        const aoFactor = clamp((lenFromCenter / avgRadius - 0.3) * 1.5, 0, 1);
+        const ao = 1.0 - (1.0 - aoFactor) * aoIntensity;
+        
+        color.r *= ao;
+        color.g *= ao;
+        color.b *= ao;
+        
+        colors[i * 3] = color.r;
+        colors[i * 3 + 1] = color.g;
+        colors[i * 3 + 2] = color.b;
+      }
+      
+      geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+      
+      // Always generate UVs (needed for baking even if using triplanar preview)
+      generateUVs(geometry, uvMethod, normals);
+      
+      // Create material based on color mode
+      let material;
+      const useTextureMap = colorMode === 'texture' || colorMode === 'blend';
+      
+      if (useTextureMap) {
+        const { colorTexture, roughnessTexture } = generateProceduralTexture(params, noise);
+        
+        // Use triplanar mapping shader to eliminate seams
+        material = new THREE.MeshStandardMaterial({
+          roughness: baseRoughness,
+          metalness: metalness,
+          flatShading: flatShading,
+          vertexColors: colorMode === 'blend',
+        });
+        
+        // Inject triplanar sampling into shader
+        material.onBeforeCompile = (shader) => {
+          // Add uniforms for triplanar textures
+          shader.uniforms.triplanarMap = { value: colorTexture };
+          shader.uniforms.triplanarRoughness = { value: roughnessTexture };
+          shader.uniforms.triplanarScale = { value: 1.0 };
+          shader.uniforms.triplanarSharpness = { value: 8.0 };
+          shader.uniforms.textureBlend = { value: textureBlend };
+          shader.uniforms.useBlendMode = { value: colorMode === 'blend' ? 1.0 : 0.0 };
+          
+          // Add varyings for world position and normal
+          shader.vertexShader = shader.vertexShader.replace(
+            '#include <common>',
+            `
+            #include <common>
+            varying vec3 vWorldPosition;
+            varying vec3 vWorldNormal;
+            `
+          );
+          
+          // Calculate world position manually (not relying on USE_WORLDPOS)
+          shader.vertexShader = shader.vertexShader.replace(
+            '#include <fog_vertex>',
+            `
+            #include <fog_vertex>
+            vec4 worldPos4 = modelMatrix * vec4(position, 1.0);
+            vWorldPosition = worldPos4.xyz;
+            vWorldNormal = normalize(mat3(modelMatrix) * normal);
+            `
+          );
+          
+          // Add triplanar sampling to fragment shader
+          shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <common>',
+            `
+            #include <common>
+            uniform sampler2D triplanarMap;
+            uniform sampler2D triplanarRoughness;
+            uniform float triplanarScale;
+            uniform float triplanarSharpness;
+            uniform float textureBlend;
+            uniform float useBlendMode;
+            varying vec3 vWorldPosition;
+            varying vec3 vWorldNormal;
+            
+            vec4 triplanarSample(sampler2D tex, vec3 worldPos, vec3 blendWeights) {
+              vec4 xSample = texture2D(tex, worldPos.yz * triplanarScale);
+              vec4 ySample = texture2D(tex, worldPos.xz * triplanarScale);
+              vec4 zSample = texture2D(tex, worldPos.xy * triplanarScale);
+              return xSample * blendWeights.x + ySample * blendWeights.y + zSample * blendWeights.z;
+            }
+            `
+          );
+          
+          // Replace map_fragment with triplanar sampling
+          shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <map_fragment>',
+            `
+            // Triplanar blend weights from world normal
+            vec3 blendWeights = abs(vWorldNormal);
+            blendWeights = pow(blendWeights, vec3(triplanarSharpness));
+            blendWeights = blendWeights / (blendWeights.x + blendWeights.y + blendWeights.z);
+            
+            // Sample texture with triplanar projection
+            vec4 triplanarColor = triplanarSample(triplanarMap, vWorldPosition, blendWeights);
+            
+            // Apply triplanar color
+            diffuseColor.rgb *= triplanarColor.rgb;
+            
+            // Blend with vertex colors if in blend mode
+            if (useBlendMode > 0.5) {
+              diffuseColor.rgb = mix(vColor * triplanarColor.rgb, triplanarColor.rgb, textureBlend);
+            }
+            `
+          );
+          
+          // Add triplanar roughness sampling
+          shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <roughnessmap_fragment>',
+            `
+            float roughnessFactor = roughness;
+            vec4 triplanarRough = triplanarSample(triplanarRoughness, vWorldPosition, blendWeights);
+            roughnessFactor *= triplanarRough.r;
+            `
+          );
+        };
+        
+        // Mark material to not use regular UV-based map
+        material.map = null;
+        
+      } else {
+        // Vertex colors only
+        material = new THREE.MeshStandardMaterial({
+          vertexColors: true,
+          roughness: baseRoughness,
+          metalness: metalness,
+          flatShading: flatShading,
+        });
+      }
+      
+      // Create mesh
+      const mesh = new THREE.Mesh(geometry, material);
+      
+      // Center at bottom
+      const box = new THREE.Box3().setFromObject(mesh);
+      mesh.position.y = -box.min.y;
+      
+      // Compute stats
+      const indexCount = geometry.index ? geometry.index.count : finalVertexCount;
+      const faceCount = indexCount / 3;
+      
+      return {
+        mesh,
+        geometry,
+        noise,
+        params,
+        stats: {
+          vertices: indexCount,
+          triangles: Math.floor(faceCount),
+          uniqueVertices: finalVertexCount,
+        },
+      };
+    }
+
+    // ============================================================
+    // UI HANDLING
+    // ============================================================
+    function getParams() {
+      return {
+        seed: document.getElementById("seedInput").value || "rock-001",
+        baseShape: document.getElementById("baseShape").value,
+        resolution: parseInt(document.getElementById("resolution").value),
+        scaleX: parseFloat(document.getElementById("scaleX").value),
+        scaleY: parseFloat(document.getElementById("scaleY").value),
+        scaleZ: parseFloat(document.getElementById("scaleZ").value),
+        noiseScale: parseFloat(document.getElementById("noiseScale").value),
+        noiseAmplitude: parseFloat(document.getElementById("noiseAmplitude").value),
+        noiseOctaves: parseInt(document.getElementById("noiseOctaves").value),
+        noiseLacunarity: parseFloat(document.getElementById("noiseLacunarity").value),
+        noisePersistence: parseFloat(document.getElementById("noisePersistence").value),
+        crackDepth: parseFloat(document.getElementById("crackDepth").value),
+        crackFrequency: parseFloat(document.getElementById("crackFrequency").value),
+        smoothIterations: parseInt(document.getElementById("smoothIterations").value),
+        smoothStrength: parseFloat(document.getElementById("smoothStrength").value),
+        baseColor: document.getElementById("baseColor").value,
+        secondaryColor: document.getElementById("secondaryColor").value,
+        accentColor: document.getElementById("accentColor").value,
+        colorVariation: parseFloat(document.getElementById("colorVariation").value),
+        heightBlend: parseFloat(document.getElementById("heightBlend").value),
+        slopeBlend: parseFloat(document.getElementById("slopeBlend").value),
+        aoIntensity: parseFloat(document.getElementById("aoIntensity").value),
+        flatShading: document.getElementById("flatShading").checked,
+        // Color mode params
+        colorMode: document.getElementById("colorMode").value,
+        textureBlend: parseFloat(document.getElementById("textureBlend").value),
+        // Texture params
+        texturePattern: document.getElementById("texturePattern").value,
+        textureScale: parseFloat(document.getElementById("textureScale").value),
+        patternDetail: parseInt(document.getElementById("patternDetail").value),
+        textureContrast: parseFloat(document.getElementById("textureContrast").value),
+        roughnessVariation: parseFloat(document.getElementById("roughnessVariation").value),
+        // Material params
+        baseRoughness: parseFloat(document.getElementById("baseRoughness").value),
+        metalness: parseFloat(document.getElementById("metalness").value),
+        // UV params
+        uvMethod: document.getElementById("uvMethod").value,
+        bakeResolution: parseInt(document.getElementById("bakeResolution").value),
+        useTriplanar: document.getElementById("useTriplanar").checked,
+      };
+    }
+
+    function setParams(params) {
+      if (params.baseShape) document.getElementById("baseShape").value = params.baseShape;
+      if (params.resolution !== undefined) {
+        document.getElementById("resolution").value = params.resolution;
+        document.getElementById("resolutionValue").textContent = params.resolution;
+      }
+      if (params.scaleX !== undefined) {
+        document.getElementById("scaleX").value = params.scaleX;
+        document.getElementById("scaleXValue").textContent = params.scaleX.toFixed(2);
+      }
+      if (params.scaleY !== undefined) {
+        document.getElementById("scaleY").value = params.scaleY;
+        document.getElementById("scaleYValue").textContent = params.scaleY.toFixed(2);
+      }
+      if (params.scaleZ !== undefined) {
+        document.getElementById("scaleZ").value = params.scaleZ;
+        document.getElementById("scaleZValue").textContent = params.scaleZ.toFixed(2);
+      }
+      if (params.noiseScale !== undefined) {
+        document.getElementById("noiseScale").value = params.noiseScale;
+        document.getElementById("noiseScaleValue").textContent = params.noiseScale.toFixed(1);
+      }
+      if (params.noiseAmplitude !== undefined) {
+        document.getElementById("noiseAmplitude").value = params.noiseAmplitude;
+        document.getElementById("noiseAmplitudeValue").textContent = params.noiseAmplitude.toFixed(2);
+      }
+      if (params.noiseOctaves !== undefined) {
+        document.getElementById("noiseOctaves").value = params.noiseOctaves;
+        document.getElementById("noiseOctavesValue").textContent = params.noiseOctaves;
+      }
+      if (params.noiseLacunarity !== undefined) {
+        document.getElementById("noiseLacunarity").value = params.noiseLacunarity;
+        document.getElementById("noiseLacunarityValue").textContent = params.noiseLacunarity.toFixed(1);
+      }
+      if (params.noisePersistence !== undefined) {
+        document.getElementById("noisePersistence").value = params.noisePersistence;
+        document.getElementById("noisePersistenceValue").textContent = params.noisePersistence.toFixed(2);
+      }
+      if (params.crackDepth !== undefined) {
+        document.getElementById("crackDepth").value = params.crackDepth;
+        document.getElementById("crackDepthValue").textContent = params.crackDepth.toFixed(2);
+      }
+      if (params.crackFrequency !== undefined) {
+        document.getElementById("crackFrequency").value = params.crackFrequency;
+        document.getElementById("crackFrequencyValue").textContent = params.crackFrequency.toFixed(1);
+      }
+      if (params.smoothIterations !== undefined) {
+        document.getElementById("smoothIterations").value = params.smoothIterations;
+        document.getElementById("smoothIterationsValue").textContent = params.smoothIterations;
+      }
+      if (params.smoothStrength !== undefined) {
+        document.getElementById("smoothStrength").value = params.smoothStrength;
+        document.getElementById("smoothStrengthValue").textContent = params.smoothStrength.toFixed(2);
+      }
+      if (params.baseColor) document.getElementById("baseColor").value = params.baseColor;
+      if (params.secondaryColor) document.getElementById("secondaryColor").value = params.secondaryColor;
+      if (params.accentColor) document.getElementById("accentColor").value = params.accentColor;
+      if (params.colorVariation !== undefined) {
+        document.getElementById("colorVariation").value = params.colorVariation;
+        document.getElementById("colorVariationValue").textContent = params.colorVariation.toFixed(2);
+      }
+      if (params.heightBlend !== undefined) {
+        document.getElementById("heightBlend").value = params.heightBlend;
+        document.getElementById("heightBlendValue").textContent = params.heightBlend.toFixed(2);
+      }
+      if (params.slopeBlend !== undefined) {
+        document.getElementById("slopeBlend").value = params.slopeBlend;
+        document.getElementById("slopeBlendValue").textContent = params.slopeBlend.toFixed(2);
+      }
+      if (params.aoIntensity !== undefined) {
+        document.getElementById("aoIntensity").value = params.aoIntensity;
+        document.getElementById("aoIntensityValue").textContent = params.aoIntensity.toFixed(2);
+      }
+      if (params.flatShading !== undefined) {
+        document.getElementById("flatShading").checked = params.flatShading;
+      }
+      // Color mode params
+      if (params.colorMode) {
+        document.getElementById("colorMode").value = params.colorMode;
+      }
+      if (params.textureBlend !== undefined) {
+        document.getElementById("textureBlend").value = params.textureBlend;
+        document.getElementById("textureBlendValue").textContent = params.textureBlend.toFixed(2);
+      }
+      // Texture params
+      if (params.texturePattern) {
+        document.getElementById("texturePattern").value = params.texturePattern;
+      }
+      if (params.textureScale !== undefined) {
+        document.getElementById("textureScale").value = params.textureScale;
+        document.getElementById("textureScaleValue").textContent = params.textureScale.toFixed(1);
+      }
+      if (params.patternDetail !== undefined) {
+        document.getElementById("patternDetail").value = params.patternDetail;
+        document.getElementById("patternDetailValue").textContent = params.patternDetail;
+      }
+      if (params.textureContrast !== undefined) {
+        document.getElementById("textureContrast").value = params.textureContrast;
+        document.getElementById("textureContrastValue").textContent = params.textureContrast.toFixed(1);
+      }
+      if (params.roughnessVariation !== undefined) {
+        document.getElementById("roughnessVariation").value = params.roughnessVariation;
+        document.getElementById("roughnessVariationValue").textContent = params.roughnessVariation.toFixed(2);
+      }
+      // Material params
+      if (params.baseRoughness !== undefined) {
+        document.getElementById("baseRoughness").value = params.baseRoughness;
+        document.getElementById("baseRoughnessValue").textContent = params.baseRoughness.toFixed(2);
+      }
+      if (params.metalness !== undefined) {
+        document.getElementById("metalness").value = params.metalness;
+        document.getElementById("metalnessValue").textContent = params.metalness.toFixed(2);
+      }
+      // UV params
+      if (params.uvMethod) {
+        document.getElementById("uvMethod").value = params.uvMethod;
+      }
+      if (params.bakeResolution !== undefined) {
+        document.getElementById("bakeResolution").value = params.bakeResolution;
+        document.getElementById("bakeResolutionValue").textContent = params.bakeResolution;
+      }
+      if (params.useTriplanar !== undefined) {
+        document.getElementById("useTriplanar").checked = params.useTriplanar;
+      }
+    }
+
+    function updateStats(stats) {
+      document.getElementById("stats").innerHTML = `
+        <strong>Triangles:</strong> ${stats.triangles.toLocaleString()}<br>
+        <strong>Vertices:</strong> ${stats.vertices.toLocaleString()}<br>
+        <strong>Unique Verts:</strong> ${stats.uniqueVertices.toLocaleString()}
+      `;
+    }
+
+    function generate() {
+      const params = getParams();
+      const rockData = generateRock(params);
+      const { mesh, geometry, noise, stats } = rockData;
+      
+      // Remove old rock
+      if (currentRock) {
+        scene.remove(currentRock);
+        currentRock.geometry.dispose();
+        currentRock.material.dispose();
+      }
+      if (wireframeMesh) {
+        scene.remove(wireframeMesh);
+        wireframeMesh.geometry.dispose();
+        wireframeMesh.material.dispose();
+        wireframeMesh = null;
+      }
+      
+      // Store for baking
+      currentRockData = rockData;
+      bakedTexture = null;
+      
+      currentRock = mesh;
+      scene.add(currentRock);
+      
+      // Create wireframe if enabled
+      updateWireframe();
+      
+      updateStats(stats);
+    }
+
+    function updateWireframe() {
+      if (wireframeMesh) {
+        scene.remove(wireframeMesh);
+        wireframeMesh.geometry.dispose();
+        wireframeMesh.material.dispose();
+        wireframeMesh = null;
+      }
+      
+      if (document.getElementById("showWireframe").checked && currentRock) {
+        const wireGeom = new THREE.WireframeGeometry(currentRock.geometry);
+        const wireMat = new THREE.LineBasicMaterial({
+          color: 0x8bd3ff,
+          opacity: 0.5,
+          transparent: true,
+        });
+        wireframeMesh = new THREE.LineSegments(wireGeom, wireMat);
+        wireframeMesh.position.copy(currentRock.position);
+        scene.add(wireframeMesh);
+      }
+    }
+
+    // ============================================================
+    // EXPORT FUNCTIONS
+    // ============================================================
+    function exportGLB() {
+      if (!currentRock) return;
+      
+      const exporter = new GLTFExporter();
+      
+      // Clone for export
+      const exportMesh = currentRock.clone();
+      exportMesh.position.set(0, 0, 0);
+      
+      exporter.parse(
+        exportMesh,
+        (result) => {
+          const blob = new Blob([result], { type: "application/octet-stream" });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = `rock_${document.getElementById("seedInput").value}.glb`;
+          link.click();
+          URL.revokeObjectURL(url);
+        },
+        (error) => {
+          console.error("Export error:", error);
+          alert("Export failed: " + error.message);
+        },
+        { binary: true }
+      );
+    }
+
+    function exportOBJ() {
+      if (!currentRock) return;
+      
+      const geometry = currentRock.geometry;
+      const position = geometry.attributes.position;
+      const normal = geometry.attributes.normal;
+      const color = geometry.attributes.color;
+      
+      let obj = "# Procedural Rock\n";
+      obj += `# Vertices: ${position.count}\n\n`;
+      
+      // Vertices with colors
+      for (let i = 0; i < position.count; i++) {
+        const x = position.getX(i).toFixed(6);
+        const y = (position.getY(i) + currentRock.position.y).toFixed(6);
+        const z = position.getZ(i).toFixed(6);
+        
+        if (color) {
+          const r = color.getX(i).toFixed(4);
+          const g = color.getY(i).toFixed(4);
+          const b = color.getZ(i).toFixed(4);
+          obj += `v ${x} ${y} ${z} ${r} ${g} ${b}\n`;
+        } else {
+          obj += `v ${x} ${y} ${z}\n`;
+        }
+      }
+      
+      obj += "\n";
+      
+      // Normals
+      if (normal) {
+        for (let i = 0; i < normal.count; i++) {
+          const nx = normal.getX(i).toFixed(6);
+          const ny = normal.getY(i).toFixed(6);
+          const nz = normal.getZ(i).toFixed(6);
+          obj += `vn ${nx} ${ny} ${nz}\n`;
+        }
+        obj += "\n";
+      }
+      
+      // Faces
+      if (geometry.index) {
+        const index = geometry.index;
+        for (let i = 0; i < index.count; i += 3) {
+          const a = index.getX(i) + 1;
+          const b = index.getX(i + 1) + 1;
+          const c = index.getX(i + 2) + 1;
+          if (normal) {
+            obj += `f ${a}//${a} ${b}//${b} ${c}//${c}\n`;
+          } else {
+            obj += `f ${a} ${b} ${c}\n`;
+          }
+        }
+      } else {
+        for (let i = 0; i < position.count; i += 3) {
+          const a = i + 1;
+          const b = i + 2;
+          const c = i + 3;
+          if (normal) {
+            obj += `f ${a}//${a} ${b}//${b} ${c}//${c}\n`;
+          } else {
+            obj += `f ${a} ${b} ${c}\n`;
+          }
+        }
+      }
+      
+      const blob = new Blob([obj], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `rock_${document.getElementById("seedInput").value}.obj`;
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+    
+    function bakeTexture() {
+      if (!currentRockData) {
+        alert("Generate a rock first!");
+        return;
+      }
+      
+      const { geometry, noise, params } = currentRockData;
+      const resolution = parseInt(document.getElementById("bakeResolution").value);
+      const useTriplanar = document.getElementById("useTriplanar").checked;
+      
+      // Make sure we have UVs
+      if (!geometry.attributes.uv) {
+        const uvMethod = document.getElementById("uvMethod").value;
+        generateUVs(geometry, uvMethod, geometry.attributes.normal);
+      }
+      
+      // Update params with current UI settings
+      const bakeParams = {
+        ...params,
+        useTriplanar,
+        textureScale: parseFloat(document.getElementById("textureScale").value),
+        patternDetail: parseInt(document.getElementById("patternDetail").value),
+        textureContrast: parseFloat(document.getElementById("textureContrast").value),
+        baseColor: document.getElementById("baseColor").value,
+        secondaryColor: document.getElementById("secondaryColor").value,
+        accentColor: document.getElementById("accentColor").value,
+      };
+      
+      console.time("Bake texture");
+      bakedTexture = bakeTextureToUV(geometry, bakeParams, noise, resolution);
+      console.timeEnd("Bake texture");
+      
+      // Create a NEW clean material with the baked texture (no triplanar shader)
+      // This is important for export - the onBeforeCompile modifications don't export well
+      if (currentRock) {
+        const oldMaterial = currentRock.material;
+        
+        // Create fresh material with just the baked texture
+        const bakedMaterial = new THREE.MeshStandardMaterial({
+          map: bakedTexture,
+          roughness: parseFloat(document.getElementById("baseRoughness").value),
+          metalness: parseFloat(document.getElementById("metalness").value),
+          flatShading: document.getElementById("flatShading").checked,
+          vertexColors: false,
+        });
+        
+        currentRock.material = bakedMaterial;
+        
+        // Dispose old material
+        if (oldMaterial) {
+          oldMaterial.dispose();
+        }
+        
+        console.log("Applied baked texture - mesh now uses standard UV-mapped material");
+      }
+      
+      // Show preview
+      const canvas = document.getElementById('bakeCanvas');
+      canvas.style.display = 'block';
+      canvas.style.position = 'fixed';
+      canvas.style.bottom = '16px';
+      canvas.style.right = '16px';
+      canvas.style.width = '200px';
+      canvas.style.height = '200px';
+      canvas.style.border = '2px solid #8bd3ff';
+      canvas.style.borderRadius = '8px';
+      canvas.style.zIndex = '1000';
+      
+      // Auto-hide after 5 seconds
+      setTimeout(() => {
+        canvas.style.display = 'none';
+      }, 5000);
+      
+      updateStats(currentRockData.stats);
+      document.getElementById("stats").innerHTML += `<br><strong>Baked:</strong> ${resolution}x${resolution}`;
+    }
+    
+    function exportPNG() {
+      const canvas = document.getElementById('bakeCanvas');
+      if (!canvas || canvas.width === 0) {
+        alert("Bake a texture first!");
+        return;
+      }
+      
+      canvas.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `rock_${document.getElementById("seedInput").value}_texture.png`;
+        link.click();
+        URL.revokeObjectURL(url);
+      }, 'image/png');
+    }
+
+    // ============================================================
+    // EVENT LISTENERS
+    // ============================================================
+    
+    // Slider value displays
+    const sliders = [
+      ["resolution", "resolutionValue"],
+      ["scaleX", "scaleXValue", 2],
+      ["scaleY", "scaleYValue", 2],
+      ["scaleZ", "scaleZValue", 2],
+      ["noiseScale", "noiseScaleValue", 1],
+      ["noiseAmplitude", "noiseAmplitudeValue", 2],
+      ["noiseOctaves", "noiseOctavesValue"],
+      ["noiseLacunarity", "noiseLacunarityValue", 1],
+      ["noisePersistence", "noisePersistenceValue", 2],
+      ["crackDepth", "crackDepthValue", 2],
+      ["crackFrequency", "crackFrequencyValue", 1],
+      ["smoothIterations", "smoothIterationsValue"],
+      ["smoothStrength", "smoothStrengthValue", 2],
+      ["colorVariation", "colorVariationValue", 2],
+      ["heightBlend", "heightBlendValue", 2],
+      ["slopeBlend", "slopeBlendValue", 2],
+      ["aoIntensity", "aoIntensityValue", 2],
+      // Color mode sliders
+      ["textureBlend", "textureBlendValue", 2],
+      // Texture sliders
+      ["textureScale", "textureScaleValue", 1],
+      ["patternDetail", "patternDetailValue"],
+      ["textureContrast", "textureContrastValue", 1],
+      ["roughnessVariation", "roughnessVariationValue", 2],
+      // Material sliders
+      ["baseRoughness", "baseRoughnessValue", 2],
+      ["metalness", "metalnessValue", 2],
+    ];
+
+    sliders.forEach(([id, valueId, decimals]) => {
+      const input = document.getElementById(id);
+      const value = document.getElementById(valueId);
+      input.addEventListener("input", () => {
+        value.textContent = decimals
+          ? parseFloat(input.value).toFixed(decimals)
+          : input.value;
+      });
+    });
+
+    // Generate button
+    document.getElementById("generateBtn").addEventListener("click", generate);
+
+    // Random seed
+    document.getElementById("randomSeed").addEventListener("click", () => {
+      document.getElementById("seedInput").value = Math.random().toString(36).slice(2, 10);
+      generate();
+    });
+
+    // Presets
+    document.querySelectorAll("[data-preset]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const preset = PRESETS[btn.dataset.preset];
+        if (preset) {
+          setParams(preset);
+          generate();
+        }
+      });
+    });
+
+    // Display options
+    document.getElementById("showWireframe").addEventListener("change", updateWireframe);
+    document.getElementById("showGrid").addEventListener("change", (e) => {
+      grid.visible = e.target.checked;
+    });
+    document.getElementById("autoRotate").addEventListener("change", (e) => {
+      controls.autoRotate = e.target.checked;
+    });
+    document.getElementById("flatShading").addEventListener("change", generate);
+    
+    // Color mode and texture controls
+    document.getElementById("colorMode").addEventListener("change", generate);
+    document.getElementById("texturePattern").addEventListener("change", generate);
+
+    // Export buttons
+    document.getElementById("exportGLB").addEventListener("click", exportGLB);
+    document.getElementById("exportOBJ").addEventListener("click", exportOBJ);
+    
+    // Bake and texture export
+    document.getElementById("bakeTexture").addEventListener("click", bakeTexture);
+    document.getElementById("exportPNG").addEventListener("click", exportPNG);
+    
+    // UV method change triggers regenerate
+    document.getElementById("uvMethod").addEventListener("change", generate);
+    document.getElementById("bakeResolution").addEventListener("change", () => {
+      document.getElementById("bakeResolutionValue").textContent = document.getElementById("bakeResolution").value;
+    });
+
+    // Window resize
+    function onResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+    window.addEventListener("resize", onResize);
+
+    // ============================================================
+    // ANIMATION LOOP
+    // ============================================================
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    // Initialize
+    generate();
+    animate();
+  </script>
+</body>
+</html>

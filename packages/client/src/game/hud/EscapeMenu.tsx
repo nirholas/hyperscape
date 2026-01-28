@@ -9,7 +9,7 @@
 
 import React, { useCallback, useEffect, useState, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 import { usePrivy } from "@privy-io/react-auth";
 import type { ClientWorld } from "../../types";
 import {

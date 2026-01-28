@@ -21,7 +21,13 @@ import React, {
   useCallback,
   useMemo,
 } from "react";
-import { useEditMode, useSnap, useThemeStore, useMobileLayout } from "hs-kit";
+import {
+  useEditMode,
+  useSnap,
+  useThemeStore,
+  useMobileLayout,
+  StatusOrb,
+} from "@/ui";
 import type { PlayerStats } from "../../types";
 
 /** Display mode type */
@@ -56,24 +62,24 @@ const DEFAULT_CONFIG: StatusBarsConfig = {
   showLabels: true,
 };
 
-/** Size presets for bar mode */
+/** Size presets for bar mode - compact sizing */
 const BAR_SIZE_PRESETS: Record<SizePreset, { width: number; height: number }> =
   {
-    compact: { width: 160, height: 36 },
-    normal: { width: 220, height: 44 },
-    large: { width: 300, height: 60 },
+    compact: { width: 140, height: 32 },
+    normal: { width: 180, height: 38 },
+    large: { width: 240, height: 50 },
   };
 
-/** Size presets for orb mode */
+/** Size presets for orb mode - compact sizing */
 const ORB_SIZE_PRESETS: Record<SizePreset, number> = {
-  compact: 32,
-  normal: 40,
-  large: 52,
+  compact: 28,
+  normal: 34,
+  large: 44,
 };
 
 /** Min/max dimensions */
-const MIN_SIZE = { width: 120, height: 36 };
-const MAX_SIZE = { width: 400, height: 120 };
+const MIN_SIZE = { width: 100, height: 32 };
+const MAX_SIZE = { width: 350, height: 100 };
 
 interface StatusBarsProps {
   /** Player stats containing health and prayerPoints */
@@ -315,21 +321,52 @@ export function StatusBars({
     (prayerPoints.current / Math.max(1, prayerPoints.max)) * 100,
   );
 
-  // Adaptive sizing for bar mode
-  const gap = Math.max(4, size.height * 0.08);
-  const padding = Math.max(4, size.height * 0.1);
-
   // Orb size based on container
   const orbSize = ORB_SIZE_PRESETS[config.sizePreset];
 
-  // Render orb mode - styled to match minimap stamina orb
-  // Render orb mode - circular orbs with fill
+  // Render orb mode - using shared StatusOrb from @/ui
   const renderOrbMode = () => {
+    return (
+      <div
+        style={{
+          display: "flex",
+          flexDirection: config.orientation === "horizontal" ? "row" : "column",
+          alignItems: "center",
+          gap: 4,
+        }}
+      >
+        <StatusOrb
+          type="hp"
+          current={health.current}
+          max={health.max}
+          size={orbSize}
+          icon="♥"
+          showValue={config.showLabels}
+          dynamicLabelColor
+        />
+        <StatusOrb
+          type="prayer"
+          current={prayerPoints.current}
+          max={prayerPoints.max}
+          size={orbSize}
+          icon="✦"
+          showValue={config.showLabels}
+        />
+      </div>
+    );
+  };
+
+  // Render bar mode - compact orbs with progress bars
+  const renderBarMode = () => {
+    // Orb size for bar mode - compact
+    const barOrbSize = Math.max(26, Math.min(32, size.height * 0.45));
+
     // Orb configurations
     const orbs = [
       {
         id: "hp",
         value: health.current,
+        max: health.max,
         percent: hpPercent,
         fillColor: "#dc2626",
         darkColor: "#7f1d1d",
@@ -339,6 +376,7 @@ export function StatusBars({
       {
         id: "prayer",
         value: prayerPoints.current,
+        max: prayerPoints.max,
         percent: prayerPercent,
         fillColor: "#0ea5e9",
         darkColor: "#0c4a6e",
@@ -351,124 +389,8 @@ export function StatusBars({
       <div
         style={{
           display: "flex",
-          flexDirection: config.orientation === "horizontal" ? "row" : "column",
-          alignItems: "center",
-          gap: gap,
-        }}
-      >
-        {orbs.map((orb) => (
-          <div
-            key={orb.id}
-            style={{
-              width: orbSize,
-              height: orbSize,
-              borderRadius: "50%",
-              background: theme.colors.background.tertiary,
-              padding: 2,
-              boxShadow: `0 2px 6px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05)`,
-              position: "relative",
-            }}
-            title={orb.title}
-          >
-            {/* Inner orb */}
-            <div
-              style={{
-                width: "100%",
-                height: "100%",
-                borderRadius: "50%",
-                position: "relative",
-                background: `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${orb.darkColor}40 100%)`,
-                overflow: "hidden",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                border: `1px solid ${theme.colors.border.default}`,
-                boxShadow: "inset 0 2px 4px rgba(0, 0, 0, 0.4)",
-              }}
-            >
-              {/* Fill from bottom */}
-              <div
-                style={{
-                  position: "absolute",
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  height: `${orb.percent}%`,
-                  background: `linear-gradient(to top, ${orb.fillColor} 0%, ${orb.darkColor} 100%)`,
-                  transition: "height 0.3s ease-out",
-                }}
-              />
-              {/* Icon */}
-              <span
-                style={{
-                  fontSize: orbSize * 0.32,
-                  color: orb.fillColor,
-                  textShadow: `0 0 6px ${orb.fillColor}, 0 1px 2px rgba(0, 0, 0, 0.9)`,
-                  zIndex: 1,
-                  lineHeight: 1,
-                  filter: "brightness(1.2)",
-                }}
-              >
-                {orb.icon}
-              </span>
-              {/* Value */}
-              {config.showLabels && (
-                <span
-                  style={{
-                    fontSize: orbSize * 0.24,
-                    fontWeight: theme.typography.fontWeight.bold,
-                    color: theme.colors.text.primary,
-                    textShadow: "0 1px 2px rgba(0, 0, 0, 0.9)",
-                    zIndex: 1,
-                    marginTop: 1,
-                  }}
-                >
-                  {orb.value}
-                </span>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-  };
-
-  // Render bar mode - orbs with progress bars
-  const renderBarMode = () => {
-    // Orb size for bar mode
-    const barOrbSize = Math.max(32, Math.min(40, size.height * 0.5));
-
-    // Orb configurations
-    const orbs = [
-      {
-        id: "hp",
-        value: health.current,
-        max: health.max,
-        percent: hpPercent,
-        fillColor: "#dc2626",
-        darkColor: "#7f1d1d", // Dark red
-        icon: "♥",
-        title: `Hitpoints: ${health.current}/${health.max}`,
-      },
-      {
-        id: "prayer",
-        value: prayerPoints.current,
-        max: prayerPoints.max,
-        percent: prayerPercent,
-        fillColor: "#0ea5e9",
-        darkColor: "#0c4a6e", // Dark blue
-        icon: "✦",
-        title: `Prayer: ${prayerPoints.current}/${prayerPoints.max}`,
-      },
-    ];
-
-    return (
-      <div
-        style={{
-          display: "flex",
           flexDirection: "column",
-          gap: 4,
+          gap: 3,
           alignItems: "center",
         }}
       >
@@ -488,9 +410,9 @@ export function StatusBars({
                 width: barOrbSize,
                 height: barOrbSize,
                 borderRadius: "50%",
-                background: theme.colors.background.tertiary,
-                padding: 2,
-                boxShadow: `0 2px 6px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05)`,
+                background: theme.colors.slot.filled,
+                padding: 1,
+                boxShadow: `0 1px 3px rgba(0, 0, 0, 0.4)`,
                 position: "relative",
                 zIndex: 2,
                 flexShrink: 0,
@@ -503,14 +425,14 @@ export function StatusBars({
                   height: "100%",
                   borderRadius: "50%",
                   position: "relative",
-                  background: `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${orb.darkColor}40 100%)`,
+                  background: theme.colors.slot.empty,
                   overflow: "hidden",
                   display: "flex",
                   flexDirection: "column",
                   alignItems: "center",
                   justifyContent: "center",
-                  border: `1px solid ${theme.colors.border.default}`,
-                  boxShadow: "inset 0 2px 4px rgba(0, 0, 0, 0.4)",
+                  border: `1px solid ${theme.colors.border.default}30`,
+                  boxShadow: "inset 0 1px 2px rgba(0, 0, 0, 0.3)",
                 }}
               >
                 {/* Fill from bottom */}
@@ -522,21 +444,21 @@ export function StatusBars({
                     right: 0,
                     height: `${orb.percent}%`,
                     background: `linear-gradient(to top, ${orb.fillColor} 0%, ${orb.darkColor} 100%)`,
-                    transition: "height 0.3s ease-out",
+                    transition: "height 0.2s ease-out",
                   }}
                 />
-                {/* Icon */}
+                {/* Value number inside orb */}
                 <span
                   style={{
-                    fontSize: barOrbSize * 0.35,
-                    color: orb.fillColor,
-                    textShadow: `0 0 6px ${orb.fillColor}, 0 1px 2px rgba(0, 0, 0, 0.9)`,
+                    fontSize: barOrbSize * 0.38,
+                    color: "#fff",
+                    textShadow: `0 0 3px rgba(0, 0, 0, 0.9), 0 1px 2px rgba(0, 0, 0, 0.8)`,
                     zIndex: 1,
                     lineHeight: 1,
-                    filter: "brightness(1.2)",
+                    fontWeight: 700,
                   }}
                 >
-                  {orb.icon}
+                  {orb.value}
                 </span>
               </div>
             </div>
@@ -544,17 +466,17 @@ export function StatusBars({
             {/* Progress bar extending from orb */}
             <div
               style={{
-                width: size.width - barOrbSize - 40,
-                height: 12,
-                marginLeft: -barOrbSize * 0.25,
-                background: theme.colors.background.overlay,
-                borderRadius: "0 6px 6px 0",
+                width: size.width - barOrbSize - 32,
+                height: 8,
+                marginLeft: -barOrbSize * 0.2,
+                background: theme.colors.slot.empty,
+                borderRadius: 0,
                 overflow: "hidden",
-                border: `1px solid ${theme.colors.border.default}`,
+                border: `1px solid ${theme.colors.border.default}30`,
                 borderLeft: "none",
                 position: "relative",
                 zIndex: 1,
-                boxShadow: "inset 0 1px 3px rgba(0, 0, 0, 0.4)",
+                boxShadow: "inset 0 1px 2px rgba(0, 0, 0, 0.3)",
               }}
             >
               {/* Fill */}
@@ -563,55 +485,41 @@ export function StatusBars({
                   width: `${orb.percent}%`,
                   height: "100%",
                   background: orb.fillColor,
-                  borderRadius: "0 4px 4px 0",
-                  transition: "width 0.3s ease-out",
+                  borderRadius: 0,
+                  transition: "width 0.2s ease-out",
                 }}
               />
             </div>
-
-            {/* Value label */}
-            {config.showLabels && (
-              <span
-                style={{
-                  fontSize: theme.typography.fontSize.xs,
-                  color: theme.colors.text.primary,
-                  fontWeight: theme.typography.fontWeight.semibold,
-                  minWidth: 24,
-                  marginLeft: 6,
-                  textAlign: "right",
-                }}
-              >
-                {orb.value}
-              </span>
-            )}
           </div>
         ))}
       </div>
     );
   };
 
-  // Calculate container size based on mode
+  // Calculate container size based on mode - compact sizing
   // Fixed: 2 orbs (HP + Prayer) - Stamina is shown in minimap area
   const orbCount = 2;
+  const compactGap = 4;
+  const compactPadding = 3;
 
-  // Orb size for bar mode
-  const barOrbSizeCalc = Math.max(32, Math.min(40, size.height * 0.5));
+  // Orb size for bar mode - compact
+  const barOrbSizeCalc = Math.max(26, Math.min(32, size.height * 0.45));
 
   const containerWidth =
     config.displayMode === "orbs"
       ? config.orientation === "horizontal"
-        ? orbSize * orbCount + gap * (orbCount - 1) + padding * 2
-        : orbSize + padding * 2
+        ? orbSize * orbCount + compactGap * (orbCount - 1) + compactPadding * 2
+        : orbSize + compactPadding * 2
       : size.width;
 
-  // For bar mode: 2 orb rows with gap + padding
-  const barModeHeight = barOrbSizeCalc * 2 + 4 + 12; // 2 orbs + gap + padding
+  // For bar mode: 2 orb rows with gap + padding - compact
+  const barModeHeight = barOrbSizeCalc * 2 + 3 + 8; // 2 orbs + gap + padding
 
   const containerHeight =
     config.displayMode === "orbs"
       ? config.orientation === "vertical"
-        ? orbSize * orbCount + gap * (orbCount - 1) + padding * 2
-        : orbSize + padding * 2
+        ? orbSize * orbCount + compactGap * (orbCount - 1) + compactPadding * 2
+        : orbSize + compactPadding * 2
       : Math.max(size.height, barModeHeight);
 
   return (
@@ -627,14 +535,14 @@ export function StatusBars({
         flexDirection: config.displayMode === "bars" ? "column" : "row",
         alignItems: config.displayMode === "bars" ? "stretch" : "center",
         justifyContent: config.displayMode === "bars" ? "center" : "flex-start",
-        gap: config.displayMode === "bars" ? 0 : gap,
-        padding: config.displayMode === "bars" ? "6px 8px" : padding,
-        background: theme.colors.background.tertiary,
-        borderRadius: theme.borderRadius.md,
-        border: `1px solid ${theme.colors.border.default}`,
+        gap: config.displayMode === "bars" ? 0 : compactGap,
+        padding: config.displayMode === "bars" ? "4px 6px" : compactPadding,
+        background: theme.colors.slot.filled,
+        borderRadius: 3,
+        border: `1px solid ${theme.colors.border.default}30`,
         boxShadow: isUnlocked
-          ? `${theme.shadows.md}, 0 0 0 2px ${theme.colors.accent.primary}40`
-          : theme.shadows.md,
+          ? `0 1px 3px rgba(0,0,0,0.3), 0 0 0 1px ${theme.colors.accent.primary}40`
+          : "0 1px 3px rgba(0,0,0,0.3)",
         cursor: isUnlocked ? "move" : "default",
         userSelect: "none",
         pointerEvents: "auto",
@@ -718,17 +626,17 @@ export function StatusBars({
           data-toggle="mode"
           style={{
             position: "absolute",
-            top: 2,
-            right: 2,
-            width: 16,
-            height: 16,
-            borderRadius: 4,
-            backgroundColor: theme.colors.background.tertiary,
-            border: `1px solid ${theme.colors.border.default}`,
+            top: 1,
+            right: 1,
+            width: 14,
+            height: 14,
+            borderRadius: 3,
+            backgroundColor: theme.colors.slot.filled,
+            border: `1px solid ${theme.colors.border.default}30`,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontSize: 10,
+            fontSize: 8,
             cursor: "pointer",
             zIndex: 20,
           }}

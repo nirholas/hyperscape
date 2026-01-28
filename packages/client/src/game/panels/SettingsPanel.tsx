@@ -17,8 +17,7 @@ import { isTouch } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
 import { useFullscreen } from "../../hooks/useFullscreen";
 import { MicIcon, MicOffIcon } from "../../components/Icons";
-import { ToggleSwitch } from "../../components/ToggleSwitch";
-import { Slider } from "../../components/Slider";
+import { ToggleSwitch, Slider } from "@/ui";
 import { NAME_SANITIZE_REGEX } from "../../utils/validation";
 import { COLORS } from "../../constants/colors";
 import {
@@ -26,9 +25,9 @@ import {
   useComplexityMode,
   COMPLEXITY_MODE_CONFIGS,
   useThemeStore,
-} from "hs-kit";
+  type ComplexityMode,
+} from "@/ui";
 import type { StatusBarsConfig } from "../hud/StatusBars";
-import type { ComplexityMode } from "hs-kit";
 import { privyAuthManager } from "../../auth/PrivyAuthManager";
 import {
   type GraphicsQuality,
@@ -250,7 +249,7 @@ function AccountTabContent({
       <div
         className="rounded-lg relative overflow-hidden"
         style={{
-          background: `linear-gradient(135deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+          background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
           border: authenticated
             ? `1px solid ${theme.colors.state.success}40`
             : `1px solid ${theme.colors.border.default}80`,
@@ -795,7 +794,7 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
       <div
         className="flex gap-1 mb-2 flex-shrink-0"
         style={{
-          background: theme.colors.background.primary,
+          background: theme.colors.background.panelPrimary,
           border: `1px solid ${theme.colors.border.default}66`,
           borderRadius: "6px",
           padding: "4px",
@@ -842,7 +841,7 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
       <div
         className="flex-1 overflow-y-auto noscrollbar"
         style={{
-          background: theme.colors.background.secondary,
+          background: theme.colors.background.panelSecondary,
           border: `1px solid ${theme.colors.border.default}66`,
           borderRadius: "6px",
           padding: "8px",
@@ -1164,22 +1163,6 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
               )}
             </SettingsSection>
 
-            {/* UI Scale */}
-            <SettingsSection title="UI Scale">
-              <Slider
-                label="Size"
-                value={uiScale}
-                onChange={(v) => {
-                  setUiScale(v);
-                  prefs?.setUI?.(v);
-                }}
-                min={0.6}
-                max={1.6}
-                step={0.05}
-                formatValue={(v) => `${v.toFixed(2)}x`}
-              />
-            </SettingsSection>
-
             {/* Interface Complexity */}
             <ComplexityModeSelector />
 
@@ -1408,7 +1391,7 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
               <div
                 className="p-2.5 rounded relative overflow-hidden"
                 style={{
-                  background: `linear-gradient(135deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+                  background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
                   border: world.graphics?.isWebGPU
                     ? `1px solid ${theme.colors.state.success}66`
                     : `1px solid ${theme.colors.state.info}66`,

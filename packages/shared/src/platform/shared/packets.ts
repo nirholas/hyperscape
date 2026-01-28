@@ -134,6 +134,8 @@ const names = [
   'processingSmithing', // Client -> Server: player selected item to smith from UI
   'smeltingInterfaceOpen', // Server -> Client: show smelting interface with available bars
   'smithingInterfaceOpen', // Server -> Client: show smithing interface with available recipes
+  'smeltingClose',         // Server -> Client: close smelting interface (walked away, etc.)
+  'smithingClose',         // Server -> Client: close smithing interface (walked away, etc.)
   // Combat packets
   'attackMob',
   'attackPlayer',  // PvP attack
@@ -172,6 +174,7 @@ const names = [
   'playerRespawned',
   // Loot packets
   'corpseLoot',
+  'lootResult',            // Server -> Client: loot transaction result (success/failure)
   // Attack style packets
   'attackStyleChanged',
   'attackStyleUpdate',
@@ -179,6 +182,11 @@ const names = [
   'combatDamageDealt',
   // Player state packets
   'playerUpdated',
+  'playerNameChanged',     // Server -> Client: player name change confirmed
+  // Action bar packets
+  'actionBarSave',         // Client -> Server: save action bar configuration
+  'actionBarLoad',         // Client -> Server: load action bar configuration
+  'actionBarState',        // Server -> Client: action bar state response
   // Character selection packets (feature-flagged usage)
   'characterListRequest',
   'characterCreate',
@@ -259,6 +267,10 @@ const names = [
   'questDetail',         // Server -> Client: quest detail response
   'questStartConfirm',   // Server -> Client: show quest accept screen
   'questAccept',         // Client -> Server: player accepted quest
+  'questAbandon',        // Client -> Server: player abandoned quest
+  'questTogglePin',      // Client -> Server: toggle quest pinned status
+  'questPinned',         // Server -> Client: quest pin status changed
+  'questComplete',       // Client -> Server: request to complete quest (when ready_to_complete)
   'questProgressed',     // Server -> Client: quest progress updated
   'questCompleted',      // Server -> Client: quest completed, show rewards
   // XP Lamp packets
@@ -283,6 +295,43 @@ const names = [
   'tradeCompleted',      // Server -> Client: trade successful, items swapped
   'tradeCancelled',      // Server -> Client: trade cancelled (disconnect, decline, etc.)
   'tradeError',          // Server -> Client: trade operation failed with reason
+  'tradeConfirmScreen',  // Server -> Client: move to confirmation screen (OSRS two-screen)
+  // Duel Arena packets
+  'duel:challenge',        // Client -> Server: challenge player to duel
+  'duel:challenge:respond',// Client -> Server: accept/decline duel challenge
+  'duelChallengeSent',     // Server -> Client: challenge sent confirmation
+  'duelChallengeIncoming', // Server -> Client: incoming challenge notification
+  'duelSessionStarted',    // Server -> Client: duel session created (open duel interface)
+  'duelChallengeDeclined', // Server -> Client: challenge was declined
+  'duelError',             // Server -> Client: duel operation failed with reason
+  // Duel rules/stakes packets
+  'duel:toggle:rule',      // Client -> Server: toggle a duel rule on/off
+  'duel:toggle:equipment', // Client -> Server: toggle equipment restriction
+  'duel:accept:rules',     // Client -> Server: accept current rules
+  'duel:add:stake',        // Client -> Server: add item to stakes
+  'duel:remove:stake',     // Client -> Server: remove item from stakes
+  'duel:accept:stakes',    // Client -> Server: accept current stakes
+  'duel:accept:final',     // Client -> Server: final confirmation
+  'duel:cancel',           // Client -> Server: cancel duel session
+  'duelStateUpdated',      // Server -> Client: duel state changed (rules, stakes, acceptance)
+  'duelMoveToStakes',      // Server -> Client: both accepted rules, move to stakes screen
+  'duelMoveToConfirm',     // Server -> Client: both accepted stakes, move to confirm screen
+  'duelStartFight',        // Server -> Client: both confirmed, start countdown/fight
+  'duelCancelled',         // Server -> Client: duel was cancelled
+  'duelRulesUpdated',      // Server -> Client: rule toggle notification
+  'duelEquipmentUpdated',  // Server -> Client: equipment restriction toggle notification
+  'duelAcceptanceUpdated', // Server -> Client: acceptance state changed
+  'duelStateChanged',      // Server -> Client: duel phase changed (RULES -> STAKES -> CONFIRMING)
+  'duelStakesUpdated',     // Server -> Client: stakes changed (add/remove stake)
+  'duelCountdownStart',    // Server -> Client: both confirmed, start 3-2-1 countdown
+  'duelCountdownTick',     // Server -> Client: countdown tick (3, 2, 1, 0)
+  'duelFightBegin',        // Server -> Client: countdown finished, fight begins
+  'duelFightStart',        // Server -> Client: fight starting with arena ID
+  'duelEnded',             // Server -> Client: duel has ended (winner, loser, rewards)
+  'duelCompleted',         // Server -> Client: duel completed with results
+  'duelOpponentDisconnected', // Server -> Client: opponent disconnected during duel
+  'duelOpponentReconnected',  // Server -> Client: opponent reconnected during duel
+  'duel:forfeit',          // Client -> Server: forfeit active duel (surrender)
   // Skill/Spell ability packets
   'useSkill',            // Client -> Server: activate a skill ability
   'castSpell',           // Client -> Server: cast a spell (optionally on target)
@@ -290,6 +339,24 @@ const names = [
   'spellCast',           // Server -> Client: spell cast acknowledged
   'abilityCooldown',     // Server -> Client: ability cooldown update (skill or spell)
   'abilityFailed',       // Server -> Client: ability failed (cooldown, level, resources, etc.)
+  // Friend/Social system packets
+  'friendRequest',         // Client -> Server: send friend request by player name
+  'friendAccept',          // Client -> Server: accept friend request
+  'friendDecline',         // Client -> Server: decline friend request
+  'friendRemove',          // Client -> Server: remove friend from list
+  'friendsListSync',       // Server -> Client: full friends/requests/ignore list sync
+  'friendStatusUpdate',    // Server -> Client: friend came online/offline/location change
+  'friendRequestIncoming', // Server -> Client: new friend request received
+  'ignoreAdd',             // Client -> Server: add player to ignore list
+  'ignoreRemove',          // Client -> Server: remove player from ignore list
+  'privateMessage',        // Client -> Server: send private message to player
+  'privateMessageReceived',// Server -> Client: incoming private message
+  'privateMessageFailed',  // Server -> Client: message delivery failed (offline, ignored, etc.)
+  'socialError',           // Server -> Client: social operation error
+  // Test/Debug packets (dev only - UI visual testing, no state changes)
+  'testLevelUp',           // Server -> Client: test level up popup (visual only)
+  'testXpDrop',            // Server -> Client: test XP drop animation (visual only)
+  'testDeathScreen',       // Server -> Client: test death screen (visual only)
 ]
 
 const byName: Record<string, PacketInfo> = {};

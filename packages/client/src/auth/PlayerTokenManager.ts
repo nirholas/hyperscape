@@ -34,6 +34,7 @@
 
 import EventEmitter from "eventemitter3";
 import { GAME_API_URL } from "../lib/api-config";
+import { logger } from "../lib/logger";
 
 interface ClientPlayerToken {
   playerId: string;
@@ -73,15 +74,35 @@ export class PlayerTokenManager extends EventEmitter {
 
   constructor() {
     super();
-    // Load existing token and session immediately
+    // Load existing token and session immediately with safe JSON parsing
     const storedToken = localStorage.getItem(PlayerTokenManager.STORAGE_KEY);
-    this.currentToken = storedToken
-      ? JSON.parse(storedToken)
-      : this.createNewToken("New Player");
+    let parsedToken: ClientPlayerToken | null = null;
+    if (storedToken) {
+      try {
+        parsedToken = JSON.parse(storedToken) as ClientPlayerToken;
+      } catch (err) {
+        logger.error(
+          "[PlayerTokenManager] Failed to parse stored token, creating new:",
+          err,
+        );
+      }
+    }
+    this.currentToken = parsedToken ?? this.createNewToken("New Player");
+
     const storedSession = localStorage.getItem(PlayerTokenManager.SESSION_KEY);
-    this.currentSession = storedSession
-      ? JSON.parse(storedSession)
-      : this.startSession();
+    let parsedSession: PlayerSession | null = null;
+    if (storedSession) {
+      try {
+        parsedSession = JSON.parse(storedSession) as PlayerSession;
+      } catch (err) {
+        logger.error(
+          "[PlayerTokenManager] Failed to parse stored session, starting new:",
+          err,
+        );
+      }
+    }
+    this.currentSession = parsedSession ?? this.startSession();
+
     this.setupBeforeUnloadHandler();
     this.startHeartbeat();
   }
@@ -258,9 +279,7 @@ export class PlayerTokenManager extends EventEmitter {
   }
 
   private generatePlayerId(): string {
-    const timestamp = Date.now().toString(36);
-    const randomPart = Math.random().toString(36).substr(2, 9);
-    return `player_${timestamp}_${randomPart}`;
+    return `player_${crypto.randomUUID()}`;
   }
 
   private generateTokenSecret(): string {
@@ -288,7 +307,7 @@ export class PlayerTokenManager extends EventEmitter {
   }
 
   private generateSessionId(): string {
-    return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return `session_${crypto.randomUUID()}`;
   }
 
   private saveToken(token: ClientPlayerToken): void {

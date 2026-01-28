@@ -407,6 +407,12 @@ export interface Entities extends System {
   getAllPlayers(): PlayerEntity[];
 }
 
+// Chat message types for different message styles
+export type ChatMessageType =
+  | "chat" // Normal chat message
+  | "system" // System messages
+  | "trade_request"; // OSRS-style trade request (pink clickable)
+
 // Chat message interface with all required properties
 export interface ChatMessage {
   id: string;
@@ -424,6 +430,10 @@ export interface ChatMessage {
   entityId?: string;
   playerId?: string;
   playerName?: string;
+  /** Message type for different display styles (default: "chat") */
+  type?: ChatMessageType;
+  /** Trade ID for trade_request messages */
+  tradeId?: string;
 }
 
 // Alias for backward compatibility

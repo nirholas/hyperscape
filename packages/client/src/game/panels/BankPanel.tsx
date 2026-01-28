@@ -21,7 +21,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { getItem } from "@hyperscape/shared";
-import { useThemeStore, useMobileLayout } from "hs-kit";
+import { useThemeStore, useMobileLayout } from "@/ui";
 
 // Types
 import type {
@@ -405,7 +405,7 @@ export function BankPanel({
         <div
           className="flex flex-col rounded-lg flex-1"
           style={{
-            background: `linear-gradient(135deg, ${theme.colors.background.primary}fa 0%, ${theme.colors.background.secondary}fa 100%)`,
+            background: `linear-gradient(135deg, ${theme.colors.background.panelPrimary} 0%, ${theme.colors.background.panelSecondary} 100%)`,
             border: `2px solid ${theme.colors.border.decorative}`,
             boxShadow: `0 10px 30px rgba(0, 0, 0, 0.8), inset 0 2px 4px ${theme.colors.border.default}`,
             minHeight: shouldUseMobileUI

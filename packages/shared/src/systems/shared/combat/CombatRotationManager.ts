@@ -78,6 +78,12 @@ export class CombatRotationManager {
     const target = this.getEntity(targetId, targetType);
 
     if (!entity || !target) {
+      // DEBUG: Log when entities can't be found for PvP rotation
+      if (entityType === "player" && targetType === "player") {
+        console.warn(
+          `[CombatRotationManager] PvP rotation failed - entity: ${entity ? "found" : "NOT FOUND"} (${entityId}), target: ${target ? "found" : "NOT FOUND"} (${targetId})`,
+        );
+      }
       return;
     }
 
@@ -86,6 +92,12 @@ export class CombatRotationManager {
     const targetPos = getEntityPosition(target);
 
     if (!entityPos || !targetPos) {
+      // DEBUG: Log when positions can't be found
+      if (entityType === "player" && targetType === "player") {
+        console.warn(
+          `[CombatRotationManager] PvP rotation failed - entityPos: ${entityPos ? "found" : "NOT FOUND"}, targetPos: ${targetPos ? "found" : "NOT FOUND"}`,
+        );
+      }
       return;
     }
 
@@ -97,6 +109,13 @@ export class CombatRotationManager {
     // VRM 1.0+ models have 180° base rotation, so we need to compensate
     // Otherwise entities face AWAY from each other instead of towards
     angle += Math.PI;
+
+    // DEBUG: Log PvP rotation
+    if (entityType === "player" && targetType === "player") {
+      console.log(
+        `[CombatRotationManager] PvP rotation: ${entityId} -> ${targetId}, angle: ${((angle * 180) / Math.PI).toFixed(1)}°`,
+      );
+    }
 
     // Set rotation using pooled quaternion to avoid allocations
     this.applyRotation(entity, entityType, angle);

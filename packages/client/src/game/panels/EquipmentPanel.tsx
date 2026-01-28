@@ -7,7 +7,7 @@ import {
   TOOLTIP_SIZE_ESTIMATES,
   useThemeStore,
   useMobileLayout,
-} from "hs-kit";
+} from "@/ui";
 import { MOBILE_EQUIPMENT } from "../../constants";
 import { useContextMenuState } from "../../hooks";
 import {
@@ -175,35 +175,6 @@ function DeathIcon({ className }: { className?: string }) {
 }
 
 // ============================================================================
-// Character Silhouette (OSRS-style visual anchor)
-// ============================================================================
-
-/** Character silhouette displayed behind equipment slots */
-function CharacterSilhouette({ color }: { color: string }) {
-  return (
-    <svg
-      viewBox="0 0 80 120"
-      fill={color}
-      className="h-3/4 opacity-[0.12]"
-      style={{ filter: "blur(0.5px)" }}
-    >
-      {/* Head */}
-      <circle cx="40" cy="14" r="10" />
-      {/* Neck */}
-      <rect x="36" y="24" width="8" height="6" rx="1" />
-      {/* Torso */}
-      <path d="M22 30 L58 30 L54 70 L26 70 Z" />
-      {/* Arms */}
-      <rect x="10" y="32" width="12" height="32" rx="4" />
-      <rect x="58" y="32" width="12" height="32" rx="4" />
-      {/* Legs */}
-      <rect x="27" y="70" width="11" height="38" rx="3" />
-      <rect x="42" y="70" width="11" height="38" rx="3" />
-    </svg>
-  );
-}
-
-// ============================================================================
 // Utility Button Component
 // ============================================================================
 
@@ -219,7 +190,6 @@ function UtilityButton({
   label,
   onClick,
   disabled,
-  compact,
 }: UtilityButtonProps & { compact?: boolean }) {
   const theme = useThemeStore((s) => s.theme);
 
@@ -227,30 +197,16 @@ function UtilityButton({
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`flex items-center justify-center rounded transition-all duration-150 hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed ${compact ? "flex-row gap-1.5 px-2 py-1.5" : "flex-col gap-1 px-3 py-2"}`}
+      className="flex items-center justify-center rounded transition-all duration-150 hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed px-3 py-2"
       title={label}
       style={{
         background: `${theme.colors.background.tertiary}80`,
         border: `1px solid ${theme.colors.border.default}60`,
       }}
     >
-      <div
-        className={compact ? "w-4 h-4" : "w-5 h-5"}
-        style={{ color: theme.colors.accent.primary }}
-      >
+      <div className="w-5 h-5" style={{ color: theme.colors.accent.primary }}>
         {icon}
       </div>
-      <span
-        style={{
-          fontSize: compact ? "10px" : theme.typography.fontSize.xs,
-          color: theme.colors.text.secondary,
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-          fontWeight: theme.typography.fontWeight.medium,
-        }}
-      >
-        {label}
-      </span>
     </button>
   );
 }
@@ -288,7 +244,7 @@ function renderEquipmentHoverTooltip(
   const rarity = itemData?.rarity || "common";
   const equipSlot = itemData?.equipSlot || hoverState.slot.label;
 
-  // Rarity colors (matching hs-kit RARITY_COLORS)
+  // Rarity colors (matching RARITY_COLORS)
   const rarityColors: Record<string, string> = {
     common: "#9d9d9d",
     uncommon: "#1eff00",
@@ -299,7 +255,7 @@ function renderEquipmentHoverTooltip(
   };
   const rarityColor = rarityColors[rarity] || theme.colors.accent.primary;
 
-  // Use hs-kit tooltip positioning with edge detection
+  // Use tooltip positioning with edge detection
   const { left, top } = calculateCursorTooltipPosition(
     { x: hoverState.position.x, y: hoverState.position.y },
     TOOLTIP_SIZE_ESTIMATES.large,
@@ -553,7 +509,7 @@ function DroppableEquipmentSlot({
       }}
       className="w-full h-full rounded transition-all duration-150 cursor-pointer group relative"
       style={{
-        // Embossed style matching inventory
+        // Embossed style matching inventory - aligned with theme
         background:
           isOver && isValidDrop
             ? "rgba(242, 208, 138, 0.15)"
@@ -562,8 +518,8 @@ function DroppableEquipmentSlot({
               : isDraggingInventoryItem && isValidDrop
                 ? "rgba(242, 208, 138, 0.08)"
                 : isEmpty
-                  ? "rgba(12, 10, 8, 0.95)"
-                  : "rgba(20, 16, 12, 0.95)",
+                  ? "rgba(16, 16, 18, 0.95)"
+                  : "rgba(20, 20, 22, 0.95)",
         borderWidth: "1px",
         borderStyle: isOver
           ? "solid"
@@ -577,7 +533,7 @@ function DroppableEquipmentSlot({
               ? "rgba(180, 80, 80, 0.7)"
               : isDraggingInventoryItem && isValidDrop
                 ? "rgba(180, 160, 100, 0.5)"
-                : "rgba(0, 0, 0, 0.4)",
+                : "rgba(8, 8, 10, 0.6)",
         // Embossed shadows: dark on top-left, subtle light on bottom-right
         boxShadow:
           isOver && isValidDrop
@@ -585,8 +541,8 @@ function DroppableEquipmentSlot({
             : isOver && !isValidDrop
               ? "inset 0 0 8px rgba(180, 80, 80, 0.3)"
               : isEmpty
-                ? "inset 2px 2px 4px rgba(0, 0, 0, 0.6), inset -1px -1px 2px rgba(60, 50, 40, 0.1)"
-                : "inset 2px 2px 4px rgba(0, 0, 0, 0.5), inset -1px -1px 2px rgba(80, 70, 50, 0.1)",
+                ? "inset 2px 2px 4px rgba(0, 0, 0, 0.5), inset -1px -1px 2px rgba(40, 40, 45, 0.15)"
+                : "inset 2px 2px 4px rgba(0, 0, 0, 0.4), inset -1px -1px 2px rgba(50, 50, 55, 0.12)",
       }}
     >
       {/* Slot Label - subtle, positioned at top */}
@@ -959,11 +915,6 @@ export function EquipmentPanel({
 
   const renderDesktopEquipmentGrid = () => (
     <>
-      {/* Character Silhouette (OSRS-style visual anchor) - Desktop only */}
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <CharacterSilhouette color={theme.colors.accent.primary} />
-      </div>
-
       {/* Paperdoll Grid Layout - 3 rows for melee-only MVP */}
       <div
         className="relative grid h-full"
@@ -1049,13 +1000,13 @@ export function EquipmentPanel({
         <div
           className="flex-1 relative overflow-hidden"
           style={{
-            background: theme.colors.background.primary,
-            border: "1px solid rgba(0, 0, 0, 0.5)",
+            background: theme.colors.background.panelSecondary,
+            border: "1px solid rgba(10, 10, 12, 0.6)",
             borderRadius: `${theme.borderRadius.md}px`,
             padding: shouldUseMobileUI ? 0 : `${theme.spacing.sm}px`,
             // Embossed container
             boxShadow:
-              "inset 3px 3px 6px rgba(0, 0, 0, 0.4), inset -2px -2px 4px rgba(60, 50, 40, 0.08)",
+              "inset 2px 2px 4px rgba(0, 0, 0, 0.4), inset -1px -1px 3px rgba(40, 40, 45, 0.08)",
           }}
         >
           {shouldUseMobileUI
@@ -1068,9 +1019,9 @@ export function EquipmentPanel({
           <div
             className="flex items-center justify-center gap-2 px-3 py-1.5"
             style={{
-              background: "rgba(25, 22, 18, 0.95)",
+              background: theme.colors.background.panelSecondary,
               borderRadius: `${theme.borderRadius.sm}px`,
-              border: "1px solid rgba(0, 0, 0, 0.4)",
+              border: "1px solid rgba(10, 10, 12, 0.6)",
               boxShadow: "inset 1px 1px 3px rgba(0, 0, 0, 0.3)",
             }}
           >
@@ -1078,13 +1029,11 @@ export function EquipmentPanel({
               icon={<StatsIcon className="w-full h-full" />}
               label="Stats"
               onClick={handleOpenStats}
-              compact
             />
             <UtilityButton
               icon={<DeathIcon className="w-full h-full" />}
               label="Death"
               onClick={handleOpenDeath}
-              compact
             />
           </div>
         ) : (

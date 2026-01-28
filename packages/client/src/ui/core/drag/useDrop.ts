@@ -1,0 +1,529 @@
+import { useCallback, useRef, useEffect, useState } from "react";
+import { useDragStore } from "../../stores/dragStore";
+import type { DropConfig, DropResult, Point, Rect } from "../../types";
+import { dropTargetRegistry, getElementRect } from "./utils";
+
+/**
+ * Hook to make an element a drop target
+ *
+ * @example
+ * ```tsx
+ * function DropZone({ id }: { id: string }) {
+ *   const { isOver, canDrop, dropProps } = useDrop({
+ *     id,
+ *     accepts: ['window', 'tab'],
+ *     onDrop: (item, position) => {
+ *       console.log('Dropped', item, 'at', position);
+ *     },
+ *   });
+ *
+ *   return (
+ *     <div
+ *       {...dropProps}
+ *       style={{
+ *         backgroundColor: isOver && canDrop ? 'green' : 'gray',
+ *       }}
+ *     >
+ *       Drop here
+ *     </div>
+ *   );
+ * }
+ * ```
+ */
+export function useDrop(config: DropConfig): DropResult {
+  const {
+    id,
+    accepts,
+    onDrop,
+    onDragEnter,
+    onDragLeave,
+    onDragOver,
+    disabled,
+  } = config;
+
+  const elementRef = useRef<HTMLElement | null>(null);
+  // Use ref for rect to avoid setState during ref callback (causes infinite loops)
+  const dropRectRef = useRef<Rect | null>(null);
+  // Only use state for triggering re-renders when needed
+  const [, forceUpdate] = useState(0);
+
+  // Get drag state from store
+  const isDragging = useDragStore((s) => s.isDragging);
+  const dragItem = useDragStore((s) => s.item);
+  const overTargets = useDragStore((s) => s.overTargets);
+  const currentPosition = useDragStore((s) => s.current);
+
+  // Check if this target is being hovered
+  const isOver = overTargets.includes(id);
+
+  // Check if the current drag item is compatible
+  const canDrop =
+    !disabled && dragItem !== null && accepts.includes(dragItem.type);
+
+  // Calculate relative position within the drop target
+  const relativePosition: Point | null =
+    isOver && dropRectRef.current
+      ? {
+          x: currentPosition.x - dropRectRef.current.x,
+          y: currentPosition.y - dropRectRef.current.y,
+        }
+      : null;
+
+  // Ref callback to register/unregister the drop target
+  // IMPORTANT: Do NOT call setState here - it causes infinite loops during React's commit phase
+  const setNodeRef = useCallback(
+    (node: HTMLElement | null) => {
+      elementRef.current = node;
+
+      if (node && !disabled) {
+        const rect = getElementRect(node);
+        dropRectRef.current = rect;
+        dropTargetRegistry.register(id, {
+          element: node,
+          accepts,
+          rect,
+        });
+      } else {
+        dropTargetRegistry.unregister(id);
+        dropRectRef.current = null;
+      }
+    },
+    [id, accepts, disabled],
+  );
+
+  // Re-register when disabled changes (the ref callback doesn't re-run when only disabled changes)
+  useEffect(() => {
+    const node = elementRef.current;
+    if (!node) return;
+
+    if (!disabled) {
+      const rect = getElementRect(node);
+      dropRectRef.current = rect;
+      dropTargetRegistry.register(id, {
+        element: node,
+        accepts,
+        rect,
+      });
+    } else {
+      dropTargetRegistry.unregister(id);
+      dropRectRef.current = null;
+    }
+  }, [id, accepts, disabled]);
+
+  // Update rect on resize - safe to use setState here in effect
+  useEffect(() => {
+    if (!elementRef.current || disabled) return;
+
+    const observer = new ResizeObserver(() => {
+      if (elementRef.current) {
+        const rect = getElementRect(elementRef.current);
+        dropRectRef.current = rect;
+        dropTargetRegistry.updateRect(id, rect);
+        // Only force update if we're actively dragging (need position updates)
+        if (isDragging) {
+          forceUpdate((n) => n + 1);
+        }
+      }
+    });
+
+    observer.observe(elementRef.current);
+    return () => observer.disconnect();
+  }, [id, disabled, isDragging]);
+
+  // Track state for drop detection - saved while dragging, used after drag ends
+  const savedStateRef = useRef<{
+    item: typeof dragItem;
+    position: typeof relativePosition;
+    canDrop: boolean;
+    wasOver: boolean;
+  }>({ item: null, position: null, canDrop: false, wasOver: false });
+
+  // Track previous isDragging to detect drag end transition
+  const prevIsDraggingRef = useRef(false);
+
+  // Save state while dragging and handle enter/leave callbacks
+  useEffect(() => {
+    if (isDragging && dragItem) {
+      // Save state for drop detection
+      savedStateRef.current.item = dragItem;
+      savedStateRef.current.position = relativePosition;
+      savedStateRef.current.canDrop = canDrop;
+
+      // Track wasOver state
+      if (isOver && canDrop) {
+        if (!savedStateRef.current.wasOver) {
+          onDragEnter?.(dragItem);
+        }
+        savedStateRef.current.wasOver = true;
+      } else if (!isOver && savedStateRef.current.wasOver) {
+        onDragLeave?.(dragItem);
+        savedStateRef.current.wasOver = false;
+      }
+
+      // Fire dragOver callback
+      if (isOver && relativePosition) {
+        onDragOver?.(dragItem, relativePosition);
+      }
+    }
+  }, [
+    isDragging,
+    dragItem,
+    relativePosition,
+    canDrop,
+    isOver,
+    onDragEnter,
+    onDragLeave,
+    onDragOver,
+  ]);
+
+  // Handle drop when drag ends
+  useEffect(() => {
+    const wasDragging = prevIsDraggingRef.current;
+    const justEnded = !isDragging && wasDragging;
+    const saved = savedStateRef.current;
+
+    if (justEnded && saved.wasOver && saved.item && saved.canDrop) {
+      onDrop(saved.item, saved.position || { x: 0, y: 0 });
+    }
+
+    // Clear saved state when drag ends
+    if (justEnded) {
+      savedStateRef.current = {
+        item: null,
+        position: null,
+        canDrop: false,
+        wasOver: false,
+      };
+    }
+
+    prevIsDraggingRef.current = isDragging;
+  }, [isDragging, onDrop]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      dropTargetRegistry.unregister(id);
+    };
+  }, [id]);
+
+  return {
+    isOver,
+    canDrop,
+    relativePosition,
+    dropRect: dropRectRef.current,
+    dragItem: canDrop ? dragItem : null,
+    dropProps: {
+      ref: setNodeRef,
+      "data-drop-id": id,
+    },
+  };
+}
+
+/**
+ * Event type for drag end events (dnd-kit compatible interface)
+ */
+export interface DragEndEvent {
+  /** The draggable that was dropped */
+  active: {
+    id: string;
+    /** The type of draggable (e.g., "tab", "window", "item") */
+    type: string;
+    /** The source container ID (e.g., windowId for tabs) */
+    sourceId: string | null;
+    data: unknown;
+  };
+  /** The drop target (if any) */
+  over: {
+    id: string;
+    data?: unknown;
+  } | null;
+  /** Position delta from start to end */
+  delta: Point;
+}
+
+/**
+ * dnd-kit compatible useDraggable hook
+ *
+ * @example
+ * ```tsx
+ * const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+ *   id: 'my-draggable',
+ *   data: { type: 'item' },
+ * });
+ * ```
+ */
+export function useDraggable(config: {
+  id: string;
+  data?: Record<string, unknown>;
+  disabled?: boolean;
+}): {
+  attributes: Record<string, string | number>;
+  listeners: {
+    onPointerDown: (e: React.PointerEvent) => void;
+  };
+  setNodeRef: (node: HTMLElement | null) => void;
+  isDragging: boolean;
+} {
+  const { id, data, disabled } = config;
+  const nodeRef = useRef<HTMLElement | null>(null);
+  const isDragging = useDragStore((s) => s.isDragging && s.item?.id === id);
+  const startDrag = useDragStore((s) => s.startDrag);
+  const updateDrag = useDragStore((s) => s.updateDrag);
+  const endDrag = useDragStore((s) => s.endDrag);
+  const addOverTarget = useDragStore((s) => s.addOverTarget);
+  const removeOverTarget = useDragStore((s) => s.removeOverTarget);
+
+  const pendingRef = useRef<{
+    started: boolean;
+    origin: Point;
+    pointerId: number;
+  } | null>(null);
+
+  const prevOverTargetsRef = useRef<Set<string>>(new Set());
+
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (disabled || e.button !== 0) return;
+      e.preventDefault();
+
+      const origin = { x: e.clientX, y: e.clientY };
+      pendingRef.current = {
+        started: false,
+        origin,
+        pointerId: e.pointerId,
+      };
+
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    },
+    [disabled],
+  );
+
+  const handlePointerMove = useCallback(
+    (e: PointerEvent) => {
+      if (!pendingRef.current || pendingRef.current.pointerId !== e.pointerId)
+        return;
+
+      const current = { x: e.clientX, y: e.clientY };
+      const DRAG_THRESHOLD = 3;
+
+      if (!pendingRef.current.started) {
+        const dx = current.x - pendingRef.current.origin.x;
+        const dy = current.y - pendingRef.current.origin.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist >= DRAG_THRESHOLD) {
+          pendingRef.current.started = true;
+          startDrag(
+            { id, type: "item", sourceId: null, data },
+            pendingRef.current.origin,
+          );
+        }
+      }
+
+      if (pendingRef.current.started) {
+        updateDrag(current);
+
+        // Find drop targets under pointer
+        const targetsAtPoint = dropTargetRegistry.getTargetsAtPoint(
+          current,
+          "item",
+        );
+        const currentTargets = new Set(targetsAtPoint);
+        const prevTargets = prevOverTargetsRef.current;
+
+        currentTargets.forEach((targetId) => {
+          if (!prevTargets.has(targetId)) {
+            addOverTarget(targetId);
+          }
+        });
+
+        prevTargets.forEach((targetId) => {
+          if (!currentTargets.has(targetId)) {
+            removeOverTarget(targetId);
+          }
+        });
+
+        prevOverTargetsRef.current = currentTargets;
+      }
+    },
+    [id, data, startDrag, updateDrag, addOverTarget, removeOverTarget],
+  );
+
+  const handlePointerUp = useCallback(
+    (e: PointerEvent) => {
+      if (!pendingRef.current || pendingRef.current.pointerId !== e.pointerId)
+        return;
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+
+      if (pendingRef.current.started) {
+        endDrag();
+      }
+
+      pendingRef.current = null;
+      prevOverTargetsRef.current.clear();
+    },
+    [endDrag],
+  );
+
+  useEffect(() => {
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+  }, [handlePointerMove, handlePointerUp]);
+
+  return {
+    attributes: {
+      role: "button",
+      "aria-pressed": String(isDragging),
+      tabIndex: 0,
+    },
+    listeners: {
+      onPointerDown: handlePointerDown,
+    },
+    setNodeRef: (node: HTMLElement | null) => {
+      nodeRef.current = node;
+    },
+    isDragging,
+  };
+}
+
+/**
+ * dnd-kit compatible useDroppable hook
+ *
+ * @example
+ * ```tsx
+ * const { setNodeRef, isOver } = useDroppable({
+ *   id: 'my-droppable',
+ *   data: { accepts: ['item'] },
+ * });
+ * ```
+ */
+export function useDroppable(config: {
+  id: string;
+  data?: Record<string, unknown>;
+  disabled?: boolean;
+}): {
+  setNodeRef: (node: HTMLElement | null) => void;
+  isOver: boolean;
+  active: { id: string; data: unknown } | null;
+} {
+  const { id, disabled } = config;
+  const elementRef = useRef<HTMLElement | null>(null);
+
+  const isDragging = useDragStore((s) => s.isDragging);
+  const dragItem = useDragStore((s) => s.item);
+  const overTargets = useDragStore((s) => s.overTargets);
+
+  const isOver = overTargets.includes(id);
+
+  const setNodeRef = useCallback(
+    (node: HTMLElement | null) => {
+      elementRef.current = node;
+
+      if (node && !disabled) {
+        const rect = getElementRect(node);
+        dropTargetRegistry.register(id, {
+          element: node,
+          accepts: ["item", "window", "tab", "resize-handle", "custom"],
+          rect,
+        });
+      } else {
+        dropTargetRegistry.unregister(id);
+      }
+    },
+    [id, disabled],
+  );
+
+  useEffect(() => {
+    return () => {
+      dropTargetRegistry.unregister(id);
+    };
+  }, [id]);
+
+  return {
+    setNodeRef,
+    isOver,
+    active:
+      isDragging && dragItem ? { id: dragItem.id, data: dragItem.data } : null,
+  };
+}
+
+/**
+ * Monitor for drag-drop events (dnd-kit compatible interface)
+ *
+ * @example
+ * ```tsx
+ * useDndMonitor({
+ *   onDragStart: (event) => console.log('Started dragging', event.active.id),
+ *   onDragEnd: (event) => console.log('Dropped', event.active.id, 'on', event.over?.id),
+ * });
+ * ```
+ */
+export function useDndMonitor(handlers: {
+  onDragStart?: (event: { active: { id: string; data: unknown } }) => void;
+  onDragEnd?: (event: DragEndEvent) => void;
+  onDragOver?: (event: {
+    active: { id: string; data: unknown };
+    over: { id: string } | null;
+  }) => void;
+}): void {
+  const { onDragStart, onDragEnd, onDragOver } = handlers;
+
+  const isDragging = useDragStore((s) => s.isDragging);
+  const dragItem = useDragStore((s) => s.item);
+  const overTargets = useDragStore((s) => s.overTargets);
+  const delta = useDragStore((s) => s.delta);
+
+  const wasDraggingRef = useRef(false);
+  const prevItemRef = useRef<typeof dragItem>(null);
+
+  useEffect(() => {
+    // Detect drag start
+    if (isDragging && !wasDraggingRef.current && dragItem) {
+      onDragStart?.({ active: { id: dragItem.id, data: dragItem.data } });
+    }
+
+    // Detect drag end
+    if (!isDragging && wasDraggingRef.current && prevItemRef.current) {
+      const item = prevItemRef.current;
+      const overId = overTargets.length > 0 ? overTargets[0] : null;
+
+      onDragEnd?.({
+        active: {
+          id: item.id,
+          type: item.type,
+          sourceId: item.sourceId,
+          data: item.data,
+        },
+        over: overId ? { id: overId } : null,
+        delta,
+      });
+    }
+
+    // Detect drag over changes
+    if (isDragging && dragItem) {
+      const overId = overTargets.length > 0 ? overTargets[0] : null;
+      onDragOver?.({
+        active: { id: dragItem.id, data: dragItem.data },
+        over: overId ? { id: overId } : null,
+      });
+    }
+
+    wasDraggingRef.current = isDragging;
+    prevItemRef.current = dragItem;
+  }, [
+    isDragging,
+    dragItem,
+    overTargets,
+    delta,
+    onDragStart,
+    onDragEnd,
+    onDragOver,
+  ]);
+}

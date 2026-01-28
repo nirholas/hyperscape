@@ -65,19 +65,37 @@ export const DEFAULT_BIOME_SUITABILITY: Record<string, number> = {
 // BUILDING TYPE CONFIGURATIONS
 // ============================================================
 
+/**
+ * Building dimensions in meters, aligned to CELL_SIZE (4m) grid.
+ * Each building cell is 4m x 4m, so dimensions should be multiples of 4.
+ * This ensures buildings align with the movement tile grid (1m tiles).
+ *
+ * Example: A 3x3 cell bank = 12m x 12m
+ */
+const CELL_SIZE = 4; // Must match procgen/building/generator/constants.ts
+
 export const DEFAULT_BUILDING_CONFIGS: Record<
   TownBuildingType,
   BuildingConfig
 > = {
-  bank: { width: 8, depth: 6, priority: 1 },
-  store: { width: 7, depth: 5, priority: 2 },
-  anvil: { width: 5, depth: 4, priority: 3 },
-  well: { width: 3, depth: 3, priority: 4 },
-  house: { width: 6, depth: 5, priority: 5 },
-  inn: { width: 10, depth: 12, priority: 2 },
-  smithy: { width: 7, depth: 7, priority: 3 },
-  "simple-house": { width: 6, depth: 6, priority: 6 },
-  "long-house": { width: 5, depth: 12, priority: 6 },
+  // Bank: 3x3 cells (12x12m) - matches recipe widthRange [3,4], depthRange [3,4]
+  bank: { width: 3 * CELL_SIZE, depth: 3 * CELL_SIZE, priority: 1 },
+  // Store: 2x3 cells (8x12m) - matches recipe widthRange [2,3], depthRange [2,4]
+  store: { width: 2 * CELL_SIZE, depth: 3 * CELL_SIZE, priority: 2 },
+  // Anvil: 2x2 cells (8x8m) - standalone forge/anvil station
+  anvil: { width: 2 * CELL_SIZE, depth: 2 * CELL_SIZE, priority: 3 },
+  // Well: 1x1 cell (4x4m) - small structure
+  well: { width: 1 * CELL_SIZE, depth: 1 * CELL_SIZE, priority: 4 },
+  // House: 2x2 cells (8x8m) - generic house placeholder
+  house: { width: 2 * CELL_SIZE, depth: 2 * CELL_SIZE, priority: 5 },
+  // Inn: 3x4 cells (12x16m) - matches recipe widthRange [3,4], depthRange [3,5]
+  inn: { width: 3 * CELL_SIZE, depth: 4 * CELL_SIZE, priority: 2 },
+  // Smithy: 2x2 cells (8x8m) - matches recipe widthRange [2,3], depthRange [2,3]
+  smithy: { width: 2 * CELL_SIZE, depth: 2 * CELL_SIZE, priority: 3 },
+  // Simple House: 2x2 cells (8x8m) - matches recipe widthRange [2,3], depthRange [2,3]
+  "simple-house": { width: 2 * CELL_SIZE, depth: 2 * CELL_SIZE, priority: 6 },
+  // Long House: 2x5 cells (8x20m) - matches recipe widthRange [1,2], depthRange [4,6]
+  "long-house": { width: 2 * CELL_SIZE, depth: 5 * CELL_SIZE, priority: 6 },
 };
 
 // ============================================================

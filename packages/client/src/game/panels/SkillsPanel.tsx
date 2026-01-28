@@ -3,19 +3,21 @@
  * Hyperscape-themed skills interface (Prayer is now in separate PrayerPanel)
  * Uses project theme colors (gold #f2d08a, brown borders)
  * Supports drag-drop to action bar
+ * Uses shared SKILL_DEFINITIONS for data-driven skill display
  */
 
-import React, { useState, useRef, useMemo } from "react";
+import React, { useState, useRef, useMemo, memo } from "react";
 import { createPortal } from "react-dom";
+import { useDraggable } from "@dnd-kit/core";
 import {
   calculateCursorTooltipPosition,
   useThemeStore,
   useMobileLayout,
-  useDraggable,
-} from "hs-kit";
+} from "@/ui";
 import { zIndex, MOBILE_SKILLS } from "../../constants";
 import { useTooltipSize } from "../../hooks";
 import type { PlayerStats, Skills } from "../../types";
+import { SKILL_DEFINITIONS, type SkillDefinition } from "@hyperscape/shared";
 
 interface SkillsPanelProps {
   stats: PlayerStats | null;
@@ -49,7 +51,8 @@ function calculateCombatLevel(stats: Partial<Skills>): number {
 }
 
 /** Draggable skill card component for action bar drag-drop */
-function DraggableSkillCard({
+// Memoized to prevent re-renders of all skill cards when any changes
+const DraggableSkillCard = memo(function DraggableSkillCard({
   skill,
   isHovered,
   isMobile,
@@ -80,18 +83,18 @@ function DraggableSkillCard({
     },
   });
 
-  // Memoize card style to prevent recreation on every render
+  // Memoize card style to prevent recreation on every render - compact styling
   const cardStyle = useMemo(
     (): React.CSSProperties => ({
       background: isHovered
         ? theme.colors.slot.hover
         : theme.colors.slot.filled,
       border: `1px solid ${isHovered ? theme.colors.border.hover : theme.colors.border.default}`,
-      borderRadius: "6px",
-      padding: isMobile ? "6px 8px" : "8px 10px",
-      minHeight: isMobile ? MOBILE_SKILLS.cardHeight : 44,
+      borderRadius: "3px",
+      padding: isMobile ? "4px 6px" : "3px 6px",
+      minHeight: isMobile ? MOBILE_SKILLS.cardHeight : 28,
       cursor: isDragging ? "grabbing" : "grab",
-      transition: "all 0.15s ease",
+      transition: "all 0.1s ease",
       display: "flex",
       alignItems: "center",
       flexDirection: "row" as const,
@@ -112,12 +115,12 @@ function DraggableSkillCard({
       {...attributes}
       {...listeners}
     >
-      {/* Unified layout: Icon + Level inline (same for mobile and desktop) */}
-      <div className="flex items-center gap-1.5 w-full">
+      {/* Unified layout: Icon + Level inline - compact but readable */}
+      <div className="flex items-center justify-center gap-1 w-full">
         <span
           style={{
-            fontSize: "15px",
-            filter: "drop-shadow(1px 1px 1px rgba(0,0,0,0.5))",
+            fontSize: isMobile ? "14px" : "13px",
+            filter: "drop-shadow(1px 1px 1px rgba(0,0,0,0.4))",
             lineHeight: 1,
           }}
         >
@@ -135,7 +138,7 @@ function DraggableSkillCard({
           {/* Current level - shifted up */}
           <span
             style={{
-              fontSize: "11px",
+              fontSize: isMobile ? "11px" : "10px",
               fontWeight: 700,
               color:
                 skill.level >= 99
@@ -143,7 +146,7 @@ function DraggableSkillCard({
                   : theme.colors.text.accent,
               lineHeight: 1,
               position: "relative",
-              top: "-3px",
+              top: "-2px",
               textShadow: "1px 1px 1px rgba(0,0,0,0.5)",
             }}
           >
@@ -152,7 +155,7 @@ function DraggableSkillCard({
           {/* Slanted separator */}
           <span
             style={{
-              fontSize: "10px",
+              fontSize: isMobile ? "10px" : "9px",
               fontWeight: 400,
               color: theme.colors.text.disabled,
               lineHeight: 1,
@@ -166,7 +169,7 @@ function DraggableSkillCard({
           {/* Base level - shifted down */}
           <span
             style={{
-              fontSize: "11px",
+              fontSize: isMobile ? "11px" : "10px",
               fontWeight: 700,
               color:
                 skill.level >= 99
@@ -174,7 +177,7 @@ function DraggableSkillCard({
                   : theme.colors.text.accent,
               lineHeight: 1,
               position: "relative",
-              top: "3px",
+              top: "2px",
               textShadow: "1px 1px 1px rgba(0,0,0,0.5)",
             }}
           >
@@ -184,7 +187,7 @@ function DraggableSkillCard({
       </div>
     </div>
   );
-}
+});
 
 export function SkillsPanel({ stats }: SkillsPanelProps) {
   const theme = useThemeStore((s) => s.theme);
@@ -200,93 +203,18 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
 
   const s: Partial<Skills> = stats?.skills ?? {};
 
-  // Build skills array from stats
-  const skills: Skill[] = [
-    {
-      key: "attack",
-      label: "Attack",
-      icon: "⚔️",
-      level: s?.attack?.level || 1,
-      xp: s?.attack?.xp || 0,
-    },
-    {
-      key: "strength",
-      label: "Strength",
-      icon: "💪",
-      level: s?.strength?.level || 1,
-      xp: s?.strength?.xp || 0,
-    },
-    {
-      key: "defense",
-      label: "Defence",
-      icon: "🛡️",
-      level: s?.defense?.level || 1,
-      xp: s?.defense?.xp || 0,
-    },
-    {
-      key: "constitution",
-      label: "Constitution",
-      icon: "❤️",
-      level: s?.constitution?.level || 10,
-      xp: s?.constitution?.xp || 0,
-    },
-    {
-      key: "ranged",
-      label: "Ranged",
-      icon: "🏹",
-      level: s?.ranged?.level || 1,
-      xp: s?.ranged?.xp || 0,
-    },
-    {
-      key: "magic",
-      label: "Magic",
-      icon: "✨",
-      level: s?.magic?.level || 1,
-      xp: s?.magic?.xp || 0,
-    },
-    {
-      key: "fishing",
-      label: "Fishing",
-      icon: "🐟",
-      level: s?.fishing?.level || 1,
-      xp: s?.fishing?.xp || 0,
-    },
-    {
-      key: "cooking",
-      label: "Cooking",
-      icon: "🍖",
-      level: s?.cooking?.level || 1,
-      xp: s?.cooking?.xp || 0,
-    },
-    {
-      key: "woodcutting",
-      label: "Woodcutting",
-      icon: "🪓",
-      level: s?.woodcutting?.level || 1,
-      xp: s?.woodcutting?.xp || 0,
-    },
-    {
-      key: "firemaking",
-      label: "Firemaking",
-      icon: "🔥",
-      level: s?.firemaking?.level || 1,
-      xp: s?.firemaking?.xp || 0,
-    },
-    {
-      key: "mining",
-      label: "Mining",
-      icon: "⛏️",
-      level: s?.mining?.level || 1,
-      xp: s?.mining?.xp || 0,
-    },
-    {
-      key: "smithing",
-      label: "Smithing",
-      icon: "🔨",
-      level: s?.smithing?.level || 1,
-      xp: s?.smithing?.xp || 0,
-    },
-  ];
+  // Build skills array from shared SKILL_DEFINITIONS
+  // This ensures all skills including Agility are displayed and metadata stays in sync
+  const skills: Skill[] = SKILL_DEFINITIONS.map((def: SkillDefinition) => {
+    const skillData = s[def.key];
+    return {
+      key: def.key,
+      label: def.label,
+      icon: def.icon,
+      level: skillData?.level ?? def.defaultLevel,
+      xp: skillData?.xp ?? 0,
+    };
+  });
 
   const totalLevel = skills.reduce((sum, skill) => sum + skill.level, 0);
   const combatLevel = calculateCombatLevel(s);
@@ -294,16 +222,14 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
   return (
     <div
       className="flex flex-col h-full overflow-hidden"
-      style={{ padding: "6px" }}
+      style={{ padding: shouldUseMobileUI ? "4px" : "3px" }}
     >
       {/* Content */}
       <div
         className="flex flex-col flex-1 overflow-hidden"
         style={{
-          background: theme.colors.background.secondary,
-          border: `1px solid ${theme.colors.border.default}80`,
-          borderRadius: "6px",
-          padding: "8px",
+          background: "transparent",
+          padding: shouldUseMobileUI ? "4px" : "3px",
         }}
       >
         {/* Skills Grid - Mobile: 2 columns with names, Desktop: 3 columns compact */}
@@ -313,7 +239,7 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
             gridTemplateColumns: shouldUseMobileUI
               ? `repeat(${MOBILE_SKILLS.columns}, 1fr)`
               : "repeat(3, 1fr)",
-            gap: shouldUseMobileUI ? `${MOBILE_SKILLS.gap}px` : "6px",
+            gap: shouldUseMobileUI ? `${MOBILE_SKILLS.gap}px` : "3px",
           }}
         >
           {skills.map((skill) => (
@@ -334,33 +260,34 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
           ))}
         </div>
 
-        {/* Total Level & Combat Level */}
+        {/* Total Level & Combat Level - Compact */}
         <div
-          className="flex justify-between mt-2"
+          className="flex justify-between"
           style={{
+            marginTop: shouldUseMobileUI ? "4px" : "3px",
             background: theme.colors.slot.filled,
-            border: `1px solid ${theme.colors.border.default}80`,
-            borderRadius: "4px",
-            padding: "8px 10px",
+            border: `1px solid ${theme.colors.border.default}30`,
+            borderRadius: "3px",
+            padding: shouldUseMobileUI ? "6px 8px" : "4px 6px",
             flexShrink: 0,
           }}
         >
           <div className="text-center flex-1">
             <div
               style={{
-                fontSize: "9px",
+                fontSize: shouldUseMobileUI ? "8px" : "7px",
                 color: theme.colors.text.muted,
                 textTransform: "uppercase",
-                letterSpacing: "0.5px",
-                marginBottom: "2px",
+                letterSpacing: "0.3px",
+                marginBottom: "1px",
               }}
             >
               Total Level
             </div>
             <span
               style={{
-                fontSize: "16px",
-                fontWeight: 700,
+                fontSize: shouldUseMobileUI ? "14px" : "12px",
+                fontWeight: 600,
                 color: theme.colors.text.accent,
               }}
             >
@@ -370,26 +297,26 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
           <div
             style={{
               width: "1px",
-              background: `${theme.colors.border.default}66`,
-              margin: "0 6px",
+              background: `${theme.colors.border.default}30`,
+              margin: "0 4px",
             }}
           />
           <div className="text-center flex-1">
             <div
               style={{
-                fontSize: "9px",
+                fontSize: shouldUseMobileUI ? "8px" : "7px",
                 color: theme.colors.text.muted,
                 textTransform: "uppercase",
-                letterSpacing: "0.5px",
-                marginBottom: "2px",
+                letterSpacing: "0.3px",
+                marginBottom: "1px",
               }}
             >
               Combat Level
             </div>
             <span
               style={{
-                fontSize: "16px",
-                fontWeight: 700,
+                fontSize: shouldUseMobileUI ? "14px" : "12px",
+                fontWeight: 600,
                 color: theme.colors.state.danger,
               }}
             >
@@ -430,21 +357,21 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
                   left,
                   top,
                   zIndex: zIndex.tooltip,
-                  background: theme.colors.background.glass,
-                  border: `1px solid ${theme.colors.border.default}99`,
-                  borderRadius: "4px",
-                  padding: "8px 10px",
-                  minWidth: "160px",
-                  boxShadow: theme.shadows.md,
+                  background: theme.colors.slot.filled,
+                  border: `1px solid ${theme.colors.border.default}40`,
+                  borderRadius: "3px",
+                  padding: "6px 8px",
+                  minWidth: "140px",
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
                 }}
               >
                 {/* Header */}
-                <div className="flex items-center gap-2 mb-2">
-                  <span style={{ fontSize: "16px" }}>{hoveredSkill.icon}</span>
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <span style={{ fontSize: "14px" }}>{hoveredSkill.icon}</span>
                   <span
                     style={{
-                      fontSize: "13px",
-                      fontWeight: 700,
+                      fontSize: "11px",
+                      fontWeight: 600,
                       color: theme.colors.text.accent,
                     }}
                   >
@@ -453,8 +380,8 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
                   <span
                     style={{
                       marginLeft: "auto",
-                      fontSize: "12px",
-                      fontWeight: 700,
+                      fontSize: "10px",
+                      fontWeight: 600,
                       color:
                         hoveredSkill.level >= 99
                           ? theme.colors.state.success
@@ -467,14 +394,20 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
 
                 {/* XP Info */}
                 <div
-                  className="text-xs mb-1"
-                  style={{ color: theme.colors.text.secondary }}
+                  style={{
+                    fontSize: "9px",
+                    color: theme.colors.text.secondary,
+                    marginBottom: "2px",
+                  }}
                 >
                   XP: {hoveredSkill.xp.toLocaleString()}
                 </div>
                 <div
-                  className="text-xs mb-2"
-                  style={{ color: theme.colors.text.muted }}
+                  style={{
+                    fontSize: "9px",
+                    color: theme.colors.text.muted,
+                    marginBottom: "4px",
+                  }}
                 >
                   {hoveredSkill.level >= 99
                     ? "Max level reached!"
@@ -485,9 +418,9 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
                 {hoveredSkill.level < 99 && (
                   <div
                     style={{
-                      height: "4px",
-                      background: theme.colors.background.overlay,
-                      borderRadius: "2px",
+                      height: "3px",
+                      background: theme.colors.slot.empty,
+                      borderRadius: "1px",
                       overflow: "hidden",
                     }}
                   >
@@ -495,8 +428,8 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
                       style={{
                         height: "100%",
                         width: `${progress}%`,
-                        background: `linear-gradient(90deg, ${theme.colors.accent.secondary}99, ${theme.colors.accent.secondary})`,
-                        borderRadius: "2px",
+                        background: theme.colors.accent.secondary,
+                        borderRadius: "1px",
                       }}
                     />
                   </div>

@@ -322,6 +322,22 @@ export class BuildingRenderingSystem extends SystemBase {
   private _tempQuat = new THREE.Quaternion();
   private _tempScale = new THREE.Vector3();
 
+  // ============================================
+  // ROOF AUTO-HIDE FEATURE
+  // ============================================
+
+  /** Setting: Whether to auto-hide roofs when player is inside a building */
+  private _autoHideRoofsEnabled = true;
+
+  /** Currently hidden roof building IDs (player is inside these buildings) */
+  private _hiddenRoofBuildings = new Set<string>();
+
+  /** Cached local player entity ID */
+  private _localPlayerId: string | null = null;
+
+  /** Storage key for roof auto-hide setting */
+  private static readonly ROOF_SETTING_KEY = "hyperscape:autoHideRoofs";
+
   constructor(world: World) {
     super(world, {
       name: "building-rendering",
@@ -357,6 +373,145 @@ export class BuildingRenderingSystem extends SystemBase {
       return;
     }
     this.scene = stage.scene;
+
+    // Load roof auto-hide setting from localStorage
+    this.loadRoofSetting();
+  }
+
+  // ============================================
+  // ROOF AUTO-HIDE PUBLIC API
+  // ============================================
+
+  /**
+   * Get whether roof auto-hide is enabled
+   */
+  isAutoHideRoofsEnabled(): boolean {
+    return this._autoHideRoofsEnabled;
+  }
+
+  /**
+   * Set whether to auto-hide roofs when player is inside a building.
+   * Setting is persisted to localStorage.
+   *
+   * @param enabled - Whether to enable roof auto-hide
+   */
+  setAutoHideRoofs(enabled: boolean): void {
+    this._autoHideRoofsEnabled = enabled;
+    this.saveRoofSetting();
+
+    // If disabling, show all currently hidden roofs
+    if (!enabled) {
+      this.showAllRoofs();
+    }
+  }
+
+  /**
+   * Toggle roof auto-hide setting
+   */
+  toggleAutoHideRoofs(): boolean {
+    this.setAutoHideRoofs(!this._autoHideRoofsEnabled);
+    return this._autoHideRoofsEnabled;
+  }
+
+  /**
+   * Load roof setting from localStorage
+   */
+  private loadRoofSetting(): void {
+    if (typeof localStorage === "undefined") return;
+
+    try {
+      const stored = localStorage.getItem(
+        BuildingRenderingSystem.ROOF_SETTING_KEY,
+      );
+      if (stored !== null) {
+        this._autoHideRoofsEnabled = stored === "true";
+      }
+    } catch {
+      // localStorage not available or error - use default
+    }
+  }
+
+  /**
+   * Save roof setting to localStorage
+   */
+  private saveRoofSetting(): void {
+    if (typeof localStorage === "undefined") return;
+
+    try {
+      localStorage.setItem(
+        BuildingRenderingSystem.ROOF_SETTING_KEY,
+        String(this._autoHideRoofsEnabled),
+      );
+    } catch {
+      // localStorage not available or error - ignore
+    }
+  }
+
+  /**
+   * Show all roofs (when disabling auto-hide)
+   */
+  private showAllRoofs(): void {
+    for (const [, town] of this.townData) {
+      if (town.batchedMesh?.roofMesh) {
+        town.batchedMesh.roofMesh.visible = true;
+      }
+    }
+    this._hiddenRoofBuildings.clear();
+  }
+
+  /**
+   * Update roof visibility based on player position inside buildings.
+   * Called from update() when auto-hide is enabled.
+   */
+  private updateRoofVisibility(cameraPos: THREE.Vector3): void {
+    if (!this._autoHideRoofsEnabled) return;
+
+    // Get the local player's position (camera is above player)
+    // Estimate player position from camera
+    const playerX = cameraPos.x;
+    const playerZ = cameraPos.z;
+
+    // Check if player is inside any building
+    // Convert to tile coordinates (1 tile = 1 meter)
+    const tileX = Math.floor(playerX);
+    const tileZ = Math.floor(playerZ);
+
+    // Get town system to check building collision
+    const townSystem = this.world.getSystem("towns") as {
+      getCollisionService?: () => {
+        getBuildingAtTile: (x: number, z: number) => string | null;
+      };
+    } | null;
+
+    const collisionService = townSystem?.getCollisionService?.();
+    if (!collisionService) {
+      // No collision service - can't determine if inside building
+      return;
+    }
+
+    // Check if player is inside a building
+    const insideBuildingId = collisionService.getBuildingAtTile(tileX, tileZ);
+
+    // Update roof visibility for each town
+    for (const [, town] of this.townData) {
+      if (!town.batchedMesh?.roofMesh) continue;
+
+      // Check if player is inside any building in this town
+      let shouldHideRoof = false;
+
+      if (insideBuildingId) {
+        // Check if this building is in this town
+        for (const building of town.buildings) {
+          if (building.buildingId === insideBuildingId) {
+            shouldHideRoof = true;
+            break;
+          }
+        }
+      }
+
+      // Update roof visibility
+      town.batchedMesh.roofMesh.visible = !shouldHideRoof;
+    }
   }
 
   async start(): Promise<void> {
@@ -1494,6 +1649,11 @@ export class BuildingRenderingSystem extends SystemBase {
     if (!moved && this.townData.size > 0) return;
 
     this._lastCameraPos.copy(cameraPos);
+
+    // ============================================
+    // ROOF AUTO-HIDE (when player inside building)
+    // ============================================
+    this.updateRoofVisibility(cameraPos);
 
     // LOD distances (squared for efficiency)
     const lod1DistSq = this.lodConfig.lod1DistanceSq;

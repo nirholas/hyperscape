@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Procedural Plant Generator - Preview All Presets</title>
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      background: #0d1117;
+      font-family: "Inter", "SF Pro Text", system-ui, -apple-system, sans-serif;
+      color: #e5e9f0;
+    }
+    .header {
+      padding: 20px;
+      background: rgba(12, 16, 24, 0.95);
+      border-bottom: 1px solid rgba(140, 160, 180, 0.25);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .header h1 {
+      margin: 0 0 10px 0;
+      font-size: 24px;
+      color: #8bd3ff;
+    }
+    .header p {
+      margin: 0;
+      color: #6b7a8a;
+      font-size: 14px;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin-top: 15px;
+      flex-wrap: wrap;
+    }
+    button {
+      appearance: none;
+      border: 1px solid rgba(130, 150, 170, 0.3);
+      background: #121826;
+      color: #e5e9f0;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.15s ease;
+    }
+    button:hover {
+      background: #1a2233;
+      border-color: #8bd3ff;
+    }
+    button.primary {
+      background: #2563eb;
+      border-color: #2563eb;
+    }
+    button.primary:hover {
+      background: #3b82f6;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 20px;
+      padding: 20px;
+    }
+    .plant-card {
+      background: rgba(12, 16, 24, 0.92);
+      border: 1px solid rgba(140, 160, 180, 0.25);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .plant-card .preview {
+      width: 100%;
+      height: 250px;
+      background: linear-gradient(135deg, #1a1f2e 0%, #0d1117 100%);
+      position: relative;
+    }
+    .plant-card canvas {
+      width: 100%;
+      height: 100%;
+    }
+    .plant-card .info {
+      padding: 12px;
+      border-top: 1px solid rgba(140, 160, 180, 0.15);
+    }
+    .plant-card .name {
+      font-size: 14px;
+      font-weight: 600;
+      color: #8bd3ff;
+      text-transform: capitalize;
+      margin-bottom: 4px;
+    }
+    .plant-card .stats {
+      font-size: 11px;
+      color: #6b7a8a;
+    }
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 250px;
+      color: #6b7a8a;
+    }
+    .spinner {
+      width: 24px;
+      height: 24px;
+      border: 2px solid rgba(139, 211, 255, 0.3);
+      border-top-color: #8bd3ff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-right: 10px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    #status {
+      background: rgba(12, 16, 24, 0.95);
+      padding: 10px 20px;
+      border-top: 1px solid rgba(140, 160, 180, 0.25);
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      font-size: 12px;
+      color: #6b7a8a;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Procedural Plant Generator</h1>
+    <p>Preview all 30 plant presets from @hyperscape/procgen/plant</p>
+    <div class="controls">
+      <button class="primary" onclick="generateAll()">Generate All Plants</button>
+      <button onclick="downloadAll()">Download All Images</button>
+      <button onclick="toggleRotation()">Toggle Rotation</button>
+    </div>
+  </div>
+  <div class="grid" id="grid"></div>
+  <div id="status">Ready</div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // Plant presets (same as in the package)
+    const PRESET_NAMES = [
+      'gloriosum', 'monstera', 'pothos', 'philodendron', 'alocasia',
+      'calathea', 'anthurium', 'aglaonema', 'dieffenbachia', 'spathiphyllum',
+      'syngonium', 'caladium', 'colocasia', 'xanthosoma', 'arum',
+      'calla', 'zamioculcas', 'maranta', 'stromanthe', 'ctenanthe',
+      'ficus', 'schefflera', 'fatsia', 'polyscias', 'aralia',
+      'hosta', 'heuchera', 'brunnera', 'pulmonaria', 'bergenia'
+    ];
+
+    // Plant generation parameters per preset (simplified visual approximations)
+    const PRESET_CONFIGS = {
+      gloriosum: { color: 0x1a5c1a, shape: 'heart', veins: true, size: 1.2 },
+      monstera: { color: 0x228b22, shape: 'split', veins: false, size: 1.3 },
+      pothos: { color: 0x2d8b2d, shape: 'heart', veins: false, size: 0.8 },
+      philodendron: { color: 0x1e6e1e, shape: 'heart', veins: true, size: 1.0 },
+      alocasia: { color: 0x1a4a2e, shape: 'arrow', veins: true, size: 1.1 },
+      calathea: { color: 0x2d5a27, shape: 'oval', veins: true, size: 0.9 },
+      anthurium: { color: 0x8b1a1a, shape: 'heart', veins: false, size: 0.7 },
+      aglaonema: { color: 0x3a5f3a, shape: 'lance', veins: true, size: 0.8 },
+      dieffenbachia: { color: 0x4a7a4a, shape: 'oval', veins: true, size: 1.0 },
+      spathiphyllum: { color: 0x2d5a27, shape: 'lance', veins: true, size: 0.9 },
+      syngonium: { color: 0x3a6a3a, shape: 'arrow', veins: true, size: 0.7 },
+      caladium: { color: 0xc04040, shape: 'heart', veins: true, size: 0.9 },
+      colocasia: { color: 0x1a3a1a, shape: 'heart', veins: true, size: 1.4 },
+      xanthosoma: { color: 0x2a4a2a, shape: 'arrow', veins: true, size: 1.2 },
+      arum: { color: 0x2d5a27, shape: 'arrow', veins: true, size: 0.8 },
+      calla: { color: 0xffffff, shape: 'funnel', veins: false, size: 0.6 },
+      zamioculcas: { color: 0x1a3a1a, shape: 'oval', veins: false, size: 0.5 },
+      maranta: { color: 0x3a6a4a, shape: 'oval', veins: true, size: 0.6 },
+      stromanthe: { color: 0x4a3a5a, shape: 'lance', veins: true, size: 0.8 },
+      ctenanthe: { color: 0x3a5a4a, shape: 'lance', veins: true, size: 0.7 },
+      ficus: { color: 0x2d5a27, shape: 'oval', veins: true, size: 1.0 },
+      schefflera: { color: 0x2d6a27, shape: 'palmate', veins: true, size: 0.9 },
+      fatsia: { color: 0x1a4a1a, shape: 'palmate', veins: true, size: 1.1 },
+      polyscias: { color: 0x3a6a3a, shape: 'compound', veins: true, size: 0.8 },
+      aralia: { color: 0x2a5a2a, shape: 'palmate', veins: true, size: 1.0 },
+      hosta: { color: 0x4a7a5a, shape: 'heart', veins: true, size: 0.9 },
+      heuchera: { color: 0x6a3a4a, shape: 'round', veins: true, size: 0.5 },
+      brunnera: { color: 0x4a6a5a, shape: 'heart', veins: true, size: 0.6 },
+      pulmonaria: { color: 0x3a5a4a, shape: 'oval', veins: true, size: 0.5 },
+      bergenia: { color: 0x2a4a3a, shape: 'round', veins: true, size: 0.7 }
+    };
+
+    const plants = [];
+    let rotating = true;
+
+    function setStatus(text) {
+      document.getElementById('status').textContent = text;
+    }
+
+    function createLeafGeometry(config) {
+      const shape = new THREE.Shape();
+      const size = config.size;
+      
+      switch (config.shape) {
+        case 'heart':
+          // Heart-shaped leaf
+          shape.moveTo(0, -size * 0.8);
+          shape.bezierCurveTo(-size * 0.3, -size * 0.9, -size * 0.6, -size * 0.4, -size * 0.5, 0);
+          shape.bezierCurveTo(-size * 0.4, size * 0.5, -size * 0.1, size * 0.9, 0, size);
+          shape.bezierCurveTo(size * 0.1, size * 0.9, size * 0.4, size * 0.5, size * 0.5, 0);
+          shape.bezierCurveTo(size * 0.6, -size * 0.4, size * 0.3, -size * 0.9, 0, -size * 0.8);
+          break;
+        case 'arrow':
+          // Arrow-shaped leaf
+          shape.moveTo(0, -size);
+          shape.lineTo(-size * 0.3, -size * 0.3);
+          shape.bezierCurveTo(-size * 0.5, 0, -size * 0.4, size * 0.5, 0, size);
+          shape.bezierCurveTo(size * 0.4, size * 0.5, size * 0.5, 0, size * 0.3, -size * 0.3);
+          shape.lineTo(0, -size);
+          break;
+        case 'oval':
+          // Oval leaf
+          shape.ellipse(0, 0, size * 0.4, size * 0.8, 0, Math.PI * 2, false, 0);
+          break;
+        case 'lance':
+          // Lance-shaped (long and narrow)
+          shape.moveTo(0, -size);
+          shape.bezierCurveTo(-size * 0.2, -size * 0.5, -size * 0.25, 0, -size * 0.2, size * 0.5);
+          shape.bezierCurveTo(-size * 0.1, size * 0.8, 0, size, 0, size);
+          shape.bezierCurveTo(0, size, size * 0.1, size * 0.8, size * 0.2, size * 0.5);
+          shape.bezierCurveTo(size * 0.25, 0, size * 0.2, -size * 0.5, 0, -size);
+          break;
+        case 'split':
+          // Monstera-style with holes
+          shape.moveTo(0, -size * 0.9);
+          shape.bezierCurveTo(-size * 0.4, -size * 0.8, -size * 0.7, -size * 0.3, -size * 0.6, size * 0.2);
+          shape.bezierCurveTo(-size * 0.5, size * 0.6, -size * 0.2, size * 0.9, 0, size);
+          shape.bezierCurveTo(size * 0.2, size * 0.9, size * 0.5, size * 0.6, size * 0.6, size * 0.2);
+          shape.bezierCurveTo(size * 0.7, -size * 0.3, size * 0.4, -size * 0.8, 0, -size * 0.9);
+          break;
+        case 'palmate':
+          // Palmate (hand-like)
+          for (let i = 0; i < 5; i++) {
+            const angle = (i - 2) * 0.4 + Math.PI / 2;
+            const tipX = Math.cos(angle) * size * 0.8;
+            const tipY = Math.sin(angle) * size * 0.8;
+            if (i === 0) {
+              shape.moveTo(0, -size * 0.3);
+            }
+            shape.bezierCurveTo(
+              tipX * 0.3, tipY * 0.5,
+              tipX * 0.7, tipY * 0.8,
+              tipX, tipY
+            );
+            const nextAngle = (i - 1) * 0.4 + Math.PI / 2;
+            if (i < 4) {
+              shape.bezierCurveTo(
+                Math.cos(nextAngle) * size * 0.3, Math.sin(nextAngle) * size * 0.4,
+                Math.cos(nextAngle) * size * 0.2, Math.sin(nextAngle) * size * 0.3,
+                0, 0
+              );
+            }
+          }
+          shape.lineTo(0, -size * 0.3);
+          break;
+        case 'round':
+          // Round leaf
+          shape.absarc(0, 0, size * 0.5, 0, Math.PI * 2, false);
+          break;
+        case 'funnel':
+          // Calla lily funnel shape
+          shape.moveTo(0, -size * 0.5);
+          shape.bezierCurveTo(-size * 0.4, -size * 0.3, -size * 0.5, size * 0.2, -size * 0.3, size * 0.6);
+          shape.bezierCurveTo(-size * 0.1, size * 0.8, size * 0.1, size * 0.8, size * 0.3, size * 0.6);
+          shape.bezierCurveTo(size * 0.5, size * 0.2, size * 0.4, -size * 0.3, 0, -size * 0.5);
+          break;
+        case 'compound':
+          // Compound leaf (simplified)
+          shape.ellipse(0, 0, size * 0.2, size * 0.5, 0, Math.PI * 2, false, 0);
+          break;
+        default:
+          shape.ellipse(0, 0, size * 0.4, size * 0.7, 0, Math.PI * 2, false, 0);
+      }
+      
+      const geometry = new THREE.ExtrudeGeometry(shape, {
+        depth: 0.02,
+        bevelEnabled: true,
+        bevelThickness: 0.01,
+        bevelSize: 0.01,
+        bevelSegments: 2
+      });
+      
+      // Rotate to be horizontal
+      geometry.rotateX(-Math.PI / 2);
+      
+      return geometry;
+    }
+
+    function createVeins(config) {
+      if (!config.veins) return null;
+      
+      const group = new THREE.Group();
+      const material = new THREE.LineBasicMaterial({ 
+        color: 0x0a3a0a,
+        linewidth: 1,
+        transparent: true,
+        opacity: 0.6
+      });
+      
+      const size = config.size;
+      
+      // Midrib
+      const midribPoints = [];
+      for (let i = 0; i <= 10; i++) {
+        const t = i / 10;
+        midribPoints.push(new THREE.Vector3(0, 0.03, size * (t * 2 - 1)));
+      }
+      const midribGeometry = new THREE.BufferGeometry().setFromPoints(midribPoints);
+      const midrib = new THREE.Line(midribGeometry, material);
+      group.add(midrib);
+      
+      // Secondary veins
+      for (let i = 1; i <= 5; i++) {
+        const y = size * (i / 5 * 1.5 - 0.5);
+        const width = size * 0.4 * (1 - Math.abs(y) / size);
+        
+        [-1, 1].forEach(side => {
+          const points = [];
+          for (let j = 0; j <= 5; j++) {
+            const t = j / 5;
+            points.push(new THREE.Vector3(
+              side * width * t,
+              0.03,
+              y + t * size * 0.1
+            ));
+          }
+          const geometry = new THREE.BufferGeometry().setFromPoints(points);
+          const vein = new THREE.Line(geometry, material);
+          group.add(vein);
+        });
+      }
+      
+      return group;
+    }
+
+    function createStem(size) {
+      const curve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(0, 0, -size * 0.8),
+        new THREE.Vector3(0, -size * 0.3, -size * 0.9),
+        new THREE.Vector3(0, -size * 0.8, -size * 0.7),
+        new THREE.Vector3(0, -size * 1.2, -size * 0.4)
+      ]);
+      
+      const geometry = new THREE.TubeGeometry(curve, 20, size * 0.03, 8, false);
+      const material = new THREE.MeshStandardMaterial({
+        color: 0x2d5a27,
+        roughness: 0.7,
+        metalness: 0.0
+      });
+      
+      return new THREE.Mesh(geometry, material);
+    }
+
+    function createPlant(presetName) {
+      const config = PRESET_CONFIGS[presetName];
+      const group = new THREE.Group();
+      
+      // Create multiple leaves with variation
+      const leafCount = 3 + Math.floor(Math.random() * 3);
+      
+      for (let i = 0; i < leafCount; i++) {
+        const leafGroup = new THREE.Group();
+        
+        // Leaf geometry
+        const geometry = createLeafGeometry(config);
+        const material = new THREE.MeshStandardMaterial({
+          color: config.color,
+          roughness: 0.6,
+          metalness: 0.0,
+          side: THREE.DoubleSide
+        });
+        
+        const leaf = new THREE.Mesh(geometry, material);
+        leafGroup.add(leaf);
+        
+        // Add veins
+        const veins = createVeins(config);
+        if (veins) {
+          leafGroup.add(veins);
+        }
+        
+        // Add stem
+        const stem = createStem(config.size);
+        leafGroup.add(stem);
+        
+        // Position and rotate each leaf
+        const angle = (i / leafCount) * Math.PI * 2 + Math.random() * 0.3;
+        leafGroup.rotation.y = angle;
+        leafGroup.rotation.x = Math.random() * 0.3 - 0.15;
+        leafGroup.rotation.z = Math.random() * 0.2 - 0.1;
+        
+        const scale = 0.8 + Math.random() * 0.4;
+        leafGroup.scale.setScalar(scale);
+        
+        leafGroup.position.y = i * 0.1;
+        
+        group.add(leafGroup);
+      }
+      
+      return group;
+    }
+
+    function createCard(presetName, index) {
+      const card = document.createElement('div');
+      card.className = 'plant-card';
+      card.id = `card-${presetName}`;
+      
+      const preview = document.createElement('div');
+      preview.className = 'preview';
+      preview.innerHTML = '<div class="loading"><div class="spinner"></div>Generating...</div>';
+      
+      const info = document.createElement('div');
+      info.className = 'info';
+      info.innerHTML = `
+        <div class="name">${presetName}</div>
+        <div class="stats" id="stats-${presetName}">Pending...</div>
+      `;
+      
+      card.appendChild(preview);
+      card.appendChild(info);
+      
+      return card;
+    }
+
+    function setupScene(container, presetName) {
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+      
+      // Scene
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x0d1117);
+      
+      // Camera
+      const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
+      camera.position.set(2, 2, 3);
+      camera.lookAt(0, 0, 0);
+      
+      // Renderer
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      container.innerHTML = '';
+      container.appendChild(renderer.domElement);
+      
+      // Lighting
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+      scene.add(ambientLight);
+      
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      directionalLight.position.set(5, 10, 5);
+      directionalLight.castShadow = true;
+      scene.add(directionalLight);
+      
+      const fillLight = new THREE.DirectionalLight(0x8bd3ff, 0.3);
+      fillLight.position.set(-5, 5, -5);
+      scene.add(fillLight);
+      
+      // Ground
+      const groundGeometry = new THREE.CircleGeometry(3, 32);
+      const groundMaterial = new THREE.MeshStandardMaterial({
+        color: 0x1a1f2e,
+        roughness: 0.9,
+        metalness: 0.0
+      });
+      const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+      ground.rotation.x = -Math.PI / 2;
+      ground.position.y = -1.5;
+      ground.receiveShadow = true;
+      scene.add(ground);
+      
+      // Create plant
+      const plant = createPlant(presetName);
+      scene.add(plant);
+      
+      return { scene, camera, renderer, plant };
+    }
+
+    async function generateAll() {
+      const grid = document.getElementById('grid');
+      grid.innerHTML = '';
+      plants.length = 0;
+      
+      setStatus('Generating plants...');
+      
+      for (let i = 0; i < PRESET_NAMES.length; i++) {
+        const presetName = PRESET_NAMES[i];
+        setStatus(`Generating ${presetName} (${i + 1}/${PRESET_NAMES.length})...`);
+        
+        const card = createCard(presetName, i);
+        grid.appendChild(card);
+        
+        // Small delay to allow UI update
+        await new Promise(r => setTimeout(r, 50));
+        
+        const preview = card.querySelector('.preview');
+        const startTime = performance.now();
+        
+        const { scene, camera, renderer, plant } = setupScene(preview, presetName);
+        
+        const endTime = performance.now();
+        const genTime = (endTime - startTime).toFixed(1);
+        
+        // Count geometry stats
+        let vertices = 0;
+        let triangles = 0;
+        plant.traverse(obj => {
+          if (obj.geometry) {
+            vertices += obj.geometry.attributes.position?.count || 0;
+            triangles += (obj.geometry.index?.count || 0) / 3;
+          }
+        });
+        
+        document.getElementById(`stats-${presetName}`).textContent = 
+          `${vertices} verts | ${Math.floor(triangles)} tris | ${genTime}ms`;
+        
+        plants.push({ presetName, scene, camera, renderer, plant });
+      }
+      
+      setStatus(`Generated ${PRESET_NAMES.length} plants. Rendering...`);
+      
+      // Start animation loop
+      animate();
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      
+      plants.forEach(({ scene, camera, renderer, plant }) => {
+        if (rotating) {
+          plant.rotation.y += 0.005;
+        }
+        renderer.render(scene, camera);
+      });
+    }
+
+    function toggleRotation() {
+      rotating = !rotating;
+      setStatus(rotating ? 'Rotation enabled' : 'Rotation paused');
+    }
+
+    async function downloadAll() {
+      setStatus('Preparing downloads...');
+      
+      // Pause rotation for clean screenshots
+      const wasRotating = rotating;
+      rotating = false;
+      
+      for (let i = 0; i < plants.length; i++) {
+        const { presetName, scene, camera, renderer } = plants[i];
+        setStatus(`Downloading ${presetName} (${i + 1}/${plants.length})...`);
+        
+        renderer.render(scene, camera);
+        
+        const dataUrl = renderer.domElement.toDataURL('image/png');
+        const link = document.createElement('a');
+        link.download = `plant-${presetName}.png`;
+        link.href = dataUrl;
+        link.click();
+        
+        await new Promise(r => setTimeout(r, 200));
+      }
+      
+      rotating = wasRotating;
+      setStatus('All downloads complete!');
+    }
+
+    // Make functions available globally
+    window.generateAll = generateAll;
+    window.downloadAll = downloadAll;
+    window.toggleRotation = toggleRotation;
+
+    // Initial generation
+    window.addEventListener('load', () => {
+      setStatus('Click "Generate All Plants" to begin');
+    });
+  </script>
+</body>
+</html>

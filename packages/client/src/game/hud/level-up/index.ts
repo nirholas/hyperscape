@@ -16,7 +16,7 @@ export { LevelUpNotification } from "./LevelUpNotification";
 export { LevelUpPopup } from "./LevelUpPopup";
 export { UnlocksSection } from "./UnlocksSection";
 
-// Note: FireworksEffect is now exported from hs-kit
+// Note: FireworksEffect is exported from UI components
 
 // Hooks
 export { useLevelUpState } from "./useLevelUpState";

@@ -83,25 +83,42 @@ export function getDatabase(world: World): DatabaseConnection | null {
 }
 
 /**
+ * Session type returned by session manager
+ */
+export interface SessionInfo {
+  targetEntityId: string;
+  type?: string;
+}
+
+/**
  * Get session manager from world.
  * Returns undefined if session manager is not available.
  *
- * Session manager is single source of truth for entity IDs.
+ * Session manager is single source of truth for UI sessions (store, bank, dialogue).
  */
 export function getSessionManager(
   world: World,
-):
-  | { getSession: (playerId: string) => { targetEntityId: string } | undefined }
-  | undefined {
+): { getSession: (playerId: string) => SessionInfo | undefined } | undefined {
   return (
     world as {
       interactionSessionManager?: {
-        getSession: (
-          playerId: string,
-        ) => { targetEntityId: string } | undefined;
+        getSession: (playerId: string) => SessionInfo | undefined;
       };
     }
   ).interactionSessionManager;
+}
+
+/**
+ * Check if player has an active UI session (store, bank, dialogue)
+ * Players with active sessions should not be able to initiate certain actions
+ */
+export function hasActiveInterfaceSession(
+  world: World,
+  playerId: string,
+): boolean {
+  const sessionManager = getSessionManager(world);
+  if (!sessionManager) return false;
+  return sessionManager.getSession(playerId) !== undefined;
 }
 
 // ============================================================================

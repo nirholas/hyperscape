@@ -8,6 +8,7 @@ import React, { useEffect } from "react";
 import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
 import { toSolanaWalletConnectors } from "@privy-io/react-auth/solana";
 import { privyAuthManager } from "./PrivyAuthManager";
+import { logger } from "../lib/logger";
 
 interface PrivyAuthProviderProps {
   children: React.ReactNode;
@@ -34,7 +35,7 @@ function PrivyAuthHandler({ children }: { children: React.ReactNode }) {
         const token = await getAccessToken();
         // Only proceed if we have a valid token
         if (!token) {
-          console.warn("[PrivyAuthProvider] getAccessToken returned null");
+          logger.warn("[PrivyAuthProvider] getAccessToken returned null");
           return;
         }
         privyAuthManager.setAuthenticatedUser(user, token);
@@ -85,13 +86,13 @@ export function PrivyAuthProvider({ children }: PrivyAuthProviderProps) {
     appId && appId.length > 0 && !appId.includes("your-privy-app-id");
 
   if (!isValidAppId) {
-    console.warn(
+    logger.warn(
       "[PrivyAuthProvider] No valid Privy App ID configured. Authentication disabled.",
     );
-    console.warn(
+    logger.warn(
       "[PrivyAuthProvider] To enable authentication, set PUBLIC_PRIVY_APP_ID in your .env file",
     );
-    console.warn(
+    logger.warn(
       "[PrivyAuthProvider] Get your App ID from https://dashboard.privy.io/",
     );
     // Return children without Privy if no app ID - allows development without Privy

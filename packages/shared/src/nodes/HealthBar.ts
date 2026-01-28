@@ -82,11 +82,9 @@ export class HealthBar extends Node {
     }
 
     // Find HealthBars system
-    const healthbars = this.ctx?.systems.find(
-      (s) =>
-        (s as { systemName?: string }).systemName === "healthbars" ||
-        s.constructor.name === "HealthBars",
-    ) as HealthBarsSystem | undefined;
+    const healthbars = this.ctx?.getSystem?.("healthbars") as
+      | HealthBarsSystem
+      | undefined;
 
     if (healthbars) {
       this.handle = healthbars.add(

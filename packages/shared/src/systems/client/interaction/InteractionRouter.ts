@@ -43,6 +43,7 @@ import { SmeltingSourceInteractionHandler } from "./handlers/SmeltingSourceInter
 import { SmithingSourceInteractionHandler } from "./handlers/SmithingSourceInteractionHandler";
 import { AltarInteractionHandler } from "./handlers/AltarInteractionHandler";
 import { StarterChestInteractionHandler } from "./handlers/StarterChestInteractionHandler";
+import { ForfeitPillarInteractionHandler } from "./handlers/ForfeitPillarInteractionHandler";
 
 /**
  * Targeting mode state for "Use X on Y" interactions
@@ -169,6 +170,12 @@ export class InteractionRouter extends System {
       "starter_chest",
       new StarterChestInteractionHandler(this.world, this.actionQueue),
     );
+
+    // Forfeit pillar (duel arena surrender)
+    this.handlers.set(
+      "forfeit_pillar",
+      new ForfeitPillarInteractionHandler(this.world, this.actionQueue),
+    );
   }
 
   override start(): void {
@@ -218,6 +225,15 @@ export class InteractionRouter extends System {
 
     // Update visual feedback (animate markers)
     this.visualFeedback.update();
+  }
+
+  /**
+   * Cancel any pending client-side action (walk-to, interaction).
+   * Used when player teleports to prevent stale actions from executing.
+   */
+  cancelCurrentAction(): void {
+    this.actionQueue.cancelCurrentAction();
+    this.visualFeedback.hideTargetMarker();
   }
 
   override destroy(): void {
@@ -274,12 +290,6 @@ export class InteractionRouter extends System {
         // Valid target clicked - emit TARGETING_SELECT
         const player = this.world.getPlayer();
         if (player && this.targetingMode.sourceItem) {
-          console.log("[InteractionRouter] 🎯 World target clicked:", {
-            entityId: target.entityId,
-            entityType: target.entityType,
-            actionType: this.targetingMode.actionType,
-          });
-
           this.world.emit(EventType.TARGETING_SELECT, {
             playerId: player.id,
             sourceItemId: this.targetingMode.sourceItem.id,
@@ -290,9 +300,6 @@ export class InteractionRouter extends System {
         }
       } else {
         // Clicked empty space or invalid target - cancel targeting mode
-        console.log(
-          "[InteractionRouter] ❌ Invalid target or empty space - cancelling targeting",
-        );
         const player = this.world.getPlayer();
         if (player) {
           this.world.emit(EventType.TARGETING_CANCEL, { playerId: player.id });
@@ -358,53 +365,58 @@ export class InteractionRouter extends System {
       }
     } else {
       // Terrain right-click - show "Walk here" menu
-      const terrainPos = this.raycastService.getTerrainPosition(
-        event.clientX,
-        event.clientY,
-        this.canvas,
-      );
-
-      if (terrainPos) {
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-
-        // Capture event coordinates for the handler closure
-        const clickX = event.clientX;
-        const clickY = event.clientY;
-        const shiftKey = event.shiftKey;
-
-        const walkAction: ContextMenuAction = {
-          id: "walk-here",
-          label: "Walk here",
-          enabled: true,
-          priority: 0,
-          handler: () => {
-            this.handleMoveClick(clickX, clickY, shiftKey);
-          },
-        };
-
-        const cancelAction: ContextMenuAction = {
-          id: "cancel",
-          label: "Cancel",
-          enabled: true,
-          priority: 100,
-          handler: () => {
-            // Just close the menu - no action needed
-          },
-        };
-
-        this.contextMenu.showMenu(
-          null,
-          [walkAction, cancelAction],
-          clickX,
-          clickY,
-        );
-      }
+      this.showTerrainContextMenu(event.clientX, event.clientY, event.shiftKey);
     }
 
     if (DEBUG_INTERACTIONS) console.timeEnd("[ContextMenu] Total");
   };
+
+  /**
+   * Show terrain context menu with "Walk here" and "Cancel" options
+   * Used by both desktop right-click and mobile long-press
+   */
+  private showTerrainContextMenu(
+    screenX: number,
+    screenY: number,
+    shiftKey: boolean = false,
+  ): void {
+    if (!this.canvas) return;
+
+    const terrainPos = this.raycastService.getTerrainPosition(
+      screenX,
+      screenY,
+      this.canvas,
+    );
+
+    if (!terrainPos) return;
+
+    const walkAction: ContextMenuAction = {
+      id: "walk-here",
+      label: "Walk here",
+      enabled: true,
+      priority: 0,
+      handler: () => {
+        this.handleMoveClick(screenX, screenY, shiftKey);
+      },
+    };
+
+    const cancelAction: ContextMenuAction = {
+      id: "cancel",
+      label: "Cancel",
+      enabled: true,
+      priority: 100,
+      handler: () => {
+        // Just close the menu - no action needed
+      },
+    };
+
+    this.contextMenu.showMenu(
+      null,
+      [walkAction, cancelAction],
+      screenX,
+      screenY,
+    );
+  }
 
   private onMouseDown = (event: MouseEvent): void => {
     if (!this.areControlsEnabled()) return;
@@ -462,9 +474,13 @@ export class InteractionRouter extends System {
     // Long-press timer for context menu
     this.longPressTimer = setTimeout(() => {
       if (this.touchStart && this.canvas) {
+        // Capture coordinates before clearing touchStart
+        const touchX = this.touchStart.x;
+        const touchY = this.touchStart.y;
+
         const target = this.raycastService.getEntityAtPosition(
-          this.touchStart.x,
-          this.touchStart.y,
+          touchX,
+          touchY,
           this.canvas,
         );
 
@@ -475,13 +491,11 @@ export class InteractionRouter extends System {
           const handler = this.handlers.get(target.entityType);
           if (handler) {
             const actions = handler.getContextMenuActions(target);
-            this.contextMenu.showMenu(
-              target,
-              actions,
-              this.touchStart.x,
-              this.touchStart.y,
-            );
+            this.contextMenu.showMenu(target, actions, touchX, touchY);
           }
+        } else {
+          // Terrain long-press - show "Walk here" menu (like right-click on desktop)
+          this.showTerrainContextMenu(touchX, touchY, false);
         }
         this.touchStart = null;
       }
@@ -702,12 +716,6 @@ export class InteractionRouter extends System {
       actionType: "firemaking" | "cooking" | "smelting" | "none";
     };
 
-    console.log("[InteractionRouter] 🎯 Targeting mode started:", {
-      sourceItem: data.sourceItem,
-      validTargetIds: data.validTargetIds.length,
-      actionType: data.actionType,
-    });
-
     this.targetingMode = {
       active: true,
       sourceItem: data.sourceItem,
@@ -725,7 +733,6 @@ export class InteractionRouter extends System {
    * Exit targeting mode after successful action.
    */
   private onTargetingComplete = (): void => {
-    console.log("[InteractionRouter] ✅ Targeting mode completed");
     this.exitTargetingMode();
   };
 
@@ -733,7 +740,6 @@ export class InteractionRouter extends System {
    * Exit targeting mode when cancelled.
    */
   private onTargetingCancel = (): void => {
-    console.log("[InteractionRouter] ❌ Targeting mode cancelled");
     this.exitTargetingMode();
   };
 

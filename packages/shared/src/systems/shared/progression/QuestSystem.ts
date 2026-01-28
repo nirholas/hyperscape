@@ -262,10 +262,7 @@ export class QuestSystem extends SystemBase implements IQuestSystem {
 
       try {
         const questsData = await fs.readFile(questsPath, "utf-8");
-        const questData = JSON.parse(questsData) as Record<
-          string,
-          QuestDefinition
-        >;
+        const questData = JSON.parse(questsData) as QuestManifest;
 
         let validCount = 0;
         let invalidCount = 0;
@@ -298,7 +295,7 @@ export class QuestSystem extends SystemBase implements IQuestSystem {
             `Loaded ${validCount} quest definitions from ${questsPath}`,
           );
         }
-      } catch (_error) {
+      } catch {
         this.logger.warn(
           `Quest manifest not found at ${questsPath}, using empty quest list`,
         );
@@ -810,10 +807,20 @@ export class QuestSystem extends SystemBase implements IQuestSystem {
       }
     }
 
+    // Info-level logging for kill tracking visibility
+    this.logger.info(`[Quest] Kill: player=${killedBy}, mobType=${mobType}`);
+
     const state = this.playerStates.get(killedBy);
     if (!state) {
+      this.logger.warn(
+        `[Quest] No player state for ${killedBy} - kills not tracked`,
+      );
       return;
     }
+
+    this.logger.info(
+      `[Quest] Player ${killedBy}: ${state.activeQuests.size} active quests`,
+    );
 
     // Check all active quests for kill objectives
     for (const [questId, progress] of state.activeQuests) {
@@ -1196,6 +1203,70 @@ export class QuestSystem extends SystemBase implements IQuestSystem {
         error instanceof Error ? error : undefined,
       );
     }
+  }
+
+  /**
+   * Abandon an active quest for a player
+   *
+   * Removes the quest from active quests and deletes progress from database
+   */
+  public async abandonQuest(
+    playerId: string,
+    questId: string,
+  ): Promise<boolean> {
+    const state = this.playerStates.get(playerId);
+    if (!state) {
+      this.logger.warn(`Cannot abandon quest: player ${playerId} not found`);
+      return false;
+    }
+
+    const progress = state.activeQuests.get(questId);
+    if (!progress) {
+      this.logger.warn(`Quest ${questId} not active for ${playerId}`);
+      return false;
+    }
+
+    const definition = this.questDefinitions.get(questId);
+    const questName = definition?.name || questId;
+
+    // Remove from active quests
+    state.activeQuests.delete(questId);
+    this.markActiveQuestsDirty(playerId);
+
+    // Delete from database
+    try {
+      const dbSystem = this.world.getSystem("database") as {
+        getQuestRepository?: () => {
+          abandonQuest: (playerId: string, questId: string) => Promise<void>;
+        };
+      };
+
+      if (dbSystem?.getQuestRepository) {
+        await dbSystem.getQuestRepository().abandonQuest(playerId, questId);
+      }
+    } catch (error) {
+      this.logger.error(
+        `Failed to delete quest ${questId} from database for ${playerId}`,
+        error instanceof Error ? error : undefined,
+      );
+    }
+
+    // Send chat message
+    this.emitTypedEvent(EventType.CHAT_MESSAGE, {
+      playerId,
+      message: `You have abandoned the quest: ${questName}`,
+      type: "game",
+    });
+
+    // Emit quest abandoned event
+    this.emitTypedEvent(EventType.QUEST_ABANDONED, {
+      playerId,
+      questId,
+      questName,
+    });
+
+    this.logger.info(`Player ${playerId} abandoned quest: ${questId}`);
+    return true;
   }
 
   /**

@@ -180,6 +180,46 @@ export function GameClient({ wsUrl, onSetup }: GameClientProps) {
     };
   }, [world]);
 
+  // Handle WebGL context loss/restoration
+  // This can happen when GPU resources are exhausted or driver issues occur
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    // Find the canvas element (created by Three.js renderer)
+    const canvas = viewport.querySelector("canvas");
+    if (!canvas) return;
+
+    const handleContextLost = (event: Event) => {
+      event.preventDefault(); // Allows context to be restored
+      console.warn(
+        "[GameClient] WebGL context lost - GPU resources exhausted or driver issue",
+      );
+      // The Three.js renderer will attempt to restore automatically
+      // User will see frozen frame until restored
+    };
+
+    const handleContextRestored = () => {
+      console.info("[GameClient] WebGL context restored - resuming rendering");
+      // Three.js handles re-initialization automatically
+      // Force a resize to ensure proper viewport dimensions
+      const graphics = world.getSystem("graphics") as {
+        resize?: (width: number, height: number) => void;
+      } | null;
+      if (graphics?.resize) {
+        graphics.resize(viewport.offsetWidth, viewport.offsetHeight);
+      }
+    };
+
+    canvas.addEventListener("webglcontextlost", handleContextLost);
+    canvas.addEventListener("webglcontextrestored", handleContextRestored);
+
+    return () => {
+      canvas.removeEventListener("webglcontextlost", handleContextLost);
+      canvas.removeEventListener("webglcontextrestored", handleContextRestored);
+    };
+  }, [world]);
+
   useEffect(() => {
     let cleanedUp = false;
 
@@ -271,9 +311,12 @@ export function GameClient({ wsUrl, onSetup }: GameClientProps) {
         }
       `}</style>
       <div
+        id="game-canvas"
         className="App__viewport"
         ref={viewportRef}
         data-component="viewport"
+        aria-label="Game Canvas"
+        role="application"
       >
         <div className="App__ui" ref={uiRef} data-component="ui">
           <CoreUI world={world} />

@@ -25,6 +25,10 @@ import {
   World,
   type EquipmentSyncData,
 } from "@hyperscape/shared";
+import {
+  sendFriendsListSync,
+  notifyFriendsOfStatusChange,
+} from "./handlers/friends";
 
 /**
  * Create an ElizaOS agent record for a character
@@ -681,6 +685,19 @@ export async function handleEnterWorld(
     } catch {}
   }
 
+  // Check if player logged out inside a combat arena (server restart edge case)
+  // If so, teleport them to the duel arena lobby spawn point
+  const { isPositionInsideCombatArena, getDuelArenaConfig } = await import(
+    "@hyperscape/shared"
+  );
+  if (isPositionInsideCombatArena(position[0], position[2])) {
+    const lobbySpawn = getDuelArenaConfig().lobbySpawnPoint;
+    console.log(
+      `[CharacterSelection] Player ${characterId} was inside combat arena, teleporting to lobby`,
+    );
+    position = [lobbySpawn.x, lobbySpawn.y, lobbySpawn.z];
+  }
+
   // Ground to terrain
   const terrain = world.getSystem("terrain") as InstanceType<
     typeof TerrainSystem
@@ -926,6 +943,20 @@ export async function handleEnterWorld(
       sendToFn(socket.id, "enterWorldApproved", {
         characterId: characterId || socket.player.id,
       });
+
+      // Send friends list sync to the connecting player
+      const playerId = characterId || socket.player.id;
+      try {
+        await sendFriendsListSync(socket, world, playerId);
+        // Notify this player's friends that they came online
+        await notifyFriendsOfStatusChange(playerId, "online", world);
+      } catch (friendErr) {
+        console.warn(
+          "[CharacterSelection] Failed to sync friends list:",
+          friendErr,
+        );
+        // Non-fatal - continue even if friends sync fails
+      }
     } catch (_err) {}
   }
 }

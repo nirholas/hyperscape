@@ -10,7 +10,7 @@
  */
 
 import React, { useMemo } from "react";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 import { SKILL_ICONS } from "@hyperscape/shared";
 import type { GroupedXPDrop } from "./useXPOrbState";
 

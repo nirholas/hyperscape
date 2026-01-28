@@ -170,47 +170,78 @@ export class ZoneDetectionSystem extends SystemBase {
 
   /**
    * Actual zone lookup logic
+   * Finds the SMALLEST matching zone to handle overlapping zones correctly
+   * (e.g., duel_arena inside central_haven)
    */
   private lookupZoneProperties(position: {
     x: number;
     z: number;
   }): ZoneProperties {
-    // Check world areas first (from data/world-areas.ts)
-    for (const area of Object.values(ALL_WORLD_AREAS) as WorldArea[]) {
+    // Find all matching zones and select the smallest one (most specific)
+    let bestMatch: { area: WorldArea; size: number } | null = null;
+    const allAreas = Object.values(ALL_WORLD_AREAS) as WorldArea[];
+
+    // Debug: log all available zones
+    console.log(
+      `[ZoneDetection] Checking ${allAreas.length} zones for position (${position.x.toFixed(1)}, ${position.z.toFixed(1)})`,
+    );
+    console.log(
+      `[ZoneDetection] Available zones: ${allAreas.map((a) => a.id).join(", ")}`,
+    );
+
+    for (const area of allAreas) {
       if (area.bounds) {
         const { minX, maxX, minZ, maxZ } = area.bounds;
-        // Use exclusive left boundary to prevent position matching multiple zones
-        // A position exactly on the boundary belongs to the zone on the RIGHT (higher values)
-        if (
+        const inBounds =
           position.x > minX &&
           position.x <= maxX &&
           position.z > minZ &&
-          position.z <= maxZ
-        ) {
-          // Found matching area
-          const isSafe = area.safeZone === true;
-          const isPvP = area.pvpEnabled === true;
-          const isWild = !isSafe || isPvP;
+          position.z <= maxZ;
 
-          let type: ZoneType;
-          if (isPvP) {
-            type = ZoneTypeEnum.PVP_ZONE;
-          } else if (isSafe) {
-            type = ZoneTypeEnum.SAFE_AREA;
-          } else {
-            type = ZoneTypeEnum.WILDERNESS;
+        if (inBounds) {
+          // Calculate zone area (smaller = more specific)
+          const zoneSize = (maxX - minX) * (maxZ - minZ);
+          console.log(`[ZoneDetection] MATCH: ${area.id} (size: ${zoneSize})`);
+
+          // Keep the smallest matching zone
+          if (!bestMatch || zoneSize < bestMatch.size) {
+            bestMatch = { area, size: zoneSize };
           }
-
-          return {
-            type,
-            isSafe,
-            isPvPEnabled: isPvP,
-            isWilderness: isWild,
-            name: area.name,
-            difficultyLevel: area.difficultyLevel,
-          };
         }
       }
+    }
+
+    if (bestMatch) {
+      console.log(
+        `[ZoneDetection] Selected: ${bestMatch.area.id} (smallest match)`,
+      );
+    }
+
+    // Return the smallest matching zone
+    if (bestMatch) {
+      const area = bestMatch.area;
+      const isSafe = area.safeZone === true;
+      const isPvP = area.pvpEnabled === true;
+      const isWild = !isSafe || isPvP;
+
+      let type: ZoneType;
+      if (isPvP) {
+        type = ZoneTypeEnum.PVP_ZONE;
+      } else if (isSafe) {
+        type = ZoneTypeEnum.SAFE_AREA;
+      } else {
+        type = ZoneTypeEnum.WILDERNESS;
+      }
+
+      return {
+        type,
+        isSafe,
+        isPvPEnabled: isPvP,
+        isWilderness: isWild,
+        name: area.name,
+        difficultyLevel: area.difficultyLevel,
+        id: area.id,
+      };
     }
 
     // Check zones (from data/world-structure.ts)
@@ -241,6 +272,7 @@ export class ZoneDetectionSystem extends SystemBase {
         isWilderness: isWild,
         name: zone.name || "Unknown Zone",
         difficultyLevel: zone.difficultyLevel || 0,
+        id: zone.id,
       };
     }
 
@@ -256,6 +288,7 @@ export class ZoneDetectionSystem extends SystemBase {
           isWilderness: false,
           name: town.name,
           difficultyLevel: 0,
+          id: town.id,
         };
       }
     }

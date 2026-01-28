@@ -7,7 +7,7 @@ import React, { useEffect, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { useLoginToMiniApp } from "@privy-io/react-auth/farcaster";
 import miniappSdk from "@farcaster/miniapp-sdk";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 
 interface LoginScreenProps {
   onAuthenticated: () => void;

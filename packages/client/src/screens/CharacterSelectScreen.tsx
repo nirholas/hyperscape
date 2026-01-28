@@ -30,15 +30,11 @@ import {
   AVATAR_OPTIONS,
 } from "@hyperscape/shared";
 import React from "react";
-import { CharacterPreview } from "../components/CharacterPreview";
+import { CharacterPreview } from "../game/character/CharacterPreview";
 import { usePrivy, useCreateWallet } from "@privy-io/react-auth";
-import { useThemeStore } from "hs-kit";
-import {
-  ELIZAOS_API,
-  GAME_API_URL,
-  GAME_WS_URL,
-  CDN_URL,
-} from "@/lib/api-config";
+import { useThemeStore } from "@/ui";
+import { ELIZAOS_API, GAME_WS_URL, CDN_URL } from "@/lib/api-config";
+import { apiClient } from "@/lib/api-client";
 
 type Character = {
   id: string;
@@ -334,20 +330,20 @@ export function CharacterSelectScreen({
 
       setLoadingTemplates(true);
       try {
-        const response = await fetch(`${GAME_API_URL}/api/templates`);
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.templates) {
-            setTemplates(data.templates);
-            // Auto-select first template as default
-            if (data.templates.length > 0) {
-              setSelectedTemplate(data.templates[0]);
-            }
-            console.log(
-              "[CharacterSelect] ✅ Loaded character templates:",
-              data.templates,
-            );
+        const result = await apiClient.get<{
+          success: boolean;
+          templates: CharacterTemplate[];
+        }>("/api/templates");
+        if (result.ok && result.data?.success && result.data.templates) {
+          setTemplates(result.data.templates);
+          // Auto-select first template as default
+          if (result.data.templates.length > 0) {
+            setSelectedTemplate(result.data.templates[0]);
           }
+          console.log(
+            "[CharacterSelect] ✅ Loaded character templates:",
+            result.data.templates,
+          );
         }
       } catch (error) {
         console.error("[CharacterSelect] ❌ Failed to fetch templates:", error);
@@ -365,6 +361,17 @@ export function CharacterSelectScreen({
   }>(null);
   // Ref for synchronous double-click prevention when entering world
   const enteringWorldRef = React.useRef(false);
+
+  // Reconnection state and refs
+  const reconnectAttemptsRef = React.useRef(0);
+  const reconnectTimeoutRef = React.useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const intentionalDisconnectRef = React.useRef(false);
+  const MAX_RECONNECT_ATTEMPTS = 5;
+  const [connectionState, setConnectionState] = React.useState<
+    "disconnected" | "connecting" | "connected" | "reconnecting" | "failed"
+  >("disconnected");
   // Use primitive states instead of object to prevent unnecessary re-renders
   const [authToken, setAuthToken] = React.useState(
     localStorage.getItem("privy_auth_token") || "",
@@ -419,6 +426,7 @@ export function CharacterSelectScreen({
         `[CharacterSelect] ⏳ Waiting for Privy: ready=${ready}, authenticated=${authenticated}`,
       );
       setWsReady(false);
+      setConnectionState("disconnected");
       return; // Don't create websocket until Privy is ready
     }
 
@@ -430,6 +438,7 @@ export function CharacterSelectScreen({
         "[CharacterSelect] ⏳ Waiting for Privy user data to load...",
       );
       setWsReady(false);
+      setConnectionState("disconnected");
       return;
     }
 
@@ -439,6 +448,7 @@ export function CharacterSelectScreen({
         "[CharacterSelect] ⏳ Waiting for localStorage auth tokens...",
       );
       setWsReady(false);
+      setConnectionState("disconnected");
       return; // Don't create websocket without auth
     }
 
@@ -454,6 +464,7 @@ export function CharacterSelectScreen({
       setAuthToken("");
       setPrivyUserId("");
       setWsReady(false);
+      setConnectionState("disconnected");
       return;
     }
 
@@ -462,356 +473,453 @@ export function CharacterSelectScreen({
       { userId: currentUser.id, privyUserId },
     );
 
-    let url = `${wsUrl}?authToken=${encodeURIComponent(authToken)}`;
-    if (privyUserId) url += `&privyUserId=${encodeURIComponent(privyUserId)}`;
+    // Reset reconnection state for fresh connection
+    intentionalDisconnectRef.current = false;
+    reconnectAttemptsRef.current = 0;
 
-    console.log("[CharacterSelect] 🔌 Creating WebSocket connection to:", url);
-    const ws = new WebSocket(url);
-    ws.binaryType = "arraybuffer";
-    preWsRef.current = ws;
-    setWsReady(false);
-    ws.addEventListener("open", () => {
+    // Create WebSocket connection with reconnection support
+    const connect = (): void => {
+      // Don't connect if intentionally disconnected
+      if (intentionalDisconnectRef.current) return;
+
+      // Build WebSocket URL with authentication
+      // SECURITY NOTE: Auth token in URL can leak via server logs, browser history,
+      // and referrer headers. Ideally should use first-message auth pattern like
+      // EmbeddedGameClient. However, this requires coordinated server changes to
+      // handle auth packets before characterListRequest. See: packages/server/src/
+      // systems/ServerNetwork/character-selection.ts handleCharacterListRequest()
+      // TODO: Migrate to first-message auth when server supports it
+      let url = `${wsUrl}?authToken=${encodeURIComponent(authToken)}`;
+      if (privyUserId) url += `&privyUserId=${encodeURIComponent(privyUserId)}`;
+
       console.log(
-        "[CharacterSelect] ✅ WebSocket opened with authenticated user:",
-        currentUser.id,
+        "[CharacterSelect] 🔌 Creating WebSocket connection to:",
+        wsUrl,
       );
-      setWsReady(true);
-      // Request character list from server
-      const packet = writePacket("characterListRequest", {});
-      ws.send(packet);
-      // Flush any pending create
-      const pending = pendingActionRef.current;
-      if (pending && pending.type === "create") {
-        ws.send(writePacket("characterCreate", { name: pending.name }));
-        pendingActionRef.current = null;
-      }
-    });
-    ws.addEventListener("error", (err) => {
-      console.error("[CharacterSelect] ❌ WebSocket ERROR:", err);
-    });
-    ws.addEventListener("close", (_e) => {
+      setConnectionState(
+        reconnectAttemptsRef.current > 0 ? "reconnecting" : "connecting",
+      );
+
+      const ws = new WebSocket(url);
+      ws.binaryType = "arraybuffer";
+      preWsRef.current = ws;
       setWsReady(false);
-    });
-    ws.addEventListener("message", (e) => {
-      const result = readPacket(e.data);
-      if (!result) {
-        console.warn("[CharacterSelect] ⚠️ readPacket returned null/undefined");
-        return;
-      }
-      const [method, data] = result as [string, unknown];
 
-      if (method === "onSnapshot") {
-        // Extract characters from snapshot
-        const snap = data as { characters?: Character[] };
-        if (snap.characters && Array.isArray(snap.characters)) {
-          setCharacters(snap.characters);
+      // Define named handlers for proper cleanup
+      const handleOpen = (): void => {
+        console.log("[CharacterSelect] ✅ WebSocket connected");
+
+        // Reset reconnection state on successful connection
+        reconnectAttemptsRef.current = 0;
+        setConnectionState("connected");
+        setWsReady(true);
+
+        // Request character list from server
+        const packet = writePacket("characterListRequest", {});
+        ws.send(packet);
+        // Flush any pending create
+        const pending = pendingActionRef.current;
+        if (pending && pending.type === "create") {
+          ws.send(writePacket("characterCreate", { name: pending.name }));
+          pendingActionRef.current = null;
         }
-      } else if (method === "onCharacterList") {
-        const listData = data as { characters: Character[] };
-        setCharacters(listData.characters);
-      } else if (method === "onCharacterCreated") {
-        const c = data as Character;
-        setCharacters((prev) => {
-          const newList = [...prev, c];
-          return newList;
-        });
+      };
 
-        // Read current values from refs (prevents stale closures)
-        const currentCharacterType = characterTypeRef.current;
-        const currentUser = userRef.current;
-        const currentSelectedTemplate = selectedTemplateRef.current;
-        const currentSelectedAvatarIndex = selectedAvatarIndexRef.current;
+      const handleError = (err: Event): void => {
+        console.error("[CharacterSelect] ❌ WebSocket ERROR:", err);
+      };
 
-        // AGENT FLOW: Generate JWT, create ElizaOS agent, redirect to character editor
-        // HUMAN FLOW: Show "Enter World" confirmation screen
-        if (currentCharacterType === "agent") {
-          console.log(
-            "[CharacterSelect] 🤖 Agent character created, generating JWT and creating ElizaOS agent...",
+      const handleClose = (event: CloseEvent): void => {
+        setWsReady(false);
+
+        // Don't reconnect if intentionally closed
+        if (intentionalDisconnectRef.current) {
+          setConnectionState("disconnected");
+          return;
+        }
+
+        console.log(
+          `[CharacterSelect] 🔌 WebSocket closed (code: ${event.code}, reason: ${event.reason || "none"})`,
+        );
+
+        // Attempt reconnection with exponential backoff
+        if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+          const delay = Math.min(
+            1000 * Math.pow(2, reconnectAttemptsRef.current),
+            30000,
           );
+          reconnectAttemptsRef.current++;
 
-          // Generate JWT and create ElizaOS agent immediately
-          const createAgentAndRedirect = async () => {
-            try {
-              // Use user.id from Privy hook instead of localStorage to ensure correct Privy DID
-              const accountId = currentUser?.id;
-              if (!accountId) {
-                throw new Error("No account ID found - user not authenticated");
-              }
+          console.log(
+            `[CharacterSelect] 🔄 Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})`,
+          );
+          setConnectionState("reconnecting");
 
-              // Step 1: Generate JWT
-              console.log("[CharacterSelect] 🔑 Generating JWT for agent...");
-              const credentialsResponse = await fetch(
-                `${GAME_API_URL}/api/agents/credentials`,
-                {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    characterId: c.id,
-                    accountId,
-                  }),
-                },
-              );
+          reconnectTimeoutRef.current = setTimeout(() => {
+            connect();
+          }, delay);
+        } else {
+          console.error(
+            "[CharacterSelect] ❌ Max reconnection attempts exceeded",
+          );
+          setConnectionState("failed");
+        }
+      };
 
-              if (!credentialsResponse.ok) {
-                throw new Error(
-                  `Failed to generate JWT: ${credentialsResponse.status}`,
-                );
-              }
+      const handleMessage = (e: MessageEvent): void => {
+        const result = readPacket(e.data);
+        if (!result) {
+          console.warn(
+            "[CharacterSelect] ⚠️ readPacket returned null/undefined",
+          );
+          return;
+        }
+        const [method, data] = result as [string, unknown];
 
-              const credentials = await credentialsResponse.json();
-              console.log("[CharacterSelect] ✅ JWT generated successfully");
+        if (method === "onSnapshot") {
+          // Extract characters from snapshot
+          const snap = data as { characters?: Character[] };
+          if (snap.characters && Array.isArray(snap.characters)) {
+            setCharacters(snap.characters);
+          }
+        } else if (method === "onCharacterList") {
+          const listData = data as { characters: Character[] };
+          setCharacters(listData.characters);
+        } else if (method === "onCharacterCreated") {
+          const c = data as Character;
+          setCharacters((prev) => {
+            const newList = [...prev, c];
+            return newList;
+          });
 
-              // Step 2: Get template config and create ElizaOS agent
-              if (!currentSelectedTemplate) {
-                throw new Error("No character template selected");
-              }
+          // Read current values from refs (prevents stale closures)
+          const currentCharacterType = characterTypeRef.current;
+          const currentUserFromRef = userRef.current;
+          const currentSelectedTemplate = selectedTemplateRef.current;
+          const currentSelectedAvatarIndex = selectedAvatarIndexRef.current;
 
-              console.log(
-                `[CharacterSelect] 📥 Using template: ${currentSelectedTemplate.name}`,
-              );
+          // AGENT FLOW: Generate JWT, create ElizaOS agent, redirect to character editor
+          // HUMAN FLOW: Show "Enter World" confirmation screen
+          if (currentCharacterType === "agent") {
+            console.log(
+              "[CharacterSelect] 🤖 Agent character created, generating JWT and creating ElizaOS agent...",
+            );
 
-              // Parse template config from database (stored as JSON string)
-              // This avoids a separate fetch - config is already in the templates response
-              let templateJson: Record<string, unknown>;
-              if (currentSelectedTemplate.templateConfig) {
-                try {
-                  templateJson = JSON.parse(
-                    currentSelectedTemplate.templateConfig,
-                  );
-                  console.log(
-                    "[CharacterSelect] ✅ Template config parsed from database",
-                  );
-                } catch (parseError) {
-                  console.error(
-                    "[CharacterSelect] ❌ Failed to parse templateConfig:",
-                    parseError,
-                  );
-                  throw new Error("Invalid template configuration in database");
-                }
-              } else {
-                // Fallback: Fetch from templateUrl (legacy support)
-                console.log(
-                  "[CharacterSelect] ⚠️ No templateConfig in database, fetching from URL...",
-                );
-                const templateResponse = await fetch(
-                  currentSelectedTemplate.templateUrl,
-                );
-                if (!templateResponse.ok) {
-                  throw new Error(
-                    `Failed to fetch template: ${templateResponse.status}`,
-                  );
-                }
-                templateJson = await templateResponse.json();
-                console.log("[CharacterSelect] ✅ Template fetched from URL");
-              }
-
-              // Remove fields that ElizaOS validation doesn't accept
-              // Migration 0006 has 'modelProvider' but ElizaOS schema rejects it
-              delete templateJson.modelProvider;
-
-              // Merge template with character-specific data
-              // Handle case where templateJson.settings might not exist
-              const baseSettings = (templateJson.settings || {}) as Record<
-                string,
-                unknown
-              >;
-              const baseSecrets = (baseSettings.secrets || {}) as Record<
-                string,
-                unknown
-              >;
-
-              const characterTemplate = {
-                ...templateJson,
-                name: c.name, // Override template name with character name
-                username: c.name.toLowerCase().replace(/\s+/g, "_"),
-                settings: {
-                  ...baseSettings,
-                  accountId,
-                  characterType: "ai-agent",
-                  avatar: AVATAR_OPTIONS[currentSelectedAvatarIndex]?.url || "",
-                  secrets: {
-                    ...baseSecrets,
-                    HYPERSCAPE_AUTH_TOKEN: credentials.authToken,
-                    HYPERSCAPE_CHARACTER_ID: c.id,
-                    HYPERSCAPE_ACCOUNT_ID: accountId,
-                    HYPERSCAPE_SERVER_URL: GAME_WS_URL,
-                    wallet: c.wallet || "",
-                  },
-                },
-              };
-
-              console.log(
-                `[CharacterSelect] 🤖 Creating ${currentSelectedTemplate.name} agent with character-specific data...`,
-              );
-
-              // Create agent in ElizaOS
-              const createAgentResponse = await fetch(`${ELIZAOS_API}/agents`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ characterJson: characterTemplate }),
-              });
-
-              if (!createAgentResponse.ok) {
-                const errorData = await createAgentResponse
-                  .json()
-                  .catch(() => ({}));
-                throw new Error(
-                  `Failed to create ElizaOS agent: ${errorData.error || createAgentResponse.statusText}`,
-                );
-              }
-
-              const agentResult = await createAgentResponse.json();
-              console.log(
-                "[CharacterSelect] ✅ ElizaOS agent creation response:",
-                agentResult,
-              );
-
-              // Extract agent ID from response - ElizaOS returns UUID in data.character.id
-              const agentId = agentResult.data?.character?.id;
-
-              if (!agentId) {
-                console.error(
-                  "[CharacterSelect] ❌ No agent ID in response! Full response:",
-                  agentResult,
-                );
-                throw new Error(
-                  "Agent created but no ID was returned. Response structure may have changed.",
-                );
-              }
-
-              console.log("[CharacterSelect] ✅ Agent ID extracted:", agentId);
-
-              // Store agent ID for dashboard
-              localStorage.setItem("last_created_agent_id", agentId);
-
-              // Step 3: Create agent mapping in Hyperscape database (CRITICAL for dashboard)
-              // This must happen BEFORE redirect so agent shows in dashboard even if user cancels editor
-              console.log(
-                "[CharacterSelect] 📝 Creating agent mapping in Hyperscape database...",
-              );
+            // Generate JWT and create ElizaOS agent immediately
+            const createAgentAndRedirect = async () => {
               try {
-                const mappingResponse = await fetch(
-                  `${GAME_API_URL}/api/agents/mappings`,
+                // Use user.id from Privy hook instead of localStorage to ensure correct Privy DID
+                const accountId = currentUserFromRef?.id;
+                if (!accountId) {
+                  throw new Error(
+                    "No account ID found - user not authenticated",
+                  );
+                }
+
+                // Step 1: Generate JWT
+                console.log("[CharacterSelect] 🔑 Generating JWT for agent...");
+                const credentialsResult = await apiClient.post<{
+                  authToken: string;
+                }>("/api/agents/credentials", {
+                  characterId: c.id,
+                  accountId,
+                });
+
+                if (!credentialsResult.ok || !credentialsResult.data) {
+                  throw new Error(
+                    `Failed to generate JWT: ${credentialsResult.error || credentialsResult.status}`,
+                  );
+                }
+
+                const credentials = credentialsResult.data;
+                console.log("[CharacterSelect] ✅ JWT generated successfully");
+
+                // Step 2: Get template config and create ElizaOS agent
+                if (!currentSelectedTemplate) {
+                  throw new Error("No character template selected");
+                }
+
+                console.log(
+                  `[CharacterSelect] 📥 Using template: ${currentSelectedTemplate.name}`,
+                );
+
+                // Parse template config from database (stored as JSON string)
+                // This avoids a separate fetch - config is already in the templates response
+                let templateJson: Record<string, unknown>;
+                if (currentSelectedTemplate.templateConfig) {
+                  try {
+                    templateJson = JSON.parse(
+                      currentSelectedTemplate.templateConfig,
+                    );
+                    console.log(
+                      "[CharacterSelect] ✅ Template config parsed from database",
+                    );
+                  } catch (parseError) {
+                    console.error(
+                      "[CharacterSelect] ❌ Failed to parse templateConfig:",
+                      parseError,
+                    );
+                    throw new Error(
+                      "Invalid template configuration in database",
+                    );
+                  }
+                } else {
+                  // Fallback: Fetch from templateUrl (legacy support)
+                  console.log(
+                    "[CharacterSelect] ⚠️ No templateConfig in database, fetching from URL...",
+                  );
+                  const templateResponse = await fetch(
+                    currentSelectedTemplate.templateUrl,
+                  );
+                  if (!templateResponse.ok) {
+                    throw new Error(
+                      `Failed to fetch template: ${templateResponse.status}`,
+                    );
+                  }
+                  templateJson = await templateResponse.json();
+                  console.log("[CharacterSelect] ✅ Template fetched from URL");
+                }
+
+                // Remove fields that ElizaOS validation doesn't accept
+                // Migration 0006 has 'modelProvider' but ElizaOS schema rejects it
+                delete templateJson.modelProvider;
+
+                // Merge template with character-specific data
+                // Handle case where templateJson.settings might not exist
+                const baseSettings = (templateJson.settings || {}) as Record<
+                  string,
+                  unknown
+                >;
+                const baseSecrets = (baseSettings.secrets || {}) as Record<
+                  string,
+                  unknown
+                >;
+
+                const characterTemplate = {
+                  ...templateJson,
+                  name: c.name, // Override template name with character name
+                  username: c.name.toLowerCase().replace(/\s+/g, "_"),
+                  settings: {
+                    ...baseSettings,
+                    accountId,
+                    characterType: "ai-agent",
+                    avatar:
+                      AVATAR_OPTIONS[currentSelectedAvatarIndex]?.url || "",
+                    secrets: {
+                      ...baseSecrets,
+                      HYPERSCAPE_AUTH_TOKEN: credentials.authToken,
+                      HYPERSCAPE_CHARACTER_ID: c.id,
+                      HYPERSCAPE_ACCOUNT_ID: accountId,
+                      HYPERSCAPE_SERVER_URL: GAME_WS_URL,
+                      wallet: c.wallet || "",
+                    },
+                  },
+                };
+
+                console.log(
+                  `[CharacterSelect] 🤖 Creating ${currentSelectedTemplate.name} agent with character-specific data...`,
+                );
+
+                // Create agent in ElizaOS
+                const createAgentResponse = await fetch(
+                  `${ELIZAOS_API}/agents`,
                   {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
+                    body: JSON.stringify({ characterJson: characterTemplate }),
+                  },
+                );
+
+                if (!createAgentResponse.ok) {
+                  const errorData = await createAgentResponse
+                    .json()
+                    .catch(() => ({}));
+                  throw new Error(
+                    `Failed to create ElizaOS agent: ${errorData.error || createAgentResponse.statusText}`,
+                  );
+                }
+
+                const agentResult = await createAgentResponse.json();
+                console.log(
+                  "[CharacterSelect] ✅ ElizaOS agent creation response:",
+                  agentResult,
+                );
+
+                // Extract agent ID from response - ElizaOS returns UUID in data.character.id
+                const agentId = agentResult.data?.character?.id;
+
+                if (!agentId) {
+                  console.error(
+                    "[CharacterSelect] ❌ No agent ID in response! Full response:",
+                    agentResult,
+                  );
+                  throw new Error(
+                    "Agent created but no ID was returned. Response structure may have changed.",
+                  );
+                }
+
+                console.log(
+                  "[CharacterSelect] ✅ Agent ID extracted:",
+                  agentId,
+                );
+
+                // Store agent ID for dashboard
+                localStorage.setItem("last_created_agent_id", agentId);
+
+                // Step 3: Create agent mapping in Hyperscape database (CRITICAL for dashboard)
+                // This must happen BEFORE redirect so agent shows in dashboard even if user cancels editor
+                console.log(
+                  "[CharacterSelect] 📝 Creating agent mapping in Hyperscape database...",
+                );
+                try {
+                  const mappingResult = await apiClient.post(
+                    "/api/agents/mappings",
+                    {
                       agentId: agentId,
                       accountId: accountId,
                       characterId: c.id,
                       agentName: c.name,
-                    }),
-                  },
-                );
+                    },
+                  );
 
-                if (!mappingResponse.ok) {
+                  if (!mappingResult.ok) {
+                    console.error(
+                      "[CharacterSelect] ⚠️ Failed to create agent mapping:",
+                      mappingResult.error || mappingResult.status,
+                    );
+                    // Don't throw - agent was created, mapping is for dashboard filtering
+                    // User can still use the agent, it just won't show in dashboard
+                  } else {
+                    console.log(
+                      "[CharacterSelect] ✅ Agent mapping created successfully",
+                    );
+                  }
+                } catch (mappingError) {
                   console.error(
-                    "[CharacterSelect] ⚠️ Failed to create agent mapping:",
-                    mappingResponse.status,
+                    "[CharacterSelect] ⚠️ Error creating agent mapping:",
+                    mappingError,
                   );
-                  // Don't throw - agent was created, mapping is for dashboard filtering
-                  // User can still use the agent, it just won't show in dashboard
-                } else {
-                  console.log(
-                    "[CharacterSelect] ✅ Agent mapping created successfully",
-                  );
+                  // Don't throw - continue to editor even if mapping fails
                 }
-              } catch (mappingError) {
+
+                // Step 4: Redirect to character editor for customization
+                // Note: JWT is stored in agent's secrets, not passed in URL (security risk)
+                const params = new URLSearchParams({
+                  characterId: c.id,
+                  agentId: agentId,
+                  name: c.name,
+                  wallet: c.wallet || "",
+                  avatar: AVATAR_OPTIONS[selectedAvatarIndex]?.url || "",
+                });
+
+                window.location.href = `/?page=character-editor&${params.toString()}`;
+              } catch (error) {
                 console.error(
-                  "[CharacterSelect] ⚠️ Error creating agent mapping:",
-                  mappingError,
+                  "[CharacterSelect] ❌ Failed to create agent:",
+                  error,
                 );
-                // Don't throw - continue to editor even if mapping fails
+                setErrorMessage(
+                  error instanceof Error
+                    ? error.message
+                    : "Failed to create agent. Please try again.",
+                );
               }
+            };
 
-              // Step 4: Redirect to character editor for customization
-              // Note: JWT is stored in agent's secrets, not passed in URL (security risk)
-              const params = new URLSearchParams({
-                characterId: c.id,
-                agentId: agentId,
-                name: c.name,
-                wallet: c.wallet || "",
-                avatar: AVATAR_OPTIONS[selectedAvatarIndex]?.url || "",
-              });
+            createAgentAndRedirect();
+            return; // Exit early - agents go to character editor, NOT to "Enter World"
+          }
 
-              window.location.href = `/?page=character-editor&${params.toString()}`;
-            } catch (error) {
-              console.error(
-                "[CharacterSelect] ❌ Failed to create agent:",
-                error,
-              );
-              setErrorMessage(
-                error instanceof Error
-                  ? error.message
-                  : "Failed to create agent. Please try again.",
-              );
-            }
+          // HUMAN FLOW: Show "Enter World" confirmation screen
+          // This ONLY runs for human players (agents exit early above)
+          setSelectedCharacterId(c.id);
+          setView("confirm"); // Show the "Enter World" confirmation screen
+          setShowCreate(false);
+          const currentWs = preWsRef.current!;
+          if (currentWs.readyState === WebSocket.OPEN) {
+            currentWs.send(
+              writePacket("characterSelected", { characterId: c.id }),
+            );
+          }
+        } else if (method === "onCharacterSelected") {
+          const payload = data as { characterId: string | null };
+          setSelectedCharacterId(payload.characterId || null);
+          if (payload.characterId) setView("confirm");
+        } else if (method === "onEntityEvent") {
+          const evt = data as {
+            id?: string;
+            version?: number;
+            name?: string;
+            data?: unknown;
           };
+          if (evt?.name === "character:list") {
+            const list =
+              (evt.data as { characters?: Character[] })?.characters || [];
+            setCharacters(list);
+          }
+        } else if (method === "onEnterWorldApproved") {
+          // Server approved entering world - proceed to game
+          const payload = data as { characterId: string };
+          console.log(
+            "[CharacterSelect] ✅ Enter world approved for:",
+            payload.characterId,
+          );
+          enteringWorldRef.current = false;
+          setEnteringWorld(false);
+          // Mark as intentional disconnect before transitioning to game
+          intentionalDisconnectRef.current = true;
+          // Call onPlay to transition to game
+          onPlayRef.current(payload.characterId);
+        } else if (method === "onEnterWorldRejected") {
+          // Character is already logged in on another session
+          const payload = data as { reason: string; message: string };
+          console.warn(
+            "[CharacterSelect] ⚠️ Enter world rejected:",
+            payload.reason,
+          );
+          enteringWorldRef.current = false;
+          setEnteringWorld(false);
+          setErrorMessage(payload.message);
+          // Stay on character select screen (already on confirm view, just show error)
+        } else if (method === "onShowToast") {
+          const toast = data as { message?: string; type?: string };
+          console.error("[CharacterSelect] ❌ Server error:", toast.message);
+          setErrorMessage(toast.message || "An error occurred");
+        } else if (method === "onEntityModified") {
+          // Entity updates are not relevant for character selection screen
+          // These are real-time position/rotation/velocity updates that happen in the world
+          // Silently ignore them
+        }
+      };
 
-          createAgentAndRedirect();
-          return; // Exit early - agents go to character editor, NOT to "Enter World"
-        }
+      // Add event listeners with named handlers for proper cleanup
+      ws.addEventListener("open", handleOpen);
+      ws.addEventListener("error", handleError);
+      ws.addEventListener("close", handleClose);
+      ws.addEventListener("message", handleMessage);
+    };
 
-        // HUMAN FLOW: Show "Enter World" confirmation screen
-        // This ONLY runs for human players (agents exit early above)
-        setSelectedCharacterId(c.id);
-        setView("confirm"); // Show the "Enter World" confirmation screen
-        setShowCreate(false);
-        const ws = preWsRef.current!;
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(writePacket("characterSelected", { characterId: c.id }));
-        }
-      } else if (method === "onCharacterSelected") {
-        const payload = data as { characterId: string | null };
-        setSelectedCharacterId(payload.characterId || null);
-        if (payload.characterId) setView("confirm");
-      } else if (method === "onEntityEvent") {
-        const evt = data as {
-          id?: string;
-          version?: number;
-          name?: string;
-          data?: unknown;
-        };
-        if (evt?.name === "character:list") {
-          const list =
-            (evt.data as { characters?: Character[] })?.characters || [];
-          setCharacters(list);
-        }
-      } else if (method === "onEnterWorldApproved") {
-        // Server approved entering world - proceed to game
-        const payload = data as { characterId: string };
-        console.log(
-          "[CharacterSelect] ✅ Enter world approved for:",
-          payload.characterId,
-        );
-        enteringWorldRef.current = false;
-        setEnteringWorld(false);
-        // Call onPlay to transition to game
-        onPlayRef.current(payload.characterId);
-      } else if (method === "onEnterWorldRejected") {
-        // Character is already logged in on another session
-        const payload = data as { reason: string; message: string };
-        console.warn(
-          "[CharacterSelect] ⚠️ Enter world rejected:",
-          payload.reason,
-        );
-        enteringWorldRef.current = false;
-        setEnteringWorld(false);
-        setErrorMessage(payload.message);
-        // Stay on character select screen (already on confirm view, just show error)
-      } else if (method === "onShowToast") {
-        const toast = data as { message?: string; type?: string };
-        console.error("[CharacterSelect] ❌ Server error:", toast.message);
-        setErrorMessage(toast.message || "An error occurred");
-      } else if (method === "onEntityModified") {
-        // Entity updates are not relevant for character selection screen
-        // These are real-time position/rotation/velocity updates that happen in the world
-        // Silently ignore them
-      }
-    });
+    // Start initial connection
+    connect();
+
     return () => {
-      ws.close();
-      if (preWsRef.current === ws) preWsRef.current = null;
+      // Mark as intentional disconnect to prevent reconnection attempts
+      intentionalDisconnectRef.current = true;
+
+      // Clear any pending reconnection timeout
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+
+      // Close WebSocket
+      const ws = preWsRef.current;
+      if (ws) {
+        ws.close();
+        preWsRef.current = null;
+      }
+
+      setConnectionState("disconnected");
     };
   }, [wsUrl, authToken, privyUserId, ready, authenticated]);
 
@@ -860,14 +968,13 @@ export function CharacterSelectScreen({
               if (!accountId) {
                 throw new Error("No account ID - user not authenticated");
               }
-              const hyperscapeResponse = await fetch(
-                `${GAME_API_URL}/api/characters/${accountId}`,
-              );
+              const hyperscapeResult = await apiClient.get<{
+                characters?: { id: string; avatar?: string }[];
+              }>(`/api/characters/${accountId}`);
 
               let avatarUrl = "";
-              if (hyperscapeResponse.ok) {
-                const hyperscapeData = await hyperscapeResponse.json();
-                const hyperscapeChar = hyperscapeData.characters?.find(
+              if (hyperscapeResult.ok && hyperscapeResult.data) {
+                const hyperscapeChar = hyperscapeResult.data.characters?.find(
                   (c: { id: string }) => c.id === id,
                 );
                 avatarUrl = hyperscapeChar?.avatar || "";
@@ -877,7 +984,7 @@ export function CharacterSelectScreen({
                 );
               }
 
-              window.location.href = `/?page=character-editor&characterId=${id}&name=${character.name}&wallet=${character.wallet || ""}&avatar=${encodeURIComponent(avatarUrl)}`;
+              window.location.href = `/?page=character-editor&characterId=${id}&name=${encodeURIComponent(character.name)}&wallet=${encodeURIComponent(character.wallet || "")}&avatar=${encodeURIComponent(avatarUrl)}`;
             }
           } else {
             // ElizaOS not responding - show error
@@ -1169,6 +1276,12 @@ export function CharacterSelectScreen({
 
           {view === "select" && (
             <div className="mt-8">
+              {/* Error message display */}
+              {errorMessage && (
+                <div className="mb-3 mx-auto max-w-md p-3 bg-red-900/80 border border-red-500 rounded-lg text-center">
+                  <p className="text-red-200 text-sm">{errorMessage}</p>
+                </div>
+              )}
               <div className="space-y-3 max-h-[360px] overflow-y-auto pr-2 scrollbar-thin">
                 {sortedCharacters.map((c) => (
                   <div
@@ -1577,8 +1690,37 @@ export function CharacterSelectScreen({
                 </div>
               )}
 
-              {!wsReady && (
-                <div className="text-xs opacity-60 mt-2">Connecting…</div>
+              {/* Connection status indicator */}
+              {connectionState === "connecting" && (
+                <div className="text-xs opacity-60 mt-2">Connecting...</div>
+              )}
+              {connectionState === "reconnecting" && (
+                <div className="mt-3 mx-auto max-w-md p-3 bg-yellow-900/60 border border-yellow-500/50 rounded-lg text-center">
+                  <p className="text-yellow-200 text-sm flex items-center justify-center gap-2">
+                    <span className="animate-spin">↻</span>
+                    Reconnecting... (attempt {reconnectAttemptsRef.current}/
+                    {MAX_RECONNECT_ATTEMPTS})
+                  </p>
+                </div>
+              )}
+              {connectionState === "failed" && (
+                <div className="mt-3 mx-auto max-w-md p-3 bg-red-900/60 border border-red-500/50 rounded-lg text-center">
+                  <p className="text-red-200 text-sm mb-2">
+                    Connection failed after {MAX_RECONNECT_ATTEMPTS} attempts.
+                  </p>
+                  <button
+                    onClick={() => {
+                      reconnectAttemptsRef.current = 0;
+                      intentionalDisconnectRef.current = false;
+                      setConnectionState("connecting");
+                      // Force re-render by updating a dependency
+                      window.location.reload();
+                    }}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded text-sm font-medium transition-colors"
+                  >
+                    Retry Connection
+                  </button>
+                </div>
               )}
               <div className="mt-6 flex justify-center">
                 <div className="w-full max-w-sm relative">

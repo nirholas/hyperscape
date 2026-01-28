@@ -1,120 +1,55 @@
 /**
- * Test mocks for client tests
+ * Mock utilities for testing
+ *
+ * Exports all mock factories and utilities for use in tests.
  */
 
 import { vi } from "vitest";
 
-interface MockNetwork {
-  send: ReturnType<typeof vi.fn>;
-  on: ReturnType<typeof vi.fn>;
-  off: ReturnType<typeof vi.fn>;
-  calls: Array<{ type: string; payload: Record<string, unknown> }>;
+// Re-export MockWorld
+export {
+  createMockWorld,
+  type MockWorld,
+  asClientWorld,
+  createEventTracker,
+} from "./MockWorld";
+
+// Type alias for consistency with existing tests
+export type MockClientWorld = import("./MockWorld").MockWorld;
+
+/**
+ * Create a mock world without network capabilities
+ */
+export function createMockWorldWithoutNetwork(): MockClientWorld {
+  const { createMockWorld } = require("./MockWorld");
+  const world = createMockWorld();
+  world.network = undefined as unknown as typeof world.network;
+  return world;
 }
 
-export interface MockClientWorld {
-  getPlayer: ReturnType<typeof vi.fn>;
-  network: MockNetwork;
-  on: ReturnType<typeof vi.fn>;
-  off: ReturnType<typeof vi.fn>;
-}
-
-interface MockPlayer {
-  inventory: {
-    items: Array<{ slot: number; itemId: string; quantity: number }>;
-    coins: number;
-  };
-  equipment: {
-    helmet: null | { id: string; slot: string };
-    body: null | { id: string; slot: string };
-    legs: null | { id: string; slot: string };
-    weapon: null | { id: string; slot: string };
-    shield: null | { id: string; slot: string };
-    arrows: null | { id: string; slot: string };
-  };
-  stats: {
-    totalLevel: number;
-    totalXp: number;
-  };
-}
-
-let mockWorldInstance: MockClientWorld | null = null;
-
-export function createMockWorld(): MockClientWorld {
-  const networkCalls: Array<{
-    type: string;
-    payload: Record<string, unknown>;
-  }> = [];
-
-  mockWorldInstance = {
-    getPlayer: vi.fn(() => ({
-      inventory: {
-        items: [],
-        coins: 1000,
-      },
-      equipment: {
-        helmet: null,
-        body: null,
-        legs: null,
-        weapon: null,
-        shield: null,
-        arrows: null,
-      },
-      stats: {
-        totalLevel: 35,
-        totalXp: 50000,
-      },
-    })),
-    network: {
-      send: vi.fn((type: string, payload: Record<string, unknown>) => {
-        networkCalls.push({ type, payload });
-      }),
-      on: vi.fn(),
-      off: vi.fn(),
-      calls: networkCalls,
-    },
-    on: vi.fn(),
-    off: vi.fn(),
-  };
-  return mockWorldInstance;
-}
-
-export function createMockWorldWithoutNetwork(): Partial<MockClientWorld> {
-  return {
-    getPlayer: vi.fn(() => ({
-      inventory: { items: [], coins: 1000 },
-      equipment: {
-        helmet: null,
-        body: null,
-        legs: null,
-        weapon: null,
-        shield: null,
-        arrows: null,
-      },
-      stats: { totalLevel: 35, totalXp: 50000 },
-    })),
-    network: undefined,
-    on: vi.fn(),
-    off: vi.fn(),
-  };
-}
-
-export function getLastNetworkCall(
-  world: MockClientWorld,
-): { type: string; payload: Record<string, unknown> } | undefined {
-  const calls = world.network.calls;
-  return calls[calls.length - 1];
-}
-
-export function clearMockWorldCalls(): void {
-  if (mockWorldInstance) {
-    mockWorldInstance.getPlayer.mockClear();
-    mockWorldInstance.network.send.mockClear();
-    mockWorldInstance.network.on.mockClear();
-    mockWorldInstance.network.off.mockClear();
-    mockWorldInstance.network.calls.length = 0;
-    mockWorldInstance.on.mockClear();
-    mockWorldInstance.off.mockClear();
+/**
+ * Get the last network call made on a mock world
+ */
+export function getLastNetworkCall(world: MockClientWorld): {
+  event: string;
+  data: unknown;
+} | null {
+  const sendMock = world.network?.send;
+  if (!sendMock || sendMock.mock.calls.length === 0) {
+    return null;
   }
+  const lastCall = sendMock.mock.calls[sendMock.mock.calls.length - 1];
+  return { event: lastCall[0], data: lastCall[1] };
+}
+
+/**
+ * Clear all mock calls on a mock world
+ */
+export function clearMockWorldCalls(world: MockClientWorld): void {
+  world.emit.mockClear();
+  world.on.mockClear();
+  world.off.mockClear();
+  world.network?.send.mockClear();
 }
 
 // NOTE: Performance mocks are handled by setup.ts

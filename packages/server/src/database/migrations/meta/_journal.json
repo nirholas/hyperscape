@@ -176,6 +176,13 @@
       "when": 1769234809693,
       "tag": "0024_natural_luckman",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1769368861084,
+      "tag": "0025_thin_toad_men",
+      "breakpoints": true
     }
   ]
 }

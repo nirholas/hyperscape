@@ -2026,3 +2026,155 @@ describe("Building Geometry Validation", () => {
     });
   });
 });
+
+// ============================================================
+// GRID ALIGNMENT TESTS
+// ============================================================
+
+import {
+  BUILDING_GRID_SNAP,
+  TILES_PER_CELL,
+  MOVEMENT_TILE_SIZE,
+  snapToBuildingGrid,
+  isGridAligned,
+} from "./constants";
+
+describe("Grid Alignment System", () => {
+  describe("Constants Relationships", () => {
+    it("should have correct grid constant values", () => {
+      // CELL_SIZE = 4 meters (4x4 movement tiles per building cell)
+      expect(CELL_SIZE).toBe(4);
+
+      // Movement tile is 1 meter
+      expect(MOVEMENT_TILE_SIZE).toBe(1);
+
+      // Tiles per cell should be CELL_SIZE / MOVEMENT_TILE_SIZE = 4
+      expect(TILES_PER_CELL).toBe(4);
+
+      // Grid snap should be CELL_SIZE / 2 = 2 (for cell center alignment)
+      expect(BUILDING_GRID_SNAP).toBe(2);
+    });
+
+    it("should have 1 building cell = 16 movement tiles", () => {
+      // Each building cell is CELL_SIZE x CELL_SIZE meters
+      // Each movement tile is MOVEMENT_TILE_SIZE x MOVEMENT_TILE_SIZE meters
+      // So 1 building cell = (CELL_SIZE/MOVEMENT_TILE_SIZE)^2 = 4x4 = 16 tiles
+      const tilesPerCellArea = TILES_PER_CELL * TILES_PER_CELL;
+      expect(tilesPerCellArea).toBe(16);
+    });
+  });
+
+  describe("snapToBuildingGrid", () => {
+    it("should snap exact grid positions to themselves", () => {
+      // Positions on the grid should stay unchanged
+      expect(snapToBuildingGrid(0, 0)).toEqual({ x: 0, z: 0 });
+      expect(snapToBuildingGrid(2, 2)).toEqual({ x: 2, z: 2 });
+      expect(snapToBuildingGrid(4, 4)).toEqual({ x: 4, z: 4 });
+      expect(snapToBuildingGrid(-2, -2)).toEqual({ x: -2, z: -2 });
+    });
+
+    it("should snap off-grid positions to nearest grid point", () => {
+      // Values < BUILDING_GRID_SNAP/2 from grid point snap to it
+      expect(snapToBuildingGrid(0.5, 0.5)).toEqual({ x: 0, z: 0 });
+      expect(snapToBuildingGrid(1.9, 1.9)).toEqual({ x: 2, z: 2 });
+
+      // Values >= BUILDING_GRID_SNAP/2 from grid point snap to next
+      expect(snapToBuildingGrid(1.0, 1.0)).toEqual({ x: 2, z: 2 });
+      expect(snapToBuildingGrid(3.0, 3.0)).toEqual({ x: 4, z: 4 });
+    });
+
+    it("should handle negative coordinates", () => {
+      // Note: JavaScript Math.round uses "round half toward positive infinity"
+      // So Math.round(-0.5/2) = Math.round(-0.25) = 0, Math.round(-1.5/2) = Math.round(-0.75) = -1
+      // Use closeTo for comparisons to avoid -0/+0 issues
+      let result = snapToBuildingGrid(-0.5, -0.5);
+      expect(result.x).toBeCloseTo(0, 5);
+      expect(result.z).toBeCloseTo(0, 5);
+
+      // -1.5/2 = -0.75, Math.round(-0.75) = -1, -1 * 2 = -2
+      result = snapToBuildingGrid(-1.5, -1.5);
+      expect(result.x).toBeCloseTo(-2, 5);
+      expect(result.z).toBeCloseTo(-2, 5);
+
+      // -3.0/2 = -1.5, Math.round(-1.5) = -1 (rounds toward +infinity), -1 * 2 = -2
+      result = snapToBuildingGrid(-3.0, -3.0);
+      expect(result.x).toBeCloseTo(-2, 5);
+      expect(result.z).toBeCloseTo(-2, 5);
+
+      // -4.0/2 = -2.0, Math.round(-2.0) = -2, -2 * 2 = -4
+      result = snapToBuildingGrid(-4.0, -4.0);
+      expect(result.x).toBeCloseTo(-4, 5);
+      expect(result.z).toBeCloseTo(-4, 5);
+    });
+
+    it("should snap mixed positive/negative coordinates", () => {
+      expect(snapToBuildingGrid(1.5, -1.5)).toEqual({ x: 2, z: -2 });
+      expect(snapToBuildingGrid(-3.5, 3.5)).toEqual({ x: -4, z: 4 });
+    });
+  });
+
+  describe("isGridAligned", () => {
+    it("should return true for aligned positions", () => {
+      expect(isGridAligned(0, 0)).toBe(true);
+      expect(isGridAligned(2, 2)).toBe(true);
+      expect(isGridAligned(4, 4)).toBe(true);
+      expect(isGridAligned(-2, -2)).toBe(true);
+      expect(isGridAligned(100, -200)).toBe(true);
+    });
+
+    it("should return false for unaligned positions", () => {
+      expect(isGridAligned(0.5, 0)).toBe(false);
+      expect(isGridAligned(0, 0.5)).toBe(false);
+      expect(isGridAligned(1, 1)).toBe(false);
+      expect(isGridAligned(3, 3)).toBe(false);
+    });
+
+    it("should handle small floating point errors", () => {
+      // Positions very close to grid (within epsilon=0.001) should be aligned
+      // Test values further from threshold to avoid floating point issues
+      expect(isGridAligned(2.005, 4.005)).toBe(false); // Clearly outside epsilon
+      expect(isGridAligned(2.0005, 4.0005)).toBe(true); // Within epsilon (0.001)
+    });
+  });
+
+  describe("Building Cell to Tile Alignment", () => {
+    it("should align building cells with movement tiles", () => {
+      // A building at grid-aligned position should have cell boundaries
+      // that align with movement tile boundaries
+
+      // Building at (0, 0): cells should span tiles 0-3, 4-7, etc.
+      const buildingPos = snapToBuildingGrid(0, 0);
+      expect(buildingPos).toEqual({ x: 0, z: 0 });
+
+      // Cell centers should be at positions like 2, 6, 10 (cell edges at 0, 4, 8, 12)
+      // Since BUILDING_GRID_SNAP = 2, building positions are at 0, 2, 4, etc.
+      // This means cell boundaries fall on even tile numbers
+
+      // A 2-cell-wide building (8m) centered at x=0 spans from x=-4 to x=4
+      // Cell 0: x=-4 to x=0 (tiles -4, -3, -2, -1)
+      // Cell 1: x=0 to x=4 (tiles 0, 1, 2, 3)
+      // Both ranges are 4 tiles each, aligned with tile boundaries
+    });
+
+    it("should ensure snapped positions maintain tile alignment for any building size", () => {
+      // Test various building positions
+      const testPositions = [
+        { x: 15.3, z: 27.8 },
+        { x: -42.1, z: 88.9 },
+        { x: 100.5, z: -50.5 },
+      ];
+
+      for (const pos of testPositions) {
+        const snapped = snapToBuildingGrid(pos.x, pos.z);
+
+        // Snapped position should be on the grid
+        expect(isGridAligned(snapped.x, snapped.z)).toBe(true);
+
+        // The snapped position should be a multiple of BUILDING_GRID_SNAP
+        // Use Math.abs to handle -0/+0 comparison
+        expect(Math.abs(snapped.x % BUILDING_GRID_SNAP)).toBeCloseTo(0, 5);
+        expect(Math.abs(snapped.z % BUILDING_GRID_SNAP)).toBeCloseTo(0, 5);
+      }
+    });
+  });
+});

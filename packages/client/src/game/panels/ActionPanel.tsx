@@ -7,14 +7,19 @@
 import React, { useState, useEffect, useCallback, useRef, memo } from "react";
 import { createPortal } from "react-dom";
 import {
-  DndProvider,
+  DndContext,
   useDraggable,
   useDroppable,
-  ComposableDragOverlay,
-  useThemeStore,
+  DragOverlay,
+  useSensors,
+  useSensor,
+  PointerSensor,
+  TouchSensor,
+  KeyboardSensor,
   type DragStartEvent,
   type DragEndEvent,
-} from "hs-kit";
+} from "@dnd-kit/core";
+import { useThemeStore } from "@/ui";
 import { breakpoints, gameUI } from "../../constants";
 import {
   getItem,
@@ -25,6 +30,7 @@ import {
   usesWear,
   CONTEXT_MENU_COLORS,
 } from "@hyperscape/shared";
+import { getItemIcon } from "@/utils";
 /**
  * Minimal item type for ActionPanel - only requires the properties actually used
  * Compatible with both InventorySlotItem and InventorySlotViewItem
@@ -226,6 +232,24 @@ export function ActionPanel({
 }: ActionPanelProps) {
   const isVertical = orientation === "vertical";
   const theme = useThemeStore((s) => s.theme);
+
+  // Configure sensors for accessibility and mobile support
+  // PointerSensor: distance-based for mouse, TouchSensor: delay-based for mobile long-press
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8, // Require 8px movement before drag starts
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 250, // Long-press 250ms to start drag on mobile
+        tolerance: 5,
+      },
+    }),
+    useSensor(KeyboardSensor),
+  );
+
   const [isMobile, setIsMobile] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth < breakpoints.md : false,
   );
@@ -242,7 +266,7 @@ export function ActionPanel({
   });
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Note: hs-kit handles sensors internally with useDraggable
+  // Note: Drag sensors are handled internally with useDraggable
 
   useEffect(() => {
     const handleResize = () => {
@@ -314,8 +338,11 @@ export function ActionPanel({
 
   const handleDragStart = (event: DragStartEvent) => {
     const { active } = event;
-    // hs-kit: data is at active.data.data (DragItem.data)
-    const dragData = active.data.data as
+    // @dnd-kit: data is at active.data.current.data (DragItem.data)
+    const activeDataWrapper = active.data.current as
+      | { data?: Record<string, unknown> }
+      | undefined;
+    const dragData = activeDataWrapper?.data as
       | { item?: ActionPanelItem; slotNumber?: number }
       | undefined;
     const item = dragData?.item || null;
@@ -328,11 +355,19 @@ export function ActionPanel({
 
     if (!over || active.id === over.id) return;
 
-    // hs-kit: data is at active.data.data (DragItem.data)
-    const activeData = active.data.data as { slotNumber?: number } | undefined;
-    const overData = over.data as { slotNumber?: number } | undefined;
+    // @dnd-kit: data is at active.data.current.data (DragItem.data)
+    const activeDataWrapper = active.data.current as
+      | { data?: Record<string, unknown> }
+      | undefined;
+    const activeData = activeDataWrapper?.data as
+      | { slotNumber?: number }
+      | undefined;
+    // @dnd-kit: data is at over.data.current
+    const overDataCurrent = over.data.current as
+      | { slotNumber?: number }
+      | undefined;
     const fromSlot = activeData?.slotNumber;
-    const toSlot = overData?.slotNumber;
+    const toSlot = overDataCurrent?.slotNumber;
 
     if (fromSlot !== undefined && toSlot !== undefined && onItemMove) {
       onItemMove(fromSlot, toSlot);
@@ -420,25 +455,29 @@ export function ActionPanel({
         }
       }
 
-      // Drop option
-      menuItems.push({
-        id: "drop",
-        label: `Drop ${itemName}`,
-        styledLabel: [
-          { text: "Drop ", color: "#fff" },
-          { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
-        ],
-      });
+      // Drop option (only add if not already present from inventoryActions)
+      if (!menuItems.some((m) => m.id === "drop")) {
+        menuItems.push({
+          id: "drop",
+          label: `Drop ${itemName}`,
+          styledLabel: [
+            { text: "Drop ", color: "#fff" },
+            { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+          ],
+        });
+      }
 
-      // Examine
-      menuItems.push({
-        id: "examine",
-        label: `Examine ${itemName}`,
-        styledLabel: [
-          { text: "Examine ", color: "#fff" },
-          { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
-        ],
-      });
+      // Examine (only add if not already present from inventoryActions)
+      if (!menuItems.some((m) => m.id === "examine")) {
+        menuItems.push({
+          id: "examine",
+          label: `Examine ${itemName}`,
+          styledLabel: [
+            { text: "Examine ", color: "#fff" },
+            { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+          ],
+        });
+      }
 
       // Cancel
       menuItems.push({
@@ -486,48 +525,6 @@ export function ActionPanel({
     [contextMenu.targetItem, contextMenu.targetIndex, onItemAction, onItemUse],
   );
 
-  // Memoize getItemIcon to provide a stable identity for DraggableSlot
-  const getItemIcon = useCallback((itemId: string) => {
-    if (
-      itemId.includes("sword") ||
-      itemId.includes("dagger") ||
-      itemId.includes("scimitar")
-    )
-      return "⚔️";
-    if (itemId.includes("shield") || itemId.includes("defender")) return "🛡️";
-    if (
-      itemId.includes("helmet") ||
-      itemId.includes("helm") ||
-      itemId.includes("hat")
-    )
-      return "⛑️";
-    if (itemId.includes("boots") || itemId.includes("boot")) return "👢";
-    if (itemId.includes("glove") || itemId.includes("gauntlet")) return "🧤";
-    if (itemId.includes("cape") || itemId.includes("cloak")) return "🧥";
-    if (itemId.includes("amulet") || itemId.includes("necklace")) return "📿";
-    if (itemId.includes("ring")) return "💍";
-    if (itemId.includes("arrow") || itemId.includes("bolt")) return "🏹";
-    if (
-      itemId.includes("fish") ||
-      itemId.includes("lobster") ||
-      itemId.includes("shark")
-    )
-      return "🐟";
-    if (itemId.includes("log") || itemId.includes("wood")) return "🪵";
-    if (itemId.includes("ore") || itemId.includes("bar")) return "⛏️";
-    if (itemId.includes("coin")) return "💰";
-    if (itemId.includes("potion") || itemId.includes("vial")) return "🧪";
-    if (
-      itemId.includes("food") ||
-      itemId.includes("bread") ||
-      itemId.includes("meat")
-    )
-      return "🍖";
-    if (itemId.includes("axe")) return "🪓";
-    if (itemId.includes("pickaxe")) return "⛏️";
-    return itemId.substring(0, 2).toUpperCase();
-  }, []);
-
   const slotSize = isMobile ? 36 : 42;
   const gap = 3;
 
@@ -537,7 +534,11 @@ export function ActionPanel({
 
   return (
     <>
-      <DndProvider onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <DndContext
+        sensors={sensors}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+      >
         <div
           className={
             isVertical ? "flex flex-col items-center" : "flex items-center"
@@ -674,7 +675,7 @@ export function ActionPanel({
         </div>
 
         {/* Drag Overlay - Follows cursor smoothly */}
-        <ComposableDragOverlay adjustToPointer>
+        <DragOverlay>
           {draggedItem && (
             <div
               style={{
@@ -694,8 +695,8 @@ export function ActionPanel({
               {getItemIcon(draggedItem.itemId)}
             </div>
           )}
-        </ComposableDragOverlay>
-      </DndProvider>
+        </DragOverlay>
+      </DndContext>
 
       {/* Context Menu Portal - Compact, with dynamic positioning */}
       {contextMenu.visible &&
@@ -795,7 +796,7 @@ const ContextMenuPortal = memo(function ContextMenuPortal({
     >
       <div
         style={{
-          background: theme.colors.background.primary,
+          background: theme.colors.background.panelPrimary,
           border: `1px solid ${theme.colors.border.decorative}80`,
           borderRadius: `${theme.borderRadius.sm}px`,
           boxShadow: theme.shadows.md,

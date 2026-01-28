@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { TradingSystem } from "@/systems/TradingSystem";
+import { TradingSystem } from "../../../src/systems/TradingSystem";
 import {
   TRADE_CONSTANTS,
   type TradeSession,
@@ -380,27 +380,36 @@ describe("TradingSystem Integration Tests", () => {
       const result = tradingSystem.setAcceptance(tradeId, "player-1", true);
 
       expect(result.success).toBe(true);
-      expect(result.bothAccepted).toBe(false);
+      // In "active" status, bothAccepted is not returned (only moveToConfirming)
+      expect(result.moveToConfirming).toBeUndefined();
 
       const session = tradingSystem.getTradeSession(tradeId);
       expect(session?.initiator.accepted).toBe(true);
       expect(session?.recipient.accepted).toBe(false);
     });
 
-    it("detects both players accepted", () => {
+    it("detects both players accepted on offer screen triggers confirmation", () => {
       tradingSystem.setAcceptance(tradeId, "player-1", true);
       const result = tradingSystem.setAcceptance(tradeId, "player-2", true);
 
       expect(result.success).toBe(true);
-      expect(result.bothAccepted).toBe(true);
+      // In "active" status, when both accept, moveToConfirming is set
+      expect(result.moveToConfirming).toBe(true);
     });
 
-    it("completes trade when both accepted", () => {
+    it("completes trade with full two-screen flow", () => {
       // Add items
       tradingSystem.addItemToTrade(tradeId, "player-1", 0, "bronze_sword", 1);
       tradingSystem.addItemToTrade(tradeId, "player-2", 0, "iron_sword", 1);
 
-      // Both accept
+      // Both accept on offer screen
+      tradingSystem.setAcceptance(tradeId, "player-1", true);
+      tradingSystem.setAcceptance(tradeId, "player-2", true);
+
+      // Move to confirmation screen
+      tradingSystem.moveToConfirmation(tradeId);
+
+      // Both accept on confirmation screen
       tradingSystem.setAcceptance(tradeId, "player-1", true);
       tradingSystem.setAcceptance(tradeId, "player-2", true);
 
@@ -414,14 +423,15 @@ describe("TradingSystem Integration Tests", () => {
       expect(result.recipientReceives?.[0].itemId).toBe("bronze_sword");
     });
 
-    it("rejects completion without both accepting", () => {
+    it("rejects completion when not in confirming status", () => {
       tradingSystem.setAcceptance(tradeId, "player-1", true);
-      // player-2 has not accepted
+      tradingSystem.setAcceptance(tradeId, "player-2", true);
+      // Did not call moveToConfirmation - still in "active" status
 
       const result = tradingSystem.completeTrade(tradeId);
 
       expect(result.success).toBe(false);
-      expect(result.errorCode).toBe("NOT_ACCEPTED");
+      expect(result.errorCode).toBe("INVALID_TRADE");
     });
   });
 
@@ -984,6 +994,11 @@ describe("TradingSystem Integration Tests", () => {
     it("rejects operations on completed trade", () => {
       const tradeId = createActiveTrade(tradingSystem);
       tradingSystem.addItemToTrade(tradeId, "player-1", 0, "item", 1);
+      // Two-screen flow: accept on offer screen
+      tradingSystem.setAcceptance(tradeId, "player-1", true);
+      tradingSystem.setAcceptance(tradeId, "player-2", true);
+      tradingSystem.moveToConfirmation(tradeId);
+      // Accept on confirmation screen
       tradingSystem.setAcceptance(tradeId, "player-1", true);
       tradingSystem.setAcceptance(tradeId, "player-2", true);
       tradingSystem.completeTrade(tradeId);
@@ -1001,6 +1016,11 @@ describe("TradingSystem Integration Tests", () => {
 
     it("cannot complete trade twice", () => {
       const tradeId = createActiveTrade(tradingSystem);
+      // Two-screen flow: accept on offer screen
+      tradingSystem.setAcceptance(tradeId, "player-1", true);
+      tradingSystem.setAcceptance(tradeId, "player-2", true);
+      tradingSystem.moveToConfirmation(tradeId);
+      // Accept on confirmation screen
       tradingSystem.setAcceptance(tradeId, "player-1", true);
       tradingSystem.setAcceptance(tradeId, "player-2", true);
 
@@ -1029,14 +1049,22 @@ describe("TradingSystem Integration Tests", () => {
   // =========================================================================
 
   describe("Trade Completion - Data Verification", () => {
+    // Helper to go through full two-screen flow
+    function acceptAndConfirm(tradeId: string): void {
+      tradingSystem.setAcceptance(tradeId, "player-1", true);
+      tradingSystem.setAcceptance(tradeId, "player-2", true);
+      tradingSystem.moveToConfirmation(tradeId);
+      tradingSystem.setAcceptance(tradeId, "player-1", true);
+      tradingSystem.setAcceptance(tradeId, "player-2", true);
+    }
+
     it("correctly swaps single items between players", () => {
       const tradeId = createActiveTrade(tradingSystem);
 
       tradingSystem.addItemToTrade(tradeId, "player-1", 5, "sword", 1);
       tradingSystem.addItemToTrade(tradeId, "player-2", 10, "shield", 1);
 
-      tradingSystem.setAcceptance(tradeId, "player-1", true);
-      tradingSystem.setAcceptance(tradeId, "player-2", true);
+      acceptAndConfirm(tradeId);
 
       const result = tradingSystem.completeTrade(tradeId);
 
@@ -1067,8 +1095,7 @@ describe("TradingSystem Integration Tests", () => {
       tradingSystem.addItemToTrade(tradeId, "player-2", 0, "armor", 1);
       tradingSystem.addItemToTrade(tradeId, "player-2", 1, "arrows", 500);
 
-      tradingSystem.setAcceptance(tradeId, "player-1", true);
-      tradingSystem.setAcceptance(tradeId, "player-2", true);
+      acceptAndConfirm(tradeId);
 
       const result = tradingSystem.completeTrade(tradeId);
 
@@ -1099,8 +1126,7 @@ describe("TradingSystem Integration Tests", () => {
     it("completes trade with no items (empty trade)", () => {
       const tradeId = createActiveTrade(tradingSystem);
 
-      tradingSystem.setAcceptance(tradeId, "player-1", true);
-      tradingSystem.setAcceptance(tradeId, "player-2", true);
+      acceptAndConfirm(tradeId);
 
       const result = tradingSystem.completeTrade(tradeId);
 
@@ -1115,8 +1141,7 @@ describe("TradingSystem Integration Tests", () => {
       tradingSystem.addItemToTrade(tradeId, "player-1", 0, "gift", 1);
       // Player 2 offers nothing
 
-      tradingSystem.setAcceptance(tradeId, "player-1", true);
-      tradingSystem.setAcceptance(tradeId, "player-2", true);
+      acceptAndConfirm(tradeId);
 
       const result = tradingSystem.completeTrade(tradeId);
 
@@ -1421,11 +1446,204 @@ describe("TradingSystem Integration Tests", () => {
   });
 
   // =========================================================================
+  // TWO-SCREEN CONFIRMATION FLOW TESTS
+  // =========================================================================
+
+  describe("Two-Screen Confirmation Flow", () => {
+    let tradeId: string;
+
+    beforeEach(() => {
+      tradeId = createActiveTrade(tradingSystem);
+    });
+
+    it("moves to confirming status after both accept on offer screen", () => {
+      // Add items
+      tradingSystem.addItemToTrade(tradeId, "player-1", 0, "sword", 1);
+      tradingSystem.addItemToTrade(tradeId, "player-2", 0, "shield", 1);
+
+      // First player accepts
+      tradingSystem.setAcceptance(tradeId, "player-1", true);
+      let session = tradingSystem.getTradeSession(tradeId);
+      expect(session?.status).toBe("active");
+
+      // Second player accepts - should trigger moveToConfirming flag
+      const result = tradingSystem.setAcceptance(tradeId, "player-2", true);
+      expect(result.success).toBe(true);
+      expect(result.moveToConfirming).toBe(true);
+      // bothAccepted is not set when moveToConfirming - the confirmation happens on next screen
+
+      // Move to confirmation screen
+      const moveResult = tradingSystem.moveToConfirmation(tradeId);
+      expect(moveResult.success).toBe(true);
+
+      // Verify status changed to "confirming"
+      session = tradingSystem.getTradeSession(tradeId);
+      expect(session?.status).toBe("confirming");
+
+      // Verify acceptances were reset for second round
+      expect(session?.initiator.accepted).toBe(false);
+      expect(session?.recipient.accepted).toBe(false);
+    });
+
+    it("moveToConfirming flag only set when both accept on offer screen", () => {
+      tradingSystem.addItemToTrade(tradeId, "player-1", 0, "sword", 1);
+
+      // Only one player accepts - moveToConfirming should not be set
+      const result1 = tradingSystem.setAcceptance(tradeId, "player-1", true);
+      expect(result1.success).toBe(true);
+      expect(result1.moveToConfirming).toBeUndefined();
+
+      // Second player accepts - now moveToConfirming should be set
+      const result2 = tradingSystem.setAcceptance(tradeId, "player-2", true);
+      expect(result2.success).toBe(true);
+      expect(result2.moveToConfirming).toBe(true);
+    });
+
+    it("rejects moveToConfirmation for non-active trade", () => {
+      // Cancel the trade first
+      tradingSystem.cancelTrade(tradeId, "cancelled");
+
+      // Try to move to confirmation
+      const result = tradingSystem.moveToConfirmation(tradeId);
+      expect(result.success).toBe(false);
+      expect(result.errorCode).toBe("INVALID_TRADE");
+    });
+
+    it("allows setAcceptance in confirming status", () => {
+      // Set up and move to confirmation
+      tradingSystem.addItemToTrade(tradeId, "player-1", 0, "sword", 1);
+      tradingSystem.setAcceptance(tradeId, "player-1", true);
+      tradingSystem.setAcceptance(tradeId, "player-2", true);
+      tradingSystem.moveToConfirmation(tradeId);
+
+      // Both accept on confirmation screen
+      const result1 = tradingSystem.setAcceptance(tradeId, "player-1", true);
+      expect(result1.success).toBe(true);
+      expect(result1.bothAccepted).toBeUndefined(); // Only one accepted so far
+
+      const result2 = tradingSystem.setAcceptance(tradeId, "player-2", true);
+      expect(result2.success).toBe(true);
+      expect(result2.bothAccepted).toBe(true);
+    });
+
+    it("completeTrade only works in confirming status", () => {
+      tradingSystem.addItemToTrade(tradeId, "player-1", 0, "sword", 1);
+      tradingSystem.setAcceptance(tradeId, "player-1", true);
+      tradingSystem.setAcceptance(tradeId, "player-2", true);
+
+      // Trade is still in "active" status - should fail (returns INVALID_TRADE)
+      const resultActive = tradingSystem.completeTrade(tradeId);
+      expect(resultActive.success).toBe(false);
+      expect(resultActive.errorCode).toBe("INVALID_TRADE");
+
+      // Move to confirmation
+      tradingSystem.moveToConfirmation(tradeId);
+
+      // Accept again on confirmation screen
+      tradingSystem.setAcceptance(tradeId, "player-1", true);
+      tradingSystem.setAcceptance(tradeId, "player-2", true);
+
+      // Now completeTrade should work
+      const resultConfirm = tradingSystem.completeTrade(tradeId);
+      expect(resultConfirm.success).toBe(true);
+    });
+
+    it("rejects item changes while in confirming status", () => {
+      // Move to confirmation screen
+      tradingSystem.addItemToTrade(tradeId, "player-1", 0, "sword", 1);
+      tradingSystem.setAcceptance(tradeId, "player-1", true);
+      tradingSystem.setAcceptance(tradeId, "player-2", true);
+      tradingSystem.moveToConfirmation(tradeId);
+
+      // Try to add item - should fail
+      const addResult = tradingSystem.addItemToTrade(
+        tradeId,
+        "player-1",
+        1,
+        "shield",
+        1,
+      );
+      expect(addResult.success).toBe(false);
+      expect(addResult.errorCode).toBe("NOT_IN_TRADE");
+
+      // Try to remove item - should also fail
+      const removeResult = tradingSystem.removeItemFromTrade(
+        tradeId,
+        "player-1",
+        0,
+      );
+      expect(removeResult.success).toBe(false);
+      expect(removeResult.errorCode).toBe("NOT_IN_TRADE");
+    });
+
+    it("cancellation still works in confirming status", () => {
+      // Move to confirmation screen
+      tradingSystem.addItemToTrade(tradeId, "player-1", 0, "sword", 1);
+      tradingSystem.setAcceptance(tradeId, "player-1", true);
+      tradingSystem.setAcceptance(tradeId, "player-2", true);
+      tradingSystem.moveToConfirmation(tradeId);
+
+      // Cancel the trade
+      const result = tradingSystem.cancelTrade(tradeId, "cancelled");
+      expect(result.success).toBe(true);
+
+      // Verify trade is gone
+      expect(tradingSystem.getTradeSession(tradeId)).toBeUndefined();
+      expect(tradingSystem.isPlayerInTrade("player-1")).toBe(false);
+      expect(tradingSystem.isPlayerInTrade("player-2")).toBe(false);
+    });
+
+    it("full two-screen flow: active → confirming → completed", () => {
+      // Step 1: Add items on offer screen
+      tradingSystem.addItemToTrade(tradeId, "player-1", 0, "rare_sword", 1);
+      tradingSystem.addItemToTrade(tradeId, "player-2", 0, "gold_coins", 10000);
+
+      // Step 2: Both accept on offer screen
+      tradingSystem.setAcceptance(tradeId, "player-1", true);
+      const firstAccept = tradingSystem.setAcceptance(
+        tradeId,
+        "player-2",
+        true,
+      );
+      expect(firstAccept.moveToConfirming).toBe(true);
+
+      // Step 3: Move to confirmation screen
+      tradingSystem.moveToConfirmation(tradeId);
+      let session = tradingSystem.getTradeSession(tradeId);
+      expect(session?.status).toBe("confirming");
+      expect(session?.initiator.accepted).toBe(false);
+      expect(session?.recipient.accepted).toBe(false);
+
+      // Step 4: Both accept on confirmation screen
+      tradingSystem.setAcceptance(tradeId, "player-1", true);
+      const finalAccept = tradingSystem.setAcceptance(
+        tradeId,
+        "player-2",
+        true,
+      );
+      expect(finalAccept.bothAccepted).toBe(true);
+
+      // Step 5: Complete the trade
+      const result = tradingSystem.completeTrade(tradeId);
+      expect(result.success).toBe(true);
+
+      // Verify items were swapped
+      expect(result.initiatorReceives).toHaveLength(1);
+      expect(result.initiatorReceives![0].itemId).toBe("gold_coins");
+      expect(result.initiatorReceives![0].quantity).toBe(10000);
+
+      expect(result.recipientReceives).toHaveLength(1);
+      expect(result.recipientReceives![0].itemId).toBe("rare_sword");
+      expect(result.recipientReceives![0].quantity).toBe(1);
+    });
+  });
+
+  // =========================================================================
   // FULL FLOW INTEGRATION TESTS
   // =========================================================================
 
   describe("Full Trade Flow", () => {
-    it("complete trade flow: request → accept → add items → accept → complete", () => {
+    it("complete trade flow: request → accept → add items → confirm → accept → complete", () => {
       // Step 1: Create request
       const createResult = tradingSystem.createTradeRequest(
         "player-1",
@@ -1466,17 +1684,33 @@ describe("TradingSystem Integration Tests", () => {
       expect(session?.initiator.offeredItems).toHaveLength(2);
       expect(session?.recipient.offeredItems).toHaveLength(1);
 
-      // Step 4: First player accepts
+      // Step 4: First player accepts on offer screen
       const accept1 = tradingSystem.setAcceptance(tradeId, "player-1", true);
       expect(accept1.success).toBe(true);
-      expect(accept1.bothAccepted).toBe(false);
+      expect(accept1.moveToConfirming).toBeUndefined(); // Only one accepted
 
-      // Step 5: Second player accepts
+      // Step 5: Second player accepts on offer screen - triggers move to confirming
       const accept2 = tradingSystem.setAcceptance(tradeId, "player-2", true);
       expect(accept2.success).toBe(true);
-      expect(accept2.bothAccepted).toBe(true);
+      expect(accept2.moveToConfirming).toBe(true);
 
-      // Step 6: Complete trade
+      // Step 6: Move to confirmation screen
+      tradingSystem.moveToConfirmation(tradeId);
+      session = tradingSystem.getTradeSession(tradeId);
+      expect(session?.status).toBe("confirming");
+      expect(session?.initiator.accepted).toBe(false);
+      expect(session?.recipient.accepted).toBe(false);
+
+      // Step 7: Both accept on confirmation screen
+      tradingSystem.setAcceptance(tradeId, "player-1", true);
+      const finalAccept = tradingSystem.setAcceptance(
+        tradeId,
+        "player-2",
+        true,
+      );
+      expect(finalAccept.bothAccepted).toBe(true);
+
+      // Step 8: Complete trade
       const completeResult = tradingSystem.completeTrade(tradeId);
       expect(completeResult.success).toBe(true);
 
@@ -1500,7 +1734,7 @@ describe("TradingSystem Integration Tests", () => {
     it("trade flow with modification after acceptance resets and completes", () => {
       const tradeId = createActiveTrade(tradingSystem);
 
-      // Add initial items and accept
+      // Add initial items and accept on offer screen
       tradingSystem.addItemToTrade(tradeId, "player-1", 0, "item_a", 10);
       tradingSystem.setAcceptance(tradeId, "player-1", true);
       tradingSystem.setAcceptance(tradeId, "player-2", true);
@@ -1510,14 +1744,19 @@ describe("TradingSystem Integration Tests", () => {
       expect(session?.initiator.accepted).toBe(true);
       expect(session?.recipient.accepted).toBe(true);
 
-      // Modify offer - should reset acceptances
+      // Modify offer - should reset acceptances (only works while still "active")
       tradingSystem.addItemToTrade(tradeId, "player-1", 1, "item_b", 5);
 
       session = tradingSystem.getTradeSession(tradeId);
       expect(session?.initiator.accepted).toBe(false);
       expect(session?.recipient.accepted).toBe(false);
 
-      // Re-accept and complete
+      // Re-accept on offer screen and move to confirmation
+      tradingSystem.setAcceptance(tradeId, "player-1", true);
+      tradingSystem.setAcceptance(tradeId, "player-2", true);
+      tradingSystem.moveToConfirmation(tradeId);
+
+      // Accept on confirmation screen and complete
       tradingSystem.setAcceptance(tradeId, "player-1", true);
       tradingSystem.setAcceptance(tradeId, "player-2", true);
 

@@ -65,33 +65,35 @@ export const MOBILE_EQUIPMENT = {
   /** Number of columns in mobile equipment grid */
   columns: 2,
   /** Slot height */
-  slotHeight: 52,
+  slotHeight: 58,
   /** Gap between slots */
   gap: 6,
   /** Padding inside panel */
-  padding: 8,
+  padding: 6,
 } as const;
 
 /** Skills panel configuration for mobile - matches desktop 3-column layout */
 export const MOBILE_SKILLS = {
-  /** Number of columns in mobile skills grid (3 like desktop) */
-  columns: 3,
+  /** Number of columns in mobile skills grid (4 to match prayer panel) */
+  columns: 4,
   /** Minimum card height - compact like desktop */
-  cardHeight: 38,
+  cardHeight: 32,
   /** Gap between cards */
   gap: 4,
   /** Icon size in skill cards */
-  iconSize: 16,
+  iconSize: 14,
 } as const;
 
 /** Prayer panel configuration for mobile */
 export const MOBILE_PRAYER = {
   /** Prayer icon size on mobile */
-  iconSize: 48,
+  iconSize: 40,
   /** Maximum columns on mobile */
   maxColumns: 4,
+  /** Minimum columns on mobile (force 4-wide layout) */
+  minColumns: 4,
   /** Gap between prayer icons */
-  gap: 6,
+  gap: 4,
   /** Prayer points bar height */
   barHeight: 14,
 } as const;

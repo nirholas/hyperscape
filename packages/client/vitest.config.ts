@@ -1,5 +1,9 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   plugins: [react() as never],
@@ -12,8 +16,21 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],
-      include: ["src/game/panels/BankPanel/**/*.{ts,tsx}"],
+      include: [
+        "src/game/panels/**/*.{ts,tsx}",
+        "src/lib/**/*.{ts,tsx}",
+        "src/utils/**/*.{ts,tsx}",
+        "src/hooks/**/*.{ts,tsx}",
+        "src/auth/**/*.{ts,tsx}",
+        "src/game/systems/**/*.{ts,tsx}",
+      ],
       exclude: ["**/*.test.{ts,tsx}", "**/index.ts"],
+      thresholds: {
+        statements: 80,
+        branches: 75,
+        functions: 80,
+        lines: 80,
+      },
     },
     // Timeout for async operations
     testTimeout: 10000,
@@ -22,8 +39,14 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      // Path alias to match vite.config.ts
+      "@": path.resolve(__dirname, "src"),
       // Use actual shared package - per project rules, no mocks allowed
       // Tests should use real Hyperscape instances with Playwright
+      "@hyperscape/shared": path.resolve(
+        __dirname,
+        "../shared/build/framework.client.js",
+      ),
     },
   },
 });

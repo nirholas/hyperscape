@@ -126,7 +126,11 @@ import { NPCSystem } from "..";
 import { DialogueSystem } from "..";
 
 // Client-only visual systems
+// NOTE: Import directly from specific files to avoid circular dependency
 import { DamageSplatSystem } from "../../client/DamageSplatSystem";
+import { DuelCountdownSplatSystem } from "../../client/DuelCountdownSplatSystem";
+import { SocialSystem } from "../../client/SocialSystem";
+import { DuelArenaVisualsSystem } from "../../client/DuelArenaVisualsSystem";
 
 // Zone systems
 import { ZoneDetectionSystem } from "../death/ZoneDetectionSystem";
@@ -362,6 +366,33 @@ export async function registerSystems(world: World): Promise<void> {
     } catch (err) {
       console.error(
         "[SystemLoader] Failed to register DamageSplatSystem:",
+        err,
+      );
+    }
+
+    // Duel countdown splat system - 3D countdown numbers over players' heads
+    try {
+      world.register("duel-countdown-splat", DuelCountdownSplatSystem);
+    } catch (err) {
+      console.error(
+        "[SystemLoader] Failed to register DuelCountdownSplatSystem:",
+        err,
+      );
+    }
+
+    // Social system - client-side friend list caching
+    try {
+      world.register("social", SocialSystem);
+    } catch (err) {
+      console.error("[SystemLoader] Failed to register SocialSystem:", err);
+    }
+
+    // Duel Arena visual system - procedural arena geometry
+    try {
+      world.register("duel-arena-visuals", DuelArenaVisualsSystem);
+    } catch (err) {
+      console.error(
+        "[SystemLoader] Failed to register DuelArenaVisualsSystem:",
         err,
       );
     }
@@ -671,6 +702,14 @@ function setupAPI(world: World, systems: Systems): void {
       // Use the singleton renderer for this world
       const renderer = MobInstancedRenderer.get(world);
       return renderer.getStats();
+    },
+    getImpostorManagerStats: () => {
+      // Client-side only - returns null on server
+      if (world.isServer) return null;
+      // Get the ImpostorManager singleton for this world
+      const { ImpostorManager } = require("../rendering");
+      const manager = ImpostorManager.getInstance(world);
+      return manager.getStats();
     },
 
     // Banking API

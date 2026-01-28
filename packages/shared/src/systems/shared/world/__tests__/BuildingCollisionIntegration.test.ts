@@ -531,4 +531,193 @@ describe("Building Collision Integration", () => {
       expect(elevation).toBeNull();
     });
   });
+
+  describe("End-to-End Runtime Simulation", () => {
+    /**
+     * This test simulates the COMPLETE server runtime flow:
+     * 1. TownSystem generates buildings and registers collision
+     * 2. Player clicks on terrain inside building area
+     * 3. Server calculates path using isTileWalkable
+     * 4. Server determines player height based on building floor
+     *
+     * This is the EXACT flow that happens at runtime.
+     */
+
+    // Simulate manifest building positions from buildings.json
+    const MANIFEST_BUILDINGS = [
+      { id: "bank-1", type: "bank", x: 10, z: 10, rotation: 0 },
+      { id: "inn-1", type: "inn", x: -15, z: 10, rotation: 0 },
+      { id: "store-1", type: "store", x: 10, z: -15, rotation: Math.PI },
+    ];
+
+    beforeEach(() => {
+      // Simulate TownSystem.registerBuildingCollision()
+      for (const b of MANIFEST_BUILDINGS) {
+        // Simulate terrain height query (flat terrain at Y=0)
+        const groundY = 0;
+
+        service.registerBuilding(
+          b.id,
+          "town-origin",
+          createBankLayout(), // Using same layout for simplicity
+          { x: b.x, y: groundY, z: b.z },
+          b.rotation,
+        );
+      }
+    });
+
+    it("verifies building count matches manifest", () => {
+      expect(service.getBuildingCount()).toBe(MANIFEST_BUILDINGS.length);
+    });
+
+    it("click at building center is detected as inside building", () => {
+      // Simulate player clicking at world position (10, 0, 10)
+      // This is the bank center from the manifest
+      const clickWorldX = 10;
+      const clickWorldZ = 10;
+
+      // Server converts world position to tile (same as InteractionRouter)
+      const tileX = Math.floor(clickWorldX);
+      const tileZ = Math.floor(clickWorldZ);
+
+      // Query collision at this tile
+      const result = service.queryCollision(tileX, tileZ, 0);
+
+      expect(result.isInsideBuilding).toBe(true);
+      expect(result.buildingId).toBe("bank-1");
+      expect(result.isWalkable).toBe(true);
+    });
+
+    it("complete path from outside to inside building", () => {
+      // Player starts at (10, 0) - south of the bank
+      const playerStartTile: TileCoord = { x: 10, z: 0 };
+
+      // Player clicks inside bank at (10, 10)
+      const targetTile: TileCoord = { x: 10, z: 10 };
+
+      // Simulate server's isTileWalkable check
+      const serverIsTileWalkable = (
+        tile: TileCoord,
+        fromTile?: TileCoord,
+      ): boolean => {
+        // Wall blocking check (exactly like server)
+        if (fromTile) {
+          if (
+            service.isWallBlocked(fromTile.x, fromTile.z, tile.x, tile.z, 0)
+          ) {
+            return false;
+          }
+        }
+
+        // Building collision check
+        const result = service.queryCollision(tile.x, tile.z, 0);
+        if (result.isInsideBuilding) {
+          return result.isWalkable;
+        }
+
+        // Terrain walkability (assume true in test)
+        return true;
+      };
+
+      // Calculate path (exactly like server does)
+      const path = pathfinder.findPath(
+        playerStartTile,
+        targetTile,
+        serverIsTileWalkable,
+      );
+
+      // Path should exist and end at target
+      expect(path.length).toBeGreaterThan(0);
+      expect(path[path.length - 1]).toEqual(targetTile);
+
+      // Verify path enters building through door
+      let enteredBuilding = false;
+      let prev = playerStartTile;
+      for (const tile of path) {
+        const result = service.queryCollision(tile.x, tile.z, 0);
+        if (result.isInsideBuilding && !enteredBuilding) {
+          enteredBuilding = true;
+
+          // When entering building, should be through a door (not blocked)
+          const isBlocked = service.isWallBlocked(
+            prev.x,
+            prev.z,
+            tile.x,
+            tile.z,
+            0,
+          );
+          expect(isBlocked).toBe(false);
+        }
+        prev = tile;
+      }
+      expect(enteredBuilding).toBe(true);
+    });
+
+    it("player height is set correctly inside building", () => {
+      // Player moves to tile inside building
+      const tile: TileCoord = { x: 10, z: 10 };
+
+      // Get building at this tile
+      const buildingId = service.getBuildingAtTile(tile.x, tile.z);
+      expect(buildingId).toBe("bank-1");
+
+      // Get floor elevation
+      const elevation = service.getFloorElevation(tile.x, tile.z, 0);
+      expect(elevation).not.toBeNull();
+
+      // Player Y position would be set to elevation + small offset
+      const playerY = elevation! + 0.1;
+
+      // Should be above ground (foundation height is 0.2)
+      expect(playerY).toBeGreaterThan(0);
+      expect(playerY).toBeLessThan(5); // Not ridiculously high
+    });
+
+    it("verifies tile coverage for all manifest buildings", () => {
+      for (const b of MANIFEST_BUILDINGS) {
+        // Check that building center tile is registered
+        const result = service.queryCollision(b.x, b.z, 0);
+        expect(result.isInsideBuilding).toBe(true);
+        expect(result.buildingId).toBe(b.id);
+
+        // Verify building bounds (3x3 cells = 12x12 tiles centered)
+        const halfSize = 6; // 3 cells * 4 tiles/cell / 2
+
+        // Corner tiles should also be inside
+        const corners = [
+          { x: b.x - halfSize + 1, z: b.z - halfSize + 1 },
+          { x: b.x + halfSize - 1, z: b.z - halfSize + 1 },
+          { x: b.x - halfSize + 1, z: b.z + halfSize - 1 },
+          { x: b.x + halfSize - 1, z: b.z + halfSize - 1 },
+        ];
+
+        for (const corner of corners) {
+          const cornerResult = service.queryCollision(corner.x, corner.z, 0);
+          expect(cornerResult.isInsideBuilding).toBe(true);
+        }
+      }
+    });
+
+    it("ensures wall blocking works at building edges", () => {
+      // Bank is at (10, 10), covers [4, 15] in both X and Z
+      // West wall is at X=4
+
+      // Try to enter from west (X=3 to X=4) - should be blocked (no door)
+      const fromOutside: TileCoord = { x: 3, z: 10 };
+      const toEdge: TileCoord = { x: 4, z: 10 };
+
+      const isBlocked = service.isWallBlocked(
+        fromOutside.x,
+        fromOutside.z,
+        toEdge.x,
+        toEdge.z,
+        0,
+      );
+      expect(isBlocked).toBe(true);
+
+      // Verify the tile AT the edge is inside the building
+      const edgeResult = service.queryCollision(toEdge.x, toEdge.z, 0);
+      expect(edgeResult.isInsideBuilding).toBe(true);
+    });
+  });
 });

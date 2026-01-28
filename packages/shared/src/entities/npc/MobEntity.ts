@@ -527,11 +527,9 @@ export class MobEntity extends CombatantEntity {
     // Register with HealthBars system (client-side only)
     // Uses atlas-based instanced mesh for performance instead of sprite per mob
     if (!this.world.isServer) {
-      const healthbars = this.world.systems.find(
-        (s) =>
-          (s as { systemName?: string }).systemName === "healthbars" ||
-          s.constructor.name === "HealthBars",
-      ) as HealthBarsSystem | undefined;
+      const healthbars = this.world.getSystem?.("healthbars") as
+        | HealthBarsSystem
+        | undefined;
 
       if (healthbars) {
         this._healthBarHandle = healthbars.add(
@@ -2224,6 +2222,11 @@ export class MobEntity extends CombatantEntity {
       // Start tracking client-side death time when we first see DEAD state
       if (!this.clientDeathStartTime) {
         this.clientDeathStartTime = Date.now();
+        // Destroy health bar immediately when mob dies (frees atlas slot)
+        if (this._healthBarHandle) {
+          this._healthBarHandle.destroy();
+          this._healthBarHandle = null;
+        }
       }
 
       const currentTime = Date.now();
@@ -3210,6 +3213,13 @@ export class MobEntity extends CombatantEntity {
               this.node.position.set(spawnPos[0], spawnPos[1], spawnPos[2]);
             }
 
+            // Reset health to full on respawn (server will send correct value)
+            this.config.currentHealth = this.config.maxHealth;
+            this._lastKnownHealth = this.config.maxHealth;
+
+            // Reset health bar visibility timeout so bar stays hidden until combat
+            this._healthBarVisibleUntil = 0;
+
             // Mark that we need to restore visibility AFTER position update
             this._pendingRespawnRestore = true;
           }
@@ -3340,6 +3350,21 @@ export class MobEntity extends CombatantEntity {
           this.node.position,
           this.node.quaternion,
         );
+      }
+
+      // Recreate health bar (was destroyed on death to free atlas slot)
+      if (!this._healthBarHandle) {
+        const healthbars = this.world.getSystem?.("healthbars") as
+          | HealthBarsSystem
+          | undefined;
+
+        if (healthbars) {
+          this._healthBarHandle = healthbars.add(
+            this.id,
+            this.config.currentHealth,
+            this.config.maxHealth,
+          );
+        }
       }
 
       // Update health bar now that mesh is visible again

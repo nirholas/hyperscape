@@ -20,7 +20,11 @@ import { BaseRepository } from "./BaseRepository";
 import * as schema from "../schema";
 
 /** Quest audit action types */
-export type QuestAuditAction = "started" | "progressed" | "completed";
+export type QuestAuditAction =
+  | "started"
+  | "progressed"
+  | "completed"
+  | "abandoned";
 
 /** Database status values (not including derived "ready_to_complete") */
 export type QuestDbStatus = "not_started" | "in_progress" | "completed";
@@ -244,6 +248,43 @@ export class QuestRepository extends BaseRepository {
           eq(schema.questProgress.questId, questId),
         ),
       );
+  }
+
+  /**
+   * Abandon a quest
+   *
+   * Deletes the quest progress row, effectively resetting the quest to not_started.
+   * Logs the abandonment in the audit log.
+   *
+   * @param playerId - The player ID
+   * @param questId - The quest identifier
+   */
+  async abandonQuest(playerId: string, questId: string): Promise<void> {
+    if (this.isDestroying) {
+      return;
+    }
+
+    this.ensureDatabase();
+
+    await this.db.transaction(async (tx) => {
+      // Delete quest progress entry
+      await tx
+        .delete(schema.questProgress)
+        .where(
+          and(
+            eq(schema.questProgress.playerId, playerId),
+            eq(schema.questProgress.questId, questId),
+          ),
+        );
+
+      // Audit log entry for quest abandonment
+      await tx.insert(schema.questAuditLog).values({
+        playerId,
+        questId,
+        action: "abandoned",
+        timestamp: Date.now(),
+      });
+    });
   }
 
   /**

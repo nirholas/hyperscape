@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback, useId } from "react";
 import { useMemo } from "react";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 
 interface ContextMenuAction {
   id: string;

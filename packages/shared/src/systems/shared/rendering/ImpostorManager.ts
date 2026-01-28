@@ -498,14 +498,19 @@ export class ImpostorManager {
 
     // AAA LOD: Prepare mesh IMMEDIATELY before baking (e.g., set idle pose)
     // This is critical - if called earlier, the animation may have moved by bake time
+    let prepareSuccess = true;
     if (options.prepareForBake) {
       try {
         await options.prepareForBake();
       } catch (err) {
-        console.warn(
-          `[ImpostorManager] prepareForBake failed for ${modelId}:`,
+        prepareSuccess = false;
+        // Log with ERROR level since this affects visual quality
+        console.error(
+          `[ImpostorManager] prepareForBake FAILED for ${modelId} - impostor may show wrong pose:`,
           err,
         );
+        // Continue baking anyway - a wrong-pose impostor is better than no impostor
+        // The error is surfaced to help diagnose visual issues
       }
     }
 
@@ -564,11 +569,17 @@ export class ImpostorManager {
 
   /**
    * Generate cache key from model ID and options
+   *
+   * IMPORTANT: Includes all options that affect the baked result to prevent cache collisions.
+   * Previously missing gridSizeX/Y could cause wrong-resolution impostors to be returned.
    */
   private getCacheKey(modelId: string, options: ImpostorOptions): string {
     const size = options.atlasSize ?? IMPOSTOR_CONFIG.ATLAS_SIZE;
     const hemi = options.hemisphere ?? true;
-    return `${modelId}_${size}_${hemi ? "hemi" : "full"}_v${IMPOSTOR_CONFIG.CACHE_VERSION}`;
+    // Include grid size in cache key to prevent collisions
+    const gridX = options.gridSizeX ?? (hemi ? 16 : 8);
+    const gridY = options.gridSizeY ?? (hemi ? 8 : 8);
+    return `${modelId}_${size}_${gridX}x${gridY}_${hemi ? "hemi" : "full"}_v${IMPOSTOR_CONFIG.CACHE_VERSION}`;
   }
 
   /**

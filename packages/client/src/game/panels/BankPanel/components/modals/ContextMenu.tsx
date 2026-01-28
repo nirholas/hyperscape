@@ -3,13 +3,13 @@
  *
  * Right-click context menu for bank items with withdraw/deposit options.
  * RS3-style: Shows different options for placeholders (qty=0) vs items.
- * Uses hs-kit theme system for consistent styling.
+ * Uses theme system for consistent styling.
  */
 
 import { useState, useEffect, useRef, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { getItem } from "@hyperscape/shared";
-import { useThemeStore } from "hs-kit";
+import { useThemeStore } from "@/ui";
 import type { ContextMenuState } from "../../types";
 import type { RightPanelMode } from "../../types";
 
@@ -88,7 +88,7 @@ export function ContextMenu({
   adjustedY = Math.max(padding, adjustedY);
 
   const menuContainerStyle: CSSProperties = {
-    background: `linear-gradient(135deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+    background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
     border: `1px solid ${theme.colors.border.default}`,
     borderRadius: theme.borderRadius.md,
     boxShadow: theme.shadows.lg,

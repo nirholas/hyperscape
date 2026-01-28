@@ -104,3 +104,34 @@ export interface RoadSegment {
 // BiomeData moved to core.ts to avoid duplication
 
 // ResourceNodeData and ResourceMesh moved to core.ts to avoid duplication
+
+// ============================================================================
+// TERRAIN FLATTENING
+// ============================================================================
+
+/**
+ * Defines a rectangular area where terrain should be flattened.
+ * Used for stations and other world objects that need level ground.
+ */
+export interface FlatZone {
+  /** Unique identifier (e.g., "station_furnace_lumbridge_1") */
+  id: string;
+  /** Center X position in world coordinates (meters) */
+  centerX: number;
+  /** Center Z position in world coordinates (meters) */
+  centerZ: number;
+  /** Width in meters (X axis) */
+  width: number;
+  /** Depth in meters (Z axis) */
+  depth: number;
+  /** Target height for the flat area (meters) */
+  height: number;
+  /** Blend radius for smooth transition to procedural terrain (meters) */
+  blendRadius: number;
+}
+
+/**
+ * Spatial index key for flat zone lookup.
+ * Format: "tileX_tileZ" where tiles are terrain tiles (100m each).
+ */
+export type FlatZoneKey = `${number}_${number}`;

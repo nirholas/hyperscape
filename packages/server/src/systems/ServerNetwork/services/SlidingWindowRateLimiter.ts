@@ -186,6 +186,8 @@ let prayerLimiter: RateLimiter | null = null;
 let questListLimiter: RateLimiter | null = null;
 let questDetailLimiter: RateLimiter | null = null;
 let questAcceptLimiter: RateLimiter | null = null;
+let questAbandonLimiter: RateLimiter | null = null;
+let questCompleteLimiter: RateLimiter | null = null;
 
 /**
  * Get the pickup rate limiter (5/sec)
@@ -391,6 +393,34 @@ export function getQuestAcceptRateLimiter(): RateLimiter {
 }
 
 /**
+ * Get the quest abandon rate limiter (2/sec)
+ * Limits quest abandon requests
+ */
+export function getQuestAbandonRateLimiter(): RateLimiter {
+  if (!questAbandonLimiter) {
+    questAbandonLimiter = createRateLimiter({
+      maxPerSecond: 2,
+      name: "quest-abandon",
+    });
+  }
+  return questAbandonLimiter;
+}
+
+/**
+ * Get the quest complete rate limiter (2/sec)
+ * Limits quest completion requests
+ */
+export function getQuestCompleteRateLimiter(): RateLimiter {
+  if (!questCompleteLimiter) {
+    questCompleteLimiter = createRateLimiter({
+      maxPerSecond: 2,
+      name: "quest-complete",
+    });
+  }
+  return questCompleteLimiter;
+}
+
+/**
  * Destroy all singleton rate limiters
  * Call this during server shutdown
  */
@@ -409,6 +439,8 @@ export function destroyAllRateLimiters(): void {
   questListLimiter?.destroy();
   questDetailLimiter?.destroy();
   questAcceptLimiter?.destroy();
+  questAbandonLimiter?.destroy();
+  questCompleteLimiter?.destroy();
 
   pickupLimiter = null;
   moveLimiter = null;
@@ -424,4 +456,6 @@ export function destroyAllRateLimiters(): void {
   questListLimiter = null;
   questDetailLimiter = null;
   questAcceptLimiter = null;
+  questAbandonLimiter = null;
+  questCompleteLimiter = null;
 }
