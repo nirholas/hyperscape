@@ -333,6 +333,7 @@ export interface EquipmentSlot {
   slot: EquipmentSlotName;
   itemId: string | number | null;
   item: Item | null;
+  quantity?: number; // For stackable items like arrows
   visualMesh?: THREE.Object3D | THREE.Mesh;
 }
 

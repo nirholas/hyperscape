@@ -659,6 +659,8 @@ export class PlayerRemote extends Entity implements HotReloadable {
             talk: Emotes.TALK,
             combat: Emotes.COMBAT,
             sword_swing: Emotes.SWORD_SWING,
+            range: Emotes.RANGE,
+            spell_cast: Emotes.SPELL_CAST,
             chopping: Emotes.CHOPPING,
             mining: Emotes.CHOPPING, // Use chopping animation for mining (temporary)
             fishing: Emotes.FISHING,

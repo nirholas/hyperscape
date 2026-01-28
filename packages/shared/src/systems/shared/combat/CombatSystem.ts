@@ -21,7 +21,11 @@ import { createEntityID } from "../../../utils/IdentifierUtils";
 import { EntityManager } from "..";
 import { MobNPCSystem } from "..";
 import { SystemBase } from "../infrastructure/SystemBase";
-import { tilesWithinMeleeRange, worldToTile } from "../movement/TileSystem";
+import {
+  tilesWithinMeleeRange,
+  tilesWithinRange,
+  worldToTile,
+} from "../movement/TileSystem";
 import { tilePool, PooledTile } from "../../../utils/pools/TilePool";
 import { CombatAnimationManager } from "./CombatAnimationManager";
 import { CombatRotationManager } from "./CombatRotationManager";
@@ -393,10 +397,19 @@ export class CombatSystem extends SystemBase {
   }
 
   /**
-   * Get attack type from equipped weapon
-   * Returns AttackType based on weapon's attackType property
+   * Get attack type from equipped weapon or selected spell
+   * Returns AttackType based on weapon's attackType property, or MAGIC if spell selected
+   *
+   * OSRS-accurate: You can cast spells without a staff - the staff just provides
+   * magic attack bonus and elemental staves give infinite runes
    */
   private getAttackTypeFromWeapon(attackerId: string): AttackType {
+    // Check if player has a spell selected - if so, use magic regardless of weapon
+    const selectedSpell = this.getPlayerSelectedSpell(attackerId);
+    if (selectedSpell) {
+      return AttackType.MAGIC;
+    }
+
     if (!this.equipmentSystem) return AttackType.MELEE;
 
     const equipment = this.equipmentSystem.getPlayerEquipment(attackerId);
@@ -404,19 +417,23 @@ export class CombatSystem extends SystemBase {
 
     if (!weapon) return AttackType.MELEE;
 
+    // Normalize to lowercase for comparison (JSON may have uppercase values)
+    const attackType = weapon.attackType?.toLowerCase();
+    const weaponType = weapon.weaponType?.toLowerCase();
+
     // Check weapon's attackType property
-    if (weapon.attackType) {
-      return weapon.attackType;
+    if (attackType === "ranged") {
+      return AttackType.RANGED;
+    }
+    if (attackType === "magic") {
+      return AttackType.MAGIC;
     }
 
     // Fall back to weaponType for legacy compatibility
-    if (weapon.weaponType === WeaponType.BOW) {
+    if (weaponType === "bow" || weaponType === "crossbow") {
       return AttackType.RANGED;
     }
-    if (
-      weapon.weaponType === WeaponType.STAFF ||
-      weapon.weaponType === WeaponType.WAND
-    ) {
+    if (weaponType === "staff" || weaponType === "wand") {
       return AttackType.MAGIC;
     }
 
@@ -797,6 +814,9 @@ export class CombatSystem extends SystemBase {
     attackerType: "player" | "mob";
     targetType: "player" | "mob";
   }): void {
+    console.log(
+      `[CombatSystem] handleRangedAttack called for ${data.attackerId}`,
+    );
     const { attackerId, targetId, attackerType, targetType } = data;
     const currentTick = this.world.currentTick ?? 0;
 
@@ -1120,7 +1140,8 @@ export class CombatSystem extends SystemBase {
     playerId: string,
     skill: "ranged" | "magic" | "defense",
   ): number {
-    const playerEntity = this.world.entities.get(playerId);
+    // Use world.getPlayer() to ensure consistency with PlayerSystem
+    const playerEntity = this.world.getPlayer?.(playerId);
     if (!playerEntity) return 1;
 
     const statsComponent = playerEntity.getComponent("stats");
@@ -1145,7 +1166,8 @@ export class CombatSystem extends SystemBase {
    * Get player's selected autocast spell
    */
   private getPlayerSelectedSpell(playerId: string): string | null {
-    const playerEntity = this.world.entities.get(playerId);
+    // Use world.getPlayer() to ensure we get the same player entity as PlayerSystem
+    const playerEntity = this.world.getPlayer?.(playerId);
     if (!playerEntity?.data) return null;
 
     return (
@@ -1209,6 +1231,15 @@ export class CombatSystem extends SystemBase {
     // Get arrow strength bonus
     const arrowStrength = ammunitionService.getArrowStrengthBonus(arrowSlot);
 
+    // DEBUG: Log all relevant values
+    console.log(`[CombatSystem] RANGED DEBUG for ${attackerId}:`, {
+      rangedLevel,
+      equipmentStatsExists: !!equipmentStats,
+      equipmentRangedStrength: equipmentStats?.rangedStrength,
+      arrowSlotItemId: arrowSlot?.itemId,
+      arrowStrengthFromService: arrowStrength,
+    });
+
     // Get target stats
     const targetDefenseLevel =
       targetType === "mob" && isMobEntity(target)
@@ -1228,11 +1259,14 @@ export class CombatSystem extends SystemBase {
         ? prayerSystem?.getCombinedBonuses(String(target.id))
         : undefined;
 
+    // NOTE: equipmentStats.rangedStrength already includes arrow strength from EquipmentSystem
+    // Do NOT add arrowStrength separately as that would double-count it
+    const rangedStrengthBonus = equipmentStats?.rangedStrength ?? arrowStrength;
+
     const params: RangedDamageParams = {
       rangedLevel,
       rangedAttackBonus: equipmentStats?.rangedAttack ?? 0,
-      rangedStrengthBonus:
-        (equipmentStats?.rangedStrength ?? 0) + arrowStrength,
+      rangedStrengthBonus,
       style: "accurate" as RangedCombatStyle,
       targetDefenseLevel,
       targetRangedDefenseBonus: targetRangedDefense,
@@ -1240,7 +1274,19 @@ export class CombatSystem extends SystemBase {
       targetPrayerBonuses: defenderPrayer,
     };
 
+    // Debug logging for ranged damage calculation
+    console.log(`[CombatSystem] Ranged damage params:`, {
+      rangedLevel,
+      rangedAttackBonus: equipmentStats?.rangedAttack ?? 0,
+      rangedStrengthBonus,
+      arrowStrength,
+      targetDefenseLevel,
+    });
+
     const result = calculateRangedDamage(params, getGameRng());
+    console.log(
+      `[CombatSystem] Ranged damage result: damage=${result.damage}, maxHit=${result.maxHit}, hitChance=${result.hitChance}`,
+    );
     return result.damage;
   }
 
@@ -1706,7 +1752,7 @@ export class CombatSystem extends SystemBase {
           );
         }
 
-        // If not in melee range, also emit follow event to trigger movement
+        // If not in attack range, also emit follow event to trigger movement
         // Movement will update rotation to face movement direction
         if (targetType === "player" && attackerEntity && targetEntity) {
           const attackerPos = getEntityPosition(attackerEntity);
@@ -1715,13 +1761,27 @@ export class CombatSystem extends SystemBase {
           if (attackerPos && targetPos) {
             const attackerTile = worldToTile(attackerPos.x, attackerPos.z);
             const targetTile = worldToTile(targetPos.x, targetPos.z);
-            const inMeleeRange = tilesWithinMeleeRange(
-              targetTile,
-              attackerTile,
-              1,
+
+            // Get target player's attack type and range (they are retaliating)
+            const targetAttackType = this.getAttackTypeFromWeapon(
+              String(targetId),
+            );
+            const targetCombatRange = this.entityResolver.getCombatRange(
+              targetEntity,
+              "player",
             );
 
-            if (!inMeleeRange) {
+            // Use appropriate range check based on attack type
+            const inRange =
+              targetAttackType === AttackType.MELEE
+                ? tilesWithinMeleeRange(
+                    targetTile,
+                    attackerTile,
+                    targetCombatRange,
+                  )
+                : tilesWithinRange(targetTile, attackerTile, targetCombatRange);
+
+            if (!inRange) {
               // Not in range - emit follow event to trigger movement
               this.emitTypedEvent(EventType.COMBAT_FOLLOW_TARGET, {
                 playerId: String(targetId),
@@ -1731,6 +1791,8 @@ export class CombatSystem extends SystemBase {
                   y: attackerPos.y,
                   z: attackerPos.z,
                 },
+                attackRange: targetCombatRange,
+                attackType: targetAttackType,
               });
             }
           }
@@ -2505,14 +2567,29 @@ export class CombatSystem extends SystemBase {
       combatState.attackerType,
     );
 
-    // OSRS-accurate melee range check (cardinal-only for range 1)
-    if (
-      !tilesWithinMeleeRange(
-        this._attackerTile,
-        this._targetTile,
-        combatRangeTiles,
-      )
-    ) {
+    // Get attack type for proper range checking (players may use ranged/magic)
+    const attackType =
+      combatState.attackerType === "player"
+        ? this.getAttackTypeFromWeapon(attackerId)
+        : AttackType.MELEE;
+
+    // OSRS-accurate range check:
+    // - MELEE: Cardinal-only for range 1 (using tilesWithinMeleeRange)
+    // - RANGED/MAGIC: Chebyshev distance (can attack diagonally)
+    const inRange =
+      attackType === AttackType.MELEE
+        ? tilesWithinMeleeRange(
+            this._attackerTile,
+            this._targetTile,
+            combatRangeTiles,
+          )
+        : tilesWithinRange(
+            this._attackerTile,
+            this._targetTile,
+            combatRangeTiles,
+          );
+
+    if (!inRange) {
       // Out of range - follow the target
       // Note: If player clicked away, their combat would already be ended by
       // COMBAT_PLAYER_DISENGAGE event (OSRS-accurate: clicking cancels action)
@@ -2525,7 +2602,8 @@ export class CombatSystem extends SystemBase {
         playerId: attackerId,
         targetId: targetId,
         targetPosition: { x: targetPos.x, y: targetPos.y, z: targetPos.z },
-        meleeRange: combatRangeTiles, // Pass range for OSRS-accurate pathfinding
+        attackRange: combatRangeTiles,
+        attackType: attackType,
       });
     }
   }
@@ -2890,12 +2968,30 @@ export class CombatSystem extends SystemBase {
     if (!actors) return;
     const { attacker, target } = actors;
 
-    // Step 2: Validate attack range
+    // Step 1.5: Check attack type for players - route ranged/magic to their handlers
+    // These attacks are handled via projectiles, not direct damage
+    if (combatState.attackerType === "player") {
+      const attackType = this.getAttackTypeFromWeapon(attackerId);
+      if (attackType === AttackType.RANGED || attackType === AttackType.MAGIC) {
+        // Route to the appropriate handler which creates projectiles
+        this.handleAttack({
+          attackerId,
+          targetId,
+          attackerType: "player",
+          targetType: combatState.targetType,
+        });
+        // Update next attack tick
+        combatState.nextAttackTick = tickNumber + combatState.attackSpeedTicks;
+        return;
+      }
+    }
+
+    // Step 2: Validate attack range (melee only from here)
     if (!this.validateAttackRange(attacker, target, combatState.attackerType)) {
       return;
     }
 
-    // Step 3: Execute attack (rotation, animation, damage)
+    // Step 3: Execute melee attack (rotation, animation, damage)
     const damage = this.executeAttackDamage(
       attackerId,
       targetId,

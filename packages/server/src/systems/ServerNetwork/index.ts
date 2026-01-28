@@ -107,6 +107,7 @@ import {
   handlePrayerDeactivateAll,
   handleAltarPray,
 } from "./handlers/prayer";
+import { handleSetAutocast } from "./handlers/magic";
 import { handleResourceGather } from "./handlers/resources";
 import {
   handleActionBarSave,
@@ -1160,14 +1161,17 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         playerId: string;
         targetId: string;
         targetPosition: { x: number; y: number; z: number };
-        meleeRange?: number;
+        attackRange?: number;
+        attackType?: AttackType;
       };
-      // Use OSRS-style melee pathfinding (cardinal-only for range 1)
+      // Use OSRS-style pathfinding with appropriate range and type
+      // MELEE: Cardinal-only for range 1, RANGED/MAGIC: Chebyshev distance
       this.tileMovementManager.movePlayerToward(
         followEvent.playerId,
         followEvent.targetPosition,
         true, // Run toward target
-        followEvent.meleeRange ?? 1, // Default to standard melee range
+        followEvent.attackRange ?? 1, // Default to standard melee range
+        followEvent.attackType ?? AttackType.MELEE, // Default to melee if not specified
       );
     });
 
@@ -1752,6 +1756,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           targetId,
           this.world.currentTick,
           attackRange,
+          "mob",
+          attackType,
         );
       }
     };
@@ -1832,6 +1838,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           this.world.currentTick,
           attackRange,
           "player", // PvP target type
+          attackType,
         );
       }
     };
@@ -1913,6 +1920,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.handlers["onAltarPray"] = (socket, data) =>
       handleAltarPray(socket, data, this.world);
     this.handlers["altarPray"] = this.handlers["onAltarPray"];
+
+    // Magic handlers
+    this.handlers["onSetAutocast"] = (socket, data) =>
+      handleSetAutocast(socket, data, this.world);
+    this.handlers["setAutocast"] = this.handlers["onSetAutocast"];
 
     // Action bar handlers
     this.handlers["onActionBarSave"] = (socket, data) =>
@@ -3065,11 +3077,21 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   }
 
   /**
-   * Get player's weapon attack range in tiles
-   * Uses equipment system to get equipped weapon's attackRange from manifest
+   * Get player's attack range in tiles
+   * Spell selection takes priority (magic range = 10)
+   * Otherwise uses equipped weapon's attackRange from manifest
    * Returns 1 for unarmed (punching)
    */
   getPlayerWeaponRange(playerId: string): number {
+    // Check if player has a spell selected - if so, use magic range regardless of weapon
+    const playerEntity = this.world.getPlayer?.(playerId);
+    const selectedSpell = (playerEntity?.data as { selectedSpell?: string })
+      ?.selectedSpell;
+
+    if (selectedSpell) {
+      return 10; // Standard magic attack range
+    }
+
     const equipmentSystem = this.world.getSystem("equipment") as
       | {
           getPlayerEquipment?: (id: string) => {
@@ -3104,10 +3126,22 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   }
 
   /**
-   * Get the attack type from the player's equipped weapon
-   * Returns AttackType.MELEE if no weapon or melee weapon equipped
+   * Get the attack type from the player's equipped weapon or selected spell
+   * Returns AttackType.MELEE if no weapon or melee weapon equipped and no spell selected
+   *
+   * OSRS-accurate: You can cast spells without a staff - the staff just provides
+   * magic attack bonus and elemental staves give infinite runes
    */
   getPlayerAttackType(playerId: string): AttackType {
+    // Check if player has a spell selected - if so, use magic regardless of weapon
+    const playerEntity = this.world.getPlayer?.(playerId);
+    const selectedSpell = (playerEntity?.data as { selectedSpell?: string })
+      ?.selectedSpell;
+
+    if (selectedSpell) {
+      return AttackType.MAGIC;
+    }
+
     const equipmentSystem = this.world.getSystem("equipment") as
       | {
           getPlayerEquipment?: (id: string) => {

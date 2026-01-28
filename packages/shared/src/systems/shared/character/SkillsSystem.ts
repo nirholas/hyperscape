@@ -766,10 +766,22 @@ export class SkillsSystem extends SystemBase {
       }
 
       case "ranged":
-        // Train Ranged only
+      case "rapid":
+      case "longrange":
+        // Train Ranged only (all ranged styles)
         this.emitTypedEvent(EventType.SKILLS_XP_GAINED, {
           playerId: attackerId,
           skill: Skill.RANGE,
+          amount: combatSkillXP,
+        });
+        break;
+
+      case "magic":
+      case "autocast":
+        // Train Magic only
+        this.emitTypedEvent(EventType.SKILLS_XP_GAINED, {
+          playerId: attackerId,
+          skill: Skill.MAGIC,
           amount: combatSkillXP,
         });
         break;

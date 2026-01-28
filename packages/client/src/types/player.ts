@@ -12,7 +12,11 @@ import type { Item } from "@hyperscape/shared";
 /**
  * Raw equipment slot format from server network cache
  */
-export type RawEquipmentSlot = { item: Item | null; itemId?: string } | null;
+export type RawEquipmentSlot = {
+  item: Item | null;
+  itemId?: string;
+  quantity?: number; // For stackable items like arrows
+} | null;
 
 /**
  * Raw equipment data structure from server network cache

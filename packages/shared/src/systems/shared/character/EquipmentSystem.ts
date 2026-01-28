@@ -359,6 +359,10 @@ export class EquipmentSystem extends SystemBase {
         defense: 0,
         ranged: 0,
         constitution: 0,
+        rangedAttack: 0,
+        rangedStrength: 0,
+        magicAttack: 0,
+        magicDefense: 0,
       },
     };
 
@@ -408,6 +412,8 @@ export class EquipmentSystem extends SystemBase {
             // Keep itemId as STRING (matches database format)
             equipSlot.itemId = dbItem.itemId;
             equipSlot.item = itemData;
+            // Load quantity for stackable items (like arrows)
+            equipSlot.quantity = dbItem.quantity ?? 1;
           }
         }
       }
@@ -494,6 +500,8 @@ export class EquipmentSystem extends SystemBase {
           // Keep itemId as STRING (matches database format)
           equipSlot.itemId = dbItem.itemId;
           equipSlot.item = itemData;
+          // Load quantity for stackable items (like arrows)
+          equipSlot.quantity = dbItem.quantity ?? 1;
         }
       }
     }
@@ -594,7 +602,7 @@ export class EquipmentSystem extends SystemBase {
           dbEquipment.push({
             slotType: slot,
             itemId: String(typedSlot.itemId),
-            quantity: 1,
+            quantity: typedSlot.quantity ?? 1,
           });
         }
       }
@@ -649,6 +657,10 @@ export class EquipmentSystem extends SystemBase {
       defense: 0,
       ranged: 0,
       constitution: 0,
+      rangedAttack: 0,
+      rangedStrength: 0,
+      magicAttack: 0,
+      magicDefense: 0,
     };
 
     // Emit UI update event
@@ -710,16 +722,17 @@ export class EquipmentSystem extends SystemBase {
     for (const slotName of EQUIPMENT_SLOT_NAMES) {
       const slot = equipment[slotName] as EquipmentSlot | null;
       if (slot && slot.itemId) {
-        // Collect item info BEFORE clearing
+        // Collect item info BEFORE clearing (use actual quantity for stackable items like arrows)
         clearedItems.push({
           itemId: String(slot.itemId),
           slot: slotName,
-          quantity: 1, // Equipment always has quantity 1
+          quantity: slot.quantity ?? 1,
         });
 
-        // Clear the slot atomically
+        // Clear the slot atomically (including quantity for stackable items)
         slot.itemId = null;
         slot.item = null;
+        slot.quantity = undefined;
         if (slot.visualMesh) {
           slot.visualMesh = undefined;
         }
@@ -740,6 +753,10 @@ export class EquipmentSystem extends SystemBase {
       defense: 0,
       ranged: 0,
       constitution: 0,
+      rangedAttack: 0,
+      rangedStrength: 0,
+      magicAttack: 0,
+      magicDefense: 0,
     };
 
     // Emit UI update event
@@ -963,11 +980,30 @@ export class EquipmentSystem extends SystemBase {
         return;
       }
 
+      // Get the full quantity from inventory for stackable items (like arrows)
+      let quantityToEquip = 1;
+      if (
+        itemData.stackable &&
+        inventorySystem &&
+        data.inventorySlot !== undefined
+      ) {
+        const inventory = inventorySystem.getInventory(data.playerId);
+        const invItem = inventory?.items.find(
+          (item) =>
+            item.slot === data.inventorySlot &&
+            item.itemId === String(data.itemId),
+        );
+        if (invItem) {
+          quantityToEquip = invItem.quantity;
+        }
+      }
+
       // DUPLICATION FIX: Remove from inventory FIRST, then equip
       // This ensures if removal fails, item is not duplicated
+      // For stackable items like arrows, remove the ENTIRE stack
       const removed = inventorySystem?.removeItemDirect(data.playerId, {
         itemId: String(data.itemId),
-        quantity: 1,
+        quantity: quantityToEquip,
         slot: data.inventorySlot,
       });
 
@@ -987,6 +1023,7 @@ export class EquipmentSystem extends SystemBase {
       // Now safe to equip - item has been removed from inventory
       equipmentSlot.itemId = data.itemId;
       equipmentSlot.item = itemData;
+      equipmentSlot.quantity = quantityToEquip;
 
       // Create visual representation
       this.createEquipmentVisual(data.playerId, equipmentSlot);
@@ -1053,6 +1090,7 @@ export class EquipmentSystem extends SystemBase {
     const itemName = equipmentSlot.item.name;
     const itemIdToAdd = equipmentSlot.itemId?.toString() || "";
     const itemData = equipmentSlot.item;
+    const quantityToReturn = equipmentSlot.quantity ?? 1;
 
     // DUPLICATION FIX: Check inventory has space FIRST
     const inventorySystem = this.world.getSystem<InventorySystem>("inventory");
@@ -1083,14 +1121,16 @@ export class EquipmentSystem extends SystemBase {
       // Remove visual representation
       this.removeEquipmentVisual(equipmentSlot);
 
-      // Clear equipment slot FIRST
+      // Clear equipment slot FIRST (including quantity)
       equipmentSlot.itemId = null;
       equipmentSlot.item = null;
+      equipmentSlot.quantity = undefined;
 
       // Now add back to inventory - use direct method for better error handling
+      // For stackable items like arrows, return the FULL quantity
       const added = inventorySystem?.addItemDirect(data.playerId, {
         itemId: itemIdToAdd,
-        quantity: 1,
+        quantity: quantityToReturn,
       });
 
       if (!added) {
@@ -1102,6 +1142,7 @@ export class EquipmentSystem extends SystemBase {
         );
         equipmentSlot.itemId = itemIdToAdd;
         equipmentSlot.item = itemData;
+        equipmentSlot.quantity = quantityToReturn;
         this.createEquipmentVisual(data.playerId, equipmentSlot);
         this.sendMessage(
           data.playerId,
@@ -1189,13 +1230,19 @@ export class EquipmentSystem extends SystemBase {
     const equipment = this.playerEquipment.get(playerId);
     if (!equipment) return;
 
-    // Reset stats
+    // Reset stats (including ranged/magic bonuses for F2P combat)
     equipment.totalStats = {
       attack: 0,
       strength: 0,
       defense: 0,
       ranged: 0,
       constitution: 0,
+      // Ranged bonuses (F2P)
+      rangedAttack: 0,
+      rangedStrength: 0,
+      // Magic bonuses (F2P)
+      magicAttack: 0,
+      magicDefense: 0,
     };
 
     // Add bonuses from each equipped item
@@ -1210,14 +1257,26 @@ export class EquipmentSystem extends SystemBase {
 
     slots.forEach((slot) => {
       if (slot.item) {
-        const bonuses = slot.item.bonuses || {};
+        const bonuses = slot.item.bonuses as Record<string, number> | undefined;
+        if (!bonuses) return;
 
-        Object.keys(equipment.totalStats).forEach((stat) => {
-          if (bonuses[stat]) {
-            equipment.totalStats[stat as keyof typeof equipment.totalStats] +=
-              bonuses[stat];
-          }
-        });
+        // Map simple bonuses (attack, strength, defense, ranged)
+        if (bonuses.attack) equipment.totalStats.attack += bonuses.attack;
+        if (bonuses.strength) equipment.totalStats.strength += bonuses.strength;
+        if (bonuses.defense) equipment.totalStats.defense += bonuses.defense;
+        if (bonuses.ranged) equipment.totalStats.ranged += bonuses.ranged;
+
+        // Map detailed ranged bonuses (attackRanged -> rangedAttack, rangedStrength)
+        if (bonuses.attackRanged)
+          equipment.totalStats.rangedAttack += bonuses.attackRanged;
+        if (bonuses.rangedStrength)
+          equipment.totalStats.rangedStrength += bonuses.rangedStrength;
+
+        // Map detailed magic bonuses (attackMagic -> magicAttack, defenseMagic -> magicDefense)
+        if (bonuses.attackMagic)
+          equipment.totalStats.magicAttack += bonuses.attackMagic;
+        if (bonuses.defenseMagic)
+          equipment.totalStats.magicDefense += bonuses.defenseMagic;
       }
     });
 
@@ -1749,13 +1808,15 @@ export class EquipmentSystem extends SystemBase {
     }
 
     const itemId = slot.itemId?.toString() || "";
+    const quantity = slot.quantity ?? 1;
 
     // Remove visual
     this.removeEquipmentVisual(slot);
 
-    // Clear slot
+    // Clear slot (including quantity)
     slot.itemId = null;
     slot.item = null;
+    slot.quantity = undefined;
 
     // Update stats
     this.recalculateStats(playerId);
@@ -1779,7 +1840,7 @@ export class EquipmentSystem extends SystemBase {
     // Save to database
     await this.saveEquipmentToDatabase(playerId);
 
-    return { success: true, itemId, quantity: 1 };
+    return { success: true, itemId, quantity };
   }
 
   /**
@@ -1807,7 +1868,7 @@ export class EquipmentSystem extends SystemBase {
         result.push({
           slot: slotName,
           itemId: slot.itemId.toString(),
-          quantity: 1,
+          quantity: slot.quantity ?? 1,
         });
       }
     }
@@ -1832,21 +1893,12 @@ export class EquipmentSystem extends SystemBase {
    */
   getArrowCount(playerId: string): number {
     const equipment = this.playerEquipment.get(playerId);
-    if (!equipment || !equipment.arrows?.item) return 0;
-
-    // Get arrow quantity from inventory system
-    const inventorySystem = this.world.getSystem("inventory") as
-      | import("./InventorySystem").InventorySystem
-      | undefined;
-    if (inventorySystem && equipment.arrows.itemId) {
-      const arrowCount = inventorySystem.getItemQuantity(
-        playerId,
-        equipment.arrows.itemId?.toString() || "",
-      );
-      return Math.max(0, arrowCount);
+    if (!equipment || !equipment.arrows?.item || !equipment.arrows.itemId) {
+      return 0;
     }
 
-    return (equipment.arrows as { quantity?: number }).quantity || 0;
+    // Arrows are stored directly in the equipment slot with quantity
+    return equipment.arrows.quantity ?? 0;
   }
 
   /**
@@ -1866,38 +1918,44 @@ export class EquipmentSystem extends SystemBase {
    */
   public async consumeArrow(playerId: string): Promise<boolean> {
     const equipment = this.playerEquipment.get(playerId);
-    if (!equipment || !equipment.arrows?.item) {
+    if (!equipment || !equipment.arrows?.item || !equipment.arrows.itemId) {
       return false;
     }
 
-    // Request inventory to remove arrow via typed event API
-    if (equipment.arrows.itemId) {
-      this.emitTypedEvent(EventType.INVENTORY_REMOVE_ITEM, {
-        playerId,
-        itemId: equipment.arrows.itemId?.toString() || "",
-        quantity: 1,
-      });
+    // Arrows are stored directly in equipment slot with quantity
+    const currentQuantity = equipment.arrows.quantity ?? 1;
 
-      {
-        // Update equipment quantity
-        const arrowsWithQuantity = equipment.arrows as { quantity?: number };
-        if (arrowsWithQuantity.quantity) {
-          arrowsWithQuantity.quantity = Math.max(
-            0,
-            arrowsWithQuantity.quantity - 1,
-          );
-        }
-
-        // If no arrows left, unequip the arrow slot
-        if (this.getArrowCount(playerId) === 0) {
-          await this.unequipItem({ playerId, slot: "arrows" });
-        }
-
-        return true;
-      }
+    if (currentQuantity <= 0) {
+      // No arrows left
+      await this.unequipItem({ playerId, slot: "arrows" });
+      return false;
     }
 
-    return false;
+    // Reduce quantity by 1
+    equipment.arrows.quantity = currentQuantity - 1;
+
+    // If no arrows left after consumption, clear the slot
+    if (equipment.arrows.quantity <= 0) {
+      // Clear the arrow slot
+      this.removeEquipmentVisual(equipment.arrows);
+      equipment.arrows.itemId = null;
+      equipment.arrows.item = null;
+      equipment.arrows.quantity = undefined;
+
+      // Notify client of equipment change
+      if (this.world.isServer && this.world.network?.send) {
+        const updatedEquipment = this.getPlayerEquipment(playerId);
+        this.world.network.send("equipmentUpdated", {
+          playerId,
+          equipment: updatedEquipment,
+        });
+      }
+
+      // Save to database
+      await this.saveEquipmentToDatabase(playerId);
+    }
+
+    return true;
   }
 
   /**

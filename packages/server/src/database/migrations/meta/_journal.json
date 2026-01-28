@@ -183,6 +183,13 @@
       "when": 1769368861084,
       "tag": "0025_thin_toad_men",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1769500000000,
+      "tag": "0026_add_magic_skill",
+      "breakpoints": true
     }
   ]
 }

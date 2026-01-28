@@ -335,6 +335,7 @@ const names = [
   // Skill/Spell ability packets
   'useSkill',            // Client -> Server: activate a skill ability
   'castSpell',           // Client -> Server: cast a spell (optionally on target)
+  'setAutocast',         // Client -> Server: set autocast spell (or null to disable)
   'skillActivated',      // Server -> Client: skill activation acknowledged
   'spellCast',           // Server -> Client: spell cast acknowledged
   'abilityCooldown',     // Server -> Client: ability cooldown update (skill or spell)

@@ -39,11 +39,22 @@ export function processRawEquipment(
 
   for (const [slot, slotData] of Object.entries(rawEquipment)) {
     if (slotData?.item) {
-      processedEquipment[slot as keyof PlayerEquipmentItems] = slotData.item;
+      // Copy item and include quantity from slot data (for stackable items like arrows)
+      const item = { ...slotData.item };
+      if (slotData.quantity !== undefined && slotData.quantity > 1) {
+        item.quantity = slotData.quantity;
+      }
+      processedEquipment[slot as keyof PlayerEquipmentItems] = item;
     } else if (slotData?.itemId) {
-      processedEquipment[slot as keyof PlayerEquipmentItems] = getItem(
-        slotData.itemId,
-      );
+      const baseItem = getItem(slotData.itemId);
+      if (baseItem) {
+        // Copy item and include quantity from slot data (for stackable items like arrows)
+        const item = { ...baseItem };
+        if (slotData.quantity !== undefined && slotData.quantity > 1) {
+          item.quantity = slotData.quantity;
+        }
+        processedEquipment[slot as keyof PlayerEquipmentItems] = item;
+      }
     }
   }
 

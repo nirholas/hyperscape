@@ -72,7 +72,9 @@ export function isMobSystem(system: unknown): system is MobSystemLike {
  */
 export interface EquipmentSystemLike {
   getPlayerEquipment: (playerId: string) => {
-    weapon?: { item?: { weaponType?: string; id?: string } };
+    weapon?: {
+      item?: { weaponType?: string; attackType?: string; id?: string };
+    };
   };
 }
 

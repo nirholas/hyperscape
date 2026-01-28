@@ -2946,6 +2946,11 @@ export class ClientNetwork extends SystemBase {
     this.send("altarPray", { altarId, timestamp: Date.now() });
   }
 
+  // Magic autocast actions
+  setAutocast(spellId: string | null) {
+    this.send("setAutocast", { spellId, timestamp: Date.now() });
+  }
+
   onEntityRemoved = (id: string) => {
     // Remove from interpolation tracking
     this.interpolationStates.delete(id);

@@ -527,5 +527,9 @@ export interface PlayerEquipment {
     defense: number;
     ranged: number;
     constitution: number;
+    rangedAttack: number;
+    rangedStrength: number;
+    magicAttack: number;
+    magicDefense: number;
   };
 }

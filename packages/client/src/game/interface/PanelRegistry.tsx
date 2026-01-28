@@ -34,6 +34,7 @@ import {
   ACTION_BAR_DIMENSIONS,
 } from "../../game/panels/ActionBarPanel";
 import { PRAYER_PANEL_DIMENSIONS } from "../../game/panels/PrayerPanel";
+import { SPELLS_PANEL_DIMENSIONS } from "../../game/panels/SpellsPanel";
 import {
   PresetPanel,
   AccessibilityPanel,
@@ -189,8 +190,8 @@ export function getResponsivePanelSize(
 
 // Menu bar configuration constants (similar to ActionBarPanel)
 const MENUBAR_MIN_BUTTONS = 4;
-const MENUBAR_MAX_BUTTONS = 9; // ALL_MENU_BUTTONS.length - defined inline to avoid circular reference
-const MENUBAR_DEFAULT_BUTTONS = 9;
+const MENUBAR_MAX_BUTTONS = 10; // ALL_MENU_BUTTONS.length - defined inline to avoid circular reference
+const MENUBAR_DEFAULT_BUTTONS = 10;
 
 // Special panel IDs that open modals instead of windows
 export const MODAL_PANEL_IDS = ["map", "stats", "death"] as const;
@@ -463,6 +464,38 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
       drawerHeight: "compact",
       landscapePosition: "left",
       compact: true,
+    },
+  },
+  // Spells - magic spellbook with spell grid
+  spells: {
+    minSize: {
+      width: SPELLS_PANEL_DIMENSIONS.minWidth,
+      height: SPELLS_PANEL_DIMENSIONS.minHeight,
+    },
+    preferredSize: {
+      width: SPELLS_PANEL_DIMENSIONS.defaultWidth,
+      height: SPELLS_PANEL_DIMENSIONS.defaultHeight,
+    },
+    maxSize: {
+      width: SPELLS_PANEL_DIMENSIONS.maxWidth,
+      height: SPELLS_PANEL_DIMENSIONS.maxHeight,
+    },
+    scrollable: false,
+    resizable: true,
+    scaleFactor: { min: 0.85, max: 1.15 },
+    responsive: {
+      mobile: { width: 200, height: 280 },
+      tablet: { width: 210, height: 300 },
+      desktop: {
+        width: SPELLS_PANEL_DIMENSIONS.defaultWidth,
+        height: SPELLS_PANEL_DIMENSIONS.defaultHeight,
+      },
+    },
+    mobileLayout: {
+      drawerType: "sheet",
+      drawerHeight: "half",
+      landscapePosition: "right",
+      gridColumns: 4,
     },
   },
   // Settings - toggles and sliders, panel handles own scrolling
@@ -909,6 +942,7 @@ const ALL_MENU_BUTTONS: Array<{
   { panelId: "equipment", iconName: "equipment", label: "Equipment" },
   { panelId: "skills", iconName: "skills", label: "Skills" },
   { panelId: "prayer", iconName: "prayer", label: "Prayer" },
+  { panelId: "spells", iconName: "spells", label: "Spells" },
   { panelId: "combat", iconName: "combat", label: "Combat" },
   { panelId: "quests", iconName: "quests", label: "Quests" },
   { panelId: "friends", iconName: "friends", label: "Friends" },
@@ -1312,6 +1346,11 @@ const PrayerPanel = lazy(() =>
     default: m.PrayerPanel,
   })),
 );
+const SpellsPanel = lazy(() =>
+  import("../../game/panels/SpellsPanel").then((m) => ({
+    default: m.SpellsPanel,
+  })),
+);
 
 /** Panel loading fallback */
 function PanelLoadingFallback(): React.ReactElement {
@@ -1364,6 +1403,8 @@ function getPanelIcon(panelId: string): string {
     equipment: "🎽",
     stats: "📊",
     skills: "⭐",
+    prayer: "✨",
+    spells: "🔮",
     combat: "⚔️",
     settings: "⚙️",
     bank: "🏦",
@@ -1511,6 +1552,15 @@ export function createPanelRenderer(
           <ScrollablePanelWrapper scrollable={config.scrollable}>
             <Suspense fallback={<PanelLoadingFallback />}>
               <PrayerPanel stats={stats} world={world} />
+            </Suspense>
+          </ScrollablePanelWrapper>
+        );
+
+      case "spells":
+        return (
+          <ScrollablePanelWrapper scrollable={config.scrollable}>
+            <Suspense fallback={<PanelLoadingFallback />}>
+              <SpellsPanel stats={stats} world={world} />
             </Suspense>
           </ScrollablePanelWrapper>
         );
@@ -1704,6 +1754,7 @@ export function getAvailablePanels(): Array<{
     { id: "stats", label: "Stats", icon: "📊", implemented: true },
     { id: "skills", label: "Skills", icon: "⭐", implemented: true },
     { id: "prayer", label: "Prayer", icon: "✨", implemented: true },
+    { id: "spells", label: "Spells", icon: "🔮", implemented: true },
     { id: "combat", label: "Combat", icon: "⚔️", implemented: true },
     { id: "settings", label: "Settings", icon: "⚙️", implemented: true },
     { id: "bank", label: "Bank", icon: "🏦", implemented: true },

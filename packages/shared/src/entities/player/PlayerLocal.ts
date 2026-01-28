@@ -935,6 +935,8 @@ export class PlayerLocal extends Entity implements HotReloadable {
             run: Emotes.RUN,
             combat: Emotes.COMBAT,
             sword_swing: Emotes.SWORD_SWING,
+            range: Emotes.RANGE,
+            spell_cast: Emotes.SPELL_CAST,
             chopping: Emotes.CHOPPING,
             mining: Emotes.CHOPPING, // Use chopping animation for mining (temporary)
             fishing: Emotes.FISHING,

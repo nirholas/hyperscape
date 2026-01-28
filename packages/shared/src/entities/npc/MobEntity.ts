@@ -2401,13 +2401,76 @@ export class MobEntity extends CombatantEntity {
       });
 
       // Emit COMBAT_KILL event for SkillsSystem to grant combat XP
-      // Get the player's actual attack style from PlayerSystem
+      // Determine attack style based on weapon type (ranged/magic override melee styles)
+      const equipmentSystem = this.world.getSystem("equipment") as {
+        getPlayerEquipment?: (playerId: string) => {
+          weapon?: { item?: { weaponType?: string; attackType?: string } };
+        } | null;
+      } | null;
       const playerSystem = this.world.getSystem("player") as {
         getPlayerAttackStyle?: (playerId: string) => { id: string } | null;
       } | null;
-      const attackStyleData =
-        playerSystem?.getPlayerAttackStyle?.(lastAttackerId);
-      const attackStyle = attackStyleData?.id || "aggressive"; // Default to aggressive if not found
+
+      // Check equipped weapon type to determine if using ranged/magic
+      const equipment = equipmentSystem?.getPlayerEquipment?.(lastAttackerId);
+      const weapon = equipment?.weapon?.item;
+      let attackStyle = "aggressive"; // Default
+
+      // Debug logging for XP assignment
+      console.log(
+        `[MobEntity] XP Debug - attacker: ${lastAttackerId}, weapon:`,
+        weapon
+          ? { weaponType: weapon.weaponType, attackType: weapon.attackType }
+          : "none",
+      );
+
+      if (weapon) {
+        // Check attackType first (preferred), then weaponType (legacy)
+        // Values may be uppercase (from JSON) or lowercase (from enum)
+        const attackType = weapon.attackType?.toLowerCase();
+        const weaponType = weapon.weaponType?.toLowerCase();
+
+        if (
+          attackType === "ranged" ||
+          weaponType === "bow" ||
+          weaponType === "crossbow"
+        ) {
+          // Ranged weapon - use "ranged" style for Ranged XP
+          attackStyle = "ranged";
+        } else if (
+          attackType === "magic" ||
+          weaponType === "staff" ||
+          weaponType === "wand"
+        ) {
+          // Magic weapon - use "magic" style for Magic XP
+          attackStyle = "magic";
+        } else {
+          // Melee weapon - use player's selected melee attack style
+          const attackStyleData =
+            playerSystem?.getPlayerAttackStyle?.(lastAttackerId);
+          attackStyle = attackStyleData?.id || "aggressive";
+        }
+      } else {
+        // No weapon (unarmed) - check if player has a spell selected
+        // OSRS-accurate: You can cast spells without a staff
+        const playerEntity = this.world.getPlayer?.(lastAttackerId);
+        const selectedSpell = (playerEntity?.data as { selectedSpell?: string })
+          ?.selectedSpell;
+
+        if (selectedSpell) {
+          // Player has a spell selected - use "magic" for Magic XP
+          attackStyle = "magic";
+        } else {
+          // No spell, no weapon - use player's melee attack style
+          const attackStyleData =
+            playerSystem?.getPlayerAttackStyle?.(lastAttackerId);
+          attackStyle = attackStyleData?.id || "aggressive";
+        }
+      }
+
+      console.log(
+        `[MobEntity] XP Debug - determined attackStyle: ${attackStyle}`,
+      );
 
       this.world.emit(EventType.COMBAT_KILL, {
         attackerId: lastAttackerId,

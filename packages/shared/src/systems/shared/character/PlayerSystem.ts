@@ -2104,16 +2104,23 @@ export class PlayerSystem extends SystemBase {
   }): void {
     const { playerId, spellId } = data;
 
-    // Validate player exists
+    // Validate player exists in PlayerSystem's internal map
     const player = this.players.get(playerId);
     if (!player) {
       this.logger.warn(`Set autocast rejected: unknown player ${playerId}`);
       return;
     }
 
-    // Update player entity data
+    // Update player entity data on PlayerSystem's internal player
     if (player.data) {
       (player.data as { selectedSpell?: string | null }).selectedSpell =
+        spellId;
+    }
+
+    // ALSO update on Entities.players (used by CombatSystem via world.getPlayer())
+    const entitiesPlayer = this.world.getPlayer?.(playerId);
+    if (entitiesPlayer?.data) {
+      (entitiesPlayer.data as { selectedSpell?: string | null }).selectedSpell =
         spellId;
     }
 

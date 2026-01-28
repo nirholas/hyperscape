@@ -20,7 +20,9 @@ import {
   worldToTile,
   worldToTileInto,
   tilesWithinMeleeRange,
+  tilesWithinRange,
   EventType,
+  AttackType,
 } from "@hyperscape/shared";
 import type { TileMovementManager } from "./tile-movement";
 
@@ -31,8 +33,10 @@ interface PendingAttack {
   targetType: "mob" | "player";
   /** Last tile we pathed toward (to detect when target moves) */
   lastTargetTile: { x: number; z: number } | null;
-  /** Weapon melee range in tiles (1 = standard melee/unarmed, 2 = halberd) */
-  meleeRange: number;
+  /** Weapon attack range in tiles (1 = standard melee/unarmed, 2 = halberd, 10 = ranged/magic) */
+  attackRange: number;
+  /** Attack type: melee uses cardinal-only for range 1, ranged/magic use Chebyshev distance */
+  attackType: AttackType;
 }
 
 export class PendingAttackManager {
@@ -62,17 +66,19 @@ export class PendingAttackManager {
    * Queue a pending attack for a player
    * Called when player clicks target but is not in range
    *
-   * OSRS: When clicking an NPC/player, pathfinding targets all tiles within melee range
+   * OSRS: When clicking an NPC/player, pathfinding targets all tiles within attack range
    *
-   * @param meleeRange - Weapon's melee range (1 = standard/unarmed, 2 = halberd)
+   * @param attackRange - Weapon's attack range (1 = standard melee/unarmed, 2 = halberd, 10 = ranged/magic)
    * @param targetType - "mob" for PvE, "player" for PvP
+   * @param attackType - Type of attack: MELEE, RANGED, or MAGIC
    */
   queuePendingAttack(
     playerId: string,
     targetId: string,
     _currentTick: number,
-    meleeRange: number = 1,
+    attackRange: number = 1,
     targetType: "mob" | "player" = "mob",
+    attackType: AttackType = AttackType.MELEE,
   ): void {
     // Cancel any existing pending attack
     this.cancelPendingAttack(playerId);
@@ -89,15 +95,17 @@ export class PendingAttackManager {
       targetId,
       targetType,
       lastTargetTile: { x: targetTile.x, z: targetTile.z },
-      meleeRange,
+      attackRange,
+      attackType,
     });
 
-    // Immediately start moving toward target using OSRS melee pathfinding
+    // Immediately start moving toward target using appropriate pathfinding
     this.tileMovementManager.movePlayerToward(
       playerId,
       targetPos,
       true,
-      meleeRange,
+      attackRange,
+      attackType,
     );
   }
 
@@ -198,23 +206,31 @@ export class PendingAttackManager {
       worldToTileInto(playerPos.x, playerPos.z, this._playerTile);
       worldToTileInto(targetPos.x, targetPos.z, this._targetTile);
 
-      // OSRS-accurate melee range check:
-      // - Range 1: Cardinal only (N/S/E/W)
-      // - Range 2+: Allows diagonal (Chebyshev distance)
-      if (
-        tilesWithinMeleeRange(
-          this._playerTile,
-          this._targetTile,
-          pending.meleeRange,
-        )
-      ) {
+      // OSRS-accurate range check:
+      // - Melee range 1: Cardinal only (N/S/E/W)
+      // - Melee range 2+: Allows diagonal (Chebyshev distance)
+      // - Ranged/Magic: Always use Chebyshev distance
+      const inRange =
+        pending.attackType === AttackType.MELEE
+          ? tilesWithinMeleeRange(
+              this._playerTile,
+              this._targetTile,
+              pending.attackRange,
+            )
+          : tilesWithinRange(
+              this._playerTile,
+              this._targetTile,
+              pending.attackRange,
+            );
+
+      if (inRange) {
         // In range! Start combat (use correct targetType for PvP/PvE)
         this.world.emit(EventType.COMBAT_ATTACK_REQUEST, {
           playerId,
           targetId: pending.targetId,
           attackerType: "player",
           targetType: pending.targetType,
-          attackType: "melee",
+          attackType: pending.attackType,
         });
 
         // Remove pending attack
@@ -229,12 +245,13 @@ export class PendingAttackManager {
         pending.lastTargetTile.x !== this._targetTile.x ||
         pending.lastTargetTile.z !== this._targetTile.z
       ) {
-        // Target moved - re-path using OSRS melee pathfinding
+        // Target moved - re-path toward target
         this.tileMovementManager.movePlayerToward(
           playerId,
           targetPos,
           true,
-          pending.meleeRange,
+          pending.attackRange,
+          pending.attackType,
         );
         // Zero-allocation: reuse or create lastTargetTile
         if (!pending.lastTargetTile) {
@@ -283,21 +300,28 @@ export class PendingAttackManager {
     worldToTileInto(playerPos.x, playerPos.z, this._playerTile);
     worldToTileInto(targetPos.x, targetPos.z, this._targetTile);
 
-    // OSRS-accurate melee range check
-    if (
-      tilesWithinMeleeRange(
-        this._playerTile,
-        this._targetTile,
-        pending.meleeRange,
-      )
-    ) {
+    // OSRS-accurate range check based on attack type
+    const inRange =
+      pending.attackType === AttackType.MELEE
+        ? tilesWithinMeleeRange(
+            this._playerTile,
+            this._targetTile,
+            pending.attackRange,
+          )
+        : tilesWithinRange(
+            this._playerTile,
+            this._targetTile,
+            pending.attackRange,
+          );
+
+    if (inRange) {
       // In range! Start combat (use correct targetType for PvP/PvE)
       this.world.emit(EventType.COMBAT_ATTACK_REQUEST, {
         playerId,
         targetId: pending.targetId,
         attackerType: "player",
         targetType: pending.targetType,
-        attackType: "melee",
+        attackType: pending.attackType,
       });
 
       // Remove pending attack
@@ -311,12 +335,13 @@ export class PendingAttackManager {
       pending.lastTargetTile.x !== this._targetTile.x ||
       pending.lastTargetTile.z !== this._targetTile.z
     ) {
-      // Target moved - re-path using OSRS melee pathfinding
+      // Target moved - re-path toward target
       this.tileMovementManager.movePlayerToward(
         playerId,
         targetPos,
         true,
-        pending.meleeRange,
+        pending.attackRange,
+        pending.attackType,
       );
       // Zero-allocation: reuse or create lastTargetTile
       if (!pending.lastTargetTile) {

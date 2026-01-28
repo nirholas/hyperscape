@@ -18,6 +18,7 @@ import {
   World,
   EventType,
   DeathState,
+  AttackType,
   // Tile movement utilities
   TILES_PER_TICK_WALK,
   TILES_PER_TICK_RUN,
@@ -26,7 +27,9 @@ import {
   tileToWorld,
   tilesEqual,
   tilesWithinMeleeRange,
+  tilesWithinRange,
   getBestMeleeTile,
+  getBestCombatRangeTile,
   createTileMovementState,
   BFSPathfinder,
   // Collision system
@@ -985,15 +988,17 @@ export class TileMovementManager {
    * Used for combat follow when target moves out of range
    *
    * OSRS-style pathfinding (from wiki):
-   * - When clicking on an NPC, the requested tiles are all tiles within melee range
+   * - When clicking on an NPC, the requested tiles are all tiles within attack range
    * - BFS finds the CLOSEST valid tile among those options
-   * - For range 1 melee: only cardinal tiles (N/S/E/W) are valid destinations
+   * - For melee range 1: only cardinal tiles (N/S/E/W) are valid destinations
+   * - For ranged/magic: Chebyshev distance to any tile within range
    * - Pathfinding recalculates every tick until target tile is found
    *
    * @param playerId - The player to move
    * @param targetPosition - Target position in world coordinates
    * @param running - Whether to run (default: true for combat following)
-   * @param meleeRange - Weapon's melee range (1 = standard, 2 = halberd, 0 = non-combat)
+   * @param attackRange - Weapon's attack range (1 = standard melee, 2 = halberd, 10 = ranged/magic, 0 = non-combat)
+   * @param attackType - Attack type (MELEE, RANGED, MAGIC) - affects positioning logic
    *
    * @see https://oldschool.runescape.wiki/w/Pathfinding
    */
@@ -1001,7 +1006,8 @@ export class TileMovementManager {
     playerId: string,
     targetPosition: { x: number; y: number; z: number },
     running: boolean = true,
-    meleeRange: number = 0, // 0 = non-combat, 1+ = melee combat range
+    attackRange: number = 0, // 0 = non-combat, 1+ = combat range
+    attackType: AttackType = AttackType.MELEE,
   ): void {
     const entity = this.world.entities.get(playerId);
     if (!entity) {
@@ -1034,28 +1040,55 @@ export class TileMovementManager {
     // Determine destination tile based on combat or non-combat movement
     let destinationTile: TileCoord;
 
-    if (meleeRange > 0) {
-      // COMBAT MOVEMENT: Use OSRS-accurate melee positioning
-      // Check if already in valid melee range (cardinal-only for range 1)
-      if (
-        tilesWithinMeleeRange(state.currentTile, this._targetTile, meleeRange)
-      ) {
-        return; // Already in position, no movement needed
+    if (attackRange > 0) {
+      // COMBAT MOVEMENT: Use appropriate positioning based on attack type
+      if (attackType === AttackType.RANGED || attackType === AttackType.MAGIC) {
+        // RANGED/MAGIC: Use Chebyshev distance - stop when within attack range
+        if (
+          tilesWithinRange(state.currentTile, this._targetTile, attackRange)
+        ) {
+          return; // Already in position, no movement needed
+        }
+
+        // Find best tile within attack range
+        const combatTile = getBestCombatRangeTile(
+          this._targetTile,
+          state.currentTile,
+          attackRange,
+          (tile) => this.isTileWalkable(tile),
+        );
+
+        if (!combatTile) {
+          return; // No valid combat position found
+        }
+
+        destinationTile = combatTile;
+      } else {
+        // MELEE: Use OSRS-accurate melee positioning (cardinal-only for range 1)
+        if (
+          tilesWithinMeleeRange(
+            state.currentTile,
+            this._targetTile,
+            attackRange,
+          )
+        ) {
+          return; // Already in position, no movement needed
+        }
+
+        // Find best melee tile (cardinal-only for range 1, diagonal allowed for range 2+)
+        const meleeTile = getBestMeleeTile(
+          this._targetTile,
+          state.currentTile,
+          attackRange,
+          (tile) => this.isTileWalkable(tile),
+        );
+
+        if (!meleeTile) {
+          return; // No valid melee position found
+        }
+
+        destinationTile = meleeTile;
       }
-
-      // Find best melee tile (cardinal-only for range 1, diagonal allowed for range 2+)
-      const meleeTile = getBestMeleeTile(
-        this._targetTile,
-        state.currentTile,
-        meleeRange,
-        (tile) => this.isTileWalkable(tile),
-      );
-
-      if (!meleeTile) {
-        return; // No valid melee position found
-      }
-
-      destinationTile = meleeTile;
     } else {
       // NON-COMBAT MOVEMENT: Go directly to target tile
       if (tilesEqual(this._targetTile, state.currentTile)) {

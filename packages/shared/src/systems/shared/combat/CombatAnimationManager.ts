@@ -141,8 +141,34 @@ export class CombatAnimationManager {
 
       if (equipment?.weapon?.item) {
         const weaponItem = equipment.weapon.item;
-        if (weaponItem.weaponType === "SWORD") {
+        // Normalize to lowercase for comparison (JSON may have uppercase values)
+        const weaponType =
+          weaponItem.weaponType?.toLowerCase?.() ?? weaponItem.weaponType;
+        const attackType =
+          weaponItem.attackType?.toLowerCase?.() ?? weaponItem.attackType;
+
+        if (
+          attackType === "magic" ||
+          weaponType === "staff" ||
+          weaponType === "wand"
+        ) {
+          combatEmote = "spell_cast";
+        } else if (weaponType === "sword") {
           combatEmote = "sword_swing";
+        } else if (
+          weaponType === "bow" ||
+          weaponType === "crossbow" ||
+          attackType === "ranged"
+        ) {
+          combatEmote = "range";
+        }
+      } else {
+        // No weapon equipped - check if player has a spell selected (unarmed casting)
+        const selectedSpell = (
+          playerEntity as { data?: { selectedSpell?: string } }
+        )?.data?.selectedSpell;
+        if (selectedSpell) {
+          combatEmote = "spell_cast";
         }
       }
     }

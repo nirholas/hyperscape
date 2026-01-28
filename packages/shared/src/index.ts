@@ -131,7 +131,12 @@ export { EventType } from "./types/events";
 export { PlayerMigration } from "./types/core/core";
 
 // Export enums (these are values, not types)
-export { WeaponType, EquipmentSlotName } from "./types/core/core";
+export {
+  WeaponType,
+  EquipmentSlotName,
+  AttackType,
+  ItemType,
+} from "./types/core/core";
 
 // Export DeathState enum for death/respawn system
 export { DeathState } from "./types/entities/entities";
@@ -368,6 +373,10 @@ export type {
 
 // Export prayer data provider for UI panels
 export { prayerDataProvider } from "./data/PrayerDataProvider";
+
+// Export spell service for magic combat
+export { spellService } from "./systems/shared/combat/SpellService";
+export type { Spell } from "./systems/shared/combat/SpellService";
 
 // Export world area data for server use
 export { ALL_WORLD_AREAS, STARTER_TOWNS } from "./data/world-areas";
@@ -614,9 +623,7 @@ export type {
   Item,
   Inventory,
   PlayerEquipment,
-  AttackType,
   CombatStyle,
-  ItemType,
   ItemRarity,
   CombatBonuses,
   EquipmentSlot,

@@ -63,6 +63,8 @@ const REQUIRED_ITEM_FILES = [
   "resources",
   "food",
   "misc",
+  "ammunition",
+  "runes",
 ] as const;
 const getAllTreasureLocations = () => TREASURE_LOCATIONS;
 const getTreasureLocationsByDifficulty = (_difficulty: number) =>

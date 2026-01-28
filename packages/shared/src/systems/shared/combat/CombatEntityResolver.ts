@@ -239,6 +239,7 @@ export class CombatEntityResolver {
   /**
    * Get combat range for an entity in tiles
    * Mobs use combatRange from manifest, players use equipped weapon's attackRange
+   * OSRS-accurate: If player has a spell selected, use magic range (10 tiles)
    * @param entity - Entity to check
    * @param entityType - Type of entity ("player" or "mob")
    * @returns Combat range in tiles (default: 1 for unarmed)
@@ -251,6 +252,14 @@ export class CombatEntityResolver {
     }
 
     if (entityType === "player") {
+      // OSRS-accurate: Check if player has a spell selected first
+      // You can cast spells without a staff - the staff just provides magic bonus
+      const selectedSpell = (entity as { data?: { selectedSpell?: string } })
+        ?.data?.selectedSpell;
+      if (selectedSpell) {
+        return 10; // Standard magic attack range
+      }
+
       const equipmentSystem = this.world.getSystem?.("equipment") as
         | {
             getPlayerEquipment?: (id: string) => {

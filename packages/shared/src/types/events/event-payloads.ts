@@ -10,6 +10,7 @@ import { Skills, InventoryItem, Position3D } from "../core/core";
 import type { Item } from "../core/core";
 import type { EntitySpawnedEvent } from "../systems/system-interfaces";
 import { EventType } from "./event-types";
+import { AttackType } from "../game/item-types";
 
 // ============================================================================
 // EVENT PAYLOAD INTERFACES
@@ -68,6 +69,10 @@ export interface CombatFollowTargetPayload {
   playerId: string;
   targetId: string;
   targetPosition: { x: number; y: number; z: number };
+  /** Attack range in tiles (1=melee, 2=halberd, 10=ranged/magic) */
+  attackRange?: number;
+  /** Attack type for proper pathfinding (melee vs ranged/magic) */
+  attackType?: AttackType;
 }
 
 /**

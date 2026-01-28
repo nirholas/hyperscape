@@ -51,6 +51,12 @@ export const Emotes = {
   /** Sword swing attack animation (used when sword is equipped) - plays once per attack, no loop */
   SWORD_SWING: "asset://emotes/emote_sword_swing.glb?l=0",
 
+  /** Ranged attack animation (used when bow is equipped) - plays once per attack, no loop */
+  RANGE: "asset://emotes/emote-range.glb?l=0",
+
+  /** Spell cast animation (used for magic attacks) - plays once per attack, no loop */
+  SPELL_CAST: "asset://emotes/emote-spell-cast.glb?l=0",
+
   /** Chopping/woodcutting animation (used when cutting trees) */
   CHOPPING: "asset://emotes/emote_chopping.glb",
 
@@ -75,6 +81,8 @@ export const emoteUrls = [
   Emotes.TALK,
   Emotes.COMBAT,
   Emotes.SWORD_SWING,
+  Emotes.RANGE,
+  Emotes.SPELL_CAST,
   Emotes.CHOPPING,
   Emotes.FISHING,
   Emotes.DEATH,

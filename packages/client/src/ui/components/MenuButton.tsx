@@ -5,6 +5,7 @@ import {
   Zap,
   // Skills & Magic
   Wand2,
+  BookOpen,
   // Inventory & Equipment
   Package,
   Gem,
@@ -35,6 +36,7 @@ export type MenuIconName =
   | "combat"
   | "skills"
   | "prayer"
+  | "spells"
   | "inventory"
   | "equipment"
   | "stats"
@@ -58,6 +60,7 @@ const ICON_MAP: Record<MenuIconName, LucideIcon> = {
   stats: Activity, // Vital signs/stats pulse
   skills: Wand2, // Magic wand for abilities
   prayer: Sparkles, // Divine sparkles
+  spells: BookOpen, // Spellbook for magic
   combat: Swords, // Crossed swords
   chat: MessageCircle, // Speech bubble
   account: CircleUserRound, // Profile avatar

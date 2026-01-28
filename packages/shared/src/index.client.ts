@@ -169,6 +169,10 @@ export type {
   PrayerCategory,
 } from "./data/PrayerDataProvider";
 
+// Export spell service for magic spellbook UI
+export { spellService } from "./systems/shared/combat/SpellService";
+export type { Spell } from "./systems/shared/combat/SpellService";
+
 // Export CLIENT system classes only (NO SERVER SYSTEMS)
 export { Entities } from "./systems/shared";
 export { Physics } from "./systems/shared";

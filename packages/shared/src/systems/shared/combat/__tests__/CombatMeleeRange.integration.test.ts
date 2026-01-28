@@ -693,11 +693,12 @@ describe("OSRS Melee Range Integration", () => {
       expect(followEvent?.data).toMatchObject({
         playerId: "player1",
         targetId: "mob1",
-        meleeRange: 1,
+        attackRange: 1,
+        attackType: "melee",
       });
     });
 
-    it("follow event includes correct meleeRange for halberd", () => {
+    it("follow event includes correct attackRange for halberd", () => {
       const player = createTestPlayer("player1", {
         position: { x: 5.5, y: 0, z: 5.5 },
       });
@@ -731,7 +732,8 @@ describe("OSRS Melee Range Integration", () => {
       );
       expect(followEvent).toBeDefined();
       expect(followEvent?.data).toMatchObject({
-        meleeRange: 2, // Halberd range
+        attackRange: 2, // Halberd range
+        attackType: "melee",
       });
     });
   });

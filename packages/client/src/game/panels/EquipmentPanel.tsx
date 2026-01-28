@@ -132,6 +132,30 @@ function LegsIcon({ className }: { className?: string }) {
   );
 }
 
+/** Arrows/Ammo slot icon */
+function ArrowsIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      {/* Arrow shaft */}
+      <path d="M5 19L19 5" />
+      {/* Arrow head */}
+      <path d="M15 5h4v4" />
+      {/* Arrow fletching */}
+      <path d="M5 19l3-1M5 19l1-3" />
+      {/* Second arrow (stacked) */}
+      <path d="M8 16L18 6" strokeOpacity="0.5" />
+    </svg>
+  );
+}
+
 // ============================================================================
 // Utility Button Icons
 // ============================================================================
@@ -680,7 +704,12 @@ export function EquipmentPanel({
       icon: <ShieldIcon className="w-full h-full" />,
       item: equipment?.shield || null,
     },
-    // Arrows slot hidden for melee-only MVP
+    {
+      key: EquipmentSlotName.ARROWS,
+      label: "Ammo",
+      icon: <ArrowsIcon className="w-full h-full" />,
+      item: equipment?.arrows || null,
+    },
   ];
 
   // Calculate total equipment bonuses for stats display
@@ -893,11 +922,10 @@ export function EquipmentPanel({
         />
       </div>
 
-      {/* Row 3: Legs (full width) */}
+      {/* Row 3: Legs / Ammo */}
       <div
         style={{
           height: MOBILE_EQUIPMENT.slotHeight,
-          gridColumn: "span 2",
           containerType: "size",
         }}
       >
@@ -910,12 +938,27 @@ export function EquipmentPanel({
           onContextMenuOpen={handleContextMenuOpen}
         />
       </div>
+      <div
+        style={{
+          height: MOBILE_EQUIPMENT.slotHeight,
+          containerType: "size",
+        }}
+      >
+        <DroppableEquipmentSlot
+          slot={getSlot(EquipmentSlotName.ARROWS)!}
+          onSlotClick={handleSlotClick}
+          onHoverStart={handleHoverStart}
+          onHoverMove={handleHoverMove}
+          onHoverEnd={handleHoverEnd}
+          onContextMenuOpen={handleContextMenuOpen}
+        />
+      </div>
     </div>
   );
 
   const renderDesktopEquipmentGrid = () => (
     <>
-      {/* Paperdoll Grid Layout - 3 rows for melee-only MVP */}
+      {/* Paperdoll Grid Layout - 3x3 with ammo in top-right */}
       <div
         className="relative grid h-full"
         style={{
@@ -924,7 +967,7 @@ export function EquipmentPanel({
           gap: `${theme.spacing.xs}px`,
         }}
       >
-        {/* Row 1: Head slot centered */}
+        {/* Row 1: empty, Head, Ammo */}
         <div />
         <div className="w-full h-full" style={{ containerType: "size" }}>
           <DroppableEquipmentSlot
@@ -936,7 +979,16 @@ export function EquipmentPanel({
             onContextMenuOpen={handleContextMenuOpen}
           />
         </div>
-        <div />
+        <div className="w-full h-full" style={{ containerType: "size" }}>
+          <DroppableEquipmentSlot
+            slot={getSlot(EquipmentSlotName.ARROWS)!}
+            onSlotClick={handleSlotClick}
+            onHoverStart={handleHoverStart}
+            onHoverMove={handleHoverMove}
+            onHoverEnd={handleHoverEnd}
+            onContextMenuOpen={handleContextMenuOpen}
+          />
+        </div>
 
         {/* Row 2: Weapon, Body, Shield */}
         <div className="w-full h-full" style={{ containerType: "size" }}>
@@ -970,7 +1022,7 @@ export function EquipmentPanel({
           />
         </div>
 
-        {/* Row 3: Legs centered */}
+        {/* Row 3: empty, Legs, empty */}
         <div />
         <div className="w-full h-full" style={{ containerType: "size" }}>
           <DroppableEquipmentSlot

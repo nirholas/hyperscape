@@ -14,7 +14,7 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { PendingAttackManager } from "../../../src/systems/ServerNetwork/PendingAttackManager";
-import { EventType } from "@hyperscape/shared";
+import { EventType, AttackType } from "@hyperscape/shared";
 
 // Mock the World class
 function createMockWorld() {
@@ -89,6 +89,7 @@ describe("PendingAttackManager", () => {
         { x: 5.5, y: 0, z: 5.5 },
         true,
         1, // default melee range
+        AttackType.MELEE, // default attack type
       );
     });
 
@@ -103,6 +104,7 @@ describe("PendingAttackManager", () => {
         { x: 5.5, y: 0, z: 5.5 },
         true,
         2, // halberd range
+        AttackType.MELEE, // default attack type
       );
     });
 
@@ -236,7 +238,7 @@ describe("PendingAttackManager", () => {
           targetId: "mob1",
           attackerType: "player",
           targetType: "mob",
-          attackType: "melee",
+          attackType: AttackType.MELEE,
         },
       );
 
@@ -278,7 +280,7 @@ describe("PendingAttackManager", () => {
           targetId: "mob1",
           attackerType: "player",
           targetType: "mob",
-          attackType: "melee",
+          attackType: AttackType.MELEE,
         },
       );
     });
@@ -301,6 +303,7 @@ describe("PendingAttackManager", () => {
         { x: 8.5, y: 0, z: 8.5 },
         true,
         1,
+        AttackType.MELEE,
       );
     });
 
