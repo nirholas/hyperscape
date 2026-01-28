@@ -163,7 +163,7 @@ export async function createRenderer(
       const initTimeSeconds = initTime / 1000;
       if (initTimeSeconds > 1) {
         console.log(
-          `[RendererFactory] ✅ ${rendererType} renderer initialized in ${initTime.toFixed(2)}ms (${initTimeSeconds.toFixed(2)}s)`,
+          `[RendererFactory] ✅ ${rendererType} renderer initialized in ${initTimeSeconds.toFixed(2)}s`,
         );
       }
 
@@ -181,10 +181,10 @@ export async function createRenderer(
   let forceWebGLFallback = false;
   try {
     // Vite exposes import.meta.env, check if PUBLIC_FORCE_WEBGL is set
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    const envValue = (import.meta as { env?: { PUBLIC_FORCE_WEBGL?: string } })
+    // The value is converted to boolean in vite.config.ts, so we use a truthy check
+    const envValue = (import.meta as { env?: { PUBLIC_FORCE_WEBGL?: boolean } })
       .env?.PUBLIC_FORCE_WEBGL;
-    forceWebGLFallback = envValue === "true" || envValue === "1";
+    forceWebGLFallback = !!envValue;
   } catch {
     // import.meta not available (e.g., Node.js environment)
     forceWebGLFallback = false;
