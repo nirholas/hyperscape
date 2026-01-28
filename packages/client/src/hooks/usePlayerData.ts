@@ -79,9 +79,6 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
         console.warn("[usePlayerData] Invalid inventory update event:", data);
         return;
       }
-      setInventory(data.items || []);
-      if (typeof data.coins === "number") {
-        setCoins(data.coins);
       const invData = data as {
         playerId: string;
         items: InventorySlotViewItem[];
