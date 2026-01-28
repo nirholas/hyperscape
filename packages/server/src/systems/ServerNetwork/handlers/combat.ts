@@ -83,15 +83,22 @@ export function handleAttackPlayer(
 
   const payload = data as Record<string, unknown>;
 
-  // Validate timestamp to prevent replay attacks
-  if (payload.timestamp !== undefined) {
-    const timestampValidation = validateRequestTimestamp(payload.timestamp);
-    if (!timestampValidation.valid) {
-      console.warn(
-        `[Combat] Replay attack blocked from ${attackerId}: ${timestampValidation.reason}`,
-      );
-      return;
-    }
+  // Validate timestamp to prevent replay attacks (required)
+  if (
+    payload.timestamp === undefined ||
+    typeof payload.timestamp !== "number"
+  ) {
+    console.warn(
+      `[Combat] Missing or invalid timestamp from ${attackerId} - potential replay attack`,
+    );
+    return;
+  }
+  const timestampValidation = validateRequestTimestamp(payload.timestamp);
+  if (!timestampValidation.valid) {
+    console.warn(
+      `[Combat] Replay attack blocked from ${attackerId}: ${timestampValidation.reason}`,
+    );
+    return;
   }
 
   // Extract target player ID
@@ -242,15 +249,22 @@ export function handleAttackMob(
 
   const payload = data as Record<string, unknown>;
 
-  // Validate timestamp to prevent replay attacks
-  if (payload.timestamp !== undefined) {
-    const timestampValidation = validateRequestTimestamp(payload.timestamp);
-    if (!timestampValidation.valid) {
-      console.warn(
-        `[Combat] Replay attack blocked from ${playerId}: ${timestampValidation.reason}`,
-      );
-      return;
-    }
+  // Validate timestamp to prevent replay attacks (required)
+  if (
+    payload.timestamp === undefined ||
+    typeof payload.timestamp !== "number"
+  ) {
+    console.warn(
+      `[Combat] Missing or invalid timestamp from ${playerId} - potential replay attack`,
+    );
+    return;
+  }
+  const timestampValidation = validateRequestTimestamp(payload.timestamp);
+  if (!timestampValidation.valid) {
+    console.warn(
+      `[Combat] Replay attack blocked from ${playerId}: ${timestampValidation.reason}`,
+    );
+    return;
   }
 
   // Extract and validate target ID (support both mobId and targetId)

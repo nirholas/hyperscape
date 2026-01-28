@@ -370,19 +370,78 @@ export class ProjectileRenderer extends System {
   }
 
   /**
+   * Type guard for projectile launch event payload
+   */
+  private isValidLaunchPayload(data: unknown): data is {
+    attackerId: string;
+    targetId: string;
+    projectileType: string;
+    sourcePosition: { x: number; y: number; z: number };
+    targetPosition: { x: number; y: number; z: number };
+    spellId?: string;
+    arrowId?: string;
+    delayMs?: number;
+  } {
+    if (typeof data !== "object" || data === null) return false;
+    const d = data as Record<string, unknown>;
+
+    // Required string fields
+    if (typeof d.attackerId !== "string" || d.attackerId.length === 0)
+      return false;
+    if (typeof d.targetId !== "string" || d.targetId.length === 0) return false;
+    if (typeof d.projectileType !== "string") return false;
+
+    // Required position objects
+    if (!this.isValidPosition(d.sourcePosition)) return false;
+    if (!this.isValidPosition(d.targetPosition)) return false;
+
+    // Optional fields - validate if present
+    if (d.spellId !== undefined && typeof d.spellId !== "string") return false;
+    if (d.arrowId !== undefined && typeof d.arrowId !== "string") return false;
+    if (d.delayMs !== undefined && typeof d.delayMs !== "number") return false;
+
+    return true;
+  }
+
+  /**
+   * Type guard for position object
+   */
+  private isValidPosition(
+    pos: unknown,
+  ): pos is { x: number; y: number; z: number } {
+    if (typeof pos !== "object" || pos === null) return false;
+    const p = pos as Record<string, unknown>;
+    return (
+      typeof p.x === "number" &&
+      typeof p.y === "number" &&
+      typeof p.z === "number"
+    );
+  }
+
+  /**
+   * Type guard for projectile hit event payload
+   */
+  private isValidHitPayload(
+    data: unknown,
+  ): data is { attackerId: string; targetId: string } {
+    if (typeof data !== "object" || data === null) return false;
+    const d = data as Record<string, unknown>;
+    return (
+      typeof d.attackerId === "string" &&
+      d.attackerId.length > 0 &&
+      typeof d.targetId === "string" &&
+      d.targetId.length > 0
+    );
+  }
+
+  /**
    * Handle projectile launch event
    */
   private onProjectileLaunched = (data: unknown): void => {
-    const payload = data as {
-      attackerId: string;
-      targetId: string;
-      projectileType: string;
-      sourcePosition: { x: number; y: number; z: number };
-      targetPosition: { x: number; y: number; z: number };
-      spellId?: string;
-      arrowId?: string;
-      delayMs?: number;
-    };
+    // Validate payload structure before use
+    if (!this.isValidLaunchPayload(data)) {
+      return;
+    }
 
     const {
       attackerId,
@@ -393,7 +452,7 @@ export class ProjectileRenderer extends System {
       spellId,
       arrowId,
       delayMs,
-    } = payload;
+    } = data;
 
     // Determine if this is an arrow or spell
     const isSpell = projectileType !== "arrow" && spellId;
@@ -429,17 +488,17 @@ export class ProjectileRenderer extends System {
    * Handle projectile hit event - remove projectile early if still in flight
    */
   private onProjectileHit = (data: unknown): void => {
-    const payload = data as {
-      attackerId: string;
-      targetId: string;
-    };
+    // Validate payload structure before use
+    if (!this.isValidHitPayload(data)) {
+      return;
+    }
 
     // Find and mark for removal any projectile matching this attacker/target
     for (let i = 0; i < this.activeProjectiles.length; i++) {
       const proj = this.activeProjectiles[i];
       if (
-        proj.attackerId === payload.attackerId &&
-        proj.targetId === payload.targetId
+        proj.attackerId === data.attackerId &&
+        proj.targetId === data.targetId
       ) {
         // Set maxLifetime to 0 to remove on next update
         proj.maxLifetime = 0;

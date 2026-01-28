@@ -816,9 +816,6 @@ export class CombatSystem extends SystemBase {
     attackerType: "player" | "mob";
     targetType: "player" | "mob";
   }): void {
-    console.log(
-      `[CombatSystem] handleRangedAttack called for ${data.attackerId}`,
-    );
     const { attackerId, targetId, attackerType, targetType } = data;
     const currentTick = this.world.currentTick ?? 0;
 
@@ -1253,15 +1250,6 @@ export class CombatSystem extends SystemBase {
     // Get arrow strength bonus
     const arrowStrength = ammunitionService.getArrowStrengthBonus(arrowSlot);
 
-    // DEBUG: Log all relevant values
-    console.log(`[CombatSystem] RANGED DEBUG for ${attackerId}:`, {
-      rangedLevel,
-      equipmentStatsExists: !!equipmentStats,
-      equipmentRangedStrength: equipmentStats?.rangedStrength,
-      arrowSlotItemId: arrowSlot?.itemId,
-      arrowStrengthFromService: arrowStrength,
-    });
-
     // Get target stats
     const targetDefenseLevel =
       targetType === "mob" && isMobEntity(target)
@@ -1307,19 +1295,7 @@ export class CombatSystem extends SystemBase {
       targetPrayerBonuses: defenderPrayer,
     };
 
-    // Debug logging for ranged damage calculation
-    console.log(`[CombatSystem] Ranged damage params:`, {
-      rangedLevel,
-      rangedAttackBonus: equipmentStats?.rangedAttack ?? 0,
-      rangedStrengthBonus,
-      arrowStrength,
-      targetDefenseLevel,
-    });
-
     const result = calculateRangedDamage(params, getGameRng());
-    console.log(
-      `[CombatSystem] Ranged damage result: damage=${result.damage}, maxHit=${result.maxHit}, hitChance=${result.hitChance}`,
-    );
     return result.damage;
   }
 
