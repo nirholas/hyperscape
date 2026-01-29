@@ -3115,6 +3115,14 @@ export class ClientNetwork extends SystemBase {
       getHeightAt?: (x: number, z: number) => number | null;
     } | null;
 
+    // Get building collision service for building proximity checks
+    const townSystem = this.world.getSystem("town") as {
+      getCollisionService?: () => {
+        isNearBuildingForElevation: (x: number, z: number) => boolean;
+      };
+    } | null;
+    const collisionService = townSystem?.getCollisionService?.();
+
     // Update tile-based interpolation (RuneScape-style)
     this.tileInterpolator.update(
       delta,
@@ -3149,6 +3157,12 @@ export class ClientNetwork extends SystemBase {
           },
         });
       },
+      // Pass building proximity check for preserving server Y near buildings
+      // Uses bounding box which includes door approach areas
+      collisionService
+        ? (x: number, z: number) =>
+            collisionService.isNearBuildingForElevation(x, z)
+        : undefined,
     );
   }
 

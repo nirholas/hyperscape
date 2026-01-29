@@ -265,10 +265,8 @@ export async function registerSystems(world: World): Promise<void> {
   systems.entityManager = getSystem(world, "entity-manager") as EntityManager;
 
   if (world.isClient) {
-    // Register new modular interaction system (replaces legacy InteractionSystem)
-    world.register("interaction", InteractionRouter);
-    // CameraSystem is ClientCameraSystem
-    // UI components are React-based in the client package
+    // InteractionRouter is now registered in createClientWorld.ts (before ClientCameraSystem)
+    // so that ClientCameraSystem can access its RaycastService during initialization
     systems.interaction = getSystem(world, "interaction") as InteractionRouter;
     // Camera system API is accessed through world events, not direct system reference
     systems.cameraSystem = undefined;

@@ -100,6 +100,9 @@ export interface WorldPreferences {
   bloom: boolean;
   colorGrading: string;
   colorGradingIntensity: number;
+  depthBlur: boolean;
+  depthBlurIntensity: number;
+  depthBlurDistance: number;
   music: number;
   sfx: number;
   voice: number;
@@ -116,6 +119,9 @@ export interface WorldPreferences {
   setBloom: (value: boolean) => void;
   setColorGrading: (value: string) => void;
   setColorGradingIntensity: (value: number) => void;
+  setDepthBlur: (value: boolean) => void;
+  setDepthBlurIntensity: (value: number) => void;
+  setDepthBlurDistance: (value: number) => void;
   setMusic: (value: number) => void;
   setSFX: (value: number) => void;
   setVoice: (value: number) => void;

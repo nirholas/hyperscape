@@ -20,9 +20,14 @@ import type {
   RoadPathPoint,
   RoadTileSegment,
   RoadNetwork,
+  PointOfInterest,
+  RoadEndpointType,
+  TownInternalRoad,
+  TownPath,
 } from "../../../types/world/world-types";
 import { NoiseGenerator } from "../../../utils/NoiseGenerator";
 import type { TownSystem } from "./TownSystem";
+import type { POISystem } from "./POISystem";
 import { EventType } from "../../../types/events";
 import { Logger } from "../../../utils/Logger";
 import { DataManager } from "../../../data/DataManager";
@@ -30,6 +35,7 @@ import {
   smoothPathAsync,
   isProcgenWorkerAvailable,
 } from "../../../utils/workers";
+import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
 
 // Default configuration values
 const DEFAULTS = {
@@ -45,6 +51,10 @@ const DEFAULTS = {
   noiseDisplacementStrength: 3,
   minPointSpacing: 4,
   heuristicWeight: 2.5,
+  // Exploration road settings
+  minRoadsPerTown: 2, // Minimum roads from each town
+  explorationRoadLength: 150, // How far exploration roads extend
+  explorationRoadSearchRadius: 300, // Search radius for natural destinations
 } as const;
 
 const DEFAULT_BIOME_COSTS: Record<string, number> = {
@@ -122,7 +132,7 @@ export function getDirections(
 }
 
 const TILE_SIZE = 100;
-const WATER_THRESHOLD = 5.4;
+const WATER_THRESHOLD = TERRAIN_CONSTANTS.WATER_THRESHOLD;
 
 const dist2D = (x1: number, z1: number, x2: number, z2: number): number =>
   Math.sqrt((x2 - x1) ** 2 + (z2 - z1) ** 2);
@@ -143,6 +153,7 @@ interface Edge {
 export class RoadNetworkSystem extends System {
   private roads: ProceduralRoad[] = [];
   private townSystem?: TownSystem;
+  private poiSystem?: POISystem;
   private noise!: NoiseGenerator;
   private seed: number = 0;
   private randomState: number = 0;
@@ -159,7 +170,7 @@ export class RoadNetworkSystem extends System {
   }
 
   getDependencies() {
-    return { required: ["terrain", "towns"], optional: [] };
+    return { required: ["terrain", "towns"], optional: ["pois"] };
   }
 
   async init(): Promise<void> {
@@ -178,6 +189,7 @@ export class RoadNetworkSystem extends System {
         }
       | undefined;
     this.townSystem = this.world.getSystem("towns") as TownSystem | undefined;
+    this.poiSystem = this.world.getSystem("pois") as POISystem | undefined;
 
     if (DataManager.getWorldConfig()?.roads) {
       Logger.system(
@@ -194,27 +206,52 @@ export class RoadNetworkSystem extends System {
       throw new Error("RoadNetworkSystem requires TownSystem");
 
     const towns = this.townSystem.getTowns();
-    if (towns.length < 2) {
-      Logger.systemWarn("RoadNetworkSystem", "Not enough towns for roads");
+    if (towns.length === 0) {
+      Logger.systemWarn("RoadNetworkSystem", "No towns for roads");
       return;
     }
 
     // Generate roads - uses worker for path smoothing when available
     const startTime = performance.now();
-    await this.generateRoadNetworkAsync(towns);
+
+    // Phase 1: Generate town-to-town roads (MST + extra connections)
+    // Only if we have 2+ towns
+    if (towns.length >= 2) {
+      await this.generateRoadNetworkAsync(towns);
+    }
+    const townRoadCount = this.roads.length;
+
+    // Phase 2: Generate roads to important POIs
+    const pois = this.poiSystem?.getImportantPOIs() ?? [];
+    if (pois.length > 0) {
+      await this.generatePOIRoadsAsync(towns, pois);
+    }
+    const poiRoadCount = this.roads.length - townRoadCount;
+
+    // Phase 3: Generate exploration roads to natural features
+    // This ensures towns with few connections still have roads leading somewhere
+    await this.generateExplorationRoadsAsync(towns);
+    const explorationRoadCount =
+      this.roads.length - townRoadCount - poiRoadCount;
+
     const elapsed = performance.now() - startTime;
 
-    this.validateNetworkConnectivity(towns);
+    // Validate connectivity only if we have multiple towns
+    if (towns.length >= 2) {
+      this.validateNetworkConnectivity(towns);
+    }
     await this.buildTileCacheAsync();
 
     Logger.system(
       "RoadNetworkSystem",
-      `Generated ${this.roads.length} roads connecting ${towns.length} towns in ${elapsed.toFixed(0)}ms` +
+      `Generated ${this.roads.length} roads (${townRoadCount} town-town, ${poiRoadCount} town-POI, ${explorationRoadCount} exploration) connecting ${towns.length} towns and ${pois.length} POIs in ${elapsed.toFixed(0)}ms` +
         (isProcgenWorkerAvailable() ? " (worker-assisted)" : ""),
     );
     this.world.emit(EventType.ROADS_GENERATED, {
       roadCount: this.roads.length,
       townCount: towns.length,
+      poiCount: pois.length,
+      explorationRoadCount,
     });
   }
 
@@ -476,8 +513,522 @@ export class RoadNetworkSystem extends System {
 
     return {
       id: `road_${roadIndex}`,
+      fromType: "town" as RoadEndpointType,
       fromTownId: fromTown.id,
+      toType: "town" as RoadEndpointType,
       toTownId: toTown.id,
+      path: smoothedPath,
+      width: this.config.roadWidth,
+      material: "dirt",
+      length: totalLength,
+    };
+  }
+
+  /**
+   * Generate roads from towns to important POIs.
+   * Each POI is connected to its nearest town (if within max distance).
+   */
+  private async generatePOIRoadsAsync(
+    towns: ProceduralTown[],
+    pois: PointOfInterest[],
+  ): Promise<void> {
+    if (!this.poiSystem) return;
+
+    const poiConfig = this.poiSystem.getConfig();
+    const maxDistance = poiConfig.maxRoadExtensionDistance;
+    const roadStartIndex = this.roads.length;
+
+    // For each POI, find nearest town and create road if within range
+    const poiRoadPromises: Array<Promise<ProceduralRoad | null>> = [];
+
+    for (let i = 0; i < pois.length; i++) {
+      const poi = pois[i];
+
+      // Find nearest town
+      let nearestTown: ProceduralTown | null = null;
+      let nearestDistance = Infinity;
+
+      for (const town of towns) {
+        const distance = dist2D(
+          poi.position.x,
+          poi.position.z,
+          town.position.x,
+          town.position.z,
+        );
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestTown = town;
+        }
+      }
+
+      // Skip if too far from any town
+      if (!nearestTown || nearestDistance > maxDistance) {
+        continue;
+      }
+
+      // Check if there's already a road to this area (avoid duplicates)
+      const existingRoad = this.roads.find(
+        (r) => r.toPOIId === poi.id || r.fromPOIId === poi.id,
+      );
+      if (existingRoad) continue;
+
+      // Generate road from town to POI
+      const roadIndex = roadStartIndex + poiRoadPromises.length;
+      poiRoadPromises.push(
+        this.generateTownToPOIRoadAsync(nearestTown, poi, roadIndex),
+      );
+    }
+
+    // Process roads in batches
+    const BATCH_SIZE = 4;
+    for (let i = 0; i < poiRoadPromises.length; i += BATCH_SIZE) {
+      const batch = poiRoadPromises.slice(i, i + BATCH_SIZE);
+      const results = await Promise.all(batch);
+
+      for (const road of results) {
+        if (road) {
+          this.roads.push(road);
+
+          // Update POI with connected road
+          const poi = pois.find((p) => p.id === road.toPOIId);
+          if (poi) {
+            poi.connectedRoads.push(road.id);
+          }
+
+          // Update town with connected road
+          const town = towns.find((t) => t.id === road.fromTownId);
+          if (town) {
+            town.connectedRoads.push(road.id);
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Generate a single road from a town to a POI.
+   */
+  private async generateTownToPOIRoadAsync(
+    town: ProceduralTown,
+    poi: PointOfInterest,
+    roadIndex: number,
+  ): Promise<ProceduralRoad | null> {
+    // Find best entry point on town
+    const townEntry = this.findBestEntryPoint(town, poi.position);
+
+    // Calculate entry point on POI (edge of POI radius facing the town)
+    const poiEntry = this.poiSystem!.calculateEntryPoint(
+      poi,
+      town.position.x,
+      town.position.z,
+    );
+
+    // Update POI's entry point
+    poi.entryPoint = poiEntry;
+
+    // BFS pathfinding
+    const rawPath = await this.findPathAsync(
+      townEntry.x,
+      townEntry.z,
+      poiEntry.x,
+      poiEntry.z,
+    );
+
+    if (rawPath.length < 2) {
+      Logger.systemWarn(
+        "RoadNetworkSystem",
+        `No path from ${town.name} to POI ${poi.name}`,
+      );
+      return null;
+    }
+
+    // Smooth path
+    let smoothedPath: RoadPathPoint[];
+    if (isProcgenWorkerAvailable()) {
+      const smoothResult = await smoothPathAsync(
+        rawPath.map((p) => ({ x: p.x, z: p.z })),
+        {
+          iterations: this.config.smoothingIterations,
+          noiseScale: this.config.noiseDisplacementScale,
+          noiseStrength: this.config.noiseDisplacementStrength,
+          seed: this.seed + roadIndex * 7793,
+        },
+      );
+
+      if (smoothResult) {
+        smoothedPath = smoothResult.path.map((p) => ({
+          x: p.x,
+          z: p.z,
+          y: this.terrainSystem!.getHeightAt(p.x, p.z),
+        }));
+      } else {
+        smoothedPath = this.smoothPath(rawPath, roadIndex);
+      }
+    } else {
+      smoothedPath = this.smoothPath(rawPath, roadIndex);
+    }
+
+    let totalLength = 0;
+    for (let i = 1; i < smoothedPath.length; i++) {
+      totalLength += dist2D(
+        smoothedPath[i - 1].x,
+        smoothedPath[i - 1].z,
+        smoothedPath[i].x,
+        smoothedPath[i].z,
+      );
+    }
+
+    return {
+      id: `road_poi_${roadIndex}`,
+      fromType: "town" as RoadEndpointType,
+      fromTownId: town.id,
+      toType: "poi" as RoadEndpointType,
+      toTownId: "", // Empty for POI roads
+      toPOIId: poi.id,
+      path: smoothedPath,
+      width: this.config.roadWidth,
+      material: "dirt",
+      length: totalLength,
+    };
+  }
+
+  // ============================================================================
+  // EXPLORATION ROADS - Roads to natural features (water, mountains, viewpoints)
+  // ============================================================================
+
+  /**
+   * Natural destination type for exploration roads
+   */
+  private static readonly DESTINATION_TYPES = {
+    WATER_EDGE: "water_edge",
+    MOUNTAIN: "mountain",
+    VIEWPOINT: "viewpoint",
+    LAKE: "lake",
+  } as const;
+
+  /**
+   * Generate exploration roads to natural features.
+   * Ensures towns with few connections still have roads leading somewhere interesting.
+   */
+  private async generateExplorationRoadsAsync(
+    towns: ProceduralTown[],
+  ): Promise<void> {
+    const minRoadsPerTown = DEFAULTS.minRoadsPerTown;
+    const searchRadius = DEFAULTS.explorationRoadSearchRadius;
+    const roadStartIndex = this.roads.length;
+
+    let explorationRoadsGenerated = 0;
+
+    for (const town of towns) {
+      // Count existing roads for this town
+      const existingRoadCount = town.connectedRoads.length;
+
+      // Skip if town already has enough roads
+      if (existingRoadCount >= minRoadsPerTown) continue;
+
+      // Find directions that don't already have roads
+      const usedAngles = this.getUsedRoadAngles(town);
+      const roadsNeeded = minRoadsPerTown - existingRoadCount;
+
+      // Find natural destinations in unused directions
+      const destinations = this.findNaturalDestinations(
+        town,
+        searchRadius,
+        usedAngles,
+        roadsNeeded,
+      );
+
+      // Generate roads to destinations
+      for (const dest of destinations) {
+        const roadIndex = roadStartIndex + explorationRoadsGenerated;
+        const road = await this.generateExplorationRoadAsync(
+          town,
+          dest,
+          roadIndex,
+        );
+
+        if (road) {
+          this.roads.push(road);
+          town.connectedRoads.push(road.id);
+          explorationRoadsGenerated++;
+        }
+      }
+    }
+
+    if (explorationRoadsGenerated > 0) {
+      Logger.system(
+        "RoadNetworkSystem",
+        `Generated ${explorationRoadsGenerated} exploration roads to natural features`,
+      );
+    }
+  }
+
+  /**
+   * Get angles of existing roads from a town (to avoid duplicating directions)
+   */
+  private getUsedRoadAngles(town: ProceduralTown): number[] {
+    const angles: number[] = [];
+
+    for (const roadId of town.connectedRoads) {
+      const road = this.roads.find((r) => r.id === roadId);
+      if (!road || road.path.length < 2) continue;
+
+      // Determine which end of the road is at this town
+      const firstPoint = road.path[0];
+      const lastPoint = road.path[road.path.length - 1];
+
+      const distToFirst = dist2D(
+        town.position.x,
+        town.position.z,
+        firstPoint.x,
+        firstPoint.z,
+      );
+      const distToLast = dist2D(
+        town.position.x,
+        town.position.z,
+        lastPoint.x,
+        lastPoint.z,
+      );
+
+      // Get the direction the road goes from the town
+      let angle: number;
+      if (distToFirst < distToLast) {
+        // Road starts at this town
+        const secondPoint = road.path[Math.min(5, road.path.length - 1)];
+        angle = Math.atan2(
+          secondPoint.z - firstPoint.z,
+          secondPoint.x - firstPoint.x,
+        );
+      } else {
+        // Road ends at this town
+        const secondToLast = road.path[Math.max(0, road.path.length - 6)];
+        angle = Math.atan2(
+          secondToLast.z - lastPoint.z,
+          secondToLast.x - lastPoint.x,
+        );
+      }
+
+      angles.push(angle);
+    }
+
+    return angles;
+  }
+
+  /**
+   * Find natural destinations for exploration roads
+   */
+  private findNaturalDestinations(
+    town: ProceduralTown,
+    searchRadius: number,
+    usedAngles: number[],
+    maxDestinations: number,
+  ): Array<{
+    x: number;
+    z: number;
+    type: string;
+    angle: number;
+  }> {
+    const destinations: Array<{
+      x: number;
+      z: number;
+      type: string;
+      angle: number;
+      score: number;
+    }> = [];
+
+    // Sample points in a circle around the town
+    const sampleCount = 24;
+    const angleStep = (Math.PI * 2) / sampleCount;
+
+    for (let i = 0; i < sampleCount; i++) {
+      const angle = i * angleStep;
+
+      // Skip if this direction is already used by a road (within 45 degrees)
+      const isTooClose = usedAngles.some((used) => {
+        let diff = Math.abs(angle - used);
+        if (diff > Math.PI) diff = Math.PI * 2 - diff;
+        return diff < Math.PI / 4; // 45 degrees
+      });
+      if (isTooClose) continue;
+
+      // Search along this ray for interesting features
+      const dest = this.findDestinationAlongRay(
+        town.position.x,
+        town.position.z,
+        angle,
+        searchRadius,
+      );
+
+      if (dest) {
+        destinations.push({ ...dest, angle });
+      }
+    }
+
+    // Sort by score (best destinations first)
+    destinations.sort((a, b) => b.score - a.score);
+
+    // Return top destinations
+    return destinations.slice(0, maxDestinations).map((d) => ({
+      x: d.x,
+      z: d.z,
+      type: d.type,
+      angle: d.angle,
+    }));
+  }
+
+  /**
+   * Search along a ray from a point to find interesting natural features
+   */
+  private findDestinationAlongRay(
+    startX: number,
+    startZ: number,
+    angle: number,
+    maxDistance: number,
+  ): { x: number; z: number; type: string; score: number } | null {
+    if (!this.terrainSystem) return null;
+
+    const stepSize = 20;
+    const dirX = Math.cos(angle);
+    const dirZ = Math.sin(angle);
+
+    let bestDest: { x: number; z: number; type: string; score: number } | null =
+      null;
+
+    // Track terrain features along the ray
+    let lastHeight = this.terrainSystem.getHeightAt(startX, startZ);
+    let maxHeight = lastHeight;
+    let maxHeightPos = { x: startX, z: startZ };
+    let waterEdgePos: { x: number; z: number } | null = null;
+
+    for (let dist = stepSize * 2; dist <= maxDistance; dist += stepSize) {
+      const x = startX + dirX * dist;
+      const z = startZ + dirZ * dist;
+      const height = this.terrainSystem.getHeightAt(x, z);
+
+      // Check for water edge (transition from land to water)
+      if (lastHeight >= WATER_THRESHOLD && height < WATER_THRESHOLD) {
+        // Found water edge - this is a great destination
+        waterEdgePos = {
+          x: startX + dirX * (dist - stepSize / 2),
+          z: startZ + dirZ * (dist - stepSize / 2),
+        };
+      }
+
+      // Track highest point (mountain/viewpoint)
+      if (height > maxHeight) {
+        maxHeight = height;
+        maxHeightPos = { x, z };
+      }
+
+      lastHeight = height;
+    }
+
+    // Prioritize destinations:
+    // 1. Water edge (ocean, lake) - most scenic
+    // 2. High point (mountain, viewpoint)
+    // 3. Distance-based viewpoint
+
+    if (waterEdgePos) {
+      bestDest = {
+        x: waterEdgePos.x,
+        z: waterEdgePos.z,
+        type: RoadNetworkSystem.DESTINATION_TYPES.WATER_EDGE,
+        score: 1.0,
+      };
+    } else if (maxHeight > lastHeight + 10) {
+      // Significant elevation gain - mountain/viewpoint
+      bestDest = {
+        x: maxHeightPos.x,
+        z: maxHeightPos.z,
+        type: RoadNetworkSystem.DESTINATION_TYPES.MOUNTAIN,
+        score: 0.7 + (maxHeight - lastHeight) / 100,
+      };
+    } else {
+      // Just extend the road in this direction as a scenic viewpoint
+      const viewpointDist = Math.min(
+        maxDistance * 0.7,
+        DEFAULTS.explorationRoadLength,
+      );
+      bestDest = {
+        x: startX + dirX * viewpointDist,
+        z: startZ + dirZ * viewpointDist,
+        type: RoadNetworkSystem.DESTINATION_TYPES.VIEWPOINT,
+        score: 0.4,
+      };
+    }
+
+    return bestDest;
+  }
+
+  /**
+   * Generate a single exploration road to a natural destination
+   */
+  private async generateExplorationRoadAsync(
+    town: ProceduralTown,
+    destination: { x: number; z: number; type: string; angle: number },
+    roadIndex: number,
+  ): Promise<ProceduralRoad | null> {
+    // Find best entry point on town facing the destination
+    const townEntry = this.findBestEntryPoint(town, {
+      x: destination.x,
+      z: destination.z,
+    });
+
+    // BFS pathfinding to destination
+    const rawPath = await this.findPathAsync(
+      townEntry.x,
+      townEntry.z,
+      destination.x,
+      destination.z,
+    );
+
+    if (rawPath.length < 2) {
+      return null;
+    }
+
+    // Smooth path
+    let smoothedPath: RoadPathPoint[];
+    if (isProcgenWorkerAvailable()) {
+      const smoothResult = await smoothPathAsync(
+        rawPath.map((p) => ({ x: p.x, z: p.z })),
+        {
+          iterations: this.config.smoothingIterations,
+          noiseScale: this.config.noiseDisplacementScale,
+          noiseStrength: this.config.noiseDisplacementStrength,
+          seed: this.seed + roadIndex * 7793,
+        },
+      );
+
+      if (smoothResult) {
+        smoothedPath = smoothResult.path.map((p) => ({
+          x: p.x,
+          z: p.z,
+          y: this.terrainSystem!.getHeightAt(p.x, p.z),
+        }));
+      } else {
+        smoothedPath = this.smoothPath(rawPath, roadIndex);
+      }
+    } else {
+      smoothedPath = this.smoothPath(rawPath, roadIndex);
+    }
+
+    let totalLength = 0;
+    for (let i = 1; i < smoothedPath.length; i++) {
+      totalLength += dist2D(
+        smoothedPath[i - 1].x,
+        smoothedPath[i - 1].z,
+        smoothedPath[i].x,
+        smoothedPath[i].z,
+      );
+    }
+
+    return {
+      id: `road_explore_${roadIndex}`,
+      fromType: "town" as RoadEndpointType,
+      fromTownId: town.id,
+      toType: "poi" as RoadEndpointType, // Treat as POI for simplicity
+      toTownId: "", // Empty for exploration roads
+      toPOIId: `natural_${destination.type}_${roadIndex}`, // Virtual POI ID
       path: smoothedPath,
       width: this.config.roadWidth,
       material: "dirt",
@@ -522,7 +1073,9 @@ export class RoadNetworkSystem extends System {
 
     return {
       id: `road_${roadIndex}`,
+      fromType: "town" as RoadEndpointType,
       fromTownId: fromTown.id,
+      toType: "town" as RoadEndpointType,
       toTownId: toTown.id,
       path: smoothedPath,
       width: this.config.roadWidth,
@@ -919,11 +1472,13 @@ export class RoadNetworkSystem extends System {
   /**
    * Build tile cache asynchronously with yielding to prevent main thread blocking.
    * Processes roads in batches, yielding between batches.
+   * Also includes town internal roads and paths for seamless rendering.
    */
   private async buildTileCacheAsync(): Promise<void> {
     this.tileRoadCache.clear();
     const ROAD_BATCH_SIZE = 5; // Process 5 roads per batch
 
+    // Phase 1: Cache inter-town/POI roads
     for (
       let roadIdx = 0;
       roadIdx < this.roads.length;
@@ -980,6 +1535,131 @@ export class RoadNetworkSystem extends System {
       // Yield to main thread between batches
       if (batchEnd < this.roads.length) {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+    }
+
+    // Phase 2: Cache town internal roads and paths
+    // This makes roads visually extend through towns instead of stopping at the edge
+    await this.cacheTownInternalRoads();
+  }
+
+  /**
+   * Cache town internal roads, paths, and plazas for terrain rendering.
+   * This ensures roads visually connect through towns.
+   */
+  private async cacheTownInternalRoads(): Promise<void> {
+    if (!this.townSystem) return;
+
+    const towns = this.townSystem.getTowns();
+    const TOWN_ROAD_WIDTH = 8; // Main street width (wider than inter-town roads)
+    const TOWN_PATH_WIDTH = 2; // Walkway paths to buildings
+
+    for (const town of towns) {
+      // Cache internal roads (main streets through town)
+      const internalRoads = town.internalRoads ?? [];
+      for (let i = 0; i < internalRoads.length; i++) {
+        const road = internalRoads[i];
+        const roadWidth = road.isMain ? TOWN_ROAD_WIDTH : 6;
+        this.cacheRoadSegment(
+          road.start.x,
+          road.start.z,
+          road.end.x,
+          road.end.z,
+          roadWidth,
+          `${town.id}_internal_${i}`,
+        );
+      }
+
+      // Cache paths from roads to building entrances
+      const paths = town.paths ?? [];
+      for (let i = 0; i < paths.length; i++) {
+        const path = paths[i];
+        this.cacheRoadSegment(
+          path.start.x,
+          path.start.z,
+          path.end.x,
+          path.end.z,
+          path.width || TOWN_PATH_WIDTH,
+          `${town.id}_path_${i}`,
+        );
+      }
+
+      // Cache plaza as radial road segments (star pattern for circular coverage)
+      const plaza = town.plaza;
+      if (plaza) {
+        const plazaSegments = 8; // 8 directions for good coverage
+        for (let i = 0; i < plazaSegments; i++) {
+          const angle = (i / plazaSegments) * Math.PI * 2;
+          const endX = plaza.position.x + Math.cos(angle) * plaza.radius;
+          const endZ = plaza.position.z + Math.sin(angle) * plaza.radius;
+
+          this.cacheRoadSegment(
+            plaza.position.x,
+            plaza.position.z,
+            endX,
+            endZ,
+            plaza.radius * 1.5, // Wide enough to fill the plaza
+            `${town.id}_plaza_${i}`,
+          );
+        }
+      }
+
+      // Yield periodically
+      if (towns.indexOf(town) % 5 === 4) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+    }
+  }
+
+  /**
+   * Cache a single road segment into the tile cache.
+   * Handles clipping to tile boundaries.
+   */
+  private cacheRoadSegment(
+    x1: number,
+    z1: number,
+    x2: number,
+    z2: number,
+    width: number,
+    roadId: string,
+  ): void {
+    const minTileX = Math.floor(Math.min(x1, x2) / TILE_SIZE);
+    const maxTileX = Math.floor(Math.max(x1, x2) / TILE_SIZE);
+    const minTileZ = Math.floor(Math.min(z1, z2) / TILE_SIZE);
+    const maxTileZ = Math.floor(Math.max(z1, z2) / TILE_SIZE);
+
+    for (let tileX = minTileX; tileX <= maxTileX; tileX++) {
+      for (let tileZ = minTileZ; tileZ <= maxTileZ; tileZ++) {
+        const tileKey = `${tileX}_${tileZ}`;
+        const tileMinX = tileX * TILE_SIZE;
+        const tileMaxX = (tileX + 1) * TILE_SIZE;
+        const tileMinZ = tileZ * TILE_SIZE;
+        const tileMaxZ = (tileZ + 1) * TILE_SIZE;
+
+        const clipped = this.clipSegmentToTile(
+          x1,
+          z1,
+          x2,
+          z2,
+          tileMinX,
+          tileMaxX,
+          tileMinZ,
+          tileMaxZ,
+        );
+
+        if (clipped) {
+          const segment: RoadTileSegment = {
+            start: { x: clipped.x1 - tileMinX, z: clipped.z1 - tileMinZ },
+            end: { x: clipped.x2 - tileMinX, z: clipped.z2 - tileMinZ },
+            width,
+            roadId,
+          };
+
+          if (!this.tileRoadCache.has(tileKey)) {
+            this.tileRoadCache.set(tileKey, []);
+          }
+          this.tileRoadCache.get(tileKey)!.push(segment);
+        }
       }
     }
   }
@@ -1149,6 +1829,7 @@ export class RoadNetworkSystem extends System {
     if (!this.townSystem) return null;
     return {
       towns: this.townSystem.getTowns(),
+      pois: this.poiSystem?.getPOIs() ?? [],
       roads: this.roads,
       seed: this.seed,
       generatedAt: Date.now(),

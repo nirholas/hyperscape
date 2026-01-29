@@ -33,6 +33,7 @@ import {
 import type { GatheringToolData } from "../../../data/DataManager";
 import { ALL_WORLD_AREAS } from "../../../data/world-areas";
 import { GATHERING_CONSTANTS } from "../../../constants/GatheringConstants";
+import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
 import { findWaterEdgePoints, shuffleArray } from "../../../utils/ShoreUtils";
 import type { WorldArea } from "../../../types/world/world-types";
 // Note: quaternionPool no longer used here - face rotation is deferred to FaceDirectionManager
@@ -747,7 +748,7 @@ export class ResourceSystem extends SystemBase {
       this.terrainSystem.getHeightAt.bind(this.terrainSystem),
       {
         sampleInterval: 1, // 1m = 1 tile for tile-accurate detection
-        waterThreshold: 5.4, // TerrainSystem.CONFIG.WATER_THRESHOLD
+        waterThreshold: TERRAIN_CONSTANTS.WATER_THRESHOLD,
         shoreMaxHeight: 20.0, // Higher to accommodate elevated island terrain
         minSpacing: 8, // Increased spacing to spread spots out more
       },
@@ -877,19 +878,35 @@ export class ResourceSystem extends SystemBase {
       }
 
       // Spawn actual ResourceEntity instance
-      // Create proper quaternion for random Y-axis rotation
-      const randomYRotation = Math.random() * Math.PI * 2;
+      // Use rotation from spawn point if available (deterministic from BiomeResourceGenerator)
+      // Otherwise fall back to random rotation
+      const yRotation = spawnPoint.rotation ?? Math.random() * Math.PI * 2;
       const quat = {
         x: 0,
-        y: Math.sin(randomYRotation / 2),
+        y: Math.sin(yRotation / 2),
         z: 0,
-        w: Math.cos(randomYRotation / 2),
+        w: Math.cos(yRotation / 2),
       };
 
       // OSRS-ACCURACY: Calculate tile footprint data for proper interaction positioning
       const footprint: ResourceFootprint = resource.footprint || "standard";
       const anchorTile = worldToTile(resource.position.x, resource.position.z);
       const occupiedTiles = this.getOccupiedTiles(anchorTile, footprint);
+
+      // Get base scale from manifest and multiply by spawn point variation
+      const baseScale = this.getScaleForResource(
+        resource.type,
+        spawnPoint.subType,
+      );
+      const scaleVariation = spawnPoint.scale ?? 1.0;
+      const finalScale = baseScale * scaleVariation;
+
+      // Same for depleted model scale
+      const baseDepletedScale = this.getDepletedScaleForResource(
+        resource.type,
+        spawnPoint.subType,
+      );
+      const finalDepletedScale = baseDepletedScale * scaleVariation;
 
       const resourceConfig = {
         id: resource.id,
@@ -900,7 +917,7 @@ export class ResourceSystem extends SystemBase {
           y: resource.position.y,
           z: resource.position.z,
         },
-        rotation: quat, // Proper quaternion for random Y-axis rotation
+        rotation: quat, // Quaternion from spawn point or random
         scale: { x: 1, y: 1, z: 1 }, // ALWAYS uniform scale - ResourceEntity handles mesh scale
         visible: true,
         interactable: true,
@@ -927,16 +944,19 @@ export class ResourceSystem extends SystemBase {
         })),
         respawnTime: resource.respawnTime,
         depleted: false,
-        // Manifest-driven model config
+        // Manifest-driven model config with scale variation applied
         depletedModelPath: this.getDepletedModelPathForResource(
           resource.type,
           spawnPoint.subType,
         ),
-        modelScale: this.getScaleForResource(resource.type, spawnPoint.subType),
-        depletedModelScale: this.getDepletedScaleForResource(
+        modelScale: finalScale,
+        depletedModelScale: finalDepletedScale,
+        // LOD support - use LOD1 model for medium distance rendering
+        lod1Model: this.getLod1ModelPathForResource(
           resource.type,
           spawnPoint.subType,
         ),
+        lod1ModelScale: finalScale, // Same scale variation as main model
         // OSRS-ACCURACY: Tile-based positioning for face direction and interaction
         footprint,
         anchorTile,
@@ -1020,6 +1040,27 @@ export class ResourceSystem extends SystemBase {
     }
 
     return manifestData.scale;
+  }
+
+  /**
+   * Get LOD1 model path for resource type from manifest
+   * Returns null if not specified (full model used until imposter)
+   */
+  private getLod1ModelPathForResource(
+    type: string,
+    subType?: string,
+  ): string | null {
+    const variantKey = subType ? `${type}_${subType}` : `${type}_normal`;
+    const manifestData = getExternalResource(variantKey);
+
+    if (!manifestData) {
+      throw new Error(
+        `[ResourceSystem] Resource manifest not found for '${variantKey}'. ` +
+          `Ensure resources.json is loaded and contains this resource type.`,
+      );
+    }
+
+    return manifestData.lod1ModelPath ?? null;
   }
 
   /**
@@ -2219,7 +2260,7 @@ export class ResourceSystem extends SystemBase {
       searchBounds,
       this.terrainSystem.getHeightAt.bind(this.terrainSystem),
       {
-        waterThreshold: 5.4,
+        waterThreshold: TERRAIN_CONSTANTS.WATER_THRESHOLD,
         shoreMaxHeight: 20.0, // Higher to accommodate elevated island terrain
         minSpacing: 3, // Smaller spacing for relocation candidates
       },

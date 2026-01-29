@@ -28,6 +28,7 @@ import type {
   PlantPresetName,
   RenderQuality,
   QualitySettings,
+  HSLColor,
 } from "./types.js";
 import { LPK, RenderQuality as RQ } from "./types.js";
 
@@ -38,6 +39,7 @@ import { generateLeafShape } from "./shape/LeafShape.js";
 import {
   createDefaultParams,
   getParamValue,
+  getParamColorValue,
 } from "./params/LeafParamDefaults.js";
 import { generateLeafVeins, getMidrib } from "./veins/LeafVeins.js";
 import { triangulateLeaf } from "./mesh/Triangulation.js";
@@ -57,6 +59,73 @@ import {
   applyPreset,
   createParamsFromPreset,
 } from "./presets/PlantPresets.js";
+
+// =============================================================================
+// COLOR UTILITIES
+// =============================================================================
+
+/**
+ * Convert HSL color to RGB values (0-255)
+ */
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  let r: number, g: number, b: number;
+
+  if (s === 0) {
+    r = g = b = l;
+  } else {
+    const hue2rgb = (p: number, q: number, t: number): number => {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    };
+
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1 / 3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1 / 3);
+  }
+
+  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+}
+
+/**
+ * Convert HSL to hex color number for Three.js
+ */
+function hslToHex(h: number, s: number, l: number): number {
+  const [r, g, b] = hslToRgb(h, s, l);
+  return (r << 16) | (g << 8) | b;
+}
+
+/**
+ * Lerp between two HSL colors
+ */
+function lerpHsl(a: HSLColor, b: HSLColor, t: number): HSLColor {
+  return {
+    h: a.h + (b.h - a.h) * t,
+    s: a.s + (b.s - a.s) * t,
+    l: a.l + (b.l - a.l) * t,
+  };
+}
+
+/**
+ * Adjust HSL color values
+ */
+function adjustHsl(
+  base: HSLColor,
+  hueOffset: number,
+  satOffset: number,
+  litOffset: number,
+): HSLColor {
+  return {
+    h: (((base.h + hueOffset) % 1) + 1) % 1, // Keep in 0-1 range
+    s: Math.max(0, Math.min(1, base.s + satOffset)),
+    l: Math.max(0, Math.min(1, base.l + litOffset)),
+  };
+}
 
 // =============================================================================
 // GLB EXPORT TYPES
@@ -97,6 +166,15 @@ export interface PlantGLBExportResult {
 // QUALITY SETTINGS
 // =============================================================================
 
+/**
+ * Quality presets for plant generation.
+ *
+ * - Minimum: Low detail for distant LOD (LOD2)
+ * - Medium: Balanced detail for mid-range (LOD1)
+ * - Maximum: Full detail for close-up (LOD0)
+ * - Current: Alias for Medium - use for "default" quality
+ * - Custom: High quality with lower subdivision - use for runtime customization
+ */
 const QUALITY_SETTINGS: Record<RenderQuality, QualitySettings> = {
   [RQ.Minimum]: {
     subdivSteps: 0,
@@ -116,17 +194,19 @@ const QUALITY_SETTINGS: Record<RenderQuality, QualitySettings> = {
     textureDownsample: 1,
     meshDensity: 1.0,
   },
+  // Current: Alias for Medium - provides a stable "default" quality level
   [RQ.Current]: {
     subdivSteps: 1,
     renderLineSteps: 10,
     textureDownsample: 2,
     meshDensity: 0.75,
   },
+  // Custom: High mesh density with single subdivision - balanced for runtime use
   [RQ.Custom]: {
     subdivSteps: 1,
-    renderLineSteps: 10,
-    textureDownsample: 1,
-    meshDensity: 1.0,
+    renderLineSteps: 12, // Slightly higher than Medium
+    textureDownsample: 1, // Full texture resolution
+    meshDensity: 0.9, // High but not maximum density
   },
 };
 
@@ -166,6 +246,23 @@ function meshDataToBufferGeometry(meshData: MeshData): BufferGeometry {
   }
   geometry.setAttribute("uv", new Float32BufferAttribute(uvs, 2));
 
+  // Vertex Colors (RGBA)
+  if (meshData.colors && meshData.colors.length > 0) {
+    // Colors are stored as flat RGBA array (4 values per vertex)
+    const expectedLength = meshData.vertices.length * 4;
+    if (meshData.colors.length >= expectedLength) {
+      // Three.js uses RGB (3 values) for vertex colors
+      const colorArray = new Float32Array(meshData.vertices.length * 3);
+      for (let i = 0; i < meshData.vertices.length; i++) {
+        colorArray[i * 3] = meshData.colors[i * 4]; // R
+        colorArray[i * 3 + 1] = meshData.colors[i * 4 + 1]; // G
+        colorArray[i * 3 + 2] = meshData.colors[i * 4 + 2]; // B
+        // Alpha is ignored for vertex colors in Three.js MeshStandardMaterial
+      }
+      geometry.setAttribute("color", new Float32BufferAttribute(colorArray, 3));
+    }
+  }
+
   // Triangles
   geometry.setIndex(
     new Uint32BufferAttribute(new Uint32Array(meshData.triangles), 1),
@@ -179,17 +276,28 @@ function meshDataToBufferGeometry(meshData: MeshData): BufferGeometry {
 
 /**
  * Convert ImageData to Three.js CanvasTexture
+ * @throws Error if canvas 2D context cannot be obtained
  */
 function imageDataToTexture(imageData: ImageData): CanvasTexture {
   const canvas = new OffscreenCanvas(imageData.width, imageData.height);
-  const ctx = canvas.getContext("2d")!;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    throw new Error(
+      "[PlantGenerator] Failed to get 2D context from OffscreenCanvas for texture generation",
+    );
+  }
   ctx.putImageData(imageData, 0, 0);
 
   // Create a regular canvas for Three.js compatibility
   const regularCanvas = document.createElement("canvas");
   regularCanvas.width = imageData.width;
   regularCanvas.height = imageData.height;
-  const regularCtx = regularCanvas.getContext("2d")!;
+  const regularCtx = regularCanvas.getContext("2d");
+  if (!regularCtx) {
+    throw new Error(
+      "[PlantGenerator] Failed to get 2D context from canvas for texture generation",
+    );
+  }
   regularCtx.putImageData(imageData, 0, 0);
 
   return new CanvasTexture(regularCanvas);
@@ -477,47 +585,139 @@ function getLeafAttachmentInfo(
   const { points, normals } = getStemPoints(curves, 2);
 
   if (points.length === 0 || normals.length === 0) {
-    // Log warning for debugging - this indicates invalid stem curve data
-    console.warn(
-      "[PlantGenerator] getLeafAttachmentInfo: empty stem points/normals, returning identity",
+    // This indicates invalid stem curve data - fail early instead of producing wrong geometry
+    throw new Error(
+      "[PlantGenerator] getLeafAttachmentInfo: empty stem points/normals - stem curves are invalid",
     );
-    return {
-      position: { x: 0, y: 0, z: 0 },
-      rotation: { x: 0, y: 0, z: 0, w: 1 },
-    };
   }
 
   const lastPoint = points[points.length - 1];
   const lastNormal = normals[normals.length - 1];
 
-  // Normalize the normal
+  // CRITICAL: Apply the same coordinate transformation as generateStemMesh
+  // Original stem curves: Y is extension (length), X is flop offset
+  // Transformed for mesh: X is extension (outward), Y is NEGATIVE flop (droop goes DOWN)
+  const transformedLastPoint: Point3D = {
+    x: lastPoint.y, // Extension becomes outward (+X)
+    y: -lastPoint.x, // Flop offset becomes downward (-Y for droop)
+    z: lastPoint.z, // Z stays as wobble
+  };
+
+  const transformedNormal: Point3D = {
+    x: lastNormal.y,
+    y: -lastNormal.x, // Negate to match position transform
+    z: lastNormal.z,
+  };
+
+  // Normalize the transformed normal
   const nLen = Math.sqrt(
-    lastNormal.x * lastNormal.x +
-      lastNormal.y * lastNormal.y +
-      lastNormal.z * lastNormal.z,
+    transformedNormal.x * transformedNormal.x +
+      transformedNormal.y * transformedNormal.y +
+      transformedNormal.z * transformedNormal.z,
   );
   const normalizedNormal =
     nLen > 0.0001
       ? {
-          x: lastNormal.x / nLen,
-          y: lastNormal.y / nLen,
-          z: lastNormal.z / nLen,
+          x: transformedNormal.x / nLen,
+          y: transformedNormal.y / nLen,
+          z: transformedNormal.z / nLen,
         }
-      : { x: 0, y: 1, z: 0 };
+      : { x: 1, y: 0, z: 0 }; // Default to outward (+X) direction
 
   // Add small buffer along normal direction (0.02 units)
   const buffer = 0.02;
   const position: Point3D = {
-    x: lastPoint.x + normalizedNormal.x * buffer,
-    y: lastPoint.y + normalizedNormal.y * buffer,
-    z: lastPoint.z + normalizedNormal.z * buffer,
+    x: transformedLastPoint.x + normalizedNormal.x * buffer,
+    y: transformedLastPoint.y + normalizedNormal.y * buffer,
+    z: transformedLastPoint.z + normalizedNormal.z * buffer,
   };
 
-  // Calculate rotation: LookRotation(normal, up) * Euler(0, 180, leafZAngle)
-  const lookRot = lookRotation(normalizedNormal, { x: 0, y: 1, z: 0 });
+  // Calculate rotation for leaf attachment
+  // We want: Leaf Y (length) = tangent direction, Leaf Z (face) = generally upward
+  // This is different from lookRotation which aligns Z with forward
+  //
+  // Build rotation matrix with Y along tangent, Z perpendicular trying to stay vertical:
+  // Y = tangent (normalized)
+  // X = cross(up, Y) - perpendicular to Y and up
+  // Z = cross(Y, X) - perpendicular to both
+  const tangentY = normalizedNormal;
+  const worldUp = { x: 0, y: 1, z: 0 };
 
-  // Create Euler rotation (0, 180, leafZAngle) in radians
-  const eulerRad = { x: 0, y: Math.PI, z: (leafZAngle * Math.PI) / 180 };
+  // X = up × Y (cross product)
+  let leafX = {
+    x: worldUp.y * tangentY.z - worldUp.z * tangentY.y,
+    y: worldUp.z * tangentY.x - worldUp.x * tangentY.z,
+    z: worldUp.x * tangentY.y - worldUp.y * tangentY.x,
+  };
+  let xLen = Math.sqrt(
+    leafX.x * leafX.x + leafX.y * leafX.y + leafX.z * leafX.z,
+  );
+  if (xLen < 0.0001) {
+    // Tangent is vertical, use arbitrary X
+    leafX = { x: 1, y: 0, z: 0 };
+    xLen = 1;
+  }
+  leafX = { x: leafX.x / xLen, y: leafX.y / xLen, z: leafX.z / xLen };
+
+  // Z = Y × X (cross product)
+  const leafZ = {
+    x: tangentY.y * leafX.z - tangentY.z * leafX.y,
+    y: tangentY.z * leafX.x - tangentY.x * leafX.z,
+    z: tangentY.x * leafX.y - tangentY.y * leafX.x,
+  };
+
+  // Build quaternion from rotation matrix [X, Y, Z]
+  // m00=X.x, m01=Y.x, m02=Z.x
+  // m10=X.y, m11=Y.y, m12=Z.y
+  // m20=X.z, m21=Y.z, m22=Z.z
+  const m00 = leafX.x,
+    m01 = tangentY.x,
+    m02 = leafZ.x;
+  const m10 = leafX.y,
+    m11 = tangentY.y,
+    m12 = leafZ.y;
+  const m20 = leafX.z,
+    m21 = tangentY.z,
+    m22 = leafZ.z;
+
+  const trace = m00 + m11 + m22;
+  let lookRot: { x: number; y: number; z: number; w: number };
+  if (trace > 0) {
+    const s = 0.5 / Math.sqrt(trace + 1);
+    lookRot = {
+      w: 0.25 / s,
+      x: (m21 - m12) * s,
+      y: (m02 - m20) * s,
+      z: (m10 - m01) * s,
+    };
+  } else if (m00 > m11 && m00 > m22) {
+    const s = 2 * Math.sqrt(1 + m00 - m11 - m22);
+    lookRot = {
+      w: (m21 - m12) / s,
+      x: 0.25 * s,
+      y: (m01 + m10) / s,
+      z: (m02 + m20) / s,
+    };
+  } else if (m11 > m22) {
+    const s = 2 * Math.sqrt(1 + m11 - m00 - m22);
+    lookRot = {
+      w: (m02 - m20) / s,
+      x: (m01 + m10) / s,
+      y: 0.25 * s,
+      z: (m12 + m21) / s,
+    };
+  } else {
+    const s = 2 * Math.sqrt(1 + m22 - m00 - m11);
+    lookRot = {
+      w: (m10 - m01) / s,
+      x: (m02 + m20) / s,
+      y: (m12 + m21) / s,
+      z: 0.25 * s,
+    };
+  }
+
+  // Apply leafZAngle rotation around Z axis
+  const eulerRad = { x: 0, y: 0, z: (leafZAngle * Math.PI) / 180 };
   const cx = Math.cos(eulerRad.x / 2);
   const cy = Math.cos(eulerRad.y / 2);
   const cz = Math.cos(eulerRad.z / 2);
@@ -560,30 +760,21 @@ function getLeafAttachmentInfo(
 }
 
 /**
- * Create stem shape points - EXACTLY matches C# LeafStem.CreateShape
- * Uses Polar3 spherical coordinates: (len, lat, longi) where
- * Vector = (len * sin(longi) * cos(lat), len * sin(longi) * sin(lat), len * cos(longi))
- * With lat=0: x = len*sin(longi), y = 0, z = len*cos(longi)
+ * Create stem shape points - circular cross-section in the XZ plane
+ * The stem extends along the Y axis, so cross-section is perpendicular to Y
  * Exported for testing
  */
 export function createStemShape(width: number, sides: number = 6): Point3D[] {
   const shape: Point3D[] = [];
-  const PI = Math.PI;
-  const PI2 = PI * 2;
+  const PI2 = Math.PI * 2;
 
   for (let i = 0; i < sides; i++) {
-    // Original: new Polar3(s, 0, (float)i / (float)sides * Polar.Pi2 + Polar.Pi).Vector
-    // lat=0, longi = (i/sides) * 2π + π
-    const longi = (i / sides) * PI2 + PI;
-
-    // Polar3.Vector with lat=0:
-    // x = len * sin(longi) * cos(0) = len * sin(longi)
-    // y = len * sin(longi) * sin(0) = 0
-    // z = len * cos(longi)
+    // Create circular cross-section in XZ plane (perpendicular to Y-axis)
+    const angle = (i / sides) * PI2;
     shape.push({
-      x: width * Math.sin(longi),
+      x: width * Math.cos(angle),
       y: 0,
-      z: width * Math.cos(longi),
+      z: width * Math.sin(angle),
     });
   }
 
@@ -592,123 +783,145 @@ export function createStemShape(width: number, sides: number = 6): Point3D[] {
 
 /**
  * Generate stem mesh from ALL curves
- * Matches original C# StemRenderer.Render EXACTLY
+ *
+ * CRITICAL: The stem curves are generated in 2D (XY plane) where:
+ * - X is the horizontal offset (flop direction)
+ * - Y is the extension direction (stem length)
+ * - Z is minimal wobble
+ *
+ * When the stem is placed in the scene, it needs to extend OUTWARD from the trunk
+ * (horizontally), not upward. This is achieved by swapping axes: what was Y (extension)
+ * becomes X (outward), and what was X (flop offset) becomes Y (vertical droop).
  */
 function generateStemMesh(
   stem: { curves: { p0: Point3D; h0: Point3D; h1: Point3D; p1: Point3D }[] },
   width: number,
   segments: number = 6,
+  baseColor?: HSLColor,
+  topColor?: HSLColor,
+  colorBias: number = 0,
 ): MeshData {
   const vertices: Point3D[] = [];
   const triangles: number[] = [];
   const uvs: { x: number; y: number }[] = [];
   const normals: Point3D[] = [];
+  const colors: number[] = [];
 
-  // Get all stem points and normals from ALL curves
-  const baseLineSteps = 5;
-  const { points: stemPoints, normals: stemNormals } = getStemPoints(
+  // Default colors if not provided
+  const defaultBaseColor: HSLColor = { h: 0.33, s: 0.8, l: 0.15 }; // Dark green
+  const defaultTopColor: HSLColor = { h: 0.33, s: 0.7, l: 0.25 }; // Lighter green
+  const actualBaseColor = baseColor || defaultBaseColor;
+  const actualTopColor = topColor || defaultTopColor;
+
+  // Get all stem points and tangents from ALL curves
+  const baseLineSteps = 8; // Increased for smoother curves
+  const { points: stemPoints, normals: stemTangents } = getStemPoints(
     stem.curves,
     baseLineSteps,
   );
 
   if (stemPoints.length === 0) {
-    // Log warning - this indicates invalid stem curve data
-    console.warn(
-      "[PlantGenerator] generateStemMesh: no stem points from curves, returning empty mesh",
+    // Stem curves must produce at least one point - fail early
+    throw new Error(
+      "[PlantGenerator] generateStemMesh: no stem points from curves - stem curve data is invalid",
     );
-    return {
-      vertices: [],
-      triangles: [],
-      uvs: [],
-      normals: [],
-      colors: [],
-      orderedEdgeVerts: [],
-    };
   }
 
-  // Face forward rotation - EXACTLY matches Quaternion.Euler(90, 0, 0)
-  // This rotates 90° around X axis
-  const faceForward = {
-    x: Math.sin(Math.PI / 4), // sin(45°) = 0.7071...
-    y: 0,
-    z: 0,
-    w: Math.cos(Math.PI / 4), // cos(45°) = 0.7071...
-  };
-
-  // Create shape points using Polar3 (EXACTLY like original)
+  // Create circular cross-section shape
   const shapePoints = createStemShape(width, segments);
 
   // Generate vertices for each stem point
   for (let i = 0; i < stemPoints.length; i++) {
     const stemPoint = stemPoints[i];
-    const normal = stemNormals[i];
-    const perc = i / (stemPoints.length - 1);
+    const tangent = stemTangents[i];
+    const perc = i / Math.max(1, stemPoints.length - 1);
 
-    // Normalize and truncate normal (matches original .normalized.Truncate())
-    const nLen = Math.sqrt(
-      normal.x * normal.x + normal.y * normal.y + normal.z * normal.z,
+    // Transform stem point: swap X and Y so stem extends along X (outward from trunk)
+    // Original: Y is extension (length), X is flop offset (horizontal displacement)
+    // Transformed: X is extension (outward), Y is NEGATIVE flop (so droop goes DOWN)
+    const transformedStemPoint: Point3D = {
+      x: stemPoint.y, // Extension becomes outward (+X)
+      y: -stemPoint.x, // Flop offset becomes downward (-Y for droop)
+      z: stemPoint.z, // Z stays as wobble
+    };
+
+    // Transform tangent the same way
+    const transformedTangent: Point3D = {
+      x: tangent.y,
+      y: -tangent.x, // Negate to match position transform
+      z: tangent.z,
+    };
+
+    // Normalize the tangent
+    const tLen = Math.sqrt(
+      transformedTangent.x * transformedTangent.x +
+        transformedTangent.y * transformedTangent.y +
+        transformedTangent.z * transformedTangent.z,
     );
-    let normalizedNormal: Point3D;
-    if (nLen > 0.0001) {
-      // Truncate to 3 decimal places like original
-      normalizedNormal = {
-        x: Math.round((normal.x / nLen) * 1000) / 1000,
-        y: Math.round((normal.y / nLen) * 1000) / 1000,
-        z: Math.round((normal.z / nLen) * 1000) / 1000,
+
+    let forward: Point3D;
+    if (tLen > 0.0001) {
+      forward = {
+        x: transformedTangent.x / tLen,
+        y: transformedTangent.y / tLen,
+        z: transformedTangent.z / tLen,
       };
     } else {
-      normalizedNormal = { x: 0, y: 1, z: 0 };
+      forward = { x: 1, y: 0, z: 0 }; // Default to outward (+X)
     }
 
-    // Check if normal is not zero/NaN (SoftEquals check from original)
-    const isZero =
-      Math.abs(normalizedNormal.x) < 0.001 &&
-      Math.abs(normalizedNormal.y) < 0.001 &&
-      Math.abs(normalizedNormal.z) < 0.001;
+    // Calculate up vector (perpendicular to forward, trying to stay vertical)
+    // Use world up as reference, then orthogonalize
+    let up: Point3D = { x: 0, y: 1, z: 0 };
+    const dotUp = forward.x * up.x + forward.y * up.y + forward.z * up.z;
 
-    // Get rotation to orient shape along curve direction
-    // Original: q = !normal.SoftEquals(Vector3.zero) ? Quaternion.LookRotation(normal, Vector3.up) : Quaternion.identity
-    const q = !isZero
-      ? lookRotation(normalizedNormal, { x: 0, y: 1, z: 0 })
-      : { x: 0, y: 0, z: 0, w: 1 };
+    // If forward is nearly vertical, use a different reference
+    if (Math.abs(dotUp) > 0.99) {
+      up = { x: 0, y: 0, z: 1 };
+    }
 
-    // Width modifier based on position (taper at tip) - matches ShapeScaleAtPercent
+    // Calculate right = forward x up
+    const right: Point3D = {
+      x: forward.y * up.z - forward.z * up.y,
+      y: forward.z * up.x - forward.x * up.z,
+      z: forward.x * up.y - forward.y * up.x,
+    };
+    const rLen = Math.sqrt(
+      right.x * right.x + right.y * right.y + right.z * right.z,
+    );
+    if (rLen > 0.0001) {
+      right.x /= rLen;
+      right.y /= rLen;
+      right.z /= rLen;
+    }
+
+    // Recalculate up = right x forward (to ensure orthogonal)
+    up = {
+      x: right.y * forward.z - right.z * forward.y,
+      y: right.z * forward.x - right.x * forward.z,
+      z: right.x * forward.y - right.y * forward.x,
+    };
+
+    // Width modifier based on position (taper at tip)
     const widthMod = shapeScaleAtPercent(perc);
 
     for (let j = 0; j < segments; j++) {
       const shapePoint = shapePoints[j];
 
-      // Scale shape point - matches: widthMod * Vector3.Lerp(Vector3.zero, shapePoint, ShapeScaleAtPercent)
-      // But ShapeScaleAtPercent is already applied via widthMod
-      const scaledPoint: Point3D = {
-        x: shapePoint.x * widthMod,
-        y: shapePoint.y * widthMod,
-        z: shapePoint.z * widthMod,
+      // Scale the shape point
+      const scaledX = shapePoint.x * widthMod;
+      const scaledZ = shapePoint.z * widthMod;
+
+      // Transform shape point to world space using the basis vectors
+      // Shape is in XZ plane (perpendicular to Y), but we want it perpendicular to forward
+      // So shape.x maps to 'up' direction and shape.z maps to 'right' direction
+      const worldPoint: Point3D = {
+        x: transformedStemPoint.x + up.x * scaledX + right.x * scaledZ,
+        y: transformedStemPoint.y + up.y * scaledX + right.y * scaledZ,
+        z: transformedStemPoint.z + up.z * scaledX + right.z * scaledZ,
       };
 
-      // Check for zero scaled point (single point case)
-      const isScaledZero =
-        scaledPoint.x === 0 && scaledPoint.y === 0 && scaledPoint.z === 0;
-
-      if (isScaledZero) {
-        // Single point - just add stem position
-        vertices.push({
-          x: stemPoint.x,
-          y: stemPoint.y,
-          z: stemPoint.z,
-        });
-      } else {
-        // Rotate by faceForward then by curve orientation
-        // Original: Vector3 rotatedPoint = q * faceForward * scaledPoint;
-        const rotatedByFace = rotatePointByQuat(scaledPoint, faceForward);
-        const rotatedPoint = rotatePointByQuat(rotatedByFace, q);
-
-        vertices.push({
-          x: rotatedPoint.x + stemPoint.x,
-          y: rotatedPoint.y + stemPoint.y,
-          z: rotatedPoint.z + stemPoint.z,
-        });
-      }
+      vertices.push(worldPoint);
 
       uvs.push({
         x: j / segments,
@@ -716,11 +929,10 @@ function generateStemMesh(
       });
 
       // Calculate outward normal
-      const lastVert = vertices[vertices.length - 1];
       const outward = {
-        x: lastVert.x - stemPoint.x,
-        y: lastVert.y - stemPoint.y,
-        z: lastVert.z - stemPoint.z,
+        x: worldPoint.x - transformedStemPoint.x,
+        y: worldPoint.y - transformedStemPoint.y,
+        z: worldPoint.z - transformedStemPoint.z,
       };
       const outLen = Math.sqrt(
         outward.x * outward.x + outward.y * outward.y + outward.z * outward.z,
@@ -734,23 +946,29 @@ function generateStemMesh(
             }
           : { x: 0, y: 1, z: 0 },
       );
+
+      // Generate vertex color with gradient from base to top
+      // Apply color bias to shift gradient towards base or top
+      let colorT = perc;
+      if (colorBias !== 0) {
+        // Positive bias = more base color, negative = more top color
+        colorT = Math.pow(colorT, 1 + colorBias);
+      }
+      const vertexColor = lerpHsl(actualBaseColor, actualTopColor, colorT);
+      const [r, g, b] = hslToRgb(vertexColor.h, vertexColor.s, vertexColor.l);
+      colors.push(r / 255, g / 255, b / 255, 1.0);
     }
   }
 
-  // Generate triangles - MUST match C# StemRenderer winding order
-  // C# uses: vn -> vn+sides -> lessOne, and vn+sides -> lessOne+sides -> lessOne
-  // Where lessOne = vn - 1 (with wraparound)
+  // Generate triangles
   for (let ring = 0; ring < stemPoints.length - 1; ring++) {
     const floor = ring * segments;
     const ceil = floor + segments;
 
     for (let vn = floor; vn < ceil; vn++) {
-      // lessOne wraps around within the current ring
       let lessOne = vn - 1;
       if (lessOne < floor) lessOne += segments;
 
-      // Triangle 1: current vertex -> next ring same position -> previous vertex
-      // Triangle 2: next ring same position -> next ring previous position -> previous vertex
       triangles.push(vn, vn + segments, lessOne);
       triangles.push(vn + segments, lessOne + segments, lessOne);
     }
@@ -761,9 +979,7 @@ function generateStemMesh(
     triangles,
     uvs,
     normals,
-    // Colors: white (1,1,1,1) - stem color is applied via material, not vertex colors
-    colors: new Array(vertices.length * 4).fill(1),
-    // orderedEdgeVerts: empty - not needed for stem meshes (used for leaf edge processing)
+    colors,
     orderedEdgeVerts: [],
   };
 }
@@ -789,120 +1005,140 @@ export function trunkShapeScaleAtPercent(
 }
 
 /**
- * Generate trunk mesh with proper trunk taper (different from stem taper)
- * Trunk uses 16 sides and quadratic taper starting from taperStartPerc
+ * Generate trunk mesh with proper trunk taper
+ *
+ * Unlike stems, the trunk grows VERTICALLY (Y is up), which is correct for the trunk.
+ * The trunk curves are already in the correct orientation for world space.
  */
 function generateTrunkMesh(
-  stem: { curves: { p0: Point3D; h0: Point3D; h1: Point3D; p1: Point3D }[] },
+  trunk: { curves: { p0: Point3D; h0: Point3D; h1: Point3D; p1: Point3D }[] },
   width: number,
   segments: number = 16,
   taperStartPerc: number = 0.9,
+  baseColor?: HSLColor,
+  topColor?: HSLColor,
+  browning: number = 0.2,
+  lightness: number = 0.2,
 ): MeshData {
   const vertices: Point3D[] = [];
   const triangles: number[] = [];
   const uvs: { x: number; y: number }[] = [];
   const normals: Point3D[] = [];
+  const colors: number[] = [];
 
-  const baseLineSteps = 5;
-  const { points: stemPoints, normals: stemNormals } = getStemPoints(
-    stem.curves,
+  // Default trunk colors - brown/green gradient
+  // Apply browning and lightness adjustments
+  const defaultBaseColor: HSLColor = {
+    h: 0.33 - browning * 0.2, // Shift hue towards brown
+    s: 0.6 - browning * 0.2,
+    l: 0.12 + lightness * 0.1,
+  };
+  const defaultTopColor: HSLColor = {
+    h: 0.33, // More green at top
+    s: 0.7,
+    l: 0.18 + lightness * 0.15,
+  };
+  const actualBaseColor = baseColor || defaultBaseColor;
+  const actualTopColor = topColor || defaultTopColor;
+
+  const baseLineSteps = 10;
+  const { points: trunkPoints, normals: trunkTangents } = getStemPoints(
+    trunk.curves,
     baseLineSteps,
   );
 
-  if (stemPoints.length === 0) {
-    // Log warning - this indicates invalid trunk curve data
-    console.warn(
-      "[PlantGenerator] generateTrunkMesh: no stem points from curves, returning empty mesh",
+  if (trunkPoints.length === 0) {
+    // Trunk curves must produce at least one point - fail early
+    throw new Error(
+      "[PlantGenerator] generateTrunkMesh: no trunk points from curves - trunk curve data is invalid",
     );
-    return {
-      vertices: [],
-      triangles: [],
-      uvs: [],
-      normals: [],
-      colors: [],
-      orderedEdgeVerts: [],
-    };
   }
 
-  const faceForward = {
-    x: Math.sin(Math.PI / 4),
-    y: 0,
-    z: 0,
-    w: Math.cos(Math.PI / 4),
-  };
-
+  // Create circular cross-section shape
   const shapePoints = createStemShape(width, segments);
 
-  for (let i = 0; i < stemPoints.length; i++) {
-    const stemPoint = stemPoints[i];
-    const normal = stemNormals[i];
-    const perc = i / (stemPoints.length - 1);
+  for (let i = 0; i < trunkPoints.length; i++) {
+    const trunkPoint = trunkPoints[i];
+    const tangent = trunkTangents[i];
+    const perc = i / Math.max(1, trunkPoints.length - 1);
 
-    const nLen = Math.sqrt(
-      normal.x * normal.x + normal.y * normal.y + normal.z * normal.z,
+    // Normalize the tangent (direction the trunk is growing)
+    const tLen = Math.sqrt(
+      tangent.x * tangent.x + tangent.y * tangent.y + tangent.z * tangent.z,
     );
-    let normalizedNormal: Point3D;
-    if (nLen > 0.0001) {
-      normalizedNormal = {
-        x: Math.round((normal.x / nLen) * 1000) / 1000,
-        y: Math.round((normal.y / nLen) * 1000) / 1000,
-        z: Math.round((normal.z / nLen) * 1000) / 1000,
+
+    let forward: Point3D;
+    if (tLen > 0.0001) {
+      forward = {
+        x: tangent.x / tLen,
+        y: tangent.y / tLen,
+        z: tangent.z / tLen,
       };
     } else {
-      normalizedNormal = { x: 0, y: 1, z: 0 };
+      forward = { x: 0, y: 1, z: 0 }; // Default to upward
     }
 
-    const isZero =
-      Math.abs(normalizedNormal.x) < 0.001 &&
-      Math.abs(normalizedNormal.y) < 0.001 &&
-      Math.abs(normalizedNormal.z) < 0.001;
+    // Calculate perpendicular basis for the cross-section
+    // Use world X as reference for creating perpendicular vectors
+    let refVec: Point3D = { x: 1, y: 0, z: 0 };
+    const dotRef =
+      forward.x * refVec.x + forward.y * refVec.y + forward.z * refVec.z;
+    if (Math.abs(dotRef) > 0.95) {
+      refVec = { x: 0, y: 0, z: 1 };
+    }
 
-    const q = !isZero
-      ? lookRotation(normalizedNormal, { x: 0, y: 1, z: 0 })
-      : { x: 0, y: 0, z: 0, w: 1 };
+    // right = forward x refVec
+    let right: Point3D = {
+      x: forward.y * refVec.z - forward.z * refVec.y,
+      y: forward.z * refVec.x - forward.x * refVec.z,
+      z: forward.x * refVec.y - forward.y * refVec.x,
+    };
+    const rLen = Math.sqrt(
+      right.x * right.x + right.y * right.y + right.z * right.z,
+    );
+    if (rLen > 0.0001) {
+      right.x /= rLen;
+      right.y /= rLen;
+      right.z /= rLen;
+    }
 
-    // Use trunk taper (quadratic from taperStartPerc)
+    // up = right x forward
+    const up: Point3D = {
+      x: right.y * forward.z - right.z * forward.y,
+      y: right.z * forward.x - right.x * forward.z,
+      z: right.x * forward.y - right.y * forward.x,
+    };
+
+    // Width modifier based on position (taper near top)
     const widthMod = trunkShapeScaleAtPercent(perc, taperStartPerc);
 
     for (let j = 0; j < segments; j++) {
       const shapePoint = shapePoints[j];
 
-      const scaledPoint: Point3D = {
-        x: shapePoint.x * widthMod,
-        y: shapePoint.y * widthMod,
-        z: shapePoint.z * widthMod,
+      // Scale the shape point
+      const scaledX = shapePoint.x * widthMod;
+      const scaledZ = shapePoint.z * widthMod;
+
+      // Transform shape point to world space
+      // Shape is in XZ plane, we map X to 'right' and Z to 'up'
+      const worldPoint: Point3D = {
+        x: trunkPoint.x + right.x * scaledX + up.x * scaledZ,
+        y: trunkPoint.y + right.y * scaledX + up.y * scaledZ,
+        z: trunkPoint.z + right.z * scaledX + up.z * scaledZ,
       };
 
-      const isScaledZero =
-        scaledPoint.x === 0 && scaledPoint.y === 0 && scaledPoint.z === 0;
-
-      if (isScaledZero) {
-        vertices.push({
-          x: stemPoint.x,
-          y: stemPoint.y,
-          z: stemPoint.z,
-        });
-      } else {
-        const rotatedByFace = rotatePointByQuat(scaledPoint, faceForward);
-        const rotatedPoint = rotatePointByQuat(rotatedByFace, q);
-
-        vertices.push({
-          x: rotatedPoint.x + stemPoint.x,
-          y: rotatedPoint.y + stemPoint.y,
-          z: rotatedPoint.z + stemPoint.z,
-        });
-      }
+      vertices.push(worldPoint);
 
       uvs.push({
         x: j / segments,
         y: perc,
       });
 
-      const lastVert = vertices[vertices.length - 1];
+      // Calculate outward normal
       const outward = {
-        x: lastVert.x - stemPoint.x,
-        y: lastVert.y - stemPoint.y,
-        z: lastVert.z - stemPoint.z,
+        x: worldPoint.x - trunkPoint.x,
+        y: worldPoint.y - trunkPoint.y,
+        z: worldPoint.z - trunkPoint.z,
       };
       const outLen = Math.sqrt(
         outward.x * outward.x + outward.y * outward.y + outward.z * outward.z,
@@ -914,13 +1150,18 @@ function generateTrunkMesh(
               y: outward.y / outLen,
               z: outward.z / outLen,
             }
-          : { x: 0, y: 1, z: 0 },
+          : { x: 1, y: 0, z: 0 },
       );
+
+      // Generate vertex color with gradient from base to top
+      const vertexColor = lerpHsl(actualBaseColor, actualTopColor, perc);
+      const [r, g, b] = hslToRgb(vertexColor.h, vertexColor.s, vertexColor.l);
+      colors.push(r / 255, g / 255, b / 255, 1.0);
     }
   }
 
-  // Generate triangles (same winding as stem)
-  for (let ring = 0; ring < stemPoints.length - 1; ring++) {
+  // Generate triangles
+  for (let ring = 0; ring < trunkPoints.length - 1; ring++) {
     const floor = ring * segments;
     const ceil = floor + segments;
 
@@ -938,9 +1179,7 @@ function generateTrunkMesh(
     triangles,
     uvs,
     normals,
-    // Colors: white (1,1,1,1) - trunk color is applied via material, not vertex colors
-    colors: new Array(vertices.length * 4).fill(1),
-    // orderedEdgeVerts: empty - not needed for trunk meshes (used for leaf edge processing)
+    colors,
     orderedEdgeVerts: [],
   };
 }
@@ -1153,25 +1392,55 @@ export class PlantGenerator {
       max: getExtents3D(leafMesh.vertices).max,
     };
 
+    // Pre-compute stem color parameters for all bundles
+    const bundleStemBaseColor = getParamColorValue(
+      this.params,
+      LPK.StemBaseColor,
+    );
+    const bundleStemTopColorHue = getParamValue(
+      this.params,
+      LPK.StemTopColorHue,
+    );
+    const bundleStemTopColorLit = getParamValue(
+      this.params,
+      LPK.StemTopColorLit,
+    );
+    const bundleStemTopColorSat = getParamValue(
+      this.params,
+      LPK.StemTopColorSat,
+    );
+    const bundleStemColorBias = getParamValue(this.params, LPK.StemColorBias);
+
+    // Calculate stem top color from base color with adjustments
+    const bundleStemTopColor = adjustHsl(
+      bundleStemBaseColor,
+      bundleStemTopColorHue * 0.1,
+      bundleStemTopColorSat * 0.3,
+      bundleStemTopColorLit * 0.3,
+    );
+
     for (let i = 0; i < arrangements.length; i++) {
       const arrangement = arrangements[i];
 
-      // Generate stem
-      const direction: Point3D = { x: 1, y: 0, z: 0 };
-      const stemData = generateStem(
-        arrangement.pos,
-        direction,
-        this.params,
-        arrangement,
-        seed + i,
-      );
+      // Generate stem (at origin in bundle-local space, positioned by bundle transform)
+      const stemData = generateStem(this.params, arrangement, seed + i);
 
-      // Generate stem mesh
-      // Original C#: float s = 0.25f * fields[LPK.StemWidth].value * scale
-      // The stem width is scaled by arrangement.scale
-      const stemWidth =
-        0.25 * getParamValue(this.params, LPK.StemWidth) * arrangement.scale;
-      const stemMeshData = generateStemMesh(stemData, stemWidth, 6);
+      // Generate stem mesh with color gradient
+      // Stem width uses the StemWidth parameter with a minimum base width
+      // The scale factor is applied more gently to prevent tiny stems on small leaves
+      const baseStemWidth = getParamValue(this.params, LPK.StemWidth);
+      // Use square root of scale to reduce the impact of small scales on stem width
+      const scaleAdjusted = Math.sqrt(arrangement.scale);
+      // Minimum stem width of 0.08 to ensure visibility
+      const stemWidth = Math.max(0.08, baseStemWidth * 0.5 * scaleAdjusted);
+      const stemMeshData = generateStemMesh(
+        stemData,
+        stemWidth,
+        8, // 8 segments for smoother stems
+        bundleStemBaseColor,
+        bundleStemTopColor,
+        bundleStemColorBias,
+      );
       const stemGeometry = meshDataToBufferGeometry(stemMeshData);
 
       leafBundles.push({
@@ -1187,14 +1456,25 @@ export class PlantGenerator {
     // Apply collision avoidance
     applyCollisionAvoidance(leafBundles, baseAABB, this.params);
 
-    // Generate trunk mesh with proper taper (different from stem taper)
+    // Generate trunk mesh with proper taper
     // Trunk taper: starts at topStemPos / trunkHeight, goes to 0 at tip
     const taperStartPerc = trunkHeight > 0 ? topStemPos / trunkHeight : 0.9;
+    // Trunk width should be substantial - use the full width parameter
+    const trunkWidthFinal = Math.max(0.15, trunk.width * 0.8);
+
+    // Get trunk color parameters
+    const trunkBrowning = getParamValue(this.params, LPK.TrunkBrowning);
+    const trunkLightness = getParamValue(this.params, LPK.TrunkLightness);
+
     const trunkMeshData = generateTrunkMesh(
       { curves: trunk.curves },
-      trunk.width * 0.5,
-      16, // 16 sides for trunk (matches C#)
+      trunkWidthFinal,
+      16, // 16 sides for smoother trunk
       taperStartPerc,
+      undefined, // Use default base color (will be affected by browning/lightness)
+      undefined, // Use default top color
+      trunkBrowning,
+      trunkLightness,
     );
     const trunkGeometry = meshDataToBufferGeometry(trunkMeshData);
 
@@ -1202,9 +1482,21 @@ export class PlantGenerator {
     const group = new Group();
     group.name = "Plant";
 
-    // Create materials
+    // Get stem color parameters for material
+    const stemBaseColor = getParamColorValue(this.params, LPK.StemBaseColor);
+    const stemShine = getParamValue(this.params, LPK.StemShine);
+
+    // Get leaf base color for material fallback (when textures not available)
+    const leafBaseColor = getParamColorValue(this.params, LPK.TexBaseColor);
+    const leafColorHex = hslToHex(
+      leafBaseColor.h,
+      leafBaseColor.s,
+      leafBaseColor.l,
+    );
+
+    // Create leaf material using TexBaseColor as base
     const leafMaterial = new MeshStandardMaterial({
-      color: 0x228b22,
+      color: leafColorHex,
       roughness: 0.7,
       metalness: 0.0,
       side: DoubleSide,
@@ -1217,10 +1509,17 @@ export class PlantGenerator {
       leafMaterial.normalMap = imageDataToTexture(textures.normal);
     }
 
+    // Create stem/trunk material using stem color parameters with vertex colors
+    const stemBaseColorHex = hslToHex(
+      stemBaseColor.h,
+      stemBaseColor.s,
+      stemBaseColor.l,
+    );
     const stemMaterial = new MeshStandardMaterial({
-      color: 0x2d5a27,
-      roughness: 0.8,
-      metalness: 0.0,
+      color: stemBaseColorHex,
+      roughness: 1.0 - stemShine * 0.5, // Higher shine = lower roughness
+      metalness: stemShine * 0.1, // Slight metalness for shine
+      vertexColors: true, // Enable vertex colors for gradients
     });
 
     // Add trunk mesh
@@ -1274,41 +1573,48 @@ export class PlantGenerator {
       );
 
       // Apply attachment rotation
-      // Original C#: leafRotation = Quaternion.Euler(0, 0, stemAttachmentAngle) * leafRotation
+      // The attachment angle tilts the leaf around its local X axis (width direction)
+      // to make it face more upward or downward relative to the stem
       const stemAttachmentAngle = getParamValue(
         this.params,
         LPK.StemAttachmentAngle,
       );
+
+      // Create rotation around local X axis (leaf width)
       const attachAngleRad = (stemAttachmentAngle * Math.PI) / 180;
       const attachQuat = {
-        x: 0,
+        x: Math.sin(attachAngleRad / 2),
         y: 0,
-        z: Math.sin(attachAngleRad / 2),
+        z: 0,
         w: Math.cos(attachAngleRad / 2),
       };
 
-      // Multiply: attachQuat * attachmentInfo.rotation
+      // The final rotation is: baseRot * attachQuat
+      // This applies baseRot first (orientation), then attachQuat (tilt around local X)
+      // Note: In quaternion multiplication, q1*q2 applied to point means q2 first, then q1
+      // So baseRot * attachQuat means: attachQuat (tilt) is applied in the baseRot-rotated space
+      const baseRot = attachmentInfo.rotation;
       const finalRot = {
         x:
-          attachQuat.w * attachmentInfo.rotation.x +
-          attachQuat.x * attachmentInfo.rotation.w +
-          attachQuat.y * attachmentInfo.rotation.z -
-          attachQuat.z * attachmentInfo.rotation.y,
+          baseRot.w * attachQuat.x +
+          baseRot.x * attachQuat.w +
+          baseRot.y * attachQuat.z -
+          baseRot.z * attachQuat.y,
         y:
-          attachQuat.w * attachmentInfo.rotation.y -
-          attachQuat.x * attachmentInfo.rotation.z +
-          attachQuat.y * attachmentInfo.rotation.w +
-          attachQuat.z * attachmentInfo.rotation.x,
+          baseRot.w * attachQuat.y -
+          baseRot.x * attachQuat.z +
+          baseRot.y * attachQuat.w +
+          baseRot.z * attachQuat.x,
         z:
-          attachQuat.w * attachmentInfo.rotation.z +
-          attachQuat.x * attachmentInfo.rotation.y -
-          attachQuat.y * attachmentInfo.rotation.x +
-          attachQuat.z * attachmentInfo.rotation.w,
+          baseRot.w * attachQuat.z +
+          baseRot.x * attachQuat.y -
+          baseRot.y * attachQuat.x +
+          baseRot.z * attachQuat.w,
         w:
-          attachQuat.w * attachmentInfo.rotation.w -
-          attachQuat.x * attachmentInfo.rotation.x -
-          attachQuat.y * attachmentInfo.rotation.y -
-          attachQuat.z * attachmentInfo.rotation.z,
+          baseRot.w * attachQuat.w -
+          baseRot.x * attachQuat.x -
+          baseRot.y * attachQuat.y -
+          baseRot.z * attachQuat.z,
       };
 
       leafMeshObj.quaternion.set(

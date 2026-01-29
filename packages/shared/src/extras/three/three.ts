@@ -117,6 +117,10 @@ export const {
   mrt,
   // Reflection
   reflector,
+  // Screen-space coordinates (for dithering)
+  viewportCoordinate,
+  screenUV,
+  viewportSize,
 } = THREE_NAMESPACE.TSL;
 
 // Re-export Node Materials (these ARE directly on three/webgpu)

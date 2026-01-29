@@ -15,7 +15,7 @@ import { useCallback, useMemo, type CSSProperties } from "react";
 import { useThemeStore, type Theme } from "@/ui";
 import {
   type DuelRules,
-  type EquipmentSlot,
+  type DuelEquipmentSlot,
   DUEL_RULE_DEFINITIONS,
   EQUIPMENT_SLOT_LABELS,
 } from "@hyperscape/shared";
@@ -45,7 +45,7 @@ interface RulesScreenProps {
   opponentAccepted: boolean;
   opponentName: string;
   onToggleRule: (rule: keyof DuelRules) => void;
-  onToggleEquipment: (slot: EquipmentSlot) => void;
+  onToggleEquipment: (slot: DuelEquipmentSlot) => void;
   onAccept: () => void;
   onCancel: () => void;
 }
@@ -211,7 +211,7 @@ export function RulesScreen({
   );
 
   const handleEquipmentToggle = useCallback(
-    (slot: EquipmentSlot) => {
+    (slot: DuelEquipmentSlot) => {
       onToggleEquipment(slot);
     },
     [onToggleEquipment],
@@ -248,7 +248,7 @@ export function RulesScreen({
       <div style={styles.sectionStyle}>
         <div style={styles.sectionTitleStyle}>Disabled Equipment</div>
         <div style={styles.gridStyle}>
-          {(Object.keys(EQUIPMENT_SLOT_LABELS) as EquipmentSlot[]).map(
+          {(Object.keys(EQUIPMENT_SLOT_LABELS) as DuelEquipmentSlot[]).map(
             (slot) => (
               <div
                 key={slot}

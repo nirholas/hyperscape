@@ -33,6 +33,7 @@ const PresetCategorySchema = t.Union([
   t.Literal("plant"),
   t.Literal("building"),
   t.Literal("terrain"),
+  t.Literal("roads"),
 ]);
 
 const TreeSettingsSchema = t.Object({
@@ -104,6 +105,15 @@ const TerrainSettingsSchema = t.Object({
   ),
 });
 
+const RoadsSettingsSchema = t.Object({
+  townSize: t.Union([
+    t.Literal("hamlet"),
+    t.Literal("village"),
+    t.Literal("town"),
+  ]),
+  seed: t.Number(),
+});
+
 const CreatePresetSchema = t.Object({
   name: t.String({ minLength: 1, maxLength: 100 }),
   description: t.Optional(t.String({ maxLength: 500 })),
@@ -114,6 +124,7 @@ const CreatePresetSchema = t.Object({
     PlantSettingsSchema,
     BuildingSettingsSchema,
     TerrainSettingsSchema,
+    RoadsSettingsSchema,
   ]),
   tags: t.Optional(t.Array(t.String())),
 });

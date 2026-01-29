@@ -206,49 +206,82 @@ describe("Rotation Calculation", () => {
     setParamValue(params, LPK.LeafSkewMax, 0);
   });
 
+  // Helper to extract Y rotation angle from quaternion (in degrees)
+  function getYRotationDegrees(q: {
+    x: number;
+    y: number;
+    z: number;
+    w: number;
+  }): number {
+    // For a pure Y rotation: q = (0, sin(θ/2), 0, cos(θ/2))
+    // θ = 2 * atan2(y, w)
+    const angle = 2 * Math.atan2(q.y, q.w) * (180 / Math.PI);
+    // Normalize to [0, 360)
+    return ((angle % 360) + 360) % 360;
+  }
+
   it("should calculate angleMax = 360 * (1 - RotationClustering)", () => {
     // Original C#: float angleMax = 360f * (1f - fields[LPK.RotationClustering].value);
     // With RotationClustering = 0.5: angleMax = 360 * 0.5 = 180
+    // angleStart = 90 - (180 / 2) = 0
+    // stemYAngle for i=0: 0 * 180 + 0 + 0 + 0 = 0
+    // stemYAngle for i=1: 0.5 * 180 + 0 + 0 + 0 = 90
     setParamValue(params, LPK.RotationClustering, 0.5);
     setParamValue(params, LPK.LeafCount, 2);
 
     const trunk = generateTrunk(params, 5, 12345);
     const arrangements = calculateArrangements(params, trunk, 12345);
 
-    // angleStart = 90 - (180 / 2) = 0
-    // stemYAngle for i=0: 0 * 180 + 0 + 0 + 0 = 0
-    // stemYAngle for i=1: 0.5 * 180 + 0 + 0 + 0 = 90
-    // But we convert to quaternion, so check the rotation values
     expect(arrangements.length).toBe(2);
+
+    // Verify actual Y rotation angles
+    const angle0 = getYRotationDegrees(arrangements[0].stemRotation);
+    const angle1 = getYRotationDegrees(arrangements[1].stemRotation);
+
+    // Leaf 0: mostPerc = 0/2 = 0, stemYAngle = 0 * 180 + 0 + 0 = 0
+    // Leaf 1: mostPerc = 1/2 = 0.5, stemYAngle = 0.5 * 180 + 0 + 0 = 90
+    expect(angle0).toBeCloseTo(0, 0);
+    expect(angle1).toBeCloseTo(90, 0);
   });
 
   it("should calculate angleStart = 90 - (angleMax / 2)", () => {
     // Original C#: float angleStart = 90f - (angleMax / 2f);
     // With RotationClustering = 0: angleMax = 360, angleStart = 90 - 180 = -90
-    // With RotationClustering = 1: angleMax = 0, angleStart = 90 - 0 = 90
     setParamValue(params, LPK.RotationClustering, 0);
     setParamValue(params, LPK.LeafCount, 1);
 
     const trunk = generateTrunk(params, 5, 12345);
     const arrangements = calculateArrangements(params, trunk, 12345);
 
-    // angleMax = 360, angleStart = -90
-    // stemYAngle for i=0: 0 * 360 + 0 + 0 + (-90) = -90
     expect(arrangements.length).toBe(1);
+
+    // angleMax = 360, angleStart = -90
+    // stemYAngle for i=0: 0 * 360 + 0 + 0 + (-90) = -90 = 270 (normalized)
+    const angle0 = getYRotationDegrees(arrangements[0].stemRotation);
+    expect(angle0).toBeCloseTo(270, 0);
   });
 
   it("should use mostPerc = i / count for rotation (not fullPerc)", () => {
     // Original C#: float mostPerc = (float)i / count;
     // This is different from fullPerc = i / (count - 1)
+    // With RotationClustering = 0: angleMax = 360, angleStart = -90
     setParamValue(params, LPK.RotationClustering, 0);
     setParamValue(params, LPK.LeafCount, 4);
 
     const trunk = generateTrunk(params, 5, 12345);
     const arrangements = calculateArrangements(params, trunk, 12345);
 
-    // mostPerc values: 0/4=0, 1/4=0.25, 2/4=0.5, 3/4=0.75
-    // (not 4/4=1, because last mostPerc is (count-1)/count)
     expect(arrangements.length).toBe(4);
+
+    // mostPerc values: 0/4=0, 1/4=0.25, 2/4=0.5, 3/4=0.75
+    // stemYAngle = mostPerc * 360 + (-90) = mostPerc * 360 - 90
+    // Expected angles: -90, 0, 90, 180 -> normalized: 270, 0, 90, 180
+    const angles = arrangements.map((a) => getYRotationDegrees(a.stemRotation));
+
+    expect(angles[0]).toBeCloseTo(270, 0); // 0 * 360 - 90 = -90 -> 270
+    expect(angles[1]).toBeCloseTo(0, 0); // 0.25 * 360 - 90 = 0
+    expect(angles[2]).toBeCloseTo(90, 0); // 0.5 * 360 - 90 = 90
+    expect(angles[3]).toBeCloseTo(180, 0); // 0.75 * 360 - 90 = 180
   });
 });
 
@@ -258,6 +291,17 @@ describe("Rotation Calculation", () => {
 
 describe("Symmetry Angle Calculation", () => {
   let params: LeafParamDict;
+
+  // Helper to extract Y rotation angle from quaternion (in degrees)
+  function getYRotationDegrees(q: {
+    x: number;
+    y: number;
+    z: number;
+    w: number;
+  }): number {
+    const angle = 2 * Math.atan2(q.y, q.w) * (180 / Math.PI);
+    return ((angle % 360) + 360) % 360;
+  }
 
   beforeEach(() => {
     params = createDefaultParams();
@@ -271,6 +315,9 @@ describe("Symmetry Angle Calculation", () => {
 
   it("should handle symmetry = 0 as symmetry = 1", () => {
     // Original C#: if (sym == 0) sym = 1;
+    // With sym=1, symAngleAdd = 360 * (i % 1) = 0 for all leaves
+    // angleMax = 0 (clustering = 1), angleStart = 90
+    // All leaves at angle 90°
     setParamValue(params, LPK.RotationalSymmetry, 0);
     setParamValue(params, LPK.LeafCount, 3);
 
@@ -278,47 +325,93 @@ describe("Symmetry Angle Calculation", () => {
     const arrangements = calculateArrangements(params, trunk, 12345);
 
     expect(arrangements.length).toBe(3);
+
+    // All angles should be 90° (angleStart with no spread and sym=1)
+    for (const arr of arrangements) {
+      const angle = getYRotationDegrees(arr.stemRotation);
+      expect(angle).toBeCloseTo(90, 0);
+    }
   });
 
   it("should add +90 degrees for symmetry = 2", () => {
     // Original C#: if (sym == 2) symAngleAdd += 90f;
+    // symAngleAdd = (360/2) * (i % 2) + 90 = 180 * (i % 2) + 90
+    // For i=0: 90°, i=1: 270°, i=2: 90°, i=3: 270°
     setParamValue(params, LPK.RotationalSymmetry, 2);
     setParamValue(params, LPK.LeafCount, 4);
 
     const trunk = generateTrunk(params, 5, 12345);
     const arrangements = calculateArrangements(params, trunk, 12345);
 
-    // symAngleAdd for i=0: (360/2) * 0 + 90 = 90
-    // symAngleAdd for i=1: (360/2) * 1 + 90 = 270
-    // symAngleAdd for i=2: (360/2) * 0 + 90 = 90
-    // symAngleAdd for i=3: (360/2) * 1 + 90 = 270
     expect(arrangements.length).toBe(4);
+
+    const angles = arrangements.map((a) => getYRotationDegrees(a.stemRotation));
+    // With clustering=1, angleMax=0, angleStart=90
+    // stemYAngle = 0 + symAngleAdd + 90 = symAngleAdd + 90
+    // i=0: 0 + 90 + 90 = 180
+    // i=1: 180 + 90 + 90 = 360 = 0
+    // i=2: 0 + 90 + 90 = 180
+    // i=3: 180 + 90 + 90 = 0
+    expect(angles[0]).toBeCloseTo(180, 0);
+    expect(angles[1]).toBeCloseTo(0, 0);
+    expect(angles[2]).toBeCloseTo(180, 0);
+    expect(angles[3]).toBeCloseTo(0, 0);
   });
 
   it("should add +180 degrees for symmetry = 3", () => {
     // Original C#: if (sym == 3) symAngleAdd += 180f;
+    // symAngleAdd = (360/3) * (i % 3) + 180 = 120 * (i % 3) + 180
     setParamValue(params, LPK.RotationalSymmetry, 3);
     setParamValue(params, LPK.LeafCount, 6);
 
     const trunk = generateTrunk(params, 5, 12345);
     const arrangements = calculateArrangements(params, trunk, 12345);
 
-    // symAngleAdd for i=0: (360/3) * 0 + 180 = 180
-    // symAngleAdd for i=1: (360/3) * 1 + 180 = 300
-    // symAngleAdd for i=2: (360/3) * 2 + 180 = 420 = 60 (mod 360 doesn't matter)
     expect(arrangements.length).toBe(6);
+
+    const angles = arrangements.map((a) => getYRotationDegrees(a.stemRotation));
+    // With clustering=1, angleStart=90
+    // stemYAngle = 0 + symAngleAdd + 90
+    // i=0: 0 * 120 + 180 + 90 = 270
+    // i=1: 1 * 120 + 180 + 90 = 390 = 30
+    // i=2: 2 * 120 + 180 + 90 = 510 = 150
+    // i=3: 0 * 120 + 180 + 90 = 270
+    // i=4: 1 * 120 + 180 + 90 = 30
+    // i=5: 2 * 120 + 180 + 90 = 150
+    expect(angles[0]).toBeCloseTo(270, 0);
+    expect(angles[1]).toBeCloseTo(30, 0);
+    expect(angles[2]).toBeCloseTo(150, 0);
+    expect(angles[3]).toBeCloseTo(270, 0);
+    expect(angles[4]).toBeCloseTo(30, 0);
+    expect(angles[5]).toBeCloseTo(150, 0);
   });
 
   it("should calculate symAngleAdd = (360 / sym) * (i % sym)", () => {
     // Original C#: float symAngleAdd = (360f / sym) * (i % sym);
+    // For sym=4: 90 * (i % 4) = 0, 90, 180, 270 repeating
     setParamValue(params, LPK.RotationalSymmetry, 4);
     setParamValue(params, LPK.LeafCount, 8);
 
     const trunk = generateTrunk(params, 5, 12345);
     const arrangements = calculateArrangements(params, trunk, 12345);
 
-    // For sym=4: base angles are 0, 90, 180, 270 repeating
     expect(arrangements.length).toBe(8);
+
+    const angles = arrangements.map((a) => getYRotationDegrees(a.stemRotation));
+    // With clustering=1, angleStart=90
+    // stemYAngle = symAngleAdd + 90
+    // Sym=4 has no extra offset (not 2 or 3)
+    // i % 4: 0, 1, 2, 3, 0, 1, 2, 3
+    // symAngleAdd: 0, 90, 180, 270, 0, 90, 180, 270
+    // stemYAngle: 90, 180, 270, 0, 90, 180, 270, 0
+    expect(angles[0]).toBeCloseTo(90, 0);
+    expect(angles[1]).toBeCloseTo(180, 0);
+    expect(angles[2]).toBeCloseTo(270, 0);
+    expect(angles[3]).toBeCloseTo(0, 0);
+    expect(angles[4]).toBeCloseTo(90, 0);
+    expect(angles[5]).toBeCloseTo(180, 0);
+    expect(angles[6]).toBeCloseTo(270, 0);
+    expect(angles[7]).toBeCloseTo(0, 0);
   });
 });
 
@@ -467,13 +560,7 @@ describe("Stem Curve Generation", () => {
       potScale: 13.32,
     };
 
-    const stem = generateStem(
-      { x: 0, y: 0, z: 0 },
-      { x: 1, y: 0, z: 0 },
-      params,
-      arrData,
-      12345,
-    );
+    const stem = generateStem(params, arrData, 12345);
 
     // With StemFlop = 45 and no modifiers, flopPerc = 45/90 = 0.5
     expect(stem.curves.length).toBeGreaterThanOrEqual(1);
@@ -496,13 +583,7 @@ describe("Stem Curve Generation", () => {
       potScale: 13.32,
     };
 
-    const stem = generateStem(
-      { x: 0, y: 0, z: 0 },
-      { x: 1, y: 0, z: 0 },
-      params,
-      arrData,
-      12345,
-    );
+    const stem = generateStem(params, arrData, 12345);
 
     expect(stem.curves.length).toBeGreaterThanOrEqual(1);
   });
@@ -523,13 +604,7 @@ describe("Stem Curve Generation", () => {
 
     setParamValue(params, LPK.StemFlop, 0); // flopPerc = 0
 
-    const stem = generateStem(
-      { x: 0, y: 0, z: 0 },
-      { x: 1, y: 0, z: 0 },
-      params,
-      arrData,
-      12345,
-    );
+    const stem = generateStem(params, arrData, 12345);
 
     // With flopPerc = 0: len = 1.2 * (2.0 + 0.5) / (1 + 0) = 3.0
     // Note: stem generation now includes ±5% seed-based length variation
@@ -555,26 +630,14 @@ describe("Stem Curve Generation", () => {
     };
 
     setParamValue(params, LPK.StemFlop, 0); // flopPerc = 0
-    const stem0 = generateStem(
-      { x: 0, y: 0, z: 0 },
-      { x: 1, y: 0, z: 0 },
-      params,
-      arrData,
-      12345,
-    );
+    const stem0 = generateStem(params, arrData, 12345);
 
     // At flopPerc = 0, endpoint should be roughly horizontal (y > x)
     const mainCurve0 = stem0.curves[0];
     expect(mainCurve0.p1.y).toBeGreaterThan(mainCurve0.p1.x * 0.9); // Close to vertical
 
     setParamValue(params, LPK.StemFlop, 90); // flopPerc = 1
-    const stem90 = generateStem(
-      { x: 0, y: 0, z: 0 },
-      { x: 1, y: 0, z: 0 },
-      params,
-      arrData,
-      12345,
-    );
+    const stem90 = generateStem(params, arrData, 12345);
 
     // At flopPerc = 1, endpoint should be roughly horizontal (x > y)
     const mainCurve90 = stem90.curves[0];
@@ -597,13 +660,7 @@ describe("Stem Curve Generation", () => {
     };
 
     setParamValue(params, LPK.StemFlop, 45); // flopPerc = 0.5
-    const stem = generateStem(
-      { x: 0, y: 0, z: 0 },
-      { x: 1, y: 0, z: 0 },
-      params,
-      arrData,
-      12345,
-    );
+    const stem = generateStem(params, arrData, 12345);
 
     // Main curve should be truncated (p1 is not the full flop endpoint)
     const mainCurve = stem.curves[0];
@@ -842,14 +899,8 @@ describe("Stem Mesh Generation", () => {
     const trunk = generateTrunk(params, 5, 12345);
     const arrangements = calculateArrangements(params, trunk, 12345);
 
-    // Generate stem
-    const stem = generateStem(
-      { x: 0, y: 0, z: 0 },
-      { x: 1, y: 0, z: 0 },
-      params,
-      arrangements[0],
-      12345,
-    );
+    // Generate stem (at origin in bundle-local space)
+    const stem = generateStem(params, arrangements[0], 12345);
 
     // Stem should have 2 curves (main + neck)
     expect(stem.curves.length).toBe(2);
@@ -875,54 +926,95 @@ describe("Stem Mesh Generation", () => {
   it("should taper stem width only in last 5% (0.95 to 1.0)", () => {
     // Original C# ShapeScaleAtPercent:
     // if (perc <= 0.95f) return 1f;
-    // Then tapers from 1.0 to 0.25 in the last 5%
-    // At 0.0, should be 1.0
-    // At 0.5, should be 1.0
-    // At 0.94, should be 1.0
-    // At 0.95, should be 1.0
-    // At 1.0, should be ~0.25 (floor value)
+    // Then: ret = 1 - (perc - 0.95) * 20, floor = 0.25
+    // ret = ret * (1 - floor) + floor = ret * 0.75 + 0.25
+    // EaseOutQuad: ret = 1 - (1 - ret)^2
+    const { shapeScaleAtPercent } = require("../../src/plant/index.js");
+
+    // Before 0.95, scale should be 1.0
+    expect(shapeScaleAtPercent(0.0)).toBe(1.0);
+    expect(shapeScaleAtPercent(0.5)).toBe(1.0);
+    expect(shapeScaleAtPercent(0.94)).toBe(1.0);
+    expect(shapeScaleAtPercent(0.95)).toBe(1.0);
+
+    // At 0.975 (halfway through taper)
+    // ret = 1 - 0.025 * 20 = 0.5
+    // ret = 0.5 * 0.75 + 0.25 = 0.625
+    // EaseOutQuad: 1 - (1 - 0.625)^2 = 1 - 0.140625 = 0.859375
+    const scale975 = shapeScaleAtPercent(0.975);
+    expect(scale975).toBeCloseTo(0.859, 2);
+
+    // At 1.0:
+    // ret = 1 - 0.05 * 20 = 0
+    // ret = 0 * 0.75 + 0.25 = 0.25
+    // EaseOutQuad: 1 - (1 - 0.25)^2 = 1 - 0.5625 = 0.4375
+    const scale1 = shapeScaleAtPercent(1.0);
+    expect(scale1).toBeCloseTo(0.4375, 3);
+
+    // Monotonically decreasing
+    expect(scale975).toBeGreaterThan(scale1);
   });
 
   it("should use 6-sided polygon shape, not circular", () => {
     // Original C# CreateShape uses 6 sides
-    // Our implementation also uses 6 segments by default
-    const params = createDefaultParams();
-    setParamValue(params, LPK.LeafCount, 1);
+    // Test via createStemShape function
+    const { createStemShape } = require("../../src/plant/index.js");
 
-    const trunk = generateTrunk(params, 5, 12345);
-    const arrangements = calculateArrangements(params, trunk, 12345);
+    const shape = createStemShape(1.0, 6);
 
-    const stem = generateStem(
-      { x: 0, y: 0, z: 0 },
-      { x: 1, y: 0, z: 0 },
-      params,
-      arrangements[0],
-      12345,
-    );
+    // Should have exactly 6 points
+    expect(shape.length).toBe(6);
 
-    expect(stem.curves.length).toBeGreaterThanOrEqual(1);
+    // All points should be in XZ plane (Y=0)
+    for (const p of shape) {
+      expect(p.y).toBe(0);
+    }
+
+    // Points should be at radius 1.0
+    for (const p of shape) {
+      const radius = Math.sqrt(p.x * p.x + p.z * p.z);
+      expect(radius).toBeCloseTo(1.0, 5);
+    }
+
+    // Points should be evenly distributed (60° apart)
+    for (let i = 0; i < 6; i++) {
+      const expectedAngle = (i * 2 * Math.PI) / 6;
+      const actualAngle = Math.atan2(shape[i].z, shape[i].x);
+      const normalizedActual =
+        actualAngle < 0 ? actualAngle + 2 * Math.PI : actualAngle;
+      expect(normalizedActual).toBeCloseTo(expectedAngle, 3);
+    }
   });
 
   it("should orient rings along curve tangent direction", () => {
-    // Original C# uses Quaternion.LookRotation(normal, Vector3.up)
-    // to orient shape rings perpendicular to curve direction
+    // Test that stem curves have tangents that match stem direction
     const params = createDefaultParams();
-    setParamValue(params, LPK.StemFlop, 90); // Maximum droop for visible orientation change
+    setParamValue(params, LPK.StemFlop, 90); // Maximum droop - stem is horizontal
     setParamValue(params, LPK.LeafCount, 1);
+    setParamValue(params, LPK.StemLength, 2.0);
+    setParamValue(params, LPK.StemNeck, 0); // No neck bend
 
     const trunk = generateTrunk(params, 5, 12345);
     const arrangements = calculateArrangements(params, trunk, 12345);
 
-    const stem = generateStem(
-      { x: 0, y: 0, z: 0 },
-      { x: 1, y: 0, z: 0 },
-      params,
-      arrangements[0],
-      12345,
-    );
+    const stem = generateStem(params, arrangements[0], 12345);
 
-    // Stem should have curves
-    expect(stem.curves.length).toBeGreaterThanOrEqual(1);
+    // Stem should have 2 curves (main + neck)
+    expect(stem.curves.length).toBe(2);
+
+    // With 90° flop, angle = -(1*90)+90 = 0° which is horizontal
+    // At flopPerc=1, endpoint should be in +X direction (cos(0)=1, sin(0)=0)
+    const mainCurve = stem.curves[0];
+    const neckCurve = stem.curves[1];
+
+    // The endpoint should be primarily horizontal (X > Y)
+    // Note: The neck curve continues from main curve's 0.9 point
+    expect(neckCurve.p1.x).toBeGreaterThan(Math.abs(neckCurve.p1.y) * 0.5);
+
+    // Both curves should be continuous at their junction
+    expect(mainCurve.p1.x).toBeCloseTo(neckCurve.p0.x, 4);
+    expect(mainCurve.p1.y).toBeCloseTo(neckCurve.p0.y, 4);
+    expect(mainCurve.p1.z).toBeCloseTo(neckCurve.p0.z, 4);
   });
 });
 
@@ -936,63 +1028,99 @@ describe("Leaf Attachment Info", () => {
     // where buffer = normals.Last().normalized * 0.02f
     const params = createDefaultParams();
     setParamValue(params, LPK.StemLength, 2.0);
-    setParamValue(params, LPK.StemFlop, 0); // No flop for predictable position
+    setParamValue(params, LPK.StemFlop, 0); // No flop - stem goes straight up (Y direction)
+    setParamValue(params, LPK.StemNeck, 0); // No neck bend
     setParamValue(params, LPK.LeafCount, 1);
 
     const trunk = generateTrunk(params, 5, 12345);
     const arrangements = calculateArrangements(params, trunk, 12345);
 
-    const stem = generateStem(
-      { x: 0, y: 0, z: 0 },
-      { x: 1, y: 0, z: 0 },
-      params,
-      arrangements[0],
-      12345,
-    );
+    const stem = generateStem(params, arrangements[0], 12345);
 
     // Last curve endpoint
     const lastCurve = stem.curves[stem.curves.length - 1];
     const lastPoint = lastCurve.p1;
 
-    // Leaf should be positioned slightly beyond the stem tip
-    // The buffer is 0.02 units along the tangent direction
-    expect(lastPoint.y).toBeGreaterThan(0); // Stem goes upward
+    // With flopPerc=0, angle = -(0*90)+90 = 90°, which is vertical in stem-local space
+    // Stem Y should be positive (extends upward in local space)
+    expect(lastPoint.y).toBeGreaterThan(0);
+
+    // Verify stem has proper structure - curves exist and are continuous
+    expect(stem.curves.length).toBe(2);
+    expect(stem.curves[0].p1.x).toBeCloseTo(stem.curves[1].p0.x, 4);
+    expect(stem.curves[0].p1.y).toBeCloseTo(stem.curves[1].p0.y, 4);
+    expect(stem.curves[0].p1.z).toBeCloseTo(stem.curves[1].p0.z, 4);
+
+    // Total stem length should approximate the stem length parameter
+    const stemDistance = Math.sqrt(
+      lastPoint.x * lastPoint.x +
+        lastPoint.y * lastPoint.y +
+        lastPoint.z * lastPoint.z,
+    );
+    // Length varies due to subdivision at 0.9 and seed-based variation (±5%)
+    expect(stemDistance).toBeGreaterThan(1.5);
+    expect(stemDistance).toBeLessThan(2.5);
   });
 
   it("should calculate rotation based on stem tangent", () => {
-    // Original C#: Quaternion.LookRotation(normals.Last(), Vector3.up)
-    // The leaf faces along the stem direction
+    // Test tangent direction at end of stem for different flop values
     const params = createDefaultParams();
-    setParamValue(params, LPK.StemFlop, 45);
+    setParamValue(params, LPK.StemFlop, 45); // 45° flop
+    setParamValue(params, LPK.StemLength, 2.0);
+    setParamValue(params, LPK.StemNeck, 0);
     setParamValue(params, LPK.LeafCount, 1);
 
     const trunk = generateTrunk(params, 5, 12345);
     const arrangements = calculateArrangements(params, trunk, 12345);
 
-    const stem = generateStem(
-      { x: 0, y: 0, z: 0 },
-      { x: 1, y: 0, z: 0 },
-      params,
-      arrangements[0],
-      12345,
-    );
+    const stem = generateStem(params, arrangements[0], 12345);
 
-    // Stem should have valid curves
-    expect(stem.curves.length).toBeGreaterThanOrEqual(1);
+    expect(stem.curves.length).toBe(2); // Main + neck
+
+    // Verify the curves are continuous at junction
+    const mainCurve = stem.curves[0];
+    const neckCurve = stem.curves[1];
+    expect(mainCurve.p1.x).toBeCloseTo(neckCurve.p0.x, 4);
+    expect(mainCurve.p1.y).toBeCloseTo(neckCurve.p0.y, 4);
+
+    // At 45° flop (flopPerc=0.5), angle = -(0.5*90)+90 = 45°
+    // Endpoint should have both X and Y components (cos(45°)≈sin(45°)≈0.707)
+    // The neck curve's endpoint should reflect this diagonal direction
+    expect(neckCurve.p1.x).toBeGreaterThan(0); // Some horizontal extent
+    expect(neckCurve.p1.y).toBeGreaterThan(0); // Some vertical extent
   });
 
   it("should apply leafZAngle in attachment rotation", () => {
     // Original C#: Quaternion.Euler(0, 180, arrData.leafZAngle)
+    // LeafSkewMax controls the range of leafZAngle
     const params = createDefaultParams();
     setParamValue(params, LPK.LeafSkewMax, 30);
-    setParamValue(params, LPK.LeafCount, 3);
+    setParamValue(params, LPK.LeafCount, 5);
+    // Use random seed that will generate different skew values
+    setParamValue(params, LPK.RotationRand, 0);
+    setParamValue(params, LPK.ScaleRand, 0);
+    setParamValue(params, LPK.StemLengthRand, 0);
+    setParamValue(params, LPK.StemFlopRand, 0);
 
     const trunk = generateTrunk(params, 5, 12345);
     const arrangements = calculateArrangements(params, trunk, 12345);
 
-    // Different arrangements may have different leafZAngle values
-    // due to random skew
-    expect(arrangements.length).toBe(3);
+    expect(arrangements.length).toBe(5);
+
+    // All leafZAngle values should be within [-30, 30]
+    for (const arr of arrangements) {
+      expect(arr.leafZAngle).toBeGreaterThanOrEqual(-30);
+      expect(arr.leafZAngle).toBeLessThanOrEqual(30);
+    }
+
+    // With LeafSkewMax=30 and 5 leaves, there should be some variation
+    const angles = arrangements.map((a) => a.leafZAngle);
+    const minAngle = Math.min(...angles);
+    const maxAngle = Math.max(...angles);
+    const range = maxAngle - minAngle;
+
+    // Expect at least some variation (not all exactly 0)
+    expect(range).toBeGreaterThan(0);
   });
 });
 
@@ -1156,13 +1284,7 @@ describe("Full Plant Generation Sanity Check", () => {
       potScale: 13.32,
     };
 
-    const stem = generateStem(
-      { x: 0, y: 0, z: 0 },
-      { x: 1, y: 0, z: 0 },
-      params,
-      arrData,
-      12345,
-    );
+    const stem = generateStem(params, arrData, 12345);
 
     expect(stem.curves.length).toBeGreaterThan(0);
     expect(stem.length).toBeGreaterThan(0);

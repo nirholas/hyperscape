@@ -50,6 +50,7 @@ export interface Theme {
       secondary: string;
       hover: string;
       active: string;
+      gold: string;
     };
     state: {
       success: string;
@@ -228,6 +229,7 @@ export const baseTheme: Theme = {
       secondary: "#60a5fa", // Blue-400
       hover: "#2563eb", // Blue-600
       active: "#1d4ed8", // Blue-700
+      gold: "#ffd700", // Gold for stake totals, currency
     },
     state: {
       success: "#22c55e", // Green-500
@@ -394,6 +396,7 @@ export const hyperscapeTheme: Theme = {
       secondary: "#ffd866", // Bright gold highlight
       hover: "#e8be5a", // Lighter on hover
       active: "#c49530", // Deeper on press
+      gold: "#ffd700", // Gold for stake totals, currency
     },
     state: {
       success: "#4ade80", // Modern green

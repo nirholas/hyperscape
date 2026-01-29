@@ -270,9 +270,49 @@ self.onmessage = function(e) {
 
 let lodWorkerPool: WorkerPool<LODWorkerInput, LODWorkerOutput> | null = null;
 
+/** Track if workers are available */
+let workersChecked = false;
+let workersAvailable = false;
+
+/**
+ * Check if LOD workers are available (client-side with Worker + Blob URL support)
+ * Bun provides Worker and Blob but doesn't support blob URLs for workers
+ */
+function checkWorkerAvailability(): boolean {
+  if (!workersChecked) {
+    workersChecked = true;
+    // Check basic Worker/Blob availability
+    if (typeof Worker === "undefined" || typeof Blob === "undefined") {
+      workersAvailable = false;
+      return workersAvailable;
+    }
+    // Detect Bun runtime - Bun has Worker/Blob but blob URLs don't work for workers
+    if (
+      typeof process !== "undefined" &&
+      process.versions &&
+      "bun" in process.versions
+    ) {
+      workersAvailable = false;
+      return workersAvailable;
+    }
+    // Detect Node.js runtime (no browser globals like window)
+    if (typeof window === "undefined") {
+      workersAvailable = false;
+      return workersAvailable;
+    }
+    workersAvailable = true;
+  }
+  return workersAvailable;
+}
+
 export function getLODWorkerPool(
   poolSize?: number,
-): WorkerPool<LODWorkerInput, LODWorkerOutput> {
+): WorkerPool<LODWorkerInput, LODWorkerOutput> | null {
+  // Return null if workers not available (graceful degradation for server/Bun)
+  if (!checkWorkerAvailability()) {
+    return null;
+  }
+
   if (!lodWorkerPool) {
     lodWorkerPool = new WorkerPool<LODWorkerInput, LODWorkerOutput>(
       LOD_WORKER_CODE,
@@ -284,13 +324,20 @@ export function getLODWorkerPool(
 }
 
 export function isLODWorkerAvailable(): boolean {
-  return getLODWorkerPool().hasWorkers();
+  const pool = getLODWorkerPool();
+  return pool !== null && pool.hasWorkers();
 }
 
 export async function generateLODsAsync(
   input: LODWorkerInput,
 ): Promise<LODWorkerOutput> {
   const pool = getLODWorkerPool();
+
+  // Fall back to sync generation if workers not available (server/Bun)
+  if (!pool) {
+    return generateLODsSync(input);
+  }
+
   const positions = new Float32Array(input.positions);
   const indices =
     input.indices instanceof Uint32Array
@@ -317,5 +364,16 @@ export function terminateLODWorkerPool(): void {
 }
 
 export function getLODWorkerStats() {
-  return getLODWorkerPool().getStats();
+  const pool = getLODWorkerPool();
+  if (!pool) {
+    return {
+      workerCount: 0,
+      busyCount: 0,
+      queuedTasks: 0,
+      totalTasksProcessed: 0,
+      workersAvailable: false,
+      initError: "Workers not available in this environment",
+    };
+  }
+  return pool.getStats();
 }

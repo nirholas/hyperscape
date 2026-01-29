@@ -11,4 +11,7 @@ export type NavigationView =
   | "buildingGen"
   | "treeGen"
   | "rockGen"
-  | "plantGen";
+  | "plantGen"
+  | "terrainGen"
+  | "roadsGen"
+  | "grassGen";

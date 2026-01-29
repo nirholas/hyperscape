@@ -314,22 +314,13 @@ export async function initSIMD(): Promise<boolean> {
 /**
  * Simple WAT to WASM compiler using wabt.js or browser API
  */
-async function compileWAT(wat: string): Promise<WebAssembly.Module | null> {
+async function compileWAT(_wat: string): Promise<WebAssembly.Module | null> {
   // Modern approach: use the browser's built-in WAT compiler if available
   // This is a simplified fallback that works without external tools
-  try {
-    // Try using the experimental WebAssembly.Module.compile with text
-    // This won't work in most browsers, so we fall back to binary
-
-    // For production, pre-compile WAT to binary or use wabt.js
-    // Here we return null to indicate WASM is not available
-    // The caller will use the JS fallback
-
-    // To actually compile, you'd need wabt.js or a build step
-    return null;
-  } catch {
-    return null;
-  }
+  // WebAssembly text compilation is not available in most browsers
+  // For production, pre-compile WAT to binary or use wabt.js
+  // Return null to indicate WASM is not available - caller will use JS fallback
+  return null;
 }
 
 /**

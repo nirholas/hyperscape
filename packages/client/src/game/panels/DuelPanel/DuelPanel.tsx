@@ -18,7 +18,7 @@ import { ModalWindow, useThemeStore } from "@/ui";
 import { RulesScreen } from "./RulesScreen";
 import { StakesScreen } from "./StakesScreen";
 import { ConfirmScreen } from "./ConfirmScreen";
-import type { DuelRules, EquipmentSlot } from "@hyperscape/shared";
+import type { DuelRules, DuelEquipmentSlot } from "@hyperscape/shared";
 
 // ============================================================================
 // Types
@@ -80,7 +80,7 @@ interface DuelPanelProps {
   state: DuelPanelState;
   inventory: InventoryItem[];
   onToggleRule: (rule: keyof DuelRules) => void;
-  onToggleEquipment: (slot: EquipmentSlot) => void;
+  onToggleEquipment: (slot: DuelEquipmentSlot) => void;
   onAcceptRules: () => void;
   onAddStake: (inventorySlot: number, quantity: number) => void;
   onRemoveStake: (stakeIndex: number) => void;

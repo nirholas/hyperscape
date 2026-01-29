@@ -53,10 +53,13 @@ import {
   EventType,
   CombatSystem,
   ResourceSystem,
+  TownSystem,
   worldToTile,
   tilesWithinMeleeRange,
   getItem,
   DeathState,
+  type DuelRules,
+  type DuelEquipmentSlot,
 } from "@hyperscape/shared";
 
 // PlayerDeathSystem type for tick processing (not exported from main index)
@@ -1047,6 +1050,27 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.world.on(EventType.PLAYER_DIED, (eventData) => {
       const event = eventData as { entityId: string };
       this.tileMovementManager.resetAgilityProgress(event.entityId);
+    });
+
+    // Sync tile position when player FIRST JOINS the world
+    // CRITICAL: Without this, TileMovementManager defaults player tile to (0,0) and building
+    // navigation will not work because the player appears to be at origin instead of spawn point
+    this.world.on(EventType.PLAYER_JOINED, (eventData) => {
+      const event = eventData as {
+        playerId: string;
+        player: { position?: { x: number; y: number; z: number } };
+      };
+      if (event.playerId && event.player?.position) {
+        const pos = event.player.position;
+        this.tileMovementManager.syncPlayerPosition(event.playerId, {
+          x: pos.x,
+          y: pos.y,
+          z: pos.z,
+        });
+        console.log(
+          `[ServerNetwork] Synced tile position for JOINED player ${event.playerId} at (${pos.x.toFixed(1)}, ${pos.z.toFixed(1)})`,
+        );
+      }
     });
 
     // Sync tile position when player respawns at spawn point
@@ -2610,7 +2634,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.handlers["duel:toggle:rule"] = (socket, data) =>
       handleDuelToggleRule(
         socket,
-        data as { duelId: string; rule: string },
+        data as { duelId: string; rule: keyof DuelRules },
         this.world,
       );
     this.handlers["onDuel:toggle:rule"] = this.handlers["duel:toggle:rule"];
@@ -2618,7 +2642,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.handlers["duel:toggle:equipment"] = (socket, data) =>
       handleDuelToggleEquipment(
         socket,
-        data as { duelId: string; slot: string },
+        data as { duelId: string; slot: DuelEquipmentSlot },
         this.world,
       );
     this.handlers["onDuel:toggle:equipment"] =
@@ -2711,6 +2735,180 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         this.world,
       );
     this.handlers["privateMessage"] = this.handlers["onPrivateMessage"];
+
+    // Debug handler for building collision diagnostics
+    this.handlers["debugBuildingCollision"] = (socket, data) => {
+      const player = socket.player;
+      if (!player) return;
+
+      const payload = data as { tileX?: number; tileZ?: number };
+      const towns = this.world.getSystem("towns") as TownSystem | null;
+
+      if (!towns) {
+        this.broadcastManager.sendToSocket(
+          socket.id,
+          "debugBuildingCollisionResult",
+          {
+            error: "No TownSystem",
+            buildingCount: 0,
+          },
+        );
+        return;
+      }
+
+      const collisionService = towns.getCollisionService();
+      const buildingCount = collisionService.getBuildingCount();
+      const buildings = collisionService.getDebugBuildingInfo();
+
+      // If specific tile requested, get collision info for it
+      let tileInfo: ReturnType<typeof collisionService.queryCollision> | null =
+        null;
+      if (
+        typeof payload.tileX === "number" &&
+        typeof payload.tileZ === "number"
+      ) {
+        tileInfo = collisionService.queryCollision(
+          payload.tileX,
+          payload.tileZ,
+          0,
+        );
+      }
+
+      this.broadcastManager.sendToSocket(
+        socket.id,
+        "debugBuildingCollisionResult",
+        {
+          buildingCount,
+          buildings: buildings.slice(0, 5), // Limit to 5 buildings to avoid huge payloads
+          tileInfo,
+        },
+      );
+    };
+
+    // Debug handler to enable/disable walkability logging
+    this.handlers["debugWalkability"] = (socket, data) => {
+      const player = socket.player;
+      if (!player) return;
+
+      const payload = data as { enabled: boolean };
+      this.tileMovementManager.setDebugWalkability(payload.enabled);
+
+      this.broadcastManager.sendToSocket(socket.id, "debugWalkabilityResult", {
+        enabled: payload.enabled,
+        message: `Walkability debug logging ${payload.enabled ? "enabled" : "disabled"}`,
+      });
+    };
+
+    // Debug handler to get door tiles for a building
+    this.handlers["debugDoorTiles"] = (socket, data) => {
+      const player = socket.player;
+      if (!player) return;
+
+      const payload = data as {
+        buildingId?: string;
+        tileX?: number;
+        tileZ?: number;
+      };
+      const towns = this.world.getSystem("towns") as TownSystem | null;
+
+      if (!towns) {
+        this.broadcastManager.sendToSocket(socket.id, "debugDoorTilesResult", {
+          error: "No TownSystem",
+        });
+        return;
+      }
+
+      const collisionService = towns.getCollisionService();
+
+      // Find building by ID or by tile position
+      let buildingId = payload.buildingId;
+      if (
+        !buildingId &&
+        typeof payload.tileX === "number" &&
+        typeof payload.tileZ === "number"
+      ) {
+        buildingId =
+          collisionService.getBuildingAtTile(payload.tileX, payload.tileZ) ??
+          undefined;
+      }
+
+      if (!buildingId) {
+        this.broadcastManager.sendToSocket(socket.id, "debugDoorTilesResult", {
+          error: "No building found at tile or no buildingId provided",
+        });
+        return;
+      }
+
+      const doorTiles = collisionService.getDoorTiles(buildingId);
+
+      this.broadcastManager.sendToSocket(socket.id, "debugDoorTilesResult", {
+        buildingId,
+        doorTiles,
+        message: `Found ${doorTiles.length} door tile(s)`,
+      });
+    };
+
+    // Debug handler to check wall blocking between two tiles
+    this.handlers["debugWallBlocking"] = (socket, data) => {
+      const player = socket.player;
+      if (!player) return;
+
+      const payload = data as {
+        fromX: number;
+        fromZ: number;
+        toX: number;
+        toZ: number;
+        floor?: number;
+      };
+      const towns = this.world.getSystem("towns") as TownSystem | null;
+
+      if (!towns) {
+        this.broadcastManager.sendToSocket(
+          socket.id,
+          "debugWallBlockingResult",
+          {
+            error: "No TownSystem",
+          },
+        );
+        return;
+      }
+
+      const floor = payload.floor ?? 0;
+      const isBlocked = towns.isBuildingWallBlocked(
+        payload.fromX,
+        payload.fromZ,
+        payload.toX,
+        payload.toZ,
+        floor,
+      );
+
+      const collisionService = towns.getCollisionService();
+      const fromInfo = collisionService.queryCollision(
+        payload.fromX,
+        payload.fromZ,
+        floor,
+      );
+      const toInfo = collisionService.queryCollision(
+        payload.toX,
+        payload.toZ,
+        floor,
+      );
+
+      this.broadcastManager.sendToSocket(socket.id, "debugWallBlockingResult", {
+        from: {
+          x: payload.fromX,
+          z: payload.fromZ,
+          wallBlocking: fromInfo.wallBlocking,
+        },
+        to: {
+          x: payload.toX,
+          z: payload.toZ,
+          wallBlocking: toInfo.wallBlocking,
+        },
+        floor,
+        isBlocked,
+      });
+    };
   }
 
   async init(options: WorldOptions): Promise<void> {
@@ -2874,7 +3072,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     const serverWorld = this.world as {
       pgPool?: import("pg").Pool;
       drizzleDb?: import("drizzle-orm/node-postgres").NodePgDatabase<
-        typeof import("../../database/schema").default
+        typeof import("../../database/schema")
       >;
     };
 

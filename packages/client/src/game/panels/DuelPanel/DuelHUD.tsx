@@ -295,7 +295,7 @@ export function createDefaultDuelHUDState(): DuelHUDState {
       noFood: false,
       noMovement: false,
       noForfeit: false,
-      obstaclesEnabled: false,
+      funWeapons: false,
     },
     opponentDisconnected: false,
     disconnectCountdown: 0,

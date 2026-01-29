@@ -14,6 +14,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import { setSystemTime } from "bun:test";
 import { HOME_TELEPORT_CONSTANTS, EventType, Emotes } from "@hyperscape/shared";
 import {
   initHomeTeleportManager,
@@ -110,7 +111,7 @@ describe("Home Teleport Manager", () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2025-01-15T12:00:00Z"));
+    setSystemTime(new Date("2025-01-15T12:00:00Z"));
 
     mockCombatService = { isInCombat: vi.fn().mockReturnValue(false) };
     mockTerrainGetHeight = vi.fn().mockReturnValue(50);
@@ -390,7 +391,10 @@ describe("Home Teleport Manager", () => {
       const initialRemaining = manager.getCooldownRemaining(mockPlayer.id);
       expect(initialRemaining).toBeGreaterThan(COOLDOWN_MS - 1000);
 
-      vi.advanceTimersByTime(5 * 60 * 1000); // 5 minutes
+      // Use setSystemTime to advance time by 5 minutes (setSystemTime affects Date.now())
+      const fiveMinutesLater = new Date("2025-01-15T12:05:00Z");
+      setSystemTime(fiveMinutesLater);
+
       const afterFiveMin = manager.getCooldownRemaining(mockPlayer.id);
       expect(afterFiveMin).toBeLessThan(initialRemaining);
       expect(afterFiveMin).toBeGreaterThan(9 * 60 * 1000); // ~10 min remaining

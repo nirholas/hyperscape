@@ -145,8 +145,8 @@ describe("RightPanel", () => {
       render(<RightPanel {...defaultProps} mode="inventory" />);
 
       const inventoryTab = screen.getByTitle("View Backpack");
-      // Theme decorative color is #8b6914 = rgb(139, 105, 20)
-      expect(inventoryTab.style.background).toContain("139, 105, 20");
+      // Theme decorative color is #b88828 = rgb(184, 136, 40)
+      expect(inventoryTab.style.background).toContain("184, 136, 40");
     });
   });
 

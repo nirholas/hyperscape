@@ -57,11 +57,17 @@ import { DataManager } from "../../../data/DataManager";
 // NOTE: Import directly to avoid circular dependency through barrel file
 import { WaterSystem } from "./WaterSystem";
 import { Environment } from "./Environment";
+import {
+  generateTrees,
+  generateOres,
+  type ResourceGenerationContext,
+} from "./BiomeResourceGenerator";
 import { stationDataProvider } from "../../../data/StationDataProvider";
 import { resolveFootprint } from "../../../types/game/resource-processing-types";
 import { createTerrainMaterial, TerrainUniforms } from "./TerrainShader";
 import type { RoadNetworkSystem } from "./RoadNetworkSystem";
 import type { TownSystem } from "./TownSystem";
+import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
 
 // Road coloring constants
 const ROAD_COLOR = { r: 0.45, g: 0.35, b: 0.25 }; // Dirt brown color
@@ -100,6 +106,7 @@ export class TerrainSystem extends System {
   // Flat zones for terrain flattening under stations
   private flatZones = new Map<string, FlatZone>();
   private flatZonesByTile = new Map<string, FlatZone[]>(); // Spatial index by terrain tile
+  private _pendingTileRegeneration = new Set<string>(); // Tracks tiles being regenerated to avoid duplicates
   public instancedMeshManager!: InstancedMeshManager;
   private _terrainInitialized = false;
   private _initialTilesReady = false; // Track when initial tiles are loaded
@@ -923,8 +930,12 @@ export class TerrainSystem extends System {
         return {
           id: r.id,
           type: r.type,
-          subType: r.type === "tree" ? "normal" : r.type,
+          // Use actual subType from resource node, or derive from type
+          subType: r.subType ?? (r.type === "tree" ? "normal" : undefined),
           position: worldPos,
+          // Pass scale and rotation for visual variation
+          scale: r.scale,
+          rotation: r.rotation,
         };
       });
       this.world.emit(EventType.RESOURCE_SPAWN_POINTS_REGISTERED, {
@@ -940,8 +951,12 @@ export class TerrainSystem extends System {
         return {
           id: r.id,
           type: r.type,
-          subType: r.type === "tree" ? "normal" : r.type,
+          // Use actual subType from resource node, or derive from type
+          subType: r.subType ?? (r.type === "tree" ? "normal" : undefined),
           position: worldPos,
+          // Pass scale and rotation for visual variation
+          scale: r.scale,
+          rotation: r.rotation,
         };
       });
       this.world.emit(EventType.RESOURCE_SPAWN_POINTS_REGISTERED, {
@@ -1136,7 +1151,7 @@ export class TerrainSystem extends System {
     WORLD_SIZE: 100, // 100x100 grid = 10km x 10km world
     TILE_RESOLUTION: 64, // 64x64 vertices per tile for smooth terrain
     MAX_HEIGHT: 50, // 50m max height variation (bumpy terrain to show flat zones)
-    WATER_THRESHOLD: 9.0, // Water appears below 9m (0.18 * MAX_HEIGHT)
+    WATER_THRESHOLD: TERRAIN_CONSTANTS.WATER_THRESHOLD, // Water appears below this level
 
     // Performance: Reduced draw distance
     CAMERA_FAR: 400, // Match fog far + buffer
@@ -1153,8 +1168,8 @@ export class TerrainSystem extends System {
 
     // Movement Constraints
     WATER_IMPASSABLE: true, // Water blocks movement
-    MAX_WALKABLE_SLOPE: 0.7, // Maximum slope for movement (tan of angle)
-    SLOPE_CHECK_DISTANCE: 1, // Distance to check for slope calculation
+    MAX_WALKABLE_SLOPE: TERRAIN_CONSTANTS.MAX_WALKABLE_SLOPE, // Maximum slope for movement (tan of angle)
+    SLOPE_CHECK_DISTANCE: TERRAIN_CONSTANTS.SLOPE_CHECK_DISTANCE, // Distance to check for slope calculation
 
     // Features
     ROAD_WIDTH: 4, // 4m wide roads
@@ -1396,6 +1411,10 @@ export class TerrainSystem extends System {
     this.boundingBoxIntervalId = setInterval(() => {
       this.verifyTerrainBoundingBoxes();
     }, 30000); // Verify every 30 seconds
+
+    // Mark terrain as initialized - allows update() to start processing
+    this._terrainInitialized = true;
+    console.log("[TerrainSystem] Terrain initialization complete");
   }
 
   private setupClientTerrain(): void {
@@ -1818,8 +1837,12 @@ export class TerrainSystem extends System {
         return {
           id: r.id,
           type: r.type,
-          subType: r.type === "tree" ? "normal" : r.type,
+          // Use actual subType from resource node, or derive from type
+          subType: r.subType ?? (r.type === "tree" ? "normal" : undefined),
           position: worldPos,
+          // Pass scale and rotation for visual variation
+          scale: r.scale,
+          rotation: r.rotation,
         };
       });
       this.world.emit(EventType.RESOURCE_SPAWN_POINTS_REGISTERED, {
@@ -1839,8 +1862,12 @@ export class TerrainSystem extends System {
         return {
           id: r.id,
           type: r.type,
-          subType: r.type === "tree" ? "normal" : r.type,
+          // Use actual subType from resource node, or derive from type
+          subType: r.subType ?? (r.type === "tree" ? "normal" : undefined),
           position: worldPos,
+          // Pass scale and rotation for visual variation
+          scale: r.scale,
+          rotation: r.rotation,
         };
       });
       this.world.emit(EventType.RESOURCE_SPAWN_POINTS_REGISTERED, {
@@ -2656,7 +2683,22 @@ export class TerrainSystem extends System {
   }
 
   getHeightAt(worldX: number, worldZ: number): number {
-    // PERFORMANCE: Try cached tile data first (O(1) bilinear interpolation)
+    // Validate inputs
+    if (!Number.isFinite(worldX) || !Number.isFinite(worldZ)) {
+      throw new Error(
+        `[TerrainSystem] getHeightAt: invalid coords (${worldX}, ${worldZ})`,
+      );
+    }
+
+    // CRITICAL: Check flat zones FIRST - they may be registered after terrain generation
+    // This ensures buildings and other structures have correct floor heights even when
+    // terrain tiles were generated before their flat zones were registered.
+    const flatHeight = this.getFlatZoneHeight(worldX, worldZ);
+    if (flatHeight !== null) {
+      return flatHeight;
+    }
+
+    // PERFORMANCE: Try cached tile data (O(1) bilinear interpolation)
     const cachedHeight = this.getHeightAtCached(worldX, worldZ);
     if (cachedHeight !== null) {
       return cachedHeight;
@@ -2741,8 +2783,45 @@ export class TerrainSystem extends System {
   /**
    * Register a flat zone and update spatial index.
    * Spatial index uses terrain tiles (100m each) for efficient lookup.
+   *
+   * IMPORTANT: Also regenerates affected terrain tile meshes so that
+   * the visual terrain reflects the flat zone heights. This is critical
+   * because terrain tiles may have been generated before flat zones
+   * were registered (e.g., building flat zones registered after terrain init).
    */
   registerFlatZone(zone: FlatZone): void {
+    // Validate zone data
+    if (!zone || !zone.id || typeof zone.id !== "string") {
+      throw new Error(
+        `[TerrainSystem] registerFlatZone: invalid zone id: ${zone?.id}`,
+      );
+    }
+    if (!Number.isFinite(zone.centerX) || !Number.isFinite(zone.centerZ)) {
+      throw new Error(
+        `[TerrainSystem] registerFlatZone "${zone.id}": invalid center (${zone.centerX}, ${zone.centerZ})`,
+      );
+    }
+    if (!Number.isFinite(zone.width) || zone.width <= 0) {
+      throw new Error(
+        `[TerrainSystem] registerFlatZone "${zone.id}": invalid width ${zone.width}`,
+      );
+    }
+    if (!Number.isFinite(zone.depth) || zone.depth <= 0) {
+      throw new Error(
+        `[TerrainSystem] registerFlatZone "${zone.id}": invalid depth ${zone.depth}`,
+      );
+    }
+    if (!Number.isFinite(zone.height)) {
+      throw new Error(
+        `[TerrainSystem] registerFlatZone "${zone.id}": invalid height ${zone.height}`,
+      );
+    }
+    if (!Number.isFinite(zone.blendRadius) || zone.blendRadius < 0) {
+      throw new Error(
+        `[TerrainSystem] registerFlatZone "${zone.id}": invalid blendRadius ${zone.blendRadius}`,
+      );
+    }
+
     this.flatZones.set(zone.id, zone);
 
     // Calculate affected terrain tiles (100m each)
@@ -2761,6 +2840,8 @@ export class TerrainSystem extends System {
     );
 
     const tileKeys: string[] = [];
+    const tilesToRegenerate: Array<{ x: number; z: number }> = [];
+
     for (let tx = minTileX; tx <= maxTileX; tx++) {
       for (let tz = minTileZ; tz <= maxTileZ; tz++) {
         const key = `${tx}_${tz}`;
@@ -2771,11 +2852,75 @@ export class TerrainSystem extends System {
           this.flatZonesByTile.set(key, zones);
         }
         zones.push(zone);
+
+        // Track tiles that need regeneration (if they already exist)
+        if (this.terrainTiles.has(key)) {
+          tilesToRegenerate.push({ x: tx, z: tz });
+        }
       }
     }
 
     console.log(
       `[TerrainSystem] Registered flat zone "${zone.id}" -> tile keys: [${tileKeys.join(", ")}]`,
+    );
+
+    // Regenerate any existing terrain tiles to apply flat zone heights
+    // This ensures terrain meshes reflect the flat zone even if they were
+    // generated before the flat zone was registered
+    //
+    // Use deduplication set to avoid regenerating the same tile multiple times
+    // (e.g., when multiple buildings register flat zones in the same terrain tile)
+    if (tilesToRegenerate.length > 0) {
+      const uniqueTiles = new Set<string>();
+      const filteredTiles = tilesToRegenerate.filter((tile) => {
+        const key = `${tile.x}_${tile.z}`;
+        if (this._pendingTileRegeneration.has(key)) {
+          return false; // Already scheduled for regeneration
+        }
+        if (uniqueTiles.has(key)) {
+          return false; // Duplicate in this batch
+        }
+        uniqueTiles.add(key);
+        this._pendingTileRegeneration.add(key);
+        return true;
+      });
+
+      if (filteredTiles.length > 0) {
+        console.log(
+          `[TerrainSystem] Regenerating ${filteredTiles.length} terrain tiles for flat zone "${zone.id}"`,
+        );
+        for (const tile of filteredTiles) {
+          this.regenerateTerrainTile(tile.x, tile.z);
+          this._pendingTileRegeneration.delete(`${tile.x}_${tile.z}`);
+        }
+      }
+    }
+  }
+
+  /**
+   * Regenerate a terrain tile's visual mesh to reflect current flat zones.
+   * Called when flat zones are registered after terrain tiles were already generated.
+   *
+   * NOTE: Only updates the visual mesh geometry. Physics height queries already
+   * use getHeightAt() which checks flat zones dynamically, so physics doesn't
+   * need regeneration.
+   */
+  private regenerateTerrainTile(tileX: number, tileZ: number): void {
+    const key = `${tileX}_${tileZ}`;
+    const existingTile = this.terrainTiles.get(key);
+    if (!existingTile || !existingTile.mesh) return;
+
+    // Regenerate geometry with current flat zones
+    const newGeometry = this.createTileGeometry(tileX, tileZ);
+
+    // Update the existing mesh's geometry (preserves material, position, etc.)
+    existingTile.mesh.geometry.dispose();
+    existingTile.mesh.geometry = newGeometry;
+    existingTile.mesh.geometry.computeBoundingSphere();
+    existingTile.mesh.geometry.computeBoundingBox();
+
+    console.log(
+      `[TerrainSystem] Regenerated terrain tile (${tileX},${tileZ}) for flat zone`,
     );
   }
 
@@ -3209,24 +3354,54 @@ export class TerrainSystem extends System {
     // Roads are now generated using noise patterns instead of segments
   }
 
-  private generateTreesForTile(
-    _tile: TerrainTile,
-    _biomeData: BiomeData,
-  ): void {
-    // DISABLED: Procedural tree generation is disabled.
-    // Trees are now exclusively spawned from world-areas.json manifest via ResourceSystem.
-    // To add trees, edit: packages/server/world/assets/manifests/world-areas.json
-    // This prevents random trees from spawning across the world - only manifest-defined trees exist.
+  /**
+   * Generate harvestable trees for a tile based on biome configuration.
+   * Uses the extracted BiomeResourceGenerator for the actual algorithm.
+   */
+  private generateTreesForTile(tile: TerrainTile, biomeData: BiomeData): void {
+    const treeConfig = biomeData.trees;
+    if (!treeConfig) {
+      return;
+    }
+
+    // Create context for resource generation
+    const ctx: ResourceGenerationContext = {
+      tileX: tile.x,
+      tileZ: tile.z,
+      tileKey: tile.key,
+      tileSize: this.CONFIG.TILE_SIZE,
+      waterThreshold: this.CONFIG.WATER_THRESHOLD,
+      getHeightAt: (worldX, worldZ) => this.getHeightAt(worldX, worldZ),
+      isOnRoad: this.roadNetworkSystem
+        ? (worldX, worldZ) => this.roadNetworkSystem!.isOnRoad(worldX, worldZ)
+        : undefined,
+      createRng: (salt) => this.createTileRng(tile.x, tile.z, salt),
+    };
+
+    // Generate trees using the extracted algorithm
+    const trees = generateTrees(ctx, treeConfig);
+    tile.resources.push(...trees);
   }
 
+  /**
+   * Generate ore nodes and other resources for a tile based on biome configuration.
+   * Uses the extracted BiomeResourceGenerator for ores.
+   */
   private generateOtherResourcesForTile(
     tile: TerrainTile,
     biomeData: BiomeData,
   ): void {
-    // Generate other resources (ore, herbs, fishing spots, etc.)
-    // Filter out both 'tree' and 'trees' variations
+    // Generate ore nodes from biome ore config
+    this.generateOresForTile(tile, biomeData);
+
+    // Generate other resources (herbs, fishing spots) from legacy config
     const otherResources = biomeData.resources.filter(
-      (r) => r !== "tree" && r !== "trees",
+      (r) =>
+        r !== "tree" &&
+        r !== "trees" &&
+        r !== "ore" &&
+        r !== "ores" &&
+        r !== "rock",
     );
 
     for (const resourceType of otherResources) {
@@ -3236,17 +3411,11 @@ export class TerrainSystem extends System {
       // Determine count based on resource type and biome
       switch (resourceType) {
         case "fish":
+        case "fishing_spots":
           resourceCount = (tile.biome as string) === "lakes" ? 3 : 0;
-          break;
-        case "ore":
-        case "rare_ore":
-          resourceCount = rng() < 0.3 ? 1 : 0;
           break;
         case "herb":
           resourceCount = Math.floor(rng() * 3);
-          break;
-        case "rock":
-          resourceCount = Math.floor(rng() * 2);
           break;
         case "gem":
           resourceCount = rng() < 0.1 ? 1 : 0; // Rare
@@ -3254,30 +3423,26 @@ export class TerrainSystem extends System {
       }
 
       for (let i = 0; i < resourceCount; i++) {
-        const worldX =
-          tile.x * this.CONFIG.TILE_SIZE +
-          (rng() - 0.5) * this.CONFIG.TILE_SIZE;
-        const worldZ =
-          tile.z * this.CONFIG.TILE_SIZE +
-          (rng() - 0.5) * this.CONFIG.TILE_SIZE;
+        const localX = rng() * this.CONFIG.TILE_SIZE;
+        const localZ = rng() * this.CONFIG.TILE_SIZE;
+        const worldX = tile.x * this.CONFIG.TILE_SIZE + localX;
+        const worldZ = tile.z * this.CONFIG.TILE_SIZE + localZ;
 
         // For fishing spots, place in water only
-        if (resourceType === "fish") {
+        if (resourceType === "fish" || resourceType === "fishing_spots") {
           const height = this.getHeightAt(worldX, worldZ);
-          if (height >= this.CONFIG.WATER_THRESHOLD) continue; // Only place fish in water
+          if (height >= this.CONFIG.WATER_THRESHOLD) continue;
         }
 
         const height = this.getHeightAt(worldX, worldZ);
-        const position = this._tempVec3.set(
-          worldX - tile.x * this.CONFIG.TILE_SIZE,
-          height,
-          worldZ - tile.z * this.CONFIG.TILE_SIZE,
-        );
 
         const resource: ResourceNode = {
           id: `${tile.key}_${resourceType}_${i}`,
-          type: resourceType as ResourceNode["type"],
-          position,
+          type:
+            resourceType === "fishing_spots"
+              ? "fish"
+              : (resourceType as ResourceNode["type"]),
+          position: { x: localX, y: height, z: localZ },
           mesh: null,
           health: 100,
           maxHealth: 100,
@@ -3289,6 +3454,35 @@ export class TerrainSystem extends System {
         tile.resources.push(resource);
       }
     }
+  }
+
+  /**
+   * Generate ore nodes for a tile based on biome ore configuration.
+   * Uses the extracted BiomeResourceGenerator for the actual algorithm.
+   */
+  private generateOresForTile(tile: TerrainTile, biomeData: BiomeData): void {
+    const oreConfig = biomeData.ores;
+    if (!oreConfig) {
+      return;
+    }
+
+    // Create context for resource generation
+    const ctx: ResourceGenerationContext = {
+      tileX: tile.x,
+      tileZ: tile.z,
+      tileKey: tile.key,
+      tileSize: this.CONFIG.TILE_SIZE,
+      waterThreshold: this.CONFIG.WATER_THRESHOLD,
+      getHeightAt: (worldX, worldZ) => this.getHeightAt(worldX, worldZ),
+      isOnRoad: this.roadNetworkSystem
+        ? (worldX, worldZ) => this.roadNetworkSystem!.isOnRoad(worldX, worldZ)
+        : undefined,
+      createRng: (salt) => this.createTileRng(tile.x, tile.z, salt),
+    };
+
+    // Generate ores using the extracted algorithm
+    const ores = generateOres(ctx, oreConfig);
+    tile.resources.push(...ores);
   }
 
   // DEPRECATED: Roads are now generated using noise patterns instead of segments
@@ -3472,6 +3666,12 @@ export class TerrainSystem extends System {
   }
 
   update(_deltaTime: number): void {
+    // Skip processing until terrain is fully initialized (DataManager loaded BIOMES)
+    // This prevents race conditions where update() is called before start() completes
+    if (!this._terrainInitialized) {
+      return;
+    }
+
     // Dispatch pending tiles to workers for pre-computation (client only)
     if (this.world.isClient && this.CONFIG.USE_WORKERS) {
       this.dispatchWorkerBatch();
@@ -3748,24 +3948,53 @@ export class TerrainSystem extends System {
   }
 
   /**
-   * Calculate slope at a given world position
+   * Calculate slope at a given world position using 8-directional sampling.
+   * Includes cardinal and diagonal directions to catch steep slopes that
+   * might be missed by 4-directional sampling.
    */
   private calculateSlope(worldX: number, worldZ: number): number {
     const checkDistance = this.CONFIG.SLOPE_CHECK_DISTANCE;
     const centerHeight = this.getHeightAt(worldX, worldZ);
 
-    // Sample heights in 4 directions
+    // Sample heights in 4 cardinal directions
     const northHeight = this.getHeightAt(worldX, worldZ + checkDistance);
     const southHeight = this.getHeightAt(worldX, worldZ - checkDistance);
     const eastHeight = this.getHeightAt(worldX + checkDistance, worldZ);
     const westHeight = this.getHeightAt(worldX - checkDistance, worldZ);
 
+    // Sample heights in 4 diagonal directions
+    // Diagonal distance is sqrt(2) * checkDistance for proper slope calculation
+    const diagDistance = checkDistance * Math.SQRT2;
+    const neHeight = this.getHeightAt(
+      worldX + checkDistance,
+      worldZ + checkDistance,
+    );
+    const nwHeight = this.getHeightAt(
+      worldX - checkDistance,
+      worldZ + checkDistance,
+    );
+    const seHeight = this.getHeightAt(
+      worldX + checkDistance,
+      worldZ - checkDistance,
+    );
+    const swHeight = this.getHeightAt(
+      worldX - checkDistance,
+      worldZ - checkDistance,
+    );
+
     // Calculate maximum slope in any direction
+    // Cardinal slopes use checkDistance, diagonal slopes use diagDistance
     const slopes = [
+      // Cardinal directions
       Math.abs(northHeight - centerHeight) / checkDistance,
       Math.abs(southHeight - centerHeight) / checkDistance,
       Math.abs(eastHeight - centerHeight) / checkDistance,
       Math.abs(westHeight - centerHeight) / checkDistance,
+      // Diagonal directions (normalized by diagonal distance)
+      Math.abs(neHeight - centerHeight) / diagDistance,
+      Math.abs(nwHeight - centerHeight) / diagDistance,
+      Math.abs(seHeight - centerHeight) / diagDistance,
+      Math.abs(swHeight - centerHeight) / diagDistance,
     ];
 
     return Math.max(...slopes);

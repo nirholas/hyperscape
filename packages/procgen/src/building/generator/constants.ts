@@ -58,6 +58,11 @@ export function snapToBuildingGrid(
   x: number,
   z: number,
 ): { x: number; z: number } {
+  // Validate inputs
+  if (!Number.isFinite(x) || !Number.isFinite(z)) {
+    throw new Error(`[snapToBuildingGrid] Invalid coords: (${x}, ${z})`);
+  }
+
   return {
     x: Math.round(x / BUILDING_GRID_SNAP) * BUILDING_GRID_SNAP,
     z: Math.round(z / BUILDING_GRID_SNAP) * BUILDING_GRID_SNAP,

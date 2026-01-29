@@ -33,7 +33,11 @@ import {
   // Collision system
   CollisionMask,
 } from "@hyperscape/shared";
-import type { TileCoord, TileMovementState } from "@hyperscape/shared";
+import type {
+  TileCoord,
+  TileMovementState,
+  EntityID,
+} from "@hyperscape/shared";
 
 // Security: Input validation and anti-cheat
 import {
@@ -195,6 +199,23 @@ export class TileMovementManager {
     > | null;
   }
 
+  // Debug flag for walkability logging (set to true to debug pathfinding)
+  // NOTE: Keep disabled in production - excessive logging causes performance issues
+  private _debugWalkability = false;
+
+  // Track logged building mismatch tiles to avoid spam
+  private loggedBuildingMismatchTiles: Set<string> | null = null;
+
+  /**
+   * Enable/disable walkability debug logging
+   */
+  setDebugWalkability(enabled: boolean): void {
+    this._debugWalkability = enabled;
+    console.log(
+      `[TileMovement] Walkability debug logging ${enabled ? "enabled" : "disabled"}`,
+    );
+  }
+
   /**
    * Check if a tile is walkable based on collision and terrain constraints
    * Checks CollisionMatrix for static objects (trees, rocks, stations),
@@ -208,21 +229,40 @@ export class TileMovementManager {
   private isTileWalkable(tile: TileCoord, fromTile?: TileCoord): boolean {
     const towns = this.townSystem;
     const playerFloor = this.currentPlayerFloor;
+    const debug = this._debugWalkability;
 
     // FIRST: Check wall blocking between tiles (this handles building walls)
     // This MUST be checked regardless of whether tiles are inside/outside buildings
     // because walls block entry/exit at building boundaries
     if (fromTile && towns) {
+      const collisionService = towns.getCollisionService();
+
       // Check building wall blocking (handles entry, exit, and internal movement)
-      if (
-        towns.isBuildingWallBlocked(
-          fromTile.x,
-          fromTile.z,
-          tile.x,
-          tile.z,
-          playerFloor,
-        )
-      ) {
+      const wallBlocked = towns.isBuildingWallBlocked(
+        fromTile.x,
+        fromTile.z,
+        tile.x,
+        tile.z,
+        playerFloor,
+      );
+      if (wallBlocked) {
+        if (debug) {
+          const fromResult = collisionService.queryCollision(
+            fromTile.x,
+            fromTile.z,
+            playerFloor,
+          );
+          const toResult = collisionService.queryCollision(
+            tile.x,
+            tile.z,
+            playerFloor,
+          );
+          console.log(
+            `[isTileWalkable] BLOCKED by building wall: (${fromTile.x},${fromTile.z}) -> (${tile.x},${tile.z}) floor=${playerFloor}` +
+              ` | from=${fromResult.buildingId || "none"} walls=${JSON.stringify(fromResult.wallBlocking)}` +
+              ` | to=${toResult.buildingId || "none"} walls=${JSON.stringify(toResult.wallBlocking)}`,
+          );
+        }
         return false;
       }
 
@@ -230,28 +270,57 @@ export class TileMovementManager {
       if (
         this.world.collision.isBlocked(fromTile.x, fromTile.z, tile.x, tile.z)
       ) {
+        if (debug) {
+          console.log(
+            `[isTileWalkable] BLOCKED by CollisionMatrix wall: (${fromTile.x},${fromTile.z}) -> (${tile.x},${tile.z})`,
+          );
+        }
         return false;
       }
     }
 
-    // SECOND: Check if target tile is inside a building
+    // SECOND: Check if target tile is inside a building's footprint
+    // This blocks ALL tiles under buildings except explicitly walkable floor tiles
     if (towns) {
       const collisionService = towns.getCollisionService();
 
-      // Query building collision to check if tile is walkable inside a building
-      const buildingResult = collisionService.queryCollision(
+      // Check if tile is walkable in building system
+      const isWalkableInBuilding = collisionService.isTileWalkableInBuilding(
         tile.x,
         tile.z,
         playerFloor,
       );
 
-      if (buildingResult.isInsideBuilding) {
-        // Check if this tile is walkable at the current floor
-        if (!buildingResult.isWalkable) {
-          return false;
+      if (!isWalkableInBuilding) {
+        if (debug) {
+          const inBbox = collisionService.isTileInBuildingBoundingBox(
+            tile.x,
+            tile.z,
+          );
+          const inFootprint = collisionService.isTileInBuildingFootprint(
+            tile.x,
+            tile.z,
+          );
+          console.log(
+            `[isTileWalkable] BLOCKED by building system: (${tile.x},${tile.z}) floor=${playerFloor}` +
+              ` | inBbox=${inBbox || "no"} | inFootprint=${inFootprint || "no"}`,
+          );
         }
+        return false;
+      }
 
-        // Building floor is walkable - skip terrain checks
+      // If tile is a walkable building floor, skip terrain checks
+      const buildingId = collisionService.isTileInBuildingFootprint(
+        tile.x,
+        tile.z,
+      );
+      if (buildingId) {
+        // Inside building footprint and walkable - skip terrain checks
+        if (debug) {
+          console.log(
+            `[isTileWalkable] ALLOWED (building floor): (${tile.x},${tile.z}) floor=${playerFloor} building=${buildingId}`,
+          );
+        }
         return true;
       }
     }
@@ -264,6 +333,12 @@ export class TileMovementManager {
     if (
       this.world.collision.hasFlags(tile.x, tile.z, CollisionMask.BLOCKS_WALK)
     ) {
+      if (debug) {
+        const flags = this.world.collision.getFlags(tile.x, tile.z);
+        console.log(
+          `[isTileWalkable] BLOCKED by CollisionMatrix flags: (${tile.x},${tile.z}) flags=${flags}`,
+        );
+      }
       return false;
     }
 
@@ -278,6 +353,11 @@ export class TileMovementManager {
 
     // Use TerrainSystem's walkability check (water, slope, lakes biome)
     const result = terrain.isPositionWalkable(worldPos.x, worldPos.z);
+    if (!result.walkable && debug) {
+      console.log(
+        `[isTileWalkable] BLOCKED by terrain: (${tile.x},${tile.z}) reason=${result.reason || "unknown"}`,
+      );
+    }
     return result.walkable;
   }
 
@@ -425,6 +505,16 @@ export class TileMovementManager {
 
     const payload = validation.payload!;
 
+    // DEBUG: Log received move request
+    if (this._debugWalkability && payload.targetTile) {
+      console.log(
+        `[TileMovement] MOVE_REQUEST received:` +
+          `\n  target tile: (${payload.targetTile.x}, ${payload.targetTile.z})` +
+          `\n  current tile: (${state.currentTile.x}, ${state.currentTile.z})` +
+          `\n  runMode: ${payload.runMode}`,
+      );
+    }
+
     // OSRS-ACCURACY: Emit click-to-move event for weak queue cancellation
     // This MUST happen before any early returns (same-tile, cancel, etc.)
     // ResourceSystem subscribes to this to cancel gathering when player clicks ground
@@ -479,17 +569,216 @@ export class TileMovementManager {
     if (towns) {
       const playerState = towns
         .getCollisionService()
-        .getPlayerBuildingState(playerId);
+        .getPlayerBuildingState(playerId as EntityID);
       this.currentPlayerFloor = playerState.currentFloor;
     }
 
-    // Calculate BFS path from current tile to target
-    // IMPORTANT: Pass fromTile to enable wall blocking checks (building walls, etc.)
-    const path = this.pathfinder.findPath(
-      state.currentTile,
-      payload.targetTile,
-      (tile, fromTile) => this.isTileWalkable(tile, fromTile),
-    );
+    // === TWO-STAGE BUILDING NAVIGATION ===
+    // If target is inside a building but player is outside, we need to:
+    // 1. First path to the nearest door of the building
+    // 2. Then continue to the final destination inside
+    let path: TileCoord[] = [];
+    let waypointDoor: TileCoord | null = null;
+    let finalDestination: TileCoord | null = null;
+
+    if (towns) {
+      const collisionService = towns.getCollisionService();
+
+      // Check if target is inside a building on ANY floor (not just floor 0!)
+      // This is critical for detecting clicks on stairs or upper floors
+      const targetInBuilding = collisionService.isTileInBuildingAnyFloor(
+        payload.targetTile.x,
+        payload.targetTile.z,
+      );
+
+      // Check if player is currently inside a building
+      const playerInBuilding = collisionService.isTileInBuildingAnyFloor(
+        state.currentTile.x,
+        state.currentTile.z,
+      );
+
+      // Check if target is inside a building but player is outside (or in different building)
+      const targetInsideBuilding = targetInBuilding !== null;
+      const playerInSameBuilding =
+        playerInBuilding !== null &&
+        targetInBuilding !== null &&
+        playerInBuilding.buildingId === targetInBuilding.buildingId;
+
+      // Debug: Log what we detected
+      if (this._debugWalkability) {
+        console.log(
+          `[TileMovement] Click analysis: target=(${payload.targetTile.x},${payload.targetTile.z}) ` +
+            `inBuilding=${targetInsideBuilding} buildingId=${targetInBuilding?.buildingId || "none"} floor=${targetInBuilding?.floorIndex ?? "N/A"} | ` +
+            `player=(${state.currentTile.x},${state.currentTile.z}) ` +
+            `inBuilding=${playerInBuilding !== null} buildingId=${playerInBuilding?.buildingId || "none"}`,
+        );
+      }
+
+      // Keep targetResult for backward compatibility with buildingId access
+      const targetResult = {
+        isInsideBuilding: targetInsideBuilding,
+        buildingId: targetInBuilding?.buildingId ?? null,
+      };
+
+      if (targetInsideBuilding && !playerInSameBuilding) {
+        // Player is outside, target is inside - need door-based navigation
+        const buildingId = targetResult.buildingId!;
+
+        if (this._debugWalkability) {
+          console.log(
+            `[TileMovement] TWO-STAGE NAV: Player at (${state.currentTile.x},${state.currentTile.z}) ` +
+              `clicking inside ${buildingId} at (${payload.targetTile.x},${payload.targetTile.z})`,
+          );
+        }
+
+        // Find nearest door to player's current position
+        const doorTile = collisionService.findClosestDoorTile(
+          buildingId,
+          state.currentTile.x,
+          state.currentTile.z,
+        );
+
+        if (doorTile) {
+          // Store the final destination for stage 2 (after entering building)
+          finalDestination = payload.targetTile;
+
+          // EXTERIOR door tile is the approach tile OUTSIDE the building
+          const exteriorTile = { x: doorTile.tileX, z: doorTile.tileZ };
+          // INTERIOR door tile is the first tile INSIDE the building
+          const interiorDoorTile = {
+            x: doorTile.interiorTileX,
+            z: doorTile.interiorTileZ,
+          };
+
+          if (this._debugWalkability) {
+            console.log(
+              `[TileMovement] TWO-STAGE NAV: Found door - exterior=(${exteriorTile.x},${exteriorTile.z}) ` +
+                `interior=(${interiorDoorTile.x},${interiorDoorTile.z}) direction=${doorTile.direction}`,
+            );
+          }
+
+          // Stage 1: Path to the EXTERIOR door tile (approach from outside)
+          // This ensures BFS doesn't try to find an alternate path around the building
+          path = this.pathfinder.findPath(
+            state.currentTile,
+            exteriorTile,
+            (tile, fromTile) => this.isTileWalkable(tile, fromTile),
+          );
+
+          if (this._debugWalkability) {
+            console.log(
+              `[TileMovement] TWO-STAGE NAV: Stage 1 path to exterior door: ${path.length} tiles`,
+            );
+          }
+
+          if (path.length > 0) {
+            // Append the interior door tile to the path so player steps through
+            path.push(interiorDoorTile);
+
+            // Store pending destination for stage 2 (from interior door to final destination)
+            state.pendingDestination = finalDestination;
+            state.pendingBuildingId = buildingId;
+            waypointDoor = interiorDoorTile; // Stage 2 starts when we reach interior
+
+            if (this._debugWalkability) {
+              console.log(
+                `[TileMovement] TWO-STAGE NAV: Path extended with interior tile, total=${path.length} tiles`,
+              );
+            }
+          } else {
+            if (this._debugWalkability) {
+              console.log(
+                `[TileMovement] TWO-STAGE NAV: FAILED - no path to exterior door tile`,
+              );
+            }
+          }
+        } else {
+          if (this._debugWalkability) {
+            console.log(
+              `[TileMovement] TWO-STAGE NAV: FAILED - no door found for ${buildingId}`,
+            );
+          }
+        }
+      }
+    }
+
+    // If no special building navigation, use standard pathfinding
+    if (path.length === 0 && !waypointDoor) {
+      // Calculate BFS path from current tile to target
+      // IMPORTANT: Pass fromTile to enable wall blocking checks (building walls, etc.)
+      path = this.pathfinder.findPath(
+        state.currentTile,
+        payload.targetTile,
+        (tile, fromTile) => this.isTileWalkable(tile, fromTile),
+      );
+    }
+
+    // === DIAGNOSTIC: Check if path goes through any building walls or touches buildings ===
+    if (path.length > 1 && towns) {
+      const collisionService = towns.getCollisionService();
+      let pathTouchesBuildingBbox = false;
+
+      for (let i = 0; i < path.length; i++) {
+        const tile = path[i];
+        const inBbox = collisionService.isTileInBuildingBoundingBox(
+          tile.x,
+          tile.z,
+        );
+        const inFootprint = collisionService.isTileInBuildingFootprint(
+          tile.x,
+          tile.z,
+        );
+
+        if (inBbox && !pathTouchesBuildingBbox) {
+          pathTouchesBuildingBbox = true;
+          if (this._debugWalkability) {
+            console.log(
+              `[TileMovement] PATH DIAGNOSTIC: Path step ${i} at (${tile.x},${tile.z}) is in building bbox=${inBbox}` +
+                `\n  In walkable footprint: ${inFootprint ?? "NO"}` +
+                `\n  This means: ${inFootprint ? "tile is a walkable floor tile" : "tile is inside building but NOT a registered walkable tile"}`,
+            );
+          }
+        }
+
+        // Check wall blocking for consecutive tiles
+        if (i < path.length - 1) {
+          const from = path[i];
+          const to = path[i + 1];
+          const wallBlocked = towns.isBuildingWallBlocked(
+            from.x,
+            from.z,
+            to.x,
+            to.z,
+            this.currentPlayerFloor,
+          );
+          if (wallBlocked) {
+            console.error(
+              `[TileMovement] BUG: Path goes through wall! Step ${i}: (${from.x},${from.z}) -> (${to.x},${to.z})` +
+                `\n  This should have been blocked by pathfinder!`,
+            );
+            const fromInfo = collisionService.queryCollision(
+              from.x,
+              from.z,
+              this.currentPlayerFloor,
+            );
+            const toInfo = collisionService.queryCollision(
+              to.x,
+              to.z,
+              this.currentPlayerFloor,
+            );
+            console.error(
+              `  From tile: inside=${fromInfo.isInsideBuilding}, walls=${JSON.stringify(fromInfo.wallBlocking)}`,
+            );
+            console.error(
+              `  To tile: inside=${toInfo.isInsideBuilding}, walls=${JSON.stringify(toInfo.wallBlocking)}`,
+            );
+            // Don't execute this invalid path - clear it
+            path.length = 0;
+            break;
+          }
+        }
+      }
+    }
 
     // === DIAGNOSTIC: Log once per session to confirm building collision status ===
     if (!this._hasLoggedBuildingStatus) {
@@ -502,15 +791,99 @@ export class TileMovementManager {
       console.log(`[TileMovement] Buildings registered: ${buildingCount}`);
       if (buildingCount > 0) {
         const buildings = towns!.getCollisionService().getAllBuildings();
-        for (const b of buildings.slice(0, 3)) {
-          // Log first 3 buildings
-          const tiles = b.floors[0]?.walkableTiles.size ?? 0;
+        for (const b of buildings.slice(0, 2)) {
+          // Log first 2 buildings with detailed info
+          const floor0 = b.floors[0];
+          const tiles = floor0?.walkableTiles.size ?? 0;
+          const wallSegments = floor0?.wallSegments.length ?? 0;
+          const doors =
+            floor0?.wallSegments.filter(
+              (w) => w.hasOpening && w.openingType === "door",
+            ).length ?? 0;
           console.log(
-            `[TileMovement]   - ${b.id}: ${tiles} tiles at (${b.worldPosition.x.toFixed(0)}, ${b.worldPosition.z.toFixed(0)})`,
+            `[TileMovement]   - ${b.buildingId}: ${tiles} tiles, ${wallSegments} wall segments (${doors} doors)`,
+          );
+          console.log(
+            `[TileMovement]     Position: (${b.worldPosition.x.toFixed(0)}, ${b.worldPosition.z.toFixed(0)})`,
+          );
+          console.log(
+            `[TileMovement]     Bbox: (${b.boundingBox.minTileX},${b.boundingBox.minTileZ}) → (${b.boundingBox.maxTileX},${b.boundingBox.maxTileZ})`,
+          );
+          // Show a sample of walkable tiles to help debug coordinate system
+          const sampleTiles = Array.from(floor0?.walkableTiles ?? []).slice(
+            0,
+            15,
+          );
+          console.log(
+            `[TileMovement]     Sample tiles: ${sampleTiles.join(", ")}`,
           );
         }
       }
       console.log(`[TileMovement] =====================================`);
+    }
+
+    // === DIAGNOSTIC: When path is empty, log detailed debug info ===
+    if (path.length === 0) {
+      const towns = this.townSystem;
+      const collisionService = towns?.getCollisionService();
+
+      // Check if we're near a building
+      const targetInBuilding = collisionService?.isTileInBuildingAnyFloor(
+        payload.targetTile.x,
+        payload.targetTile.z,
+      );
+      const targetInBbox = collisionService?.isTileInBuildingBoundingBox(
+        payload.targetTile.x,
+        payload.targetTile.z,
+      );
+
+      if (targetInBuilding || targetInBbox) {
+        // Player clicked inside/near a building but no path found - this is a problem!
+        console.error(
+          `[TileMovement] NAVIGATION FAILURE: Cannot path to building tile!\n` +
+            `  Player at: (${state.currentTile.x}, ${state.currentTile.z})\n` +
+            `  Target at: (${payload.targetTile.x}, ${payload.targetTile.z})\n` +
+            `  Target in building: ${targetInBuilding ? `Yes (${targetInBuilding.buildingId} floor ${targetInBuilding.floorIndex})` : "No"}\n` +
+            `  Target in bbox: ${targetInBbox ?? "No"}\n` +
+            `  Buildings registered: ${collisionService?.getBuildingCount() ?? 0}`,
+        );
+
+        // Check if there are any doors we could path to
+        if (targetInBuilding) {
+          const doorTile = collisionService?.findClosestDoorTile(
+            targetInBuilding.buildingId,
+            state.currentTile.x,
+            state.currentTile.z,
+          );
+          if (doorTile) {
+            console.error(
+              `  Closest door: exterior=(${doorTile.tileX}, ${doorTile.tileZ}) interior=(${doorTile.interiorTileX}, ${doorTile.interiorTileZ})\n` +
+                `  Door direction: ${doorTile.direction}`,
+            );
+
+            // Check if exterior door tile is walkable
+            const exteriorWalkable = this.isTileWalkable(
+              { x: doorTile.tileX, z: doorTile.tileZ },
+              state.currentTile,
+            );
+            console.error(`  Exterior door walkable: ${exteriorWalkable}`);
+
+            // Try pathfinding just to the door
+            const doorPath = this.pathfinder.findPath(
+              state.currentTile,
+              { x: doorTile.tileX, z: doorTile.tileZ },
+              (tile, fromTile) => this.isTileWalkable(tile, fromTile),
+            );
+            console.error(
+              `  Path to door: ${doorPath.length > 0 ? `${doorPath.length} tiles` : "NO PATH FOUND"}`,
+            );
+          } else {
+            console.error(
+              `  NO DOORS FOUND for building ${targetInBuilding.buildingId}!`,
+            );
+          }
+        }
+      }
     }
 
     // Store path and update state
@@ -687,6 +1060,139 @@ export class TileMovementManager {
         state.pathIndex++;
       }
 
+      // === TWO-STAGE BUILDING NAVIGATION: Check if we reached the door ===
+      // If path is complete and there's a pending destination, continue to it
+      if (
+        state.pathIndex >= state.path.length &&
+        state.pendingDestination &&
+        state.pendingBuildingId
+      ) {
+        // We've reached the door - now path to the final destination inside the building
+        const towns = this.townSystem;
+        if (towns) {
+          console.log(
+            `[TileMovement] TWO-STAGE NAV: Stage 2 - Reached door at (${state.currentTile.x},${state.currentTile.z}), ` +
+              `pathing to (${state.pendingDestination.x},${state.pendingDestination.z}) in ${state.pendingBuildingId}`,
+          );
+
+          // Update player floor now that we're inside the building
+          const collisionService = towns.getCollisionService();
+          const playerState = collisionService.getPlayerBuildingState(
+            playerId as EntityID,
+          );
+          this.currentPlayerFloor = playerState.currentFloor;
+
+          // Calculate new path from door to final destination
+          const newPath = this.pathfinder.findPath(
+            state.currentTile,
+            state.pendingDestination,
+            (tile, fromTile) => this.isTileWalkable(tile, fromTile),
+          );
+
+          console.log(
+            `[TileMovement] TWO-STAGE NAV: Stage 2 path length: ${newPath.length}`,
+          );
+
+          if (newPath.length > 0) {
+            // Continue with the second stage of navigation
+            state.path = newPath;
+            state.pathIndex = 0;
+            state.moveSeq = (state.moveSeq || 0) + 1;
+
+            // Broadcast continuation of movement with new path
+            this._networkPathBuffer.length = newPath.length;
+            for (let i = 0; i < newPath.length; i++) {
+              if (!this._networkPathBuffer[i]) {
+                this._networkPathBuffer[i] = { x: 0, z: 0 };
+              }
+              this._networkPathBuffer[i].x = newPath[i].x;
+              this._networkPathBuffer[i].z = newPath[i].z;
+            }
+
+            const finalDestination = newPath[newPath.length - 1];
+            this.sendFn("tileMovementStart", {
+              id: playerId,
+              startTile: { x: state.currentTile.x, z: state.currentTile.z },
+              path: this._networkPathBuffer,
+              running: state.isRunning,
+              destinationTile: { x: finalDestination.x, z: finalDestination.z },
+              moveSeq: state.moveSeq,
+              emote: state.isRunning ? "run" : "walk",
+            });
+          } else {
+            // Stage 2 FAILED - player stuck at door, implement graceful recovery
+            console.warn(
+              `[TileMovement] TWO-STAGE NAV: Stage 2 failed, player stopping at door\n` +
+                `  Current tile (door): (${state.currentTile.x}, ${state.currentTile.z})\n` +
+                `  Target tile: (${state.pendingDestination.x}, ${state.pendingDestination.z})\n` +
+                `  Building: ${state.pendingBuildingId}\n` +
+                `  Player floor: ${this.currentPlayerFloor}`,
+            );
+
+            // RECOVERY: Stop the player at the door with proper notification
+            // The player successfully entered the building but couldn't reach final destination
+            state.path.length = 0;
+            state.pathIndex = 0;
+
+            // Clear movement flag
+            if (entity) {
+              entity.data.tileMovementActive = false;
+            }
+
+            // Get world position at current door tile
+            const doorWorldPos = tileToWorld(state.currentTile);
+
+            // Get building elevation for proper Y position
+            const elevationService = collisionService;
+            const doorElevation = elevationService.getFloorElevation(
+              state.currentTile.x,
+              state.currentTile.z,
+              this.currentPlayerFloor,
+            );
+            if (doorElevation !== null && Number.isFinite(doorElevation)) {
+              doorWorldPos.y = doorElevation + 0.1;
+            }
+
+            // Send tileMovementEnd to notify client that movement is complete
+            this.sendFn("tileMovementEnd", {
+              id: playerId,
+              tile: state.currentTile,
+              worldPos: [doorWorldPos.x, doorWorldPos.y, doorWorldPos.z],
+              moveSeq: state.moveSeq,
+              emote: "idle",
+            });
+
+            // Update entity position
+            if (entity) {
+              entity.position.set(
+                doorWorldPos.x,
+                doorWorldPos.y,
+                doorWorldPos.z,
+              );
+              entity.data.position = [
+                doorWorldPos.x,
+                doorWorldPos.y,
+                doorWorldPos.z,
+              ];
+            }
+
+            // Broadcast idle state
+            this.sendFn("entityModified", {
+              id: playerId,
+              changes: {
+                p: [doorWorldPos.x, doorWorldPos.y, doorWorldPos.z],
+                v: [0, 0, 0],
+                e: "idle",
+              },
+            });
+          }
+        }
+
+        // Clear pending destination (either we used it or it failed)
+        state.pendingDestination = null;
+        state.pendingBuildingId = null;
+      }
+
       // Track tiles moved for Agility XP (batched at 100 tiles = 50 XP)
       const tilesMoved =
         Math.abs(state.currentTile.x - this._prevTile.x) +
@@ -719,8 +1225,94 @@ export class TileMovementManager {
       // Convert tile to world position
       const worldPos = tileToWorld(state.currentTile);
 
-      // Get terrain height
-      if (terrain) {
+      // === ELEVATION PRIORITY ===
+      // 1. Building floor elevation (if inside building)
+      // 2. Terrain height (includes flat zones like duel arenas)
+      let elevationSet = false;
+
+      // Check if inside a building - use building floor elevation
+      const towns = this.townSystem;
+      if (towns) {
+        const collisionService = towns.getCollisionService();
+        const playerBuildingState = collisionService.getPlayerBuildingState(
+          playerId as EntityID,
+        );
+
+        // Check if tile is in ANY building's bounding box (for elevation purposes)
+        // This includes both walkable floor tiles AND non-walkable tiles under the building structure
+        // We use bounding box check (not footprint) to ensure consistent Y-elevation for all tiles
+        // within a building, preventing players from dropping to terrain height on "hole" tiles
+        const buildingIdForElevation =
+          collisionService.isTileInBuildingBoundingBox(
+            state.currentTile.x,
+            state.currentTile.z,
+          );
+
+        if (buildingIdForElevation) {
+          // Check if on stairs - use interpolated elevation
+          const stairElevation = collisionService.getStairElevation(
+            worldPos.x,
+            worldPos.z,
+            playerBuildingState.currentFloor,
+          );
+
+          if (stairElevation !== null && Number.isFinite(stairElevation)) {
+            // On stairs - use interpolated elevation
+            worldPos.y = stairElevation + 0.1;
+            elevationSet = true;
+
+            if (this._debugWalkability) {
+              console.log(
+                `[onTick] Using stair elevation for (${state.currentTile.x},${state.currentTile.z}): ${stairElevation.toFixed(2)} + 0.1`,
+              );
+            }
+          } else {
+            // Not on stairs - use flat floor elevation
+            const floorElevation = collisionService.getFloorElevation(
+              state.currentTile.x,
+              state.currentTile.z,
+              playerBuildingState.currentFloor,
+            );
+
+            if (floorElevation !== null && Number.isFinite(floorElevation)) {
+              worldPos.y = floorElevation + 0.1;
+              elevationSet = true;
+
+              if (this._debugWalkability) {
+                console.log(
+                  `[onTick] Using building elevation for (${state.currentTile.x},${state.currentTile.z}): ${floorElevation.toFixed(2)} + 0.1`,
+                );
+              }
+            }
+          }
+
+          // Update player's building state for floor tracking
+          collisionService.updatePlayerBuildingState(
+            playerId as EntityID,
+            state.currentTile.x,
+            state.currentTile.z,
+            worldPos.y,
+          );
+
+          // Handle stair transitions (floor changes)
+          if (state.previousTile) {
+            const newFloor = collisionService.handleStairTransition(
+              playerId as EntityID,
+              state.previousTile,
+              state.currentTile,
+            );
+            if (newFloor !== null) {
+              // Floor changed - elevation will be updated on next tick
+              if (this._debugWalkability) {
+                console.log(`[onTick] Stair transition to floor ${newFloor}`);
+              }
+            }
+          }
+        }
+      }
+
+      // Fallback to terrain height (includes flat zones for duel arenas)
+      if (!elevationSet && terrain) {
         const height = terrain.getHeightAt(worldPos.x, worldPos.z);
         if (height !== null && Number.isFinite(height)) {
           worldPos.y = (height as number) + 0.1;
@@ -883,33 +1475,79 @@ export class TileMovementManager {
 
     if (towns) {
       const collisionService = towns.getCollisionService();
+      const entityId = playerId as EntityID;
 
       // First, get current player state to know which floor they're on
-      const playerState = collisionService.getPlayerBuildingState(playerId);
+      const playerState = collisionService.getPlayerBuildingState(entityId);
 
-      // Check if this tile is inside a building
-      const buildingId = collisionService.getBuildingAtTile(
-        state.currentTile.x,
-        state.currentTile.z,
-      );
-
-      if (buildingId) {
-        // Player is inside or entering a building - use building floor elevation
-        const floorElevation = collisionService.getFloorElevation(
+      // Check if this tile is inside any building's bounding box (for elevation purposes)
+      // Use bounding box check (not footprint) to ensure consistent Y-elevation for all tiles
+      // within a building, including "hole" tiles in L-shaped buildings
+      const buildingIdForElevation =
+        collisionService.isTileInBuildingBoundingBox(
           state.currentTile.x,
           state.currentTile.z,
+        );
+
+      // DIAGNOSTIC: Log elevation decision once per tile change
+      if (
+        this._debugWalkability &&
+        (state.previousTile?.x !== state.currentTile.x ||
+          state.previousTile?.z !== state.currentTile.z)
+      ) {
+        const inFootprint = collisionService.isTileInBuildingFootprint(
+          state.currentTile.x,
+          state.currentTile.z,
+        );
+        const terrainH = terrain?.getHeightAt(worldPos.x, worldPos.z);
+        console.log(
+          `[ELEVATION] Tile (${state.currentTile.x},${state.currentTile.z}): ` +
+            `bbox=${buildingIdForElevation ?? "none"} footprint=${inFootprint ?? "none"} terrain=${terrainH?.toFixed(2) ?? "null"}`,
+        );
+      }
+
+      if (buildingIdForElevation) {
+        // Check if on stairs - use interpolated elevation
+        const stairElevation = collisionService.getStairElevation(
+          worldPos.x,
+          worldPos.z,
           playerState.currentFloor,
         );
 
-        if (floorElevation !== null && Number.isFinite(floorElevation)) {
-          worldPos.y = floorElevation + 0.1; // Small offset above floor
+        if (stairElevation !== null && Number.isFinite(stairElevation)) {
+          // On stairs - use interpolated elevation
+          worldPos.y = stairElevation + 0.1;
           usedBuildingElevation = true;
+
+          if (this._debugWalkability) {
+            console.log(
+              `[processPlayerTick] Using stair elevation for (${state.currentTile.x},${state.currentTile.z}): ${stairElevation.toFixed(2)} + 0.1`,
+            );
+          }
+        } else {
+          // Not on stairs - use flat floor elevation
+          const floorElevation = collisionService.getFloorElevation(
+            state.currentTile.x,
+            state.currentTile.z,
+            playerState.currentFloor,
+          );
+
+          if (floorElevation !== null && Number.isFinite(floorElevation)) {
+            worldPos.y = floorElevation + 0.1; // Small offset above floor
+            usedBuildingElevation = true;
+
+            if (this._debugWalkability) {
+              console.log(
+                `[processPlayerTick] Using building elevation for (${state.currentTile.x},${state.currentTile.z}): ${floorElevation.toFixed(2)} + 0.1`,
+              );
+            }
+          }
         }
       }
 
       // Update player building/floor state for multi-level collision tracking
       collisionService.updatePlayerBuildingState(
-        playerId,
+        entityId,
         state.currentTile.x,
         state.currentTile.z,
         worldPos.y,
@@ -919,28 +1557,23 @@ export class TileMovementManager {
       // This is called when player steps onto a stair tile
       if (state.previousTile) {
         const newFloor = collisionService.handleStairTransition(
-          playerId,
+          entityId,
           state.previousTile,
           state.currentTile,
         );
 
         if (newFloor !== null) {
-          // Player changed floors via stairs - update elevation
-          const newElevation = collisionService.getFloorElevation(
-            state.currentTile.x,
-            state.currentTile.z,
-            newFloor,
-          );
-
-          if (newElevation !== null && Number.isFinite(newElevation)) {
-            worldPos.y = newElevation + 0.1;
-            usedBuildingElevation = true;
+          // Floor changed - elevation will be updated on next tick
+          if (this._debugWalkability) {
+            console.log(
+              `[processPlayerTick] Stair transition to floor ${newFloor}`,
+            );
           }
         }
       }
 
       // Cache current floor for subsequent walkability checks
-      const updatedState = collisionService.getPlayerBuildingState(playerId);
+      const updatedState = collisionService.getPlayerBuildingState(entityId);
       this.currentPlayerFloor = updatedState.currentFloor;
     }
 
@@ -1094,7 +1727,35 @@ export class TileMovementManager {
     playerId: string,
     position: { x: number; y: number; z: number },
   ): void {
+    // Validate inputs
+    if (!playerId || typeof playerId !== "string") {
+      throw new Error(
+        `[TileMovement] syncPlayerPosition: invalid playerId: ${playerId}`,
+      );
+    }
+    if (
+      !position ||
+      typeof position.x !== "number" ||
+      typeof position.z !== "number"
+    ) {
+      throw new Error(
+        `[TileMovement] syncPlayerPosition: invalid position for ${playerId}: ${JSON.stringify(position)}`,
+      );
+    }
+    if (!Number.isFinite(position.x) || !Number.isFinite(position.z)) {
+      throw new Error(
+        `[TileMovement] syncPlayerPosition: non-finite position for ${playerId}: (${position.x}, ${position.z})`,
+      );
+    }
+
     const newTile = worldToTile(position.x, position.z);
+
+    // Validate resulting tile
+    if (!Number.isFinite(newTile.x) || !Number.isFinite(newTile.z)) {
+      throw new Error(
+        `[TileMovement] syncPlayerPosition: worldToTile returned non-finite tile for ${playerId}: (${newTile.x}, ${newTile.z})`,
+      );
+    }
 
     // Get existing state or create new one
     let state = this.playerStates.get(playerId);
@@ -1112,16 +1773,20 @@ export class TileMovementManager {
         entity.data.tileMovementActive = false;
       }
 
-      console.log(
-        `[TileMovement] Synced ${playerId} position to tile (${newTile.x},${newTile.z}) after respawn/teleport`,
-      );
+      if (this._debugWalkability) {
+        console.log(
+          `[TileMovement] Synced ${playerId} position to tile (${newTile.x},${newTile.z}) after respawn/teleport`,
+        );
+      }
     } else {
       // Create fresh state at new position
       state = createTileMovementState(newTile);
       this.playerStates.set(playerId, state);
-      console.log(
-        `[TileMovement] Created new state for ${playerId} at tile (${newTile.x},${newTile.z})`,
-      );
+      if (this._debugWalkability) {
+        console.log(
+          `[TileMovement] Created new state for ${playerId} at tile (${newTile.x},${newTile.z})`,
+        );
+      }
     }
 
     // Update spatial registry with new position (for interest-based filtering)
@@ -1312,7 +1977,7 @@ export class TileMovementManager {
     if (townsForPath) {
       const playerState = townsForPath
         .getCollisionService()
-        .getPlayerBuildingState(playerId);
+        .getPlayerBuildingState(playerId as EntityID);
       this.currentPlayerFloor = playerState.currentFloor;
     }
 

@@ -263,6 +263,14 @@ export class DuelArenaVisualsSystem extends System {
     floor.position.set(centerX, floorY, centerZ);
     floor.name = `ArenaFloor_${arenaId}`;
 
+    // Set layer 2 for click-to-move raycasting (walkable surface)
+    floor.layers.set(2);
+    floor.userData = {
+      type: "arena-floor",
+      walkable: true,
+      arenaId,
+    };
+
     console.log(
       `[DuelArenaVisualsSystem] Created floor ${arenaId} at (${centerX}, ${floorY.toFixed(1)}, ${centerZ}) - terrain=${terrainY.toFixed(1)}`,
     );
@@ -356,6 +364,13 @@ export class DuelArenaVisualsSystem extends System {
     wall.castShadow = true;
     wall.receiveShadow = true;
 
+    // Set layer 1 (main camera only, excluded from click-to-move raycast)
+    wall.layers.set(1);
+    wall.userData = {
+      type: "arena-wall",
+      walkable: false,
+    };
+
     this.geometries.push(geometry);
     this.arenaGroup!.add(wall);
   }
@@ -385,6 +400,13 @@ export class DuelArenaVisualsSystem extends System {
     const floor = new THREE.Mesh(geometry, material);
     floor.position.set(LOBBY_CENTER_X, floorY, LOBBY_CENTER_Z);
     floor.name = "LobbyFloor";
+
+    // Set layer 2 for click-to-move raycasting (walkable surface)
+    floor.layers.set(2);
+    floor.userData = {
+      type: "lobby-floor",
+      walkable: true,
+    };
 
     console.log(
       `[DuelArenaVisualsSystem] Created lobby floor at (${LOBBY_CENTER_X}, ${floorY.toFixed(1)}, ${LOBBY_CENTER_Z}) - terrain=${terrainY.toFixed(1)}`,
@@ -430,6 +452,13 @@ export class DuelArenaVisualsSystem extends System {
     const floor = new THREE.Mesh(geometry, material);
     floor.position.set(HOSPITAL_CENTER_X, floorY, HOSPITAL_CENTER_Z);
     floor.name = "HospitalFloor";
+
+    // Set layer 2 for click-to-move raycasting (walkable surface)
+    floor.layers.set(2);
+    floor.userData = {
+      type: "hospital-floor",
+      walkable: true,
+    };
 
     console.log(
       `[DuelArenaVisualsSystem] Created hospital floor at (${HOSPITAL_CENTER_X}, ${floorY.toFixed(1)}, ${HOSPITAL_CENTER_Z}) - terrain=${terrainY.toFixed(1)}`,

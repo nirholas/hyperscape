@@ -1,11 +1,7 @@
 /**
- * Post-Processing Factory - WebGPU rendering
+ * Post-Processing Factory - WebGPU TSL-based effects pipeline
  *
- * Provides WebGPU-compatible post-processing effects including:
- * - 3D LUT color grading for cinematic looks
- * - Tone mapping control
- *
- * Uses Three.js TSL (Three Shading Language) for GPU-accelerated effects.
+ * Effects: 3D LUT color grading, depth-based camera blur (DoF), tone mapping
  */
 
 import THREE, {
@@ -13,30 +9,44 @@ import THREE, {
   uniform,
   renderOutput,
   texture3D,
+  mix,
+  smoothstep,
+  abs,
+  sub,
+  mul,
 } from "../../extras/three/three";
+import type { ShaderNode, ShaderNodeInput } from "../../extras/three/three";
 import type { WebGPURenderer } from "./RendererFactory";
 
-// Dynamic imports for LUT loaders to handle ESM/CJS module resolution
-// These are loaded at runtime to avoid bundler issues
+// Dynamic module types
 type LUT3DFunction = (
-  input: unknown,
-  lutTexture: unknown,
-  size: unknown,
-  intensity: unknown,
-) => unknown;
+  input: ShaderNodeInput,
+  lutTexture: ShaderNodeInput,
+  size: number,
+  intensity: ShaderNodeInput,
+) => ShaderNode;
+type LUTLoaderResult = { texture3D: THREE.Data3DTexture };
+type LUTLoader = { loadAsync: (url: string) => Promise<LUTLoaderResult> };
+type BoxBlurFunction = (
+  input: ShaderNodeInput,
+  options: { size: ShaderNodeInput; separation: ShaderNodeInput },
+) => ShaderNode;
 
-type LUTLoaderResult = {
-  texture3D: THREE.Data3DTexture;
-};
+/** Default depth blur parameters (RuneScape-style DoF) */
+export const DEPTH_BLUR_DEFAULTS = {
+  /** Focus distance in world units - objects at this distance are sharpest */
+  focusDistance: 60,
+  /** Range over which blur transitions from 0 to max */
+  blurRange: 40,
+  /** Overall blur intensity 0-1 */
+  intensity: 0.85,
+  /** Blur kernel size (higher = softer but more expensive) */
+  blurSize: 3,
+  /** Sample spread (higher = wider blur) */
+  blurSpread: 6,
+} as const;
 
-type LUTLoader = {
-  loadAsync: (url: string) => Promise<LUTLoaderResult>;
-};
-
-/**
- * Available LUT presets for color grading
- * Maps preset key to display name and file name
- */
+/** LUT presets for color grading */
 export const LUT_PRESETS = {
   none: { label: "None", file: null },
   cinematic: { label: "Cinematic", file: "Presetpro-Cinematic.3dl" },
@@ -51,30 +61,23 @@ export const LUT_PRESETS = {
 
 export type LUTPresetName = keyof typeof LUT_PRESETS;
 
-/**
- * LUT data containing the 3D texture
- */
-type LUTData = {
-  texture3D: THREE.Data3DTexture;
-};
-
-/**
- * Loaded LUT cache
- */
-const lutCache = new Map<string, LUTData>();
-
-/**
- * PostProcessing composer type with LUT support
- */
+/** PostProcessing composer interface */
 export type PostProcessingComposer = {
   render: () => void;
   renderAsync: () => Promise<void>;
   setSize: (width: number, height: number) => void;
   dispose: () => void;
-  setLUT: (lutName: LUTPresetName) => void;
+  // LUT
+  setLUT: (lutName: LUTPresetName) => Promise<void>;
   setLUTIntensity: (intensity: number) => void;
   getCurrentLUT: () => LUTPresetName;
   isLUTEnabled: () => boolean;
+  // Depth blur
+  setDepthBlur: (enabled: boolean) => void;
+  setDepthBlurIntensity: (intensity: number) => void;
+  setDepthBlurFocusDistance: (distance: number) => void;
+  setDepthBlurRange: (range: number) => void;
+  isDepthBlurEnabled: () => boolean;
 };
 
 export interface PostProcessingOptions {
@@ -83,137 +86,155 @@ export interface PostProcessingOptions {
     lut?: LUTPresetName;
     intensity?: number;
   };
-  bloom?: {
+  depthBlur?: {
     enabled?: boolean;
+    focusDistance?: number;
+    blurRange?: number;
     intensity?: number;
-    threshold?: number;
-    radius?: number;
+    blurSize?: number;
+    blurSpread?: number;
   };
 }
 
-// Cached loader modules
+// Cached dynamic modules
 let lut3DModule: { lut3D: LUT3DFunction } | null = null;
 let lutCubeLoaderModule: { LUTCubeLoader: new () => LUTLoader } | null = null;
 let lut3dlLoaderModule: { LUT3dlLoader: new () => LUTLoader } | null = null;
 let lutImageLoaderModule: { LUTImageLoader: new () => LUTLoader } | null = null;
+let boxBlurModule: { boxBlur: BoxBlurFunction } | null = null;
 
-/**
- * Load required LUT modules dynamically
- */
-async function loadLUTModules(): Promise<void> {
-  if (!lut3DModule) {
-    lut3DModule = (await import(
-      "three/examples/jsm/tsl/display/Lut3DNode.js"
-    )) as unknown as { lut3D: LUT3DFunction };
-  }
-  if (!lutCubeLoaderModule) {
-    lutCubeLoaderModule = (await import(
-      "three/examples/jsm/loaders/LUTCubeLoader.js"
-    )) as { LUTCubeLoader: new () => LUTLoader };
-  }
-  if (!lut3dlLoaderModule) {
-    lut3dlLoaderModule = (await import(
-      "three/examples/jsm/loaders/LUT3dlLoader.js"
-    )) as { LUT3dlLoader: new () => LUTLoader };
-  }
-  if (!lutImageLoaderModule) {
-    lutImageLoaderModule = (await import(
-      "three/examples/jsm/loaders/LUTImageLoader.js"
-    )) as { LUTImageLoader: new () => LUTLoader };
-  }
+// LUT texture cache
+const lutCache = new Map<string, { texture3D: THREE.Data3DTexture }>();
+
+/** Load all required dynamic modules */
+async function loadModules(): Promise<void> {
+  const imports = await Promise.all([
+    lut3DModule ? null : import("three/examples/jsm/tsl/display/Lut3DNode.js"),
+    lutCubeLoaderModule
+      ? null
+      : import("three/examples/jsm/loaders/LUTCubeLoader.js"),
+    lut3dlLoaderModule
+      ? null
+      : import("three/examples/jsm/loaders/LUT3dlLoader.js"),
+    lutImageLoaderModule
+      ? null
+      : import("three/examples/jsm/loaders/LUTImageLoader.js"),
+    boxBlurModule ? null : import("three/addons/tsl/display/boxBlur.js"),
+  ]);
+
+  if (imports[0]) lut3DModule = imports[0] as { lut3D: LUT3DFunction };
+  if (imports[1])
+    lutCubeLoaderModule = imports[1] as { LUTCubeLoader: new () => LUTLoader };
+  if (imports[2])
+    lut3dlLoaderModule = imports[2] as { LUT3dlLoader: new () => LUTLoader };
+  if (imports[3])
+    lutImageLoaderModule = imports[3] as {
+      LUTImageLoader: new () => LUTLoader;
+    };
+  if (imports[4]) boxBlurModule = imports[4] as { boxBlur: BoxBlurFunction };
 }
 
-/**
- * Load a LUT from file
- */
-async function loadLUT(lutName: LUTPresetName): Promise<LUTData | null> {
+/** Load a LUT texture by preset name */
+async function loadLUT(
+  lutName: LUTPresetName,
+): Promise<THREE.Data3DTexture | null> {
   if (lutName === "none") return null;
 
   const preset = LUT_PRESETS[lutName];
   if (!preset.file) return null;
 
-  // Check cache first
-  if (lutCache.has(lutName)) {
-    return lutCache.get(lutName) || null;
-  }
+  // Return cached texture
+  const cached = lutCache.get(lutName);
+  if (cached) return cached.texture3D;
 
-  // Ensure loaders are loaded
-  await loadLUTModules();
-
-  // LUTs are served from public/luts/ directly
   const fileName = preset.file;
   const lutPath = `/luts/${fileName}`;
 
-  console.log(`[PostProcessing] Loading LUT file: ${lutPath}`);
-
-  try {
-    let lut: LUTLoaderResult;
-
-    if (fileName.endsWith(".CUBE")) {
-      const cubeLoader = new lutCubeLoaderModule!.LUTCubeLoader();
-      lut = await cubeLoader.loadAsync(lutPath);
-    } else if (fileName.endsWith(".3dl")) {
-      const threeDlLoader = new lut3dlLoaderModule!.LUT3dlLoader();
-      lut = await threeDlLoader.loadAsync(lutPath);
-    } else if (fileName.endsWith(".png")) {
-      const imageLoader = new lutImageLoaderModule!.LUTImageLoader();
-      lut = await imageLoader.loadAsync(lutPath);
-    } else {
-      console.error(`[PostProcessing] Unknown LUT format: ${fileName}`);
-      return null;
-    }
-
-    const lutData: LUTData = { texture3D: lut.texture3D };
-    lutCache.set(lutName, lutData);
-    console.log(
-      `[PostProcessing] LUT loaded successfully: ${lutName} (${lut.texture3D.image.width}x${lut.texture3D.image.width})`,
-    );
-    return lutData;
-  } catch (error) {
-    console.error(`[PostProcessing] Failed to load LUT ${lutName}:`, error);
+  let loader: LUTLoader;
+  if (fileName.endsWith(".CUBE")) {
+    loader = new lutCubeLoaderModule!.LUTCubeLoader();
+  } else if (fileName.endsWith(".3dl")) {
+    loader = new lut3dlLoaderModule!.LUT3dlLoader();
+  } else if (fileName.endsWith(".png")) {
+    loader = new lutImageLoaderModule!.LUTImageLoader();
+  } else {
+    console.error(`[PostProcessing] Unknown LUT format: ${fileName}`);
     return null;
   }
+
+  const result = await loader.loadAsync(lutPath);
+  lutCache.set(lutName, { texture3D: result.texture3D });
+  return result.texture3D;
 }
 
-/**
- * Create post-processing pipeline with LUT color grading support
- */
+/** Create identity LUT (passthrough) */
+function createIdentityLUT(): THREE.Data3DTexture {
+  const size = 2;
+  const data = new Uint8Array(size * size * size * 4);
+  for (let z = 0; z < size; z++) {
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const i = (z * size * size + y * size + x) * 4;
+        data[i] = Math.round((x / (size - 1)) * 255);
+        data[i + 1] = Math.round((y / (size - 1)) * 255);
+        data[i + 2] = Math.round((z / (size - 1)) * 255);
+        data[i + 3] = 255;
+      }
+    }
+  }
+  const tex = new THREE.Data3DTexture(data, size, size, size);
+  tex.format = THREE.RGBAFormat;
+  tex.type = THREE.UnsignedByteType;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/** Create post-processing pipeline */
 export async function createPostProcessing(
   renderer: WebGPURenderer,
   scene: THREE.Scene,
   camera: THREE.Camera,
   options: PostProcessingOptions = {},
 ): Promise<PostProcessingComposer> {
-  console.log("[PostProcessing] Creating post-processing pipeline...");
+  await loadModules();
 
-  // Load LUT modules at creation time
-  await loadLUTModules();
-  console.log("[PostProcessing] LUT modules loaded");
-
-  const colorGradingEnabled = options.colorGrading?.enabled ?? true;
+  // State
   let currentLUT: LUTPresetName = options.colorGrading?.lut ?? "none";
-  const intensityUniform = uniform(options.colorGrading?.intensity ?? 1.0);
+  let lutEnabled = false;
+  let depthBlurActive = options.depthBlur?.enabled ?? false;
+  // Track user's preferred intensity (mutable - updated when user changes slider)
+  let userDepthBlurIntensity =
+    options.depthBlur?.intensity ?? DEPTH_BLUR_DEFAULTS.intensity;
 
-  console.log(
-    `[PostProcessing] Color grading enabled: ${colorGradingEnabled}, LUT: ${currentLUT}, intensity: ${intensityUniform.value}`,
+  // Uniforms
+  const lutIntensityUniform = uniform(options.colorGrading?.intensity ?? 1.0);
+  const depthBlurFocusUniform = uniform(
+    options.depthBlur?.focusDistance ?? DEPTH_BLUR_DEFAULTS.focusDistance,
+  );
+  const depthBlurRangeUniform = uniform(
+    options.depthBlur?.blurRange ?? DEPTH_BLUR_DEFAULTS.blurRange,
+  );
+  const depthBlurIntensityUniform = uniform(
+    depthBlurActive ? userDepthBlurIntensity : 0,
+  );
+  const depthBlurSizeUniform = uniform(
+    options.depthBlur?.blurSize ?? DEPTH_BLUR_DEFAULTS.blurSize,
+  );
+  const depthBlurSpreadUniform = uniform(
+    options.depthBlur?.blurSpread ?? DEPTH_BLUR_DEFAULTS.blurSpread,
   );
 
-  // Get the lut3D function from dynamically loaded module
-  const lut3DFn = lut3DModule!.lut3D;
-
-  // Type for PostProcessing from three/webgpu
+  // PostProcessing instance
   type PostProcessingType = {
     outputColorTransform: boolean;
-    outputNode: ReturnType<typeof pass>;
+    outputNode: ShaderNode;
     render: () => void;
     renderAsync: () => Promise<void>;
     dispose: () => void;
   };
 
-  // Type for texture3D node (unused but kept for future use)
-  // type Texture3DNode = ReturnType<typeof uniform>;
-
-  // Create PostProcessing instance from three/webgpu
   const PostProcessingClass = (
     THREE as unknown as {
       PostProcessing: new (renderer: WebGPURenderer) => PostProcessingType;
@@ -221,161 +242,166 @@ export async function createPostProcessing(
   ).PostProcessing;
 
   if (!PostProcessingClass) {
-    console.error(
-      "[PostProcessing] PostProcessing class not found in THREE namespace",
-    );
-    throw new Error("PostProcessing class not available");
+    throw new Error("PostProcessing class not available in THREE namespace");
   }
 
-  console.log("[PostProcessing] Creating PostProcessing instance...");
   const postProcessing = new PostProcessingClass(renderer);
-  console.log("[PostProcessing] PostProcessing instance created");
-
-  // We'll control tone mapping and color space manually
   postProcessing.outputColorTransform = false;
 
-  // Create scene pass
+  // Build TSL pipeline: scene -> depth blur -> tone map -> LUT
   const scenePass = pass(scene, camera);
+  type ScenePassWithNodes = typeof scenePass & {
+    getTextureNode: () => ShaderNode;
+    getViewZNode: () => ShaderNode;
+  };
+  const sceneColor = (scenePass as ScenePassWithNodes).getTextureNode();
+  const sceneViewZ = (scenePass as ScenePassWithNodes).getViewZNode();
 
-  // Create renderOutput node for proper tone mapping
-  const outputPass = renderOutput(scenePass);
-
-  // Create a placeholder LUT texture for initialization
-  // This will be replaced when a real LUT is loaded
-  function createPlaceholderLUT(): THREE.Data3DTexture {
-    const size = 2;
-    const data = new Uint8Array(size * size * size * 4);
-    for (let z = 0; z < size; z++) {
-      for (let y = 0; y < size; y++) {
-        for (let x = 0; x < size; x++) {
-          const i = (z * size * size + y * size + x) * 4;
-          data[i] = Math.round((x / (size - 1)) * 255);
-          data[i + 1] = Math.round((y / (size - 1)) * 255);
-          data[i + 2] = Math.round((z / (size - 1)) * 255);
-          data[i + 3] = 255;
-        }
-      }
-    }
-    const tex = new THREE.Data3DTexture(data, size, size, size);
-    tex.format = THREE.RGBAFormat;
-    tex.type = THREE.UnsignedByteType;
-    tex.minFilter = THREE.LinearFilter;
-    tex.magFilter = THREE.LinearFilter;
-    tex.needsUpdate = true;
-    return tex;
-  }
-
-  // Create a Texture3D node we can update at runtime
-  const placeholderLUT = createPlaceholderLUT();
-  const lutTextureNode = texture3D(placeholderLUT);
-  const lutSizeUniform = uniform(placeholderLUT.image.width);
-
-  // Create the LUT pass node once - we'll update its uniforms
-  // Cast is needed because lut3D accepts uniform nodes but types are stricter
-  const lutPassNode = lut3DFn(
-    outputPass,
-    lutTextureNode,
-    lutSizeUniform,
-    intensityUniform,
+  // Depth blur: mix sharp/blurred based on distance from focus plane
+  const blurredColor = boxBlurModule!.boxBlur(sceneColor as ShaderNodeInput, {
+    size: depthBlurSizeUniform as ShaderNodeInput,
+    separation: depthBlurSpreadUniform as ShaderNodeInput,
+  });
+  const depthFromFocus = abs(
+    sub(
+      mul(sceneViewZ as ShaderNodeInput, -1),
+      depthBlurFocusUniform as ShaderNodeInput,
+    ),
+  );
+  const blurAmount = smoothstep(
+    uniform(0),
+    depthBlurRangeUniform as ShaderNodeInput,
+    depthFromFocus,
+  );
+  const depthBlurOutput = mix(
+    sceneColor as ShaderNodeInput,
+    blurredColor,
+    mul(blurAmount, depthBlurIntensityUniform as ShaderNodeInput),
   );
 
-  // Use the LUT pass as output
-  postProcessing.outputNode = lutPassNode as unknown as ReturnType<typeof pass>;
+  // Tone mapping
+  const toneMapped = renderOutput(depthBlurOutput);
 
-  // Track if LUT is currently enabled (for performance bypass)
-  let lutEnabled = false;
+  // LUT color grading
+  const identityLUT = createIdentityLUT();
+  const lutTextureNode = texture3D(identityLUT);
+  const lutSize = identityLUT.image.width;
+  const lutOutput = lut3DModule!.lut3D(
+    toneMapped,
+    lutTextureNode,
+    lutSize,
+    lutIntensityUniform,
+  );
 
-  // Load initial LUT if color grading is enabled
-  let currentLUTData: LUTData | null = null;
+  postProcessing.outputNode = lutOutput;
 
-  if (colorGradingEnabled && currentLUT !== "none") {
-    console.log(`[PostProcessing] Loading initial LUT: ${currentLUT}`);
-    currentLUTData = await loadLUT(currentLUT);
-    if (currentLUTData) {
-      console.log(
-        `[PostProcessing] LUT loaded, texture size: ${currentLUTData.texture3D.image.width}`,
+  // Load initial LUT if specified
+  // Note: LUT size is fixed at creation time. Loaded LUTs should match the identity LUT size.
+  if (options.colorGrading?.enabled !== false && currentLUT !== "none") {
+    try {
+      const tex = await loadLUT(currentLUT);
+      if (tex) {
+        lutTextureNode.value = tex;
+        lutEnabled = true;
+      }
+    } catch (err) {
+      console.error(
+        `[PostProcessing] Failed to load initial LUT "${currentLUT}":`,
+        err,
       );
-      // Update the LUT texture and size uniforms
-      lutTextureNode.value = currentLUTData.texture3D;
-      lutSizeUniform.value = currentLUTData.texture3D.image.width;
-      intensityUniform.value = options.colorGrading?.intensity ?? 1.0;
-      lutEnabled = true;
-      console.log("[PostProcessing] LUT color grading applied");
-    } else {
-      // Failed to load LUT
-      lutEnabled = false;
-      console.log("[PostProcessing] Failed to load LUT, using direct render");
+      // Continue with identity LUT (no color grading)
+      currentLUT = "none";
     }
-  } else {
-    console.log("[PostProcessing] Color grading disabled or LUT is none");
-    lutEnabled = false;
   }
 
-  const composer: PostProcessingComposer = {
+  const isAnyEffectActive = () => lutEnabled || depthBlurActive;
+
+  return {
     render: () => {
-      if (lutEnabled) {
-        // Use post-processing with LUT
+      if (isAnyEffectActive()) {
         postProcessing.render();
       } else {
-        // Bypass post-processing entirely for better performance
         renderer.render(scene, camera);
       }
     },
+
     renderAsync: async () => {
-      if (lutEnabled) {
+      if (isAnyEffectActive()) {
         await postProcessing.renderAsync();
       } else {
         await renderer.renderAsync(scene, camera);
       }
     },
-    setSize: () => {
-      // PostProcessing handles resize automatically
+
+    setSize: (_width: number, _height: number) => {
+      // WebGPU PostProcessing reads renderer size each frame - no manual resize needed
+      // This method exists for API compatibility with other composer patterns
     },
+
     dispose: () => {
       postProcessing.dispose();
-      placeholderLUT.dispose();
-      // Clean up LUT textures
-      lutCache.forEach((lut) => {
-        lut.texture3D.dispose();
-      });
+      identityLUT.dispose();
+      lutCache.forEach((lut) => lut.texture3D.dispose());
       lutCache.clear();
     },
-    setLUT: async (lutName: LUTPresetName) => {
-      console.log(`[PostProcessing] Switching LUT to: ${lutName}`);
 
+    // LUT methods
+    setLUT: async (lutName: LUTPresetName) => {
       if (lutName === currentLUT) return;
-      currentLUT = lutName;
 
       if (lutName === "none") {
-        // Disable LUT - bypass post-processing entirely
+        currentLUT = lutName;
         lutEnabled = false;
-        console.log(
-          "[PostProcessing] LUT disabled (bypassing post-processing for performance)",
-        );
+        lutIntensityUniform.value = 0;
         return;
       }
 
-      const lutData = await loadLUT(lutName);
-      if (lutData) {
-        currentLUTData = lutData;
-        // Update the LUT texture and size uniforms
-        lutTextureNode.value = lutData.texture3D;
-        lutSizeUniform.value = lutData.texture3D.image.width;
-        // Restore full intensity
-        intensityUniform.value = options.colorGrading?.intensity ?? 1.0;
-        // Enable LUT
+      // Load new LUT before updating state - if load fails, keep current LUT
+      let tex: THREE.Data3DTexture | null = null;
+      try {
+        tex = await loadLUT(lutName);
+      } catch (err) {
+        console.error(`[PostProcessing] Failed to load LUT "${lutName}":`, err);
+        return; // Keep current LUT on failure
+      }
+
+      if (tex) {
+        currentLUT = lutName;
+        lutTextureNode.value = tex;
+        lutIntensityUniform.value = options.colorGrading?.intensity ?? 1.0;
         lutEnabled = true;
-        console.log(
-          `[PostProcessing] LUT switched to ${lutName} (size: ${lutData.texture3D.image.width})`,
-        );
       }
     },
+
     setLUTIntensity: (intensity: number) => {
-      intensityUniform.value = Math.max(0, Math.min(1, intensity));
+      lutIntensityUniform.value = Math.max(0, Math.min(1, intensity));
     },
+
     getCurrentLUT: () => currentLUT,
     isLUTEnabled: () => lutEnabled,
-  };
 
-  return composer;
+    // Depth blur methods
+    setDepthBlur: (enabled: boolean) => {
+      depthBlurActive = enabled;
+      depthBlurIntensityUniform.value = enabled ? userDepthBlurIntensity : 0;
+    },
+
+    setDepthBlurIntensity: (intensity: number) => {
+      const clamped = Math.max(0, Math.min(1, intensity));
+      // Store user's preferred intensity so toggle off/on restores it
+      userDepthBlurIntensity = clamped;
+      depthBlurIntensityUniform.value = clamped;
+      depthBlurActive = clamped > 0;
+    },
+
+    setDepthBlurFocusDistance: (distance: number) => {
+      depthBlurFocusUniform.value = Math.max(0, distance);
+    },
+
+    setDepthBlurRange: (range: number) => {
+      depthBlurRangeUniform.value = Math.max(0.1, range);
+    },
+
+    isDepthBlurEnabled: () => depthBlurActive,
+  };
 }

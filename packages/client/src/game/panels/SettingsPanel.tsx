@@ -16,7 +16,7 @@ import {
 import { isTouch } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
 import { useFullscreen } from "../../hooks/useFullscreen";
-import { MicIcon, MicOffIcon } from "../../components/Icons";
+import { MicIcon, MicOffIcon } from "../../ui/components/Icons";
 import { ToggleSwitch, Slider } from "@/ui";
 import { NAME_SANITIZE_REGEX } from "../../utils/validation";
 import { COLORS } from "../../constants/colors";
@@ -621,13 +621,20 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
   const [colorGradingIntensity, setColorGradingIntensity] = useState(
     prefs?.colorGradingIntensity ?? 1,
   );
+  const [depthBlur, setDepthBlur] = useState(prefs?.depthBlur ?? false);
+  const [depthBlurIntensity, setDepthBlurIntensity] = useState(
+    prefs?.depthBlurIntensity ?? 0.85,
+  );
+  const [depthBlurDistance, setDepthBlurDistance] = useState(
+    prefs?.depthBlurDistance ?? 60,
+  );
   const [music, setMusic] = useState(prefs?.music || 0.5);
   const [sfx, setSFX] = useState(prefs?.sfx || 0.5);
   const [voice, setVoice] = useState(prefs?.voice || 1);
   const [voiceEnabled, setVoiceEnabled] = useState(
     prefs?.voiceEnabled ?? false,
   );
-  const [uiScale, setUiScale] = useState(prefs?.ui || 1);
+  const [_uiScale, setUiScale] = useState(prefs?.ui || 1);
   const [statsOn, setStatsOn] = useState(prefs?.stats || false);
 
   // Status bar configuration
@@ -771,6 +778,11 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
         setColorGrading(changes.colorGrading.value as string);
       if (changes.colorGradingIntensity)
         setColorGradingIntensity(changes.colorGradingIntensity.value as number);
+      if (changes.depthBlur) setDepthBlur(changes.depthBlur.value as boolean);
+      if (changes.depthBlurIntensity)
+        setDepthBlurIntensity(changes.depthBlurIntensity.value as number);
+      if (changes.depthBlurDistance)
+        setDepthBlurDistance(changes.depthBlurDistance.value as number);
       if (changes.music) setMusic(changes.music.value as number);
       if (changes.sfx) setSFX(changes.sfx.value as number);
       if (changes.voice) setVoice(changes.voice.value as number);
@@ -949,7 +961,42 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
                     prefs?.setWaterReflections?.(v);
                   }}
                 />
+                <ToggleSwitch
+                  label="Depth Blur"
+                  checked={depthBlur}
+                  disabled={!postprocessing}
+                  onChange={(v) => {
+                    setDepthBlur(v);
+                    prefs?.setDepthBlur?.(v);
+                  }}
+                />
               </div>
+              {postprocessing && depthBlur && (
+                <div className="mt-1.5 space-y-1">
+                  <Slider
+                    label="Blur Distance"
+                    value={depthBlurDistance}
+                    onChange={(v) => {
+                      setDepthBlurDistance(v);
+                      prefs?.setDepthBlurDistance?.(v);
+                    }}
+                    min={20}
+                    max={150}
+                    step={5}
+                  />
+                  <Slider
+                    label="Blur Intensity"
+                    value={depthBlurIntensity}
+                    onChange={(v) => {
+                      setDepthBlurIntensity(v);
+                      prefs?.setDepthBlurIntensity?.(v);
+                    }}
+                    min={0}
+                    max={1}
+                    step={0.05}
+                  />
+                </div>
+              )}
             </SettingsSection>
 
             {/* Color Grading */}

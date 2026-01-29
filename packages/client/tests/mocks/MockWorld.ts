@@ -13,6 +13,7 @@ import type { ClientWorld } from "../../src/types";
  */
 export interface MockWorld {
   getPlayer: ReturnType<typeof vi.fn>;
+  getSystem: ReturnType<typeof vi.fn>;
   emit: ReturnType<typeof vi.fn>;
   on: ReturnType<typeof vi.fn>;
   off: ReturnType<typeof vi.fn>;
@@ -52,6 +53,11 @@ export interface MockWorld {
 export function createMockWorld(overrides: Partial<MockWorld> = {}): MockWorld {
   const defaultMock: MockWorld = {
     getPlayer: vi.fn(() => ({ id: "test-player-id" })),
+    getSystem: vi.fn(() => ({
+      // Mock actions system
+      performAction: vi.fn(),
+      getAvailableActions: vi.fn(() => []),
+    })),
     emit: vi.fn(),
     on: vi.fn(() => () => {}), // Returns unsubscribe function
     off: vi.fn(),

@@ -250,6 +250,32 @@ export function cellToWorldTile(
   rotationRad: number,
   cellSize: number,
 ): TileCoord {
+  // Validate inputs
+  if (!cell || typeof cell.col !== "number" || typeof cell.row !== "number") {
+    throw new Error(`[cellToWorldTile] Invalid cell: ${JSON.stringify(cell)}`);
+  }
+  if (!Number.isFinite(buildingCenterX) || !Number.isFinite(buildingCenterZ)) {
+    throw new Error(
+      `[cellToWorldTile] Invalid building center: (${buildingCenterX}, ${buildingCenterZ})`,
+    );
+  }
+  if (!Number.isFinite(buildingWidth) || buildingWidth <= 0) {
+    throw new Error(
+      `[cellToWorldTile] Invalid buildingWidth: ${buildingWidth}`,
+    );
+  }
+  if (!Number.isFinite(buildingDepth) || buildingDepth <= 0) {
+    throw new Error(
+      `[cellToWorldTile] Invalid buildingDepth: ${buildingDepth}`,
+    );
+  }
+  if (!Number.isFinite(rotationRad)) {
+    throw new Error(`[cellToWorldTile] Invalid rotationRad: ${rotationRad}`);
+  }
+  if (!Number.isFinite(cellSize) || cellSize <= 0) {
+    throw new Error(`[cellToWorldTile] Invalid cellSize: ${cellSize}`);
+  }
+
   // Cell (0,0) is at the SW corner of the building
   // Building center is at (width/2, depth/2) in cell space
 
@@ -340,6 +366,10 @@ export function toWallDirection(dir: string): WallDirection {
  * Create a tile key string for Set/Map storage
  */
 export function tileKey(tileX: number, tileZ: number): string {
+  // Validate inputs
+  if (!Number.isFinite(tileX) || !Number.isFinite(tileZ)) {
+    throw new Error(`[tileKey] Invalid tile coords: (${tileX}, ${tileZ})`);
+  }
   return `${tileX},${tileZ}`;
 }
 

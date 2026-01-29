@@ -420,6 +420,9 @@ export class World extends EventEmitter {
     bloom?: boolean;
     colorGrading?: string;
     colorGradingIntensity?: number;
+    depthBlur?: boolean;
+    depthBlurIntensity?: number;
+    depthBlurDistance?: number;
     music?: number;
     sfx?: number;
     voice?: number;
@@ -435,6 +438,9 @@ export class World extends EventEmitter {
     setBloom?: (value: boolean) => void;
     setColorGrading?: (value: string) => void;
     setColorGradingIntensity?: (value: number) => void;
+    setDepthBlur?: (value: boolean) => void;
+    setDepthBlurIntensity?: (value: number) => void;
+    setDepthBlurDistance?: (value: number) => void;
     setMusic?: (value: number) => void;
     setSFX?: (value: number) => void;
     setVoice?: (value: number) => void;
@@ -952,9 +958,11 @@ export class World extends EventEmitter {
     // This prevents z-fighting without needing expensive logarithmic depth buffers
     this.camera = new THREE.PerspectiveCamera(70, 16 / 9, 0.2, 800);
 
-    // Enable layer 1 for main camera (vegetation, water, grass are on layer 1)
+    // Enable layer 1 for main camera (vegetation, water, grass, building walls are on layer 1)
+    // Enable layer 2 for building floors (walkable surfaces for click-to-move)
     // Minimap camera only sees layer 0 for performance
     this.camera.layers.enable(1);
+    this.camera.layers.enable(2);
 
     this.rig.add(this.camera);
 

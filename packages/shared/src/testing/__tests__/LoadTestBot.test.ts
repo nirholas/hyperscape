@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect } from "vitest";
 import { LoadTestBot, type LoadTestBehavior } from "../LoadTestBot";
 
 const TEST_WS_URL = "ws://localhost:5555/ws";
@@ -7,10 +7,10 @@ const TEST_WS_URL = "ws://localhost:5555/ws";
  * Check if the game server is running.
  * Uses a short timeout to fail fast when server is unavailable.
  */
-async function isServerAvailable(): Promise<boolean> {
+async function checkServerAvailable(): Promise<boolean> {
   try {
     const controller = new globalThis.AbortController();
-    const timeout = setTimeout(() => controller.abort(), 500); // Short timeout
+    const timeout = setTimeout(() => controller.abort(), 500);
     await fetch("http://localhost:5555/health", { signal: controller.signal });
     clearTimeout(timeout);
     return true;
@@ -19,8 +19,30 @@ async function isServerAvailable(): Promise<boolean> {
   }
 }
 
-// Module-level flag set once at test suite initialization
+// Check server availability at module load time
 let serverAvailable = false;
+const serverCheckPromise = checkServerAvailable().then((available) => {
+  serverAvailable = available;
+  if (!available) {
+    console.log(
+      "[LoadTestBot Tests] Server not available at localhost:5555, integration tests will be skipped",
+    );
+  }
+  return available;
+});
+
+/**
+ * Helper to skip integration tests when server is not available.
+ * Must be called at the start of each integration test.
+ */
+async function skipIfNoServer(): Promise<boolean> {
+  await serverCheckPromise;
+  if (!serverAvailable) {
+    console.log("  → Skipped: server not available");
+    return true;
+  }
+  return false;
+}
 
 describe("LoadTestBot Unit Tests", () => {
   describe("Configuration", () => {
@@ -238,20 +260,12 @@ describe("LoadTestBot Unit Tests", () => {
   });
 });
 
-describe("LoadTestBot Integration Tests", () => {
-  // Check server availability ONCE at suite start (not per-test)
-  beforeAll(async () => {
-    serverAvailable = await isServerAvailable();
-    if (!serverAvailable) {
-      console.log(
-        "[LoadTestBot Tests] Server not available, integration tests will be skipped",
-      );
-    }
-  });
-
+// Integration tests require a running server - skip entire section if unavailable
+// These tests are meant to be run manually with: bun test LoadTestBot.test.ts
+// when the game server is running on localhost:5555
+describe.skipIf(!serverAvailable)("LoadTestBot Integration Tests", () => {
   describe("Connection", () => {
     it("connects to server when available", async () => {
-      if (!serverAvailable) return;
       const bot = new LoadTestBot({
         wsUrl: TEST_WS_URL,
         name: "IntegrationBot-001",
@@ -268,7 +282,6 @@ describe("LoadTestBot Integration Tests", () => {
     });
 
     it("updates metrics after connection attempt", async () => {
-      if (!serverAvailable) return;
       const bot = new LoadTestBot({
         wsUrl: TEST_WS_URL,
         name: "MetricsIntegrationBot",
@@ -285,7 +298,6 @@ describe("LoadTestBot Integration Tests", () => {
     });
 
     it("handles rapid connect/disconnect", async () => {
-      if (!serverAvailable) return;
       const bot = new LoadTestBot({
         wsUrl: TEST_WS_URL,
         name: "RapidBot",
@@ -293,7 +305,9 @@ describe("LoadTestBot Integration Tests", () => {
       });
       try {
         await bot.connect();
-      } catch {}
+      } catch {
+        // Connection may fail, that's ok
+      }
       bot.disconnect();
       expect(bot.connected).toBe(false);
     });
@@ -324,7 +338,6 @@ describe("LoadTestBot Integration Tests", () => {
 
   describe("Wander Behavior", () => {
     it("completes startup with wander behavior", async () => {
-      if (!serverAvailable) return;
       const bot = new LoadTestBot({
         wsUrl: TEST_WS_URL,
         name: "WanderBot",
@@ -336,6 +349,7 @@ describe("LoadTestBot Integration Tests", () => {
         await new Promise((r) => setTimeout(r, 1500));
         expect(typeof bot.metrics.moveCommandsSent).toBe("number");
       } catch {
+        // Connection may fail
       } finally {
         bot.disconnect();
       }
@@ -344,7 +358,6 @@ describe("LoadTestBot Integration Tests", () => {
 
   describe("Explore Behavior", () => {
     it("completes startup with explore behavior", async () => {
-      if (!serverAvailable) return;
       const bot = new LoadTestBot({
         wsUrl: TEST_WS_URL,
         name: "ExploreBot",
@@ -356,6 +369,7 @@ describe("LoadTestBot Integration Tests", () => {
         await new Promise((r) => setTimeout(r, 1500));
         expect(typeof bot.metrics.moveCommandsSent).toBe("number");
       } catch {
+        // Connection may fail
       } finally {
         bot.disconnect();
       }
@@ -364,7 +378,6 @@ describe("LoadTestBot Integration Tests", () => {
 
   describe("Sprint Behavior", () => {
     it("completes startup with sprint behavior", async () => {
-      if (!serverAvailable) return;
       const bot = new LoadTestBot({
         wsUrl: TEST_WS_URL,
         name: "SprintBot",
@@ -376,6 +389,7 @@ describe("LoadTestBot Integration Tests", () => {
         await new Promise((r) => setTimeout(r, 1500));
         expect(typeof bot.metrics.moveCommandsSent).toBe("number");
       } catch {
+        // Connection may fail
       } finally {
         bot.disconnect();
       }
@@ -384,7 +398,6 @@ describe("LoadTestBot Integration Tests", () => {
 
   describe("Idle Behavior", () => {
     it("does not send move commands when idle", async () => {
-      if (!serverAvailable) return;
       const bot = new LoadTestBot({
         wsUrl: TEST_WS_URL,
         name: "IdleBot",
@@ -395,6 +408,7 @@ describe("LoadTestBot Integration Tests", () => {
         await new Promise((r) => setTimeout(r, 2000));
         expect(bot.metrics.moveCommandsSent).toBe(0);
       } catch {
+        // Connection may fail
       } finally {
         bot.disconnect();
       }

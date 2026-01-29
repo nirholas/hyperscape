@@ -177,9 +177,15 @@ describe("AnimationLOD", () => {
       });
 
       it("should return FROZEN level in freeze zone (between quarter and freeze distance)", () => {
-        // FROZEN zone is >80m and <=100m (quarterDistance to freezeDistance)
-        // Use 90m which is firmly in the frozen zone
-        const result = lod.update(90 * 90, deltaTime);
+        // FROZEN zone is >quarterDistance and <=freezeDistance
+        // Use a value firmly in the frozen zone
+        const quarterDist = DEFAULT_ANIMATION_LOD_CONFIG.quarterDistance;
+        const freezeDist = DEFAULT_ANIMATION_LOD_CONFIG.freezeDistance;
+        const frozenZoneDistance = (quarterDist + freezeDist) / 2;
+        const result = lod.update(
+          frozenZoneDistance * frozenZoneDistance,
+          deltaTime,
+        );
         expect(result.lodLevel).toBe(LOD_LEVEL.FROZEN);
         expect(result.shouldFreeze).toBe(true);
         expect(result.shouldUpdate).toBe(false);
@@ -233,8 +239,11 @@ describe("AnimationLOD", () => {
       });
 
       it("should never update when FROZEN or CULLED", () => {
-        // Use 90m which is in the FROZEN zone (80-100m)
-        const frozenDistSq = 90 * 90;
+        // Use a value in the FROZEN zone (>quarterDistance and <=freezeDistance)
+        const quarterDist = DEFAULT_ANIMATION_LOD_CONFIG.quarterDistance;
+        const freezeDist = DEFAULT_ANIMATION_LOD_CONFIG.freezeDistance;
+        const frozenZoneDistance = (quarterDist + freezeDist) / 2;
+        const frozenDistSq = frozenZoneDistance * frozenZoneDistance;
 
         for (let i = 0; i < 10; i++) {
           const result = lod.update(frozenDistSq, deltaTime);
@@ -270,8 +279,11 @@ describe("AnimationLOD", () => {
       });
 
       it("should return zero delta when frozen", () => {
-        // Use 90m which is in the FROZEN zone (80-100m)
-        const frozenDistSq = 90 * 90;
+        // Use a value in the FROZEN zone (>quarterDistance and <=freezeDistance)
+        const quarterDist = DEFAULT_ANIMATION_LOD_CONFIG.quarterDistance;
+        const freezeDist = DEFAULT_ANIMATION_LOD_CONFIG.freezeDistance;
+        const frozenZoneDistance = (quarterDist + freezeDist) / 2;
+        const frozenDistSq = frozenZoneDistance * frozenZoneDistance;
         const result = lod.update(frozenDistSq, deltaTime);
         expect(result.effectiveDelta).toBe(0);
       });
@@ -283,8 +295,11 @@ describe("AnimationLOD", () => {
         lod.update(10 * 10, deltaTime);
         expect(lod.isFrozen()).toBe(false);
 
-        // Move to frozen zone (90m, between 80-100m)
-        const frozenDistSq = 90 * 90;
+        // Move to frozen zone (between quarterDistance and freezeDistance)
+        const quarterDist = DEFAULT_ANIMATION_LOD_CONFIG.quarterDistance;
+        const freezeDist = DEFAULT_ANIMATION_LOD_CONFIG.freezeDistance;
+        const frozenZoneDistance = (quarterDist + freezeDist) / 2;
+        const frozenDistSq = frozenZoneDistance * frozenZoneDistance;
         const result = lod.update(frozenDistSq, deltaTime);
 
         expect(result.shouldApplyRestPose).toBe(true);
@@ -296,13 +311,17 @@ describe("AnimationLOD", () => {
       });
 
       it("should not trigger rest pose when moving from frozen to culled", () => {
-        // Start frozen (90m)
-        const frozenDistSq = 90 * 90;
+        // Start frozen (in freeze zone)
+        const quarterDist = DEFAULT_ANIMATION_LOD_CONFIG.quarterDistance;
+        const freezeDist = DEFAULT_ANIMATION_LOD_CONFIG.freezeDistance;
+        const frozenZoneDistance = (quarterDist + freezeDist) / 2;
+        const frozenDistSq = frozenZoneDistance * frozenZoneDistance;
         lod.update(frozenDistSq, deltaTime);
         expect(lod.isFrozen()).toBe(true);
 
-        // Move to culled (beyond 100m freeze distance)
-        const cullDistSq = 150 * 150;
+        // Move to culled (beyond cullDistance)
+        const cullDist = DEFAULT_ANIMATION_LOD_CONFIG.cullDistance;
+        const cullDistSq = (cullDist + 10) * (cullDist + 10);
         const result = lod.update(cullDistSq, deltaTime);
 
         // Rest pose already applied when entering frozen, not again when moving to culled
@@ -361,8 +380,11 @@ describe("AnimationLOD", () => {
         lod.update(10 * 10, deltaTime);
         expect(lod.getCurrentLevel()).toBe(LOD_LEVEL.FULL);
 
-        // Use 90m which is in the FROZEN zone (80-100m)
-        const frozenDistSq = 90 * 90;
+        // Use frozen zone distance
+        const quarterDist = DEFAULT_ANIMATION_LOD_CONFIG.quarterDistance;
+        const freezeDist = DEFAULT_ANIMATION_LOD_CONFIG.freezeDistance;
+        const frozenZoneDistance = (quarterDist + freezeDist) / 2;
+        const frozenDistSq = frozenZoneDistance * frozenZoneDistance;
         lod.update(frozenDistSq, deltaTime);
         expect(lod.getCurrentLevel()).toBe(LOD_LEVEL.FROZEN);
       });
@@ -370,8 +392,11 @@ describe("AnimationLOD", () => {
 
     describe("isFrozen() / isPaused()", () => {
       it("isFrozen() should return true when at FROZEN level", () => {
-        // Use 90m which is in the FROZEN zone (80-100m)
-        const frozenDistSq = 90 * 90;
+        // Use frozen zone distance
+        const quarterDist = DEFAULT_ANIMATION_LOD_CONFIG.quarterDistance;
+        const freezeDist = DEFAULT_ANIMATION_LOD_CONFIG.freezeDistance;
+        const frozenZoneDistance = (quarterDist + freezeDist) / 2;
+        const frozenDistSq = frozenZoneDistance * frozenZoneDistance;
         lod.update(frozenDistSq, deltaTime);
         expect(lod.isFrozen()).toBe(true);
       });
@@ -384,8 +409,11 @@ describe("AnimationLOD", () => {
       });
 
       it("isPaused() should be alias for isFrozen()", () => {
-        // Use 90m which is in the FROZEN zone (80-100m)
-        const frozenDistSq = 90 * 90;
+        // Use frozen zone distance
+        const quarterDist = DEFAULT_ANIMATION_LOD_CONFIG.quarterDistance;
+        const freezeDist = DEFAULT_ANIMATION_LOD_CONFIG.freezeDistance;
+        const frozenZoneDistance = (quarterDist + freezeDist) / 2;
+        const frozenDistSq = frozenZoneDistance * frozenZoneDistance;
         lod.update(frozenDistSq, deltaTime);
         expect(lod.isPaused()).toBe(lod.isFrozen());
       });
@@ -400,9 +428,11 @@ describe("AnimationLOD", () => {
       });
 
       it("should return false when frozen (in freeze zone, not yet culled)", () => {
-        // FROZEN zone is between quarterDistance (80m) and freezeDistance (100m)
-        // Use 90m which is in the frozen zone
-        const frozenDistSq = 90 * 90;
+        // FROZEN zone is between quarterDistance and freezeDistance
+        const quarterDist = DEFAULT_ANIMATION_LOD_CONFIG.quarterDistance;
+        const freezeDist = DEFAULT_ANIMATION_LOD_CONFIG.freezeDistance;
+        const frozenZoneDistance = (quarterDist + freezeDist) / 2;
+        const frozenDistSq = frozenZoneDistance * frozenZoneDistance;
         lod.update(frozenDistSq, deltaTime);
         expect(lod.isCulled()).toBe(false);
         expect(lod.isFrozen()).toBe(true);
@@ -528,24 +558,35 @@ describe("AnimationLOD", () => {
     });
 
     it("should track last LOD level correctly through transitions", () => {
-      // FULL: <= 30m
-      lod.update(10 * 10, deltaTime);
+      const fullDist = DEFAULT_ANIMATION_LOD_CONFIG.fullDistance;
+      const halfDist = DEFAULT_ANIMATION_LOD_CONFIG.halfDistance;
+      const quarterDist = DEFAULT_ANIMATION_LOD_CONFIG.quarterDistance;
+      const freezeDist = DEFAULT_ANIMATION_LOD_CONFIG.freezeDistance;
+      const cullDist = DEFAULT_ANIMATION_LOD_CONFIG.cullDistance;
+
+      // FULL: <= fullDistance
+      const fullZone = fullDist * 0.5;
+      lod.update(fullZone * fullZone, deltaTime);
       expect(lod.getCurrentLevel()).toBe(LOD_LEVEL.FULL);
 
-      // HALF: > 30m and <= 60m
-      lod.update(50 * 50, deltaTime);
+      // HALF: > fullDistance and <= halfDistance
+      const halfZone = (fullDist + halfDist) / 2;
+      lod.update(halfZone * halfZone, deltaTime);
       expect(lod.getCurrentLevel()).toBe(LOD_LEVEL.HALF);
 
-      // QUARTER: > 60m and <= 80m
-      lod.update(75 * 75, deltaTime);
+      // QUARTER: > halfDistance and <= quarterDistance
+      const quarterZone = (halfDist + quarterDist) / 2;
+      lod.update(quarterZone * quarterZone, deltaTime);
       expect(lod.getCurrentLevel()).toBe(LOD_LEVEL.QUARTER);
 
-      // FROZEN: > 80m and <= 100m
-      lod.update(95 * 95, deltaTime);
+      // FROZEN: > quarterDistance and <= freezeDistance
+      const frozenZone = (quarterDist + freezeDist) / 2;
+      lod.update(frozenZone * frozenZone, deltaTime);
       expect(lod.getCurrentLevel()).toBe(LOD_LEVEL.FROZEN);
 
-      // CULLED: > 100m (freezeDistance)
-      lod.update(110 * 110, deltaTime);
+      // CULLED: > cullDistance
+      const culledZone = cullDist + 10;
+      lod.update(culledZone * culledZone, deltaTime);
       expect(lod.getCurrentLevel()).toBe(LOD_LEVEL.CULLED);
     });
   });
@@ -632,31 +673,39 @@ describe("AnimationLOD", () => {
       const lod = new AnimationLOD(ANIMATION_LOD_PRESETS.MOB);
       const deltaTime = 1 / 60;
 
+      // Get actual distances from the MOB preset
+      const fullDist = ANIMATION_LOD_PRESETS.MOB.fullDistance;
+      const halfDist = ANIMATION_LOD_PRESETS.MOB.halfDistance;
+      const quarterDist = ANIMATION_LOD_PRESETS.MOB.quarterDistance;
+      const freezeDist = ANIMATION_LOD_PRESETS.MOB.freezeDistance;
+      const cullDist = ANIMATION_LOD_PRESETS.MOB.cullDistance;
+
       // Mob at origin, player starts far
-      // LOD distances: FULL=30, HALF=60, QUARTER=80, FROZEN=100, CULLED>100
       const mobX = 0,
         mobZ = 0;
-      let playerX = 180;
 
-      // Far away (180m) - culled (beyond freeze distance of 100m)
+      // Far away (beyond freezeDistance) - culled
+      // Note: AnimationLOD uses freezeDistance as the threshold for CULLED
+      // (anything > freezeDistance is CULLED, regardless of cullDistance)
+      let playerX = freezeDist + 50;
       let result = lod.updateFromPosition(mobX, mobZ, playerX, 0, deltaTime);
       expect(result.shouldCull).toBe(true);
       expect(result.lodLevel).toBe(LOD_LEVEL.CULLED);
 
-      // Player approaches to 95m - frozen (between 80m and 100m)
-      playerX = 95;
+      // Player approaches to frozen zone (between quarterDist and freezeDist)
+      playerX = (quarterDist + freezeDist) / 2;
       result = lod.updateFromPosition(mobX, mobZ, playerX, 0, deltaTime);
       expect(result.shouldFreeze).toBe(true);
       expect(result.shouldCull).toBe(false);
       expect(result.lodLevel).toBe(LOD_LEVEL.FROZEN);
 
-      // Closer to 75m - quarter (between 60m and 80m)
-      playerX = 75;
+      // Closer to quarter zone (between halfDist and quarterDist)
+      playerX = (halfDist + quarterDist) / 2;
       result = lod.updateFromPosition(mobX, mobZ, playerX, 0, deltaTime);
       expect(result.lodLevel).toBe(LOD_LEVEL.QUARTER);
 
-      // Close at 20m - full (under 30m)
-      playerX = 20;
+      // Close at full zone (under fullDist)
+      playerX = fullDist * 0.5;
       result = lod.updateFromPosition(mobX, mobZ, playerX, 0, deltaTime);
       expect(result.lodLevel).toBe(LOD_LEVEL.FULL);
     });

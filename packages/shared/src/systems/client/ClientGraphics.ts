@@ -87,6 +87,7 @@ import {
 import {
   createPostProcessing,
   type PostProcessingComposer,
+  DEPTH_BLUR_DEFAULTS,
 } from "../../utils/rendering/PostProcessingFactory";
 
 let renderer: UniversalRenderer | undefined;
@@ -201,17 +202,19 @@ export class ClientGraphics extends System {
       const colorGradingIntensity =
         this.world.prefs?.colorGradingIntensity ?? 1.0;
 
+      // Get depth blur settings from preferences
+      const depthBlurEnabled = this.world.prefs?.depthBlur ?? true;
+      const depthBlurIntensity =
+        this.world.prefs?.depthBlurIntensity ?? DEPTH_BLUR_DEFAULTS.intensity;
+      const depthBlurDistance =
+        this.world.prefs?.depthBlurDistance ??
+        DEPTH_BLUR_DEFAULTS.focusDistance;
+
       this.composer = await createPostProcessing(
         this.renderer,
         this.world.stage.scene,
         this.world.camera,
         {
-          bloom: {
-            enabled: this.world.prefs?.bloom ?? true,
-            intensity: 0.3,
-            threshold: 1.0,
-            radius: 0.5,
-          },
           colorGrading: {
             enabled: true,
             lut: colorGradingLut as
@@ -225,6 +228,14 @@ export class ClientGraphics extends System {
               | "bw"
               | "night",
             intensity: colorGradingIntensity,
+          },
+          depthBlur: {
+            enabled: depthBlurEnabled,
+            intensity: depthBlurIntensity,
+            focusDistance: depthBlurDistance,
+            blurRange: DEPTH_BLUR_DEFAULTS.blurRange,
+            blurSize: DEPTH_BLUR_DEFAULTS.blurSize,
+            blurSpread: DEPTH_BLUR_DEFAULTS.blurSpread,
           },
         },
       );
@@ -348,6 +359,9 @@ export class ClientGraphics extends System {
     bloom?: { value: boolean };
     colorGrading?: { value: string };
     colorGradingIntensity?: { value: number };
+    depthBlur?: { value: boolean };
+    depthBlurIntensity?: { value: number };
+    depthBlurDistance?: { value: number };
   }) => {
     // dpr
     if (changes.dpr) {
@@ -377,6 +391,18 @@ export class ClientGraphics extends System {
     // color grading intensity
     if (changes.colorGradingIntensity && this.composer) {
       this.composer.setLUTIntensity(changes.colorGradingIntensity.value);
+    }
+    // depth blur enabled/disabled
+    if (changes.depthBlur && this.composer) {
+      this.composer.setDepthBlur(changes.depthBlur.value);
+    }
+    // depth blur intensity
+    if (changes.depthBlurIntensity && this.composer) {
+      this.composer.setDepthBlurIntensity(changes.depthBlurIntensity.value);
+    }
+    // depth blur distance
+    if (changes.depthBlurDistance && this.composer) {
+      this.composer.setDepthBlurFocusDistance(changes.depthBlurDistance.value);
     }
   };
 

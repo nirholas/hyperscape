@@ -66,6 +66,60 @@ export const WORLD_CONSTANTS = {
   RESOURCE_SPAWN_DENSITY: 0.1,
 } as const;
 
+// === TERRAIN CONSTANTS ===
+/**
+ * Centralized terrain constants for water, slopes, and walkability.
+ * SINGLE SOURCE OF TRUTH - all systems must import from here.
+ *
+ * IMPORTANT: TerrainSystem.CONFIG uses these values but has its own internal
+ * CONFIG object for backwards compatibility. When changing values here,
+ * ensure TerrainSystem.CONFIG is also updated.
+ */
+export const TERRAIN_CONSTANTS = {
+  /**
+   * Water threshold in world Y units.
+   * Terrain below this height is underwater and impassable.
+   * Used by: TerrainSystem, VegetationSystem, GPUVegetation, RoadNetworkSystem, ResourceSystem
+   */
+  WATER_THRESHOLD: 9.0,
+
+  /**
+   * Buffer distance above water where vegetation shouldn't spawn.
+   * Prevents plants from appearing in the shoreline splash zone.
+   */
+  WATER_EDGE_BUFFER: 1.5,
+
+  /**
+   * Maximum slope for walkable terrain (tan of angle).
+   * Slopes steeper than this block movement.
+   * 0.7 ≈ 35 degree angle
+   */
+  MAX_WALKABLE_SLOPE: 0.7,
+
+  /**
+   * Distance to sample for slope calculation (in meters).
+   */
+  SLOPE_CHECK_DISTANCE: 1.0,
+
+  /**
+   * Tile size in meters (1 tile = 1 meter for movement grid).
+   */
+  TILE_SIZE: 1.0,
+
+  /**
+   * Terrain tile size in meters (100m x 100m per terrain chunk).
+   */
+  TERRAIN_TILE_SIZE: 100,
+
+  /**
+   * Pre-computed water threshold + buffer for vegetation checks.
+   * Vegetation should not spawn below this level.
+   */
+  get WATER_CUTOFF(): number {
+    return this.WATER_THRESHOLD + this.WATER_EDGE_BUFFER;
+  },
+} as const;
+
 // === DISTANCE AND CULLING ===
 /** Distance constants for render culling, LOD, and server simulation (meters) */
 export const DISTANCE_CONSTANTS = {
@@ -93,13 +147,13 @@ export const DISTANCE_CONSTANTS = {
     CHUNK_HYSTERESIS: 5,
   },
 
-  /** Animation LOD tiers by distance */
+  /** Animation LOD tiers by distance - values doubled to prevent skating at medium distances */
   ANIMATION_LOD: {
-    FULL: 30, // 60fps
-    HALF: 60, // 30fps
-    QUARTER: 80, // 15fps
-    FROZEN: 100, // static pose
-    CULLED: 150, // not rendered
+    FULL: 60, // 60fps - full animation up to 60m
+    HALF: 120, // 30fps - half-rate animation 60-120m
+    QUARTER: 160, // 15fps - quarter-rate animation 120-160m
+    FROZEN: 200, // static pose - frozen 160-200m
+    CULLED: 250, // not rendered - cull at 250m
   },
 
   /** Pre-computed squared distances for hot paths */
@@ -123,11 +177,11 @@ export const DISTANCE_CONSTANTS = {
   },
 
   ANIMATION_LOD_SQ: {
-    FULL: 30 * 30,
-    HALF: 60 * 60,
-    QUARTER: 80 * 80,
-    FROZEN: 100 * 100,
-    CULLED: 150 * 150,
+    FULL: 60 * 60,
+    HALF: 120 * 120,
+    QUARTER: 160 * 160,
+    FROZEN: 200 * 200,
+    CULLED: 250 * 250,
   },
 } as const;
 
@@ -422,6 +476,7 @@ export const GAME_CONSTANTS = {
   HOME_TELEPORT: HOME_TELEPORT_CONSTANTS,
   XP: XP_CONSTANTS,
   WORLD: WORLD_CONSTANTS,
+  TERRAIN: TERRAIN_CONSTANTS,
   DISTANCE: DISTANCE_CONSTANTS,
   GATHERING: GATHERING_CONSTANTS,
   MOB: MOB_CONSTANTS,

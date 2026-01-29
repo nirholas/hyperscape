@@ -65,6 +65,30 @@ export class WorkerPool<TInput = unknown, TOutput = unknown> {
       return;
     }
 
+    // Detect Bun runtime - Bun has Worker/Blob but blob URLs don't work for workers
+    if (
+      typeof process !== "undefined" &&
+      process.versions &&
+      "bun" in process.versions
+    ) {
+      this.initError = new Error("Blob URLs not supported in Bun runtime");
+      console.warn(
+        "[WorkerPool] Bun runtime detected - blob URLs not supported, using fallback if provided",
+      );
+      return;
+    }
+
+    // Detect non-browser environment (no window global)
+    if (typeof window === "undefined") {
+      this.initError = new Error(
+        "Web Workers require browser environment (window global)",
+      );
+      console.warn(
+        "[WorkerPool] Server environment detected - using fallback if provided",
+      );
+      return;
+    }
+
     // Create blob URL from inline worker code
     let url: string;
     try {

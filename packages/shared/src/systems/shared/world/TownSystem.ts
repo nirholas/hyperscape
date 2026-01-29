@@ -46,6 +46,7 @@ import {
   type BuildingLayout,
   CELL_SIZE,
   FOUNDATION_HEIGHT,
+  snapToBuildingGrid,
 } from "@hyperscape/procgen/building";
 import { BuildingCollisionService } from "./BuildingCollisionService";
 import type { FlatZone } from "../../../types/world/terrain";
@@ -311,11 +312,16 @@ export class TownSystem extends System {
       );
     }
 
-    // Generate building layouts and register collision (server-side)
+    // Generate building layouts, register collision, and register flat zones
+    // IMPORTANT: Runs on BOTH client and server:
+    // - Server: Authoritative collision data for pathfinding
+    // - Client: Prediction collision + flat zones for terrain flattening
     // Note: Runs async with yielding to prevent main thread blocking
-    if (this.world.isServer) {
-      await this.registerBuildingCollision();
-    }
+    Logger.system(
+      "TownSystem",
+      `isServer=${this.world.isServer}, towns=${this.towns.length} - registering building collision and flat zones`,
+    );
+    await this.registerBuildingCollision();
 
     Logger.system(
       "TownSystem",
@@ -333,6 +339,30 @@ export class TownSystem extends System {
     }
 
     for (const manifestTown of buildingsManifest.towns) {
+      // Validate manifest town structure
+      if (!manifestTown.id || typeof manifestTown.id !== "string") {
+        throw new Error(
+          `[TownSystem] Manifest town has invalid id: ${JSON.stringify(manifestTown.id)}`,
+        );
+      }
+      if (
+        !manifestTown.position ||
+        typeof manifestTown.position.x !== "number" ||
+        typeof manifestTown.position.z !== "number"
+      ) {
+        throw new Error(
+          `[TownSystem] Manifest town "${manifestTown.id}" has invalid position: ${JSON.stringify(manifestTown.position)}`,
+        );
+      }
+      if (
+        !Array.isArray(manifestTown.buildings) ||
+        manifestTown.buildings.length === 0
+      ) {
+        throw new Error(
+          `[TownSystem] Manifest town "${manifestTown.id}" has no buildings`,
+        );
+      }
+
       const town = this.convertManifestTown(manifestTown);
       this.towns.push(town);
     }
@@ -368,9 +398,49 @@ export class TownSystem extends System {
 
     // Convert buildings - positions are relative in manifest, convert to world coords
     // Also calculate entrance positions for each building
-    const buildings: TownBuilding[] = manifest.buildings.map((b) => {
-      const worldX = manifest.position.x + b.position.x;
-      const worldZ = manifest.position.z + b.position.z;
+    // IMPORTANT: Snap to building grid for proper tile alignment (cells must align with tiles)
+    const buildings: TownBuilding[] = manifest.buildings.map((b, index) => {
+      // Validate each building in manifest
+      if (!b.id || typeof b.id !== "string") {
+        throw new Error(
+          `[TownSystem] Building ${index} in town "${manifest.id}" has invalid id: ${JSON.stringify(b.id)}`,
+        );
+      }
+      if (!b.type || typeof b.type !== "string") {
+        throw new Error(
+          `[TownSystem] Building "${b.id}" in town "${manifest.id}" has invalid type: ${JSON.stringify(b.type)}`,
+        );
+      }
+      if (
+        !b.position ||
+        typeof b.position.x !== "number" ||
+        typeof b.position.z !== "number"
+      ) {
+        throw new Error(
+          `[TownSystem] Building "${b.id}" in town "${manifest.id}" has invalid position: ${JSON.stringify(b.position)}`,
+        );
+      }
+      if (
+        !b.size ||
+        typeof b.size.width !== "number" ||
+        typeof b.size.depth !== "number"
+      ) {
+        throw new Error(
+          `[TownSystem] Building "${b.id}" in town "${manifest.id}" has invalid size: ${JSON.stringify(b.size)}`,
+        );
+      }
+      if (typeof b.rotation !== "number" || !Number.isFinite(b.rotation)) {
+        throw new Error(
+          `[TownSystem] Building "${b.id}" in town "${manifest.id}" has invalid rotation: ${b.rotation}`,
+        );
+      }
+
+      const rawWorldX = manifest.position.x + b.position.x;
+      const rawWorldZ = manifest.position.z + b.position.z;
+      // Snap to building grid - critical for collision tile alignment
+      const snapped = snapToBuildingGrid(rawWorldX, rawWorldZ);
+      const worldX = snapped.x;
+      const worldZ = snapped.z;
       const worldY =
         this.terrainSystem?.getHeightAt(worldX, worldZ) ?? b.position.y;
 
@@ -925,6 +995,502 @@ export class TownSystem extends System {
       "TownSystem",
       `Registered collision for ${registeredBuildings}/${totalBuildings} buildings`,
     );
+
+    // Log collision service status for debugging
+    const buildingCount = this.collisionService.getBuildingCount();
+    Logger.system(
+      "TownSystem",
+      `BuildingCollisionService now has ${buildingCount} buildings registered`,
+    );
+
+    // === VALIDATION: Verify building collision system is working ===
+    this.validateBuildingCollisionSystem();
+  }
+
+  /**
+   * Validate that the building collision system is properly set up.
+   * Throws errors if critical problems are detected.
+   */
+  private validateBuildingCollisionSystem(): void {
+    const buildingCount = this.collisionService.getBuildingCount();
+
+    // ERROR: No buildings registered when we should have some
+    if (buildingCount === 0 && this.towns.length > 0) {
+      const totalBuildings = this.towns.reduce(
+        (sum, t) => sum + t.buildings.length,
+        0,
+      );
+      throw new Error(
+        `[TownSystem] CRITICAL: No buildings registered with collision service! ` +
+          `Expected ${totalBuildings} buildings from ${this.towns.length} towns.`,
+      );
+    }
+
+    // Validate each building has:
+    // 1. Walkable tiles
+    // 2. At least one door
+    // 3. Proper terrain integration (flat zone)
+    const allBuildings = this.collisionService.getAllBuildings();
+    let errorsFound = 0;
+
+    for (const building of allBuildings) {
+      // Use static helper for consistent ground floor lookup
+      const groundFloor =
+        BuildingCollisionService.getGroundFloorFromData(building);
+      if (!groundFloor) {
+        Logger.systemError(
+          "TownSystem",
+          `Building ${building.buildingId} has NO ground floor!`,
+        );
+        errorsFound++;
+        continue;
+      }
+
+      // Check walkable tiles
+      if (groundFloor.walkableTiles.size === 0) {
+        Logger.systemError(
+          "TownSystem",
+          `Building ${building.buildingId} has NO walkable tiles on ground floor!`,
+        );
+        errorsFound++;
+      }
+
+      // Check for doors using helper
+      const doorWalls =
+        BuildingCollisionService.getDoorWallSegments(groundFloor);
+      const doorCount = doorWalls.length;
+      if (doorCount === 0) {
+        Logger.systemError(
+          "TownSystem",
+          `Building ${building.buildingId} has NO doors! Players cannot enter.`,
+        );
+        errorsFound++;
+      }
+
+      // Verify terrain flat zone exists for this building
+      if (this.terrainSystem) {
+        const centerHeight = this.terrainSystem.getHeightAt(
+          building.worldPosition.x,
+          building.worldPosition.z,
+        );
+        const expectedFloor = groundFloor.elevation;
+        const heightDiff = Math.abs((centerHeight ?? 0) - expectedFloor);
+
+        if (heightDiff > 0.5) {
+          Logger.systemWarn(
+            "TownSystem",
+            `Building ${building.buildingId} terrain height mismatch: ` +
+              `terrain=${centerHeight?.toFixed(2)}, floor=${expectedFloor.toFixed(2)}, diff=${heightDiff.toFixed(2)}m`,
+          );
+        }
+      }
+
+      // Validate door tiles are reachable from outside
+      const doorTiles = this.collisionService.getDoorTiles(building.buildingId);
+      if (doorTiles.length > 0) {
+        let reachableDoors = 0;
+        for (const door of doorTiles) {
+          // Check if the exterior approach tile is walkable
+          const exteriorWalkable =
+            this.collisionService.isTileWalkableInBuilding(
+              door.tileX,
+              door.tileZ,
+              0,
+            );
+          if (exteriorWalkable) {
+            reachableDoors++;
+          } else {
+            Logger.systemWarn(
+              "TownSystem",
+              `Building ${building.buildingId} door at (${door.tileX},${door.tileZ}) ` +
+                `exterior approach tile is NOT walkable!`,
+            );
+          }
+        }
+
+        if (reachableDoors === 0) {
+          Logger.systemError(
+            "TownSystem",
+            `Building ${building.buildingId} has ${doorTiles.length} doors but NONE are reachable from outside!`,
+          );
+          errorsFound++;
+        }
+      }
+    }
+
+    if (errorsFound > 0) {
+      throw new Error(
+        `[TownSystem] CRITICAL: ${errorsFound} building collision errors detected! ` +
+          `Check logs above for details. Navigation will NOT work correctly.`,
+      );
+    }
+
+    // === CRITICAL: Test actual pathfinding to buildings ===
+    this.validateBuildingPathfinding(allBuildings);
+
+    // === CRITICAL: Validate tiles under buildings are blocked ===
+    this.validateBuildingTileBlocking(allBuildings);
+
+    // Summary stats using helper methods
+    const totalWalkableTiles = allBuildings.reduce((sum, b) => {
+      const floor0 = BuildingCollisionService.getGroundFloorFromData(b);
+      return sum + (floor0?.walkableTiles.size ?? 0);
+    }, 0);
+    const totalDoors = allBuildings.reduce((sum, b) => {
+      const floor0 = BuildingCollisionService.getGroundFloorFromData(b);
+      if (!floor0) return sum;
+      return sum + BuildingCollisionService.getDoorWallSegments(floor0).length;
+    }, 0);
+
+    // Print prominent success message
+    console.log(
+      `\n╔══════════════════════════════════════════════════════════════╗`,
+    );
+    console.log(
+      `║  BUILDING COLLISION SYSTEM: INITIALIZED SUCCESSFULLY         ║`,
+    );
+    console.log(
+      `╠══════════════════════════════════════════════════════════════╣`,
+    );
+    console.log(
+      `║  Buildings registered: ${String(allBuildings.length).padEnd(38)}║`,
+    );
+    console.log(
+      `║  Total walkable tiles: ${String(totalWalkableTiles).padEnd(38)}║`,
+    );
+    console.log(`║  Total doors: ${String(totalDoors).padEnd(47)}║`);
+    console.log(`║  Towns: ${String(this.towns.length).padEnd(53)}║`);
+    console.log(
+      `╚══════════════════════════════════════════════════════════════╝\n`,
+    );
+
+    Logger.system(
+      "TownSystem",
+      `✓ Building collision validation passed: ${allBuildings.length} buildings, all have doors and walkable tiles`,
+    );
+  }
+
+  /**
+   * Validate that pathfinding actually works to buildings.
+   * Tests path from outside to DOOR INTERIOR (the actual entry point).
+   * THROWS if pathfinding fails - this is a critical error.
+   */
+  private validateBuildingPathfinding(
+    allBuildings: import("../../../types/world/building-collision-types").BuildingCollisionData[],
+  ): void {
+    // Import BFSPathfinder for testing (lazy import to avoid circular deps)
+    const { BFSPathfinder } = require("../../shared/movement/BFSPathfinder");
+    const pathfinder = new BFSPathfinder();
+
+    let buildingsTested = 0;
+    let pathfindingErrors = 0;
+    const failedBuildings: string[] = [];
+
+    for (const building of allBuildings) {
+      // Use static helper for consistent ground floor lookup
+      const groundFloor =
+        BuildingCollisionService.getGroundFloorFromData(building);
+      if (!groundFloor) {
+        // This is a critical error - all buildings MUST have a ground floor
+        Logger.systemError(
+          "TownSystem",
+          `VALIDATION ERROR [${building.buildingId}]: No ground floor found!`,
+        );
+        pathfindingErrors++;
+        failedBuildings.push(`${building.buildingId}:no-ground-floor`);
+        continue;
+      }
+
+      if (groundFloor.walkableTiles.size === 0) {
+        Logger.systemError(
+          "TownSystem",
+          `VALIDATION ERROR [${building.buildingId}]: Ground floor has no walkable tiles!`,
+        );
+        pathfindingErrors++;
+        failedBuildings.push(`${building.buildingId}:no-walkable-tiles`);
+        continue;
+      }
+
+      // Get ALL doors for this building - test each one
+      const allDoors = this.collisionService.getDoorTiles(building.buildingId);
+      if (allDoors.length === 0) {
+        Logger.systemError(
+          "TownSystem",
+          `VALIDATION ERROR [${building.buildingId}]: No doors found! Building is inaccessible.`,
+        );
+        pathfindingErrors++;
+        failedBuildings.push(`${building.buildingId}:no-doors`);
+        continue;
+      }
+
+      // Define walkability check using collision service (reused for all doors)
+      const isWalkable = (
+        tile: { x: number; z: number },
+        fromTile?: { x: number; z: number },
+      ): boolean => {
+        // Check building walkability
+        const buildingWalkable = this.collisionService.isTileWalkableInBuilding(
+          tile.x,
+          tile.z,
+          0,
+        );
+        if (!buildingWalkable) return false;
+
+        // Check wall blocking if we have a source tile
+        if (fromTile) {
+          const wallBlocked = this.collisionService.isWallBlocked(
+            fromTile.x,
+            fromTile.z,
+            tile.x,
+            tile.z,
+            0,
+          );
+          if (wallBlocked) return false;
+        }
+
+        return true;
+      };
+
+      // Test EACH door for this building
+      let doorsWorking = 0;
+      let doorsFailed = 0;
+      const doorResults: string[] = [];
+
+      for (const doorInfo of allDoors) {
+        // doorInfo has: tileX, tileZ (exterior approach), direction
+        // But doorInfo.tileX/tileZ are already the EXTERIOR tiles from getDoorTiles()
+        // We need to recalculate to get proper interior
+        // Actually, getDoorTiles returns exterior tiles, so we need the interior
+        const exteriorX = doorInfo.tileX;
+        const exteriorZ = doorInfo.tileZ;
+
+        // Interior tile is one step INTO the building (opposite of door direction)
+        let interiorX = exteriorX;
+        let interiorZ = exteriorZ;
+        switch (doorInfo.direction) {
+          case "north":
+            interiorZ += 1;
+            break; // Door faces north, interior is south (higher Z)
+          case "south":
+            interiorZ -= 1;
+            break; // Door faces south, interior is north (lower Z)
+          case "east":
+            interiorX -= 1;
+            break; // Door faces east, interior is west (lower X)
+          case "west":
+            interiorX += 1;
+            break; // Door faces west, interior is east (higher X)
+        }
+
+        // Start from 5 tiles AWAY from door in the approach direction
+        let startX = exteriorX;
+        let startZ = exteriorZ;
+        const approachDistance = 5;
+        switch (doorInfo.direction) {
+          case "north":
+            startZ -= approachDistance;
+            break;
+          case "south":
+            startZ += approachDistance;
+            break;
+          case "east":
+            startX += approachDistance;
+            break;
+          case "west":
+            startX -= approachDistance;
+            break;
+        }
+
+        // TEST 1: Can we path from outside to door EXTERIOR?
+        const pathToExterior = pathfinder.findPath(
+          { x: startX, z: startZ },
+          { x: exteriorX, z: exteriorZ },
+          isWalkable,
+        );
+
+        if (pathToExterior.length === 0) {
+          doorsFailed++;
+          doorResults.push(`door@(${exteriorX},${exteriorZ}):no-path`);
+          continue;
+        }
+
+        // Verify path reaches exterior (not truncated)
+        const lastTile = pathToExterior[pathToExterior.length - 1];
+        if (lastTile.x !== exteriorX || lastTile.z !== exteriorZ) {
+          doorsFailed++;
+          doorResults.push(`door@(${exteriorX},${exteriorZ}):truncated`);
+          continue;
+        }
+
+        // TEST 2: Can we step from door exterior to door INTERIOR?
+        const canEnterDoor = isWalkable(
+          { x: interiorX, z: interiorZ },
+          { x: exteriorX, z: exteriorZ },
+        );
+        if (!canEnterDoor) {
+          doorsFailed++;
+          doorResults.push(`door@(${exteriorX},${exteriorZ}):blocked`);
+          continue;
+        }
+
+        doorsWorking++;
+        doorResults.push(
+          `door@(${exteriorX},${exteriorZ}):OK[${pathToExterior.length}]`,
+        );
+      }
+
+      // Building passes if AT LEAST ONE door works
+      if (doorsWorking === 0) {
+        Logger.systemError(
+          "TownSystem",
+          `ALL DOORS FAILED [${building.buildingId}]: ${doorsFailed} doors tested, none accessible. ${doorResults.join(", ")}`,
+        );
+        pathfindingErrors++;
+        failedBuildings.push(`${building.buildingId}:all-doors-failed`);
+        continue;
+      }
+
+      buildingsTested++;
+      if (doorsFailed > 0) {
+        Logger.systemWarn(
+          "TownSystem",
+          `Building ${building.buildingId}: ${doorsWorking}/${allDoors.length} doors work (${doorsFailed} blocked)`,
+        );
+      }
+      Logger.system(
+        "TownSystem",
+        `✓ Building ${building.buildingId}: ${doorsWorking}/${allDoors.length} doors accessible`,
+      );
+    }
+
+    if (pathfindingErrors > 0) {
+      throw new Error(
+        `[TownSystem] CRITICAL PATHFINDING FAILURE: ${pathfindingErrors} building(s) unreachable!\n` +
+          `Failed: ${failedBuildings.join(", ")}\n` +
+          `Players will NOT be able to enter these buildings. Server startup aborted.`,
+      );
+    }
+
+    // LARP check: Ensure we actually tested something
+    if (buildingsTested === 0 && allBuildings.length > 0) {
+      throw new Error(
+        `[TownSystem] CRITICAL: ${allBuildings.length} buildings exist but ZERO were validated! ` +
+          `All buildings failed pre-checks (no ground floor, no doors, or no walkable tiles).`,
+      );
+    }
+
+    Logger.system(
+      "TownSystem",
+      `✓ Pathfinding validation PASSED: All ${buildingsTested}/${allBuildings.length} buildings are reachable from outside`,
+    );
+  }
+
+  /**
+   * Validate that tiles under buildings are properly blocked.
+   * This ensures:
+   * 1. Tiles INSIDE the building (not walkable floors) are BLOCKED
+   * 2. Tiles OUTSIDE (approach areas) are WALKABLE
+   * 3. Building floor tiles are WALKABLE
+   */
+  private validateBuildingTileBlocking(
+    allBuildings: import("../../../types/world/building-collision-types").BuildingCollisionData[],
+  ): void {
+    let tilesChecked = 0;
+    let errors = 0;
+    const failedChecks: string[] = [];
+
+    for (const building of allBuildings) {
+      const bbox = building.boundingBox;
+      // Use static helper for consistent ground floor lookup
+      const groundFloor =
+        BuildingCollisionService.getGroundFloorFromData(building);
+      if (!groundFloor) continue;
+
+      // Get door walls once for the entire building check
+      const doorWalls =
+        BuildingCollisionService.getDoorWallSegments(groundFloor);
+
+      // Check ALL tiles within the building's bounding box
+      for (let tx = bbox.minTileX; tx <= bbox.maxTileX; tx++) {
+        for (let tz = bbox.minTileZ; tz <= bbox.maxTileZ; tz++) {
+          tilesChecked++;
+          const key = `${tx},${tz}`;
+          const isWalkableFloor = groundFloor.walkableTiles.has(key);
+          const isWalkable = this.collisionService.isTileWalkableInBuilding(
+            tx,
+            tz,
+            0,
+          );
+
+          if (isWalkableFloor) {
+            // Floor tile SHOULD be walkable
+            if (!isWalkable) {
+              errors++;
+              if (failedChecks.length < 5) {
+                failedChecks.push(
+                  `${building.buildingId}:(${tx},${tz}) floor tile marked NOT walkable`,
+                );
+              }
+            }
+          } else {
+            // Not a floor tile - check if it's in the interior (should be blocked)
+            // Tiles at the edge (within 1 tile margin) are allowed for approach
+            const margin = 1;
+            const isInterior =
+              tx > bbox.minTileX + margin &&
+              tx < bbox.maxTileX - margin &&
+              tz > bbox.minTileZ + margin &&
+              tz < bbox.maxTileZ - margin;
+
+            if (isInterior && isWalkable) {
+              // Interior non-floor tile SHOULD be blocked (unless it's a door exterior)
+              // Check against pre-fetched door walls
+              let isDoorExterior = false;
+              for (const wall of doorWalls) {
+                const doorTiles =
+                  BuildingCollisionService.getDoorExteriorAndInterior(
+                    wall.tileX,
+                    wall.tileZ,
+                    wall.side,
+                  );
+                if (doorTiles.exteriorX === tx && doorTiles.exteriorZ === tz) {
+                  isDoorExterior = true;
+                  break;
+                }
+              }
+
+              if (!isDoorExterior) {
+                errors++;
+                if (failedChecks.length < 5) {
+                  failedChecks.push(
+                    `${building.buildingId}:(${tx},${tz}) interior non-floor tile is WALKABLE (should be blocked)`,
+                  );
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (errors > 0) {
+      Logger.systemError(
+        "TownSystem",
+        `TILE BLOCKING VALIDATION FAILED: ${errors} tiles have incorrect walkability!`,
+      );
+      for (const check of failedChecks) {
+        Logger.systemError("TownSystem", `  - ${check}`);
+      }
+      throw new Error(
+        `[TownSystem] CRITICAL: ${errors} tiles have incorrect walkability. ` +
+          `Players may walk through walls or be blocked from valid tiles.`,
+      );
+    }
+
+    Logger.system(
+      "TownSystem",
+      `✓ Tile blocking validation PASSED: ${tilesChecked} tiles checked, all correct`,
+    );
   }
 
   /**
@@ -934,6 +1500,24 @@ export class TownSystem extends System {
    * 1. Flat zones modify the terrain heightmap
    * 2. getHeightAt() returns the flat zone height instead of procedural terrain
    * 3. Players naturally walk at the correct elevation
+   *
+   * **Door Approach Y-Transition:**
+   *
+   * When a player walks from terrain to a building through a door, the Y-elevation
+   * transitions as follows:
+   *
+   * 1. **Far approach** (outside blend radius): Terrain height from procedural generation
+   * 2. **Blend zone** (within blendRadius of flat zone edge): Smooth interpolation
+   *    between terrain height and building floor height
+   * 3. **Door exterior** (within padding area): Building floor height (part of flat zone)
+   * 4. **Door interior** (on building floor tile): Building floor height
+   *
+   * The padding and blend radius are carefully chosen to prevent sharp Y-jumps:
+   * - Padding (3m) extends the flat zone beyond the building walls to cover entrance
+   *   steps and door approach tiles (which are 1m outside the building bbox)
+   * - Blend radius (4m) provides gradual transition from natural terrain to flat zone
+   *
+   * Total smooth transition zone: ~7m (3m padding + 4m blend) on each side of building.
    *
    * @param building - The building to register a flat zone for
    * @param layout - The building's generated layout
@@ -955,10 +1539,24 @@ export class TownSystem extends System {
     // This is where players stand when inside the building
     const floorHeight = groundY + FOUNDATION_HEIGHT;
 
-    // Create flat zone matching building footprint
-    // Add a small padding for entrance areas
-    const padding = 2; // 2m padding for entrance steps
-    const blendRadius = 3; // Smooth terrain transition over 3m
+    // Create flat zone matching building footprint with generous padding
+    // Building visuals extend beyond the cell grid:
+    // - Wall thickness: 0.22m at cell boundaries
+    // - Foundation overhang: 0.15m past walls
+    // - Entrance steps: 2 steps × 0.4m depth = 0.8m
+    // - Total visual extension: ~1.2m
+    //
+    // We add extra padding to ensure terrain doesn't poke through and
+    // to cover door approach tiles (1 tile = 1m outside building bbox):
+    // - 3m padding covers entrance steps + approach area + 2m safety margin
+    // - 4m blend radius provides smooth transition to natural terrain
+    // - Together with collision margin (1 tile), this prevents clipping
+    //
+    // IMPORTANT: If changing these values, consider the door approach Y-transition.
+    // The flat zone MUST extend at least 1m past the building bbox to cover
+    // door approach tiles, otherwise players will experience Y-jumps at doors.
+    const padding = 3; // 3m padding for entrance steps and foundation overhang
+    const blendRadius = 4; // Smooth terrain transition over 4m
 
     const zone: FlatZone = {
       id: `building_${building.id}`,

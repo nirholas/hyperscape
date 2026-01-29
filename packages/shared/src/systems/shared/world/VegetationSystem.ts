@@ -258,11 +258,14 @@ function getAssetLODConfig(category: string, boundingSize?: number) {
 // PERFORMANCE: Reduced from 3 to 2 tiles - vegetation fades before this distance anyway
 const MAX_VEGETATION_TILE_RADIUS = 2;
 
-/** Water level in world units - MUST match TerrainSystem.CONFIG.WATER_THRESHOLD */
-const WATER_LEVEL = 5.4;
+/** Water threshold from centralized constants */
+import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
+
+/** Water level in world units - from centralized TERRAIN_CONSTANTS */
+const WATER_LEVEL = TERRAIN_CONSTANTS.WATER_THRESHOLD;
 
 /** Buffer distance from water edge where vegetation shouldn't spawn - generous buffer */
-const WATER_EDGE_BUFFER = 6.0; // Min spawn height = 11.4 - well above any shoreline
+const WATER_EDGE_BUFFER = 6.0; // Min spawn height = WATER_LEVEL + WATER_EDGE_BUFFER
 
 /**
  * Extended impostor instance with dissolve support
@@ -2533,9 +2536,14 @@ export class VegetationSystem extends System {
       };
       this.imposters.set(assetId, imposterData);
 
-      console.log(
-        `[VegetationSystem] 📸 Baked imposter for ${assetId} (${size.toFixed(1)}m, deferred)`,
-      );
+      console.log(`[VegetationSystem] 📸 Baked imposter for ${assetId}:`, {
+        size: size.toFixed(1) + "m",
+        atlasTextureValid: !!bakeResult.atlasTexture,
+        atlasColorSpace: bakeResult.atlasTexture?.colorSpace ?? "none",
+        gridSize: `${bakeResult.gridSizeX}x${bakeResult.gridSizeY}`,
+        imposterDistance: lodConfig.imposterDistance,
+        fadeDistance: lodConfig.fadeDistance,
+      });
 
       // Continue processing queue
       if (this.pendingImposterBakes.length > 0) {
@@ -3516,7 +3524,7 @@ export class VegetationSystem extends System {
         {
           dissolve: imposter.dissolveConfig,
           useTSL: this.usesTSL,
-          debugMode: VegetationSystem.IMPOSTOR_DEBUG_MODE as 0 | 1 | 2 | 3 | 4,
+          debugMode: VegetationSystem.IMPOSTOR_DEBUG_MODE,
         },
       ) as ImpostorInstanceWithDissolve;
 
@@ -3532,6 +3540,21 @@ export class VegetationSystem extends System {
       // Add to scene
       if (this.vegetationGroup) {
         this.vegetationGroup.add(impostorInstance.mesh);
+      }
+
+      // Debug: Log first impostor instance per asset for diagnostics
+      if (imposter.instances.size === 0) {
+        console.log(
+          `[VegetationSystem] 🎯 Created first impostor instance for chunk ${chunkKey}:`,
+          {
+            position: `(${inst.x.toFixed(1)}, ${inst.y.toFixed(1)}, ${inst.z.toFixed(1)})`,
+            scale: inst.scale.toFixed(2),
+            meshVisible: impostorInstance.mesh.visible,
+            materialType: impostorInstance.material?.type ?? "unknown",
+            usesTSL: this.usesTSL,
+            debugMode: VegetationSystem.IMPOSTOR_DEBUG_MODE,
+          },
+        );
       }
 
       // Store instance for later update

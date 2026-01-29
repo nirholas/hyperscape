@@ -22,7 +22,7 @@
  * @see packages/shared/src/types/game/duel-types.ts for type definitions
  */
 
-import type { World } from "@hyperscape/shared";
+import type { World, PlayerID, SlotNumber, ItemID } from "@hyperscape/shared";
 import {
   EventType,
   type DuelRules,
@@ -233,9 +233,11 @@ export class DuelSystem {
    * Create a duel challenge from challenger to target
    */
   createChallenge(
-    challengerId: string,
+    challengerId: PlayerID,
     challengerName: string,
-    targetId: string,
+    challengerSocketId: string,
+    challengerCombatLevel: number,
+    targetId: PlayerID,
     targetName: string,
   ): DuelOperationResult & { challengeId?: string } {
     // Check for self-challenge
@@ -268,6 +270,8 @@ export class DuelSystem {
     const result = this.pendingDuels.createChallenge(
       challengerId,
       challengerName,
+      challengerSocketId,
+      challengerCombatLevel,
       targetId,
       targetName,
     );
@@ -670,8 +674,8 @@ export class DuelSystem {
 
     // Add new stake
     stakes.push({
-      inventorySlot,
-      itemId,
+      inventorySlot: inventorySlot as SlotNumber,
+      itemId: itemId as ItemID,
       quantity,
       value,
     });

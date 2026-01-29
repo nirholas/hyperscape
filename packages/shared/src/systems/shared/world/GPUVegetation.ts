@@ -49,7 +49,12 @@ import THREE, {
   instanceIndex,
   sqrt,
   length,
+  mod,
+  floor,
+  abs,
+  viewportCoordinate,
 } from "../../../extras/three/three";
+import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
 
 // ============================================================================
 // CONFIGURATION
@@ -75,8 +80,8 @@ export const GPU_VEG_CONFIG = {
   /** Max instances per mesh */
   MAX_INSTANCES: 65536,
 
-  /** Water level (Y coordinate) - MUST match TerrainSystem.CONFIG.WATER_THRESHOLD */
-  WATER_LEVEL: 5.4,
+  /** Water level (Y coordinate) - from centralized TERRAIN_CONSTANTS */
+  WATER_LEVEL: TERRAIN_CONSTANTS.WATER_THRESHOLD,
 
   /** Buffer above water for shoreline avoidance */
   WATER_BUFFER: 3.0,
@@ -86,13 +91,13 @@ export const GPU_VEG_CONFIG = {
   // Uses a CONE shape that expands from camera toward player for natural visibility
 
   /** Radius at camera end of the cone (meters) - keeps near objects visible */
-  OCCLUSION_CAMERA_RADIUS: 0.3,
+  OCCLUSION_CAMERA_RADIUS: 0.2,
 
   /** Radius at player end of the cone (meters) - bubble around player */
-  OCCLUSION_PLAYER_RADIUS: 2.0,
+  OCCLUSION_PLAYER_RADIUS: 1.0,
 
   /** Extra radius added based on camera distance (meters per meter of distance) */
-  OCCLUSION_DISTANCE_SCALE: 0.05,
+  OCCLUSION_DISTANCE_SCALE: 0.03,
 
   /** Minimum distance from camera before occlusion kicks in (prevents near-clip artifacts) */
   OCCLUSION_NEAR_MARGIN: 0.3,
@@ -101,10 +106,19 @@ export const GPU_VEG_CONFIG = {
   OCCLUSION_FAR_MARGIN: 0.3,
 
   /** Sharpness of the cutoff edge (higher = sharper, more binary like RuneScape) */
-  OCCLUSION_EDGE_SHARPNESS: 0.3,
+  OCCLUSION_EDGE_SHARPNESS: 0.5,
 
-  /** Maximum occlusion dissolve strength (1.0 = fully dissolve like RuneScape) */
-  OCCLUSION_STRENGTH: 1.0,
+  /** Maximum occlusion dissolve strength (0.7 = partial dissolve for subtle visibility) */
+  OCCLUSION_STRENGTH: 0.7,
+
+  // ========== NEAR-CAMERA DISSOLVE (RuneScape-style depth fade) ==========
+  // Prevents hard geometry clipping when camera clips through objects
+
+  /** Distance from camera where near-fade begins (meters) - fully opaque beyond this */
+  NEAR_CAMERA_FADE_START: 1.5,
+
+  /** Distance from camera where geometry is fully dissolved (meters) - at near clip */
+  NEAR_CAMERA_FADE_END: 0.05,
 } as const;
 
 // ============================================================================
@@ -246,15 +260,15 @@ export const LOD_DISTANCES: Record<string, LODDistances> = {
   // Mobs and NPCs (skip LOD2 - use LOD1 to impostor)
   mob: {
     lod1Distance: 40,
-    lod2Distance: 70, // Same as imposter range
+    lod2Distance: 70,
     imposterDistance: 100,
-    fadeDistance: 180,
+    fadeDistance: 150,
   },
   npc: {
     lod1Distance: 50,
     lod2Distance: 90,
     imposterDistance: 120,
-    fadeDistance: 200,
+    fadeDistance: 180,
   },
   player: {
     lod1Distance: 50,
@@ -622,13 +636,16 @@ export function createGPUVegetationMaterial(
   const occlusionEdgeSharpness = float(GPU_VEG_CONFIG.OCCLUSION_EDGE_SHARPNESS);
   const occlusionStrength = float(GPU_VEG_CONFIG.OCCLUSION_STRENGTH);
 
-  // ========== ALPHA TEST (DITHERED DISSOLVE + OCCLUSION) ==========
+  // Near-camera dissolve constants (RuneScape-style depth fade)
+  const nearCameraFadeStart = float(GPU_VEG_CONFIG.NEAR_CAMERA_FADE_START);
+  const nearCameraFadeEnd = float(GPU_VEG_CONFIG.NEAR_CAMERA_FADE_END);
+
+  // ========== ALPHA TEST (DITHERED DISSOLVE + OCCLUSION + NEAR-CAMERA FADE) ==========
   // alphaTestNode controls fragment discard directly
   // Fragment is discarded when alpha < alphaTestNode value
   // We compute a per-fragment threshold, so higher threshold = more likely to discard
   material.alphaTestNode = Fn(() => {
-    // Use positionWorld which includes instance transform - this gives us the
-    // world position of each vertex being rendered
+    // Use positionWorld which includes instance transform
     const worldPos = positionWorld;
 
     // 1. Water check: if below water, use threshold of 2.0 to always discard
@@ -737,55 +754,49 @@ export function createGPUVegetationMaterial(
         })()
       : float(0.0);
 
-    // 5. TEMPORALLY STABLE DITHERING
-    // Uses instance index as primary seed to eliminate shimmer when camera moves.
-    // Each vegetation instance gets a consistent dither pattern that doesn't shift
-    // with camera movement, providing visual stability.
-    //
-    // World position is still used for per-fragment variation within each instance,
-    // but at a much smaller scale to avoid camera-dependent shimmer.
-    const ditherScale = float(0.5); // Reduced scale for subtler variation
-    const instanceSeed = fract(mul(float(instanceIndex), float(0.61803398875))); // Golden ratio hash
+    // 5. NEAR-CAMERA DISSOLVE (RuneScape-style depth fade)
+    // Prevents hard geometry clipping when camera clips through vegetation
+    const camToFrag = sub(worldPos, uCameraPos);
+    const camDistSq = dot(camToFrag, camToFrag);
+    const camDist = sqrt(camDistSq);
+    const nearCameraFade = sub(
+      float(1.0),
+      smoothstep(nearCameraFadeEnd, nearCameraFadeStart, camDist),
+    );
 
-    // Combine instance-based seed with local position variation
-    // The instance seed provides stability, local variation adds detail
-    const ditherInput = vec2(
+    // 6. Combine all fade factors (max ensures all effects work independently)
+    const combinedFade = max(max(distanceFade, occlusionFade), nearCameraFade);
+
+    // 7. SCREEN-SPACE 4x4 BAYER DITHERING (RuneScape 3 style)
+    // 4x4 Bayer matrix: [ 0, 8, 2,10; 12, 4,14, 6; 3,11, 1, 9; 15, 7,13, 5]/16
+    const ix = mod(floor(viewportCoordinate.x), float(4.0));
+    const iy = mod(floor(viewportCoordinate.y), float(4.0));
+
+    const bit0_x = mod(ix, float(2.0));
+    const bit1_x = floor(mul(ix, float(0.5)));
+    const bit0_y = mod(iy, float(2.0));
+    const bit1_y = floor(mul(iy, float(0.5)));
+    const xor0 = abs(sub(bit0_x, bit0_y));
+    const xor1 = abs(sub(bit1_x, bit1_y));
+
+    const bayerInt = add(
       add(
-        mul(instanceSeed, float(100.0)), // Instance-based (stable)
-        add(mul(worldPos.x, ditherScale), mul(worldPos.y, float(0.2))), // Local variation (subtle)
+        add(mul(xor0, float(8.0)), mul(bit0_y, float(4.0))),
+        mul(xor1, float(2.0)),
       ),
-      add(
-        mul(fract(mul(instanceSeed, float(1.618))), float(100.0)), // Instance-based (stable)
-        add(mul(worldPos.z, ditherScale), mul(worldPos.y, float(0.15))), // Local variation (subtle)
-      ),
+      bit1_y,
     );
+    const ditherValue = mul(bayerInt, float(0.0625));
 
-    // Hash function for pseudo-random dither value (0.0 - 1.0)
-    const hash1 = fract(
-      mul(sin(dot(ditherInput, vec2(12.9898, 78.233))), float(43758.5453)),
+    // 8. RS3-style threshold: discard when fade >= dither
+    // step returns 0 or 1, multiply by 2 so threshold > 1.0 causes discard
+    // IMPORTANT: Only apply dithering when combinedFade > 0, otherwise step(0,0)=1 causes holes
+    const hasAnyFade = step(float(0.001), combinedFade);
+    const ditherThreshold = mul(
+      mul(step(ditherValue, combinedFade), hasAnyFade),
+      float(2.0),
     );
-    const hash2 = fract(
-      mul(cos(dot(ditherInput, vec2(39.346, 11.135))), float(23421.6312)),
-    );
-    const ditherValue = mul(add(hash1, hash2), float(0.5));
-
-    // 6. Combine all fade factors
-    // Take the maximum of distance fade and occlusion fade
-    // This ensures both effects work independently
-    const combinedFade = max(distanceFade, occlusionFade);
-
-    // 7. Compute alpha threshold
-    // alphaTest discards when: opacity (1.0) < threshold
-    // So threshold > 1.0 means discard, threshold < 1.0 means keep
-    //
-    // Formula: threshold = ditherValue + combinedFade
-    // - No fade (combinedFade=0): threshold = ditherValue (0-1) → all kept
-    // - Partial fade (combinedFade=0.5): threshold = 0.5-1.5 → dithered
-    // - Full fade (combinedFade=1): threshold = 1-2 → all discarded
-    const baseThreshold = add(ditherValue, combinedFade);
-
-    // Combine with water check (below water = always discard with threshold > 1)
-    const threshold = add(baseThreshold, mul(belowWater, float(2.0)));
+    const threshold = max(ditherThreshold, mul(belowWater, float(2.0)));
 
     return threshold;
   })();
@@ -921,7 +932,11 @@ export function createDissolveMaterial(
   const occlusionEdgeSharpness = float(GPU_VEG_CONFIG.OCCLUSION_EDGE_SHARPNESS);
   const occlusionStrength = float(GPU_VEG_CONFIG.OCCLUSION_STRENGTH);
 
-  // ========== ALPHA TEST (DITHERED DISSOLVE + OCCLUSION) ==========
+  // Near-camera dissolve constants (RuneScape-style depth fade)
+  const nearCameraFadeStart = float(GPU_VEG_CONFIG.NEAR_CAMERA_FADE_START);
+  const nearCameraFadeEnd = float(GPU_VEG_CONFIG.NEAR_CAMERA_FADE_END);
+
+  // ========== ALPHA TEST (DITHERED DISSOLVE + OCCLUSION + NEAR-CAMERA FADE) ==========
   material.alphaTestNode = Fn(() => {
     const worldPos = positionWorld;
 
@@ -936,13 +951,21 @@ export function createDissolveMaterial(
     const farFade = smoothstep(fadeStartSq, fadeEndSq, distSq);
 
     // NEAR fade: 0.0 when outside near zone (keep), 1.0 when too close (discard)
-    // smoothstep returns 1 when distSq <= nearFadeStartSq, 0 when distSq >= nearFadeEndSq
     const nearFade = enableNearFade
       ? sub(float(1.0), smoothstep(nearFadeStartSq, nearFadeEndSq, distSq))
       : float(0.0);
 
     // Combined distance fade (max of near and far fade)
     const distanceFadeBase = max(farFade, nearFade);
+
+    // NEAR-CAMERA DISSOLVE (prevents hard clipping when camera clips through objects)
+    const camToFrag = sub(worldPos, uCameraPos);
+    const camDistSq = dot(camToFrag, camToFrag);
+    const camDist = sqrt(camDistSq);
+    const nearCameraFade = sub(
+      float(1.0),
+      smoothstep(nearCameraFadeEnd, nearCameraFadeStart, camDist),
+    );
 
     // CAMERA-TO-PLAYER OCCLUSION DISSOLVE (RuneScape-style)
     // Uses a CONE shape that expands from camera toward player
@@ -1027,43 +1050,46 @@ export function createDissolveMaterial(
         })()
       : float(0.0);
 
-    // Combine distance fade with occlusion fade (take max)
-    const distanceFade = max(distanceFadeBase, occlusionFade);
+    // Combine distance fade, occlusion fade, and near-camera fade
+    const distanceFade = max(
+      max(distanceFadeBase, occlusionFade),
+      nearCameraFade,
+    );
 
-    // TEMPORALLY STABLE DITHERING
-    const ditherScale = float(0.5);
-    const instanceSeed = fract(mul(float(instanceIndex), float(0.61803398875)));
+    // SCREEN-SPACE 4x4 BAYER DITHERING (RuneScape 3 style)
+    const ix = mod(floor(viewportCoordinate.x), float(4.0));
+    const iy = mod(floor(viewportCoordinate.y), float(4.0));
 
-    const ditherInput = vec2(
+    const bit0_x = mod(ix, float(2.0));
+    const bit1_x = floor(mul(ix, float(0.5)));
+    const bit0_y = mod(iy, float(2.0));
+    const bit1_y = floor(mul(iy, float(0.5)));
+    const xor0 = abs(sub(bit0_x, bit0_y));
+    const xor1 = abs(sub(bit1_x, bit1_y));
+
+    const bayerInt = add(
       add(
-        mul(instanceSeed, float(100.0)),
-        add(mul(worldPos.x, ditherScale), mul(worldPos.y, float(0.2))),
+        add(mul(xor0, float(8.0)), mul(bit0_y, float(4.0))),
+        mul(xor1, float(2.0)),
       ),
-      add(
-        mul(fract(mul(instanceSeed, float(1.618))), float(100.0)),
-        add(mul(worldPos.z, ditherScale), mul(worldPos.y, float(0.15))),
-      ),
+      bit1_y,
+    );
+    const ditherValue = mul(bayerInt, float(0.0625));
+
+    // RS3-style: discard when fade >= dither
+    // step returns 0 or 1, multiply by 2 so threshold > 1.0 causes discard
+    // IMPORTANT: Only apply dithering when distanceFade > 0, otherwise step(0,0)=1 causes holes
+    const hasAnyFade = step(float(0.001), distanceFade);
+    const ditherThreshold = mul(
+      mul(step(ditherValue, distanceFade), hasAnyFade),
+      float(2.0),
     );
 
-    // Hash function for pseudo-random dither value (0.0 - 1.0)
-    const hash1 = fract(
-      mul(sin(dot(ditherInput, vec2(12.9898, 78.233))), float(43758.5453)),
-    );
-    const hash2 = fract(
-      mul(cos(dot(ditherInput, vec2(39.346, 11.135))), float(23421.6312)),
-    );
-    const ditherValue = mul(add(hash1, hash2), float(0.5));
-
-    // Base threshold from dither + distance fade
-    const baseThreshold = add(ditherValue, distanceFade);
-
-    // Water culling (optional) - add 2.0 if below water to force discard
+    // Water culling (optional)
     const waterCullValue = enableWaterCulling
       ? mul(step(worldPos.y, waterCutoff), float(2.0))
       : float(0.0);
-
-    // Final threshold
-    const threshold = add(baseThreshold, waterCullValue);
+    const threshold = max(ditherThreshold, waterCullValue);
 
     return threshold;
   })();
@@ -1199,38 +1225,35 @@ export function createImposterMaterial(
     // FAR fade: 0.0 when close (keep), 1.0 when far (discard)
     const farFade = smoothstep(fadeStartSq, fadeEndSq, distSq);
 
-    // TEMPORALLY STABLE DITHERING for imposters
-    // Uses instance index as primary seed to eliminate shimmer when camera moves.
-    // Same algorithm as 3D vegetation for consistent appearance.
-    const ditherScale = float(0.5);
-    const instanceSeed = fract(mul(float(instanceIndex), float(0.61803398875)));
+    // SCREEN-SPACE 4x4 BAYER DITHERING (RuneScape 3 style)
+    const ix = mod(floor(viewportCoordinate.x), float(4.0));
+    const iy = mod(floor(viewportCoordinate.y), float(4.0));
 
-    const ditherInput = vec2(
+    const bit0_x = mod(ix, float(2.0));
+    const bit1_x = floor(mul(ix, float(0.5)));
+    const bit0_y = mod(iy, float(2.0));
+    const bit1_y = floor(mul(iy, float(0.5)));
+    const xor0 = abs(sub(bit0_x, bit0_y));
+    const xor1 = abs(sub(bit1_x, bit1_y));
+
+    const bayerInt = add(
       add(
-        mul(instanceSeed, float(100.0)),
-        add(mul(worldPos.x, ditherScale), mul(worldPos.y, float(0.2))),
+        add(mul(xor0, float(8.0)), mul(bit0_y, float(4.0))),
+        mul(xor1, float(2.0)),
       ),
-      add(
-        mul(fract(mul(instanceSeed, float(1.618))), float(100.0)),
-        add(mul(worldPos.z, ditherScale), mul(worldPos.y, float(0.15))),
-      ),
+      bit1_y,
     );
+    const ditherValue = mul(bayerInt, float(0.0625));
 
-    // Hash function for pseudo-random dither value (0.0 - 1.0)
-    const hash1 = fract(
-      mul(sin(dot(ditherInput, vec2(12.9898, 78.233))), float(43758.5453)),
+    // RS3-style: combine texture cutout with dithered distance fade
+    // step returns 0 or 1, multiply by 2 so threshold > 1.0 causes discard
+    // IMPORTANT: Only apply dithering when farFade > 0, otherwise step(0,0)=1 causes holes
+    const hasAnyFade = step(float(0.001), farFade);
+    const ditherDiscard = mul(
+      mul(step(ditherValue, farFade), hasAnyFade),
+      float(2.0),
     );
-    const hash2 = fract(
-      mul(cos(dot(ditherInput, vec2(39.346, 11.135))), float(23421.6312)),
-    );
-    const ditherValue = mul(add(hash1, hash2), float(0.5));
-
-    // Threshold = base alpha test + (dither * fade)
-    // - When farFade=0: threshold = 0.5 (normal cutout)
-    // - When farFade=1: threshold = 0.5 + 0.5 = 1.0 (all pixels discarded since alpha<=1)
-    // The dither creates the dissolve pattern during transition
-    const dissolveContribution = mul(ditherValue, farFade);
-    const threshold = add(baseAlphaThreshold, dissolveContribution);
+    const threshold = max(baseAlphaThreshold, ditherDiscard);
 
     return threshold;
   })();

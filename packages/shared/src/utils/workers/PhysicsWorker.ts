@@ -599,13 +599,14 @@ export async function initPhysicsWorker(
             break;
           }
 
-          case "error":
+          case "error": {
             console.error("[PhysicsWorker] Error:", msg.message);
             const pendingErr = pendingSimulations.shift();
             if (pendingErr) {
               pendingErr.reject(new Error(msg.message));
             }
             break;
+          }
         }
       };
 

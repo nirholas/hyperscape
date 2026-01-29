@@ -35,6 +35,14 @@ const _raycaster = new THREE.Raycaster();
 // Enable layer 1 for raycaster (entities like mobs, NPCs, items, resources, players are on layer 1)
 // Layer 0 is for terrain/minimap-only objects, layer 1 is for main camera objects
 _raycaster.layers.enable(1);
+
+// === MOVEMENT RAYCASTER (for click-to-move) ===
+// Only hits walkable surfaces: terrain (layer 0) and building floors (layer 2)
+// Excludes walls (layer 1) so clicking inside buildings hits floors, not walls
+const _movementRaycaster = new THREE.Raycaster();
+_movementRaycaster.layers.set(0); // Terrain (layer 0)
+_movementRaycaster.layers.enable(2); // Building floors (layer 2)
+
 const _mouse = new THREE.Vector2();
 const _worldPos = new THREE.Vector3();
 const _terrainResult = new THREE.Vector3();
@@ -322,21 +330,39 @@ export class RaycastService {
   }
 
   /**
-   * Raycast to terrain for ground click position
+   * Get world position from screen coordinates for click-to-move.
    *
-   * Used for click-to-move when not clicking on an entity.
+   * Uses the movement raycaster which only hits walkable surfaces:
+   * - Terrain (layer 0)
+   * - Building floors, stairs, entrance steps (layer 2)
+   *
+   * Excludes walls (layer 1) so clicking inside buildings hits floors.
    * Uses pre-allocated objects for zero GC pressure.
    *
    * @param screenX - Screen X coordinate
    * @param screenY - Screen Y coordinate
    * @param canvas - The canvas element
-   * @returns World position if terrain hit, null otherwise
+   * @returns World position if walkable surface hit, null otherwise
    */
   getTerrainPosition(
     screenX: number,
     screenY: number,
     canvas: HTMLCanvasElement,
   ): THREE.Vector3 | null {
+    // Validate inputs
+    if (!Number.isFinite(screenX) || !Number.isFinite(screenY)) {
+      console.error(
+        `[RaycastService] getTerrainPosition called with invalid screen coords: (${screenX}, ${screenY})`,
+      );
+      return null;
+    }
+    if (!canvas || typeof canvas.getBoundingClientRect !== "function") {
+      console.error(
+        `[RaycastService] getTerrainPosition called with invalid canvas`,
+      );
+      return null;
+    }
+
     const camera = this.world.camera;
     const scene = this.world.stage?.scene;
 
@@ -347,14 +373,25 @@ export class RaycastService {
     _mouse.x = ((screenX - rect.left) / rect.width) * 2 - 1;
     _mouse.y = -((screenY - rect.top) / rect.height) * 2 + 1;
 
-    _raycaster.setFromCamera(_mouse, camera);
+    // Use movement raycaster (only hits walkable surfaces: terrain + building floors)
+    _movementRaycaster.setFromCamera(_mouse, camera);
 
-    // Raycast against scene
-    const intersects = _raycaster.intersectObjects(scene.children, true);
+    // Raycast against scene with layer filtering (0=terrain, 2=building floors)
+    const intersects = _movementRaycaster.intersectObjects(
+      scene.children,
+      true,
+    );
+
+    // Two-pass approach: prioritize building floors (layer 2) over terrain
+    // This handles the case where terrain mesh wasn't updated after flat zones
+    // were registered and may protrude through building floors.
+    let terrainHit: THREE.Intersection | null = null;
+    let buildingFloorHit: THREE.Intersection | null = null;
 
     for (const intersect of intersects) {
-      // Skip entities - we want terrain only
       const userData = intersect.object.userData;
+
+      // Skip entities - we want terrain/floors only
       if (
         userData?.entityId ||
         userData?.mobId ||
@@ -364,13 +401,60 @@ export class RaycastService {
         continue;
       }
 
-      // Found terrain - copy to pre-allocated result vector
-      _terrainResult.copy(intersect.point);
+      // Skip explicitly non-walkable surfaces
+      if (userData?.walkable === false) {
+        continue;
+      }
+
+      // Skip surfaces marked to ignore click-move
+      if (userData?.ignoreClickMove) {
+        continue;
+      }
+
+      // Check if this is a building floor (layer 2) - prioritize these
+      // Building floors have userData.walkable: true and are on layer 2
+      const isBuildingFloor =
+        userData?.type === "batched-building-floors" ||
+        userData?.type === "arena-floor" ||
+        (userData?.walkable === true &&
+          intersect.object.layers.isEnabled(2) &&
+          !intersect.object.layers.isEnabled(0));
+
+      if (isBuildingFloor && !buildingFloorHit) {
+        buildingFloorHit = intersect;
+      } else if (!terrainHit) {
+        terrainHit = intersect;
+      }
+
+      // If we have both, we can stop - we'll use building floor
+      if (buildingFloorHit && terrainHit) break;
+    }
+
+    // Prioritize building floor over terrain
+    const chosenHit = buildingFloorHit || terrainHit;
+    if (chosenHit) {
+      _terrainResult.copy(chosenHit.point);
+
+      // Validate result is finite
+      if (
+        !Number.isFinite(_terrainResult.x) ||
+        !Number.isFinite(_terrainResult.z)
+      ) {
+        console.error(
+          `[RaycastService] CRITICAL: Raycast hit returned non-finite position: (${_terrainResult.x}, ${_terrainResult.y}, ${_terrainResult.z})`,
+          {
+            hitObject: chosenHit.object.name,
+            hitType: chosenHit.object.userData?.type,
+          },
+        );
+        return null;
+      }
+
       return _terrainResult;
     }
 
     // Fallback: intersect with Y=0 plane using pre-allocated objects
-    if (_raycaster.ray.intersectPlane(_fallbackPlane, _planeTarget)) {
+    if (_movementRaycaster.ray.intersectPlane(_fallbackPlane, _planeTarget)) {
       _terrainResult.copy(_planeTarget);
       return _terrainResult;
     }

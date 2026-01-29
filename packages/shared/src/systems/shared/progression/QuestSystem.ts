@@ -33,6 +33,7 @@ import type {
   StageProgress,
   QuestProgress,
   PlayerQuestState,
+  QuestManifest,
 } from "../../../types/game/quest-types";
 import { validateQuestDefinition } from "../../../types/game/quest-types";
 import type { NPCDiedPayload } from "../../../types/events/event-payloads";

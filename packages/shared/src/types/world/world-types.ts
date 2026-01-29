@@ -206,7 +206,77 @@ export interface BiomeVegetationConfig {
   layers: VegetationLayer[];
 }
 
+// ============== GRASS SYSTEM TYPES ==============
+
+/**
+ * Grass rendering configuration for a biome.
+ * Controls procedural grass density, color, and appearance per biome.
+ */
+export interface BiomeGrassConfig {
+  /** Whether grass is enabled for this biome */
+  enabled: boolean;
+  /** Density multiplier (1.0 = normal, 0.5 = half density, 2.0 = double) */
+  densityMultiplier: number;
+  /** Optional color tint applied to grass (hex color) */
+  colorTint?: number;
+  /** Height multiplier (1.0 = normal, 0.5 = short grass, 1.5 = tall grass) */
+  heightMultiplier?: number;
+  /** Wind responsiveness multiplier (1.0 = normal, 0.5 = stiff, 2.0 = very bendy) */
+  windMultiplier?: number;
+}
+
 // ============== BIOME TYPES ==============
+
+/**
+ * Distribution weight for a resource type within a biome.
+ * Keys are resource IDs (from woodcutting.json/mining.json), values are spawn weights.
+ * Higher weight = more likely to spawn relative to other resources.
+ */
+export interface ResourceDistribution {
+  [resourceId: string]: number;
+}
+
+/**
+ * Configuration for harvestable tree spawning in a biome.
+ * Controls which tree types spawn and at what density.
+ */
+export interface BiomeTreeConfig {
+  /** Whether harvestable trees are enabled for this biome */
+  enabled: boolean;
+  /** Distribution weights for tree types (IDs from woodcutting.json) */
+  distribution: ResourceDistribution;
+  /** Trees per 64m tile (base density, modified by resourceDensity) */
+  density: number;
+  /** Minimum spacing between trees in meters */
+  minSpacing: number;
+  /** Whether trees should cluster together */
+  clustering: boolean;
+  /** Cluster size if clustering is enabled */
+  clusterSize?: number;
+  /** Scale variation range [min, max] multiplier (default: [0.8, 1.2]) */
+  scaleVariation?: [number, number];
+}
+
+/**
+ * Configuration for ore spawning in a biome.
+ * Controls which ore types spawn and at what density.
+ */
+export interface BiomeOreConfig {
+  /** Whether ore spawning is enabled for this biome */
+  enabled: boolean;
+  /** Distribution weights for ore types (IDs from mining.json) */
+  distribution: ResourceDistribution;
+  /** Ores per 64m tile (base density) */
+  density: number;
+  /** Minimum spacing between ore nodes in meters */
+  minSpacing: number;
+  /** Whether ores should form veins (clusters) */
+  veins: boolean;
+  /** Vein size if veins is enabled */
+  veinSize?: number;
+  /** Scale variation range [min, max] multiplier (default: [0.9, 1.1]) */
+  scaleVariation?: [number, number];
+}
 
 /**
  * Biome data - defines characteristics of a biome type
@@ -249,6 +319,12 @@ export interface BiomeData {
   resourceTypes: string[]; // Types of resources that can spawn
   /** Vegetation configuration for procedural placement (optional) */
   vegetation?: BiomeVegetationConfig;
+  /** Grass rendering configuration (optional) */
+  grass?: BiomeGrassConfig;
+  /** Harvestable tree configuration for procedural spawning (optional) */
+  trees?: BiomeTreeConfig;
+  /** Ore node configuration for procedural spawning (optional) */
+  ores?: BiomeOreConfig;
 }
 
 /**
@@ -790,6 +866,66 @@ export interface ProceduralTown {
   plaza?: TownPlaza;
 }
 
+// ============== POINTS OF INTEREST (POI) TYPES ==============
+
+/**
+ * Point of Interest category - what type of destination this is
+ */
+export type POICategory =
+  | "dungeon" // Cave, mine entrance, ruins
+  | "shrine" // Small religious site, altar
+  | "landmark" // Natural landmark (waterfall, ancient tree, rock formation)
+  | "resource_area" // Mining area, fishing spot, lumber camp
+  | "ruin" // Ancient structure, abandoned building
+  | "camp" // Bandit camp, hunter camp
+  | "crossing" // Bridge, ford, mountain pass
+  | "waystation"; // Rest stop along roads
+
+/**
+ * Point of Interest - A destination that roads can connect to
+ * POIs are smaller than towns but important enough to warrant road access
+ */
+export interface PointOfInterest {
+  /** Unique POI ID */
+  id: string;
+  /** Display name */
+  name: string;
+  /** Category of POI */
+  category: POICategory;
+  /** World position */
+  position: { x: number; y: number; z: number };
+  /** Importance score (0-1) - higher = more likely to get road connection */
+  importance: number;
+  /** Radius of the POI area in meters */
+  radius: number;
+  /** Biome the POI is located in */
+  biome: string;
+  /** Connected road IDs */
+  connectedRoads: string[];
+  /** Entry point where road connects (computed) */
+  entryPoint?: { x: number; z: number; angle: number };
+  /** Associated world area ID (if any) */
+  areaId?: string;
+  /** Whether this POI is procedurally generated */
+  procedural: boolean;
+}
+
+/**
+ * POI generation configuration
+ */
+export interface POIConfig {
+  /** Number of POIs to generate per category */
+  countPerCategory: Partial<Record<POICategory, number>>;
+  /** Minimum distance from towns */
+  minDistanceFromTowns: number;
+  /** Minimum distance between POIs */
+  minPOISpacing: number;
+  /** Maximum distance a road will extend to connect a POI */
+  maxRoadExtensionDistance: number;
+  /** Importance threshold for automatic road connection */
+  importanceThresholdForRoad: number;
+}
+
 // ============== PROCEDURAL ROAD TYPES ==============
 
 /**
@@ -810,15 +946,28 @@ export interface RoadPathPoint {
 export type RoadMaterial = "dirt" | "cobblestone" | "stone";
 
 /**
- * A road connection between two towns
+ * Road endpoint type - what a road connects to
+ */
+export type RoadEndpointType = "town" | "poi";
+
+/**
+ * A road connection between two locations (towns and/or POIs)
  */
 export interface ProceduralRoad {
   /** Unique road ID */
   id: string;
-  /** Source town ID */
+  /** Source endpoint type */
+  fromType: RoadEndpointType;
+  /** Source town ID (when fromType is 'town') */
   fromTownId: string;
-  /** Destination town ID */
+  /** Source POI ID (when fromType is 'poi') */
+  fromPOIId?: string;
+  /** Destination endpoint type */
+  toType: RoadEndpointType;
+  /** Destination town ID (when toType is 'town') */
   toTownId: string;
+  /** Destination POI ID (when toType is 'poi') */
+  toPOIId?: string;
   /** Path points from source to destination */
   path: RoadPathPoint[];
   /** Road width in meters */
@@ -850,7 +999,9 @@ export interface RoadTileSegment {
 export interface RoadNetwork {
   /** All towns in the network */
   towns: ProceduralTown[];
-  /** All roads connecting towns */
+  /** All points of interest in the network */
+  pois: PointOfInterest[];
+  /** All roads connecting towns and POIs */
   roads: ProceduralRoad[];
   /** World seed used for generation */
   seed: number;
@@ -966,6 +1117,24 @@ export interface RoadConfigManifest {
 }
 
 /**
+ * POI generation configuration manifest
+ */
+export interface POIConfigManifest {
+  /** Number of POIs to generate per category */
+  countPerCategory: Partial<Record<POICategory, number>>;
+  /** Minimum distance from towns in meters (default: 100) */
+  minDistanceFromTowns: number;
+  /** Minimum distance between POIs in meters (default: 200) */
+  minPOISpacing: number;
+  /** Maximum distance a road will extend to connect a POI (default: 500) */
+  maxRoadExtensionDistance: number;
+  /** Importance threshold for automatic road connection (default: 0.5) */
+  importanceThresholdForRoad: number;
+  /** Biome suitability for POI categories */
+  biomeSuitability?: Partial<Record<POICategory, Record<string, number>>>;
+}
+
+/**
  * Complete world configuration manifest
  * Loaded from assets/manifests/world-config.json
  */
@@ -978,6 +1147,8 @@ export interface WorldConfigManifest {
   towns: TownConfigManifest;
   /** Road generation configuration */
   roads: RoadConfigManifest;
+  /** POI generation configuration */
+  pois?: POIConfigManifest;
   /** World seed for procedural generation */
   seed: number;
 }

@@ -12,6 +12,23 @@
  * 1. First tries naive diagonal path (fast, intuitive, no obstacles)
  * 2. Falls back to BFS if obstacles block the naive path
  *
+ * **BFS Iteration Limit:**
+ *
+ * To prevent main thread blocking on complex maps, BFS is limited to
+ * MAX_BFS_ITERATIONS (2000) iterations. If the limit is reached:
+ * 1. A partial path to the closest explored tile is returned
+ * 2. `wasLastPathPartial()` returns true
+ * 3. A warning is logged (throttled to avoid spam)
+ *
+ * Callers can check `wasLastPathPartial()` after `findPath()` to determine
+ * if the returned path reaches the actual destination or just a partial point.
+ * This can be used to show a visual indicator to the player.
+ *
+ * **Search Radius:**
+ *
+ * BFS is limited to PATHFIND_RADIUS (128 tiles) from the start position.
+ * Destinations outside this radius will result in partial paths.
+ *
  * @see https://oldschool.runescape.wiki/w/Pathfinding
  */
 
@@ -40,28 +57,100 @@ export type WalkabilityChecker = (
  */
 export class BFSPathfinder {
   /**
+   * Track whether the last path was partial (didn't reach destination).
+   * Set to true when BFS iteration limit is reached or target is unreachable.
+   */
+  private _lastPathWasPartial = false;
+
+  /**
+   * Track the actual destination for the last path request.
+   * Used to compare against partial path endpoint.
+   */
+  private _lastRequestedDestination: TileCoord | null = null;
+
+  /**
+   * Check if the last path returned by findPath() was partial.
+   * A partial path means the destination wasn't reached due to:
+   * - BFS iteration limit (MAX_BFS_ITERATIONS)
+   * - Destination outside search radius (PATHFIND_RADIUS)
+   * - Destination is blocked (path goes to nearest walkable)
+   *
+   * @returns true if last path was partial, false if it reached destination
+   */
+  wasLastPathPartial(): boolean {
+    return this._lastPathWasPartial;
+  }
+
+  /**
+   * Get the destination that was requested for the last path.
+   * Useful for comparing against the actual path endpoint to show
+   * the player where they wanted to go vs where they'll actually end up.
+   */
+  getLastRequestedDestination(): TileCoord | null {
+    return this._lastRequestedDestination;
+  }
+
+  /**
    * Find a path from start to end
    * Uses naive diagonal pathing first (OSRS follow-mode style),
    * falls back to BFS if obstacles are encountered
+   *
+   * After calling, check `wasLastPathPartial()` to see if the path
+   * reaches the actual destination or just a partial point.
    */
   findPath(
     start: TileCoord,
     end: TileCoord,
     isWalkable: WalkabilityChecker,
   ): TileCoord[] {
+    // Validate inputs
+    if (!start || typeof start.x !== "number" || typeof start.z !== "number") {
+      throw new Error(
+        `[BFSPathfinder] Invalid start tile: ${JSON.stringify(start)}`,
+      );
+    }
+    if (!end || typeof end.x !== "number" || typeof end.z !== "number") {
+      throw new Error(
+        `[BFSPathfinder] Invalid end tile: ${JSON.stringify(end)}`,
+      );
+    }
+    if (!Number.isFinite(start.x) || !Number.isFinite(start.z)) {
+      throw new Error(
+        `[BFSPathfinder] Start tile has non-finite coords: (${start.x}, ${start.z})`,
+      );
+    }
+    if (!Number.isFinite(end.x) || !Number.isFinite(end.z)) {
+      throw new Error(
+        `[BFSPathfinder] End tile has non-finite coords: (${end.x}, ${end.z})`,
+      );
+    }
+    if (typeof isWalkable !== "function") {
+      throw new Error(`[BFSPathfinder] isWalkable must be a function`);
+    }
+
+    // Reset partial path tracking for this request
+    this._lastPathWasPartial = false;
+    this._lastRequestedDestination = { x: end.x, z: end.z };
+
     // Already at destination
     if (tilesEqual(start, end)) {
       return [];
     }
 
     // Check if end is walkable
+    const originalEnd = { x: end.x, z: end.z };
     if (!isWalkable(end)) {
       // Find nearest walkable tile to destination
       const nearestWalkable = this.findNearestWalkable(end, isWalkable);
       if (!nearestWalkable) {
+        this._lastPathWasPartial = true; // Destination unreachable
         return []; // No path possible
       }
       end = nearestWalkable;
+      // Mark as partial if we had to change the destination
+      if (!tilesEqual(originalEnd, end)) {
+        this._lastPathWasPartial = true;
+      }
     }
 
     // First, try naive diagonal path (fast and intuitive)
@@ -71,6 +160,7 @@ export class BFSPathfinder {
     }
 
     // Naive path blocked - use BFS to find path around obstacles
+    // Note: BFS may also set _lastPathWasPartial if iteration limit is reached
     return this.findBFSPath(start, end, isWalkable);
   }
 
@@ -212,10 +302,12 @@ export class BFSPathfinder {
       while (queueReadIndex < queue.length) {
         // PERFORMANCE: Check iteration limit to prevent frame drops
         if (iterations >= this.MAX_BFS_ITERATIONS) {
+          // Mark path as partial due to iteration limit
+          this._lastPathWasPartial = true;
           // Log warning periodically (not every path to avoid spam)
           if (this._bfsIterationWarnings % 100 === 0) {
             console.warn(
-              `[BFSPathfinder] Iteration limit (${this.MAX_BFS_ITERATIONS}) reached, returning partial path`,
+              `[BFSPathfinder] Iteration limit (${this.MAX_BFS_ITERATIONS}) reached at tile (${start.x},${start.z}), returning partial path to (${end.x},${end.z})`,
             );
           }
           this._bfsIterationWarnings++;
@@ -270,6 +362,7 @@ export class BFSPathfinder {
       }
 
       // No path found - return partial path to closest point
+      this._lastPathWasPartial = true;
       return this.findPartialPath(start, end, visited, parent);
     } finally {
       // Always release back to pool

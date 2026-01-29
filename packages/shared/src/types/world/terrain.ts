@@ -11,20 +11,47 @@ import type { PMeshHandle } from "../../extras/three/geometryToPxMesh";
 import type { ActorHandle } from "../systems/physics";
 
 // Terrain resource interfaces
+/**
+ * Tree subtypes that can spawn in the world.
+ * These map to tree_<subtype> in woodcutting.json manifest.
+ */
+export type TreeSubType =
+  | "normal"
+  | "oak"
+  | "willow"
+  | "teak"
+  | "maple"
+  | "mahogany"
+  | "yew"
+  | "magic";
+
+/**
+ * Ore subtypes that can spawn in the world.
+ * These map to ore_<subtype> in mining.json manifest.
+ */
+export type OreSubType =
+  | "copper"
+  | "tin"
+  | "iron"
+  | "coal"
+  | "mithril"
+  | "adamant"
+  | "runite";
+
+/**
+ * Combined resource subtype for spawn points.
+ */
+export type ResourceSubType = TreeSubType | OreSubType;
+
 export interface TerrainResourceSpawnPoint {
   position: Position3D;
   type: "tree" | "rock" | "ore" | "herb" | "fish" | "gem" | "rare_ore";
-  subType:
-    | "willow"
-    | "oak"
-    | "yew"
-    | "coal"
-    | "iron"
-    | "mithril"
-    | "adamant"
-    | "runite"
-    | "copper"
-    | "tin";
+  /** Optional subtype for variant selection (e.g., "oak" for tree_oak, "copper" for ore_copper) */
+  subType?: ResourceSubType;
+  /** Scale multiplier for visual variation (default: 1.0) */
+  scale?: number;
+  /** Y-axis rotation in radians for visual variation */
+  rotation?: number;
 }
 
 export interface TerrainTileData {
@@ -81,6 +108,8 @@ export interface TerrainTile {
 export interface ResourceNode {
   id: string;
   type: "tree" | "rock" | "ore" | "herb" | "fish" | "gem" | "rare_ore";
+  /** Specific variant (e.g., "oak" for tree_oak, "copper" for ore_copper) */
+  subType?: ResourceSubType;
   position: Position3D | THREE.Vector3;
   mesh?: THREE.Mesh | null; // For non-instanced meshes
   instanceId?: number | null;
@@ -90,6 +119,10 @@ export interface ResourceNode {
   respawnTime: number;
   harvestable: boolean;
   requiredLevel: number;
+  /** Scale multiplier for visual variation (default: 1.0) */
+  scale?: number;
+  /** Y-axis rotation in radians for visual variation */
+  rotation?: number;
 }
 
 export interface RoadSegment {

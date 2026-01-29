@@ -58,6 +58,14 @@ export interface TileMovementState {
    * @see https://rune-server.org/threads/help-with-player-dancing-spinning-when-following-each-other.706121/
    */
   previousTile: TileCoord | null;
+
+  /**
+   * Two-stage building navigation:
+   * When clicking inside a building while outside, we first path to the door,
+   * then continue to this pending destination once inside.
+   */
+  pendingDestination?: TileCoord | null;
+  pendingBuildingId?: string | null;
 }
 
 /**
@@ -78,6 +86,13 @@ export interface TileFlags {
  * NOTE: This allocates a new object. For hot paths, use worldToTileInto().
  */
 export function worldToTile(worldX: number, worldZ: number): TileCoord {
+  // Validate inputs are finite numbers
+  if (!Number.isFinite(worldX) || !Number.isFinite(worldZ)) {
+    throw new Error(
+      `[TileSystem] worldToTile called with non-finite coords: (${worldX}, ${worldZ})`,
+    );
+  }
+
   return {
     x: Math.floor(worldX / TILE_SIZE),
     z: Math.floor(worldZ / TILE_SIZE),

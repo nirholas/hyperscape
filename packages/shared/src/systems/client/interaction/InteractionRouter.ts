@@ -22,6 +22,7 @@ import type { Position3D } from "../../../types/core/base-types";
 import { INPUT, TIMING, MESSAGE_TYPES, DEBUG_INTERACTIONS } from "./constants";
 import { EventType } from "../../../types/events/event-types";
 import { worldToTile, tileToWorld } from "../../shared/movement/TileSystem";
+import type { BuildingCollisionService } from "../../shared/world/BuildingCollisionService";
 
 // Services
 import { ActionQueueService } from "./services/ActionQueueService";
@@ -234,6 +235,7 @@ export class InteractionRouter extends System {
   cancelCurrentAction(): void {
     this.actionQueue.cancelCurrentAction();
     this.visualFeedback.hideTargetMarker();
+    this.visualFeedback.hideMovementIndicator();
   }
 
   override destroy(): void {
@@ -603,12 +605,6 @@ export class InteractionRouter extends System {
     );
     if (!terrainPos) return;
 
-    // Show yellow X click indicator
-    this.visualFeedback.showClickIndicator(
-      { x: terrainPos.x, y: terrainPos.y, z: terrainPos.z },
-      "ground",
-    );
-
     // Cancel any pending action
     this.actionQueue.cancelCurrentAction();
 
@@ -630,7 +626,26 @@ export class InteractionRouter extends System {
     const tile = worldToTile(terrainPos.x, terrainPos.z);
     const snappedPos = tileToWorld(tile);
 
-    // Show target marker
+    // NOTE: Door pathfinding is handled SERVER-SIDE via two-stage navigation.
+    // The server detects when the target is inside a building and the player is outside,
+    // then automatically routes through the nearest door.
+    // Client-side redirection was removed to avoid conflict with server logic.
+
+    // Stair click targeting: if clicking on stairs, resolve Y to destination floor
+    if (player) {
+      const stairDestination = this.checkStairClickTargeting(tile, player);
+      if (stairDestination !== null) {
+        terrainPos.y = stairDestination;
+      }
+    }
+
+    // Show movement indicator at the snapped tile center (where player will actually move)
+    this.visualFeedback.showClickIndicator(
+      { x: snappedPos.x, y: terrainPos.y, z: snappedPos.z },
+      "ground",
+    );
+
+    // Show target marker (syncs with minimap)
     this.visualFeedback.showTargetMarker({
       x: snappedPos.x,
       y: terrainPos.y,
@@ -654,6 +669,127 @@ export class InteractionRouter extends System {
         cancel: false,
       });
     }
+  }
+
+  /**
+   * Get BuildingCollisionService from TownSystem
+   */
+  private getBuildingCollisionService(): BuildingCollisionService | null {
+    const townSystem = this.world.getSystem("towns") as {
+      getCollisionService?: () => BuildingCollisionService;
+    } | null;
+    return townSystem?.getCollisionService?.() ?? null;
+  }
+
+  /**
+   * Check if door pathfinding is needed and return redirected tile.
+   * When player is outside a building and clicks inside, redirect to nearest door.
+   *
+   * @param targetTile - The tile the player clicked on
+   * @param player - The player entity
+   * @returns Redirected door tile, or null if no redirect needed
+   */
+  private checkDoorPathfinding(
+    targetTile: { x: number; z: number },
+    player: { position: { x: number; z: number } },
+  ): { x: number; z: number } | null {
+    const collisionService = this.getBuildingCollisionService();
+    if (!collisionService) return null;
+
+    // Get player's current tile
+    const playerTile = worldToTile(player.position.x, player.position.z);
+
+    // Check if target tile is inside a building
+    const targetBuildingId = collisionService.getBuildingAtTile(
+      targetTile.x,
+      targetTile.z,
+    );
+    if (!targetBuildingId) return null; // Target not inside a building
+
+    // Check if player is also inside a building
+    const playerBuildingId = collisionService.getBuildingAtTile(
+      playerTile.x,
+      playerTile.z,
+    );
+
+    // If player is inside the same building, no redirect needed
+    if (playerBuildingId === targetBuildingId) return null;
+
+    // If player is inside a different building, also redirect to door
+    // (they need to exit current building and enter target building)
+    // For now, just redirect to target building's door
+
+    // Find closest door to player's position
+    const closestDoor = collisionService.findClosestDoorTile(
+      targetBuildingId,
+      playerTile.x,
+      playerTile.z,
+    );
+
+    if (closestDoor) {
+      return { x: closestDoor.tileX, z: closestDoor.tileZ };
+    }
+
+    return null;
+  }
+
+  /**
+   * Check if clicking on stairs and return destination floor elevation.
+   * When clicking on stairs, the movement should target the destination floor's Y position.
+   *
+   * @param targetTile - The tile the player clicked on
+   * @param player - The player entity (to determine current floor)
+   * @returns Destination floor elevation, or null if not clicking on stairs
+   */
+  private checkStairClickTargeting(
+    targetTile: { x: number; z: number },
+    player: { position: { x: number; y: number; z: number } },
+  ): number | null {
+    const collisionService = this.getBuildingCollisionService();
+    if (!collisionService) return null;
+
+    // Get player's current tile to determine their floor
+    const playerTile = worldToTile(player.position.x, player.position.z);
+
+    // Query player's building state to get current floor
+    const playerCollision = collisionService.queryCollision(
+      playerTile.x,
+      playerTile.z,
+      0, // Start at ground floor
+    );
+
+    // Determine player's current floor from their Y position
+    // This is a rough estimate - check multiple floors to find best match
+    let currentFloor = 0;
+    if (playerCollision.isInsideBuilding && playerCollision.buildingId) {
+      const building = collisionService.getBuilding(playerCollision.buildingId);
+      if (building) {
+        // Find floor closest to player's Y position
+        let closestFloor = 0;
+        let closestDiff = Infinity;
+        for (const floor of building.floors) {
+          const diff = Math.abs(player.position.y - floor.elevation);
+          if (diff < closestDiff) {
+            closestDiff = diff;
+            closestFloor = floor.floorIndex;
+          }
+        }
+        currentFloor = closestFloor;
+      }
+    }
+
+    // Check if target tile is a stair and get destination
+    const stairDest = collisionService.getStairDestination(
+      targetTile.x,
+      targetTile.z,
+      currentFloor,
+    );
+
+    if (stairDest) {
+      return stairDest.elevation;
+    }
+
+    return null;
   }
 
   // === Utilities ===

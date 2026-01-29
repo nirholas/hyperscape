@@ -323,6 +323,30 @@ export class BuildingGenerator {
       }
     }
 
+    // Validate generated layout
+    if (baseFootprint.width <= 0 || baseFootprint.depth <= 0) {
+      throw new Error(
+        `[BuildingGenerator] Invalid layout dimensions: ${baseFootprint.width}x${baseFootprint.depth}`,
+      );
+    }
+    if (floors <= 0 || floorPlans.length === 0) {
+      throw new Error(
+        `[BuildingGenerator] Invalid floor count: floors=${floors}, floorPlans=${floorPlans.length}`,
+      );
+    }
+    if (floorPlans.length !== floors) {
+      throw new Error(
+        `[BuildingGenerator] Floor count mismatch: floors=${floors}, floorPlans=${floorPlans.length}`,
+      );
+    }
+    // Validate each floor plan has a footprint
+    for (let i = 0; i < floorPlans.length; i++) {
+      const plan = floorPlans[i];
+      if (!plan.footprint || plan.footprint.length === 0) {
+        throw new Error(`[BuildingGenerator] Floor ${i} has invalid footprint`);
+      }
+    }
+
     return {
       width: baseFootprint.width,
       depth: baseFootprint.depth,
@@ -334,8 +358,9 @@ export class BuildingGenerator {
 
   /**
    * Build a Three.js mesh from a layout
-   * Returns a group with two children:
-   * - "body": walls, floors, ceilings, stairs, props
+   * Returns a group with three children for separate raycast filtering:
+   * - "floors": floor tiles, stairs, entrance steps (walkable surfaces - raycastable for click-to-move)
+   * - "walls": walls, ceilings, foundation, railings, props (non-walkable - excluded from click raycast)
    * - "roof": actual roof pieces and terrace roofs (can be hidden separately)
    */
   buildBuilding(
@@ -346,8 +371,9 @@ export class BuildingGenerator {
     includeRoof: boolean,
     useGreedyMeshing: boolean = true,
   ): { building: THREE.Mesh | THREE.Group; stats: BuildingStats } {
-    // Separate geometry arrays for body and roof
-    const bodyGeometries: THREE.BufferGeometry[] = [];
+    // Separate geometry arrays for floors (walkable), walls (non-walkable), and roof
+    const floorGeometries: THREE.BufferGeometry[] = []; // Walkable surfaces
+    const wallGeometries: THREE.BufferGeometry[] = []; // Non-walkable (walls, ceilings, props)
     const roofGeometries: THREE.BufferGeometry[] = [];
 
     const stats: BuildingStats = {
@@ -376,27 +402,32 @@ export class BuildingGenerator {
       );
     }
 
-    // Add foundation first (sits at ground level)
+    // Add foundation first (sits at ground level) - non-walkable
     if (useGreedyMeshing) {
-      this.addFoundationOptimized(bodyGeometries, layout);
+      this.addFoundationOptimized(wallGeometries, layout);
     } else {
-      this.addFoundation(bodyGeometries, layout);
+      this.addFoundation(wallGeometries, layout);
     }
 
     // Add entrance steps at doors on ground floor
-    this.addEntranceSteps(bodyGeometries, layout);
+    // Visual steps go to walls (decoration), invisible ramps go to floors (walkable)
+    this.addEntranceSteps(wallGeometries, layout); // Visual box steps (decoration)
+    this.addEntranceRamps(floorGeometries, layout); // Invisible walkable ramps
 
     for (let floor = 0; floor < layout.floors; floor += 1) {
-      // Use optimized greedy meshing for floors if enabled
+      // Floor tiles are WALKABLE
       if (useGreedyMeshing) {
-        this.addFloorTilesOptimized(bodyGeometries, layout, floor, stats);
+        this.addFloorTilesOptimized(floorGeometries, layout, floor, stats);
       } else {
-        this.addFloorTiles(bodyGeometries, layout, floor, stats);
+        this.addFloorTiles(floorGeometries, layout, floor, stats);
       }
 
-      this.addFloorEdgeSkirts(bodyGeometries, layout, floor);
+      // Floor edge skirts are visual trim - non-walkable
+      this.addFloorEdgeSkirts(wallGeometries, layout, floor);
+
+      // Walls are non-walkable
       this.addWallsForFloor(
-        bodyGeometries,
+        wallGeometries,
         layout,
         layout.floorPlans[floor],
         floor,
@@ -405,26 +436,29 @@ export class BuildingGenerator {
 
       // Add ceiling tiles for floors that have another floor above
       if (floor < layout.floors - 1) {
-        // Use optimized greedy meshing for ceilings if enabled
+        // Ceilings are non-walkable (viewed from below)
         if (useGreedyMeshing) {
-          this.addCeilingTilesOptimized(bodyGeometries, layout, floor, stats);
+          this.addCeilingTilesOptimized(wallGeometries, layout, floor, stats);
         } else {
-          this.addCeilingTiles(bodyGeometries, layout, floor, stats);
+          this.addCeilingTiles(wallGeometries, layout, floor, stats);
         }
         // Terrace roofs go to roof group (they're roofs, not floors with ceilings above)
         this.addTerraceRoofs(roofGeometries, layout, floor, stats);
-        // Terrace railings are part of the body (structural)
-        this.addTerraceRailings(bodyGeometries, layout, floor);
+        // Terrace railings are non-walkable
+        this.addTerraceRailings(wallGeometries, layout, floor);
       }
     }
 
-    this.addStairs(bodyGeometries, layout, stats);
+    // Stairs - visual steps go to walls (decoration), invisible ramps go to floors (walkable)
+    this.addStairs(wallGeometries, layout, stats); // Visual box steps (decoration)
+    this.addStairRamps(floorGeometries, layout); // Invisible walkable ramps
     if (includeRoof) {
       // Actual roof pieces go to roof group
       this.addRoofPieces(roofGeometries, layout, stats);
     }
+    // Props are non-walkable
     this.addBuildingProps(
-      bodyGeometries,
+      wallGeometries,
       layout,
       recipe,
       typeKey,
@@ -450,18 +484,35 @@ export class BuildingGenerator {
     const buildingGroup = new THREE.Group();
     buildingGroup.userData = { layout, recipe, stats };
 
-    // Create body mesh
-    if (bodyGeometries.length > 0) {
-      const mergedBody = mergeGeometries(bodyGeometries, false);
-      if (mergedBody) {
-        const cleanedBody = removeInternalFaces(mergedBody);
-        mergedBody.dispose();
-        for (const geometry of bodyGeometries) {
+    // Create floors mesh (walkable surfaces - for click-to-move raycast)
+    if (floorGeometries.length > 0) {
+      const mergedFloors = mergeGeometries(floorGeometries, false);
+      if (mergedFloors) {
+        const cleanedFloors = removeInternalFaces(mergedFloors);
+        mergedFloors.dispose();
+        for (const geometry of floorGeometries) {
           geometry.dispose();
         }
-        const bodyMesh = new THREE.Mesh(cleanedBody, this.uberMaterial);
-        bodyMesh.name = "body";
-        buildingGroup.add(bodyMesh);
+        const floorMesh = new THREE.Mesh(cleanedFloors, this.uberMaterial);
+        floorMesh.name = "floors";
+        floorMesh.userData = { walkable: true };
+        buildingGroup.add(floorMesh);
+      }
+    }
+
+    // Create walls mesh (non-walkable - excluded from click raycast)
+    if (wallGeometries.length > 0) {
+      const mergedWalls = mergeGeometries(wallGeometries, false);
+      if (mergedWalls) {
+        const cleanedWalls = removeInternalFaces(mergedWalls);
+        mergedWalls.dispose();
+        for (const geometry of wallGeometries) {
+          geometry.dispose();
+        }
+        const wallMesh = new THREE.Mesh(cleanedWalls, this.uberMaterial);
+        wallMesh.name = "walls";
+        wallMesh.userData = { walkable: false };
+        buildingGroup.add(wallMesh);
       }
     }
 
@@ -476,6 +527,7 @@ export class BuildingGenerator {
         }
         const roofMesh = new THREE.Mesh(cleanedRoof, this.uberMaterial);
         roofMesh.name = "roof";
+        roofMesh.userData = { walkable: false };
         buildingGroup.add(roofMesh);
       }
     }
@@ -1843,6 +1895,97 @@ export class BuildingGenerator {
     }
   }
 
+  /**
+   * Add invisible walkable ramps at entrance doors.
+   * These replace the visual box steps for actual walking collision.
+   * The ramp is a thin angled plane that the character walks up smoothly.
+   */
+  private addEntranceRamps(
+    geometries: THREE.BufferGeometry[],
+    layout: BuildingLayout,
+  ): void {
+    const plan = layout.floorPlans[0];
+    const halfCell = CELL_SIZE / 2;
+
+    // Find all ground floor doors
+    for (const [key, opening] of plan.externalOpenings) {
+      if (opening !== "door") continue;
+
+      const [colStr, rowStr, side] = key.split(",");
+      const col = parseInt(colStr, 10);
+      const row = parseInt(rowStr, 10);
+
+      const { x, z } = getCellCenter(
+        col,
+        row,
+        CELL_SIZE,
+        layout.width,
+        layout.depth,
+      );
+      const sideVec = getSideVector(side);
+
+      // Ramp parameters
+      const rampWidth = DOOR_WIDTH + 0.4; // Wider than door for easy walking
+      const isVertical = sideVec.x !== 0;
+
+      // Calculate ramp extent
+      // Starts at the door threshold (inside edge of foundation)
+      // Ends at the bottom of the terrain steps
+      const rampStartDist = halfCell + FOUNDATION_OVERHANG * 0.5; // Inside foundation edge
+      const rampEndDist =
+        halfCell +
+        FOUNDATION_OVERHANG +
+        ENTRANCE_STEP_DEPTH * ENTRANCE_STEP_COUNT +
+        ENTRANCE_STEP_DEPTH * TERRAIN_STEP_COUNT;
+
+      const rampLength = rampEndDist - rampStartDist;
+
+      // Start Y = foundation height (top of ramp, at door)
+      // End Y = terrain level at bottom of terrain steps
+      const startY = FOUNDATION_HEIGHT;
+      const endY = -ENTRANCE_STEP_HEIGHT * (TERRAIN_STEP_COUNT - 1);
+
+      // Create a plane geometry for the ramp
+      const rampGeo = new THREE.PlaneGeometry(
+        isVertical ? rampLength : rampWidth,
+        isVertical ? rampWidth : rampLength,
+      );
+
+      // Calculate ramp center position
+      const rampCenterDist = (rampStartDist + rampEndDist) / 2;
+      const rampCenterX = x + sideVec.x * rampCenterDist;
+      const rampCenterZ = z + sideVec.z * rampCenterDist;
+      const rampCenterY = (startY + endY) / 2;
+
+      // Calculate the angle of inclination
+      const heightDiff = startY - endY;
+      const angle = Math.atan2(heightDiff, rampLength);
+
+      // Position and rotate the ramp
+      // First rotate to be horizontal (default plane is vertical facing +Z)
+      rampGeo.rotateX(-Math.PI / 2);
+
+      // Then tilt the ramp based on direction
+      if (Math.abs(sideVec.z) > 0.5) {
+        // North/South facing ramp - tilt around X axis
+        const tiltAngle = sideVec.z > 0 ? angle : -angle;
+        rampGeo.rotateX(tiltAngle);
+      } else {
+        // East/West facing ramp - tilt around Z axis
+        const tiltAngle = sideVec.x > 0 ? -angle : angle;
+        rampGeo.rotateZ(tiltAngle);
+      }
+
+      rampGeo.translate(rampCenterX, rampCenterY, rampCenterZ);
+
+      // Use floor color for the ramp (will be mostly hidden under steps anyway)
+      // The ramp is thin and positioned under the visual steps
+      applyVertexColors(rampGeo, palette.floor);
+
+      geometries.push(rampGeo);
+    }
+  }
+
   private addFloorTiles(
     geometries: THREE.BufferGeometry[],
     layout: BuildingLayout,
@@ -3167,6 +3310,102 @@ export class BuildingGenerator {
     );
     applyVertexColors(rightStringerGeo, palette.trim); // Stringers use trim color
     geometries.push(rightStringerGeo);
+  }
+
+  /**
+   * Add invisible walkable ramps for interior stairs.
+   * These replace the visual box steps for actual walking collision.
+   * The ramp is a thin angled plane spanning from one floor to the next.
+   */
+  private addStairRamps(
+    geometries: THREE.BufferGeometry[],
+    layout: BuildingLayout,
+  ): void {
+    if (!layout.stairs) return;
+
+    const { col, row, direction, landing } = layout.stairs;
+    const { x: cellCenterX, z: cellCenterZ } = getCellCenter(
+      col,
+      row,
+      CELL_SIZE,
+      layout.width,
+      layout.depth,
+    );
+
+    // Get direction vector
+    const sideVec = getSideVector(direction);
+    const dirX = sideVec.x;
+    const dirZ = sideVec.z;
+
+    // Ramp parameters - spans from stair cell to landing cell
+    const stepWidth = CELL_SIZE - WALL_THICKNESS * 4;
+    const landingDepth = CELL_SIZE * 0.15;
+
+    // Base Y position
+    const baseY = FOUNDATION_HEIGHT;
+
+    // Start position (bottom of stairs)
+    const rampStartX = cellCenterX - dirX * (CELL_SIZE / 2 - landingDepth);
+    const rampStartZ = cellCenterZ - dirZ * (CELL_SIZE / 2 - landingDepth);
+
+    // End position (top landing cell)
+    const { x: landingCenterX, z: landingCenterZ } = getCellCenter(
+      landing.col,
+      landing.row,
+      CELL_SIZE,
+      layout.width,
+      layout.depth,
+    );
+
+    // The ramp goes from bottom of stair cell to the landing
+    // Calculate the actual ramp length
+    const rampEndX = landingCenterX - dirX * (CELL_SIZE / 2 - landingDepth);
+    const rampEndZ = landingCenterZ - dirZ * (CELL_SIZE / 2 - landingDepth);
+
+    const rampLength = Math.sqrt(
+      Math.pow(rampEndX - rampStartX, 2) + Math.pow(rampEndZ - rampStartZ, 2),
+    );
+
+    // Height change
+    const startY = baseY;
+    const endY = baseY + FLOOR_HEIGHT;
+    const heightDiff = endY - startY;
+
+    // Create plane geometry for the ramp
+    const isXAligned = Math.abs(dirX) > 0.5;
+    const rampGeo = new THREE.PlaneGeometry(
+      isXAligned ? rampLength : stepWidth,
+      isXAligned ? stepWidth : rampLength,
+    );
+
+    // Calculate ramp center
+    const rampCenterX = (rampStartX + rampEndX) / 2;
+    const rampCenterZ = (rampStartZ + rampEndZ) / 2;
+    const rampCenterY = (startY + endY) / 2;
+
+    // Calculate inclination angle
+    const angle = Math.atan2(heightDiff, rampLength);
+
+    // Rotate plane to be horizontal first
+    rampGeo.rotateX(-Math.PI / 2);
+
+    // Then tilt based on stair direction
+    if (Math.abs(dirZ) > 0.5) {
+      // North/South stairs - tilt around X axis
+      const tiltAngle = dirZ > 0 ? -angle : angle;
+      rampGeo.rotateX(tiltAngle);
+    } else {
+      // East/West stairs - tilt around Z axis
+      const tiltAngle = dirX > 0 ? angle : -angle;
+      rampGeo.rotateZ(tiltAngle);
+    }
+
+    rampGeo.translate(rampCenterX, rampCenterY, rampCenterZ);
+
+    // Use floor color (ramp is thin and hidden under visual steps)
+    applyVertexColors(rampGeo, palette.floor);
+
+    geometries.push(rampGeo);
   }
 
   private addRoofPieces(

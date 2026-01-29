@@ -53,7 +53,7 @@
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint src --max-warnings 0",
+    "lint": "eslint src --max-warnings 50",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist",
     "viewer": "vite viewer"

@@ -18,6 +18,9 @@ import { BuildingGenPage } from "./pages/BuildingGenPage";
 import { TreeGenPage } from "./pages/TreeGenPage";
 import { RockGenPage } from "./pages/RockGenPage";
 import { PlantGenPage } from "./pages/PlantGenPage";
+import { TerrainGenPage } from "./pages/TerrainGenPage";
+import { RoadsGenPage } from "./pages/RoadsGenPage";
+import { GrassGenPage } from "./pages/GrassGenPage";
 
 function AppLayout() {
   return (
@@ -71,6 +74,10 @@ function AppLayout() {
             <Route path={ROUTES.TREE_GEN} element={<TreeGenPage />} />
             <Route path={ROUTES.ROCK_GEN} element={<RockGenPage />} />
             <Route path={ROUTES.PLANT_GEN} element={<PlantGenPage />} />
+            <Route path={ROUTES.TERRAIN_GEN} element={<TerrainGenPage />} />
+            <Route path={ROUTES.ROADS_GEN} element={<RoadsGenPage />} />
+            <Route path={ROUTES.GRASS_GEN} element={<GrassGenPage />} />
+            <Route path={ROUTES.GRASS_GEN} element={<GrassGenPage />} />
 
             {/* Catch-all redirect */}
             <Route

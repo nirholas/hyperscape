@@ -18,6 +18,7 @@ import {
   TreePine,
   Flower2,
   Gem,
+  Globe,
 } from "lucide-react";
 import React, { useEffect, useRef, useState, useCallback } from "react";
 
@@ -56,6 +57,7 @@ import {
   CardTitle,
 } from "@/components/common";
 import { notify } from "@/utils/notify";
+import { WorldTab } from "@/components/WorldBuilder";
 
 // API base URL for manifest loading
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3401";
@@ -3125,6 +3127,7 @@ const DEFAULT_WORLD_CONFIG: WorldConfig = {
 };
 
 type WorldBuilderTab =
+  | "world"
   | "buildings"
   | "terrain"
   | "towns"
@@ -3655,7 +3658,7 @@ export const WorldBuilderPage: React.FC = () => {
   const [isExporting, setIsExporting] = useState<boolean>(false);
 
   // Tab and World Config State
-  const [activeTab, setActiveTab] = useState<WorldBuilderTab>("buildings");
+  const [activeTab, setActiveTab] = useState<WorldBuilderTab>("world");
   const [worldConfig, setWorldConfig] =
     useState<WorldConfig>(DEFAULT_WORLD_CONFIG);
   const [configDirty, setConfigDirty] = useState<boolean>(false);
@@ -5246,6 +5249,95 @@ export const WorldBuilderPage: React.FC = () => {
     </div>
   );
 
+  // World tab has its own full-width layout
+  if (activeTab === "world") {
+    return (
+      <div className="flex flex-col h-[calc(100vh-60px)] bg-bg-primary">
+        {/* Tab navigation bar for switching back to other tabs */}
+        <div className="p-2 border-b border-border-primary flex gap-1 flex-wrap bg-bg-secondary">
+          <TabButton
+            tab="world"
+            icon={<Globe className="w-3 h-3" />}
+            label="World"
+          />
+          <TabButton
+            tab="buildings"
+            icon={<Building2 className="w-3 h-3" />}
+            label="Buildings"
+          />
+          <TabButton
+            tab="terrain"
+            icon={<Mountain className="w-3 h-3" />}
+            label="Terrain"
+          />
+          <TabButton
+            tab="towns"
+            icon={<MapPin className="w-3 h-3" />}
+            label="Towns"
+          />
+          <TabButton
+            tab="roads"
+            icon={<Route className="w-3 h-3" />}
+            label="Roads"
+          />
+          <TabButton
+            tab="assets"
+            icon={<Grid3x3 className="w-3 h-3" />}
+            label="Assets & LOD"
+          />
+          <TabButton
+            tab="trees"
+            icon={<TreePine className="w-3 h-3" />}
+            label="Trees"
+          />
+          <TabButton
+            tab="rocks"
+            icon={<Gem className="w-3 h-3" />}
+            label="Rocks"
+          />
+          <TabButton
+            tab="plants"
+            icon={<Flower2 className="w-3 h-3" />}
+            label="Plants"
+          />
+        </div>
+        {/* World tab content - full width layout */}
+        <div className="flex-1 overflow-hidden">
+          <WorldTab
+            onWorldCreated={(world) => {
+              notify.success(`World "${world.name}" created`);
+            }}
+            onWorldSave={async (world) => {
+              // TODO: Implement world saving to backend
+              notify.success(`World "${world.name}" saved`);
+            }}
+            onWorldExport={(world) => {
+              // Export as JSON file
+              const data = JSON.stringify(
+                world,
+                (key, value) => {
+                  if (value instanceof Map) {
+                    return Object.fromEntries(value);
+                  }
+                  return value;
+                },
+                2,
+              );
+              const blob = new Blob([data], { type: "application/json" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `${world.name.toLowerCase().replace(/\s+/g, "-")}.json`;
+              a.click();
+              URL.revokeObjectURL(url);
+              notify.success("World exported");
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-[calc(100vh-60px)] bg-bg-primary">
       <div className="flex flex-1 overflow-hidden">
@@ -5253,6 +5345,11 @@ export const WorldBuilderPage: React.FC = () => {
         <div className="w-96 bg-bg-secondary border-r border-border-primary flex flex-col">
           {/* Tab Navigation */}
           <div className="p-2 border-b border-border-primary flex gap-1 flex-wrap">
+            <TabButton
+              tab="world"
+              icon={<Globe className="w-3 h-3" />}
+              label="World"
+            />
             <TabButton
               tab="buildings"
               icon={<Building2 className="w-3 h-3" />}

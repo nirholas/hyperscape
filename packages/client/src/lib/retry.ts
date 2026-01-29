@@ -10,8 +10,6 @@
  * @packageDocumentation
  */
 
-/* global AbortSignal */
-
 /** Retry options configuration */
 export interface RetryOptions {
   /** Maximum number of retry attempts (default: 3) */

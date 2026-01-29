@@ -48,7 +48,33 @@
  * **Runs on:** Client only (buildings are purely visual on client)
  */
 
-import THREE from "../../../extras/three/three";
+import THREE, {
+  uniform,
+  sub,
+  add,
+  mul,
+  div,
+  Fn,
+  MeshStandardNodeMaterial,
+  float,
+  fract,
+  sin,
+  cos,
+  dot,
+  vec2,
+  vec3,
+  smoothstep,
+  positionWorld,
+  step,
+  max,
+  min,
+  clamp,
+  sqrt,
+  mod,
+  floor,
+  abs,
+  viewportCoordinate,
+} from "../../../extras/three/three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { SystemBase } from "../infrastructure/SystemBase";
 import type { World } from "../../../types";
@@ -80,6 +106,245 @@ import {
 import { getPhysX } from "../../../physics/PhysXManager";
 import { Layers } from "../../../physics/Layers";
 import type { PhysicsHandle } from "../../../types/systems/physics";
+
+// ============================================================================
+// BUILDING OCCLUSION CONFIG
+// ============================================================================
+
+/**
+ * Building occlusion shader configuration.
+ * Uses dithered/stippled effect like RuneScape for seeing character through walls.
+ * Values are intentionally smaller than vegetation for subtle visibility.
+ */
+export const BUILDING_OCCLUSION_CONFIG = {
+  /** Radius at camera end of the cone (meters) */
+  CAMERA_RADIUS: 0.15,
+
+  /** Radius at player end of the cone (meters) - smaller bubble around player */
+  PLAYER_RADIUS: 0.8,
+
+  /** Extra radius added based on camera distance */
+  DISTANCE_SCALE: 0.02,
+
+  /** Minimum distance from camera before occlusion kicks in */
+  NEAR_MARGIN: 0.2,
+
+  /** Distance from player where occlusion stops */
+  FAR_MARGIN: 0.2,
+
+  /** Sharpness of the cutoff edge (higher = sharper stipple pattern) */
+  EDGE_SHARPNESS: 0.7,
+
+  /** Occlusion strength (0 = disabled, only near-camera dissolve active) */
+  STRENGTH: 0.0,
+
+  // ========== NEAR-CAMERA DISSOLVE (RuneScape-style depth fade) ==========
+  // Prevents hard geometry clipping when camera clips through objects
+
+  /** Distance from camera where near-fade begins (meters) - fully opaque beyond this */
+  NEAR_FADE_START: 1.5,
+
+  /** Distance from camera where geometry is fully dissolved (meters) - at near clip */
+  NEAR_FADE_END: 0.05,
+} as const;
+
+// ============================================================================
+// BUILDING OCCLUSION MATERIAL
+// ============================================================================
+
+/**
+ * Uniforms for building occlusion material.
+ */
+export type BuildingOcclusionUniforms = {
+  playerPos: { value: THREE.Vector3 };
+  cameraPos: { value: THREE.Vector3 };
+};
+
+/**
+ * Building material with occlusion uniforms attached.
+ */
+export type BuildingOcclusionMaterial = MeshStandardNodeMaterial & {
+  occlusionUniforms: BuildingOcclusionUniforms;
+};
+
+/**
+ * Creates a building material with dithered occlusion dissolve.
+ * Uses TSL (Three Shading Language) for GPU-accelerated occlusion.
+ *
+ * The shader creates a cone-shaped dissolve from camera to player,
+ * using a dithered/stippled pattern like classic RuneScape.
+ *
+ * @returns Material with occlusion shader
+ */
+function createBuildingOcclusionMaterial(): BuildingOcclusionMaterial {
+  const material = new MeshStandardNodeMaterial();
+
+  // Create uniforms
+  const uPlayerPos = uniform(new THREE.Vector3(0, 0, 0));
+  const uCameraPos = uniform(new THREE.Vector3(0, 0, 0));
+
+  // Config as shader constants - Player occlusion cone
+  const occlusionCameraRadius = float(BUILDING_OCCLUSION_CONFIG.CAMERA_RADIUS);
+  const occlusionPlayerRadius = float(BUILDING_OCCLUSION_CONFIG.PLAYER_RADIUS);
+  const occlusionDistanceScale = float(
+    BUILDING_OCCLUSION_CONFIG.DISTANCE_SCALE,
+  );
+  const occlusionNearMargin = float(BUILDING_OCCLUSION_CONFIG.NEAR_MARGIN);
+  const occlusionFarMargin = float(BUILDING_OCCLUSION_CONFIG.FAR_MARGIN);
+  const occlusionEdgeSharpness = float(
+    BUILDING_OCCLUSION_CONFIG.EDGE_SHARPNESS,
+  );
+  const occlusionStrength = float(BUILDING_OCCLUSION_CONFIG.STRENGTH);
+
+  // Config as shader constants - Near-camera dissolve (prevents hard geometry clipping)
+  const nearFadeStart = float(BUILDING_OCCLUSION_CONFIG.NEAR_FADE_START);
+  const nearFadeEnd = float(BUILDING_OCCLUSION_CONFIG.NEAR_FADE_END);
+
+  // Create alphaTest node for dithered occlusion + near-camera dissolve
+  material.alphaTestNode = Fn(() => {
+    const worldPos = positionWorld;
+
+    // ========== CAMERA-TO-FRAGMENT DISTANCE ==========
+    // Used for both near-camera dissolve and player occlusion
+    const cfX = sub(worldPos.x, uCameraPos.x);
+    const cfY = sub(worldPos.y, uCameraPos.y);
+    const cfZ = sub(worldPos.z, uCameraPos.z);
+    const camDistSq = add(add(mul(cfX, cfX), mul(cfY, cfY)), mul(cfZ, cfZ));
+    const camDist = sqrt(camDistSq);
+
+    // ========== NEAR-CAMERA DISSOLVE (RuneScape-style depth fade) ==========
+    // Prevents hard geometry clipping when camera clips through objects
+    // smoothstep returns 0→1 as distance goes from end→start, we invert for fade
+    const nearCameraFade = sub(
+      float(1.0),
+      smoothstep(nearFadeEnd, nearFadeStart, camDist),
+    );
+
+    // ========== PLAYER OCCLUSION CONE ==========
+    // Camera-to-player vector
+    const ctX = sub(uPlayerPos.x, uCameraPos.x);
+    const ctY = sub(uPlayerPos.y, uCameraPos.y);
+    const ctZ = sub(uPlayerPos.z, uCameraPos.z);
+    const ctLengthSq = add(add(mul(ctX, ctX), mul(ctY, ctY)), mul(ctZ, ctZ));
+    const ctLength = sqrt(ctLengthSq);
+
+    // Project fragment onto camera-player line
+    // projDist = dot(cf, ct) / length(ct)
+    const dotCfCt = add(add(mul(cfX, ctX), mul(cfY, ctY)), mul(cfZ, ctZ));
+    const projDist = div(dotCfCt, max(ctLength, float(0.001)));
+
+    // Check if fragment is in the valid range (between camera and player)
+    const minDist = occlusionNearMargin;
+    const maxDist = sub(ctLength, occlusionFarMargin);
+    const afterNear = step(minDist, projDist);
+    const beforeFar = step(projDist, maxDist);
+    const inRange = mul(afterNear, beforeFar);
+
+    // Projection point on the camera-player line
+    const projT = div(projDist, max(ctLength, float(0.001)));
+    const projX = add(uCameraPos.x, mul(ctX, projT));
+    const projY = add(uCameraPos.y, mul(ctY, projT));
+    const projZ = add(uCameraPos.z, mul(ctZ, projT));
+
+    // Perpendicular distance from fragment to line
+    const perpX = sub(worldPos.x, projX);
+    const perpY = sub(worldPos.y, projY);
+    const perpZ = sub(worldPos.z, projZ);
+    const perpDistSq = add(
+      add(mul(perpX, perpX), mul(perpY, perpY)),
+      mul(perpZ, perpZ),
+    );
+    const perpDist = sqrt(perpDistSq);
+
+    // Cone radius calculation (expands from camera to player)
+    const t = clamp(
+      div(projDist, max(ctLength, float(0.001))),
+      float(0.0),
+      float(1.0),
+    );
+    const coneRadius = add(
+      add(
+        occlusionCameraRadius,
+        mul(t, sub(occlusionPlayerRadius, occlusionCameraRadius)),
+      ),
+      mul(ctLength, occlusionDistanceScale),
+    );
+
+    // Sharp edge falloff with stipple effect
+    const edgeStart = mul(coneRadius, sub(float(1.0), occlusionEdgeSharpness));
+    const rawOcclusionFade = sub(
+      float(1.0),
+      smoothstep(edgeStart, coneRadius, perpDist),
+    );
+
+    // Apply occlusion strength and range check
+    const occlusionFade = mul(
+      mul(rawOcclusionFade, occlusionStrength),
+      inRange,
+    );
+
+    // ========== COMBINE FADE EFFECTS ==========
+    // Take maximum of near-camera fade and player occlusion fade
+    const combinedFade = max(nearCameraFade, occlusionFade);
+
+    // ========== SCREEN-SPACE 4x4 BAYER DITHERING (RuneScape 3 style) ==========
+    // 4x4 Bayer matrix: [ 0, 8, 2,10; 12, 4,14, 6; 3,11, 1, 9; 15, 7,13, 5]/16
+    const ix = mod(floor(viewportCoordinate.x), float(4.0));
+    const iy = mod(floor(viewportCoordinate.y), float(4.0));
+
+    // Extract bits (0 or 1)
+    const bit0_x = mod(ix, float(2.0));
+    const bit1_x = floor(mul(ix, float(0.5)));
+    const bit0_y = mod(iy, float(2.0));
+    const bit1_y = floor(mul(iy, float(0.5)));
+
+    // XOR for floats: |a - b| gives 0 when equal, 1 when different
+    const xor0 = abs(sub(bit0_x, bit0_y)); // (x^y) bit 0
+    const xor1 = abs(sub(bit1_x, bit1_y)); // (x^y) bit 1
+
+    // Bayer = ((x^y)&1)*8 + (y&1)*4 + ((x^y)&2) + ((y&2)>>1)
+    const bayerInt = add(
+      add(
+        add(
+          mul(xor0, float(8.0)), // ((x^y)&1) << 3
+          mul(bit0_y, float(4.0)),
+        ), // (y&1) << 2
+        mul(xor1, float(2.0)),
+      ), // ((x^y)&2)
+      bit1_y, // (y&2) >> 1
+    );
+    const ditherValue = mul(bayerInt, float(0.0625)); // /16
+
+    // RS3-style: discard when fade >= dither
+    // step returns 0 or 1, multiply by 2 so threshold > 1.0 causes discard
+    // (alphaTest discards when material.alpha (1.0) < threshold)
+    // IMPORTANT: Only apply dithering when combinedFade > 0, otherwise step(0,0)=1 causes holes
+    const hasAnyFade = step(float(0.001), combinedFade); // 1 if fade > 0.001
+    const rawThreshold = step(ditherValue, combinedFade);
+    const threshold = mul(mul(rawThreshold, hasAnyFade), float(2.0));
+
+    return threshold;
+  })();
+
+  // Material settings
+  material.vertexColors = true;
+  material.roughness = 0.85;
+  material.metalness = 0.05;
+  material.transparent = false;
+  material.opacity = 1.0;
+  material.alphaTest = 0.5;
+  material.side = THREE.FrontSide;
+  material.depthWrite = true;
+
+  // Attach uniforms for external updates
+  const occlusionMaterial = material as BuildingOcclusionMaterial;
+  occlusionMaterial.occlusionUniforms = {
+    playerPos: uPlayerPos,
+    cameraPos: uCameraPos,
+  };
+
+  return occlusionMaterial;
+}
 
 /**
  * Building type mapping from TownBuildingType to procgen recipe keys.
@@ -153,10 +418,15 @@ interface BuildingData {
 
 /**
  * Batched mesh data for a town
+ * Separated into floors (walkable), walls (non-walkable), and roof for:
+ * - Click-to-move raycasting (only floors are raycastable)
+ * - Occlusion shader (walls get see-through effect)
  */
 interface BatchedTownMesh {
-  /** Combined body geometry (walls, floors) */
-  bodyMesh: THREE.Mesh;
+  /** Combined floor geometry (walkable surfaces - stairs, floor tiles) */
+  floorMesh: THREE.Mesh;
+  /** Combined wall geometry (non-walkable - walls, ceilings, props) */
+  wallMesh: THREE.Mesh;
   /** Combined roof geometry (separate for optional hiding) */
   roofMesh: THREE.Mesh;
   /** Map from triangle index to building ID for raycast hit detection */
@@ -314,8 +584,8 @@ export class BuildingRenderingSystem extends SystemBase {
   /** Track impostor updates per frame */
   private _impostorUpdatesThisFrame = 0;
 
-  /** Shared uber-material for all batched buildings */
-  private batchedMaterial: THREE.MeshStandardMaterial;
+  /** Shared uber-material for all batched buildings (with occlusion shader) */
+  private batchedMaterial: BuildingOcclusionMaterial;
 
   /** Temporary matrix for impostor transforms */
   private _tempMatrix = new THREE.Matrix4();
@@ -328,6 +598,17 @@ export class BuildingRenderingSystem extends SystemBase {
 
   /** Setting: Whether to auto-hide roofs when player is inside a building */
   private _autoHideRoofsEnabled = true;
+
+  /** Setting: Whether roofs are always hidden (default true for better visibility) */
+  private _roofsAlwaysHidden = true;
+
+  /**
+   * Current floor the local player is on.
+   * Used for: UI display, sound effects, gameplay logic.
+   * NOTE: Per-floor VISIBILITY is not implemented because buildings are batched
+   * by town (all floors in one mesh). Would require per-building-floor batching.
+   */
+  private _playerCurrentFloor = 0;
 
   /** Currently hidden roof building IDs (player is inside these buildings) */
   private _hiddenRoofBuildings = new Set<string>();
@@ -357,12 +638,8 @@ export class BuildingRenderingSystem extends SystemBase {
     // Get building LOD config from unified system
     this.lodConfig = getLODDistances("building");
 
-    // Create shared material for batched buildings
-    this.batchedMaterial = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.85,
-      metalness: 0.05,
-    });
+    // Create shared material for batched buildings (with occlusion shader)
+    this.batchedMaterial = createBuildingOcclusionMaterial();
   }
 
   async init(): Promise<void> {
@@ -460,10 +737,43 @@ export class BuildingRenderingSystem extends SystemBase {
   }
 
   /**
+   * Update occlusion shader uniforms with player and camera positions.
+   * This enables the dithered see-through effect when character is behind walls.
+   */
+  private updateOcclusionUniforms(cameraPos: THREE.Vector3): void {
+    // Get actual player position (not camera position for third-person)
+    const players = this.world.getPlayers?.();
+    let playerPos: THREE.Vector3;
+
+    if (players && players.length > 0) {
+      const player = players[0];
+      const nodePos = (player as { node?: { position?: THREE.Vector3 } }).node
+        ?.position;
+      playerPos = nodePos ?? cameraPos;
+    } else {
+      playerPos = cameraPos;
+    }
+
+    // Update material uniforms
+    this.batchedMaterial.occlusionUniforms.playerPos.value.copy(playerPos);
+    this.batchedMaterial.occlusionUniforms.cameraPos.value.copy(cameraPos);
+  }
+
+  /**
    * Update roof visibility based on player position inside buildings.
    * Called from update() when auto-hide is enabled.
    */
   private updateRoofVisibility(cameraPos: THREE.Vector3): void {
+    // If roofs are always hidden, keep them hidden
+    if (this._roofsAlwaysHidden) {
+      for (const [, town] of this.townData) {
+        if (town.batchedMesh?.roofMesh) {
+          town.batchedMesh.roofMesh.visible = false;
+        }
+      }
+      return;
+    }
+
     if (!this._autoHideRoofsEnabled) return;
 
     // Get the local player's position (camera is above player)
@@ -514,6 +824,152 @@ export class BuildingRenderingSystem extends SystemBase {
     }
   }
 
+  /**
+   * Get whether roofs are always hidden
+   */
+  isRoofsAlwaysHidden(): boolean {
+    return this._roofsAlwaysHidden;
+  }
+
+  /**
+   * Set whether roofs should always be hidden
+   */
+  setRoofsAlwaysHidden(hidden: boolean): void {
+    this._roofsAlwaysHidden = hidden;
+    if (!hidden) {
+      // If un-hiding, show all roofs immediately
+      this.showAllRoofs();
+    }
+  }
+
+  /**
+   * Get the player's current floor (for UI display)
+   */
+  getPlayerCurrentFloor(): number {
+    return this._playerCurrentFloor;
+  }
+
+  /**
+   * Set the player's current floor (called when floor changes via stairs)
+   */
+  setPlayerCurrentFloor(floor: number): void {
+    this._playerCurrentFloor = floor;
+    // Update floor visibility when floor changes
+    this.updateFloorVisibility();
+  }
+
+  /**
+   * Update floor visibility based on player's current floor.
+   *
+   * ARCHITECTURE LIMITATION: Per-floor visibility is NOT possible with current
+   * batching strategy. Buildings are batched per-TOWN (one mesh for all buildings
+   * in a town), not per-floor. To hide upper floors when player is on ground floor
+   * would require:
+   * 1. Batching per-building-per-floor (significant performance impact)
+   * 2. Or using shader-based floor masking (complex)
+   *
+   * For now, all floors are always visible. Roofs can be hidden separately
+   * since they're in a dedicated roofMesh.
+   *
+   * The _playerCurrentFloor value IS tracked and can be used for:
+   * - UI indicators (showing current floor)
+   * - Sound effects (different footsteps per floor material)
+   * - Gameplay logic (floor-specific NPCs, etc.)
+   */
+  private updateFloorVisibility(): void {
+    // No-op: See architecture limitation above.
+    // Floor visibility requires per-building-per-floor mesh batching.
+  }
+
+  /**
+   * Update the player's current floor based on their Y position.
+   *
+   * Uses BuildingCollisionService to query building floor elevations
+   * and determine which floor the player is currently on.
+   *
+   * This enables:
+   * - UI indicators (showing "Floor 1", "Floor 2", etc.)
+   * - Different footstep sounds per floor material
+   * - Floor-specific gameplay (NPCs, interactions)
+   */
+  private updatePlayerFloorTracking(): void {
+    // Get local player
+    const player = this.world.getPlayer?.();
+    if (!player) return;
+
+    // Get collision service from town system
+    const townSystem = this.world.getSystem("towns") as {
+      getCollisionService?: () => {
+        queryCollision: (
+          x: number,
+          z: number,
+          floorIndex: number,
+        ) => {
+          isInsideBuilding: boolean;
+          buildingId: string | null;
+          floorIndex: number | null;
+        };
+        getBuilding: (id: string) =>
+          | {
+              floors: Array<{ floorIndex: number; elevation: number }>;
+            }
+          | undefined;
+      };
+    } | null;
+
+    const collisionService = townSystem?.getCollisionService?.();
+    if (!collisionService) return;
+
+    // Convert player position to tile
+    const tileX = Math.floor(player.position.x);
+    const tileZ = Math.floor(player.position.z);
+    const playerY = player.position.y;
+
+    // Query collision to see if player is in a building
+    const result = collisionService.queryCollision(
+      tileX,
+      tileZ,
+      this._playerCurrentFloor,
+    );
+
+    if (!result.isInsideBuilding || !result.buildingId) {
+      // Player is outside - floor is 0 (ground level)
+      if (this._playerCurrentFloor !== 0) {
+        this._playerCurrentFloor = 0;
+        this.updateFloorVisibility();
+      }
+      return;
+    }
+
+    // Player is inside - find the floor that matches their Y position
+    const building = collisionService.getBuilding(result.buildingId);
+    if (!building) return;
+
+    // Find floor closest to player's Y position
+    let closestFloor = 0;
+    let closestDiff = Infinity;
+
+    for (const floor of building.floors) {
+      const diff = Math.abs(playerY - floor.elevation);
+      if (diff < closestDiff) {
+        closestDiff = diff;
+        closestFloor = floor.floorIndex;
+      }
+    }
+
+    // Update floor if changed
+    if (this._playerCurrentFloor !== closestFloor) {
+      this._playerCurrentFloor = closestFloor;
+      this.updateFloorVisibility();
+
+      // Emit event for UI components
+      this.world.emit("player:floor:changed", {
+        floor: closestFloor,
+        buildingId: result.buildingId,
+      });
+    }
+  }
+
   async start(): Promise<void> {
     // Only render buildings on client
     if (this.world.isServer) {
@@ -541,9 +997,18 @@ export class BuildingRenderingSystem extends SystemBase {
 
     const towns = townSystem.getTowns();
     if (towns.length === 0) {
-      this.logger.info("No towns to render");
+      this.logger.info("No towns to render - TownSystem returned empty array");
       return;
     }
+
+    // DEBUG: Log town and building counts to verify data is loaded
+    const totalBuildingCount = towns.reduce(
+      (sum, t) => sum + t.buildings.length,
+      0,
+    );
+    this.logger.info(
+      `[BuildingRenderingSystem] Starting render: ${towns.length} towns, ${totalBuildingCount} total buildings`,
+    );
 
     // Get terrain system for height queries
     const terrainSystem = this.world.getSystem("terrain") as {
@@ -564,7 +1029,8 @@ export class BuildingRenderingSystem extends SystemBase {
       townGroup.name = `Town_${town.id}`;
 
       const townBuildings: BuildingData[] = [];
-      const bodyGeometries: THREE.BufferGeometry[] = [];
+      const floorGeometries: THREE.BufferGeometry[] = [];
+      const wallGeometries: THREE.BufferGeometry[] = [];
       const roofGeometries: THREE.BufferGeometry[] = [];
       const triangleToBuildingMap = new Map<number, string>();
       let currentTriangleOffset = 0;
@@ -690,24 +1156,31 @@ export class BuildingRenderingSystem extends SystemBase {
 
           // Extract geometries for static batching
           if (BUILDING_PERF_CONFIG.enableStaticBatching) {
-            const { bodyGeo, roofGeo } = this.extractBuildingGeometries(mesh);
+            const { floorGeo, wallGeo, roofGeo } =
+              this.extractBuildingGeometries(mesh);
 
-            if (bodyGeo) {
-              bodyGeometries.push(bodyGeo);
-              // Map triangles to building ID for raycast hit detection
-              const bodyTriangles = bodyGeo.index
-                ? bodyGeo.index.count / 3
-                : (bodyGeo.getAttribute("position")?.count ?? 0) / 3;
-              for (let t = 0; t < bodyTriangles; t++) {
+            // Floor geometry (walkable surfaces)
+            if (floorGeo) {
+              floorGeometries.push(floorGeo);
+              // Map floor triangles to building ID for raycast hit detection
+              const floorTriangles = floorGeo.index
+                ? floorGeo.index.count / 3
+                : (floorGeo.getAttribute("position")?.count ?? 0) / 3;
+              for (let t = 0; t < floorTriangles; t++) {
                 triangleToBuildingMap.set(
                   currentTriangleOffset + t,
                   building.id,
                 );
               }
               buildingData.batchedIndexOffset = currentTriangleOffset;
-              buildingData.batchedTriangleCount = bodyTriangles;
-              currentTriangleOffset += bodyTriangles;
+              buildingData.batchedTriangleCount = floorTriangles;
+              currentTriangleOffset += floorTriangles;
             }
+            // Wall geometry (non-walkable)
+            if (wallGeo) {
+              wallGeometries.push(wallGeo);
+            }
+            // Roof geometry
             if (roofGeo) {
               roofGeometries.push(roofGeo);
             }
@@ -763,17 +1236,18 @@ export class BuildingRenderingSystem extends SystemBase {
       let batchedMesh: BatchedTownMesh | undefined;
       if (
         BUILDING_PERF_CONFIG.enableStaticBatching &&
-        bodyGeometries.length > 0
+        (floorGeometries.length > 0 || wallGeometries.length > 0)
       ) {
         batchedMesh = this.createBatchedTownMesh(
-          bodyGeometries,
+          floorGeometries,
+          wallGeometries,
           roofGeometries,
           triangleToBuildingMap,
           townGroup,
         );
-        totalDrawCalls += 2; // body + roof = 2 draw calls per town
+        totalDrawCalls += 3; // floors + walls + roof = 3 draw calls per town
       } else {
-        totalDrawCalls += townBuildings.length * 2; // Individual meshes
+        totalDrawCalls += townBuildings.length * 3; // Individual meshes
       }
 
       // Only add town group if it has buildings
@@ -822,6 +1296,41 @@ export class BuildingRenderingSystem extends SystemBase {
       `Rendered ${renderedBuildings}/${totalBuildings} buildings across ${this.townMeshes.size} towns ` +
         `(batching: ${batchingStatus}, draw calls: ~${totalDrawCalls})`,
     );
+
+    // === CRITICAL VALIDATION ===
+    // Verify buildings were actually rendered if we expected them
+    if (totalBuildings > 0 && renderedBuildings === 0) {
+      throw new Error(
+        `[BuildingRendering] CRITICAL: ${totalBuildings} buildings to render but ZERO were rendered! ` +
+          `Building click detection will NOT work.`,
+      );
+    }
+
+    // Verify floor meshes exist in scene for click detection
+    if (renderedBuildings > 0 && BUILDING_PERF_CONFIG.enableStaticBatching) {
+      let floorMeshCount = 0;
+      for (const townGroup of this.townMeshes.values()) {
+        townGroup.traverse((child) => {
+          if (
+            child instanceof THREE.Mesh &&
+            child.userData?.type === "batched-building-floors"
+          ) {
+            floorMeshCount++;
+          }
+        });
+      }
+
+      if (floorMeshCount === 0) {
+        throw new Error(
+          `[BuildingRendering] CRITICAL: ${renderedBuildings} buildings rendered but NO floor meshes found! ` +
+            `Click-to-move on buildings will NOT work.`,
+        );
+      }
+
+      this.logger.info(
+        `Verified ${floorMeshCount} floor meshes in scene for click detection`,
+      );
+    }
 
     // Start processing impostor bakes asynchronously
     this.processImpostorBakeQueue();
@@ -1131,14 +1640,21 @@ export class BuildingRenderingSystem extends SystemBase {
 
   /**
    * Extract geometries from a building mesh for batching.
-   * Applies world transforms and separates body/roof geometries.
+   * Applies world transforms and separates floors/walls/roof geometries.
+   *
+   * Separation is based on mesh names from BuildingGenerator:
+   * - "floors" → walkable surfaces (for click-to-move raycast)
+   * - "walls" → non-walkable (excluded from click raycast, gets occlusion shader)
+   * - "roof" → roof pieces (can be hidden when inside building)
    */
   private extractBuildingGeometries(mesh: THREE.Mesh | THREE.Group): {
-    bodyGeo: THREE.BufferGeometry | null;
+    floorGeo: THREE.BufferGeometry | null;
+    wallGeo: THREE.BufferGeometry | null;
     roofGeo: THREE.BufferGeometry | null;
     triangleCount: number;
   } {
-    const bodyGeometries: THREE.BufferGeometry[] = [];
+    const floorGeometries: THREE.BufferGeometry[] = [];
+    const wallGeometries: THREE.BufferGeometry[] = [];
     const roofGeometries: THREE.BufferGeometry[] = [];
     let triangleCount = 0;
 
@@ -1154,25 +1670,43 @@ export class BuildingRenderingSystem extends SystemBase {
           : (geo.getAttribute("position")?.count ?? 0);
         triangleCount += Math.floor(indexCount / 3);
 
-        // Separate roof from body based on mesh name
-        if (child.name.toLowerCase().includes("roof")) {
+        // Separate based on mesh name from BuildingGenerator
+        const name = child.name.toLowerCase();
+        if (name.includes("roof")) {
           roofGeometries.push(geo);
+        } else if (name.includes("floor")) {
+          floorGeometries.push(geo);
+        } else if (name.includes("wall") || name === "body") {
+          // "walls" or legacy "body" mesh → walls
+          wallGeometries.push(geo);
         } else {
-          bodyGeometries.push(geo);
+          // Default to walls for any unrecognized meshes
+          wallGeometries.push(geo);
         }
       }
     });
 
-    // Merge body geometries
-    let bodyGeo: THREE.BufferGeometry | null = null;
-    if (bodyGeometries.length > 0) {
-      bodyGeo =
-        bodyGeometries.length === 1
-          ? bodyGeometries[0]
-          : mergeGeometries(bodyGeometries, false);
-      // Dispose individual geometries if merged
-      if (bodyGeometries.length > 1) {
-        for (const geo of bodyGeometries) geo.dispose();
+    // Merge floor geometries (walkable)
+    let floorGeo: THREE.BufferGeometry | null = null;
+    if (floorGeometries.length > 0) {
+      floorGeo =
+        floorGeometries.length === 1
+          ? floorGeometries[0]
+          : mergeGeometries(floorGeometries, false);
+      if (floorGeometries.length > 1) {
+        for (const geo of floorGeometries) geo.dispose();
+      }
+    }
+
+    // Merge wall geometries (non-walkable)
+    let wallGeo: THREE.BufferGeometry | null = null;
+    if (wallGeometries.length > 0) {
+      wallGeo =
+        wallGeometries.length === 1
+          ? wallGeometries[0]
+          : mergeGeometries(wallGeometries, false);
+      if (wallGeometries.length > 1) {
+        for (const geo of wallGeometries) geo.dispose();
       }
     }
 
@@ -1188,41 +1722,119 @@ export class BuildingRenderingSystem extends SystemBase {
       }
     }
 
-    return { bodyGeo, roofGeo, triangleCount };
+    return { floorGeo, wallGeo, roofGeo, triangleCount };
   }
 
   /**
-   * Create a batched mesh for an entire town.
-   * Merges all building geometries into a single mesh for minimal draw calls.
+   * Create batched meshes for an entire town.
+   * Creates three separate meshes:
+   * - floorMesh: walkable surfaces (Layer 2 - for click-to-move raycast)
+   * - wallMesh: non-walkable (Layer 1 - gets occlusion shader)
+   * - roofMesh: roof pieces (can be hidden when inside)
    */
   private createBatchedTownMesh(
-    bodyGeometries: THREE.BufferGeometry[],
+    floorGeometries: THREE.BufferGeometry[],
+    wallGeometries: THREE.BufferGeometry[],
     roofGeometries: THREE.BufferGeometry[],
     triangleToBuildingMap: Map<number, string>,
     townGroup: THREE.Group,
   ): BatchedTownMesh {
-    // Merge all body geometries into one
-    const mergedBodyGeo =
-      bodyGeometries.length === 1
-        ? bodyGeometries[0]
-        : mergeGeometries(bodyGeometries, false);
+    // === FLOOR MESH (walkable - raycastable for click-to-move) ===
+    let floorMesh: THREE.Mesh;
+    if (floorGeometries.length > 0) {
+      const mergedFloorGeo =
+        floorGeometries.length === 1
+          ? floorGeometries[0]
+          : mergeGeometries(floorGeometries, false);
 
-    if (!mergedBodyGeo) {
-      throw new Error("Failed to merge body geometries");
+      if (mergedFloorGeo) {
+        // Floors use a simple material (no occlusion needed - they're walkable)
+        const floorMaterial = new THREE.MeshStandardMaterial({
+          vertexColors: true,
+          roughness: 0.85,
+          metalness: 0.05,
+        });
+        floorMesh = new THREE.Mesh(mergedFloorGeo, floorMaterial);
+        floorMesh.name = "BatchedBuildingFloors";
+        floorMesh.castShadow = true;
+        floorMesh.receiveShadow = true;
+        // Layer 2 for click-to-move raycasting (terrain is layer 0, entities layer 1)
+        floorMesh.layers.set(2);
+        floorMesh.userData = {
+          type: "batched-building-floors",
+          walkable: true,
+          triangleToBuildingMap,
+        };
+        townGroup.add(floorMesh);
+
+        // CRITICAL VALIDATION: Ensure floor mesh is on correct layer for raycasting
+        if (!floorMesh.layers.isEnabled(2)) {
+          throw new Error(
+            `[BuildingRendering] CRITICAL: Floor mesh not on layer 2! Click-to-move will not work.`,
+          );
+        }
+
+        // Log floor mesh creation for debugging
+        const vertexCount = mergedFloorGeo.getAttribute("position")?.count ?? 0;
+        console.log(
+          `[BuildingRendering] Created floor mesh: ${vertexCount} vertices, layer=${floorMesh.layers.mask}`,
+        );
+      } else {
+        // mergeGeometries returned null - this shouldn't happen with valid geometries
+        console.warn(
+          `[BuildingRendering] WARNING: mergeGeometries returned null for ${floorGeometries.length} floor geometries`,
+        );
+        floorMesh = new THREE.Mesh(
+          new THREE.BufferGeometry(),
+          this.batchedMaterial,
+        );
+      }
+    } else {
+      // No floor geometries - this is a problem if we expected buildings
+      console.warn(
+        `[BuildingRendering] WARNING: No floor geometries provided to createBatchedTownMesh`,
+      );
+      floorMesh = new THREE.Mesh(
+        new THREE.BufferGeometry(),
+        this.batchedMaterial,
+      );
     }
 
-    // Create batched body mesh
-    const bodyMesh = new THREE.Mesh(mergedBodyGeo, this.batchedMaterial);
-    bodyMesh.name = "BatchedBuildingBody";
-    bodyMesh.castShadow = true;
-    bodyMesh.receiveShadow = true;
-    bodyMesh.userData = {
-      type: "batched-buildings",
-      triangleToBuildingMap, // For raycast hit detection
-    };
-    townGroup.add(bodyMesh);
+    // === WALL MESH (non-walkable - gets occlusion shader) ===
+    let wallMesh: THREE.Mesh;
+    if (wallGeometries.length > 0) {
+      const mergedWallGeo =
+        wallGeometries.length === 1
+          ? wallGeometries[0]
+          : mergeGeometries(wallGeometries, false);
 
-    // Merge all roof geometries into one
+      if (mergedWallGeo) {
+        // Walls use the occlusion material (see-through effect)
+        wallMesh = new THREE.Mesh(mergedWallGeo, this.batchedMaterial);
+        wallMesh.name = "BatchedBuildingWalls";
+        wallMesh.castShadow = true;
+        wallMesh.receiveShadow = true;
+        // Layer 1 (main camera only, excluded from click-to-move raycast)
+        wallMesh.layers.set(1);
+        wallMesh.userData = {
+          type: "batched-building-walls",
+          walkable: false,
+        };
+        townGroup.add(wallMesh);
+      } else {
+        wallMesh = new THREE.Mesh(
+          new THREE.BufferGeometry(),
+          this.batchedMaterial,
+        );
+      }
+    } else {
+      wallMesh = new THREE.Mesh(
+        new THREE.BufferGeometry(),
+        this.batchedMaterial,
+      );
+    }
+
+    // === ROOF MESH (can be hidden when inside building) ===
     let roofMesh: THREE.Mesh;
     if (roofGeometries.length > 0) {
       const mergedRoofGeo =
@@ -1231,13 +1843,19 @@ export class BuildingRenderingSystem extends SystemBase {
           : mergeGeometries(roofGeometries, false);
 
       if (mergedRoofGeo) {
+        // Roofs use the occlusion material too
         roofMesh = new THREE.Mesh(mergedRoofGeo, this.batchedMaterial);
         roofMesh.name = "BatchedBuildingRoof";
         roofMesh.castShadow = true;
         roofMesh.receiveShadow = true;
+        // Layer 1 (main camera only)
+        roofMesh.layers.set(1);
+        roofMesh.userData = {
+          type: "batched-building-roof",
+          walkable: false,
+        };
         townGroup.add(roofMesh);
       } else {
-        // Fallback: create empty mesh
         roofMesh = new THREE.Mesh(
           new THREE.BufferGeometry(),
           this.batchedMaterial,
@@ -1251,20 +1869,29 @@ export class BuildingRenderingSystem extends SystemBase {
     }
 
     // Dispose individual geometries (they're now merged)
-    if (bodyGeometries.length > 1) {
-      for (const geo of bodyGeometries) geo.dispose();
+    if (floorGeometries.length > 1) {
+      for (const geo of floorGeometries) geo.dispose();
+    }
+    if (wallGeometries.length > 1) {
+      for (const geo of wallGeometries) geo.dispose();
     }
     if (roofGeometries.length > 1) {
       for (const geo of roofGeometries) geo.dispose();
     }
 
+    const totalVertices =
+      (floorMesh.geometry.getAttribute("position")?.count ?? 0) +
+      (wallMesh.geometry.getAttribute("position")?.count ?? 0) +
+      (roofMesh.geometry.getAttribute("position")?.count ?? 0);
+
     this.logger.info(
-      `Created batched town mesh: ${mergedBodyGeo.getAttribute("position")?.count ?? 0} vertices, ` +
+      `Created batched town meshes: ${totalVertices} vertices, ` +
         `${triangleToBuildingMap.size} triangles mapped to ${new Set(triangleToBuildingMap.values()).size} buildings`,
     );
 
     return {
-      bodyMesh,
+      floorMesh,
+      wallMesh,
       roofMesh,
       triangleToBuildingMap,
     };
@@ -1644,6 +2271,11 @@ export class BuildingRenderingSystem extends SystemBase {
     // Only update LOD every frame (buildings don't need throttling - few buildings)
     const cameraPos = camera.position;
 
+    // ============================================
+    // UPDATE OCCLUSION SHADER UNIFORMS
+    // ============================================
+    this.updateOcclusionUniforms(cameraPos);
+
     // Check if camera moved significantly
     const moved = this._lastCameraPos.distanceToSquared(cameraPos) > 1;
     if (!moved && this.townData.size > 0) return;
@@ -1654,6 +2286,11 @@ export class BuildingRenderingSystem extends SystemBase {
     // ROOF AUTO-HIDE (when player inside building)
     // ============================================
     this.updateRoofVisibility(cameraPos);
+
+    // ============================================
+    // FLOOR TRACKING (for UI, sounds, gameplay)
+    // ============================================
+    this.updatePlayerFloorTracking();
 
     // LOD distances (squared for efficiency)
     const lod1DistSq = this.lodConfig.lod1DistanceSq;
@@ -1721,7 +2358,8 @@ export class BuildingRenderingSystem extends SystemBase {
           town.visible = false;
           // Hide batched mesh
           if (town.batchedMesh) {
-            town.batchedMesh.bodyMesh.visible = false;
+            town.batchedMesh.floorMesh.visible = false;
+            town.batchedMesh.wallMesh.visible = false;
             town.batchedMesh.roofMesh.visible = false;
           }
           // Hide impostor atlas or individual impostors
@@ -1760,7 +2398,8 @@ export class BuildingRenderingSystem extends SystemBase {
 
         if (isCulled) {
           // Hide batched mesh and impostors
-          town.batchedMesh.bodyMesh.visible = false;
+          town.batchedMesh.floorMesh.visible = false;
+          town.batchedMesh.wallMesh.visible = false;
           town.batchedMesh.roofMesh.visible = false;
           // Hide impostor atlas or individual impostors
           if (town.impostorAtlas) {
@@ -1777,7 +2416,8 @@ export class BuildingRenderingSystem extends SystemBase {
           }
         } else if (useImpostors) {
           // Hide batched mesh, show impostors (atlas or individual)
-          town.batchedMesh.bodyMesh.visible = false;
+          town.batchedMesh.floorMesh.visible = false;
+          town.batchedMesh.wallMesh.visible = false;
           town.batchedMesh.roofMesh.visible = false;
 
           if (town.impostorAtlas) {
@@ -1802,12 +2442,14 @@ export class BuildingRenderingSystem extends SystemBase {
           }
         } else {
           // Show batched mesh, hide impostors
-          town.batchedMesh.bodyMesh.visible = true;
+          town.batchedMesh.floorMesh.visible = true;
+          town.batchedMesh.wallMesh.visible = true;
           town.batchedMesh.roofMesh.visible = true;
 
           // Shadow optimization based on distance
           const enableShadows = effectiveDistSq <= lod1DistSq;
-          town.batchedMesh.bodyMesh.castShadow = enableShadows;
+          town.batchedMesh.floorMesh.castShadow = enableShadows;
+          town.batchedMesh.wallMesh.castShadow = enableShadows;
           town.batchedMesh.roofMesh.castShadow = enableShadows;
 
           // Hide impostor atlas or individual impostors
@@ -2093,8 +2735,13 @@ export class BuildingRenderingSystem extends SystemBase {
     for (const town of this.townData.values()) {
       // Dispose batched mesh geometries
       if (town.batchedMesh) {
-        town.batchedMesh.bodyMesh.geometry.dispose();
+        town.batchedMesh.floorMesh.geometry.dispose();
+        town.batchedMesh.wallMesh.geometry.dispose();
         town.batchedMesh.roofMesh.geometry.dispose();
+        // Dispose floor material (separate from wall/roof material)
+        if (town.batchedMesh.floorMesh.material instanceof THREE.Material) {
+          town.batchedMesh.floorMesh.material.dispose();
+        }
         town.batchedMesh.triangleToBuildingMap.clear();
       }
 

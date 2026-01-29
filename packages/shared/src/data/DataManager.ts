@@ -147,6 +147,8 @@ export interface ExternalResourceData {
   type: string;
   examine?: string;
   modelPath: string | null;
+  /** LOD1 model path for medium distance rendering */
+  lod1ModelPath?: string | null;
   depletedModelPath: string | null;
   scale: number;
   depletedScale: number;
@@ -427,6 +429,7 @@ export class DataManager {
       }
 
       // Load buildings manifest for pre-defined towns
+      // Note: buildings.json is in the manifests/ folder
       try {
         const buildingsRes = await fetch(`${baseUrl}/buildings.json`);
         if (buildingsRes.ok) {
@@ -1195,7 +1198,8 @@ export class DataManager {
         "[DataManager] No gathering manifests found, falling back to resources.json",
       );
       try {
-        const resourcesRes = await fetch(`${baseUrl}/resources.json`);
+        // Legacy fallback - resources.json is in items/ folder
+        const resourcesRes = await fetch(`${baseUrl}/items/resources.json`);
         const resourceList =
           (await resourcesRes.json()) as Array<ExternalResourceData>;
         for (const resource of resourceList) {

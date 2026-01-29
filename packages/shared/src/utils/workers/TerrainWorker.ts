@@ -527,13 +527,32 @@ let workersChecked = false;
 let workersAvailable = false;
 
 /**
- * Check if terrain workers are available (client-side with Worker support)
+ * Check if terrain workers are available (client-side with Worker + Blob URL support)
+ * Bun provides Worker and Blob but doesn't support blob URLs for workers
  */
 export function isTerrainWorkerAvailable(): boolean {
   if (!workersChecked) {
     workersChecked = true;
-    workersAvailable =
-      typeof Worker !== "undefined" && typeof Blob !== "undefined";
+    // Check basic Worker/Blob availability
+    if (typeof Worker === "undefined" || typeof Blob === "undefined") {
+      workersAvailable = false;
+      return workersAvailable;
+    }
+    // Detect Bun runtime - Bun has Worker/Blob but blob URLs don't work for workers
+    if (
+      typeof process !== "undefined" &&
+      process.versions &&
+      "bun" in process.versions
+    ) {
+      workersAvailable = false;
+      return workersAvailable;
+    }
+    // Detect Node.js runtime (no browser globals like window)
+    if (typeof window === "undefined") {
+      workersAvailable = false;
+      return workersAvailable;
+    }
+    workersAvailable = true;
   }
   return workersAvailable;
 }

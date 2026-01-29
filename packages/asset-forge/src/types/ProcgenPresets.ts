@@ -12,7 +12,8 @@ export type ProcgenCategory =
   | "rock"
   | "plant"
   | "building"
-  | "terrain";
+  | "terrain"
+  | "roads";
 
 // Base preset interface
 export interface BaseProcgenPreset {
@@ -82,7 +83,7 @@ export interface PlantPreset extends BaseProcgenPreset {
 export interface BuildingPreset extends BaseProcgenPreset {
   category: "building";
   settings: {
-    buildingType: string; // e.g., "bank", "store", "inn"
+    buildingType: string; // e.g., "bank", "store", "inn", or "town" for town mode
     seed: string;
     showRoof: boolean;
     // Optional overrides
@@ -90,6 +91,7 @@ export interface BuildingPreset extends BaseProcgenPreset {
       floors?: number;
       width?: number;
       depth?: number;
+      townSize?: string; // "hamlet" | "village" | "town" for town mode
     };
   };
 }
@@ -110,13 +112,23 @@ export interface TerrainPreset extends BaseProcgenPreset {
   };
 }
 
+// Roads-specific preset (town road networks)
+export interface RoadsPreset extends BaseProcgenPreset {
+  category: "roads";
+  settings: {
+    townSize: "hamlet" | "village" | "town";
+    seed: number;
+  };
+}
+
 // Union type for all presets
 export type ProcgenPreset =
   | TreePreset
   | RockPreset
   | PlantPreset
   | BuildingPreset
-  | TerrainPreset;
+  | TerrainPreset
+  | RoadsPreset;
 
 // Batch generation request
 export interface BatchGenerationRequest {
@@ -175,6 +187,7 @@ export interface ProcgenPresetManifest {
     plants: PlantPreset[];
     buildings: BuildingPreset[];
     terrain: TerrainPreset[];
+    roads: RoadsPreset[];
   };
   generatedAssets: GeneratedProcgenAsset[];
 }
@@ -217,6 +230,11 @@ export const DEFAULT_PROCGEN_LOD_SETTINGS: Record<
   },
   terrain: {
     lod1: null, // Terrain uses tile-based LOD
+    lod2: null,
+    impostor: null,
+  },
+  roads: {
+    lod1: null, // Roads are part of town generation
     lod2: null,
     impostor: null,
   },

@@ -202,6 +202,17 @@ export class LODManager {
     const uvs = lod0.getAttribute("uv") as THREE.BufferAttribute | undefined;
     if (!positions) throw new Error(`[LODManager] No positions: ${id}`);
 
+    // Check if source contains skinned meshes - skip decimation if so
+    // Animation freezing (via Entity HLOD) handles LOD1 for skinned meshes
+    const isSkinned =
+      !(source instanceof THREE.BufferGeometry) &&
+      this.containsSkinnedMesh(source);
+    if (isSkinned) {
+      console.log(
+        `[LODManager] ${id}: Skinned mesh detected - skipping LOD1/LOD2 decimation (use animation freezing)`,
+      );
+    }
+
     const bundle: LODBundle = {
       id,
       category: opts.category,
@@ -215,7 +226,9 @@ export class LODManager {
       },
     };
 
-    if ((opts.generateLOD1 || opts.generateLOD2) && indices) {
+    // Skip LOD1/LOD2 decimation for skinned meshes - decimation loses bone weights
+    // Entity HLOD system uses freezeAnimationAtLOD1 to pause animations at distance instead
+    if ((opts.generateLOD1 || opts.generateLOD2) && indices && !isSkinned) {
       const decimationStart = performance.now();
       const workerInput: LODWorkerInput = {
         meshId: id,
@@ -291,10 +304,29 @@ export class LODManager {
     return configs;
   }
 
+  /**
+   * Check if an object contains skinned meshes (animated characters).
+   * Skinned meshes use animation freezing at LOD1 instead of geometry decimation.
+   */
+  private containsSkinnedMesh(source: THREE.Object3D): boolean {
+    let hasSkinned = false;
+    source.traverse((node) => {
+      if ((node as THREE.SkinnedMesh).isSkinnedMesh) {
+        hasSkinned = true;
+      }
+    });
+    return hasSkinned;
+  }
+
   private extractGeometry(
     source: THREE.Object3D | THREE.BufferGeometry,
   ): THREE.BufferGeometry | null {
     if (source instanceof THREE.BufferGeometry) return source;
+
+    // For skinned meshes, still extract geometry for LOD0 and impostor baking
+    // LOD1/LOD2 decimation is skipped in doGenerateLODBundle because it would
+    // lose bone weight data. Entity HLOD uses animation freezing instead.
+
     let geometry: THREE.BufferGeometry | null = null;
     source.traverse((node) => {
       if (!geometry && node instanceof THREE.Mesh && node.geometry)

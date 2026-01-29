@@ -269,6 +269,8 @@ export default defineConfig(({ mode }) => {
 
     define: {
       global: "globalThis", // Needed for some node polyfills in browser
+      // Provide Buffer global for libraries that expect it (bn.js, crypto)
+      Buffer: "globalThis.Buffer",
 
       // ============================================================================
       // SECURITY: process.env Polyfill for Browser
@@ -419,8 +421,9 @@ export default defineConfig(({ mode }) => {
           __dirname,
           "../procgen/dist/index.js",
         ),
-        // Ensure buffer polyfill is used consistently
-        buffer: "buffer",
+        // Ensure buffer polyfill is used consistently - point to actual npm package
+        // This prevents Vite from externalizing it as a Node built-in
+        buffer: path.resolve(__dirname, "../../node_modules/buffer/index.js"),
       },
       dedupe: ["three", "buffer"],
     },
@@ -442,6 +445,8 @@ export default defineConfig(({ mode }) => {
         define: {
           global: "globalThis",
         },
+        // Inject Buffer polyfill into all dependency bundles
+        inject: [path.resolve(__dirname, "src/polyfills/buffer-shim.js")],
       },
     },
     ssr: {

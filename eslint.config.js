@@ -157,6 +157,33 @@ export default [
 
         // PhysX global
         PHYSX: "readonly",
+
+        // WebGPU globals
+        GPUAdapter: "readonly",
+        GPUAdapterInfo: "readonly",
+        GPUBuffer: "readonly",
+        GPUBufferUsage: "readonly",
+        GPUBufferUsageFlags: "readonly",
+        GPUCanvasContext: "readonly",
+        GPUCommandEncoder: "readonly",
+        GPUComputePipeline: "readonly",
+        GPUDevice: "readonly",
+        GPUMapMode: "readonly",
+        GPUPowerPreference: "readonly",
+        GPUQueue: "readonly",
+        GPURenderPipeline: "readonly",
+        GPUShaderModule: "readonly",
+        GPUTexture: "readonly",
+        GPUTextureFormat: "readonly",
+        GPUTextureUsage: "readonly",
+
+        // WebAssembly globals
+        WebAssembly: "readonly",
+
+        // Additional DOM globals
+        AbortSignal: "readonly",
+        DOMException: "readonly",
+        ImageData: "readonly",
       },
     },
     plugins: {

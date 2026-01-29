@@ -13,6 +13,8 @@ import {
   ChevronDown,
   Boxes,
   Globe,
+  Route,
+  Sprout,
 } from "lucide-react";
 import React, { useState, useRef, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
@@ -22,9 +24,12 @@ import { ROUTES } from "../../constants";
 // Procedural generator menu items
 const GENERATOR_ITEMS = [
   { route: ROUTES.BUILDING_GEN, label: "Buildings & Towns", icon: Building2 },
+  { route: ROUTES.TERRAIN_GEN, label: "Terrain", icon: Mountain },
+  { route: ROUTES.ROADS_GEN, label: "Roads", icon: Route },
   { route: ROUTES.TREE_GEN, label: "Trees", icon: TreePine },
-  { route: ROUTES.ROCK_GEN, label: "Rocks", icon: Mountain },
+  { route: ROUTES.ROCK_GEN, label: "Rocks", icon: Globe },
   { route: ROUTES.PLANT_GEN, label: "Plants", icon: Flower2 },
+  { route: ROUTES.GRASS_GEN, label: "Grass", icon: Sprout },
 ] as const;
 
 const Navigation: React.FC = () => {

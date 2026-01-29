@@ -101,6 +101,8 @@ export class NPCEntity extends Entity {
 
   /** Animation LOD controller - throttles animation updates for distant NPCs */
   private readonly _animationLOD = new AnimationLOD(ANIMATION_LOD_PRESETS.NPC);
+  /** Track if idle pose has been applied at least once - prevents T-pose at frozen distances */
+  private _hasAppliedIdlePose = false;
 
   /** Distance fade controller - dissolve effect for entities near render distance */
   private _distanceFade: DistanceFadeController | null = null;
@@ -359,10 +361,6 @@ export class NPCEntity extends Entity {
       vrmHooks,
     );
 
-    // Set initial emote to idle (service NPCs should stand still)
-    this._currentEmote = Emotes.IDLE;
-    this._avatarInstance.setEmote(this._currentEmote);
-
     // Set up userData for interaction detection on the avatar
     // Get the VRM scene from the instance
     const instanceWithRaw = this._avatarInstance as {
@@ -371,6 +369,10 @@ export class NPCEntity extends Entity {
     if (instanceWithRaw?.raw?.scene) {
       // Set mesh reference for HLOD system
       this.mesh = instanceWithRaw.raw.scene;
+
+      // CRITICAL: Hide VRM mesh immediately to prevent T-pose flash
+      // The mesh will be shown only after idle animation is loaded and applied
+      this.mesh.visible = false;
 
       const userData = {
         type: "npc",
@@ -395,42 +397,67 @@ export class NPCEntity extends Entity {
         child.raycast = () => {};
       });
 
-      // AAA LOD: Initialize HLOD impostor support for VRM NPCs
-      // Bake impostor in idle pose (not T-pose), freeze animations at LOD1
+      // CRITICAL: Load and apply idle emote BEFORE making VRM visible
+      // This prevents T-pose flash on spawn - NPCs should NEVER appear in T-pose
+      const avatarWithEmote = this._avatarInstance as {
+        setEmote?: (emote: string) => void;
+        setEmoteAndWait?: (emote: string, timeoutMs?: number) => Promise<void>;
+        update: (delta: number) => void;
+      };
+
+      // Set initial emote to idle and WAIT for it to load (service NPCs should stand still)
+      this._currentEmote = Emotes.IDLE;
+      if (avatarWithEmote.setEmoteAndWait) {
+        try {
+          await avatarWithEmote.setEmoteAndWait(Emotes.IDLE, 3000);
+        } catch {
+          // Timeout is okay - the rest pose fallback will handle it
+          avatarWithEmote.setEmote?.(Emotes.IDLE);
+        }
+      } else if (avatarWithEmote.setEmote) {
+        avatarWithEmote.setEmote(Emotes.IDLE);
+      }
+
+      // Apply first frame of animation to skeleton before showing
+      this._avatarInstance.update(0);
+      this.mesh.updateMatrixWorld(true);
+
+      // NOW make VRM visible - idle animation is guaranteed to be playing (or rest pose fallback)
+      this.mesh.visible = true;
+
+      // Initialize HLOD impostor support for VRM NPCs
+      // VRM models use a different rendering path (avatarInstance.move()) but we can still use impostors.
+      // The key is that this.node.position is kept in sync with the VRM's world position,
+      // so the impostor (parented to this.node) will be at the correct position.
       await this.initHLOD(
-        `npc_vrm_${this.config.npcType}_${this.config.model}`,
+        `vrm_npc_${this.config.npcType}_${this.config.model}`,
         {
           category: "npc",
-          atlasSize: 512,
+          atlasSize: 512, // Smaller for NPCs
           hemisphere: true,
           freezeAnimationAtLOD1: true, // AAA LOD: Freeze animation at medium distance
           prepareForBake: async () => {
-            // AAA LOD: Ensure VRM is in idle pose before baking impostor
-            // The VRM factory's update() handles rest pose fallback if no emote is playing
-            if (this._avatarInstance && this.mesh) {
-              // Ensure idle emote is set if available
-              const instanceWithEmote = this._avatarInstance as {
-                setEmote?: (emote: string) => void;
-                setEmoteAndWait?: (
-                  emote: string,
-                  timeoutMs?: number,
-                ) => Promise<void>;
-                update: (delta: number) => void;
-              };
+            // AAA LOD: Prepare VRM mesh for impostor baking at local origin
+            if (this.mesh && this._avatarInstance) {
+              const savedPosition = this.mesh.position.clone();
+              const savedQuaternion = this.mesh.quaternion.clone();
 
-              // Set idle emote if not already set
-              if (instanceWithEmote.setEmoteAndWait) {
-                await instanceWithEmote.setEmoteAndWait(Emotes.IDLE, 2000);
-              } else if (instanceWithEmote.setEmote) {
-                instanceWithEmote.setEmote(Emotes.IDLE);
-              }
+              // Move mesh to local origin for baking
+              this.mesh.position.set(0, 0, 0);
+              this.mesh.quaternion.identity();
 
-              // Update animation to apply idle pose to skeleton
-              // delta=0 applies current animation state without advancing time
+              // Update the animation to ensure idle pose at frame 0
               this._avatarInstance.update(0);
-
-              // Force complete matrix world update
               this.mesh.updateMatrixWorld(true);
+
+              // Restore position after baking (microtask)
+              Promise.resolve().then(() => {
+                if (this.mesh) {
+                  this.mesh.position.copy(savedPosition);
+                  this.mesh.quaternion.copy(savedQuaternion);
+                  this.mesh.updateMatrixWorld(true);
+                }
+              });
             }
           },
         },
@@ -748,7 +775,49 @@ export class NPCEntity extends Entity {
           effectiveDelta: deltaTime,
           lodLevel: 0,
           distanceSq: 0,
+          shouldApplyRestPose: false,
         };
+
+    // T-POSE FIX: When entering frozen state (or never applied idle), apply idle pose once
+    // This ensures NPCs at frozen/culled distances show idle pose instead of T-pose
+    // The shouldApplyRestPose flag is true when transitioning INTO frozen state
+    const needsIdlePoseApplication =
+      animLODResult.shouldApplyRestPose || !this._hasAppliedIdlePose;
+
+    if (needsIdlePoseApplication) {
+      // VRM path: Apply idle pose
+      if (this._avatarInstance) {
+        const avatarWithEmote = this._avatarInstance as {
+          setEmote?: (emote: string) => void;
+        };
+        // Ensure idle emote is set
+        if (avatarWithEmote.setEmote && this._currentEmote !== Emotes.IDLE) {
+          this._currentEmote = Emotes.IDLE;
+          avatarWithEmote.setEmote(Emotes.IDLE);
+        }
+        // Apply frame 0 to bake idle pose into skeleton
+        this._avatarInstance.update(0);
+        this._hasAppliedIdlePose = true;
+      }
+      // GLB path: Apply idle pose via mixer
+      else {
+        const mixer = (this as { mixer?: THREE.AnimationMixer }).mixer;
+        if (mixer) {
+          mixer.update(0);
+          // Force skeleton update
+          if (this.mesh) {
+            this.mesh.traverse((child) => {
+              if (child instanceof THREE.SkinnedMesh && child.skeleton) {
+                child.skeleton.bones.forEach((bone) =>
+                  bone.updateMatrixWorld(),
+                );
+              }
+            });
+          }
+          this._hasAppliedIdlePose = true;
+        }
+      }
+    }
 
     // VRM avatar path: Update avatar instance
     if (this._avatarInstance) {

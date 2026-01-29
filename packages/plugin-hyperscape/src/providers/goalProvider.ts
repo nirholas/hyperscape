@@ -234,6 +234,7 @@ export function getAvailableGoals(service: HyperscapeService): GoalOption[] {
       type: "starter_items",
       description: "Search the starter chest for basic tools and food",
       targetEntity: "starter_chest",
+      location: "spawn", // Starter chest is at spawn
       priority: 100, // Highest priority - new players need tools!
       reason:
         "You have no basic tools! The starter chest contains an axe, pickaxe, tinderbox, fishing net, and food to get you started.",
@@ -334,6 +335,7 @@ export function getAvailableGoals(service: HyperscapeService): GoalOption[] {
     targetSkill: "fishing",
     targetSkillLevel: fishingLevel + 2,
     targetEntity: "fishing_spot",
+    location: "fishing",
     priority: hasFishingSpots ? 60 : 35,
     reason: hasFishingSpots
       ? "Fishing spots nearby - steady XP gains"
@@ -348,6 +350,7 @@ export function getAvailableGoals(service: HyperscapeService): GoalOption[] {
     targetSkill: "mining",
     targetSkillLevel: miningLevel + 2,
     targetEntity: "mining_rock",
+    location: "mine",
     priority: hasMiningRocks ? 60 : 35,
     reason: hasMiningRocks
       ? "Mining rocks nearby - good for mining practice"

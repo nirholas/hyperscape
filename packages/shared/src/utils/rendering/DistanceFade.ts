@@ -48,7 +48,6 @@ export const enum FadeState {
 // Shader uniforms for dithered dissolve with occlusion support
 const DISSOLVE_SHADER_UNIFORMS = `
 uniform float uFadeAmount;
-uniform float uDitherScale;
 uniform vec3 uCameraPos;
 uniform vec3 uPlayerPos;
 uniform float uOcclusionEnabled;
@@ -68,60 +67,59 @@ const DISSOLVE_FRAGMENT_VARYING = `
 varying vec3 vWorldPositionDissolve;
 `;
 
-// Fragment shader code for dithered dissolve with RuneScape-style cone occlusion
+// Fragment shader code for dithered dissolve with RuneScape 3-style effects
 const DISSOLVE_SHADER_FRAGMENT = `
-// Distance-based dithering
-vec2 ditherCoord = gl_FragCoord.xy * uDitherScale;
-float hash = fract(sin(dot(ditherCoord, vec2(12.9898, 78.233))) * 43758.5453);
+// SCREEN-SPACE 4x4 BAYER DITHERING (RuneScape 3 style)
+// 4x4 Bayer matrix: [ 0, 8, 2,10; 12, 4,14, 6; 3,11, 1, 9; 15, 7,13, 5]/16
+float ix = mod(floor(gl_FragCoord.x), 4.0);
+float iy = mod(floor(gl_FragCoord.y), 4.0);
+
+float bit0_x = mod(ix, 2.0);
+float bit1_x = floor(ix * 0.5);
+float bit0_y = mod(iy, 2.0);
+float bit1_y = floor(iy * 0.5);
+float xor0 = abs(bit0_x - bit0_y);
+float xor1 = abs(bit1_x - bit1_y);
+float ditherValue = (xor0 * 8.0 + bit0_y * 4.0 + xor1 * 2.0 + bit1_y) * 0.0625;
 
 // Base fade from distance
 float fadeValue = uFadeAmount;
 
+// NEAR-CAMERA DISSOLVE (prevents hard clipping)
+vec3 camToFrag = vWorldPositionDissolve - uCameraPos;
+float camDist = length(camToFrag);
+float nearCameraFade = 1.0 - smoothstep(${GPU_VEG_CONFIG.NEAR_CAMERA_FADE_END.toFixed(2)}, ${GPU_VEG_CONFIG.NEAR_CAMERA_FADE_START.toFixed(1)}, camDist);
+fadeValue = max(fadeValue, nearCameraFade);
+
 // Camera-to-player occlusion dissolve (RuneScape-style cone)
 if (uOcclusionEnabled > 0.5) {
   vec3 camToPlayer = uPlayerPos - uCameraPos;
-  vec3 camToFrag = vWorldPositionDissolve - uCameraPos;
-  
   float ctLengthSq = dot(camToPlayer, camToPlayer);
   float ctLength = sqrt(ctLengthSq);
-  vec3 ctDir = camToPlayer / ctLength;
+  vec3 ctDir = camToPlayer / max(ctLength, 0.001);
   
-  // Project fragment onto camera-player line
   float projDist = dot(camToFrag, ctDir);
+  float inRange = step(${GPU_VEG_CONFIG.OCCLUSION_NEAR_MARGIN.toFixed(1)}, projDist) * step(projDist, ctLength - ${GPU_VEG_CONFIG.OCCLUSION_FAR_MARGIN.toFixed(1)});
   
-  // Check if in occlusion range
-  float nearMargin = ${GPU_VEG_CONFIG.OCCLUSION_NEAR_MARGIN.toFixed(1)};
-  float farMargin = ${GPU_VEG_CONFIG.OCCLUSION_FAR_MARGIN.toFixed(1)};
-  float inRange = step(nearMargin, projDist) * step(projDist, ctLength - farMargin);
-  
-  // Calculate perpendicular distance
   vec3 projPoint = uCameraPos + projDist * ctDir;
   float perpDist = distance(vWorldPositionDissolve, projPoint);
   
-  // CONE RADIUS - expands from camera toward player (RuneScape-style)
-  float cameraRadius = ${GPU_VEG_CONFIG.OCCLUSION_CAMERA_RADIUS.toFixed(2)};
-  float playerRadius = ${GPU_VEG_CONFIG.OCCLUSION_PLAYER_RADIUS.toFixed(2)};
-  float distanceScale = ${GPU_VEG_CONFIG.OCCLUSION_DISTANCE_SCALE.toFixed(3)};
-  float t = clamp(projDist / ctLength, 0.0, 1.0);
-  float coneRadius = cameraRadius + t * (playerRadius - cameraRadius) + ctLength * distanceScale;
+  float t = clamp(projDist / max(ctLength, 0.001), 0.0, 1.0);
+  float coneRadius = ${GPU_VEG_CONFIG.OCCLUSION_CAMERA_RADIUS.toFixed(2)} + t * (${GPU_VEG_CONFIG.OCCLUSION_PLAYER_RADIUS.toFixed(2)} - ${GPU_VEG_CONFIG.OCCLUSION_CAMERA_RADIUS.toFixed(2)}) + ctLength * ${GPU_VEG_CONFIG.OCCLUSION_DISTANCE_SCALE.toFixed(3)};
   
-  // Sharp edge falloff (RuneScape-style binary disappearance)
-  float edgeSharpness = ${GPU_VEG_CONFIG.OCCLUSION_EDGE_SHARPNESS.toFixed(2)};
-  float edgeStart = coneRadius * (1.0 - edgeSharpness);
+  float edgeStart = coneRadius * (1.0 - ${GPU_VEG_CONFIG.OCCLUSION_EDGE_SHARPNESS.toFixed(2)});
   float occlusionFade = (1.0 - smoothstep(edgeStart, coneRadius, perpDist)) * ${GPU_VEG_CONFIG.OCCLUSION_STRENGTH.toFixed(2)} * inRange;
-  
-  // Combine with distance fade
   fadeValue = max(fadeValue, occlusionFade);
 }
 
-float threshold = hash + fadeValue - 0.5;
-if (threshold > 0.5) discard;
+// RS3-style: discard when fade >= dither (binary pattern)
+// Only discard if there's actual fade happening (prevents holes when fadeValue=0)
+if (fadeValue > 0.001 && fadeValue >= ditherValue) discard;
 `;
 
 /** Dissolve uniforms structure with occlusion support */
 export type DissolveUniforms = {
   fadeAmount: { value: number };
-  ditherScale: { value: number };
   cameraPos: { value: THREE.Vector3 };
   playerPos: { value: THREE.Vector3 };
   occlusionEnabled: { value: number };
@@ -143,7 +141,6 @@ function applyDissolveShader(
 
   const uniforms: DissolveUniforms = {
     fadeAmount: { value: 0.0 },
-    ditherScale: { value: 0.01 },
     cameraPos: { value: new THREE.Vector3() },
     playerPos: { value: new THREE.Vector3() },
     occlusionEnabled: { value: enableOcclusion ? 1.0 : 0.0 },
@@ -155,7 +152,6 @@ function applyDissolveShader(
 
     // Add uniforms
     shader.uniforms.uFadeAmount = uniforms.fadeAmount;
-    shader.uniforms.uDitherScale = uniforms.ditherScale;
     shader.uniforms.uCameraPos = uniforms.cameraPos;
     shader.uniforms.uPlayerPos = uniforms.playerPos;
     shader.uniforms.uOcclusionEnabled = uniforms.occlusionEnabled;

@@ -334,8 +334,8 @@ describe("Moderation System Integration Tests", () => {
   // ==========================================================================
 
   describe("User Creation with Roles", () => {
-    it("creates admin user in database", async ({ skip }) => {
-      if (!canRunDbTests) skip();
+    it("creates admin user in database", async () => {
+      if (!canRunDbTests) return;
 
       const admin = await createTestUser("TestAdmin", ["admin"]);
 
@@ -346,8 +346,8 @@ describe("Moderation System Integration Tests", () => {
       expect(roles).toContain("admin");
     });
 
-    it("creates mod user in database", async ({ skip }) => {
-      if (!canRunDbTests) skip();
+    it("creates mod user in database", async () => {
+      if (!canRunDbTests) return;
 
       const mod = await createTestUser("TestMod", ["mod"]);
 
@@ -358,8 +358,8 @@ describe("Moderation System Integration Tests", () => {
       expect(roles).toContain("mod");
     });
 
-    it("creates regular user in database", async ({ skip }) => {
-      if (!canRunDbTests) skip();
+    it("creates regular user in database", async () => {
+      if (!canRunDbTests) return;
 
       const user = await createTestUser("TestUser", []);
 
@@ -376,8 +376,8 @@ describe("Moderation System Integration Tests", () => {
   // ==========================================================================
 
   describe("Admin Granting Mod Role", () => {
-    it("admin can grant mod role to a regular user", async ({ skip }) => {
-      if (!canRunDbTests) skip();
+    it("admin can grant mod role to a regular user", async () => {
+      if (!canRunDbTests) return;
 
       // Create admin and regular user
       const admin = await createTestUser("GrantAdmin", ["admin"]);
@@ -398,8 +398,8 @@ describe("Moderation System Integration Tests", () => {
       expect(hasModPermission(updatedRoles)).toBe(true);
     });
 
-    it("mod cannot grant mod role (no admin permission)", async ({ skip }) => {
-      if (!canRunDbTests) skip();
+    it("mod cannot grant mod role (no admin permission)", async () => {
+      if (!canRunDbTests) return;
 
       const mod = await createTestUser("ModCantGrant", ["mod"]);
       const user = await createTestUser("UserTarget", []);
@@ -417,10 +417,8 @@ describe("Moderation System Integration Tests", () => {
   // ==========================================================================
 
   describe("Mod Cannot Kick Admin", () => {
-    it("mod attempting to kick admin is blocked by protection check", async ({
-      skip,
-    }) => {
-      if (!canRunDbTests) skip();
+    it("mod attempting to kick admin is blocked by protection check", async () => {
+      if (!canRunDbTests) return;
 
       const mod = await createTestUser("KickModActor", ["mod"]);
       const admin = await createTestUser("KickAdminTarget", ["admin"]);
@@ -437,8 +435,8 @@ describe("Moderation System Integration Tests", () => {
       expect(protection.reason).toContain("administrator");
     });
 
-    it("mod attempting to kick another mod is blocked", async ({ skip }) => {
-      if (!canRunDbTests) skip();
+    it("mod attempting to kick another mod is blocked", async () => {
+      if (!canRunDbTests) return;
 
       const mod1 = await createTestUser("KickMod1", ["mod"]);
       const mod2 = await createTestUser("KickMod2", ["mod"]);
@@ -457,8 +455,8 @@ describe("Moderation System Integration Tests", () => {
   // ==========================================================================
 
   describe("Mod Can Kick Regular User", () => {
-    it("mod can kick regular user (not protected)", async ({ skip }) => {
-      if (!canRunDbTests) skip();
+    it("mod can kick regular user (not protected)", async () => {
+      if (!canRunDbTests) return;
 
       const mod = await createTestUser("KickMod", ["mod"]);
       const user = await createTestUser("KickUser", []);
@@ -480,10 +478,8 @@ describe("Moderation System Integration Tests", () => {
   // ==========================================================================
 
   describe("Ban System", () => {
-    it("creates permanent ban and verifies user is banned", async ({
-      skip,
-    }) => {
-      if (!canRunDbTests) skip();
+    it("creates permanent ban and verifies user is banned", async () => {
+      if (!canRunDbTests) return;
 
       const mod = await createTestUser("BanMod", ["mod"]);
       const user = await createTestUser("BanUser", []);
@@ -505,8 +501,8 @@ describe("Moderation System Integration Tests", () => {
       expect(banCheck.expiresAt).toBeNull();
     });
 
-    it("creates temporary ban with expiration", async ({ skip }) => {
-      if (!canRunDbTests) skip();
+    it("creates temporary ban with expiration", async () => {
+      if (!canRunDbTests) return;
 
       const mod = await createTestUser("TempBanMod", ["mod"]);
       const user = await createTestUser("TempBanUser", []);
@@ -528,8 +524,8 @@ describe("Moderation System Integration Tests", () => {
       expect(banCheck.expiresAt).toBe(oneHourFromNow);
     });
 
-    it("expired ban is not considered active", async ({ skip }) => {
-      if (!canRunDbTests) skip();
+    it("expired ban is not considered active", async () => {
+      if (!canRunDbTests) return;
 
       const mod = await createTestUser("ExpiredBanMod", ["mod"]);
       const user = await createTestUser("ExpiredBanUser", []);
@@ -543,8 +539,8 @@ describe("Moderation System Integration Tests", () => {
       expect(banCheck.isBanned).toBe(false);
     });
 
-    it("unbanning user makes them not banned", async ({ skip }) => {
-      if (!canRunDbTests) skip();
+    it("unbanning user makes them not banned", async () => {
+      if (!canRunDbTests) return;
 
       const mod = await createTestUser("UnbanMod", ["mod"]);
       const user = await createTestUser("UnbanUser", []);
@@ -564,8 +560,8 @@ describe("Moderation System Integration Tests", () => {
       expect(banCheck.isBanned).toBe(false);
     });
 
-    it("non-banned user shows as not banned", async ({ skip }) => {
-      if (!canRunDbTests) skip();
+    it("non-banned user shows as not banned", async () => {
+      if (!canRunDbTests) return;
 
       const user = await createTestUser("NeverBannedUser", []);
 
@@ -579,8 +575,8 @@ describe("Moderation System Integration Tests", () => {
   // ==========================================================================
 
   describe("Full Moderation Flow", () => {
-    it("complete flow: admin → mod → ban user", async ({ skip }) => {
-      if (!canRunDbTests) skip();
+    it("complete flow: admin → mod → ban user", async () => {
+      if (!canRunDbTests) return;
 
       // Step 1: Create admin
       const admin = await createTestUser("FlowAdmin", ["admin"]);

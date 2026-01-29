@@ -790,7 +790,13 @@ export interface EventMap {
     spawnPoints: Array<{
       id: string;
       type: string;
+      /** Specific variant (e.g., "oak" for tree_oak, "copper" for ore_copper) */
+      subType?: string;
       position: { x: number; y: number; z: number };
+      /** Scale multiplier for visual variation */
+      scale?: number;
+      /** Y-axis rotation in radians for visual variation */
+      rotation?: number;
     }>;
   };
   [EventType.RESOURCE_MESH_CREATED]: {

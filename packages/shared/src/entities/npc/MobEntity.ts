@@ -187,6 +187,8 @@ export class MobEntity extends CombatantEntity {
   // Track if we've received authoritative position from server (Issue #416 fix)
   // Ensures all clients start with same XZ before terrain snapping
   private _hasReceivedServerPosition = false;
+  // Server Y position for building floor support - preserved when in building footprint
+  private _serverY: number | null = null;
   // Track if death position has been terrain-snapped (Issue #244 fix)
   // Ensures death animation plays at ground level, not floating
   private _deathPositionTerrainSnapped = false;
@@ -248,6 +250,8 @@ export class MobEntity extends CombatantEntity {
 
   /** Animation LOD controller - throttles animation updates for distant mobs */
   private readonly _animationLOD = new AnimationLOD(ANIMATION_LOD_PRESETS.MOB);
+  // Track if idle pose has been applied at least once - prevents T-pose at frozen distances
+  private _hasAppliedIdlePose = false;
 
   /** Distance fade controller - dissolve effect for entities near render distance */
   private _distanceFade: DistanceFadeController | null = null;
@@ -888,17 +892,6 @@ export class MobEntity extends CombatantEntity {
       vrmHooks,
     );
 
-    // Check for pending emote that arrived before VRM loaded
-    if (this._pendingServerEmote) {
-      // Apply the pending emote using the same logic as modify()
-      this.applyServerEmote(this._pendingServerEmote);
-      this._pendingServerEmote = null;
-    } else {
-      // Set initial emote to idle
-      this._currentEmote = Emotes.IDLE;
-      this._avatarInstance.setEmote(this._currentEmote);
-    }
-
     // NOTE: Don't register VRM instance as hot - the MobEntity itself is registered
     // The entity's clientUpdate() will call avatarInstance.update()
 
@@ -909,6 +902,10 @@ export class MobEntity extends CombatantEntity {
     if (instanceWithRaw?.raw?.scene) {
       this.mesh = instanceWithRaw.raw.scene;
       this.mesh.name = `Mob_VRM_${this.config.mobType}_${this.id}`;
+
+      // CRITICAL: Hide VRM mesh immediately to prevent T-pose flash
+      // The mesh will be shown only after idle animation is loaded and applied
+      this.mesh.visible = false;
 
       // PERFORMANCE: Set VRM mesh to layer 1 (main camera only, not minimap)
       // Minimap only renders terrain and uses 2D dots for entities
@@ -951,42 +948,93 @@ export class MobEntity extends CombatantEntity {
       // The factory already added the scene to world.stage.scene
       // We'll use avatarInstance.move() to position it each frame
 
-      // AAA LOD: Initialize HLOD impostor support for VRM mobs
-      // Bake impostor in idle pose (not T-pose), freeze animations at LOD1
+      // CRITICAL: Load and apply idle emote BEFORE making VRM visible
+      // This prevents T-pose flash on spawn - mobs should NEVER appear in T-pose
+      const avatarWithEmote = this._avatarInstance as {
+        setEmote?: (emote: string) => void;
+        setEmoteAndWait?: (emote: string, timeoutMs?: number) => Promise<void>;
+        update: (delta: number) => void;
+      };
+
+      // Check for pending emote that arrived before VRM loaded
+      if (this._pendingServerEmote) {
+        // Apply the pending emote using the same logic as modify()
+        this.applyServerEmote(this._pendingServerEmote);
+        this._pendingServerEmote = null;
+        // Wait for the pending emote to load if possible
+        if (avatarWithEmote.setEmoteAndWait && this._currentEmote) {
+          try {
+            await avatarWithEmote.setEmoteAndWait(this._currentEmote, 3000);
+          } catch {
+            // Timeout is okay - show anyway
+          }
+        }
+      } else {
+        // Set initial emote to idle and WAIT for it to load
+        this._currentEmote = Emotes.IDLE;
+        if (avatarWithEmote.setEmoteAndWait) {
+          try {
+            await avatarWithEmote.setEmoteAndWait(Emotes.IDLE, 3000);
+          } catch {
+            // Timeout is okay - the rest pose fallback will handle it
+            avatarWithEmote.setEmote?.(Emotes.IDLE);
+          }
+        } else if (avatarWithEmote.setEmote) {
+          avatarWithEmote.setEmote(Emotes.IDLE);
+        }
+      }
+
+      // Apply first frame of animation to skeleton before showing
+      this._avatarInstance.update(0);
+      this.mesh.updateMatrixWorld(true);
+
+      // NOW make VRM visible - idle animation is guaranteed to be playing (or rest pose fallback)
+      this.mesh.visible = true;
+
+      // Initialize HLOD impostor support for VRM mobs
+      // VRM mobs use a different rendering path (avatarInstance.move()) but we can still use impostors.
+      // The key is that this.node.position is kept in sync with the VRM's world position,
+      // so the impostor (parented to this.node) will be at the correct position.
+      //
+      // AAA LOD: Bake VRM in idle pose at LOCAL origin for correct impostor positioning
       await this.initHLOD(
-        `mob_vrm_${this.config.mobType}_${this.config.model}`,
+        `vrm_mob_${this.config.mobType}_${this.config.model}`,
         {
           category: "mob",
           atlasSize: 512, // Smaller for mobs
           hemisphere: true,
           freezeAnimationAtLOD1: true, // AAA LOD: Freeze animation at medium distance
           prepareForBake: async () => {
-            // AAA LOD: Ensure VRM is in idle pose before baking impostor
-            // The VRM factory's update() handles rest pose fallback if no emote is playing
-            if (this._avatarInstance && this.mesh) {
-              // Ensure idle emote is set if available
-              const instanceWithEmote = this._avatarInstance as {
-                setEmote?: (emote: string) => void;
-                setEmoteAndWait?: (
-                  emote: string,
-                  timeoutMs?: number,
-                ) => Promise<void>;
-                update: (delta: number) => void;
-              };
+            // AAA LOD: Prepare VRM mesh for impostor baking
+            // 1. Ensure mesh is in idle pose
+            // 2. Temporarily position at local origin for consistent bounding box
+            if (this.mesh && this._avatarInstance) {
+              // Save current mesh position (VRM might be at world position)
+              const savedPosition = this.mesh.position.clone();
+              const savedQuaternion = this.mesh.quaternion.clone();
 
-              // Set idle emote if not already set
-              if (instanceWithEmote.setEmoteAndWait) {
-                await instanceWithEmote.setEmoteAndWait(Emotes.IDLE, 2000);
-              } else if (instanceWithEmote.setEmote) {
-                instanceWithEmote.setEmote(Emotes.IDLE);
-              }
+              // Move mesh to local origin for baking
+              this.mesh.position.set(0, 0, 0);
+              this.mesh.quaternion.identity();
 
-              // Update animation to apply idle pose to skeleton
-              // delta=0 applies current animation state without advancing time
+              // Update the animation to ensure idle pose at frame 0
               this._avatarInstance.update(0);
 
-              // Force complete matrix world update
+              // Force complete mesh hierarchy update at origin
               this.mesh.updateMatrixWorld(true);
+
+              // After baking (handled by ImpostorManager), restore position
+              // Note: prepareForBake is called synchronously before baking
+              // The mesh will be restored after baking completes
+
+              // Restore position after a microtask (baking is sync within this frame)
+              Promise.resolve().then(() => {
+                if (this.mesh) {
+                  this.mesh.position.copy(savedPosition);
+                  this.mesh.quaternion.copy(savedQuaternion);
+                  this.mesh.updateMatrixWorld(true);
+                }
+              });
             }
           },
         },
@@ -2307,7 +2355,50 @@ export class MobEntity extends CombatantEntity {
           effectiveDelta: deltaTime,
           lodLevel: 0,
           distanceSq: 0,
+          shouldApplyRestPose: false,
         };
+
+    // T-POSE FIX: When entering frozen state (or never applied idle), apply idle pose once
+    // This ensures mobs at frozen/culled distances show idle pose instead of T-pose
+    // The shouldApplyRestPose flag is true when transitioning INTO frozen state
+    const needsIdlePoseApplication =
+      animLODResult.shouldApplyRestPose || !this._hasAppliedIdlePose;
+
+    if (needsIdlePoseApplication) {
+      // VRM path: Apply idle pose
+      if (this._avatarInstance) {
+        const avatarWithEmote = this._avatarInstance as {
+          setEmote?: (emote: string) => void;
+        };
+        // Ensure idle emote is set
+        if (avatarWithEmote.setEmote && this._currentEmote !== Emotes.IDLE) {
+          this._currentEmote = Emotes.IDLE;
+          avatarWithEmote.setEmote(Emotes.IDLE);
+        }
+        // Apply frame 0 to bake idle pose into skeleton
+        this._avatarInstance.update(0);
+        this._hasAppliedIdlePose = true;
+      }
+      // GLB path: Apply idle pose via mixer
+      else {
+        const mixer = (this as { mixer?: THREE.AnimationMixer }).mixer;
+        if (mixer) {
+          mixer.update(0);
+          // Force skeleton update
+          if (this.mesh) {
+            this.mesh.traverse((child) => {
+              if (child instanceof THREE.SkinnedMesh && child.skeleton) {
+                const bones = child.skeleton.bones;
+                for (let i = 0; i < bones.length; i++) {
+                  bones[i].updateMatrixWorld();
+                }
+              }
+            });
+          }
+          this._hasAppliedIdlePose = true;
+        }
+      }
+    }
 
     // VRM path: Use avatar instance update (handles everything)
     if (this._avatarInstance) {
@@ -2375,28 +2466,60 @@ export class MobEntity extends CombatantEntity {
         // Issue #416 fix: Only snap to terrain AFTER receiving server position
         // This ensures all clients use same XZ coordinates for terrain lookup,
         // preventing Y desync between clients with different terrain load times
+        //
+        // BUILDING SUPPORT: If mob is inside a building footprint, preserve server Y
+        // Server sends correct building floor elevation - don't override with terrain
         if (this._hasReceivedServerPosition) {
-          const terrain = this.world.getSystem("terrain");
-          if (terrain && "getHeightAt" in terrain) {
+          // Check if mob is in a building footprint
+          let isInBuilding = false;
+          const townSystem = this.world.getSystem("town");
+          if (townSystem && "getCollisionService" in townSystem) {
             try {
-              // CRITICAL: Must call method on terrain object to preserve 'this' context
-              const terrainHeight = (
-                terrain as { getHeightAt: (x: number, z: number) => number }
-              ).getHeightAt(this.node.position.x, this.node.position.z);
-              if (Number.isFinite(terrainHeight)) {
-                this._hasValidTerrainHeight = true;
-                this.node.position.y = terrainHeight;
-                this.position.y = terrainHeight;
-              }
-            } catch (_err) {
-              // Terrain tile not generated yet - keep current Y and retry next frame
-              if (
-                this.clientUpdateCalls === 10 &&
-                !this._hasValidTerrainHeight
-              ) {
-                console.warn(
-                  `[MobEntity] Waiting for terrain tile to generate at (${this.node.position.x.toFixed(1)}, ${this.node.position.z.toFixed(1)})`,
-                );
+              const collisionService = (
+                townSystem as {
+                  getCollisionService: () => {
+                    isInBuildingFootprint: (x: number, z: number) => boolean;
+                  };
+                }
+              ).getCollisionService();
+              isInBuilding = collisionService.isInBuildingFootprint(
+                this.node.position.x,
+                this.node.position.z,
+              );
+            } catch {
+              // TownSystem not ready - fall back to terrain
+            }
+          }
+
+          if (isInBuilding && this._serverY !== null) {
+            // In building - preserve server Y (correct floor elevation)
+            this._hasValidTerrainHeight = true;
+            this.node.position.y = this._serverY;
+            this.position.y = this._serverY;
+          } else {
+            // Not in building - snap to terrain
+            const terrain = this.world.getSystem("terrain");
+            if (terrain && "getHeightAt" in terrain) {
+              try {
+                // CRITICAL: Must call method on terrain object to preserve 'this' context
+                const terrainHeight = (
+                  terrain as { getHeightAt: (x: number, z: number) => number }
+                ).getHeightAt(this.node.position.x, this.node.position.z);
+                if (Number.isFinite(terrainHeight)) {
+                  this._hasValidTerrainHeight = true;
+                  this.node.position.y = terrainHeight;
+                  this.position.y = terrainHeight;
+                }
+              } catch (_err) {
+                // Terrain tile not generated yet - keep current Y and retry next frame
+                if (
+                  this.clientUpdateCalls === 10 &&
+                  !this._hasValidTerrainHeight
+                ) {
+                  console.warn(
+                    `[MobEntity] Waiting for terrain tile to generate at (${this.node.position.x.toFixed(1)}, ${this.node.position.z.toFixed(1)})`,
+                  );
+                }
               }
             }
           }
@@ -2408,21 +2531,52 @@ export class MobEntity extends CombatantEntity {
       this.node.updateMatrix();
       this.node.updateMatrixWorld(true);
 
-      // Get terrain height for grounding
-      const terrain = this.world.getSystem("terrain");
-      let terrainHeight = 0;
-      if (terrain && "getHeightAt" in terrain) {
+      // Get ground height for VRM clamping
+      // Priority: building floor elevation > terrain height
+      let groundHeight = this.node.position.y;
+
+      // Check if mob is in a building footprint
+      let isInBuilding = false;
+      const townSystem = this.world.getSystem("town");
+      if (townSystem && "getCollisionService" in townSystem) {
         try {
-          terrainHeight = (
-            terrain as { getHeightAt: (x: number, z: number) => number }
-          ).getHeightAt(this.node.position.x, this.node.position.z);
-          if (!Number.isFinite(terrainHeight)) {
-            terrainHeight = this.node.position.y;
-          }
+          const collisionService = (
+            townSystem as {
+              getCollisionService: () => {
+                isInBuildingFootprint: (x: number, z: number) => boolean;
+              };
+            }
+          ).getCollisionService();
+          isInBuilding = collisionService.isInBuildingFootprint(
+            this.node.position.x,
+            this.node.position.z,
+          );
         } catch {
-          terrainHeight = this.node.position.y;
+          // TownSystem not ready
         }
       }
+
+      if (isInBuilding && this._serverY !== null) {
+        // In building - use server Y (correct floor elevation)
+        groundHeight = this._serverY;
+      } else {
+        // Not in building - use terrain height
+        const terrain = this.world.getSystem("terrain");
+        if (terrain && "getHeightAt" in terrain) {
+          try {
+            const terrainHeight = (
+              terrain as { getHeightAt: (x: number, z: number) => number }
+            ).getHeightAt(this.node.position.x, this.node.position.z);
+            if (Number.isFinite(terrainHeight)) {
+              groundHeight = terrainHeight;
+            }
+          } catch {
+            // Terrain tile not generated yet
+          }
+        }
+      }
+      // Use groundHeight instead of terrainHeight for all subsequent operations
+      const terrainHeight = groundHeight;
 
       // SPECIAL HANDLING FOR DEATH: Lock position, let animation play
       const deathLockedPos = this.deathManager.getLockedPosition();
@@ -3297,6 +3451,8 @@ export class MobEntity extends CombatantEntity {
           const pos = data.p as [number, number, number];
           this.position.set(pos[0], pos[1], pos[2]);
           this.node.position.set(pos[0], pos[1], pos[2]);
+          // Store server Y for building floor support - server has correct floor elevation
+          this._serverY = pos[1];
           // Mark that we've received authoritative server position (Issue #416 fix)
           // This ensures all clients have consistent XZ before terrain snapping Y
           this._hasReceivedServerPosition = true;

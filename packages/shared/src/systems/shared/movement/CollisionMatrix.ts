@@ -14,7 +14,34 @@
  * - 1000x1000 tile world = 125x125 zones = 15,625 zones
  * - 15,625 zones × 256 bytes = ~4MB
  *
+ * **IMPORTANT: 2D Limitation for Multi-Floor Buildings**
+ *
+ * CollisionMatrix is a **2D system** - it does NOT support floor layers.
+ * This has the following implications for multi-floor buildings:
+ *
+ * 1. **Ground floor walls**: Registered in CollisionMatrix via WALL_* flags.
+ *    These are checked by pathfinding and movement systems.
+ *
+ * 2. **Upper floor walls** (floor > 0): NOT stored in CollisionMatrix.
+ *    Upper floor collision is handled separately by BuildingCollisionService.queryCollision()
+ *    which accepts a floorIndex parameter.
+ *
+ * 3. **Pathfinding integration**: The pathfinder's isWalkable callback should:
+ *    - Check CollisionMatrix for 2D obstacles (terrain, ground floor buildings)
+ *    - Call BuildingCollisionService.isWallBlocked() for floor-aware wall checks
+ *    - Call BuildingCollisionService.isTileWalkableInBuilding() for floor tiles
+ *
+ * 4. **Why not extend CollisionMatrix?**: Adding floor support would require:
+ *    - 3D zone storage (significant memory increase)
+ *    - Complex pathfinding changes (A* would need floor transitions)
+ *    - Breaking changes to existing terrain/obstacle code
+ *
+ * The current approach keeps CollisionMatrix simple and efficient for the 99%
+ * case (ground level navigation) while delegating building-specific logic to
+ * BuildingCollisionService.
+ *
  * @see CollisionFlags for flag definitions
+ * @see BuildingCollisionService for multi-floor building collision
  */
 
 import {
@@ -148,6 +175,12 @@ export class CollisionMatrix implements ICollisionMatrix {
    * Returns 0 if zone not allocated (unblocked)
    */
   getFlags(tileX: number, tileZ: number): number {
+    // Validate inputs
+    if (!Number.isFinite(tileX) || !Number.isFinite(tileZ)) {
+      throw new Error(
+        `[CollisionMatrix] getFlags: invalid tile coords (${tileX}, ${tileZ})`,
+      );
+    }
     const zone = this.getZone(tileX, tileZ);
     if (!zone) return 0;
     const index = this.getTileIndex(tileX, tileZ);
@@ -158,6 +191,15 @@ export class CollisionMatrix implements ICollisionMatrix {
    * Set collision flags for a tile (replaces existing)
    */
   setFlags(tileX: number, tileZ: number, flags: number): void {
+    // Validate inputs
+    if (!Number.isFinite(tileX) || !Number.isFinite(tileZ)) {
+      throw new Error(
+        `[CollisionMatrix] setFlags: invalid tile coords (${tileX}, ${tileZ})`,
+      );
+    }
+    if (!Number.isFinite(flags)) {
+      throw new Error(`[CollisionMatrix] setFlags: invalid flags ${flags}`);
+    }
     const zone = this.getOrCreateZone(tileX, tileZ);
     const index = this.getTileIndex(tileX, tileZ);
     zone[index] = flags;
@@ -167,6 +209,15 @@ export class CollisionMatrix implements ICollisionMatrix {
    * Add collision flags to a tile (bitwise OR)
    */
   addFlags(tileX: number, tileZ: number, flags: number): void {
+    // Validate inputs
+    if (!Number.isFinite(tileX) || !Number.isFinite(tileZ)) {
+      throw new Error(
+        `[CollisionMatrix] addFlags: invalid tile coords (${tileX}, ${tileZ})`,
+      );
+    }
+    if (!Number.isFinite(flags)) {
+      throw new Error(`[CollisionMatrix] addFlags: invalid flags ${flags}`);
+    }
     const zone = this.getOrCreateZone(tileX, tileZ);
     const index = this.getTileIndex(tileX, tileZ);
     zone[index] |= flags;
@@ -176,6 +227,15 @@ export class CollisionMatrix implements ICollisionMatrix {
    * Remove collision flags from a tile (bitwise AND NOT)
    */
   removeFlags(tileX: number, tileZ: number, flags: number): void {
+    // Validate inputs
+    if (!Number.isFinite(tileX) || !Number.isFinite(tileZ)) {
+      throw new Error(
+        `[CollisionMatrix] removeFlags: invalid tile coords (${tileX}, ${tileZ})`,
+      );
+    }
+    if (!Number.isFinite(flags)) {
+      throw new Error(`[CollisionMatrix] removeFlags: invalid flags ${flags}`);
+    }
     const zone = this.getZone(tileX, tileZ);
     if (!zone) return; // Nothing to remove from unallocated zone
     const index = this.getTileIndex(tileX, tileZ);
@@ -186,6 +246,12 @@ export class CollisionMatrix implements ICollisionMatrix {
    * Check if tile has any of the specified flags
    */
   hasFlags(tileX: number, tileZ: number, flags: number): boolean {
+    // Validate inputs
+    if (!Number.isFinite(tileX) || !Number.isFinite(tileZ)) {
+      throw new Error(
+        `[CollisionMatrix] hasFlags: invalid tile coords (${tileX}, ${tileZ})`,
+      );
+    }
     const zone = this.getZone(tileX, tileZ);
     if (!zone) return false;
     const index = this.getTileIndex(tileX, tileZ);
@@ -196,6 +262,12 @@ export class CollisionMatrix implements ICollisionMatrix {
    * Check if a tile is walkable (no blocking flags)
    */
   isWalkable(tileX: number, tileZ: number): boolean {
+    // Validate inputs
+    if (!Number.isFinite(tileX) || !Number.isFinite(tileZ)) {
+      throw new Error(
+        `[CollisionMatrix] isWalkable: invalid tile coords (${tileX}, ${tileZ})`,
+      );
+    }
     return !this.hasFlags(tileX, tileZ, CollisionMask.BLOCKS_MOVEMENT);
   }
 
@@ -209,6 +281,18 @@ export class CollisionMatrix implements ICollisionMatrix {
    * - Diagonal movement (checks cardinal tiles too)
    */
   isBlocked(fromX: number, fromZ: number, toX: number, toZ: number): boolean {
+    // Validate inputs
+    if (
+      !Number.isFinite(fromX) ||
+      !Number.isFinite(fromZ) ||
+      !Number.isFinite(toX) ||
+      !Number.isFinite(toZ)
+    ) {
+      throw new Error(
+        `[CollisionMatrix] isBlocked: invalid coords from=(${fromX},${fromZ}) to=(${toX},${toZ})`,
+      );
+    }
+
     const dx = toX - fromX;
     const dz = toZ - fromZ;
 

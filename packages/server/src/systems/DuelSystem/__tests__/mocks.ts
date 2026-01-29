@@ -18,6 +18,13 @@ export interface MockPlayer {
   combatLevel?: number;
 }
 
+export interface MockCollision {
+  addFlags: ReturnType<typeof vi.fn>;
+  removeFlags: ReturnType<typeof vi.fn>;
+  getFlags: ReturnType<typeof vi.fn>;
+  isBlocked: ReturnType<typeof vi.fn>;
+}
+
 export interface MockWorld {
   entities: {
     players: Map<string, MockPlayer>;
@@ -26,6 +33,7 @@ export interface MockWorld {
   emit: ReturnType<typeof vi.fn>;
   on: ReturnType<typeof vi.fn>;
   getSystem: ReturnType<typeof vi.fn>;
+  collision: MockCollision;
   setPlayerPosition: (
     playerId: string,
     x: number,
@@ -50,6 +58,14 @@ export function createMockWorld(): MockWorld {
   const onFn = vi.fn();
   const getSystemFn = vi.fn();
 
+  // Mock collision system for arena wall registration
+  const collisionMock: MockCollision = {
+    addFlags: vi.fn(),
+    removeFlags: vi.fn(),
+    getFlags: vi.fn().mockReturnValue(0),
+    isBlocked: vi.fn().mockReturnValue(false),
+  };
+
   const world: MockWorld = {
     entities: {
       players,
@@ -58,6 +74,7 @@ export function createMockWorld(): MockWorld {
     emit: emitFn,
     on: onFn,
     getSystem: getSystemFn,
+    collision: collisionMock,
     setPlayerPosition: (playerId: string, x: number, y: number, z: number) => {
       const player = players.get(playerId);
       if (player) {

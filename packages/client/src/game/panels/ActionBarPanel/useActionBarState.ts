@@ -2,7 +2,7 @@
  * ActionBarPanel - State management hook
  */
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useWindowStore, useEditStore } from "@/ui";
 import { useActionBarKeybindsForBar } from "../../../ui/components/ActionBar";
 import { EventType } from "@hyperscape/shared";
@@ -252,12 +252,24 @@ export function useActionBarState({
       });
     };
 
-    world.on(EventType.PRAYER_STATE_SYNC, handlePrayerStateSync);
-    world.on(EventType.PRAYER_TOGGLED, handlePrayerToggled);
+    world.on(
+      EventType.PRAYER_STATE_SYNC,
+      handlePrayerStateSync as (...args: unknown[]) => void,
+    );
+    world.on(
+      EventType.PRAYER_TOGGLED,
+      handlePrayerToggled as (...args: unknown[]) => void,
+    );
 
     return () => {
-      world.off(EventType.PRAYER_STATE_SYNC, handlePrayerStateSync);
-      world.off(EventType.PRAYER_TOGGLED, handlePrayerToggled);
+      world.off(
+        EventType.PRAYER_STATE_SYNC,
+        handlePrayerStateSync as (...args: unknown[]) => void,
+      );
+      world.off(
+        EventType.PRAYER_TOGGLED,
+        handlePrayerToggled as (...args: unknown[]) => void,
+      );
     };
   }, [world]);
 
@@ -288,12 +300,24 @@ export function useActionBarState({
       }
     }
 
-    world.on(EventType.UI_ATTACK_STYLE_UPDATE, handleAttackStyleUpdate);
-    world.on(EventType.UI_ATTACK_STYLE_CHANGED, handleAttackStyleChanged);
+    world.on(
+      EventType.UI_ATTACK_STYLE_UPDATE,
+      handleAttackStyleUpdate as (...args: unknown[]) => void,
+    );
+    world.on(
+      EventType.UI_ATTACK_STYLE_CHANGED,
+      handleAttackStyleChanged as (...args: unknown[]) => void,
+    );
 
     return () => {
-      world.off(EventType.UI_ATTACK_STYLE_UPDATE, handleAttackStyleUpdate);
-      world.off(EventType.UI_ATTACK_STYLE_CHANGED, handleAttackStyleChanged);
+      world.off(
+        EventType.UI_ATTACK_STYLE_UPDATE,
+        handleAttackStyleUpdate as (...args: unknown[]) => void,
+      );
+      world.off(
+        EventType.UI_ATTACK_STYLE_CHANGED,
+        handleAttackStyleChanged as (...args: unknown[]) => void,
+      );
     };
   }, [world]);
 
@@ -327,9 +351,15 @@ export function useActionBarState({
       }
     };
 
-    world.on("actionBarState", handleActionBarState);
+    world.on(
+      "actionBarState",
+      handleActionBarState as (...args: unknown[]) => void,
+    );
     return () => {
-      world.off("actionBarState", handleActionBarState);
+      world.off(
+        "actionBarState",
+        handleActionBarState as (...args: unknown[]) => void,
+      );
     };
   }, [world, barId]);
 
@@ -360,11 +390,23 @@ export function useActionBarState({
       });
     };
 
-    world.on(EventType.ACTION_BAR_SLOT_UPDATE, handleSlotUpdate);
-    world.on(EventType.ACTION_BAR_SLOT_SWAP, handleSlotSwap);
+    world.on(
+      EventType.ACTION_BAR_SLOT_UPDATE,
+      handleSlotUpdate as (...args: unknown[]) => void,
+    );
+    world.on(
+      EventType.ACTION_BAR_SLOT_SWAP,
+      handleSlotSwap as (...args: unknown[]) => void,
+    );
     return () => {
-      world.off(EventType.ACTION_BAR_SLOT_UPDATE, handleSlotUpdate);
-      world.off(EventType.ACTION_BAR_SLOT_SWAP, handleSlotSwap);
+      world.off(
+        EventType.ACTION_BAR_SLOT_UPDATE,
+        handleSlotUpdate as (...args: unknown[]) => void,
+      );
+      world.off(
+        EventType.ACTION_BAR_SLOT_SWAP,
+        handleSlotSwap as (...args: unknown[]) => void,
+      );
     };
   }, [world, barId, useParentDndContext]);
 

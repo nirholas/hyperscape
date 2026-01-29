@@ -2,6 +2,7 @@
  * TerrainPreview - Real-time terrain visualization using @hyperscape/procgen
  */
 
+import { TerrainGen, BuildingGen } from "@hyperscape/procgen";
 import React, {
   useEffect,
   useRef,
@@ -11,7 +12,6 @@ import React, {
 } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { TerrainGen, BuildingGen } from "@hyperscape/procgen";
 
 export interface TerrainPreviewConfig {
   seed: number;

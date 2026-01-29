@@ -107,6 +107,46 @@ export function groundToTerrain(
   yOffset: number = 0,
   maxHeightDifference: number = 2.0,
 ): Position3D {
+  // BUILDING SUPPORT: Check for building floor elevation first
+  // Priority: building floor > terrain height
+  const townSystem = world.getSystem("town") as
+    | {
+        getCollisionService?: () => {
+          isInBuildingFootprint: (x: number, z: number) => boolean;
+          getFloorElevation: (
+            tileX: number,
+            tileZ: number,
+            floorIndex: number,
+          ) => number | null;
+        };
+      }
+    | undefined;
+
+  if (townSystem?.getCollisionService) {
+    try {
+      const collisionService = townSystem.getCollisionService();
+      if (collisionService.isInBuildingFootprint(position.x, position.z)) {
+        // Inside building - use floor elevation (floor 0 for ground level)
+        const tileX = Math.floor(position.x);
+        const tileZ = Math.floor(position.z);
+        const floorElevation = collisionService.getFloorElevation(
+          tileX,
+          tileZ,
+          0, // Ground floor
+        );
+        if (floorElevation !== null && Number.isFinite(floorElevation)) {
+          return {
+            x: position.x,
+            y: floorElevation + yOffset,
+            z: position.z,
+          };
+        }
+      }
+    } catch {
+      // TownSystem not ready - fall through to terrain
+    }
+  }
+
   // Get terrain system
   const terrainSystem = world.getSystem("terrain") as
     | { getHeightAt: (x: number, z: number) => number | null }

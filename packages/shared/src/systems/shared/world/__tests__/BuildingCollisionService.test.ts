@@ -65,8 +65,9 @@ function createSimpleBuildingLayout(): BuildingLayoutInput {
         ],
         internalOpenings: new Map(),
         externalOpenings: new Map([
-          // Door on south side (row 0, col 0)
-          ["0,0,south", "door"],
+          // Door on north side (row 0, col 0)
+          // Row 0 has external edge on NORTH (dr-1 → row -1 doesn't exist)
+          ["0,0,north", "door"],
         ]),
       },
     ],
@@ -95,7 +96,7 @@ function createMultiFloorBuildingLayout(): BuildingLayoutInput {
         ],
         internalOpenings: new Map(),
         externalOpenings: new Map([
-          ["1,0,south", "door"], // Door at center of south wall
+          ["1,0,north", "door"], // Door at center of north wall (row 0 external edge)
         ]),
       },
       // Second floor
@@ -145,9 +146,9 @@ function createMultiRoomBuildingLayout(): BuildingLayoutInput {
           ["1,1,east", "door"],
         ]),
         externalOpenings: new Map([
-          // External door to each room
-          ["0,0,south", "door"], // Room 0 entrance
-          ["3,0,south", "door"], // Room 1 entrance
+          // External door to each room (row 0 has north external edge)
+          ["0,0,north", "door"], // Room 0 entrance
+          ["3,0,north", "door"], // Room 1 entrance
         ]),
       },
     ],
@@ -567,7 +568,7 @@ describe("BuildingCollisionService", () => {
             footprint: [[true]],
             roomMap: [[0]],
             internalOpenings: new Map(),
-            externalOpenings: new Map([["0,0,south", "door"]]),
+            externalOpenings: new Map([["0,0,north", "door"]]),
           },
         ],
         stairs: null,
@@ -586,13 +587,15 @@ describe("BuildingCollisionService", () => {
       // Each cell is CELL_SIZE (4m) x CELL_SIZE (4m) = 16 tiles per cell
       // 1 cell = 16 walkable tiles
       expect(building!.floors[0].walkableTiles.size).toBe(16);
-      // Single cell should have walls on 3 sides (one door)
-      // Each side has 16 wall segments (one per tile in the cell)
-      // 3 solid sides × 16 tiles = 48 wall segments
+      // Single cell should have walls on all 4 sides
+      // Each side has 4 wall segments (one per tile along the edge)
+      // Total: 4 sides × 4 tiles = 16 wall segments
+      // 1 side has door opening (4 segments with hasOpening=true)
+      // Remaining 3 sides have 12 solid wall segments
       const closedWalls = building!.floors[0].wallSegments.filter(
         (w) => !w.hasOpening,
       );
-      expect(closedWalls.length).toBe(48);
+      expect(closedWalls.length).toBe(12);
     });
 
     it("handles building at negative coordinates", () => {
@@ -717,7 +720,7 @@ describe("BuildingCollisionService", () => {
               [0, -1, -1],
             ],
             internalOpenings: new Map(),
-            externalOpenings: new Map([["0,0,south", "door"]]),
+            externalOpenings: new Map([["0,0,north", "door"]]),
           },
         ],
         stairs: null,
@@ -857,13 +860,25 @@ describe("BuildingCollisionService", () => {
 
       if (doorWall) {
         // Movement through door should NOT be blocked
+        // Door faces outward, so movement through it goes in the door's direction
         let toZ = doorWall.tileZ;
-        if (doorWall.side === "south") toZ = doorWall.tileZ - 1;
-        else if (doorWall.side === "north") toZ = doorWall.tileZ + 1;
-
         let toX = doorWall.tileX;
-        if (doorWall.side === "west") toX = doorWall.tileX - 1;
-        else if (doorWall.side === "east") toX = doorWall.tileX + 1;
+
+        // Movement goes in the door's facing direction (outward from building)
+        switch (doorWall.side) {
+          case "north":
+            toZ = doorWall.tileZ - 1; // Move north (decreasing Z)
+            break;
+          case "south":
+            toZ = doorWall.tileZ + 1; // Move south (increasing Z)
+            break;
+          case "east":
+            toX = doorWall.tileX + 1; // Move east (increasing X)
+            break;
+          case "west":
+            toX = doorWall.tileX - 1; // Move west (decreasing X)
+            break;
+        }
 
         const isBlocked = service.isWallBlocked(
           doorWall.tileX,
@@ -1537,12 +1552,23 @@ describe("BuildingCollisionService", () => {
       expect(doorWall).toBeDefined();
 
       // Calculate the tile just outside the door
+      // Outside tile is in the direction the door faces (outward from building)
       let outsideTileX = doorWall!.tileX;
       let outsideTileZ = doorWall!.tileZ;
-      if (doorWall!.side === "south") outsideTileZ -= 1;
-      else if (doorWall!.side === "north") outsideTileZ += 1;
-      else if (doorWall!.side === "west") outsideTileX -= 1;
-      else if (doorWall!.side === "east") outsideTileX += 1;
+      switch (doorWall!.side) {
+        case "north":
+          outsideTileZ -= 1; // North = decreasing Z
+          break;
+        case "south":
+          outsideTileZ += 1; // South = increasing Z
+          break;
+        case "east":
+          outsideTileX += 1; // East = increasing X
+          break;
+        case "west":
+          outsideTileX -= 1; // West = decreasing X
+          break;
+      }
 
       // Verify tile outside is NOT inside building
       const outsideResult = service.queryCollision(
@@ -1881,13 +1907,23 @@ describe("BuildingCollisionService", () => {
         return true;
       };
 
-      // Calculate tile outside door
+      // Calculate tile outside door (in the direction the door faces)
       let outsideX = doorWall!.tileX;
       let outsideZ = doorWall!.tileZ;
-      if (doorWall!.side === "south") outsideZ -= 1;
-      else if (doorWall!.side === "north") outsideZ += 1;
-      else if (doorWall!.side === "west") outsideX -= 1;
-      else if (doorWall!.side === "east") outsideX += 1;
+      switch (doorWall!.side) {
+        case "north":
+          outsideZ -= 1; // North = decreasing Z
+          break;
+        case "south":
+          outsideZ += 1; // South = increasing Z
+          break;
+        case "east":
+          outsideX += 1; // East = increasing X
+          break;
+        case "west":
+          outsideX -= 1; // West = decreasing X
+          break;
+      }
 
       // Test: Outside tile is walkable (terrain)
       expect(isTileWalkable(outsideX, outsideZ)).toBe(true);
@@ -1924,5 +1960,83 @@ describe("BuildingCollisionService", () => {
         ),
       ).toBe(false);
     });
+  });
+});
+
+/**
+ * Tests for getDoorExteriorAndInterior static helper
+ * Ensures door tile calculations are correct for all cardinal directions
+ */
+describe("getDoorExteriorAndInterior", () => {
+  it("calculates north-facing door correctly", () => {
+    // North-facing wall: exterior is north (lower Z), interior is the wall tile
+    const result = BuildingCollisionService.getDoorExteriorAndInterior(
+      10,
+      10,
+      "north",
+    );
+    expect(result.interiorX).toBe(10);
+    expect(result.interiorZ).toBe(10);
+    expect(result.exteriorX).toBe(10);
+    expect(result.exteriorZ).toBe(9); // North = lower Z
+  });
+
+  it("calculates south-facing door correctly", () => {
+    // South-facing wall: exterior is south (higher Z), interior is the wall tile
+    const result = BuildingCollisionService.getDoorExteriorAndInterior(
+      10,
+      10,
+      "south",
+    );
+    expect(result.interiorX).toBe(10);
+    expect(result.interiorZ).toBe(10);
+    expect(result.exteriorX).toBe(10);
+    expect(result.exteriorZ).toBe(11); // South = higher Z
+  });
+
+  it("calculates east-facing door correctly", () => {
+    // East-facing wall: exterior is east (higher X), interior is the wall tile
+    const result = BuildingCollisionService.getDoorExteriorAndInterior(
+      10,
+      10,
+      "east",
+    );
+    expect(result.interiorX).toBe(10);
+    expect(result.interiorZ).toBe(10);
+    expect(result.exteriorX).toBe(11); // East = higher X
+    expect(result.exteriorZ).toBe(10);
+  });
+
+  it("calculates west-facing door correctly", () => {
+    // West-facing wall: exterior is west (lower X), interior is the wall tile
+    const result = BuildingCollisionService.getDoorExteriorAndInterior(
+      10,
+      10,
+      "west",
+    );
+    expect(result.interiorX).toBe(10);
+    expect(result.interiorZ).toBe(10);
+    expect(result.exteriorX).toBe(9); // West = lower X
+    expect(result.exteriorZ).toBe(10);
+  });
+
+  it("handles negative coordinates", () => {
+    const result = BuildingCollisionService.getDoorExteriorAndInterior(
+      -5,
+      -5,
+      "north",
+    );
+    expect(result.exteriorX).toBe(-5);
+    expect(result.exteriorZ).toBe(-6);
+  });
+
+  it("handles zero coordinates", () => {
+    const result = BuildingCollisionService.getDoorExteriorAndInterior(
+      0,
+      0,
+      "south",
+    );
+    expect(result.exteriorX).toBe(0);
+    expect(result.exteriorZ).toBe(1);
   });
 });

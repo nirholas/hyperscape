@@ -756,6 +756,7 @@ export class TileInterpolator {
    * @param getEntity - Function to get entity by ID
    * @param getTerrainHeight - Optional function to get terrain height at X/Z (for smooth Y)
    * @param onMovementComplete - Optional callback when an entity finishes moving (arrives at destination)
+   * @param isNearBuilding - Optional function to check if position is near a building (preserve server Y for elevation)
    */
   update(
     deltaTime: number,
@@ -774,6 +775,7 @@ export class TileInterpolator {
       entityId: string,
       position: { x: number; y: number; z: number },
     ) => void,
+    isNearBuilding?: (x: number, z: number) => boolean,
   ): void {
     // OPTIMIZATION: Use cached array to avoid Map->Array conversion each frame
     if (this._entityArrayDirty) {
@@ -810,8 +812,18 @@ export class TileInterpolator {
         state.fullPath.length === 0 ||
         state.targetTileIndex >= state.fullPath.length
       ) {
-        // Update Y from terrain if available
-        if (getTerrainHeight) {
+        // Update Y: building floor takes priority over terrain
+        // Check if near building - if so, preserve server Y (correct floor elevation)
+        const inBuilding =
+          isNearBuilding &&
+          isNearBuilding(state.visualPosition.x, state.visualPosition.z);
+
+        if (inBuilding) {
+          // In building - preserve server Y (floor elevation set by server)
+          const serverY = state.serverConfirmedY ?? state.visualPosition.y;
+          state.visualPosition.y = serverY;
+        } else if (getTerrainHeight) {
+          // Not in building - use terrain height
           const height = getTerrainHeight(
             state.visualPosition.x,
             state.visualPosition.z,
@@ -1051,29 +1063,24 @@ export class TileInterpolator {
         }
       }
 
-      // Update Y from terrain for smooth ground following
-      // IMPORTANT: Preserve server Y if it's significantly higher than terrain
-      // This handles building floors where server sends floor elevation
-      if (getTerrainHeight) {
+      // Update Y: building floor takes priority over terrain
+      // Check if near building - if so, preserve server Y (correct floor elevation)
+      const inBuilding =
+        isNearBuilding &&
+        isNearBuilding(state.visualPosition.x, state.visualPosition.z);
+
+      if (inBuilding) {
+        // In building - preserve server Y (floor elevation set by server)
+        const serverY = state.serverConfirmedY ?? state.visualPosition.y;
+        state.visualPosition.y = serverY;
+      } else if (getTerrainHeight) {
+        // Not in building - use terrain height for smooth ground following
         const height = getTerrainHeight(
           state.visualPosition.x,
           state.visualPosition.z,
         );
         if (height !== null && Number.isFinite(height)) {
-          // Only use terrain height if server Y isn't significantly above terrain
-          // Building floors have elevation = terrainY + FOUNDATION_HEIGHT + floorIndex * FLOOR_HEIGHT
-          // FOUNDATION_HEIGHT is ~0.3m, FLOOR_HEIGHT is ~3m, so any floor is at least 0.3m above terrain
-          const serverY = state.serverConfirmedY ?? state.visualPosition.y;
-          const heightDiff = serverY - height;
-
-          // If server Y is more than 0.2m above terrain, preserve it (building floor)
-          // Otherwise use terrain height for smooth ground following
-          if (heightDiff < 0.2) {
-            state.visualPosition.y = height; // Use terrain - on ground level
-          } else {
-            // Preserve server Y - on a building floor
-            state.visualPosition.y = serverY;
-          }
+          state.visualPosition.y = height; // Feet at ground level
         }
       }
 

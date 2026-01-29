@@ -515,6 +515,36 @@ export class PlayerLocal extends Entity implements HotReloadable {
   // Internal avatar reference (rename existing avatar property)
   private _avatar?: AvatarNode;
 
+  // ========== PLAYER SILHOUETTE (RuneScape-style x-ray effect) ==========
+  //
+  // TECHNIQUE (from official RuneScape dev blog):
+  // "Silhouettes are handled... we use the same size for both and only check
+  // against the depth buffer on the last draw operation."
+  //
+  // This means:
+  // 1. Silhouette renders with depthTest: FALSE (always draws, ignores depth)
+  // 2. Player renders with depthTest: TRUE (normal rendering)
+  // 3. Player overwrites silhouette where visible (normal depth test passes)
+  // 4. Where player is occluded, silhouette remains visible
+  //
+  // RENDER ORDER:
+  // - Scene objects (buildings, trees): renderOrder ~0, writes depth
+  // - Silhouette: renderOrder 50, depthTest=false (draws everywhere)
+  // - Player: renderOrder 100, depthTest=true (overwrites silhouette where visible)
+  //
+  // CRITICAL: Silhouette MUST be opaque (transparent: false) because
+  // Three.js renders transparent objects AFTER all opaques, breaking render order!
+  private _silhouetteMeshes: THREE.SkinnedMesh[] = [];
+  private _silhouetteMaterial?: THREE.MeshBasicMaterial;
+  private static readonly SILHOUETTE_CONFIG = {
+    /** Color of the silhouette (dark blue-gray, visible but not jarring) */
+    COLOR: 0x1a1a2a,
+    /** Render order for silhouette (renders FIRST, before player) */
+    SILHOUETTE_RENDER_ORDER: 50,
+    /** Render order for player meshes (renders AFTER silhouette, overwrites it) */
+    PLAYER_RENDER_ORDER: 100,
+  };
+
   isPlayer: boolean;
   // Explicit local flag for tests and systems that distinguish local vs remote
   isLocal: boolean = true;
@@ -821,6 +851,30 @@ export class PlayerLocal extends Entity implements HotReloadable {
   }
 
   private validateTerrainPosition(): void {
+    // BUILDING SUPPORT: Skip terrain validation if inside a building
+    // Server sends correct floor elevation - don't override it with terrain height
+    const townSystem = this.world.getSystem("town") as {
+      getCollisionService?: () => {
+        isInBuildingFootprint: (x: number, z: number) => boolean;
+      };
+    } | null;
+    if (townSystem?.getCollisionService) {
+      try {
+        const collisionService = townSystem.getCollisionService();
+        if (
+          collisionService.isInBuildingFootprint(
+            this.position.x,
+            this.position.z,
+          )
+        ) {
+          // Inside building - trust server Y, skip terrain clamping
+          return;
+        }
+      } catch {
+        // TownSystem not ready - continue with terrain validation
+      }
+    }
+
     // Follow terrain height
     const terrain = this.world.getSystem<TerrainSystem>(
       "terrain",
@@ -1598,6 +1652,61 @@ export class PlayerLocal extends Entity implements HotReloadable {
     });
 
     this.loadingAvatarUrl = undefined;
+
+    // Create silhouette effect for x-ray visibility (RuneScape-style)
+    this.createPlayerSilhouette();
+  }
+
+  /**
+   * Create RuneScape-style silhouette for x-ray visibility when occluded.
+   * Silhouette renders with depthTest=false (always draws), player overwrites where visible.
+   */
+  private createPlayerSilhouette(): void {
+    const vrmScene = (this._avatar as AvatarNode)?.instance?.raw?.scene;
+    if (!vrmScene) return;
+
+    this.destroyPlayerSilhouette();
+
+    // Material: depthTest=false draws everywhere, transparent=false for correct render order
+    this._silhouetteMaterial = new THREE.MeshBasicMaterial({
+      color: PlayerLocal.SILHOUETTE_CONFIG.COLOR,
+      transparent: false,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.FrontSide,
+    });
+
+    const { SILHOUETTE_RENDER_ORDER, PLAYER_RENDER_ORDER } =
+      PlayerLocal.SILHOUETTE_CONFIG;
+
+    vrmScene.traverse((child: THREE.Object3D) => {
+      const skinnedMesh = child as THREE.SkinnedMesh;
+      if (!skinnedMesh.isSkinnedMesh) return;
+
+      skinnedMesh.renderOrder = PLAYER_RENDER_ORDER;
+
+      const silhouetteMesh = new THREE.SkinnedMesh(
+        skinnedMesh.geometry,
+        this._silhouetteMaterial,
+      );
+      silhouetteMesh.bind(skinnedMesh.skeleton, skinnedMesh.bindMatrix);
+      silhouetteMesh.renderOrder = SILHOUETTE_RENDER_ORDER;
+      silhouetteMesh.frustumCulled = false;
+      silhouetteMesh.name = `Silhouette_${skinnedMesh.name}`;
+
+      (skinnedMesh.parent ?? vrmScene).add(silhouetteMesh);
+      this._silhouetteMeshes.push(silhouetteMesh);
+    });
+  }
+
+  /** Clean up silhouette meshes and material. */
+  private destroyPlayerSilhouette(): void {
+    for (const mesh of this._silhouetteMeshes) {
+      mesh.parent?.remove(mesh);
+    }
+    this._silhouetteMeshes = [];
+    this._silhouetteMaterial?.dispose();
+    this._silhouetteMaterial = undefined;
   }
 
   async initCapsule(): Promise<void> {
@@ -2794,6 +2903,9 @@ export class PlayerLocal extends Entity implements HotReloadable {
       }
       this._avatar = undefined;
     }
+
+    // Clean up player silhouette (RuneScape-style x-ray effect)
+    this.destroyPlayerSilhouette();
 
     // Clean up UI elements
     if (this.aura) {

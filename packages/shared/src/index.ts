@@ -922,9 +922,11 @@ export { CircularSpawnArea } from "./utils/physics/CircularSpawnArea";
 // Export terrain system
 export { TerrainSystem } from "./systems/shared";
 
-// Export town and road systems
+// Export town, POI, and road systems
 export { TownSystem } from "./systems/shared";
+export { POISystem } from "./systems/shared";
 export { RoadNetworkSystem } from "./systems/shared";
+export { BuildingCollisionService } from "./systems/shared/world/BuildingCollisionService";
 
 // Export tile movement system (RuneScape-style)
 export {
@@ -1020,6 +1022,10 @@ export { HOME_TELEPORT_CONSTANTS } from "./constants/GameConstants";
 
 // Distance constants for render culling, LOD, and server simulation
 export { DISTANCE_CONSTANTS } from "./constants/GameConstants";
+
+// Terrain constants (water threshold, walkable slopes, etc.)
+// Single source of truth for terrain-related values used across all systems
+export { TERRAIN_CONSTANTS } from "./constants/GameConstants";
 
 // Gathering constants (tick-based timing, ranges, etc.)
 export { GATHERING_CONSTANTS } from "./constants/GatheringConstants";

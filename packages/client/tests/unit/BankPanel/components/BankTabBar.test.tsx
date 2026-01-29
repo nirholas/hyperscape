@@ -131,16 +131,16 @@ describe("BankTabBar", () => {
       );
 
       const allTab = screen.getByText("∞").closest("button");
-      // Selected tab uses theme decorative color #8b6914
-      expect(allTab?.style.background).toContain("#8b6914");
+      // Selected tab uses theme decorative color #b88828
+      expect(allTab?.style.background).toContain("#b88828");
     });
 
     it("highlights selected numbered tab", () => {
       render(<BankTabBar {...defaultProps} selectedTab={0} />);
 
       const tab0 = screen.getByText("⚔️").closest("button");
-      // Selected tab uses theme decorative color #8b6914
-      expect(tab0?.style.background).toContain("#8b6914");
+      // Selected tab uses theme decorative color #b88828
+      expect(tab0?.style.background).toContain("#b88828");
     });
   });
 

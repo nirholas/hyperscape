@@ -42,6 +42,14 @@ export {
   generateAndExportPlant,
   type PlantGLBExportOptions,
   type PlantGLBExportResult,
+  // Math/geometry helpers (for testing)
+  shapeScaleAtPercent,
+  trunkShapeScaleAtPercent,
+  createStemShape,
+  lookRotation,
+  rotatePointByQuat,
+  evaluateBezierPoint,
+  getBezierTangent,
 } from "./PlantGenerator.js";
 
 // Types
@@ -147,6 +155,7 @@ export {
   generateStem,
   calculateArrangements,
   applyCollisionAvoidance,
+  quaternionFromEuler,
 } from "./assembly/Arrangement.js";
 
 // Parameters module

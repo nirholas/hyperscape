@@ -68,8 +68,9 @@ function createBankLayout(): BuildingLayoutInput {
         ],
         internalOpenings: new Map(),
         externalOpenings: new Map([
-          // Door on south side, center cell (col 1, row 0)
-          ["1,0,south", "door"],
+          // Door on north side, center cell (col 1, row 0)
+          // Row 0 has external edge on NORTH (dr-1 from row 0 → row -1 doesn't exist)
+          ["1,0,north", "door"],
         ]),
       },
     ],
@@ -175,24 +176,24 @@ describe("Building Collision Integration", () => {
       expect(isBlocked).toBe(true);
     });
 
-    it("door allows entry from south", () => {
-      // Door is on south side, center cell (col 1 of 3)
+    it("door allows entry from north", () => {
+      // Door is on north side, center cell (col 1 of 3)
       // Cell 1 in X direction spans tiles 8-11 (center cell)
-      // Door tiles would be at Z=4 (south edge of building)
+      // Door tiles would be at the north edge of the building
 
-      // Find the door tiles by checking which south wall segments have openings
+      // Find the door tiles by checking which north wall segments have openings
       const building = service.getBuilding("bank-1");
       const groundFloor = building!.floors[0];
 
       const doorWalls = groundFloor.wallSegments.filter(
-        (w) => w.side === "south" && w.hasOpening && w.openingType === "door",
+        (w) => w.side === "north" && w.hasOpening && w.openingType === "door",
       );
 
       expect(doorWalls.length).toBeGreaterThan(0);
 
       // Check that entry through one of the door tiles is NOT blocked
       const doorWall = doorWalls[0];
-      const outsideZ = doorWall.tileZ - 1; // One tile south of the door
+      const outsideZ = doorWall.tileZ - 1; // One tile north of the door (decreasing Z)
 
       const isBlocked = service.isWallBlocked(
         doorWall.tileX,

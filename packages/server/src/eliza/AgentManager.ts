@@ -11,8 +11,6 @@
  * Hyperscape server process with direct world access.
  */
 
-/* global AbortController */
-
 import { AgentRuntime, ChannelType, mergeCharacterDefaults, stringToUuid, type Plugin } from "@elizaos/core";
 import { hyperscapePlugin } from "@hyperscape/plugin-hyperscape";
 

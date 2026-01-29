@@ -52,6 +52,7 @@ import { ClientActions } from "../systems/client/ClientActions";
 import { ClientAudio } from "../systems/client/ClientAudio";
 import { ClientCameraSystem } from "../systems/client/ClientCameraSystem";
 import { DevStats } from "../systems/client/DevStats";
+import { PathfindingDebugSystem } from "../systems/client/PathfindingDebugSystem";
 import { Environment } from "../systems/shared";
 import { ClientGraphics } from "../systems/client/ClientGraphics";
 import { ClientInput } from "../systems/client/ClientInput";
@@ -65,11 +66,13 @@ import { Stage } from "../systems/shared";
 
 import THREE from "../extras/three/three";
 
-// Terrain, vegetation, towns, roads, buildings, and physics
+// Terrain, vegetation, grass, towns, roads, POIs, buildings, and physics
 import { TerrainSystem } from "../systems/shared";
 import { TownSystem } from "../systems/shared";
+import { POISystem } from "../systems/shared";
 import { RoadNetworkSystem } from "../systems/shared";
 import { VegetationSystem } from "../systems/shared";
+import { GrassSystem } from "../systems/shared";
 import { BuildingRenderingSystem } from "../systems/shared";
 import { Physics } from "../systems/shared";
 
@@ -87,6 +90,7 @@ import { EquipmentVisualSystem } from "../systems/client/EquipmentVisualSystem";
 import { ZoneVisualsSystem } from "../systems/client/ZoneVisualsSystem";
 import { ResourceTileDebugSystem } from "../systems/client/ResourceTileDebugSystem";
 import { ZoneDetectionSystem } from "../systems/shared/death/ZoneDetectionSystem";
+import { InteractionRouter } from "../systems/client/interaction";
 import { Particles } from "../systems/shared";
 import { Wind } from "../systems/shared";
 
@@ -164,6 +168,7 @@ export function createClientWorld() {
 
   // Dev tools (only active in dev mode)
   world.register("devStats", DevStats); // FPS counter and performance telemetry
+  world.register("pathfindingDebug", PathfindingDebugSystem); // Press 'P' to toggle
 
   // Audio systems
   world.register("audio", ClientAudio); // 3D spatial audio
@@ -178,6 +183,10 @@ export function createClientWorld() {
 
   // Physics (local simulation, validated by server)
   world.register("physics", Physics); // PhysX collision and raycasting
+
+  // Interaction system - handles clicks, raycasting, context menus
+  // MUST be registered before ClientCameraSystem which uses its RaycastService
+  world.register("interaction", InteractionRouter);
 
   // Camera
   world.register("client-camera-system", ClientCameraSystem); // Camera controller
@@ -197,6 +206,7 @@ export function createClientWorld() {
   // Roads are rendered via vertex coloring in the terrain shader
 
   world.register("towns", TownSystem);
+  world.register("pois", POISystem);
   world.register("roads", RoadNetworkSystem);
 
   // ============================================================================
@@ -228,6 +238,14 @@ export function createClientWorld() {
   world.register("resource-tile-debug", ResourceTileDebugSystem); // Debug: shows resource tile occupancy
   world.register("particles", Particles); // Particle effects system
   world.register("wind", Wind); // Environmental wind effects
+
+  // ============================================================================
+  // GRASS SYSTEM
+  // ============================================================================
+  // Procedural WebGPU grass rendering with wind animation
+  // Must be registered after terrain (listens to tile events) and wind (uses wind uniforms)
+
+  world.register("grass", GrassSystem);
 
   // ============================================================================
   // THREE.JS SETUP

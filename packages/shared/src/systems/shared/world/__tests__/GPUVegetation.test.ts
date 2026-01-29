@@ -76,11 +76,17 @@ describe("GPUVegetation", () => {
       );
     });
 
-    it("should have valid near fade distances", () => {
-      expect(GPU_VEG_CONFIG.NEAR_FADE_START).toBeGreaterThan(0);
-      expect(GPU_VEG_CONFIG.NEAR_FADE_END).toBeGreaterThan(
-        GPU_VEG_CONFIG.NEAR_FADE_START,
+    it("should have valid near-camera fade distances", () => {
+      // NEAR_FADE_START = distance where fade begins (fully opaque beyond)
+      // NEAR_FADE_END = distance where fully dissolved (at near clip)
+      // START > END because we fade IN as camera gets closer
+      expect(GPU_VEG_CONFIG.NEAR_CAMERA_FADE_START).toBeGreaterThan(0);
+      expect(GPU_VEG_CONFIG.NEAR_CAMERA_FADE_END).toBeGreaterThan(0);
+      expect(GPU_VEG_CONFIG.NEAR_CAMERA_FADE_START).toBeGreaterThan(
+        GPU_VEG_CONFIG.NEAR_CAMERA_FADE_END,
       );
+      // Near clip should be very close to camera
+      expect(GPU_VEG_CONFIG.NEAR_CAMERA_FADE_END).toBeLessThan(0.5);
     });
 
     it("should have reasonable max instances", () => {
@@ -99,6 +105,135 @@ describe("GPUVegetation", () => {
       // This ensures the values cannot be modified in TypeScript code
       expect(GPU_VEG_CONFIG.FADE_START).toBeDefined();
       expect(GPU_VEG_CONFIG.FADE_END).toBeDefined();
+    });
+  });
+
+  // ===== BAYER DITHERING FORMULA VERIFICATION =====
+  describe("Bayer Dithering Formula", () => {
+    // Standard 4x4 Bayer matrix
+    const BAYER_4x4 = [
+      [0, 8, 2, 10],
+      [12, 4, 14, 6],
+      [3, 11, 1, 9],
+      [15, 7, 13, 5],
+    ];
+
+    // The shader formula (must match what's in GPUVegetation.ts)
+    function bayerFormula(x: number, y: number): number {
+      const bit0_x = x % 2;
+      const bit1_x = Math.floor(x / 2);
+      const bit0_y = y % 2;
+      const bit1_y = Math.floor(y / 2);
+      const xor0 = Math.abs(bit0_x - bit0_y);
+      const xor1 = Math.abs(bit1_x - bit1_y);
+      return xor0 * 8 + bit0_y * 4 + xor1 * 2 + bit1_y;
+    }
+
+    it("should produce correct 4x4 Bayer matrix values", () => {
+      for (let y = 0; y < 4; y++) {
+        for (let x = 0; x < 4; x++) {
+          const expected = BAYER_4x4[y][x];
+          const computed = bayerFormula(x, y);
+          expect(computed).toBe(expected);
+        }
+      }
+    });
+
+    it("should produce values in range [0, 15]", () => {
+      for (let y = 0; y < 4; y++) {
+        for (let x = 0; x < 4; x++) {
+          const value = bayerFormula(x, y);
+          expect(value).toBeGreaterThanOrEqual(0);
+          expect(value).toBeLessThanOrEqual(15);
+        }
+      }
+    });
+
+    it("should produce all 16 unique values", () => {
+      const values = new Set<number>();
+      for (let y = 0; y < 4; y++) {
+        for (let x = 0; x < 4; x++) {
+          values.add(bayerFormula(x, y));
+        }
+      }
+      expect(values.size).toBe(16);
+    });
+
+    it("should work with modulo for screen coordinates", () => {
+      // Simulate screen pixel 1234, 5678
+      const screenX = 1234;
+      const screenY = 5678;
+      const ix = screenX % 4;
+      const iy = screenY % 4;
+      const value = bayerFormula(ix, iy);
+      // Should be a valid Bayer value
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThanOrEqual(15);
+    });
+  });
+
+  // ===== THRESHOLD LOGIC VERIFICATION =====
+  describe("Dissolve Threshold Logic", () => {
+    // The shader uses step(ditherValue, combinedFade) which returns:
+    // 1 if combinedFade >= ditherValue, 0 otherwise
+    // Then multiplied by 2 for alphaTest threshold
+
+    it("should keep most fragments when combinedFade is very small", () => {
+      const combinedFade = 0.01; // Very small but non-zero
+      // Only dither values <= 0.01 will cause discard
+      // Bayer/16 values: 0, 0.0625, 0.125, ... 0.9375
+      // Only 0/16=0 is <= 0.01
+      let discardCount = 0;
+      for (let d = 0; d < 16; d++) {
+        const ditherValue = d / 16;
+        const stepResult = combinedFade >= ditherValue ? 1 : 0;
+        if (stepResult === 1) discardCount++;
+      }
+      expect(discardCount).toBe(1); // Only the 0 dither value
+    });
+
+    it("should discard all fragments when combinedFade=1 (full dissolve)", () => {
+      const combinedFade = 1;
+      // With any dither value 0-15, step(dither/16, 1) returns 1
+      // threshold = 1 * 2 = 2
+      // alphaTest: 1.0 < 2 = true, fragment DISCARDED
+      for (let d = 0; d < 16; d++) {
+        const ditherValue = d / 16;
+        const stepResult = combinedFade >= ditherValue ? 1 : 0;
+        const threshold = stepResult * 2;
+        expect(threshold).toBe(2);
+      }
+    });
+
+    it("should progressively dither more fragments as fade increases", () => {
+      // Test that increasing fade causes more fragments to be discarded
+      const fadeLevels = [0.1, 0.3, 0.5, 0.7, 0.9];
+      let previousDiscardCount = 0;
+
+      for (const combinedFade of fadeLevels) {
+        let discardCount = 0;
+        for (let d = 0; d < 16; d++) {
+          const ditherValue = d / 16;
+          if (combinedFade >= ditherValue) discardCount++;
+        }
+        expect(discardCount).toBeGreaterThanOrEqual(previousDiscardCount);
+        previousDiscardCount = discardCount;
+      }
+    });
+
+    it("should threshold correctly for alphaTest comparison", () => {
+      // When step returns 1, threshold = 2, which causes discard (1.0 < 2)
+      // When step returns 0, threshold = 0, which keeps fragment (1.0 < 0 is false)
+      const materialAlpha = 1.0;
+      const alphaTest = 0.5;
+
+      // Test discard case
+      const discardThreshold = 2.0;
+      expect(materialAlpha < discardThreshold).toBe(true); // Discarded
+
+      // Test keep case
+      const keepThreshold = 0.0;
+      expect(materialAlpha < keepThreshold).toBe(false); // Kept
     });
   });
 

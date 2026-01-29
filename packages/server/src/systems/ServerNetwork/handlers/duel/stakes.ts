@@ -13,7 +13,13 @@
  * - Audit logging for economic integrity
  */
 
-import { type World, getItem, isValidSlotNumber } from "@hyperscape/shared";
+import {
+  type World,
+  type SlotNumber,
+  type ItemID,
+  getItem,
+  isValidSlotNumber,
+} from "@hyperscape/shared";
 import type { ServerSocket } from "../../../../shared/types";
 import { InventoryRepository } from "../../../../database/repositories/InventoryRepository";
 import type { DatabaseConnection } from "../trade/types";
@@ -198,8 +204,8 @@ export async function handleDuelAddStake(
 
       // Audit log the stake operation
       AuditLogger.getInstance().logDuelStakeAdd(duelId, playerId, {
-        inventorySlot,
-        itemId: inventoryItem.itemId,
+        inventorySlot: inventorySlot as SlotNumber,
+        itemId: inventoryItem.itemId as ItemID,
         quantity: qty,
         value,
       });

@@ -12,8 +12,29 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import type { PlayerID } from "@hyperscape/shared";
 import { DuelSystem } from "../index";
 import { createMockWorld, createDuelPlayers, type MockWorld } from "./mocks";
+
+/**
+ * Helper to create a challenge with default socket ID and combat level
+ */
+function createTestChallenge(
+  duelSystem: DuelSystem,
+  challengerId: string,
+  challengerName: string,
+  targetId: string,
+  targetName: string,
+) {
+  return duelSystem.createChallenge(
+    challengerId as PlayerID,
+    challengerName,
+    `socket-${challengerId}`,
+    50, // Default combat level for tests
+    targetId as PlayerID,
+    targetName,
+  );
+}
 
 describe("DuelSystem", () => {
   let world: MockWorld;
@@ -40,7 +61,8 @@ describe("DuelSystem", () => {
 
   describe("createChallenge", () => {
     it("creates a challenge successfully", () => {
-      const result = duelSystem.createChallenge(
+      const result = createTestChallenge(
+        duelSystem,
         "player1",
         "TestPlayer1",
         "player2",
@@ -52,7 +74,8 @@ describe("DuelSystem", () => {
     });
 
     it("rejects self-challenge", () => {
-      const result = duelSystem.createChallenge(
+      const result = createTestChallenge(
+        duelSystem,
         "player1",
         "TestPlayer1",
         "player1",
@@ -65,7 +88,8 @@ describe("DuelSystem", () => {
 
     it("rejects if challenger already in duel", () => {
       // Accept a challenge to create a duel session
-      const challenge = duelSystem.createChallenge(
+      const challenge = createTestChallenge(
+        duelSystem,
         "player1",
         "P1",
         "player2",
@@ -77,7 +101,8 @@ describe("DuelSystem", () => {
 
       // Try to challenge another player
       world.addPlayer({ id: "player3", position: { x: 70, y: 0, z: 70 } });
-      const result = duelSystem.createChallenge(
+      const result = createTestChallenge(
+        duelSystem,
         "player1",
         "P1",
         "player3",
@@ -92,7 +117,8 @@ describe("DuelSystem", () => {
       world.addPlayer({ id: "player3", position: { x: 70, y: 0, z: 70 } });
 
       // Create a duel with player2
-      const challenge = duelSystem.createChallenge(
+      const challenge = createTestChallenge(
+        duelSystem,
         "player1",
         "P1",
         "player2",
@@ -103,7 +129,8 @@ describe("DuelSystem", () => {
       }
 
       // Try to challenge player2 from player3
-      const result = duelSystem.createChallenge(
+      const result = createTestChallenge(
+        duelSystem,
         "player3",
         "P3",
         "player2",
@@ -117,7 +144,8 @@ describe("DuelSystem", () => {
 
   describe("respondToChallenge", () => {
     it("accepts challenge and creates duel session", () => {
-      const challenge = duelSystem.createChallenge(
+      const challenge = createTestChallenge(
+        duelSystem,
         "player1",
         "P1",
         "player2",
@@ -136,7 +164,8 @@ describe("DuelSystem", () => {
     });
 
     it("declines challenge", () => {
-      const challenge = duelSystem.createChallenge(
+      const challenge = createTestChallenge(
+        duelSystem,
         "player1",
         "P1",
         "player2",
@@ -171,7 +200,8 @@ describe("DuelSystem", () => {
 
   describe("getDuelSession", () => {
     it("returns session by ID", () => {
-      const challenge = duelSystem.createChallenge(
+      const challenge = createTestChallenge(
+        duelSystem,
         "player1",
         "P1",
         "player2",
@@ -198,7 +228,8 @@ describe("DuelSystem", () => {
 
   describe("getPlayerDuel", () => {
     it("returns session for player in duel", () => {
-      const challenge = duelSystem.createChallenge(
+      const challenge = createTestChallenge(
+        duelSystem,
         "player1",
         "P1",
         "player2",
@@ -220,7 +251,8 @@ describe("DuelSystem", () => {
 
   describe("isPlayerInDuel", () => {
     it("returns true when player is in duel", () => {
-      const challenge = duelSystem.createChallenge(
+      const challenge = createTestChallenge(
+        duelSystem,
         "player1",
         "P1",
         "player2",
@@ -245,7 +277,8 @@ describe("DuelSystem", () => {
     let duelId: string;
 
     beforeEach(() => {
-      const challenge = duelSystem.createChallenge(
+      const challenge = createTestChallenge(
+        duelSystem,
         "player1",
         "P1",
         "player2",
@@ -314,7 +347,8 @@ describe("DuelSystem", () => {
     let duelId: string;
 
     beforeEach(() => {
-      const challenge = duelSystem.createChallenge(
+      const challenge = createTestChallenge(
+        duelSystem,
         "player1",
         "P1",
         "player2",
@@ -357,7 +391,8 @@ describe("DuelSystem", () => {
     let duelId: string;
 
     beforeEach(() => {
-      const challenge = duelSystem.createChallenge(
+      const challenge = createTestChallenge(
+        duelSystem,
         "player1",
         "P1",
         "player2",
@@ -401,7 +436,8 @@ describe("DuelSystem", () => {
     let duelId: string;
 
     beforeEach(() => {
-      const challenge = duelSystem.createChallenge(
+      const challenge = createTestChallenge(
+        duelSystem,
         "player1",
         "P1",
         "player2",
@@ -482,7 +518,8 @@ describe("DuelSystem", () => {
     let duelId: string;
 
     beforeEach(() => {
-      const challenge = duelSystem.createChallenge(
+      const challenge = createTestChallenge(
+        duelSystem,
         "player1",
         "P1",
         "player2",
@@ -532,7 +569,8 @@ describe("DuelSystem", () => {
     let duelId: string;
 
     beforeEach(() => {
-      const challenge = duelSystem.createChallenge(
+      const challenge = createTestChallenge(
+        duelSystem,
         "player1",
         "P1",
         "player2",
@@ -567,7 +605,8 @@ describe("DuelSystem", () => {
     let duelId: string;
 
     beforeEach(() => {
-      const challenge = duelSystem.createChallenge(
+      const challenge = createTestChallenge(
+        duelSystem,
         "player1",
         "P1",
         "player2",
@@ -618,7 +657,8 @@ describe("DuelSystem", () => {
     let duelId: string;
 
     beforeEach(() => {
-      const challenge = duelSystem.createChallenge(
+      const challenge = createTestChallenge(
+        duelSystem,
         "player1",
         "P1",
         "player2",
@@ -677,7 +717,8 @@ describe("DuelSystem", () => {
     let duelId: string;
 
     beforeEach(() => {
-      const challenge = duelSystem.createChallenge(
+      const challenge = createTestChallenge(
+        duelSystem,
         "player1",
         "P1",
         "player2",
@@ -745,7 +786,8 @@ describe("DuelSystem", () => {
     let duelId: string;
 
     beforeEach(() => {
-      const challenge = duelSystem.createChallenge(
+      const challenge = createTestChallenge(
+        duelSystem,
         "player1",
         "P1",
         "player2",
@@ -823,7 +865,8 @@ describe("DuelSystem", () => {
     let duelId: string;
 
     beforeEach(() => {
-      const challenge = duelSystem.createChallenge(
+      const challenge = createTestChallenge(
+        duelSystem,
         "player1",
         "P1",
         "player2",
@@ -873,7 +916,8 @@ describe("DuelSystem", () => {
       world.addPlayer({ id: "player3", position: { x: 70, y: 0, z: 70 } });
       world.addPlayer({ id: "player4", position: { x: 72, y: 0, z: 70 } });
 
-      const challenge2 = duelSystem.createChallenge(
+      const challenge2 = createTestChallenge(
+        duelSystem,
         "player3",
         "P3",
         "player4",
@@ -901,7 +945,8 @@ describe("DuelSystem", () => {
     let duelId: string;
 
     beforeEach(() => {
-      const challenge = duelSystem.createChallenge(
+      const challenge = createTestChallenge(
+        duelSystem,
         "player1",
         "P1",
         "player2",
@@ -984,7 +1029,8 @@ describe("DuelSystem", () => {
 
   describe("onPlayerReconnect", () => {
     it("clears disconnect timer on reconnect", () => {
-      const challenge = duelSystem.createChallenge(
+      const challenge = createTestChallenge(
+        duelSystem,
         "player1",
         "P1",
         "player2",
@@ -1027,7 +1073,8 @@ describe("DuelSystem", () => {
 
   describe("destroy", () => {
     it("cancels all active duels", () => {
-      const challenge = duelSystem.createChallenge(
+      const challenge = createTestChallenge(
+        duelSystem,
         "player1",
         "P1",
         "player2",
@@ -1044,7 +1091,8 @@ describe("DuelSystem", () => {
 
   describe("cleanupExpiredSessions", () => {
     it("cancels sessions stuck in setup for too long", () => {
-      const challenge = duelSystem.createChallenge(
+      const challenge = createTestChallenge(
+        duelSystem,
         "player1",
         "P1",
         "player2",

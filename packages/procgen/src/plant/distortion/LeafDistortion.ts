@@ -466,19 +466,38 @@ function calculateFlopDistortion(
 // =============================================================================
 
 /**
+ * Simple seeded random for distortion variation
+ */
+function createDistortionRandom(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (state * 1103515245 + 12345) & 0x7fffffff;
+    return state / 0x7fffffff;
+  };
+}
+
+/**
  * Apply all distortions to a leaf mesh
+ *
+ * @param mesh - Base mesh to distort
+ * @param midrib - Midrib vein curve for reference
+ * @param params - Plant parameters
+ * @param seed - Random seed for micro-variation in distortion amounts
  */
 export function applyDistortions(
   mesh: MeshData,
   midrib: LeafVein,
   params: LeafParamDict,
-  _seed: number,
+  seed: number,
 ): MeshData {
   // Check if distortion is enabled
   const distortionEnabled = getParamValue(params, LPK.DistortionEnabled) > 0;
   if (!distortionEnabled) {
     return mesh;
   }
+
+  // Create seeded random for variation
+  const random = createDistortionRandom(seed);
 
   // Clone vertices for modification
   const distortedVertices = mesh.vertices.map(clone3D);
@@ -495,14 +514,16 @@ export function applyDistortions(
     p1: midrib.p1,
   };
 
-  // Get distortion parameters
-  const curlAmount = getParamValue(params, LPK.DistortCurl);
+  // Get distortion parameters with seed-based micro-variation (±5%)
+  const variationFactor = () => 1.0 + (random() - 0.5) * 0.1;
+
+  const curlAmount = getParamValue(params, LPK.DistortCurl) * variationFactor();
   const curlPoint = getParamValue(params, LPK.DistortCurlPoint);
-  const cupAmount = getParamValue(params, LPK.DistortCup);
+  const cupAmount = getParamValue(params, LPK.DistortCup) * variationFactor();
   const cupClamp = getParamValue(params, LPK.DistortCupClamp);
-  const flopAmount = getParamValue(params, LPK.DistortFlop);
+  const flopAmount = getParamValue(params, LPK.DistortFlop) * variationFactor();
   const flopStart = getParamValue(params, LPK.DistortFlopStart);
-  const waveAmp = getParamValue(params, LPK.DistortWaveAmp);
+  const waveAmp = getParamValue(params, LPK.DistortWaveAmp) * variationFactor();
   const wavePeriod = getParamValue(params, LPK.DistortWavePeriod);
   const waveDepth = getParamValue(params, LPK.DistortWaveDepth);
   const waveDivergence = getParamValue(params, LPK.DistortWaveDivergance);

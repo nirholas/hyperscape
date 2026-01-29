@@ -137,8 +137,15 @@ export type EventCallback = (data: unknown) => void;
  * and component-based architecture. All game objects inherit from Entity.
  */
 export class Entity implements IEntity {
-  /** Enable verbose HLOD debug logging (set in browser console: Entity.HLOD_DEBUG = true) */
+  /** Enable verbose HLOD debug logging (enable in browser console: Entity.HLOD_DEBUG = true) */
   static HLOD_DEBUG = false;
+
+  /**
+   * Enable visual LOD debug labels (floating numbers above entities)
+   * Shows: 0 = LOD0 (full), 1 = LOD1 (frozen), I = Impostor, X = Culled
+   * Enable in browser console: Entity.LOD_DEBUG_LABELS = true
+   */
+  static LOD_DEBUG_LABELS = false;
 
   world: World;
   data: EntityData;
@@ -219,6 +226,12 @@ export class Entity implements IEntity {
   private _hlodRayDirection = new THREE.Vector3();
   private _hlodRaycaster = new THREE.Raycaster();
   protected lastUpdate = 0;
+
+  // LOD Debug Label (floating text showing current LOD level)
+  private _lodDebugSprite: THREE.Sprite | null = null;
+  private _lodDebugCanvas: HTMLCanvasElement | null = null;
+  private _lodDebugTexture: THREE.CanvasTexture | null = null;
+  private _lodDebugLastLevel: number = -1; // Track changes to avoid redraws
 
   protected health: number = 0;
   protected maxHealth: number = 100;
@@ -1690,9 +1703,12 @@ export class Entity implements IEntity {
 
     if (this.hlodState.usesTSL) {
       console.log(`[Entity HLOD] Creating TSL material for ${this.name}`);
-      // Use debugMode 4 (solid red) temporarily to verify shader runs
-      // Change to 0 for normal rendering once verified
-      const TSL_DEBUG_MODE = 0 as 0 | 1 | 2 | 3 | 4;
+      // Debug modes for diagnosing impostor issues:
+      // 0 = normal rendering (default)
+      // 4 = solid red (verify shader runs)
+      // 5 = sample texture at (0.5, 0.5) - verify texture has content
+      // 6 = sample with raw billboard UVs - verify UV mapping
+      const TSL_DEBUG_MODE = 0 as 0 | 1 | 2 | 3 | 4 | 5 | 6;
       material = createTSLImpostorMaterial({
         atlasTexture,
         gridSizeX,
@@ -1708,6 +1724,10 @@ export class Entity implements IEntity {
         hasImpostorUniforms: !!(material as TSLImpostorMaterial)
           .impostorUniforms,
         debugMode: TSL_DEBUG_MODE,
+        atlasTextureUuid: atlasTexture?.uuid ?? "none",
+        atlasTextureSource: atlasTexture?.source?.uuid ?? "none",
+        atlasIsRenderTargetTexture:
+          atlasTexture?.isRenderTargetTexture ?? false,
       });
     } else {
       console.log(`[Entity HLOD] Creating GLSL material for ${this.name}`);
@@ -1727,6 +1747,66 @@ export class Entity implements IEntity {
     mesh.name = `HLOD_${this.name}`;
     mesh.visible = false; // Hidden initially (LOD0 active)
     mesh.layers.set(1); // Main camera only
+
+    // Position impostor LOCAL to entity's node (not world space)
+    // X/Z should be 0 (centered on entity) - Y is height offset from ground
+    //
+    // The bounding box center is computed in world space during baking, but
+    // we need the LOCAL height offset for proper positioning when parented to this.node.
+    //
+    // For characters/mobs: origin is at feet, so center.y represents height/2 above ground
+    // For trees: same logic - center.y is vertical offset from base
+    //
+    // NOTE: We only use the vertical (Y) component of the bounding box center
+    // as the height offset. X/Z are kept at 0 so the impostor stays centered
+    // on the entity's node position in world space.
+    let heightOffset = 0;
+    if (boundingBox) {
+      const boxCenter = new THREE.Vector3();
+      const boxSize = new THREE.Vector3();
+      boundingBox.getCenter(boxCenter);
+      boundingBox.getSize(boxSize);
+
+      // For entities positioned at world origin during baking, boxCenter.y is
+      // the vertical center of the mesh. For entities NOT at origin, we need
+      // to subtract the source mesh's world position to get local offset.
+      // However, since we can't easily access the source's position here,
+      // we assume the mesh was centered during baking and use boxCenter.y
+      // as the height of the center above the entity's node Y position.
+      //
+      // Better approach: compute height offset as (boxMin.y + boxSize.y/2)
+      // This gives us the center Y relative to the box's bottom, which is
+      // typically where the entity's feet/base would be.
+      const boxMin = boundingBox.min.y;
+      heightOffset = boxMin + boxSize.y / 2;
+
+      // If the box minimum is very negative, the mesh might be floating
+      // Fall back to using the box center directly relative to 0
+      if (Math.abs(boxMin) > boxSize.y) {
+        // Box seems to be at an arbitrary world position - use size-based offset
+        heightOffset = boxSize.y / 2;
+      }
+    } else if (boundingSphere) {
+      // Fallback: use sphere center Y, or half the diameter
+      const sphereCenterY = boundingSphere.center.y;
+      heightOffset =
+        Math.abs(sphereCenterY) > boundingSphere.radius * 2
+          ? boundingSphere.radius // Sphere at world position - use radius
+          : sphereCenterY; // Sphere near origin - use center
+    } else {
+      // Fallback: offset by half height (assume origin at feet)
+      heightOffset = height / 2;
+    }
+
+    // Set LOCAL position: centered on X/Z, offset vertically
+    mesh.position.set(0, heightOffset, 0);
+
+    console.log(`[Entity HLOD] Impostor position for ${this.name}:`, {
+      heightOffset: heightOffset.toFixed(2),
+      meshSize: `${width.toFixed(2)} x ${height.toFixed(2)}`,
+      boundingBoxMin: boundingBox?.min.y?.toFixed(2) ?? "N/A",
+      boundingBoxMax: boundingBox?.max.y?.toFixed(2) ?? "N/A",
+    });
 
     // Add to entity's node
     this.node.add(mesh);
@@ -1797,13 +1877,18 @@ export class Entity implements IEntity {
     ) {
       // Hysteresis: stay culled until significantly closer
       targetLOD = LODLevel.CULLED;
-    } else if (distSq >= lodConfig.imposterDistanceSq && impostorReady) {
-      // Far enough for impostor
+    } else if (
+      distSq >= lodConfig.imposterDistanceSq &&
+      impostorReady &&
+      impostorMesh
+    ) {
+      // Far enough for impostor (require BOTH flag and mesh to exist)
       targetLOD = LODLevel.IMPOSTOR;
     } else if (
       currentLOD === LODLevel.IMPOSTOR &&
       distSq >= lodConfig.imposterDistanceSq * hysteresisSq &&
-      impostorReady
+      impostorReady &&
+      impostorMesh
     ) {
       // Hysteresis: stay at impostor until significantly closer
       targetLOD = LODLevel.IMPOSTOR;
@@ -1825,6 +1910,14 @@ export class Entity implements IEntity {
     // Transition LOD if changed
     if (targetLOD !== currentLOD) {
       this.transitionHLOD(currentLOD, targetLOD);
+    }
+
+    // Update LOD debug label if enabled
+    if (Entity.LOD_DEBUG_LABELS) {
+      this.updateLODDebugLabel(this.hlodState.currentLOD, cameraPosition);
+    } else if (this._lodDebugSprite) {
+      // Clean up label if debug was disabled
+      this.destroyLODDebugLabel();
     }
 
     // Update impostor view direction if active
@@ -1872,21 +1965,48 @@ export class Entity implements IEntity {
       );
     }
 
+    // DEFENSIVE: When going to IMPOSTOR, only hide 3D mesh if impostor actually exists
+    // This prevents entities from becoming invisible when impostor baking fails
+    const hasValidImpostor = !!impostorMesh;
+    const goingToImpostor = to === LODLevel.IMPOSTOR;
+    const goingToCulled = to === LODLevel.CULLED;
+
     // Hide previous LOD
     switch (from) {
       case LODLevel.LOD0:
-        // Only hide lod0Mesh if we're transitioning to a level that has its own mesh
-        // (either lod1Mesh exists, or we're going to IMPOSTOR/CULLED)
-        if (lod0Mesh && (to !== LODLevel.LOD1 || lod1Mesh)) {
-          lod0Mesh.visible = false;
+        // Only hide lod0Mesh if:
+        // - Going to LOD1 with a lod1Mesh, OR
+        // - Going to IMPOSTOR with a valid impostor, OR
+        // - Going to CULLED
+        if (lod0Mesh) {
+          const shouldHide =
+            (to === LODLevel.LOD1 && lod1Mesh) ||
+            (goingToImpostor && hasValidImpostor) ||
+            goingToCulled;
+          if (shouldHide) {
+            lod0Mesh.visible = false;
+          }
         }
         break;
       case LODLevel.LOD1:
         // If we have a lod1Mesh, hide it; otherwise lod0Mesh was being shown
+        // Only hide if we have a valid replacement or going to CULLED
         if (lod1Mesh) {
-          lod1Mesh.visible = false;
+          const shouldHide =
+            to === LODLevel.LOD0 ||
+            (goingToImpostor && hasValidImpostor) ||
+            goingToCulled;
+          if (shouldHide) {
+            lod1Mesh.visible = false;
+          }
         } else if (lod0Mesh) {
-          lod0Mesh.visible = false;
+          const shouldHide =
+            to === LODLevel.LOD0 ||
+            (goingToImpostor && hasValidImpostor) ||
+            goingToCulled;
+          if (shouldHide) {
+            lod0Mesh.visible = false;
+          }
         }
         break;
       case LODLevel.IMPOSTOR:
@@ -1912,21 +2032,17 @@ export class Entity implements IEntity {
           impostorMesh.visible = true;
         } else {
           // Fallback: no impostor mesh available, keep best available 3D mesh visible
-          // This prevents entities from disappearing while impostor is pending/failed
+          // This should not happen due to defensive checks above, but log if it does
           console.warn(
-            `[Entity HLOD] No impostor mesh for ${this.name}, falling back to 3D mesh`,
+            `[Entity HLOD] ⚠️ No impostor mesh for ${this.name}, 3D mesh should still be visible`,
           );
-          if (lod1Mesh) {
-            lod1Mesh.visible = true;
-          } else if (lod0Mesh) {
-            lod0Mesh.visible = true;
-          }
         }
         break;
       case LODLevel.CULLED:
         // Everything hidden - make sure both meshes are hidden
         if (lod0Mesh) lod0Mesh.visible = false;
         if (lod1Mesh) lod1Mesh.visible = false;
+        if (impostorMesh) impostorMesh.visible = false;
         break;
     }
 
@@ -2099,6 +2215,179 @@ export class Entity implements IEntity {
     }
 
     this.hlodState = null;
+  }
+
+  // ============================================================================
+  // LOD DEBUG LABELS
+  // ============================================================================
+
+  /**
+   * Update or create LOD debug label (floating text above entity)
+   * Shows: 0 = LOD0 (full), 1 = LOD1 (frozen), I = Impostor, X = Culled
+   */
+  private updateLODDebugLabel(
+    lodLevel: LODLevel,
+    cameraPosition: THREE.Vector3,
+  ): void {
+    // Only redraw canvas if LOD level changed
+    if (lodLevel !== this._lodDebugLastLevel) {
+      this._lodDebugLastLevel = lodLevel;
+
+      // Create sprite lazily on first call
+      if (!this._lodDebugSprite) {
+        this.createLODDebugSprite();
+        console.log(
+          `[Entity LOD Label] Created debug label for ${this.name} at LOD${lodLevel}`,
+        );
+      }
+
+      // Redraw the label with new LOD
+      this.drawLODDebugLabel(lodLevel);
+    }
+
+    // Position sprite above entity (billboard toward camera)
+    if (this._lodDebugSprite && this.node) {
+      // Position 2.5 units above the entity
+      this._lodDebugSprite.position.copy(this.node.position);
+      this._lodDebugSprite.position.y += 2.5;
+
+      // Make sprite face camera (billboard)
+      this._lodDebugSprite.lookAt(cameraPosition);
+    }
+  }
+
+  /**
+   * Create the LOD debug sprite and canvas
+   */
+  private createLODDebugSprite(): void {
+    // Don't create on server
+    if (this.world.isServer) return;
+
+    // Create canvas for rendering text
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 64;
+    this._lodDebugCanvas = canvas;
+
+    // Create texture from canvas
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    this._lodDebugTexture = texture;
+
+    // Create sprite material
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+    });
+
+    // Create sprite
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(1.5, 1.5, 1);
+    sprite.name = `LOD_Debug_${this.id}`;
+
+    // Set to layer 1 (main camera) - matches other game objects
+    // Also enable layer 0 so it's visible on all cameras
+    sprite.layers.enable(0);
+    sprite.layers.enable(1);
+
+    // Add to scene
+    const scene = this.world.stage?.scene;
+    if (scene) {
+      scene.add(sprite);
+      console.log(
+        `[Entity LOD Label] Added debug sprite to scene for ${this.name}`,
+      );
+    } else {
+      console.warn(
+        `[Entity LOD Label] No scene available for ${this.name}, sprite not added`,
+      );
+    }
+
+    this._lodDebugSprite = sprite;
+  }
+
+  /**
+   * Draw the LOD level label on canvas
+   */
+  private drawLODDebugLabel(lodLevel: LODLevel): void {
+    if (!this._lodDebugCanvas || !this._lodDebugTexture) return;
+
+    const ctx = this._lodDebugCanvas.getContext("2d");
+    if (!ctx) return;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, 64, 64);
+
+    // Get label text and color based on LOD level
+    let label: string;
+    let bgColor: string;
+
+    switch (lodLevel) {
+      case LODLevel.LOD0:
+        label = "0";
+        bgColor = "#00aa00"; // Green - full detail
+        break;
+      case LODLevel.LOD1:
+        label = "1";
+        bgColor = "#aaaa00"; // Yellow - medium detail
+        break;
+      case LODLevel.IMPOSTOR:
+        label = "I";
+        bgColor = "#aa5500"; // Orange - impostor
+        break;
+      case LODLevel.CULLED:
+        label = "X";
+        bgColor = "#aa0000"; // Red - culled
+        break;
+      default:
+        label = "?";
+        bgColor = "#555555";
+    }
+
+    // Draw circular background
+    ctx.beginPath();
+    ctx.arc(32, 32, 28, 0, Math.PI * 2);
+    ctx.fillStyle = bgColor;
+    ctx.fill();
+
+    // Draw black outline
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "#000000";
+    ctx.stroke();
+
+    // Draw label text
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 36px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, 32, 34);
+
+    // Update texture
+    this._lodDebugTexture.needsUpdate = true;
+  }
+
+  /**
+   * Destroy LOD debug label and clean up resources
+   */
+  private destroyLODDebugLabel(): void {
+    if (this._lodDebugSprite) {
+      if (this._lodDebugSprite.parent) {
+        this._lodDebugSprite.parent.remove(this._lodDebugSprite);
+      }
+      (this._lodDebugSprite.material as THREE.SpriteMaterial).dispose();
+      this._lodDebugSprite = null;
+    }
+
+    if (this._lodDebugTexture) {
+      this._lodDebugTexture.dispose();
+      this._lodDebugTexture = null;
+    }
+
+    this._lodDebugCanvas = null;
+    this._lodDebugLastLevel = -1;
   }
 
   // Fixed timestep update (for physics, etc.)
@@ -2313,6 +2602,9 @@ export class Entity implements IEntity {
 
     // Dispose of HLOD impostor resources
     this.disposeHLOD();
+
+    // Dispose of LOD debug label
+    this.destroyLODDebugLabel();
 
     // Dispose of THREE.js resources
     if (this.mesh) {

@@ -42,6 +42,12 @@ export interface ClientPrefsData {
   bloom?: boolean;
   colorGrading?: string;
   colorGradingIntensity?: number;
+  /** Depth-based camera blur (RuneScape-style DoF) */
+  depthBlur?: boolean;
+  /** Depth blur intensity 0-1 */
+  depthBlurIntensity?: number;
+  /** Depth blur focus distance in world units */
+  depthBlurDistance?: number;
   music?: number;
   sfx?: number;
   voice?: number;
@@ -76,10 +82,16 @@ export class ClientInterface extends SystemBase {
   stats: boolean = false;
   dpr: number = 1;
   shadows: string = "med";
-  postprocessing: boolean = false;
+  postprocessing: boolean = true;
   bloom: boolean = true;
   colorGrading: string = "none";
   colorGradingIntensity: number = 1;
+  /** Depth-based camera blur (RuneScape-style DoF) - enabled by default */
+  depthBlur: boolean = true;
+  /** Depth blur intensity 0-1, default 0.85 for RuneScape-style heavy blur */
+  depthBlurIntensity: number = 0.85;
+  /** Depth blur focus distance in world units - how far before blur starts */
+  depthBlurDistance: number = 60;
   music: number = 1;
   sfx: number = 1;
   voice: number = 1;
@@ -154,6 +166,11 @@ export class ClientInterface extends SystemBase {
         this.colorGrading = parsed.colorGrading;
       if (parsed.colorGradingIntensity !== undefined)
         this.colorGradingIntensity = parsed.colorGradingIntensity;
+      if (parsed.depthBlur !== undefined) this.depthBlur = parsed.depthBlur;
+      if (parsed.depthBlurIntensity !== undefined)
+        this.depthBlurIntensity = parsed.depthBlurIntensity;
+      if (parsed.depthBlurDistance !== undefined)
+        this.depthBlurDistance = parsed.depthBlurDistance;
 
       if (parsed.chatVisible !== undefined)
         this.chatVisible = parsed.chatVisible;
@@ -496,6 +513,9 @@ export class ClientInterface extends SystemBase {
       bloom: this.bloom,
       colorGrading: this.colorGrading,
       colorGradingIntensity: this.colorGradingIntensity,
+      depthBlur: this.depthBlur,
+      depthBlurIntensity: this.depthBlurIntensity,
+      depthBlurDistance: this.depthBlurDistance,
 
       music: this.music,
       sfx: this.sfx,
@@ -537,6 +557,15 @@ export class ClientInterface extends SystemBase {
   }
   setColorGradingIntensity(value: number) {
     this.modify("colorGradingIntensity", value);
+  }
+  setDepthBlur(value: boolean) {
+    this.modify("depthBlur", value);
+  }
+  setDepthBlurIntensity(value: number) {
+    this.modify("depthBlurIntensity", value);
+  }
+  setDepthBlurDistance(value: number) {
+    this.modify("depthBlurDistance", value);
   }
   setMusic(value: number) {
     this.modify("music", value);

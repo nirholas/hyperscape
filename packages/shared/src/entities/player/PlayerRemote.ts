@@ -166,6 +166,8 @@ export class PlayerRemote extends Entity implements HotReloadable {
   private readonly _animationLOD = new AnimationLOD(
     ANIMATION_LOD_PRESETS.PLAYER,
   );
+  /** Track if idle pose has been applied at least once - prevents T-pose at frozen distances */
+  private _hasAppliedIdlePose = false;
 
   /** Distance fade controller - dissolve effect for entities near render distance */
   private _distanceFade: DistanceFadeController | null = null;
@@ -480,26 +482,42 @@ export class PlayerRemote extends Entity implements HotReloadable {
       const avatarHeight = (this.avatar as AvatarWithHeight).height ?? 1.5;
       const camHeight = Math.max(1.2, avatarHeight * 0.9);
 
-      // HLOD: Set mesh reference for impostor baking (VRM scene is the mesh)
+      // HLOD: Set mesh reference (VRM scene is the mesh)
       if (instanceWithRaw?.raw?.scene) {
         this.mesh = instanceWithRaw.raw.scene as THREE.Object3D;
 
-        // Initialize HLOD impostor support for remote players
-        // Bake impostor in idle pose, freeze animations at LOD1
-        await this.initHLOD(`player_remote_${this.id}_${avatarUrl}`, {
+        // Initialize HLOD impostor support for VRM players
+        // VRM models use a different rendering path (avatarInstance.move()) but we can still use impostors.
+        // The key is that this.node.position is kept in sync with the VRM's world position.
+        await this.initHLOD(`vrm_player_${this.id}_${avatarUrl}`, {
           category: "player",
-          atlasSize: 512,
+          atlasSize: 512, // Smaller for players
           hemisphere: true,
-          freezeAnimationAtLOD1: true, // AAA LOD: Freeze animation at medium distance
+          freezeAnimationAtLOD1: true, // Freeze animation at medium distance
           prepareForBake: async () => {
-            // Ensure VRM is in idle pose before baking impostor
-            if (avatarWithEmote.instance?.setEmoteAndWait) {
-              await avatarWithEmote.instance.setEmoteAndWait(Emotes.IDLE, 2000);
-            } else if (avatarWithEmote.setEmote) {
-              avatarWithEmote.setEmote(Emotes.IDLE);
+            // Prepare VRM mesh for impostor baking at local origin
+            if (this.mesh && this.avatar) {
+              const savedPosition = this.mesh.position.clone();
+              const savedQuaternion = this.mesh.quaternion.clone();
+
+              // Move mesh to local origin for baking
+              this.mesh.position.set(0, 0, 0);
+              this.mesh.quaternion.identity();
+
+              // Update to ensure current pose
+              const avatarWithInstance = this.avatar as AvatarWithInstance;
+              avatarWithInstance.instance?.update(0);
+              this.mesh.updateMatrixWorld(true);
+
+              // Restore position after baking (microtask)
+              Promise.resolve().then(() => {
+                if (this.mesh) {
+                  this.mesh.position.copy(savedPosition);
+                  this.mesh.quaternion.copy(savedQuaternion);
+                  this.mesh.updateMatrixWorld(true);
+                }
+              });
             }
-            // Update animation mixer to apply pose
-            avatarWithEmote.instance?.update?.(0);
           },
         });
       }
@@ -587,7 +605,35 @@ export class PlayerRemote extends Entity implements HotReloadable {
           effectiveDelta: delta,
           lodLevel: 0,
           distanceSq: 0,
+          shouldApplyRestPose: false,
         };
+
+    // T-POSE FIX: When entering frozen state (or never applied idle), apply idle pose once
+    // This ensures remote players at frozen/culled distances show idle pose instead of T-pose
+    const needsIdlePoseApplication =
+      animLODResult.shouldApplyRestPose || !this._hasAppliedIdlePose;
+
+    if (needsIdlePoseApplication && this.avatar) {
+      type AvatarWithIdlePose = {
+        instance?: {
+          setEmote?: (emote: string) => void;
+          update?: (delta: number) => void;
+        };
+      };
+      const avatarWithInstance = this.avatar as AvatarWithIdlePose;
+      if (avatarWithInstance.instance) {
+        const instance = avatarWithInstance.instance;
+        // Ensure idle emote is set
+        if (instance.setEmote) {
+          instance.setEmote(Emotes.IDLE);
+        }
+        // Apply frame 0 to bake idle pose into skeleton
+        if (instance.update) {
+          instance.update(0);
+        }
+        this._hasAppliedIdlePose = true;
+      }
+    }
 
     const anchor = this.getAnchorMatrix();
     if (!anchor) {

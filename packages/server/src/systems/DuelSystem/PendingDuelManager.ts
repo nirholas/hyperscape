@@ -11,7 +11,7 @@
  * Similar pattern to trade request management.
  */
 
-import type { World } from "@hyperscape/shared";
+import type { World, PlayerID } from "@hyperscape/shared";
 import type { PendingDuelChallenge } from "@hyperscape/shared";
 import {
   CHALLENGE_TIMEOUT_TICKS,
@@ -50,9 +50,11 @@ export class PendingDuelManager {
    * @returns The challenge ID if successful, null if player already has a pending challenge
    */
   createChallenge(
-    challengerId: string,
+    challengerId: PlayerID,
     challengerName: string,
-    targetId: string,
+    challengerSocketId: string,
+    challengerCombatLevel: number,
+    targetId: PlayerID,
     targetName: string,
   ):
     | { success: true; challengeId: string }
@@ -93,6 +95,8 @@ export class PendingDuelManager {
       challengeId,
       challengerId,
       challengerName,
+      challengerSocketId,
+      challengerCombatLevel,
       targetId,
       targetName,
       createdAt: Date.now(),

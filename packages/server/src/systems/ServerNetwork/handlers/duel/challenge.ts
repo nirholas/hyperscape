@@ -6,7 +6,12 @@
  * - handleDuelChallengeRespond: Player B accepts/declines the challenge
  */
 
-import { type World, isValidPlayerID, uuid } from "@hyperscape/shared";
+import {
+  type World,
+  type PlayerID,
+  isValidPlayerID,
+  uuid,
+} from "@hyperscape/shared";
 import type { ServerSocket } from "../../../../shared/types";
 import { hasActiveInterfaceSession } from "../common";
 import { Logger } from "../../services";
@@ -182,9 +187,11 @@ export function handleDuelChallenge(
 
     // Create duel challenge
     const result = duelSystem.createChallenge(
-      playerId,
+      playerId as PlayerID,
       challengerName,
-      targetPlayerId,
+      socket.id,
+      challengerLevel,
+      targetPlayerId as PlayerID,
       targetName,
     );
 

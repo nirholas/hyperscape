@@ -320,13 +320,15 @@ export function fastCurveLength(
 /**
  * Generate stem curves for a leaf (matches original C# LeafStem.CreateCurves)
  *
- * Note: attachPoint and direction are currently unused - stem is generated at origin
- * and direction is determined by flop parameters. These are kept for API compatibility.
- * The seed IS used for slight curve variation.
+ * Stems are generated at origin in local bundle space - the bundle's transform
+ * positions and rotates the stem in world space. Stem direction/curvature is
+ * controlled by StemFlop and StemNeck parameters.
+ *
+ * @param params - Plant parameters dictionary
+ * @param arrangementData - Arrangement data for this leaf bundle
+ * @param seed - Random seed for curve variation
  */
 export function generateStem(
-  _attachPoint: Point3D,
-  _direction: Point3D,
   params: LeafParamDict,
   arrangementData: ArrangementData,
   seed: number,
@@ -688,6 +690,11 @@ export function applyCollisionAvoidance(
 
   if (physicsAmp < 0.01) return;
 
+  // Maximum adjustment per iteration to prevent massive separations
+  const maxAdjustmentPerIter = 0.1;
+  // Maximum total adjustment to keep bundles attached to trunk
+  const maxTotalAdjustment = 0.3;
+
   for (let iter = 0; iter < iterations; iter++) {
     for (let i = 0; i < bundles.length; i++) {
       const bundleA = bundles[i];
@@ -717,7 +724,18 @@ export function applyCollisionAvoidance(
         if (aabbIntersects(aabbA, aabbB)) {
           // Calculate separation
           const separation = calculateSeparation(aabbA, aabbB);
-          const halfSep = mul3D(separation, physicsAmp * 0.5);
+          let halfSep = mul3D(separation, physicsAmp * 0.5);
+
+          // Clamp adjustment per iteration
+          const sepLen = Math.sqrt(
+            halfSep.x * halfSep.x +
+              halfSep.y * halfSep.y +
+              halfSep.z * halfSep.z,
+          );
+          if (sepLen > maxAdjustmentPerIter) {
+            const scale = maxAdjustmentPerIter / sepLen;
+            halfSep = mul3D(halfSep, scale);
+          }
 
           // Apply to both bundles (move apart)
           bundleA.collisionAdjustment = add3D(
@@ -730,6 +748,16 @@ export function applyCollisionAvoidance(
           );
         }
       }
+    }
+  }
+
+  // Clamp total adjustments to keep bundles near trunk
+  for (const bundle of bundles) {
+    const adj = bundle.collisionAdjustment;
+    const totalLen = Math.sqrt(adj.x * adj.x + adj.y * adj.y + adj.z * adj.z);
+    if (totalLen > maxTotalAdjustment) {
+      const scale = maxTotalAdjustment / totalLen;
+      bundle.collisionAdjustment = mul3D(adj, scale);
     }
   }
 }

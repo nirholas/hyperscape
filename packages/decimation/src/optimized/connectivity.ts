@@ -48,7 +48,7 @@ class EdgeHashTable {
   private hash(key: bigint): number {
     let h = key;
     h ^= h >> BigInt(33);
-    h *= BigInt(0xff51afd7ed558ccd);
+    h *= 0xff51afd7ed558ccdn;
     h ^= h >> BigInt(33);
     return Number(h & BigInt(this.capacity - 1));
   }

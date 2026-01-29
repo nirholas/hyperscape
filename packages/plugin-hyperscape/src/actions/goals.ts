@@ -521,6 +521,8 @@ Choose the goal ID that makes the most sense. Respond with ONLY the goal ID (e.g
         targetSkillLevel = currentLevel + 2;
         progress = currentLevel;
         target = targetSkillLevel;
+        targetEntity = "furnace";
+        location = "furnace"; // Start at furnace for smelting
       } else if (selectedGoal.type === "fishing") {
         targetSkill = "fishing";
         const currentLevel = skills?.fishing?.level ?? 1;
@@ -535,15 +537,18 @@ Choose the goal ID that makes the most sense. Respond with ONLY the goal ID (e.g
         targetSkillLevel = currentLevel + 2;
         progress = currentLevel;
         target = targetSkillLevel;
+        location = "spawn"; // Cooking fires typically near spawn
       } else if (selectedGoal.type === "firemaking") {
         targetSkill = "firemaking";
         const currentLevel = skills?.firemaking?.level ?? 1;
         targetSkillLevel = currentLevel + 2;
         progress = currentLevel;
         target = targetSkillLevel;
+        location = "spawn"; // Can do firemaking anywhere, default to spawn
       } else if (selectedGoal.type === "exploration") {
         progress = 0;
         target = 3; // 3 exploration steps
+        location = "spawn"; // Start exploration from spawn
       }
 
       // Set the goal in the behavior manager
@@ -680,7 +685,7 @@ export const navigateToAction: Action = {
     const goal = behaviorManager?.getGoal();
 
     logger.info(
-      `[NAVIGATE_TO] Checking goal - location: ${goal?.location}, targetPosition: ${goal?.targetPosition ? `(${goal.targetPosition[0]}, ${goal.targetPosition[2]})` : "none"}`,
+      `[NAVIGATE_TO] Checking goal - type: ${goal?.type}, location: ${goal?.location}, targetPosition: ${goal?.targetPosition ? `(${goal.targetPosition[0]}, ${goal.targetPosition[2]})` : "none"}`,
     );
 
     // Get target position - prefer dynamic targetPosition over KNOWN_LOCATIONS
@@ -693,7 +698,7 @@ export const navigateToAction: Action = {
       targetName = goal.location || "dynamic target";
       logger.info(`[NAVIGATE_TO] Using dynamic position for ${targetName}`);
     } else if (goal?.location) {
-      // Fall back to KNOWN_LOCATIONS
+      // Use KNOWN_LOCATIONS lookup
       const targetLoc = KNOWN_LOCATIONS[goal.location];
       if (targetLoc) {
         targetPos = targetLoc.position;
@@ -704,7 +709,7 @@ export const navigateToAction: Action = {
 
     if (!targetPos) {
       logger.info(
-        "[NAVIGATE_TO] Validation failed: no target position available",
+        "[NAVIGATE_TO] Validation failed: no target position available. Goal must have location or targetPosition set.",
       );
       return false;
     }
@@ -749,27 +754,35 @@ export const navigateToAction: Action = {
 
       const behaviorManager = service.getBehaviorManager();
       const goal = behaviorManager?.getGoal();
-      const destinationKey = goal?.location || "spawn";
 
-      // Get target position - prefer dynamic targetPosition over KNOWN_LOCATIONS
+      // Get target position - prefer dynamic targetPosition over explicit location
       let targetPos: [number, number, number] | null = null;
+      let destinationKey = goal?.location || "unknown";
 
       if (goal?.targetPosition) {
         // Use dynamically discovered position
         targetPos = goal.targetPosition;
+        destinationKey = goal.location || "dynamic target";
         logger.info(
           `[NAVIGATE_TO] Handler using dynamic position for ${destinationKey}`,
         );
-      } else {
-        // Fall back to KNOWN_LOCATIONS
-        const destination = KNOWN_LOCATIONS[destinationKey];
+      } else if (goal?.location) {
+        // Use KNOWN_LOCATIONS lookup
+        const destination = KNOWN_LOCATIONS[goal.location];
         if (destination) {
           targetPos = destination.position;
+          destinationKey = goal.location;
+          logger.info(
+            `[NAVIGATE_TO] Handler using KNOWN_LOCATIONS for ${destinationKey}`,
+          );
         }
       }
 
       if (!targetPos) {
-        return { success: false, error: `Unknown location: ${destinationKey}` };
+        return {
+          success: false,
+          error: `No target position available. Goal must have location or targetPosition set. Current goal type: ${goal?.type}, location: ${goal?.location}`,
+        };
       }
 
       // Get current player position

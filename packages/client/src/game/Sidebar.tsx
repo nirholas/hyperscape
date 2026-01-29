@@ -9,11 +9,11 @@ import type {
 } from "../types";
 import { getEmbeddedConfig } from "../types/embeddedConfig";
 import { useChatContext } from "./chat/ChatContext";
-import { HintProvider } from "../components/Hint";
+import { HintProvider } from "../ui/components/Hint";
 import { Minimap } from "./hud/Minimap";
-import { MenuButton } from "../components/MenuButton";
-import { GameWindow } from "../components/GameWindow";
-import { MinimapCompass } from "../components/MinimapCompass";
+import { MenuButton } from "../ui/components/MenuButton";
+import { GameWindow } from "./GameWindow";
+import { MinimapCompass } from "./hud/MinimapCompass";
 import { SkillsPanel } from "./panels/SkillsPanel";
 import { InventoryPanel } from "./panels/InventoryPanel";
 import { CombatPanel } from "./panels/CombatPanel";
@@ -198,11 +198,15 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
   const [tradeData, setTradeData] = useState<TradeWindowState>({
     isOpen: false,
     tradeId: null,
+    screen: "offer",
     partner: null,
     myOffer: [],
     myAccepted: false,
     theirOffer: [],
     theirAccepted: false,
+    myOfferValue: 0,
+    theirOfferValue: 0,
+    partnerFreeSlots: 28,
   });
 
   // Trade request modal state
@@ -513,6 +517,7 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
         setTradeData({
           isOpen: data.isOpen,
           tradeId: data.tradeId,
+          screen: "offer",
           partner: {
             id: data.partner.id as import("@hyperscape/shared").PlayerID,
             name: data.partner.name,
@@ -522,6 +527,9 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
           myAccepted: data.myAccepted,
           theirOffer: data.theirOffer,
           theirAccepted: data.theirAccepted,
+          myOfferValue: 0,
+          theirOfferValue: 0,
+          partnerFreeSlots: 28,
         });
       }
       // Handle trade state updates
@@ -564,11 +572,15 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
           return {
             isOpen: false,
             tradeId: null,
+            screen: "offer",
             partner: null,
             myOffer: [],
             myAccepted: false,
             theirOffer: [],
             theirAccepted: false,
+            myOfferValue: 0,
+            theirOfferValue: 0,
+            partnerFreeSlots: 28,
           };
         });
         // Also close trade request modal if it matches
@@ -1316,11 +1328,15 @@ export function Sidebar({ world, ui: _ui }: SidebarProps) {
             setTradeData({
               isOpen: false,
               tradeId: null,
+              screen: "offer",
               partner: null,
               myOffer: [],
               myAccepted: false,
               theirOffer: [],
               theirAccepted: false,
+              myOfferValue: 0,
+              theirOfferValue: 0,
+              partnerFreeSlots: 28,
             });
           }}
         />

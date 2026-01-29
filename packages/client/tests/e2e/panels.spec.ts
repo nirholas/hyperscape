@@ -194,6 +194,114 @@ test.describe("Settings Panel", () => {
       }
     }
   });
+
+  test("depth blur toggle should require post-processing enabled", async ({
+    page,
+  }) => {
+    await openPanel(page, "settings");
+    await page.waitForTimeout(300);
+
+    // Navigate to Visuals tab
+    const settingsPanel = page.locator('[data-panel="settings"]');
+    const visualsTab = settingsPanel.getByRole("button", { name: /visual/i });
+    if ((await visualsTab.count()) > 0) {
+      await visualsTab.click();
+      await page.waitForTimeout(200);
+    }
+
+    // Find depth blur toggle by label text
+    const depthBlurToggle = settingsPanel
+      .locator("text=Depth Blur")
+      .locator("..");
+
+    if ((await depthBlurToggle.count()) > 0) {
+      // Find the post-processing toggle
+      const postProcessingRow = settingsPanel
+        .locator("text=Post-Processing")
+        .locator("..");
+      const postProcessingToggle = postProcessingRow.locator(
+        '[role="checkbox"], [role="switch"], input[type="checkbox"]',
+      );
+
+      // Get post-processing state
+      const ppEnabled = await postProcessingToggle
+        .isChecked()
+        .catch(() => false);
+
+      // Find depth blur's toggle button
+      const depthBlurButton = depthBlurToggle.locator(
+        '[role="checkbox"], [role="switch"], input[type="checkbox"]',
+      );
+
+      if (!ppEnabled) {
+        // Depth blur should be disabled when post-processing is off
+        const isDisabled = await depthBlurButton.isDisabled().catch(() => true);
+        expect(isDisabled).toBe(true);
+      }
+
+      await takeGameScreenshot(page, "settings-depth-blur-disabled-state");
+    }
+  });
+
+  test("depth blur intensity slider should appear when enabled", async ({
+    page,
+  }) => {
+    await openPanel(page, "settings");
+    await page.waitForTimeout(300);
+
+    // Navigate to Visuals tab
+    const settingsPanel = page.locator('[data-panel="settings"]');
+    const visualsTab = settingsPanel.getByRole("button", { name: /visual/i });
+    if ((await visualsTab.count()) > 0) {
+      await visualsTab.click();
+      await page.waitForTimeout(200);
+    }
+
+    // Enable post-processing first if not enabled
+    const postProcessingRow = settingsPanel
+      .locator("text=Post-Processing")
+      .locator("..");
+    const postProcessingToggle = postProcessingRow.locator(
+      '[role="checkbox"], [role="switch"], input[type="checkbox"]',
+    );
+
+    if ((await postProcessingToggle.count()) > 0) {
+      const ppEnabled = await postProcessingToggle
+        .isChecked()
+        .catch(() => false);
+      if (!ppEnabled) {
+        await postProcessingToggle.click();
+        await page.waitForTimeout(200);
+      }
+    }
+
+    // Enable depth blur
+    const depthBlurRow = settingsPanel.locator("text=Depth Blur").locator("..");
+    const depthBlurToggle = depthBlurRow.locator(
+      '[role="checkbox"], [role="switch"], input[type="checkbox"]',
+    );
+
+    if ((await depthBlurToggle.count()) > 0) {
+      const dbEnabled = await depthBlurToggle.isChecked().catch(() => false);
+      if (!dbEnabled) {
+        await depthBlurToggle.click();
+        await page.waitForTimeout(200);
+      }
+
+      // Verify intensity slider appears
+      const intensitySlider = settingsPanel.locator(
+        "text=Depth Blur Intensity",
+      );
+      const sliderVisible = await intensitySlider
+        .isVisible()
+        .catch(() => false);
+
+      // The intensity slider should be visible when depth blur is enabled
+      expect(sliderVisible).toBe(true);
+
+      await takeGameScreenshot(page, "settings-depth-blur-intensity-slider");
+    }
+  });
 });
 
 test.describe("Bank Panel", () => {

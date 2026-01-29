@@ -13,7 +13,7 @@ export default [
   },
   js.configs.recommended,
   {
-    files: ['src/**/*.{ts,tsx}'],
+    files: ['src/**/*.{ts,tsx}', 'tests/**/*.{ts,tsx}', '*.config.ts'],
     languageOptions: {
       parser: tsparser,
       ecmaVersion: 2022,

@@ -357,6 +357,15 @@ const names = [
   'testLevelUp',           // Server -> Client: test level up popup (visual only)
   'testXpDrop',            // Server -> Client: test XP drop animation (visual only)
   'testDeathScreen',       // Server -> Client: test death screen (visual only)
+  // Building collision debug packets
+  'debugBuildingCollision',       // Client -> Server: query building collision status
+  'debugBuildingCollisionResult', // Server -> Client: building collision status response
+  'debugWalkability',             // Client -> Server: enable/disable walkability debug logging
+  'debugWalkabilityResult',       // Server -> Client: walkability debug toggle confirmation
+  'debugDoorTiles',               // Client -> Server: query door tiles for a building
+  'debugDoorTilesResult',         // Server -> Client: door tiles response
+  'debugWallBlocking',            // Client -> Server: check wall blocking between tiles
+  'debugWallBlockingResult',      // Server -> Client: wall blocking check result
 ]
 
 const byName: Record<string, PacketInfo> = {};
