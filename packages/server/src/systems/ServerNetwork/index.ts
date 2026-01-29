@@ -3549,7 +3549,13 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     const equipmentSystem = this.world.getSystem("equipment") as
       | {
           getPlayerEquipment?: (id: string) => {
-            weapon?: { item?: { attackRange?: number; id?: string } };
+            weapon?: {
+              item?: {
+                attackRange?: number;
+                attackType?: string;
+                id?: string;
+              };
+            };
           } | null;
         }
       | undefined;
@@ -3560,22 +3566,34 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       if (equipment?.weapon?.item) {
         const weaponItem = equipment.weapon.item;
 
-        // Check if weapon has attackRange directly
-        if (weaponItem.attackRange) {
-          return weaponItem.attackRange;
-        }
+        // OSRS-accurate: Magic weapons (staffs/wands) without autocast
+        // default to melee range (1 tile bonk). The selectedSpell check above
+        // already returns 10 for magic range when a spell is selected.
+        const isMagicWeapon =
+          String(weaponItem.attackType || "").toLowerCase() === "magic" ||
+          (weaponItem.id &&
+            String(getItem(weaponItem.id)?.attackType || "").toLowerCase() ===
+              "magic");
 
-        // Fallback: look up from items manifest
-        if (weaponItem.id) {
-          const itemData = getItem(weaponItem.id);
-          if (itemData?.attackRange) {
-            return itemData.attackRange;
+        if (!isMagicWeapon) {
+          // Non-magic weapons use their attackRange (e.g., bows)
+          if (weaponItem.attackRange) {
+            return weaponItem.attackRange;
+          }
+
+          // Fallback: look up from items manifest
+          if (weaponItem.id) {
+            const itemData = getItem(weaponItem.id);
+            if (itemData?.attackRange) {
+              return itemData.attackRange;
+            }
           }
         }
+        // Magic weapons without autocast fall through to melee range (1)
       }
     }
 
-    // Default to 1 tile (unarmed/punching)
+    // Default to 1 tile (unarmed/punching, or magic weapon without autocast)
     return 1;
   }
 
@@ -3617,18 +3635,29 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
         // Check explicit attackType first
         if (weaponItem.attackType) {
-          return weaponItem.attackType;
+          // OSRS-accurate: Magic weapons (staffs/wands) without autocast use
+          // melee crush attack (bonk). The selectedSpell check above already
+          // returns MAGIC when a spell is selected.
+          const isMagicAttackType =
+            String(weaponItem.attackType).toLowerCase() === "magic";
+          if (!isMagicAttackType) {
+            return weaponItem.attackType as AttackType;
+          }
+          // Magic attack type without autocast → melee bonk
+          return AttackType.MELEE;
         }
 
         // Fall back to weaponType for legacy compatibility
         if (weaponItem.weaponType === WeaponType.BOW) {
           return AttackType.RANGED;
         }
+        // OSRS-accurate: Staffs/wands without autocast use melee (crush bonk)
+        // The selectedSpell check above already handles the autocast case
         if (
           weaponItem.weaponType === WeaponType.STAFF ||
           weaponItem.weaponType === WeaponType.WAND
         ) {
-          return AttackType.MAGIC;
+          return AttackType.MELEE;
         }
       }
     }
