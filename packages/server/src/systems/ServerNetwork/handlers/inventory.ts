@@ -320,6 +320,15 @@ export function handleDropItem(
       ? payload.slot
       : undefined;
 
+  // Block ALL drops during duel (can't drop any items while in duel)
+  const duelSystem = world.getSystem("duel") as
+    | { isPlayerInDuel?: (id: string) => boolean }
+    | undefined;
+  if (duelSystem?.isPlayerInDuel?.(playerEntity.id)) {
+    console.warn("[Inventory] handleDropItem: player is in duel");
+    return;
+  }
+
   world.emit(EventType.ITEM_DROP, {
     playerId: playerEntity.id,
     itemId: payload.itemId,
@@ -575,6 +584,20 @@ export function handleMoveItem(
 
   // Can't move to same slot (no-op)
   if (payload.fromSlot === payload.toSlot) {
+    return;
+  }
+
+  // Check if either slot contains a staked item (can't move staked items)
+  const duelSystem = world.getSystem("duel") as
+    | { getStakedSlots?: (id: string) => Set<number> }
+    | undefined;
+  const stakedSlots = duelSystem?.getStakedSlots?.(playerEntity.id);
+  if (stakedSlots?.has(payload.fromSlot as number)) {
+    sendInventoryError(socket, "move", "That item is staked in a duel.");
+    return;
+  }
+  if (stakedSlots?.has(payload.toSlot as number)) {
+    sendInventoryError(socket, "move", "That slot contains a staked item.");
     return;
   }
 

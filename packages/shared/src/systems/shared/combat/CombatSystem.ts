@@ -423,22 +423,18 @@ export class CombatSystem extends SystemBase {
     const attackType = weapon.attackType?.toLowerCase();
     const weaponType = weapon.weaponType?.toLowerCase();
 
-    // Check weapon's attackType property
+    // Check weapon's attackType property for ranged
+    // Note: Magic only activates via autocast (checked above) - staffs melee by default
     if (attackType === "ranged") {
       return AttackType.RANGED;
     }
-    if (attackType === "magic") {
-      return AttackType.MAGIC;
-    }
 
-    // Fall back to weaponType for legacy compatibility
+    // Fall back to weaponType for legacy compatibility (ranged only)
     if (weaponType === "bow" || weaponType === "crossbow") {
       return AttackType.RANGED;
     }
-    if (weaponType === "staff" || weaponType === "wand") {
-      return AttackType.MAGIC;
-    }
 
+    // Default to melee (includes staffs/wands without autocast - OSRS accurate)
     return AttackType.MELEE;
   }
 

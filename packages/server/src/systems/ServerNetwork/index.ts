@@ -787,30 +787,6 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       );
     });
 
-    // Listen for duel stakes return (called on duel cancel/disconnect)
-    // CRASH-SAFE: Items were never removed from inventory, so nothing to return.
-    // This handler now just logs for debugging - the actual items are still in player's inventory.
-    this.world.on("duel:stakes:return", (event) => {
-      const { playerId, stakes, reason } = event as {
-        playerId: string;
-        stakes: Array<{
-          inventorySlot: number;
-          itemId: string;
-          quantity: number;
-          value: number;
-        }>;
-        reason: string;
-      };
-
-      // Items never left the player's inventory, so no action needed
-      console.log(
-        `[Duel] Stakes return event received (no-op) - playerId: ${playerId}, stakes: ${stakes?.length || 0}, reason: ${reason}`,
-      );
-      console.log(
-        "[Duel] Items remain in inventory (crash-safe design) - no transfer needed",
-      );
-    });
-
     // Listen for duel stakes settle (atomic transfer: loser's items -> winner)
     // CRASH-SAFE: Items remain in inventory until this atomic transfer.
     // Winner's own stakes stay in their inventory (nothing to do).
@@ -3183,10 +3159,48 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           // Find free slot and insert
           const freeSlot = findFreeSlot();
           if (freeSlot === -1) {
-            console.warn(
-              `[Duel] Winner inventory full! Item ${stake.itemId} x${stake.quantity} could not be transferred`,
+            // Inventory full - send to bank instead
+            console.log(
+              `[Duel] Winner inventory full, sending ${stake.itemId} x${stake.quantity} to bank`,
             );
-            // TODO: Drop on ground or send to bank
+
+            // Check if item already exists in bank (for stacking)
+            const bankResult = await pool.query(
+              `SELECT id, quantity FROM bank_storage
+               WHERE "playerId" = $1 AND "itemId" = $2
+               FOR UPDATE`,
+              [winnerId, stake.itemId],
+            );
+
+            if (bankResult.rows.length > 0) {
+              // Add to existing bank stack
+              const bankRow = bankResult.rows[0] as {
+                id: string;
+                quantity: number;
+              };
+              await pool.query(
+                `UPDATE bank_storage SET quantity = quantity + $1 WHERE id = $2`,
+                [stake.quantity, bankRow.id],
+              );
+            } else {
+              // Find next available bank slot
+              const maxSlotResult = await pool.query(
+                `SELECT COALESCE(MAX(slot), -1) + 1 as next_slot FROM bank_storage
+                 WHERE "playerId" = $1 AND "tabIndex" = 0`,
+                [winnerId],
+              );
+              const nextSlot = (maxSlotResult.rows[0] as { next_slot: number })
+                .next_slot;
+
+              await pool.query(
+                `INSERT INTO bank_storage ("playerId", "itemId", quantity, slot, "tabIndex")
+                 VALUES ($1, $2, $3, $4, 0)`,
+                [winnerId, stake.itemId, stake.quantity, nextSlot],
+              );
+            }
+            console.log(
+              `[Duel] Sent ${stake.itemId} x${stake.quantity} to ${winnerId}'s bank`,
+            );
             continue;
           }
 
@@ -3218,6 +3232,29 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       }
     } catch (error) {
       console.error("[Duel] Stake transfer transaction failed:", error);
+
+      // Notify both players of transfer failure
+      const winnerSocket = this.getSocketByPlayerId(winnerId);
+      const loserSocket = this.getSocketByPlayerId(loserId);
+
+      if (winnerSocket) {
+        winnerSocket.send("chatAdded", {
+          id: `duel-error-${Date.now()}`,
+          from: "",
+          body: "Failed to transfer duel stakes. Items remain with original owners.",
+          createdAt: new Date().toISOString(),
+          type: "system",
+        });
+      }
+      if (loserSocket) {
+        loserSocket.send("chatAdded", {
+          id: `duel-error-${Date.now()}`,
+          from: "",
+          body: "Failed to transfer duel stakes. Your items were not taken.",
+          createdAt: new Date().toISOString(),
+          type: "system",
+        });
+      }
     } finally {
       // Always unlock both inventories
       inventorySystem?.unlockTransaction?.(winnerId);

@@ -152,26 +152,29 @@ export class DuelCombatResolver {
   }
 
   /**
-   * Return staked items to both players (on cancel/disconnect)
+   * Handle staked items on duel cancel/disconnect.
+   *
+   * CRASH-SAFE: Items were never removed from inventory during staking,
+   * so there's nothing to "return". This method just logs for audit purposes.
    */
   returnStakedItems(session: DuelSession): void {
-    // Return challenger's stakes
-    if (session.challengerStakes.length > 0) {
-      this.world.emit("duel:stakes:return", {
-        playerId: session.challengerId,
-        stakes: session.challengerStakes,
-        reason: "duel_cancelled",
-      });
-    }
+    const challengerStakeCount = session.challengerStakes.length;
+    const targetStakeCount = session.targetStakes.length;
 
-    // Return target's stakes
-    if (session.targetStakes.length > 0) {
-      this.world.emit("duel:stakes:return", {
-        playerId: session.targetId,
-        stakes: session.targetStakes,
-        reason: "duel_cancelled",
-      });
+    if (challengerStakeCount > 0 || targetStakeCount > 0) {
+      Logger.debug(
+        "DuelCombatResolver",
+        "Duel cancelled - stakes remain in inventory",
+        {
+          duelId: session.duelId,
+          challengerId: session.challengerId,
+          challengerStakes: challengerStakeCount,
+          targetId: session.targetId,
+          targetStakes: targetStakeCount,
+        },
+      );
     }
+    // No event emission needed - items never left player inventories
   }
 
   // ==========================================================================

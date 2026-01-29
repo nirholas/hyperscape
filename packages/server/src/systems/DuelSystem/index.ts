@@ -373,6 +373,22 @@ export class DuelSystem {
   }
 
   /**
+   * Get inventory slots that are currently staked by a player.
+   * Used to prevent trading/dropping staked items.
+   */
+  getStakedSlots(playerId: string): Set<number> {
+    const session = this.sessionManager.getPlayerSession(playerId);
+    if (!session) return new Set();
+
+    const stakes =
+      playerId === session.challengerId
+        ? session.challengerStakes
+        : session.targetStakes;
+
+    return new Set(stakes.map((s) => s.inventorySlot));
+  }
+
+  /**
    * Cancel a duel session
    */
   cancelDuel(
