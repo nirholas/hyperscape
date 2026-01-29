@@ -260,6 +260,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   /** Handler method registry */
   private handlers: Record<string, NetworkHandler> = {};
 
+  /** Idempotency guard: prevents double-settlement of duel stakes */
+  private processedDuelSettlements: Set<string> = new Set();
+
   /** Agent goal storage (characterId -> goal data) for dashboard display */
   static agentGoals: Map<string, unknown> = new Map();
 
@@ -814,6 +817,20 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       console.log(
         `[Duel] Stakes settle event received - winnerId: ${playerId}, loserId: ${fromPlayerId}, ownStakes: ${ownStakes?.length || 0}, wonStakes: ${wonStakes?.length || 0}, reason: ${reason}`,
       );
+
+      // Idempotency guard: prevent double-settlement if event fires twice
+      const settlementKey = `${playerId}:${fromPlayerId}`;
+      if (this.processedDuelSettlements.has(settlementKey)) {
+        console.warn(
+          `[Duel] SECURITY: Duplicate settlement blocked for ${settlementKey}`,
+        );
+        return;
+      }
+      this.processedDuelSettlements.add(settlementKey);
+      // Auto-cleanup after 60 seconds to prevent unbounded growth
+      setTimeout(() => {
+        this.processedDuelSettlements.delete(settlementKey);
+      }, 60_000);
 
       // Winner's own stakes stay in their inventory - nothing to do
       // Only need to transfer loser's stakes (wonStakes) from loser to winner
@@ -3110,8 +3127,20 @@ export class ServerNetwork extends System implements NetworkWithSocket {
             continue;
           }
 
+          // SECURITY: Use actual DB quantity, not staked quantity.
+          // If player consumed part of a stack during the duel (e.g. ate food),
+          // we must only transfer what actually remains — not the originally staked amount.
+          const transferQuantity = Math.min(stake.quantity, dbItem.quantity);
+          if (transferQuantity <= 0) {
+            console.warn(
+              `[Duel] SECURITY: Staked item quantity is 0 — skipping. ` +
+                `loserId=${loserId}, slot=${stake.inventorySlot}, itemId=${stake.itemId}`,
+            );
+            continue;
+          }
+
           // 2. Remove from loser's inventory
-          if (dbItem.quantity <= stake.quantity) {
+          if (dbItem.quantity <= transferQuantity) {
             // Remove entire item
             await pool.query(
               `DELETE FROM inventory WHERE "playerId" = $1 AND "slotIndex" = $2`,
@@ -3122,7 +3151,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
             await pool.query(
               `UPDATE inventory SET quantity = quantity - $1
                WHERE "playerId" = $2 AND "slotIndex" = $3`,
-              [stake.quantity, loserId, stake.inventorySlot],
+              [transferQuantity, loserId, stake.inventorySlot],
             );
           }
 
@@ -3140,17 +3169,32 @@ export class ServerNetwork extends System implements NetworkWithSocket {
             );
 
             if (existingResult.rows.length > 0) {
-              // Add to existing stack
+              // Add to existing stack — check for integer overflow first
               const existingSlot = (
                 existingResult.rows[0] as { slotIndex: number }
               ).slotIndex;
+              const existingQty = (
+                existingResult.rows[0] as {
+                  slotIndex: number;
+                  quantity: number;
+                }
+              ).quantity;
+              if (existingQty > 2147483647 - transferQuantity) {
+                console.error(
+                  `[Duel] SECURITY: Stack merge would overflow! ` +
+                    `winnerId=${winnerId}, itemId=${stake.itemId}, ` +
+                    `existing=${existingQty}, adding=${transferQuantity}`,
+                );
+                // Overflow: skip this item — it stays with the loser
+                continue;
+              }
               await pool.query(
                 `UPDATE inventory SET quantity = quantity + $1
                  WHERE "playerId" = $2 AND "slotIndex" = $3`,
-                [stake.quantity, winnerId, existingSlot],
+                [transferQuantity, winnerId, existingSlot],
               );
               console.log(
-                `[Duel] Transferred ${stake.quantity} ${stake.itemId} from ${loserId} to ${winnerId} (stacked)`,
+                `[Duel] Transferred ${transferQuantity} ${stake.itemId} from ${loserId} to ${winnerId} (stacked)`,
               );
               continue;
             }
@@ -3161,7 +3205,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           if (freeSlot === -1) {
             // Inventory full - send to bank instead
             console.log(
-              `[Duel] Winner inventory full, sending ${stake.itemId} x${stake.quantity} to bank`,
+              `[Duel] Winner inventory full, sending ${stake.itemId} x${transferQuantity} to bank`,
             );
 
             // Check if item already exists in bank (for stacking)
@@ -3173,14 +3217,22 @@ export class ServerNetwork extends System implements NetworkWithSocket {
             );
 
             if (bankResult.rows.length > 0) {
-              // Add to existing bank stack
+              // Add to existing bank stack — check for integer overflow
               const bankRow = bankResult.rows[0] as {
                 id: string;
                 quantity: number;
               };
+              if (bankRow.quantity > 2147483647 - transferQuantity) {
+                console.error(
+                  `[Duel] SECURITY: Bank stack merge would overflow! ` +
+                    `winnerId=${winnerId}, itemId=${stake.itemId}, ` +
+                    `existing=${bankRow.quantity}, adding=${transferQuantity}`,
+                );
+                continue;
+              }
               await pool.query(
                 `UPDATE bank_storage SET quantity = quantity + $1 WHERE id = $2`,
-                [stake.quantity, bankRow.id],
+                [transferQuantity, bankRow.id],
               );
             } else {
               // Find next available bank slot
@@ -3195,11 +3247,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
               await pool.query(
                 `INSERT INTO bank_storage ("playerId", "itemId", quantity, slot, "tabIndex")
                  VALUES ($1, $2, $3, $4, 0)`,
-                [winnerId, stake.itemId, stake.quantity, nextSlot],
+                [winnerId, stake.itemId, transferQuantity, nextSlot],
               );
             }
             console.log(
-              `[Duel] Sent ${stake.itemId} x${stake.quantity} to ${winnerId}'s bank`,
+              `[Duel] Sent ${stake.itemId} x${transferQuantity} to ${winnerId}'s bank`,
             );
             continue;
           }
@@ -3207,10 +3259,10 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           await pool.query(
             `INSERT INTO inventory ("playerId", "itemId", quantity, "slotIndex", metadata)
              VALUES ($1, $2, $3, $4, NULL)`,
-            [winnerId, stake.itemId, stake.quantity, freeSlot],
+            [winnerId, stake.itemId, transferQuantity, freeSlot],
           );
           console.log(
-            `[Duel] Transferred ${stake.itemId} x${stake.quantity} from ${loserId} to ${winnerId} slot ${freeSlot}`,
+            `[Duel] Transferred ${stake.itemId} x${transferQuantity} from ${loserId} to ${winnerId} slot ${freeSlot}`,
           );
         }
 

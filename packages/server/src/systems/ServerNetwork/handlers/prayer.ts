@@ -93,6 +93,22 @@ export function handlePrayerToggle(
     return;
   }
 
+  // Block prayer activation if duel rules prohibit it
+  const duelSystemPrayer = world.getSystem("duel") as
+    | {
+        canUsePrayer?: (id: string) => boolean;
+        isPlayerInActiveDuel?: (id: string) => boolean;
+      }
+    | undefined;
+  if (
+    duelSystemPrayer?.isPlayerInActiveDuel?.(playerId) &&
+    duelSystemPrayer.canUsePrayer &&
+    !duelSystemPrayer.canUsePrayer(playerId)
+  ) {
+    sendPrayerError(socket, "Prayer is disabled in this duel.");
+    return;
+  }
+
   // Forward validated request to PrayerSystem
   // PrayerSystem handles:
   // - Prayer existence check via PrayerDataProvider
@@ -141,6 +157,15 @@ export function handleAltarPray(
   const payload = data as { altarId?: string };
   if (!payload.altarId || typeof payload.altarId !== "string") {
     console.warn(`[Prayer] Missing altarId from ${playerId}`);
+    return;
+  }
+
+  // Block altar usage during active duels
+  const duelSystemAltar = world.getSystem("duel") as
+    | { isPlayerInActiveDuel?: (id: string) => boolean }
+    | undefined;
+  if (duelSystemAltar?.isPlayerInActiveDuel?.(playerId)) {
+    sendPrayerError(socket, "You can't use an altar during a duel.");
     return;
   }
 

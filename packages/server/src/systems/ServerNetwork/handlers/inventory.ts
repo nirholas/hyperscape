@@ -208,6 +208,14 @@ export function handlePickupItem(
     return;
   }
 
+  // Block item pickup during active duels (COUNTDOWN/FIGHTING/FINISHED)
+  const duelSystemPickup = world.getSystem("duel") as
+    | { isPlayerInActiveDuel?: (id: string) => boolean }
+    | undefined;
+  if (duelSystemPickup?.isPlayerInActiveDuel?.(playerEntity.id)) {
+    return; // Silently ignore - player shouldn't be near ground items in arena
+  }
+
   // Server-side distance validation
   const itemEntity = world.entities.get(entityId);
   if (itemEntity) {
@@ -396,6 +404,30 @@ export function handleEquipItem(
     ? payload.inventorySlot
     : undefined;
 
+  // Block all equip/unequip during active duels (OSRS: can't change gear mid-duel)
+  const duelSystemEquip = world.getSystem("duel") as
+    | {
+        getStakedSlots?: (id: string) => Set<number>;
+        isPlayerInActiveDuel?: (id: string) => boolean;
+      }
+    | undefined;
+  if (duelSystemEquip?.isPlayerInActiveDuel?.(playerEntity.id)) {
+    sendInventoryError(
+      socket,
+      "equip",
+      "You can't change equipment during a duel.",
+    );
+    return;
+  }
+  // Also block equipping staked items in pre-fight duel states
+  if (inventorySlot !== undefined) {
+    const stakedSlotsEquip = duelSystemEquip?.getStakedSlots?.(playerEntity.id);
+    if (stakedSlotsEquip?.has(inventorySlot)) {
+      sendInventoryError(socket, "equip", "That item is staked in a duel.");
+      return;
+    }
+  }
+
   // Emit event for EquipmentSystem to handle
   world.emit(EventType.INVENTORY_ITEM_RIGHT_CLICK, {
     playerId: playerEntity.id,
@@ -458,6 +490,42 @@ export function handleUseItem(
     return;
   }
 
+  // Duel system checks: staked items + food/potion rules
+  const duelSystemUse = world.getSystem("duel") as
+    | {
+        getStakedSlots?: (id: string) => Set<number>;
+        canEatFood?: (id: string) => boolean;
+        canUsePotions?: (id: string) => boolean;
+        isPlayerInActiveDuel?: (id: string) => boolean;
+      }
+    | undefined;
+  if (duelSystemUse) {
+    // Check if the slot is staked
+    const stakedSlots = duelSystemUse.getStakedSlots?.(playerEntity.id);
+    if (stakedSlots?.has(payload.slot as number)) {
+      sendInventoryError(socket, "use", "That item is staked in a duel.");
+      return;
+    }
+
+    // Check if player is in an active duel and food/potion rules apply
+    if (duelSystemUse.isPlayerInActiveDuel?.(playerEntity.id)) {
+      if (
+        duelSystemUse.canEatFood &&
+        !duelSystemUse.canEatFood(playerEntity.id)
+      ) {
+        sendInventoryError(socket, "use", "Food is disabled in this duel.");
+        return;
+      }
+      if (
+        duelSystemUse.canUsePotions &&
+        !duelSystemUse.canUsePotions(playerEntity.id)
+      ) {
+        sendInventoryError(socket, "use", "Potions are disabled in this duel.");
+        return;
+      }
+    }
+  }
+
   // Emit INVENTORY_USE for InventorySystem to handle
   // InventorySystem will validate item exists at slot, consume it, and emit ITEM_USED
   world.emit(EventType.INVENTORY_USE, {
@@ -513,6 +581,19 @@ export function handleUnequipItem(
   const slot = payload.slot;
   if (typeof slot !== "string" || !VALID_EQUIPMENT_SLOTS.has(slot)) {
     console.warn("[Inventory] handleUnequipItem: invalid slot");
+    return;
+  }
+
+  // Block unequip during active duels (OSRS: can't change gear mid-duel)
+  const duelSystemUnequip = world.getSystem("duel") as
+    | { isPlayerInActiveDuel?: (id: string) => boolean }
+    | undefined;
+  if (duelSystemUnequip?.isPlayerInActiveDuel?.(playerEntity.id)) {
+    sendInventoryError(
+      socket,
+      "unequip",
+      "You can't change equipment during a duel.",
+    );
     return;
   }
 
@@ -677,6 +758,19 @@ export async function handleCoinPouchWithdraw(
 
   // Step 2: Rate limit (uses SlidingWindowRateLimiter with automatic cleanup)
   if (!getCoinPouchRateLimiter().check(playerId)) {
+    return;
+  }
+
+  // Block coin pouch withdrawal during duels
+  const duelSystemCoins = world.getSystem("duel") as
+    | { isPlayerInDuel?: (id: string) => boolean }
+    | undefined;
+  if (duelSystemCoins?.isPlayerInDuel?.(playerId)) {
+    sendInventoryError(
+      socket,
+      "coinPouchWithdraw",
+      "You can't do that during a duel.",
+    );
     return;
   }
 
@@ -931,6 +1025,15 @@ export async function handleXpLampUse(
   // Validate slot
   if (!isValidInventorySlot(payload.slot)) {
     console.warn("[Inventory] handleXpLampUse: invalid slot");
+    return;
+  }
+
+  // Block XP lamp usage during duels
+  const duelSystemLamp = world.getSystem("duel") as
+    | { isPlayerInDuel?: (id: string) => boolean }
+    | undefined;
+  if (duelSystemLamp?.isPlayerInDuel?.(playerEntity.id)) {
+    sendInventoryError(socket, "xpLampUse", "You can't do that during a duel.");
     return;
   }
 

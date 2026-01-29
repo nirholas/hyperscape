@@ -867,6 +867,13 @@ export class PlayerSystem extends SystemBase {
       return;
     }
 
+    // SECURITY: Only respawn players who are actually dead.
+    // Without this check, any system emitting PLAYER_RESPAWNED would
+    // unconditionally heal a player to full health mid-combat.
+    if (player.alive && player.health.current > 0) {
+      return;
+    }
+
     // Reset player state to alive
     player.alive = true;
     player.health.current = player.health.max;

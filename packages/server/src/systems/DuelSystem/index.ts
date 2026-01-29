@@ -164,6 +164,26 @@ export class DuelSystem {
       }
     });
 
+    // Verify critical event listeners are registered after all systems initialize.
+    // If ServerNetwork hasn't registered its duel:stakes:settle listener,
+    // stake transfers will silently fire into the void.
+    setTimeout(() => {
+      const listenerCount =
+        (
+          this.world as { listenerCount?: (event: string) => number }
+        ).listenerCount?.("duel:stakes:settle") ?? -1;
+      if (listenerCount === 0) {
+        Logger.error(
+          "DuelSystem",
+          "CRITICAL: No listener for duel:stakes:settle — stake transfers will fail!",
+        );
+      } else {
+        Logger.debug("DuelSystem", "Listener verification passed", {
+          "duel:stakes:settle": listenerCount,
+        });
+      }
+    }, 0);
+
     Logger.info("DuelSystem", "Initialized");
   }
 
