@@ -269,24 +269,132 @@ export class DuelCombatResolver {
       winnerOwnStakeValue: winnerOwnValue,
     });
 
-    // Combine winner's own stakes AND loser's stakes into a single operation
-    // This prevents race conditions where both try to insert into slot 0
-    const allWinnerItems = [...winnerStakes, ...loserStakes];
+    // Pre-settlement verification (defense-in-depth):
+    // Verify loser's staked items still exist in the in-memory inventory.
+    // The DB-level check in executeDuelStakeTransfer is the authoritative guard,
+    // but this catches obvious discrepancies early and logs them.
+    const verifiedLoserStakes = this.verifyStakesInMemory(
+      loserId,
+      loserStakes,
+      session.duelId,
+    );
+
+    // Combine winner's own stakes AND verified loser stakes
+    const allWinnerItems = [...winnerStakes, ...verifiedLoserStakes];
 
     if (allWinnerItems.length > 0) {
       Logger.debug("DuelCombatResolver", "Settling stakes", {
         winnerId,
         ownStakesCount: winnerStakes.length,
-        wonStakesCount: loserStakes.length,
+        wonStakesCount: verifiedLoserStakes.length,
+        skippedStakes: loserStakes.length - verifiedLoserStakes.length,
       });
       this.world.emit("duel:stakes:settle", {
         playerId: winnerId,
         ownStakes: winnerStakes,
-        wonStakes: loserStakes,
+        wonStakes: verifiedLoserStakes,
         fromPlayerId: loserId,
         reason: "duel_won",
       });
     }
+  }
+
+  /**
+   * Verify staked items still exist in the in-memory inventory.
+   * Returns only the stakes that pass verification.
+   * This is a defense-in-depth check; the DB transaction is the authoritative guard.
+   */
+  private verifyStakesInMemory(
+    playerId: string,
+    stakes: StakedItem[],
+    duelId: string,
+  ): StakedItem[] {
+    if (stakes.length === 0) return stakes;
+
+    const inventorySystem = this.world.getSystem?.("inventory") as {
+      getInventoryData?: (id: string) => {
+        items: Array<{ slot: number; itemId: string; quantity: number }>;
+      };
+    } | null;
+
+    if (!inventorySystem?.getInventoryData) {
+      // Can't verify — pass all stakes through to DB-level check
+      return stakes;
+    }
+
+    const inventoryData = inventorySystem.getInventoryData(playerId);
+    const itemsBySlot = new Map(
+      inventoryData.items.map((item) => [item.slot, item]),
+    );
+
+    const verified: StakedItem[] = [];
+
+    for (const stake of stakes) {
+      const slotItem = itemsBySlot.get(stake.inventorySlot);
+
+      if (!slotItem) {
+        Logger.error(
+          "DuelCombatResolver",
+          "SECURITY: Staked item missing from memory",
+          {
+            duelId,
+            playerId,
+            slot: stake.inventorySlot,
+            itemId: stake.itemId,
+          },
+        );
+        continue;
+      }
+
+      if (slotItem.itemId !== stake.itemId) {
+        Logger.error(
+          "DuelCombatResolver",
+          "SECURITY: Staked item ID mismatch in memory",
+          {
+            duelId,
+            playerId,
+            slot: stake.inventorySlot,
+            expected: stake.itemId,
+            found: slotItem.itemId,
+          },
+        );
+        continue;
+      }
+
+      if (slotItem.quantity < stake.quantity) {
+        Logger.warn(
+          "DuelCombatResolver",
+          "Staked quantity exceeds in-memory quantity",
+          {
+            duelId,
+            playerId,
+            slot: stake.inventorySlot,
+            itemId: stake.itemId,
+            staked: stake.quantity,
+            actual: slotItem.quantity,
+          },
+        );
+        // Still include — the DB-level check will use Math.min()
+      }
+
+      verified.push(stake);
+    }
+
+    if (verified.length < stakes.length) {
+      Logger.error(
+        "DuelCombatResolver",
+        "SECURITY: Pre-settlement verification filtered stakes",
+        {
+          duelId,
+          playerId,
+          original: stakes.length,
+          verified: verified.length,
+          filtered: stakes.length - verified.length,
+        },
+      );
+    }
+
+    return verified;
   }
 
   // ==========================================================================

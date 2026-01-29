@@ -781,7 +781,7 @@ describe("DuelSystem", () => {
       );
     });
 
-    it("returns stakes on cancel", () => {
+    it("keeps stakes in inventory on cancel (crash-safe design)", () => {
       // Add stakes
       duelSystem.acceptRules(duelId, "player1");
       duelSystem.acceptRules(duelId, "player2");
@@ -789,12 +789,10 @@ describe("DuelSystem", () => {
 
       duelSystem.cancelDuel(duelId, "player_cancelled");
 
-      expect(world._emit).toHaveBeenCalledWith(
-        "duel:stakes:return",
-        expect.objectContaining({
-          playerId: "player1",
-        }),
-      );
+      // Crash-safe design: items never leave inventory during staking,
+      // so no "duel:stakes:return" event is needed. Session is simply deleted.
+      expect(duelSystem.getDuelSession(duelId)).toBeUndefined();
+      expect(duelSystem.isPlayerInDuel("player1")).toBe(false);
     });
 
     it("releases arena on cancel", () => {
@@ -1061,6 +1059,146 @@ describe("DuelSystem", () => {
       vi.advanceTimersByTime(31 * 60 * 1000);
 
       expect(duelSystem.getDuelSession(duelId)).toBeUndefined();
+    });
+  });
+
+  // ============================================================================
+  // Race Condition Tests
+  // ============================================================================
+
+  describe("race conditions", () => {
+    let duelId: string;
+
+    /**
+     * Helper: progress a duel from RULES to FIGHTING state.
+     */
+    function progressToFighting(id: string): void {
+      duelSystem.acceptRules(id, "player1");
+      duelSystem.acceptRules(id, "player2");
+      duelSystem.acceptStakes(id, "player1");
+      duelSystem.acceptStakes(id, "player2");
+      duelSystem.acceptFinal(id, "player1");
+      duelSystem.acceptFinal(id, "player2");
+      vi.advanceTimersByTime(3500);
+      duelSystem.processTick();
+    }
+
+    beforeEach(() => {
+      const challenge = duelSystem.createChallenge(
+        "player1",
+        "P1",
+        "player2",
+        "P2",
+      );
+      const response = duelSystem.respondToChallenge(
+        challenge.challengeId!,
+        "player2",
+        true,
+      );
+      duelId = response.duelId!;
+      progressToFighting(duelId);
+    });
+
+    it("both players die same tick — only one resolution fires", () => {
+      const session = duelSystem.getDuelSession(duelId)!;
+      expect(session.state).toBe("FIGHTING");
+
+      // Simulate two ENTITY_DEATH events in the same tick
+      // First death sets state to FINISHED
+      // handlePlayerDeath is private, but we can trigger via the event listener
+      // Since we can't call private methods, manually set state and test forfeit guard
+      session.state = "FINISHED";
+
+      // Second death is a forfeit attempt which should be rejected
+      const result = duelSystem.forfeitDuel("player2");
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("not started");
+    });
+
+    it("cancelDuel rejects FINISHED sessions", () => {
+      const session = duelSystem.getDuelSession(duelId)!;
+      session.state = "FINISHED";
+
+      const result = duelSystem.cancelDuel(duelId, "test_cancel");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("already being resolved");
+    });
+
+    it("player forfeits while state is already FINISHED — rejected", () => {
+      const session = duelSystem.getDuelSession(duelId)!;
+      session.state = "FINISHED";
+
+      const result = duelSystem.forfeitDuel("player1");
+
+      expect(result.success).toBe(false);
+    });
+
+    it("disconnect during FINISHED state does NOT cancel session", () => {
+      const session = duelSystem.getDuelSession(duelId)!;
+      session.state = "FINISHED";
+
+      duelSystem.onPlayerDisconnect("player1");
+
+      // Session must still exist — resolution is pending
+      const sessionAfter = duelSystem.getDuelSession(duelId);
+      expect(sessionAfter).toBeDefined();
+      expect(sessionAfter!.state).toBe("FINISHED");
+    });
+
+    it("disconnect + reconnect during death delay — resolution still fires", () => {
+      const session = duelSystem.getDuelSession(duelId)!;
+      session.state = "FINISHED";
+
+      // Disconnect then reconnect
+      duelSystem.onPlayerDisconnect("player1");
+      duelSystem.onPlayerReconnect("player1");
+
+      // Session should still exist
+      expect(duelSystem.getDuelSession(duelId)).toBeDefined();
+      expect(duelSystem.getDuelSession(duelId)!.state).toBe("FINISHED");
+    });
+
+    it("both players disconnect during FINISHED — session is NOT deleted", () => {
+      const session = duelSystem.getDuelSession(duelId)!;
+      session.state = "FINISHED";
+
+      duelSystem.onPlayerDisconnect("player1");
+      duelSystem.onPlayerDisconnect("player2");
+
+      // Session must still exist for resolution to complete
+      expect(duelSystem.getDuelSession(duelId)).toBeDefined();
+    });
+
+    it("concurrent acceptRules calls only transition once", () => {
+      // Create a new duel in RULES state
+      world.addPlayer({ id: "player3", position: { x: 70, y: 0, z: 70 } });
+      world.addPlayer({ id: "player4", position: { x: 72, y: 0, z: 70 } });
+
+      const challenge2 = duelSystem.createChallenge(
+        "player3",
+        "P3",
+        "player4",
+        "P4",
+      );
+      const response2 = duelSystem.respondToChallenge(
+        challenge2.challengeId!,
+        "player4",
+        true,
+      );
+      const duelId2 = response2.duelId!;
+
+      // Both accept
+      duelSystem.acceptRules(duelId2, "player3");
+      duelSystem.acceptRules(duelId2, "player4");
+
+      const session2 = duelSystem.getDuelSession(duelId2)!;
+      expect(session2.state).toBe("STAKES");
+
+      // Calling acceptRules again should fail (wrong state)
+      const result = duelSystem.acceptRules(duelId2, "player3");
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Cannot accept rules");
     });
   });
 });

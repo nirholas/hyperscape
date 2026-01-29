@@ -26,6 +26,9 @@ export interface MockWorld {
   emit: ReturnType<typeof vi.fn>;
   on: ReturnType<typeof vi.fn>;
   getSystem: ReturnType<typeof vi.fn>;
+  collision: {
+    addFlags: ReturnType<typeof vi.fn>;
+  };
   setPlayerPosition: (
     playerId: string,
     x: number,
@@ -58,6 +61,9 @@ export function createMockWorld(): MockWorld {
     emit: emitFn,
     on: onFn,
     getSystem: getSystemFn,
+    collision: {
+      addFlags: vi.fn(),
+    },
     setPlayerPosition: (playerId: string, x: number, y: number, z: number) => {
       const player = players.get(playerId);
       if (player) {

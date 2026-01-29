@@ -843,12 +843,14 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         `[Duel] Transferring ${wonStakes.length} items from ${fromPlayerId} to ${playerId}`,
       );
 
-      // Fire and forget - don't await in event handler
-      this.executeDuelStakeTransfer(playerId, fromPlayerId, wonStakes).catch(
-        (err) => {
-          console.error("[Duel] Error in stakes transfer:", err);
-        },
-      );
+      // Fire and forget with retry logic
+      this.executeDuelStakeTransferWithRetry(
+        playerId,
+        fromPlayerId,
+        wonStakes,
+      ).catch((err) => {
+        console.error("[Duel] All settlement retries exhausted:", err);
+      });
     });
 
     // Listen for player teleport events (used by duel system)
@@ -3009,6 +3011,80 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   }
 
   /**
+   * Retry wrapper for executeDuelStakeTransfer.
+   * Retries up to 3 times with exponential backoff [0, 1000, 3000]ms.
+   * Ensures economic integrity even if the first attempt fails due to
+   * transient errors (connection timeouts, lock contention).
+   */
+  private async executeDuelStakeTransferWithRetry(
+    winnerId: string,
+    loserId: string,
+    stakes: Array<{
+      inventorySlot: number;
+      itemId: string;
+      quantity: number;
+      value: number;
+    }>,
+  ): Promise<void> {
+    const MAX_RETRIES = 3;
+    const RETRY_DELAYS = [0, 1000, 3000];
+
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        if (attempt > 0) {
+          console.log(
+            `[Duel] Settlement retry attempt ${attempt + 1}/${MAX_RETRIES} for ${winnerId} <- ${loserId}`,
+          );
+        }
+        await this.executeDuelStakeTransfer(winnerId, loserId, stakes);
+        return; // Success — exit retry loop
+      } catch (err) {
+        const isLastAttempt = attempt === MAX_RETRIES - 1;
+
+        if (isLastAttempt) {
+          console.error(
+            `[Duel] CRITICAL: Settlement failed after ${MAX_RETRIES} attempts. ` +
+              `Items remain with loser (crash-safe). winnerId=${winnerId}, loserId=${loserId}`,
+            err,
+          );
+          // Notify players of permanent failure
+          const winnerSocket = this.getSocketByPlayerId(winnerId);
+          const loserSocket = this.getSocketByPlayerId(loserId);
+          if (winnerSocket) {
+            winnerSocket.send("chatAdded", {
+              id: `duel-settle-fail-${Date.now()}`,
+              from: "",
+              body: "Duel stake transfer failed. Please contact support if items are missing.",
+              createdAt: new Date().toISOString(),
+              type: "system",
+            });
+          }
+          if (loserSocket) {
+            loserSocket.send("chatAdded", {
+              id: `duel-settle-fail-${Date.now()}`,
+              from: "",
+              body: "Duel stake transfer failed. Your items were not taken.",
+              createdAt: new Date().toISOString(),
+              type: "system",
+            });
+          }
+          throw err;
+        }
+
+        console.warn(
+          `[Duel] Settlement attempt ${attempt + 1} failed, retrying in ${RETRY_DELAYS[attempt + 1]}ms:`,
+          err instanceof Error ? err.message : err,
+        );
+
+        // Wait before retry
+        await new Promise((resolve) =>
+          setTimeout(resolve, RETRY_DELAYS[attempt + 1]),
+        );
+      }
+    }
+  }
+
+  /**
    * Execute atomic duel stake transfer from loser to winner.
    *
    * CRASH-SAFE: Items remain in loser's inventory until this atomic transaction.
@@ -3070,217 +3146,277 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     }
 
     try {
-      // Execute atomic transfer in a single transaction
-      await pool.query("BEGIN");
+      // Deadlock retry: PostgreSQL 40P01 / serialization 40001
+      const DEADLOCK_MAX_RETRIES = 3;
+      const DEADLOCK_DELAYS = [50, 100, 200];
 
-      try {
-        // Get winner's current inventory to find free slots
-        const winnerInvResult = await pool.query(
-          `SELECT "slotIndex" FROM inventory WHERE "playerId" = $1`,
-          [winnerId],
-        );
-        const usedSlots = new Set(
-          winnerInvResult.rows.map((r: { slotIndex: number }) => r.slotIndex),
-        );
+      for (
+        let deadlockAttempt = 0;
+        deadlockAttempt < DEADLOCK_MAX_RETRIES;
+        deadlockAttempt++
+      ) {
+        try {
+          // Execute atomic transfer in a single transaction
+          await pool.query("BEGIN");
 
-        const findFreeSlot = (): number => {
-          for (let i = 0; i < 28; i++) {
-            if (!usedSlots.has(i)) {
-              usedSlots.add(i);
-              return i;
-            }
-          }
-          return -1;
-        };
-
-        // Process each staked item
-        for (const stake of stakes) {
-          // 1. Validate item exists in loser's inventory at the exact slot
-          const validateResult = await pool.query(
-            `SELECT "itemId", quantity FROM inventory
-             WHERE "playerId" = $1 AND "slotIndex" = $2
-             FOR UPDATE`,
-            [loserId, stake.inventorySlot],
+          // Get winner's current inventory to find free slots
+          const winnerInvResult = await pool.query(
+            `SELECT "slotIndex" FROM inventory WHERE "playerId" = $1`,
+            [winnerId],
+          );
+          const usedSlots = new Set(
+            winnerInvResult.rows.map((r: { slotIndex: number }) => r.slotIndex),
           );
 
-          if (validateResult.rows.length === 0) {
-            console.error(
-              `[Duel] SECURITY: Staked item not found in loser inventory! ` +
-                `loserId=${loserId}, slot=${stake.inventorySlot}, itemId=${stake.itemId}`,
-            );
-            // Item was removed/traded/dropped during duel - skip this item
-            // This prevents dupe exploits
-            continue;
-          }
-
-          const dbItem = validateResult.rows[0] as {
-            itemId: string;
-            quantity: number;
+          const findFreeSlot = (): number => {
+            for (let i = 0; i < 28; i++) {
+              if (!usedSlots.has(i)) {
+                usedSlots.add(i);
+                return i;
+              }
+            }
+            return -1;
           };
 
-          // Verify item ID matches
-          if (dbItem.itemId !== stake.itemId) {
-            console.error(
-              `[Duel] SECURITY: Item ID mismatch! ` +
-                `Expected ${stake.itemId}, found ${dbItem.itemId} at slot ${stake.inventorySlot}`,
-            );
-            continue;
-          }
-
-          // SECURITY: Use actual DB quantity, not staked quantity.
-          // If player consumed part of a stack during the duel (e.g. ate food),
-          // we must only transfer what actually remains — not the originally staked amount.
-          const transferQuantity = Math.min(stake.quantity, dbItem.quantity);
-          if (transferQuantity <= 0) {
-            console.warn(
-              `[Duel] SECURITY: Staked item quantity is 0 — skipping. ` +
-                `loserId=${loserId}, slot=${stake.inventorySlot}, itemId=${stake.itemId}`,
-            );
-            continue;
-          }
-
-          // 2. Remove from loser's inventory
-          if (dbItem.quantity <= transferQuantity) {
-            // Remove entire item
-            await pool.query(
-              `DELETE FROM inventory WHERE "playerId" = $1 AND "slotIndex" = $2`,
+          // Process each staked item
+          for (const stake of stakes) {
+            // 1. Validate item exists in loser's inventory at the exact slot
+            const validateResult = await pool.query(
+              `SELECT "itemId", quantity FROM inventory
+             WHERE "playerId" = $1 AND "slotIndex" = $2
+             FOR UPDATE`,
               [loserId, stake.inventorySlot],
             );
-          } else {
-            // Reduce quantity
-            await pool.query(
-              `UPDATE inventory SET quantity = quantity - $1
-               WHERE "playerId" = $2 AND "slotIndex" = $3`,
-              [transferQuantity, loserId, stake.inventorySlot],
-            );
-          }
 
-          // 3. Add to winner's inventory
-          // Check if item is stackable and already exists
-          const itemData = getItem(stake.itemId);
-          const isStackable = itemData?.stackable ?? false;
-
-          if (isStackable) {
-            const existingResult = await pool.query(
-              `SELECT "slotIndex" FROM inventory
-               WHERE "playerId" = $1 AND "itemId" = $2
-               FOR UPDATE`,
-              [winnerId, stake.itemId],
-            );
-
-            if (existingResult.rows.length > 0) {
-              // Add to existing stack — check for integer overflow first
-              const existingSlot = (
-                existingResult.rows[0] as { slotIndex: number }
-              ).slotIndex;
-              const existingQty = (
-                existingResult.rows[0] as {
-                  slotIndex: number;
-                  quantity: number;
-                }
-              ).quantity;
-              if (existingQty > 2147483647 - transferQuantity) {
-                console.error(
-                  `[Duel] SECURITY: Stack merge would overflow! ` +
-                    `winnerId=${winnerId}, itemId=${stake.itemId}, ` +
-                    `existing=${existingQty}, adding=${transferQuantity}`,
-                );
-                // Overflow: skip this item — it stays with the loser
-                continue;
-              }
-              await pool.query(
-                `UPDATE inventory SET quantity = quantity + $1
-                 WHERE "playerId" = $2 AND "slotIndex" = $3`,
-                [transferQuantity, winnerId, existingSlot],
+            if (validateResult.rows.length === 0) {
+              console.error(
+                `[Duel] SECURITY: Staked item not found in loser inventory! ` +
+                  `loserId=${loserId}, slot=${stake.inventorySlot}, itemId=${stake.itemId}`,
               );
-              console.log(
-                `[Duel] Transferred ${transferQuantity} ${stake.itemId} from ${loserId} to ${winnerId} (stacked)`,
+              // Item was removed/traded/dropped during duel - skip this item
+              // This prevents dupe exploits
+              continue;
+            }
+
+            const dbItem = validateResult.rows[0] as {
+              itemId: string;
+              quantity: number;
+            };
+
+            // Verify item ID matches
+            if (dbItem.itemId !== stake.itemId) {
+              console.error(
+                `[Duel] SECURITY: Item ID mismatch! ` +
+                  `Expected ${stake.itemId}, found ${dbItem.itemId} at slot ${stake.inventorySlot}`,
               );
               continue;
             }
-          }
 
-          // Find free slot and insert
-          const freeSlot = findFreeSlot();
-          if (freeSlot === -1) {
-            // Inventory full - send to bank instead
-            console.log(
-              `[Duel] Winner inventory full, sending ${stake.itemId} x${transferQuantity} to bank`,
-            );
+            // SECURITY: Use actual DB quantity, not staked quantity.
+            // If player consumed part of a stack during the duel (e.g. ate food),
+            // we must only transfer what actually remains — not the originally staked amount.
+            const transferQuantity = Math.min(stake.quantity, dbItem.quantity);
+            if (transferQuantity <= 0) {
+              console.warn(
+                `[Duel] SECURITY: Staked item quantity is 0 — skipping. ` +
+                  `loserId=${loserId}, slot=${stake.inventorySlot}, itemId=${stake.itemId}`,
+              );
+              continue;
+            }
 
-            // Check if item already exists in bank (for stacking)
-            const bankResult = await pool.query(
-              `SELECT id, quantity FROM bank_storage
+            // 2. Remove from loser's inventory
+            if (dbItem.quantity <= transferQuantity) {
+              // Remove entire item
+              await pool.query(
+                `DELETE FROM inventory WHERE "playerId" = $1 AND "slotIndex" = $2`,
+                [loserId, stake.inventorySlot],
+              );
+            } else {
+              // Reduce quantity
+              await pool.query(
+                `UPDATE inventory SET quantity = quantity - $1
+               WHERE "playerId" = $2 AND "slotIndex" = $3`,
+                [transferQuantity, loserId, stake.inventorySlot],
+              );
+            }
+
+            // 3. Add to winner's inventory
+            // Check if item is stackable and already exists
+            const itemData = getItem(stake.itemId);
+            const isStackable = itemData?.stackable ?? false;
+
+            if (isStackable) {
+              const existingResult = await pool.query(
+                `SELECT "slotIndex" FROM inventory
                WHERE "playerId" = $1 AND "itemId" = $2
                FOR UPDATE`,
-              [winnerId, stake.itemId],
-            );
+                [winnerId, stake.itemId],
+              );
 
-            if (bankResult.rows.length > 0) {
-              // Add to existing bank stack — check for integer overflow
-              const bankRow = bankResult.rows[0] as {
-                id: string;
-                quantity: number;
-              };
-              if (bankRow.quantity > 2147483647 - transferQuantity) {
-                console.error(
-                  `[Duel] SECURITY: Bank stack merge would overflow! ` +
-                    `winnerId=${winnerId}, itemId=${stake.itemId}, ` +
-                    `existing=${bankRow.quantity}, adding=${transferQuantity}`,
+              if (existingResult.rows.length > 0) {
+                // Add to existing stack — check for integer overflow first
+                const existingSlot = (
+                  existingResult.rows[0] as { slotIndex: number }
+                ).slotIndex;
+                const existingQty = (
+                  existingResult.rows[0] as {
+                    slotIndex: number;
+                    quantity: number;
+                  }
+                ).quantity;
+                if (existingQty > 2147483647 - transferQuantity) {
+                  console.error(
+                    `[Duel] SECURITY: Stack merge would overflow! ` +
+                      `winnerId=${winnerId}, itemId=${stake.itemId}, ` +
+                      `existing=${existingQty}, adding=${transferQuantity}`,
+                  );
+                  // Overflow: skip this item — it stays with the loser
+                  continue;
+                }
+                await pool.query(
+                  `UPDATE inventory SET quantity = quantity + $1
+                 WHERE "playerId" = $2 AND "slotIndex" = $3`,
+                  [transferQuantity, winnerId, existingSlot],
+                );
+                console.log(
+                  `[Duel] Transferred ${transferQuantity} ${stake.itemId} from ${loserId} to ${winnerId} (stacked)`,
                 );
                 continue;
               }
-              await pool.query(
-                `UPDATE bank_storage SET quantity = quantity + $1 WHERE id = $2`,
-                [transferQuantity, bankRow.id],
-              );
-            } else {
-              // Find next available bank slot
-              const maxSlotResult = await pool.query(
-                `SELECT COALESCE(MAX(slot), -1) + 1 as next_slot FROM bank_storage
-                 WHERE "playerId" = $1 AND "tabIndex" = 0`,
-                [winnerId],
-              );
-              const nextSlot = (maxSlotResult.rows[0] as { next_slot: number })
-                .next_slot;
-
-              await pool.query(
-                `INSERT INTO bank_storage ("playerId", "itemId", quantity, slot, "tabIndex")
-                 VALUES ($1, $2, $3, $4, 0)`,
-                [winnerId, stake.itemId, transferQuantity, nextSlot],
-              );
             }
-            console.log(
-              `[Duel] Sent ${stake.itemId} x${transferQuantity} to ${winnerId}'s bank`,
+
+            // Find free slot and insert
+            const freeSlot = findFreeSlot();
+            if (freeSlot === -1) {
+              // Inventory full - send to bank instead
+              console.log(
+                `[Duel] Winner inventory full, sending ${stake.itemId} x${transferQuantity} to bank`,
+              );
+
+              // Check if item already exists in bank (for stacking)
+              const bankResult = await pool.query(
+                `SELECT id, quantity FROM bank_storage
+               WHERE "playerId" = $1 AND "itemId" = $2
+               FOR UPDATE`,
+                [winnerId, stake.itemId],
+              );
+
+              if (bankResult.rows.length > 0) {
+                // Add to existing bank stack — check for integer overflow
+                const bankRow = bankResult.rows[0] as {
+                  id: string;
+                  quantity: number;
+                };
+                if (bankRow.quantity > 2147483647 - transferQuantity) {
+                  console.error(
+                    `[Duel] SECURITY: Bank stack merge would overflow! ` +
+                      `winnerId=${winnerId}, itemId=${stake.itemId}, ` +
+                      `existing=${bankRow.quantity}, adding=${transferQuantity}`,
+                  );
+                  continue;
+                }
+                await pool.query(
+                  `UPDATE bank_storage SET quantity = quantity + $1 WHERE id = $2`,
+                  [transferQuantity, bankRow.id],
+                );
+              } else {
+                // Find next available bank slot
+                const maxSlotResult = await pool.query(
+                  `SELECT COALESCE(MAX(slot), -1) + 1 as next_slot FROM bank_storage
+                 WHERE "playerId" = $1 AND "tabIndex" = 0`,
+                  [winnerId],
+                );
+                const nextSlot = (
+                  maxSlotResult.rows[0] as { next_slot: number }
+                ).next_slot;
+
+                await pool.query(
+                  `INSERT INTO bank_storage ("playerId", "itemId", quantity, slot, "tabIndex")
+                 VALUES ($1, $2, $3, $4, 0)`,
+                  [winnerId, stake.itemId, transferQuantity, nextSlot],
+                );
+              }
+              console.log(
+                `[Duel] Sent ${stake.itemId} x${transferQuantity} to ${winnerId}'s bank`,
+              );
+              continue;
+            }
+
+            await pool.query(
+              `INSERT INTO inventory ("playerId", "itemId", quantity, "slotIndex", metadata)
+             VALUES ($1, $2, $3, $4, NULL)`,
+              [winnerId, stake.itemId, transferQuantity, freeSlot],
             );
-            continue;
+            console.log(
+              `[Duel] Transferred ${stake.itemId} x${transferQuantity} from ${loserId} to ${winnerId} slot ${freeSlot}`,
+            );
           }
 
-          await pool.query(
-            `INSERT INTO inventory ("playerId", "itemId", quantity, "slotIndex", metadata)
-             VALUES ($1, $2, $3, $4, NULL)`,
-            [winnerId, stake.itemId, transferQuantity, freeSlot],
-          );
+          // Commit the atomic transaction
+          await pool.query("COMMIT");
           console.log(
-            `[Duel] Transferred ${stake.itemId} x${transferQuantity} from ${loserId} to ${winnerId} slot ${freeSlot}`,
+            `[Duel] Stake transfer complete: ${stakes.length} items from ${loserId} to ${winnerId}`,
           );
-        }
 
-        // Commit the atomic transaction
-        await pool.query("COMMIT");
-        console.log(
-          `[Duel] Stake transfer complete: ${stakes.length} items from ${loserId} to ${winnerId}`,
-        );
+          // Reload both inventories from database
+          if (inventorySystem?.reloadFromDatabase) {
+            await inventorySystem.reloadFromDatabase(winnerId);
+            await inventorySystem.reloadFromDatabase(loserId);
+          }
 
-        // Reload both inventories from database
-        if (inventorySystem?.reloadFromDatabase) {
-          await inventorySystem.reloadFromDatabase(winnerId);
-          await inventorySystem.reloadFromDatabase(loserId);
+          // Notify both players of successful settlement
+          const winnerSocket = this.getSocketByPlayerId(winnerId);
+          const loserSocket = this.getSocketByPlayerId(loserId);
+          if (winnerSocket) {
+            winnerSocket.send("chatAdded", {
+              id: `duel-win-${Date.now()}`,
+              from: "",
+              body: `You received your opponent's stakes (${stakes.length} item${stakes.length !== 1 ? "s" : ""}).`,
+              createdAt: new Date().toISOString(),
+              type: "system",
+            });
+          }
+          if (loserSocket) {
+            loserSocket.send("chatAdded", {
+              id: `duel-loss-${Date.now()}`,
+              from: "",
+              body: "Your staked items have been transferred to the winner.",
+              createdAt: new Date().toISOString(),
+              type: "system",
+            });
+          }
+          // Transaction succeeded — exit the deadlock retry loop
+          return;
+        } catch (error) {
+          // Rollback on any error
+          try {
+            await pool.query("ROLLBACK");
+          } catch (_rollbackErr) {
+            // Rollback failed — connection may be broken
+          }
+
+          // Check for deadlock (40P01) or serialization failure (40001)
+          const errorMsg =
+            error instanceof Error ? error.message : String(error);
+          const isDeadlock =
+            errorMsg.includes("deadlock") ||
+            errorMsg.includes("40P01") ||
+            errorMsg.includes("could not serialize") ||
+            errorMsg.includes("40001");
+
+          if (isDeadlock && deadlockAttempt < DEADLOCK_MAX_RETRIES - 1) {
+            const delay = DEADLOCK_DELAYS[deadlockAttempt];
+            console.warn(
+              `[Duel] Deadlock detected in stake transfer, retrying in ${delay}ms ` +
+                `(attempt ${deadlockAttempt + 1}/${DEADLOCK_MAX_RETRIES})`,
+            );
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            continue; // Retry the transaction
+          }
+
+          // Not a deadlock or last attempt — throw to outer handler
+          throw error;
         }
-      } catch (error) {
-        // Rollback on any error
-        await pool.query("ROLLBACK");
-        throw error;
       }
     } catch (error) {
       console.error("[Duel] Stake transfer transaction failed:", error);
