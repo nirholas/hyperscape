@@ -987,6 +987,47 @@ export const userBans = pgTable(
 );
 
 /**
+ * Operations Log Table - Write-Ahead Logging for Persistence Operations
+ *
+ * Provides durability guarantees for critical operations (inventory, equipment, trades).
+ * Operations are logged before execution - on crash recovery, incomplete operations
+ * can be replayed to ensure no data loss.
+ *
+ * **Pattern**: Write-Ahead Log (WAL)
+ * 1. Log operation intent with state
+ * 2. Execute operation
+ * 3. Mark operation complete
+ * 4. On startup, replay any incomplete operations
+ *
+ * **Use Cases**:
+ * - Trade completions
+ * - Bank transactions
+ * - Equipment changes
+ * - Inventory modifications
+ */
+export const operationsLog = pgTable(
+  "operations_log",
+  {
+    id: text("id").primaryKey(), // UUID
+    playerId: text("playerId").notNull(),
+    operationType: text("operationType").notNull(), // 'trade', 'bank', 'equipment', 'inventory'
+    operationState: jsonb("operationState").notNull(), // Full operation data for replay
+    completed: boolean("completed").default(false),
+    timestamp: bigint("timestamp", { mode: "number" }).notNull(),
+    completedAt: bigint("completedAt", { mode: "number" }),
+  },
+  (table) => ({
+    // Index for recovery queries - find incomplete operations for a player
+    incompleteIdx: index("idx_operations_log_incomplete").on(
+      table.playerId,
+      table.completed,
+    ),
+    // Index for cleanup queries - find old completed operations
+    timestampIdx: index("idx_operations_log_timestamp").on(table.timestamp),
+  }),
+);
+
+/**
  * ============================================================================
  * TABLE RELATIONS
  * ============================================================================

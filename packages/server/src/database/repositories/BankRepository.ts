@@ -136,6 +136,98 @@ export class BankRepository extends BaseRepository {
   }
 
   /**
+   * Save player bank tabs to database
+   *
+   * Performs an atomic replace of all tabs using a transaction.
+   *
+   * @param playerId - The player ID to save tabs for
+   * @param tabs - Complete tabs state to save
+   */
+  async savePlayerTabs(playerId: string, tabs: BankTab[]): Promise<void> {
+    if (this.isDestroying) {
+      return;
+    }
+
+    this.ensureDatabase();
+
+    await this.db.transaction(async (tx) => {
+      // Delete existing tabs
+      await tx
+        .delete(schema.bankTabs)
+        .where(eq(schema.bankTabs.playerId, playerId));
+
+      // Insert new tabs (only custom tabs 1-9, tab 0 is implicit)
+      const customTabs = tabs.filter((tab) => tab.tabIndex > 0);
+      if (customTabs.length > 0) {
+        await tx.insert(schema.bankTabs).values(
+          customTabs.map((tab) => ({
+            playerId,
+            tabIndex: tab.tabIndex,
+            iconItemId: tab.iconItemId,
+          })),
+        );
+      }
+    });
+  }
+
+  /**
+   * Save complete bank state (items and tabs) atomically
+   *
+   * Performs an atomic replace of both items and tabs in a single transaction.
+   * This ensures consistency - either both succeed or both fail.
+   *
+   * @param playerId - The player ID to save bank for
+   * @param data - Complete bank state including items and tabs
+   */
+  async savePlayerBankComplete(
+    playerId: string,
+    data: { items: BankItem[]; tabs: BankTab[] },
+  ): Promise<void> {
+    if (this.isDestroying) {
+      return;
+    }
+
+    this.ensureDatabase();
+
+    await this.db.transaction(async (tx) => {
+      // Delete existing bank items
+      await tx
+        .delete(schema.bankStorage)
+        .where(eq(schema.bankStorage.playerId, playerId));
+
+      // Delete existing tabs
+      await tx
+        .delete(schema.bankTabs)
+        .where(eq(schema.bankTabs.playerId, playerId));
+
+      // Insert new items
+      if (data.items.length > 0) {
+        await tx.insert(schema.bankStorage).values(
+          data.items.map((item) => ({
+            playerId,
+            itemId: item.itemId,
+            quantity: item.quantity,
+            slot: item.slot,
+            tabIndex: item.tabIndex,
+          })),
+        );
+      }
+
+      // Insert new tabs (only custom tabs 1-9, tab 0 is implicit)
+      const customTabs = data.tabs.filter((tab) => tab.tabIndex > 0);
+      if (customTabs.length > 0) {
+        await tx.insert(schema.bankTabs).values(
+          customTabs.map((tab) => ({
+            playerId,
+            tabIndex: tab.tabIndex,
+            iconItemId: tab.iconItemId,
+          })),
+        );
+      }
+    });
+  }
+
+  /**
    * Load player placeholders from database
    *
    * Retrieves all placeholders (reserved slots) for a player.

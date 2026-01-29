@@ -517,6 +517,7 @@ export function registerAdminRoutes(
           ),
           ranged: skillDef(character.rangedLevel, character.rangedXp),
           prayer: skillDef(character.prayerLevel, character.prayerXp),
+          magic: skillDef(character.magicLevel, character.magicXp),
           woodcutting: skillDef(
             character.woodcuttingLevel,
             character.woodcuttingXp,

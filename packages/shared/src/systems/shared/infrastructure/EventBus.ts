@@ -32,6 +32,12 @@ export class EventBus extends EventEmitter {
   private readonly maxHistorySize = 1000;
 
   /**
+   * Track pending async handlers for graceful shutdown
+   * Allows waiting for all async operations to complete before shutdown
+   */
+  private pendingAsyncHandlers: Set<Promise<unknown>> = new Set();
+
+  /**
    * Emit a typed event
    */
   emitEvent<T extends AnyEvent>(
@@ -85,9 +91,17 @@ export class EventBus extends EventEmitter {
 
       const result = handler(event);
 
-      // Handle async handlers
+      // Handle async handlers - track for graceful shutdown
       if (result instanceof Promise) {
-        result; // Let promise rejection propagate naturally
+        this.pendingAsyncHandlers.add(result);
+        result
+          .catch((err) => {
+            // Log error but don't crash - handlers should handle their own errors
+            console.error("[EventBus] Async handler error:", err);
+          })
+          .finally(() => {
+            this.pendingAsyncHandlers.delete(result);
+          });
       }
 
       if (once) {
@@ -221,6 +235,45 @@ export class EventBus extends EventEmitter {
   }
 
   /**
+   * Wait for all pending async handlers to complete
+   *
+   * Call this during graceful shutdown to ensure all async operations
+   * (like database saves) complete before shutting down.
+   *
+   * @param timeout - Maximum time to wait in ms (default: 5000)
+   * @returns Promise that resolves when all handlers complete or timeout
+   */
+  async waitForPendingHandlers(timeout: number = 5000): Promise<void> {
+    if (this.pendingAsyncHandlers.size === 0) {
+      return;
+    }
+
+    const pending = Array.from(this.pendingAsyncHandlers);
+    console.log(
+      `[EventBus] Waiting for ${pending.length} pending async handlers...`,
+    );
+
+    // Race between waiting for all handlers and timeout
+    await Promise.race([
+      Promise.allSettled(pending),
+      new Promise<void>((resolve) => setTimeout(resolve, timeout)),
+    ]);
+
+    if (this.pendingAsyncHandlers.size > 0) {
+      console.warn(
+        `[EventBus] ${this.pendingAsyncHandlers.size} handlers still pending after timeout`,
+      );
+    }
+  }
+
+  /**
+   * Get count of pending async handlers (for debugging/monitoring)
+   */
+  getPendingHandlerCount(): number {
+    return this.pendingAsyncHandlers.size;
+  }
+
+  /**
    * Cleanup all subscriptions
    */
   cleanup(): void {
@@ -229,6 +282,7 @@ export class EventBus extends EventEmitter {
     });
     this.activeSubscriptions.clear();
     this.eventHistory.length = 0;
+    this.pendingAsyncHandlers.clear();
     this.removeAllListeners();
   }
 }

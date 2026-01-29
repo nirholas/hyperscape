@@ -150,6 +150,8 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
       defense: { level: savedData?.defenseLevel || 1, xp: savedData?.defenseXp || 0 },
       constitution: { level: savedData?.constitutionLevel || 10, xp: savedData?.constitutionXp || 0 },
       ranged: { level: savedData?.rangedLevel || 1, xp: savedData?.rangedXp || 0 },
+      magic: { level: savedData?.magicLevel || 1, xp: savedData?.magicXp || 0 },
+      prayer: { level: savedData?.prayerLevel || 1, xp: savedData?.prayerXp || 0 },
       woodcutting: { level: savedData?.woodcuttingLevel || 1, xp: savedData?.woodcuttingXp || 0 },
       mining: { level: savedData?.miningLevel || 1, xp: savedData?.miningXp || 0 },
       fishing: { level: savedData?.fishingLevel || 1, xp: savedData?.fishingXp || 0 },

@@ -23,12 +23,20 @@ export interface EquipmentSyncData {
   quantity: number;
 }
 
+export interface InventorySyncData {
+  slotIndex: number;
+  itemId: string;
+  quantity: number;
+}
+
 // Core Event Payloads
 export interface PlayerJoinedPayload {
   playerId: string;
   player: PlayerLocal;
   /** Equipment data loaded from database during login (optional for backwards compatibility) */
   equipment?: EquipmentSyncData[];
+  /** Inventory data loaded from database during login (optional for backwards compatibility) */
+  inventory?: InventorySyncData[];
   /** Whether this player is a load test bot */
   isLoadTestBot?: boolean;
   /** Whether this player is an embedded AI agent */

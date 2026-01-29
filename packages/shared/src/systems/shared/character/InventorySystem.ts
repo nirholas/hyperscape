@@ -12,6 +12,7 @@ import type {
   InventoryCanAddEvent,
   InventoryCheckEvent,
   InventoryItemInfo,
+  InventorySyncData,
 } from "../../../types/events";
 import { PlayerID } from "../../../types/core/identifiers";
 import type { InventoryData } from "../../../types/systems/system-interfaces";
@@ -35,7 +36,7 @@ export class InventorySystem extends SystemBase {
   private readonly MAX_INVENTORY_SLOTS = 28;
   private persistTimers = new Map<string, NodeJS.Timeout>();
   private saveInterval?: NodeJS.Timeout;
-  private readonly AUTO_SAVE_INTERVAL = 30000; // 30 seconds
+  private readonly AUTO_SAVE_INTERVAL = 5000; // 5 seconds - reduced for minimal data loss
 
   // Pickup locks to prevent race conditions when multiple players try to pickup same item
   private pickupLocks = new Set<string>();
@@ -84,16 +85,39 @@ export class InventorySystem extends SystemBase {
 
   async init(): Promise<void> {
     // Subscribe to inventory events
+    // PLAYER_REGISTERED: Just initialize empty inventory structure
+    // Actual data loading happens in PLAYER_JOINED with payload from character-selection
     this.subscribe(
       EventType.PLAYER_REGISTERED,
-      async (data: { playerId: string }) => {
-        // Use async method to properly load from database
-        const loaded = await this.loadPersistedInventoryAsync(data.playerId);
-        if (!loaded) {
-          this.initializeInventory({ id: data.playerId });
+      (data: { playerId: string }) => {
+        // Initialize empty inventory structure - data will be populated by PLAYER_JOINED
+        this.initializeInventory({ id: data.playerId });
+      },
+    );
+
+    // CRITICAL: Inventory is now passed via event payload from character-selection
+    // This eliminates the race condition where two systems query DB independently
+    this.subscribe(
+      EventType.PLAYER_JOINED,
+      async (data: { playerId: string; inventory?: InventorySyncData[] }) => {
+        // Use inventory from payload (single source of truth from character-selection)
+        if (data.inventory && data.inventory.length > 0) {
+          await this.loadInventoryFromPayload(data.playerId, data.inventory);
+        } else if (data.inventory) {
+          // Empty array = new player or no items, inventory already initialized
+          // Mark as initialized so requests work immediately
+          this.initializedInventories.add(data.playerId);
+        } else {
+          // Backwards compatibility: no inventory in payload, fall back to DB query
+          const loaded = await this.loadPersistedInventoryAsync(data.playerId);
+          if (!loaded) {
+            // Mark as initialized even if DB had nothing (new player)
+            this.initializedInventories.add(data.playerId);
+          }
         }
       },
     );
+
     this.subscribe(EventType.PLAYER_CLEANUP, (data) => {
       this.cleanupInventory({ id: data.playerId });
     });
@@ -795,6 +819,9 @@ export class InventorySystem extends SystemBase {
           },
         });
       }
+
+      // CRITICAL: Persist immediately for item drops to prevent duplication on crash
+      await this.persistInventoryImmediate(data.playerId);
     }
   }
 
@@ -900,11 +927,11 @@ export class InventorySystem extends SystemBase {
     });
   }
 
-  private pickupItem(data: {
+  private async pickupItem(data: {
     playerId: string;
     entityId: string;
     itemId?: string;
-  }): void {
+  }): Promise<void> {
     // SERVER-SIDE ONLY: Prevent duplication by ensuring only server processes pickups
     if (!this.world.isServer) {
       // Client just sent the request, don't process locally
@@ -1062,6 +1089,9 @@ export class InventorySystem extends SystemBase {
             message: "Failed to pick up item. Please try again.",
             type: "warning",
           });
+        } else {
+          // CRITICAL: Persist immediately for item pickups to prevent loss on crash
+          await this.persistInventoryImmediate(data.playerId);
         }
       } else {
         // Could not add (should not happen after canAddItem check, but handle defensively)
@@ -1915,6 +1945,87 @@ export class InventorySystem extends SystemBase {
   // === Persistence helpers ===
   private getDatabase(): DatabaseSystem | null {
     return this.world.getSystem<DatabaseSystem>("database") || null;
+  }
+
+  /**
+   * Load inventory from event payload data (single source of truth pattern)
+   *
+   * Called when PLAYER_JOINED event includes inventory data from character-selection.
+   * This eliminates the race condition where InventorySystem and character-selection
+   * both query the database independently, potentially causing stale data.
+   *
+   * @param playerId - The player ID
+   * @param inventoryData - Inventory data from event payload
+   */
+  private async loadInventoryFromPayload(
+    playerId: string,
+    inventoryData: InventorySyncData[],
+  ): Promise<void> {
+    // Mark as loading to prevent race conditions
+    this.loadingInventories.add(playerId);
+
+    try {
+      const pid = createPlayerID(playerId);
+      let inv = this.playerInventories.get(pid);
+
+      if (!inv) {
+        inv = {
+          playerId: pid,
+          items: [],
+          coins: 0,
+        };
+        this.playerInventories.set(pid, inv);
+      } else {
+        // Clear existing items before loading from payload
+        inv.items = [];
+      }
+
+      // Use silent mode to batch load without emitting updates for each item
+      for (const row of inventoryData) {
+        this.addItem({
+          playerId,
+          itemId: createItemID(String(row.itemId)),
+          quantity: row.quantity || 1,
+          slot: row.slotIndex,
+          silent: true, // Don't emit updates during batch load
+        });
+      }
+
+      // Mark as fully initialized before emitting event
+      this.initializedInventories.add(playerId);
+      this.loadingInventories.delete(playerId);
+
+      const data = this.getInventoryData(playerId);
+      this.emitTypedEvent(EventType.INVENTORY_INITIALIZED, {
+        playerId,
+        inventory: {
+          items: data.items.map((item) => ({
+            slot: item.slot,
+            itemId: item.itemId,
+            quantity: item.quantity,
+            item: {
+              id: item.item.id,
+              name: item.item.name,
+              type: item.item.type,
+              stackable: item.item.stackable,
+              weight: item.item.weight,
+            },
+          })),
+          coins: data.coins,
+          maxSlots: data.maxSlots,
+        },
+      });
+
+      // Emit initial weight for stamina drain calculations
+      const totalWeight = this.getTotalWeight(playerId);
+      this.emitTypedEvent(EventType.PLAYER_WEIGHT_CHANGED, {
+        playerId,
+        weight: totalWeight,
+      });
+    } catch (error) {
+      this.loadingInventories.delete(playerId);
+      throw error;
+    }
   }
 
   private async loadPersistedInventoryAsync(

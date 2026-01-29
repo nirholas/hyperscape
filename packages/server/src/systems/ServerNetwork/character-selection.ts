@@ -24,6 +24,7 @@ import {
   Entity,
   World,
   type EquipmentSyncData,
+  type InventorySyncData,
 } from "@hyperscape/shared";
 import {
   sendFriendsListSync,
@@ -643,6 +644,10 @@ export async function handleEnterWorld(
               xp: savedData.constitutionXp,
             },
             ranged: { level: savedData.rangedLevel, xp: savedData.rangedXp },
+            magic: {
+              level: (savedData as { magicLevel?: number }).magicLevel || 1,
+              xp: (savedData as { magicXp?: number }).magicXp || 0,
+            },
             woodcutting: {
               level: savedData.woodcuttingLevel || 1,
               xp: savedData.woodcuttingXp || 0,
@@ -779,32 +784,51 @@ export async function handleEnterWorld(
   }, 30000);
 
   if (socket.player) {
-    // CRITICAL: Load equipment from DB BEFORE emitting PLAYER_JOINED
-    // This ensures EquipmentSystem receives the data via event payload (single source of truth)
+    // CRITICAL: Load equipment and inventory from DB BEFORE emitting PLAYER_JOINED
+    // This ensures systems receive the data via event payload (single source of truth)
     // and eliminates the race condition where two systems query the DB independently
+    const dbSys = world.getSystem?.("database") as
+      | DatabaseSystemOperations
+      | undefined;
+    const persistenceId = characterId || socket.player.id;
+
     let equipmentRows: EquipmentSyncData[] | undefined;
     try {
-      const dbSys = world.getSystem?.("database") as
-        | DatabaseSystemOperations
-        | undefined;
-      const persistenceId = characterId || socket.player.id;
       equipmentRows = dbSys?.getPlayerEquipmentAsync
         ? await dbSys.getPlayerEquipmentAsync(persistenceId)
-        : [];
+        : undefined;
     } catch (err) {
       console.error("[CharacterSelection] ❌ Failed to load equipment:", err);
       // Leave equipmentRows undefined to trigger DB fallback in EquipmentSystem
       equipmentRows = undefined;
     }
 
-    // Emit PLAYER_JOINED with equipment data in payload
-    // EquipmentSystem will use this data instead of querying DB again
-    // If equipmentRows is undefined (load failed), EquipmentSystem falls back to DB query
+    let inventoryRows: InventorySyncData[] | undefined;
+    try {
+      const rawRows = dbSys?.getPlayerInventoryAsync
+        ? await dbSys.getPlayerInventoryAsync(persistenceId)
+        : undefined;
+      // Transform to InventorySyncData format (slotIndex, itemId, quantity)
+      inventoryRows = rawRows?.map((row) => ({
+        slotIndex: row.slotIndex ?? 0,
+        itemId: String(row.itemId),
+        quantity: row.quantity || 1,
+      }));
+    } catch (err) {
+      console.error("[CharacterSelection] ❌ Failed to load inventory:", err);
+      // Leave inventoryRows undefined to trigger DB fallback in InventorySystem
+      inventoryRows = undefined;
+    }
+
+    // Emit PLAYER_JOINED with equipment and inventory data in payload
+    // Systems will use this data instead of querying DB again
+    // If data is undefined (load failed), systems fall back to DB query
     world.emit(EventType.PLAYER_JOINED, {
       playerId: socket.player.data.id as string,
       player:
         socket.player as unknown as import("@hyperscape/shared").PlayerLocal,
       equipment: equipmentRows,
+      inventory: inventoryRows,
       isLoadTestBot,
     });
 

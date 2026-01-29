@@ -266,6 +266,7 @@ export class CharacterRepository extends BaseRepository {
       },
       ranged: { level: row.rangedLevel || 1, xp: row.rangedXp || 0 },
       prayer: { level: row.prayerLevel || 1, xp: row.prayerXp || 0 },
+      magic: { level: row.magicLevel || 1, xp: row.magicXp || 0 },
       woodcutting: {
         level: row.woodcuttingLevel || 1,
         xp: row.woodcuttingXp || 0,

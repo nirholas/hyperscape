@@ -46,8 +46,9 @@ export class EquipmentRepository extends BaseRepository {
   /**
    * Save player equipment to database
    *
-   * Performs an atomic replace of all equipment slots.
-   * Deletes existing equipment and inserts new state.
+   * Performs an atomic replace of all equipment slots within a transaction.
+   * Deletes existing equipment and inserts new state atomically - either
+   * both operations succeed or both are rolled back.
    *
    * @param playerId - The player ID to save equipment for
    * @param items - Complete equipment state to save
@@ -63,21 +64,25 @@ export class EquipmentRepository extends BaseRepository {
 
     this.ensureDatabase();
 
-    // Delete existing equipment
-    await this.db
-      .delete(schema.equipment)
-      .where(eq(schema.equipment.playerId, playerId));
+    // Wrap delete and insert in a transaction for atomicity
+    // This prevents equipment loss if server crashes between operations
+    await this.db.transaction(async (tx) => {
+      // Delete existing equipment
+      await tx
+        .delete(schema.equipment)
+        .where(eq(schema.equipment.playerId, playerId));
 
-    // Insert new equipment
-    if (items.length > 0) {
-      await this.db.insert(schema.equipment).values(
-        items.map((item) => ({
-          playerId,
-          slotType: item.slotType,
-          itemId: item.itemId || null,
-          quantity: item.quantity ?? 1,
-        })),
-      );
-    }
+      // Insert new equipment
+      if (items.length > 0) {
+        await tx.insert(schema.equipment).values(
+          items.map((item) => ({
+            playerId,
+            slotType: item.slotType,
+            itemId: item.itemId || null,
+            quantity: item.quantity ?? 1,
+          })),
+        );
+      }
+    });
   }
 }

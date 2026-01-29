@@ -131,7 +131,7 @@ export class EquipmentSystem extends SystemBase {
   >();
   private databaseSystem?: DatabaseSystem;
   private saveInterval?: NodeJS.Timeout;
-  private readonly AUTO_SAVE_INTERVAL = 30000; // 30 seconds
+  private readonly AUTO_SAVE_INTERVAL = 5000; // 5 seconds - reduced for minimal data loss
 
   // GDD-compliant level requirements
   // Level requirements are now stored in item data directly

@@ -36,30 +36,18 @@ export interface SkillDefinition {
 }
 
 /**
- * All skill definitions in display order.
- * Combat skills first, then gathering, then production.
- * Prayer is excluded (displayed in separate PrayerPanel).
+ * All skill definitions in OSRS-style display order.
+ * Arranged in 3-column grid matching RuneScape layout:
+ *   Column 1: Combat (Attack, Strength, Defence, Ranged, Magic, Prayer)
+ *   Column 2: Support (Constitution, Agility)
+ *   Column 3: Gathering/Production (Mining, Smithing, Fishing, Cooking, Firemaking, Woodcutting)
  */
 export const SKILL_DEFINITIONS: readonly SkillDefinition[] = [
-  // Combat skills
+  // Row 1: Attack, Constitution (Hitpoints), Mining
   {
     key: "attack",
     label: "Attack",
     icon: "⚔️",
-    category: "combat",
-    defaultLevel: 1,
-  },
-  {
-    key: "strength",
-    label: "Strength",
-    icon: "💪",
-    category: "combat",
-    defaultLevel: 1,
-  },
-  {
-    key: "defense",
-    label: "Defence",
-    icon: "🛡️",
     category: "combat",
     defaultLevel: 1,
   },
@@ -71,53 +59,24 @@ export const SKILL_DEFINITIONS: readonly SkillDefinition[] = [
     defaultLevel: 10,
   },
   {
-    key: "ranged",
-    label: "Ranged",
-    icon: "🏹",
-    category: "combat",
-    defaultLevel: 1,
-  },
-  {
-    key: "magic",
-    label: "Magic",
-    icon: "🔮",
-    category: "combat",
-    defaultLevel: 1,
-  },
-  // Gathering skills
-  {
-    key: "woodcutting",
-    label: "Woodcutting",
-    icon: "🪓",
-    category: "gathering",
-    defaultLevel: 1,
-  },
-  {
     key: "mining",
     label: "Mining",
     icon: "⛏️",
     category: "gathering",
     defaultLevel: 1,
   },
+  // Row 2: Strength, Agility, Smithing
   {
-    key: "fishing",
-    label: "Fishing",
-    icon: "🐟",
-    category: "gathering",
-    defaultLevel: 1,
-  },
-  // Production skills
-  {
-    key: "firemaking",
-    label: "Firemaking",
-    icon: "🔥",
-    category: "production",
+    key: "strength",
+    label: "Strength",
+    icon: "💪",
+    category: "combat",
     defaultLevel: 1,
   },
   {
-    key: "cooking",
-    label: "Cooking",
-    icon: "🍖",
+    key: "agility",
+    label: "Agility",
+    icon: "🏃",
     category: "production",
     defaultLevel: 1,
   },
@@ -128,11 +87,63 @@ export const SKILL_DEFINITIONS: readonly SkillDefinition[] = [
     category: "production",
     defaultLevel: 1,
   },
+  // Row 3: Defence, Fishing, Cooking
   {
-    key: "agility",
-    label: "Agility",
-    icon: "🏃",
+    key: "defense",
+    label: "Defence",
+    icon: "🛡️",
+    category: "combat",
+    defaultLevel: 1,
+  },
+  {
+    key: "fishing",
+    label: "Fishing",
+    icon: "🐟",
+    category: "gathering",
+    defaultLevel: 1,
+  },
+  {
+    key: "cooking",
+    label: "Cooking",
+    icon: "🍖",
     category: "production",
+    defaultLevel: 1,
+  },
+  // Row 4: Ranged, Firemaking, Woodcutting
+  {
+    key: "ranged",
+    label: "Ranged",
+    icon: "🏹",
+    category: "combat",
+    defaultLevel: 1,
+  },
+  {
+    key: "firemaking",
+    label: "Firemaking",
+    icon: "🔥",
+    category: "production",
+    defaultLevel: 1,
+  },
+  {
+    key: "woodcutting",
+    label: "Woodcutting",
+    icon: "🪓",
+    category: "gathering",
+    defaultLevel: 1,
+  },
+  // Row 5: Magic, Prayer
+  {
+    key: "magic",
+    label: "Magic",
+    icon: "🔮",
+    category: "combat",
+    defaultLevel: 1,
+  },
+  {
+    key: "prayer",
+    label: "Prayer",
+    icon: "✨",
+    category: "combat",
     defaultLevel: 1,
   },
 ] as const;

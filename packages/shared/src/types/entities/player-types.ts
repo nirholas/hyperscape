@@ -170,8 +170,8 @@ export class PlayerMigration {
         defense: { level: old.defenseLevel, xp: old.defenseXp },
         constitution: { level: old.constitutionLevel, xp: old.constitutionXp },
         ranged: { level: old.rangedLevel, xp: old.rangedXp },
-        magic: { level: 1, xp: 0 }, // Magic skill defaults
-        prayer: { level: 1, xp: 0 }, // Prayer skill defaults
+        magic: { level: old.magicLevel || 1, xp: old.magicXp || 0 },
+        prayer: { level: old.prayerLevel || 1, xp: old.prayerXp || 0 },
         woodcutting: {
           level: old.woodcuttingLevel || 1,
           xp: old.woodcuttingXp || 0,

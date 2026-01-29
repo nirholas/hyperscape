@@ -824,7 +824,11 @@ export type {
 // Export event payloads namespace
 export * as Payloads from "./types/events";
 // Export specific event payload types for convenience
-export type { SkillsLevelUpEvent, EquipmentSyncData } from "./types/events";
+export type {
+  SkillsLevelUpEvent,
+  EquipmentSyncData,
+  InventorySyncData,
+} from "./types/events";
 
 // Export additional core types
 export type { SkillsData } from "./types/systems/system-interfaces";
