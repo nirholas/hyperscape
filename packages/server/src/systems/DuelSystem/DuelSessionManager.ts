@@ -15,7 +15,11 @@
 import type { World } from "@hyperscape/shared";
 import type { DuelRules, StakedItem, DuelState } from "@hyperscape/shared";
 import { DEFAULT_DUEL_RULES } from "@hyperscape/shared";
-import { DEFAULT_EQUIPMENT_RESTRICTIONS, type EquipmentSlot } from "./config";
+import {
+  DEFAULT_EQUIPMENT_RESTRICTIONS,
+  type EquipmentSlot,
+  generateDuelId,
+} from "./config";
 
 // ============================================================================
 // Types
@@ -120,7 +124,7 @@ export class DuelSessionManager {
     targetId: string,
     targetName: string,
   ): string {
-    const duelId = this.generateDuelId();
+    const duelId = generateDuelId();
 
     const session: DuelSession = {
       duelId,
@@ -290,16 +294,5 @@ export class DuelSessionManager {
       session.targetAccepted = accepted;
     }
     return session.challengerAccepted && session.targetAccepted;
-  }
-
-  // ==========================================================================
-  // Private Helpers
-  // ==========================================================================
-
-  /**
-   * Generate a unique duel ID
-   */
-  private generateDuelId(): string {
-    return `duel_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   }
 }

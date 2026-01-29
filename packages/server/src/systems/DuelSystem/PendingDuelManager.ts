@@ -18,6 +18,7 @@ import {
   CHALLENGE_CLEANUP_INTERVAL_TICKS,
   CHALLENGE_DISTANCE_TILES,
   ticksToMs,
+  generateDuelId,
 } from "./config";
 
 export class PendingDuelManager {
@@ -87,7 +88,7 @@ export class PendingDuelManager {
     }
 
     // Generate unique challenge ID
-    const challengeId = `duel_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const challengeId = generateDuelId();
 
     const challenge: PendingDuelChallenge = {
       challengeId,

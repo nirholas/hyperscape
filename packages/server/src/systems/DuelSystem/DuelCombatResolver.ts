@@ -166,6 +166,17 @@ export class DuelCombatResolver {
         winnerReceivesValue,
         challengerStakes: session.challengerStakes,
         targetStakes: session.targetStakes,
+        summary: {
+          duration:
+            session.finishedAt! - (session.fightStartedAt || session.createdAt),
+          rules: session.rules,
+          challengerStakeValue: winnerIsChallenger
+            ? winnerStakes.reduce((s, i) => s + i.value, 0)
+            : winnerReceivesValue,
+          targetStakeValue: winnerIsChallenger
+            ? winnerReceivesValue
+            : winnerStakes.reduce((s, i) => s + i.value, 0),
+        },
       });
     } catch (err) {
       Logger.error("DuelCombatResolver", "Completion event failed", {

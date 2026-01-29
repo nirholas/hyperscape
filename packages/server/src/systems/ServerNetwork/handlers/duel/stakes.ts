@@ -20,11 +20,11 @@ import type { DatabaseConnection } from "../trade/types";
 import { AuditLogger } from "../../services";
 import {
   rateLimiter,
-  getDuelSystem,
   sendDuelError,
   sendToSocket,
-  getPlayerId,
   getSocketByPlayerId,
+  withDuelAuth,
+  DUEL_PACKETS,
 } from "./helpers";
 
 // ============================================================================
@@ -50,11 +50,9 @@ export async function handleDuelAddStake(
   world: World,
   db: DatabaseConnection,
 ): Promise<void> {
-  const playerId = getPlayerId(socket);
-  if (!playerId) {
-    sendDuelError(socket, "Not authenticated", "NOT_AUTHENTICATED");
-    return;
-  }
+  const auth = withDuelAuth(socket, world);
+  if (!auth) return;
+  const { playerId, duelSystem } = auth;
 
   // Rate limiting - prevent rapid stake operations
   if (!rateLimiter.tryOperation(playerId)) {
@@ -63,12 +61,6 @@ export async function handleDuelAddStake(
       "Please wait before modifying stakes",
       "RATE_LIMITED",
     );
-    return;
-  }
-
-  const duelSystem = getDuelSystem(world);
-  if (!duelSystem) {
-    sendDuelError(socket, "Duel system unavailable", "SYSTEM_ERROR");
     return;
   }
 
@@ -161,7 +153,7 @@ export async function handleDuelAddStake(
       modifiedBy: playerId,
     };
 
-    sendToSocket(socket, "duelStakesUpdated", updatePayload);
+    sendToSocket(socket, DUEL_PACKETS.STAKES_UPDATED, updatePayload);
 
     const opponentId =
       playerId === session.challengerId
@@ -169,7 +161,7 @@ export async function handleDuelAddStake(
         : session.challengerId;
     const opponentSocket = getSocketByPlayerId(world, opponentId);
     if (opponentSocket) {
-      sendToSocket(opponentSocket, "duelStakesUpdated", updatePayload);
+      sendToSocket(opponentSocket, DUEL_PACKETS.STAKES_UPDATED, updatePayload);
     }
   } catch (error) {
     console.error("[Duel] Stake add failed:", error);
@@ -197,11 +189,9 @@ export async function handleDuelRemoveStake(
   world: World,
   _db: DatabaseConnection,
 ): Promise<void> {
-  const playerId = getPlayerId(socket);
-  if (!playerId) {
-    sendDuelError(socket, "Not authenticated", "NOT_AUTHENTICATED");
-    return;
-  }
+  const auth = withDuelAuth(socket, world);
+  if (!auth) return;
+  const { playerId, duelSystem } = auth;
 
   // Rate limiting - prevent rapid stake operations
   if (!rateLimiter.tryOperation(playerId)) {
@@ -210,12 +200,6 @@ export async function handleDuelRemoveStake(
       "Please wait before modifying stakes",
       "RATE_LIMITED",
     );
-    return;
-  }
-
-  const duelSystem = getDuelSystem(world);
-  if (!duelSystem) {
-    sendDuelError(socket, "Duel system unavailable", "SYSTEM_ERROR");
     return;
   }
 
@@ -260,13 +244,13 @@ export async function handleDuelRemoveStake(
     modifiedBy: playerId,
   };
 
-  sendToSocket(socket, "duelStakesUpdated", updatePayload);
+  sendToSocket(socket, DUEL_PACKETS.STAKES_UPDATED, updatePayload);
 
   const opponentId =
     playerId === session.challengerId ? session.targetId : session.challengerId;
   const opponentSocket = getSocketByPlayerId(world, opponentId);
   if (opponentSocket) {
-    sendToSocket(opponentSocket, "duelStakesUpdated", updatePayload);
+    sendToSocket(opponentSocket, DUEL_PACKETS.STAKES_UPDATED, updatePayload);
   }
 }
 
@@ -282,21 +266,13 @@ export function handleDuelAcceptStakes(
   data: { duelId: string },
   world: World,
 ): void {
-  const playerId = getPlayerId(socket);
-  if (!playerId) {
-    sendDuelError(socket, "Not authenticated", "NOT_AUTHENTICATED");
-    return;
-  }
+  const auth = withDuelAuth(socket, world);
+  if (!auth) return;
+  const { playerId, duelSystem } = auth;
 
   // Rate limit accept operations to prevent spam
   if (!rateLimiter.tryOperation(playerId)) {
     sendDuelError(socket, "Please wait before accepting", "RATE_LIMITED");
-    return;
-  }
-
-  const duelSystem = getDuelSystem(world);
-  if (!duelSystem) {
-    sendDuelError(socket, "Duel system unavailable", "SYSTEM_ERROR");
     return;
   }
 
@@ -325,13 +301,17 @@ export function handleDuelAcceptStakes(
     movedToConfirm,
   };
 
-  sendToSocket(socket, "duelAcceptanceUpdated", updatePayload);
+  sendToSocket(socket, DUEL_PACKETS.ACCEPTANCE_UPDATED, updatePayload);
 
   const opponentId =
     playerId === session.challengerId ? session.targetId : session.challengerId;
   const opponentSocket = getSocketByPlayerId(world, opponentId);
   if (opponentSocket) {
-    sendToSocket(opponentSocket, "duelAcceptanceUpdated", updatePayload);
+    sendToSocket(
+      opponentSocket,
+      DUEL_PACKETS.ACCEPTANCE_UPDATED,
+      updatePayload,
+    );
   }
 
   // If moved to confirm screen, send state change notification
@@ -345,9 +325,9 @@ export function handleDuelAcceptStakes(
       targetStakes: session.targetStakes,
     };
 
-    sendToSocket(socket, "duelStateChanged", statePayload);
+    sendToSocket(socket, DUEL_PACKETS.STATE_CHANGED, statePayload);
     if (opponentSocket) {
-      sendToSocket(opponentSocket, "duelStateChanged", statePayload);
+      sendToSocket(opponentSocket, DUEL_PACKETS.STATE_CHANGED, statePayload);
     }
   }
 }

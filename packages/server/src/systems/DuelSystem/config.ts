@@ -177,6 +177,17 @@ export const DEFAULT_EQUIPMENT_RESTRICTIONS = {
 export type EquipmentSlot = keyof typeof DEFAULT_EQUIPMENT_RESTRICTIONS;
 
 // ============================================================================
+// ID GENERATION
+// ============================================================================
+
+/**
+ * Generate a unique duel-related ID (shared between DuelSessionManager and PendingDuelManager)
+ */
+export function generateDuelId(): string {
+  return `duel_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+}
+
+// ============================================================================
 // DUEL STATES
 // ============================================================================
 
