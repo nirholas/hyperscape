@@ -592,6 +592,29 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.duelSystem,
     );
 
+    // Listen for duel countdown start and forward to clients
+    // This tells clients to close the duel panel and show the countdown overlay
+    this.world.on("duel:countdown:start", (event) => {
+      const { duelId, arenaId, challengerId, targetId } = event as {
+        duelId: string;
+        arenaId: number;
+        challengerId: string;
+        targetId: string;
+      };
+
+      const payload = { duelId, arenaId, challengerId, targetId };
+
+      const challengerSocket = this.getSocketByPlayerId(challengerId);
+      if (challengerSocket) {
+        challengerSocket.send("duelCountdownStart", payload);
+      }
+
+      const targetSocket = this.getSocketByPlayerId(targetId);
+      if (targetSocket) {
+        targetSocket.send("duelCountdownStart", payload);
+      }
+    });
+
     // Listen for duel countdown ticks and forward to clients
     this.world.on("duel:countdown:tick", (event) => {
       const { duelId, count, challengerId, targetId } = event as {
