@@ -787,8 +787,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       );
     });
 
-    // Listen for duel stakes return (player's own items returned on cancel)
-    // Note: For duel wins, we use duel:stakes:settle to avoid race conditions
+    // Listen for duel stakes return (called on duel cancel/disconnect)
+    // CRASH-SAFE: Items were never removed from inventory, so nothing to return.
+    // This handler now just logs for debugging - the actual items are still in player's inventory.
     this.world.on("duel:stakes:return", (event) => {
       const { playerId, stakes, reason } = event as {
         playerId: string;
@@ -801,25 +802,19 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         reason: string;
       };
 
+      // Items never left the player's inventory, so no action needed
       console.log(
-        `[Duel] Stakes return event received - playerId: ${playerId}, stakes: ${stakes?.length || 0}, reason: ${reason}`,
+        `[Duel] Stakes return event received (no-op) - playerId: ${playerId}, stakes: ${stakes?.length || 0}, reason: ${reason}`,
       );
-
-      if (!stakes || stakes.length === 0) {
-        console.log("[Duel] No stakes to return, skipping");
-        return;
-      }
-
-      // Fire and forget - don't await in event handler
-      this.addStakedItemsToInventory(playerId, stakes, "return").catch(
-        (err) => {
-          console.error("[Duel] Error in stakes return handler:", err);
-        },
+      console.log(
+        "[Duel] Items remain in inventory (crash-safe design) - no transfer needed",
       );
     });
 
-    // Listen for duel stakes settle (combined: winner gets own stakes back + loser's stakes)
-    // This handles both in a single operation to avoid race conditions
+    // Listen for duel stakes settle (atomic transfer: loser's items -> winner)
+    // CRASH-SAFE: Items remain in inventory until this atomic transfer.
+    // Winner's own stakes stay in their inventory (nothing to do).
+    // Loser's stakes are atomically transferred to winner.
     this.world.on("duel:stakes:settle", (event) => {
       const { playerId, ownStakes, wonStakes, fromPlayerId, reason } =
         event as {
@@ -840,24 +835,25 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           reason: string;
         };
 
-      // Combine both sets of stakes into a single operation
-      const allStakes = [...(ownStakes || []), ...(wonStakes || [])];
-
       console.log(
-        `[Duel] Stakes settle event received - winnerId: ${playerId}, fromPlayerId: ${fromPlayerId}, ownStakes: ${ownStakes?.length || 0}, wonStakes: ${wonStakes?.length || 0}, reason: ${reason}`,
+        `[Duel] Stakes settle event received - winnerId: ${playerId}, loserId: ${fromPlayerId}, ownStakes: ${ownStakes?.length || 0}, wonStakes: ${wonStakes?.length || 0}, reason: ${reason}`,
       );
 
-      if (allStakes.length === 0) {
-        console.log("[Duel] No stakes to settle, skipping");
+      // Winner's own stakes stay in their inventory - nothing to do
+      // Only need to transfer loser's stakes (wonStakes) from loser to winner
+      if (!wonStakes || wonStakes.length === 0) {
+        console.log("[Duel] No stakes to transfer from loser, skipping");
         return;
       }
 
-      console.log("[Duel] All stakes to add:", JSON.stringify(allStakes));
+      console.log(
+        `[Duel] Transferring ${wonStakes.length} items from ${fromPlayerId} to ${playerId}`,
+      );
 
       // Fire and forget - don't await in event handler
-      this.addStakedItemsToInventory(playerId, allStakes, "award").catch(
+      this.executeDuelStakeTransfer(playerId, fromPlayerId, wonStakes).catch(
         (err) => {
-          console.error("[Duel] Error in stakes settle handler:", err);
+          console.error("[Duel] Error in stakes transfer:", err);
         },
       );
     });
@@ -3016,6 +3012,216 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         `[Duel] Error adding staked items to inventory for ${playerId}:`,
         error,
       );
+    }
+  }
+
+  /**
+   * Execute atomic duel stake transfer from loser to winner.
+   *
+   * CRASH-SAFE: Items remain in loser's inventory until this atomic transaction.
+   * If server crashes during duel, items are still in loser's inventory (no loss).
+   *
+   * Transaction:
+   * 1. Validate items still exist in loser's inventory
+   * 2. Remove items from loser's inventory
+   * 3. Add items to winner's inventory
+   * 4. Reload both inventories from DB
+   */
+  private async executeDuelStakeTransfer(
+    winnerId: string,
+    loserId: string,
+    stakes: Array<{
+      inventorySlot: number;
+      itemId: string;
+      quantity: number;
+      value: number;
+    }>,
+  ): Promise<void> {
+    // Get database from world
+    const serverWorld = this.world as {
+      pgPool?: import("pg").Pool;
+      drizzleDb?: import("drizzle-orm/node-postgres").NodePgDatabase<
+        typeof import("../../database/schema").default
+      >;
+    };
+
+    if (!serverWorld.drizzleDb || !serverWorld.pgPool) {
+      console.error("[Duel] Database not available for stake transfer");
+      return;
+    }
+
+    const pool = serverWorld.pgPool;
+
+    // Get inventory system for locking and reloading
+    const inventorySystem = this.world.getSystem("inventory") as
+      | {
+          lockForTransaction: (id: string) => boolean;
+          unlockTransaction: (id: string) => void;
+          reloadFromDatabase: (id: string) => Promise<void>;
+        }
+      | undefined;
+
+    // Lock both inventories
+    const winnerLocked =
+      inventorySystem?.lockForTransaction?.(winnerId) ?? true;
+    const loserLocked = inventorySystem?.lockForTransaction?.(loserId) ?? true;
+
+    if (!winnerLocked || !loserLocked) {
+      console.warn(
+        `[Duel] Could not lock inventories for transfer (winner: ${winnerLocked}, loser: ${loserLocked})`,
+      );
+      // Unlock any that were locked
+      if (winnerLocked) inventorySystem?.unlockTransaction?.(winnerId);
+      if (loserLocked) inventorySystem?.unlockTransaction?.(loserId);
+      return;
+    }
+
+    try {
+      // Execute atomic transfer in a single transaction
+      await pool.query("BEGIN");
+
+      try {
+        // Get winner's current inventory to find free slots
+        const winnerInvResult = await pool.query(
+          `SELECT "slotIndex" FROM inventory WHERE "playerId" = $1`,
+          [winnerId],
+        );
+        const usedSlots = new Set(
+          winnerInvResult.rows.map((r: { slotIndex: number }) => r.slotIndex),
+        );
+
+        const findFreeSlot = (): number => {
+          for (let i = 0; i < 28; i++) {
+            if (!usedSlots.has(i)) {
+              usedSlots.add(i);
+              return i;
+            }
+          }
+          return -1;
+        };
+
+        // Process each staked item
+        for (const stake of stakes) {
+          // 1. Validate item exists in loser's inventory at the exact slot
+          const validateResult = await pool.query(
+            `SELECT "itemId", quantity FROM inventory
+             WHERE "playerId" = $1 AND "slotIndex" = $2
+             FOR UPDATE`,
+            [loserId, stake.inventorySlot],
+          );
+
+          if (validateResult.rows.length === 0) {
+            console.error(
+              `[Duel] SECURITY: Staked item not found in loser inventory! ` +
+                `loserId=${loserId}, slot=${stake.inventorySlot}, itemId=${stake.itemId}`,
+            );
+            // Item was removed/traded/dropped during duel - skip this item
+            // This prevents dupe exploits
+            continue;
+          }
+
+          const dbItem = validateResult.rows[0] as {
+            itemId: string;
+            quantity: number;
+          };
+
+          // Verify item ID matches
+          if (dbItem.itemId !== stake.itemId) {
+            console.error(
+              `[Duel] SECURITY: Item ID mismatch! ` +
+                `Expected ${stake.itemId}, found ${dbItem.itemId} at slot ${stake.inventorySlot}`,
+            );
+            continue;
+          }
+
+          // 2. Remove from loser's inventory
+          if (dbItem.quantity <= stake.quantity) {
+            // Remove entire item
+            await pool.query(
+              `DELETE FROM inventory WHERE "playerId" = $1 AND "slotIndex" = $2`,
+              [loserId, stake.inventorySlot],
+            );
+          } else {
+            // Reduce quantity
+            await pool.query(
+              `UPDATE inventory SET quantity = quantity - $1
+               WHERE "playerId" = $2 AND "slotIndex" = $3`,
+              [stake.quantity, loserId, stake.inventorySlot],
+            );
+          }
+
+          // 3. Add to winner's inventory
+          // Check if item is stackable and already exists
+          const itemData = getItem(stake.itemId);
+          const isStackable = itemData?.stackable ?? false;
+
+          if (isStackable) {
+            const existingResult = await pool.query(
+              `SELECT "slotIndex" FROM inventory
+               WHERE "playerId" = $1 AND "itemId" = $2
+               FOR UPDATE`,
+              [winnerId, stake.itemId],
+            );
+
+            if (existingResult.rows.length > 0) {
+              // Add to existing stack
+              const existingSlot = (
+                existingResult.rows[0] as { slotIndex: number }
+              ).slotIndex;
+              await pool.query(
+                `UPDATE inventory SET quantity = quantity + $1
+                 WHERE "playerId" = $2 AND "slotIndex" = $3`,
+                [stake.quantity, winnerId, existingSlot],
+              );
+              console.log(
+                `[Duel] Transferred ${stake.quantity} ${stake.itemId} from ${loserId} to ${winnerId} (stacked)`,
+              );
+              continue;
+            }
+          }
+
+          // Find free slot and insert
+          const freeSlot = findFreeSlot();
+          if (freeSlot === -1) {
+            console.warn(
+              `[Duel] Winner inventory full! Item ${stake.itemId} x${stake.quantity} could not be transferred`,
+            );
+            // TODO: Drop on ground or send to bank
+            continue;
+          }
+
+          await pool.query(
+            `INSERT INTO inventory ("playerId", "itemId", quantity, "slotIndex", metadata)
+             VALUES ($1, $2, $3, $4, NULL)`,
+            [winnerId, stake.itemId, stake.quantity, freeSlot],
+          );
+          console.log(
+            `[Duel] Transferred ${stake.itemId} x${stake.quantity} from ${loserId} to ${winnerId} slot ${freeSlot}`,
+          );
+        }
+
+        // Commit the atomic transaction
+        await pool.query("COMMIT");
+        console.log(
+          `[Duel] Stake transfer complete: ${stakes.length} items from ${loserId} to ${winnerId}`,
+        );
+
+        // Reload both inventories from database
+        if (inventorySystem?.reloadFromDatabase) {
+          await inventorySystem.reloadFromDatabase(winnerId);
+          await inventorySystem.reloadFromDatabase(loserId);
+        }
+      } catch (error) {
+        // Rollback on any error
+        await pool.query("ROLLBACK");
+        throw error;
+      }
+    } catch (error) {
+      console.error("[Duel] Stake transfer transaction failed:", error);
+    } finally {
+      // Always unlock both inventories
+      inventorySystem?.unlockTransaction?.(winnerId);
+      inventorySystem?.unlockTransaction?.(loserId);
     }
   }
 
