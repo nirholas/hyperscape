@@ -2,6 +2,7 @@ import { AttackType } from "../../../types/core/core";
 import { EventType } from "../../../types/events";
 import type { World } from "../../../types/index";
 import { SystemBase } from "../infrastructure/SystemBase";
+import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
 // World eliminated - using base World instead
 import { ALL_NPCS, NPC_SPAWN_CONSTANTS } from "../../../data/npcs";
 import { ALL_WORLD_AREAS } from "../../../data/world-areas";
@@ -76,6 +77,8 @@ export class MobNPCSystem extends SystemBase {
           lootTable: `${npcId}_drops`,
           isAggressive: npcData.combat.aggressive,
           aggroRange: npcData.combat.aggroRange,
+          leashRange: npcData.combat.leashRange,
+          combatRange: npcData.combat.combatRange,
           respawnTime: npcData.combat.respawnTime || this.GLOBAL_RESPAWN_TIME,
         };
       }
@@ -482,6 +485,9 @@ export class MobNPCSystem extends SystemBase {
       lootTable: "default",
       isAggressive: config.isAggressive !== false, // Default to true if not specified
       aggroRange: config.aggroRange ?? 5,
+      leashRange:
+        config.leashRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE,
+      combatRange: config.combatRange ?? 1,
       respawnTime: config.respawnTime ?? 0,
     };
 

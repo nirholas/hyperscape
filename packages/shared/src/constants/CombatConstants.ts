@@ -103,7 +103,7 @@ export const COMBAT_CONSTANTS = {
       ATTACK_SPEED_TICKS: 4,
       AGGRO_RANGE: 4,
       COMBAT_RANGE: 1,
-      LEASH_RANGE: 7,
+      LEASH_RANGE: 42, // Extended from OSRS default of 7 for better gameplay
       RESPAWN_TICKS: 25,
       WANDER_RADIUS: 5,
     },

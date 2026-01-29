@@ -1222,6 +1222,8 @@ export class DataManager {
         aggroRange: npc.combat?.aggroRange ?? 0, // 0 = non-aggressive by default
         combatRange:
           npc.combat?.combatRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.COMBAT_RANGE,
+        leashRange:
+          npc.combat?.leashRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE,
         attackSpeedTicks:
           npc.combat?.attackSpeedTicks ??
           COMBAT_CONSTANTS.DEFAULTS.NPC.ATTACK_SPEED_TICKS,

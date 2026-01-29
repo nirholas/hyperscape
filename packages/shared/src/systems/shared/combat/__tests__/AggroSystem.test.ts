@@ -220,8 +220,8 @@ describe("AggroSystem", () => {
       expect(COMBAT_CONSTANTS.DEFAULTS.NPC.AGGRO_RANGE).toBe(4);
     });
 
-    it("has OSRS-accurate leashRange of 7", () => {
-      expect(COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE).toBe(7);
+    it("has extended leashRange of 42 for better gameplay", () => {
+      expect(COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE).toBe(42);
     });
 
     it("has OSRS-accurate attackSpeedTicks of 4", () => {

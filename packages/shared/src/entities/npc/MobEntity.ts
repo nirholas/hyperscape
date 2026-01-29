@@ -1393,7 +1393,8 @@ export class MobEntity extends CombatantEntity {
       getSpawnPoint: () => this._currentSpawnPoint,
       getDistanceFromSpawn: () => this.getSpawnDistanceTiles(), // OSRS Chebyshev tiles
       getWanderRadius: () => this.respawnManager.getSpawnAreaRadius(),
-      getLeashRange: () => this.config.leashRange ?? 7, // OSRS-accurate: 7 tiles max range from spawn
+      getLeashRange: () =>
+        this.config.leashRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE,
       getCombatRange: () => this.config.combatRange,
 
       // Wander
@@ -2285,7 +2286,7 @@ export class MobEntity extends CombatantEntity {
    * @see https://oldschool.runescape.wiki/w/Aggressiveness
    */
   getLeashRange(): number {
-    return this.config.leashRange ?? 7;
+    return this.config.leashRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE;
   }
 
   takeDamage(damage: number, attackerId?: string): boolean {
@@ -2634,7 +2635,8 @@ export class MobEntity extends CombatantEntity {
     // Aggression range = max range (leash) + attack range (combat range)
     // Players must be within this distance of SPAWN to be attacked.
     // @see https://oldschool.runescape.wiki/w/Aggressiveness
-    const leashRange = this.config.leashRange ?? 7;
+    const leashRange =
+      this.config.leashRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE;
     const attackRange = Math.max(1, this.config.combatRange);
     const aggressionRange = leashRange + attackRange;
 

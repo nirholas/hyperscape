@@ -257,6 +257,7 @@ export interface NPCCombatConfig {
   retaliates: boolean; // Fights back when attacked?
   aggroRange: number; // Detection range (0 = non-aggressive)
   combatRange: number; // Attack range
+  leashRange: number; // Max tiles from spawn before returning
   attackSpeedTicks: number; // Game ticks between attacks (4 = standard sword, 600ms/tick)
   respawnTicks?: number; // Game ticks to respawn (manifest input, converted to ms internally)
   respawnTime: number; // Milliseconds to respawn (computed from respawnTicks)
@@ -619,6 +620,8 @@ export interface MobSpawnConfig {
   lootTable: string;
   isAggressive: boolean;
   aggroRange: number;
+  leashRange: number; // Max tiles from spawn before returning
+  combatRange: number; // Attack range
   respawnTime: number;
 }
 

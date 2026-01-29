@@ -9,6 +9,7 @@
  */
 
 import { World } from "../../../core/World";
+import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
 import { Entity, EntityConfig } from "../../../entities/Entity";
 import { ItemEntity } from "../../../entities/world/ItemEntity";
 import { HeadstoneEntity } from "../../../entities/world/HeadstoneEntity";
@@ -1098,10 +1099,12 @@ export class EntityManager extends SystemBase {
   private getMobLeashRange(mobType: string): number {
     const npcData = getNPCById(mobType);
     if (!npcData) {
-      return 7; // Default: 7 tiles max chase distance from spawn (OSRS-accurate)
+      return COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE; // Extended default: 42 tiles
     }
-    // leashRange may not be defined in the manifest, fallback to default
-    return (npcData.combat as { leashRange?: number }).leashRange ?? 7;
+    // leashRange from manifest, or fallback to default
+    return (
+      npcData.combat.leashRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE
+    );
   }
 
   private getMobXPReward(mobType: string, level: number): number {
