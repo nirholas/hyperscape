@@ -1,6 +1,9 @@
 /**
  * PersistenceService - Unified Write-Ahead Logging for Critical Operations
  *
+ * STATUS: Phase 2 scaffolding - not yet integrated into game systems.
+ * TODO: Wire up to TradingSystem, BankSystem in future PR for crash recovery.
+ *
  * Provides durability guarantees for critical operations (trades, bank, inventory, equipment).
  * Uses Write-Ahead Logging (WAL) pattern:
  * 1. Log operation intent before execution
@@ -13,8 +16,6 @@
  * - Automatic retry on failure
  * - Crash recovery via operations log
  * - Operation deduplication
- *
- * Used by: TradingSystem, BankSystem, InventorySystem, EquipmentSystem
  */
 
 import { eq, and, lt } from "drizzle-orm";
