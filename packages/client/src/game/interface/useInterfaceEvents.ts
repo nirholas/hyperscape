@@ -66,6 +66,8 @@ export function useUIUpdateEvents(
     | "setDialogueData"
     | "setSmeltingData"
     | "setSmithingData"
+    | "setCraftingData"
+    | "setTanningData"
   >,
 ): void {
   const { setPlayerStats, setEquipment } = playerDataSetters;
@@ -75,6 +77,8 @@ export function useUIUpdateEvents(
     setDialogueData,
     setSmeltingData,
     setSmithingData,
+    setCraftingData,
+    setTanningData,
   } = modalPanelSetters;
 
   useEffect(() => {
@@ -263,6 +267,65 @@ export function useUIUpdateEvents(
           setSmithingData(null);
         }
       }
+
+      // Crafting updates via UI_UPDATE
+      if (update.component === "crafting") {
+        const data = update.data as {
+          isOpen: boolean;
+          availableRecipes?: Array<{
+            output: string;
+            name: string;
+            category: string;
+            inputs: Array<{ item: string; amount: number }>;
+            tools: string[];
+            level: number;
+            xp: number;
+            meetsLevel: boolean;
+            hasInputs: boolean;
+          }>;
+          station?: string;
+        };
+        if (data.isOpen && data.availableRecipes) {
+          setCraftingData({
+            visible: true,
+            availableRecipes: data.availableRecipes,
+            station: data.station || "",
+          });
+        } else {
+          setCraftingData(null);
+        }
+      }
+
+      if (update.component === "craftingClose") {
+        setCraftingData(null);
+      }
+
+      // Tanning updates via UI_UPDATE
+      if (update.component === "tanning") {
+        const data = update.data as {
+          isOpen: boolean;
+          availableRecipes?: Array<{
+            input: string;
+            output: string;
+            cost: number;
+            name: string;
+            hasHide: boolean;
+            hideCount: number;
+          }>;
+        };
+        if (data.isOpen && data.availableRecipes) {
+          setTanningData({
+            visible: true,
+            availableRecipes: data.availableRecipes,
+          });
+        } else {
+          setTanningData(null);
+        }
+      }
+
+      if (update.component === "tanningClose") {
+        setTanningData(null);
+      }
     };
 
     world.on(EventType.UI_UPDATE, onUIUpdate);
@@ -279,6 +342,8 @@ export function useUIUpdateEvents(
     setDialogueData,
     setSmeltingData,
     setSmithingData,
+    setCraftingData,
+    setTanningData,
   ]);
 }
 

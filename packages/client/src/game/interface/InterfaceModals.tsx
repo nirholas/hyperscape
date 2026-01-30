@@ -21,6 +21,8 @@ import type {
   DialogueData,
   SmeltingData,
   SmithingData,
+  CraftingData,
+  TanningData,
   LootWindowData,
   QuestStartData,
   QuestCompleteData,
@@ -33,6 +35,8 @@ import { StorePanel } from "../panels/StorePanel";
 import { DialoguePanel } from "../panels/DialoguePanel";
 import { SmeltingPanel } from "../panels/SmeltingPanel";
 import { SmithingPanel } from "../panels/SmithingPanel";
+import { CraftingPanel } from "../panels/CraftingPanel";
+import { TanningPanel } from "../panels/TanningPanel";
 import { StatsPanel } from "../panels/StatsPanel";
 import { LootWindowPanel } from "../panels/LootWindowPanel";
 import { QuestStartPanel } from "../panels/QuestStartPanel";
@@ -612,6 +616,8 @@ export interface InterfaceModalsRendererProps {
   dialogueData: DialogueData | null;
   smeltingData: SmeltingData | null;
   smithingData: SmithingData | null;
+  craftingData: CraftingData | null;
+  tanningData: TanningData | null;
   questStartData: QuestStartData | null;
   questCompleteData: QuestCompleteData | null;
   xpLampData: XpLampData | null;
@@ -632,6 +638,8 @@ export interface InterfaceModalsRendererProps {
   setDialogueData: React.Dispatch<React.SetStateAction<DialogueData | null>>;
   setSmeltingData: React.Dispatch<React.SetStateAction<SmeltingData | null>>;
   setSmithingData: React.Dispatch<React.SetStateAction<SmithingData | null>>;
+  setCraftingData: React.Dispatch<React.SetStateAction<CraftingData | null>>;
+  setTanningData: React.Dispatch<React.SetStateAction<TanningData | null>>;
   setQuestStartData: React.Dispatch<
     React.SetStateAction<QuestStartData | null>
   >;
@@ -666,6 +674,8 @@ export function InterfaceModalsRenderer({
   dialogueData,
   smeltingData,
   smithingData,
+  craftingData,
+  tanningData,
   questStartData,
   questCompleteData,
   xpLampData,
@@ -680,6 +690,8 @@ export function InterfaceModalsRenderer({
   setDialogueData,
   setSmeltingData,
   setSmithingData,
+  setCraftingData,
+  setTanningData,
   setQuestStartData,
   setQuestCompleteData,
   setXpLampData,
@@ -818,6 +830,39 @@ export function InterfaceModalsRenderer({
             availableRecipes={smithingData.availableRecipes}
             world={world}
             onClose={() => setSmithingData(null)}
+          />
+        </ModalWindow>
+      )}
+
+      {/* Crafting Panel */}
+      {craftingData?.visible && (
+        <ModalWindow
+          visible={true}
+          onClose={() => setCraftingData(null)}
+          title="Crafting"
+          width={700}
+        >
+          <CraftingPanel
+            availableRecipes={craftingData.availableRecipes}
+            station={craftingData.station}
+            world={world}
+            onClose={() => setCraftingData(null)}
+          />
+        </ModalWindow>
+      )}
+
+      {/* Tanning Panel */}
+      {tanningData?.visible && (
+        <ModalWindow
+          visible={true}
+          onClose={() => setTanningData(null)}
+          title="Tanning"
+          width={600}
+        >
+          <TanningPanel
+            availableRecipes={tanningData.availableRecipes}
+            world={world}
+            onClose={() => setTanningData(null)}
           />
         </ModalWindow>
       )}

@@ -2064,6 +2064,65 @@ export class ClientNetwork extends SystemBase {
     });
   };
 
+  // --- Crafting interface handler ---
+  onCraftingInterfaceOpen = (data: {
+    availableRecipes: Array<{
+      output: string;
+      name: string;
+      category: string;
+      inputs: Array<{ item: string; amount: number }>;
+      tools: string[];
+      level: number;
+      xp: number;
+      meetsLevel: boolean;
+      hasInputs: boolean;
+    }>;
+    station: string;
+  }) => {
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "crafting",
+      data: {
+        isOpen: true,
+        availableRecipes: data.availableRecipes,
+        station: data.station,
+      },
+    });
+  };
+
+  onCraftingClose = (_data: { reason?: string }) => {
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "craftingClose",
+      data: _data,
+    });
+  };
+
+  // --- Tanning interface handler ---
+  onTanningInterfaceOpen = (data: {
+    availableRecipes: Array<{
+      input: string;
+      output: string;
+      cost: number;
+      name: string;
+      hasHide: boolean;
+      hideCount: number;
+    }>;
+  }) => {
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "tanning",
+      data: {
+        isOpen: true,
+        availableRecipes: data.availableRecipes,
+      },
+    });
+  };
+
+  onTanningClose = (_data: { reason?: string }) => {
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "tanningClose",
+      data: _data,
+    });
+  };
+
   // --- Dialogue handlers ---
   onDialogueStart = (data: {
     npcId: string;

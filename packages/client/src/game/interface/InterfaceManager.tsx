@@ -146,6 +146,8 @@ function DesktopInterfaceManager({
     dialogueData,
     smeltingData,
     smithingData,
+    craftingData,
+    tanningData,
     lootWindowData,
     questStartData,
     questCompleteData,
@@ -157,6 +159,8 @@ function DesktopInterfaceManager({
     setDialogueData,
     setSmeltingData,
     setSmithingData,
+    setCraftingData,
+    setTanningData,
     setLootWindowData,
     setQuestStartData,
     setQuestCompleteData,
@@ -189,6 +193,8 @@ function DesktopInterfaceManager({
       setDialogueData,
       setSmeltingData,
       setSmithingData,
+      setCraftingData,
+      setTanningData,
     },
   );
 
@@ -405,6 +411,8 @@ function DesktopInterfaceManager({
           dialogueData={dialogueData}
           smeltingData={smeltingData}
           smithingData={smithingData}
+          craftingData={craftingData}
+          tanningData={tanningData}
           questStartData={questStartData}
           questCompleteData={questCompleteData}
           xpLampData={xpLampData}
@@ -419,6 +427,8 @@ function DesktopInterfaceManager({
           setDialogueData={setDialogueData}
           setSmeltingData={setSmeltingData}
           setSmithingData={setSmithingData}
+          setCraftingData={setCraftingData}
+          setTanningData={setTanningData}
           setQuestStartData={setQuestStartData}
           setQuestCompleteData={setQuestCompleteData}
           setXpLampData={setXpLampData}

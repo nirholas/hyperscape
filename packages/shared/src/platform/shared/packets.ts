@@ -136,6 +136,15 @@ const names = [
   'smithingInterfaceOpen', // Server -> Client: show smithing interface with available recipes
   'smeltingClose',         // Server -> Client: close smelting interface (walked away, etc.)
   'smithingClose',         // Server -> Client: close smithing interface (walked away, etc.)
+  // Crafting packets (leather, jewelry, gem cutting)
+  'craftingSourceInteract', // Client -> Server: player clicked crafting source (needle/chisel)
+  'processingCrafting',     // Client -> Server: player selected item to craft from UI
+  'craftingInterfaceOpen',  // Server -> Client: show crafting interface with available recipes
+  'craftingClose',          // Server -> Client: close crafting interface
+  // Tanning packets (NPC tanner)
+  'processingTanning',      // Client -> Server: player selected hides to tan from UI
+  'tanningInterfaceOpen',   // Server -> Client: show tanning interface with available hides
+  'tanningClose',           // Server -> Client: close tanning interface
   // Combat packets
   'attackMob',
   'attackPlayer',  // PvP attack
