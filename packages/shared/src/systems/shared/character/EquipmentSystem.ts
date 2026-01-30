@@ -124,6 +124,28 @@ const attachmentPoints = {
 // Re-export for backward compatibility
 export type { EquipmentSlot, PlayerEquipment };
 
+/** Create a zeroed-out equipment stats object (all 16 fields = 0) */
+function createEmptyTotalStats(): PlayerEquipment["totalStats"] {
+  return {
+    attack: 0,
+    strength: 0,
+    defense: 0,
+    ranged: 0,
+    constitution: 0,
+    rangedAttack: 0,
+    rangedStrength: 0,
+    magicAttack: 0,
+    magicDefense: 0,
+    defenseStab: 0,
+    defenseSlash: 0,
+    defenseCrush: 0,
+    defenseRanged: 0,
+    attackStab: 0,
+    attackSlash: 0,
+    attackCrush: 0,
+  };
+}
+
 /**
  * Equipment System - GDD Compliant
  * Manages player equipment per GDD specifications:
@@ -170,8 +192,9 @@ export class EquipmentSystem extends SystemBase {
       | undefined;
 
     if (!this.databaseSystem && this.world.isServer) {
-      console.warn(
-        "[EquipmentSystem] DatabaseSystem not found - equipment will not persist!",
+      Logger.systemWarn(
+        "EquipmentSystem",
+        "DatabaseSystem not found - equipment will not persist!",
       );
     }
 
@@ -369,24 +392,7 @@ export class EquipmentSystem extends SystemBase {
         itemId: null,
         item: null,
       },
-      totalStats: {
-        attack: 0,
-        strength: 0,
-        defense: 0,
-        ranged: 0,
-        constitution: 0,
-        rangedAttack: 0,
-        rangedStrength: 0,
-        magicAttack: 0,
-        magicDefense: 0,
-        defenseStab: 0,
-        defenseSlash: 0,
-        defenseCrush: 0,
-        defenseRanged: 0,
-        attackStab: 0,
-        attackSlash: 0,
-        attackCrush: 0,
-      },
+      totalStats: createEmptyTotalStats(),
     };
 
     this.playerEquipment.set(playerData.id, equipment);
@@ -444,46 +450,14 @@ export class EquipmentSystem extends SystemBase {
       // Recalculate stats after loading equipment
       this.recalculateStats(playerId);
 
-      // CRITICAL: Send loaded equipment state to client
-      if (this.world.isServer && this.world.network?.send) {
-        const equipmentData = this.getPlayerEquipment(playerId);
-        this.world.network.send("equipmentUpdated", {
-          playerId,
-          equipment: equipmentData,
-        });
-      }
-
-      // Emit PLAYER_EQUIPMENT_CHANGED for each slot to update visuals
-      for (const slotName of EQUIPMENT_SLOT_NAMES) {
-        const slot = equipment[slotName] as EquipmentSlot | null;
-        const itemId = slot?.itemId ? slot.itemId.toString() : null;
-        this.emitTypedEvent(EventType.PLAYER_EQUIPMENT_CHANGED, {
-          playerId: playerId,
-          slot: slotName as EquipmentSlotName,
-          itemId: itemId,
-        });
-      }
+      // Send loaded equipment state to client and update visuals
+      this.sendEquipmentUpdated(playerId);
+      this.emitEquipmentChangedForAllSlots(playerId);
     } else {
       // NEW PLAYERS START WITH EMPTY EQUIPMENT
       // Starting items (like bronze sword) should be in INVENTORY, not equipped
-
-      // Send empty equipment to client
-      if (this.world.isServer && this.world.network?.send) {
-        const equipmentData = this.getPlayerEquipment(playerId);
-        this.world.network.send("equipmentUpdated", {
-          playerId,
-          equipment: equipmentData,
-        });
-      }
-
-      // Emit PLAYER_EQUIPMENT_CHANGED for each slot with null (clear visuals)
-      for (const slotName of EQUIPMENT_SLOT_NAMES) {
-        this.emitTypedEvent(EventType.PLAYER_EQUIPMENT_CHANGED, {
-          playerId: playerId,
-          slot: slotName as EquipmentSlotName,
-          itemId: null, // No equipment - clear visuals
-        });
-      }
+      this.sendEquipmentUpdated(playerId);
+      this.emitEquipmentChangedForAllSlots(playerId);
     }
   }
 
@@ -533,21 +507,48 @@ export class EquipmentSystem extends SystemBase {
     this.recalculateStats(playerId);
 
     // CRITICAL: Do NOT send equipmentUpdated here
-    // character-selection.ts already sends it (lines 882-885)
-    // Sending again would cause duplicate network traffic and potential race conditions
+    // character-selection.ts already sends it — sending again would cause duplicate traffic
 
     // Emit PLAYER_EQUIPMENT_CHANGED for each slot to update server-side systems
     // (visual attachment, combat calculations, etc.)
-    // Client receives equipment via equipmentUpdated network message from character-selection
-    for (const slotName of EQUIPMENT_SLOT_NAMES) {
-      const slot = equipment[slotName] as EquipmentSlot | null;
-      const itemId = slot?.itemId ? slot.itemId.toString() : null;
-      this.emitTypedEvent(EventType.PLAYER_EQUIPMENT_CHANGED, {
-        playerId: playerId,
-        slot: slotName as EquipmentSlotName,
-        itemId: itemId,
+    this.emitEquipmentChangedForAllSlots(playerId);
+  }
+
+  /** Send full equipment state to client via network */
+  private sendEquipmentUpdated(playerId: string): void {
+    if (this.world.isServer && this.world.network?.send) {
+      const equipment = this.getPlayerEquipment(playerId);
+      this.world.network.send("equipmentUpdated", {
+        playerId,
+        equipment,
       });
     }
+  }
+
+  /** Emit PLAYER_EQUIPMENT_CHANGED for every slot (uses current equipment state) */
+  private emitEquipmentChangedForAllSlots(playerId: string): void {
+    const equipment = this.playerEquipment.get(playerId);
+    for (const slotName of EQUIPMENT_SLOT_NAMES) {
+      const slot = equipment?.[slotName] as EquipmentSlot | null | undefined;
+      const itemId = slot?.itemId ? slot.itemId.toString() : null;
+      this.emitTypedEvent(EventType.PLAYER_EQUIPMENT_CHANGED, {
+        playerId,
+        slot: slotName as EquipmentSlotName,
+        itemId,
+      });
+    }
+  }
+
+  /** Emit UI_EQUIPMENT_UPDATE with all slots set to null (for clearing) */
+  private emitAllSlotsNullUIUpdate(playerId: string): void {
+    const nullSlots: Record<string, null> = {};
+    for (const slotName of EQUIPMENT_SLOT_NAMES) {
+      nullSlots[slotName] = null;
+    }
+    this.emitTypedEvent(EventType.UI_EQUIPMENT_UPDATE, {
+      playerId,
+      equipment: nullSlots,
+    });
   }
 
   /**
@@ -559,14 +560,7 @@ export class EquipmentSystem extends SystemBase {
    * @param playerId - The player ID
    */
   private emitEmptyEquipmentEvents(playerId: string): void {
-    // Emit PLAYER_EQUIPMENT_CHANGED for each slot with null (clear visuals)
-    for (const slotName of EQUIPMENT_SLOT_NAMES) {
-      this.emitTypedEvent(EventType.PLAYER_EQUIPMENT_CHANGED, {
-        playerId: playerId,
-        slot: slotName as EquipmentSlotName,
-        itemId: null,
-      });
-    }
+    this.emitEquipmentChangedForAllSlots(playerId);
   }
 
   /**
@@ -580,18 +574,18 @@ export class EquipmentSystem extends SystemBase {
     _tx?: TransactionContext,
   ): Promise<void> {
     if (!this.databaseSystem) {
-      console.warn(
-        "[EquipmentSystem] 💾 Cannot save - no database system for:",
-        playerId,
+      Logger.systemWarn(
+        "EquipmentSystem",
+        `Cannot save - no database system for: ${playerId}`,
       );
       return;
     }
 
     const equipment = this.playerEquipment.get(playerId);
     if (!equipment) {
-      console.warn(
-        "[EquipmentSystem] 💾 Cannot save - no equipment data for:",
-        playerId,
+      Logger.systemWarn(
+        "EquipmentSystem",
+        `Cannot save - no equipment data for: ${playerId}`,
       );
       return;
     }
@@ -603,36 +597,14 @@ export class EquipmentSystem extends SystemBase {
       quantity: number;
     }> = [];
 
-    const slots = [
-      { key: "weapon", slot: EquipmentSlotName.WEAPON },
-      { key: "shield", slot: EquipmentSlotName.SHIELD },
-      { key: "helmet", slot: EquipmentSlotName.HELMET },
-      { key: "body", slot: EquipmentSlotName.BODY },
-      { key: "legs", slot: EquipmentSlotName.LEGS },
-      { key: "boots", slot: EquipmentSlotName.BOOTS },
-      { key: "gloves", slot: EquipmentSlotName.GLOVES },
-      { key: "cape", slot: EquipmentSlotName.CAPE },
-      { key: "amulet", slot: EquipmentSlotName.AMULET },
-      { key: "ring", slot: EquipmentSlotName.RING },
-      { key: "arrows", slot: EquipmentSlotName.ARROWS },
-    ];
-
-    for (const { key, slot } of slots) {
-      const equipSlot = equipment[key as keyof PlayerEquipment];
-      // Strong type assumption - equipSlot is EquipmentSlot if it's not playerId or totalStats
-      if (
-        equipSlot &&
-        equipSlot !== equipment.playerId &&
-        equipSlot !== equipment.totalStats
-      ) {
-        const typedSlot = equipSlot as EquipmentSlot;
-        if (typedSlot.itemId) {
-          dbEquipment.push({
-            slotType: slot,
-            itemId: String(typedSlot.itemId),
-            quantity: typedSlot.quantity ?? 1,
-          });
-        }
+    for (const slotName of EQUIPMENT_SLOT_NAMES) {
+      const slot = equipment[slotName] as EquipmentSlot | undefined;
+      if (slot?.itemId) {
+        dbEquipment.push({
+          slotType: slotName,
+          itemId: String(slot.itemId),
+          quantity: slot.quantity ?? 1,
+        });
       }
     }
 
@@ -647,79 +619,8 @@ export class EquipmentSystem extends SystemBase {
    * CRITICAL for death system to prevent item duplication
    */
   async clearEquipmentImmediate(playerId: string): Promise<number> {
-    const equipment = this.playerEquipment.get(playerId);
-    if (!equipment) {
-      return 0;
-    }
-
-    // Count equipped items before clearing
-    let clearedCount = 0;
-
-    for (const slotName of EQUIPMENT_SLOT_NAMES) {
-      const slot = equipment[slotName] as EquipmentSlot | null;
-      if (slot && slot.item) {
-        clearedCount++;
-
-        // CRITICAL: Clear the slot's contents, but keep the slot object intact!
-        // Don't do: equipment[slotName] = null (this destroys the slot object)
-        // Instead: Clear the slot's properties while keeping the object
-        slot.itemId = null;
-        slot.item = null;
-        if (slot.visualMesh) {
-          slot.visualMesh = undefined;
-        }
-
-        // Emit PLAYER_EQUIPMENT_CHANGED for visual system to remove item from avatar
-        this.emitTypedEvent(EventType.PLAYER_EQUIPMENT_CHANGED, {
-          playerId: playerId,
-          slot: slotName as EquipmentSlotName,
-          itemId: null, // null = item removed
-        });
-      }
-    }
-
-    // Reset total stats
-    equipment.totalStats = {
-      attack: 0,
-      strength: 0,
-      defense: 0,
-      ranged: 0,
-      constitution: 0,
-      rangedAttack: 0,
-      rangedStrength: 0,
-      magicAttack: 0,
-      magicDefense: 0,
-      defenseStab: 0,
-      defenseSlash: 0,
-      defenseCrush: 0,
-      defenseRanged: 0,
-      attackStab: 0,
-      attackSlash: 0,
-      attackCrush: 0,
-    };
-
-    // Emit UI update event
-    this.emitTypedEvent(EventType.UI_EQUIPMENT_UPDATE, {
-      playerId,
-      equipment: {
-        weapon: null,
-        shield: null,
-        helmet: null,
-        body: null,
-        legs: null,
-        boots: null,
-        gloves: null,
-        cape: null,
-        amulet: null,
-        ring: null,
-        arrows: null,
-      },
-    });
-
-    // CRITICAL: Persist to database IMMEDIATELY (no debounce)
-    await this.saveEquipmentToDatabase(playerId);
-
-    return clearedCount;
+    const clearedItems = await this.clearEquipmentAndReturn(playerId);
+    return clearedItems.length;
   }
 
   /**
@@ -787,42 +688,10 @@ export class EquipmentSystem extends SystemBase {
     }
 
     // Reset total stats
-    equipment.totalStats = {
-      attack: 0,
-      strength: 0,
-      defense: 0,
-      ranged: 0,
-      constitution: 0,
-      rangedAttack: 0,
-      rangedStrength: 0,
-      magicAttack: 0,
-      magicDefense: 0,
-      defenseStab: 0,
-      defenseSlash: 0,
-      defenseCrush: 0,
-      defenseRanged: 0,
-      attackStab: 0,
-      attackSlash: 0,
-      attackCrush: 0,
-    };
+    equipment.totalStats = createEmptyTotalStats();
 
-    // Emit UI update event
-    this.emitTypedEvent(EventType.UI_EQUIPMENT_UPDATE, {
-      playerId,
-      equipment: {
-        weapon: null,
-        shield: null,
-        helmet: null,
-        body: null,
-        legs: null,
-        boots: null,
-        gloves: null,
-        cape: null,
-        amulet: null,
-        ring: null,
-        arrows: null,
-      },
-    });
+    // Emit UI update event with all slots null
+    this.emitAllSlotsNullUIUpdate(playerId);
 
     // Save with transaction context for atomicity
     await this.saveEquipmentToDatabase(playerId, tx);
@@ -855,16 +724,8 @@ export class EquipmentSystem extends SystemBase {
         itemId: data.itemId,
         inventorySlot: data.slot,
       });
-    } else {
-      // Not equippable - maybe it's consumable?
-      if (itemData.type === "food") {
-        this.emitTypedEvent(EventType.INVENTORY_CONSUME_ITEM, {
-          playerId: data.playerId,
-          itemId: data.itemId,
-          slot: data.slot,
-        });
-      }
     }
+    // Non-equippable items (food, potions) are handled by InventoryInteractionSystem
   }
 
   private async tryEquipItem(data: {
@@ -1103,13 +964,7 @@ export class EquipmentSystem extends SystemBase {
     });
 
     // Send equipment state to client
-    if (this.world.isServer && this.world.network?.send) {
-      const equipment = this.getPlayerEquipment(data.playerId);
-      this.world.network.send("equipmentUpdated", {
-        playerId: data.playerId,
-        equipment,
-      });
-    }
+    this.sendEquipmentUpdated(data.playerId);
 
     this.sendMessage(data.playerId, `Equipped ${itemData.name}.`, "info");
 
@@ -1227,13 +1082,7 @@ export class EquipmentSystem extends SystemBase {
     });
 
     // Send equipment state to client
-    if (this.world.isServer && this.world.network?.send) {
-      const equipment = this.getPlayerEquipment(data.playerId);
-      this.world.network.send("equipmentUpdated", {
-        playerId: data.playerId,
-        equipment,
-      });
-    }
+    this.sendEquipmentUpdated(data.playerId);
 
     this.sendMessage(data.playerId, `Unequipped ${itemName}.`, "info");
 
@@ -1298,43 +1147,12 @@ export class EquipmentSystem extends SystemBase {
     if (!equipment) return;
 
     // Reset stats (including ranged/magic bonuses for F2P combat)
-    equipment.totalStats = {
-      attack: 0,
-      strength: 0,
-      defense: 0,
-      ranged: 0,
-      constitution: 0,
-      // Ranged bonuses (F2P)
-      rangedAttack: 0,
-      rangedStrength: 0,
-      // Magic bonuses (F2P)
-      magicAttack: 0,
-      magicDefense: 0,
-      // Per-style melee defence bonuses (OSRS combat triangle)
-      defenseStab: 0,
-      defenseSlash: 0,
-      defenseCrush: 0,
-      defenseRanged: 0,
-      // Per-style melee attack bonuses
-      attackStab: 0,
-      attackSlash: 0,
-      attackCrush: 0,
-    };
+    equipment.totalStats = createEmptyTotalStats();
 
     // Add bonuses from each equipped item
-    const slots = [
-      equipment.weapon,
-      equipment.shield,
-      equipment.helmet,
-      equipment.body,
-      equipment.legs,
-      equipment.boots,
-      equipment.gloves,
-      equipment.cape,
-      equipment.amulet,
-      equipment.ring,
-      equipment.arrows,
-    ].filter((slot): slot is EquipmentSlot => slot !== null);
+    const slots = EQUIPMENT_SLOT_NAMES.map(
+      (name) => equipment[name] as EquipmentSlot | null,
+    ).filter((slot): slot is EquipmentSlot => slot !== null);
 
     slots.forEach((slot) => {
       if (slot.item) {
@@ -1492,21 +1310,10 @@ export class EquipmentSystem extends SystemBase {
     // Also check if item is already equipped
     const equipment = this.playerEquipment.get(playerId);
     if (equipment) {
-      const slots = [
-        equipment.weapon,
-        equipment.shield,
-        equipment.helmet,
-        equipment.body,
-        equipment.legs,
-        equipment.boots,
-        equipment.gloves,
-        equipment.cape,
-        equipment.amulet,
-        equipment.ring,
-        equipment.arrows,
-      ].filter((slot): slot is EquipmentSlot => slot !== null);
-
-      const isEquipped = slots.some((slot) => slot.itemId === itemIdStr);
+      const isEquipped = EQUIPMENT_SLOT_NAMES.some((name) => {
+        const slot = equipment[name] as EquipmentSlot | null;
+        return slot?.itemId === itemIdStr;
+      });
       if (isEquipped) {
         return true;
       }
@@ -1576,19 +1383,12 @@ export class EquipmentSystem extends SystemBase {
     const equipment = this.playerEquipment.get(playerId);
     if (!equipment) return {};
 
-    return {
-      weapon: equipment.weapon?.item || null,
-      shield: equipment.shield?.item || null,
-      helmet: equipment.helmet?.item || null,
-      body: equipment.body?.item || null,
-      legs: equipment.legs?.item || null,
-      boots: equipment.boots?.item || null,
-      gloves: equipment.gloves?.item || null,
-      cape: equipment.cape?.item || null,
-      amulet: equipment.amulet?.item || null,
-      ring: equipment.ring?.item || null,
-      arrows: equipment.arrows?.item || null,
-    };
+    const data: Record<string, unknown> = {};
+    for (const slotName of EQUIPMENT_SLOT_NAMES) {
+      const slot = equipment[slotName] as EquipmentSlot | null | undefined;
+      data[slotName] = slot?.item || null;
+    }
+    return data;
   }
 
   /**
@@ -1631,25 +1431,15 @@ export class EquipmentSystem extends SystemBase {
    *   console.log("Player has bronze sword equipped");
    * }
    */
-  isItemEquipped(playerId: string, itemId: number): boolean {
+  isItemEquipped(playerId: string, itemId: number | string): boolean {
     const equipment = this.playerEquipment.get(playerId);
     if (!equipment) return false;
 
-    const slots = [
-      equipment.weapon,
-      equipment.shield,
-      equipment.helmet,
-      equipment.body,
-      equipment.legs,
-      equipment.boots,
-      equipment.gloves,
-      equipment.cape,
-      equipment.amulet,
-      equipment.ring,
-      equipment.arrows,
-    ].filter((slot): slot is EquipmentSlot => slot !== null);
-
-    return slots.some((slot) => slot.itemId === itemId);
+    const itemIdStr = itemId.toString();
+    return EQUIPMENT_SLOT_NAMES.some((name) => {
+      const slot = equipment[name] as EquipmentSlot | null;
+      return slot?.itemId === itemIdStr;
+    });
   }
 
   /**
@@ -1861,13 +1651,7 @@ export class EquipmentSystem extends SystemBase {
     });
 
     // Send equipment state to client
-    if (this.world.isServer && this.world.network?.send) {
-      const equipmentData = this.getPlayerEquipment(playerId);
-      this.world.network.send("equipmentUpdated", {
-        playerId,
-        equipment: equipmentData,
-      });
-    }
+    this.sendEquipmentUpdated(playerId);
 
     // Save to database
     await this.saveEquipmentToDatabase(playerId);
@@ -1940,13 +1724,7 @@ export class EquipmentSystem extends SystemBase {
     });
 
     // Send equipment state to client
-    if (this.world.isServer && this.world.network?.send) {
-      const equipmentData = this.getPlayerEquipment(playerId);
-      this.world.network.send("equipmentUpdated", {
-        playerId,
-        equipment: equipmentData,
-      });
-    }
+    this.sendEquipmentUpdated(playerId);
 
     // Save to database
     await this.saveEquipmentToDatabase(playerId);
@@ -1970,22 +1748,8 @@ export class EquipmentSystem extends SystemBase {
 
     const result: Array<{ slot: string; itemId: string; quantity: number }> =
       [];
-    const slotNames = [
-      "weapon",
-      "shield",
-      "helmet",
-      "body",
-      "legs",
-      "boots",
-      "gloves",
-      "cape",
-      "amulet",
-      "ring",
-      "arrows",
-    ];
 
-    for (const slotName of slotNames) {
-      if (!this.isValidEquipmentSlot(slotName)) continue;
+    for (const slotName of EQUIPMENT_SLOT_NAMES) {
       const slot = equipment[slotName] as EquipmentSlot | undefined;
       if (slot?.itemId) {
         result.push({
@@ -2066,13 +1830,7 @@ export class EquipmentSystem extends SystemBase {
       equipment.arrows.quantity = undefined;
 
       // Notify client of equipment change
-      if (this.world.isServer && this.world.network?.send) {
-        const updatedEquipment = this.getPlayerEquipment(playerId);
-        this.world.network.send("equipmentUpdated", {
-          playerId,
-          equipment: updatedEquipment,
-        });
-      }
+      this.sendEquipmentUpdated(playerId);
 
       // Save to database
       await this.saveEquipmentToDatabase(playerId);
