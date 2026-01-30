@@ -62,10 +62,10 @@ export const MOBILE_INVENTORY_GRID = {
 
 /** Equipment panel configuration for mobile */
 export const MOBILE_EQUIPMENT = {
-  /** Number of columns in mobile equipment grid */
-  columns: 2,
+  /** Number of columns in mobile equipment grid (3-column OSRS paperdoll) */
+  columns: 3,
   /** Slot height */
-  slotHeight: 58,
+  slotHeight: 52,
   /** Gap between slots */
   gap: 6,
   /** Padding inside panel */

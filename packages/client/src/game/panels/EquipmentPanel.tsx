@@ -156,6 +156,102 @@ function ArrowsIcon({ className }: { className?: string }) {
   );
 }
 
+/** Boots slot icon */
+function BootsIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M7 3v8l-3 4v5h6l1-3h2l1 3h6v-5l-3-4V3" />
+      <path d="M7 11h10" />
+    </svg>
+  );
+}
+
+/** Gloves slot icon */
+function GlovesIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M6 14V8a2 2 0 0 1 4 0v1a2 2 0 0 1 4 0v-1a2 2 0 0 1 4 0v6" />
+      <path d="M6 14c0 4 2 7 6 7s6-3 6-7" />
+      <path d="M10 9V6a2 2 0 0 0-4 0v2" />
+    </svg>
+  );
+}
+
+/** Cape slot icon */
+function CapeIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M8 3h8v2l1 14-5 3-5-3 1-14V3z" />
+      <path d="M8 3c-1 0-2 1-2 2M16 3c1 0 2 1 2 2" />
+      <path d="M9 7h6" />
+    </svg>
+  );
+}
+
+/** Amulet/Necklace slot icon */
+function AmuletIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M7 4c0 3 2 6 5 8 3-2 5-5 5-8" />
+      <circle cx="12" cy="15" r="3" />
+      <path d="M12 18v1" />
+    </svg>
+  );
+}
+
+/** Ring slot icon */
+function RingIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <ellipse cx="12" cy="14" rx="6" ry="4" />
+      <ellipse cx="12" cy="14" rx="3.5" ry="2" />
+      <path d="M10 7l2-4 2 4" />
+      <path d="M10 7h4" />
+      <path d="M12 7v3" />
+    </svg>
+  );
+}
+
 // ============================================================================
 // Utility Button Icons
 // ============================================================================
@@ -869,6 +965,36 @@ export function EquipmentPanel({
       item: equipment?.shield || null,
     },
     {
+      key: EquipmentSlotName.BOOTS,
+      label: "Boots",
+      icon: <BootsIcon className="w-full h-full" />,
+      item: equipment?.boots || null,
+    },
+    {
+      key: EquipmentSlotName.GLOVES,
+      label: "Gloves",
+      icon: <GlovesIcon className="w-full h-full" />,
+      item: equipment?.gloves || null,
+    },
+    {
+      key: EquipmentSlotName.CAPE,
+      label: "Cape",
+      icon: <CapeIcon className="w-full h-full" />,
+      item: equipment?.cape || null,
+    },
+    {
+      key: EquipmentSlotName.AMULET,
+      label: "Amulet",
+      icon: <AmuletIcon className="w-full h-full" />,
+      item: equipment?.amulet || null,
+    },
+    {
+      key: EquipmentSlotName.RING,
+      label: "Ring",
+      icon: <RingIcon className="w-full h-full" />,
+      item: equipment?.ring || null,
+    },
+    {
       key: EquipmentSlotName.ARROWS,
       label: "Ammo",
       icon: <ArrowsIcon className="w-full h-full" />,
@@ -1011,8 +1137,27 @@ export function EquipmentPanel({
   // Helper to find slot by key
   const getSlot = (key: string) => slots.find((s) => s.key === key) || null;
 
-  // Mobile layout renders a compact 2-column grid
-  // Desktop layout renders the traditional 3x3 paperdoll
+  // Helper to render a single slot cell for the grid
+  const renderSlotCell = (slotName: string) => (
+    <div
+      style={{
+        height: MOBILE_EQUIPMENT.slotHeight,
+        containerType: "size",
+      }}
+    >
+      <DroppableEquipmentSlot
+        slot={getSlot(slotName)!}
+        onSlotClick={handleSlotClick}
+        onHoverStart={handleHoverStart}
+        onHoverMove={handleHoverMove}
+        onHoverEnd={handleHoverEnd}
+        onContextMenuOpen={handleContextMenuOpen}
+      />
+    </div>
+  );
+
+  // Mobile layout renders a compact 3-column, 4-row OSRS paperdoll grid
+  // Desktop layout renders the same paperdoll with more spacing
   const renderMobileEquipmentGrid = () => (
     <div
       className="grid"
@@ -1022,183 +1167,72 @@ export function EquipmentPanel({
         padding: `${MOBILE_EQUIPMENT.padding}px`,
       }}
     >
-      {/* Row 1: Weapon / Shield */}
-      <div
-        style={{
-          height: MOBILE_EQUIPMENT.slotHeight,
-          containerType: "size",
-        }}
-      >
-        <DroppableEquipmentSlot
-          slot={getSlot(EquipmentSlotName.WEAPON)!}
-          onSlotClick={handleSlotClick}
-          onHoverStart={handleHoverStart}
-          onHoverMove={handleHoverMove}
-          onHoverEnd={handleHoverEnd}
-          onContextMenuOpen={handleContextMenuOpen}
-        />
-      </div>
-      <div
-        style={{
-          height: MOBILE_EQUIPMENT.slotHeight,
-          containerType: "size",
-        }}
-      >
-        <DroppableEquipmentSlot
-          slot={getSlot(EquipmentSlotName.SHIELD)!}
-          onSlotClick={handleSlotClick}
-          onHoverStart={handleHoverStart}
-          onHoverMove={handleHoverMove}
-          onHoverEnd={handleHoverEnd}
-          onContextMenuOpen={handleContextMenuOpen}
-        />
-      </div>
+      {/* Row 1: Cape / Head / Amulet */}
+      {renderSlotCell(EquipmentSlotName.CAPE)}
+      {renderSlotCell(EquipmentSlotName.HELMET)}
+      {renderSlotCell(EquipmentSlotName.AMULET)}
 
-      {/* Row 2: Head / Body */}
-      <div
-        style={{
-          height: MOBILE_EQUIPMENT.slotHeight,
-          containerType: "size",
-        }}
-      >
-        <DroppableEquipmentSlot
-          slot={getSlot(EquipmentSlotName.HELMET)!}
-          onSlotClick={handleSlotClick}
-          onHoverStart={handleHoverStart}
-          onHoverMove={handleHoverMove}
-          onHoverEnd={handleHoverEnd}
-          onContextMenuOpen={handleContextMenuOpen}
-        />
-      </div>
-      <div
-        style={{
-          height: MOBILE_EQUIPMENT.slotHeight,
-          containerType: "size",
-        }}
-      >
-        <DroppableEquipmentSlot
-          slot={getSlot(EquipmentSlotName.BODY)!}
-          onSlotClick={handleSlotClick}
-          onHoverStart={handleHoverStart}
-          onHoverMove={handleHoverMove}
-          onHoverEnd={handleHoverEnd}
-          onContextMenuOpen={handleContextMenuOpen}
-        />
-      </div>
+      {/* Row 2: Weapon / Body / Shield */}
+      {renderSlotCell(EquipmentSlotName.WEAPON)}
+      {renderSlotCell(EquipmentSlotName.BODY)}
+      {renderSlotCell(EquipmentSlotName.SHIELD)}
 
-      {/* Row 3: Legs / Ammo */}
-      <div
-        style={{
-          height: MOBILE_EQUIPMENT.slotHeight,
-          containerType: "size",
-        }}
-      >
-        <DroppableEquipmentSlot
-          slot={getSlot(EquipmentSlotName.LEGS)!}
-          onSlotClick={handleSlotClick}
-          onHoverStart={handleHoverStart}
-          onHoverMove={handleHoverMove}
-          onHoverEnd={handleHoverEnd}
-          onContextMenuOpen={handleContextMenuOpen}
-        />
-      </div>
-      <div
-        style={{
-          height: MOBILE_EQUIPMENT.slotHeight,
-          containerType: "size",
-        }}
-      >
-        <DroppableEquipmentSlot
-          slot={getSlot(EquipmentSlotName.ARROWS)!}
-          onSlotClick={handleSlotClick}
-          onHoverStart={handleHoverStart}
-          onHoverMove={handleHoverMove}
-          onHoverEnd={handleHoverEnd}
-          onContextMenuOpen={handleContextMenuOpen}
-        />
-      </div>
+      {/* Row 3: Ring / Legs / Gloves */}
+      {renderSlotCell(EquipmentSlotName.RING)}
+      {renderSlotCell(EquipmentSlotName.LEGS)}
+      {renderSlotCell(EquipmentSlotName.GLOVES)}
+
+      {/* Row 4: Boots / empty / Ammo */}
+      {renderSlotCell(EquipmentSlotName.BOOTS)}
+      <div />
+      {renderSlotCell(EquipmentSlotName.ARROWS)}
+    </div>
+  );
+
+  // Helper to render a desktop slot cell
+  const renderDesktopSlotCell = (slotName: string) => (
+    <div className="w-full h-full" style={{ containerType: "size" }}>
+      <DroppableEquipmentSlot
+        slot={getSlot(slotName)!}
+        onSlotClick={handleSlotClick}
+        onHoverStart={handleHoverStart}
+        onHoverMove={handleHoverMove}
+        onHoverEnd={handleHoverEnd}
+        onContextMenuOpen={handleContextMenuOpen}
+      />
     </div>
   );
 
   const renderDesktopEquipmentGrid = () => (
     <>
-      {/* Paperdoll Grid Layout - 3x3 with ammo in top-right */}
+      {/* OSRS Paperdoll Grid Layout - 3 columns, 4 rows */}
       <div
         className="relative grid h-full"
         style={{
           gridTemplateColumns: "1fr 1.2fr 1fr",
-          gridTemplateRows: "1fr 1.2fr 1fr",
+          gridTemplateRows: "1fr 1.2fr 1fr 1fr",
           gap: `${theme.spacing.xs}px`,
         }}
       >
-        {/* Row 1: empty, Head, Ammo */}
-        <div />
-        <div className="w-full h-full" style={{ containerType: "size" }}>
-          <DroppableEquipmentSlot
-            slot={getSlot(EquipmentSlotName.HELMET)!}
-            onSlotClick={handleSlotClick}
-            onHoverStart={handleHoverStart}
-            onHoverMove={handleHoverMove}
-            onHoverEnd={handleHoverEnd}
-            onContextMenuOpen={handleContextMenuOpen}
-          />
-        </div>
-        <div className="w-full h-full" style={{ containerType: "size" }}>
-          <DroppableEquipmentSlot
-            slot={getSlot(EquipmentSlotName.ARROWS)!}
-            onSlotClick={handleSlotClick}
-            onHoverStart={handleHoverStart}
-            onHoverMove={handleHoverMove}
-            onHoverEnd={handleHoverEnd}
-            onContextMenuOpen={handleContextMenuOpen}
-          />
-        </div>
+        {/* Row 1: Cape, Head, Amulet */}
+        {renderDesktopSlotCell(EquipmentSlotName.CAPE)}
+        {renderDesktopSlotCell(EquipmentSlotName.HELMET)}
+        {renderDesktopSlotCell(EquipmentSlotName.AMULET)}
 
         {/* Row 2: Weapon, Body, Shield */}
-        <div className="w-full h-full" style={{ containerType: "size" }}>
-          <DroppableEquipmentSlot
-            slot={getSlot(EquipmentSlotName.WEAPON)!}
-            onSlotClick={handleSlotClick}
-            onHoverStart={handleHoverStart}
-            onHoverMove={handleHoverMove}
-            onHoverEnd={handleHoverEnd}
-            onContextMenuOpen={handleContextMenuOpen}
-          />
-        </div>
-        <div className="w-full h-full" style={{ containerType: "size" }}>
-          <DroppableEquipmentSlot
-            slot={getSlot(EquipmentSlotName.BODY)!}
-            onSlotClick={handleSlotClick}
-            onHoverStart={handleHoverStart}
-            onHoverMove={handleHoverMove}
-            onHoverEnd={handleHoverEnd}
-            onContextMenuOpen={handleContextMenuOpen}
-          />
-        </div>
-        <div className="w-full h-full" style={{ containerType: "size" }}>
-          <DroppableEquipmentSlot
-            slot={getSlot(EquipmentSlotName.SHIELD)!}
-            onSlotClick={handleSlotClick}
-            onHoverStart={handleHoverStart}
-            onHoverMove={handleHoverMove}
-            onHoverEnd={handleHoverEnd}
-            onContextMenuOpen={handleContextMenuOpen}
-          />
-        </div>
+        {renderDesktopSlotCell(EquipmentSlotName.WEAPON)}
+        {renderDesktopSlotCell(EquipmentSlotName.BODY)}
+        {renderDesktopSlotCell(EquipmentSlotName.SHIELD)}
 
-        {/* Row 3: empty, Legs, empty */}
+        {/* Row 3: Ring, Legs, Gloves */}
+        {renderDesktopSlotCell(EquipmentSlotName.RING)}
+        {renderDesktopSlotCell(EquipmentSlotName.LEGS)}
+        {renderDesktopSlotCell(EquipmentSlotName.GLOVES)}
+
+        {/* Row 4: Boots, empty, Ammo */}
+        {renderDesktopSlotCell(EquipmentSlotName.BOOTS)}
         <div />
-        <div className="w-full h-full" style={{ containerType: "size" }}>
-          <DroppableEquipmentSlot
-            slot={getSlot(EquipmentSlotName.LEGS)!}
-            onSlotClick={handleSlotClick}
-            onHoverStart={handleHoverStart}
-            onHoverMove={handleHoverMove}
-            onHoverEnd={handleHoverEnd}
-            onContextMenuOpen={handleContextMenuOpen}
-          />
-        </div>
-        <div />
+        {renderDesktopSlotCell(EquipmentSlotName.ARROWS)}
       </div>
     </>
   );

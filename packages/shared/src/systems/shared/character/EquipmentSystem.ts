@@ -82,6 +82,11 @@ const equipmentRequirements = {
       helmet: "#606060",
       body: "#505050",
       legs: "#404040",
+      boots: "#3A3A3A",
+      gloves: "#4A4A4A",
+      cape: "#8B0000",
+      amulet: "#DAA520",
+      ring: "#FFD700",
       arrows: "#FFD700",
     };
     return defaults[itemType] || "#808080";
@@ -108,6 +113,11 @@ const attachmentPoints = {
   legs: { bone: "hips", offset: new THREE.Vector3(0, -0.2, 0) },
   weapon: { bone: "rightHand", offset: new THREE.Vector3(0.1, 0, 0) },
   shield: { bone: "leftHand", offset: new THREE.Vector3(-0.1, 0, 0) },
+  boots: { bone: "leftFoot", offset: new THREE.Vector3(0, -0.4, 0) },
+  gloves: { bone: "rightHand", offset: new THREE.Vector3(0, 0, 0) },
+  cape: { bone: "spine", offset: new THREE.Vector3(0, 0.1, -0.15) },
+  amulet: { bone: "spine", offset: new THREE.Vector3(0, 0.2, 0.05) },
+  ring: { bone: "rightHand", offset: new THREE.Vector3(0, 0, 0) },
   arrows: { bone: "spine", offset: new THREE.Vector3(0, 0, -0.2) },
 };
 
@@ -117,7 +127,7 @@ export type { EquipmentSlot, PlayerEquipment };
 /**
  * Equipment System - GDD Compliant
  * Manages player equipment per GDD specifications:
- * - 6 equipment slots as defined in GDD
+ * - 11 equipment slots (weapon, shield, helmet, body, legs, boots, gloves, cape, amulet, ring, arrows)
  * - Level requirements (bronze=1, steel=10, mithril=20)
  * - Automatic stat calculation from equipped items
  * - Arrow consumption integration with combat
@@ -593,6 +603,11 @@ export class EquipmentSystem extends SystemBase {
       { key: "helmet", slot: EquipmentSlotName.HELMET },
       { key: "body", slot: EquipmentSlotName.BODY },
       { key: "legs", slot: EquipmentSlotName.LEGS },
+      { key: "boots", slot: EquipmentSlotName.BOOTS },
+      { key: "gloves", slot: EquipmentSlotName.GLOVES },
+      { key: "cape", slot: EquipmentSlotName.CAPE },
+      { key: "amulet", slot: EquipmentSlotName.AMULET },
+      { key: "ring", slot: EquipmentSlotName.RING },
       { key: "arrows", slot: EquipmentSlotName.ARROWS },
     ];
 
@@ -686,6 +701,11 @@ export class EquipmentSystem extends SystemBase {
         helmet: null,
         body: null,
         legs: null,
+        boots: null,
+        gloves: null,
+        cape: null,
+        amulet: null,
+        ring: null,
         arrows: null,
       },
     });
@@ -789,6 +809,11 @@ export class EquipmentSystem extends SystemBase {
         helmet: null,
         body: null,
         legs: null,
+        boots: null,
+        gloves: null,
+        cape: null,
+        amulet: null,
+        ring: null,
         arrows: null,
       },
     });
@@ -1282,6 +1307,11 @@ export class EquipmentSystem extends SystemBase {
       equipment.helmet,
       equipment.body,
       equipment.legs,
+      equipment.boots,
+      equipment.gloves,
+      equipment.cape,
+      equipment.amulet,
+      equipment.ring,
       equipment.arrows,
     ].filter((slot): slot is EquipmentSlot => slot !== null);
 
@@ -1447,6 +1477,11 @@ export class EquipmentSystem extends SystemBase {
         equipment.helmet,
         equipment.body,
         equipment.legs,
+        equipment.boots,
+        equipment.gloves,
+        equipment.cape,
+        equipment.amulet,
+        equipment.ring,
         equipment.arrows,
       ].filter((slot): slot is EquipmentSlot => slot !== null);
 
@@ -1529,6 +1564,11 @@ export class EquipmentSystem extends SystemBase {
       helmet: equipment.helmet?.item || null,
       body: equipment.body?.item || null,
       legs: equipment.legs?.item || null,
+      boots: equipment.boots?.item || null,
+      gloves: equipment.gloves?.item || null,
+      cape: equipment.cape?.item || null,
+      amulet: equipment.amulet?.item || null,
+      ring: equipment.ring?.item || null,
       arrows: equipment.arrows?.item || null,
     };
   }
@@ -1583,6 +1623,11 @@ export class EquipmentSystem extends SystemBase {
       equipment.helmet,
       equipment.body,
       equipment.legs,
+      equipment.boots,
+      equipment.gloves,
+      equipment.cape,
+      equipment.amulet,
+      equipment.ring,
       equipment.arrows,
     ].filter((slot): slot is EquipmentSlot => slot !== null);
 
@@ -1907,7 +1952,19 @@ export class EquipmentSystem extends SystemBase {
 
     const result: Array<{ slot: string; itemId: string; quantity: number }> =
       [];
-    const slotNames = ["weapon", "shield", "helmet", "body", "legs", "arrows"];
+    const slotNames = [
+      "weapon",
+      "shield",
+      "helmet",
+      "body",
+      "legs",
+      "boots",
+      "gloves",
+      "cape",
+      "amulet",
+      "ring",
+      "arrows",
+    ];
 
     for (const slotName of slotNames) {
       if (!this.isValidEquipmentSlot(slotName)) continue;
