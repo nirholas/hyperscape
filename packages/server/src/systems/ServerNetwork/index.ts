@@ -1667,6 +1667,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       const payload = data as {
         triggerType?: string;
         stationId?: string;
+        inputItemId?: string;
       };
       if (!payload.triggerType) return;
 
@@ -1675,11 +1676,21 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         return;
       }
 
+      // Validate inputItemId if provided
+      if (
+        payload.inputItemId !== undefined &&
+        (typeof payload.inputItemId !== "string" ||
+          payload.inputItemId.length > 64)
+      ) {
+        return;
+      }
+
       // Emit event for CraftingSystem to handle
       this.world.emit(EventType.CRAFTING_INTERACT, {
         playerId: player.id,
         triggerType: payload.triggerType,
         stationId: payload.stationId,
+        inputItemId: payload.inputItemId,
       });
     };
 

@@ -1642,26 +1642,32 @@ export class InventoryInteractionSystem extends SystemBase {
         triggerType = "chisel";
       }
 
+      // Determine the input material (the non-tool item)
+      let inputItemId = sourceItemId;
+      if (sourceItemId === "needle" || sourceItemId === "chisel") {
+        inputItemId = targetId; // target is the material
+      }
+      // else sourceItemId IS the material (reverse targeting: clicked leather then needle)
+
       // Send to server for authoritative processing
       if (this.world.network?.send) {
-        console.log(
-          "[InventoryInteractionSystem] 🔨 Sending craftingSourceInteract to server:",
-          { triggerType },
-        );
         this.world.network.send("craftingSourceInteract", {
           triggerType,
+          inputItemId,
         });
       } else {
         // Fallback: emit local event
         this.emitTypedEvent(EventType.CRAFTING_INTERACT, {
           playerId,
           triggerType,
+          inputItemId,
         });
       }
 
       Logger.system("InventoryInteractionSystem", "Crafting request", {
         playerId,
         triggerType,
+        inputItemId,
         sourceItemId,
         targetId,
       });

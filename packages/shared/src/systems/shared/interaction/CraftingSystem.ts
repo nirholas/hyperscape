@@ -109,8 +109,9 @@ export class CraftingSystem extends SystemBase {
     playerId: string;
     triggerType: string;
     stationId?: string;
+    inputItemId?: string;
   }): void {
-    const { playerId, triggerType } = data;
+    const { playerId, triggerType, inputItemId } = data;
 
     // Check if already crafting
     if (this.activeSessions.has(playerId)) {
@@ -139,11 +140,33 @@ export class CraftingSystem extends SystemBase {
     // Determine station type based on trigger
     const station = triggerType === "furnace" ? "furnace" : "none";
 
-    // Get all crafting recipes filtered by station
-    const allRecipes =
+    // Build inventory lookup first (needed for recipe filtering and availability)
+    const inventoryCounts = new Map<string, number>();
+    for (const item of inventory) {
+      if (!isLooseInventoryItem(item)) continue;
+      const count = inventoryCounts.get(item.itemId) || 0;
+      inventoryCounts.set(item.itemId, count + getItemQuantity(item));
+    }
+
+    // Get crafting recipes filtered by station
+    let filteredRecipes =
       processingDataProvider.getCraftingRecipesByStation(station);
 
-    if (allRecipes.length === 0) {
+    // Filter by specific input item if provided (OSRS-accurate: only show relevant recipes)
+    if (inputItemId) {
+      filteredRecipes = filteredRecipes.filter((recipe) =>
+        recipe.inputs.some((inp) => inp.item === inputItemId),
+      );
+    }
+
+    // For furnace (jewelry): only show recipes where player has required moulds
+    if (station === "furnace") {
+      filteredRecipes = filteredRecipes.filter((recipe) =>
+        recipe.tools.every((tool) => inventoryCounts.has(tool)),
+      );
+    }
+
+    if (filteredRecipes.length === 0) {
       this.emitTypedEvent(EventType.UI_MESSAGE, {
         playerId,
         message: "There are no crafting recipes available.",
@@ -152,16 +175,8 @@ export class CraftingSystem extends SystemBase {
       return;
     }
 
-    // Build inventory lookup for availability checking
-    const inventoryCounts = new Map<string, number>();
-    for (const item of inventory) {
-      if (!isLooseInventoryItem(item)) continue;
-      const count = inventoryCounts.get(item.itemId) || 0;
-      inventoryCounts.set(item.itemId, count + getItemQuantity(item));
-    }
-
     // Check availability for each recipe
-    const availableRecipes = allRecipes.map((recipe) => {
+    const availableRecipes = filteredRecipes.map((recipe) => {
       const meetsLevel = craftingLevel >= recipe.level;
       const hasInputs = recipe.inputs.every((input) => {
         const count = inventoryCounts.get(input.item) || 0;
