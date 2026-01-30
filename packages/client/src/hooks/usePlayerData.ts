@@ -8,10 +8,11 @@
  */
 
 import { useState, useEffect } from "react";
-import { EventType, getItem } from "@hyperscape/shared";
+import { EventType } from "@hyperscape/shared";
 import type { PlayerStats } from "@hyperscape/shared";
 import type { ClientWorld, PlayerEquipmentItems } from "../types";
 import type { RawEquipmentData, InventorySlotViewItem } from "../game/types";
+import { processRawEquipment } from "../utils/equipment";
 import {
   isInventoryUpdateEvent,
   isCoinUpdateWithPlayerEvent,
@@ -117,31 +118,7 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
         console.warn("[usePlayerData] Invalid equipment update event:", data);
         return;
       }
-      const rawEquipment = data as RawEquipmentData;
-      const processedEquipment: PlayerEquipmentItems = {
-        weapon: null,
-        shield: null,
-        helmet: null,
-        body: null,
-        legs: null,
-        boots: null,
-        gloves: null,
-        cape: null,
-        amulet: null,
-        ring: null,
-        arrows: null,
-      };
-      for (const [slot, slotData] of Object.entries(rawEquipment)) {
-        if (slotData?.item) {
-          processedEquipment[slot as keyof PlayerEquipmentItems] =
-            slotData.item;
-        } else if (slotData?.itemId) {
-          processedEquipment[slot as keyof PlayerEquipmentItems] = getItem(
-            slotData.itemId,
-          );
-        }
-      }
-      setEquipment(processedEquipment);
+      setEquipment(processRawEquipment(data as RawEquipmentData));
     };
 
     // UI_UPDATE is the primary source for player stats
@@ -299,21 +276,7 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
       const cachedEquipment =
         world.network?.lastEquipmentByPlayerId?.[playerId];
       if (cachedEquipment) {
-        const rawEq = cachedEquipment as RawEquipmentData;
-        const mappedEquipment: PlayerEquipmentItems = {
-          weapon: rawEq.weapon?.item ?? null,
-          shield: rawEq.shield?.item ?? null,
-          helmet: rawEq.helmet?.item ?? null,
-          body: rawEq.body?.item ?? null,
-          legs: rawEq.legs?.item ?? null,
-          boots: rawEq.boots?.item ?? null,
-          gloves: rawEq.gloves?.item ?? null,
-          cape: rawEq.cape?.item ?? null,
-          amulet: rawEq.amulet?.item ?? null,
-          ring: rawEq.ring?.item ?? null,
-          arrows: rawEq.arrows?.item ?? null,
-        };
-        setEquipment(mappedEquipment);
+        setEquipment(processRawEquipment(cachedEquipment as RawEquipmentData));
       }
 
       // Get cached prayer state

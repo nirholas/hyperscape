@@ -24,7 +24,9 @@ import {
   World,
   COMBAT_CONSTANTS,
   INPUT_LIMITS,
+  DeathState,
 } from "@hyperscape/shared";
+import { getTradingSystem } from "./trade/helpers";
 import {
   isValidItemId,
   isValidInventorySlot,
@@ -72,15 +74,15 @@ function isValidEntityId(value: unknown): value is string {
 const VALID_EQUIPMENT_SLOTS = new Set([
   "weapon",
   "shield",
-  "head",
+  "helmet",
   "body",
   "legs",
-  "feet",
-  "hands",
+  "boots",
+  "gloves",
   "cape",
-  "neck",
+  "amulet",
   "ring",
-  "ammo",
+  "arrows",
 ]);
 
 /**
@@ -357,6 +359,7 @@ export function handleDropItem(
  *
  * Security:
  * - Rate limited to 5/sec
+ * - Idempotency check (5s dedup window)
  * - Item ID validation
  * - Inventory slot validation
  *
@@ -387,6 +390,16 @@ export function handleEquipItem(
   }
 
   const payload = data as Record<string, unknown>;
+
+  // Idempotency check - prevent duplicate equip requests
+  const equipIdempotencyKey = getIdempotencyService().generateKey(
+    playerEntity.id,
+    "equip",
+    { itemId: payload.itemId },
+  );
+  if (!getIdempotencyService().checkAndMark(equipIdempotencyKey)) {
+    return;
+  }
 
   // itemId can be string or number (some systems use numeric IDs)
   const itemId = payload.itemId;
@@ -426,6 +439,33 @@ export function handleEquipItem(
       sendInventoryError(socket, "equip", "That item is staked in a duel.");
       return;
     }
+  }
+
+  // Block equip during active trades (OSRS: can't change gear mid-trade)
+  const tradingSystemEquip = getTradingSystem(world);
+  if (tradingSystemEquip?.isPlayerInTrade(playerEntity.id)) {
+    sendInventoryError(
+      socket,
+      "equip",
+      "You can't change equipment during a trade.",
+    );
+    return;
+  }
+
+  // Block equip while dead (OSRS: can't change gear while dead)
+  const entityDataEquip = playerEntity.data as
+    | { deathState?: DeathState }
+    | undefined;
+  if (
+    entityDataEquip?.deathState === DeathState.DYING ||
+    entityDataEquip?.deathState === DeathState.DEAD
+  ) {
+    sendInventoryError(
+      socket,
+      "equip",
+      "You can't change equipment while dead.",
+    );
+    return;
   }
 
   // Emit event for EquipmentSystem to handle
@@ -547,6 +587,7 @@ export function handleUseItem(
  *
  * Security:
  * - Rate limited to 5/sec (shared with equip)
+ * - Idempotency check (5s dedup window)
  * - Equipment slot validation (must be valid slot name)
  *
  * @param socket - Client socket with player entity
@@ -577,6 +618,16 @@ export function handleUnequipItem(
 
   const payload = data as Record<string, unknown>;
 
+  // Idempotency check - prevent duplicate unequip requests
+  const unequipIdempotencyKey = getIdempotencyService().generateKey(
+    playerEntity.id,
+    "unequip",
+    { slot: payload.slot },
+  );
+  if (!getIdempotencyService().checkAndMark(unequipIdempotencyKey)) {
+    return;
+  }
+
   // Validate slot - must be a valid equipment slot name
   const slot = payload.slot;
   if (typeof slot !== "string" || !VALID_EQUIPMENT_SLOTS.has(slot)) {
@@ -593,6 +644,33 @@ export function handleUnequipItem(
       socket,
       "unequip",
       "You can't change equipment during a duel.",
+    );
+    return;
+  }
+
+  // Block unequip during active trades (OSRS: can't change gear mid-trade)
+  const tradingSystemUnequip = getTradingSystem(world);
+  if (tradingSystemUnequip?.isPlayerInTrade(playerEntity.id)) {
+    sendInventoryError(
+      socket,
+      "unequip",
+      "You can't change equipment during a trade.",
+    );
+    return;
+  }
+
+  // Block unequip while dead (OSRS: can't change gear while dead)
+  const entityDataUnequip = playerEntity.data as
+    | { deathState?: DeathState }
+    | undefined;
+  if (
+    entityDataUnequip?.deathState === DeathState.DYING ||
+    entityDataUnequip?.deathState === DeathState.DEAD
+  ) {
+    sendInventoryError(
+      socket,
+      "unequip",
+      "You can't change equipment while dead.",
     );
     return;
   }

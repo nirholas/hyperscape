@@ -7,6 +7,26 @@
  * @see https://oldschool.runescape.wiki/w/Game_tick
  */
 
+import { WeaponType } from "../types/game/item-types";
+
+/**
+ * Melee attack style determines which per-style attack/defence bonuses are used.
+ * OSRS: Each weapon type has a default style (e.g., swords slash, daggers stab).
+ */
+export type MeleeAttackStyle = "stab" | "slash" | "crush";
+
+/** Default melee attack style per weapon type (OSRS-accurate) */
+export const WEAPON_DEFAULT_ATTACK_STYLE: Record<string, MeleeAttackStyle> = {
+  [WeaponType.SWORD]: "slash",
+  [WeaponType.SCIMITAR]: "slash",
+  [WeaponType.AXE]: "slash",
+  [WeaponType.MACE]: "crush",
+  [WeaponType.DAGGER]: "stab",
+  [WeaponType.SPEAR]: "stab",
+  [WeaponType.HALBERD]: "slash",
+  [WeaponType.NONE]: "crush", // unarmed = crush (fists)
+};
+
 export const COMBAT_CONSTANTS = {
   // === Ranges (tiles) ===
   MELEE_RANGE: 2,

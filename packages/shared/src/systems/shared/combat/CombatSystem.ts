@@ -4,7 +4,11 @@
 
 import { EventType } from "../../../types/events";
 import type { World } from "../../../core/World";
-import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
+import {
+  COMBAT_CONSTANTS,
+  WEAPON_DEFAULT_ATTACK_STYLE,
+  type MeleeAttackStyle,
+} from "../../../constants/CombatConstants";
 import { AttackType } from "../../../types/core/core";
 import { EntityID } from "../../../types/core/identifiers";
 import { MobEntity } from "../../../entities/npc/MobEntity";
@@ -158,6 +162,15 @@ export class CombatSystem extends SystemBase {
       rangedStrength: number;
       magicAttack: number;
       magicDefense: number;
+      // Per-style melee defence bonuses (OSRS combat triangle)
+      defenseStab: number;
+      defenseSlash: number;
+      defenseCrush: number;
+      defenseRanged: number;
+      // Per-style melee attack bonuses
+      attackStab: number;
+      attackSlash: number;
+      attackCrush: number;
     }
   >();
 
@@ -382,6 +395,14 @@ export class CombatSystem extends SystemBase {
           rangedStrength?: number;
           magicAttack?: number;
           magicDefense?: number;
+          // Optional per-style bonuses (OSRS combat triangle)
+          defenseStab?: number;
+          defenseSlash?: number;
+          defenseCrush?: number;
+          defenseRanged?: number;
+          attackStab?: number;
+          attackSlash?: number;
+          attackCrush?: number;
         };
       }) => {
         this.playerEquipmentStats.set(data.playerId, {
@@ -393,6 +414,13 @@ export class CombatSystem extends SystemBase {
           rangedStrength: data.equipmentStats.rangedStrength ?? 0,
           magicAttack: data.equipmentStats.magicAttack ?? 0,
           magicDefense: data.equipmentStats.magicDefense ?? 0,
+          defenseStab: data.equipmentStats.defenseStab ?? 0,
+          defenseSlash: data.equipmentStats.defenseSlash ?? 0,
+          defenseCrush: data.equipmentStats.defenseCrush ?? 0,
+          defenseRanged: data.equipmentStats.defenseRanged ?? 0,
+          attackStab: data.equipmentStats.attackStab ?? 0,
+          attackSlash: data.equipmentStats.attackSlash ?? 0,
+          attackCrush: data.equipmentStats.attackCrush ?? 0,
         });
       },
     );
@@ -1252,10 +1280,13 @@ export class CombatSystem extends SystemBase {
         ? target.getMobData().defense
         : this.getPlayerSkillLevel(String(target.id), "defense");
 
+    // Use per-style defenseRanged from equipment (OSRS combat triangle).
+    // Falls back to generic ranged bonus for backward compatibility.
+    const targetEquipStats = this.playerEquipmentStats.get(String(target.id));
     const targetRangedDefense =
       targetType === "mob" && isMobEntity(target)
         ? target.getMobData().defense
-        : (this.playerEquipmentStats.get(String(target.id))?.ranged ?? 0);
+        : (targetEquipStats?.defenseRanged ?? targetEquipStats?.ranged ?? 0);
 
     // Get prayer bonuses
     const prayerSystem = this.world.getSystem("prayer") as PrayerSystem | null;
@@ -1524,12 +1555,21 @@ export class CombatSystem extends SystemBase {
       }
     }
 
+    // Determine melee attack style from weapon type (OSRS combat triangle)
+    let meleeAttackStyle: MeleeAttackStyle | undefined;
+    if (!(attacker instanceof MobEntity)) {
+      const weapon = this.getEquippedWeapon(attacker.id);
+      const weaponType = weapon?.weaponType?.toLowerCase() ?? "none";
+      meleeAttackStyle = WEAPON_DEFAULT_ATTACK_STYLE[weaponType] ?? "crush";
+    }
+
     return this.damageCalculator.calculateMeleeDamage(
       attacker,
       target,
       style,
       attackerPrayerBonuses,
       defenderPrayerBonuses,
+      meleeAttackStyle,
     );
   }
 

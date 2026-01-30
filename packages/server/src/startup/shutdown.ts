@@ -6,12 +6,14 @@
  *
  * Shutdown sequence:
  * 1. Close HTTP server (stop accepting new connections)
- * 2. Wait for pending database operations
- * 3. Destroy world and all systems
- * 4. Close database connections
- * 5. Stop Docker containers (if started)
- * 6. Clear startup flag (for hot reload)
- * 7. Exit process (unless hot reload)
+ * 2. Shutdown embedded agents
+ * 3. Force-save all player data (inventory, equipment, coins)
+ * 4. Wait for pending database operations
+ * 5. Destroy world and all systems
+ * 6. Close database connections
+ * 7. Stop Docker containers (if started)
+ * 8. Clear startup flag (for hot reload)
+ * 9. Exit process (unless hot reload)
  *
  * Handles signals:
  * - SIGINT (Ctrl+C) - User termination
@@ -87,19 +89,24 @@ export function registerShutdownHandlers(
     // Step 2: Shutdown embedded agents
     await shutdownAgents();
 
-    // Step 3: Wait for pending database operations
+    // Step 3: Force-save all player data (inventory, equipment, coins)
+    // Must happen BEFORE waitForDatabaseOperations() which sets isDestroying=true,
+    // and BEFORE world.destroy() which calls system.destroy() fire-and-forget.
+    await forcePlayerDataSave(context);
+
+    // Step 4: Wait for pending database operations
     await waitForDatabaseOperations(context);
 
-    // Step 4: Destroy world and systems
+    // Step 5: Destroy world and systems
     await destroyWorld(context);
 
-    // Step 5: Close database connections
+    // Step 6: Close database connections
     await closeDatabaseConnections(context);
 
-    // Step 6: Stop Docker containers
+    // Step 7: Stop Docker containers
     await stopDocker(context);
 
-    // Step 7: Clear startup flag
+    // Step 8: Clear startup flag
     clearStartupFlag();
 
     console.log("[Shutdown] ✅ Graceful shutdown complete");
@@ -164,6 +171,66 @@ async function shutdownAgents(): Promise<void> {
     }
   } catch (err) {
     console.error("[Shutdown] Error shutting down agents:", err);
+  }
+}
+
+/**
+ * Force-save all player data before shutdown
+ *
+ * Directly calls destroyAsync() on inventory, equipment, and coin pouch systems
+ * and awaits their completion. This ensures all player data is persisted BEFORE
+ * the database system marks itself as destroying (which rejects new operations).
+ *
+ * After this runs, the systems' data maps are cleared, so when world.destroy()
+ * later calls their destroy() → destroyAsync() again, the saves are no-ops.
+ *
+ * @param context - Shutdown context
+ * @private
+ */
+async function forcePlayerDataSave(context: ShutdownContext): Promise<void> {
+  try {
+    console.log("[Shutdown] Force-saving all player data...");
+
+    const savePromises: Promise<void>[] = [];
+
+    // Get each critical system and call destroyAsync() directly
+    const inventorySystem = context.world.getSystem("inventory") as
+      | { destroyAsync(): Promise<void> }
+      | undefined;
+    if (inventorySystem?.destroyAsync) {
+      savePromises.push(
+        inventorySystem.destroyAsync().catch((err) => {
+          console.error("[Shutdown] Inventory save error:", err);
+        }),
+      );
+    }
+
+    const equipmentSystem = context.world.getSystem("equipment") as
+      | { destroyAsync(): Promise<void> }
+      | undefined;
+    if (equipmentSystem?.destroyAsync) {
+      savePromises.push(
+        equipmentSystem.destroyAsync().catch((err) => {
+          console.error("[Shutdown] Equipment save error:", err);
+        }),
+      );
+    }
+
+    const coinPouchSystem = context.world.getSystem("coin-pouch") as
+      | { destroyAsync(): Promise<void> }
+      | undefined;
+    if (coinPouchSystem?.destroyAsync) {
+      savePromises.push(
+        coinPouchSystem.destroyAsync().catch((err) => {
+          console.error("[Shutdown] Coin pouch save error:", err);
+        }),
+      );
+    }
+
+    await Promise.all(savePromises);
+    console.log("[Shutdown] ✅ Player data saved");
+  } catch (err) {
+    console.error("[Shutdown] Error force-saving player data:", err);
   }
 }
 

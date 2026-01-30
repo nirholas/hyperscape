@@ -835,7 +835,7 @@ export function InterfaceModalsRenderer({
         <ModalWindow
           visible={true}
           onClose={() => setStatsModalOpen(false)}
-          title="Character Stats"
+          title="Equipment Stats"
           width={520}
           maxWidth="95vw"
         >

@@ -65,6 +65,7 @@ const REQUIRED_ITEM_FILES = [
   "misc",
   "ammunition",
   "runes",
+  "armor",
 ] as const;
 const getAllTreasureLocations = () => TREASURE_LOCATIONS;
 const getTreasureLocationsByDifficulty = (_difficulty: number) =>
@@ -718,6 +719,30 @@ export class DataManager {
       }
     }
 
+    // Derive simple defense/attack from detailed bonuses for backward compatibility.
+    // Armor items define per-style bonuses (defenseStab, defenseSlash, etc.) but the
+    // existing DamageCalculator reads simple "defense". Use highest melee defence as the
+    // simple value until per-style combat is wired up.
+    const bonuses = item.bonuses as Record<string, number> | undefined;
+    if (bonuses) {
+      if (bonuses.defense === undefined) {
+        const ds = bonuses.defenseStab ?? 0;
+        const dl = bonuses.defenseSlash ?? 0;
+        const dc = bonuses.defenseCrush ?? 0;
+        if (ds !== 0 || dl !== 0 || dc !== 0) {
+          bonuses.defense = Math.max(ds, dl, dc);
+        }
+      }
+      if (bonuses.attack === undefined) {
+        const as_ = bonuses.attackStab ?? 0;
+        const al = bonuses.attackSlash ?? 0;
+        const ac = bonuses.attackCrush ?? 0;
+        if (as_ !== 0 || al !== 0 || ac !== 0) {
+          bonuses.attack = Math.max(as_, al, ac);
+        }
+      }
+    }
+
     // Apply defaults only for missing fields (use ?? to preserve falsy values like 0)
     const normalized: Item = {
       ...item,
@@ -1345,6 +1370,21 @@ export class DataManager {
     const treasureCount = Object.keys(TREASURE_LOCATIONS).length;
     if (treasureCount === 0) {
       warnings.push("No treasure locations found in TREASURE_LOCATIONS");
+    }
+
+    // Validate equipSlot values match valid EquipmentSlotName or "2h"
+    if (itemCount > 0) {
+      const validSlots = new Set<string>([
+        ...Object.values(EquipmentSlotName),
+        "2h",
+      ]);
+      for (const [itemId, item] of ITEMS) {
+        if (item.equipSlot && !validSlots.has(item.equipSlot)) {
+          errors.push(
+            `Item "${itemId}" has invalid equipSlot "${item.equipSlot}" (valid: ${[...validSlots].join(", ")})`,
+          );
+        }
+      }
     }
 
     // Validate cross-references (only if we have data)

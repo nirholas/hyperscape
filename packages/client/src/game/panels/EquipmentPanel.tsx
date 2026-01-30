@@ -1,10 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { createPortal } from "react-dom";
 import {
   useDroppable,
   useDragStore,
-  calculateCursorTooltipPosition,
-  TOOLTIP_SIZE_ESTIMATES,
   useThemeStore,
   useMobileLayout,
 } from "@/ui";
@@ -17,186 +14,34 @@ import {
   uuid,
   CONTEXT_MENU_COLORS,
 } from "@hyperscape/shared";
-import type { PlayerEquipmentItems, Item, ClientWorld } from "../../types";
+import type { PlayerEquipmentItems, ClientWorld } from "../../types";
+import {
+  HelmetIcon,
+  WeaponIcon,
+  BodyIcon,
+  ShieldIcon,
+  LegsIcon,
+  ArrowsIcon,
+  BootsIcon,
+  GlovesIcon,
+  CapeIcon,
+  AmuletIcon,
+  RingIcon,
+  StatsIcon,
+  DeathIcon,
+} from "./equipment/EquipmentIcons";
+import {
+  EquipmentTooltip,
+  type EquipmentSlotData,
+  type EquipmentHoverState,
+} from "./equipment/EquipmentTooltip";
 
 interface EquipmentPanelProps {
   equipment: PlayerEquipmentItems | null;
   world?: ClientWorld;
-  onItemDrop?: (item: Item, slot: keyof typeof EquipmentSlotName) => void;
 }
 
-interface EquipmentSlot {
-  key: string;
-  label: string;
-  icon: React.ReactNode;
-  item: Item | null;
-}
-
-// ============================================================================
-// SVG Icons for Equipment Slots (Clean monochrome design)
-// ============================================================================
-
-/** Helmet/Head slot icon */
-function HelmetIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M12 2C7 2 4 6 4 10v4c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-4c0-4-3-8-8-8z" />
-      <path d="M4 12h16" />
-      <path d="M8 16v2M16 16v2" />
-    </svg>
-  );
-}
-
-/** Weapon slot icon (crossed swords) */
-function WeaponIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M14.5 17.5L3 6V3h3l11.5 11.5" />
-      <path d="M13 19l6-6" />
-      <path d="M16 16l4 4" />
-      <path d="M19 21l2-2" />
-      <path d="M9.5 6.5L21 18V21h-3L6.5 9.5" />
-    </svg>
-  );
-}
-
-/** Body/Chest armor slot icon */
-function BodyIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M6 4l-2 2v12l2 2h12l2-2V6l-2-2" />
-      <path d="M6 4h12" />
-      <path d="M9 4v3c0 1.7 1.3 3 3 3s3-1.3 3-3V4" />
-      <path d="M4 8h2M18 8h2" />
-    </svg>
-  );
-}
-
-/** Shield slot icon */
-function ShieldIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-    </svg>
-  );
-}
-
-/** Legs slot icon */
-function LegsIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M6 4h12v4l-1 12H7L6 8V4z" />
-      <path d="M12 4v16" />
-      <path d="M6 8h12" />
-    </svg>
-  );
-}
-
-/** Arrows/Ammo slot icon */
-function ArrowsIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      {/* Arrow shaft */}
-      <path d="M5 19L19 5" />
-      {/* Arrow head */}
-      <path d="M15 5h4v4" />
-      {/* Arrow fletching */}
-      <path d="M5 19l3-1M5 19l1-3" />
-      {/* Second arrow (stacked) */}
-      <path d="M8 16L18 6" strokeOpacity="0.5" />
-    </svg>
-  );
-}
-
-// ============================================================================
-// Utility Button Icons
-// ============================================================================
-
-/** Stats icon (bar chart) */
-function StatsIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M18 20V10M12 20V4M6 20v-6" />
-    </svg>
-  );
-}
-
-/** Death/Skull icon */
-function DeathIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <circle cx="12" cy="10" r="7" />
-      <circle cx="9" cy="9" r="1.5" fill="currentColor" />
-      <circle cx="15" cy="9" r="1.5" fill="currentColor" />
-      <path d="M8 17v4M12 17v4M16 17v4" />
-      <path d="M9 14c.8.7 1.9 1 3 1s2.2-.3 3-1" />
-    </svg>
-  );
-}
+type EquipmentSlot = EquipmentSlotData;
 
 // ============================================================================
 // Utility Button Component
@@ -245,182 +90,6 @@ interface DroppableEquipmentSlotProps {
   onHoverMove: (position: { x: number; y: number }) => void;
   onHoverEnd: () => void;
   onContextMenuOpen: () => void;
-}
-
-interface EquipmentHoverState {
-  slot: EquipmentSlot;
-  position: { x: number; y: number };
-}
-
-/**
- * Render enhanced equipment hover tooltip content
- * Shows item stats, rarity, requirements, and hints
- */
-function renderEquipmentHoverTooltip(
-  hoverState: EquipmentHoverState,
-  theme: ReturnType<typeof useThemeStore.getState>["theme"],
-): React.ReactNode {
-  const item = hoverState.slot.item;
-  if (!item) return null;
-
-  // Get full item data for additional info
-  const itemData = getItem(item.id);
-  const rarity = itemData?.rarity || "common";
-  const equipSlot = itemData?.equipSlot || hoverState.slot.label;
-
-  // Rarity colors (matching RARITY_COLORS)
-  const rarityColors: Record<string, string> = {
-    common: "#9d9d9d",
-    uncommon: "#1eff00",
-    rare: "#0070dd",
-    epic: "#a335ee",
-    legendary: "#ff8000",
-    mythic: "#e6cc80",
-  };
-  const rarityColor = rarityColors[rarity] || theme.colors.accent.primary;
-
-  // Use tooltip positioning with edge detection
-  const { left, top } = calculateCursorTooltipPosition(
-    { x: hoverState.position.x, y: hoverState.position.y },
-    TOOLTIP_SIZE_ESTIMATES.large,
-    8,
-  );
-
-  const hasBonuses =
-    item.bonuses &&
-    ((item.bonuses.attack !== undefined && item.bonuses.attack !== 0) ||
-      (item.bonuses.defense !== undefined && item.bonuses.defense !== 0) ||
-      (item.bonuses.strength !== undefined && item.bonuses.strength !== 0));
-
-  return createPortal(
-    <div
-      className="pointer-events-none"
-      style={{
-        position: "fixed",
-        left,
-        top,
-        zIndex: theme.zIndex.tooltip,
-        background: `linear-gradient(180deg, ${theme.colors.background.primary} 0%, ${theme.colors.background.secondary} 100%)`,
-        border: `1px solid ${theme.colors.border.hover}`,
-        borderRadius: `${theme.borderRadius.md}px`,
-        padding: "10px 12px",
-        boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
-        minWidth: "160px",
-        maxWidth: "240px",
-      }}
-    >
-      {/* Item name with rarity color */}
-      <div
-        style={{
-          color: rarityColor,
-          fontWeight: theme.typography.fontWeight.bold,
-          fontSize: theme.typography.fontSize.sm,
-          marginBottom: "2px",
-        }}
-      >
-        {item.name}
-      </div>
-
-      {/* Item type and rarity */}
-      <div
-        style={{
-          fontSize: "10px",
-          color: theme.colors.text.muted,
-          marginBottom: hasBonuses ? "8px" : "0",
-          textTransform: "capitalize",
-        }}
-      >
-        {equipSlot} • {rarity}
-      </div>
-
-      {/* Stat bonuses */}
-      {hasBonuses && (
-        <div
-          style={{
-            fontSize: "11px",
-            borderTop: `1px solid ${theme.colors.border.default}40`,
-            paddingTop: "6px",
-            marginBottom: "6px",
-          }}
-        >
-          {item.bonuses!.attack !== undefined && item.bonuses!.attack !== 0 && (
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                color: theme.colors.text.secondary,
-                marginBottom: "2px",
-              }}
-            >
-              <span>Attack</span>
-              <span style={{ color: theme.colors.state.success }}>
-                +{item.bonuses!.attack}
-              </span>
-            </div>
-          )}
-          {item.bonuses!.defense !== undefined &&
-            item.bonuses!.defense !== 0 && (
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  color: theme.colors.text.secondary,
-                  marginBottom: "2px",
-                }}
-              >
-                <span>Defense</span>
-                <span style={{ color: theme.colors.state.success }}>
-                  +{item.bonuses!.defense}
-                </span>
-              </div>
-            )}
-          {item.bonuses!.strength !== undefined &&
-            item.bonuses!.strength !== 0 && (
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  color: theme.colors.text.secondary,
-                }}
-              >
-                <span>Strength</span>
-                <span style={{ color: theme.colors.state.success }}>
-                  +{item.bonuses!.strength}
-                </span>
-              </div>
-            )}
-        </div>
-      )}
-
-      {/* Level requirement if any */}
-      {itemData?.requirements?.level && (
-        <div
-          style={{
-            fontSize: "10px",
-            color: theme.colors.text.muted,
-            marginBottom: "4px",
-          }}
-        >
-          Requires Level {itemData.requirements.level}
-        </div>
-      )}
-
-      {/* Click hint */}
-      <div
-        style={{
-          fontSize: "9px",
-          color: theme.colors.text.muted,
-          marginTop: "6px",
-          paddingTop: "6px",
-          borderTop: `1px solid ${theme.colors.border.default}30`,
-          opacity: 0.7,
-        }}
-      >
-        Click to unequip • Right-click for options
-      </div>
-    </div>,
-    document.body,
-  );
 }
 
 function DroppableEquipmentSlot({
@@ -472,6 +141,11 @@ function DroppableEquipmentSlot({
   return (
     <button
       ref={setNodeRef}
+      aria-label={
+        slot.item
+          ? `${slot.item.name} equipped in ${slot.label} slot`
+          : `Empty ${slot.label} slot`
+      }
       onClick={() => onSlotClick(slot)}
       onMouseEnter={(e) => {
         if (slot.item) {
@@ -657,10 +331,9 @@ function DroppableEquipmentSlot({
   );
 }
 
-export function EquipmentPanel({
+export const EquipmentPanel = React.memo(function EquipmentPanel({
   equipment,
   world,
-  onItemDrop: _onItemDrop,
 }: EquipmentPanelProps) {
   const theme = useThemeStore((s) => s.theme);
   const { shouldUseMobileUI } = useMobileLayout();
@@ -705,6 +378,36 @@ export function EquipmentPanel({
       item: equipment?.shield || null,
     },
     {
+      key: EquipmentSlotName.BOOTS,
+      label: "Boots",
+      icon: <BootsIcon className="w-full h-full" />,
+      item: equipment?.boots || null,
+    },
+    {
+      key: EquipmentSlotName.GLOVES,
+      label: "Gloves",
+      icon: <GlovesIcon className="w-full h-full" />,
+      item: equipment?.gloves || null,
+    },
+    {
+      key: EquipmentSlotName.CAPE,
+      label: "Cape",
+      icon: <CapeIcon className="w-full h-full" />,
+      item: equipment?.cape || null,
+    },
+    {
+      key: EquipmentSlotName.AMULET,
+      label: "Amulet",
+      icon: <AmuletIcon className="w-full h-full" />,
+      item: equipment?.amulet || null,
+    },
+    {
+      key: EquipmentSlotName.RING,
+      label: "Ring",
+      icon: <RingIcon className="w-full h-full" />,
+      item: equipment?.ring || null,
+    },
+    {
       key: EquipmentSlotName.ARROWS,
       label: "Ammo",
       icon: <ArrowsIcon className="w-full h-full" />,
@@ -744,21 +447,21 @@ export function EquipmentPanel({
     }
   };
 
+  // Send unequip request to server for a given slot key
+  const sendUnequip = (slotKey: string) => {
+    const localPlayer = world?.getPlayer();
+    if (localPlayer && world?.network?.send) {
+      world.network.send("unequipItem", {
+        playerId: localPlayer.id,
+        slot: slotKey,
+      });
+    }
+  };
+
   // RS3-style: Click immediately unequips
   const handleSlotClick = (slot: EquipmentSlot) => {
     if (!slot.item) return;
-
-    const localPlayer = world?.getPlayer();
-    if (localPlayer && world?.network?.send) {
-      console.log("[EquipmentPanel] 📤 Click-to-unequip:", {
-        playerId: localPlayer.id,
-        slot: slot.key,
-      });
-      world.network.send("unequipItem", {
-        playerId: localPlayer.id,
-        slot: slot.key,
-      });
-    }
+    sendUnequip(slot.key);
   };
 
   // Hover handlers for tooltip
@@ -801,19 +504,7 @@ export function EquipmentPanel({
       if (!slot || !slot.item) return;
 
       if (ce.detail.actionId === "unequip") {
-        const localPlayer = world?.getPlayer();
-        if (localPlayer && world?.network?.send) {
-          console.log("[EquipmentPanel] 📤 Sending unequipItem to server:", {
-            playerId: localPlayer.id,
-            slot: slotKey,
-          });
-          world.network.send("unequipItem", {
-            playerId: localPlayer.id,
-            slot: slotKey,
-          });
-        } else {
-          console.error("[EquipmentPanel] ❌ No local player or network.send!");
-        }
+        sendUnequip(slotKey);
       }
 
       if (ce.detail.actionId === "examine") {
@@ -847,196 +538,65 @@ export function EquipmentPanel({
   // Helper to find slot by key
   const getSlot = (key: string) => slots.find((s) => s.key === key) || null;
 
-  // Mobile layout renders a compact 2-column grid
-  // Desktop layout renders the traditional 3x3 paperdoll
-  const renderMobileEquipmentGrid = () => (
+  // Unified slot cell renderer for both mobile and desktop
+  const renderSlotCell = (slotName: string, isMobile: boolean) => (
     <div
-      className="grid"
+      className={isMobile ? undefined : "w-full h-full"}
       style={{
-        gridTemplateColumns: `repeat(${MOBILE_EQUIPMENT.columns}, 1fr)`,
-        gap: `${MOBILE_EQUIPMENT.gap}px`,
-        padding: `${MOBILE_EQUIPMENT.padding}px`,
+        height: isMobile ? MOBILE_EQUIPMENT.slotHeight : undefined,
+        containerType: "size",
       }}
     >
-      {/* Row 1: Weapon / Shield */}
-      <div
-        style={{
-          height: MOBILE_EQUIPMENT.slotHeight,
-          containerType: "size",
-        }}
-      >
-        <DroppableEquipmentSlot
-          slot={getSlot(EquipmentSlotName.WEAPON)!}
-          onSlotClick={handleSlotClick}
-          onHoverStart={handleHoverStart}
-          onHoverMove={handleHoverMove}
-          onHoverEnd={handleHoverEnd}
-          onContextMenuOpen={handleContextMenuOpen}
-        />
-      </div>
-      <div
-        style={{
-          height: MOBILE_EQUIPMENT.slotHeight,
-          containerType: "size",
-        }}
-      >
-        <DroppableEquipmentSlot
-          slot={getSlot(EquipmentSlotName.SHIELD)!}
-          onSlotClick={handleSlotClick}
-          onHoverStart={handleHoverStart}
-          onHoverMove={handleHoverMove}
-          onHoverEnd={handleHoverEnd}
-          onContextMenuOpen={handleContextMenuOpen}
-        />
-      </div>
-
-      {/* Row 2: Head / Body */}
-      <div
-        style={{
-          height: MOBILE_EQUIPMENT.slotHeight,
-          containerType: "size",
-        }}
-      >
-        <DroppableEquipmentSlot
-          slot={getSlot(EquipmentSlotName.HELMET)!}
-          onSlotClick={handleSlotClick}
-          onHoverStart={handleHoverStart}
-          onHoverMove={handleHoverMove}
-          onHoverEnd={handleHoverEnd}
-          onContextMenuOpen={handleContextMenuOpen}
-        />
-      </div>
-      <div
-        style={{
-          height: MOBILE_EQUIPMENT.slotHeight,
-          containerType: "size",
-        }}
-      >
-        <DroppableEquipmentSlot
-          slot={getSlot(EquipmentSlotName.BODY)!}
-          onSlotClick={handleSlotClick}
-          onHoverStart={handleHoverStart}
-          onHoverMove={handleHoverMove}
-          onHoverEnd={handleHoverEnd}
-          onContextMenuOpen={handleContextMenuOpen}
-        />
-      </div>
-
-      {/* Row 3: Legs / Ammo */}
-      <div
-        style={{
-          height: MOBILE_EQUIPMENT.slotHeight,
-          containerType: "size",
-        }}
-      >
-        <DroppableEquipmentSlot
-          slot={getSlot(EquipmentSlotName.LEGS)!}
-          onSlotClick={handleSlotClick}
-          onHoverStart={handleHoverStart}
-          onHoverMove={handleHoverMove}
-          onHoverEnd={handleHoverEnd}
-          onContextMenuOpen={handleContextMenuOpen}
-        />
-      </div>
-      <div
-        style={{
-          height: MOBILE_EQUIPMENT.slotHeight,
-          containerType: "size",
-        }}
-      >
-        <DroppableEquipmentSlot
-          slot={getSlot(EquipmentSlotName.ARROWS)!}
-          onSlotClick={handleSlotClick}
-          onHoverStart={handleHoverStart}
-          onHoverMove={handleHoverMove}
-          onHoverEnd={handleHoverEnd}
-          onContextMenuOpen={handleContextMenuOpen}
-        />
-      </div>
+      <DroppableEquipmentSlot
+        slot={getSlot(slotName)!}
+        onSlotClick={handleSlotClick}
+        onHoverStart={handleHoverStart}
+        onHoverMove={handleHoverMove}
+        onHoverEnd={handleHoverEnd}
+        onContextMenuOpen={handleContextMenuOpen}
+      />
     </div>
   );
 
-  const renderDesktopEquipmentGrid = () => (
-    <>
-      {/* Paperdoll Grid Layout - 3x3 with ammo in top-right */}
-      <div
-        className="relative grid h-full"
-        style={{
-          gridTemplateColumns: "1fr 1.2fr 1fr",
-          gridTemplateRows: "1fr 1.2fr 1fr",
-          gap: `${theme.spacing.xs}px`,
-        }}
-      >
-        {/* Row 1: empty, Head, Ammo */}
-        <div />
-        <div className="w-full h-full" style={{ containerType: "size" }}>
-          <DroppableEquipmentSlot
-            slot={getSlot(EquipmentSlotName.HELMET)!}
-            onSlotClick={handleSlotClick}
-            onHoverStart={handleHoverStart}
-            onHoverMove={handleHoverMove}
-            onHoverEnd={handleHoverEnd}
-            onContextMenuOpen={handleContextMenuOpen}
-          />
-        </div>
-        <div className="w-full h-full" style={{ containerType: "size" }}>
-          <DroppableEquipmentSlot
-            slot={getSlot(EquipmentSlotName.ARROWS)!}
-            onSlotClick={handleSlotClick}
-            onHoverStart={handleHoverStart}
-            onHoverMove={handleHoverMove}
-            onHoverEnd={handleHoverEnd}
-            onContextMenuOpen={handleContextMenuOpen}
-          />
-        </div>
+  // OSRS Paperdoll Grid Layout - 3 columns, 4 rows
+  // Both mobile and desktop share the same slot order, only styling differs
+  const renderEquipmentGrid = (isMobile: boolean) => (
+    <div
+      className={isMobile ? "grid" : "relative grid h-full"}
+      style={
+        isMobile
+          ? {
+              gridTemplateColumns: `repeat(${MOBILE_EQUIPMENT.columns}, 1fr)`,
+              gap: `${MOBILE_EQUIPMENT.gap}px`,
+              padding: `${MOBILE_EQUIPMENT.padding}px`,
+            }
+          : {
+              gridTemplateColumns: "1fr 1.2fr 1fr",
+              gridTemplateRows: "1fr 1.2fr 1fr 1fr",
+              gap: `${theme.spacing.xs}px`,
+            }
+      }
+    >
+      {/* Row 1: Cape, Head, Amulet */}
+      {renderSlotCell(EquipmentSlotName.CAPE, isMobile)}
+      {renderSlotCell(EquipmentSlotName.HELMET, isMobile)}
+      {renderSlotCell(EquipmentSlotName.AMULET, isMobile)}
 
-        {/* Row 2: Weapon, Body, Shield */}
-        <div className="w-full h-full" style={{ containerType: "size" }}>
-          <DroppableEquipmentSlot
-            slot={getSlot(EquipmentSlotName.WEAPON)!}
-            onSlotClick={handleSlotClick}
-            onHoverStart={handleHoverStart}
-            onHoverMove={handleHoverMove}
-            onHoverEnd={handleHoverEnd}
-            onContextMenuOpen={handleContextMenuOpen}
-          />
-        </div>
-        <div className="w-full h-full" style={{ containerType: "size" }}>
-          <DroppableEquipmentSlot
-            slot={getSlot(EquipmentSlotName.BODY)!}
-            onSlotClick={handleSlotClick}
-            onHoverStart={handleHoverStart}
-            onHoverMove={handleHoverMove}
-            onHoverEnd={handleHoverEnd}
-            onContextMenuOpen={handleContextMenuOpen}
-          />
-        </div>
-        <div className="w-full h-full" style={{ containerType: "size" }}>
-          <DroppableEquipmentSlot
-            slot={getSlot(EquipmentSlotName.SHIELD)!}
-            onSlotClick={handleSlotClick}
-            onHoverStart={handleHoverStart}
-            onHoverMove={handleHoverMove}
-            onHoverEnd={handleHoverEnd}
-            onContextMenuOpen={handleContextMenuOpen}
-          />
-        </div>
+      {/* Row 2: Weapon, Body, Shield */}
+      {renderSlotCell(EquipmentSlotName.WEAPON, isMobile)}
+      {renderSlotCell(EquipmentSlotName.BODY, isMobile)}
+      {renderSlotCell(EquipmentSlotName.SHIELD, isMobile)}
 
-        {/* Row 3: empty, Legs, empty */}
-        <div />
-        <div className="w-full h-full" style={{ containerType: "size" }}>
-          <DroppableEquipmentSlot
-            slot={getSlot(EquipmentSlotName.LEGS)!}
-            onSlotClick={handleSlotClick}
-            onHoverStart={handleHoverStart}
-            onHoverMove={handleHoverMove}
-            onHoverEnd={handleHoverEnd}
-            onContextMenuOpen={handleContextMenuOpen}
-          />
-        </div>
-        <div />
-      </div>
-    </>
+      {/* Row 3: Ring, Legs, Gloves */}
+      {renderSlotCell(EquipmentSlotName.RING, isMobile)}
+      {renderSlotCell(EquipmentSlotName.LEGS, isMobile)}
+      {renderSlotCell(EquipmentSlotName.GLOVES, isMobile)}
+
+      {/* Row 4: Boots, empty, Ammo */}
+      {renderSlotCell(EquipmentSlotName.BOOTS, isMobile)}
+      <div />
+      {renderSlotCell(EquipmentSlotName.ARROWS, isMobile)}
+    </div>
   );
 
   return (
@@ -1061,9 +621,7 @@ export function EquipmentPanel({
               "inset 2px 2px 4px rgba(0, 0, 0, 0.4), inset -1px -1px 3px rgba(40, 40, 45, 0.08)",
           }}
         >
-          {shouldUseMobileUI
-            ? renderMobileEquipmentGrid()
-            : renderDesktopEquipmentGrid()}
+          {renderEquipmentGrid(shouldUseMobileUI)}
         </div>
 
         {/* Bottom section: Utility Buttons */}
@@ -1136,9 +694,7 @@ export function EquipmentPanel({
       </div>
 
       {/* Enhanced hover tooltip - rendered via portal */}
-      {hoverState &&
-        hoverState.slot.item &&
-        renderEquipmentHoverTooltip(hoverState, theme)}
+      <EquipmentTooltip hoverState={hoverState} />
     </>
   );
-}
+});

@@ -36,6 +36,7 @@ interface EquipmentSlot {
   slot: string;
   itemId: string | null;
   item: Item | null;
+  quantity?: number;
 }
 
 interface PlayerEquipment {
@@ -45,6 +46,11 @@ interface PlayerEquipment {
   helmet: EquipmentSlot;
   body: EquipmentSlot;
   legs: EquipmentSlot;
+  boots: EquipmentSlot;
+  gloves: EquipmentSlot;
+  cape: EquipmentSlot;
+  amulet: EquipmentSlot;
+  ring: EquipmentSlot;
   arrows: EquipmentSlot;
   totalStats: Record<string, number>;
 }
@@ -57,9 +63,12 @@ class MockEquipmentManager {
   private playerEquipment = new Map<string, PlayerEquipment>();
   private playerSkills = new Map<string, Record<string, number>>();
   private inventoryItems = new Map<string, Map<string, number>>(); // playerId -> itemId -> quantity
+  private playerTradeState = new Map<string, boolean>(); // playerId -> in trade
+  private playerDeathState = new Map<string, "alive" | "dying" | "dead">();
   private savedEquipment: Array<{
     playerId: string;
     slots: Record<string, string | null>;
+    quantities?: Record<string, number | null>;
   }> = [];
   private messages: Array<{ playerId: string; message: string; type: string }> =
     [];
@@ -112,6 +121,41 @@ class MockEquipmentManager {
         id: `${playerId}_legs`,
         name: "Legs Slot",
         slot: "legs",
+        itemId: null,
+        item: null,
+      },
+      boots: {
+        id: `${playerId}_boots`,
+        name: "Boots Slot",
+        slot: "boots",
+        itemId: null,
+        item: null,
+      },
+      gloves: {
+        id: `${playerId}_gloves`,
+        name: "Gloves Slot",
+        slot: "gloves",
+        itemId: null,
+        item: null,
+      },
+      cape: {
+        id: `${playerId}_cape`,
+        name: "Cape Slot",
+        slot: "cape",
+        itemId: null,
+        item: null,
+      },
+      amulet: {
+        id: `${playerId}_amulet`,
+        name: "Amulet Slot",
+        slot: "amulet",
+        itemId: null,
+        item: null,
+      },
+      ring: {
+        id: `${playerId}_ring`,
+        name: "Ring Slot",
+        slot: "ring",
         itemId: null,
         item: null,
       },
@@ -204,6 +248,35 @@ class MockEquipmentManager {
   }
 
   /**
+   * Set player trade state (for guard tests)
+   */
+  setInTrade(playerId: string, inTrade: boolean): void {
+    this.playerTradeState.set(playerId, inTrade);
+  }
+
+  /**
+   * Set player death state (for guard tests)
+   */
+  setDeathState(playerId: string, state: "alive" | "dying" | "dead"): void {
+    this.playerDeathState.set(playerId, state);
+  }
+
+  /**
+   * Check if player is in active trade
+   */
+  isPlayerInTrade(playerId: string): boolean {
+    return this.playerTradeState.get(playerId) === true;
+  }
+
+  /**
+   * Check if player is dead or dying
+   */
+  isPlayerDead(playerId: string): boolean {
+    const state = this.playerDeathState.get(playerId);
+    return state === "dying" || state === "dead";
+  }
+
+  /**
    * Check level requirements for an item
    */
   meetsLevelRequirements(playerId: string, item: Item): boolean {
@@ -280,6 +353,20 @@ class MockEquipmentManager {
       return { success: false, message: "Item not found" };
     }
 
+    // Guard: block equip during active trade
+    if (this.isPlayerInTrade(playerId)) {
+      const msg = "You can't change equipment during a trade.";
+      this.messages.push({ playerId, message: msg, type: "warning" });
+      return { success: false, message: msg };
+    }
+
+    // Guard: block equip while dead
+    if (this.isPlayerDead(playerId)) {
+      const msg = "You can't change equipment while dead.";
+      this.messages.push({ playerId, message: msg, type: "warning" });
+      return { success: false, message: msg };
+    }
+
     // Check if player has item
     if (!this.hasItem(playerId, itemId)) {
       return { success: false, message: "Item not in inventory" };
@@ -352,13 +439,18 @@ class MockEquipmentManager {
       this.unequipSlot(playerId, slotName);
     }
 
-    // Remove from inventory and equip
-    if (!this.removeFromInventory(playerId, itemId)) {
+    // Remove from inventory and equip (track quantity for stackable items)
+    const inv = this.inventoryItems.get(playerId);
+    const currentQuantity = inv?.get(itemId) || 0;
+    if (!this.removeFromInventory(playerId, itemId, currentQuantity)) {
       return { success: false, message: "Failed to remove from inventory" };
     }
 
     slot.itemId = itemId;
     slot.item = item;
+    if (item.type === "ammunition") {
+      slot.quantity = currentQuantity;
+    }
 
     // Recalculate stats
     this.recalculateStats(playerId);
@@ -380,6 +472,20 @@ class MockEquipmentManager {
   ): { success: boolean; message?: string } {
     const equipment = this.playerEquipment.get(playerId);
     if (!equipment) return { success: false, message: "Player not found" };
+
+    // Guard: block unequip during active trade
+    if (this.isPlayerInTrade(playerId)) {
+      const msg = "You can't change equipment during a trade.";
+      this.messages.push({ playerId, message: msg, type: "warning" });
+      return { success: false, message: msg };
+    }
+
+    // Guard: block unequip while dead
+    if (this.isPlayerDead(playerId)) {
+      const msg = "You can't change equipment while dead.";
+      this.messages.push({ playerId, message: msg, type: "warning" });
+      return { success: false, message: msg };
+    }
 
     const slot = equipment[slotName as keyof PlayerEquipment] as EquipmentSlot;
     if (!slot || typeof slot === "string" || !("itemId" in slot)) {
@@ -444,6 +550,11 @@ class MockEquipmentManager {
       equipment.helmet,
       equipment.body,
       equipment.legs,
+      equipment.boots,
+      equipment.gloves,
+      equipment.cape,
+      equipment.amulet,
+      equipment.ring,
       equipment.arrows,
     ];
 
@@ -494,6 +605,11 @@ class MockEquipmentManager {
       "helmet",
       "body",
       "legs",
+      "boots",
+      "gloves",
+      "cape",
+      "amulet",
+      "ring",
       "arrows",
     ] as const;
 
@@ -524,6 +640,11 @@ class MockEquipmentManager {
         helmet: null,
         body: null,
         legs: null,
+        boots: null,
+        gloves: null,
+        cape: null,
+        amulet: null,
+        ring: null,
         arrows: null,
       },
     });
@@ -546,7 +667,15 @@ class MockEquipmentManager {
         helmet: equipment.helmet.itemId,
         body: equipment.body.itemId,
         legs: equipment.legs.itemId,
+        boots: equipment.boots.itemId,
+        gloves: equipment.gloves.itemId,
+        cape: equipment.cape.itemId,
+        amulet: equipment.amulet.itemId,
+        ring: equipment.ring.itemId,
         arrows: equipment.arrows.itemId,
+      },
+      quantities: {
+        arrows: equipment.arrows.quantity ?? null,
       },
     });
   }
@@ -554,7 +683,11 @@ class MockEquipmentManager {
   /**
    * Load equipment from database (simulated)
    */
-  loadEquipment(playerId: string, slots: Record<string, string | null>): void {
+  loadEquipment(
+    playerId: string,
+    slots: Record<string, string | null>,
+    quantities?: Record<string, number | null>,
+  ): void {
     const equipment = this.playerEquipment.get(playerId);
     if (!equipment) return;
 
@@ -567,6 +700,9 @@ class MockEquipmentManager {
         if (slot && item && typeof slot !== "string" && "itemId" in slot) {
           slot.itemId = itemId;
           slot.item = item;
+          if (quantities?.[slotName]) {
+            slot.quantity = quantities[slotName]!;
+          }
         }
       }
     }
@@ -580,6 +716,7 @@ class MockEquipmentManager {
   getSavedEquipment(): Array<{
     playerId: string;
     slots: Record<string, string | null>;
+    quantities?: Record<string, number | null>;
   }> {
     return this.savedEquipment;
   }
@@ -669,6 +806,51 @@ function createTestItems(): Map<string, Item> {
     id: "coins",
     name: "Coins",
     type: "currency",
+  });
+
+  // Boots
+  items.set("leather_boots", {
+    id: "leather_boots",
+    name: "Leather Boots",
+    type: "armor",
+    equipSlot: "boots",
+    bonuses: { defense: 2 },
+  });
+
+  // Gloves
+  items.set("leather_gloves", {
+    id: "leather_gloves",
+    name: "Leather Gloves",
+    type: "armor",
+    equipSlot: "gloves",
+    bonuses: { attack: 1, defense: 1 },
+  });
+
+  // Cape
+  items.set("cape", {
+    id: "cape",
+    name: "Cape",
+    type: "armor",
+    equipSlot: "cape",
+    bonuses: { defense: 1 },
+  });
+
+  // Amulet
+  items.set("amulet_of_strength", {
+    id: "amulet_of_strength",
+    name: "Amulet of Strength",
+    type: "armor",
+    equipSlot: "amulet",
+    bonuses: { strength: 6 },
+  });
+
+  // Ring
+  items.set("berserker_ring", {
+    id: "berserker_ring",
+    name: "Berserker Ring",
+    type: "armor",
+    equipSlot: "ring",
+    bonuses: { strength: 4 },
   });
 
   // Arrows
@@ -884,6 +1066,59 @@ describe("EquipmentSystem", () => {
           .some((m) => m.message.includes("cannot be equipped")),
       ).toBe(true);
     });
+
+    it("equips boots to the boots slot", () => {
+      manager.addToInventory("player-1", "leather_boots");
+
+      const result = manager.tryEquipItem("player-1", "leather_boots");
+
+      expect(result.success).toBe(true);
+      expect(manager.getEquipment("player-1")?.boots.itemId).toBe(
+        "leather_boots",
+      );
+    });
+
+    it("equips gloves to the gloves slot", () => {
+      manager.addToInventory("player-1", "leather_gloves");
+
+      const result = manager.tryEquipItem("player-1", "leather_gloves");
+
+      expect(result.success).toBe(true);
+      expect(manager.getEquipment("player-1")?.gloves.itemId).toBe(
+        "leather_gloves",
+      );
+    });
+
+    it("equips cape to the cape slot", () => {
+      manager.addToInventory("player-1", "cape");
+
+      const result = manager.tryEquipItem("player-1", "cape");
+
+      expect(result.success).toBe(true);
+      expect(manager.getEquipment("player-1")?.cape.itemId).toBe("cape");
+    });
+
+    it("equips amulet to the amulet slot", () => {
+      manager.addToInventory("player-1", "amulet_of_strength");
+
+      const result = manager.tryEquipItem("player-1", "amulet_of_strength");
+
+      expect(result.success).toBe(true);
+      expect(manager.getEquipment("player-1")?.amulet.itemId).toBe(
+        "amulet_of_strength",
+      );
+    });
+
+    it("equips ring to the ring slot", () => {
+      manager.addToInventory("player-1", "berserker_ring");
+
+      const result = manager.tryEquipItem("player-1", "berserker_ring");
+
+      expect(result.success).toBe(true);
+      expect(manager.getEquipment("player-1")?.ring.itemId).toBe(
+        "berserker_ring",
+      );
+    });
   });
 
   describe("Stats Calculation", () => {
@@ -941,6 +1176,34 @@ describe("EquipmentSystem", () => {
         "basic_helmet",
       );
     });
+
+    it("sums bonuses from all 11 slots including new accessory slots", () => {
+      manager.setSkills("player-1", { attack: 10, defense: 10 });
+      manager.addToInventory("player-1", "steel_sword"); // attack: 12, strength: 10
+      manager.addToInventory("player-1", "steel_platebody"); // defense: 15
+      manager.addToInventory("player-1", "leather_boots"); // defense: 2
+      manager.addToInventory("player-1", "leather_gloves"); // attack: 1, defense: 1
+      manager.addToInventory("player-1", "cape"); // defense: 1
+      manager.addToInventory("player-1", "amulet_of_strength"); // strength: 6
+      manager.addToInventory("player-1", "berserker_ring"); // strength: 4
+      manager.addToInventory("player-1", "bronze_arrows"); // ranged: 2
+
+      manager.tryEquipItem("player-1", "steel_sword");
+      manager.tryEquipItem("player-1", "steel_platebody");
+      manager.tryEquipItem("player-1", "leather_boots");
+      manager.tryEquipItem("player-1", "leather_gloves");
+      manager.tryEquipItem("player-1", "cape");
+      manager.tryEquipItem("player-1", "amulet_of_strength");
+      manager.tryEquipItem("player-1", "berserker_ring");
+      manager.tryEquipItem("player-1", "bronze_arrows");
+
+      const stats = manager.getTotalStats("player-1");
+
+      expect(stats.attack).toBe(12 + 1); // sword + gloves
+      expect(stats.strength).toBe(10 + 6 + 4); // sword + amulet + ring
+      expect(stats.defense).toBe(15 + 2 + 1 + 1); // body + boots + gloves + cape
+      expect(stats.ranged).toBe(2); // arrows
+    });
   });
 
   describe("Persistence", () => {
@@ -963,6 +1226,11 @@ describe("EquipmentSystem", () => {
         helmet: null,
         body: null,
         legs: null,
+        boots: null,
+        gloves: null,
+        cape: null,
+        amulet: null,
+        ring: null,
         arrows: null,
       });
 
@@ -974,6 +1242,35 @@ describe("EquipmentSystem", () => {
       );
     });
 
+    it("preserves arrow quantity across save and load", () => {
+      manager.addToInventory("player-1", "bronze_arrows", 150);
+
+      manager.tryEquipItem("player-1", "bronze_arrows");
+
+      // Verify quantity is tracked on the slot
+      const equipment = manager.getEquipment("player-1");
+      expect(equipment?.arrows.itemId).toBe("bronze_arrows");
+      expect(equipment?.arrows.quantity).toBe(150);
+
+      // Save
+      manager.saveEquipment("player-1");
+      const saved = manager.getSavedEquipment();
+      expect(saved[0].slots.arrows).toBe("bronze_arrows");
+      expect(saved[0].quantities?.arrows).toBe(150);
+
+      // Simulate reload: re-initialize and load from saved data
+      manager.initializePlayer("player-reload");
+      manager.loadEquipment(
+        "player-reload",
+        saved[0].slots,
+        saved[0].quantities,
+      );
+
+      const reloaded = manager.getEquipment("player-reload");
+      expect(reloaded?.arrows.itemId).toBe("bronze_arrows");
+      expect(reloaded?.arrows.quantity).toBe(150);
+    });
+
     it("recalculates stats after loading", () => {
       manager.loadEquipment("player-1", {
         weapon: "bronze_sword",
@@ -981,6 +1278,11 @@ describe("EquipmentSystem", () => {
         helmet: null,
         body: null,
         legs: null,
+        boots: null,
+        gloves: null,
+        cape: null,
+        amulet: null,
+        ring: null,
         arrows: null,
       });
 
@@ -1027,6 +1329,36 @@ describe("EquipmentSystem", () => {
       expect(manager.getTotalStats("player-1").attack).toBe(0);
     });
 
+    it("clears all 11 equipment slots on death", () => {
+      manager.addToInventory("player-1", "bronze_sword");
+      manager.addToInventory("player-1", "bronze_shield");
+      manager.addToInventory("player-1", "basic_helmet");
+      manager.addToInventory("player-1", "leather_boots");
+      manager.addToInventory("player-1", "leather_gloves");
+      manager.addToInventory("player-1", "cape");
+      manager.addToInventory("player-1", "amulet_of_strength");
+      manager.addToInventory("player-1", "berserker_ring");
+      manager.addToInventory("player-1", "bronze_arrows");
+      manager.tryEquipItem("player-1", "bronze_sword");
+      manager.tryEquipItem("player-1", "bronze_shield");
+      manager.tryEquipItem("player-1", "basic_helmet");
+      manager.tryEquipItem("player-1", "leather_boots");
+      manager.tryEquipItem("player-1", "leather_gloves");
+      manager.tryEquipItem("player-1", "cape");
+      manager.tryEquipItem("player-1", "amulet_of_strength");
+      manager.tryEquipItem("player-1", "berserker_ring");
+      manager.tryEquipItem("player-1", "bronze_arrows");
+
+      const clearedCount = manager.clearEquipmentImmediate("player-1");
+
+      expect(clearedCount).toBe(9); // 9 items equipped (body + legs empty)
+      expect(manager.getEquipment("player-1")?.boots.itemId).toBeNull();
+      expect(manager.getEquipment("player-1")?.gloves.itemId).toBeNull();
+      expect(manager.getEquipment("player-1")?.cape.itemId).toBeNull();
+      expect(manager.getEquipment("player-1")?.amulet.itemId).toBeNull();
+      expect(manager.getEquipment("player-1")?.ring.itemId).toBeNull();
+    });
+
     it("can re-equip after respawn", () => {
       manager.addToInventory("player-1", "bronze_sword");
       manager.tryEquipItem("player-1", "bronze_sword");
@@ -1042,9 +1374,119 @@ describe("EquipmentSystem", () => {
         helmet: null,
         body: null,
         legs: null,
+        boots: null,
+        gloves: null,
+        cape: null,
+        amulet: null,
+        ring: null,
         arrows: null,
       });
 
+      expect(manager.getEquipment("player-1")?.weapon.itemId).toBe(
+        "bronze_sword",
+      );
+    });
+  });
+
+  describe("Trade + Equip Guard", () => {
+    it("blocks equip when player is in active trade", () => {
+      manager.addToInventory("player-1", "bronze_sword");
+      manager.setInTrade("player-1", true);
+
+      const result = manager.tryEquipItem("player-1", "bronze_sword");
+
+      expect(result.success).toBe(false);
+      expect(result.message).toBe("You can't change equipment during a trade.");
+      expect(manager.getEquipment("player-1")?.weapon.itemId).toBeNull();
+      expect(manager.hasItem("player-1", "bronze_sword")).toBe(true);
+    });
+
+    it("blocks unequip when player is in active trade", () => {
+      manager.addToInventory("player-1", "bronze_sword");
+      manager.tryEquipItem("player-1", "bronze_sword");
+      manager.setInTrade("player-1", true);
+
+      const result = manager.unequipSlot("player-1", "weapon");
+
+      expect(result.success).toBe(false);
+      expect(result.message).toBe("You can't change equipment during a trade.");
+      expect(manager.getEquipment("player-1")?.weapon.itemId).toBe(
+        "bronze_sword",
+      );
+    });
+
+    it("allows equip after trade ends", () => {
+      manager.addToInventory("player-1", "bronze_sword");
+      manager.setInTrade("player-1", true);
+
+      // Blocked during trade
+      expect(manager.tryEquipItem("player-1", "bronze_sword").success).toBe(
+        false,
+      );
+
+      // Trade ends
+      manager.setInTrade("player-1", false);
+
+      // Now allowed
+      const result = manager.tryEquipItem("player-1", "bronze_sword");
+      expect(result.success).toBe(true);
+      expect(manager.getEquipment("player-1")?.weapon.itemId).toBe(
+        "bronze_sword",
+      );
+    });
+  });
+
+  describe("Death + Equip Guard", () => {
+    it("blocks equip when player is dying", () => {
+      manager.addToInventory("player-1", "bronze_sword");
+      manager.setDeathState("player-1", "dying");
+
+      const result = manager.tryEquipItem("player-1", "bronze_sword");
+
+      expect(result.success).toBe(false);
+      expect(result.message).toBe("You can't change equipment while dead.");
+      expect(manager.getEquipment("player-1")?.weapon.itemId).toBeNull();
+    });
+
+    it("blocks equip when player is dead", () => {
+      manager.addToInventory("player-1", "bronze_sword");
+      manager.setDeathState("player-1", "dead");
+
+      const result = manager.tryEquipItem("player-1", "bronze_sword");
+
+      expect(result.success).toBe(false);
+      expect(result.message).toBe("You can't change equipment while dead.");
+    });
+
+    it("blocks unequip when player is dead", () => {
+      manager.addToInventory("player-1", "bronze_sword");
+      manager.tryEquipItem("player-1", "bronze_sword");
+      manager.setDeathState("player-1", "dead");
+
+      const result = manager.unequipSlot("player-1", "weapon");
+
+      expect(result.success).toBe(false);
+      expect(result.message).toBe("You can't change equipment while dead.");
+      expect(manager.getEquipment("player-1")?.weapon.itemId).toBe(
+        "bronze_sword",
+      );
+    });
+
+    it("allows equip after respawn", () => {
+      manager.addToInventory("player-1", "bronze_sword");
+      manager.setDeathState("player-1", "dead");
+
+      // Blocked while dead
+      expect(manager.tryEquipItem("player-1", "bronze_sword").success).toBe(
+        false,
+      );
+
+      // Respawn
+      manager.setDeathState("player-1", "alive");
+
+      // Now allowed
+      const result = manager.tryEquipItem("player-1", "bronze_sword");
+      expect(result.success).toBe(true);
       expect(manager.getEquipment("player-1")?.weapon.itemId).toBe(
         "bronze_sword",
       );

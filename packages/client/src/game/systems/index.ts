@@ -11,9 +11,6 @@
 // Shared types
 export * from "./types";
 
-// Equipment System - Paper doll / equipment management
-export * from "./equipment";
-
 // Quest System - Quest log, tracking, filtering
 export * from "./quest";
 

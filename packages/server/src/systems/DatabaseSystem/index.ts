@@ -1082,25 +1082,6 @@ export class DatabaseSystem extends SystemBase {
   }
 
   /**
-   * @deprecated Use getPlayerEquipmentAsync instead
-   * @returns Empty array (use async method to get real data)
-   */
-  getPlayerEquipment(_playerId: string): EquipmentRow[] {
-    console.warn(
-      "[DatabaseSystem] getPlayerEquipment called synchronously - use getPlayerEquipmentAsync instead",
-    );
-    return [];
-  }
-
-  /**
-   * Save player equipment (fire-and-forget)
-   * Tracks the operation for graceful shutdown
-   */
-  savePlayerEquipment(playerId: string, items: EquipmentSaveItem[]): void {
-    this.trackAsyncOperation(this.savePlayerEquipmentAsync(playerId, items));
-  }
-
-  /**
    * Create player session (fire-and-forget)
    * Returns a session ID synchronously, tracks the operation for graceful shutdown
    */

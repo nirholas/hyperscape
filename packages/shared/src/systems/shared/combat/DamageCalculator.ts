@@ -8,6 +8,7 @@
 import { Entity } from "../../../entities/Entity";
 import { MobEntity } from "../../../entities/npc/MobEntity";
 import { AttackType } from "../../../types/core/core";
+import type { MeleeAttackStyle } from "../../../constants/CombatConstants";
 import {
   calculateDamage,
   CombatStats,
@@ -24,6 +25,64 @@ export interface EquipmentStats {
   strength: number;
   defense: number;
   ranged: number;
+  // Per-style melee defence bonuses (OSRS combat triangle)
+  defenseStab?: number;
+  defenseSlash?: number;
+  defenseCrush?: number;
+  defenseRanged?: number;
+  // Per-style melee attack bonuses
+  attackStab?: number;
+  attackSlash?: number;
+  attackCrush?: number;
+  // Ranged/Magic bonuses
+  rangedAttack?: number;
+  rangedStrength?: number;
+  magicAttack?: number;
+  magicDefense?: number;
+}
+
+/**
+ * Get the attacker's equipment attack bonus for a given melee attack style.
+ * Falls back to generic `attack` if per-style bonus is not available.
+ */
+function getAttackBonusForStyle(
+  stats: EquipmentStats,
+  attackStyle: MeleeAttackStyle,
+): number {
+  switch (attackStyle) {
+    case "stab":
+      return stats.attackStab ?? stats.attack;
+    case "slash":
+      return stats.attackSlash ?? stats.attack;
+    case "crush":
+      return stats.attackCrush ?? stats.attack;
+    default: {
+      const _exhaustive: never = attackStyle;
+      return stats.attack;
+    }
+  }
+}
+
+/**
+ * Get the defender's equipment defence bonus for a given melee attack style.
+ * Falls back to generic `defense` if per-style bonus is not available.
+ */
+function getDefenseBonusForStyle(
+  stats: EquipmentStats,
+  attackStyle: MeleeAttackStyle,
+): number {
+  switch (attackStyle) {
+    case "stab":
+      return stats.defenseStab ?? stats.defense;
+    case "slash":
+      return stats.defenseSlash ?? stats.defense;
+    case "crush":
+      return stats.defenseCrush ?? stats.defense;
+    default: {
+      const _exhaustive: never = attackStyle;
+      return stats.defense;
+    }
+  }
 }
 
 /**
@@ -50,6 +109,7 @@ export class DamageCalculator {
    * @param style - Combat style for OSRS-accurate stat bonuses (default: "accurate")
    * @param attackerPrayerBonuses - Prayer multipliers for attacker (optional)
    * @param defenderPrayerBonuses - Prayer multipliers for defender (optional)
+   * @param meleeAttackStyle - Weapon attack style (stab/slash/crush) for per-style bonus lookup
    * @returns Calculated damage value
    */
   calculateMeleeDamage(
@@ -58,6 +118,7 @@ export class DamageCalculator {
     style: CombatStyle = "accurate",
     attackerPrayerBonuses?: PrayerCombatBonuses,
     defenderPrayerBonuses?: PrayerCombatBonuses,
+    meleeAttackStyle?: MeleeAttackStyle,
   ): number {
     // Extract required properties for damage calculation
     let attackerData: {
@@ -156,11 +217,36 @@ export class DamageCalculator {
       equipmentStats = this.playerEquipmentStats.get(attacker.id);
     }
 
+    // Resolve per-style bonuses when attack style is known
+    let resolvedEquipmentStats = equipmentStats;
+    if (meleeAttackStyle && equipmentStats) {
+      // Override generic attack bonus with per-style value
+      resolvedEquipmentStats = {
+        ...equipmentStats,
+        attack: getAttackBonusForStyle(equipmentStats, meleeAttackStyle),
+      };
+    }
+
+    // Resolve target's per-style defence bonus from their equipment
+    if (meleeAttackStyle && !isMobEntity(target)) {
+      const targetEquipStats = this.playerEquipmentStats.get(target.id);
+      if (targetEquipStats) {
+        const defenseBonus = getDefenseBonusForStyle(
+          targetEquipStats,
+          meleeAttackStyle,
+        );
+        // Set defenseBonus on target stats so calculateDamage() uses it
+        if (targetData.stats) {
+          targetData.stats = { ...targetData.stats, defenseBonus };
+        }
+      }
+    }
+
     const result = calculateDamage(
       attackerData,
       targetData,
       AttackType.MELEE,
-      equipmentStats,
+      resolvedEquipmentStats,
       style,
       undefined, // defenderStyle - not tracked for mobs
       attackerPrayerBonuses,

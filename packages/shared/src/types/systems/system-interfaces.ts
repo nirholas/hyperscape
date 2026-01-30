@@ -187,9 +187,7 @@ export interface DatabaseSystem extends System {
   ): Promise<void>;
 
   // Equipment methods
-  getPlayerEquipment(playerId: string): EquipmentRow[];
   getPlayerEquipmentAsync(playerId: string): Promise<EquipmentRow[]>;
-  savePlayerEquipment(playerId: string, equipment: EquipmentSaveItem[]): void;
   savePlayerEquipmentAsync(
     playerId: string,
     equipment: EquipmentSaveItem[],
