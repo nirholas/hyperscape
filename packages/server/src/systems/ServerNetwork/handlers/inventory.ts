@@ -359,6 +359,7 @@ export function handleDropItem(
  *
  * Security:
  * - Rate limited to 5/sec
+ * - Idempotency check (5s dedup window)
  * - Item ID validation
  * - Inventory slot validation
  *
@@ -389,6 +390,16 @@ export function handleEquipItem(
   }
 
   const payload = data as Record<string, unknown>;
+
+  // Idempotency check - prevent duplicate equip requests
+  const equipIdempotencyKey = getIdempotencyService().generateKey(
+    playerEntity.id,
+    "equip",
+    { itemId: payload.itemId },
+  );
+  if (!getIdempotencyService().checkAndMark(equipIdempotencyKey)) {
+    return;
+  }
 
   // itemId can be string or number (some systems use numeric IDs)
   const itemId = payload.itemId;
@@ -576,6 +587,7 @@ export function handleUseItem(
  *
  * Security:
  * - Rate limited to 5/sec (shared with equip)
+ * - Idempotency check (5s dedup window)
  * - Equipment slot validation (must be valid slot name)
  *
  * @param socket - Client socket with player entity
@@ -605,6 +617,16 @@ export function handleUnequipItem(
   }
 
   const payload = data as Record<string, unknown>;
+
+  // Idempotency check - prevent duplicate unequip requests
+  const unequipIdempotencyKey = getIdempotencyService().generateKey(
+    playerEntity.id,
+    "unequip",
+    { slot: payload.slot },
+  );
+  if (!getIdempotencyService().checkAndMark(unequipIdempotencyKey)) {
+    return;
+  }
 
   // Validate slot - must be a valid equipment slot name
   const slot = payload.slot;
