@@ -43,6 +43,7 @@ import {
   type FiremakingManifest,
   type SmeltingManifest,
   type SmithingManifest,
+  type CraftingManifest,
 } from "./ProcessingDataProvider";
 import {
   stationDataProvider,
@@ -896,6 +897,17 @@ export class DataManager {
       );
     }
 
+    // Load crafting recipes
+    try {
+      const craftingRes = await fetch(`${baseUrl}/recipes/crafting.json`);
+      const craftingManifest = (await craftingRes.json()) as CraftingManifest;
+      processingDataProvider.loadCraftingRecipes(craftingManifest);
+    } catch {
+      console.warn(
+        "[DataManager] recipes/crafting.json not found, crafting will be unavailable",
+      );
+    }
+
     // Rebuild ProcessingDataProvider to use the loaded manifests
     // This is necessary in case it was already lazy-initialized before manifests loaded
     processingDataProvider.rebuild();
@@ -993,6 +1005,18 @@ export class DataManager {
     } catch {
       console.warn(
         "[DataManager] recipes/smithing.json not found, falling back to embedded item data",
+      );
+    }
+
+    // Load crafting recipes
+    try {
+      const craftingPath = path.join(recipesDir, "crafting.json");
+      const craftingData = await fs.readFile(craftingPath, "utf-8");
+      const craftingManifest = JSON.parse(craftingData) as CraftingManifest;
+      processingDataProvider.loadCraftingRecipes(craftingManifest);
+    } catch {
+      console.warn(
+        "[DataManager] recipes/crafting.json not found, crafting will be unavailable",
       );
     }
 

@@ -63,6 +63,70 @@ export interface SmeltingRecipeManifest {
 }
 
 /**
+ * Crafting recipe input from recipes/crafting.json
+ */
+export interface CraftingRecipeInput {
+  item: string;
+  amount: number;
+}
+
+/**
+ * Crafting consumable from recipes/crafting.json
+ */
+export interface CraftingConsumable {
+  item: string;
+  uses: number;
+}
+
+/**
+ * Crafting recipe from recipes/crafting.json
+ */
+export interface CraftingRecipeManifest {
+  output: string;
+  category: string;
+  inputs: CraftingRecipeInput[];
+  tools: string[];
+  consumables: CraftingConsumable[];
+  level: number;
+  xp: number;
+  ticks: number;
+  station: string;
+}
+
+/**
+ * Full manifest structure for recipes/crafting.json
+ */
+export interface CraftingManifest {
+  recipes: CraftingRecipeManifest[];
+}
+
+/**
+ * Crafting recipe data for runtime use
+ */
+export interface CraftingRecipeData {
+  /** Output item ID */
+  output: string;
+  /** Display name for the item */
+  name: string;
+  /** Category for UI grouping (leather, studded, dragonhide, jewelry, gem_cutting) */
+  category: string;
+  /** Input materials required */
+  inputs: CraftingRecipeInput[];
+  /** Tool item IDs required in inventory (not consumed) */
+  tools: string[];
+  /** Consumable items with limited uses (e.g., thread with 5 uses) */
+  consumables: CraftingConsumable[];
+  /** Crafting level required */
+  level: number;
+  /** XP granted per item made */
+  xp: number;
+  /** Time in game ticks (600ms per tick) */
+  ticks: number;
+  /** Station required ("none" or "furnace") */
+  station: string;
+}
+
+/**
  * Smithing recipe from recipes/smithing.json
  */
 export interface SmithingRecipeManifest {
@@ -201,11 +265,17 @@ export class ProcessingDataProvider {
   private smithableItemIds = new Set<string>();
   private smithingRecipesByBar = new Map<string, SmithingRecipeData[]>();
 
+  // Crafting lookup tables (built from recipes/crafting.json)
+  private craftingRecipeMap = new Map<string, CraftingRecipeData>();
+  private craftableItemIds = new Set<string>();
+  private craftingRecipesByCategory = new Map<string, CraftingRecipeData[]>();
+
   // Loaded recipe manifests (set by DataManager)
   private cookingManifest: CookingManifest | null = null;
   private firemakingManifest: FiremakingManifest | null = null;
   private smeltingManifest: SmeltingManifest | null = null;
   private smithingManifest: SmithingManifest | null = null;
+  private craftingManifest: CraftingManifest | null = null;
 
   // ============================================================================
   // PRE-ALLOCATED BUFFERS (Memory optimization - avoid allocation in hot paths)
@@ -262,6 +332,13 @@ export class ProcessingDataProvider {
   }
 
   /**
+   * Load crafting recipes from manifest
+   */
+  public loadCraftingRecipes(manifest: CraftingManifest): void {
+    this.craftingManifest = manifest;
+  }
+
+  /**
    * Check if recipe manifests are loaded
    */
   public hasRecipeManifests(): boolean {
@@ -269,7 +346,8 @@ export class ProcessingDataProvider {
       this.cookingManifest ||
       this.firemakingManifest ||
       this.smeltingManifest ||
-      this.smithingManifest
+      this.smithingManifest ||
+      this.craftingManifest
     );
   }
 
@@ -308,10 +386,14 @@ export class ProcessingDataProvider {
       this.buildSmithingDataFromItems();
     }
 
+    if (this.craftingManifest) {
+      this.buildCraftingDataFromManifest();
+    }
+
     this.isInitialized = true;
 
     console.log(
-      `[ProcessingDataProvider] Initialized: ${this.cookableItemIds.size} cookable items, ${this.burneableLogIds.size} burnable logs, ${this.smeltableBarIds.size} smeltable bars, ${this.smithableItemIds.size} smithable items`,
+      `[ProcessingDataProvider] Initialized: ${this.cookableItemIds.size} cookable items, ${this.burneableLogIds.size} burnable logs, ${this.smeltableBarIds.size} smeltable bars, ${this.smithableItemIds.size} smithable items, ${this.craftableItemIds.size} craftable items`,
     );
   }
 
@@ -328,6 +410,9 @@ export class ProcessingDataProvider {
     this.smithingRecipeMap.clear();
     this.smithableItemIds.clear();
     this.smithingRecipesByBar.clear();
+    this.craftingRecipeMap.clear();
+    this.craftableItemIds.clear();
+    this.craftingRecipesByCategory.clear();
     this.isInitialized = false;
     this.initialize();
   }
@@ -1020,6 +1105,141 @@ export class ProcessingDataProvider {
   }
 
   // ==========================================================================
+  // BUILD CRAFTING DATA FROM MANIFEST
+  // ==========================================================================
+
+  /**
+   * Build crafting lookup tables from recipes/crafting.json
+   */
+  private buildCraftingDataFromManifest(): void {
+    if (!this.craftingManifest) return;
+
+    for (const recipe of this.craftingManifest.recipes) {
+      const item = ITEMS.get(recipe.output);
+      const name = item?.name || recipe.output;
+
+      const recipeData: CraftingRecipeData = {
+        output: recipe.output,
+        name,
+        category: recipe.category,
+        inputs: recipe.inputs,
+        tools: recipe.tools,
+        consumables: recipe.consumables || [],
+        level: recipe.level,
+        xp: recipe.xp,
+        ticks: recipe.ticks,
+        station: recipe.station,
+      };
+
+      this.craftingRecipeMap.set(recipe.output, recipeData);
+      this.craftableItemIds.add(recipe.output);
+
+      const categoryRecipes =
+        this.craftingRecipesByCategory.get(recipe.category) || [];
+      categoryRecipes.push(recipeData);
+      this.craftingRecipesByCategory.set(recipe.category, categoryRecipes);
+    }
+  }
+
+  // ==========================================================================
+  // CRAFTING ACCESSORS
+  // ==========================================================================
+
+  /**
+   * Check if an item is craftable
+   */
+  public isCraftableItem(itemId: string): boolean {
+    this.ensureInitialized();
+    return this.craftableItemIds.has(itemId);
+  }
+
+  /**
+   * Get crafting recipe data for an output item
+   */
+  public getCraftingRecipe(outputItemId: string): CraftingRecipeData | null {
+    this.ensureInitialized();
+    return this.craftingRecipeMap.get(outputItemId) || null;
+  }
+
+  /**
+   * Get all craftable item IDs
+   */
+  public getCraftableItemIds(): Set<string> {
+    this.ensureInitialized();
+    return this.craftableItemIds;
+  }
+
+  /**
+   * Get all crafting recipes
+   */
+  public getAllCraftingRecipes(): CraftingRecipeData[] {
+    this.ensureInitialized();
+    return Array.from(this.craftingRecipeMap.values());
+  }
+
+  /**
+   * Get crafting recipes for a specific category
+   */
+  public getCraftingRecipesByCategory(category: string): CraftingRecipeData[] {
+    this.ensureInitialized();
+    return this.craftingRecipesByCategory.get(category) || [];
+  }
+
+  /**
+   * Get all crafting category names
+   */
+  public getCraftingCategories(): string[] {
+    this.ensureInitialized();
+    return Array.from(this.craftingRecipesByCategory.keys());
+  }
+
+  /**
+   * Get crafting level requirement for an item
+   */
+  public getCraftingLevel(outputItemId: string): number {
+    const recipe = this.getCraftingRecipe(outputItemId);
+    return recipe?.level ?? 1;
+  }
+
+  /**
+   * Get crafting XP for an item
+   */
+  public getCraftingXP(outputItemId: string): number {
+    const recipe = this.getCraftingRecipe(outputItemId);
+    return recipe?.xp ?? 0;
+  }
+
+  /**
+   * Get crafting ticks for an item
+   */
+  public getCraftingTicks(outputItemId: string): number {
+    const recipe = this.getCraftingRecipe(outputItemId);
+    return recipe?.ticks ?? 3;
+  }
+
+  /**
+   * Get all recipes the player can make with their crafting level
+   */
+  public getAvailableCraftingRecipes(
+    craftingLevel: number,
+  ): CraftingRecipeData[] {
+    this.ensureInitialized();
+    return Array.from(this.craftingRecipeMap.values()).filter(
+      (recipe) => recipe.level <= craftingLevel,
+    );
+  }
+
+  /**
+   * Get crafting recipes that require a specific station
+   */
+  public getCraftingRecipesByStation(station: string): CraftingRecipeData[] {
+    this.ensureInitialized();
+    return Array.from(this.craftingRecipeMap.values()).filter(
+      (recipe) => recipe.station === station,
+    );
+  }
+
+  // ==========================================================================
   // UTILITY
   // ==========================================================================
 
@@ -1048,6 +1268,7 @@ export class ProcessingDataProvider {
     burnableLogs: number;
     smeltableBars: number;
     smithingRecipes: number;
+    craftingRecipes: number;
     isInitialized: boolean;
   } {
     this.ensureInitialized();
@@ -1056,6 +1277,7 @@ export class ProcessingDataProvider {
       burnableLogs: this.burneableLogIds.size,
       smeltableBars: this.smeltableBarIds.size,
       smithingRecipes: this.smithingRecipeMap.size,
+      craftingRecipes: this.craftingRecipeMap.size,
       isInitialized: this.isInitialized,
     };
   }
