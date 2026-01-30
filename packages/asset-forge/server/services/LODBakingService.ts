@@ -473,10 +473,10 @@ export class LODBakingService {
 
     // Find all GLB files in asset directories
     // Note: vegetation assets are in packages/server/world/assets/vegetation
+    // Rocks are now procedurally generated via @hyperscape/procgen/rock
     const patterns = [
       "packages/server/world/assets/vegetation/**/*.glb",
       "assets/trees/**/*.glb",
-      "assets/rocks/**/*.glb",
       "assets/grass/**/*.glb",
     ];
 

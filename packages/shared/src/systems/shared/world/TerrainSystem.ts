@@ -60,14 +60,37 @@ import { Environment } from "./Environment";
 import {
   generateTrees,
   generateOres,
+  generateRocks,
+  // generatePlants, // DISABLED - plants not working/looking good yet
   type ResourceGenerationContext,
 } from "./BiomeResourceGenerator";
+import {
+  setProcgenRockWorld,
+  addRockInstance,
+  preWarmRockCache,
+  BIOME_ROCK_PRESETS,
+} from "./ProcgenRockCache";
+import { ProcgenRockInstancer } from "./ProcgenRockInstancer";
+// Plants disabled - not working/looking good yet
+// import {
+//   setProcgenPlantWorld,
+//   addPlantInstance,
+//   preWarmPlantCache,
+//   BIOME_PLANT_PRESETS,
+// } from "./ProcgenPlantCache";
+import { ProcgenPlantInstancer } from "./ProcgenPlantInstancer"; // Still needed for cleanup
+import type { VegetationInstance } from "../../../types/world/world-types";
 import { stationDataProvider } from "../../../data/StationDataProvider";
 import { resolveFootprint } from "../../../types/game/resource-processing-types";
 import { createTerrainMaterial, TerrainUniforms } from "./TerrainShader";
 import type { RoadNetworkSystem } from "./RoadNetworkSystem";
 import type { TownSystem } from "./TownSystem";
 import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
+import {
+  TerrainComputeContext,
+  isTerrainComputeAvailable,
+  type GPURoadSegment,
+} from "../../../utils/compute";
 
 // Road coloring constants
 const ROAD_COLOR = { r: 0.45, g: 0.35, b: 0.25 }; // Dirt brown color
@@ -145,10 +168,12 @@ export class TerrainSystem extends System {
   private maxTilesPerFrame = 2; // cap tiles generated per frame
   private generationBudgetMsPerFrame = 6; // time budget per frame (ms)
   // Pending resource instance creation (deferred to spread across frames)
+  // Uses index-based dequeue to avoid O(n) shift() operations
   private pendingResourceInstances: Array<{
     tile: TerrainTile;
     resourceIndex: number;
   }> = [];
+  private pendingResourceHead = 0; // Index of next item to process
   private maxResourceInstancesPerFrame = 10; // Process 10 resource instances per frame
   private _tempVec3 = new THREE.Vector3();
   private _tempVec3_2 = new THREE.Vector3();
@@ -161,6 +186,10 @@ export class TerrainSystem extends System {
   private roadNetworkSystem?: RoadNetworkSystem;
   private townSystem: TownSystem | null = null;
   private bossHotspots: BossHotspot[] = [];
+
+  // GPU compute context for accelerated terrain operations
+  private terrainComputeContext: TerrainComputeContext | null = null;
+  private gpuComputeAvailable = false;
 
   // Unified terrain generator from @hyperscape/procgen
   // Provides deterministic height/biome calculation independent of rendering
@@ -502,16 +531,25 @@ export class TerrainSystem extends System {
   /**
    * Process pending resource instance creation queue.
    * Spreads instance creation across frames to prevent hitches.
+   * Uses index-based dequeue to avoid O(n) shift() operations.
    */
   private processResourceInstanceQueue(): void {
-    if (this.pendingResourceInstances.length === 0) return;
+    const queueLength = this.pendingResourceInstances.length;
+    if (this.pendingResourceHead >= queueLength) {
+      // Queue exhausted - reset for next batch
+      if (queueLength > 0) {
+        this.pendingResourceInstances.length = 0;
+        this.pendingResourceHead = 0;
+      }
+      return;
+    }
 
     let processed = 0;
     while (
-      this.pendingResourceInstances.length > 0 &&
+      this.pendingResourceHead < queueLength &&
       processed < this.maxResourceInstancesPerFrame
     ) {
-      const item = this.pendingResourceInstances.shift()!;
+      const item = this.pendingResourceInstances[this.pendingResourceHead++];
       const { tile, resourceIndex } = item;
 
       // Tile may have been unloaded
@@ -520,6 +558,10 @@ export class TerrainSystem extends System {
 
       const resource = tile.resources[resourceIndex];
       if (resource.instanceId != null) continue;
+
+      // Skip tree types - they're rendered by ProcgenTreeInstancer with proper models
+      // (the InstancedMeshManager only creates placeholder green boxes for trees)
+      if (resource.type === "tree") continue;
 
       // Create the instance
       this._tempVec3.set(
@@ -1317,6 +1359,40 @@ export class TerrainSystem extends System {
     // Initialize terrain material (client-side only)
     if (this.world.isClient) {
       this.initTerrainMaterial();
+
+      // Initialize procgen rock system (plants disabled - not working/looking good yet)
+      setProcgenRockWorld(this.world);
+      // setProcgenPlantWorld(this.world); // DISABLED
+
+      // Pre-warm common rock presets for the world's biomes
+      const commonRockPresets = ["boulder", "pebble", "granite", "sandstone"];
+
+      // Pre-warm mesh variant caches (rocks only)
+      preWarmRockCache(commonRockPresets).catch((err) =>
+        console.warn("[TerrainSystem] Failed to pre-warm rock cache:", err),
+      );
+
+      // Pre-warm impostor caches from IndexedDB (loads without rebaking)
+      preWarmRockCache(commonRockPresets)
+        .then(() => {
+          // Create instancer to enable impostor pre-warming
+          const rockInstancer = ProcgenRockInstancer.getInstance(this.world);
+
+          // Pre-warm impostor caches (loads from IndexedDB if available)
+          if (rockInstancer) {
+            rockInstancer
+              .preWarmImpostorCache(commonRockPresets)
+              .catch((err) =>
+                console.warn(
+                  "[TerrainSystem] Failed to pre-warm rock impostors:",
+                  err,
+                ),
+              );
+          }
+        })
+        .catch((err) =>
+          console.warn("[TerrainSystem] Failed during cache pre-warming:", err),
+        );
     }
 
     // Initialize water system
@@ -1434,6 +1510,18 @@ export class TerrainSystem extends System {
       | RoadNetworkSystem
       | undefined;
 
+    // Initialize GPU compute context for accelerated terrain operations (client only)
+    if (isClient && isTerrainComputeAvailable()) {
+      this.terrainComputeContext = new TerrainComputeContext({
+        minVerticesForGPU: 1000,
+        minRoadsForGPU: 3,
+      });
+      // Will be fully initialized when renderer is available
+      console.log(
+        "[TerrainSystem] GPU compute context created (pending renderer init)",
+      );
+    }
+
     // Subscribe to roads generated event to refresh existing tile colors
     this.world.on(EventType.ROADS_GENERATED, () => {
       // Get road system reference now that it's ready
@@ -1499,30 +1587,23 @@ export class TerrainSystem extends System {
       1000,
     );
 
-    // Register rock mesh - pooled to 500 visible instances
-    const rockSize = { x: 1.0, y: 1.0, z: 1.0 };
-    const rockGeometry = new THREE.BoxGeometry(
-      rockSize.x,
-      rockSize.y,
-      rockSize.z,
-    );
-    const rockMaterial = new THREE.MeshLambertMaterial({ color: 0x8a8a8a });
-    this.instancedMeshManager.registerMesh(
-      "rock",
-      rockGeometry,
-      rockMaterial,
-      500,
-    );
+    // NOTE: Decorative rocks are now handled by ProcgenRockInstancer
+    // with procedurally generated geometry and LODs.
+    // Ore meshes remain as placeholder boxes since they are harvestable resources
+    // and will be replaced with GLB models from the resource system.
+    const oreSize = { x: 1.0, y: 1.0, z: 1.0 };
+    const oreGeometry = new THREE.BoxGeometry(oreSize.x, oreSize.y, oreSize.z);
+    const oreMaterial = new THREE.MeshLambertMaterial({ color: 0x8a8a8a });
     this.instancedMeshManager.registerMesh(
       "ore",
-      rockGeometry,
-      rockMaterial,
+      oreGeometry,
+      oreMaterial,
       500,
     );
     this.instancedMeshManager.registerMesh(
       "rare_ore",
-      rockGeometry,
-      rockMaterial,
+      oreGeometry,
+      oreMaterial,
       200,
     );
 
@@ -2145,6 +2226,164 @@ export class TerrainSystem extends System {
     const projZ = z1 + t * dz;
 
     return Math.sqrt((px - projX) ** 2 + (pz - projZ) ** 2);
+  }
+
+  /**
+   * Initialize GPU compute context from renderer.
+   * Should be called when the WebGPU renderer is available.
+   */
+  public initializeGPUCompute(renderer: {
+    backend?: { device?: GPUDevice };
+  }): boolean {
+    if (!this.terrainComputeContext) {
+      return false;
+    }
+
+    try {
+      this.gpuComputeAvailable =
+        this.terrainComputeContext.initializeFromRenderer(renderer);
+      if (this.gpuComputeAvailable) {
+        console.log("[TerrainSystem] GPU compute initialized successfully");
+      }
+      return this.gpuComputeAvailable;
+    } catch (error) {
+      console.warn("[TerrainSystem] GPU compute initialization failed:", error);
+      this.gpuComputeAvailable = false;
+      return false;
+    }
+  }
+
+  /**
+   * Compute road influence for all vertices in a tile using GPU.
+   * Falls back to CPU if GPU is not available.
+   *
+   * @param vertices - Float32Array of [localX, localZ, ...] pairs
+   * @param tileX - Tile X coordinate
+   * @param tileZ - Tile Z coordinate
+   * @returns Float32Array of influence values (0-1) per vertex
+   */
+  private async computeRoadInfluenceBatchGPU(
+    vertices: Float32Array,
+    tileX: number,
+    tileZ: number,
+  ): Promise<Float32Array | null> {
+    // Get road segments
+    this.roadNetworkSystem ??= this.world.getSystem("roads") as
+      | RoadNetworkSystem
+      | undefined;
+    if (!this.roadNetworkSystem) return null;
+
+    const segments = this.roadNetworkSystem.getRoadSegmentsForTile(
+      tileX,
+      tileZ,
+    );
+    if (segments.length === 0) return null;
+
+    const vertexCount = vertices.length / 2;
+
+    // Check if GPU should be used
+    if (
+      this.gpuComputeAvailable &&
+      this.terrainComputeContext &&
+      this.terrainComputeContext.shouldUseGPUForRoadInfluence(
+        vertexCount,
+        segments.length,
+      )
+    ) {
+      try {
+        // Convert segments to GPU format
+        const gpuRoads: GPURoadSegment[] = segments.map((seg) => ({
+          startX: seg.start.x,
+          startZ: seg.start.z,
+          endX: seg.end.x,
+          endZ: seg.end.z,
+          width: seg.width,
+        }));
+
+        const tileOffset = {
+          x: tileX * this.CONFIG.TILE_SIZE,
+          z: tileZ * this.CONFIG.TILE_SIZE,
+        };
+
+        // Use GPU compute
+        const influences =
+          await this.terrainComputeContext.computeRoadInfluence(
+            vertices,
+            gpuRoads,
+            tileOffset,
+          );
+
+        return influences;
+      } catch (error) {
+        console.warn(
+          "[TerrainSystem] GPU road influence failed, falling back to CPU:",
+          error,
+        );
+        // Fall through to CPU computation
+      }
+    }
+
+    // CPU fallback
+    return this.computeRoadInfluenceBatchCPU(vertices, tileX, tileZ, segments);
+  }
+
+  /**
+   * Compute road influence for all vertices using CPU (fallback).
+   */
+  private computeRoadInfluenceBatchCPU(
+    vertices: Float32Array,
+    tileX: number,
+    tileZ: number,
+    segments: Array<{
+      start: { x: number; z: number };
+      end: { x: number; z: number };
+      width: number;
+    }>,
+  ): Float32Array {
+    const vertexCount = vertices.length / 2;
+    const influences = new Float32Array(vertexCount);
+    const tileOffsetX = tileX * this.CONFIG.TILE_SIZE;
+    const tileOffsetZ = tileZ * this.CONFIG.TILE_SIZE;
+
+    for (let i = 0; i < vertexCount; i++) {
+      const localX = vertices[i * 2];
+      const localZ = vertices[i * 2 + 1];
+      const worldX = localX + tileOffsetX;
+      const worldZ = localZ + tileOffsetZ;
+
+      let minDistance = Infinity;
+      let closestWidth = this.CONFIG.ROAD_WIDTH;
+
+      for (const segment of segments) {
+        const distance = this.distanceToLineSegmentLocal(
+          localX,
+          localZ,
+          segment.start.x,
+          segment.start.z,
+          segment.end.x,
+          segment.end.z,
+        );
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestWidth = segment.width;
+        }
+      }
+
+      // Calculate influence
+      const halfWidth = closestWidth / 2;
+      const totalInfluenceWidth = halfWidth + ROAD_BLEND_WIDTH;
+
+      if (minDistance >= totalInfluenceWidth) {
+        influences[i] = 0;
+      } else if (minDistance <= halfWidth) {
+        influences[i] = 1.0;
+      } else {
+        const t = 1.0 - (minDistance - halfWidth) / ROAD_BLEND_WIDTH;
+        influences[i] = t * t * (3 - 2 * t); // smoothstep
+      }
+    }
+
+    return influences;
   }
 
   /**
@@ -2813,6 +3052,93 @@ export class TerrainSystem extends System {
   }
 
   /**
+   * Check if a world position is inside a flat zone's core area.
+   * Used by GrassSystem to exclude grass from artificial flat areas (buildings, arenas, etc.)
+   *
+   * @param worldX - World X coordinate
+   * @param worldZ - World Z coordinate
+   * @returns true if position is in a flat zone's core area (not blend area)
+   */
+  isInFlatZone(worldX: number, worldZ: number): boolean {
+    if (this.flatZones.size === 0) {
+      return false;
+    }
+
+    for (const zone of this.flatZones.values()) {
+      const dx = Math.abs(worldX - zone.centerX);
+      const dz = Math.abs(worldZ - zone.centerZ);
+      const halfWidth = zone.width / 2;
+      const halfDepth = zone.depth / 2;
+
+      // Check if in core flat area (not blend area)
+      if (dx <= halfWidth && dz <= halfDepth) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Get terrain color at a world position by sampling the nearest terrain tile vertex.
+   * Used by GrassSystem to match grass color to terrain.
+   *
+   * @param worldX - World X coordinate
+   * @param worldZ - World Z coordinate
+   * @returns RGB color (0-1 range) or null if no terrain data available
+   */
+  getTerrainColorAt(
+    worldX: number,
+    worldZ: number,
+  ): { r: number; g: number; b: number } | null {
+    // Find the terrain tile containing this position
+    const tileX = Math.floor(worldX / this.CONFIG.TILE_SIZE);
+    const tileZ = Math.floor(worldZ / this.CONFIG.TILE_SIZE);
+    const key = `${tileX},${tileZ}`;
+
+    const tile = this.terrainTiles.get(key);
+    if (!tile?.mesh) {
+      return null;
+    }
+
+    // Get vertex colors from geometry
+    const geometry = tile.mesh.geometry as THREE.BufferGeometry;
+    const colorAttr = geometry.getAttribute("color") as
+      | THREE.BufferAttribute
+      | undefined;
+    if (!colorAttr) {
+      return null;
+    }
+
+    // Calculate local position within tile
+    const localX = worldX - tileX * this.CONFIG.TILE_SIZE;
+    const localZ = worldZ - tileZ * this.CONFIG.TILE_SIZE;
+
+    // Find nearest vertex (simplified - could use bilinear interpolation for smoother results)
+    const resolution = this.CONFIG.TILE_RESOLUTION;
+    const vertexX = Math.round(
+      (localX / this.CONFIG.TILE_SIZE) * (resolution - 1),
+    );
+    const vertexZ = Math.round(
+      (localZ / this.CONFIG.TILE_SIZE) * (resolution - 1),
+    );
+    const vertexIndex = vertexZ * resolution + vertexX;
+
+    if (
+      vertexIndex < 0 ||
+      vertexIndex * 3 + 2 >= colorAttr.count * colorAttr.itemSize
+    ) {
+      return null;
+    }
+
+    return {
+      r: colorAttr.getX(vertexIndex),
+      g: colorAttr.getY(vertexIndex),
+      b: colorAttr.getZ(vertexIndex),
+    };
+  }
+
+  /**
    * Register a flat zone and update spatial index.
    * Spatial index uses terrain tiles (100m each) for efficient lookup.
    *
@@ -3413,10 +3739,141 @@ export class TerrainSystem extends System {
       return;
     }
 
-    this.generateTreesForTile(tile, biomeData);
-    this.generateOtherResourcesForTile(tile, biomeData);
+    // TEMPORARILY DISABLED - debugging leaf rendering
+    // this.generateTreesForTile(tile, biomeData);
+    // this.generateOtherResourcesForTile(tile, biomeData);
+    // Generate decorative rocks (client only)
+    // NOTE: Plants disabled - not working/looking good yet
+    // const isClient = this.world.network?.isClient || false;
+    // if (isClient) {
+    //   this.generateDecorativeRocksForTile(tile, biomeData);
+    //   // this.generateDecorativePlantsForTile(tile, biomeData); // DISABLED
+    // }
     // Roads are now generated using noise patterns instead of segments
   }
+
+  /**
+   * Generate decorative (non-harvestable) rocks for a tile.
+   * Uses procedural generation from @hyperscape/procgen/rock.
+   */
+  private generateDecorativeRocksForTile(
+    tile: TerrainTile,
+    biomeData: BiomeData,
+  ): void {
+    // Use default rock config if not specified in biome
+    const rockConfig = biomeData.rocks ?? {
+      enabled: true,
+      density: 8, // 8 rocks per 100m²
+      presets: BIOME_ROCK_PRESETS[tile.biome] ?? ["boulder", "pebble"],
+      scaleRange: [0.3, 1.5] as [number, number],
+      clusterChance: 0.3,
+      minSpacing: 3,
+    };
+
+    if (!rockConfig.enabled) {
+      return;
+    }
+
+    // Create context for resource generation
+    const ctx: ResourceGenerationContext = {
+      tileX: tile.x,
+      tileZ: tile.z,
+      tileKey: tile.key,
+      tileSize: this.CONFIG.TILE_SIZE,
+      waterThreshold: this.CONFIG.WATER_THRESHOLD,
+      getHeightAt: (worldX, worldZ) => this.getHeightAt(worldX, worldZ),
+      isOnRoad: this.roadNetworkSystem
+        ? (worldX, worldZ) => this.roadNetworkSystem!.isOnRoad(worldX, worldZ)
+        : undefined,
+      createRng: (salt) => this.createTileRng(tile.x, tile.z, salt),
+    };
+
+    // Generate rock placement data
+    const rocks = generateRocks(ctx, rockConfig, tile.biome);
+
+    // Initialize array if not exists
+    tile.decorativeRockIds = tile.decorativeRockIds ?? [];
+
+    // Add each rock to the instancer (async but don't wait)
+    for (const rock of rocks) {
+      const position = new THREE.Vector3(
+        rock.position.x,
+        rock.position.y,
+        rock.position.z,
+      );
+      addRockInstance(
+        rock.assetId,
+        position,
+        rock.rotation.y,
+        rock.scale,
+        rock.id,
+      )
+        .then((id) => {
+          if (id && tile.decorativeRockIds) {
+            tile.decorativeRockIds.push(id);
+          }
+        })
+        .catch((err) => {
+          console.warn(`[TerrainSystem] Failed to add rock instance:`, err);
+        });
+    }
+  }
+
+  /**
+   * Generate decorative (non-harvestable) plants for a tile.
+   * Uses procedural generation from @hyperscape/procgen/plant.
+   * DISABLED: Plants not working/looking good yet
+   */
+  // private generateDecorativePlantsForTile(tile: TerrainTile, biomeData: BiomeData): void {
+  //   // Use default plant config if not specified in biome
+  //   const plantConfig = biomeData.plants ?? {
+  //     enabled: true,
+  //     density: 15, // 15 plants per 100m²
+  //     presets: BIOME_PLANT_PRESETS[tile.biome] ?? ["monstera", "philodendron"],
+  //     scaleRange: [0.5, 1.2] as [number, number],
+  //     minSpacing: 1.5,
+  //     clustering: true,
+  //     clusterSize: [2, 4] as [number, number],
+  //   };
+  //
+  //   if (!plantConfig.enabled) {
+  //     return;
+  //   }
+  //
+  //   // Create context for resource generation
+  //   const ctx: ResourceGenerationContext = {
+  //     tileX: tile.x,
+  //     tileZ: tile.z,
+  //     tileKey: tile.key,
+  //     tileSize: this.CONFIG.TILE_SIZE,
+  //     waterThreshold: this.CONFIG.WATER_THRESHOLD,
+  //     getHeightAt: (worldX, worldZ) => this.getHeightAt(worldX, worldZ),
+  //     isOnRoad: this.roadNetworkSystem
+  //       ? (worldX, worldZ) => this.roadNetworkSystem!.isOnRoad(worldX, worldZ)
+  //       : undefined,
+  //     createRng: (salt) => this.createTileRng(tile.x, tile.z, salt),
+  //   };
+  //
+  //   // Generate plant placement data
+  //   const plants = generatePlants(ctx, plantConfig, tile.biome);
+  //
+  //   // Initialize array if not exists
+  //   tile.decorativePlantIds = tile.decorativePlantIds ?? [];
+  //
+  //   // Add each plant to the instancer (async but don't wait)
+  //   for (const plant of plants) {
+  //     const position = new THREE.Vector3(plant.position.x, plant.position.y, plant.position.z);
+  //     addPlantInstance(plant.assetId, position, plant.rotation.y, plant.scale, plant.id)
+  //       .then((id) => {
+  //         if (id && tile.decorativePlantIds) {
+  //           tile.decorativePlantIds.push(id);
+  //         }
+  //       })
+  //       .catch((err) => {
+  //         console.warn(`[TerrainSystem] Failed to add plant instance:`, err);
+  //       });
+  //   }
+  // }
 
   /**
    * Generate harvestable trees for a tile based on biome configuration.
@@ -3759,6 +4216,17 @@ export class TerrainSystem extends System {
     if (this.world.network?.isClient && this.instancedMeshManager) {
       this.instancedMeshManager.updateAllInstanceVisibility();
 
+      // Update procgen rock and plant instancers for LOD transitions
+      const rockInstancer = ProcgenRockInstancer.getInstance(null);
+      if (rockInstancer) {
+        rockInstancer.update(_deltaTime);
+      }
+      // Plant instancer disabled - not working/looking good yet
+      // const plantInstancer = ProcgenPlantInstancer.getInstance(null);
+      // if (plantInstancer) {
+      //   plantInstancer.update(_deltaTime);
+      // }
+
       // Log pooling stats occasionally for debugging
       if (Math.random() < 0.002) {
         // Log approximately once every 500 frames at 60fps
@@ -3878,6 +4346,26 @@ export class TerrainSystem extends System {
     }
   }
 
+  /**
+   * Safely dispose a Three.js material, handling WebGPU NodeMaterial edge cases
+   * where the internal nodeBuilderState may be undefined if the material was
+   * never rendered or already cleaned up by the renderer.
+   */
+  private safeDisposeMaterial(material: THREE.Material): void {
+    try {
+      material.dispose();
+    } catch (err) {
+      // WebGPU NodeMaterial may throw if nodeBuilderState was never created
+      // (e.g., material was never rendered before disposal)
+      // This is safe to ignore - the material is still cleaned up
+      if (err instanceof TypeError && String(err).includes("usedTimes")) {
+        // Expected error for unrendered WebGPU materials - silently ignore
+      } else {
+        console.warn("[TerrainSystem] Material disposal error:", err);
+      }
+    }
+  }
+
   private unloadTile(tile: TerrainTile): void {
     // Clean up road meshes
     for (const road of tile.roads) {
@@ -3885,7 +4373,7 @@ export class TerrainSystem extends System {
         road.mesh.parent.remove(road.mesh);
         road.mesh.geometry.dispose();
         if (road.mesh.material instanceof THREE.Material) {
-          road.mesh.material.dispose();
+          this.safeDisposeMaterial(road.mesh.material);
         }
         road.mesh = null;
       }
@@ -3903,6 +4391,28 @@ export class TerrainSystem extends System {
       }
     }
 
+    // Remove decorative rock instances
+    if (tile.decorativeRockIds?.length) {
+      const rockInstancer = ProcgenRockInstancer.getInstance(null);
+      if (rockInstancer) {
+        for (const id of tile.decorativeRockIds) {
+          rockInstancer.removeInstance(id);
+        }
+      }
+      tile.decorativeRockIds = [];
+    }
+
+    // Remove decorative plant instances
+    if (tile.decorativePlantIds?.length) {
+      const plantInstancer = ProcgenPlantInstancer.getInstance(null);
+      if (plantInstancer) {
+        for (const id of tile.decorativePlantIds) {
+          plantInstancer.removeInstance(id);
+        }
+      }
+      tile.decorativePlantIds = [];
+    }
+
     // Clean up water meshes
     if (tile.waterMeshes) {
       for (const waterMesh of tile.waterMeshes) {
@@ -3910,7 +4420,7 @@ export class TerrainSystem extends System {
           waterMesh.parent.remove(waterMesh);
           waterMesh.geometry.dispose();
           if (waterMesh.material instanceof THREE.Material) {
-            waterMesh.material.dispose();
+            this.safeDisposeMaterial(waterMesh.material);
           }
         }
       }
@@ -3922,7 +4432,7 @@ export class TerrainSystem extends System {
       this.terrainContainer.remove(tile.mesh);
       tile.mesh.geometry.dispose();
       if (tile.mesh.material instanceof THREE.Material) {
-        tile.mesh.material.dispose();
+        this.safeDisposeMaterial(tile.mesh.material);
       }
     }
 
@@ -4727,7 +5237,34 @@ export class TerrainSystem extends System {
   }
 
   /**
+   * Get all loaded tiles with their biome (for GrassSystem and other systems)
+   * Returns ALL tiles regardless of difficulty or mob presence.
+   */
+  getLoadedTiles(): Array<{
+    tileX: number;
+    tileZ: number;
+    biome: string;
+  }> {
+    const tilesData: Array<{
+      tileX: number;
+      tileZ: number;
+      biome: string;
+    }> = [];
+
+    for (const [_key, tile] of this.terrainTiles.entries()) {
+      tilesData.push({
+        tileX: tile.x,
+        tileZ: tile.z,
+        biome: this.mapBiomeToGeneric(tile.biome),
+      });
+    }
+
+    return tilesData;
+  }
+
+  /**
    * Get all loaded tiles with their biome and mob spawn data
+   * Note: Only returns tiles with difficulty > 0 AND mobTypes (for mob spawning)
    */
   getLoadedTilesWithSpawnData(): Array<{
     tileX: number;
@@ -4749,7 +5286,11 @@ export class TerrainSystem extends System {
     for (const [_key, tile] of this.terrainTiles.entries()) {
       const biomeData = BIOMES[tile.biome];
 
-      if (biomeData.difficulty > 0 && biomeData.mobTypes.length > 0) {
+      if (
+        biomeData &&
+        biomeData.difficulty > 0 &&
+        biomeData.mobTypes.length > 0
+      ) {
         const spawnPositions = this.getMobSpawnPositionsForTile(
           tile.x,
           tile.z,
@@ -4823,6 +5364,13 @@ export class TerrainSystem extends System {
     this.chunkPlayerCounts.clear();
     this.terrainBoundingBoxes.clear();
     this.pendingSerializationData.clear();
+
+    // Cleanup GPU compute context
+    if (this.terrainComputeContext) {
+      this.terrainComputeContext.destroy();
+      this.terrainComputeContext = null;
+      this.gpuComputeAvailable = false;
+    }
   }
 
   private emitTileUnloaded(tileId: string, tileX: number, tileZ: number): void {

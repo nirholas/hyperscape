@@ -48,11 +48,6 @@ import THREE, {
   Fn,
   MeshStandardNodeMaterial,
   float,
-  fract,
-  sin,
-  cos,
-  dot,
-  vec2,
   smoothstep,
   positionWorld,
   viewportCoordinate,
@@ -87,6 +82,7 @@ import {
   type TSLImpostorMaterial,
 } from "@hyperscape/impostor";
 import { isWebGPURenderer } from "./RendererFactory";
+import { isGPUComputeAvailable, getGlobalCullingManager } from "../compute";
 
 // ============================================================================
 // MOB DISSOLVE MATERIAL TYPES
@@ -861,6 +857,10 @@ export class MobInstancedRenderer {
   // Track which handles are currently using imposters vs 3D
   private readonly imposterHandles = new Set<string>();
 
+  // GPU compute culling (optional enhancement)
+  private _gpuCullingEnabled = false;
+  private _gpuCullingInitialized = false;
+
   // Track all dissolve materials for uniform updates
   private readonly _dissolveMaterials: MobDissolveMaterial[] = [];
   private readonly _dissolvePlayerPos = new THREE.Vector3();
@@ -966,6 +966,32 @@ export class MobInstancedRenderer {
     console.log(
       `[MobInstancedRenderer] Synced with shadows "${shadowsLevel}": fade ${fadeStart.toFixed(0)}-${fadeEnd.toFixed(0)}m, imposterAt=${this._imposterDistance.toFixed(0)}m`,
     );
+
+    // Initialize GPU culling if available
+    this.initializeGPUCulling();
+  }
+
+  /**
+   * Initialize GPU compute culling if available.
+   * Falls back to CPU frustum culling if not available.
+   */
+  private initializeGPUCulling(): void {
+    if (this._gpuCullingInitialized) return;
+    this._gpuCullingInitialized = true;
+
+    if (!isGPUComputeAvailable()) {
+      this._gpuCullingEnabled = false;
+      return;
+    }
+
+    const cullingManager = getGlobalCullingManager();
+    if (!cullingManager?.isAvailable()) {
+      this._gpuCullingEnabled = false;
+      return;
+    }
+
+    this._gpuCullingEnabled = true;
+    console.log("[MobInstancedRenderer] GPU compute culling enabled");
   }
 
   static get(world: World): MobInstancedRenderer {
@@ -1907,6 +1933,12 @@ export class MobInstancedRenderer {
       camera.matrixWorldInverse,
     );
     this._frustum.setFromProjectionMatrix(this._projScreenMatrix);
+
+    // Update GPU compute frustum when available
+    if (this._gpuCullingEnabled && isGPUComputeAvailable()) {
+      const cullingManager = getGlobalCullingManager();
+      cullingManager?.updateFrustum(camera);
+    }
   }
 
   private shouldRefreshLOD(

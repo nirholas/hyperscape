@@ -56,17 +56,16 @@ import type { World } from "../../../types";
 import { EventType } from "../../../types/events";
 import { NoiseGenerator } from "../../../utils/NoiseGenerator";
 import type { Wind } from "./Wind";
-import { GPU_VEG_CONFIG } from "./GPUVegetation";
-import {
-  getGrassiness,
-  calculateSlope,
-  generateNoiseTexture,
-  TERRAIN_CONSTANTS,
-} from "./TerrainShader";
+import { generateNoiseTexture, TERRAIN_CONSTANTS } from "./TerrainShader";
 import {
   isGPUComputeAvailable,
   getGPUComputeManager,
 } from "../../../utils/compute";
+import {
+  isGrassWorkerAvailable,
+  generateGrassPlacementsAsync,
+  type GrassPlacementData,
+} from "../../../utils/workers/GrassWorker";
 
 // ============================================================================
 // CONFIGURATION
@@ -77,16 +76,19 @@ import {
  */
 export const GRASS_CONFIG = {
   /** Grass blade height in meters (base, varies per instance) */
-  BLADE_HEIGHT: 0.4,
+  BLADE_HEIGHT: 0.35,
 
   /** Grass blade width at base in meters */
-  BLADE_WIDTH: 0.04,
+  BLADE_WIDTH: 0.035,
 
   /** Number of segments per blade (more = smoother bend) */
-  BLADE_SEGMENTS: 4,
+  BLADE_SEGMENTS: 3,
+
+  /** Number of blades per tuft (grouped for efficiency) */
+  BLADES_PER_TUFT: 4,
 
   /** Maximum instances per chunk (power of 2 for GPU memory alignment) */
-  MAX_INSTANCES_PER_CHUNK: 131072,
+  MAX_INSTANCES_PER_CHUNK: 65536,
 
   /** Chunk size in meters (should match or subdivide terrain tile) */
   CHUNK_SIZE: 25,
@@ -94,33 +96,38 @@ export const GRASS_CONFIG = {
   /** Terrain tile size in meters (must match TerrainSystem.CONFIG.TILE_SIZE) */
   TILE_SIZE: 100,
 
-  /** Base density: instances per square meter (high for thick grass coverage) */
-  BASE_DENSITY: 40,
+  /** Base density: tufts per square meter (each tuft has BLADES_PER_TUFT blades) */
+  BASE_DENSITY: 12,
 
   /** Distance where grass starts fading (meters from player) */
-  FADE_START: 100,
+  FADE_START: 80,
 
   /** Distance where grass is fully invisible */
-  FADE_END: 150,
+  FADE_END: 120,
 
-  /** Water level - grass doesn't grow below this (matches TerrainShader visual) */
-  WATER_LEVEL: 5.0, // Direct value to avoid constant conflicts
+  /**
+   * Shoreline grass cutoff - matches terrain shader's visual zones:
+   * - Green terrain: above 14m
+   * - Wet dirt zone: 8-14m (grass fades)
+   * - Mud zone: 6-9m (no grass)
+   * - Water's edge: 5-6.5m (no grass)
+   * - Water: below 5m (no grass)
+   */
+  SHORELINE_FADE_START: 14.0, // Full grass above this
+  SHORELINE_FADE_END: 9.0, // No grass below this (matches mud zone start)
 
-  /** Buffer above water for shoreline avoidance */
-  WATER_BUFFER: 0.5, // Small buffer - grass can grow near water
-
-  // Wind animation parameters
+  // Wind animation parameters - GENTLE AND REALISTIC
   /** Primary wind oscillation speed (lower = gentler sway) */
-  WIND_SPEED: 0.5,
+  WIND_SPEED: 0.3,
 
   /** Secondary gust wave speed */
-  GUST_SPEED: 0.2,
+  GUST_SPEED: 0.12,
 
-  /** Maximum wind bend angle (radians) */
-  MAX_BEND: 0.5,
+  /** Maximum wind bend angle (radians) - subtle sway */
+  MAX_BEND: 0.25,
 
-  /** Flutter intensity for blade tips */
-  FLUTTER_INTENSITY: 0.15,
+  /** Flutter intensity for blade tips - very subtle */
+  FLUTTER_INTENSITY: 0.08,
 
   // Color variation - slightly lighter than terrain to catch light
   /** Base grass color (slightly lighter than terrain grassGreen for better visibility) */
@@ -132,9 +139,9 @@ export const GRASS_CONFIG = {
   /** Dark grass color for variation (matches terrain grassDark) */
   DARK_COLOR: new THREE.Color(0.28, 0.48, 0.15),
 
-  // LOD
+  // LOD - Dense close, sparse far
   /** Near distance for full density */
-  LOD_NEAR: 15,
+  LOD_NEAR: 20,
 
   /** Far distance for reduced density */
   LOD_FAR: 40,
@@ -215,21 +222,114 @@ export const BIOME_GRASS_DEFAULTS: Record<string, BiomeGrassConfig> = {
 // ============================================================================
 
 /**
- * Creates the base grass blade geometry (single blade, triangle strip).
- * The geometry is a flat quad that bends in the vertex shader.
+ * Creates a grass tuft geometry with multiple blades for efficiency.
+ * Each tuft contains BLADES_PER_TUFT blades arranged in a small cluster.
+ * This reduces instance count while maintaining visual density.
  *
- * Blade structure (5 segments = 10 vertices, 8 triangles):
- *   4---5
- *   |\  |
- *   | \ |
- *   2---3
- *   |\  |
- *   | \ |
- *   0---1  (base at y=0)
+ * Blade structure (per blade):
+ *   Segments from base to tip, tapering width
  *
- * UV mapping: u = 0 (left edge) to 1 (right edge), v = 0 (base) to 1 (tip)
+ * UV mapping: u = blade index (for variation), v = height (0=base, 1=tip)
  */
 function createGrassBladeGeometry(
+  segments: number = GRASS_CONFIG.BLADE_SEGMENTS,
+): THREE.BufferGeometry {
+  const geometry = new THREE.BufferGeometry();
+  const bladesPerTuft = GRASS_CONFIG.BLADES_PER_TUFT;
+
+  // Each blade: (segments + 1) * 2 vertices
+  const verticesPerBlade = (segments + 1) * 2;
+  const trianglesPerBlade = segments * 2;
+  const totalVertices = verticesPerBlade * bladesPerTuft;
+  const totalTriangles = trianglesPerBlade * bladesPerTuft;
+
+  const positions = new Float32Array(totalVertices * 3);
+  const uvs = new Float32Array(totalVertices * 2);
+  const normals = new Float32Array(totalVertices * 3);
+  const indices = new Uint16Array(totalTriangles * 3);
+
+  // Generate each blade in the tuft
+  for (let blade = 0; blade < bladesPerTuft; blade++) {
+    // Random offset for this blade within the tuft (deterministic)
+    const angle = (blade / bladesPerTuft) * Math.PI * 2 + blade * 0.7;
+    const radius = 0.03 + blade * 0.02; // Slight spread
+    const offsetX = Math.cos(angle) * radius;
+    const offsetZ = Math.sin(angle) * radius;
+    const bladeRotation = angle + Math.PI * 0.3; // Face outward slightly
+    const heightVariation = 0.85 + (blade % 3) * 0.1; // Height varies per blade
+
+    const vertexOffset = blade * verticesPerBlade;
+    const indexOffset = blade * trianglesPerBlade * 3;
+
+    // Generate vertices for this blade
+    for (let i = 0; i <= segments; i++) {
+      const t = i / segments; // 0 at base, 1 at tip
+      const y = t * heightVariation; // Height with variation
+
+      // Blade tapers toward tip
+      const width = (1.0 - t * 0.7) * 0.8; // Slightly narrower blades
+
+      // Apply rotation and offset
+      const cosR = Math.cos(bladeRotation);
+      const sinR = Math.sin(bladeRotation);
+
+      // Left vertex
+      const leftIdx = vertexOffset + i * 2;
+      const leftX = -0.5 * width;
+      positions[leftIdx * 3 + 0] = leftX * cosR + offsetX;
+      positions[leftIdx * 3 + 1] = y;
+      positions[leftIdx * 3 + 2] = leftX * sinR + offsetZ;
+
+      uvs[leftIdx * 2 + 0] = blade / bladesPerTuft; // u = blade index for variation
+      uvs[leftIdx * 2 + 1] = t; // v = height
+
+      normals[leftIdx * 3 + 0] = -sinR;
+      normals[leftIdx * 3 + 1] = 0;
+      normals[leftIdx * 3 + 2] = cosR;
+
+      // Right vertex
+      const rightIdx = vertexOffset + i * 2 + 1;
+      const rightX = 0.5 * width;
+      positions[rightIdx * 3 + 0] = rightX * cosR + offsetX;
+      positions[rightIdx * 3 + 1] = y;
+      positions[rightIdx * 3 + 2] = rightX * sinR + offsetZ;
+
+      uvs[rightIdx * 2 + 0] = blade / bladesPerTuft;
+      uvs[rightIdx * 2 + 1] = t;
+
+      normals[rightIdx * 3 + 0] = -sinR;
+      normals[rightIdx * 3 + 1] = 0;
+      normals[rightIdx * 3 + 2] = cosR;
+    }
+
+    // Generate indices for this blade
+    let idx = indexOffset;
+    for (let i = 0; i < segments; i++) {
+      const base = vertexOffset + i * 2;
+      // First triangle (lower-left)
+      indices[idx++] = base;
+      indices[idx++] = base + 2;
+      indices[idx++] = base + 1;
+      // Second triangle (upper-right)
+      indices[idx++] = base + 1;
+      indices[idx++] = base + 2;
+      indices[idx++] = base + 3;
+    }
+  }
+
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+  geometry.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
+  geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+  geometry.computeBoundingSphere();
+
+  return geometry;
+}
+
+/**
+ * Original single-blade geometry (kept for reference/fallback)
+ */
+function createSingleBladeGeometry(
   segments: number = GRASS_CONFIG.BLADE_SEGMENTS,
 ): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
@@ -335,9 +435,9 @@ function createGrassMaterial(): GrassMaterial {
   // ========== CONSTANTS ==========
   const fadeStartSq = float(GRASS_CONFIG.FADE_START * GRASS_CONFIG.FADE_START);
   const fadeEndSq = float(GRASS_CONFIG.FADE_END * GRASS_CONFIG.FADE_END);
-  const waterLevel = float(
-    GRASS_CONFIG.WATER_LEVEL + GRASS_CONFIG.WATER_BUFFER,
-  );
+  // Shoreline fade: grass fades between 14m (full) and 9m (none) to match terrain visual
+  const shorelineFadeStart = float(GRASS_CONFIG.SHORELINE_FADE_START); // 14m - full grass
+  const shorelineFadeEnd = float(GRASS_CONFIG.SHORELINE_FADE_END); // 9m - no grass
   const maxBend = float(GRASS_CONFIG.MAX_BEND);
   const flutterIntensity = float(GRASS_CONFIG.FLUTTER_INTENSITY);
 
@@ -587,12 +687,18 @@ function createGrassMaterial(): GrassMaterial {
       smoothstep(fadeStartSq, fadeEndSq, distSq),
     );
 
-    // ========== WATER CULLING ==========
-    const aboveWater = sub(float(1.0), step(worldPos.y, waterLevel));
+    // ========== SHORELINE FADE ==========
+    // Smooth fade near water: 1.0 above 14m, fades to 0.0 at 9m (matches terrain visual)
+    // smoothstep(9, 14, height) gives 0 at 9m, 1 at 14m
+    const shorelineFade = smoothstep(
+      shorelineFadeEnd,
+      shorelineFadeStart,
+      worldPos.y,
+    );
 
-    // Combine all factors: base fade, distance fade, water culling, and LOD culling
+    // Combine all factors: base fade, distance fade, shoreline fade, and LOD culling
     const opacity = mul(
-      mul(mul(baseOpacity, distanceFade), aboveWater),
+      mul(mul(baseOpacity, distanceFade), shorelineFade),
       lodVisible,
     );
 
@@ -657,11 +763,20 @@ export class GrassSystem extends System {
   // Wind reference
   private windSystem: Wind | null = null;
 
-  // Terrain system reference for height queries
+  // Terrain system reference for height and flat zone queries
   private terrainSystem: {
     getHeightAt: (x: number, z: number) => number;
+    isInFlatZone?: (x: number, z: number) => boolean;
+    getTerrainColorAt?: (
+      x: number,
+      z: number,
+    ) => { r: number; g: number; b: number } | null;
   } | null = null;
   private terrainWarningLogged = false;
+
+  // Worker optimization state
+  private worldSeed = 0;
+  private pendingChunkGeneration = new Set<string>();
 
   // Building collision service reference for excluding grass inside buildings
   private buildingCollisionService: {
@@ -670,6 +785,11 @@ export class GrassSystem extends System {
       tileZ: number,
       floorIndex: number,
     ) => { isInsideBuilding: boolean };
+  } | null = null;
+
+  // Road network system reference for excluding grass on roads
+  private roadNetworkSystem: {
+    isOnRoad: (x: number, z: number) => boolean;
   } | null = null;
 
   // Biome grass configs (loaded from terrain system)
@@ -704,19 +824,29 @@ export class GrassSystem extends System {
       stage.scene.add(this.grassContainer);
     }
 
-    // Initialize noise from world seed
-    const seed = this.getWorldSeed();
-    this.noise = new NoiseGenerator(seed);
+    // Initialize noise from world seed and cache for worker
+    this.worldSeed = this.getWorldSeed();
+    this.noise = new NoiseGenerator(this.worldSeed);
+
+    // Log worker availability for grass generation
+    console.log(
+      `[GrassSystem] Started - Worker available: ${isGrassWorkerAvailable()}`,
+    );
 
     // Get wind system reference
     this.windSystem =
       (this.world.getSystem("wind") as Wind | undefined) ?? null;
 
-    // Get terrain system reference for height queries
+    // Get terrain system reference for height and flat zone queries
     const terrain = this.world.getSystem("terrain");
     if (terrain && "getHeightAt" in terrain) {
       this.terrainSystem = terrain as {
         getHeightAt: (x: number, z: number) => number;
+        isInFlatZone?: (x: number, z: number) => boolean;
+        getTerrainColorAt?: (
+          x: number,
+          z: number,
+        ) => { r: number; g: number; b: number } | null;
       };
     } else {
       console.warn(
@@ -751,7 +881,7 @@ export class GrassSystem extends System {
     this.initializeGPUCulling();
 
     console.log(
-      `[GrassSystem] Initialized with seed ${seed}, chunk size ${GRASS_CONFIG.CHUNK_SIZE}m, terrain=${this.terrainSystem ? "available" : "unavailable"}, gpuCulling=${this.gpuCullingEnabled}`,
+      `[GrassSystem] Initialized with seed ${this.worldSeed}, chunk size ${GRASS_CONFIG.CHUNK_SIZE}m, terrain=${this.terrainSystem ? "available" : "unavailable"}, gpuCulling=${this.gpuCullingEnabled}`,
     );
 
     // Generate grass for already-loaded terrain tiles (handles case where terrain
@@ -785,8 +915,28 @@ export class GrassSystem extends System {
   /**
    * Generate grass for terrain tiles that were already loaded before GrassSystem started.
    * This handles timing issues where terrain events fire before we subscribe.
+   * Uses a delayed retry to handle cases where terrain isn't fully ready.
    */
   private generateGrassForExistingTiles(): void {
+    this.processExistingTiles();
+
+    // Delayed retry - terrain might not be fully ready immediately
+    // This catches cases where tiles exist but terrain height queries aren't ready
+    setTimeout(() => {
+      this.processExistingTiles();
+    }, 500);
+
+    // Second retry for slow connections or complex terrain
+    setTimeout(() => {
+      this.processExistingTiles();
+    }, 2000);
+  }
+
+  /**
+   * Process existing tiles and generate grass for them.
+   * Only generates grass for tiles that don't already have grass chunks.
+   */
+  private processExistingTiles(): void {
     const terrain = this.world.getSystem("terrain") as {
       getLoadedTiles?: () => Array<{
         tileX: number;
@@ -803,15 +953,35 @@ export class GrassSystem extends System {
     }
 
     const loadedTiles = terrain.getLoadedTiles();
-    console.log(
-      `[GrassSystem] Found ${loadedTiles.length} existing terrain tiles to process`,
-    );
+    let tilesProcessed = 0;
+    let tilesSkipped = 0;
 
     for (const tile of loadedTiles) {
       const position = {
         x: tile.tileX * GRASS_CONFIG.TILE_SIZE,
         z: tile.tileZ * GRASS_CONFIG.TILE_SIZE,
       };
+
+      // Check if we already have grass for this tile's chunks
+      const chunkSize = GRASS_CONFIG.CHUNK_SIZE;
+      const chunksPerTile = Math.ceil(GRASS_CONFIG.TILE_SIZE / chunkSize);
+      let hasAllChunks = true;
+
+      for (let cx = 0; cx < chunksPerTile && hasAllChunks; cx++) {
+        for (let cz = 0; cz < chunksPerTile && hasAllChunks; cz++) {
+          const chunkX = Math.floor((position.x + cx * chunkSize) / chunkSize);
+          const chunkZ = Math.floor((position.z + cz * chunkSize) / chunkSize);
+          const key = `${chunkX}_${chunkZ}`;
+          if (!this.chunks.has(key) && !this.pendingChunkGeneration.has(key)) {
+            hasAllChunks = false;
+          }
+        }
+      }
+
+      if (hasAllChunks) {
+        tilesSkipped++;
+        continue;
+      }
 
       // Check if biome supports grass
       const grassConfig =
@@ -820,12 +990,25 @@ export class GrassSystem extends System {
         continue;
       }
 
-      // Generate grass chunks for this tile
+      tilesProcessed++;
+
+      // Generate grass chunks for this tile (async, fire-and-forget)
       this.generateGrassForTile(
         position.x,
         position.z,
         GRASS_CONFIG.TILE_SIZE,
         grassConfig,
+      ).catch((err) => {
+        console.error(
+          `[GrassSystem] Error generating grass for tile (${tile.tileX},${tile.tileZ}):`,
+          err,
+        );
+      });
+    }
+
+    if (tilesProcessed > 0) {
+      console.log(
+        `[GrassSystem] processExistingTiles: processed ${tilesProcessed} tiles, skipped ${tilesSkipped} (already have grass)`,
       );
     }
   }
@@ -901,6 +1084,119 @@ export class GrassSystem extends System {
   }
 
   /**
+   * Try to acquire road network system reference.
+   * Called lazily since RoadNetworkSystem may not be initialized when GrassSystem starts.
+   */
+  private tryAcquireRoadNetworkSystem(): void {
+    if (this.roadNetworkSystem) return;
+
+    const roadSystem = this.world.getSystem("roads") as {
+      isOnRoad?: (x: number, z: number) => boolean;
+    } | null;
+
+    if (roadSystem?.isOnRoad) {
+      this.roadNetworkSystem = roadSystem as {
+        isOnRoad: (x: number, z: number) => boolean;
+      };
+    }
+  }
+
+  /**
+   * Check if a world position is in a flat zone (building pad, arena, etc.).
+   * Returns true if grass should NOT grow at this position.
+   */
+  private isInFlatZone(worldX: number, worldZ: number): boolean {
+    if (!this.terrainSystem?.isInFlatZone) {
+      return false; // No flat zone detection available
+    }
+
+    try {
+      return this.terrainSystem.isInFlatZone(worldX, worldZ);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Get grass density factor based on terrain color at position.
+   * Returns 0.0 for dirt/brown areas, 1.0 for grass areas, with smooth transition.
+   *
+   * Uses terrain vertex color to detect:
+   * - Grass: Green channel > Red channel (greenish)
+   * - Dirt: Red channel > Green channel (brownish)
+   */
+  private getTerrainGrassFactor(worldX: number, worldZ: number): number {
+    if (!this.terrainSystem?.getTerrainColorAt) {
+      return 1.0; // No color sampling available, assume grass
+    }
+
+    try {
+      const color = this.terrainSystem.getTerrainColorAt(worldX, worldZ);
+      if (!color) {
+        return 1.0; // No color data, assume grass
+      }
+
+      // Calculate "grassiness" based on color
+      // Grass colors: green > red (e.g., 0.55 > 0.3)
+      // Dirt colors: red > green (e.g., 0.45 > 0.32)
+      const { r, g, b } = color;
+
+      // Skip very dark areas (shadows, deep water)
+      const brightness = r + g + b;
+      if (brightness < 0.3) {
+        return 0.0; // Too dark, no grass
+      }
+
+      // Calculate green-to-red ratio
+      // High ratio = grassy, Low ratio = dirt/brown
+      const greenRatio = g / Math.max(r, 0.01);
+
+      // Thresholds based on terrain colors:
+      // - grassGreen: g/r = 0.55/0.3 = 1.83
+      // - grassDark: g/r = 0.42/0.22 = 1.9
+      // - dirtBrown: g/r = 0.32/0.45 = 0.71
+      // - dirtDark: g/r = 0.22/0.32 = 0.69
+      // - sandYellow: g/r = 0.6/0.7 = 0.86
+
+      // Use smoothstep for gradual transition
+      // Below 0.9: dirt (0%), Above 1.2: grass (100%), between: fade
+      const grassFactor = Math.min(
+        1.0,
+        Math.max(0.0, (greenRatio - 0.9) / 0.3),
+      );
+
+      // Also check absolute green level (low green = not grass)
+      const greenLevel = Math.min(1.0, g / 0.35); // 0.35 is midpoint between grass and dirt green
+
+      return grassFactor * greenLevel;
+    } catch {
+      return 1.0; // On error, assume grass
+    }
+  }
+
+  /**
+   * Check if a world position is on a road.
+   * Returns true if grass should NOT grow at this position.
+   */
+  private isOnRoad(worldX: number, worldZ: number): boolean {
+    // Try to acquire road system if not already acquired
+    if (!this.roadNetworkSystem) {
+      this.tryAcquireRoadNetworkSystem();
+    }
+
+    if (!this.roadNetworkSystem) {
+      return false; // No road system, allow grass
+    }
+
+    try {
+      return this.roadNetworkSystem.isOnRoad(worldX, worldZ);
+    } catch {
+      // If query fails, allow grass (don't block on road errors)
+      return false;
+    }
+  }
+
+  /**
    * Simple hash function for deterministic chunk seeds
    */
   private hashPosition(x: number, z: number): number {
@@ -920,7 +1216,7 @@ export class GrassSystem extends System {
     tileZ: number;
     biome: string;
   }): void {
-    const { position, biome } = event;
+    const { position, biome, tileX, tileZ } = event;
 
     // Check if biome supports grass
     const grassConfig =
@@ -929,13 +1225,23 @@ export class GrassSystem extends System {
       return;
     }
 
-    // Generate grass chunks for this tile
+    // Log for debugging tile loading issues
+    console.log(
+      `[GrassSystem] Tile event: (${tileX},${tileZ}) biome=${biome} pos=(${position.x},${position.z})`,
+    );
+
+    // Generate grass chunks for this tile (async, fire-and-forget)
     this.generateGrassForTile(
       position.x,
       position.z,
       GRASS_CONFIG.TILE_SIZE,
       grassConfig,
-    );
+    ).catch((err) => {
+      console.error(
+        `[GrassSystem] Error generating grass for tile (${tileX},${tileZ}):`,
+        err,
+      );
+    });
   }
 
   /**
@@ -994,7 +1300,7 @@ export class GrassSystem extends System {
       }
     }
 
-    // Now regenerate with updated terrain heights
+    // Now regenerate with updated terrain heights (async, fire-and-forget)
     const grassConfig =
       this.biomeGrassConfigs.get(biome) ?? BIOME_GRASS_DEFAULTS.plains;
     if (grassConfig.enabled && grassConfig.densityMultiplier > 0) {
@@ -1003,19 +1309,22 @@ export class GrassSystem extends System {
         tileOriginZ,
         tileSize,
         grassConfig,
-      );
+      ).catch((err) => {
+        console.error(`[GrassSystem] Error regenerating grass for tile:`, err);
+      });
     }
   }
 
   /**
    * Generate grass for a terrain tile area
+   * Uses worker for placement computation when available, falls back to yielding sync generation
    */
-  private generateGrassForTile(
+  private async generateGrassForTile(
     originX: number,
     originZ: number,
     tileSize: number,
     grassConfig: BiomeGrassConfig,
-  ): void {
+  ): Promise<void> {
     if (!this.noise || !this.bladeGeometry || !this.grassMaterial) {
       console.warn(
         `[GrassSystem] Cannot generate grass at (${originX}, ${originZ}) - system not fully initialized: ` +
@@ -1026,6 +1335,16 @@ export class GrassSystem extends System {
 
     const chunkSize = GRASS_CONFIG.CHUNK_SIZE;
     const chunksPerTile = Math.ceil(tileSize / chunkSize);
+    const baseDensity =
+      GRASS_CONFIG.BASE_DENSITY * grassConfig.densityMultiplier;
+    const heightMultiplier = grassConfig.heightMultiplier ?? 1.0;
+
+    // Collect chunks that need generation
+    const chunksToGenerate: Array<{
+      key: string;
+      originX: number;
+      originZ: number;
+    }> = [];
 
     for (let cx = 0; cx < chunksPerTile; cx++) {
       for (let cz = 0; cz < chunksPerTile; cz++) {
@@ -1035,36 +1354,256 @@ export class GrassSystem extends System {
         const chunkZ = Math.floor(chunkOriginZ / chunkSize);
         const key = `${chunkX}_${chunkZ}`;
 
-        // Skip if chunk already exists
-        if (this.chunks.has(key)) continue;
+        // Skip if chunk already exists or is being generated
+        if (this.chunks.has(key) || this.pendingChunkGeneration.has(key))
+          continue;
 
-        // Generate grass instances for this chunk
-        this.generateChunk(
+        chunksToGenerate.push({
           key,
-          chunkOriginX,
-          chunkOriginZ,
+          originX: chunkOriginX,
+          originZ: chunkOriginZ,
+        });
+        this.pendingChunkGeneration.add(key);
+      }
+    }
+
+    if (chunksToGenerate.length === 0) return;
+
+    // Try to use worker for placement generation
+    if (isGrassWorkerAvailable()) {
+      // Generate all chunks in parallel using workers
+      const workerPromises = chunksToGenerate.map(async (chunk) => {
+        try {
+          const result = await generateGrassPlacementsAsync(
+            chunk.key,
+            chunk.originX,
+            chunk.originZ,
+            chunkSize,
+            baseDensity,
+            this.worldSeed,
+            heightMultiplier,
+            GRASS_CONFIG.MAX_INSTANCES_PER_CHUNK,
+          );
+          if (result && result.placements.length > 0) {
+            // Process worker placements on main thread (height, collision, etc.)
+            await this.processWorkerPlacements(
+              chunk.key,
+              chunk.originX,
+              chunk.originZ,
+              chunkSize,
+              result.placements,
+              grassConfig,
+            );
+          }
+        } catch (err) {
+          console.warn(
+            `[GrassSystem] Worker failed for chunk ${chunk.key}, falling back to sync`,
+            err,
+          );
+          // Fallback to synchronous generation with yielding
+          await this.generateChunkWithYielding(
+            chunk.key,
+            chunk.originX,
+            chunk.originZ,
+            chunkSize,
+            grassConfig,
+          );
+        } finally {
+          this.pendingChunkGeneration.delete(chunk.key);
+        }
+      });
+      await Promise.all(workerPromises);
+    } else {
+      // No workers available - use synchronous generation with yielding
+      for (const chunk of chunksToGenerate) {
+        await this.generateChunkWithYielding(
+          chunk.key,
+          chunk.originX,
+          chunk.originZ,
           chunkSize,
           grassConfig,
         );
+        this.pendingChunkGeneration.delete(chunk.key);
       }
     }
   }
 
   /**
-   * Generate a single grass chunk with instances
+   * Process placements from worker - validates each placement on main thread
+   * (height lookup, building collision, slope, grassiness)
    */
-  private generateChunk(
+  private async processWorkerPlacements(
+    key: string,
+    originX: number,
+    originZ: number,
+    size: number,
+    placements: GrassPlacementData[],
+    grassConfig: BiomeGrassConfig,
+  ): Promise<void> {
+    if (!this.bladeGeometry || !this.grassMaterial) return;
+
+    // Get terrain height function
+    const getHeight = (x: number, z: number): number => {
+      if (this.terrainSystem) {
+        return this.terrainSystem.getHeightAt(x, z);
+      }
+      return 0;
+    };
+
+    // Get or create chunk - ALWAYS use MAX_INSTANCES_PER_CHUNK for buffer allocation
+    // to ensure pooled chunks can be reused for any instance count
+    const instanceCount = Math.min(
+      placements.length,
+      GRASS_CONFIG.MAX_INSTANCES_PER_CHUNK,
+    );
+    let chunk = this.chunkPool.pop();
+    if (!chunk) {
+      // Create with MAX capacity so it can be reused for any chunk
+      chunk = this.createChunk(
+        key,
+        originX,
+        originZ,
+        GRASS_CONFIG.MAX_INSTANCES_PER_CHUNK,
+      );
+    } else {
+      chunk.key = key;
+      chunk.originX = originX;
+      chunk.originZ = originZ;
+      chunk.count = 0;
+    }
+
+    const positionArray = chunk.mesh.geometry.getAttribute(
+      "instancePosition",
+    ) as THREE.InstancedBufferAttribute;
+    const variationArray = chunk.mesh.geometry.getAttribute(
+      "instanceVariation",
+    ) as THREE.InstancedBufferAttribute;
+
+    let count = 0;
+    const YIELD_BATCH_SIZE = 500; // Yield every 500 placements to prevent blocking
+
+    for (let i = 0; i < placements.length && count < instanceCount; i++) {
+      // Yield periodically to prevent blocking
+      if (i > 0 && i % YIELD_BATCH_SIZE === 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+
+      const placement = placements[i];
+      const worldX = placement.x;
+      const worldZ = placement.z;
+
+      // Get terrain height (main thread only)
+      const worldY = getHeight(worldX, worldZ);
+
+      // Skip grass in excluded areas: buildings, roads, flat zones (arenas, pads)
+      if (
+        this.isInsideBuilding(worldX, worldZ) ||
+        this.isOnRoad(worldX, worldZ) ||
+        this.isInFlatZone(worldX, worldZ)
+      ) {
+        continue;
+      }
+
+      // Skip grass below shoreline cutoff (9m = mud zone, no grass)
+      if (worldY < GRASS_CONFIG.SHORELINE_FADE_END) {
+        continue;
+      }
+
+      // Check terrain color - skip grass on dirt/brown areas
+      const terrainGrassFactor = this.getTerrainGrassFactor(worldX, worldZ);
+      if (terrainGrassFactor < 0.1) {
+        continue; // Pure dirt area, no grass
+      }
+
+      // Use terrain factor for density thinning at edges
+      // On transitions (factor 0.1-1.0), probabilistically skip grass for natural fade
+      if (terrainGrassFactor < 1.0) {
+        // Use placement position as deterministic random seed
+        const hash = Math.abs(
+          Math.sin(worldX * 12.9898 + worldZ * 78.233) * 43758.5453,
+        );
+        const rand = hash - Math.floor(hash);
+        if (rand > terrainGrassFactor) {
+          continue; // Skip this grass blade based on terrain grass factor
+        }
+      }
+
+      // Apply shoreline height reduction (grass gets shorter near water)
+      // At 14m+: full height. At 9m: 30% height. Shader handles opacity fade.
+      const shorelineFactor = Math.min(
+        1.0,
+        Math.max(
+          0.3,
+          (worldY - GRASS_CONFIG.SHORELINE_FADE_END) /
+            (GRASS_CONFIG.SHORELINE_FADE_START -
+              GRASS_CONFIG.SHORELINE_FADE_END),
+        ),
+      );
+
+      // Combine factors: shoreline affects height, terrain factor also reduces height at edges
+      const heightMultiplier =
+        shorelineFactor * (0.5 + 0.5 * terrainGrassFactor);
+
+      // Set instance attributes
+      positionArray.setXYZW(
+        count,
+        worldX,
+        worldY,
+        worldZ,
+        placement.heightScale * heightMultiplier,
+      );
+      variationArray.setXYZW(
+        count,
+        placement.rotation,
+        placement.widthScale,
+        placement.colorVar,
+        placement.phaseOffset,
+      );
+      count++;
+    }
+
+    // Update instance count
+    chunk.count = count;
+    chunk.mesh.count = count;
+
+    // Update bounding sphere
+    chunk.boundingSphere.center.set(
+      originX + size / 2,
+      getHeight(originX + size / 2, originZ + size / 2) +
+        GRASS_CONFIG.BLADE_HEIGHT / 2,
+      originZ + size / 2,
+    );
+    chunk.boundingSphere.radius =
+      (Math.sqrt(2) * size) / 2 + GRASS_CONFIG.BLADE_HEIGHT;
+
+    // Mark attributes for update
+    positionArray.needsUpdate = true;
+    variationArray.needsUpdate = true;
+
+    // Add to scene and tracking (only if we have instances)
+    if (this.grassContainer && count > 0) {
+      this.grassContainer.add(chunk.mesh);
+      chunk.visible = true;
+      this.chunks.set(key, chunk);
+    } else {
+      // No valid grass placements - return chunk to pool for reuse
+      // Don't track empty chunks so they can be retried later if conditions change
+      this.chunkPool.push(chunk);
+    }
+  }
+
+  /**
+   * Generate chunk synchronously with yielding (fallback when workers unavailable)
+   * Yields every N iterations to prevent blocking the main thread
+   */
+  private async generateChunkWithYielding(
     key: string,
     originX: number,
     originZ: number,
     size: number,
     grassConfig: BiomeGrassConfig,
-  ): void {
+  ): Promise<void> {
     if (!this.noise || !this.bladeGeometry || !this.grassMaterial) {
-      // This should never happen if generateGrassForTile checked, but be safe
-      console.error(
-        `[GrassSystem] generateChunk called with uninitialized dependencies for chunk ${key}`,
-      );
       return;
     }
 
@@ -1078,34 +1617,32 @@ export class GrassSystem extends System {
 
     if (instanceCount === 0) return;
 
-    // Get or create chunk from pool
+    // Get or create chunk from pool - ALWAYS use MAX_INSTANCES_PER_CHUNK for buffer allocation
+    // to ensure pooled chunks can be reused for any instance count
     let chunk = this.chunkPool.pop();
     if (!chunk) {
-      chunk = this.createChunk(key, originX, originZ, instanceCount);
+      // Create with MAX capacity so it can be reused for any chunk
+      chunk = this.createChunk(
+        key,
+        originX,
+        originZ,
+        GRASS_CONFIG.MAX_INSTANCES_PER_CHUNK,
+      );
     } else {
-      // Reuse chunk
       chunk.key = key;
       chunk.originX = originX;
       chunk.originZ = originZ;
       chunk.count = 0;
     }
 
-    // Get terrain height function - uses cached terrain system reference
+    // Get terrain height function
     const getHeight = (x: number, z: number): number => {
       if (this.terrainSystem) {
         return this.terrainSystem.getHeightAt(x, z);
       }
-      // Log warning only once per session
-      if (!this.terrainWarningLogged) {
-        console.warn(
-          `[GrassSystem] Terrain height unavailable for chunk at (${originX}, ${originZ}) - using y=0`,
-        );
-        this.terrainWarningLogged = true;
-      }
       return 0;
     };
 
-    // Generate instance positions
     const positionArray = chunk.mesh.geometry.getAttribute(
       "instancePosition",
     ) as THREE.InstancedBufferAttribute;
@@ -1113,20 +1650,52 @@ export class GrassSystem extends System {
       "instanceVariation",
     ) as THREE.InstancedBufferAttribute;
 
-    // Deterministic RNG for this chunk
-    const chunkSeed = this.hashPosition(originX, originZ);
+    // Deterministic RNG for this chunk - MUST match GrassWorker's seed formula
+    const chunkSeed = this.hashPosition(originX, originZ) ^ this.worldSeed;
     let rngState = chunkSeed;
     const nextRandom = (): number => {
       rngState = (rngState * 1103515245 + 12345) & 0x7fffffff;
       return rngState / 0x7fffffff;
     };
 
-    let count = 0;
-    const spacing = Math.sqrt(1 / baseDensity);
+    // Simple noise function for density variation (matches GrassWorker)
+    const noise2D = (nx: number, nz: number, noiseSeed: number): number => {
+      const ix = Math.floor(nx);
+      const iz = Math.floor(nz);
+      const fx = nx - ix;
+      const fz = nz - iz;
+      const sx = fx * fx * (3 - 2 * fx);
+      const sz = fz * fz * (3 - 2 * fz);
+      const hash = (a: number, b: number): number => {
+        let h = a * 374761393 + b * 668265263 + noiseSeed;
+        h = ((h ^ (h >> 13)) * 1274126177) >>> 0;
+        return (h & 0xffffff) / 0xffffff;
+      };
+      const h00 = hash(ix, iz);
+      const h10 = hash(ix + 1, iz);
+      const h01 = hash(ix, iz + 1);
+      const h11 = hash(ix + 1, iz + 1);
+      const v0 = h00 + sx * (h10 - h00);
+      const v1 = h01 + sx * (h11 - h01);
+      return v0 + sz * (v1 - v0);
+    };
 
-    // Grid-jittered placement for even distribution
+    let count = 0;
+    let iterations = 0;
+    const YIELD_INTERVAL = 200; // Yield every 200 iterations
+    const spacing = Math.sqrt(1 / baseDensity);
+    const biomeHeightMult = grassConfig.heightMultiplier ?? 1.0;
+
+    // Grid-jittered placement with yielding (matches GrassWorker algorithm)
     for (let gx = 0; gx < size && count < instanceCount; gx += spacing) {
       for (let gz = 0; gz < size && count < instanceCount; gz += spacing) {
+        iterations++;
+
+        // Yield periodically to prevent blocking
+        if (iterations % YIELD_INTERVAL === 0) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        }
+
         // Jitter position within grid cell
         const jitterX = (nextRandom() - 0.5) * spacing * 0.8;
         const jitterZ = (nextRandom() - 0.5) * spacing * 0.8;
@@ -1137,53 +1706,61 @@ export class GrassSystem extends System {
         // Get terrain height
         const worldY = getHeight(worldX, worldZ);
 
-        // Skip grass inside buildings
-        if (this.isInsideBuilding(worldX, worldZ)) {
+        // Skip grass in excluded areas: buildings, roads, flat zones (arenas, pads)
+        if (
+          this.isInsideBuilding(worldX, worldZ) ||
+          this.isOnRoad(worldX, worldZ) ||
+          this.isInFlatZone(worldX, worldZ)
+        ) {
           continue;
         }
 
-        // Skip underwater (simple check - grass doesn't grow in water)
-        const waterCutoff =
-          GRASS_CONFIG.WATER_LEVEL + GRASS_CONFIG.WATER_BUFFER;
-        if (worldY < waterCutoff) {
+        // Skip grass below shoreline cutoff (9m = mud zone, no grass)
+        if (worldY < GRASS_CONFIG.SHORELINE_FADE_END) {
           continue;
         }
 
-        // Calculate slope for rock face exclusion
-        const slope = calculateSlope(getHeight, worldX, worldZ, 1.0);
-
-        // Check if terrain is suitable for grass (only excludes rock faces and snow)
-        const grassiness = getGrassiness(worldX, worldZ, worldY, slope);
-
-        // Very permissive threshold - grass grows almost everywhere
-        const grassThreshold = 0.1; // Only exclude steep rock (slope > 0.6) and snow
-        if (grassiness < grassThreshold) {
-          continue;
+        // Check terrain color - skip grass on dirt/brown areas
+        const terrainGrassFactor = this.getTerrainGrassFactor(worldX, worldZ);
+        if (terrainGrassFactor < 0.1) {
+          continue; // Pure dirt area, no grass
         }
 
-        // Instance variation
-        // Apply biome height multiplier (default 1.0) as a scale factor
-        // Also scale by grassiness for natural transitions at edges
-        const biomeHeightMult = grassConfig.heightMultiplier ?? 1.0;
-        const grassinessScale = 0.6 + grassiness * 0.4; // 0.6-1.0 based on grassiness
+        // Use terrain factor for density thinning at edges
+        if (terrainGrassFactor < 1.0 && nextRandom() > terrainGrassFactor) {
+          continue; // Skip this grass blade based on terrain grass factor
+        }
+
+        // Apply shoreline height reduction (grass gets shorter near water)
+        const shorelineFactor = Math.min(
+          1.0,
+          Math.max(
+            0.3,
+            (worldY - GRASS_CONFIG.SHORELINE_FADE_END) /
+              (GRASS_CONFIG.SHORELINE_FADE_START -
+                GRASS_CONFIG.SHORELINE_FADE_END),
+          ),
+        );
+
+        // Combine factors: shoreline affects height, terrain factor also reduces height at edges
+        const heightMultiplier =
+          shorelineFactor * (0.5 + 0.5 * terrainGrassFactor);
         const heightScale =
-          (0.7 + nextRandom() * 0.6) * biomeHeightMult * grassinessScale;
+          (0.7 + nextRandom() * 0.6) * biomeHeightMult * heightMultiplier;
         const rotation = nextRandom() * Math.PI * 2;
         const widthScale = 0.8 + nextRandom() * 0.4;
         const colorVar = nextRandom();
         const phaseOffset = nextRandom() * Math.PI * 2;
 
         // Set instance attributes
-        const idx = count;
-        positionArray.setXYZW(idx, worldX, worldY, worldZ, heightScale);
+        positionArray.setXYZW(count, worldX, worldY, worldZ, heightScale);
         variationArray.setXYZW(
-          idx,
+          count,
           rotation,
           widthScale,
           colorVar,
           phaseOffset,
         );
-
         count++;
       }
     }
@@ -1206,13 +1783,16 @@ export class GrassSystem extends System {
     positionArray.needsUpdate = true;
     variationArray.needsUpdate = true;
 
-    // Add to scene and tracking
+    // Add to scene and tracking (only if we have instances)
     if (this.grassContainer && count > 0) {
       this.grassContainer.add(chunk.mesh);
       chunk.visible = true;
+      this.chunks.set(key, chunk);
+    } else {
+      // No valid grass placements - return chunk to pool for reuse
+      // Don't track empty chunks so they can be retried later if conditions change
+      this.chunkPool.push(chunk);
     }
-
-    this.chunks.set(key, chunk);
   }
 
   /**
@@ -1340,32 +1920,30 @@ export class GrassSystem extends System {
 
   /**
    * Update chunk visibility based on frustum and distance.
-   * Uses GPU compute culling when available for better performance.
+   * Uses GPU culling when available for per-instance culling,
+   * with CPU coarse chunk culling as optimization.
    */
   private updateChunkVisibility(): void {
     const camera = this.world.camera;
     if (!camera) return;
 
-    // Update frustum matrices
+    // Update frustum
     this.frustumMatrix.multiplyMatrices(
       camera.projectionMatrix,
       camera.matrixWorldInverse,
     );
     this.frustum.setFromProjectionMatrix(this.frustumMatrix);
 
-    // Update GPU frustum if GPU culling is enabled
-    if (this.gpuCullingEnabled) {
+    const maxDistSq = GRASS_CONFIG.FADE_END * GRASS_CONFIG.FADE_END * 1.5;
+
+    // Update GPU compute frustum if enabled
+    if (this.gpuCullingEnabled && isGPUComputeAvailable()) {
       const gpuCompute = getGPUComputeManager();
       gpuCompute.grass?.updateFrustum(camera);
     }
 
-    const maxDistSq = GRASS_CONFIG.FADE_END * GRASS_CONFIG.FADE_END * 1.5;
-
-    // CPU-side chunk visibility (coarse culling)
-    // Even with GPU culling enabled, we still do chunk-level culling on CPU
-    // GPU culling handles per-instance culling within visible chunks
     for (const chunk of this.chunks.values()) {
-      // Distance check
+      // Coarse distance check (same for CPU and GPU paths)
       const dx = chunk.boundingSphere.center.x - this.playerPosition.x;
       const dz = chunk.boundingSphere.center.z - this.playerPosition.z;
       const distSq = dx * dx + dz * dz;
@@ -1375,10 +1953,40 @@ export class GrassSystem extends System {
         continue;
       }
 
-      // Frustum check
+      // Coarse frustum check for chunk bounds
       const inFrustum = this.frustum.intersectsSphere(chunk.boundingSphere);
-      chunk.mesh.visible = inFrustum;
+
+      if (!inFrustum) {
+        chunk.mesh.visible = false;
+        continue;
+      }
+
+      // Chunk is coarsely visible
+      chunk.mesh.visible = true;
+
+      // If GPU culling is enabled, the GPU handles per-instance culling
+      // via indirect draw. The mesh.visible controls coarse culling.
+      // The actual instance count is determined by the GPU indirect buffer.
     }
+  }
+
+  /**
+   * Get indirect draw buffer for a chunk (for GPU-driven rendering).
+   * Returns null if GPU culling is not enabled.
+   */
+  getChunkIndirectBuffer(chunkKey: string): GPUBuffer | null {
+    if (!this.gpuCullingEnabled || !isGPUComputeAvailable()) {
+      return null;
+    }
+    const gpuCompute = getGPUComputeManager();
+    return gpuCompute.grass?.getChunkIndirectBuffer(chunkKey) ?? null;
+  }
+
+  /**
+   * Check if GPU indirect draw is available for grass rendering.
+   */
+  isIndirectDrawAvailable(): boolean {
+    return this.gpuCullingEnabled && isGPUComputeAvailable();
   }
 
   /**

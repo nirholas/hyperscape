@@ -103,6 +103,10 @@ export interface TerrainTile {
   heightMap: Float32Array;
   collider: ActorHandle | null;
   lastUpdate: number;
+  /** Decorative rock instance IDs for cleanup when tile is unloaded */
+  decorativeRockIds?: string[];
+  /** Decorative plant instance IDs for cleanup when tile is unloaded */
+  decorativePlantIds?: string[];
 }
 
 export interface ResourceNode {

@@ -159,6 +159,8 @@ export interface BuildingGeneratorOptions {
   useGreedyMeshing?: boolean;
   /** Generate LOD meshes (default: false) */
   generateLODs?: boolean;
+  /** Pre-computed layout to reuse (skips layout generation if provided) */
+  cachedLayout?: BuildingLayout;
 }
 
 /** LOD level configuration */

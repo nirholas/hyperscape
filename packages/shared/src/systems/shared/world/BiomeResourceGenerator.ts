@@ -14,11 +14,14 @@
 import type {
   BiomeTreeConfig,
   BiomeOreConfig,
+  BiomeRockConfig,
+  BiomePlantConfig,
 } from "../../../types/world/world-types";
 import type {
   ResourceNode,
   ResourceSubType,
 } from "../../../types/world/terrain";
+import type { VegetationInstance } from "../../../types/world/world-types";
 
 /**
  * Context provided by TerrainSystem for resource generation.
@@ -456,4 +459,484 @@ export function generateOres(
   }
 
   return resources;
+}
+
+// ============================================================================
+// DECORATIVE ROCK GENERATION
+// ============================================================================
+
+/**
+ * Default rock presets mapping for each biome type.
+ * Used when no specific distribution is provided.
+ */
+export const ROCK_BIOME_DEFAULTS: Record<
+  string,
+  { presets: string[]; distribution: Record<string, number> }
+> = {
+  forest: {
+    presets: ["boulder", "granite", "limestone"],
+    distribution: { boulder: 3, granite: 2, limestone: 1 },
+  },
+  plains: {
+    presets: ["boulder", "pebble", "sandstone"],
+    distribution: { boulder: 2, pebble: 3, sandstone: 1 },
+  },
+  desert: {
+    presets: ["sandstone", "limestone", "pebble"],
+    distribution: { sandstone: 4, limestone: 2, pebble: 1 },
+  },
+  mountains: {
+    presets: ["granite", "basalt", "cliff"],
+    distribution: { granite: 3, basalt: 2, cliff: 2 },
+  },
+  mountain: {
+    presets: ["granite", "basalt", "cliff"],
+    distribution: { granite: 3, basalt: 2, cliff: 2 },
+  },
+  swamp: {
+    presets: ["limestone", "slate", "pebble"],
+    distribution: { limestone: 2, slate: 2, pebble: 3 },
+  },
+  frozen: {
+    presets: ["granite", "basalt", "boulder"],
+    distribution: { granite: 2, basalt: 2, boulder: 2 },
+  },
+  wastes: {
+    presets: ["basalt", "slate", "asteroid"],
+    distribution: { basalt: 3, slate: 2, asteroid: 1 },
+  },
+  corrupted: {
+    presets: ["obsidian", "basalt", "crystal"],
+    distribution: { obsidian: 3, basalt: 2, crystal: 2 },
+  },
+  lake: {
+    presets: ["pebble", "limestone", "boulder"],
+    distribution: { pebble: 4, limestone: 2, boulder: 1 },
+  },
+};
+
+/**
+ * Get rock presets and distribution for a biome type.
+ */
+export function getRockPresetsForBiome(biomeType: string): {
+  presets: string[];
+  distribution: Record<string, number>;
+} {
+  return (
+    ROCK_BIOME_DEFAULTS[biomeType.toLowerCase()] ?? ROCK_BIOME_DEFAULTS.plains
+  );
+}
+
+/**
+ * Generate decorative rocks for a tile based on biome configuration.
+ * These are non-harvestable environmental rocks for visual variety.
+ *
+ * @param ctx - Resource generation context from TerrainSystem
+ * @param rockConfig - Biome rock configuration
+ * @param biomeType - Biome type for default presets
+ * @returns Array of VegetationInstance objects for rocks
+ */
+export function generateRocks(
+  ctx: ResourceGenerationContext,
+  rockConfig: BiomeRockConfig,
+  biomeType: string,
+): VegetationInstance[] {
+  if (!rockConfig.enabled) {
+    return [];
+  }
+
+  const rocks: VegetationInstance[] = [];
+
+  // Calculate rock count based on density and tile size
+  const tileArea = (ctx.tileSize / 100) * (ctx.tileSize / 100);
+  const baseCount = Math.floor(rockConfig.density * tileArea);
+
+  if (baseCount === 0) {
+    return [];
+  }
+
+  // Use deterministic RNG
+  const rng = ctx.createRng("rocks");
+
+  // Get presets and distribution
+  const presets =
+    rockConfig.presets.length > 0
+      ? rockConfig.presets
+      : getRockPresetsForBiome(biomeType).presets;
+
+  const distribution =
+    rockConfig.distribution ?? getRockPresetsForBiome(biomeType).distribution;
+
+  if (presets.length === 0) {
+    return [];
+  }
+
+  const totalWeight = presets.reduce(
+    (sum, p) => sum + (distribution[p] ?? 1),
+    0,
+  );
+  if (totalWeight === 0) {
+    return [];
+  }
+
+  // Track placed positions for spacing
+  const placedPositions: Array<{ x: number; z: number }> = [];
+  const minSpacing = rockConfig.minSpacing;
+  const minSpacingSq = minSpacing * minSpacing;
+
+  // Generate cluster centers if clustering enabled
+  const clusterCenters: Array<{ x: number; z: number }> = [];
+  const clusterChance = rockConfig.clusterChance ?? 0.3;
+  const [clusterMin, clusterMax] = rockConfig.clusterSize ?? [3, 6];
+
+  if (clusterChance > 0) {
+    const numClusters = Math.ceil(baseCount / ((clusterMin + clusterMax) / 2));
+    for (let i = 0; i < numClusters; i++) {
+      if (rng() < clusterChance) {
+        clusterCenters.push({
+          x: rng() * ctx.tileSize,
+          z: rng() * ctx.tileSize,
+        });
+      }
+    }
+  }
+
+  let rocksPlaced = 0;
+  const maxAttempts = baseCount * 15;
+  let attempts = 0;
+
+  while (rocksPlaced < baseCount && attempts < maxAttempts) {
+    attempts++;
+
+    let localX: number;
+    let localZ: number;
+
+    // Decide if this rock should be in a cluster
+    const useCluster = clusterCenters.length > 0 && rng() < 0.6;
+
+    if (useCluster) {
+      const cluster = clusterCenters[Math.floor(rng() * clusterCenters.length)];
+      const scatterRadius = 5 + rng() * 10; // 5-15m scatter
+      const angle = rng() * Math.PI * 2;
+      const distance = rng() * scatterRadius;
+      localX = cluster.x + Math.cos(angle) * distance;
+      localZ = cluster.z + Math.sin(angle) * distance;
+    } else {
+      localX = rng() * ctx.tileSize;
+      localZ = rng() * ctx.tileSize;
+    }
+
+    // Clamp to tile bounds
+    localX = Math.max(0, Math.min(ctx.tileSize, localX));
+    localZ = Math.max(0, Math.min(ctx.tileSize, localZ));
+
+    // Convert to world coordinates for height lookup
+    const worldX = ctx.tileX * ctx.tileSize + localX;
+    const worldZ = ctx.tileZ * ctx.tileSize + localZ;
+    const height = ctx.getHeightAt(worldX, worldZ);
+
+    // Skip if underwater
+    if (height < ctx.waterThreshold) {
+      continue;
+    }
+
+    // Check minimum spacing
+    let tooClose = false;
+    for (const pos of placedPositions) {
+      const dx = localX - pos.x;
+      const dz = localZ - pos.z;
+      if (dx * dx + dz * dz < minSpacingSq) {
+        tooClose = true;
+        break;
+      }
+    }
+    if (tooClose) continue;
+
+    // Check if on road
+    if (ctx.isOnRoad?.(worldX, worldZ)) {
+      continue;
+    }
+
+    // Select preset based on weighted distribution
+    let selectedPreset = presets[0];
+    const roll = rng() * totalWeight;
+    let cumulative = 0;
+    for (const preset of presets) {
+      cumulative += distribution[preset] ?? 1;
+      if (roll < cumulative) {
+        selectedPreset = preset;
+        break;
+      }
+    }
+
+    // Generate random scale within range
+    const [minScale, maxScale] = rockConfig.scaleRange;
+    const scale = minScale + rng() * (maxScale - minScale);
+
+    // Generate random Y-axis rotation
+    const rotation = rng() * Math.PI * 2;
+
+    // Create vegetation instance for rock
+    const rock: VegetationInstance = {
+      id: `${ctx.tileKey}_rock_${rocksPlaced}`,
+      assetId: selectedPreset,
+      category: "rock",
+      position: { x: worldX, y: height, z: worldZ },
+      rotation: { x: 0, y: rotation, z: 0 },
+      scale,
+      tileKey: ctx.tileKey,
+    };
+
+    rocks.push(rock);
+    placedPositions.push({ x: localX, z: localZ });
+    rocksPlaced++;
+  }
+
+  return rocks;
+}
+
+// ============================================================================
+// DECORATIVE PLANT GENERATION
+// ============================================================================
+
+/**
+ * Default plant presets mapping for each biome type.
+ */
+export const PLANT_BIOME_DEFAULTS: Record<
+  string,
+  { presets: string[]; distribution: Record<string, number> }
+> = {
+  forest: {
+    presets: ["monstera", "philodendron", "calathea", "ficus", "hosta"],
+    distribution: {
+      monstera: 2,
+      philodendron: 2,
+      calathea: 2,
+      ficus: 1,
+      hosta: 3,
+    },
+  },
+  plains: {
+    presets: ["hosta", "heuchera", "bergenia", "maranta"],
+    distribution: { hosta: 3, heuchera: 2, bergenia: 2, maranta: 1 },
+  },
+  desert: {
+    presets: ["zamioculcas", "aglaonema", "syngonium"],
+    distribution: { zamioculcas: 3, aglaonema: 2, syngonium: 1 },
+  },
+  mountains: {
+    presets: ["bergenia", "pulmonaria", "heuchera"],
+    distribution: { bergenia: 2, pulmonaria: 2, heuchera: 2 },
+  },
+  mountain: {
+    presets: ["bergenia", "pulmonaria", "heuchera"],
+    distribution: { bergenia: 2, pulmonaria: 2, heuchera: 2 },
+  },
+  swamp: {
+    presets: [
+      "monstera",
+      "colocasia",
+      "xanthosoma",
+      "alocasia",
+      "spathiphyllum",
+    ],
+    distribution: {
+      monstera: 2,
+      colocasia: 3,
+      xanthosoma: 2,
+      alocasia: 2,
+      spathiphyllum: 2,
+    },
+  },
+  frozen: {
+    presets: ["bergenia", "pulmonaria"],
+    distribution: { bergenia: 2, pulmonaria: 2 },
+  },
+  wastes: {
+    presets: ["zamioculcas", "aglaonema"],
+    distribution: { zamioculcas: 2, aglaonema: 2 },
+  },
+  corrupted: {
+    presets: ["alocasia", "caladium", "anthurium"],
+    distribution: { alocasia: 2, caladium: 2, anthurium: 2 },
+  },
+  lake: {
+    presets: ["colocasia", "calla", "arum", "spathiphyllum"],
+    distribution: { colocasia: 2, calla: 2, arum: 2, spathiphyllum: 2 },
+  },
+};
+
+/**
+ * Get plant presets and distribution for a biome type.
+ */
+export function getPlantPresetsForBiome(biomeType: string): {
+  presets: string[];
+  distribution: Record<string, number>;
+} {
+  return (
+    PLANT_BIOME_DEFAULTS[biomeType.toLowerCase()] ?? PLANT_BIOME_DEFAULTS.forest
+  );
+}
+
+/**
+ * Generate decorative plants for a tile based on biome configuration.
+ * These are non-harvestable environmental plants for visual variety.
+ *
+ * @param ctx - Resource generation context from TerrainSystem
+ * @param plantConfig - Biome plant configuration
+ * @param biomeType - Biome type for default presets
+ * @returns Array of VegetationInstance objects for plants
+ */
+export function generatePlants(
+  ctx: ResourceGenerationContext,
+  plantConfig: BiomePlantConfig,
+  biomeType: string,
+): VegetationInstance[] {
+  if (!plantConfig.enabled) {
+    return [];
+  }
+
+  const plants: VegetationInstance[] = [];
+
+  // Calculate plant count based on density and tile size
+  const tileArea = (ctx.tileSize / 100) * (ctx.tileSize / 100);
+  const baseCount = Math.floor(plantConfig.density * tileArea);
+
+  if (baseCount === 0) {
+    return [];
+  }
+
+  // Use deterministic RNG
+  const rng = ctx.createRng("plants");
+
+  // Get presets and distribution
+  const presets =
+    plantConfig.presets.length > 0
+      ? plantConfig.presets
+      : getPlantPresetsForBiome(biomeType).presets;
+
+  const distribution =
+    plantConfig.distribution ?? getPlantPresetsForBiome(biomeType).distribution;
+
+  if (presets.length === 0) {
+    return [];
+  }
+
+  const totalWeight = presets.reduce(
+    (sum, p) => sum + (distribution[p] ?? 1),
+    0,
+  );
+  if (totalWeight === 0) {
+    return [];
+  }
+
+  // Track placed positions for spacing
+  const placedPositions: Array<{ x: number; z: number }> = [];
+  const minSpacing = plantConfig.minSpacing;
+  const minSpacingSq = minSpacing * minSpacing;
+
+  // Generate cluster centers if clustering enabled
+  const clusterCenters: Array<{ x: number; z: number }> = [];
+  if (plantConfig.clustering) {
+    const [clusterMin, clusterMax] = plantConfig.clusterSize ?? [2, 4];
+    const numClusters = Math.ceil(baseCount / ((clusterMin + clusterMax) / 2));
+    for (let i = 0; i < numClusters; i++) {
+      clusterCenters.push({
+        x: rng() * ctx.tileSize,
+        z: rng() * ctx.tileSize,
+      });
+    }
+  }
+
+  let plantsPlaced = 0;
+  const maxAttempts = baseCount * 15;
+  let attempts = 0;
+
+  while (plantsPlaced < baseCount && attempts < maxAttempts) {
+    attempts++;
+
+    let localX: number;
+    let localZ: number;
+
+    const useCluster = clusterCenters.length > 0 && rng() < 0.7;
+
+    if (useCluster) {
+      const cluster = clusterCenters[Math.floor(rng() * clusterCenters.length)];
+      const scatterRadius = 3 + rng() * 6; // 3-9m scatter (plants cluster tighter)
+      const angle = rng() * Math.PI * 2;
+      const distance = rng() * scatterRadius;
+      localX = cluster.x + Math.cos(angle) * distance;
+      localZ = cluster.z + Math.sin(angle) * distance;
+    } else {
+      localX = rng() * ctx.tileSize;
+      localZ = rng() * ctx.tileSize;
+    }
+
+    // Clamp to tile bounds
+    localX = Math.max(0, Math.min(ctx.tileSize, localX));
+    localZ = Math.max(0, Math.min(ctx.tileSize, localZ));
+
+    // Convert to world coordinates for height lookup
+    const worldX = ctx.tileX * ctx.tileSize + localX;
+    const worldZ = ctx.tileZ * ctx.tileSize + localZ;
+    const height = ctx.getHeightAt(worldX, worldZ);
+
+    // Skip if underwater
+    if (height < ctx.waterThreshold) {
+      continue;
+    }
+
+    // Check minimum spacing
+    let tooClose = false;
+    for (const pos of placedPositions) {
+      const dx = localX - pos.x;
+      const dz = localZ - pos.z;
+      if (dx * dx + dz * dz < minSpacingSq) {
+        tooClose = true;
+        break;
+      }
+    }
+    if (tooClose) continue;
+
+    // Check if on road
+    if (ctx.isOnRoad?.(worldX, worldZ)) {
+      continue;
+    }
+
+    // Select preset based on weighted distribution
+    let selectedPreset = presets[0];
+    const roll = rng() * totalWeight;
+    let cumulative = 0;
+    for (const preset of presets) {
+      cumulative += distribution[preset] ?? 1;
+      if (roll < cumulative) {
+        selectedPreset = preset;
+        break;
+      }
+    }
+
+    // Generate random scale within range
+    const [minScale, maxScale] = plantConfig.scaleRange;
+    const scale = minScale + rng() * (maxScale - minScale);
+
+    // Generate random Y-axis rotation
+    const rotation = rng() * Math.PI * 2;
+
+    // Create vegetation instance for plant
+    const plant: VegetationInstance = {
+      id: `${ctx.tileKey}_plant_${plantsPlaced}`,
+      assetId: selectedPreset,
+      category: "plant",
+      position: { x: worldX, y: height, z: worldZ },
+      rotation: { x: 0, y: rotation, z: 0 },
+      scale,
+      tileKey: ctx.tileKey,
+    };
+
+    plants.push(plant);
+    placedPositions.push({ x: localX, z: localZ });
+    plantsPlaced++;
+  }
+
+  return plants;
 }

@@ -115,7 +115,7 @@ export function useTabDrag(): TabOperations & {
       // Find the source window
       const windows = useWindowStore.getState().getAllWindows();
       let sourceWindow: WindowState | null = null;
-      let tabToSplit = null;
+      let tabToSplit: WindowState["tabs"][number] | null = null;
 
       for (const window of windows) {
         const tab = window.tabs.find((t) => t.id === tabId);

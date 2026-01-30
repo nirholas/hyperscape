@@ -20,7 +20,6 @@ import THREE, {
   Fn,
   MeshStandardNodeMaterial,
   float,
-  fract,
   smoothstep,
   positionWorld,
   step,
@@ -33,7 +32,6 @@ import THREE, {
   abs,
   viewportCoordinate,
   dot,
-  vec3,
 } from "../../extras/three/three";
 import { DISTANCE_CONSTANTS } from "../../constants/GameConstants";
 import { GPU_VEG_CONFIG } from "../../systems/shared/world/GPUVegetation";
@@ -76,6 +74,123 @@ export const enum FadeState {
 }
 
 // ============================================================================
+// SHARED UNIFORMS MANAGER
+// ============================================================================
+
+/**
+ * Shared uniform manager for camera and player positions.
+ * Allows multiple materials to share the same position uniforms,
+ * reducing per-frame update overhead from O(N materials) to O(1).
+ */
+class SharedDissolveUniforms {
+  private static instance: SharedDissolveUniforms | null = null;
+
+  // TSL uniforms (for WebGPU path)
+  readonly cameraPosUniform = uniform(new THREE.Vector3(0, 0, 0));
+  readonly playerPosUniform = uniform(new THREE.Vector3(0, 0, 0));
+
+  // GLSL uniforms (for WebGL path)
+  readonly cameraPosGLSL = { value: new THREE.Vector3(0, 0, 0) };
+  readonly playerPosGLSL = { value: new THREE.Vector3(0, 0, 0) };
+
+  // Tracking
+  private registeredMaterials = new WeakSet<THREE.Material>();
+  private lastCameraUpdate = { x: NaN, y: NaN, z: NaN };
+  private lastPlayerUpdate = { x: NaN, y: NaN, z: NaN };
+
+  private constructor() {}
+
+  static getInstance(): SharedDissolveUniforms {
+    if (!SharedDissolveUniforms.instance) {
+      SharedDissolveUniforms.instance = new SharedDissolveUniforms();
+    }
+    return SharedDissolveUniforms.instance;
+  }
+
+  /**
+   * Update shared camera position.
+   * Only updates if position has changed to avoid unnecessary GPU uploads.
+   */
+  updateCamera(x: number, y: number, z: number): void {
+    if (
+      x === this.lastCameraUpdate.x &&
+      y === this.lastCameraUpdate.y &&
+      z === this.lastCameraUpdate.z
+    ) {
+      return;
+    }
+
+    // Update TSL uniform
+    this.cameraPosUniform.value.set(x, y, z);
+
+    // Update GLSL uniform
+    this.cameraPosGLSL.value.set(x, y, z);
+
+    this.lastCameraUpdate = { x, y, z };
+  }
+
+  /**
+   * Update shared player position.
+   * Only updates if position has changed to avoid unnecessary GPU uploads.
+   */
+  updatePlayer(x: number, y: number, z: number): void {
+    if (
+      x === this.lastPlayerUpdate.x &&
+      y === this.lastPlayerUpdate.y &&
+      z === this.lastPlayerUpdate.z
+    ) {
+      return;
+    }
+
+    // Update TSL uniform
+    this.playerPosUniform.value.set(x, y, z);
+
+    // Update GLSL uniform
+    this.playerPosGLSL.value.set(x, y, z);
+
+    this.lastPlayerUpdate = { x, y, z };
+  }
+
+  /**
+   * Register a material as using shared uniforms.
+   */
+  registerMaterial(material: THREE.Material): void {
+    this.registeredMaterials.add(material);
+  }
+
+  /**
+   * Check if a material is registered for shared uniforms.
+   */
+  isMaterialRegistered(material: THREE.Material): boolean {
+    return this.registeredMaterials.has(material);
+  }
+}
+
+/**
+ * Get the global shared dissolve uniforms instance.
+ */
+export function getSharedDissolveUniforms(): SharedDissolveUniforms {
+  return SharedDissolveUniforms.getInstance();
+}
+
+/**
+ * Update shared dissolve uniforms globally.
+ * Call this once per frame from the main render loop.
+ */
+export function updateSharedDissolveUniforms(
+  cameraX: number,
+  cameraY: number,
+  cameraZ: number,
+  playerX: number,
+  playerY: number,
+  playerZ: number,
+): void {
+  const shared = getSharedDissolveUniforms();
+  shared.updateCamera(cameraX, cameraY, cameraZ);
+  shared.updatePlayer(playerX, playerY, playerZ);
+}
+
+// ============================================================================
 // TSL-BASED DISSOLVE (WebGPU Native)
 // ============================================================================
 
@@ -85,15 +200,22 @@ export type TSLDissolveUniforms = {
   cameraPos: { value: THREE.Vector3 };
   playerPos: { value: THREE.Vector3 };
   occlusionEnabled: { value: number };
+  useSharedUniforms?: boolean;
 };
 
 /**
  * Apply TSL-based dissolve to a MeshStandardNodeMaterial.
  * This is the preferred path for WebGPU as it uses native TSL nodes.
+ *
+ * @param material - The material to apply dissolve to
+ * @param enableOcclusion - Enable camera-to-player occlusion dissolve
+ * @param useSharedUniforms - Use shared global uniforms for camera/player positions
+ *                            (recommended for many objects with same fade behavior)
  */
 function applyDissolveTSL(
   material: THREE.MeshStandardNodeMaterial,
   enableOcclusion: boolean = true,
+  useSharedUniforms: boolean = false,
 ): TSLDissolveUniforms | null {
   // Check if already patched
   const matWithUniforms = material as THREE.MeshStandardNodeMaterial & {
@@ -103,11 +225,21 @@ function applyDissolveTSL(
     return matWithUniforms._dissolveUniforms;
   }
 
-  // Create uniforms
+  // Create uniforms - use shared or per-material
   const uFadeAmount = uniform(0.0);
-  const uCameraPos = uniform(new THREE.Vector3(0, 0, 0));
-  const uPlayerPos = uniform(new THREE.Vector3(0, 0, 0));
+  const shared = useSharedUniforms ? getSharedDissolveUniforms() : null;
+  const uCameraPos = shared
+    ? shared.cameraPosUniform
+    : uniform(new THREE.Vector3(0, 0, 0));
+  const uPlayerPos = shared
+    ? shared.playerPosUniform
+    : uniform(new THREE.Vector3(0, 0, 0));
   const uOcclusionEnabled = uniform(enableOcclusion ? 1.0 : 0.0);
+
+  // Register material if using shared uniforms
+  if (shared) {
+    shared.registerMaterial(material);
+  }
 
   // Pre-compute constants
   const nearCameraFadeStart = float(GPU_VEG_CONFIG.NEAR_CAMERA_FADE_START);
@@ -214,6 +346,7 @@ function applyDissolveTSL(
     cameraPos: uCameraPos,
     playerPos: uPlayerPos,
     occlusionEnabled: uOcclusionEnabled,
+    useSharedUniforms: useSharedUniforms,
   };
   matWithUniforms._dissolveUniforms = uniforms;
 
@@ -407,6 +540,7 @@ export class DistanceFadeController {
   private materialUniforms: UnifiedDissolveUniforms[] = [];
   private useShaderFade: boolean = false;
   private useTSL: boolean = false;
+  private useSharedUniforms: boolean = false;
   private lastState: FadeState = FadeState.VISIBLE;
   private lastFadeAmount: number = 0;
 
@@ -416,13 +550,18 @@ export class DistanceFadeController {
    * @param rootObject - The root Object3D of the entity (typically entity.node or entity.mesh)
    * @param config - Fade configuration (fadeStart, fadeEnd distances, occlusion settings)
    * @param enableShaderFade - Whether to attempt shader-based dissolve (default: true)
+   * @param useSharedUniforms - Use shared global uniforms for camera/player positions.
+   *                            When true, you must call updateSharedDissolveUniforms() once per frame
+   *                            instead of passing positions to each controller's update().
    */
   constructor(
     rootObject: THREE.Object3D,
     config: DistanceFadeConfig,
     enableShaderFade: boolean = true,
+    useSharedUniforms: boolean = false,
   ) {
     this.rootObject = rootObject;
+    this.useSharedUniforms = useSharedUniforms;
     this.config = {
       fadeStart: config.fadeStart,
       fadeEnd: config.fadeEnd,
@@ -458,6 +597,7 @@ export class DistanceFadeController {
             const uniforms = applyDissolveTSL(
               material as THREE.MeshStandardNodeMaterial,
               this.config.enableOcclusionDissolve,
+              this.useSharedUniforms,
             );
             if (uniforms) {
               this.materialUniforms.push(uniforms);
@@ -546,7 +686,12 @@ export class DistanceFadeController {
     }
 
     // Update occlusion uniforms if shader fade is active
-    if (this.useShaderFade && this.materialUniforms.length > 0) {
+    // Skip if using shared uniforms (positions are updated globally once per frame)
+    if (
+      this.useShaderFade &&
+      this.materialUniforms.length > 0 &&
+      !this.useSharedUniforms
+    ) {
       const camY = cameraY ?? 0;
       const plrX = playerX ?? cameraX;
       const plrY = playerY ?? camY;
@@ -568,6 +713,9 @@ export class DistanceFadeController {
   /**
    * Update only the camera and player positions for occlusion dissolve.
    * Call this when positions change but you don't need full distance-based update.
+   *
+   * Note: If using shared uniforms, this method is a no-op. Instead, call
+   * updateSharedDissolveUniforms() once per frame from the main render loop.
    */
   updateOcclusionPositions(
     cameraX: number,
@@ -577,12 +725,19 @@ export class DistanceFadeController {
     playerY: number,
     playerZ: number,
   ): void {
-    if (!this.useShaderFade) return;
+    if (!this.useShaderFade || this.useSharedUniforms) return;
 
     for (const uniforms of this.materialUniforms) {
       uniforms.cameraPos.value.set(cameraX, cameraY, cameraZ);
       uniforms.playerPos.value.set(playerX, playerY, playerZ);
     }
+  }
+
+  /**
+   * Check if this controller is using shared uniforms.
+   */
+  isUsingSharedUniforms(): boolean {
+    return this.useSharedUniforms;
   }
 
   private applyFade(state: FadeState, fadeAmount: number): void {

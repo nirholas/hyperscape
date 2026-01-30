@@ -73,9 +73,7 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     // Load character data from database
     const databaseSystem = this.world.getSystem("database") as
       | {
-          getCharactersAsync: (
-            accountId: string,
-          ) => Promise<
+          getCharactersAsync: (accountId: string) => Promise<
             Array<{
               id: string;
               name: string;
@@ -83,9 +81,7 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
               wallet?: string | null;
             }>
           >;
-          getPlayerAsync: (
-            characterId: string,
-          ) => Promise<{
+          getPlayerAsync: (characterId: string) => Promise<{
             positionX?: number;
             positionY?: number;
             positionZ?: number;
@@ -111,6 +107,10 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
             cookingXp?: number;
             smithingLevel?: number;
             smithingXp?: number;
+            magicLevel?: number;
+            magicXp?: number;
+            prayerLevel?: number;
+            prayerXp?: number;
             coins?: number;
           } | null>;
         }
@@ -145,19 +145,55 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
 
     // Load skills from saved data
     const skills = {
-      attack: { level: savedData?.attackLevel || 1, xp: savedData?.attackXp || 0 },
-      strength: { level: savedData?.strengthLevel || 1, xp: savedData?.strengthXp || 0 },
-      defense: { level: savedData?.defenseLevel || 1, xp: savedData?.defenseXp || 0 },
-      constitution: { level: savedData?.constitutionLevel || 10, xp: savedData?.constitutionXp || 0 },
-      ranged: { level: savedData?.rangedLevel || 1, xp: savedData?.rangedXp || 0 },
+      attack: {
+        level: savedData?.attackLevel || 1,
+        xp: savedData?.attackXp || 0,
+      },
+      strength: {
+        level: savedData?.strengthLevel || 1,
+        xp: savedData?.strengthXp || 0,
+      },
+      defense: {
+        level: savedData?.defenseLevel || 1,
+        xp: savedData?.defenseXp || 0,
+      },
+      constitution: {
+        level: savedData?.constitutionLevel || 10,
+        xp: savedData?.constitutionXp || 0,
+      },
+      ranged: {
+        level: savedData?.rangedLevel || 1,
+        xp: savedData?.rangedXp || 0,
+      },
       magic: { level: savedData?.magicLevel || 1, xp: savedData?.magicXp || 0 },
-      prayer: { level: savedData?.prayerLevel || 1, xp: savedData?.prayerXp || 0 },
-      woodcutting: { level: savedData?.woodcuttingLevel || 1, xp: savedData?.woodcuttingXp || 0 },
-      mining: { level: savedData?.miningLevel || 1, xp: savedData?.miningXp || 0 },
-      fishing: { level: savedData?.fishingLevel || 1, xp: savedData?.fishingXp || 0 },
-      firemaking: { level: savedData?.firemakingLevel || 1, xp: savedData?.firemakingXp || 0 },
-      cooking: { level: savedData?.cookingLevel || 1, xp: savedData?.cookingXp || 0 },
-      smithing: { level: savedData?.smithingLevel || 1, xp: savedData?.smithingXp || 0 },
+      prayer: {
+        level: savedData?.prayerLevel || 1,
+        xp: savedData?.prayerXp || 0,
+      },
+      woodcutting: {
+        level: savedData?.woodcuttingLevel || 1,
+        xp: savedData?.woodcuttingXp || 0,
+      },
+      mining: {
+        level: savedData?.miningLevel || 1,
+        xp: savedData?.miningXp || 0,
+      },
+      fishing: {
+        level: savedData?.fishingLevel || 1,
+        xp: savedData?.fishingXp || 0,
+      },
+      firemaking: {
+        level: savedData?.firemakingLevel || 1,
+        xp: savedData?.firemakingXp || 0,
+      },
+      cooking: {
+        level: savedData?.cookingLevel || 1,
+        xp: savedData?.cookingXp || 0,
+      },
+      smithing: {
+        level: savedData?.smithingLevel || 1,
+        xp: savedData?.smithingXp || 0,
+      },
     };
 
     // Calculate health from constitution
@@ -202,7 +238,8 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     // Emit player joined event
     this.world.emit(EventType.PLAYER_JOINED, {
       playerId: this.characterId,
-      player: addedEntity as unknown as import("@hyperscape/shared").PlayerLocal,
+      player:
+        addedEntity as unknown as import("@hyperscape/shared").PlayerLocal,
       isEmbeddedAgent: true,
     });
 
@@ -276,9 +313,7 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
    * Stop the service and remove the player entity
    */
   async stop(): Promise<void> {
-    console.log(
-      `[EmbeddedHyperscapeService] Stopping agent ${this.name}`,
-    );
+    console.log(`[EmbeddedHyperscapeService] Stopping agent ${this.name}`);
 
     this.isActive = false;
 
@@ -293,9 +328,7 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     this.playerEntityId = null;
     this.eventHandlers.clear();
 
-    console.log(
-      `[EmbeddedHyperscapeService] ✅ Agent ${this.name} stopped`,
-    );
+    console.log(`[EmbeddedHyperscapeService] ✅ Agent ${this.name} stopped`);
   }
 
   // ============================================================================
@@ -469,10 +502,7 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     // Use the resource system directly
     const resourceSystem = this.world.getSystem("resource") as
       | {
-          startGathering?: (
-            playerId: string,
-            resourceId: string,
-          ) => void;
+          startGathering?: (playerId: string, resourceId: string) => void;
         }
       | undefined;
 
@@ -498,7 +528,9 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     if (inventorySystem?.pickupItem) {
       await inventorySystem.pickupItem(this.playerEntityId, itemId);
     } else {
-      console.warn("[EmbeddedHyperscapeService] Inventory system not available");
+      console.warn(
+        "[EmbeddedHyperscapeService] Inventory system not available",
+      );
     }
   }
 
@@ -520,7 +552,9 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     if (inventorySystem?.dropItem) {
       await inventorySystem.dropItem(this.playerEntityId, itemId, quantity);
     } else {
-      console.warn("[EmbeddedHyperscapeService] Inventory system not available");
+      console.warn(
+        "[EmbeddedHyperscapeService] Inventory system not available",
+      );
     }
   }
 
@@ -538,7 +572,9 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     if (equipmentSystem?.equipItem) {
       await equipmentSystem.equipItem(this.playerEntityId, itemId);
     } else {
-      console.warn("[EmbeddedHyperscapeService] Equipment system not available");
+      console.warn(
+        "[EmbeddedHyperscapeService] Equipment system not available",
+      );
     }
   }
 
@@ -556,7 +592,9 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     if (inventorySystem?.useItem) {
       await inventorySystem.useItem(this.playerEntityId, itemId);
     } else {
-      console.warn("[EmbeddedHyperscapeService] Inventory system not available");
+      console.warn(
+        "[EmbeddedHyperscapeService] Inventory system not available",
+      );
     }
   }
 
@@ -656,9 +694,7 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
   /**
    * Normalize position to [x, y, z] array format
    */
-  private normalizePosition(
-    pos: unknown,
-  ): [number, number, number] | null {
+  private normalizePosition(pos: unknown): [number, number, number] | null {
     if (Array.isArray(pos) && pos.length >= 3) {
       return [pos[0], pos[1], pos[2]];
     }

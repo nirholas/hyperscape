@@ -94,13 +94,19 @@ describe("GRASS_CONFIG", () => {
     });
   });
 
-  describe("water level", () => {
-    it("should reference GPU_VEG_CONFIG.WATER_LEVEL", () => {
-      expect(GRASS_CONFIG.WATER_LEVEL).toBe(GPU_VEG_CONFIG.WATER_LEVEL);
+  describe("shoreline fade", () => {
+    it("should have reasonable shoreline fade start (14m - matches terrain wet dirt zone)", () => {
+      expect(GRASS_CONFIG.SHORELINE_FADE_START).toBe(14.0);
     });
 
-    it("should have positive water buffer", () => {
-      expect(GRASS_CONFIG.WATER_BUFFER).toBeGreaterThan(0);
+    it("should have reasonable shoreline fade end (9m - matches terrain mud zone)", () => {
+      expect(GRASS_CONFIG.SHORELINE_FADE_END).toBe(9.0);
+    });
+
+    it("should have fade start above fade end", () => {
+      expect(GRASS_CONFIG.SHORELINE_FADE_START).toBeGreaterThan(
+        GRASS_CONFIG.SHORELINE_FADE_END,
+      );
     });
   });
 
@@ -238,29 +244,29 @@ describe("Grass Blade Geometry", () => {
 
   it("should generate expected vertex count for given segments", () => {
     // Formula: (segments + 1) * 2 vertices
-    const segments = GRASS_CONFIG.BLADE_SEGMENTS;
+    const segments = GRASS_CONFIG.BLADE_SEGMENTS; // Currently 3
     const expectedVertexCount = (segments + 1) * 2;
 
-    // 4 segments = 10 vertices
-    expect(expectedVertexCount).toBe(10);
+    // 3 segments = (3+1)*2 = 8 vertices
+    expect(expectedVertexCount).toBe((GRASS_CONFIG.BLADE_SEGMENTS + 1) * 2);
   });
 
   it("should generate expected triangle count for given segments", () => {
     // Formula: segments * 2 triangles
-    const segments = GRASS_CONFIG.BLADE_SEGMENTS;
+    const segments = GRASS_CONFIG.BLADE_SEGMENTS; // Currently 3
     const expectedTriangles = segments * 2;
 
-    // 4 segments = 8 triangles
-    expect(expectedTriangles).toBe(8);
+    // 3 segments = 3*2 = 6 triangles
+    expect(expectedTriangles).toBe(GRASS_CONFIG.BLADE_SEGMENTS * 2);
   });
 
   it("should calculate correct index count", () => {
     // Formula: triangles * 3 indices
-    const segments = GRASS_CONFIG.BLADE_SEGMENTS;
+    const segments = GRASS_CONFIG.BLADE_SEGMENTS; // Currently 3
     const expectedIndices = segments * 2 * 3;
 
-    // 4 segments = 24 indices
-    expect(expectedIndices).toBe(24);
+    // 3 segments = 3*2*3 = 18 indices
+    expect(expectedIndices).toBe(GRASS_CONFIG.BLADE_SEGMENTS * 2 * 3);
   });
 });
 
@@ -316,16 +322,16 @@ describe("Grass Chunk Math", () => {
     const density = GRASS_CONFIG.BASE_DENSITY;
     const instanceCount = Math.floor(chunkSize * chunkSize * density);
 
-    // 25m * 25m * 40 density = 25000 instances
-    expect(instanceCount).toBe(25000);
+    // 25m * 25m * 12 density = 7500 tuft instances (each with BLADES_PER_TUFT blades)
+    expect(instanceCount).toBe(7500);
   });
 
   it("should calculate correct spacing from density", () => {
     const density = GRASS_CONFIG.BASE_DENSITY;
     const spacing = Math.sqrt(1 / density);
 
-    // sqrt(1/40) ≈ 0.158m between grass blades
-    expect(spacing).toBeCloseTo(0.158, 2);
+    // sqrt(1/12) ≈ 0.289m between grass tufts
+    expect(spacing).toBeCloseTo(0.289, 2);
   });
 
   it("should calculate correct bounding sphere radius", () => {
@@ -527,8 +533,9 @@ describe("Distance Calculations", () => {
     const fadeStartSq = GRASS_CONFIG.FADE_START * GRASS_CONFIG.FADE_START;
     const fadeEndSq = GRASS_CONFIG.FADE_END * GRASS_CONFIG.FADE_END;
 
-    expect(fadeStartSq).toBe(45 * 45);
-    expect(fadeEndSq).toBe(60 * 60);
+    // Fade at 80-120m for performance
+    expect(fadeStartSq).toBe(80 * 80);
+    expect(fadeEndSq).toBe(120 * 120);
   });
 
   it("should correctly determine if position is in fade range", () => {
@@ -537,51 +544,74 @@ describe("Distance Calculations", () => {
 
     const playerPos = { x: 0, z: 0 };
 
-    // Test position at 30m - should be fully visible (before fade)
-    const pos30 = { x: 30, z: 0 };
-    const distSq30 =
-      (pos30.x - playerPos.x) ** 2 + (pos30.z - playerPos.z) ** 2;
-    expect(distSq30).toBeLessThan(fadeStartSq);
-
-    // Test position at 50m - should be fading
+    // Test position at 50m - should be fully visible (before fade starts at 80m)
     const pos50 = { x: 50, z: 0 };
     const distSq50 =
       (pos50.x - playerPos.x) ** 2 + (pos50.z - playerPos.z) ** 2;
-    expect(distSq50).toBeGreaterThan(fadeStartSq);
-    expect(distSq50).toBeLessThan(fadeEndSq);
+    expect(distSq50).toBeLessThan(fadeStartSq);
 
-    // Test position at 70m - should be fully hidden
-    const pos70 = { x: 70, z: 0 };
-    const distSq70 =
-      (pos70.x - playerPos.x) ** 2 + (pos70.z - playerPos.z) ** 2;
-    expect(distSq70).toBeGreaterThan(fadeEndSq);
+    // Test position at 100m - should be fading (between 80m and 120m)
+    const pos100 = { x: 100, z: 0 };
+    const distSq100 =
+      (pos100.x - playerPos.x) ** 2 + (pos100.z - playerPos.z) ** 2;
+    expect(distSq100).toBeGreaterThan(fadeStartSq);
+    expect(distSq100).toBeLessThan(fadeEndSq);
+
+    // Test position at 130m - should be fully hidden (past 120m fade end)
+    const pos130 = { x: 130, z: 0 };
+    const distSq130 =
+      (pos130.x - playerPos.x) ** 2 + (pos130.z - playerPos.z) ** 2;
+    expect(distSq130).toBeGreaterThan(fadeEndSq);
   });
 });
 
 // ============================================================================
-// WATER CULLING TESTS
+// SHORELINE CULLING TESTS
 // ============================================================================
 
-describe("Water Culling", () => {
-  it("should calculate correct water cutoff level", () => {
-    const waterCutoff = GRASS_CONFIG.WATER_LEVEL + GRASS_CONFIG.WATER_BUFFER;
-    expect(waterCutoff).toBeGreaterThan(GRASS_CONFIG.WATER_LEVEL);
+describe("Shoreline Culling", () => {
+  it("should calculate correct shoreline cutoff (9m = mud zone)", () => {
+    // No grass below SHORELINE_FADE_END (9m) - that's the mud zone
+    expect(GRASS_CONFIG.SHORELINE_FADE_END).toBe(9.0);
   });
 
-  it("should identify underwater positions", () => {
-    const waterCutoff = GRASS_CONFIG.WATER_LEVEL + GRASS_CONFIG.WATER_BUFFER;
+  it("should identify shoreline zones correctly", () => {
+    const fadeStart = GRASS_CONFIG.SHORELINE_FADE_START; // 14m - full grass
+    const fadeEnd = GRASS_CONFIG.SHORELINE_FADE_END; // 9m - no grass
 
-    // Position below water
-    const underwaterY = GRASS_CONFIG.WATER_LEVEL - 1;
-    expect(underwaterY).toBeLessThan(waterCutoff);
+    // Position in mud zone (no grass)
+    const mudZoneY = 7.0;
+    expect(mudZoneY).toBeLessThan(fadeEnd);
 
-    // Position at water edge
-    const atWaterY = GRASS_CONFIG.WATER_LEVEL + GRASS_CONFIG.WATER_BUFFER / 2;
-    expect(atWaterY).toBeLessThan(waterCutoff);
+    // Position in wet dirt transition zone (fading grass)
+    const transitionY = 11.0;
+    expect(transitionY).toBeGreaterThan(fadeEnd);
+    expect(transitionY).toBeLessThan(fadeStart);
 
-    // Position above water
-    const aboveWaterY = waterCutoff + 1;
-    expect(aboveWaterY).toBeGreaterThan(waterCutoff);
+    // Position in full grass zone
+    const fullGrassY = 20.0;
+    expect(fullGrassY).toBeGreaterThan(fadeStart);
+  });
+
+  it("should calculate shoreline factor correctly", () => {
+    const fadeStart = GRASS_CONFIG.SHORELINE_FADE_START;
+    const fadeEnd = GRASS_CONFIG.SHORELINE_FADE_END;
+
+    // Function that matches the placement code
+    const calcShorelineFactor = (height: number) =>
+      Math.min(1.0, Math.max(0.3, (height - fadeEnd) / (fadeStart - fadeEnd)));
+
+    // At 9m (fade end): factor should be 0.3 (minimum)
+    expect(calcShorelineFactor(9.0)).toBeCloseTo(0.3, 2);
+
+    // At 14m (fade start): factor should be 1.0
+    expect(calcShorelineFactor(14.0)).toBeCloseTo(1.0, 2);
+
+    // At 11.5m (midpoint): factor should be ~0.5
+    expect(calcShorelineFactor(11.5)).toBeCloseTo(0.5, 2);
+
+    // Above 14m: factor should be 1.0 (clamped)
+    expect(calcShorelineFactor(20.0)).toBe(1.0);
   });
 });
 

@@ -35,7 +35,7 @@ import {
   isWebGPUAvailable,
 } from "./RuntimeComputeContext";
 import {
-  CULLING_SHADER,
+  CULLING_SIMD_SHADER,
   RESET_DRAW_PARAMS_SHADER,
 } from "./shaders/culling.wgsl";
 
@@ -120,9 +120,10 @@ export class GPUCullingManager {
     }
 
     // Create pipelines
+    // Use SIMD-optimized culling shader for better performance
     this.cullingPipeline = this.context.createPipeline({
-      label: "InstanceCulling",
-      code: CULLING_SHADER,
+      label: "InstanceCullingSIMD",
+      code: CULLING_SIMD_SHADER,
       entryPoint: "main",
     });
 
@@ -327,15 +328,17 @@ export class GPUCullingManager {
   }
 
   /**
-   * Perform GPU culling for a group.
-   * Returns immediately; GPU work runs asynchronously.
+   * Prepare a group for culling (upload params, ensure bind group exists).
+   * Returns the bind group if ready, null otherwise.
    */
-  cull(name: string, cameraPosition: THREE.Vector3): void {
-    const group = this.groups.get(name);
-    if (!group || !this.initialized) return;
+  private prepareGroupForCulling(
+    name: string,
+    group: CullingGroup,
+    cameraPosition: THREE.Vector3,
+  ): GPUBindGroup | null {
     if (!group.instanceBuffer || !group.indirectBuffer || !group.paramsBuffer)
-      return;
-    if (group.instanceCount === 0) return;
+      return null;
+    if (group.instanceCount === 0) return null;
 
     // Sync any dirty buffers
     this.syncBuffers(name);
@@ -347,20 +350,19 @@ export class GPUCullingManager {
     params[2] = cameraPosition.z;
     params[3] = 0; // padding
 
-    params[4] = group.config.cullDistance * group.config.cullDistance; // cullDistanceSq
+    params[4] = group.config.cullDistance * group.config.cullDistance;
     params[5] =
-      (group.config.uncullDistance ?? group.config.cullDistance * 0.9) ** 2; // uncullDistanceSq
+      (group.config.uncullDistance ?? group.config.cullDistance * 0.9) ** 2;
     params[6] = group.config.boundingRadius;
-    // Instance count as u32 - use DataView for proper encoding
     const dataView = new DataView(params.buffer);
-    dataView.setUint32(7 * 4, group.instanceCount, true); // Little endian
+    dataView.setUint32(7 * 4, group.instanceCount, true);
 
     this.context.uploadToBuffer(group.paramsBuffer, params);
 
     // Reset indirect draw params
     this.resetIndirectBuffer(group);
 
-    // Create or update bind group
+    // Create bind group if needed
     if (!group.bindGroup && this.cullingPipeline && this.frustumBuffer) {
       group.bindGroup = this.context.createBindGroup(
         this.cullingPipeline,
@@ -375,17 +377,130 @@ export class GPUCullingManager {
       );
     }
 
-    // Dispatch culling
-    if (this.cullingPipeline && group.bindGroup) {
-      this.context.dispatch({
-        pipeline: this.cullingPipeline,
-        bindGroup: group.bindGroup,
-        workgroupCount: this.context.calculateWorkgroupCount(
-          group.instanceCount,
-          64,
-        ),
-      });
+    return group.bindGroup;
+  }
+
+  /**
+   * Perform GPU culling for a group.
+   * Returns immediately; GPU work runs asynchronously.
+   */
+  cull(name: string, cameraPosition: THREE.Vector3): void {
+    const group = this.groups.get(name);
+    if (!group || !this.initialized) return;
+
+    const bindGroup = this.prepareGroupForCulling(name, group, cameraPosition);
+    if (!bindGroup || !this.cullingPipeline) return;
+
+    this.context.dispatch({
+      pipeline: this.cullingPipeline,
+      bindGroup,
+      workgroupCount: this.context.calculateWorkgroupCount(
+        group.instanceCount,
+        64,
+      ),
+    });
+  }
+
+  /**
+   * Perform GPU culling for all registered groups in a single command buffer.
+   * More efficient than calling cull() for each group separately.
+   */
+  cullAll(cameraPosition: THREE.Vector3): void {
+    if (!this.initialized || !this.cullingPipeline) return;
+
+    const device = this.context.getDevice();
+    if (!device) return;
+
+    // Collect dispatch configs for all groups
+    const dispatches: Array<{
+      bindGroup: GPUBindGroup;
+      workgroupCount: number;
+    }> = [];
+
+    for (const [name, group] of this.groups) {
+      const bindGroup = this.prepareGroupForCulling(
+        name,
+        group,
+        cameraPosition,
+      );
+      if (bindGroup && group.instanceCount > 0) {
+        dispatches.push({
+          bindGroup,
+          workgroupCount: this.context.calculateWorkgroupCount(
+            group.instanceCount,
+            64,
+          ),
+        });
+      }
     }
+
+    if (dispatches.length === 0) return;
+
+    // Single command buffer for all groups
+    const encoder = device.createCommandEncoder({
+      label: "CullAllGroups",
+    });
+
+    for (const { bindGroup, workgroupCount } of dispatches) {
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(this.cullingPipeline);
+      pass.setBindGroup(0, bindGroup);
+      pass.dispatchWorkgroups(workgroupCount);
+      pass.end();
+    }
+
+    device.queue.submit([encoder.finish()]);
+  }
+
+  /**
+   * Perform GPU culling for specific groups in a single command buffer.
+   */
+  cullGroups(groupNames: string[], cameraPosition: THREE.Vector3): void {
+    if (!this.initialized || !this.cullingPipeline) return;
+
+    const device = this.context.getDevice();
+    if (!device) return;
+
+    const dispatches: Array<{
+      bindGroup: GPUBindGroup;
+      workgroupCount: number;
+    }> = [];
+
+    for (const name of groupNames) {
+      const group = this.groups.get(name);
+      if (!group) continue;
+
+      const bindGroup = this.prepareGroupForCulling(
+        name,
+        group,
+        cameraPosition,
+      );
+      if (bindGroup && group.instanceCount > 0) {
+        dispatches.push({
+          bindGroup,
+          workgroupCount: this.context.calculateWorkgroupCount(
+            group.instanceCount,
+            64,
+          ),
+        });
+      }
+    }
+
+    if (dispatches.length === 0) return;
+
+    const encoder = device.createCommandEncoder({
+      label: "CullSelectedGroups",
+    });
+
+    for (const { bindGroup, workgroupCount } of dispatches) {
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(this.cullingPipeline);
+      pass.setBindGroup(0, bindGroup);
+      pass.dispatchWorkgroups(workgroupCount);
+      pass.end();
+    }
+
+    device.queue.submit([encoder.finish()]);
   }
 
   /**

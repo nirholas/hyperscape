@@ -59,11 +59,32 @@ export interface IndexedIndirectDrawParams {
 // RUNTIME COMPUTE CONTEXT
 // ============================================================================
 
+/** Staging buffer pool entry */
+interface StagingBufferEntry {
+  buffer: GPUBuffer;
+  size: number;
+  inUse: boolean;
+  lastUsedFrame: number;
+}
+
+/** Standard staging buffer size tiers */
+const STAGING_SIZE_TIERS = [
+  1024, // 1KB
+  4096, // 4KB
+  16384, // 16KB
+  65536, // 64KB
+  262144, // 256KB
+  1048576, // 1MB
+  4194304, // 4MB
+] as const;
+
 /**
  * Runtime compute context for GPU compute operations.
  *
  * Unlike the decimation context which initializes its own device,
  * this context integrates with Three.js WebGPURenderer to share the device.
+ *
+ * Includes a staging buffer pool for efficient GPU read-back operations.
  */
 export class RuntimeComputeContext {
   private device: GPUDevice | null = null;
@@ -73,6 +94,12 @@ export class RuntimeComputeContext {
 
   // Cached shader modules for reuse
   private shaderModules: Map<string, GPUShaderModule> = new Map();
+
+  // Staging buffer pool for efficient read-back operations
+  private stagingPool: Map<number, StagingBufferEntry[]> = new Map();
+  private stagingPoolFrame = 0;
+  private readonly stagingPoolMaxAge = 300; // ~5 seconds at 60fps
+  private readonly stagingPoolMaxPerTier = 4;
 
   /**
    * Initialize from Three.js WebGPURenderer.
@@ -424,6 +451,141 @@ export class RuntimeComputeContext {
   }
 
   // ==========================================================================
+  // STAGING BUFFER POOL
+  // ==========================================================================
+
+  /**
+   * Find the appropriate size tier for a given size.
+   */
+  private findStagingSizeTier(size: number): number {
+    for (const tier of STAGING_SIZE_TIERS) {
+      if (tier >= size) return tier;
+    }
+    // Round up to next power of 2 for very large buffers
+    return Math.pow(2, Math.ceil(Math.log2(size)));
+  }
+
+  /**
+   * Acquire a staging buffer from the pool.
+   */
+  private acquireStagingBuffer(size: number): GPUBuffer | null {
+    if (!this.device) return null;
+
+    const tierSize = this.findStagingSizeTier(size);
+    let pool = this.stagingPool.get(tierSize);
+
+    if (!pool) {
+      pool = [];
+      this.stagingPool.set(tierSize, pool);
+    }
+
+    // Find an available buffer
+    for (const entry of pool) {
+      if (!entry.inUse) {
+        entry.inUse = true;
+        entry.lastUsedFrame = this.stagingPoolFrame;
+        return entry.buffer;
+      }
+    }
+
+    // Create new buffer if pool not full
+    if (pool.length < this.stagingPoolMaxPerTier) {
+      const buffer = this.device.createBuffer({
+        label: `staging_pool_${tierSize}_${pool.length}`,
+        size: tierSize,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+      });
+
+      pool.push({
+        buffer,
+        size: tierSize,
+        inUse: true,
+        lastUsedFrame: this.stagingPoolFrame,
+      });
+
+      return buffer;
+    }
+
+    // Pool full, create temporary buffer (will be destroyed after use)
+    return this.device.createBuffer({
+      label: `staging_temp_${tierSize}`,
+      size: tierSize,
+      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    });
+  }
+
+  /**
+   * Release a staging buffer back to the pool.
+   */
+  private releaseStagingBuffer(buffer: GPUBuffer): void {
+    for (const pool of this.stagingPool.values()) {
+      for (const entry of pool) {
+        if (entry.buffer === buffer) {
+          entry.inUse = false;
+          return;
+        }
+      }
+    }
+    // Buffer not in pool (temporary), destroy it
+    buffer.destroy();
+  }
+
+  /**
+   * Clean up stale staging buffers.
+   * Call periodically (e.g., every few seconds).
+   */
+  cleanupStagingPool(): void {
+    const threshold = this.stagingPoolFrame - this.stagingPoolMaxAge;
+
+    for (const [tierSize, pool] of this.stagingPool.entries()) {
+      const filtered = pool.filter((entry) => {
+        if (!entry.inUse && entry.lastUsedFrame < threshold) {
+          entry.buffer.destroy();
+          return false;
+        }
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        this.stagingPool.delete(tierSize);
+      } else {
+        this.stagingPool.set(tierSize, filtered);
+      }
+    }
+  }
+
+  /**
+   * Advance the staging pool frame counter.
+   * Call once per frame.
+   */
+  advanceFrame(): void {
+    this.stagingPoolFrame++;
+    // Cleanup every 300 frames (~5 seconds)
+    if (this.stagingPoolFrame % 300 === 0) {
+      this.cleanupStagingPool();
+    }
+  }
+
+  /**
+   * Get staging pool statistics.
+   */
+  getStagingPoolStats(): { total: number; inUse: number; totalSize: number } {
+    let total = 0;
+    let inUse = 0;
+    let totalSize = 0;
+
+    for (const pool of this.stagingPool.values()) {
+      for (const entry of pool) {
+        total++;
+        if (entry.inUse) inUse++;
+        totalSize += entry.size;
+      }
+    }
+
+    return { total, inUse, totalSize };
+  }
+
+  // ==========================================================================
   // READ-BACK OPERATIONS
   // ==========================================================================
 
@@ -452,6 +614,7 @@ export class RuntimeComputeContext {
 
   /**
    * Read back data from a storage buffer to CPU.
+   * Uses pooled staging buffers for efficiency.
    */
   async readBuffer<T extends ArrayBufferView>(
     source: GPUBuffer,
@@ -460,11 +623,9 @@ export class RuntimeComputeContext {
   ): Promise<T> {
     if (!this.device) throw new Error("Device not initialized");
 
-    // Create staging buffer
-    const staging = this.device.createBuffer({
-      size,
-      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-    });
+    // Acquire staging buffer from pool
+    const staging = this.acquireStagingBuffer(size);
+    if (!staging) throw new Error("Failed to acquire staging buffer");
 
     // Copy source to staging
     const encoder = this.device.createCommandEncoder();
@@ -475,9 +636,9 @@ export class RuntimeComputeContext {
     await staging.mapAsync(GPUMapMode.READ);
     const data = new ArrayType(staging.getMappedRange().slice(0));
 
-    // Cleanup
+    // Release back to pool
     staging.unmap();
-    staging.destroy();
+    this.releaseStagingBuffer(staging);
 
     return data;
   }
@@ -555,6 +716,14 @@ export class RuntimeComputeContext {
       buffer.destroy();
     }
     this.buffers.clear();
+
+    // Destroy staging pool
+    for (const pool of this.stagingPool.values()) {
+      for (const entry of pool) {
+        entry.buffer.destroy();
+      }
+    }
+    this.stagingPool.clear();
 
     // Clear caches
     this.pipelines.clear();

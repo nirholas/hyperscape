@@ -21,8 +21,11 @@ import {
 } from "./shaders/grass.wgsl";
 import {
   PARTICLE_PHYSICS_SHADER,
+  PARTICLE_PHYSICS_SUBGROUP_SHADER,
   PARTICLE_EMITTER_SHADER,
   PARTICLE_COMPACT_SHADER,
+  PARTICLE_COMPACT_SUBGROUP_SHADER,
+  supportsSubgroups,
 } from "./shaders/particles.wgsl";
 import { HEIGHTMAP_GENERATION_SHADER } from "./shaders/heightmap.wgsl";
 import { generatePermutationTable } from "./shaders/noise.wgsl";
@@ -105,6 +108,13 @@ export class GPUGrassManager {
       console.warn("[GPUGrassManager] WebGPU not available");
       return false;
     }
+
+    // Pre-warm buffer pool to avoid allocation spikes during gameplay
+    this.bufferPool.warmup({
+      storageSizes: [65536, 262144, 1048576], // 64KB, 256KB, 1MB for grass instances
+      uniformSizes: [64, 256], // Params buffers
+      indirectCount: 4,
+    });
 
     this.placementPipeline = this.context.createPipeline({
       label: "GrassPlacement",
@@ -286,6 +296,7 @@ export class GPUParticleManager {
   private systems: Map<string, ParticleSystemGPU> = new Map();
   private initialized = false;
   private frameCount = 0;
+  private useSubgroups = false;
 
   constructor() {
     this.context = new RuntimeComputeContext();
@@ -298,21 +309,51 @@ export class GPUParticleManager {
       return false;
     }
 
-    this.physicsPipeline = this.context.createPipeline({
-      label: "ParticlePhysics",
-      code: PARTICLE_PHYSICS_SHADER,
-      entryPoint: "main",
+    // Pre-warm buffer pool for particle systems
+    this.bufferPool.warmup({
+      storageSizes: [65536, 262144, 1048576, 4194304], // For particle buffers (80 bytes each)
+      uniformSizes: [64, 256], // Params and emitter configs
+      stagingSizes: [1024, 16384], // For live count read-backs
     });
+
+    const device = this.context.getDevice();
+
+    // Check for subgroup support and use optimized shaders if available
+    this.useSubgroups = device ? supportsSubgroups(device) : false;
+
+    if (this.useSubgroups) {
+      console.log(
+        "[GPUParticleManager] Subgroup operations supported, using optimized shaders",
+      );
+
+      this.physicsPipeline = this.context.createPipeline({
+        label: "ParticlePhysicsSubgroup",
+        code: PARTICLE_PHYSICS_SUBGROUP_SHADER,
+        entryPoint: "main",
+      });
+
+      this.compactPipeline = this.context.createPipeline({
+        label: "ParticleCompactSubgroup",
+        code: PARTICLE_COMPACT_SUBGROUP_SHADER,
+        entryPoint: "main",
+      });
+    } else {
+      this.physicsPipeline = this.context.createPipeline({
+        label: "ParticlePhysics",
+        code: PARTICLE_PHYSICS_SHADER,
+        entryPoint: "main",
+      });
+
+      this.compactPipeline = this.context.createPipeline({
+        label: "ParticleCompact",
+        code: PARTICLE_COMPACT_SHADER,
+        entryPoint: "main",
+      });
+    }
 
     this.emitterPipeline = this.context.createPipeline({
       label: "ParticleEmitter",
       code: PARTICLE_EMITTER_SHADER,
-      entryPoint: "main",
-    });
-
-    this.compactPipeline = this.context.createPipeline({
-      label: "ParticleCompact",
-      code: PARTICLE_COMPACT_SHADER,
       entryPoint: "main",
     });
 
@@ -322,6 +363,13 @@ export class GPUParticleManager {
       this.compactPipeline !== null;
 
     return this.initialized;
+  }
+
+  /**
+   * Check if subgroup operations are being used.
+   */
+  isUsingSubgroups(): boolean {
+    return this.useSubgroups;
   }
 
   isReady(): boolean {
@@ -513,6 +561,13 @@ export class GPUTerrainManager {
       return false;
     }
 
+    // Pre-warm buffer pool for terrain heightmaps
+    this.bufferPool.warmup({
+      storageSizes: [16384, 65536, 262144], // For heightmap data (64x64, 128x128, 256x256)
+      uniformSizes: [64, 256, 2048], // Params and permutation tables
+      stagingSizes: [16384, 65536], // For heightmap read-backs
+    });
+
     this.heightmapPipeline = this.context.createPipeline({
       label: "HeightmapGeneration",
       code: HEIGHTMAP_GENERATION_SHADER,
@@ -609,17 +664,29 @@ export class GPUTerrainManager {
  * Central manager for all GPU compute systems.
  * Provides a single entry point for initializing and accessing
  * GPU acceleration features.
+ *
+ * Uses lazy initialization - sub-managers are only created when first accessed.
+ * This reduces initial load time and memory usage for features not being used.
  */
 export class GPUComputeManager {
   private renderer: THREE.WebGPURenderer | null = null;
-  private _grass: GPUGrassManager | null = null;
-  private _particles: GPUParticleManager | null = null;
-  private _terrain: GPUTerrainManager | null = null;
+  private _seed: number = 0;
   private _capabilities: GPUComputeCapabilities | null = null;
+
+  // Lazy-initialized managers
+  private _grass: GPUGrassManager | null = null;
+  private _grassInitialized = false;
+  private _particles: GPUParticleManager | null = null;
+  private _particlesInitialized = false;
+  private _terrain: GPUTerrainManager | null = null;
+  private _terrainInitialized = false;
 
   /**
    * Initialize GPU compute from a Three.js renderer.
-   * Returns true if WebGPU is available and initialized.
+   * Returns true if WebGPU is available and renderer supports it.
+   *
+   * Note: Sub-managers are lazily initialized on first access,
+   * not during this call. This improves initial load time.
    */
   initialize(renderer: THREE.Renderer, seed: number = 0): boolean {
     if (!isWebGPUAvailable()) {
@@ -643,15 +710,7 @@ export class GPUComputeManager {
     }
 
     this.renderer = renderer as THREE.WebGPURenderer;
-
-    // Initialize all managers
-    this._grass = new GPUGrassManager();
-    this._particles = new GPUParticleManager();
-    this._terrain = new GPUTerrainManager();
-
-    const grassReady = this._grass.initialize(this.renderer);
-    const particlesReady = this._particles.initialize(this.renderer);
-    const terrainReady = this._terrain.initialize(this.renderer, seed);
+    this._seed = seed;
 
     this._capabilities = {
       available: true,
@@ -660,16 +719,19 @@ export class GPUComputeManager {
       maxComputeWorkgroupSize: 256,
     };
 
-    const allReady = grassReady && particlesReady && terrainReady;
-    if (!allReady) {
-      console.warn("[GPUComputeManager] Some systems failed to initialize:", {
-        grass: grassReady,
-        particles: particlesReady,
-        terrain: terrainReady,
-      });
-    }
+    return true;
+  }
 
-    return allReady;
+  /**
+   * Eagerly initialize all sub-managers.
+   * Call this during a loading screen to avoid first-access latency.
+   */
+  preloadAll(): { grass: boolean; particles: boolean; terrain: boolean } {
+    return {
+      grass: this.initializeGrass(),
+      particles: this.initializeParticles(),
+      terrain: this.initializeTerrain(),
+    };
   }
 
   /**
@@ -696,25 +758,105 @@ export class GPUComputeManager {
     );
   }
 
+  // ==========================================================================
+  // LAZY INITIALIZATION METHODS
+  // ==========================================================================
+
+  private initializeGrass(): boolean {
+    if (this._grassInitialized) return this._grass?.isReady() ?? false;
+    this._grassInitialized = true;
+
+    if (!this.renderer) return false;
+
+    this._grass = new GPUGrassManager();
+    const ready = this._grass.initialize(this.renderer);
+    if (!ready) {
+      console.warn("[GPUComputeManager] Grass manager failed to initialize");
+    }
+    return ready;
+  }
+
+  private initializeParticles(): boolean {
+    if (this._particlesInitialized) return this._particles?.isReady() ?? false;
+    this._particlesInitialized = true;
+
+    if (!this.renderer) return false;
+
+    this._particles = new GPUParticleManager();
+    const ready = this._particles.initialize(this.renderer);
+    if (!ready) {
+      console.warn("[GPUComputeManager] Particle manager failed to initialize");
+    }
+    return ready;
+  }
+
+  private initializeTerrain(): boolean {
+    if (this._terrainInitialized) return this._terrain?.isReady() ?? false;
+    this._terrainInitialized = true;
+
+    if (!this.renderer) return false;
+
+    this._terrain = new GPUTerrainManager();
+    const ready = this._terrain.initialize(this.renderer, this._seed);
+    if (!ready) {
+      console.warn("[GPUComputeManager] Terrain manager failed to initialize");
+    }
+    return ready;
+  }
+
+  // ==========================================================================
+  // MANAGER ACCESSORS (lazy initialization)
+  // ==========================================================================
+
   /**
    * Get the grass manager (GPU-accelerated grass placement and culling).
+   * Lazily initialized on first access.
    */
   get grass(): GPUGrassManager | null {
+    if (!this.isAvailable()) return null;
+    if (!this._grassInitialized) {
+      this.initializeGrass();
+    }
     return this._grass;
   }
 
   /**
    * Get the particle manager (GPU-accelerated particle physics).
+   * Lazily initialized on first access.
    */
   get particles(): GPUParticleManager | null {
+    if (!this.isAvailable()) return null;
+    if (!this._particlesInitialized) {
+      this.initializeParticles();
+    }
     return this._particles;
   }
 
   /**
    * Get the terrain manager (GPU-accelerated heightmap generation).
+   * Lazily initialized on first access.
    */
   get terrain(): GPUTerrainManager | null {
+    if (!this.isAvailable()) return null;
+    if (!this._terrainInitialized) {
+      this.initializeTerrain();
+    }
     return this._terrain;
+  }
+
+  /**
+   * Check which managers have been initialized.
+   */
+  getInitializationStatus(): {
+    grass: boolean;
+    particles: boolean;
+    terrain: boolean;
+  } {
+    return {
+      grass: this._grassInitialized,
+      particles: this._particlesInitialized,
+      terrain: this._terrainInitialized,
+    };
   }
 
   /**
@@ -727,6 +869,9 @@ export class GPUComputeManager {
     this._grass = null;
     this._particles = null;
     this._terrain = null;
+    this._grassInitialized = false;
+    this._particlesInitialized = false;
+    this._terrainInitialized = false;
     this.renderer = null;
     this._capabilities = null;
   }

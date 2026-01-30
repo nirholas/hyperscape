@@ -490,8 +490,11 @@ export class TownGenerator {
       }
     }
 
-    // Base orientation - slight random rotation for variety
-    const baseAngle = this.random() * Math.PI * 0.25 - Math.PI * 0.125; // -22.5 to +22.5 degrees
+    // Base orientation - strictly NESW aligned (0°, 90°, 180°, 270°)
+    // Buildings and roads must align to the grid for proper navigation
+    // Choose one of four cardinal directions randomly
+    const cardinalIndex = Math.floor(this.random() * 4);
+    const baseAngle = cardinalIndex * (Math.PI / 2); // 0, π/2, π, or 3π/2 radians
     const edgeDistance = town.safeZoneRadius * 0.9;
 
     // Generate grid-based road network
@@ -770,8 +773,13 @@ export class TownGenerator {
       // Three.js: rotation.y = θ means local +Z points to (sin(θ), cos(θ))
       // Left lot needs to face -perp direction (toward road): θ = atan2(-perpX, -perpZ)
       // Right lot needs to face +perp direction (toward road): θ = atan2(perpX, perpZ)
-      const facingLeft = Math.atan2(-perpX, -perpZ);
-      const facingRight = Math.atan2(perpX, perpZ);
+      // Snap to nearest 90° increment to ensure strict NESW alignment
+      const rawFacingLeft = Math.atan2(-perpX, -perpZ);
+      const rawFacingRight = Math.atan2(perpX, perpZ);
+      const facingLeft =
+        Math.round(rawFacingLeft / (Math.PI / 2)) * (Math.PI / 2);
+      const facingRight =
+        Math.round(rawFacingRight / (Math.PI / 2)) * (Math.PI / 2);
 
       // Leave space at ends for intersections
       // Scale offsets based on road length to ensure we can fit buildings on shorter roads
@@ -958,6 +966,8 @@ export class TownGenerator {
 
   /**
    * Generate radial lots when no roads exist (fallback for small hamlets)
+   * Buildings are placed in rings around the town center, facing inward.
+   * All buildings are NESW aligned (0°, 90°, 180°, 270°) for proper grid navigation.
    */
   private generateRadialLots(town: GeneratedTown): Array<{
     x: number;
@@ -997,12 +1007,17 @@ export class TownGenerator {
         const x = snapped.x;
         const z = snapped.z;
 
-        // Face toward center
+        // Face toward center, but snap to nearest NESW direction
         // Direction toward center is (centerX - x, centerZ - z)
         const towardCenterX = town.position.x - x;
         const towardCenterZ = town.position.z - z;
         // Three.js: to face direction (fx, fz), rotation = atan2(fx, fz)
-        const facingAngle = Math.atan2(towardCenterX, towardCenterZ);
+        const rawFacingAngle = Math.atan2(towardCenterX, towardCenterZ);
+
+        // Snap to nearest 90° increment (0, π/2, π, 3π/2 radians)
+        // This ensures buildings are NESW aligned for proper grid navigation
+        const facingAngle =
+          Math.round(rawFacingAngle / (Math.PI / 2)) * (Math.PI / 2);
 
         lots.push({
           x,

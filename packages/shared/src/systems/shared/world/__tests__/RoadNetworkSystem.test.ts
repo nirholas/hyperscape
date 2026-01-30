@@ -1674,6 +1674,200 @@ describe("RoadNetworkSystem Algorithms", () => {
       // Point (-2, -50) has local coords (98, 50) -> near east edge
       expect(getNearestTileEdge(-2, -50)).toBe("east");
     });
+
+    it("should detect boundary exits from clipped segments (town-to-town roads)", () => {
+      // This tests the new functionality: detecting boundary exits during segment clipping,
+      // not just from road endpoints. This captures town-to-town roads that cross tile boundaries.
+
+      const EDGE_EPSILON = 0.01;
+
+      // Helper to detect which edge a point is on (matches getEdgeAtPoint in RoadNetworkSystem)
+      function getEdgeAtPoint(
+        x: number,
+        z: number,
+        tileMinX: number,
+        tileMaxX: number,
+        tileMinZ: number,
+        tileMaxZ: number,
+        epsilon: number,
+      ): TileEdge | null {
+        if (Math.abs(x - tileMinX) <= epsilon) return "west";
+        if (Math.abs(x - tileMaxX) <= epsilon) return "east";
+        if (Math.abs(z - tileMinZ) <= epsilon) return "south";
+        if (Math.abs(z - tileMaxZ) <= epsilon) return "north";
+        return null;
+      }
+
+      // Cohen-Sutherland clipping (copied from RoadNetworkSystem)
+      function clipSegmentToTile(
+        x1: number,
+        z1: number,
+        x2: number,
+        z2: number,
+        minX: number,
+        maxX: number,
+        minZ: number,
+        maxZ: number,
+      ): { x1: number; z1: number; x2: number; z2: number } | null {
+        const INSIDE = 0,
+          LEFT = 1,
+          RIGHT = 2,
+          BOTTOM = 4,
+          TOP = 8;
+
+        const computeCode = (x: number, z: number): number => {
+          let code = INSIDE;
+          if (x < minX) code |= LEFT;
+          else if (x > maxX) code |= RIGHT;
+          if (z < minZ) code |= BOTTOM;
+          else if (z > maxZ) code |= TOP;
+          return code;
+        };
+
+        let code1 = computeCode(x1, z1);
+        let code2 = computeCode(x2, z2);
+
+        while (true) {
+          if ((code1 | code2) === 0) return { x1, z1, x2, z2 };
+          if ((code1 & code2) !== 0) return null;
+
+          const codeOut = code1 !== 0 ? code1 : code2;
+          let x: number, z: number;
+
+          if (codeOut & TOP) {
+            x = x1 + ((x2 - x1) * (maxZ - z1)) / (z2 - z1);
+            z = maxZ;
+          } else if (codeOut & BOTTOM) {
+            x = x1 + ((x2 - x1) * (minZ - z1)) / (z2 - z1);
+            z = minZ;
+          } else if (codeOut & RIGHT) {
+            z = z1 + ((z2 - z1) * (maxX - x1)) / (x2 - x1);
+            x = maxX;
+          } else {
+            z = z1 + ((z2 - z1) * (minX - x1)) / (x2 - x1);
+            x = minX;
+          }
+
+          if (codeOut === code1) {
+            x1 = x;
+            z1 = z;
+            code1 = computeCode(x1, z1);
+          } else {
+            x2 = x;
+            z2 = z;
+            code2 = computeCode(x2, z2);
+          }
+        }
+      }
+
+      // Simulate a town-to-town road that crosses from tile (0,0) to tile (1,0)
+      // Road goes from (50, 50) to (150, 50) - crosses the east/west boundary at x=100
+      const p1 = { x: 50, z: 50 };
+      const p2 = { x: 150, z: 50 };
+
+      const exits: RoadBoundaryExit[] = [];
+      const roadId = "town_to_town_road";
+
+      // Process tile (0, 0)
+      let tileX = 0;
+      let tileZ = 0;
+      let tileMinX = 0;
+      let tileMaxX = 100;
+      let tileMinZ = 0;
+      let tileMaxZ = 100;
+
+      let clipped = clipSegmentToTile(
+        p1.x,
+        p1.z,
+        p2.x,
+        p2.z,
+        tileMinX,
+        tileMaxX,
+        tileMinZ,
+        tileMaxZ,
+      );
+      expect(clipped).not.toBeNull();
+      expect(clipped!.x1).toBe(50);
+      expect(clipped!.x2).toBe(100); // Clipped to tile boundary
+
+      // Check if end was clipped (should be at east edge)
+      const endWasClipped =
+        Math.abs(clipped!.x2 - p2.x) > EDGE_EPSILON ||
+        Math.abs(clipped!.z2 - p2.z) > EDGE_EPSILON;
+      expect(endWasClipped).toBe(true);
+
+      const endEdge = getEdgeAtPoint(
+        clipped!.x2,
+        clipped!.z2,
+        tileMinX,
+        tileMaxX,
+        tileMinZ,
+        tileMaxZ,
+        EDGE_EPSILON,
+      );
+      expect(endEdge).toBe("east"); // Road exits tile 0,0 to the east
+
+      // Record the boundary exit
+      if (endEdge) {
+        const segmentDirection = Math.atan2(
+          clipped!.z2 - clipped!.z1,
+          clipped!.x2 - clipped!.x1,
+        );
+        exits.push({
+          roadId,
+          position: { x: clipped!.x2, z: clipped!.z2 },
+          direction: segmentDirection,
+          tileX,
+          tileZ,
+          edge: endEdge,
+        });
+      }
+
+      // Process tile (1, 0)
+      tileX = 1;
+      tileMinX = 100;
+      tileMaxX = 200;
+
+      clipped = clipSegmentToTile(
+        p1.x,
+        p1.z,
+        p2.x,
+        p2.z,
+        tileMinX,
+        tileMaxX,
+        tileMinZ,
+        tileMaxZ,
+      );
+      expect(clipped).not.toBeNull();
+      expect(clipped!.x1).toBe(100); // Clipped to tile boundary
+      expect(clipped!.x2).toBe(150);
+
+      // Check if start was clipped (should be at west edge)
+      const startWasClipped =
+        Math.abs(clipped!.x1 - p1.x) > EDGE_EPSILON ||
+        Math.abs(clipped!.z1 - p1.z) > EDGE_EPSILON;
+      expect(startWasClipped).toBe(true);
+
+      const startEdge = getEdgeAtPoint(
+        clipped!.x1,
+        clipped!.z1,
+        tileMinX,
+        tileMaxX,
+        tileMinZ,
+        tileMaxZ,
+        EDGE_EPSILON,
+      );
+      expect(startEdge).toBe("west"); // Road enters tile 1,0 from the west
+
+      // Verify we detected the boundary crossing
+      expect(exits.length).toBe(1);
+      expect(exits[0].edge).toBe("east");
+      expect(exits[0].tileX).toBe(0);
+      expect(exits[0].position.x).toBe(100);
+
+      // This is the key improvement: town-to-town roads that cross tile boundaries
+      // are now detected during clipping, not just exploration roads
+    });
   });
 
   describe("Cross-Tile Road Continuity", () => {
@@ -1841,6 +2035,91 @@ describe("RoadNetworkSystem Algorithms", () => {
 
       const entries = getRoadEntriesForTile(0, 1, exits);
       expect(entries[0].edge).toBe("south");
+    });
+
+    it("should generate entry stub segments from boundary exits", () => {
+      // This tests the entry stub generation that creates visual continuity
+      // when roads cross from one tile into an adjacent tile
+
+      const STUB_LENGTH = 15;
+
+      interface RoadTileSegment {
+        start: { x: number; z: number };
+        end: { x: number; z: number };
+        width: number;
+        roadId: string;
+      }
+
+      // Helper to get direction angle into tile from edge
+      function getDirectionIntoTile(edge: TileEdge): number {
+        switch (edge) {
+          case "west":
+            return 0; // East (into tile from west edge)
+          case "east":
+            return Math.PI; // West (into tile from east edge)
+          case "south":
+            return Math.PI / 2; // North (into tile from south edge)
+          case "north":
+            return -Math.PI / 2; // South (into tile from north edge)
+        }
+      }
+
+      // Simulate generating entry stub for road entering from west edge
+      const entry: RoadBoundaryExit = {
+        roadId: "road_test",
+        position: { x: 100, z: 50 }, // At west boundary of tile (1, 0)
+        direction: 0,
+        tileX: 1,
+        tileZ: 0,
+        edge: "west",
+      };
+
+      // Generate stub segment
+      const tileMinX = 1 * TILE_SIZE; // = 100
+      const tileMinZ = 0 * TILE_SIZE; // = 0
+      const entryLocalX = entry.position.x - tileMinX; // = 0 (at west edge)
+      const entryLocalZ = entry.position.z - tileMinZ; // = 50
+
+      const dirIntoTile = getDirectionIntoTile(entry.edge);
+      expect(dirIntoTile).toBe(0); // East direction
+
+      const endX = entryLocalX + Math.cos(dirIntoTile) * STUB_LENGTH;
+      const endZ = entryLocalZ + Math.sin(dirIntoTile) * STUB_LENGTH;
+
+      // Verify stub extends into tile from west edge
+      expect(endX).toBeCloseTo(15, 5); // 0 + 15 * cos(0) = 15
+      expect(endZ).toBeCloseTo(50, 5); // 50 + 15 * sin(0) = 50
+
+      // Create the segment
+      const stubSegment: RoadTileSegment = {
+        start: { x: entryLocalX, z: entryLocalZ },
+        end: { x: endX, z: endZ },
+        width: 4,
+        roadId: entry.roadId,
+      };
+
+      // Verify segment properties
+      expect(stubSegment.start.x).toBe(0); // Starts at west edge
+      expect(stubSegment.end.x).toBeCloseTo(15); // Extends 15m into tile
+      expect(stubSegment.roadId).toBe("road_test");
+
+      // Test stub from east edge (entering from tile on the right)
+      const entryFromEast: RoadBoundaryExit = {
+        roadId: "road_east",
+        position: { x: 200, z: 50 }, // At east boundary of tile (1, 0)
+        direction: Math.PI,
+        tileX: 1,
+        tileZ: 0,
+        edge: "east",
+      };
+
+      const entryFromEastLocalX = entryFromEast.position.x - tileMinX; // = 100
+      const dirFromEast = getDirectionIntoTile(entryFromEast.edge);
+      expect(dirFromEast).toBe(Math.PI); // West direction
+
+      const endFromEastX =
+        entryFromEastLocalX + Math.cos(dirFromEast) * STUB_LENGTH;
+      expect(endFromEastX).toBeCloseTo(85, 5); // 100 + 15 * cos(PI) = 100 - 15 = 85
     });
   });
 
@@ -2881,6 +3160,595 @@ describe("RoadNetworkSystem Algorithms", () => {
           `Extension: ${extensionLength.toFixed(1)}m over ${extensionSteps} steps (avg ${avgStepSize.toFixed(1)}m/step)`,
         );
       }
+    });
+  });
+
+  describe("Entry Stub Generation Edge Cases", () => {
+    /**
+     * ALGORITHM VERIFICATION TESTS
+     *
+     * These tests verify the entry stub generation algorithm that creates
+     * short road segments continuing from adjacent tile boundaries.
+     *
+     * Algorithm extracted from RoadNetworkSystem.generateEntryStubSegments.
+     * Source: packages/shared/src/systems/shared/world/RoadNetworkSystem.ts
+     *
+     * Note: Real integration tests in TownRoadIntegration.test.ts verify actual behavior.
+     */
+
+    const STUB_LENGTH = 15; // Must match RoadNetworkSystem.STUB_LENGTH
+    const DIRECTION_INTO_TILE: Record<TileEdge, number> = {
+      west: 0,
+      east: Math.PI,
+      south: Math.PI / 2,
+      north: -Math.PI / 2,
+    };
+
+    function generateStubSegment(
+      entry: RoadBoundaryExit,
+      tileX: number,
+      tileZ: number,
+    ): RoadTileSegment | null {
+      const tileMinX = tileX * TILE_SIZE;
+      const tileMinZ = tileZ * TILE_SIZE;
+      const localX = entry.position.x - tileMinX;
+      const localZ = entry.position.z - tileMinZ;
+      const dir = DIRECTION_INTO_TILE[entry.edge];
+
+      const endX = Math.max(
+        0,
+        Math.min(TILE_SIZE, localX + Math.cos(dir) * STUB_LENGTH),
+      );
+      const endZ = Math.max(
+        0,
+        Math.min(TILE_SIZE, localZ + Math.sin(dir) * STUB_LENGTH),
+      );
+
+      const dx = endX - localX;
+      const dz = endZ - localZ;
+      if (dx * dx + dz * dz <= 1) return null;
+
+      return {
+        start: { x: localX, z: localZ },
+        end: { x: endX, z: endZ },
+        width: ROAD_WIDTH,
+        roadId: entry.roadId,
+      };
+    }
+
+    it("should handle entry at exact corner (touches two edges)", () => {
+      // Entry at southwest corner of tile (1, 1)
+      const cornerEntry: RoadBoundaryExit = {
+        roadId: "road_corner",
+        position: { x: 100, z: 100 }, // Corner of tile (1, 1)
+        direction: Math.PI / 4,
+        tileX: 1,
+        tileZ: 1,
+        edge: "west", // Entering from west
+      };
+
+      const stub = generateStubSegment(cornerEntry, 1, 1);
+      expect(stub).not.toBeNull();
+      expect(stub!.start.x).toBe(0);
+      expect(stub!.start.z).toBe(0);
+      // Stub extends east into tile
+      expect(stub!.end.x).toBeCloseTo(15);
+      expect(stub!.end.z).toBeCloseTo(0);
+    });
+
+    it("should handle entry at northeast corner", () => {
+      const cornerEntry: RoadBoundaryExit = {
+        roadId: "road_ne_corner",
+        position: { x: 200, z: 200 }, // Northeast corner of tile (1, 1)
+        direction: -Math.PI / 4,
+        tileX: 1,
+        tileZ: 1,
+        edge: "north",
+      };
+
+      const stub = generateStubSegment(cornerEntry, 1, 1);
+      expect(stub).not.toBeNull();
+      expect(stub!.start.x).toBe(100); // At east edge
+      expect(stub!.start.z).toBe(100); // At north edge
+      // Direction south (into tile from north)
+      expect(stub!.end.x).toBeCloseTo(100);
+      expect(stub!.end.z).toBeCloseTo(85); // 100 - 15
+    });
+
+    it("should handle entry with negative tile coordinates", () => {
+      const negEntry: RoadBoundaryExit = {
+        roadId: "road_negative",
+        position: { x: -100, z: -50 }, // West edge of tile (-1, -1)
+        direction: 0,
+        tileX: -1,
+        tileZ: -1,
+        edge: "west",
+      };
+
+      const stub = generateStubSegment(negEntry, -1, -1);
+      expect(stub).not.toBeNull();
+      // Tile (-1, -1) spans world [-100, 0) x [-100, 0)
+      // Entry at x=-100 is at local x=0
+      expect(stub!.start.x).toBe(0);
+      expect(stub!.start.z).toBe(50); // -50 - (-100) = 50
+      expect(stub!.end.x).toBeCloseTo(15);
+    });
+
+    it("should clamp stub at tile boundary when entry is near opposite edge", () => {
+      // Entry from west edge but very close to east edge (should clamp)
+      const nearEdgeEntry: RoadBoundaryExit = {
+        roadId: "road_near_edge",
+        position: { x: 100, z: 50 }, // West edge of tile (1, 0)
+        direction: 0,
+        tileX: 1,
+        tileZ: 0,
+        edge: "west",
+      };
+
+      const stub = generateStubSegment(nearEdgeEntry, 1, 0);
+      expect(stub).not.toBeNull();
+      expect(stub!.end.x).toBeLessThanOrEqual(TILE_SIZE);
+    });
+
+    it("should reject stub with zero effective length", () => {
+      // Entry at southeast corner entering from south - endZ would be > TILE_SIZE, clamped to 100
+      // But if localZ is already 100, stub length becomes 0
+      const zeroLengthEntry: RoadBoundaryExit = {
+        roadId: "road_zero",
+        position: { x: 150, z: 100 }, // South edge at north boundary of tile (1, 0)
+        direction: Math.PI / 2,
+        tileX: 1,
+        tileZ: 0,
+        edge: "south",
+      };
+
+      // localZ = 100 - 0 = 100 (at north edge of tile)
+      // Direction south (into tile) is Math.PI/2, so endZ = 100 + sin(PI/2)*15 = 115, clamped to 100
+      // dx=0, dz=0, length=0 -> should be rejected
+      const stub = generateStubSegment(zeroLengthEntry, 1, 0);
+      expect(stub).toBeNull();
+    });
+
+    it("should generate correct stubs for all four edges", () => {
+      const edges: TileEdge[] = ["north", "south", "east", "west"];
+      const expectedDirs = {
+        west: { dx: 1, dz: 0 }, // East
+        east: { dx: -1, dz: 0 }, // West
+        south: { dx: 0, dz: 1 }, // North
+        north: { dx: 0, dz: -1 }, // South
+      };
+
+      for (const edge of edges) {
+        const entry: RoadBoundaryExit = {
+          roadId: `road_${edge}`,
+          position: { x: 150, z: 150 }, // Center of tile (1, 1)
+          direction: 0,
+          tileX: 1,
+          tileZ: 1,
+          edge,
+        };
+
+        const stub = generateStubSegment(entry, 1, 1);
+        expect(stub).not.toBeNull();
+
+        const dx = stub!.end.x - stub!.start.x;
+        const dz = stub!.end.z - stub!.start.z;
+        const expected = expectedDirs[edge];
+
+        // Verify direction is correct (normalized)
+        const len = Math.sqrt(dx * dx + dz * dz);
+        expect(dx / len).toBeCloseTo(expected.dx, 1);
+        expect(dz / len).toBeCloseTo(expected.dz, 1);
+      }
+    });
+
+    it("should handle multiple entries on same edge", () => {
+      const entries: RoadBoundaryExit[] = [
+        {
+          roadId: "road_1",
+          position: { x: 100, z: 20 },
+          direction: 0,
+          tileX: 1,
+          tileZ: 0,
+          edge: "west",
+        },
+        {
+          roadId: "road_2",
+          position: { x: 100, z: 50 },
+          direction: 0,
+          tileX: 1,
+          tileZ: 0,
+          edge: "west",
+        },
+        {
+          roadId: "road_3",
+          position: { x: 100, z: 80 },
+          direction: 0,
+          tileX: 1,
+          tileZ: 0,
+          edge: "west",
+        },
+      ];
+
+      const stubs = entries
+        .map((e) => generateStubSegment(e, 1, 0))
+        .filter((s): s is RoadTileSegment => s !== null);
+      expect(stubs.length).toBe(3);
+
+      // All should start at x=0 (west edge)
+      for (const stub of stubs) {
+        expect(stub.start.x).toBe(0);
+        expect(stub.end.x).toBeCloseTo(15);
+      }
+
+      // Z coordinates should differ
+      expect(stubs[0].start.z).toBe(20);
+      expect(stubs[1].start.z).toBe(50);
+      expect(stubs[2].start.z).toBe(80);
+    });
+  });
+
+  describe("Segment Combination Logic", () => {
+    // These tests verify the segment combination algorithm
+    // For real integration tests, see TownRoadIntegration.test.ts
+
+    it("combining empty arrays produces empty result", () => {
+      const cachedSegments: RoadTileSegment[] = [];
+      const stubSegments: RoadTileSegment[] = [];
+      const result =
+        stubSegments.length > 0
+          ? [...cachedSegments, ...stubSegments]
+          : cachedSegments;
+      expect(result).toEqual([]);
+    });
+
+    it("combines cached with stubs when both exist", () => {
+      const cachedSegments: RoadTileSegment[] = [
+        {
+          start: { x: 20, z: 20 },
+          end: { x: 80, z: 80 },
+          width: 4,
+          roadId: "internal_road",
+        },
+      ];
+      const stubSegments: RoadTileSegment[] = [
+        {
+          start: { x: 0, z: 50 },
+          end: { x: 15, z: 50 },
+          width: 4,
+          roadId: "cross_tile_road",
+        },
+      ];
+
+      const result =
+        stubSegments.length > 0
+          ? [...cachedSegments, ...stubSegments]
+          : cachedSegments;
+      expect(result.length).toBe(2);
+      expect(result).toContainEqual(cachedSegments[0]);
+      expect(result).toContainEqual(stubSegments[0]);
+    });
+
+    it("returns cached only when stubs are empty", () => {
+      const cachedSegments: RoadTileSegment[] = [
+        {
+          start: { x: 10, z: 10 },
+          end: { x: 90, z: 90 },
+          width: 4,
+          roadId: "main_road",
+        },
+      ];
+      const stubSegments: RoadTileSegment[] = [];
+
+      const result =
+        stubSegments.length > 0
+          ? [...cachedSegments, ...stubSegments]
+          : cachedSegments;
+      expect(result).toBe(cachedSegments); // Same reference - no unnecessary spread
+      expect(result.length).toBe(1);
+    });
+  });
+
+  describe("Direction Constant Verification", () => {
+    const DIRECTION_INTO_TILE: Record<TileEdge, number> = {
+      west: 0,
+      east: Math.PI,
+      south: Math.PI / 2,
+      north: -Math.PI / 2,
+    };
+
+    it("west entry direction points east (+X)", () => {
+      const dir = DIRECTION_INTO_TILE["west"];
+      expect(Math.cos(dir)).toBeCloseTo(1, 5);
+      expect(Math.sin(dir)).toBeCloseTo(0, 5);
+    });
+
+    it("east entry direction points west (-X)", () => {
+      const dir = DIRECTION_INTO_TILE["east"];
+      expect(Math.cos(dir)).toBeCloseTo(-1, 5);
+      expect(Math.sin(dir)).toBeCloseTo(0, 5);
+    });
+
+    it("south entry direction points north (+Z)", () => {
+      const dir = DIRECTION_INTO_TILE["south"];
+      expect(Math.cos(dir)).toBeCloseTo(0, 5);
+      expect(Math.sin(dir)).toBeCloseTo(1, 5);
+    });
+
+    it("north entry direction points south (-Z)", () => {
+      const dir = DIRECTION_INTO_TILE["north"];
+      expect(Math.cos(dir)).toBeCloseTo(0, 5);
+      expect(Math.sin(dir)).toBeCloseTo(-1, 5);
+    });
+
+    it("all directions are perpendicular to their edge", () => {
+      // West/East edges are vertical (parallel to Z axis), direction should be horizontal (X axis)
+      expect(Math.abs(Math.sin(DIRECTION_INTO_TILE["west"]))).toBeLessThan(
+        0.01,
+      );
+      expect(Math.abs(Math.sin(DIRECTION_INTO_TILE["east"]))).toBeLessThan(
+        0.01,
+      );
+
+      // North/South edges are horizontal (parallel to X axis), direction should be vertical (Z axis)
+      expect(Math.abs(Math.cos(DIRECTION_INTO_TILE["north"]))).toBeLessThan(
+        0.01,
+      );
+      expect(Math.abs(Math.cos(DIRECTION_INTO_TILE["south"]))).toBeLessThan(
+        0.01,
+      );
+    });
+
+    it("opposite edges have opposite directions", () => {
+      const westDir = DIRECTION_INTO_TILE["west"];
+      const eastDir = DIRECTION_INTO_TILE["east"];
+      expect(Math.cos(westDir)).toBeCloseTo(-Math.cos(eastDir), 5);
+
+      const northDir = DIRECTION_INTO_TILE["north"];
+      const southDir = DIRECTION_INTO_TILE["south"];
+      expect(Math.sin(northDir)).toBeCloseTo(-Math.sin(southDir), 5);
+    });
+  });
+
+  describe("Boundary Detection Precision", () => {
+    const EDGE_EPSILON = 0.01;
+
+    function getEdgeAtPoint(
+      x: number,
+      z: number,
+      tileMinX: number,
+      tileMaxX: number,
+      tileMinZ: number,
+      tileMaxZ: number,
+      epsilon: number,
+    ): TileEdge | null {
+      if (Math.abs(x - tileMinX) < epsilon) return "west";
+      if (Math.abs(x - tileMaxX) < epsilon) return "east";
+      if (Math.abs(z - tileMinZ) < epsilon) return "south";
+      if (Math.abs(z - tileMaxZ) < epsilon) return "north";
+      return null;
+    }
+
+    it("detects point exactly at west edge", () => {
+      const edge = getEdgeAtPoint(0, 50, 0, 100, 0, 100, EDGE_EPSILON);
+      expect(edge).toBe("west");
+    });
+
+    it("detects point exactly at east edge", () => {
+      const edge = getEdgeAtPoint(100, 50, 0, 100, 0, 100, EDGE_EPSILON);
+      expect(edge).toBe("east");
+    });
+
+    it("detects point slightly off west edge (within epsilon)", () => {
+      const edge = getEdgeAtPoint(0.005, 50, 0, 100, 0, 100, EDGE_EPSILON);
+      expect(edge).toBe("west");
+    });
+
+    it("does not detect point beyond epsilon from edge", () => {
+      const edge = getEdgeAtPoint(0.02, 50, 0, 100, 0, 100, EDGE_EPSILON);
+      expect(edge).toBeNull();
+    });
+
+    it("handles floating point precision issues", () => {
+      // 0.1 + 0.2 = 0.30000000000000004 in IEEE 754
+      const imprecise = 0.1 + 0.2;
+      const edge = getEdgeAtPoint(
+        imprecise,
+        50,
+        0.3,
+        100.3,
+        0,
+        100,
+        EDGE_EPSILON,
+      );
+      expect(edge).toBe("west"); // Should detect despite floating point error
+    });
+
+    it("prioritizes west edge at northwest corner", () => {
+      // When at exact corner, first matching edge wins (order: west, east, south, north)
+      const edge = getEdgeAtPoint(0, 100, 0, 100, 0, 100, EDGE_EPSILON);
+      expect(edge).toBe("west");
+    });
+
+    it("prioritizes west edge at southwest corner", () => {
+      const edge = getEdgeAtPoint(0, 0, 0, 100, 0, 100, EDGE_EPSILON);
+      expect(edge).toBe("west");
+    });
+
+    it("handles negative coordinate tiles", () => {
+      // Tile at (-2, -1) spans [-200, -100) x [-100, 0)
+      const edge = getEdgeAtPoint(-200, -50, -200, -100, -100, 0, EDGE_EPSILON);
+      expect(edge).toBe("west");
+    });
+
+    it("detects edges in large coordinate tiles", () => {
+      // Tile at (100, 50) spans [10000, 10100) x [5000, 5100)
+      const edge = getEdgeAtPoint(
+        10100,
+        5050,
+        10000,
+        10100,
+        5000,
+        5100,
+        EDGE_EPSILON,
+      );
+      expect(edge).toBe("east");
+    });
+  });
+
+  describe("Clipped Segment Boundary Exit Detection", () => {
+    const EDGE_EPSILON = 0.01;
+
+    function wasPointClipped(
+      clippedX: number,
+      clippedZ: number,
+      originalX: number,
+      originalZ: number,
+      epsilon: number,
+    ): boolean {
+      return (
+        Math.abs(clippedX - originalX) > epsilon ||
+        Math.abs(clippedZ - originalZ) > epsilon
+      );
+    }
+
+    it("detects when segment start was clipped", () => {
+      // Original: (-10, 50) -> (50, 50), clipped to tile [0, 100]: (0, 50) -> (50, 50)
+      const clippedX1 = 0,
+        clippedZ1 = 50;
+      const originalX1 = -10,
+        originalZ1 = 50;
+      expect(
+        wasPointClipped(
+          clippedX1,
+          clippedZ1,
+          originalX1,
+          originalZ1,
+          EDGE_EPSILON,
+        ),
+      ).toBe(true);
+    });
+
+    it("detects when segment end was clipped", () => {
+      // Original: (50, 50) -> (150, 50), clipped: (50, 50) -> (100, 50)
+      const clippedX2 = 100,
+        clippedZ2 = 50;
+      const originalX2 = 150,
+        originalZ2 = 50;
+      expect(
+        wasPointClipped(
+          clippedX2,
+          clippedZ2,
+          originalX2,
+          originalZ2,
+          EDGE_EPSILON,
+        ),
+      ).toBe(true);
+    });
+
+    it("detects when both endpoints were clipped", () => {
+      // Original: (-10, 50) -> (150, 50), clipped: (0, 50) -> (100, 50)
+      expect(wasPointClipped(0, 50, -10, 50, EDGE_EPSILON)).toBe(true);
+      expect(wasPointClipped(100, 50, 150, 50, EDGE_EPSILON)).toBe(true);
+    });
+
+    it("does not flag unclipped endpoints", () => {
+      // Segment fully inside tile
+      expect(wasPointClipped(10, 50, 10, 50, EDGE_EPSILON)).toBe(false);
+      expect(wasPointClipped(90, 50, 90, 50, EDGE_EPSILON)).toBe(false);
+    });
+
+    it("handles diagonal segment clipping", () => {
+      // Original diagonal: (-20, -20) -> (120, 120)
+      // Clipped to [0, 100]: approximately (0, 0) -> (100, 100)
+      expect(wasPointClipped(0, 0, -20, -20, EDGE_EPSILON)).toBe(true);
+      expect(wasPointClipped(100, 100, 120, 120, EDGE_EPSILON)).toBe(true);
+    });
+
+    it("segment direction is calculated correctly from clipped points", () => {
+      // Clipped segment from (0, 50) to (100, 50) - horizontal
+      const clippedX1 = 0,
+        clippedZ1 = 50;
+      const clippedX2 = 100,
+        clippedZ2 = 50;
+      const segDir = Math.atan2(clippedZ2 - clippedZ1, clippedX2 - clippedX1);
+      expect(segDir).toBeCloseTo(0, 5); // East
+
+      // Diagonal segment from (0, 0) to (100, 100)
+      const diagDir = Math.atan2(100 - 0, 100 - 0);
+      expect(diagDir).toBeCloseTo(Math.PI / 4, 5); // Northeast
+    });
+
+    it("entry direction is opposite of segment direction at clipped start", () => {
+      // Segment goes east (0 radians) from start
+      const segDir = 0;
+      const entryDir = segDir + Math.PI; // West (road enters from west)
+      expect(Math.cos(entryDir)).toBeCloseTo(-1, 5);
+    });
+
+    it("exit direction matches segment direction at clipped end", () => {
+      // Segment goes east (0 radians) to end
+      const segDir = 0;
+      const exitDir = segDir; // East (road exits to east)
+      expect(Math.cos(exitDir)).toBeCloseTo(1, 5);
+    });
+  });
+
+  describe("Concurrent Cache Access Simulation", () => {
+    // Simulate concurrent access patterns that might occur with async tile generation
+
+    it("handles simultaneous reads from same tile", () => {
+      const cache = new Map<string, RoadTileSegment[]>();
+      const key = "1_1";
+      cache.set(key, [
+        {
+          start: { x: 0, z: 0 },
+          end: { x: 100, z: 100 },
+          width: 4,
+          roadId: "r1",
+        },
+      ]);
+
+      // Simulate multiple "threads" reading same tile
+      const reads = Array.from({ length: 100 }, () => cache.get(key));
+      expect(reads.every((r) => r !== undefined && r.length === 1)).toBe(true);
+    });
+
+    it("handles cache miss gracefully", () => {
+      const cache = new Map<string, RoadTileSegment[]>();
+      const result = cache.get("nonexistent_tile") || [];
+      expect(result).toEqual([]);
+    });
+
+    it("entry stub cache is independent of road cache", () => {
+      const tileRoadCache = new Map<string, RoadTileSegment[]>();
+      const entryStubCache = new Map<string, RoadTileSegment[]>();
+
+      const key = "4_4";
+      tileRoadCache.set(key, [
+        {
+          start: { x: 10, z: 10 },
+          end: { x: 90, z: 90 },
+          width: 4,
+          roadId: "main",
+        },
+      ]);
+      entryStubCache.set(key, [
+        {
+          start: { x: 0, z: 50 },
+          end: { x: 15, z: 50 },
+          width: 4,
+          roadId: "stub",
+        },
+      ]);
+
+      // Modify one cache shouldn't affect the other
+      tileRoadCache.delete(key);
+      expect(entryStubCache.get(key)?.length).toBe(1);
+
+      // And vice versa
+      entryStubCache.delete(key);
+      expect(tileRoadCache.get(key)).toBeUndefined();
     });
   });
 });

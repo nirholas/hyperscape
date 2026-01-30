@@ -533,9 +533,9 @@ export function isPhysicsWorkerAvailable(): boolean {
 function getCdnUrl(): string {
   if (typeof window !== "undefined") {
     const windowWithCdn = window as Window & { __CDN_URL?: string };
-    return windowWithCdn.__CDN_URL || "http://localhost:8080";
+    return windowWithCdn.__CDN_URL || "http://localhost:5555/game-assets";
   }
-  return "http://localhost:8080";
+  return "http://localhost:5555/game-assets";
 }
 
 /**

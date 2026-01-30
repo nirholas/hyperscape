@@ -1155,4 +1155,120 @@ describe("TownGenerator", () => {
       }
     });
   });
+
+  describe("NESW building alignment", () => {
+    it("should align all buildings to NESW grid (0°, 90°, 180°, 270°)", () => {
+      const gen = new TownGenerator({
+        seed: 12345,
+        config: { townCount: 10 },
+      });
+      const result = gen.generate();
+
+      // Valid rotations in radians (with small tolerance for floating point)
+      const validRotations = [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2];
+      // Also handle -π (same as π) and 2π (same as 0)
+      const tolerance = 0.001;
+
+      let buildingsChecked = 0;
+      let buildingsAligned = 0;
+
+      for (const town of result.towns) {
+        for (const building of town.buildings) {
+          buildingsChecked++;
+
+          // Normalize rotation to [0, 2π)
+          let normalizedRotation =
+            ((building.rotation % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+
+          // Check if rotation is close to any valid NESW rotation
+          const isAligned = validRotations.some(
+            (valid) =>
+              Math.abs(normalizedRotation - valid) < tolerance ||
+              Math.abs(normalizedRotation - valid - 2 * Math.PI) < tolerance,
+          );
+
+          if (isAligned) {
+            buildingsAligned++;
+          } else {
+            console.log(
+              `Building ${building.id} has non-NESW rotation: ${(building.rotation * 180) / Math.PI}°`,
+            );
+          }
+        }
+      }
+
+      console.log(
+        `NESW aligned buildings: ${buildingsAligned}/${buildingsChecked} (${((buildingsAligned / buildingsChecked) * 100).toFixed(0)}%)`,
+      );
+
+      // All buildings must be NESW aligned
+      expect(buildingsAligned).toBe(buildingsChecked);
+    });
+
+    it("should align hamlet buildings (radial layout) to NESW", () => {
+      const gen = new TownGenerator({
+        seed: 99999,
+        config: { townCount: 20 },
+      });
+      const result = gen.generate();
+
+      const hamlets = result.towns.filter((t) => t.size === "hamlet");
+      const tolerance = 0.001;
+
+      for (const hamlet of hamlets) {
+        for (const building of hamlet.buildings) {
+          // Normalize rotation to [0, 2π)
+          let normalizedRotation =
+            ((building.rotation % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+
+          // Check if rotation is a multiple of π/2 (0°, 90°, 180°, 270°)
+          const quarterTurns = normalizedRotation / (Math.PI / 2);
+          const isAligned =
+            Math.abs(quarterTurns - Math.round(quarterTurns)) < tolerance;
+
+          expect(isAligned).toBe(true);
+        }
+      }
+    });
+
+    it("should generate roads aligned to cardinal directions", () => {
+      const gen = new TownGenerator({
+        seed: 12345,
+        config: { townCount: 5 },
+      });
+      const result = gen.generate();
+
+      const tolerance = 0.01;
+
+      for (const town of result.towns) {
+        const roads = town.internalRoads ?? [];
+
+        for (const road of roads) {
+          const dx = road.end.x - road.start.x;
+          const dz = road.end.z - road.start.z;
+          const length = Math.sqrt(dx * dx + dz * dz);
+          if (length < 1) continue;
+
+          // Normalized direction
+          const dirX = dx / length;
+          const dirZ = dz / length;
+
+          // Road should be aligned to one of: N-S (0,±1), E-W (±1,0), or 45° diagonals
+          // For NESW alignment, roads should be cardinal: (0,±1) or (±1,0)
+          const isNorthSouth =
+            Math.abs(dirX) < tolerance &&
+            Math.abs(Math.abs(dirZ) - 1) < tolerance;
+          const isEastWest =
+            Math.abs(dirZ) < tolerance &&
+            Math.abs(Math.abs(dirX) - 1) < tolerance;
+
+          // At minimum, roads should be reasonably aligned (within 45°)
+          // Perfect cardinal alignment means one component is 0
+          const isCardinal = isNorthSouth || isEastWest;
+
+          expect(isCardinal).toBe(true);
+        }
+      }
+    });
+  });
 });

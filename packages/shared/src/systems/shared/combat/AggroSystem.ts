@@ -24,6 +24,12 @@ import {
   type TileCoord,
 } from "../movement/TileSystem";
 import type { Entity } from "../../../entities/Entity";
+import {
+  NetworkingComputeContext,
+  isNetworkingComputeAvailable,
+  type GPUMobData,
+  type GPUPlayerPosition,
+} from "../../../utils/compute";
 
 /**
  * Tolerance state for a player in a region
@@ -78,6 +84,10 @@ export class AggroSystem extends SystemBase {
 
   /** EntityManager for spatial queries */
   private entityManager?: import("../entities/EntityManager").EntityManager;
+
+  /** GPU compute context for batch aggro checks (server-side) */
+  private networkingCompute: NetworkingComputeContext | null = null;
+  private gpuComputeAvailable = false;
 
   constructor(world: World) {
     super(world, {
@@ -216,7 +226,26 @@ export class AggroSystem extends SystemBase {
     );
   }
 
-  start(): void {
+  async start(): Promise<void> {
+    // Initialize GPU compute for batch aggro checks (server-side only)
+    if (this.world.isServer && isNetworkingComputeAvailable()) {
+      this.networkingCompute = new NetworkingComputeContext({
+        minAggroPairsForGPU: 500, // 50 mobs × 10 players
+      });
+      try {
+        this.gpuComputeAvailable =
+          await this.networkingCompute.initializeStandalone();
+        if (this.gpuComputeAvailable) {
+          console.log(
+            "[AggroSystem] GPU compute initialized for batch aggro checks",
+          );
+        }
+      } catch (error) {
+        console.warn("[AggroSystem] GPU compute initialization failed:", error);
+        this.gpuComputeAvailable = false;
+      }
+    }
+
     // Start AI update loop aligned to server tick (OSRS-accurate)
     this.createInterval(() => {
       this.updateMobAI();
@@ -406,6 +435,98 @@ export class AggroSystem extends SystemBase {
       aggroTarget.distance = distance;
       aggroTarget.inRange = distance <= mobState.detectionRange;
     }
+  }
+
+  /**
+   * Batch compute aggro targets for all aggressive mobs using GPU.
+   * Returns a map of mobId -> best target playerId (or null if no valid target).
+   *
+   * @param mobs - Array of mob states to check
+   * @param players - Array of player positions
+   * @returns Map of mobId to best target player ID
+   */
+  private async computeBatchAggroTargetsGPU(
+    mobs: MobAIStateData[],
+    players: Array<{ entityId: string; x: number; z: number }>,
+  ): Promise<Map<string, string | null>> {
+    const result = new Map<string, string | null>();
+
+    // Check if GPU should be used
+    if (
+      this.gpuComputeAvailable &&
+      this.networkingCompute &&
+      this.networkingCompute.shouldUseGPUForAggroChecks(
+        mobs.length,
+        players.length,
+      )
+    ) {
+      try {
+        // Prepare GPU data
+        const gpuMobs: GPUMobData[] = mobs.map((m) => ({
+          x: m.currentPosition.x,
+          z: m.currentPosition.z,
+          aggroRangeSq: m.detectionRange * m.detectionRange,
+          behavior: m.behavior === "aggressive" ? 1 : 0,
+        }));
+
+        const gpuPlayers: GPUPlayerPosition[] = players.map((p) => ({
+          x: p.x,
+          z: p.z,
+        }));
+
+        // GPU compute
+        const aggroResults = await this.networkingCompute.computeAggroTargets(
+          gpuMobs,
+          gpuPlayers,
+        );
+
+        // Convert to map
+        for (let i = 0; i < mobs.length; i++) {
+          const mobId = mobs[i].mobId;
+          const targetIdx = aggroResults[i].targetPlayerIdx;
+          if (targetIdx >= 0 && targetIdx < players.length) {
+            result.set(mobId, players[targetIdx].entityId);
+          } else {
+            result.set(mobId, null);
+          }
+        }
+
+        return result;
+      } catch (error) {
+        console.warn(
+          "[AggroSystem] GPU aggro check failed, falling back to CPU:",
+          error,
+        );
+        // Fall through to CPU
+      }
+    }
+
+    // CPU fallback - compute per-mob
+    for (const mob of mobs) {
+      if (mob.behavior === "passive") {
+        result.set(mob.mobId, null);
+        continue;
+      }
+
+      let bestTarget: string | null = null;
+      let bestDistSq = Infinity;
+      const rangeSq = mob.detectionRange * mob.detectionRange;
+
+      for (const player of players) {
+        const dx = player.x - mob.currentPosition.x;
+        const dz = player.z - mob.currentPosition.z;
+        const distSq = dx * dx + dz * dz;
+
+        if (distSq <= rangeSq && distSq < bestDistSq) {
+          bestDistSq = distSq;
+          bestTarget = player.entityId;
+        }
+      }
+
+      result.set(mob.mobId, bestTarget);
+    }
+
+    return result;
   }
 
   /**
@@ -990,6 +1111,13 @@ export class AggroSystem extends SystemBase {
 
     // Clear cached skills
     this.playerSkills.clear();
+
+    // Cleanup GPU compute context
+    if (this.networkingCompute) {
+      this.networkingCompute.destroy();
+      this.networkingCompute = null;
+      this.gpuComputeAvailable = false;
+    }
 
     // Call parent cleanup (automatically handles interval cleanup)
     super.destroy();

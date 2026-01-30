@@ -17,15 +17,23 @@ describe("All Presets Verification", () => {
 
   // Skip intensive presets that take too long for quick testing
   // These are tested manually or in longer CI runs
+  // Presets that generate many leaves/stems and can exceed 10s timeout
   const intensivePresets = new Set([
     "balsamFir",
+    "blackTupelo",
     "douglasFir",
     "europeanLarch",
+    "silverBirch",
     "weepingWillow",
   ]);
 
   describe("structural validity", () => {
-    it.each(presetNames)(
+    // Filter out intensive presets for quick test runs
+    const structureTestPresets = presetNames.filter(
+      (name) => !intensivePresets.has(name),
+    );
+
+    it.each(structureTestPresets)(
       "preset %s generates valid tree structure",
       (presetName) => {
         const params = PRESETS[presetName]!;

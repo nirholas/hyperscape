@@ -39,7 +39,11 @@ import {
   getGPUComputeManager,
   isGPUComputeAvailable,
 } from "./GPUComputeIntegration";
-import { isWebGPURenderer } from "./RuntimeComputeContext";
+import {
+  isWebGPURenderer,
+  getGlobalComputeContext,
+} from "./RuntimeComputeContext";
+import { updateSharedDissolveUniforms } from "../rendering/DistanceFade";
 
 // ============================================================================
 // SETUP FUNCTIONS
@@ -112,8 +116,31 @@ function getWorldSeed(world: World): number {
  *
  * @param camera - The main camera
  * @param delta - Time delta since last frame
+ * @param playerPosition - Optional player position for occlusion dissolve
  */
-export function updateGPUCompute(camera: THREE.Camera, delta: number): void {
+export function updateGPUCompute(
+  camera: THREE.Camera,
+  delta: number,
+  playerPosition?: THREE.Vector3,
+): void {
+  // Advance staging buffer pool frame counter for cleanup
+  const context = getGlobalComputeContext();
+  if (context.isReady()) {
+    context.advanceFrame();
+  }
+
+  // Update shared dissolve uniforms (for materials using shared uniforms)
+  const camPos = camera.position;
+  const playerPos = playerPosition ?? camPos;
+  updateSharedDissolveUniforms(
+    camPos.x,
+    camPos.y,
+    camPos.z,
+    playerPos.x,
+    playerPos.y,
+    playerPos.z,
+  );
+
   if (!isGPUComputeAvailable()) return;
 
   const manager = getGPUComputeManager();

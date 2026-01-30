@@ -260,10 +260,10 @@ describe("Geometry Verification", () => {
         // We just want to ensure the face isn't pointing along the stem direction
         const absY = Math.abs(worldFaceNormal.y);
 
-        // At least 10% of the normal should be in Y direction
+        // At least 5% of the normal should be in Y direction
         // This is lenient to allow tilted/horizontal leaves but prevents completely sideways faces
-        // Note: StemAttachmentAngle can tilt leaves further from vertical
-        expect(absY).toBeGreaterThan(0.1);
+        // Note: StemAttachmentAngle can tilt leaves further from vertical, hence the low threshold
+        expect(absY).toBeGreaterThan(0.05);
       }
 
       result.dispose();

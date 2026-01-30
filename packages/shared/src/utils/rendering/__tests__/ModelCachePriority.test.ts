@@ -342,8 +342,7 @@ describe("VegetationSystem LOD Priority Usage", () => {
 
   it("LOD0 should use HIGH or immediate (no priority)", () => {
     // LOD0 (full detail) models are loaded immediately without queueing
-    const LOD0_PRIORITY = undefined; // No priority = immediate
-    // Or explicitly HIGH which also loads immediately
+    // No priority = immediate, or explicitly HIGH which also loads immediately
     expect(LoadPriority.HIGH).toBeLessThanOrEqual(LoadPriority.HIGH);
   });
 

@@ -180,9 +180,8 @@ function generatePlacements(input) {
       const worldX = originX + gx + jitterX;
       const worldZ = originZ + gz + jitterZ;
       
-      // Basic noise-based density variation (coarse filtering)
-      const noiseVal = noise2D(worldX * 0.1, worldZ * 0.1, chunkSeed);
-      if (noiseVal < 0.15) continue; // Skip sparse areas
+      // NO noise-based filtering - generates even grass coverage
+      // Density variation is handled by distance-based LOD at render time
       
       // Instance variation
       const heightScale = (0.7 + nextRandom() * 0.6) * heightMultiplier;

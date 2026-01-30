@@ -166,6 +166,8 @@ export class RoadNetworkSystem extends System {
     getBiomeAtWorldPosition?(x: number, z: number): string;
   };
   private tileRoadCache = new Map<string, RoadTileSegment[]>();
+  /** Cache for entry stub segments from adjacent tiles */
+  private entryStubCache = new Map<string, RoadTileSegment[]>();
   /** Road boundary exit points for cross-tile continuity */
   private boundaryExits: RoadBoundaryExit[] = [];
   /** World boundary (half the world size) */
@@ -1664,6 +1666,7 @@ export class RoadNetworkSystem extends System {
    */
   private buildTileCache(): void {
     this.tileRoadCache.clear();
+    this.entryStubCache.clear();
 
     for (const road of this.roads) {
       for (let i = 0; i < road.path.length - 1; i++) {
@@ -1714,12 +1717,18 @@ export class RoadNetworkSystem extends System {
    * Build tile cache asynchronously with yielding to prevent main thread blocking.
    * Processes roads in batches, yielding between batches.
    * Also includes town internal roads and paths for seamless rendering.
+   *
+   * IMPORTANT: Also detects boundary exits during clipping to capture ALL roads
+   * that cross tile boundaries, not just exploration roads.
    */
   private async buildTileCacheAsync(): Promise<void> {
     this.tileRoadCache.clear();
+    this.entryStubCache.clear();
+    this.boundaryExits = []; // Clear existing boundary exits before rebuild
     const ROAD_BATCH_SIZE = 5; // Process 5 roads per batch
+    const EDGE_EPSILON = 0.01; // Tolerance for detecting edge positions
 
-    // Phase 1: Cache inter-town/POI roads
+    // Phase 1: Cache inter-town/POI roads AND detect boundary exits during clipping
     for (
       let roadIdx = 0;
       roadIdx < this.roads.length;
@@ -1758,15 +1767,77 @@ export class RoadNetworkSystem extends System {
                 tileMaxZ,
               );
               if (clipped) {
+                // Cache the road segment for this tile
                 const segment: RoadTileSegment = {
                   start: { x: clipped.x1 - tileMinX, z: clipped.z1 - tileMinZ },
                   end: { x: clipped.x2 - tileMinX, z: clipped.z2 - tileMinZ },
                   width: road.width,
                   roadId: road.id,
                 };
-                if (!this.tileRoadCache.has(tileKey))
+                if (!this.tileRoadCache.has(tileKey)) {
                   this.tileRoadCache.set(tileKey, []);
+                }
                 this.tileRoadCache.get(tileKey)!.push(segment);
+
+                // Detect boundary exits for cross-tile road continuity
+                const segDir = Math.atan2(
+                  clipped.z2 - clipped.z1,
+                  clipped.x2 - clipped.x1,
+                );
+
+                // Check start point (was it clipped? → road enters this tile)
+                if (
+                  Math.abs(clipped.x1 - p1.x) > EDGE_EPSILON ||
+                  Math.abs(clipped.z1 - p1.z) > EDGE_EPSILON
+                ) {
+                  const edge = this.getEdgeAtPoint(
+                    clipped.x1,
+                    clipped.z1,
+                    tileMinX,
+                    tileMaxX,
+                    tileMinZ,
+                    tileMaxZ,
+                    EDGE_EPSILON,
+                  );
+                  if (edge) {
+                    this.recordBoundaryExitForClip(
+                      clipped.x1,
+                      clipped.z1,
+                      segDir + Math.PI,
+                      road.id,
+                      tileX,
+                      tileZ,
+                      edge,
+                    );
+                  }
+                }
+
+                // Check end point (was it clipped? → road exits this tile)
+                if (
+                  Math.abs(clipped.x2 - p2.x) > EDGE_EPSILON ||
+                  Math.abs(clipped.z2 - p2.z) > EDGE_EPSILON
+                ) {
+                  const edge = this.getEdgeAtPoint(
+                    clipped.x2,
+                    clipped.z2,
+                    tileMinX,
+                    tileMaxX,
+                    tileMinZ,
+                    tileMaxZ,
+                    EDGE_EPSILON,
+                  );
+                  if (edge) {
+                    this.recordBoundaryExitForClip(
+                      clipped.x2,
+                      clipped.z2,
+                      segDir,
+                      road.id,
+                      tileX,
+                      tileZ,
+                      edge,
+                    );
+                  }
+                }
               }
             }
           }
@@ -1783,50 +1854,112 @@ export class RoadNetworkSystem extends System {
     // This makes roads visually extend through towns instead of stopping at the edge
     await this.cacheTownInternalRoads();
 
-    // Phase 3: Detect boundary exits for all roads
-    // This enables cross-tile road continuity
-    this.detectAllRoadBoundaryExits();
+    // Phase 3: Also detect boundary exits for road endpoints not captured by clipping
+    // This catches exploration roads that end at natural features near tile edges
+    this.detectRoadEndpointBoundaryExits();
+
+    if (this.boundaryExits.length > 0) {
+      Logger.system(
+        "RoadNetworkSystem",
+        `Detected ${this.boundaryExits.length} boundary exit points for cross-tile continuity`,
+      );
+    }
   }
 
   /**
-   * Detect boundary exits for all roads in the network.
-   * A boundary exit occurs when a road's endpoint is at or near a tile boundary.
-   * This allows adjacent tiles to continue roads seamlessly.
+   * Determine which tile edge a point is on, if any.
+   * Returns the edge name or null if not on an edge.
    */
-  private detectAllRoadBoundaryExits(): void {
+  private getEdgeAtPoint(
+    x: number,
+    z: number,
+    tileMinX: number,
+    tileMaxX: number,
+    tileMinZ: number,
+    tileMaxZ: number,
+    epsilon: number,
+  ): TileEdge | null {
+    // Check each edge - prioritize exact matches
+    if (Math.abs(x - tileMinX) <= epsilon) return "west";
+    if (Math.abs(x - tileMaxX) <= epsilon) return "east";
+    if (Math.abs(z - tileMinZ) <= epsilon) return "south";
+    if (Math.abs(z - tileMaxZ) <= epsilon) return "north";
+    return null;
+  }
+
+  /**
+   * Record a boundary exit detected during segment clipping.
+   * Skips duplicates based on (roadId, tileX, tileZ, edge).
+   */
+  private recordBoundaryExitForClip(
+    x: number,
+    z: number,
+    direction: number,
+    roadId: string,
+    tileX: number,
+    tileZ: number,
+    edge: TileEdge,
+  ): void {
+    // Skip if duplicate (same road, tile, and edge)
+    const isDuplicate = this.boundaryExits.some(
+      (e) =>
+        e.roadId === roadId &&
+        e.tileX === tileX &&
+        e.tileZ === tileZ &&
+        e.edge === edge,
+    );
+    if (isDuplicate) return;
+
+    this.boundaryExits.push({
+      roadId,
+      position: { x, z },
+      direction,
+      tileX,
+      tileZ,
+      edge,
+    });
+  }
+
+  /**
+   * Detect boundary exits for road endpoints that weren't captured by segment clipping.
+   * This handles roads that END at a tile boundary (e.g., exploration roads to natural features).
+   *
+   * The main boundary exit detection happens during buildTileCacheAsync() when segments
+   * are clipped to tiles. This function is a supplementary check for endpoints.
+   */
+  private detectRoadEndpointBoundaryExits(): void {
     for (const road of this.roads) {
       if (road.path.length < 2) continue;
 
-      // Check start point
-      const startPoint = road.path[0];
-      const secondPoint = road.path[1];
-      const startDirection = Math.atan2(
-        secondPoint.z - startPoint.z,
-        secondPoint.x - startPoint.x,
-      );
-
-      // Only record start as exit if it's not at a town (exploration roads starting in wilderness)
-      // Town-to-town roads start/end at towns, so we don't want those as exits
+      // Check start point - only for roads not starting at towns
+      // (Town roads start inside the town, not at tile boundaries)
       if (!road.fromTownId || road.fromTownId === "") {
+        const startPoint = road.path[0];
+        const secondPoint = road.path[1];
+        const startDirection = Math.atan2(
+          secondPoint.z - startPoint.z,
+          secondPoint.x - startPoint.x,
+        );
+
+        // Opposite direction - pointing away from the road (into the wilderness)
         this.recordBoundaryExitIfAtEdge(
           startPoint.x,
           startPoint.z,
-          startDirection + Math.PI, // Opposite direction (pointing away)
+          startDirection + Math.PI,
           road.id,
         );
       }
 
-      // Check end point
-      const endPoint = road.path[road.path.length - 1];
-      const secondLastPoint = road.path[road.path.length - 2];
-      const endDirection = Math.atan2(
-        endPoint.z - secondLastPoint.z,
-        endPoint.x - secondLastPoint.x,
-      );
-
-      // Record end as exit if road doesn't terminate at a town
-      // Exploration roads to natural features should be recorded
+      // Check end point - only for roads not ending at towns
+      // (Exploration roads to natural features may end near tile boundaries)
       if (!road.toTownId || road.toTownId === "") {
+        const endPoint = road.path[road.path.length - 1];
+        const secondLastPoint = road.path[road.path.length - 2];
+        const endDirection = Math.atan2(
+          endPoint.z - secondLastPoint.z,
+          endPoint.x - secondLastPoint.x,
+        );
+
         this.recordBoundaryExitIfAtEdge(
           endPoint.x,
           endPoint.z,
@@ -1834,13 +1967,6 @@ export class RoadNetworkSystem extends System {
           road.id,
         );
       }
-    }
-
-    if (this.boundaryExits.length > 0) {
-      Logger.system(
-        "RoadNetworkSystem",
-        `Detected ${this.boundaryExits.length} boundary exit points for cross-tile continuity`,
-      );
     }
   }
 
@@ -2027,8 +2153,88 @@ export class RoadNetworkSystem extends System {
     }
   }
 
+  /** Direction angles pointing INTO a tile from each edge */
+  private static readonly DIRECTION_INTO_TILE: Record<TileEdge, number> = {
+    west: 0, // East
+    east: Math.PI, // West
+    south: Math.PI / 2, // North
+    north: -Math.PI / 2, // South
+  };
+
+  /** Length of entry stub segments in meters */
+  private static readonly STUB_LENGTH = 15;
+
+  /**
+   * Get road segments for a tile, including entry stubs from adjacent tiles.
+   * Entry stubs ensure visual continuity across tile boundaries.
+   */
   getRoadSegmentsForTile(tileX: number, tileZ: number): RoadTileSegment[] {
-    return this.tileRoadCache.get(`${tileX}_${tileZ}`) || [];
+    const key = `${tileX}_${tileZ}`;
+    const cachedSegments = this.tileRoadCache.get(key) || [];
+
+    // Get or generate entry stub segments from adjacent tiles
+    let stubSegments = this.entryStubCache.get(key);
+    if (!stubSegments) {
+      const entries = this.getRoadEntriesForTile(tileX, tileZ);
+      stubSegments =
+        entries.length > 0
+          ? this.generateEntryStubSegments(tileX, tileZ, entries)
+          : [];
+      this.entryStubCache.set(key, stubSegments);
+    }
+
+    return stubSegments.length > 0
+      ? [...cachedSegments, ...stubSegments]
+      : cachedSegments;
+  }
+
+  /**
+   * Generate stub segments for road entries from adjacent tiles.
+   */
+  private generateEntryStubSegments(
+    tileX: number,
+    tileZ: number,
+    entries: RoadBoundaryExit[],
+  ): RoadTileSegment[] {
+    const tileMinX = tileX * TILE_SIZE;
+    const tileMinZ = tileZ * TILE_SIZE;
+    const segments: RoadTileSegment[] = [];
+
+    for (const entry of entries) {
+      const localX = entry.position.x - tileMinX;
+      const localZ = entry.position.z - tileMinZ;
+      const dir = RoadNetworkSystem.DIRECTION_INTO_TILE[entry.edge];
+
+      // Calculate stub endpoint, clamped to tile bounds
+      const endX = Math.max(
+        0,
+        Math.min(
+          TILE_SIZE,
+          localX + Math.cos(dir) * RoadNetworkSystem.STUB_LENGTH,
+        ),
+      );
+      const endZ = Math.max(
+        0,
+        Math.min(
+          TILE_SIZE,
+          localZ + Math.sin(dir) * RoadNetworkSystem.STUB_LENGTH,
+        ),
+      );
+
+      // Only add stub with meaningful length (> 1m)
+      const dx = endX - localX,
+        dz = endZ - localZ;
+      if (dx * dx + dz * dz > 1) {
+        segments.push({
+          start: { x: localX, z: localZ },
+          end: { x: endX, z: endZ },
+          width: this.config.roadWidth,
+          roadId: entry.roadId,
+        });
+      }
+    }
+
+    return segments;
   }
 
   getRoads(): ProceduralRoad[] {
@@ -2142,6 +2348,7 @@ export class RoadNetworkSystem extends System {
   destroy(): void {
     this.roads = [];
     this.tileRoadCache.clear();
+    this.entryStubCache.clear();
     this.boundaryExits = [];
     super.destroy();
   }

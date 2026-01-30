@@ -223,16 +223,18 @@ export function createClientWorld() {
   // NOTE: Towns register flat zones which emit TERRAIN_TILE_REGENERATED events
   // that VegetationSystem receives to regenerate grass at correct heights
 
-  world.register("towns", TownSystem);
-  world.register("pois", POISystem);
-  world.register("roads", RoadNetworkSystem);
+  // TEMPORARILY DISABLED - debugging terrain rendering
+  // world.register("towns", TownSystem);
+  // world.register("pois", POISystem);
+  // world.register("roads", RoadNetworkSystem);
 
   // ============================================================================
   // BUILDING RENDERING SYSTEM
   // ============================================================================
   // Procedural building mesh rendering for towns
   // Must be registered after towns system as it depends on town data
-  world.register("building-rendering", BuildingRenderingSystem);
+  // TEMPORARILY DISABLED - debugging terrain rendering
+  // world.register("building-rendering", BuildingRenderingSystem);
 
   // ============================================================================
   // VISUAL EFFECTS SYSTEMS

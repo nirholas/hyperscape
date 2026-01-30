@@ -30,7 +30,7 @@ const SPELL_ICON_SIZE = 40;
 const SPELL_GAP = 4;
 const PANEL_PADDING = 8;
 const GRID_PADDING = 6;
-const HEADER_HEIGHT = 48;
+const _HEADER_HEIGHT = 48;
 
 // Mobile constants
 const MOBILE_SPELL_ICON_SIZE = 52;
@@ -712,7 +712,7 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
                 }}
                 onMouseEnter={(e) =>
                   (e.currentTarget.style.background =
-                    theme.colors.background.hover)
+                    theme.colors.background.secondary)
                 }
                 onMouseLeave={(e) =>
                   (e.currentTarget.style.background = "transparent")
@@ -744,7 +744,7 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
                 }}
                 onMouseEnter={(e) =>
                   (e.currentTarget.style.background =
-                    theme.colors.background.hover)
+                    theme.colors.background.secondary)
                 }
                 onMouseLeave={(e) =>
                   (e.currentTarget.style.background = "transparent")
@@ -785,7 +785,7 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
               }}
               onMouseEnter={(e) =>
                 (e.currentTarget.style.background =
-                  theme.colors.background.hover)
+                  theme.colors.background.secondary)
               }
               onMouseLeave={(e) =>
                 (e.currentTarget.style.background = "transparent")

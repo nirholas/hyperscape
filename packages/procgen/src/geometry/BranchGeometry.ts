@@ -44,6 +44,7 @@ const DEFAULT_OPTIONS: Required<GeometryOptions> = {
   uvScale: 1,
   maxLeaves: 50000,
   maxBranchDepth: Infinity,
+  maxStems: 2000, // Safety limit to prevent memory allocation failures
 };
 
 /**
@@ -64,8 +65,19 @@ export function generateBranchGeometry(
 
   // Filter stems by depth if maxBranchDepth is set
   const maxDepth = opts.maxBranchDepth;
-  const filteredStems =
+  let filteredStems =
     maxDepth < Infinity ? stems.filter((s) => s.depth <= maxDepth) : stems;
+
+  // Apply maxStems limit - prioritize lower depth (trunk/main branches)
+  if (filteredStems.length > opts.maxStems) {
+    // Sort by depth (ascending) then by radius (descending) to keep most important branches
+    filteredStems = [...filteredStems]
+      .sort((a, b) => {
+        if (a.depth !== b.depth) return a.depth - b.depth;
+        return b.radius - a.radius; // Larger radius = more important
+      })
+      .slice(0, opts.maxStems);
+  }
 
   // Generate geometry for each stem
   for (const stem of filteredStems) {
@@ -100,12 +112,20 @@ export function generateBranchGeometryByDepth(
 
   // Filter stems by depth if maxBranchDepth is set
   const maxDepth = opts.maxBranchDepth;
+  let filteredStems = stems.filter((s) => s.depth <= maxDepth);
+
+  // Apply maxStems limit - prioritize lower depth (trunk/main branches)
+  if (filteredStems.length > opts.maxStems) {
+    filteredStems = [...filteredStems]
+      .sort((a, b) => {
+        if (a.depth !== b.depth) return a.depth - b.depth;
+        return b.radius - a.radius;
+      })
+      .slice(0, opts.maxStems);
+  }
 
   // Generate geometry for each stem, organized by depth
-  for (const stem of stems) {
-    // Skip stems beyond maxBranchDepth
-    if (stem.depth > maxDepth) continue;
-
+  for (const stem of filteredStems) {
     const radialSegs = calculateRadialSegments(
       stem,
       params,
@@ -432,7 +452,25 @@ function createEmptyGeometry(): MeshGeometryData {
 }
 
 /**
+ * Create a simple fallback branch geometry (a tapered cylinder).
+ * Used when the full geometry would exceed memory limits.
+ */
+function createFallbackBranchGeometry(): THREE.BufferGeometry {
+  const geometry = new THREE.CylinderGeometry(0.05, 0.2, 5, 6, 1);
+  // Move base to origin (tree base)
+  geometry.translate(0, 2.5, 0);
+  return geometry;
+}
+
+/**
+ * Maximum buffer size in bytes to prevent allocation failures.
+ * 64MB is a safe limit for most browsers/devices.
+ */
+const MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+
+/**
  * Merge multiple geometry data into a single Three.js geometry.
+ * Includes safety checks to prevent memory allocation failures.
  */
 function mergeGeometries(
   geometries: MeshGeometryData[],
@@ -453,6 +491,26 @@ function mergeGeometries(
     if (!geo.colors) {
       hasColors = false;
     }
+  }
+
+  // Safety check: estimate total memory required
+  // Float32Array: 4 bytes per element, Uint32Array: 4 bytes per element
+  const positionBytes = totalPositions * 4; // positions
+  const normalBytes = totalPositions * 4; // normals
+  const uvBytes = (totalPositions / 3) * 2 * 4; // uvs
+  const indexBytes = totalIndices * 4; // indices
+  const colorBytes = hasColors ? totalPositions * 4 : 0;
+  const totalBytes =
+    positionBytes + normalBytes + uvBytes + indexBytes + colorBytes;
+
+  if (totalBytes > MAX_BUFFER_BYTES) {
+    console.warn(
+      `[BranchGeometry] Geometry too large (${(totalBytes / 1024 / 1024).toFixed(1)}MB > ${MAX_BUFFER_BYTES / 1024 / 1024}MB limit). ` +
+        `Positions: ${totalPositions}, Indices: ${totalIndices}, Stems: ${geometries.length}. ` +
+        `Returning simplified geometry.`,
+    );
+    // Return a simple placeholder geometry (a small cylinder)
+    return createFallbackBranchGeometry();
   }
 
   const mergedPositions = new Float32Array(totalPositions);

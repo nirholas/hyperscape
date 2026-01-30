@@ -2767,4 +2767,719 @@ export class BuildingCollisionService {
     this.tileToStepTile.clear();
     this.playerFloorStates.clear();
   }
+
+  // ============================================================================
+  // UNIFIED NAVIGATION HELPERS
+  // ============================================================================
+
+  /**
+   * Comprehensive navigation check - can player move from one tile to another?
+   *
+   * This is the SINGLE SOURCE OF TRUTH for building navigation.
+   * Use this method instead of combining multiple separate checks.
+   *
+   * Checks performed:
+   * 1. Source and destination tile walkability
+   * 2. Directional wall blocking
+   * 3. Step tile directional restrictions
+   * 4. Floor-appropriate collision
+   *
+   * @param fromTile - Source tile coordinates
+   * @param toTile - Destination tile coordinates
+   * @param floorIndex - Current floor level
+   * @returns Object with walkable boolean and detailed reason if blocked
+   */
+  canMoveFromTo(
+    fromTile: TileCoord,
+    toTile: TileCoord,
+    floorIndex: number,
+  ): { allowed: boolean; reason?: string } {
+    // Validate movement distance (only adjacent tiles allowed)
+    const dx = Math.abs(toTile.x - fromTile.x);
+    const dz = Math.abs(toTile.z - fromTile.z);
+    if (dx > 1 || dz > 1) {
+      return {
+        allowed: false,
+        reason: `Movement too far: (${fromTile.x},${fromTile.z}) to (${toTile.x},${toTile.z}) is ${Math.max(dx, dz)} tiles`,
+      };
+    }
+
+    // Check if SOURCE tile is in a building context
+    // If source is inside a building, it must be walkable on that floor
+    const sourceInBuilding =
+      this.isTileInBuildingFootprint(fromTile.x, fromTile.z) !== null;
+    if (sourceInBuilding) {
+      const sourceWalkable = this.isTileWalkableInBuilding(
+        fromTile.x,
+        fromTile.z,
+        floorIndex,
+      );
+      if (!sourceWalkable) {
+        return {
+          allowed: false,
+          reason: `Source tile (${fromTile.x},${fromTile.z}) not walkable on floor ${floorIndex}`,
+        };
+      }
+    }
+
+    // Check if destination is walkable in building context
+    const destWalkable = this.isTileWalkableInBuilding(
+      toTile.x,
+      toTile.z,
+      floorIndex,
+    );
+    if (!destWalkable) {
+      return {
+        allowed: false,
+        reason: `Destination tile (${toTile.x},${toTile.z}) not walkable on floor ${floorIndex}`,
+      };
+    }
+
+    // Check wall blocking
+    const wallBlocked = this.isWallBlocked(
+      fromTile.x,
+      fromTile.z,
+      toTile.x,
+      toTile.z,
+      floorIndex,
+    );
+    if (wallBlocked) {
+      return {
+        allowed: false,
+        reason: `Wall blocks movement from (${fromTile.x},${fromTile.z}) to (${toTile.x},${toTile.z})`,
+      };
+    }
+
+    // Check step tile directional restrictions
+    const stepBlocked = this.isStepBlocked(
+      fromTile.x,
+      fromTile.z,
+      toTile.x,
+      toTile.z,
+    );
+    if (stepBlocked) {
+      return {
+        allowed: false,
+        reason: `Step tile blocks side entry to (${toTile.x},${toTile.z})`,
+      };
+    }
+
+    return { allowed: true };
+  }
+
+  /**
+   * Comprehensive building movement check for pathfinding integration.
+   *
+   * This is the PRIMARY method for tile-movement.ts to use for building-related
+   * movement checks. Handles:
+   * - Building footprint and bbox analysis
+   * - Layer separation (ground vs building transitions)
+   * - Wall and step blocking
+   * - Door transition validation
+   *
+   * @param fromTile - Source tile (null for destination-only checks)
+   * @param toTile - Target tile
+   * @param playerFloor - Current player floor
+   * @param playerBuildingId - Current building the player is in (null if on ground)
+   * @returns Complete movement analysis including final buildingAllowsMovement verdict
+   */
+  checkBuildingMovement(
+    fromTile: TileCoord | null,
+    toTile: TileCoord,
+    playerFloor: number,
+    playerBuildingId: string | null,
+  ): {
+    // Target tile analysis
+    targetBuildingId: string | null;
+    targetInBuildingFootprint: boolean;
+    targetInBuildingBbox: string | null;
+    targetUnderBuilding: boolean;
+    targetWalkableOnFloor: boolean;
+    targetDoorOpenings: WallDirection[];
+
+    // Source tile analysis (if fromTile provided)
+    sourceBuildingId: string | null;
+    sourceInBuildingFootprint: boolean;
+    sourceDoorOpenings: WallDirection[];
+
+    // Movement blocking
+    wallBlocked: boolean;
+    stepBlocked: boolean;
+
+    // Final verdict for building layer (does NOT include terrain/CollisionMatrix)
+    buildingAllowsMovement: boolean;
+    blockReason: string | null;
+  } {
+    // Analyze target tile
+    const targetBuildingId = this.isTileInBuildingFootprint(toTile.x, toTile.z);
+    const targetInBuildingFootprint = targetBuildingId !== null;
+    const targetInBuildingBbox = this.isTileInBuildingBoundingBox(
+      toTile.x,
+      toTile.z,
+    );
+    const targetUnderBuilding =
+      targetInBuildingBbox !== null && !targetInBuildingFootprint;
+    const targetWalkableOnFloor = this.isTileWalkableInBuilding(
+      toTile.x,
+      toTile.z,
+      playerFloor,
+    );
+    const targetDoorOpenings = this.getDoorOpeningsAtTile(
+      toTile.x,
+      toTile.z,
+      playerFloor,
+    );
+
+    // Analyze source tile
+    let sourceBuildingId: string | null = null;
+    let sourceInBuildingFootprint = false;
+    let sourceDoorOpenings: WallDirection[] = [];
+    if (fromTile) {
+      sourceBuildingId = this.isTileInBuildingFootprint(fromTile.x, fromTile.z);
+      sourceInBuildingFootprint = sourceBuildingId !== null;
+      sourceDoorOpenings = this.getDoorOpeningsAtTile(
+        fromTile.x,
+        fromTile.z,
+        playerFloor,
+      );
+    }
+
+    // Check blocking
+    let wallBlocked = false;
+    let stepBlocked = false;
+    if (fromTile) {
+      wallBlocked = this.isWallBlocked(
+        fromTile.x,
+        fromTile.z,
+        toTile.x,
+        toTile.z,
+        playerFloor,
+      );
+      stepBlocked = this.isStepBlocked(
+        fromTile.x,
+        fromTile.z,
+        toTile.x,
+        toTile.z,
+      );
+    }
+
+    // =========================================================================
+    // LAYER SEPARATION: Determine if this movement is allowed
+    // =========================================================================
+    let buildingAllowsMovement = true;
+    let blockReason: string | null = null;
+
+    if (playerBuildingId === null) {
+      // PLAYER IS ON GROUND LAYER
+
+      // Block tiles UNDER buildings that aren't walkable (door exterior tiles)
+      if (targetUnderBuilding && !targetWalkableOnFloor) {
+        buildingAllowsMovement = false;
+        blockReason = `Ground player: tile (${toTile.x},${toTile.z}) under building ${targetInBuildingBbox} but not walkable`;
+      }
+
+      // Building interior tiles are BLOCKED unless this is a door transition
+      if (buildingAllowsMovement && targetInBuildingFootprint) {
+        if (targetDoorOpenings.length === 0) {
+          buildingAllowsMovement = false;
+          blockReason = `Ground player: cannot enter building tile (${toTile.x},${toTile.z}) - not a door`;
+        }
+        // Door tile - allow as transition point
+      }
+    } else {
+      // PLAYER IS IN BUILDING LAYER
+
+      // Block tiles under a DIFFERENT building
+      if (targetUnderBuilding && targetInBuildingBbox !== playerBuildingId) {
+        buildingAllowsMovement = false;
+        blockReason = `Building player (${playerBuildingId}): cannot path through different building ${targetInBuildingBbox}`;
+      }
+
+      if (buildingAllowsMovement && targetInBuildingFootprint) {
+        // Target is a building tile - only allow if SAME building
+        if (targetBuildingId !== playerBuildingId) {
+          buildingAllowsMovement = false;
+          blockReason = `Building player (${playerBuildingId}): cannot enter different building (${targetBuildingId})`;
+        }
+        // Same building - check floor walkability below
+      } else if (
+        buildingAllowsMovement &&
+        !targetInBuildingFootprint &&
+        !targetUnderBuilding
+      ) {
+        // Target is a GROUND tile - only allow through door exit
+        if (
+          fromTile &&
+          sourceInBuildingFootprint &&
+          sourceBuildingId === playerBuildingId
+        ) {
+          // Moving from inside building to ground - check for door
+          const dx = toTile.x - fromTile.x;
+          const dz = toTile.z - fromTile.z;
+          let exitDirection: WallDirection | null = null;
+          if (dx === 1) exitDirection = "east";
+          else if (dx === -1) exitDirection = "west";
+          else if (dz === 1) exitDirection = "south";
+          else if (dz === -1) exitDirection = "north";
+
+          if (!exitDirection || !sourceDoorOpenings.includes(exitDirection)) {
+            buildingAllowsMovement = false;
+            blockReason = `Building player: cannot exit to ground (${toTile.x},${toTile.z}) without door. Source doors=[${sourceDoorOpenings.join(",")}]`;
+          }
+          // Door exit - allow
+        } else if (!fromTile) {
+          // No fromTile - destination check only, ground tiles invalid from inside building
+          buildingAllowsMovement = false;
+          blockReason = `Building player: cannot target ground tile (${toTile.x},${toTile.z}) directly`;
+        }
+      }
+    }
+
+    // =========================================================================
+    // BUILDING FLOOR WALKABILITY (for tiles in building footprint)
+    // =========================================================================
+    if (
+      buildingAllowsMovement &&
+      targetInBuildingFootprint &&
+      !targetWalkableOnFloor
+    ) {
+      buildingAllowsMovement = false;
+      blockReason = `Target (${toTile.x},${toTile.z}) not walkable in building ${targetBuildingId} on floor ${playerFloor}`;
+    }
+
+    // =========================================================================
+    // WALL AND STEP BLOCKING
+    // =========================================================================
+    if (buildingAllowsMovement && wallBlocked) {
+      buildingAllowsMovement = false;
+      blockReason = `Wall blocks movement from (${fromTile?.x},${fromTile?.z}) to (${toTile.x},${toTile.z})`;
+    }
+
+    if (buildingAllowsMovement && stepBlocked) {
+      buildingAllowsMovement = false;
+      blockReason = `Step blocks side entry to (${toTile.x},${toTile.z})`;
+    }
+
+    return {
+      targetBuildingId,
+      targetInBuildingFootprint,
+      targetInBuildingBbox,
+      targetUnderBuilding,
+      targetWalkableOnFloor,
+      targetDoorOpenings,
+      sourceBuildingId,
+      sourceInBuildingFootprint,
+      sourceDoorOpenings,
+      wallBlocked,
+      stepBlocked,
+      buildingAllowsMovement,
+      blockReason,
+    };
+  }
+
+  /**
+   * Validate entire building's navigation integrity.
+   *
+   * Performs comprehensive checks on a building:
+   * 1. All walkable tiles are reachable from entrance (via BFS flood fill)
+   * 2. All walls properly block movement (sample tests)
+   * 3. All doors allow passage
+   * 4. Floor tracking is correct
+   *
+   * @param buildingId - Building to validate
+   * @returns Validation result with errors if any found
+   */
+  validateBuildingNavigation(buildingId: string): {
+    valid: boolean;
+    errors: string[];
+    stats: {
+      walkableTiles: number;
+      wallSegments: number;
+      doors: number;
+      reachableTiles: number;
+    };
+  } {
+    const errors: string[] = [];
+    const building = this.buildings.get(buildingId);
+
+    if (!building) {
+      return {
+        valid: false,
+        errors: [`Building ${buildingId} not registered`],
+        stats: {
+          walkableTiles: 0,
+          wallSegments: 0,
+          doors: 0,
+          reachableTiles: 0,
+        },
+      };
+    }
+
+    const groundFloor = building.floors.find((f) => f.floorIndex === 0);
+    if (!groundFloor) {
+      return {
+        valid: false,
+        errors: [`Building ${buildingId} has no ground floor`],
+        stats: {
+          walkableTiles: 0,
+          wallSegments: 0,
+          doors: 0,
+          reachableTiles: 0,
+        },
+      };
+    }
+
+    const walkableTiles = groundFloor.walkableTiles.size;
+    const wallSegments = groundFloor.wallSegments.length;
+    const doors = groundFloor.wallSegments.filter(
+      (w) =>
+        w.hasOpening && (w.openingType === "door" || w.openingType === "arch"),
+    ).length;
+
+    // Check for doors
+    if (doors === 0) {
+      errors.push(`Building ${buildingId} has no entrances (doors or arches)`);
+    }
+
+    // Check for walkable tiles
+    if (walkableTiles === 0) {
+      errors.push(`Building ${buildingId} has no walkable tiles`);
+    }
+
+    // Check that all four cardinal directions have walls on edges
+    const wallDirections = new Set(groundFloor.wallSegments.map((w) => w.side));
+    const expectedDirections: WallDirection[] = [
+      "north",
+      "south",
+      "east",
+      "west",
+    ];
+    for (const dir of expectedDirections) {
+      if (!wallDirections.has(dir)) {
+        errors.push(`Building ${buildingId} missing walls on ${dir} edge`);
+      }
+    }
+
+    // REAL REACHABILITY CHECK: BFS flood fill from door interior tile
+    // This verifies all tiles are actually reachable, not just in spatial index
+    let reachableTiles = 0;
+    const doorSegments = groundFloor.wallSegments.filter(
+      (w) =>
+        w.hasOpening && (w.openingType === "door" || w.openingType === "arch"),
+    );
+
+    if (doorSegments.length > 0) {
+      // Find a door interior tile to start BFS from
+      const door = doorSegments[0];
+      const interior = BuildingCollisionService.getDoorExteriorAndInterior(
+        door.tileX,
+        door.tileZ,
+        door.side,
+      );
+      const startTile = { x: interior.interiorX, z: interior.interiorZ };
+
+      // BFS flood fill to find all reachable tiles
+      // Performance safeguard: limit iterations to prevent runaway on malformed buildings
+      const MAX_ITERATIONS = walkableTiles * 2; // Should never need more than 2x walkable tiles
+      let iterations = 0;
+      const visited = new Set<string>();
+      const queue: TileCoord[] = [startTile];
+      visited.add(tileKey(startTile.x, startTile.z));
+
+      while (queue.length > 0 && iterations < MAX_ITERATIONS) {
+        iterations++;
+        const current = queue.shift()!;
+        const currentKey = tileKey(current.x, current.z);
+
+        // Only count tiles that are actually in the building's walkable set
+        if (groundFloor.walkableTiles.has(currentKey)) {
+          reachableTiles++;
+        }
+
+        // Check all 4 cardinal neighbors
+        const neighbors = [
+          { x: current.x, z: current.z - 1 }, // north
+          { x: current.x, z: current.z + 1 }, // south
+          { x: current.x + 1, z: current.z }, // east
+          { x: current.x - 1, z: current.z }, // west
+        ];
+
+        for (const neighbor of neighbors) {
+          const neighborKey = tileKey(neighbor.x, neighbor.z);
+
+          // Skip if already visited
+          if (visited.has(neighborKey)) continue;
+
+          // Skip if not a walkable building tile
+          if (!groundFloor.walkableTiles.has(neighborKey)) continue;
+
+          // Skip if wall blocks movement
+          const wallBlocked = this.isWallBlocked(
+            current.x,
+            current.z,
+            neighbor.x,
+            neighbor.z,
+            0,
+          );
+          if (wallBlocked) continue;
+
+          visited.add(neighborKey);
+          queue.push(neighbor);
+        }
+      }
+    }
+
+    if (reachableTiles < walkableTiles) {
+      errors.push(
+        `Building ${buildingId}: Only ${reachableTiles}/${walkableTiles} tiles reachable from entrance (unreachable tiles may be blocked by walls)`,
+      );
+    }
+
+    // WALL BLOCKING VERIFICATION: Sample test that walls actually block
+    // Pick a non-door wall segment and verify it blocks movement
+    const solidWalls = groundFloor.wallSegments.filter((w) => !w.hasOpening);
+    if (solidWalls.length > 0) {
+      const testWall = solidWalls[0];
+      // Calculate the tile outside this wall
+      const outsideOffset =
+        testWall.side === "north"
+          ? { dx: 0, dz: -1 }
+          : testWall.side === "south"
+            ? { dx: 0, dz: 1 }
+            : testWall.side === "east"
+              ? { dx: 1, dz: 0 }
+              : { dx: -1, dz: 0 };
+
+      const outsideTileX = testWall.tileX + outsideOffset.dx;
+      const outsideTileZ = testWall.tileZ + outsideOffset.dz;
+
+      const shouldBeBlocked = this.isWallBlocked(
+        outsideTileX,
+        outsideTileZ,
+        testWall.tileX,
+        testWall.tileZ,
+        0,
+      );
+
+      if (!shouldBeBlocked) {
+        errors.push(
+          `Building ${buildingId}: Wall at (${testWall.tileX},${testWall.tileZ}) ${testWall.side} does NOT block movement - walls may be broken`,
+        );
+      }
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors,
+      stats: { walkableTiles, wallSegments, doors, reachableTiles },
+    };
+  }
+
+  /**
+   * Get detailed diagnostic info for a specific tile.
+   *
+   * Useful for debugging why a tile is or isn't walkable.
+   *
+   * @param tileX - Tile X coordinate
+   * @param tileZ - Tile Z coordinate
+   * @param floorIndex - Floor to check
+   * @returns Detailed diagnostic information
+   */
+  getTileDiagnostics(
+    tileX: number,
+    tileZ: number,
+    floorIndex: number,
+  ): {
+    isWalkable: boolean;
+    isInBuilding: boolean;
+    buildingId: string | null;
+    isInBoundingBox: boolean;
+    isInFootprint: boolean;
+    hasWallFlags: {
+      north: boolean;
+      south: boolean;
+      east: boolean;
+      west: boolean;
+    };
+    collisionMatrixWallFlags: {
+      north: boolean;
+      south: boolean;
+      east: boolean;
+      west: boolean;
+    };
+    isStepTile: boolean;
+    isDoorTile: boolean;
+    blocksMovementNorth: boolean;
+    blocksMovementSouth: boolean;
+    blocksMovementEast: boolean;
+    blocksMovementWest: boolean;
+  } {
+    const key = tileKey(tileX, tileZ);
+    const buildingIds = this.tileToBuildings.get(key);
+    const buildingId = buildingIds?.values().next().value ?? null;
+    const collision = this.queryCollision(tileX, tileZ, floorIndex);
+
+    // Check if in any building's bounding box
+    let isInBoundingBox = false;
+    let bboxBuildingId: string | null = null;
+    for (const building of this.buildings.values()) {
+      const bbox = building.boundingBox;
+      if (
+        tileX >= bbox.minTileX &&
+        tileX <= bbox.maxTileX &&
+        tileZ >= bbox.minTileZ &&
+        tileZ <= bbox.maxTileZ
+      ) {
+        isInBoundingBox = true;
+        bboxBuildingId = building.buildingId;
+        break;
+      }
+    }
+
+    // Check if step tile
+    const stepTile = this.tileToStepTile.get(key);
+
+    // Check if door tile
+    let isDoorTile = false;
+    if (buildingId) {
+      const building = this.buildings.get(buildingId);
+      const floor = building?.floors.find((f) => f.floorIndex === floorIndex);
+      if (floor) {
+        isDoorTile = floor.wallSegments.some(
+          (w) =>
+            w.tileX === tileX &&
+            w.tileZ === tileZ &&
+            w.hasOpening &&
+            (w.openingType === "door" || w.openingType === "arch"),
+        );
+      }
+    }
+
+    // Get ACTUAL CollisionMatrix wall flags (ground floor only)
+    const collisionMatrix = this.world.collision as CollisionMatrix;
+    const matrixFlags = collisionMatrix?.getFlags(tileX, tileZ) ?? 0;
+    const collisionMatrixWallFlags = {
+      north: (matrixFlags & CollisionFlag.WALL_NORTH) !== 0,
+      south: (matrixFlags & CollisionFlag.WALL_SOUTH) !== 0,
+      east: (matrixFlags & CollisionFlag.WALL_EAST) !== 0,
+      west: (matrixFlags & CollisionFlag.WALL_WEST) !== 0,
+    };
+
+    // ACTUAL movement blocking tests using isWallBlocked
+    // This is the REAL test - does movement actually get blocked?
+    const blocksMovementNorth = this.isWallBlocked(
+      tileX,
+      tileZ,
+      tileX,
+      tileZ - 1,
+      floorIndex,
+    );
+    const blocksMovementSouth = this.isWallBlocked(
+      tileX,
+      tileZ,
+      tileX,
+      tileZ + 1,
+      floorIndex,
+    );
+    const blocksMovementEast = this.isWallBlocked(
+      tileX,
+      tileZ,
+      tileX + 1,
+      tileZ,
+      floorIndex,
+    );
+    const blocksMovementWest = this.isWallBlocked(
+      tileX,
+      tileZ,
+      tileX - 1,
+      tileZ,
+      floorIndex,
+    );
+
+    return {
+      isWalkable: this.isTileWalkableInBuilding(tileX, tileZ, floorIndex),
+      isInBuilding: collision.isInsideBuilding,
+      buildingId: buildingId ?? bboxBuildingId,
+      isInBoundingBox,
+      isInFootprint: buildingId !== null,
+      hasWallFlags: collision.wallBlocking,
+      collisionMatrixWallFlags,
+      isStepTile: stepTile !== undefined,
+      isDoorTile,
+      blocksMovementNorth,
+      blocksMovementSouth,
+      blocksMovementEast,
+      blocksMovementWest,
+    };
+  }
+
+  /**
+   * Get all buildings that a tile could be associated with.
+   * Useful for diagnosing overlapping building issues.
+   */
+  getBuildingsAtTile(
+    tileX: number,
+    tileZ: number,
+  ): Array<{
+    buildingId: string;
+    isInFootprint: boolean;
+    isInBoundingBox: boolean;
+    floorIndex: number | null;
+  }> {
+    const results: Array<{
+      buildingId: string;
+      isInFootprint: boolean;
+      isInBoundingBox: boolean;
+      floorIndex: number | null;
+    }> = [];
+
+    const key = tileKey(tileX, tileZ);
+    const footprintBuildings = this.tileToBuildings.get(key);
+
+    // Check footprint index
+    if (footprintBuildings) {
+      for (const buildingId of footprintBuildings) {
+        const building = this.buildings.get(buildingId);
+        if (building) {
+          // Find which floor this tile is on
+          let floorIndex: number | null = null;
+          for (const floor of building.floors) {
+            if (floor.walkableTiles.has(key)) {
+              floorIndex = floor.floorIndex;
+              break;
+            }
+          }
+          results.push({
+            buildingId,
+            isInFootprint: true,
+            isInBoundingBox: true,
+            floorIndex,
+          });
+        }
+      }
+    }
+
+    // Check bounding boxes for buildings not in footprint
+    for (const building of this.buildings.values()) {
+      // Skip if already found via footprint
+      if (results.some((r) => r.buildingId === building.buildingId)) continue;
+
+      const bbox = building.boundingBox;
+      if (
+        tileX >= bbox.minTileX &&
+        tileX <= bbox.maxTileX &&
+        tileZ >= bbox.minTileZ &&
+        tileZ <= bbox.maxTileZ
+      ) {
+        results.push({
+          buildingId: building.buildingId,
+          isInFootprint: false,
+          isInBoundingBox: true,
+          floorIndex: null,
+        });
+      }
+    }
+
+    return results;
+  }
 }

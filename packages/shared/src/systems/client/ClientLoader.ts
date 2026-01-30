@@ -914,9 +914,11 @@ export class ClientLoader extends SystemBase {
       this.promises.set(key, promise);
       return promise;
     }
+    // Resolve URL once for use in error messages and as base path for GLTF parsing
+    const resolvedUrl = this.world.resolveURL(url);
     const promise: Promise<LoaderResult> = this.loadFile(url).then(
       async (file: File | undefined): Promise<LoaderResult> => {
-        if (!file) throw new Error(`Failed to load file: ${url}`);
+        if (!file) throw new Error(`Failed to load file: ${resolvedUrl}`);
         if (type === "hdr") {
           const buffer = await file.arrayBuffer();
           const result = this.hdrLoader.parse(buffer as ArrayBuffer);
@@ -961,7 +963,8 @@ export class ClientLoader extends SystemBase {
         }
         if (type === "model") {
           const buffer = await file.arrayBuffer();
-          const gltf = await this.gltfLoader.parseAsync(buffer, "");
+          // Pass resolvedUrl as base path for resolving relative/data URIs in GLTF
+          const gltf = await this.gltfLoader.parseAsync(buffer, resolvedUrl);
           // PERF: Yield after heavy GLTF parsing to allow input/render
           await yieldToMain();
           // Convert GLTF to GLBData format
@@ -989,7 +992,8 @@ export class ClientLoader extends SystemBase {
         }
         if (type === "emote") {
           const buffer = await file.arrayBuffer();
-          const glb = await this.gltfLoader.parseAsync(buffer, "");
+          // Pass resolvedUrl as base path for resolving relative/data URIs in GLTF
+          const glb = await this.gltfLoader.parseAsync(buffer, resolvedUrl);
           // PERF: Yield after heavy GLTF parsing to allow input/render
           await yieldToMain();
           const factory = createEmoteFactory(
@@ -1016,7 +1020,8 @@ export class ClientLoader extends SystemBase {
         }
         if (type === "avatar") {
           const buffer = await file.arrayBuffer();
-          const glb = await this.gltfLoader.parseAsync(buffer, "");
+          // Pass resolvedUrl as base path for resolving relative/data URIs in GLTF
+          const glb = await this.gltfLoader.parseAsync(buffer, resolvedUrl);
           // PERF: Yield after heavy GLTF parsing to allow input/render
           await yieldToMain();
           // Suppress VRM duplicate expression warnings by overriding console.warn temporarily

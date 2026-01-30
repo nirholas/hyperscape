@@ -373,10 +373,11 @@ export class ClientGraphics extends System {
     const fovRadians = THREE.MathUtils.degToRad(fov);
     this.worldToScreenFactor = (Math.tan(fovRadians / 2) * 2) / this.height;
 
-    // Update GPU compute state for this frame (frustum updates, etc.)
-    if (this.gpuCompute && isGPUComputeAvailable()) {
-      updateGPUCompute(this.world.camera, 0);
-    }
+    // Update GPU compute state for this frame (frustum updates, shared uniforms, etc.)
+    // Pass player position for occlusion dissolve
+    const localPlayer = this.world.entities?.getLocalPlayer?.();
+    const playerPos = localPlayer?.position ?? this.world.camera.position;
+    updateGPUCompute(this.world.camera, 0, playerPos);
   }
 
   onPrefsChange = (changes: {

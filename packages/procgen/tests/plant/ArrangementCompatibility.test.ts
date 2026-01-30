@@ -923,13 +923,13 @@ describe("Stem Mesh Generation", () => {
     expect(curve2.p0.y).toBeGreaterThanOrEqual(curve1.p0.y);
   });
 
-  it("should taper stem width only in last 5% (0.95 to 1.0)", () => {
+  it("should taper stem width only in last 5% (0.95 to 1.0)", async () => {
     // Original C# ShapeScaleAtPercent:
     // if (perc <= 0.95f) return 1f;
     // Then: ret = 1 - (perc - 0.95) * 20, floor = 0.25
     // ret = ret * (1 - floor) + floor = ret * 0.75 + 0.25
     // EaseOutQuad: ret = 1 - (1 - ret)^2
-    const { shapeScaleAtPercent } = require("../../src/plant/index.js");
+    const { shapeScaleAtPercent } = await import("../../src/plant/index");
 
     // Before 0.95, scale should be 1.0
     expect(shapeScaleAtPercent(0.0)).toBe(1.0);
@@ -955,10 +955,10 @@ describe("Stem Mesh Generation", () => {
     expect(scale975).toBeGreaterThan(scale1);
   });
 
-  it("should use 6-sided polygon shape, not circular", () => {
+  it("should use 6-sided polygon shape, not circular", async () => {
     // Original C# CreateShape uses 6 sides
     // Test via createStemShape function
-    const { createStemShape } = require("../../src/plant/index.js");
+    const { createStemShape } = await import("../../src/plant/index");
 
     const shape = createStemShape(1.0, 6);
 

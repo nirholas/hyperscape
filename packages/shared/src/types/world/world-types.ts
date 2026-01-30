@@ -93,6 +93,7 @@ export type VegetationCategory =
   | "flower"
   | "fern"
   | "rock"
+  | "plant"
   | "fallen_tree";
 
 /**
@@ -279,6 +280,69 @@ export interface BiomeOreConfig {
 }
 
 /**
+ * Configuration for decorative rock spawning in a biome.
+ * These are non-harvestable environmental rocks for visual variety.
+ * Uses procedural generation from @hyperscape/procgen/rock.
+ */
+export interface BiomeRockConfig {
+  /** Whether decorative rocks are enabled for this biome */
+  enabled: boolean;
+  /** Rocks per 100m² (density multiplier) */
+  density: number;
+  /**
+   * Rock preset names from @hyperscape/procgen/rock.
+   * Available presets:
+   * - Shape: boulder, pebble, crystal, asteroid, cliff, lowpoly
+   * - Geology: sandstone, limestone, granite, marble, basalt, slate, obsidian, quartzite
+   */
+  presets: string[];
+  /** Distribution weights for each preset (higher = more common) */
+  distribution?: Record<string, number>;
+  /** Scale range [min, max] multiplier (default: [0.3, 1.5]) */
+  scaleRange: [number, number];
+  /** Chance (0-1) for rocks to cluster together (default: 0.3) */
+  clusterChance: number;
+  /** Number of rocks per cluster (default: 3-6) */
+  clusterSize?: [number, number];
+  /** Minimum slope (0-1) where rocks prefer to spawn (rocks like slopes) */
+  minSlope?: number;
+  /** Maximum slope (0-1) for rock placement */
+  maxSlope?: number;
+  /** Minimum spacing between rocks in meters */
+  minSpacing: number;
+}
+
+/**
+ * Configuration for decorative plant spawning in a biome.
+ * These are non-harvestable environmental plants for visual variety.
+ * Uses procedural generation from @hyperscape/procgen/plant.
+ */
+export interface BiomePlantConfig {
+  /** Whether decorative plants are enabled for this biome */
+  enabled: boolean;
+  /** Plants per 100m² (density multiplier) */
+  density: number;
+  /**
+   * Plant preset names from @hyperscape/procgen/plant.
+   * Common presets: fern, monstera, pothos, calathea, philodendron,
+   * snakePlant, peperomia, prayer, croton, dracaena, etc.
+   */
+  presets: string[];
+  /** Distribution weights for each preset (higher = more common) */
+  distribution?: Record<string, number>;
+  /** Scale range [min, max] multiplier (default: [0.5, 1.2]) */
+  scaleRange: [number, number];
+  /** Minimum spacing between plants in meters */
+  minSpacing: number;
+  /** Maximum slope (0-1) for plant placement (plants don't like steep slopes) */
+  maxSlope?: number;
+  /** Whether plants should cluster in small groups */
+  clustering?: boolean;
+  /** Cluster size if clustering is enabled */
+  clusterSize?: [number, number];
+}
+
+/**
  * Biome data - defines characteristics of a biome type
  */
 export interface BiomeData {
@@ -325,6 +389,10 @@ export interface BiomeData {
   trees?: BiomeTreeConfig;
   /** Ore node configuration for procedural spawning (optional) */
   ores?: BiomeOreConfig;
+  /** Decorative rock configuration for procedural spawning (optional) */
+  rocks?: BiomeRockConfig;
+  /** Decorative plant configuration for procedural spawning (optional) */
+  plants?: BiomePlantConfig;
 }
 
 /**
@@ -875,11 +943,12 @@ export type POICategory =
   | "dungeon" // Cave, mine entrance, ruins
   | "shrine" // Small religious site, altar
   | "landmark" // Natural landmark (waterfall, ancient tree, rock formation)
-  | "resource_area" // Mining area, fishing spot, lumber camp
+  | "resource_area" // Mining area, lumber camp
   | "ruin" // Ancient structure, abandoned building
   | "camp" // Bandit camp, hunter camp
   | "crossing" // Bridge, ford, mountain pass
-  | "waystation"; // Rest stop along roads
+  | "waystation" // Rest stop along roads
+  | "fishing_spot"; // Lakeside fishing location at water's edge
 
 /**
  * Point of Interest - A destination that roads can connect to

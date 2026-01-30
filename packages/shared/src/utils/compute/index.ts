@@ -49,10 +49,13 @@ export {
 export {
   WGSL_CULLING_STRUCTS,
   CULLING_SHADER,
+  CULLING_SIMD_SHADER,
   CULLING_WITH_LOD_SHADER,
   CULLING_COMPACT_MATRICES_SHADER,
   RESET_DRAW_PARAMS_SHADER,
   VEGETATION_CULLING_SHADER,
+  TEMPORAL_CULLING_SHADER,
+  INIT_VISIBILITY_HINTS_SHADER,
   CULLING_SHADERS,
 } from "./shaders/culling.wgsl";
 
@@ -60,10 +63,13 @@ export {
 export {
   WGSL_PARTICLE_STRUCTS,
   PARTICLE_PHYSICS_SHADER,
+  PARTICLE_PHYSICS_SUBGROUP_SHADER,
   PARTICLE_EMITTER_SHADER,
   PARTICLE_COMPACT_SHADER,
+  PARTICLE_COMPACT_SUBGROUP_SHADER,
   PARTICLE_SORT_SHADER,
   PARTICLE_SHADERS,
+  supportsSubgroups,
 } from "./shaders/particles.wgsl";
 
 // Noise shaders
@@ -160,3 +166,42 @@ export {
   type GPUInstanceTRS,
   type TerrainComputeConfig,
 } from "./TerrainComputeContext";
+
+// Networking Compute Context
+export {
+  NetworkingComputeContext,
+  getGlobalNetworkingComputeContext,
+  isNetworkingComputeAvailable,
+  type GPUEntityInterest,
+  type GPUPlayerPosition,
+  type GPUSpatialQuery,
+  type GPUSpatialCandidate,
+  type GPUSpatialResult,
+  type GPUMobData,
+  type GPUAggroResult,
+  type GPUAABB,
+  type GPUOverlapPair,
+  type GPUSoundSource,
+  type GPUListener,
+  type GPUSpawnCandidate,
+  type GPUOccupiedPosition,
+  type GPUSpawnResult,
+  type GPULootDrop,
+  type GPULootPlayer,
+  type GPULootResult,
+  type NetworkingComputeConfig,
+} from "./NetworkingComputeContext";
+
+// Networking shaders
+export {
+  INTEREST_MANAGEMENT_SHADER,
+  INTEREST_MANAGEMENT_PER_ENTITY_SHADER,
+  SPATIAL_RANGE_QUERY_SHADER,
+  BATCH_AGGRO_CHECK_SHADER,
+  NEAREST_ENTITY_SHADER,
+  PHYSICS_BROADPHASE_SHADER,
+  SOUND_OCCLUSION_SHADER,
+  SPAWN_VALIDATION_SHADER,
+  LOOT_DISTRIBUTION_SHADER,
+  NETWORKING_SHADERS,
+} from "./shaders/networking.wgsl";

@@ -15,7 +15,6 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   AnimationLOD,
   AnimationLODConfig,
-  AnimationLODResult,
   DEFAULT_ANIMATION_LOD_CONFIG,
   ANIMATION_LOD_PRESETS,
   ANIMATION_LOD_ALWAYS_UPDATE,
@@ -678,7 +677,7 @@ describe("AnimationLOD", () => {
       const halfDist = ANIMATION_LOD_PRESETS.MOB.halfDistance;
       const quarterDist = ANIMATION_LOD_PRESETS.MOB.quarterDistance;
       const freezeDist = ANIMATION_LOD_PRESETS.MOB.freezeDistance;
-      const cullDist = ANIMATION_LOD_PRESETS.MOB.cullDistance;
+      // Note: cullDistance not used here - AnimationLOD uses freezeDistance as the CULLED threshold
 
       // Mob at origin, player starts far
       const mobX = 0,

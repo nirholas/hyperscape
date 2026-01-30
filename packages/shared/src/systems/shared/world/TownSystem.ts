@@ -1139,6 +1139,10 @@ export class TownSystem extends System {
     // === CRITICAL: Validate tiles under buildings are blocked ===
     this.validateBuildingTileBlocking(allBuildings);
 
+    // === CRITICAL: Use BuildingCollisionService's comprehensive validation ===
+    // This uses BFS flood fill to verify ALL tiles are actually reachable from doors
+    this.validateBuildingReachability(allBuildings);
+
     // Summary stats using helper methods
     const totalWalkableTiles = allBuildings.reduce((sum, b) => {
       const floor0 = BuildingCollisionService.getGroundFloorFromData(b);
@@ -1512,6 +1516,62 @@ export class TownSystem extends System {
       "TownSystem",
       `✓ Tile blocking validation PASSED: ${tilesChecked} tiles checked, all correct`,
     );
+  }
+
+  /**
+   * Validate that ALL tiles in each building are actually reachable from the entrance.
+   * Uses BuildingCollisionService's BFS flood fill to verify real navigation works.
+   *
+   * This catches issues where tiles are registered but unreachable due to internal walls.
+   */
+  private validateBuildingReachability(
+    allBuildings: import("../../../types/world/building-collision-types").BuildingCollisionData[],
+  ): void {
+    let totalUnreachable = 0;
+    const failedBuildings: string[] = [];
+
+    for (const building of allBuildings) {
+      const validation = this.collisionService.validateBuildingNavigation(
+        building.buildingId,
+      );
+
+      if (!validation.valid) {
+        // Check if it's a reachability issue specifically
+        const reachabilityError = validation.errors.find((e) =>
+          e.includes("reachable from entrance"),
+        );
+        if (reachabilityError) {
+          const unreachable =
+            validation.stats.walkableTiles - validation.stats.reachableTiles;
+          totalUnreachable += unreachable;
+          failedBuildings.push(
+            `${building.buildingId}: ${unreachable}/${validation.stats.walkableTiles} tiles unreachable`,
+          );
+        }
+
+        // Log all errors but don't fail for minor issues
+        for (const error of validation.errors) {
+          Logger.systemWarn("TownSystem", `[Reachability] ${error}`);
+        }
+      }
+    }
+
+    if (totalUnreachable > 0) {
+      Logger.systemError(
+        "TownSystem",
+        `REACHABILITY VALIDATION: ${totalUnreachable} tiles unreachable across ${failedBuildings.length} buildings`,
+      );
+      for (const building of failedBuildings.slice(0, 5)) {
+        Logger.systemError("TownSystem", `  - ${building}`);
+      }
+      // Don't throw - this is a warning, not a fatal error
+      // Buildings may have intentionally inaccessible areas
+    } else {
+      Logger.system(
+        "TownSystem",
+        `✓ Reachability validation PASSED: All tiles in ${allBuildings.length} buildings are reachable`,
+      );
+    }
   }
 
   /**

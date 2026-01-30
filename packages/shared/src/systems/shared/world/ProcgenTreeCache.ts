@@ -106,23 +106,31 @@ const VARIANT_SEEDS = [12345, 67890, 24680];
  *
  * Key insight: Leaves are already instanced as 2-tri cards,
  * so 2500 leaves = 5000 tris for foliage alone
+ *
+ * maxStems: 500 prevents memory issues for complex presets like
+ * Black Oak (30 × 120 = 3600 stems at depth 2) by keeping the most
+ * important branches (sorted by depth, then radius).
  */
 const LOD0_GEOMETRY_OPTIONS = {
   radialSegments: 5, // Pentagon cross-section (smooth enough)
   maxLeaves: 2500, // 2500 instanced leaf cards = 5000 tris
-  maxBranchDepth: 3, // Trunk + 2 levels of branches
+  maxBranchDepth: 3, // Allow full depth for trees that have it
+  maxStems: 500, // Safety limit - keeps trunk + main branches + some secondary
 };
 
 /**
  * LOD1 geometry options - medium distance silhouette
  * Target: ~200-500 triangles per tree
  *
- * At 30-60m, players can't count individual leaves
+ * At 30-60m, players can't count individual leaves.
+ * maxStems: 50 gives a good silhouette with main branches visible.
+ * Leaves are still rendered at their correct world positions.
  */
 const LOD1_GEOMETRY_OPTIONS = {
   radialSegments: 3, // Triangle cross-section (minimum)
   maxLeaves: 150, // Just enough for silhouette shape
-  maxBranchDepth: 2, // Trunk + main branches only
+  maxBranchDepth: 2, // Trunk + main branches
+  maxStems: 50, // Safety limit - simplified branch structure
 };
 
 /**
@@ -435,6 +443,12 @@ async function generateVariants(presetName: string): Promise<TreeVariant[]> {
 
   for (let i = 0; i < VARIANTS_PER_PRESET; i++) {
     const seed = VARIANT_SEEDS[i];
+
+    // Yield between variants to prevent blocking main thread during pre-warm
+    // This spreads CPU-intensive tree generation across multiple frames
+    if (i > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
 
     try {
       // Generate LOD0 (full detail) with controlled geometry settings
@@ -890,7 +904,10 @@ export function removeTreeInstance(
     const instancer = ProcgenTreeInstancer.getInstance(worldRef);
     instancer.removeInstance(presetName, entityId, lodLevel);
   } catch (error) {
-    // Silently ignore
+    console.warn(
+      `[ProcgenTreeCache] Failed to remove instance ${entityId} from ${presetName}:`,
+      error,
+    );
   }
 }
 
@@ -936,6 +953,7 @@ export function getTreeInstanceStats(): {
     const instancer = ProcgenTreeInstancer.getInstance(worldRef);
     return instancer.getStats();
   } catch (error) {
+    console.warn("[ProcgenTreeCache] Failed to get instancer stats:", error);
     return null;
   }
 }

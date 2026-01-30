@@ -289,7 +289,7 @@ function scaleRightColumnPanels(
     const newGap = Math.max(10, Math.round(originalGap * heightScale));
 
     // Combat Y in new viewport (top of bottom stack)
-    const newCombatY =
+    const _newCombatY =
       bottomStackY +
       (bottomStackUpdates.find((u) => u.win.id === "combat-window")?.y ??
         bottomStackY);

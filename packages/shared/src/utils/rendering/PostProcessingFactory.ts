@@ -12,7 +12,6 @@ import THREE, {
   mix,
   smoothstep,
   max,
-  min,
   sub,
   mul,
   step,

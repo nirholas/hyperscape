@@ -188,7 +188,9 @@ export class TreeImpostor {
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private lastInstance:
-    | (ImpostorInstance & { updateLighting?: (lighting: any) => void })
+    | (ImpostorInstance & {
+        updateLighting?: (lighting: Record<string, unknown>) => void;
+      })
     | null = null;
 
   /**

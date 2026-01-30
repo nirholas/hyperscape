@@ -1,0 +1,575 @@
+/**
+ * ProcgenRockCache - Cached Procedural Rock Variants with LOD Support
+ *
+ * Pre-generates and caches a limited number of rock mesh variants per preset.
+ * This provides visual variety while maintaining performance through shared geometry.
+ *
+ * LOD Strategy:
+ * - LOD0 (0-50m): Full detail rock with vertex colors
+ * - LOD1 (50-100m): Simplified rock - fewer subdivisions
+ * - LOD2 (100-150m): Very low poly cross-billboard
+ * - Impostor (150m+): Octahedral billboard from ImpostorManager
+ *
+ * Design:
+ * - 3 variants per preset (good balance of variety vs memory)
+ * - Variants are generated with different seeds for unique shapes
+ * - LOD1/LOD2 meshes use progressively simpler geometry
+ * - Clones are returned to callers (shared geometry, individual transforms)
+ */
+
+import * as THREE from "three";
+import { ProcgenRockInstancer } from "./ProcgenRockInstancer";
+import type { World } from "../../../core/World";
+
+/** Number of variants to cache per rock preset */
+const VARIANTS_PER_PRESET = 3;
+
+/** World reference for instancer registration */
+let worldRef: World | null = null;
+
+/**
+ * Set the world reference for instancer registration.
+ * Call this during game initialization.
+ */
+export function setProcgenRockWorld(world: World): void {
+  worldRef = world;
+}
+
+/** Base seeds for variant generation (spread apart for visual diversity) */
+const VARIANT_SEEDS = [54321, 98765, 13579];
+
+/**
+ * LOD Configuration for Rocks
+ *
+ * Performance budget per rock at each LOD:
+ * - LOD0 (0-50m):    ~800-1500 tris, full detail for close inspection
+ * - LOD1 (50-100m):  ~100-300 tris, simplified geometry
+ * - LOD2 (100-150m): ~12 tris, billboard cards
+ * - Impostor (150m+): 2 tris, octahedral billboard
+ */
+
+/**
+ * LOD0 geometry options - full detail rock
+ */
+const LOD0_SUBDIVISIONS = 5;
+
+/**
+ * LOD1 geometry options - simplified rock
+ */
+const LOD1_SUBDIVISIONS = 2;
+
+/**
+ * LOD2 "card rock" - billboard cards for distant viewing
+ */
+const LOD2_CARD_OPTIONS = {
+  numCrossCards: 2,
+  cardSizeMultiplier: 0.9,
+};
+
+/**
+ * Cached rock variant data.
+ */
+interface RockVariant {
+  mesh: THREE.Mesh;
+  lod1Mesh: THREE.Mesh | null;
+  lod2Group: THREE.Group | null;
+  vertexCount: number;
+  triangleCount: number;
+  dimensions: { width: number; height: number; depth: number };
+  averageColor: THREE.Color;
+}
+
+/**
+ * Cache entry for a preset's variants.
+ */
+interface PresetCache {
+  /** Array of generated variants */
+  variants: RockVariant[];
+  /** Whether generation is in progress */
+  loading: boolean;
+  /** Promise for waiting on generation */
+  loadPromise: Promise<void> | null;
+}
+
+/**
+ * Global cache of rock variants per preset.
+ */
+const presetCache = new Map<string, PresetCache>();
+
+/**
+ * RockGenerator import (lazy loaded to avoid circular deps).
+ */
+let RockGenerator:
+  | typeof import("@hyperscape/procgen/rock").RockGenerator
+  | null = null;
+let procgenLoaded = false;
+let procgenLoadPromise: Promise<void> | null = null;
+let procgenLoadFailed = false;
+
+/**
+ * Lazy load the procgen rock module.
+ * Only runs on client (browser) - returns immediately on server.
+ */
+async function loadProcgen(): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+  if (procgenLoaded) return true;
+  if (procgenLoadFailed) return false;
+  if (procgenLoadPromise) {
+    await procgenLoadPromise;
+    return procgenLoaded;
+  }
+
+  console.log("[ProcgenRockCache] Loading @hyperscape/procgen/rock...");
+
+  procgenLoadPromise = import("@hyperscape/procgen/rock")
+    .then((procgen) => {
+      RockGenerator = procgen.RockGenerator;
+      procgenLoaded = true;
+      console.log(
+        "[ProcgenRockCache] Successfully loaded @hyperscape/procgen/rock",
+      );
+    })
+    .catch((err) => {
+      procgenLoadFailed = true;
+      console.error(
+        "[ProcgenRockCache] Failed to load @hyperscape/procgen/rock:",
+        err,
+      );
+    });
+
+  await procgenLoadPromise;
+  return procgenLoaded;
+}
+
+/**
+ * Count vertices and triangles in a geometry.
+ */
+function countGeometry(geo: THREE.BufferGeometry): {
+  vertexCount: number;
+  triangleCount: number;
+} {
+  const vertexCount = geo.attributes.position?.count ?? 0;
+  const triangleCount = geo.index ? geo.index.count / 3 : vertexCount / 3;
+  return { vertexCount, triangleCount };
+}
+
+/**
+ * Generate LOD1 rock using procgen with reduced geometry settings.
+ */
+function generateLOD1Rock(
+  generator: InstanceType<
+    typeof import("@hyperscape/procgen/rock").RockGenerator
+  >,
+  presetName: string,
+  seed: number,
+): { mesh: THREE.Mesh; vertexCount: number; triangleCount: number } | null {
+  const result = generator.generateFromPreset(presetName, {
+    seed,
+    params: {
+      subdivisions: LOD1_SUBDIVISIONS,
+      smooth: { iterations: 1, strength: 0.3 },
+    },
+  });
+
+  if (!result) return null;
+
+  const stats = countGeometry(result.geometry);
+  return { mesh: result.mesh, ...stats };
+}
+
+/**
+ * Extract metadata from a generated rock.
+ */
+function extractRockMetadata(mesh: THREE.Mesh): {
+  averageColor: THREE.Color;
+  dimensions: { width: number; height: number; depth: number };
+} {
+  let averageColor = new THREE.Color(0x7a7a7a); // Default gray
+
+  // Extract average color from vertex colors
+  const geometry = mesh.geometry;
+  if (geometry.attributes.color) {
+    const colors = geometry.attributes.color;
+    let r = 0,
+      g = 0,
+      b = 0;
+    const count = colors.count;
+    for (let i = 0; i < count; i++) {
+      r += colors.getX(i);
+      g += colors.getY(i);
+      b += colors.getZ(i);
+    }
+    if (count > 0) {
+      averageColor.setRGB(r / count, g / count, b / count);
+    }
+  }
+
+  // Calculate dimensions from bounding box
+  const bbox = new THREE.Box3().setFromObject(mesh);
+  const size = new THREE.Vector3();
+  bbox.getSize(size);
+
+  return {
+    averageColor,
+    dimensions: {
+      width: size.x,
+      height: size.y,
+      depth: size.z,
+    },
+  };
+}
+
+/**
+ * Generate LOD2 "card rock" using cross-billboard technique.
+ */
+function generateLOD2CardRock(
+  dimensions: { width: number; height: number; depth: number },
+  averageColor: THREE.Color,
+): THREE.Group {
+  const group = new THREE.Group();
+  group.name = "LOD2_CardRock";
+
+  const { width, height, depth } = dimensions;
+  const avgSize = (width + depth) / 2;
+  const cardWidth = avgSize * LOD2_CARD_OPTIONS.cardSizeMultiplier;
+  const cardHeight = height * LOD2_CARD_OPTIONS.cardSizeMultiplier;
+  const cardGeometry = new THREE.PlaneGeometry(cardWidth, cardHeight);
+
+  const cardMaterial = new THREE.MeshBasicMaterial({
+    color: averageColor,
+    side: THREE.DoubleSide,
+  });
+
+  const centerY = height * 0.5;
+
+  // Two perpendicular cards for cross-billboard
+  const card1 = new THREE.Mesh(cardGeometry, cardMaterial);
+  card1.position.set(0, centerY, 0);
+  group.add(card1);
+
+  const card2 = new THREE.Mesh(cardGeometry, cardMaterial);
+  card2.position.set(0, centerY, 0);
+  card2.rotation.y = Math.PI / 2;
+  group.add(card2);
+
+  return group;
+}
+
+/**
+ * Generate rock variants for a preset.
+ */
+async function generateVariants(presetName: string): Promise<RockVariant[]> {
+  const loaded = await loadProcgen();
+
+  if (!loaded || !RockGenerator) {
+    console.warn(
+      `[ProcgenRockCache] Cannot generate "${presetName}" - procgen module not loaded`,
+    );
+    return [];
+  }
+
+  const variants: RockVariant[] = [];
+  const generator = new RockGenerator();
+
+  let totalVerts = 0;
+  let totalTris = 0;
+
+  for (let i = 0; i < VARIANTS_PER_PRESET; i++) {
+    const seed = VARIANT_SEEDS[i];
+
+    // Yield between variants to prevent blocking main thread
+    if (i > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+
+    // Generate LOD0 (full detail)
+    const result = generator.generateFromPreset(presetName, {
+      seed,
+      params: { subdivisions: LOD0_SUBDIVISIONS },
+    });
+
+    if (!result) {
+      console.warn(
+        `[ProcgenRockCache] Failed to generate ${presetName} variant ${i}`,
+      );
+      continue;
+    }
+
+    // Count geometry and extract metadata
+    const { vertexCount, triangleCount } = countGeometry(result.geometry);
+    const { averageColor, dimensions } = extractRockMetadata(result.mesh);
+
+    // Generate LOD1 and LOD2
+    const lod1Result = generateLOD1Rock(generator, presetName, seed);
+    const lod2Group = generateLOD2CardRock(dimensions, averageColor);
+
+    variants.push({
+      mesh: result.mesh,
+      lod1Mesh: lod1Result?.mesh ?? null,
+      lod2Group,
+      vertexCount,
+      triangleCount,
+      dimensions,
+      averageColor,
+    });
+
+    totalVerts += vertexCount;
+    totalTris += triangleCount;
+  }
+
+  generator.dispose();
+
+  if (variants.length > 0) {
+    const avgVerts = Math.round(totalVerts / variants.length);
+    const avgTris = Math.round(totalTris / variants.length);
+    console.log(
+      `[ProcgenRockCache] Generated ${variants.length} variants for "${presetName}" ` +
+        `(avg: ${avgVerts} verts, ${avgTris} tris)`,
+    );
+  }
+
+  return variants;
+}
+
+/**
+ * Ensure variants are loaded for a preset.
+ */
+export async function ensureRockVariantsLoaded(
+  presetName: string,
+): Promise<void> {
+  let cache = presetCache.get(presetName);
+
+  if (cache?.variants.length) {
+    return; // Already loaded
+  }
+
+  if (cache?.loading && cache.loadPromise) {
+    await cache.loadPromise;
+    return;
+  }
+
+  // Start loading
+  cache = {
+    variants: [],
+    loading: true,
+    loadPromise: null,
+  };
+  presetCache.set(presetName, cache);
+
+  const loadPromise = (async () => {
+    const variants = await generateVariants(presetName);
+    const existingCache = presetCache.get(presetName);
+    if (existingCache) {
+      existingCache.variants = variants;
+      existingCache.loading = false;
+    }
+  })();
+
+  cache.loadPromise = loadPromise;
+  await loadPromise;
+}
+
+/**
+ * Get a cached rock variant mesh for a preset.
+ * Returns a clone with shared geometry but individual transform.
+ *
+ * @param presetName - Rock preset name (e.g., "boulder", "granite")
+ * @param variantIndex - Optional specific variant index (0-2), random if not specified
+ * @returns Cloned mesh with LOD data, or null if not loaded
+ */
+export function getRockVariant(
+  presetName: string,
+  variantIndex?: number,
+): {
+  mesh: THREE.Mesh;
+  lod1Mesh: THREE.Mesh | null;
+  lod2Group: THREE.Group | null;
+  dimensions: { width: number; height: number; depth: number };
+  averageColor: THREE.Color;
+} | null {
+  const cache = presetCache.get(presetName);
+
+  if (!cache?.variants.length) {
+    return null;
+  }
+
+  // Select variant
+  const idx =
+    variantIndex !== undefined
+      ? Math.abs(variantIndex) % cache.variants.length
+      : Math.floor(Math.random() * cache.variants.length);
+
+  const variant = cache.variants[idx];
+
+  // Return cloned mesh (shared geometry, individual instance)
+  return {
+    mesh: variant.mesh.clone(),
+    lod1Mesh: variant.lod1Mesh?.clone() ?? null,
+    lod2Group: variant.lod2Group?.clone() ?? null,
+    dimensions: { ...variant.dimensions },
+    averageColor: variant.averageColor.clone(),
+  };
+}
+
+/**
+ * Get the number of cached variants for a preset.
+ */
+export function getRockVariantCount(presetName: string): number {
+  return presetCache.get(presetName)?.variants.length ?? 0;
+}
+
+/**
+ * Check if a preset is loaded and ready.
+ */
+export function isRockPresetLoaded(presetName: string): boolean {
+  const cache = presetCache.get(presetName);
+  return !!cache?.variants.length && !cache.loading;
+}
+
+/**
+ * Pre-warm the cache by loading variants for multiple presets.
+ */
+export async function preWarmRockCache(presets: string[]): Promise<void> {
+  console.log(
+    `[ProcgenRockCache] Pre-warming cache with ${presets.length} presets...`,
+  );
+  const startTime = performance.now();
+
+  for (const preset of presets) {
+    await ensureRockVariantsLoaded(preset);
+    // Small delay between presets to avoid blocking
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+
+  const elapsed = Math.round(performance.now() - startTime);
+  console.log(`[ProcgenRockCache] Pre-warm complete in ${elapsed}ms`);
+}
+
+/**
+ * Add a rock instance using the instancer system.
+ * Returns the instance ID.
+ */
+export async function addRockInstance(
+  presetName: string,
+  position: THREE.Vector3,
+  rotation: number,
+  scale: number,
+  entityId?: string,
+): Promise<string | null> {
+  // Ensure variants are loaded
+  await ensureRockVariantsLoaded(presetName);
+
+  // Get instancer (create if needed)
+  const instancer = ProcgenRockInstancer.getInstance(worldRef);
+  if (!instancer) {
+    console.warn(
+      "[ProcgenRockCache] No world reference set, cannot create instancer",
+    );
+    return null;
+  }
+
+  // Add to instancer
+  const id =
+    entityId ??
+    `rock_${presetName}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  await instancer.addInstance(id, presetName, position, rotation, scale);
+
+  return id;
+}
+
+/**
+ * Remove a rock instance.
+ * @returns true if instance was found and removed, false otherwise
+ */
+export function removeRockInstance(instanceId: string): boolean {
+  const instancer = ProcgenRockInstancer.getInstance(worldRef);
+  if (!instancer) {
+    return false;
+  }
+  return instancer.removeInstance(instanceId);
+}
+
+/**
+ * Clear all cached rock variants.
+ */
+export function clearRockCache(): void {
+  // Dispose geometries and materials
+  for (const [, cache] of presetCache) {
+    for (const variant of cache.variants) {
+      variant.mesh.geometry.dispose();
+      if (variant.mesh.material instanceof THREE.Material) {
+        variant.mesh.material.dispose();
+      }
+      if (variant.lod1Mesh) {
+        variant.lod1Mesh.geometry.dispose();
+        if (variant.lod1Mesh.material instanceof THREE.Material) {
+          variant.lod1Mesh.material.dispose();
+        }
+      }
+      if (variant.lod2Group) {
+        variant.lod2Group.traverse((child) => {
+          if (child instanceof THREE.Mesh) {
+            child.geometry.dispose();
+            if (child.material instanceof THREE.Material) {
+              child.material.dispose();
+            }
+          }
+        });
+      }
+    }
+  }
+  presetCache.clear();
+  console.log("[ProcgenRockCache] Cache cleared");
+}
+
+/**
+ * Default rock presets per biome type.
+ * Used when no specific biome rock config is provided.
+ */
+export const BIOME_ROCK_PRESETS: Record<string, string[]> = {
+  forest: ["boulder", "granite", "limestone"],
+  plains: ["boulder", "pebble", "sandstone"],
+  desert: ["sandstone", "limestone", "pebble"],
+  mountains: ["granite", "basalt", "cliff"],
+  mountain: ["granite", "basalt", "cliff"],
+  swamp: ["limestone", "slate", "pebble"],
+  frozen: ["granite", "basalt", "boulder"],
+  wastes: ["basalt", "slate", "asteroid"],
+  corrupted: ["obsidian", "basalt", "crystal"],
+  lake: ["pebble", "limestone", "boulder"],
+};
+
+/**
+ * Get default rock presets for a biome.
+ */
+export function getRockPresetsForBiome(biomeType: string): string[] {
+  return (
+    BIOME_ROCK_PRESETS[biomeType.toLowerCase()] ?? [
+      "boulder",
+      "pebble",
+      "granite",
+    ]
+  );
+}
+
+/**
+ * All available rock presets.
+ */
+export const ALL_ROCK_PRESETS = [
+  // Shape presets
+  "boulder",
+  "pebble",
+  "crystal",
+  "asteroid",
+  "cliff",
+  "lowpoly",
+  // Geology presets
+  "sandstone",
+  "limestone",
+  "granite",
+  "marble",
+  "basalt",
+  "slate",
+  "obsidian",
+  "quartzite",
+];

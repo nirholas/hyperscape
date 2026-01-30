@@ -295,12 +295,12 @@ export default defineConfig(({ mode }) => {
       "process.env.NODE_ENV": JSON.stringify(mode),
       "process.env.DEBUG_RPG": JSON.stringify(env.DEBUG_RPG || ""),
       // In development, use game server for CDN if PUBLIC_CDN_URL not set
-      // Game server serves manifests at /manifests/ and assets at /assets/
+      // Game server serves manifests at /manifests/ and assets at /game-assets/
       "process.env.PUBLIC_CDN_URL": JSON.stringify(
         env.PUBLIC_CDN_URL ||
           (mode === "production"
-            ? "http://localhost:8080"
-            : "http://localhost:5555"),
+            ? "https://assets.hyperscape.club"
+            : "http://localhost:5555/game-assets"),
       ),
       "process.env.PUBLIC_STARTER_ITEMS": JSON.stringify(
         env.PUBLIC_STARTER_ITEMS || "",

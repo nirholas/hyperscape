@@ -49,6 +49,12 @@ if (typeof window !== "undefined") {
   (window as Window & { Buffer: typeof Buffer }).Buffer = Buffer;
 }
 
+// NOTE: __CDN_URL is intentionally NOT set early here.
+// Different systems need different CDN URLs in development:
+// - PhysX WASM: served from Vite at localhost:3333/web/ (uses window.location.origin fallback)
+// - Game manifests: served from game server at localhost:5555/game-assets/manifests/
+// GameClient.tsx sets __CDN_URL later with the proper production CDN URL.
+
 // setImmediate polyfill for Privy/Viem
 // Browser polyfill uses setTimeout which returns a Timeout, but libraries expect
 // the Node.js setImmediate signature. The cast is required for cross-platform compat.

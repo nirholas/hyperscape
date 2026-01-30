@@ -495,8 +495,9 @@ describe("PostProcessingComposer Interface", () => {
     let lutEnabled = false;
     let depthBlurActive = false;
     let depthBlurIntensity = 0.5;
-    let depthBlurFocusDistance = 15;
-    let depthBlurRange = 30;
+    // Focus distance and range are tracked for mock realism but not read back in tests
+    let _depthBlurFocusDistance = 15;
+    let _depthBlurRange = 30;
 
     return {
       render: vi.fn(),
@@ -522,10 +523,10 @@ describe("PostProcessingComposer Interface", () => {
       setDepthBlurFocusDistance: vi
         .fn()
         .mockImplementation((distance: number) => {
-          depthBlurFocusDistance = Math.max(0, distance);
+          _depthBlurFocusDistance = Math.max(0, distance);
         }),
       setDepthBlurRange: vi.fn().mockImplementation((range: number) => {
-        depthBlurRange = Math.max(0.1, range);
+        _depthBlurRange = Math.max(0.1, range);
       }),
       isDepthBlurEnabled: () => depthBlurActive,
     };

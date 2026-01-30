@@ -419,6 +419,8 @@ export type GeometryOptions = {
   maxLeaves?: number;
   /** Maximum depth level for branches (0=trunk only, 1=trunk+main branches, etc.) */
   maxBranchDepth?: number;
+  /** Maximum total stems to render (prevents memory explosion for complex trees, default 2000) */
+  maxStems?: number;
 };
 
 /**

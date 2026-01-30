@@ -536,9 +536,12 @@ describe("Wilderness Zone", () => {
     it("should detect position in northern wilderness", () => {
       const wilderness = generateWilderness(100, 10, "north", 0.3);
 
-      // Position in the north (z < center - boundary)
+      // Position in the north (high Z values, above threshold of 300)
+      // worldSizeMeters = 100 * 10 = 1000
+      // threshold = 1000 * 0.3 = 300
+      // position.z > threshold means in wilderness
       const inWild = isInWilderness(
-        createMockPosition(500, 0, 100),
+        createMockPosition(500, 0, 400), // z=400 > 300
         wilderness,
         100,
         10,
@@ -549,9 +552,9 @@ describe("Wilderness Zone", () => {
     it("should detect position outside wilderness", () => {
       const wilderness = generateWilderness(100, 10, "north", 0.3);
 
-      // Position in the center/south
+      // Position in the center/south (low Z values, below threshold)
       const notInWild = isInWilderness(
-        createMockPosition(500, 0, 800),
+        createMockPosition(500, 0, 200), // z=200 < 300
         wilderness,
         100,
         10,
@@ -562,47 +565,48 @@ describe("Wilderness Zone", () => {
     it("should handle all cardinal directions", () => {
       const worldSize = 100;
       const tileSize = 10;
-      const worldSizeMeters = worldSize * tileSize;
-      const center = worldSizeMeters / 2;
+      const worldSizeMeters = worldSize * tileSize; // 1000
+      const center = worldSizeMeters / 2; // 500
+      const threshold = worldSizeMeters * 0.3; // 300
 
-      // North
+      // North - wilderness at high Z values (z > threshold)
       const northWild = generateWilderness(worldSize, tileSize, "north", 0.3);
       expect(
         isInWilderness(
-          createMockPosition(center, 0, 100),
+          createMockPosition(center, 0, 400), // z=400 > 300
           northWild,
           worldSize,
           tileSize,
         ),
       ).toBe(true);
 
-      // South
+      // South - wilderness at low Z values (z < worldSizeMeters - threshold = 700)
       const southWild = generateWilderness(worldSize, tileSize, "south", 0.3);
       expect(
         isInWilderness(
-          createMockPosition(center, 0, worldSizeMeters - 100),
+          createMockPosition(center, 0, 200), // z=200 < 700
           southWild,
           worldSize,
           tileSize,
         ),
       ).toBe(true);
 
-      // East
+      // East - wilderness at high X values (x > threshold)
       const eastWild = generateWilderness(worldSize, tileSize, "east", 0.3);
       expect(
         isInWilderness(
-          createMockPosition(worldSizeMeters - 100, 0, center),
+          createMockPosition(400, 0, center), // x=400 > 300
           eastWild,
           worldSize,
           tileSize,
         ),
       ).toBe(true);
 
-      // West
+      // West - wilderness at low X values (x < worldSizeMeters - threshold = 700)
       const westWild = generateWilderness(worldSize, tileSize, "west", 0.3);
       expect(
         isInWilderness(
-          createMockPosition(100, 0, center),
+          createMockPosition(200, 0, center), // x=200 < 700
           westWild,
           worldSize,
           tileSize,
@@ -614,8 +618,9 @@ describe("Wilderness Zone", () => {
   describe("getWildernessLevel", () => {
     it("should return 0 for positions outside wilderness", () => {
       const wilderness = generateWilderness(100, 10, "north", 0.3);
+      // Position at z=200 is below threshold (300), so outside wilderness
       const level = getWildernessLevel(
-        createMockPosition(500, 0, 800),
+        createMockPosition(500, 0, 200),
         wilderness,
         100,
         10,
@@ -626,15 +631,16 @@ describe("Wilderness Zone", () => {
 
     it("should increase level deeper into wilderness", () => {
       const wilderness = generateWilderness(100, 10, "north", 0.3);
+      // For north wilderness, deeper means higher Z values
 
       const shallowLevel = getWildernessLevel(
-        createMockPosition(500, 0, 300),
+        createMockPosition(500, 0, 400), // just inside wilderness
         wilderness,
         100,
         10,
       );
       const deepLevel = getWildernessLevel(
-        createMockPosition(500, 0, 50),
+        createMockPosition(500, 0, 800), // deeper into wilderness
         wilderness,
         100,
         10,
@@ -645,8 +651,9 @@ describe("Wilderness Zone", () => {
 
     it("should return at least 1 for any position in wilderness", () => {
       const wilderness = generateWilderness(100, 10, "north", 0.3);
+      // Position at z=400 is above threshold (300), so in wilderness
       const level = getWildernessLevel(
-        createMockPosition(500, 0, 100),
+        createMockPosition(500, 0, 400),
         wilderness,
         100,
         10,

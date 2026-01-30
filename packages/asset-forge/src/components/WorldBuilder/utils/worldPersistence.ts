@@ -2041,22 +2041,27 @@ export function getWildernessLevel(
   }
 
   const worldSizeMeters = worldSize * tileSize;
-  const worldCenter = worldSizeMeters / 2;
-  const boundary = worldSizeMeters * wilderness.startBoundary;
+  const threshold = worldSizeMeters * wilderness.startBoundary;
 
+  // Calculate distance into the wilderness from the boundary
+  // Deeper into wilderness = higher level
   let distanceIntoBoundary: number;
   switch (wilderness.direction) {
     case "north":
-      distanceIntoBoundary = worldCenter - boundary - position.z;
+      // North wilderness: z > threshold, deeper = higher z
+      distanceIntoBoundary = position.z - threshold;
       break;
     case "south":
-      distanceIntoBoundary = position.z - (worldCenter + boundary);
+      // South wilderness: z < (worldSizeMeters - threshold), deeper = lower z
+      distanceIntoBoundary = worldSizeMeters - threshold - position.z;
       break;
     case "east":
-      distanceIntoBoundary = position.x - (worldCenter + boundary);
+      // East wilderness: x > threshold, deeper = higher x
+      distanceIntoBoundary = position.x - threshold;
       break;
     case "west":
-      distanceIntoBoundary = worldCenter - boundary - position.x;
+      // West wilderness: x < (worldSizeMeters - threshold), deeper = lower x
+      distanceIntoBoundary = worldSizeMeters - threshold - position.x;
       break;
   }
 

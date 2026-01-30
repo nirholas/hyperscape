@@ -11,8 +11,15 @@
  * Hyperscape server process with direct world access.
  */
 
-import { AgentRuntime, ChannelType, mergeCharacterDefaults, stringToUuid, type Plugin } from "@elizaos/core";
+import {
+  AgentRuntime,
+  ChannelType,
+  mergeCharacterDefaults,
+  stringToUuid,
+  type Plugin,
+} from "@elizaos/core";
 import { hyperscapePlugin } from "@hyperscape/plugin-hyperscape";
+import { createJWT } from "../shared/utils.js";
 
 /**
  * Dynamically import the SQL plugin required for ElizaOS database operations.
@@ -22,17 +29,24 @@ async function getSqlPlugin(): Promise<Plugin | null> {
   try {
     const mod = await import("@elizaos/plugin-sql");
     // The SQL plugin exports as 'sqlPlugin', 'plugin', or 'default' depending on version
-    const sqlPlugin = (mod as Record<string, unknown>).sqlPlugin 
-      ?? (mod as Record<string, unknown>).plugin 
-      ?? mod.default;
+    const sqlPlugin =
+      (mod as Record<string, unknown>).sqlPlugin ??
+      (mod as Record<string, unknown>).plugin ??
+      mod.default;
     if (sqlPlugin) {
       console.log("[AgentManager] Loaded SQL plugin for database support");
       return sqlPlugin as Plugin;
     }
-    console.warn("[AgentManager] SQL plugin module loaded but no plugin export found. Exports:", Object.keys(mod));
+    console.warn(
+      "[AgentManager] SQL plugin module loaded but no plugin export found. Exports:",
+      Object.keys(mod),
+    );
     return null;
   } catch (err) {
-    console.warn("[AgentManager] Failed to load SQL plugin:", err instanceof Error ? err.message : String(err));
+    console.warn(
+      "[AgentManager] Failed to load SQL plugin:",
+      err instanceof Error ? err.message : String(err),
+    );
     return null;
   }
 }
@@ -53,7 +67,10 @@ async function getModelProviderPlugin(): Promise<Plugin | null> {
       // Cast needed due to potential type version mismatch in nested node_modules
       return mod.openaiPlugin as Plugin;
     } catch (err) {
-      console.warn("[AgentManager] Failed to load OpenAI plugin:", err instanceof Error ? err.message : String(err));
+      console.warn(
+        "[AgentManager] Failed to load OpenAI plugin:",
+        err instanceof Error ? err.message : String(err),
+      );
     }
   }
 
@@ -65,7 +82,10 @@ async function getModelProviderPlugin(): Promise<Plugin | null> {
       console.log("[AgentManager] Using Anthropic model provider");
       return (mod.anthropicPlugin ?? mod.default) as Plugin;
     } catch (err) {
-      console.warn("[AgentManager] Failed to load Anthropic plugin:", err instanceof Error ? err.message : String(err));
+      console.warn(
+        "[AgentManager] Failed to load Anthropic plugin:",
+        err instanceof Error ? err.message : String(err),
+      );
     }
   }
 
@@ -77,7 +97,10 @@ async function getModelProviderPlugin(): Promise<Plugin | null> {
       console.log("[AgentManager] Using OpenRouter model provider");
       return (mod.openrouterPlugin ?? mod.default) as Plugin;
     } catch (err) {
-      console.warn("[AgentManager] Failed to load OpenRouter plugin:", err instanceof Error ? err.message : String(err));
+      console.warn(
+        "[AgentManager] Failed to load OpenRouter plugin:",
+        err instanceof Error ? err.message : String(err),
+      );
     }
   }
 
@@ -87,10 +110,15 @@ async function getModelProviderPlugin(): Promise<Plugin | null> {
     console.log("[AgentManager] Using Ollama model provider (local fallback)");
     return mod.ollamaPlugin as Plugin;
   } catch (err) {
-    console.warn("[AgentManager] Failed to load Ollama plugin:", err instanceof Error ? err.message : String(err));
+    console.warn(
+      "[AgentManager] Failed to load Ollama plugin:",
+      err instanceof Error ? err.message : String(err),
+    );
   }
 
-  console.warn("[AgentManager] No model provider available! Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY");
+  console.warn(
+    "[AgentManager] No model provider available! Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY",
+  );
   return null;
 }
 import type { World } from "@hyperscape/shared";
@@ -122,7 +150,12 @@ interface AgentInstance {
 
 type ScriptedRole = EmbeddedAgentConfig["scriptedRole"];
 type EquipSlot = keyof Equipment;
-type GatherSkill = "woodcutting" | "fishing" | "mining" | "firemaking" | "cooking";
+type GatherSkill =
+  | "woodcutting"
+  | "fishing"
+  | "mining"
+  | "firemaking"
+  | "cooking";
 
 type CommandData = {
   target?: [number, number, number];
@@ -226,8 +259,7 @@ export class AgentManager {
         await this.startAgent(characterId);
       } catch (err) {
         instance.state = "error";
-        instance.error =
-          err instanceof Error ? err.message : String(err);
+        instance.error = err instanceof Error ? err.message : String(err);
         console.error(
           `[AgentManager] Failed to auto-start agent ${name}:`,
           instance.error,
@@ -256,7 +288,9 @@ export class AgentManager {
 
     // Check if shutdown is in progress
     if (this.isShuttingDown) {
-      console.log(`[AgentManager] Shutdown in progress, skipping agent start: ${characterId}`);
+      console.log(
+        `[AgentManager] Shutdown in progress, skipping agent start: ${characterId}`,
+      );
       return;
     }
 
@@ -287,6 +321,24 @@ export class AgentManager {
           HYPERSCAPE_CHARACTER_ID: instance.config.characterId,
           HYPERSCAPE_SERVER_URL: wsUrl,
         };
+
+        // Generate auth token for embedded agent so HyperscapeService can authenticate
+        // Uses the agent's accountId to create a valid Hyperscape JWT
+        try {
+          const authToken = await createJWT({
+            userId: instance.config.accountId,
+          });
+          secrets.HYPERSCAPE_AUTH_TOKEN = authToken;
+          console.log(
+            `[AgentManager] Generated auth token for embedded agent ${instance.config.name} (accountId: ${instance.config.accountId})`,
+          );
+        } catch (authErr) {
+          console.error(
+            `[AgentManager] Failed to generate auth token for agent ${instance.config.name}:`,
+            authErr instanceof Error ? authErr.message : String(authErr),
+          );
+          // Continue without auth token - will use first-message auth or fail gracefully
+        }
 
         // Add model provider API keys if available
         if (process.env.OPENAI_API_KEY) {
@@ -331,7 +383,7 @@ export class AgentManager {
         } else {
           console.warn(
             `[AgentManager] SQL plugin not available for agent ${instance.config.name}. ` +
-            "Some database features may not work."
+              "Some database features may not work.",
           );
         }
 
@@ -343,8 +395,8 @@ export class AgentManager {
           } else {
             console.warn(
               `[AgentManager] No model provider available for LLM agent ${instance.config.name}. ` +
-              "The agent may fail when trying to use AI models. " +
-              "Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY."
+                "The agent may fail when trying to use AI models. " +
+                "Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY.",
             );
           }
         }
@@ -372,36 +424,50 @@ export class AgentManager {
         const agentDataDir = process.env.ELIZAOS_DATA_DIR || "./data/elizaos";
         const agentDbPath = `${agentDataDir}/${instance.config.characterId}`;
         runtime.setSetting("PGLITE_DATA_DIR", agentDbPath);
-        console.log(`[AgentManager] Using PGLite database for agent ${instance.config.name} at ${agentDbPath}`);
+        console.log(
+          `[AgentManager] Using PGLite database for agent ${instance.config.name} at ${agentDbPath}`,
+        );
 
         // Wrap initialization in a promise we can track and abort
         const initPromise = (async () => {
           // Check abort before each async step
           if (abortController.signal.aborted) {
-            throw new Error("Agent initialization aborted (shutdown in progress)");
+            throw new Error(
+              "Agent initialization aborted (shutdown in progress)",
+            );
           }
 
           // Note: allowNoDatabase is no longer supported in newer ElizaOS versions
-          console.log(`[AgentManager] Initializing ElizaOS runtime for agent ${instance.config.name}...`);
+          console.log(
+            `[AgentManager] Initializing ElizaOS runtime for agent ${instance.config.name}...`,
+          );
           try {
             await runtime.initialize({
               skipMigrations: false,
             } as { skipMigrations?: boolean });
-            console.log(`[AgentManager] ElizaOS runtime initialized for agent ${instance.config.name}`);
+            console.log(
+              `[AgentManager] ElizaOS runtime initialized for agent ${instance.config.name}`,
+            );
           } catch (initError) {
             console.error(
               `[AgentManager] ElizaOS runtime.initialize() failed for agent ${instance.config.name}:`,
-              initError instanceof Error ? initError.message : String(initError)
+              initError instanceof Error
+                ? initError.message
+                : String(initError),
             );
             throw initError;
           }
 
           if (abortController.signal.aborted) {
-            throw new Error("Agent initialization aborted (shutdown in progress)");
+            throw new Error(
+              "Agent initialization aborted (shutdown in progress)",
+            );
           }
 
           await runtime.ensureConnection({
-            entityId: stringToUuid(`embedded-agent-${instance.config.characterId}`),
+            entityId: stringToUuid(
+              `embedded-agent-${instance.config.characterId}`,
+            ),
             roomId: stringToUuid(
               `embedded-agent-room-${instance.config.characterId}`,
             ),
@@ -413,7 +479,9 @@ export class AgentManager {
           });
 
           if (abortController.signal.aborted) {
-            throw new Error("Agent initialization aborted (shutdown in progress)");
+            throw new Error(
+              "Agent initialization aborted (shutdown in progress)",
+            );
           }
 
           // Wait for the HyperscapeService to be available (it may take time to connect)
@@ -425,33 +493,42 @@ export class AgentManager {
           let service: HyperscapeService | undefined;
 
           console.log(
-            `[AgentManager] Waiting for HyperscapeService to be available for agent ${instance.config.name}...`
+            `[AgentManager] Waiting for HyperscapeService to be available for agent ${instance.config.name}...`,
           );
 
-          while (!service && Date.now() - startWaitTime < SERVICE_WAIT_TIMEOUT_MS) {
+          while (
+            !service &&
+            Date.now() - startWaitTime < SERVICE_WAIT_TIMEOUT_MS
+          ) {
             if (abortController.signal.aborted) {
-              throw new Error("Agent initialization aborted (shutdown in progress)");
+              throw new Error(
+                "Agent initialization aborted (shutdown in progress)",
+              );
             }
 
             // Cast needed because HyperscapeService extends Service but has protected properties
-            service = runtime.getService("hyperscapeService") as unknown as HyperscapeService | undefined;
-            
+            service = runtime.getService("hyperscapeService") as unknown as
+              | HyperscapeService
+              | undefined;
+
             if (!service) {
               // Log progress every 5 seconds
               const elapsed = Date.now() - startWaitTime;
               if (elapsed > 0 && elapsed % 5000 < SERVICE_POLL_INTERVAL_MS) {
                 console.log(
-                  `[AgentManager] Waiting for HyperscapeService... (${Math.round(elapsed / 1000)}s elapsed)`
+                  `[AgentManager] Waiting for HyperscapeService... (${Math.round(elapsed / 1000)}s elapsed)`,
                 );
               }
-              await new Promise((resolve) => setTimeout(resolve, SERVICE_POLL_INTERVAL_MS));
+              await new Promise((resolve) =>
+                setTimeout(resolve, SERVICE_POLL_INTERVAL_MS),
+              );
             }
           }
 
           if (service) {
             console.log(
               `[AgentManager] HyperscapeService found for agent ${instance.config.name} ` +
-              `after ${Date.now() - startWaitTime}ms`
+                `after ${Date.now() - startWaitTime}ms`,
             );
           }
 
@@ -461,8 +538,14 @@ export class AgentManager {
             try {
               // ElizaOS runtime may expose services via different methods
               const runtimeAny = runtime as unknown as Record<string, unknown>;
-              if (typeof runtimeAny.services === "object" && runtimeAny.services !== null) {
-                const servicesObj = runtimeAny.services as Record<string, unknown>;
+              if (
+                typeof runtimeAny.services === "object" &&
+                runtimeAny.services !== null
+              ) {
+                const servicesObj = runtimeAny.services as Record<
+                  string,
+                  unknown
+                >;
                 const serviceKeys = Object.keys(servicesObj);
                 debugInfo = ` Available service keys: ${serviceKeys.length > 0 ? serviceKeys.join(", ") : "none"}`;
               }
@@ -470,11 +553,11 @@ export class AgentManager {
               // Ignore debug info errors
             }
             console.error(
-              `[AgentManager] HyperscapeService not found after ${SERVICE_WAIT_TIMEOUT_MS}ms.${debugInfo}`
+              `[AgentManager] HyperscapeService not found after ${SERVICE_WAIT_TIMEOUT_MS}ms.${debugInfo}`,
             );
             throw new Error(
               "Hyperscape service not available in runtime after " +
-              `${SERVICE_WAIT_TIMEOUT_MS / 1000}s timeout. The service may have failed to start.`
+                `${SERVICE_WAIT_TIMEOUT_MS / 1000}s timeout. The service may have failed to start.`,
             );
           }
 
@@ -498,7 +581,6 @@ export class AgentManager {
       console.log(
         `[AgentManager] ✅ Agent ${instance.config.name} is now running`,
       );
-
     } catch (err) {
       // Clear initialization tracking on error
       instance.initializationPromise = undefined;
@@ -507,13 +589,14 @@ export class AgentManager {
       // Don't set error state if we aborted due to shutdown
       if (this.isShuttingDown) {
         instance.state = "stopped";
-        console.log(`[AgentManager] Agent ${instance.config.name} initialization aborted (shutdown)`);
+        console.log(
+          `[AgentManager] Agent ${instance.config.name} initialization aborted (shutdown)`,
+        );
         return;
       }
 
       instance.state = "error";
-      instance.error =
-        err instanceof Error ? err.message : String(err);
+      instance.error = err instanceof Error ? err.message : String(err);
       throw err;
     }
   }
@@ -547,13 +630,10 @@ export class AgentManager {
       instance.state = "stopped";
       instance.lastActivity = Date.now();
 
-      console.log(
-        `[AgentManager] ✅ Agent ${instance.config.name} stopped`,
-      );
+      console.log(`[AgentManager] ✅ Agent ${instance.config.name} stopped`);
     } catch (err) {
       instance.state = "error";
-      instance.error =
-        err instanceof Error ? err.message : String(err);
+      instance.error = err instanceof Error ? err.message : String(err);
       throw err;
     }
   }
@@ -628,7 +708,9 @@ export class AgentManager {
   async removeAgent(characterId: string): Promise<void> {
     const instance = this.agents.get(characterId);
     if (!instance) {
-      console.log(`[AgentManager] Agent ${characterId} not found, nothing to remove`);
+      console.log(
+        `[AgentManager] Agent ${characterId} not found, nothing to remove`,
+      );
       return;
     }
 
@@ -644,9 +726,7 @@ export class AgentManager {
     // Remove from tracking
     this.agents.delete(characterId);
 
-    console.log(
-      `[AgentManager] ✅ Agent ${instance.config.name} removed`,
-    );
+    console.log(`[AgentManager] ✅ Agent ${instance.config.name} removed`);
   }
 
   /**
@@ -704,9 +784,7 @@ export class AgentManager {
    * @returns Array of agent information for the account
    */
   getAgentsByAccount(accountId: string): EmbeddedAgentInfo[] {
-    return this.getAllAgents().filter(
-      (agent) => agent.accountId === accountId,
-    );
+    return this.getAllAgents().filter((agent) => agent.accountId === accountId);
   }
 
   /**
@@ -884,7 +962,8 @@ export class AgentManager {
 
     const resourceType = (resource.resourceType || "").toLowerCase();
     if (resourceType === "fishing_spot") return "fishing";
-    if (resourceType === "mining_rock" || resourceType === "ore") return "mining";
+    if (resourceType === "mining_rock" || resourceType === "ore")
+      return "mining";
 
     return "woodcutting";
   }
@@ -911,8 +990,10 @@ export class AgentManager {
     ).toLowerCase();
 
     if (itemName.includes("shield")) return "shield";
-    if (itemName.includes("helmet") || itemName.includes("helm")) return "helmet";
-    if (itemName.includes("platebody") || itemName.includes("body")) return "body";
+    if (itemName.includes("helmet") || itemName.includes("helm"))
+      return "helmet";
+    if (itemName.includes("platebody") || itemName.includes("body"))
+      return "body";
     if (itemName.includes("legs") || itemName.includes("platelegs"))
       return "legs";
     if (itemName.includes("boots")) return "boots";
@@ -926,7 +1007,11 @@ export class AgentManager {
   }
 
   private getPositionArray(
-    pos: [number, number, number] | { x: number; y?: number; z: number } | null | undefined,
+    pos:
+      | [number, number, number]
+      | { x: number; y?: number; z: number }
+      | null
+      | undefined,
   ): [number, number, number] | null {
     if (!pos) return null;
     if (Array.isArray(pos) && pos.length >= 3) {
@@ -958,7 +1043,9 @@ export class AgentManager {
     const db = databaseSystem?.getDb();
 
     if (!db) {
-      console.warn("[AgentManager] Database not available, skipping agent load");
+      console.warn(
+        "[AgentManager] Database not available, skipping agent load",
+      );
       return;
     }
 
@@ -1050,15 +1137,21 @@ export class AgentManager {
 
       // Create agents for each (with staggered startup to avoid resource contention)
       const AGENT_START_DELAY_MS = 1000; // 1 second delay between agent starts
-      
+
       for (const char of agentCharacters) {
         // Check shutdown before each agent
         if (this.isShuttingDown) {
-          console.log("[AgentManager] Shutdown in progress, stopping agent load");
+          console.log(
+            "[AgentManager] Shutdown in progress, stopping agent load",
+          );
           break;
         }
-        
-        if (devBotIds.has(char.id as `${string}-${string}-${string}-${string}-${string}`)) {
+
+        if (
+          devBotIds.has(
+            char.id as `${string}-${string}-${string}-${string}-${string}`,
+          )
+        ) {
           continue;
         }
         try {
@@ -1069,7 +1162,9 @@ export class AgentManager {
             autoStart: true,
           });
           // Small delay between agents to avoid resource contention
-          await new Promise((resolve) => setTimeout(resolve, AGENT_START_DELAY_MS));
+          await new Promise((resolve) =>
+            setTimeout(resolve, AGENT_START_DELAY_MS),
+          );
         } catch (err) {
           console.error(
             `[AgentManager] Failed to create agent for ${char.name}:`,
@@ -1084,7 +1179,7 @@ export class AgentManager {
           console.log("[AgentManager] Shutdown in progress, stopping bot load");
           break;
         }
-        
+
         try {
           await this.createAgent({
             characterId: bot.id,
@@ -1094,7 +1189,9 @@ export class AgentManager {
             autoStart: true,
           });
           // Small delay between agents to avoid resource contention
-          await new Promise((resolve) => setTimeout(resolve, AGENT_START_DELAY_MS));
+          await new Promise((resolve) =>
+            setTimeout(resolve, AGENT_START_DELAY_MS),
+          );
         } catch (err) {
           console.error(
             `[AgentManager] Failed to create dev bot ${bot.name}:`,
@@ -1103,9 +1200,7 @@ export class AgentManager {
         }
       }
 
-      console.log(
-        `[AgentManager] ✅ Loaded ${this.agents.size} agent(s)`,
-      );
+      console.log(`[AgentManager] ✅ Loaded ${this.agents.size} agent(s)`);
     } catch (err) {
       console.error(
         "[AgentManager] Error loading agents from database:",
@@ -1130,21 +1225,23 @@ export class AgentManager {
     }
 
     this.isShuttingDown = true;
-    console.log(
-      `[AgentManager] Shutting down ${this.agents.size} agent(s)...`,
-    );
+    console.log(`[AgentManager] Shutting down ${this.agents.size} agent(s)...`);
 
     // First, abort any pending initializations to prevent timeout errors
     let abortedCount = 0;
     for (const [_characterId, instance] of this.agents) {
       if (instance.initializationAbort) {
-        console.log(`[AgentManager] Aborting initialization for ${instance.config.name}`);
+        console.log(
+          `[AgentManager] Aborting initialization for ${instance.config.name}`,
+        );
         instance.initializationAbort.abort();
         abortedCount++;
       }
     }
     if (abortedCount > 0) {
-      console.log(`[AgentManager] Aborted ${abortedCount} pending initialization(s)`);
+      console.log(
+        `[AgentManager] Aborted ${abortedCount} pending initialization(s)`,
+      );
     }
 
     // Wait briefly for abort signals to propagate
@@ -1162,7 +1259,9 @@ export class AgentManager {
       }
     }
     if (initPromises.length > 0) {
-      console.log(`[AgentManager] Waiting for ${initPromises.length} initialization(s) to complete...`);
+      console.log(
+        `[AgentManager] Waiting for ${initPromises.length} initialization(s) to complete...`,
+      );
       // Wait up to 5 seconds for initializations to abort
       await Promise.race([
         Promise.all(initPromises),

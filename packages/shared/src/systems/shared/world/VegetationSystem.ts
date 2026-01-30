@@ -57,6 +57,10 @@ import {
 import { csmLevels } from "./Environment";
 import { updateTreeInstances } from "./ProcgenTreeCache";
 import type { RoadNetworkSystem } from "./RoadNetworkSystem";
+import {
+  isGPUComputeAvailable,
+  getGlobalCullingManager,
+} from "../../../utils/compute";
 // Octahedral impostor for high-quality multi-angle billboard rendering
 import {
   OctahedralImpostor,
@@ -477,6 +481,9 @@ export class VegetationSystem extends System {
   private _deferredFrom3D: string[] = [];
   // Deferred chunk hide queue (when many chunks leave frustum at once)
   private _deferredHideChunks: string[] = [];
+  // GPU compute culling (optional - uses CPU quadtree fallback)
+  private gpuCullingEnabled = false;
+  private gpuCullingInitialized = false;
   // Maximum LOD transitions per frame (prevents frame drops)
   private readonly MAX_LOD_TRANSITIONS_PER_FRAME = 8;
   // Maximum chunk hide operations per frame
@@ -759,8 +766,37 @@ export class VegetationSystem extends System {
       `[VegetationSystem] ✅ Started with ${this.assetDefinitions.size} assets, radius=${MAX_VEGETATION_TILE_RADIUS} tiles`,
     );
 
+    // Initialize GPU compute culling (optional enhancement)
+    this.initializeGPUCulling();
+
     // Process existing terrain tiles that were generated before we subscribed
     await this.processExistingTiles();
+  }
+
+  /**
+   * Initialize GPU compute culling if available.
+   * Falls back to CPU quadtree culling if not available.
+   */
+  private initializeGPUCulling(): void {
+    if (this.gpuCullingInitialized) return;
+    this.gpuCullingInitialized = true;
+
+    if (!isGPUComputeAvailable()) {
+      this.gpuCullingEnabled = false;
+      console.log(
+        "[VegetationSystem] GPU compute not available, using CPU quadtree culling",
+      );
+      return;
+    }
+
+    const cullingManager = getGlobalCullingManager();
+    if (!cullingManager?.isAvailable()) {
+      this.gpuCullingEnabled = false;
+      return;
+    }
+
+    this.gpuCullingEnabled = true;
+    console.log("[VegetationSystem] GPU compute culling enabled");
   }
 
   /**
@@ -3326,6 +3362,13 @@ export class VegetationSystem extends System {
       );
       this._frustum.setFromProjectionMatrix(this._projScreenMatrix);
       this._frustumDirty = false;
+
+      // Update GPU compute frustum when available
+      if (this.gpuCullingEnabled && isGPUComputeAvailable()) {
+        const cullingManager = getGlobalCullingManager();
+        // GPU culling provides parallel frustum tests - updates are batched
+        cullingManager?.updateFrustum(camera);
+      }
     }
 
     // OPTIMIZATION: Reuse pre-allocated arrays instead of allocating new ones each frame

@@ -283,77 +283,45 @@ export function sampleNoiseAtPosition(
  * @returns Value from 0-1 indicating how "grassy" the terrain is (1 = full grass, 0 = no grass)
  */
 export function getGrassiness(
-  worldX: number,
-  worldZ: number,
+  _worldX: number,
+  _worldZ: number,
   height: number,
   slope: number,
-  seed: number = 12345,
+  _seed: number = 12345,
 ): number {
-  // Start with full grassiness
+  // SIMPLIFIED: Grow grass almost everywhere except steep rock and snow.
+  // The terrain shader handles visual color blending (grass/dirt), so we don't
+  // need to match it exactly. Grass should appear on ALL green-ish terrain.
+  //
+  // Only exclude:
+  // 1. Very steep slopes (rock faces) - slope > 0.6
+  // 2. Snow at high elevation - height > 45m
+  //
+  // DO NOT exclude based on:
+  // - Dirt patches (they're brownish-green blend, still have grass)
+  // - Shoreline (complex, inconsistent water levels)
+  // - Moderate slopes (grass grows on hills)
+
   let grassiness = 1.0;
 
-  // Detect if this is likely a flat zone (artificial flat surface)
-  // Flat zones have near-zero slope, natural terrain rarely does
-  const isFlatZone = slope < 0.05;
-
-  // === DIRT PATCHES (matches terrain shader logic) ===
-  // Dirt patches appear on flat terrain where noise > DIRT_THRESHOLD
-  // Only check for natural terrain, not flat zones (which are artificial)
-  // NOTE: Terrain shader BLENDS grass+dirt, so even "dirt" areas have some green.
-  // We reduce grassiness but don't eliminate grass entirely - shorter/sparser grass
-  // should still appear in brownish-green transition zones.
-  if (!isFlatZone) {
-    const noiseValue = sampleNoiseAtPosition(worldX, worldZ, seed);
-
-    // Match terrain shader's dirt patch logic:
-    // dirtPatchFactor = smoothstep(DIRT_THRESHOLD - 0.05, DIRT_THRESHOLD + 0.15, noiseValue)
-    const dirtPatchFactor = smoothstepCPU(
-      TERRAIN_CONSTANTS.DIRT_THRESHOLD - 0.05,
-      TERRAIN_CONSTANTS.DIRT_THRESHOLD + 0.15,
-      noiseValue,
-    );
-
-    // Dirt only appears on relatively flat terrain (matches shader's flatnessFactor)
-    const flatnessFactor = smoothstepCPU(0.3, 0.05, slope);
-
-    // Reduce grassiness in dirt patches but keep some grass for blended zones
-    // The shader blends colors, so grass blades should still appear (just sparser)
-    grassiness -= dirtPatchFactor * flatnessFactor * 0.5;
-  }
-
-  // === SLOPE-BASED DIRT/ROCK ===
-  // Steeper terrain = more dirt, less grass (matches shader's slope-based dirt)
-  // Shader uses 0.6 multiplier, we use 0.3 to keep some grass on moderate slopes
-  const slopeDirtFactor = smoothstepCPU(0.15, 0.5, slope) * 0.3;
-  grassiness -= slopeDirtFactor;
-
-  // Very steep slopes = rock, no grass (this should exclude completely)
-  const rockFactor = smoothstepCPU(0.5, 0.75, slope);
-  grassiness -= rockFactor;
-
-  // === SHORELINE/WATER ZONES ===
-  // Only applies to NATURAL terrain near water level
-  if (!isFlatZone) {
-    const waterLevel = TERRAIN_CONSTANTS.WATER_LEVEL;
-    const shorelineTop = waterLevel + 4.0; // 9m
-
-    if (height > waterLevel && height < shorelineTop) {
-      const shorelineFactor = smoothstepCPU(
-        shorelineTop,
-        waterLevel + 1.0,
-        height,
-      );
-      grassiness -= shorelineFactor * 0.8;
-    }
+  // === VERY STEEP SLOPES = ROCK ===
+  // Only exclude on truly vertical rock faces (slope > 0.6)
+  // Gentler slopes (up to 0.6) should have grass
+  if (slope > 0.6) {
+    const rockFactor = smoothstepCPU(0.6, 0.8, slope);
+    grassiness -= rockFactor;
   }
 
   // === SNOW AT HIGH ELEVATION ===
-  const snowFactor = smoothstepCPU(
-    TERRAIN_CONSTANTS.SNOW_HEIGHT - 5.0,
-    TERRAIN_CONSTANTS.SNOW_HEIGHT + 5.0,
-    height,
-  );
-  grassiness -= snowFactor;
+  // Snow line at ~50m, full snow by 55m
+  if (height > TERRAIN_CONSTANTS.SNOW_HEIGHT - 5.0) {
+    const snowFactor = smoothstepCPU(
+      TERRAIN_CONSTANTS.SNOW_HEIGHT - 5.0,
+      TERRAIN_CONSTANTS.SNOW_HEIGHT + 5.0,
+      height,
+    );
+    grassiness -= snowFactor;
+  }
 
   // Clamp to 0-1
   return Math.max(0, Math.min(1, grassiness));

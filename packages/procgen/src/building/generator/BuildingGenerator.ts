@@ -107,7 +107,10 @@ export class BuildingGenerator {
     const includeRoof = options.includeRoof !== false;
     const useGreedyMeshing = options.useGreedyMeshing !== false; // Default: true
 
-    const layout = this.generateLayout(recipe, rng);
+    // Use cached layout if provided, otherwise generate new one
+    // This optimization allows BuildingRenderingSystem to reuse layouts
+    // already computed by TownSystem, avoiding duplicate computation
+    const layout = options.cachedLayout || this.generateLayout(recipe, rng);
     const { building, stats } = this.buildBuilding(
       layout,
       recipe,

@@ -99,10 +99,14 @@ import { getLODDistances, type LODDistancesWithSq } from "./GPUVegetation";
 import { ImpostorManager, BakePriority } from "../rendering";
 import {
   createImpostorMaterial,
+  createTSLImpostorMaterial,
   updateImpostorMaterial,
+  isTSLImpostorMaterial,
   type ImpostorBakeResult,
   type ImpostorViewData,
+  type TSLImpostorMaterial,
 } from "@hyperscape/impostor";
+import { isWebGPURenderer } from "../../../utils/rendering/RendererFactory";
 import { getPhysX } from "../../../physics/PhysXManager";
 import { Layers } from "../../../physics/Layers";
 import type { PhysicsHandle } from "../../../types/systems/physics";
@@ -592,6 +596,11 @@ export class BuildingRenderingSystem extends SystemBase {
   private _tempQuat = new THREE.Quaternion();
   private _tempScale = new THREE.Vector3();
 
+  /** Cached physics material for collision shapes (avoid recreating for every building) */
+  private _cachedPhysicsMaterial:
+    | import("../../../types/systems/physics").PxMaterial
+    | null = null;
+
   // ============================================
   // ROOF AUTO-HIDE FEATURE
   // ============================================
@@ -1068,12 +1077,24 @@ export class BuildingRenderingSystem extends SystemBase {
             continue;
           }
 
+          // OPTIMIZATION: Reuse layout cached by TownSystem to avoid duplicate computation
+          // TownSystem generates layouts for collision, we reuse them for rendering
+          const townSystem = this.world.getSystem("towns") as {
+            getBuildingLayout?: (
+              id: string,
+            ) =>
+              | import("@hyperscape/procgen/building").BuildingLayout
+              | undefined;
+          } | null;
+          const cachedLayout = townSystem?.getBuildingLayout?.(building.id);
+
           // Generate building mesh with LODs (CPU-intensive)
           const generatedBuilding = this.buildingGenerator.generate(recipeKey, {
             seed: `${town.id}_${building.id}`,
             includeRoof: true,
             useGreedyMeshing: true, // Use optimized geometry
             generateLODs: true, // Generate LOD meshes
+            cachedLayout, // Skip layout generation if TownSystem already computed it
           });
 
           if (!generatedBuilding) {
@@ -1609,13 +1630,25 @@ export class BuildingRenderingSystem extends SystemBase {
       : buildingData.dimensions.y;
 
     // Create material using @hyperscape/impostor
-    const material = createImpostorMaterial({
-      atlasTexture,
-      gridSizeX,
-      gridSizeY,
-      transparent: true,
-      depthWrite: true,
-    });
+    // Use TSL material for WebGPU, GLSL ShaderMaterial for WebGL
+    const renderer = this.world.graphics?.renderer;
+    const useWebGPU = renderer && isWebGPURenderer(renderer);
+
+    const material: THREE.ShaderMaterial | TSLImpostorMaterial = useWebGPU
+      ? createTSLImpostorMaterial({
+          atlasTexture,
+          gridSizeX,
+          gridSizeY,
+          transparent: true,
+          depthWrite: true,
+        })
+      : createImpostorMaterial({
+          atlasTexture,
+          gridSizeX,
+          gridSizeY,
+          transparent: true,
+          depthWrite: true,
+        });
     this.world.setupMaterial(material);
 
     // Create billboard geometry
@@ -2040,11 +2073,17 @@ export class BuildingRenderingSystem extends SystemBase {
       floorDepth / 2,
     );
 
-    // Create material and shape
-    const physicsMaterial = physics.physics.createMaterial(0.5, 0.5, 0.1);
+    // Create material and shape (use cached physics material)
+    if (!this._cachedPhysicsMaterial) {
+      this._cachedPhysicsMaterial = physics.physics.createMaterial(
+        0.5,
+        0.5,
+        0.1,
+      );
+    }
     const shape = physics.physics.createShape(
       boxGeometry,
-      physicsMaterial,
+      this._cachedPhysicsMaterial,
       true,
     );
 
@@ -2178,11 +2217,17 @@ export class BuildingRenderingSystem extends SystemBase {
         wall.halfDepth,
       );
 
-      // Create material and shape
-      const physicsMaterial = physics.physics.createMaterial(0.5, 0.5, 0.1);
+      // Create material and shape (use cached physics material)
+      if (!this._cachedPhysicsMaterial) {
+        this._cachedPhysicsMaterial = physics.physics.createMaterial(
+          0.5,
+          0.5,
+          0.1,
+        );
+      }
       const shape = physics.physics.createShape(
         boxGeometry,
-        physicsMaterial,
+        this._cachedPhysicsMaterial,
         true,
       );
 
@@ -2695,14 +2740,22 @@ export class BuildingRenderingSystem extends SystemBase {
     const flatIndex = clampedRow * gridSizeX + clampedCol;
 
     // Update material with view data (using pre-allocated vectors to avoid GC)
-    const material = impostorMesh.material as THREE.ShaderMaterial;
-    if (material.uniforms) {
-      this._imposterFaceIndices.set(flatIndex, flatIndex, flatIndex);
+    this._imposterFaceIndices.set(flatIndex, flatIndex, flatIndex);
+
+    // Handle both TSL (WebGPU) and GLSL (WebGL) materials
+    const material = impostorMesh.material as
+      | THREE.ShaderMaterial
+      | TSLImpostorMaterial;
+    if (isTSLImpostorMaterial(material)) {
+      // TSL material uses updateView method
+      material.updateView(this._imposterFaceIndices, this._imposterFaceWeights);
+    } else if ((material as THREE.ShaderMaterial).uniforms) {
+      // GLSL material uses updateImpostorMaterial
       const viewData: ImpostorViewData = {
         faceIndices: this._imposterFaceIndices,
         faceWeights: this._imposterFaceWeights,
       };
-      updateImpostorMaterial(material, viewData);
+      updateImpostorMaterial(material as THREE.ShaderMaterial, viewData);
     }
   }
 

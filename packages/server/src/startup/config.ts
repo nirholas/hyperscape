@@ -369,7 +369,8 @@ export async function loadConfig(): Promise<ServerConfig> {
   const USE_LOCAL_POSTGRES =
     (process.env["USE_LOCAL_POSTGRES"] || "true") === "true";
   const DATABASE_URL = process.env["DATABASE_URL"];
-  const CDN_URL = process.env["PUBLIC_CDN_URL"] || "http://localhost:8080";
+  const CDN_URL =
+    process.env["PUBLIC_CDN_URL"] || `http://localhost:${PORT}/game-assets`;
   const SYSTEMS_PATH = process.env["SYSTEMS_PATH"];
   const ADMIN_CODE = process.env["ADMIN_CODE"];
   const JWT_SECRET = process.env["JWT_SECRET"];

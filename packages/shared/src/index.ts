@@ -1176,3 +1176,63 @@ export {
   isOffscreenCanvasAvailable,
   canTransferCanvas,
 } from "./utils/rendering/RendererFactory";
+
+// GPU Compute - WebGPU compute shader infrastructure
+export {
+  // Core compute context
+  RuntimeComputeContext,
+  isWebGPUAvailable,
+  isWebGPURenderer,
+  getGlobalComputeContext,
+  initializeGlobalComputeContext,
+  // Terrain compute (road influence, vertex colors, instance matrices)
+  TerrainComputeContext,
+  getGlobalTerrainComputeContext,
+  initializeGlobalTerrainComputeContext,
+  isTerrainComputeAvailable,
+  // Networking compute (interest management, spatial queries, aggro)
+  NetworkingComputeContext,
+  getGlobalNetworkingComputeContext,
+  isNetworkingComputeAvailable,
+  // GPU culling
+  GPUCullingManager,
+  shouldUseGPUCulling,
+  matricesToFloat32Array,
+  getGlobalCullingManager,
+  // Shader exports
+  TERRAIN_SHADERS,
+  ROAD_INFLUENCE_SHADER,
+  TERRAIN_VERTEX_COLOR_SHADER,
+  INSTANCE_MATRIX_SHADER,
+  BATCH_DISTANCE_SHADER,
+  NETWORKING_SHADERS,
+} from "./utils/compute";
+export type {
+  ComputePipelineConfig,
+  ComputeBufferConfig,
+  DispatchConfig,
+  GPURoadSegment,
+  GPUBiomeData,
+  GPUInstanceTRS,
+  TerrainComputeConfig,
+  GPUEntityInterest,
+  GPUPlayerPosition,
+  GPUSpatialQuery,
+  GPUSpatialCandidate,
+  GPUMobData,
+  GPUAggroResult,
+  GPUAABB,
+  GPUOverlapPair,
+  GPUSoundSource,
+  GPUListener,
+  GPUSpawnCandidate,
+  GPUOccupiedPosition,
+  GPUSpawnResult,
+  GPULootDrop,
+  GPULootPlayer,
+  GPULootResult,
+  NetworkingComputeConfig,
+  CullingGroupConfig,
+  CullingGroup,
+  FrustumData,
+} from "./utils/compute";

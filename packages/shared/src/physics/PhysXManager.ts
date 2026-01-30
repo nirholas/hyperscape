@@ -311,10 +311,15 @@ class PhysXManager extends EventEmitter {
       typeof process !== "undefined" &&
       (process.env.NODE_ENV === "test" || process.env.VITEST);
 
-    // Add a timeout to detect if WASM loading is stuck
-    const timeoutId = setTimeout(() => {
-      throw new Error("PhysX WASM loading timeout after 30 seconds");
-    }, 30000);
+    // Create timeout tracking for detecting stuck WASM loading
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let isTimedOut = false;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        isTimedOut = true;
+        reject(new Error("PhysX WASM loading timeout after 30 seconds"));
+      }, 30000);
+    });
 
     // Configure WASM loading
     const moduleOptions: Record<string, unknown> = {
@@ -352,11 +357,19 @@ class PhysXManager extends EventEmitter {
       moduleOptions.locateFile = (wasmFileName: string) => {
         if (wasmFileName.endsWith(".wasm")) {
           // Use window.__CDN_URL if set by the application
+          // In development, fallback to current origin (Vite dev server)
           const windowWithCdn = window as Window & { __CDN_URL?: string };
-          const cdnBaseUrl = windowWithCdn.__CDN_URL || "http://localhost:8080";
+          const cdnBaseUrl =
+            windowWithCdn.__CDN_URL ||
+            (window.location.hostname === "localhost"
+              ? window.location.origin
+              : "http://localhost:8080");
           // Use static version for cache key - only change this when PhysX WASM is updated
           // This allows browser caching between page loads
           const url = `${cdnBaseUrl}/web/${wasmFileName}?v=1.0.0`;
+          console.log(
+            `[PhysXManager] locateFile called for ${wasmFileName}, returning: ${url}`,
+          );
           return url;
         }
         return wasmFileName;
@@ -366,21 +379,36 @@ class PhysXManager extends EventEmitter {
     // Use appropriate loader based on environment (use isBrowser defined at the top of function)
     let PHYSX: PhysXModule;
 
-    if (isBrowser) {
-      // Browser environment - use script loader
-      PHYSX = await loadPhysXScript(moduleOptions);
-    } else {
-      // Node.js/server environment - use dynamic import for ESM compatibility
-      const physxModule = await import("@hyperscape/physx-js-webidl");
-      const PhysXLoader = physxModule.default || physxModule;
+    // Wrap loading in Promise.race to properly handle timeout
+    const loadingPromise = (async () => {
+      if (isBrowser) {
+        // Browser environment - use script loader
+        return await loadPhysXScript(moduleOptions);
+      } else {
+        // Node.js/server environment - use dynamic import for ESM compatibility
+        const physxModule = await import("@hyperscape/physx-js-webidl");
+        const PhysXLoader = physxModule.default || physxModule;
 
-      // Strong type assumption - PhysXLoader is a function that returns PhysXModule
-      PHYSX = await (
-        PhysXLoader as (
-          options: Record<string, unknown>,
-        ) => Promise<PhysXModule>
-      )(moduleOptions);
+        // Strong type assumption - PhysXLoader is a function that returns PhysXModule
+        return await (
+          PhysXLoader as (
+            options: Record<string, unknown>,
+          ) => Promise<PhysXModule>
+        )(moduleOptions);
+      }
+    })();
+
+    // Race between loading and timeout
+    try {
+      PHYSX = await Promise.race([loadingPromise, timeoutPromise]);
+    } catch (error) {
+      // Clear timeout if loading failed for other reasons
+      if (timeoutId) clearTimeout(timeoutId);
+      throw error;
     }
+
+    // Clear the timeout on successful load
+    if (timeoutId) clearTimeout(timeoutId);
 
     // Set global PHYSX for compatibility
     Object.defineProperty(globalThis, "PHYSX", {
@@ -388,8 +416,6 @@ class PhysXManager extends EventEmitter {
       writable: true,
       configurable: true,
     });
-
-    clearTimeout(timeoutId);
 
     // Create PhysX foundation objects - PHYSX already has the correct type
     const physxWithConstants = PHYSX as PhysXModule & {

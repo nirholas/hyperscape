@@ -439,8 +439,9 @@ export class HyperscapeService
         };
 
         // Import all available actions for matching
-        const { moveToAction, stopMovementAction } =
-          await import("../actions/movement.js");
+        const { moveToAction, stopMovementAction } = await import(
+          "../actions/movement.js"
+        );
         const {
           pickupItemAction,
           equipItemAction,
@@ -917,13 +918,157 @@ Respond with ONLY the action name, nothing else.`;
         );
 
         this.ws.on("open", async () => {
+          const wsId = (this.ws as any).__wsId || "unknown";
+
+          // SECURITY: Check if we need first-message authentication
+          // If no authToken in URL, server expects us to send 'authenticate' packet
+          const needsFirstMessageAuth = !this.authToken;
+
+          if (needsFirstMessageAuth) {
+            logger.info(
+              `[HyperscapeService] 🔐 Using first-message authentication (no authToken in URL)`,
+            );
+
+            // Set up one-time handler for authResult
+            const authResultHandler = (data: WebSocket.Data) => {
+              try {
+                let buffer: Buffer;
+                if (Buffer.isBuffer(data)) {
+                  buffer = data;
+                } else if (data instanceof ArrayBuffer) {
+                  buffer = Buffer.from(data);
+                } else if (Array.isArray(data)) {
+                  buffer = Buffer.concat(data.map((b) => Buffer.from(b)));
+                } else {
+                  return; // Not binary data, ignore
+                }
+
+                const decoded = unpackr.unpack(buffer);
+                if (!Array.isArray(decoded) || decoded.length !== 2) {
+                  return;
+                }
+
+                const [packetId, packetData] = decoded;
+                const packetName = this.getPacketName(packetId as number);
+
+                if (packetName !== "authResult") {
+                  return; // Not the packet we're waiting for
+                }
+
+                // Remove this handler - we only need it once
+                this.ws?.off("message", authResultHandler);
+
+                const authResult = packetData as {
+                  success: boolean;
+                  error?: string;
+                };
+
+                if (authResult.success) {
+                  logger.info(
+                    `[HyperscapeService] ✅ First-message authentication successful`,
+                  );
+                  this.connectionState.connected = true;
+                  this.connectionState.connecting = false;
+                  this.connectionState.reconnectAttempts = 0;
+
+                  // Handle reconnection if needed (same as legacy auth path)
+                  const isReconnection = !!this.gameState.playerEntity;
+                  if (isReconnection && this.characterId) {
+                    logger.warn(
+                      `[HyperscapeService] 🔄 ===== RECONNECTION DETECTED (first-message auth) ===== Re-spawning player...`,
+                    );
+
+                    // Clear old player entity reference since we're respawning on new socket
+                    this.gameState.playerEntity = null;
+
+                    // Use setTimeout to avoid blocking the auth result handler
+                    setTimeout(async () => {
+                      try {
+                        // Wait for connection to stabilize
+                        await new Promise((r) => setTimeout(r, 500));
+
+                        // Re-send character selection
+                        this.sendBinaryPacket("characterSelected", {
+                          characterId: this.characterId,
+                        });
+                        logger.info(
+                          `[HyperscapeService] 📤 Re-sent characterSelected: ${this.characterId} (reconnection)`,
+                        );
+
+                        // Wait before entering world
+                        await new Promise((r) => setTimeout(r, 500));
+
+                        // Re-send enter world
+                        this.sendBinaryPacket("enterWorld", {
+                          characterId: this.characterId,
+                        });
+                        logger.info(
+                          `[HyperscapeService] 🚪 Re-sent enterWorld: ${this.characterId} (reconnection)`,
+                        );
+
+                        // Sync pause state
+                        setTimeout(() => {
+                          this.syncPauseStateFromServer().catch((err) => {
+                            logger.warn(
+                              `[HyperscapeService] Failed to sync pause state on reconnection: ${err instanceof Error ? err.message : String(err)}`,
+                            );
+                          });
+                        }, 1000);
+                      } catch (err) {
+                        logger.error(
+                          `[HyperscapeService] Reconnection handling failed: ${err instanceof Error ? err.message : String(err)}`,
+                        );
+                      }
+                    }, 0);
+                  }
+
+                  settleResolve();
+                } else {
+                  logger.error(
+                    `[HyperscapeService] ❌ First-message authentication failed: ${authResult.error || "Unknown error"}`,
+                  );
+                  settleReject(
+                    new Error(
+                      `Authentication failed: ${authResult.error || "Unknown error"}`,
+                    ),
+                  );
+                }
+              } catch (error) {
+                // Ignore decode errors - not the packet we're looking for
+              }
+            };
+
+            // Listen for authResult packet
+            this.ws?.on("message", authResultHandler);
+
+            // Send authenticate packet with whatever credentials we have
+            // For embedded agents, they may connect without traditional auth tokens
+            // The server can choose to allow or reject based on configuration
+            const authPacket = packr.pack([
+              this.getPacketId("authenticate"),
+              {
+                authToken: this.authToken || "",
+                privyUserId: this.privyUserId || "",
+                name: this.runtime.character?.name || "Agent",
+                avatar: "",
+              },
+            ]);
+            this.ws?.send(authPacket);
+            logger.info(
+              `[HyperscapeService] 📤 Sent authenticate packet (WebSocket ${wsId})`,
+            );
+
+            // Don't settle yet - wait for authResult
+            return;
+          }
+
+          // Legacy URL-based auth: complete immediately
           this.connectionState.connected = true;
           this.connectionState.connecting = false;
           this.connectionState.reconnectAttempts = 0;
 
           // Check if this is a reconnection (player entity already exists)
           const isReconnection = !!this.gameState.playerEntity;
-          const wsId = (this.ws as any).__wsId || "unknown";
 
           if (isReconnection && this.characterId) {
             logger.warn(

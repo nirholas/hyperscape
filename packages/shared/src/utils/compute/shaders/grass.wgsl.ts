@@ -240,7 +240,8 @@ ${WGSL_GRASS_STRUCTS}
 @group(0) @binding(3) var<storage, read_write> visibleInstances: array<GrassInstance>;
 @group(0) @binding(4) var<storage, read_write> visibleCount: atomic<u32>;
 
-fn pointInFrustum(point: vec3<f32>) -> bool {
+// Uses global frustumPlanes uniform (different signature from common.wgsl pointInFrustum)
+fn isInFrustum(point: vec3<f32>) -> bool {
   for (var i = 0u; i < 6u; i++) {
     let plane = frustumPlanes[i];
     let distance = dot(plane.xyz, point) + plane.w;
@@ -284,7 +285,7 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
   }
   
   // Frustum culling
-  if (!pointInFrustum(position)) {
+  if (!isInFrustum(position)) {
     return;
   }
   
@@ -362,7 +363,8 @@ fn sampleHeightSimple(worldX: f32, worldZ: f32) -> f32 {
   return heightmap[z * HEIGHTMAP_RESOLUTION + x];
 }
 
-fn pointInFrustum(point: vec3<f32>) -> bool {
+// Uses global frustumPlanes uniform (different signature from common.wgsl pointInFrustum)
+fn isInFrustum(point: vec3<f32>) -> bool {
   for (var i = 0u; i < 6u; i++) {
     let plane = frustumPlanes[i];
     if (dot(plane.xyz, point) + plane.w < 0.0) {
@@ -415,7 +417,7 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
   if (distSq > params.cullDistanceSq) { return; }
   
   // Frustum check
-  if (!pointInFrustum(position)) { return; }
+  if (!isInFrustum(position)) { return; }
   
   // LOD density cull
   let instanceHash = fract(f32(idx) * GOLDEN_RATIO);

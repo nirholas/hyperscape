@@ -70,6 +70,12 @@ import { getNPCById } from "../../../data/npcs";
 import { getExternalNPC } from "../../../utils/ExternalAssetUtils";
 import { SpatialEntityRegistry } from "./SpatialEntityRegistry";
 import { DISTANCE_CONSTANTS } from "../../../constants/GameConstants";
+import {
+  NetworkingComputeContext,
+  isNetworkingComputeAvailable,
+  type GPUEntityInterest,
+  type GPUPlayerPosition,
+} from "../../../utils/compute";
 
 export class EntityManager extends SystemBase {
   private entities = new Map<string, Entity>();
@@ -112,6 +118,10 @@ export class EntityManager extends SystemBase {
     totalPlayersNotified: 0,
     lastResetTime: Date.now(),
   };
+
+  /** GPU compute context for accelerated interest filtering (server-side) */
+  private networkingCompute: NetworkingComputeContext | null = null;
+  private gpuComputeAvailable = false;
 
   constructor(world: World) {
     super(world, {
@@ -304,6 +314,29 @@ export class EntityManager extends SystemBase {
     // Note: Some stations are also spawned by StationSpawnerSystem from world-areas.json
     if (this.world.isServer) {
       await this.spawnWorldObjects();
+
+      // Initialize GPU compute for accelerated interest filtering (server-side only)
+      if (isNetworkingComputeAvailable()) {
+        this.networkingCompute = new NetworkingComputeContext({
+          minInterestPairsForGPU: 500, // 10 entities × 50 players
+          minAggroPairsForGPU: 500,
+        });
+        try {
+          this.gpuComputeAvailable =
+            await this.networkingCompute.initializeStandalone();
+          if (this.gpuComputeAvailable) {
+            console.log(
+              "[EntityManager] GPU compute initialized for interest filtering",
+            );
+          }
+        } catch (error) {
+          console.warn(
+            "[EntityManager] GPU compute initialization failed:",
+            error,
+          );
+          this.gpuComputeAvailable = false;
+        }
+      }
     }
   }
 
@@ -1162,6 +1195,90 @@ export class EntityManager extends SystemBase {
     });
   }
 
+  /**
+   * Batch compute interested players for multiple entities using GPU.
+   * Falls back to CPU if GPU not available or batch too small.
+   */
+  private async computeInterestedPlayersBatchGPU(
+    entityData: Array<{ entityId: string; x: number; z: number; type: string }>,
+  ): Promise<Map<string, string[]>> {
+    const playerPositions = this.spatialRegistry.getPlayerPositions();
+    const playerCount = playerPositions.length;
+    const entityCount = entityData.length;
+
+    // Check if GPU should be used
+    if (
+      this.gpuComputeAvailable &&
+      this.networkingCompute &&
+      this.networkingCompute.shouldUseGPUForInterestFiltering(
+        entityCount,
+        playerCount,
+      )
+    ) {
+      try {
+        // Prepare GPU data
+        const gpuEntities: GPUEntityInterest[] = entityData.map((e) => {
+          const typeDistances: Record<string, number> = {
+            mob: DISTANCE_CONSTANTS.RENDER_SQ.MOB,
+            npc: DISTANCE_CONSTANTS.RENDER_SQ.NPC,
+            player: DISTANCE_CONSTANTS.RENDER_SQ.PLAYER,
+            item: DISTANCE_CONSTANTS.RENDER_SQ.ITEM,
+          };
+          return {
+            x: e.x,
+            z: e.z,
+            distanceSqThreshold:
+              typeDistances[e.type] ?? this.BROADCAST_DISTANCE_SQ,
+          };
+        });
+
+        const gpuPlayers: GPUPlayerPosition[] = playerPositions.map((p) => ({
+          x: p.x,
+          z: p.z,
+        }));
+
+        // GPU compute
+        const gpuResults =
+          await this.networkingCompute.computeInterestedPlayers(
+            gpuEntities,
+            gpuPlayers,
+          );
+
+        // Convert GPU indices to entity IDs and player IDs
+        const result = new Map<string, string[]>();
+        for (const [entityIdx, playerIndices] of gpuResults) {
+          const entityId = entityData[entityIdx].entityId;
+          const playerIds = playerIndices.map(
+            (pi) => playerPositions[pi].entityId,
+          );
+          result.set(entityId, playerIds);
+        }
+
+        return result;
+      } catch (error) {
+        console.warn(
+          "[EntityManager] GPU interest filtering failed, falling back to CPU:",
+          error,
+        );
+        // Fall through to CPU
+      }
+    }
+
+    // CPU fallback
+    const result = new Map<string, string[]>();
+    for (const entity of entityData) {
+      const players = this.getInterestedPlayers(
+        entity.x,
+        entity.z,
+        entity.type,
+      );
+      if (players.length > 0) {
+        result.set(entity.entityId, players);
+      }
+    }
+    return result;
+  }
+
   private sendNetworkUpdates(): void {
     // Only send network updates on the server
     if (!this.world.isServer) {
@@ -1195,6 +1312,15 @@ export class EntityManager extends SystemBase {
     const maxUpdates = this.MAX_NETWORK_UPDATES_PER_FRAME;
     const frameBudget = this.world.frameBudget;
 
+    // GPU BATCH: Collect entity positions for batch interest filtering
+    // Note: We process synchronously here but could batch asynchronously in future
+    const batchEntities: Array<{
+      entityId: string;
+      x: number;
+      z: number;
+      type: string;
+    }> = [];
+
     for (const entityId of dirtyEntities) {
       // Check frame budget periodically
       if (updatesThisFrame > 0 && updatesThisFrame % 10 === 0) {
@@ -1224,6 +1350,14 @@ export class EntityManager extends SystemBase {
         const pos = entity.position;
         // Get rotation: prefer node.quaternion (client) but fallback to entity.rotation (server)
         const rot = entity.node?.quaternion ?? entity.rotation;
+
+        // Collect for batch processing (GPU path uses this)
+        batchEntities.push({
+          entityId,
+          x: pos.x,
+          z: pos.z,
+          type: entity.type,
+        });
 
         // Get interested players (only those within broadcast distance)
         // For player entities, always broadcast to nearby players (they need to see each other)
@@ -1906,6 +2040,13 @@ export class EntityManager extends SystemBase {
 
     // Reset entity ID counter
     this.nextEntityId = 1;
+
+    // Cleanup GPU compute context
+    if (this.networkingCompute) {
+      this.networkingCompute.destroy();
+      this.networkingCompute = null;
+      this.gpuComputeAvailable = false;
+    }
 
     // Call parent cleanup
     super.destroy();

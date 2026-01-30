@@ -277,8 +277,8 @@ export class DataManager {
       return;
     }
 
-    // Client: Load from CDN (localhost:8080 in dev, R2/S3 in prod)
-    let cdnUrl = "http://localhost:8080";
+    // Client: Load from CDN (localhost:5555/game-assets in dev, R2/S3 in prod)
+    let cdnUrl = "http://localhost:5555/game-assets";
     // Check for CDN URL in multiple places (browser env vars, window global, process.env)
     if (typeof window !== "undefined") {
       const windowWithCdn = window as Window & { __CDN_URL?: string };

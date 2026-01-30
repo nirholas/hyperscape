@@ -27,25 +27,76 @@ export async function loadPhysXScript(
       return;
     }
 
-    const script = document.createElement("script");
-    // Load from CDN (always absolute URL to avoid Vite conflicts)
+    // Compute CDN URL for WASM location
     const windowWithCdn = window as Window & { __CDN_URL?: string };
-    const cdnUrl = windowWithCdn.__CDN_URL || "http://localhost:8080";
+    const cdnUrl =
+      windowWithCdn.__CDN_URL ||
+      (window.location.hostname === "localhost"
+        ? window.location.origin
+        : "http://localhost:8080");
+
+    // Set up Module configuration BEFORE loading the script
+    // This ensures locateFile is available when Emscripten looks for the WASM
+    const windowWithModule = window as Window & {
+      Module?: Record<string, unknown>;
+    };
+    if (!windowWithModule.Module) {
+      windowWithModule.Module = {};
+    }
+    windowWithModule.Module.locateFile = (wasmFileName: string) => {
+      if (wasmFileName.endsWith(".wasm")) {
+        const url = `${cdnUrl}/web/${wasmFileName}?v=1.0.0`;
+        console.log(
+          `[physx-script-loader] locateFile called for ${wasmFileName}, returning: ${url}`,
+        );
+        return url;
+      }
+      return wasmFileName;
+    };
+
+    const script = document.createElement("script");
     // Use static version for cache key - only change this when PhysX binary is updated
     // This allows browser caching between page loads while still allowing forced refresh when needed
     const scriptUrl = `${cdnUrl}/web/physx-js-webidl.js?v=1.0.0`;
+
+    console.log("[physx-script-loader] Loading PhysX from:", scriptUrl);
+    console.log("[physx-script-loader] CDN URL:", cdnUrl);
+    console.log("[physx-script-loader] Options:", options);
 
     script.src = scriptUrl;
     script.async = true;
 
     script.onload = () => {
+      console.log(
+        "[physx-script-loader] Script loaded, checking PhysX global...",
+      );
       // Give it a moment to initialize
       setTimeout(() => {
         const w2 = window as PhysXWindow;
         if (w2.PhysX) {
+          console.log(
+            "[physx-script-loader] PhysX global found, initializing WASM...",
+          );
           const PhysXFn = w2.PhysX!;
-          PhysXFn(options)
+          // Merge our locateFile with any options passed in
+          const mergedOptions = {
+            ...options,
+            locateFile: (file: string) => {
+              if (file.endsWith(".wasm")) {
+                const url = `${cdnUrl}/web/${file}?v=1.0.0`;
+                console.log(
+                  `[physx-script-loader] PhysXFn locateFile called for ${file}, returning: ${url}`,
+                );
+                return url;
+              }
+              return file;
+            },
+          };
+          PhysXFn(mergedOptions)
             .then((physx) => {
+              console.log(
+                "[physx-script-loader] PhysX WASM initialized successfully",
+              );
               resolve(physx);
             })
             .catch((error) => {

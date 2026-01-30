@@ -34,6 +34,7 @@ const DEFAULTS: POIConfig = {
     camp: 8,
     crossing: 5,
     waystation: 10,
+    fishing_spot: 12, // Lakeside fishing locations
   },
   minDistanceFromTowns: 100,
   minPOISpacing: 200,
@@ -86,6 +87,11 @@ const CATEGORY_PROPERTIES: Record<
     baseImportance: 0.3,
     preferredBiomes: ["plains", "valley", "forest"],
   },
+  fishing_spot: {
+    radius: 15,
+    baseImportance: 0.75, // High importance to ensure road connections
+    preferredBiomes: ["plains", "forest", "valley"], // Near lakes in temperate areas
+  },
 };
 
 // Name generation for POIs
@@ -98,17 +104,27 @@ const POI_NAME_PREFIXES: Record<POICategory, string[]> = {
   camp: ["Hidden", "Outlaw", "Hunter", "Ranger", "Traveler", "Merchant"],
   crossing: ["Old", "Stone", "Narrow", "Wide", "Rocky", "Swift"],
   waystation: ["Roadside", "Halfway", "Lonely", "Traveler", "Dusty", "Shady"],
+  fishing_spot: [
+    "Quiet",
+    "Peaceful",
+    "Sunny",
+    "Shady",
+    "Deep",
+    "Clear",
+    "Misty",
+  ],
 };
 
 const POI_NAME_SUFFIXES: Record<POICategory, string[]> = {
   dungeon: ["Caverns", "Depths", "Mines", "Catacombs", "Tunnels", "Halls"],
   shrine: ["Shrine", "Altar", "Grove", "Circle", "Stones", "Spring"],
   landmark: ["Rock", "Tree", "Falls", "Peak", "Spire", "Mesa"],
-  resource_area: ["Quarry", "Grove", "Fishing Hole", "Mine", "Camp", "Fields"],
+  resource_area: ["Quarry", "Grove", "Mine", "Camp", "Fields"],
   ruin: ["Ruins", "Tower", "Keep", "Temple", "Fortress", "Manor"],
   camp: ["Camp", "Hideout", "Lair", "Den", "Outpost", "Shelter"],
   crossing: ["Bridge", "Ford", "Pass", "Crossing", "Gate", "Gap"],
   waystation: ["Rest", "Inn", "Stop", "Shelter", "Post", "Lodge"],
+  fishing_spot: ["Cove", "Dock", "Pier", "Shore", "Bank", "Landing"],
 };
 
 /**
@@ -246,6 +262,11 @@ export class POISystem extends System {
     targetCount: number,
     halfWorld: number,
   ): PointOfInterest[] {
+    // Special handling for fishing spots - they need to be at water edges
+    if (category === "fishing_spot") {
+      return this.generateFishingSpotPOIs(targetCount, halfWorld);
+    }
+
     const pois: PointOfInterest[] = [];
     const properties = CATEGORY_PROPERTIES[category];
     const towns = this.townSystem?.getTowns() ?? [];
@@ -333,6 +354,202 @@ export class POISystem extends System {
     }
 
     return pois;
+  }
+
+  /**
+   * Generate fishing spot POIs specifically at water edges (lakes, rivers)
+   * These are placed at the transition between land and water for scenic fishing locations.
+   */
+  private generateFishingSpotPOIs(
+    targetCount: number,
+    halfWorld: number,
+  ): PointOfInterest[] {
+    const pois: PointOfInterest[] = [];
+    const properties = CATEGORY_PROPERTIES["fishing_spot"];
+    const towns = this.townSystem?.getTowns() ?? [];
+    const waterThreshold = TERRAIN_CONSTANTS.WATER_THRESHOLD; // 9.0 - no fallback, use actual constant
+    const maxAttempts = targetCount * 50; // More attempts needed for water edge finding
+    const searchRadius = 200; // Search radius for water from random point
+    const searchStepSize = 10; // Step size when searching for water edge
+
+    this.resetRandom(this.seed + 99999); // Unique seed offset for fishing spots
+
+    let waterEdgesFound = 0;
+    let tooCloseToTown = 0;
+    let tooCloseToOtherPOI = 0;
+
+    for (
+      let attempt = 0;
+      attempt < maxAttempts && pois.length < targetCount;
+      attempt++
+    ) {
+      // Random starting position
+      const startX = (this.random() - 0.5) * halfWorld * 1.8;
+      const startZ = (this.random() - 0.5) * halfWorld * 1.8;
+
+      // Check world bounds
+      if (
+        Math.abs(startX) > halfWorld - 200 ||
+        Math.abs(startZ) > halfWorld - 200
+      ) {
+        continue;
+      }
+
+      // Search in a random direction for water edge
+      const searchAngle = this.random() * Math.PI * 2;
+      const waterEdge = this.findWaterEdge(
+        startX,
+        startZ,
+        searchAngle,
+        searchRadius,
+        searchStepSize,
+        waterThreshold,
+      );
+
+      if (!waterEdge) continue;
+
+      waterEdgesFound++;
+      const { x, z } = waterEdge;
+
+      // Check distance from towns (fishing spots can be closer than other POIs)
+      const minDistFromTown = this.config.minDistanceFromTowns * 0.5;
+      const isTooCloseToTown = towns.some(
+        (t) => dist2D(x, z, t.position.x, t.position.z) < minDistFromTown,
+      );
+      if (isTooCloseToTown) {
+        tooCloseToTown++;
+        continue;
+      }
+
+      // Check distance from existing POIs and fishing spots
+      const minSpacing = this.config.minPOISpacing * 1.5; // Fishing spots need more spacing
+      const isTooCloseToOtherPOI = [...this.pois, ...pois].some(
+        (p) => dist2D(x, z, p.position.x, p.position.z) < minSpacing,
+      );
+      if (isTooCloseToOtherPOI) {
+        tooCloseToOtherPOI++;
+        continue;
+      }
+
+      // Get terrain info at the water edge (on land side)
+      const y = this.terrainSystem!.getHeightAt(x, z);
+      const biome =
+        this.terrainSystem?.getBiomeAtWorldPosition?.(x, z) ?? "plains";
+
+      // Calculate importance - fishing spots are important destinations
+      let importance = properties.baseImportance;
+      if (properties.preferredBiomes.includes(biome)) {
+        importance += 0.1;
+      }
+      // Add variation
+      const importanceNoise = this.noise.simplex2D(
+        x * 0.002 + 2000,
+        z * 0.002 + 2000,
+      );
+      importance += importanceNoise * 0.1;
+      importance = Math.max(0.5, Math.min(1.0, importance)); // Ensure high importance
+
+      const name = this.generatePOIName("fishing_spot", pois.length);
+
+      pois.push({
+        id: `poi_fishing_spot_${pois.length}`,
+        name,
+        category: "fishing_spot",
+        position: { x, y, z },
+        importance,
+        radius: properties.radius,
+        biome,
+        connectedRoads: [],
+        procedural: true,
+      });
+    }
+
+    if (pois.length > 0) {
+      Logger.system(
+        "POISystem",
+        `Generated ${pois.length} fishing spots at water edges`,
+      );
+    } else if (waterEdgesFound === 0) {
+      Logger.systemWarn(
+        "POISystem",
+        `Failed to generate fishing spots: no water edges found in ${maxAttempts} attempts. Check if world has water bodies.`,
+        { threshold: waterThreshold, attempts: maxAttempts },
+      );
+    } else {
+      Logger.systemWarn(
+        "POISystem",
+        `Failed to place fishing spots despite finding water edges.`,
+        { waterEdgesFound, tooCloseToTown, tooCloseToOtherPOI },
+      );
+    }
+
+    return pois;
+  }
+
+  /**
+   * Search for a water edge (transition from land to water) along a ray
+   * Returns the position just before the water starts (on land)
+   */
+  private findWaterEdge(
+    startX: number,
+    startZ: number,
+    angle: number,
+    maxDistance: number,
+    stepSize: number,
+    waterThreshold: number,
+  ): { x: number; z: number } | null {
+    const dirX = Math.cos(angle);
+    const dirZ = Math.sin(angle);
+
+    let currentX = startX;
+    let currentZ = startZ;
+    let lastHeight = this.terrainSystem!.getHeightAt(currentX, currentZ);
+    let lastX = currentX;
+    let lastZ = currentZ;
+
+    // If starting underwater, first find land by searching along the ray
+    if (lastHeight < waterThreshold) {
+      let foundLand = false;
+      for (let dist = stepSize; dist <= maxDistance; dist += stepSize) {
+        const x = startX + dirX * dist;
+        const z = startZ + dirZ * dist;
+        const height = this.terrainSystem!.getHeightAt(x, z);
+        if (height >= waterThreshold) {
+          // Found land - continue search from here (no recursion)
+          currentX = x;
+          currentZ = z;
+          lastHeight = height;
+          lastX = x;
+          lastZ = z;
+          foundLand = true;
+          // Continue searching from this point for water edge
+          break;
+        }
+      }
+      if (!foundLand) return null;
+    }
+
+    // Search for land-to-water transition
+    for (let dist = stepSize; dist <= maxDistance; dist += stepSize) {
+      const x = currentX + dirX * dist;
+      const z = currentZ + dirZ * dist;
+      const height = this.terrainSystem!.getHeightAt(x, z);
+
+      if (height < waterThreshold && lastHeight >= waterThreshold) {
+        // Found transition from land to water - return position just before water
+        // Move slightly toward the edge (30% of step) to be close but on land
+        return {
+          x: lastX + dirX * (stepSize * 0.3),
+          z: lastZ + dirZ * (stepSize * 0.3),
+        };
+      }
+
+      lastHeight = height;
+      lastX = x;
+      lastZ = z;
+    }
+
+    return null;
   }
 
   /**

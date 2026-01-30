@@ -96,6 +96,7 @@ export class ComputeBufferPool {
         GPUBufferUsage.COPY_SRC |
         GPUBufferUsage.COPY_DST,
       label ?? `storage_${tierSize}`,
+      "storage",
     );
   }
 
@@ -134,6 +135,7 @@ export class ComputeBufferPool {
       tierSize,
       GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       label ?? `uniform_${tierSize}`,
+      "uniform",
     );
   }
 
@@ -158,6 +160,7 @@ export class ComputeBufferPool {
       tierSize,
       GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
       label ?? `staging_${tierSize}`,
+      "staging",
     );
   }
 
@@ -333,8 +336,119 @@ export class ComputeBufferPool {
   }
 
   // ==========================================================================
-  // STATISTICS
+  // PRE-WARMING
   // ==========================================================================
+
+  /**
+   * Pre-allocate buffers to avoid allocation spikes during gameplay.
+   * Call this during initialization/loading screens.
+   *
+   * @param config - Sizes to pre-allocate for each buffer type
+   */
+  warmup(config: {
+    storageSizes?: number[];
+    uniformSizes?: number[];
+    stagingSizes?: number[];
+    indirectCount?: number;
+    indexedIndirectCount?: number;
+  }): void {
+    // Pre-warm storage buffers
+    if (config.storageSizes) {
+      for (const size of config.storageSizes) {
+        const buffer = this.acquireStorageBuffer(
+          size,
+          `warmup_storage_${size}`,
+        );
+        if (buffer) this.releaseStorageBuffer(buffer);
+      }
+    }
+
+    // Pre-warm uniform buffers
+    if (config.uniformSizes) {
+      for (const size of config.uniformSizes) {
+        const buffer = this.acquireUniformBuffer(
+          size,
+          `warmup_uniform_${size}`,
+        );
+        if (buffer) this.releaseUniformBuffer(buffer);
+      }
+    }
+
+    // Pre-warm staging buffers
+    if (config.stagingSizes) {
+      for (const size of config.stagingSizes) {
+        const buffer = this.acquireStagingBuffer(
+          size,
+          `warmup_staging_${size}`,
+        );
+        if (buffer) this.releaseStagingBuffer(buffer);
+      }
+    }
+
+    // Pre-warm indirect buffers
+    if (config.indirectCount) {
+      const buffers: GPUBuffer[] = [];
+      for (let i = 0; i < config.indirectCount; i++) {
+        const buffer = this.acquireIndirectBuffer(false);
+        if (buffer) buffers.push(buffer);
+      }
+      for (const buffer of buffers) {
+        this.releaseIndirectBuffer(buffer);
+      }
+    }
+
+    // Pre-warm indexed indirect buffers
+    if (config.indexedIndirectCount) {
+      const buffers: GPUBuffer[] = [];
+      for (let i = 0; i < config.indexedIndirectCount; i++) {
+        const buffer = this.acquireIndirectBuffer(true);
+        if (buffer) buffers.push(buffer);
+      }
+      for (const buffer of buffers) {
+        this.releaseIndirectBuffer(buffer);
+      }
+    }
+  }
+
+  /**
+   * Pre-warm with common sizes for typical game workloads.
+   * Creates buffers for culling, particles, terrain, and grass.
+   */
+  warmupDefault(): void {
+    this.warmup({
+      storageSizes: [
+        65536, // 64KB - small instance buffers
+        262144, // 256KB - medium instance buffers
+        1048576, // 1MB - large instance buffers
+        4194304, // 4MB - very large instance buffers
+      ],
+      uniformSizes: [
+        64, // Params struct
+        256, // Extended params
+        1024, // Permutation tables, etc.
+      ],
+      stagingSizes: [
+        1024, // Small read-backs
+        16384, // Medium read-backs
+        65536, // Large read-backs
+      ],
+      indirectCount: 8,
+      indexedIndirectCount: 4,
+    });
+  }
+
+  // ==========================================================================
+  // STATISTICS & METRICS
+  // ==========================================================================
+
+  // Usage metrics tracking
+  private metrics = {
+    hits: 0,
+    misses: 0,
+    evictions: 0,
+    allocations: 0,
+    peakUsage: { storage: 0, uniform: 0, staging: 0 },
+  };
 
   /**
    * Get statistics about pool usage.
@@ -361,6 +475,38 @@ export class ComputeBufferPool {
           0,
         ),
       },
+    };
+  }
+
+  /**
+   * Get usage metrics for the pool.
+   * Useful for tuning pool configuration.
+   */
+  getMetrics(): {
+    hits: number;
+    misses: number;
+    hitRate: number;
+    evictions: number;
+    allocations: number;
+    peakUsage: { storage: number; uniform: number; staging: number };
+  } {
+    const total = this.metrics.hits + this.metrics.misses;
+    return {
+      ...this.metrics,
+      hitRate: total > 0 ? this.metrics.hits / total : 0,
+    };
+  }
+
+  /**
+   * Reset usage metrics.
+   */
+  resetMetrics(): void {
+    this.metrics = {
+      hits: 0,
+      misses: 0,
+      evictions: 0,
+      allocations: 0,
+      peakUsage: { storage: 0, uniform: 0, staging: 0 },
     };
   }
 
@@ -427,6 +573,7 @@ export class ComputeBufferPool {
     tierSize: number,
     usage: GPUBufferUsageFlags,
     label: string,
+    poolType: "storage" | "uniform" | "staging" = "storage",
   ): GPUBuffer | null {
     let pool = pools.get(tierSize);
     if (!pool) {
@@ -439,9 +586,14 @@ export class ComputeBufferPool {
       if (!pooled.inUse) {
         pooled.inUse = true;
         pooled.lastUsedFrame = this.currentFrame;
+        this.metrics.hits++;
+        this.updatePeakUsage(pools, poolType);
         return pooled.buffer;
       }
     }
+
+    // No available buffer - record miss
+    this.metrics.misses++;
 
     // Check pool size limit
     if (pool.length >= this.config.maxPoolSize) {
@@ -449,6 +601,7 @@ export class ComputeBufferPool {
         `[ComputeBufferPool] Pool size limit reached for tier ${tierSize}`,
       );
       // Create non-pooled buffer
+      this.metrics.allocations++;
       return this.context.createBuffer({ label, size: tierSize, usage });
     }
 
@@ -462,9 +615,24 @@ export class ComputeBufferPool {
         inUse: true,
         lastUsedFrame: this.currentFrame,
       });
+      this.metrics.allocations++;
+      this.updatePeakUsage(pools, poolType);
     }
 
     return buffer;
+  }
+
+  private updatePeakUsage(
+    pools: Map<number, PooledBuffer[]>,
+    poolType: "storage" | "uniform" | "staging",
+  ): void {
+    let inUse = 0;
+    for (const pool of pools.values()) {
+      inUse += pool.filter((p) => p.inUse).length;
+    }
+    if (inUse > this.metrics.peakUsage[poolType]) {
+      this.metrics.peakUsage[poolType] = inUse;
+    }
   }
 
   private releaseToPool(
@@ -491,6 +659,7 @@ export class ComputeBufferPool {
       const filtered = pool.filter((pooled) => {
         if (!pooled.inUse && pooled.lastUsedFrame < threshold) {
           pooled.buffer.destroy();
+          this.metrics.evictions++;
           return false;
         }
         return true;

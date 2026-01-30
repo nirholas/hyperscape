@@ -569,7 +569,9 @@ export class ModelCache {
 
         if (file) {
           const buffer = await file.arrayBuffer();
-          gltf = await this.gltfLoader.parseAsync(buffer, "");
+          // Pass resolvedPath as base URL for resolving relative/data URIs in GLTF
+          // Empty string "" causes issues with embedded base64 data URIs
+          gltf = await this.gltfLoader.parseAsync(buffer, resolvedPath);
         } else {
           // Fallback to direct load if file fetch failed
           gltf = await this.gltfLoader.loadAsync(resolvedPath);

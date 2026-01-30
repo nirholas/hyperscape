@@ -7,12 +7,12 @@
  * In production builds (vite build):
  *   - GAME_API_URL = https://hyperscape-production.up.railway.app
  *   - GAME_WS_URL = wss://hyperscape-production.up.railway.app/ws
- *   - CDN_URL = (set via PUBLIC_CDN_URL env var)
+ *   - CDN_URL = https://assets.hyperscape.club
  *
  * In development (vite dev):
  *   - GAME_API_URL = http://localhost:5555
  *   - GAME_WS_URL = ws://localhost:5555/ws
- *   - CDN_URL = http://localhost:8080
+ *   - CDN_URL = http://localhost:5555/game-assets
  */
 
 // =============================================================================

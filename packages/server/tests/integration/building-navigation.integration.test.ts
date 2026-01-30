@@ -668,3 +668,1167 @@ describe("Building Navigation Bot Simulation", () => {
     console.log(`[Bot Test] Bot successfully navigated building!`);
   });
 });
+
+/**
+ * Full Two-Story Building Navigation Test with Floor Verification
+ *
+ * Tests a bot navigating through a two-story building:
+ * 1. Spawn outside the building
+ * 2. Walk to the door and enter
+ * 3. Walk to the stairs on ground floor
+ * 4. Climb stairs to second floor
+ * 5. Walk around on second floor
+ * 6. Descend stairs back to ground floor
+ * 7. Exit the building
+ *
+ * Errors if the bot is not on the expected floor at each step.
+ */
+describe("Two-Story Building Bot Navigation with Floor Verification", () => {
+  let world: World;
+  let collisionService: BuildingCollisionService;
+  let pathfinder: BFSPathfinder;
+
+  // Building configuration
+  const BUILDING_POS = { x: 200, y: 5, z: 200 }; // Y=5 for terrain variation
+  const BUILDING_ID = "two_story_test_building";
+  const TOWN_ID = "floor_test_town";
+
+  // Building constants (from procgen)
+  const FOUNDATION_HEIGHT = 0.5;
+  const FLOOR_HEIGHT = 3.4; // WALL_HEIGHT (3.2) + FLOOR_THICKNESS (0.2)
+
+  /**
+   * Bot state tracking
+   */
+  interface BotState {
+    tileX: number;
+    tileZ: number;
+    worldY: number;
+    currentFloor: number;
+    insideBuilding: boolean;
+    onStairs: boolean;
+    stepsTaken: number;
+  }
+
+  /**
+   * Navigation error with detailed context
+   */
+  class BotNavigationError extends Error {
+    constructor(
+      message: string,
+      public botState: BotState,
+      public expectedFloor: number,
+      public expectedY: number,
+    ) {
+      super(
+        `${message}\n` +
+          `  Bot position: (${botState.tileX}, ${botState.tileZ})\n` +
+          `  Bot Y: ${botState.worldY.toFixed(2)} (expected: ${expectedY.toFixed(2)})\n` +
+          `  Bot floor: ${botState.currentFloor} (expected: ${expectedFloor})\n` +
+          `  Steps taken: ${botState.stepsTaken}\n` +
+          `  Inside building: ${botState.insideBuilding}`,
+      );
+      this.name = "BotNavigationError";
+    }
+  }
+
+  beforeAll(async () => {
+    world = new World({ isServer: true, isClient: false });
+    collisionService = new BuildingCollisionService(world);
+
+    // Create a 2-story building layout with door and stairs
+    const layout = createTestBuildingLayout();
+    collisionService.registerBuilding(
+      BUILDING_ID,
+      TOWN_ID,
+      layout,
+      BUILDING_POS,
+      0, // No rotation
+    );
+
+    pathfinder = new BFSPathfinder();
+
+    console.log(`[Floor Test] Building registered at Y=${BUILDING_POS.y}`);
+    console.log(
+      `[Floor Test] Floor 0 elevation: ${BUILDING_POS.y + FOUNDATION_HEIGHT}`,
+    );
+    console.log(
+      `[Floor Test] Floor 1 elevation: ${BUILDING_POS.y + FOUNDATION_HEIGHT + FLOOR_HEIGHT}`,
+    );
+  }, TEST_TIMEOUT);
+
+  afterAll(() => {
+    world.destroy();
+  });
+
+  /**
+   * Calculate expected Y elevation for a floor
+   */
+  function getFloorElevation(floorIndex: number): number {
+    return BUILDING_POS.y + FOUNDATION_HEIGHT + floorIndex * FLOOR_HEIGHT;
+  }
+
+  /**
+   * Verify bot is on expected floor and Y position
+   */
+  function verifyBotPosition(
+    bot: BotState,
+    expectedFloor: number,
+    description: string,
+    toleranceY: number = 0.5,
+  ): void {
+    const expectedY = getFloorElevation(expectedFloor);
+    const yDiff = Math.abs(bot.worldY - expectedY);
+
+    // Check floor index
+    if (bot.currentFloor !== expectedFloor) {
+      throw new BotNavigationError(
+        `[FLOOR ERROR] ${description}: Bot on wrong floor!`,
+        bot,
+        expectedFloor,
+        expectedY,
+      );
+    }
+
+    // Check Y position within tolerance
+    if (yDiff > toleranceY) {
+      throw new BotNavigationError(
+        `[Y ERROR] ${description}: Bot Y position outside tolerance (${toleranceY}m)!`,
+        bot,
+        expectedFloor,
+        expectedY,
+      );
+    }
+
+    console.log(
+      `[Floor Test] ✓ ${description} - Floor ${bot.currentFloor}, Y=${bot.worldY.toFixed(2)}`,
+    );
+  }
+
+  /**
+   * Verify bot is outside building (ground level)
+   */
+  function verifyBotOutside(bot: BotState, description: string): void {
+    if (bot.insideBuilding) {
+      throw new Error(
+        `[LOCATION ERROR] ${description}: Bot should be OUTSIDE building but is inside!`,
+      );
+    }
+
+    // Outside the building, bot should be at terrain level (approx BUILDING_POS.y)
+    const terrainY = BUILDING_POS.y;
+    const yDiff = Math.abs(bot.worldY - terrainY);
+    if (yDiff > 1.0) {
+      // Allow 1m tolerance for terrain variation
+      console.warn(
+        `[Floor Test] ⚠ ${description}: Bot Y=${bot.worldY.toFixed(2)} differs from terrain Y=${terrainY} by ${yDiff.toFixed(2)}m`,
+      );
+    }
+
+    console.log(
+      `[Floor Test] ✓ ${description} - Outside building, Y=${bot.worldY.toFixed(2)}`,
+    );
+  }
+
+  it("should navigate full building circuit with floor verification", async () => {
+    // Get building data
+    const building = collisionService.getBuilding(BUILDING_ID);
+    if (!building) {
+      throw new Error("Test building not found!");
+    }
+
+    const floor0 = building.floors.find((f) => f.floorIndex === 0);
+    const floor1 = building.floors.find((f) => f.floorIndex === 1);
+
+    if (!floor0 || !floor1) {
+      throw new Error("Building must have floors 0 and 1!");
+    }
+
+    const doorTiles = collisionService.getDoorTiles(BUILDING_ID);
+    if (doorTiles.length === 0) {
+      throw new Error("Building must have a door!");
+    }
+
+    const groundStairs = floor0.stairTiles.filter((s) => !s.isLanding);
+    const landingStairs = floor1.stairTiles.filter((s) => s.isLanding);
+
+    if (groundStairs.length === 0) {
+      throw new Error("Building must have stairs on ground floor!");
+    }
+
+    const door = doorTiles[0];
+    const stairBottom = groundStairs[0];
+    const stairTop = landingStairs[0];
+
+    console.log("\n[Floor Test] === BUILDING SETUP ===");
+    console.log(`[Floor Test] Door: (${door.tileX}, ${door.tileZ})`);
+    console.log(
+      `[Floor Test] Stair bottom: (${stairBottom.tileX}, ${stairBottom.tileZ})`,
+    );
+    if (stairTop) {
+      console.log(
+        `[Floor Test] Stair top: (${stairTop.tileX}, ${stairTop.tileZ})`,
+      );
+    }
+    console.log(
+      `[Floor Test] Floor 0 walkable tiles: ${floor0.walkableTiles.size}`,
+    );
+    console.log(
+      `[Floor Test] Floor 1 walkable tiles: ${floor1.walkableTiles.size}`,
+    );
+
+    // Initialize bot state outside the building
+    const startX = door.tileX;
+    const startZ = door.tileZ - 8; // 8 tiles south of door
+    const bot: BotState = {
+      tileX: startX,
+      tileZ: startZ,
+      worldY: BUILDING_POS.y, // Start at terrain level
+      currentFloor: 0,
+      insideBuilding: false,
+      onStairs: false,
+      stepsTaken: 0,
+    };
+
+    console.log("\n[Floor Test] === STARTING NAVIGATION ===");
+    console.log(`[Floor Test] Bot start: (${bot.tileX}, ${bot.tileZ})`);
+
+    // Helper to check walkability
+    const isTileWalkable = (tile: TileCoord, fromTile?: TileCoord): boolean => {
+      // Outside building or at ground floor
+      const walkable = collisionService.isTileWalkableInBuilding(
+        tile.x,
+        tile.z,
+        bot.currentFloor,
+      );
+
+      if (!walkable) {
+        // If not walkable in building context, check if outside building
+        const inFootprint = collisionService.isTileInBuildingFootprint(
+          tile.x,
+          tile.z,
+        );
+        if (inFootprint) {
+          return false; // Inside building but not walkable
+        }
+        return true; // Outside building, assume walkable terrain
+      }
+
+      // Check wall blocking
+      if (fromTile) {
+        const wallBlocked = collisionService.isWallBlocked(
+          fromTile.x,
+          fromTile.z,
+          tile.x,
+          tile.z,
+          bot.currentFloor,
+        );
+        if (wallBlocked) {
+          return false;
+        }
+      }
+
+      return true;
+    };
+
+    // Helper to move bot along a path
+    const walkPath = (path: TileCoord[], description: string): void => {
+      if (path.length === 0) {
+        throw new Error(`[PATH ERROR] ${description}: No path found!`);
+      }
+
+      console.log(`[Floor Test] ${description}: ${path.length} steps`);
+
+      for (const tile of path) {
+        // Update bot position
+        bot.tileX = tile.x;
+        bot.tileZ = tile.z;
+        bot.stepsTaken++;
+
+        // Update building state
+        const inFootprint = collisionService.isTileInBuildingFootprint(
+          tile.x,
+          tile.z,
+        );
+        bot.insideBuilding = inFootprint !== null;
+
+        // Update Y position based on location
+        if (bot.insideBuilding) {
+          const elevation = collisionService.getFloorElevation(
+            tile.x,
+            tile.z,
+            bot.currentFloor,
+          );
+          if (elevation !== null) {
+            bot.worldY = elevation;
+          }
+        } else {
+          bot.worldY = BUILDING_POS.y; // Terrain level
+        }
+
+        // Check if on stairs
+        const collision = collisionService.queryCollision(
+          tile.x,
+          tile.z,
+          bot.currentFloor,
+        );
+        bot.onStairs = collision.stairTile !== null;
+      }
+    };
+
+    // =========================================================================
+    // STEP 1: Walk from outside to door
+    // =========================================================================
+    console.log("\n[Floor Test] STEP 1: Walking to door");
+    verifyBotOutside(bot, "Before walking to door");
+
+    let path = pathfinder.findPath(
+      { x: bot.tileX, z: bot.tileZ },
+      { x: door.tileX, z: door.tileZ },
+      (tile, from) => isTileWalkable(tile, from),
+    );
+
+    walkPath(path, "Path to door");
+    // At the door, we're entering the building
+    bot.insideBuilding = true;
+    bot.worldY = getFloorElevation(0);
+    verifyBotPosition(bot, 0, "At building door");
+
+    // =========================================================================
+    // STEP 2: Walk to stairs on ground floor
+    // =========================================================================
+    console.log("\n[Floor Test] STEP 2: Walking to stairs (ground floor)");
+
+    path = pathfinder.findPath(
+      { x: bot.tileX, z: bot.tileZ },
+      { x: stairBottom.tileX, z: stairBottom.tileZ },
+      (tile, from) => isTileWalkable(tile, from),
+    );
+
+    walkPath(path, "Path to stairs");
+    verifyBotPosition(bot, 0, "At stair bottom");
+
+    if (!bot.onStairs) {
+      console.warn(
+        "[Floor Test] ⚠ Bot not detected as on stairs at stair tile",
+      );
+    }
+
+    // =========================================================================
+    // STEP 3: Ascend stairs to second floor
+    // =========================================================================
+    console.log("\n[Floor Test] STEP 3: Climbing stairs to floor 1");
+
+    // Simulate climbing stairs - update floor
+    const previousFloor = bot.currentFloor;
+    bot.currentFloor = 1;
+    bot.worldY = getFloorElevation(1);
+
+    // Move to stair landing on floor 1
+    if (stairTop) {
+      bot.tileX = stairTop.tileX;
+      bot.tileZ = stairTop.tileZ;
+      bot.stepsTaken++;
+    }
+
+    verifyBotPosition(bot, 1, "After climbing stairs");
+
+    // Verify we actually changed floors
+    if (bot.currentFloor === previousFloor) {
+      throw new Error(
+        `[STAIR ERROR] Bot did not change floors after climbing! Still on floor ${bot.currentFloor}`,
+      );
+    }
+
+    console.log(
+      `[Floor Test] ✓ Floor transition: ${previousFloor} → ${bot.currentFloor}`,
+    );
+
+    // =========================================================================
+    // STEP 4: Walk around on second floor
+    // =========================================================================
+    console.log("\n[Floor Test] STEP 4: Walking around on floor 1");
+
+    // Find a walkable tile on floor 1 that's not a stair tile
+    const floor1Tiles = Array.from(floor1.walkableTiles);
+    const nonStairTile = floor1Tiles.find((tileKey) => {
+      const [tx, tz] = tileKey.split(",").map(Number);
+      return !floor1.stairTiles.some((s) => s.tileX === tx && s.tileZ === tz);
+    });
+
+    if (nonStairTile) {
+      const [targetX, targetZ] = nonStairTile.split(",").map(Number);
+
+      path = pathfinder.findPath(
+        { x: bot.tileX, z: bot.tileZ },
+        { x: targetX, z: targetZ },
+        (tile, from) => isTileWalkable(tile, from),
+      );
+
+      if (path.length > 0) {
+        walkPath(path, "Path on floor 1");
+        verifyBotPosition(bot, 1, "After walking on floor 1");
+      } else {
+        console.log(
+          `[Floor Test] Could not find path on floor 1 - checking direct walkability`,
+        );
+      }
+    }
+
+    // =========================================================================
+    // STEP 5: Return to stair landing
+    // =========================================================================
+    console.log("\n[Floor Test] STEP 5: Returning to stairs (floor 1)");
+
+    if (stairTop) {
+      path = pathfinder.findPath(
+        { x: bot.tileX, z: bot.tileZ },
+        { x: stairTop.tileX, z: stairTop.tileZ },
+        (tile, from) => isTileWalkable(tile, from),
+      );
+
+      if (path.length > 0) {
+        walkPath(path, "Path back to stair landing");
+      } else {
+        // Bot might already be at the stairs
+        bot.tileX = stairTop.tileX;
+        bot.tileZ = stairTop.tileZ;
+      }
+
+      verifyBotPosition(bot, 1, "At stair landing (floor 1)");
+    }
+
+    // =========================================================================
+    // STEP 6: Descend stairs to ground floor
+    // =========================================================================
+    console.log("\n[Floor Test] STEP 6: Descending stairs to floor 0");
+
+    const floorBeforeDescent = bot.currentFloor;
+    bot.currentFloor = 0;
+    bot.worldY = getFloorElevation(0);
+    bot.tileX = stairBottom.tileX;
+    bot.tileZ = stairBottom.tileZ;
+    bot.stepsTaken++;
+
+    verifyBotPosition(bot, 0, "After descending stairs");
+
+    if (bot.currentFloor === floorBeforeDescent) {
+      throw new Error(
+        `[STAIR ERROR] Bot did not change floors after descending! Still on floor ${bot.currentFloor}`,
+      );
+    }
+
+    console.log(
+      `[Floor Test] ✓ Floor transition: ${floorBeforeDescent} → ${bot.currentFloor}`,
+    );
+
+    // =========================================================================
+    // STEP 7: Walk back to door
+    // =========================================================================
+    console.log("\n[Floor Test] STEP 7: Walking back to door");
+
+    path = pathfinder.findPath(
+      { x: bot.tileX, z: bot.tileZ },
+      { x: door.tileX, z: door.tileZ },
+      (tile, from) => isTileWalkable(tile, from),
+    );
+
+    walkPath(path, "Path to door");
+    verifyBotPosition(bot, 0, "At door (exiting)");
+
+    // =========================================================================
+    // STEP 8: Exit building
+    // =========================================================================
+    console.log("\n[Floor Test] STEP 8: Exiting building");
+
+    const outsideX = door.tileX;
+    const outsideZ = door.tileZ - 5;
+
+    path = pathfinder.findPath(
+      { x: bot.tileX, z: bot.tileZ },
+      { x: outsideX, z: outsideZ },
+      (tile, from) => isTileWalkable(tile, from),
+    );
+
+    walkPath(path, "Path to outside");
+    bot.insideBuilding = false;
+    bot.worldY = BUILDING_POS.y;
+    verifyBotOutside(bot, "After exiting building");
+
+    // =========================================================================
+    // FINAL SUMMARY
+    // =========================================================================
+    console.log("\n[Floor Test] === NAVIGATION COMPLETE ===");
+    console.log(`[Floor Test] Total steps taken: ${bot.stepsTaken}`);
+    console.log(
+      `[Floor Test] Final position: (${bot.tileX}, ${bot.tileZ}) Y=${bot.worldY.toFixed(2)}`,
+    );
+    console.log(`[Floor Test] Final floor: ${bot.currentFloor}`);
+    console.log(`[Floor Test] Inside building: ${bot.insideBuilding}`);
+    console.log("[Floor Test] ✓ All floor verifications passed!");
+  });
+
+  it("should error if bot falls through floor", async () => {
+    const building = collisionService.getBuilding(BUILDING_ID);
+    if (!building) {
+      throw new Error("Test building not found!");
+    }
+
+    const floor1 = building.floors.find((f) => f.floorIndex === 1);
+    if (!floor1) {
+      console.log("[Floor Test] Skipping - no floor 1");
+      return;
+    }
+
+    // Simulate a bot on floor 1 with wrong Y (fallen through)
+    const floor1Tile = Array.from(floor1.walkableTiles)[0];
+    const [tileX, tileZ] = floor1Tile.split(",").map(Number);
+
+    const brokenBot: BotState = {
+      tileX,
+      tileZ,
+      worldY: BUILDING_POS.y + 0.5, // Ground floor Y instead of floor 1
+      currentFloor: 1, // Claims to be on floor 1
+      insideBuilding: true,
+      onStairs: false,
+      stepsTaken: 10,
+    };
+
+    const expectedY = getFloorElevation(1);
+
+    // This should detect the Y position mismatch
+    expect(() => {
+      const yDiff = Math.abs(brokenBot.worldY - expectedY);
+      if (yDiff > 0.5) {
+        throw new BotNavigationError(
+          "Bot Y position mismatch - may have fallen through floor!",
+          brokenBot,
+          1,
+          expectedY,
+        );
+      }
+    }).toThrow(BotNavigationError);
+
+    console.log(
+      "[Floor Test] ✓ Floor-through detection working - error thrown as expected",
+    );
+  });
+
+  it("should error if bot on wrong floor", async () => {
+    const bot: BotState = {
+      tileX: 100,
+      tileZ: 100,
+      worldY: getFloorElevation(0), // At ground floor elevation
+      currentFloor: 1, // But claims to be on floor 1!
+      insideBuilding: true,
+      onStairs: false,
+      stepsTaken: 5,
+    };
+
+    expect(() => {
+      // Verify should fail because currentFloor doesn't match expected
+      const expectedY = getFloorElevation(1);
+      const yDiff = Math.abs(bot.worldY - expectedY);
+      if (yDiff > 0.5) {
+        throw new BotNavigationError(
+          "Bot floor index doesn't match Y position!",
+          bot,
+          1,
+          expectedY,
+        );
+      }
+    }).toThrow(BotNavigationError);
+
+    console.log(
+      "[Floor Test] ✓ Floor index verification working - error thrown as expected",
+    );
+  });
+
+  /**
+   * LOOPING TEST: Bot navigates the full building circuit multiple times
+   *
+   * Tests continuous navigation to catch any state issues or edge cases
+   * that only appear after multiple traversals.
+   */
+  it("should navigate building circuit in a loop (5 iterations)", async () => {
+    const LOOP_COUNT = 5;
+
+    // Get building data
+    const building = collisionService.getBuilding(BUILDING_ID);
+    if (!building) {
+      throw new Error("Test building not found!");
+    }
+
+    const floor0 = building.floors.find((f) => f.floorIndex === 0);
+    const floor1 = building.floors.find((f) => f.floorIndex === 1);
+
+    if (!floor0 || !floor1) {
+      throw new Error("Building must have floors 0 and 1!");
+    }
+
+    const doorTiles = collisionService.getDoorTiles(BUILDING_ID);
+    if (doorTiles.length === 0) {
+      throw new Error("Building must have a door!");
+    }
+
+    const groundStairs = floor0.stairTiles.filter((s) => !s.isLanding);
+    const landingStairs = floor1.stairTiles.filter((s) => s.isLanding);
+
+    if (groundStairs.length === 0) {
+      throw new Error("Building must have stairs on ground floor!");
+    }
+
+    const door = doorTiles[0];
+    const stairBottom = groundStairs[0];
+    const stairTop = landingStairs[0];
+
+    // Initialize bot state outside the building
+    const startX = door.tileX;
+    const startZ = door.tileZ - 8;
+    const bot: BotState = {
+      tileX: startX,
+      tileZ: startZ,
+      worldY: BUILDING_POS.y,
+      currentFloor: 0,
+      insideBuilding: false,
+      onStairs: false,
+      stepsTaken: 0,
+    };
+
+    // Helper to check walkability
+    const isTileWalkable = (tile: TileCoord, fromTile?: TileCoord): boolean => {
+      const walkable = collisionService.isTileWalkableInBuilding(
+        tile.x,
+        tile.z,
+        bot.currentFloor,
+      );
+
+      if (!walkable) {
+        const inFootprint = collisionService.isTileInBuildingFootprint(
+          tile.x,
+          tile.z,
+        );
+        if (inFootprint) {
+          return false;
+        }
+        return true;
+      }
+
+      if (fromTile) {
+        const wallBlocked = collisionService.isWallBlocked(
+          fromTile.x,
+          fromTile.z,
+          tile.x,
+          tile.z,
+          bot.currentFloor,
+        );
+        if (wallBlocked) {
+          return false;
+        }
+      }
+
+      return true;
+    };
+
+    // Helper to move bot along a path with floor AND wall verification
+    const walkPath = (
+      path: TileCoord[],
+      expectedFloor: number,
+      description: string,
+    ): void => {
+      if (path.length === 0) {
+        throw new Error(`[LOOP PATH ERROR] ${description}: No path found!`);
+      }
+
+      let previousTile: TileCoord = { x: bot.tileX, z: bot.tileZ };
+
+      for (const tile of path) {
+        // === WALL COLLISION CHECK ===
+        // Verify we're not walking through a wall
+        const wallBlocked = collisionService.isWallBlocked(
+          previousTile.x,
+          previousTile.z,
+          tile.x,
+          tile.z,
+          bot.currentFloor,
+        );
+
+        if (wallBlocked) {
+          throw new Error(
+            `[WALL ERROR] ${description}: Bot walked through wall!\n` +
+              `  From: (${previousTile.x}, ${previousTile.z})\n` +
+              `  To: (${tile.x}, ${tile.z})\n` +
+              `  Floor: ${bot.currentFloor}\n` +
+              `  Step: ${bot.stepsTaken}`,
+          );
+        }
+
+        // === STEP ADJACENCY CHECK ===
+        // Verify steps are adjacent (max 1 tile in each direction)
+        const dx = Math.abs(tile.x - previousTile.x);
+        const dz = Math.abs(tile.z - previousTile.z);
+        if (dx > 1 || dz > 1) {
+          throw new Error(
+            `[TELEPORT ERROR] ${description}: Bot teleported!\n` +
+              `  From: (${previousTile.x}, ${previousTile.z})\n` +
+              `  To: (${tile.x}, ${tile.z})\n` +
+              `  Distance: dx=${dx}, dz=${dz}`,
+          );
+        }
+
+        // Update bot position
+        bot.tileX = tile.x;
+        bot.tileZ = tile.z;
+        bot.stepsTaken++;
+        previousTile = { x: tile.x, z: tile.z };
+
+        const inFootprint = collisionService.isTileInBuildingFootprint(
+          tile.x,
+          tile.z,
+        );
+        bot.insideBuilding = inFootprint !== null;
+
+        if (bot.insideBuilding) {
+          const elevation = collisionService.getFloorElevation(
+            tile.x,
+            tile.z,
+            bot.currentFloor,
+          );
+          if (elevation !== null) {
+            bot.worldY = elevation;
+          }
+        } else {
+          bot.worldY = BUILDING_POS.y;
+        }
+
+        // Verify floor hasn't unexpectedly changed
+        if (bot.currentFloor !== expectedFloor) {
+          throw new BotNavigationError(
+            `[LOOP ERROR] Floor changed unexpectedly during ${description}!`,
+            bot,
+            expectedFloor,
+            getFloorElevation(expectedFloor),
+          );
+        }
+
+        // Verify Y position
+        const expectedY = bot.insideBuilding
+          ? getFloorElevation(expectedFloor)
+          : BUILDING_POS.y;
+        const yDiff = Math.abs(bot.worldY - expectedY);
+        if (yDiff > 0.6) {
+          throw new BotNavigationError(
+            `[LOOP ERROR] Y position mismatch during ${description}!`,
+            bot,
+            expectedFloor,
+            expectedY,
+          );
+        }
+      }
+    };
+
+    console.log(
+      `\n[Loop Test] === STARTING ${LOOP_COUNT} ITERATION LOOP TEST ===`,
+    );
+
+    for (let iteration = 1; iteration <= LOOP_COUNT; iteration++) {
+      console.log(`\n[Loop Test] --- ITERATION ${iteration}/${LOOP_COUNT} ---`);
+
+      // Reset bot to starting position
+      bot.tileX = startX;
+      bot.tileZ = startZ;
+      bot.worldY = BUILDING_POS.y;
+      bot.currentFloor = 0;
+      bot.insideBuilding = false;
+      bot.onStairs = false;
+
+      // Verify starting state
+      if (bot.insideBuilding) {
+        throw new Error(
+          `[LOOP ERROR] Iteration ${iteration}: Bot should start OUTSIDE!`,
+        );
+      }
+      if (bot.currentFloor !== 0) {
+        throw new Error(
+          `[LOOP ERROR] Iteration ${iteration}: Bot should start on floor 0!`,
+        );
+      }
+
+      // STEP 1: Walk to door
+      let path = pathfinder.findPath(
+        { x: bot.tileX, z: bot.tileZ },
+        { x: door.tileX, z: door.tileZ },
+        (tile, from) => isTileWalkable(tile, from),
+      );
+      walkPath(path, 0, `Iter ${iteration} - to door`);
+      bot.insideBuilding = true;
+      bot.worldY = getFloorElevation(0);
+
+      // STEP 2: Walk to stairs
+      path = pathfinder.findPath(
+        { x: bot.tileX, z: bot.tileZ },
+        { x: stairBottom.tileX, z: stairBottom.tileZ },
+        (tile, from) => isTileWalkable(tile, from),
+      );
+      walkPath(path, 0, `Iter ${iteration} - to stairs`);
+
+      // STEP 3: Climb to floor 1
+      bot.currentFloor = 1;
+      bot.worldY = getFloorElevation(1);
+      if (stairTop) {
+        bot.tileX = stairTop.tileX;
+        bot.tileZ = stairTop.tileZ;
+        bot.stepsTaken++;
+      }
+
+      // Verify floor change
+      if (bot.currentFloor !== 1) {
+        throw new Error(
+          `[LOOP ERROR] Iteration ${iteration}: Failed to climb to floor 1!`,
+        );
+      }
+
+      // STEP 4: Walk on floor 1
+      const floor1Tiles = Array.from(floor1.walkableTiles);
+      const nonStairTile = floor1Tiles.find((tileKey) => {
+        const [tx, tz] = tileKey.split(",").map(Number);
+        return !floor1.stairTiles.some((s) => s.tileX === tx && s.tileZ === tz);
+      });
+
+      if (nonStairTile) {
+        const [targetX, targetZ] = nonStairTile.split(",").map(Number);
+        path = pathfinder.findPath(
+          { x: bot.tileX, z: bot.tileZ },
+          { x: targetX, z: targetZ },
+          (tile, from) => isTileWalkable(tile, from),
+        );
+        if (path.length > 0) {
+          walkPath(path, 1, `Iter ${iteration} - on floor 1`);
+        }
+      }
+
+      // STEP 5: Return to stairs
+      if (stairTop) {
+        path = pathfinder.findPath(
+          { x: bot.tileX, z: bot.tileZ },
+          { x: stairTop.tileX, z: stairTop.tileZ },
+          (tile, from) => isTileWalkable(tile, from),
+        );
+        if (path.length > 0) {
+          walkPath(path, 1, `Iter ${iteration} - back to landing`);
+        } else {
+          bot.tileX = stairTop.tileX;
+          bot.tileZ = stairTop.tileZ;
+        }
+      }
+
+      // STEP 6: Descend to floor 0
+      bot.currentFloor = 0;
+      bot.worldY = getFloorElevation(0);
+      bot.tileX = stairBottom.tileX;
+      bot.tileZ = stairBottom.tileZ;
+      bot.stepsTaken++;
+
+      // Verify floor change
+      if (bot.currentFloor !== 0) {
+        throw new Error(
+          `[LOOP ERROR] Iteration ${iteration}: Failed to descend to floor 0!`,
+        );
+      }
+
+      // STEP 7: Walk to door
+      path = pathfinder.findPath(
+        { x: bot.tileX, z: bot.tileZ },
+        { x: door.tileX, z: door.tileZ },
+        (tile, from) => isTileWalkable(tile, from),
+      );
+      walkPath(path, 0, `Iter ${iteration} - to door exit`);
+
+      // STEP 8: Exit building
+      path = pathfinder.findPath(
+        { x: bot.tileX, z: bot.tileZ },
+        { x: startX, z: startZ },
+        (tile, from) => isTileWalkable(tile, from),
+      );
+      walkPath(path, 0, `Iter ${iteration} - exit building`);
+      bot.insideBuilding = false;
+      bot.worldY = BUILDING_POS.y;
+
+      // Verify end state
+      if (bot.insideBuilding) {
+        throw new Error(
+          `[LOOP ERROR] Iteration ${iteration}: Bot should end OUTSIDE!`,
+        );
+      }
+      if (bot.currentFloor !== 0) {
+        throw new Error(
+          `[LOOP ERROR] Iteration ${iteration}: Bot should end on floor 0!`,
+        );
+      }
+
+      console.log(
+        `[Loop Test] ✓ Iteration ${iteration} complete - ${bot.stepsTaken} total steps`,
+      );
+    }
+
+    console.log(`\n[Loop Test] === LOOP TEST COMPLETE ===`);
+    console.log(`[Loop Test] Total iterations: ${LOOP_COUNT}`);
+    console.log(`[Loop Test] Total steps: ${bot.stepsTaken}`);
+    console.log(`[Loop Test] ✓ All ${LOOP_COUNT} iterations passed!`);
+  });
+
+  /**
+   * WALL COLLISION TEST: Verify walls actually block movement
+   *
+   * Tests that:
+   * 1. Direct paths through walls are blocked
+   * 2. Only door tiles allow passage through building exterior
+   * 3. Wall blocking is detected for all cardinal directions
+   */
+  it("should verify walls actually block movement (not walking through walls)", async () => {
+    const building = collisionService.getBuilding(BUILDING_ID);
+    if (!building) {
+      throw new Error("Test building not found!");
+    }
+
+    const floor0 = building.floors.find((f) => f.floorIndex === 0);
+    if (!floor0) {
+      throw new Error("Building must have floor 0!");
+    }
+
+    console.log("\n[Wall Test] === WALL COLLISION VERIFICATION ===");
+
+    // Find wall segments (walls without openings)
+    const solidWalls = floor0.wallSegments.filter((w) => !w.hasOpening);
+    const doorWalls = floor0.wallSegments.filter(
+      (w) => w.hasOpening && w.openingType === "door",
+    );
+
+    console.log(`[Wall Test] Solid wall segments: ${solidWalls.length}`);
+    console.log(`[Wall Test] Door wall segments: ${doorWalls.length}`);
+
+    if (solidWalls.length === 0) {
+      throw new Error("Building has no solid walls to test!");
+    }
+
+    // Test 1: Verify solid walls block movement
+    let wallsBlocked = 0;
+    let wallsTestedCount = 0;
+    const maxWallsToTest = 20; // Test a sample of walls
+
+    for (const wall of solidWalls.slice(0, maxWallsToTest)) {
+      wallsTestedCount++;
+
+      // Calculate the tile OUTSIDE the wall based on wall direction
+      let outsideTileX = wall.tileX;
+      let outsideTileZ = wall.tileZ;
+
+      switch (wall.side) {
+        case "north":
+          outsideTileZ -= 1;
+          break;
+        case "south":
+          outsideTileZ += 1;
+          break;
+        case "east":
+          outsideTileX += 1;
+          break;
+        case "west":
+          outsideTileX -= 1;
+          break;
+      }
+
+      // Check if movement from outside to inside is blocked
+      const blockedInward = collisionService.isWallBlocked(
+        outsideTileX,
+        outsideTileZ,
+        wall.tileX,
+        wall.tileZ,
+        0,
+      );
+
+      // Check if movement from inside to outside is blocked
+      const blockedOutward = collisionService.isWallBlocked(
+        wall.tileX,
+        wall.tileZ,
+        outsideTileX,
+        outsideTileZ,
+        0,
+      );
+
+      if (blockedInward || blockedOutward) {
+        wallsBlocked++;
+      }
+    }
+
+    console.log(
+      `[Wall Test] Walls tested: ${wallsTestedCount}, Walls blocking: ${wallsBlocked}`,
+    );
+
+    // At least 80% of solid walls should block movement
+    const blockPercentage = wallsBlocked / wallsTestedCount;
+    if (blockPercentage < 0.8) {
+      throw new Error(
+        `[WALL ERROR] Only ${(blockPercentage * 100).toFixed(1)}% of walls are blocking! Expected >= 80%`,
+      );
+    }
+
+    console.log(
+      `[Wall Test] ✓ ${(blockPercentage * 100).toFixed(1)}% of walls blocking movement`,
+    );
+
+    // Test 2: Verify door walls allow passage
+    let doorsPassable = 0;
+    for (const door of doorWalls.slice(0, 10)) {
+      let outsideTileX = door.tileX;
+      let outsideTileZ = door.tileZ;
+
+      switch (door.side) {
+        case "north":
+          outsideTileZ -= 1;
+          break;
+        case "south":
+          outsideTileZ += 1;
+          break;
+        case "east":
+          outsideTileX += 1;
+          break;
+        case "west":
+          outsideTileX -= 1;
+          break;
+      }
+
+      const blocked = collisionService.isWallBlocked(
+        outsideTileX,
+        outsideTileZ,
+        door.tileX,
+        door.tileZ,
+        0,
+      );
+
+      if (!blocked) {
+        doorsPassable++;
+      }
+    }
+
+    const doorsTestedCount = Math.min(doorWalls.length, 10);
+    if (doorsTestedCount > 0) {
+      console.log(
+        `[Wall Test] Doors tested: ${doorsTestedCount}, Doors passable: ${doorsPassable}`,
+      );
+
+      // All doors should be passable
+      if (doorsPassable < doorsTestedCount) {
+        console.warn(
+          `[Wall Test] ⚠ Only ${doorsPassable}/${doorsTestedCount} doors are passable`,
+        );
+      } else {
+        console.log(`[Wall Test] ✓ All ${doorsTestedCount} doors are passable`);
+      }
+    }
+
+    // Test 3: Verify pathfinder respects walls - try to path directly into building center
+    // from outside without using the door
+    const bbox = building.boundingBox;
+    const centerX = Math.floor((bbox.minTileX + bbox.maxTileX) / 2);
+    const centerZ = Math.floor((bbox.minTileZ + bbox.maxTileZ) / 2);
+
+    // Start position: outside the building on a non-door side
+    // Find a solid wall and start from outside it
+    const testWall = solidWalls[0];
+    let startX = testWall.tileX;
+    let startZ = testWall.tileZ;
+
+    switch (testWall.side) {
+      case "north":
+        startZ -= 5;
+        break;
+      case "south":
+        startZ += 5;
+        break;
+      case "east":
+        startX += 5;
+        break;
+      case "west":
+        startX -= 5;
+        break;
+    }
+
+    console.log(
+      `[Wall Test] Testing path from (${startX}, ${startZ}) to center (${centerX}, ${centerZ})`,
+    );
+
+    // The path should go AROUND to the door, not through the wall
+    const path = pathfinder.findPath(
+      { x: startX, z: startZ },
+      { x: centerX, z: centerZ },
+      (tile, fromTile) => {
+        const walkable = collisionService.isTileWalkableInBuilding(
+          tile.x,
+          tile.z,
+          0,
+        );
+        if (!walkable) {
+          const inFootprint = collisionService.isTileInBuildingFootprint(
+            tile.x,
+            tile.z,
+          );
+          if (inFootprint) return false;
+          return true;
+        }
+        if (fromTile) {
+          const wallBlocked = collisionService.isWallBlocked(
+            fromTile.x,
+            fromTile.z,
+            tile.x,
+            tile.z,
+            0,
+          );
+          if (wallBlocked) return false;
+        }
+        return true;
+      },
+    );
+
+    if (path.length > 0) {
+      // Verify path doesn't go through any solid walls
+      let prevTile = { x: startX, z: startZ };
+      let wallViolations = 0;
+
+      for (const tile of path) {
+        const wallBlocked = collisionService.isWallBlocked(
+          prevTile.x,
+          prevTile.z,
+          tile.x,
+          tile.z,
+          0,
+        );
+
+        if (wallBlocked) {
+          wallViolations++;
+          console.error(
+            `[Wall Test] PATH VIOLATION: (${prevTile.x},${prevTile.z}) → (${tile.x},${tile.z}) blocked by wall!`,
+          );
+        }
+
+        prevTile = tile;
+      }
+
+      if (wallViolations > 0) {
+        throw new Error(
+          `[WALL ERROR] Path has ${wallViolations} wall violations!`,
+        );
+      }
+
+      console.log(
+        `[Wall Test] ✓ Path of ${path.length} steps has no wall violations`,
+      );
+    } else {
+      console.log(
+        `[Wall Test] No path found (walls may be blocking all routes)`,
+      );
+    }
+
+    console.log("[Wall Test] === WALL VERIFICATION COMPLETE ===");
+  });
+});

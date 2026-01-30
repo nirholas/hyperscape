@@ -14,7 +14,6 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { setSystemTime } from "bun:test";
 import { HOME_TELEPORT_CONSTANTS, EventType, Emotes } from "@hyperscape/shared";
 import {
   initHomeTeleportManager,
@@ -109,9 +108,13 @@ describe("Home Teleport Manager", () => {
     quaternion: [0, 0, 0, 1],
   };
 
+  // Base time for tests
+  let currentTime = new Date("2025-01-15T12:00:00Z").getTime();
+
   beforeEach(() => {
-    vi.useFakeTimers();
-    setSystemTime(new Date("2025-01-15T12:00:00Z"));
+    // Mock Date.now() to return controlled time
+    currentTime = new Date("2025-01-15T12:00:00Z").getTime();
+    vi.spyOn(Date, "now").mockImplementation(() => currentTime);
 
     mockCombatService = { isInCombat: vi.fn().mockReturnValue(false) };
     mockTerrainGetHeight = vi.fn().mockReturnValue(50);
@@ -135,7 +138,7 @@ describe("Home Teleport Manager", () => {
   });
 
   afterEach(() => {
-    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   // Helper to get the real manager
@@ -375,8 +378,8 @@ describe("Home Teleport Manager", () => {
       manager.startCasting(mockSocket as never, 0);
       manager.processTick(CAST_TICKS, () => mockSocket as never);
 
-      // Advance time past cooldown
-      vi.advanceTimersByTime(COOLDOWN_MS + 1);
+      // Advance time past cooldown by updating the mocked Date.now
+      currentTime += COOLDOWN_MS + 1;
 
       expect(manager.isOnCooldown(mockPlayer.id)).toBe(false);
       const error = manager.startCasting(mockSocket as never, 1000);
@@ -391,9 +394,8 @@ describe("Home Teleport Manager", () => {
       const initialRemaining = manager.getCooldownRemaining(mockPlayer.id);
       expect(initialRemaining).toBeGreaterThan(COOLDOWN_MS - 1000);
 
-      // Use setSystemTime to advance time by 5 minutes (setSystemTime affects Date.now())
-      const fiveMinutesLater = new Date("2025-01-15T12:05:00Z");
-      setSystemTime(fiveMinutesLater);
+      // Advance time by 5 minutes by updating the mocked Date.now
+      currentTime = new Date("2025-01-15T12:05:00Z").getTime();
 
       const afterFiveMin = manager.getCooldownRemaining(mockPlayer.id);
       expect(afterFiveMin).toBeLessThan(initialRemaining);
