@@ -1,40 +1,21 @@
 /**
  * Equipment System
- * Handles equipment management, stat bonuses, level requirements, and visual attachment per GDD specifications
- * - Equipment slots (weapon, shield, helmet, body, legs, arrows)
+ * Handles equipment management, stat bonuses, level requirements, and persistence per GDD specifications
+ * - Equipment slots (weapon, shield, helmet, body, legs, boots, gloves, cape, amulet, ring, arrows)
  * - Level requirements for equipment tiers
  * - Stat bonuses from equipped items
  * - Right-click equip/unequip functionality
- * - Visual equipment attachment to player avatars
- * - Colored cube representations for equipment
+ * - Database persistence and auto-save
  */
 
-import THREE from "../../../extras/three/three";
 import { EventType, type EquipmentSyncData } from "../../../types/events";
 import { dataManager } from "../../../data/DataManager";
 import type { InventorySystem } from "./InventorySystem";
 import { EQUIPMENT_SLOT_NAMES } from "../../../constants/EquipmentConstants";
 
 /**
- * Equipment color mapping by material type (visual only)
- * Used for colored cube representations in the game.
- */
-const EQUIPMENT_COLORS: Record<string, string> = {
-  bronze: "#CD7F32",
-  steel: "#C0C0C0",
-  mithril: "#4169E1",
-  leather: "#8B4513",
-  hard_leather: "#A0522D",
-  studded_leather: "#654321",
-  wood: "#8B4513",
-  oak: "#8B7355",
-  willow: "#9ACD32",
-  arrows: "#FFD700",
-};
-
-/**
  * Helper functions for equipment requirements
- * Now uses manifest-driven data from DataManager instead of separate JSON file.
+ * Uses manifest-driven data from DataManager.
  */
 const equipmentRequirements = {
   /**
@@ -61,36 +42,6 @@ const equipmentRequirements = {
       )
       .join(", ");
   },
-
-  /**
-   * Get equipment color based on material prefix (for visual representation)
-   */
-  getEquipmentColor: (itemId: string): string | null => {
-    const match = itemId.match(
-      /^(bronze|steel|mithril|leather|hard_leather|studded_leather|wood|oak|willow|arrows)_/,
-    );
-    return match ? EQUIPMENT_COLORS[match[1]] : null;
-  },
-
-  /**
-   * Get default color by item type
-   */
-  getDefaultColorByType: (itemType: string): string => {
-    const defaults: Record<string, string> = {
-      weapon: "#808080",
-      shield: "#A0A0A0",
-      helmet: "#606060",
-      body: "#505050",
-      legs: "#404040",
-      boots: "#3A3A3A",
-      gloves: "#4A4A4A",
-      cape: "#8B0000",
-      amulet: "#DAA520",
-      ring: "#FFD700",
-      arrows: "#FFD700",
-    };
-    return defaults[itemType] || "#808080";
-  },
 };
 import { SystemBase } from "../infrastructure/SystemBase";
 import { Logger } from "../../../utils/Logger";
@@ -105,21 +56,6 @@ import {
   PlayerEquipment as PlayerEquipment,
   Item,
 } from "../../../types/core/core";
-import type { PlayerWithEquipmentSupport } from "../../../types/rendering/ui";
-
-const attachmentPoints = {
-  helmet: { bone: "head", offset: new THREE.Vector3(0, 0.1, 0) },
-  body: { bone: "spine", offset: new THREE.Vector3(0, 0, 0) },
-  legs: { bone: "hips", offset: new THREE.Vector3(0, -0.2, 0) },
-  weapon: { bone: "rightHand", offset: new THREE.Vector3(0.1, 0, 0) },
-  shield: { bone: "leftHand", offset: new THREE.Vector3(-0.1, 0, 0) },
-  boots: { bone: "leftFoot", offset: new THREE.Vector3(0, -0.4, 0) },
-  gloves: { bone: "rightHand", offset: new THREE.Vector3(0, 0, 0) },
-  cape: { bone: "spine", offset: new THREE.Vector3(0, 0.1, -0.15) },
-  amulet: { bone: "spine", offset: new THREE.Vector3(0, 0.2, 0.05) },
-  ring: { bone: "rightHand", offset: new THREE.Vector3(0, 0, 0) },
-  arrows: { bone: "spine", offset: new THREE.Vector3(0, 0, -0.2) },
-};
 
 // Re-export for backward compatibility
 export type { EquipmentSlot, PlayerEquipment };
@@ -401,14 +337,6 @@ export class EquipmentSystem extends SystemBase {
     // only if no equipment is found in the database
   }
 
-  private equipStartingItems(playerId: string): void {
-    // Per GDD, players start with bronze sword equipped
-    const bronzeSword = this.getItemData("bronze_sword");
-    if (bronzeSword) {
-      this.forceEquipItem(playerId, bronzeSword, "weapon");
-    }
-  }
-
   private async loadEquipmentFromDatabase(playerId: string): Promise<void> {
     if (!this.databaseSystem) {
       return;
@@ -674,9 +602,6 @@ export class EquipmentSystem extends SystemBase {
         slot.itemId = null;
         slot.item = null;
         slot.quantity = undefined;
-        if (slot.visualMesh) {
-          slot.visualMesh = undefined;
-        }
 
         // Emit PLAYER_EQUIPMENT_CHANGED for visual system
         this.emitTypedEvent(EventType.PLAYER_EQUIPMENT_CHANGED, {
@@ -938,9 +863,6 @@ export class EquipmentSystem extends SystemBase {
       equipmentSlot.itemId = data.itemId;
       equipmentSlot.item = itemData;
       equipmentSlot.quantity = quantityToEquip;
-
-      // Create visual representation
-      this.createEquipmentVisual(data.playerId, equipmentSlot);
     } finally {
       // Always release the lock
       inventorySystem?.unlockTransaction(data.playerId);
@@ -1033,9 +955,6 @@ export class EquipmentSystem extends SystemBase {
       // This ensures if add fails, item is already removed from equipment
       // The item is "lost" temporarily but not duplicated
 
-      // Remove visual representation
-      this.removeEquipmentVisual(equipmentSlot);
-
       // Clear equipment slot FIRST (including quantity)
       equipmentSlot.itemId = null;
       equipmentSlot.item = null;
@@ -1058,7 +977,6 @@ export class EquipmentSystem extends SystemBase {
         equipmentSlot.itemId = itemIdToAdd;
         equipmentSlot.item = itemData;
         equipmentSlot.quantity = quantityToReturn;
-        this.createEquipmentVisual(data.playerId, equipmentSlot);
         this.sendMessage(
           data.playerId,
           "Failed to unequip - inventory error.",
@@ -1127,9 +1045,6 @@ export class EquipmentSystem extends SystemBase {
     // Keep itemId as STRING (e.g., "bronze_sword", "steel_sword")
     equipmentSlot.itemId = itemData.id as string | number;
     equipmentSlot.item = itemData;
-
-    // Create visual representation
-    this.createEquipmentVisual(playerId, equipmentSlot);
 
     this.recalculateStats(playerId);
 
@@ -1588,7 +1503,6 @@ export class EquipmentSystem extends SystemBase {
       });
 
       // Clear shield slot
-      this.removeEquipmentVisual(equipment.shield);
       equipment.shield.itemId = null;
       equipment.shield.item = null;
 
@@ -1628,7 +1542,6 @@ export class EquipmentSystem extends SystemBase {
       });
 
       // Clear the slot
-      this.removeEquipmentVisual(targetSlot);
       targetSlot.itemId = null;
       targetSlot.item = null;
     }
@@ -1637,7 +1550,6 @@ export class EquipmentSystem extends SystemBase {
     if (targetSlot) {
       targetSlot.itemId = itemId;
       targetSlot.item = itemData;
-      this.createEquipmentVisual(playerId, targetSlot);
     }
 
     // Update stats
@@ -1704,9 +1616,6 @@ export class EquipmentSystem extends SystemBase {
 
     const itemId = slot.itemId?.toString() || "";
     const quantity = slot.quantity ?? 1;
-
-    // Remove visual
-    this.removeEquipmentVisual(slot);
 
     // Clear slot (including quantity)
     slot.itemId = null;
@@ -1824,7 +1733,6 @@ export class EquipmentSystem extends SystemBase {
     // If no arrows left after consumption, clear the slot
     if (equipment.arrows.quantity <= 0) {
       // Clear the arrow slot
-      this.removeEquipmentVisual(equipment.arrows);
       equipment.arrows.itemId = null;
       equipment.arrows.item = null;
       equipment.arrows.quantity = undefined;
@@ -1840,144 +1748,11 @@ export class EquipmentSystem extends SystemBase {
   }
 
   /**
-   * Create visual representation of equipped item
-   * DISABLED: Cube-based equipment visuals clutter the scene
-   * Equipment should be attached to player skeleton, not floating cubes
-   */
-  private createEquipmentVisual(_playerId: string, _slot: EquipmentSlot): void {
-    // DISABLED: Box geometry equipment visuals are debug/test artifacts
-    //
-    // Proper implementation should:
-    // 1. Load actual 3D models for equipment (GLB files)
-    // 2. Attach to player/mob skeleton bones (e.g., hand bone for weapon)
-    // 3. Use proper material/texture system
-    // 4. Handle equipment swapping with smooth transitions
-    //
-    // For MVP: Equipment is tracked in data/stats but not visually shown
-    // Combat mechanics work without visual equipment representation
-
-    // DO NOT CREATE CUBE PROXIES
-    return;
-  }
-
-  /**
-   * Remove visual representation of equipment
-   */
-  private removeEquipmentVisual(slot: EquipmentSlot): void {
-    if (slot.visualMesh) {
-      // Remove from scene
-      if (slot.visualMesh.parent) {
-        slot.visualMesh.parent.remove(slot.visualMesh);
-      }
-      slot.visualMesh = undefined;
-    }
-  }
-
-  /**
-   * Get equipment color based on material (returns Three.js hex number)
-   */
-  private getEquipmentColor(item: Item): number {
-    const nameLower = (item.name as string)?.toLowerCase() || "";
-
-    const hexString =
-      equipmentRequirements.getEquipmentColor(nameLower) ??
-      equipmentRequirements.getDefaultColorByType(item.type as string);
-
-    // Convert CSS hex string (#RRGGBB) to Three.js number (0xRRGGBB)
-    return parseInt(hexString.replace("#", ""), 16);
-  }
-
-  /**
-   * Type guard to check if player supports equipment attachment
-   */
-  private hasEquipmentSupport(
-    player: unknown,
-  ): player is PlayerWithEquipmentSupport {
-    return (
-      typeof player === "object" &&
-      player !== null &&
-      "position" in player &&
-      "getBoneTransform" in player
-    );
-  }
-
-  /**
-   * Update equipment positions to follow player avatars
-   */
-  private updateEquipmentPositions(): void {
-    for (const [playerId, equipment] of this.playerEquipment) {
-      // Check if player still exists (may have disconnected)
-      const player = this.world.getPlayer
-        ? this.world.getPlayer(playerId)
-        : this.world.entities?.get(playerId);
-
-      // Skip if player not found or doesn't have equipment support
-      if (!player || !this.hasEquipmentSupport(player)) {
-        // Clean up equipment for disconnected players
-        if (!player) {
-          this.playerEquipment.delete(playerId);
-        }
-        continue;
-      }
-
-      this.updatePlayerEquipmentVisuals(player, equipment);
-    }
-  }
-
-  /**
-   * Update equipment visuals for a specific player
-   */
-  private updatePlayerEquipmentVisuals(
-    player: PlayerWithEquipmentSupport,
-    equipment: PlayerEquipment,
-  ): void {
-    // Process each equipment slot
-    Object.entries(attachmentPoints).forEach(([slotName, attachment]) => {
-      const slot = equipment[
-        slotName as keyof PlayerEquipment
-      ] as EquipmentSlot;
-      if (slot?.visualMesh) {
-        this.attachEquipmentToPlayer(
-          player,
-          slot.visualMesh as THREE.Object3D,
-          attachment.bone,
-          attachment.offset,
-        );
-      }
-    });
-  }
-
-  /**
-   * Attach equipment visual to player avatar bone
-   */
-  private attachEquipmentToPlayer(
-    player: PlayerWithEquipmentSupport,
-    equipmentMesh: THREE.Object3D,
-    boneName: string,
-    offset: THREE.Vector3,
-  ): void {
-    // Try to get bone transform from player avatar
-    if (player.getBoneTransform) {
-      const boneMatrix = player.getBoneTransform(boneName);
-      if (boneMatrix) {
-        equipmentMesh.position.setFromMatrixPosition(boneMatrix);
-        equipmentMesh.quaternion.setFromRotationMatrix(boneMatrix);
-        equipmentMesh.position.add(offset);
-        return;
-      }
-    }
-
-    equipmentMesh.position.copy(player.position);
-    equipmentMesh.position.add(offset);
-    equipmentMesh.position.y += 1.8;
-  }
-
-  /**
-   * Main update loop - preserve equipment visual updates
+   * Main update loop
    */
   update(_dt: number): void {
-    // Update equipment visuals every frame
-    this.updateEquipmentPositions();
+    // No-op: visual equipment attachment will be implemented
+    // when proper 3D models are available for equipment items
   }
 
   private isValidEquipmentSlot(
