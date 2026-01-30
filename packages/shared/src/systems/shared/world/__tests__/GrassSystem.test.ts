@@ -184,10 +184,19 @@ describe("BIOME_GRASS_DEFAULTS", () => {
     expect(BIOME_GRASS_DEFAULTS.desert).toBeDefined();
   });
 
-  it("should disable grass for arid biomes", () => {
-    expect(BIOME_GRASS_DEFAULTS.desert?.enabled).toBe(false);
-    expect(BIOME_GRASS_DEFAULTS.mountains?.enabled).toBe(false);
-    expect(BIOME_GRASS_DEFAULTS.lakes?.enabled).toBe(false);
+  it("should have reduced grass density for harsh biomes", () => {
+    // Desert, mountains, lakes have grass enabled but with lower density
+    expect(BIOME_GRASS_DEFAULTS.desert?.enabled).toBe(true);
+    expect(BIOME_GRASS_DEFAULTS.mountains?.enabled).toBe(true);
+    expect(BIOME_GRASS_DEFAULTS.lakes?.enabled).toBe(true);
+
+    // Verify they have lower density than lush biomes
+    expect(BIOME_GRASS_DEFAULTS.desert.densityMultiplier).toBeLessThan(
+      BIOME_GRASS_DEFAULTS.plains.densityMultiplier,
+    );
+    expect(BIOME_GRASS_DEFAULTS.mountains.densityMultiplier).toBeLessThan(
+      BIOME_GRASS_DEFAULTS.plains.densityMultiplier,
+    );
   });
 
   it("should enable grass for vegetated biomes", () => {
@@ -307,16 +316,16 @@ describe("Grass Chunk Math", () => {
     const density = GRASS_CONFIG.BASE_DENSITY;
     const instanceCount = Math.floor(chunkSize * chunkSize * density);
 
-    // 25m * 25m * 8 density = 5000 instances
-    expect(instanceCount).toBe(5000);
+    // 25m * 25m * 40 density = 25000 instances
+    expect(instanceCount).toBe(25000);
   });
 
   it("should calculate correct spacing from density", () => {
     const density = GRASS_CONFIG.BASE_DENSITY;
     const spacing = Math.sqrt(1 / density);
 
-    // sqrt(1/8) ≈ 0.354m between grass blades
-    expect(spacing).toBeCloseTo(0.354, 2);
+    // sqrt(1/40) ≈ 0.158m between grass blades
+    expect(spacing).toBeCloseTo(0.158, 2);
   });
 
   it("should calculate correct bounding sphere radius", () => {

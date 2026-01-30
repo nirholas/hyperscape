@@ -1523,4 +1523,1364 @@ describe("RoadNetworkSystem Algorithms", () => {
       expect(first.f).toBe(5);
     });
   });
+
+  describe("Boundary Exit Detection", () => {
+    const TILE_SIZE = 100;
+    type TileEdge = "north" | "south" | "east" | "west";
+
+    interface RoadBoundaryExit {
+      roadId: string;
+      position: { x: number; z: number };
+      direction: number;
+      tileX: number;
+      tileZ: number;
+      edge: TileEdge;
+    }
+
+    /**
+     * Determine which edge of a tile a position is nearest to
+     */
+    function getNearestTileEdge(x: number, z: number): TileEdge | null {
+      const tileX = Math.floor(x / TILE_SIZE);
+      const tileZ = Math.floor(z / TILE_SIZE);
+      const localX = x - tileX * TILE_SIZE;
+      const localZ = z - tileZ * TILE_SIZE;
+
+      const edgeThreshold = 10;
+
+      if (localX < edgeThreshold) return "west";
+      if (localX > TILE_SIZE - edgeThreshold) return "east";
+      if (localZ < edgeThreshold) return "south";
+      if (localZ > TILE_SIZE - edgeThreshold) return "north";
+
+      return null;
+    }
+
+    /**
+     * Check if a position is at or near a tile boundary
+     */
+    function isAtTileBoundary(x: number, z: number): boolean {
+      const tileX = Math.floor(x / TILE_SIZE);
+      const tileZ = Math.floor(z / TILE_SIZE);
+      const localX = x - tileX * TILE_SIZE;
+      const localZ = z - tileZ * TILE_SIZE;
+
+      const edgeThreshold = 5;
+      return (
+        localX < edgeThreshold ||
+        localX > TILE_SIZE - edgeThreshold ||
+        localZ < edgeThreshold ||
+        localZ > TILE_SIZE - edgeThreshold
+      );
+    }
+
+    /**
+     * Record a boundary exit if position is at tile edge
+     */
+    function recordBoundaryExitIfAtEdge(
+      x: number,
+      z: number,
+      direction: number,
+      roadId: string,
+      exits: RoadBoundaryExit[],
+    ): void {
+      const edge = getNearestTileEdge(x, z);
+      if (!edge) return;
+
+      const tileX = Math.floor(x / TILE_SIZE);
+      const tileZ = Math.floor(z / TILE_SIZE);
+
+      // Avoid duplicates
+      const existing = exits.find(
+        (e) =>
+          e.roadId === roadId &&
+          e.tileX === tileX &&
+          e.tileZ === tileZ &&
+          e.edge === edge,
+      );
+      if (existing) return;
+
+      exits.push({
+        roadId,
+        position: { x, z },
+        direction,
+        tileX,
+        tileZ,
+        edge,
+      });
+    }
+
+    it("should detect tile boundaries correctly", () => {
+      // Point in middle of tile
+      expect(isAtTileBoundary(50, 50)).toBe(false);
+
+      // Point near west edge
+      expect(isAtTileBoundary(2, 50)).toBe(true);
+
+      // Point near east edge
+      expect(isAtTileBoundary(98, 50)).toBe(true);
+
+      // Point near south edge
+      expect(isAtTileBoundary(50, 2)).toBe(true);
+
+      // Point near north edge
+      expect(isAtTileBoundary(50, 98)).toBe(true);
+    });
+
+    it("should identify correct tile edge", () => {
+      expect(getNearestTileEdge(2, 50)).toBe("west");
+      expect(getNearestTileEdge(98, 50)).toBe("east");
+      expect(getNearestTileEdge(50, 2)).toBe("south");
+      expect(getNearestTileEdge(50, 98)).toBe("north");
+      expect(getNearestTileEdge(50, 50)).toBe(null);
+    });
+
+    it("should record boundary exits at tile edges", () => {
+      const exits: RoadBoundaryExit[] = [];
+
+      // Road ending at east edge of tile 0,0
+      recordBoundaryExitIfAtEdge(98, 50, 0, "road_1", exits);
+      expect(exits.length).toBe(1);
+      expect(exits[0].edge).toBe("east");
+      expect(exits[0].tileX).toBe(0);
+      expect(exits[0].tileZ).toBe(0);
+
+      // Road ending at north edge
+      recordBoundaryExitIfAtEdge(50, 98, Math.PI / 2, "road_2", exits);
+      expect(exits.length).toBe(2);
+      expect(exits[1].edge).toBe("north");
+    });
+
+    it("should not record duplicate boundary exits", () => {
+      const exits: RoadBoundaryExit[] = [];
+
+      recordBoundaryExitIfAtEdge(98, 50, 0, "road_1", exits);
+      recordBoundaryExitIfAtEdge(97, 50, 0, "road_1", exits); // Same road, same edge
+
+      expect(exits.length).toBe(1);
+    });
+
+    it("should not record exits for points not at boundary", () => {
+      const exits: RoadBoundaryExit[] = [];
+
+      recordBoundaryExitIfAtEdge(50, 50, 0, "road_1", exits);
+      expect(exits.length).toBe(0);
+    });
+
+    it("should handle negative coordinates", () => {
+      // Tile at (-1, -1) spans X: -100 to 0, Z: -100 to 0
+      // Point (-98, -50) has local coords (2, 50) -> near west edge
+      expect(getNearestTileEdge(-98, -50)).toBe("west");
+      // Point (-2, -50) has local coords (98, 50) -> near east edge
+      expect(getNearestTileEdge(-2, -50)).toBe("east");
+    });
+  });
+
+  describe("Cross-Tile Road Continuity", () => {
+    const TILE_SIZE = 100;
+    type TileEdge = "north" | "south" | "east" | "west";
+
+    interface RoadBoundaryExit {
+      roadId: string;
+      position: { x: number; z: number };
+      direction: number;
+      tileX: number;
+      tileZ: number;
+      edge: TileEdge;
+    }
+
+    /**
+     * Get road entry points for a tile from adjacent tiles
+     */
+    function getRoadEntriesForTile(
+      tileX: number,
+      tileZ: number,
+      allExits: RoadBoundaryExit[],
+    ): RoadBoundaryExit[] {
+      const entries: RoadBoundaryExit[] = [];
+
+      const adjacentTiles: Array<{
+        adjTileX: number;
+        adjTileZ: number;
+        adjEdge: TileEdge;
+        entryEdge: TileEdge;
+      }> = [
+        {
+          adjTileX: tileX - 1,
+          adjTileZ: tileZ,
+          adjEdge: "east",
+          entryEdge: "west",
+        },
+        {
+          adjTileX: tileX + 1,
+          adjTileZ: tileZ,
+          adjEdge: "west",
+          entryEdge: "east",
+        },
+        {
+          adjTileX: tileX,
+          adjTileZ: tileZ - 1,
+          adjEdge: "north",
+          entryEdge: "south",
+        },
+        {
+          adjTileX: tileX,
+          adjTileZ: tileZ + 1,
+          adjEdge: "south",
+          entryEdge: "north",
+        },
+      ];
+
+      for (const { adjTileX, adjTileZ, adjEdge, entryEdge } of adjacentTiles) {
+        const adjacentExits = allExits.filter(
+          (e) =>
+            e.tileX === adjTileX && e.tileZ === adjTileZ && e.edge === adjEdge,
+        );
+
+        for (const exit of adjacentExits) {
+          entries.push({
+            ...exit,
+            tileX,
+            tileZ,
+            edge: entryEdge,
+          });
+        }
+      }
+
+      return entries;
+    }
+
+    it("should find entries from adjacent tiles", () => {
+      const exits: RoadBoundaryExit[] = [
+        {
+          roadId: "road_1",
+          position: { x: 98, z: 50 },
+          direction: 0,
+          tileX: 0,
+          tileZ: 0,
+          edge: "east",
+        },
+      ];
+
+      // Tile (1,0) should see entry from tile (0,0) on its west edge
+      const entries = getRoadEntriesForTile(1, 0, exits);
+      expect(entries.length).toBe(1);
+      expect(entries[0].edge).toBe("west");
+      expect(entries[0].roadId).toBe("road_1");
+    });
+
+    it("should find entries from multiple adjacent tiles", () => {
+      const exits: RoadBoundaryExit[] = [
+        {
+          roadId: "road_1",
+          position: { x: 98, z: 50 },
+          direction: 0,
+          tileX: 0,
+          tileZ: 0,
+          edge: "east",
+        },
+        {
+          roadId: "road_2",
+          position: { x: 50, z: 98 },
+          direction: Math.PI / 2,
+          tileX: 1,
+          tileZ: -1,
+          edge: "north",
+        },
+      ];
+
+      // Tile (1,0) should see entries from west (road_1) and south (road_2)
+      const entries = getRoadEntriesForTile(1, 0, exits);
+      expect(entries.length).toBe(2);
+    });
+
+    it("should not find entries from non-adjacent tiles", () => {
+      const exits: RoadBoundaryExit[] = [
+        {
+          roadId: "road_1",
+          position: { x: 98, z: 50 },
+          direction: 0,
+          tileX: 5,
+          tileZ: 5,
+          edge: "east",
+        },
+      ];
+
+      // Tile (0,0) should not see entry from tile (5,5)
+      const entries = getRoadEntriesForTile(0, 0, exits);
+      expect(entries.length).toBe(0);
+    });
+
+    it("should map edge correctly: east exit -> west entry", () => {
+      const exits: RoadBoundaryExit[] = [
+        {
+          roadId: "road_1",
+          position: { x: 98, z: 50 },
+          direction: 0,
+          tileX: 0,
+          tileZ: 0,
+          edge: "east",
+        },
+      ];
+
+      const entries = getRoadEntriesForTile(1, 0, exits);
+      expect(entries[0].edge).toBe("west");
+    });
+
+    it("should map edge correctly: north exit -> south entry", () => {
+      const exits: RoadBoundaryExit[] = [
+        {
+          roadId: "road_1",
+          position: { x: 50, z: 98 },
+          direction: Math.PI / 2,
+          tileX: 0,
+          tileZ: 0,
+          edge: "north",
+        },
+      ];
+
+      const entries = getRoadEntriesForTile(0, 1, exits);
+      expect(entries[0].edge).toBe("south");
+    });
+  });
+
+  describe("Weighted Random Walk", () => {
+    // Test the random walk algorithm properties
+    const seed = 12345;
+    let randomState = seed;
+
+    function random(): number {
+      randomState = (randomState * 1664525 + 1013904223) >>> 0;
+      return randomState / 0xffffffff;
+    }
+
+    function resetRandom(newSeed: number): void {
+      randomState = newSeed;
+    }
+
+    it("should produce deterministic walks with same seed", () => {
+      const walk1: Array<{ x: number; z: number }> = [];
+      const walk2: Array<{ x: number; z: number }> = [];
+
+      // First walk
+      resetRandom(seed);
+      let x = 0,
+        z = 0;
+      for (let i = 0; i < 10; i++) {
+        const angle = random() * Math.PI * 2;
+        x += Math.cos(angle) * 20;
+        z += Math.sin(angle) * 20;
+        walk1.push({ x, z });
+      }
+
+      // Second walk with same seed
+      resetRandom(seed);
+      x = 0;
+      z = 0;
+      for (let i = 0; i < 10; i++) {
+        const angle = random() * Math.PI * 2;
+        x += Math.cos(angle) * 20;
+        z += Math.sin(angle) * 20;
+        walk2.push({ x, z });
+      }
+
+      // Should be identical
+      for (let i = 0; i < walk1.length; i++) {
+        expect(walk1[i].x).toBeCloseTo(walk2[i].x, 10);
+        expect(walk1[i].z).toBeCloseTo(walk2[i].z, 10);
+      }
+    });
+
+    it("should produce different walks with different seeds", () => {
+      const walk1: Array<{ x: number; z: number }> = [];
+      const walk2: Array<{ x: number; z: number }> = [];
+
+      // First walk
+      resetRandom(12345);
+      let x = 0,
+        z = 0;
+      for (let i = 0; i < 10; i++) {
+        const angle = random() * Math.PI * 2;
+        x += Math.cos(angle) * 20;
+        z += Math.sin(angle) * 20;
+        walk1.push({ x, z });
+      }
+
+      // Second walk with different seed
+      resetRandom(54321);
+      x = 0;
+      z = 0;
+      for (let i = 0; i < 10; i++) {
+        const angle = random() * Math.PI * 2;
+        x += Math.cos(angle) * 20;
+        z += Math.sin(angle) * 20;
+        walk2.push({ x, z });
+      }
+
+      // Should be different
+      let anyDifferent = false;
+      for (let i = 0; i < walk1.length; i++) {
+        if (
+          Math.abs(walk1[i].x - walk2[i].x) > 1 ||
+          Math.abs(walk1[i].z - walk2[i].z) > 1
+        ) {
+          anyDifferent = true;
+          break;
+        }
+      }
+      expect(anyDifferent).toBe(true);
+    });
+
+    it("weighted walk should favor forward direction", () => {
+      resetRandom(seed);
+
+      const forwardBias = 0.7;
+      const directionVariance = Math.PI / 8;
+      let baseDirection = 0; // Heading east
+
+      const deviations: number[] = [];
+
+      for (let i = 0; i < 100; i++) {
+        const randomValue = random();
+        let angleAdjustment: number;
+
+        if (randomValue < forwardBias) {
+          angleAdjustment = (random() - 0.5) * directionVariance * 0.5;
+        } else {
+          angleAdjustment = (random() - 0.5) * directionVariance * 2;
+        }
+
+        deviations.push(Math.abs(angleAdjustment));
+      }
+
+      // Average deviation should be small due to forward bias
+      const avgDeviation =
+        deviations.reduce((a, b) => a + b) / deviations.length;
+      expect(avgDeviation).toBeLessThan(directionVariance);
+    });
+  });
+
+  describe("Boundary Exit Edge Cases", () => {
+    const TILE_SIZE = 100;
+    type TileEdge = "north" | "south" | "east" | "west";
+
+    function getTileInfo(x: number, z: number) {
+      const tileX = Math.floor(x / TILE_SIZE);
+      const tileZ = Math.floor(z / TILE_SIZE);
+      return {
+        tileX,
+        tileZ,
+        localX: x - tileX * TILE_SIZE,
+        localZ: z - tileZ * TILE_SIZE,
+      };
+    }
+
+    function getNearestTileEdge(
+      x: number,
+      z: number,
+      threshold: number = 10,
+    ): TileEdge | null {
+      const { localX, localZ } = getTileInfo(x, z);
+      if (localX < threshold) return "west";
+      if (localX > TILE_SIZE - threshold) return "east";
+      if (localZ < threshold) return "south";
+      if (localZ > TILE_SIZE - threshold) return "north";
+      return null;
+    }
+
+    it("should handle exact boundary positions (x=0, z=0)", () => {
+      const info = getTileInfo(0, 0);
+      expect(info.tileX).toBe(0);
+      expect(info.tileZ).toBe(0);
+      expect(info.localX).toBe(0);
+      expect(info.localZ).toBe(0);
+      expect(getNearestTileEdge(0, 0)).toBe("west"); // localX=0 is near west edge
+    });
+
+    it("should handle positions at exact tile boundaries", () => {
+      // Exact east edge of tile 0
+      expect(getNearestTileEdge(100, 50)).toBe("west"); // This is localX=0 of tile 1
+      // Just inside east edge of tile 0
+      expect(getNearestTileEdge(99, 50)).toBe("east");
+    });
+
+    it("should handle corner positions (near two edges)", () => {
+      // Near SW corner - should pick one edge (west takes priority in our impl)
+      expect(getNearestTileEdge(2, 2)).toBe("west");
+      // Near NE corner
+      expect(getNearestTileEdge(98, 98)).toBe("east");
+    });
+
+    it("should handle positions exactly at threshold distance", () => {
+      const threshold = 10;
+      // Just inside threshold - should be at edge (localX < threshold)
+      expect(getNearestTileEdge(9, 50, threshold)).toBe("west");
+      // Exactly at threshold - NOT at edge (uses strict less-than)
+      expect(getNearestTileEdge(10, 50, threshold)).toBe(null);
+      // Just past threshold - not at edge
+      expect(getNearestTileEdge(11, 50, threshold)).toBe(null);
+    });
+
+    it("should handle very large coordinates", () => {
+      const info = getTileInfo(10050, 10050);
+      expect(info.tileX).toBe(100);
+      expect(info.tileZ).toBe(100);
+      expect(info.localX).toBe(50);
+      expect(info.localZ).toBe(50);
+    });
+
+    it("should handle very small negative coordinates", () => {
+      const info = getTileInfo(-10050, -10050);
+      expect(info.tileX).toBe(-101);
+      expect(info.tileZ).toBe(-101);
+      expect(info.localX).toBeCloseTo(50, 5);
+      expect(info.localZ).toBeCloseTo(50, 5);
+    });
+
+    it("should handle fractional coordinates", () => {
+      const info = getTileInfo(50.5, 50.5);
+      expect(info.tileX).toBe(0);
+      expect(info.tileZ).toBe(0);
+      expect(info.localX).toBeCloseTo(50.5, 10);
+      expect(info.localZ).toBeCloseTo(50.5, 10);
+    });
+  });
+
+  describe("Road Extension Validation", () => {
+    const WATER_THRESHOLD = 5.4;
+    const MAX_SLOPE = 0.5;
+    const STEP_SIZE = 20;
+
+    interface RoadPathPoint {
+      x: number;
+      z: number;
+      y: number;
+    }
+
+    /**
+     * Simulate road extension with stop conditions
+     */
+    function simulateRoadExtension(
+      startPath: RoadPathPoint[],
+      terrainHeight: (x: number, z: number) => number,
+      maxIterations: number = 15,
+    ): RoadPathPoint[] {
+      if (startPath.length < 2) return startPath;
+
+      const path = [...startPath];
+      const last = startPath[startPath.length - 1];
+      const prev = startPath[startPath.length - 2];
+      let direction = Math.atan2(last.z - prev.z, last.x - prev.x);
+      let x = last.x;
+      let z = last.z;
+
+      for (let i = 0; i < maxIterations; i++) {
+        const newX = x + Math.cos(direction) * STEP_SIZE;
+        const newZ = z + Math.sin(direction) * STEP_SIZE;
+        const height = terrainHeight(newX, newZ);
+        const lastHeight = path[path.length - 1].y;
+        const slope = Math.abs(height - lastHeight) / STEP_SIZE;
+
+        // Stop conditions
+        if (height < WATER_THRESHOLD) break;
+        if (slope > MAX_SLOPE) break;
+
+        path.push({ x: newX, z: newZ, y: height });
+        x = newX;
+        z = newZ;
+      }
+
+      return path;
+    }
+
+    it("should stop extension when hitting water", () => {
+      const initialPath: RoadPathPoint[] = [
+        { x: 0, z: 0, y: 10 },
+        { x: 20, z: 0, y: 10 },
+      ];
+
+      // Terrain that becomes water after 3 steps
+      const terrain = (x: number, _z: number) => (x > 60 ? 0 : 10);
+
+      const extended = simulateRoadExtension(initialPath, terrain, 10);
+
+      // Should stop before water (at x=60)
+      const lastPoint = extended[extended.length - 1];
+      expect(lastPoint.x).toBeLessThanOrEqual(60);
+      expect(extended.length).toBeLessThan(10 + 2); // Less than max iterations + initial
+    });
+
+    it("should stop extension on steep slopes", () => {
+      const initialPath: RoadPathPoint[] = [
+        { x: 0, z: 0, y: 10 },
+        { x: 20, z: 0, y: 10 },
+      ];
+
+      // Terrain with steep cliff after 2 steps
+      const terrain = (x: number, _z: number) => (x > 40 ? 100 : 10);
+
+      const extended = simulateRoadExtension(initialPath, terrain, 10);
+
+      // Should stop before cliff
+      const lastPoint = extended[extended.length - 1];
+      expect(lastPoint.x).toBeLessThanOrEqual(60); // Cliff detection at x=60 step
+    });
+
+    it("should extend fully on flat, dry terrain", () => {
+      const initialPath: RoadPathPoint[] = [
+        { x: 0, z: 0, y: 10 },
+        { x: 20, z: 0, y: 10 },
+      ];
+
+      // Completely flat terrain
+      const terrain = () => 10;
+
+      const extended = simulateRoadExtension(initialPath, terrain, 5);
+
+      // Should extend all 5 iterations
+      expect(extended.length).toBe(2 + 5);
+    });
+
+    it("should handle path with only 1 point", () => {
+      const initialPath: RoadPathPoint[] = [{ x: 0, z: 0, y: 10 }];
+
+      const extended = simulateRoadExtension(initialPath, () => 10, 5);
+
+      // Should return unchanged (cannot determine direction)
+      expect(extended.length).toBe(1);
+    });
+
+    it("should handle empty path", () => {
+      const initialPath: RoadPathPoint[] = [];
+
+      const extended = simulateRoadExtension(initialPath, () => 10, 5);
+
+      expect(extended.length).toBe(0);
+    });
+
+    it("should preserve original path points", () => {
+      const initialPath: RoadPathPoint[] = [
+        { x: 100, z: 200, y: 15 },
+        { x: 120, z: 200, y: 15 },
+      ];
+
+      const extended = simulateRoadExtension(initialPath, () => 15, 3);
+
+      // First two points should be unchanged
+      expect(extended[0]).toEqual(initialPath[0]);
+      expect(extended[1]).toEqual(initialPath[1]);
+    });
+
+    it("should follow path direction", () => {
+      // Path heading northeast
+      const initialPath: RoadPathPoint[] = [
+        { x: 0, z: 0, y: 10 },
+        { x: 20, z: 20, y: 10 },
+      ];
+
+      const extended = simulateRoadExtension(initialPath, () => 10, 5);
+
+      // Extended points should continue northeast
+      for (let i = 2; i < extended.length; i++) {
+        expect(extended[i].x).toBeGreaterThan(extended[i - 1].x);
+        expect(extended[i].z).toBeGreaterThan(extended[i - 1].z);
+      }
+    });
+  });
+
+  describe("hasRoadAtPoint Edge Cases", () => {
+    const dist2D = (x1: number, z1: number, x2: number, z2: number): number =>
+      Math.sqrt((x2 - x1) ** 2 + (z2 - z1) ** 2);
+
+    interface Road {
+      path: Array<{ x: number; z: number }>;
+    }
+
+    function hasRoadAtPoint(
+      roads: Road[],
+      x: number,
+      z: number,
+      threshold: number = 10,
+    ): boolean {
+      return roads.some((road) => {
+        if (road.path.length === 0) return false;
+        const first = road.path[0];
+        const last = road.path[road.path.length - 1];
+        return (
+          dist2D(first.x, first.z, x, z) < threshold ||
+          dist2D(last.x, last.z, x, z) < threshold
+        );
+      });
+    }
+
+    it("should return false for empty roads array", () => {
+      expect(hasRoadAtPoint([], 50, 50)).toBe(false);
+    });
+
+    it("should handle road with empty path", () => {
+      const roads: Road[] = [{ path: [] }];
+      expect(hasRoadAtPoint(roads, 50, 50)).toBe(false);
+    });
+
+    it("should handle road with single point", () => {
+      const roads: Road[] = [{ path: [{ x: 50, z: 50 }] }];
+      expect(hasRoadAtPoint(roads, 50, 50)).toBe(true);
+      expect(hasRoadAtPoint(roads, 100, 100)).toBe(false);
+    });
+
+    it("should check both endpoints", () => {
+      const roads: Road[] = [
+        {
+          path: [
+            { x: 0, z: 0 },
+            { x: 100, z: 100 },
+          ],
+        },
+      ];
+
+      // Near start
+      expect(hasRoadAtPoint(roads, 5, 5)).toBe(true);
+      // Near end
+      expect(hasRoadAtPoint(roads, 95, 95)).toBe(true);
+      // In middle (not endpoint)
+      expect(hasRoadAtPoint(roads, 50, 50)).toBe(false);
+    });
+
+    it("should respect threshold parameter", () => {
+      const roads: Road[] = [
+        {
+          path: [
+            { x: 0, z: 0 },
+            { x: 100, z: 0 },
+          ],
+        },
+      ];
+
+      // Within threshold of 10
+      expect(hasRoadAtPoint(roads, 5, 0, 10)).toBe(true);
+      // Outside threshold of 3
+      expect(hasRoadAtPoint(roads, 5, 0, 3)).toBe(false);
+    });
+
+    it("should find road at point with multiple roads", () => {
+      const roads: Road[] = [
+        {
+          path: [
+            { x: 0, z: 0 },
+            { x: 50, z: 0 },
+          ],
+        },
+        {
+          path: [
+            { x: 100, z: 100 },
+            { x: 200, z: 100 },
+          ],
+        },
+      ];
+
+      expect(hasRoadAtPoint(roads, 0, 0)).toBe(true);
+      expect(hasRoadAtPoint(roads, 100, 100)).toBe(true);
+      expect(hasRoadAtPoint(roads, 200, 100)).toBe(true);
+      expect(hasRoadAtPoint(roads, 150, 100)).toBe(false);
+    });
+  });
+
+  describe("Edge Mapping Verification", () => {
+    // Verify the edge mapping is correct for all 4 directions
+    const edgeMappings: Array<{
+      fromTile: [number, number];
+      toTile: [number, number];
+      exitEdge: string;
+      entryEdge: string;
+    }> = [
+      { fromTile: [0, 0], toTile: [1, 0], exitEdge: "east", entryEdge: "west" },
+      { fromTile: [1, 0], toTile: [0, 0], exitEdge: "west", entryEdge: "east" },
+      {
+        fromTile: [0, 0],
+        toTile: [0, 1],
+        exitEdge: "north",
+        entryEdge: "south",
+      },
+      {
+        fromTile: [0, 1],
+        toTile: [0, 0],
+        exitEdge: "south",
+        entryEdge: "north",
+      },
+    ];
+
+    for (const { fromTile, toTile, exitEdge, entryEdge } of edgeMappings) {
+      it(`should map ${exitEdge} exit from (${fromTile}) to ${entryEdge} entry in (${toTile})`, () => {
+        // Calculate the delta between tiles
+        const dx = toTile[0] - fromTile[0];
+        const dz = toTile[1] - fromTile[1];
+
+        // Verify the mapping is correct
+        if (dx === 1) {
+          expect(exitEdge).toBe("east");
+          expect(entryEdge).toBe("west");
+        } else if (dx === -1) {
+          expect(exitEdge).toBe("west");
+          expect(entryEdge).toBe("east");
+        } else if (dz === 1) {
+          expect(exitEdge).toBe("north");
+          expect(entryEdge).toBe("south");
+        } else if (dz === -1) {
+          expect(exitEdge).toBe("south");
+          expect(entryEdge).toBe("north");
+        }
+      });
+    }
+
+    it("should verify all edge pairs are opposites", () => {
+      const opposites: Record<string, string> = {
+        north: "south",
+        south: "north",
+        east: "west",
+        west: "east",
+      };
+
+      for (const [edge, opposite] of Object.entries(opposites)) {
+        expect(opposites[opposite]).toBe(edge);
+      }
+    });
+  });
+
+  describe("Road Extension Algorithm (Full Implementation)", () => {
+    /**
+     * This test mirrors the EXACT implementation of extendRoadWithRandomWalk
+     * from RoadNetworkSystem.ts to verify it actually extends roads properly.
+     */
+
+    type TileEdge = "north" | "south" | "east" | "west";
+
+    interface RoadBoundaryExit {
+      roadId: string;
+      position: { x: number; z: number };
+      direction: number;
+      tileX: number;
+      tileZ: number;
+      edge: TileEdge;
+    }
+
+    interface TerrainProvider {
+      getHeightAt(x: number, z: number): number;
+    }
+
+    // Exact replica of the implementation
+    function extendRoadWithRandomWalk(
+      currentPath: RoadPathPoint[],
+      baseDirection: number,
+      roadIndex: number,
+      terrain: TerrainProvider,
+      seed: number,
+      worldHalfSize: number,
+      boundaryExits: RoadBoundaryExit[],
+    ): RoadPathPoint[] {
+      if (currentPath.length < 2) {
+        return currentPath;
+      }
+
+      // Initialize random state exactly as in RoadNetworkSystem
+      let randomState = seed + roadIndex * 13337 + 500000;
+      const random = () => {
+        randomState = (randomState * 1664525 + 1013904223) >>> 0;
+        return randomState / 0xffffffff;
+      };
+
+      const extendedPath = [...currentPath];
+      const roadId = `road_explore_${roadIndex}`;
+
+      // Get initial direction from path's last segment, or use base direction
+      const last = currentPath[currentPath.length - 1];
+      const secondLast = currentPath[currentPath.length - 2];
+      const dx = last.x - secondLast.x;
+      const dz = last.z - secondLast.z;
+      const dirLen = Math.sqrt(dx * dx + dz * dz);
+      let direction = dirLen > 0.1 ? Math.atan2(dz, dx) : baseDirection;
+
+      let x = last.x;
+      let z = last.z;
+
+      // Walk parameters (exact values from implementation)
+      const step = PATH_STEP_SIZE;
+      const maxSteps = Math.ceil(300 / step);
+      const variance = Math.PI / 8;
+      const forwardBias = 0.7;
+
+      for (let i = 0; i < maxSteps; i++) {
+        // Weighted random direction adjustment
+        const adjustment =
+          random() < forwardBias
+            ? (random() - 0.5) * variance * 0.5
+            : (random() - 0.5) * variance * 2;
+
+        direction += adjustment;
+        const newX = x + Math.cos(direction) * step;
+        const newZ = z + Math.sin(direction) * step;
+
+        // Stop conditions: water, world bounds, steep slope, tile boundary
+        const height = terrain.getHeightAt(newX, newZ);
+        const lastY = extendedPath[extendedPath.length - 1].y;
+        const slope = Math.abs(height - lastY) / step;
+
+        if (
+          height < WATER_THRESHOLD ||
+          Math.abs(newX) > worldHalfSize ||
+          Math.abs(newZ) > worldHalfSize ||
+          slope > 0.5
+        ) {
+          recordBoundaryExitIfAtEdge(x, z, direction, roadId, boundaryExits);
+          break;
+        }
+
+        extendedPath.push({ x: newX, z: newZ, y: height });
+        x = newX;
+        z = newZ;
+
+        if (isAtTileBoundary(x, z)) {
+          recordBoundaryExitIfAtEdge(x, z, direction, roadId, boundaryExits);
+          break;
+        }
+      }
+
+      return extendedPath;
+    }
+
+    function getTileInfo(x: number, z: number) {
+      const tileX = Math.floor(x / TILE_SIZE);
+      const tileZ = Math.floor(z / TILE_SIZE);
+      return {
+        tileX,
+        tileZ,
+        localX: x - tileX * TILE_SIZE,
+        localZ: z - tileZ * TILE_SIZE,
+      };
+    }
+
+    function isAtTileBoundary(
+      x: number,
+      z: number,
+      threshold: number = 5,
+    ): boolean {
+      const { localX, localZ } = getTileInfo(x, z);
+      return (
+        localX < threshold ||
+        localX > TILE_SIZE - threshold ||
+        localZ < threshold ||
+        localZ > TILE_SIZE - threshold
+      );
+    }
+
+    function getNearestTileEdge(
+      x: number,
+      z: number,
+      threshold: number = 10,
+    ): TileEdge | null {
+      const { localX, localZ } = getTileInfo(x, z);
+      if (localX < threshold) return "west";
+      if (localX > TILE_SIZE - threshold) return "east";
+      if (localZ < threshold) return "south";
+      if (localZ > TILE_SIZE - threshold) return "north";
+      return null;
+    }
+
+    function recordBoundaryExitIfAtEdge(
+      x: number,
+      z: number,
+      direction: number,
+      roadId: string,
+      exits: RoadBoundaryExit[],
+    ): void {
+      const edge = getNearestTileEdge(x, z);
+      if (!edge) return;
+
+      const { tileX, tileZ } = getTileInfo(x, z);
+
+      const isDuplicate = exits.some(
+        (e) =>
+          e.roadId === roadId &&
+          e.tileX === tileX &&
+          e.tileZ === tileZ &&
+          e.edge === edge,
+      );
+      if (isDuplicate) return;
+
+      exits.push({ roadId, position: { x, z }, direction, tileX, tileZ, edge });
+    }
+
+    it("should extend road paths on valid terrain", () => {
+      const terrain: TerrainProvider = { getHeightAt: () => 50 };
+
+      // Initial path heading east, starting in middle of tile
+      const initialPath: RoadPathPoint[] = [
+        { x: 50, z: 50, y: 50 },
+        { x: 70, z: 50, y: 50 },
+      ];
+
+      const boundaryExits: RoadBoundaryExit[] = [];
+      const extended = extendRoadWithRandomWalk(
+        initialPath,
+        0, // heading east
+        1,
+        terrain,
+        12345,
+        5000,
+        boundaryExits,
+      );
+
+      // Path should be extended
+      expect(extended.length).toBeGreaterThan(initialPath.length);
+      console.log(
+        `Extended path from ${initialPath.length} to ${extended.length} points`,
+      );
+
+      // New points should have valid heights
+      for (let i = initialPath.length; i < extended.length; i++) {
+        expect(extended[i].y).toBe(50);
+      }
+    });
+
+    it("should record boundary exits when reaching tile edge", () => {
+      const terrain: TerrainProvider = { getHeightAt: () => 50 };
+
+      // Start near tile boundary, heading toward it
+      const initialPath: RoadPathPoint[] = [
+        { x: 70, z: 50, y: 50 },
+        { x: 90, z: 50, y: 50 }, // Heading east, near east edge
+      ];
+
+      const boundaryExits: RoadBoundaryExit[] = [];
+      const extended = extendRoadWithRandomWalk(
+        initialPath,
+        0,
+        1,
+        terrain,
+        42,
+        5000,
+        boundaryExits,
+      );
+
+      // Should record at least one boundary exit
+      console.log(`Boundary exits recorded: ${boundaryExits.length}`);
+      console.log(
+        `Final path point: (${extended[extended.length - 1].x.toFixed(1)}, ${extended[extended.length - 1].z.toFixed(1)})`,
+      );
+
+      // Extension should happen (at least one step)
+      expect(extended.length).toBeGreaterThan(initialPath.length);
+    });
+
+    it("should stop at water", () => {
+      // Terrain that becomes water after x > 150
+      const terrain: TerrainProvider = {
+        getHeightAt: (x: number) => (x > 150 ? 0 : 50),
+      };
+
+      const initialPath: RoadPathPoint[] = [
+        { x: 100, z: 50, y: 50 },
+        { x: 120, z: 50, y: 50 },
+      ];
+
+      const boundaryExits: RoadBoundaryExit[] = [];
+      const extended = extendRoadWithRandomWalk(
+        initialPath,
+        0,
+        1,
+        terrain,
+        12345,
+        5000,
+        boundaryExits,
+      );
+
+      // All extended points should be above water
+      for (const point of extended) {
+        expect(point.y).toBeGreaterThanOrEqual(WATER_THRESHOLD);
+      }
+
+      // Last point should be before water (x <= 150)
+      const lastPoint = extended[extended.length - 1];
+      expect(lastPoint.x).toBeLessThanOrEqual(180); // Some buffer for step size
+      console.log(`Stopped at x=${lastPoint.x.toFixed(1)} (water at x>150)`);
+    });
+
+    it("should stop at steep terrain", () => {
+      // Terrain with cliff at x > 200
+      const terrain: TerrainProvider = {
+        getHeightAt: (x: number) => (x > 200 ? 500 : 50),
+      };
+
+      const initialPath: RoadPathPoint[] = [
+        { x: 150, z: 50, y: 50 },
+        { x: 170, z: 50, y: 50 },
+      ];
+
+      const boundaryExits: RoadBoundaryExit[] = [];
+      const extended = extendRoadWithRandomWalk(
+        initialPath,
+        0,
+        1,
+        terrain,
+        12345,
+        5000,
+        boundaryExits,
+      );
+
+      // Last point should be before cliff
+      const lastPoint = extended[extended.length - 1];
+      expect(lastPoint.x).toBeLessThanOrEqual(220); // Cliff detection at ~200 + step size
+      console.log(`Stopped at x=${lastPoint.x.toFixed(1)} (cliff at x>200)`);
+    });
+
+    it("should respect world boundaries", () => {
+      const terrain: TerrainProvider = { getHeightAt: () => 50 };
+      const worldHalfSize = 200;
+
+      // Start near world boundary
+      const initialPath: RoadPathPoint[] = [
+        { x: 150, z: 50, y: 50 },
+        { x: 170, z: 50, y: 50 },
+      ];
+
+      const boundaryExits: RoadBoundaryExit[] = [];
+      const extended = extendRoadWithRandomWalk(
+        initialPath,
+        0,
+        1,
+        terrain,
+        12345,
+        worldHalfSize,
+        boundaryExits,
+      );
+
+      // All points should be within world bounds
+      for (const point of extended) {
+        expect(Math.abs(point.x)).toBeLessThanOrEqual(
+          worldHalfSize + PATH_STEP_SIZE,
+        );
+        expect(Math.abs(point.z)).toBeLessThanOrEqual(
+          worldHalfSize + PATH_STEP_SIZE,
+        );
+      }
+
+      console.log(
+        `Stopped at x=${extended[extended.length - 1].x.toFixed(1)} (world boundary at ${worldHalfSize})`,
+      );
+    });
+
+    it("should produce deterministic results", () => {
+      const terrain: TerrainProvider = { getHeightAt: () => 50 };
+
+      const initialPath: RoadPathPoint[] = [
+        { x: 50, z: 50, y: 50 },
+        { x: 70, z: 50, y: 50 },
+      ];
+
+      const exits1: RoadBoundaryExit[] = [];
+      const exits2: RoadBoundaryExit[] = [];
+
+      const extended1 = extendRoadWithRandomWalk(
+        initialPath,
+        0,
+        1,
+        terrain,
+        12345,
+        5000,
+        exits1,
+      );
+      const extended2 = extendRoadWithRandomWalk(
+        initialPath,
+        0,
+        1,
+        terrain,
+        12345,
+        5000,
+        exits2,
+      );
+
+      // Same seed should produce identical paths
+      expect(extended1.length).toBe(extended2.length);
+      for (let i = 0; i < extended1.length; i++) {
+        expect(extended1[i].x).toBeCloseTo(extended2[i].x, 10);
+        expect(extended1[i].z).toBeCloseTo(extended2[i].z, 10);
+      }
+    });
+
+    it("should produce different results with different seeds", () => {
+      const terrain: TerrainProvider = { getHeightAt: () => 50 };
+
+      // Start far from boundaries to allow variance
+      const initialPath: RoadPathPoint[] = [
+        { x: 500, z: 500, y: 50 },
+        { x: 520, z: 500, y: 50 },
+      ];
+
+      const exits1: RoadBoundaryExit[] = [];
+      const exits2: RoadBoundaryExit[] = [];
+
+      const extended1 = extendRoadWithRandomWalk(
+        initialPath,
+        0,
+        1,
+        terrain,
+        12345,
+        5000,
+        exits1,
+      );
+      const extended2 = extendRoadWithRandomWalk(
+        initialPath,
+        0,
+        1,
+        terrain,
+        99999,
+        5000,
+        exits2,
+      );
+
+      // Different seeds should produce different paths (at least after a few steps)
+      // Check the last point differs
+      if (extended1.length > 3 && extended2.length > 3) {
+        const last1 = extended1[extended1.length - 1];
+        const last2 = extended2[extended2.length - 1];
+        const different =
+          Math.abs(last1.x - last2.x) > 1 || Math.abs(last1.z - last2.z) > 1;
+        expect(different).toBe(true);
+      }
+    });
+
+    it("should extend in the approximate initial direction", () => {
+      const terrain: TerrainProvider = { getHeightAt: () => 50 };
+
+      // Path heading northeast (45 degrees)
+      const initialPath: RoadPathPoint[] = [
+        { x: 200, z: 200, y: 50 },
+        { x: 220, z: 220, y: 50 },
+      ];
+
+      const boundaryExits: RoadBoundaryExit[] = [];
+      const extended = extendRoadWithRandomWalk(
+        initialPath,
+        Math.PI / 4, // 45 degrees
+        1,
+        terrain,
+        42,
+        5000,
+        boundaryExits,
+      );
+
+      // New points should be generally northeast of the starting point
+      const startX = initialPath[1].x;
+      const startZ = initialPath[1].z;
+
+      let northeastCount = 0;
+      for (let i = initialPath.length; i < extended.length; i++) {
+        if (extended[i].x >= startX - 50 && extended[i].z >= startZ - 50) {
+          northeastCount++;
+        }
+      }
+
+      // Most extension points should be in the general direction
+      const extensionPoints = extended.length - initialPath.length;
+      if (extensionPoints > 0) {
+        const ratio = northeastCount / extensionPoints;
+        expect(ratio).toBeGreaterThan(0.5);
+        console.log(
+          `${northeastCount}/${extensionPoints} points in NE direction (${(ratio * 100).toFixed(0)}%)`,
+        );
+      }
+    });
+
+    it("should not modify original path", () => {
+      const terrain: TerrainProvider = { getHeightAt: () => 50 };
+
+      const initialPath: RoadPathPoint[] = [
+        { x: 50, z: 50, y: 50 },
+        { x: 70, z: 50, y: 50 },
+      ];
+      const originalLength = initialPath.length;
+
+      const boundaryExits: RoadBoundaryExit[] = [];
+      const extended = extendRoadWithRandomWalk(
+        initialPath,
+        0,
+        1,
+        terrain,
+        12345,
+        5000,
+        boundaryExits,
+      );
+
+      // Original array should not be modified
+      expect(initialPath.length).toBe(originalLength);
+
+      // Extended path should start with original points
+      expect(extended[0]).toEqual(initialPath[0]);
+      expect(extended[1]).toEqual(initialPath[1]);
+    });
+
+    it("should extend by at least one step on valid terrain", () => {
+      const terrain: TerrainProvider = { getHeightAt: () => 50 };
+
+      // Start in middle of tile, plenty of room to extend
+      const initialPath: RoadPathPoint[] = [
+        { x: 30, z: 50, y: 50 },
+        { x: 50, z: 50, y: 50 },
+      ];
+
+      const boundaryExits: RoadBoundaryExit[] = [];
+      const extended = extendRoadWithRandomWalk(
+        initialPath,
+        0,
+        1,
+        terrain,
+        12345,
+        5000,
+        boundaryExits,
+      );
+
+      // Should add at least one point before hitting tile boundary
+      expect(extended.length).toBeGreaterThan(initialPath.length);
+      console.log(
+        `Extended from ${initialPath.length} to ${extended.length} points (+${extended.length - initialPath.length})`,
+      );
+    });
+
+    it("should calculate extension length correctly", () => {
+      const terrain: TerrainProvider = { getHeightAt: () => 50 };
+
+      const initialPath: RoadPathPoint[] = [
+        { x: 50, z: 50, y: 50 },
+        { x: 70, z: 50, y: 50 },
+      ];
+
+      const boundaryExits: RoadBoundaryExit[] = [];
+      const extended = extendRoadWithRandomWalk(
+        initialPath,
+        0,
+        1,
+        terrain,
+        12345,
+        5000,
+        boundaryExits,
+      );
+
+      // Calculate total extension length
+      let extensionLength = 0;
+      for (let i = initialPath.length; i < extended.length; i++) {
+        const dx = extended[i].x - extended[i - 1].x;
+        const dz = extended[i].z - extended[i - 1].z;
+        extensionLength += Math.sqrt(dx * dx + dz * dz);
+      }
+
+      // Each step should be approximately PATH_STEP_SIZE
+      const extensionSteps = extended.length - initialPath.length;
+      if (extensionSteps > 0) {
+        const avgStepSize = extensionLength / extensionSteps;
+        expect(avgStepSize).toBeCloseTo(PATH_STEP_SIZE, 1);
+        console.log(
+          `Extension: ${extensionLength.toFixed(1)}m over ${extensionSteps} steps (avg ${avgStepSize.toFixed(1)}m/step)`,
+        );
+      }
+    });
+  });
 });

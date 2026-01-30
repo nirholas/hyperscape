@@ -20,6 +20,7 @@ import { BaseShape, ColorMode } from "./types";
 import { SimplexNoise, hashSeed } from "./noise";
 import { DEFAULT_PARAMS, getPreset, mergeParams } from "./presets";
 import { createTriplanarRockMaterial } from "./triplanarMaterial";
+import { clamp } from "../math/Vector3.js";
 
 // ============================================================================
 // UTILITY FUNCTIONS
@@ -53,13 +54,6 @@ function lerpColor(
     g: c1.g + (c2.g - c1.g) * t,
     b: c1.b + (c2.b - c1.b) * t,
   };
-}
-
-/**
- * Clamp value to range
- */
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
 }
 
 // ============================================================================

@@ -908,6 +908,13 @@ export interface EventMap {
       position: { x: number; y: number; z: number };
     }>;
   };
+  [EventType.TERRAIN_TILE_REGENERATED]: {
+    tileId: string;
+    tileX: number;
+    tileZ: number;
+    biome: string;
+    reason: "flat_zone" | "road" | "other";
+  };
   [EventType.TERRAIN_GENERATE_INITIAL]: {
     centerX: number;
     centerZ: number;

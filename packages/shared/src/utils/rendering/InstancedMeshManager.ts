@@ -55,6 +55,11 @@ import THREE, {
   vec2,
   smoothstep,
   positionWorld,
+  viewportCoordinate,
+  abs,
+  mod,
+  floor,
+  step,
 } from "../../extras/three/three";
 import type { World } from "../../core/World";
 import { modelCache } from "./ModelCache";
@@ -74,10 +79,14 @@ import { csmLevels } from "../../systems/shared/world/Environment";
 import { ImpostorManager, BakePriority } from "../../systems/shared/rendering";
 import {
   createImpostorMaterial,
+  createTSLImpostorMaterial,
   updateImpostorMaterial,
+  isTSLImpostorMaterial,
   type ImpostorViewData,
   type ImpostorBakeResult,
+  type TSLImpostorMaterial,
 } from "@hyperscape/impostor";
+import { isWebGPURenderer } from "./RendererFactory";
 
 // ============================================================================
 // MOB DISSOLVE MATERIAL TYPES
@@ -713,6 +722,11 @@ type MobInstancedGroup = {
 };
 
 /**
+ * Imposter material type - supports both GLSL (WebGL) and TSL (WebGPU) materials.
+ */
+type ImposterMaterialType = THREE.ShaderMaterial | TSLImpostorMaterial;
+
+/**
  * Imposter render data for a model.
  * Created once per model type and shared across all groups.
  * Uses OctahedralImpostor from @hyperscape/impostor for quality multi-view rendering.
@@ -722,8 +736,8 @@ type MobImposterModel = {
   texture: THREE.Texture;
   /** Billboard geometry (plane) */
   geometry: THREE.PlaneGeometry;
-  /** Billboard material (GLSL impostor material from @hyperscape/impostor) */
-  material: THREE.ShaderMaterial;
+  /** Billboard material (GLSL or TSL impostor material from @hyperscape/impostor) */
+  material: ImposterMaterialType;
   /** Instanced mesh for all imposters of this model */
   mesh: THREE.InstancedMesh;
   /** Instance index map (handle ID -> index) */
@@ -1445,13 +1459,20 @@ export class MobInstancedRenderer {
     this._imposterFaceIndices.set(flatIndex, flatIndex, flatIndex);
     // Note: _imposterFaceWeights is always (1, 0, 0), no need to update
 
-    const viewData: ImpostorViewData = {
-      faceIndices: this._imposterFaceIndices,
-      faceWeights: this._imposterFaceWeights,
-    };
-
-    // Update material using @hyperscape/impostor function
-    updateImpostorMaterial(imposter.material, viewData);
+    // Update material using appropriate method based on material type
+    // TSL materials have updateView method, GLSL uses updateImpostorMaterial
+    if (isTSLImpostorMaterial(imposter.material)) {
+      imposter.material.updateView(
+        this._imposterFaceIndices,
+        this._imposterFaceWeights,
+      );
+    } else {
+      const viewData: ImpostorViewData = {
+        faceIndices: this._imposterFaceIndices,
+        faceWeights: this._imposterFaceWeights,
+      };
+      updateImpostorMaterial(imposter.material, viewData);
+    }
   }
 
   /**
@@ -2329,14 +2350,26 @@ export class MobInstancedRenderer {
       ? boundingSphere.radius * 2 * MOB_MODEL_SCALE
       : height;
 
-    // Create material using @hyperscape/impostor's GLSL material
-    const material = createImpostorMaterial({
-      atlasTexture,
-      gridSizeX,
-      gridSizeY,
-      transparent: true,
-      depthWrite: true,
-    });
+    // Create material using appropriate type based on renderer backend
+    // WebGPU requires TSL (node-based) material, WebGL uses GLSL ShaderMaterial
+    const renderer = this.world.graphics?.renderer;
+    const useWebGPU = renderer && isWebGPURenderer(renderer);
+
+    const material: ImposterMaterialType = useWebGPU
+      ? createTSLImpostorMaterial({
+          atlasTexture,
+          gridSizeX,
+          gridSizeY,
+          transparent: true,
+          depthWrite: true,
+        })
+      : createImpostorMaterial({
+          atlasTexture,
+          gridSizeX,
+          gridSizeY,
+          transparent: true,
+          depthWrite: true,
+        });
     this.world.setupMaterial(material);
 
     // Create billboard geometry and instanced mesh
@@ -2964,27 +2997,35 @@ export class MobInstancedRenderer {
       // Combined distance fade (max of near and far fade)
       const distanceFade = max(farFade, nearFade);
 
-      // World-space dithering for smooth per-fragment dissolve
-      const ditherScale = float(3.0);
-      const ditherInput = vec2(
-        add(mul(worldPos.x, ditherScale), mul(worldPos.y, float(0.7))),
-        add(mul(worldPos.z, ditherScale), mul(worldPos.y, float(0.5))),
-      );
+      // SCREEN-SPACE 4x4 BAYER DITHERING (RuneScape 3 style)
+      // 4x4 Bayer matrix: [ 0, 8, 2,10; 12, 4,14, 6; 3,11, 1, 9; 15, 7,13, 5]/16
+      const ix = mod(floor(viewportCoordinate.x), float(4.0));
+      const iy = mod(floor(viewportCoordinate.y), float(4.0));
 
-      // Hash function for pseudo-random dither value (0.0 - 1.0)
-      const hash1 = fract(
-        mul(sin(dot(ditherInput, vec2(12.9898, 78.233))), float(43758.5453)),
-      );
-      const hash2 = fract(
-        mul(cos(dot(ditherInput, vec2(39.346, 11.135))), float(23421.6312)),
-      );
-      const ditherValue = mul(add(hash1, hash2), float(0.5));
+      const bit0_x = mod(ix, float(2.0));
+      const bit1_x = floor(mul(ix, float(0.5)));
+      const bit0_y = mod(iy, float(2.0));
+      const bit1_y = floor(mul(iy, float(0.5)));
+      const xor0 = abs(sub(bit0_x, bit0_y));
+      const xor1 = abs(sub(bit1_x, bit1_y));
 
-      // Compute alpha threshold
-      // Close (distanceFade=0): threshold = ditherValue (0-1) → all kept
-      // Middle (distanceFade=0.5): threshold = 0.5-1.5 → dithered
-      // Far (distanceFade=1): threshold = 1-2 → all discarded
-      const threshold = add(ditherValue, distanceFade);
+      const bayerInt = add(
+        add(
+          add(mul(xor0, float(8.0)), mul(bit0_y, float(4.0))),
+          mul(xor1, float(2.0)),
+        ),
+        bit1_y,
+      );
+      const ditherValue = mul(bayerInt, float(0.0625));
+
+      // RS3-style: discard when fade >= dither
+      // step returns 0 or 1, multiply by 2 so threshold > 1.0 causes discard
+      // Only apply when there's actual fade (prevents holes when distanceFade=0)
+      const hasAnyFade = step(float(0.001), distanceFade);
+      const threshold = mul(
+        mul(step(ditherValue, distanceFade), hasAnyFade),
+        float(2.0),
+      );
 
       return threshold;
     })();
@@ -3016,13 +3057,13 @@ export class MobInstancedRenderer {
     const standard = material as THREE.MeshStandardMaterial;
     const hasMaps = Boolean(
       standard.map ||
-      standard.normalMap ||
-      standard.emissiveMap ||
-      standard.roughnessMap ||
-      standard.metalnessMap ||
-      standard.alphaMap ||
-      standard.aoMap ||
-      standard.lightMap,
+        standard.normalMap ||
+        standard.emissiveMap ||
+        standard.roughnessMap ||
+        standard.metalnessMap ||
+        standard.alphaMap ||
+        standard.aoMap ||
+        standard.lightMap,
     );
     return standard.vertexColors === true && !hasMaps;
   }

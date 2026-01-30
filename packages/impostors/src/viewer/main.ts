@@ -12,7 +12,7 @@
 import "../style.css";
 import { ImpostorViewer, type RendererType } from "./ImpostorViewer";
 import { OctahedronType } from "../lib";
-import { createColoredCube } from "../lib/utils";
+import { createColoredCube, createTestTorusKnot } from "../lib/utils";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
@@ -76,7 +76,7 @@ function setupDemoMeshSwitcher(
         viewer.setSourceMesh(createColoredCube());
         break;
       case "2":
-        viewer.setSourceMesh(createTorusKnot());
+        viewer.setSourceMesh(createTestTorusKnot());
         break;
       case "3":
         viewer.setSourceMesh(createSphere());
@@ -167,12 +167,6 @@ function setupDemoMeshSwitcher(
 ║                                                                ║
 ╚════════════════════════════════════════════════════════════════╝
   `);
-}
-
-function createTorusKnot(): THREE.Mesh {
-  const geometry = new THREE.TorusKnotGeometry(0.5, 0.15, 100, 16);
-  const material = new THREE.MeshStandardMaterial({ color: 0xff69b4 });
-  return new THREE.Mesh(geometry, material);
 }
 
 function createSphere(): THREE.Mesh {

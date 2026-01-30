@@ -58,14 +58,32 @@ describe("WeaponStyleConfig", () => {
       expect(styles).not.toContain("controlled");
     });
 
-    it("returns only accurate for ranged weapons (MVP)", () => {
-      expect(getAvailableStyles(WeaponType.BOW)).toEqual(["accurate"]);
-      expect(getAvailableStyles(WeaponType.CROSSBOW)).toEqual(["accurate"]);
+    it("returns OSRS-accurate styles for ranged weapons", () => {
+      // Bows and crossbows have accurate, rapid, and longrange in OSRS
+      expect(getAvailableStyles(WeaponType.BOW)).toEqual([
+        "accurate",
+        "rapid",
+        "longrange",
+      ]);
+      expect(getAvailableStyles(WeaponType.CROSSBOW)).toEqual([
+        "accurate",
+        "rapid",
+        "longrange",
+      ]);
     });
 
-    it("returns only accurate for magic weapons (MVP)", () => {
-      expect(getAvailableStyles(WeaponType.STAFF)).toEqual(["accurate"]);
-      expect(getAvailableStyles(WeaponType.WAND)).toEqual(["accurate"]);
+    it("returns OSRS-accurate styles for magic weapons", () => {
+      // Staves and wands have accurate, longrange, and autocast in OSRS
+      expect(getAvailableStyles(WeaponType.STAFF)).toEqual([
+        "accurate",
+        "longrange",
+        "autocast",
+      ]);
+      expect(getAvailableStyles(WeaponType.WAND)).toEqual([
+        "accurate",
+        "longrange",
+        "autocast",
+      ]);
     });
 
     it("returns defensive for shields", () => {
@@ -173,8 +191,17 @@ describe("WeaponStyleConfig", () => {
       });
     });
 
-    it("all style arrays contain only valid CombatStyle values", () => {
-      const validStyles = ["accurate", "aggressive", "defensive", "controlled"];
+    it("all style arrays contain only valid CombatStyleExtended values", () => {
+      // CombatStyleExtended includes melee, ranged, and magic styles
+      const validStyles = [
+        "accurate",
+        "aggressive",
+        "defensive",
+        "controlled",
+        "longrange",
+        "rapid",
+        "autocast",
+      ];
       Object.values(WEAPON_STYLE_CONFIG).forEach((styles) => {
         styles.forEach((style) => {
           expect(validStyles).toContain(style);

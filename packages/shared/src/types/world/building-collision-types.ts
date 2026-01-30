@@ -76,6 +76,30 @@ export interface StairTile {
   isLanding: boolean;
 }
 
+/**
+ * Entrance step tile outside building door
+ *
+ * Steps can only be approached from the front (door direction).
+ * Attempting to walk onto steps from the side is blocked.
+ *
+ * Height is stored relative to the building's ground terrain level.
+ * The player Y position should be: terrainHeight + stepHeight
+ */
+export interface StepTile {
+  /** Tile X coordinate (world tile coords) */
+  tileX: number;
+  /** Tile Z coordinate (world tile coords) */
+  tileZ: number;
+  /** Direction from building center to this step (approach direction) */
+  approachDirection: WallDirection;
+  /** Building ID this step belongs to */
+  buildingId: string;
+  /** Step height above terrain (0 at ground, FOUNDATION_HEIGHT at door) */
+  stepHeight: number;
+  /** Base terrain height at this step position (for calculating world Y) */
+  terrainHeight: number;
+}
+
 // ============================================================================
 // FLOOR COLLISION TYPES
 // ============================================================================
@@ -123,6 +147,8 @@ export interface BuildingCollisionData {
   cellDepth: number;
   /** Per-floor collision data */
   floors: FloorCollisionData[];
+  /** Entrance step tiles (outside building, only walkable from front) */
+  stepTiles: StepTile[];
   /** Bounding box in world tiles (for spatial queries) */
   boundingBox: {
     minTileX: number;

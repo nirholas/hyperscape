@@ -280,14 +280,5 @@ export class SimplexNoise {
   }
 }
 
-/**
- * Hash a string to a numeric seed
- */
-export function hashSeed(text: string): number {
-  let hash = 2166136261;
-  for (let i = 0; i < text.length; i++) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
+// hashSeed is re-exported from math/Random.ts
+export { hashSeed } from "../math/Random.js";

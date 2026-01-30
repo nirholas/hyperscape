@@ -8,6 +8,7 @@
  * - Door openings (cyan)
  * - Wall blocking (orange lines)
  * - Player's current floor level
+ * - "Requires exit" tiles (yellow) - outside tiles when player is inside
  *
  * Toggle: Press 'P' to enable/disable
  * Console: world.pathfindingDebug.setEnabled(true)
@@ -16,8 +17,11 @@
  * - world.pathfindingDebug.logBuildingInfo() - Log all buildings
  * - world.pathfindingDebug.testClickAt(x, z) - Test raycast at tile
  * - world.pathfindingDebug.logClickTarget() - Log next click target
+ * - world.pathfindingDebug.setRadius(n) - Set visualization radius (default: 10)
  *
  * This helps diagnose why players can't enter/navigate buildings.
+ *
+ * PERFORMANCE: Uses InstancedMesh for efficient rendering of many tiles.
  */
 
 import * as THREE from "three";
@@ -39,10 +43,24 @@ const COLORS = {
   WALL_WEST: 0xff2200,
   STAIR: 0xff00ff, // Magenta - stair tile
   PLAYER_TILE: 0xffffff, // White - current player tile
+  REQUIRES_EXIT: 0xffff00, // Yellow - outside when player inside (need door)
+  REQUIRES_ENTRY: 0x00aaff, // Light blue - inside when player outside (need door)
+  TERRAIN_WALKABLE: 0x004400, // Dark green - walkable terrain outside buildings
 };
 
 // Tile size matches movement system
 const TILE_SIZE = 1;
+
+// Instance categories for efficient instanced rendering
+type TileCategory =
+  | "walkable"
+  | "nonWalkable"
+  | "door"
+  | "stair"
+  | "requiresExit"
+  | "requiresEntry"
+  | "terrainWalkable"
+  | "terrainBlocked";
 
 export class PathfindingDebugSystem extends System {
   private enabled = false; // Disabled by default - press 'P' to toggle
@@ -58,20 +76,55 @@ export class PathfindingDebugSystem extends System {
   // Materials cache
   private materials: Map<number, THREE.MeshBasicMaterial> = new Map();
 
+  // Instanced mesh rendering for performance
+  private instancedMeshes: Map<TileCategory, THREE.InstancedMesh> = new Map();
+  private instanceMatrices: Map<TileCategory, THREE.Matrix4[]> = new Map();
+  private maxInstances = 500; // Max tiles per category (10 radius = ~400 tiles total)
+
   // Debug info overlay
   private infoDiv: HTMLDivElement | null = null;
 
-  // Update throttling
+  // Update throttling - only update when player moves
   private lastUpdateTime = 0;
-  private updateInterval = 500; // ms
+  private updateInterval = 100; // ms - faster updates for responsiveness
+  private lastPlayerTileX = NaN;
+  private lastPlayerTileZ = NaN;
+
+  // Visualization radius (default 10m = 10 tiles)
+  private visualizationRadius = 10;
 
   // Click debugging
   private logNextClick = false;
   private lastClickPosition: THREE.Vector3 | null = null;
   private clickMarker: THREE.Mesh | null = null;
 
+  // Temporary matrix for instancing (avoid allocations)
+  private _tempMatrix = new THREE.Matrix4();
+
   constructor(world: World) {
     super(world);
+  }
+
+  /**
+   * Set the visualization radius in tiles
+   */
+  setRadius(radius: number): void {
+    this.visualizationRadius = Math.max(1, Math.min(radius, 30));
+    console.log(
+      `[PathfindingDebugSystem] Radius set to ${this.visualizationRadius} tiles`,
+    );
+    if (this.enabled) {
+      this.forceUpdate();
+    }
+  }
+
+  /**
+   * Force an immediate update of the visualization
+   */
+  forceUpdate(): void {
+    this.lastPlayerTileX = NaN;
+    this.lastPlayerTileZ = NaN;
+    this.updateVisualization();
   }
 
   async start(): Promise<void> {
@@ -88,6 +141,9 @@ export class PathfindingDebugSystem extends System {
     );
     this.wallGeometry = new THREE.BoxGeometry(TILE_SIZE * 0.1, 0.5, TILE_SIZE);
 
+    // Create instanced meshes for each tile category
+    this.createInstancedMeshes();
+
     // Setup keyboard toggle
     if (typeof window !== "undefined") {
       window.addEventListener("keydown", this.handleKeyDown);
@@ -101,6 +157,50 @@ export class PathfindingDebugSystem extends System {
     console.log(
       "[PathfindingDebugSystem] Ready - Press 'P' to toggle debug view",
     );
+    console.log(
+      "[PathfindingDebugSystem] Commands: setRadius(n), forceUpdate(), logBuildingInfo()",
+    );
+  }
+
+  /**
+   * Create instanced meshes for each tile category
+   */
+  private createInstancedMeshes(): void {
+    if (!this.tileGeometry) return;
+
+    const categories: Array<{ name: TileCategory; color: number }> = [
+      { name: "walkable", color: COLORS.WALKABLE },
+      { name: "nonWalkable", color: COLORS.NON_WALKABLE },
+      { name: "door", color: COLORS.DOOR },
+      { name: "stair", color: COLORS.STAIR },
+      { name: "requiresExit", color: COLORS.REQUIRES_EXIT },
+      { name: "requiresEntry", color: COLORS.REQUIRES_ENTRY },
+      { name: "terrainWalkable", color: COLORS.TERRAIN_WALKABLE },
+      { name: "terrainBlocked", color: 0x888888 },
+    ];
+
+    for (const { name, color } of categories) {
+      const material = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.5,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+
+      const mesh = new THREE.InstancedMesh(
+        this.tileGeometry,
+        material,
+        this.maxInstances,
+      );
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      mesh.frustumCulled = false;
+      mesh.renderOrder = 999;
+      mesh.count = 0; // Start with no visible instances
+
+      this.instancedMeshes.set(name, mesh);
+      this.instanceMatrices.set(name, []);
+    }
   }
 
   async stop(): Promise<void> {
@@ -112,6 +212,17 @@ export class PathfindingDebugSystem extends System {
     this.wallGeometry?.dispose();
     this.materials.forEach((m) => m.dispose());
     this.materials.clear();
+
+    // Dispose instanced meshes
+    for (const mesh of this.instancedMeshes.values()) {
+      mesh.geometry.dispose();
+      if (mesh.material instanceof THREE.Material) {
+        mesh.material.dispose();
+      }
+    }
+    this.instancedMeshes.clear();
+    this.instanceMatrices.clear();
+
     if (this.infoDiv) {
       this.infoDiv.remove();
       this.infoDiv = null;
@@ -171,6 +282,31 @@ export class PathfindingDebugSystem extends System {
     // Throttle updates
     const now = Date.now();
     if (now - this.lastUpdateTime < this.updateInterval) return;
+
+    // Only update if player moved to a different tile
+    const player = this.world.getPlayer?.();
+    if (!player) return;
+
+    const playerPos = player.position || { x: 0, z: 0 };
+    const currentTileX = Math.floor(playerPos.x);
+    const currentTileZ = Math.floor(playerPos.z);
+
+    // Check if player moved to a new tile
+    if (
+      currentTileX === this.lastPlayerTileX &&
+      currentTileZ === this.lastPlayerTileZ
+    ) {
+      // Player hasn't moved tiles, just update info overlay occasionally
+      if (now - this.lastUpdateTime > 500) {
+        this.updateInfoOverlay();
+        this.lastUpdateTime = now;
+      }
+      return;
+    }
+
+    // Player moved - update everything
+    this.lastPlayerTileX = currentTileX;
+    this.lastPlayerTileZ = currentTileZ;
     this.lastUpdateTime = now;
 
     this.updateVisualization();
@@ -268,31 +404,27 @@ export class PathfindingDebugSystem extends System {
       ? this.collisionService.isTileWalkableInBuilding(tileX, tileZ, 0)
       : true;
 
+    const isInside = buildingInfo !== "Not in building";
+
     this.infoDiv.innerHTML = `
       <b>Pathfinding Debug (P to toggle)</b><br>
-      <span style="color:#0f0">■</span> Walkable Floor
-      <span style="color:#f00">■</span> Blocked Interior
-      <span style="color:#0ff">■</span> Door Opening
+      <span style="color:#0f0">■</span> Walkable
+      <span style="color:#f00">■</span> Blocked
+      <span style="color:#0ff">■</span> Door
       <span style="color:#f0f">■</span> Stair<br>
-      <span style="color:#0f8">■</span> Approach Area
-      <span style="color:#f80">■</span> Under Wall
-      <span style="color:#08f">■</span> Water/Slope
-      <span style="color:#888">■</span> Static Collision
-      <br><br>
-      <b>Player Position:</b><br>
-      World: (${playerPos.x.toFixed(1)}, ${playerPos.y.toFixed(1)}, ${playerPos.z.toFixed(1)})<br>
-      Tile: (${tileX}, ${tileZ})<br>
+      <span style="color:#ff0">■</span> ${isInside ? "Requires Exit" : "Outside Walkable"}
+      <span style="color:#0af">■</span> Requires Entry<br>
+      <span style="color:#040">■</span> Terrain OK
+      <span style="color:#888">■</span> Terrain Blocked
+      <span style="color:#f80">■</span> Wall<br>
       <br>
-      <b>Building Collision:</b><br>
-      ${buildingInfo}<br>
-      ${floorInfo}<br>
-      Walkable: ${walkableInfo}<br>
+      <b>Player:</b> (${tileX}, ${tileZ}) | Radius: ${this.visualizationRadius}<br>
+      ${isInside ? `<b>INSIDE:</b> ${buildingInfo}` : "<b>OUTSIDE</b>"}<br>
+      Floor: ${floorInfo} | Walkable: ${walkableInfo}<br>
       Walls: ${wallInfo}<br>
-      In Bounding Box: ${inBoundingBox ? `Yes (${inBoundingBox})` : "No"}<br>
-      isTileWalkableInBuilding: ${buildingWalkable ? "YES" : "NO"}<br>
       <br>
-      <b>System Info:</b><br>
-      Registered Buildings: ${buildingCount}<br>
+      <b>Buildings:</b> ${buildingCount} registered<br>
+      <small>setRadius(n) to change view</small>
     `;
   }
 
@@ -300,6 +432,14 @@ export class PathfindingDebugSystem extends System {
    * Clear all debug visualization
    */
   private clearVisualization(): void {
+    // Remove instanced meshes from scene
+    if (this.scene) {
+      for (const mesh of this.instancedMeshes.values()) {
+        this.scene.remove(mesh);
+      }
+    }
+
+    // Clear old debug group (for wall indicators)
     if (this.debugGroup && this.scene) {
       this.scene.remove(this.debugGroup);
       this.debugGroup.traverse((child) => {
@@ -309,10 +449,66 @@ export class PathfindingDebugSystem extends System {
       });
       this.debugGroup = null;
     }
+
+    // Reset instance counts
+    for (const mesh of this.instancedMeshes.values()) {
+      mesh.count = 0;
+    }
+    for (const matrices of this.instanceMatrices.values()) {
+      matrices.length = 0;
+    }
   }
 
   /**
-   * Update the debug visualization
+   * Add a tile instance to a category
+   */
+  private addTileInstance(
+    category: TileCategory,
+    x: number,
+    y: number,
+    z: number,
+  ): void {
+    const matrices = this.instanceMatrices.get(category);
+    if (!matrices || matrices.length >= this.maxInstances) return;
+
+    // Create matrix for this tile (position + rotation to lay flat)
+    this._tempMatrix.makeRotationX(-Math.PI / 2);
+    this._tempMatrix.setPosition(x + 0.5, y + 0.05, z + 0.5);
+
+    const matrix = new THREE.Matrix4().copy(this._tempMatrix);
+    matrices.push(matrix);
+  }
+
+  /**
+   * Finalize instanced meshes after adding all tiles
+   */
+  private finalizeInstancedMeshes(): void {
+    if (!this.scene) return;
+
+    for (const [category, mesh] of this.instancedMeshes) {
+      const matrices = this.instanceMatrices.get(category);
+      if (!matrices || matrices.length === 0) {
+        mesh.count = 0;
+        continue;
+      }
+
+      mesh.count = matrices.length;
+
+      for (let i = 0; i < matrices.length; i++) {
+        mesh.setMatrixAt(i, matrices[i]);
+      }
+
+      mesh.instanceMatrix.needsUpdate = true;
+
+      // Add to scene if not already added
+      if (!mesh.parent) {
+        this.scene.add(mesh);
+      }
+    }
+  }
+
+  /**
+   * Update the debug visualization using instanced meshes for performance
    */
   private updateVisualization(): void {
     if (!this.scene || !this.tileGeometry) return;
@@ -320,7 +516,7 @@ export class PathfindingDebugSystem extends System {
     // Clear previous
     this.clearVisualization();
 
-    // Create new debug group
+    // Create new debug group for wall indicators (still use individual meshes for walls)
     this.debugGroup = new THREE.Group();
     this.debugGroup.name = "PathfindingDebug";
 
@@ -332,8 +528,8 @@ export class PathfindingDebugSystem extends System {
     const centerX = Math.floor(playerPos.x);
     const centerZ = Math.floor(playerPos.z);
 
-    // Visualization radius (tiles around player)
-    const radius = 20;
+    // Use configurable radius
+    const radius = this.visualizationRadius;
 
     // Get collision service
     if (!this.collisionService && this.townSystem) {
@@ -348,7 +544,10 @@ export class PathfindingDebugSystem extends System {
     // Get terrain system for height lookups
     const terrain = this.world.getSystem("terrain") as {
       getHeightAt?: (x: number, z: number) => number | null;
-      isPositionWalkable?: (x: number, z: number) => boolean;
+      isPositionWalkable?: (
+        x: number,
+        z: number,
+      ) => { walkable: boolean; reason?: string };
     } | null;
 
     // Get collision matrix for static collision
@@ -356,8 +555,15 @@ export class PathfindingDebugSystem extends System {
       hasFlags?: (x: number, z: number, flags: number) => boolean;
     } | null;
 
-    // Get player's current floor
-    const playerFloor = 0; // Default to ground floor for now
+    // Get player's current floor and building state
+    const playerFloor = 0; // Default to ground floor
+    const playerBuildingResult = this.collisionService.queryCollision(
+      centerX,
+      centerZ,
+      playerFloor,
+    );
+    const playerIsInsideBuilding = playerBuildingResult.isInsideBuilding;
+    const playerBuildingId = playerBuildingResult.buildingId;
 
     // Iterate through tiles around player
     for (let dx = -radius; dx <= radius; dx++) {
@@ -388,89 +594,87 @@ export class PathfindingDebugSystem extends System {
           playerFloor,
         );
 
-        // Check if in bounding box
-        const inBoundingBox = this.collisionService.isTileInBuildingBoundingBox(
-          tileX,
-          tileZ,
-        );
-
-        // Determine tile state and color
-        let color: number;
-        let showTile = false;
+        // Determine tile category
+        let category: TileCategory | null = null;
 
         if (buildingResult.isInsideBuilding) {
           // Inside a building (walkable floor tile)
-          showTile = true;
-          if (buildingResult.stairTile) {
-            color = COLORS.STAIR;
-            tileY = buildingResult.elevation ?? tileY;
-          } else if (buildingResult.isWalkable) {
-            color = COLORS.WALKABLE;
-            tileY = buildingResult.elevation ?? tileY;
-          } else {
-            color = COLORS.NON_WALKABLE;
-          }
-        } else if (inBoundingBox) {
-          // In bounding box but not walkable floor - approach area or under wall
-          showTile = true;
-          if (buildingWalkable) {
-            // Approach tile (allowed)
-            color = 0x00ff88; // Light green - approach area
-          } else {
-            // Blocked (under wall or interior)
-            color = 0xff8800; // Orange - blocked by building
-          }
-        } else {
-          // Outside building - only show if near player and for terrain debugging
-          const distSq = dx * dx + dz * dz;
-          if (distSq <= 100) {
-            // Within 10 tiles
-            showTile = true;
-            // Check terrain walkability
-            const terrainWalkable =
-              terrain?.isPositionWalkable?.(tileX + 0.5, tileZ + 0.5) ?? true;
-            // Check collision matrix
-            const collisionBlocked =
-              collision?.hasFlags?.(tileX, tileZ, 1) ?? false; // BLOCKED flag
+          tileY = buildingResult.elevation ?? tileY;
 
-            if (!terrainWalkable) {
-              color = 0x0088ff; // Blue - water/slope
-            } else if (collisionBlocked) {
-              color = 0x888888; // Gray - static collision (rock, tree, etc)
+          if (buildingResult.stairTile) {
+            category = "stair";
+          } else if (buildingResult.isWalkable) {
+            // Check if player needs to ENTER this building
+            if (
+              !playerIsInsideBuilding ||
+              playerBuildingId !== buildingResult.buildingId
+            ) {
+              // Player is outside or in different building - needs door to enter
+              category = "requiresEntry";
             } else {
-              color = 0x004400; // Dark green - walkable terrain
+              category = "walkable";
             }
           } else {
-            continue; // Skip far tiles outside buildings
+            category = "nonWalkable";
+          }
+
+          // Check for door openings
+          const openings = this.collisionService.getDoorOpeningsAtTile(
+            tileX,
+            tileZ,
+            playerFloor,
+          );
+          if (openings.length > 0) {
+            category = "door";
+          }
+        } else {
+          // Outside building
+          if (playerIsInsideBuilding) {
+            // Player is inside - this outside tile requires EXIT through door
+            category = "requiresExit";
+          } else {
+            // Player is outside - check terrain walkability
+            const terrainResult = terrain?.isPositionWalkable?.(
+              tileX + 0.5,
+              tileZ + 0.5,
+            );
+            const terrainWalkable = terrainResult?.walkable ?? true;
+            const collisionBlocked =
+              collision?.hasFlags?.(tileX, tileZ, 1) ?? false;
+
+            if (!terrainWalkable || collisionBlocked) {
+              category = "terrainBlocked";
+            } else {
+              category = "terrainWalkable";
+            }
           }
         }
 
-        if (!showTile) continue;
+        if (category) {
+          this.addTileInstance(category, tileX, tileY, tileZ);
+        }
 
-        // Create tile visualization
-        const tileMesh = this.createTileMesh(tileX, tileZ, tileY + 0.02, color);
-        this.debugGroup.add(tileMesh);
-
-        // Add wall indicators for building tiles
-        if (buildingResult.isInsideBuilding) {
+        // Add wall indicators for building tiles (still use debug group)
+        if (buildingResult.isInsideBuilding && this.debugGroup) {
+          const wallY = buildingResult.elevation ?? tileY;
           if (buildingResult.wallBlocking.north) {
-            this.addWallIndicator(tileX, tileZ, tileY, "north", false);
+            this.addWallIndicator(tileX, tileZ, wallY, "north", false);
           }
           if (buildingResult.wallBlocking.south) {
-            this.addWallIndicator(tileX, tileZ, tileY, "south", false);
+            this.addWallIndicator(tileX, tileZ, wallY, "south", false);
           }
           if (buildingResult.wallBlocking.east) {
-            this.addWallIndicator(tileX, tileZ, tileY, "east", false);
+            this.addWallIndicator(tileX, tileZ, wallY, "east", false);
           }
           if (buildingResult.wallBlocking.west) {
-            this.addWallIndicator(tileX, tileZ, tileY, "west", false);
+            this.addWallIndicator(tileX, tileZ, wallY, "west", false);
           }
 
-          // Check for door openings (walls that DON'T block)
+          // Add door indicators
           this.addDoorIndicators(
             tileX,
             tileZ,
-            tileY,
+            wallY,
             buildingResult,
             playerFloor,
           );
@@ -478,18 +682,16 @@ export class PathfindingDebugSystem extends System {
       }
     }
 
-    // Add player position marker
-    const playerTileMesh = this.createTileMesh(
-      centerX,
-      centerZ,
-      playerPos.y + 0.1,
-      COLORS.PLAYER_TILE,
-    );
-    playerTileMesh.scale.set(0.5, 0.5, 0.5);
-    this.debugGroup.add(playerTileMesh);
+    // Add player position marker (white center)
+    this.addTileInstance("walkable", centerX, playerPos.y + 0.1, centerZ);
 
-    // Add to scene
-    this.scene.add(this.debugGroup);
+    // Finalize all instanced meshes
+    this.finalizeInstancedMeshes();
+
+    // Add wall indicator group to scene
+    if (this.debugGroup.children.length > 0) {
+      this.scene.add(this.debugGroup);
+    }
   }
 
   /**

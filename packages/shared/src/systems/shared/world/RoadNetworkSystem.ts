@@ -24,6 +24,8 @@ import type {
   RoadEndpointType,
   TownInternalRoad,
   TownPath,
+  RoadBoundaryExit,
+  TileEdge,
 } from "../../../types/world/world-types";
 import { NoiseGenerator } from "../../../utils/NoiseGenerator";
 import type { TownSystem } from "./TownSystem";
@@ -164,6 +166,10 @@ export class RoadNetworkSystem extends System {
     getBiomeAtWorldPosition?(x: number, z: number): string;
   };
   private tileRoadCache = new Map<string, RoadTileSegment[]>();
+  /** Road boundary exit points for cross-tile continuity */
+  private boundaryExits: RoadBoundaryExit[] = [];
+  /** World boundary (half the world size) */
+  private worldHalfSize: number = 5000;
 
   constructor(world: World) {
     super(world);
@@ -181,6 +187,12 @@ export class RoadNetworkSystem extends System {
     this.noise = new NoiseGenerator(this.seed + 54321);
     this.config = loadRoadConfig();
     this.directions = getDirections(this.config.pathStepSize);
+
+    // Set world half size from terrain config (default: 5000m = 10km world)
+    const terrainConfig = DataManager.getWorldConfig()?.terrain;
+    const worldSize = terrainConfig?.worldSize ?? 100; // tiles
+    const tileSize = terrainConfig?.tileSize ?? 100; // meters
+    this.worldHalfSize = (worldSize * tileSize) / 2;
 
     this.terrainSystem = this.world.getSystem("terrain") as
       | {
@@ -1022,6 +1034,25 @@ export class RoadNetworkSystem extends System {
       );
     }
 
+    // Extend the road past the destination with weighted random walk
+    // This makes roads continue toward tile/world boundaries
+    const extendedPath = this.extendRoadWithRandomWalk(
+      smoothedPath,
+      destination.angle,
+      roadIndex,
+    );
+
+    // Recalculate total length with extension
+    let extendedLength = 0;
+    for (let i = 1; i < extendedPath.length; i++) {
+      extendedLength += dist2D(
+        extendedPath[i - 1].x,
+        extendedPath[i - 1].z,
+        extendedPath[i].x,
+        extendedPath[i].z,
+      );
+    }
+
     return {
       id: `road_explore_${roadIndex}`,
       fromType: "town" as RoadEndpointType,
@@ -1029,11 +1060,221 @@ export class RoadNetworkSystem extends System {
       toType: "poi" as RoadEndpointType, // Treat as POI for simplicity
       toTownId: "", // Empty for exploration roads
       toPOIId: `natural_${destination.type}_${roadIndex}`, // Virtual POI ID
-      path: smoothedPath,
+      path: extendedPath,
       width: this.config.roadWidth,
       material: "dirt",
-      length: totalLength,
+      length: extendedLength,
     };
+  }
+
+  /**
+   * Extend a road path using weighted random walk.
+   * Continues past destination until hitting impassable terrain or boundary.
+   */
+  private extendRoadWithRandomWalk(
+    currentPath: RoadPathPoint[],
+    baseDirection: number,
+    roadIndex: number,
+  ): RoadPathPoint[] {
+    if (currentPath.length < 2 || !this.terrainSystem) {
+      return currentPath;
+    }
+
+    this.resetRandom(this.seed + roadIndex * 13337 + 500000);
+
+    const extendedPath = [...currentPath];
+    const roadId = `road_explore_${roadIndex}`;
+
+    // Get initial direction from path's last segment, or use base direction
+    const last = currentPath[currentPath.length - 1];
+    const secondLast = currentPath[currentPath.length - 2];
+    const dx = last.x - secondLast.x;
+    const dz = last.z - secondLast.z;
+    const dirLen = Math.sqrt(dx * dx + dz * dz);
+    let direction = dirLen > 0.1 ? Math.atan2(dz, dx) : baseDirection;
+
+    let x = last.x;
+    let z = last.z;
+
+    // Walk parameters
+    const step = this.config.pathStepSize;
+    const maxSteps = Math.ceil(300 / step);
+    const variance = Math.PI / 8;
+    const forwardBias = 0.7;
+
+    for (let i = 0; i < maxSteps; i++) {
+      // Weighted random direction adjustment
+      const adjustment =
+        this.random() < forwardBias
+          ? (this.random() - 0.5) * variance * 0.5
+          : (this.random() - 0.5) * variance * 2;
+
+      direction += adjustment;
+      const newX = x + Math.cos(direction) * step;
+      const newZ = z + Math.sin(direction) * step;
+
+      // Stop conditions: water, world bounds, steep slope, tile boundary
+      const height = this.terrainSystem.getHeightAt(newX, newZ);
+      const lastY = extendedPath[extendedPath.length - 1].y;
+      const slope = Math.abs(height - lastY) / step;
+
+      if (
+        height < WATER_THRESHOLD ||
+        Math.abs(newX) > this.worldHalfSize ||
+        Math.abs(newZ) > this.worldHalfSize ||
+        slope > 0.5
+      ) {
+        this.recordBoundaryExitIfAtEdge(x, z, direction, roadId);
+        break;
+      }
+
+      extendedPath.push({ x: newX, z: newZ, y: height });
+      x = newX;
+      z = newZ;
+
+      if (this.isAtTileBoundary(x, z)) {
+        this.recordBoundaryExitIfAtEdge(x, z, direction, roadId);
+        break;
+      }
+    }
+
+    return extendedPath;
+  }
+
+  /** Get tile coordinates and local position within tile */
+  private getTileInfo(
+    x: number,
+    z: number,
+  ): {
+    tileX: number;
+    tileZ: number;
+    localX: number;
+    localZ: number;
+  } {
+    const tileX = Math.floor(x / TILE_SIZE);
+    const tileZ = Math.floor(z / TILE_SIZE);
+    return {
+      tileX,
+      tileZ,
+      localX: x - tileX * TILE_SIZE,
+      localZ: z - tileZ * TILE_SIZE,
+    };
+  }
+
+  /** Check if position is within threshold of any tile boundary */
+  private isAtTileBoundary(
+    x: number,
+    z: number,
+    threshold: number = 5,
+  ): boolean {
+    const { localX, localZ } = this.getTileInfo(x, z);
+    return (
+      localX < threshold ||
+      localX > TILE_SIZE - threshold ||
+      localZ < threshold ||
+      localZ > TILE_SIZE - threshold
+    );
+  }
+
+  /** Get which tile edge a position is nearest to, or null if not near edge */
+  private getNearestTileEdge(
+    x: number,
+    z: number,
+    threshold: number = 10,
+  ): TileEdge | null {
+    const { localX, localZ } = this.getTileInfo(x, z);
+    if (localX < threshold) return "west";
+    if (localX > TILE_SIZE - threshold) return "east";
+    if (localZ < threshold) return "south";
+    if (localZ > TILE_SIZE - threshold) return "north";
+    return null;
+  }
+
+  /** Record boundary exit if position is at tile edge (skips duplicates) */
+  private recordBoundaryExitIfAtEdge(
+    x: number,
+    z: number,
+    direction: number,
+    roadId: string,
+  ): void {
+    const edge = this.getNearestTileEdge(x, z);
+    if (!edge) return;
+
+    const { tileX, tileZ } = this.getTileInfo(x, z);
+
+    // Skip if duplicate
+    const isDuplicate = this.boundaryExits.some(
+      (e) =>
+        e.roadId === roadId &&
+        e.tileX === tileX &&
+        e.tileZ === tileZ &&
+        e.edge === edge,
+    );
+    if (isDuplicate) return;
+
+    this.boundaryExits.push({
+      roadId,
+      position: { x, z },
+      direction,
+      tileX,
+      tileZ,
+      edge,
+    });
+  }
+
+  /** Get boundary exits for a tile, optionally filtered by edge */
+  getBoundaryExitsForTile(
+    tileX: number,
+    tileZ: number,
+    edge?: TileEdge,
+  ): RoadBoundaryExit[] {
+    return this.boundaryExits.filter(
+      (e) =>
+        e.tileX === tileX && e.tileZ === tileZ && (!edge || e.edge === edge),
+    );
+  }
+
+  /** Get all boundary exits in the network */
+  getAllBoundaryExits(): RoadBoundaryExit[] {
+    return [...this.boundaryExits];
+  }
+
+  /**
+   * Get road entries for a tile from adjacent tiles.
+   * Maps exits from neighbors to entry points on this tile's edges.
+   */
+  getRoadEntriesForTile(tileX: number, tileZ: number): RoadBoundaryExit[] {
+    // Adjacent tiles and edge mappings: [dx, dz, exitEdge, entryEdge]
+    const neighbors: [number, number, TileEdge, TileEdge][] = [
+      [-1, 0, "east", "west"],
+      [1, 0, "west", "east"],
+      [0, -1, "north", "south"],
+      [0, 1, "south", "north"],
+    ];
+
+    const entries: RoadBoundaryExit[] = [];
+    for (const [dx, dz, exitEdge, entryEdge] of neighbors) {
+      for (const exit of this.getBoundaryExitsForTile(
+        tileX + dx,
+        tileZ + dz,
+        exitEdge,
+      )) {
+        entries.push({ ...exit, tileX, tileZ, edge: entryEdge });
+      }
+    }
+    return entries;
+  }
+
+  /** Check if a road endpoint exists near given coordinates */
+  hasRoadAtPoint(x: number, z: number, threshold: number = 10): boolean {
+    return this.roads.some((road) => {
+      const first = road.path[0];
+      const last = road.path[road.path.length - 1];
+      return (
+        dist2D(first.x, first.z, x, z) < threshold ||
+        dist2D(last.x, last.z, x, z) < threshold
+      );
+    });
   }
 
   /** @deprecated Use generateRoadAsync instead */
@@ -1541,6 +1782,66 @@ export class RoadNetworkSystem extends System {
     // Phase 2: Cache town internal roads and paths
     // This makes roads visually extend through towns instead of stopping at the edge
     await this.cacheTownInternalRoads();
+
+    // Phase 3: Detect boundary exits for all roads
+    // This enables cross-tile road continuity
+    this.detectAllRoadBoundaryExits();
+  }
+
+  /**
+   * Detect boundary exits for all roads in the network.
+   * A boundary exit occurs when a road's endpoint is at or near a tile boundary.
+   * This allows adjacent tiles to continue roads seamlessly.
+   */
+  private detectAllRoadBoundaryExits(): void {
+    for (const road of this.roads) {
+      if (road.path.length < 2) continue;
+
+      // Check start point
+      const startPoint = road.path[0];
+      const secondPoint = road.path[1];
+      const startDirection = Math.atan2(
+        secondPoint.z - startPoint.z,
+        secondPoint.x - startPoint.x,
+      );
+
+      // Only record start as exit if it's not at a town (exploration roads starting in wilderness)
+      // Town-to-town roads start/end at towns, so we don't want those as exits
+      if (!road.fromTownId || road.fromTownId === "") {
+        this.recordBoundaryExitIfAtEdge(
+          startPoint.x,
+          startPoint.z,
+          startDirection + Math.PI, // Opposite direction (pointing away)
+          road.id,
+        );
+      }
+
+      // Check end point
+      const endPoint = road.path[road.path.length - 1];
+      const secondLastPoint = road.path[road.path.length - 2];
+      const endDirection = Math.atan2(
+        endPoint.z - secondLastPoint.z,
+        endPoint.x - secondLastPoint.x,
+      );
+
+      // Record end as exit if road doesn't terminate at a town
+      // Exploration roads to natural features should be recorded
+      if (!road.toTownId || road.toTownId === "") {
+        this.recordBoundaryExitIfAtEdge(
+          endPoint.x,
+          endPoint.z,
+          endDirection,
+          road.id,
+        );
+      }
+    }
+
+    if (this.boundaryExits.length > 0) {
+      Logger.system(
+        "RoadNetworkSystem",
+        `Detected ${this.boundaryExits.length} boundary exit points for cross-tile continuity`,
+      );
+    }
   }
 
   /**
@@ -1833,12 +2134,15 @@ export class RoadNetworkSystem extends System {
       roads: this.roads,
       seed: this.seed,
       generatedAt: Date.now(),
+      boundaryExits:
+        this.boundaryExits.length > 0 ? [...this.boundaryExits] : undefined,
     };
   }
 
   destroy(): void {
     this.roads = [];
     this.tileRoadCache.clear();
+    this.boundaryExits = [];
     super.destroy();
   }
 }

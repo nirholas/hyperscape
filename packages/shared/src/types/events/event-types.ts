@@ -110,6 +110,7 @@ export enum EventType {
 
   // Terrain System
   TERRAIN_TILE_GENERATED = "terrain:tile:generated",
+  TERRAIN_TILE_REGENERATED = "terrain:tile:regenerated",
   TERRAIN_VALIDATION_COMPLETE = "terrain:validation:complete",
   TERRAIN_PHYSICS_READY = "terrain:physics:ready",
 

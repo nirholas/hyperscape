@@ -145,17 +145,8 @@ export interface BaseFootprint {
   frontSide: string;
 }
 
-// ============================================================
-// RNG INTERFACE
-// ============================================================
-
-export interface RNG {
-  next(): number;
-  int(min: number, max: number): number;
-  chance(probability: number): boolean;
-  pick<T>(list: T[]): T | null;
-  shuffle<T>(list: T[]): T[];
-}
+// RNG interface is imported from consolidated math/Random.ts
+export type { RNG } from "../../math/Random.js";
 
 // ============================================================
 // GENERATION OPTIONS

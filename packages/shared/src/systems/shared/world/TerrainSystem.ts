@@ -144,6 +144,12 @@ export class TerrainSystem extends System {
   private pendingCollisionSet = new Set<string>();
   private maxTilesPerFrame = 2; // cap tiles generated per frame
   private generationBudgetMsPerFrame = 6; // time budget per frame (ms)
+  // Pending resource instance creation (deferred to spread across frames)
+  private pendingResourceInstances: Array<{
+    tile: TerrainTile;
+    resourceIndex: number;
+  }> = [];
+  private maxResourceInstancesPerFrame = 10; // Process 10 resource instances per frame
   private _tempVec3 = new THREE.Vector3();
   private _tempVec3_2 = new THREE.Vector3();
   private _tempVec2 = new THREE.Vector2();
@@ -491,6 +497,75 @@ export class TerrainSystem extends System {
 
     // Avoid leaked cloned geometry
     transformedGeometry.dispose();
+  }
+
+  /**
+   * Process pending resource instance creation queue.
+   * Spreads instance creation across frames to prevent hitches.
+   */
+  private processResourceInstanceQueue(): void {
+    if (this.pendingResourceInstances.length === 0) return;
+
+    let processed = 0;
+    while (
+      this.pendingResourceInstances.length > 0 &&
+      processed < this.maxResourceInstancesPerFrame
+    ) {
+      const item = this.pendingResourceInstances.shift()!;
+      const { tile, resourceIndex } = item;
+
+      // Tile may have been unloaded
+      if (!this.terrainTiles.has(tile.key)) continue;
+      if (resourceIndex >= tile.resources.length) continue;
+
+      const resource = tile.resources[resourceIndex];
+      if (resource.instanceId != null) continue;
+
+      // Create the instance
+      this._tempVec3.set(
+        tile.x * this.CONFIG.TILE_SIZE + resource.position.x,
+        resource.position.y,
+        tile.z * this.CONFIG.TILE_SIZE + resource.position.z,
+      );
+
+      const instanceId = this.instancedMeshManager.addInstance(
+        resource.type,
+        resource.id,
+        this._tempVec3,
+      );
+
+      if (instanceId !== null) {
+        resource.instanceId = instanceId;
+        resource.meshType = resource.type;
+
+        // Emit resource created event
+        this.world.emit(EventType.RESOURCE_MESH_CREATED, {
+          mesh: undefined,
+          instanceId: instanceId,
+          resourceId: resource.id,
+          resourceType: resource.type === "ore" ? "mining_rock" : resource.type,
+          worldPosition: {
+            x: this._tempVec3.x,
+            y: this._tempVec3.y,
+            z: this._tempVec3.z,
+          },
+        });
+      }
+
+      processed++;
+    }
+  }
+
+  /**
+   * Queue resource instances for deferred creation.
+   * Called by generateTile/createTileFromGeometryWithResources.
+   */
+  private queueResourceInstances(tile: TerrainTile): void {
+    for (let i = 0; i < tile.resources.length; i++) {
+      const resource = tile.resources[i];
+      if (resource.instanceId != null) continue;
+      this.pendingResourceInstances.push({ tile, resourceIndex: i });
+    }
   }
 
   /**
@@ -863,37 +938,9 @@ export class TerrainSystem extends System {
       this.generateVisualFeatures(tile);
       this.generateWaterMeshes(tile);
 
-      // Add resource meshes
+      // Queue resource instances for deferred creation (spreads work across frames)
       if (tile.resources.length > 0 && tile.mesh) {
-        for (const resource of tile.resources) {
-          if (resource.instanceId != null) continue;
-          this._tempVec3.set(
-            tile.x * this.CONFIG.TILE_SIZE + resource.position.x,
-            resource.position.y,
-            tile.z * this.CONFIG.TILE_SIZE + resource.position.z,
-          );
-          const instanceId = this.instancedMeshManager.addInstance(
-            resource.type,
-            resource.id,
-            this._tempVec3,
-          );
-          if (instanceId !== null) {
-            resource.instanceId = instanceId;
-            resource.meshType = resource.type;
-            this.world.emit(EventType.RESOURCE_MESH_CREATED, {
-              mesh: undefined,
-              instanceId: instanceId,
-              resourceId: resource.id,
-              resourceType:
-                resource.type === "ore" ? "mining_rock" : resource.type,
-              worldPosition: {
-                x: this._tempVec3.x,
-                y: this._tempVec3.y,
-                z: this._tempVec3.z,
-              },
-            });
-          }
-        }
+        this.queueResourceInstances(tile);
       }
     }
 
@@ -1757,50 +1804,11 @@ export class TerrainSystem extends System {
         // Generate visual features and water meshes
         this.generateVisualFeatures(tile);
         this.generateWaterMeshes(tile);
-        // DISABLED: Grass generation - needs further work to match reference quality
-        // this.generateGrassForTile(tile, BIOMES[tile.biome])
+        // NOTE: Grass rendering is handled by GrassSystem
 
-        // Add visible resource meshes (instanced proxies) on client
+        // Queue resource instances for deferred creation (spreads work across frames)
         if (tile.resources.length > 0 && tile.mesh) {
-          for (const resource of tile.resources) {
-            if (resource.instanceId != null) continue;
-
-            // Reuse pre-allocated vector for resource position
-            this._tempVec3.set(
-              tile.x * this.CONFIG.TILE_SIZE + resource.position.x,
-              resource.position.y,
-              tile.z * this.CONFIG.TILE_SIZE + resource.position.z,
-            );
-
-            const instanceId = this.instancedMeshManager.addInstance(
-              resource.type,
-              resource.id,
-              this._tempVec3,
-            );
-
-            if (instanceId !== null) {
-              resource.instanceId = instanceId;
-              resource.meshType = resource.type;
-
-              // Emit resource created event for InteractionSystem registration
-              // For instanced resources, we pass the instanceId instead of a mesh
-              // Map manifest type to ResourceType enum value
-              // Manifest uses: "tree", "ore", "fishing_spot"
-              // Enum expects: "tree", "mining_rock", "fishing_spot"
-              this.world.emit(EventType.RESOURCE_MESH_CREATED, {
-                mesh: undefined,
-                instanceId: instanceId,
-                resourceId: resource.id,
-                resourceType:
-                  resource.type === "ore" ? "mining_rock" : resource.type,
-                worldPosition: {
-                  x: this._tempVec3.x,
-                  y: this._tempVec3.y,
-                  z: this._tempVec3.z,
-                },
-              });
-            }
-          }
+          this.queueResourceInstances(tile);
         }
       }
     }
@@ -2723,58 +2731,82 @@ export class TerrainSystem extends System {
   private _flatZoneLoggedZones = new Set<string>();
 
   private getFlatZoneHeight(worldX: number, worldZ: number): number | null {
-    // Quick terrain-tile-based lookup (100m tiles)
-    const tileX = Math.floor(worldX / this.CONFIG.TILE_SIZE);
-    const tileZ = Math.floor(worldZ / this.CONFIG.TILE_SIZE);
-    const key = `${tileX}_${tileZ}`;
-
-    const zones = this.flatZonesByTile.get(key);
-    if (!zones || zones.length === 0) {
-      return null; // No flat zones overlap this terrain tile
+    // Check ALL flat zones, not just spatially indexed ones
+    // This is simpler and avoids spatial index boundary issues
+    if (this.flatZones.size === 0) {
+      return null;
     }
 
-    // Check each zone that overlaps this terrain tile
-    for (const zone of zones) {
+    // Find the closest zone that affects this point
+    // Priority: core area > blend area > none
+    let bestCoreZone: FlatZone | null = null;
+    let bestCoreDist = Infinity;
+
+    let bestBlendZone: FlatZone | null = null;
+    let bestBlendFactor = Infinity; // Lower = closer to core
+
+    for (const zone of this.flatZones.values()) {
       const dx = Math.abs(worldX - zone.centerX);
       const dz = Math.abs(worldZ - zone.centerZ);
-
       const halfWidth = zone.width / 2;
       const halfDepth = zone.depth / 2;
 
-      // Inside core flat area - return exact flat height
+      // Check if in core flat area
       if (dx <= halfWidth && dz <= halfDepth) {
-        // Debug: Log first time each zone is hit
-        if (!this._flatZoneLoggedZones.has(zone.id)) {
-          this._flatZoneLoggedZones.add(zone.id);
-          console.log(
-            `[TerrainSystem] FLAT ZONE HIT: "${zone.id}" at (${worldX.toFixed(1)}, ${worldZ.toFixed(1)}) -> height=${zone.height.toFixed(2)}`,
-          );
-        }
-        this._flatZoneHitCount++;
-        return zone.height;
-      }
-
-      // Check blend area
-      const blendHalfWidth = halfWidth + zone.blendRadius;
-      const blendHalfDepth = halfDepth + zone.blendRadius;
-
-      if (dx <= blendHalfWidth && dz <= blendHalfDepth) {
-        // Get procedural height for blending
-        const proceduralHeight = this.getProceduralHeightWithBoost(
-          worldX,
-          worldZ,
+        // Distance from center (normalized)
+        const dist = Math.max(
+          halfWidth > 0 ? dx / halfWidth : 0,
+          halfDepth > 0 ? dz / halfDepth : 0,
         );
-
-        // Calculate blend factor (0 at edge of flat zone, 1 at edge of blend zone)
+        if (dist < bestCoreDist) {
+          bestCoreDist = dist;
+          bestCoreZone = zone;
+        }
+      }
+      // Check if in blend area
+      else if (
+        dx <= halfWidth + zone.blendRadius &&
+        dz <= halfDepth + zone.blendRadius
+      ) {
+        // Calculate blend factor (0 at core edge, 1 at blend edge)
         const blendX = dx > halfWidth ? (dx - halfWidth) / zone.blendRadius : 0;
         const blendZ = dz > halfDepth ? (dz - halfDepth) / zone.blendRadius : 0;
         const blend = Math.max(blendX, blendZ);
 
-        // Smoothstep for natural transition: t² × (3 - 2t)
-        const t = blend * blend * (3 - 2 * blend);
-
-        return zone.height + (proceduralHeight - zone.height) * t;
+        if (blend < bestBlendFactor) {
+          bestBlendFactor = blend;
+          bestBlendZone = zone;
+        }
       }
+    }
+
+    // If in a core area, return that zone's flat height
+    if (bestCoreZone) {
+      // Debug logging (first hit per zone)
+      if (!this._flatZoneLoggedZones.has(bestCoreZone.id)) {
+        this._flatZoneLoggedZones.add(bestCoreZone.id);
+        console.log(
+          `[TerrainSystem] FLAT ZONE HIT: "${bestCoreZone.id}" at (${worldX.toFixed(1)}, ${worldZ.toFixed(1)}) -> height=${bestCoreZone.height.toFixed(2)}`,
+        );
+      }
+      this._flatZoneHitCount++;
+      return bestCoreZone.height;
+    }
+
+    // If in a blend area, smoothly interpolate
+    if (bestBlendZone) {
+      const proceduralHeight = this.getProceduralHeightWithBoost(
+        worldX,
+        worldZ,
+      );
+
+      // Smoothstep: t² × (3 - 2t) for C1 continuous transition
+      const t = bestBlendFactor * bestBlendFactor * (3 - 2 * bestBlendFactor);
+
+      // Interpolate from flat height (t=0) to procedural height (t=1)
+      return (
+        bestBlendZone.height + (proceduralHeight - bestBlendZone.height) * t
+      );
     }
 
     return null;
@@ -2824,20 +2856,26 @@ export class TerrainSystem extends System {
 
     this.flatZones.set(zone.id, zone);
 
-    // Calculate affected terrain tiles (100m each)
+    // Calculate affected terrain tiles
+    // IMPORTANT: Visual terrain tiles are CENTERED at (tileX * TILE_SIZE, tileZ * TILE_SIZE)
+    // So tile 0 covers world X from -TILE_SIZE/2 to +TILE_SIZE/2, NOT 0 to TILE_SIZE.
+    // We must calculate which visual tiles overlap the flat zone's influence area.
     const totalRadius = Math.max(zone.width, zone.depth) / 2 + zone.blendRadius;
-    const minTileX = Math.floor(
-      (zone.centerX - totalRadius) / this.CONFIG.TILE_SIZE,
-    );
-    const maxTileX = Math.floor(
-      (zone.centerX + totalRadius) / this.CONFIG.TILE_SIZE,
-    );
-    const minTileZ = Math.floor(
-      (zone.centerZ - totalRadius) / this.CONFIG.TILE_SIZE,
-    );
-    const maxTileZ = Math.floor(
-      (zone.centerZ + totalRadius) / this.CONFIG.TILE_SIZE,
-    );
+    const halfTile = this.CONFIG.TILE_SIZE / 2;
+
+    // For visual tiles centered at tileX * TILE_SIZE:
+    // Tile covers [tileX * TILE_SIZE - halfTile, tileX * TILE_SIZE + halfTile]
+    // We need tiles where: tileX * TILE_SIZE + halfTile >= zone.minX AND tileX * TILE_SIZE - halfTile <= zone.maxX
+    // Simplifying: tileX >= (zone.minX - halfTile) / TILE_SIZE AND tileX <= (zone.maxX + halfTile) / TILE_SIZE
+    const zoneMinX = zone.centerX - totalRadius;
+    const zoneMaxX = zone.centerX + totalRadius;
+    const zoneMinZ = zone.centerZ - totalRadius;
+    const zoneMaxZ = zone.centerZ + totalRadius;
+
+    const minTileX = Math.floor((zoneMinX + halfTile) / this.CONFIG.TILE_SIZE);
+    const maxTileX = Math.floor((zoneMaxX + halfTile) / this.CONFIG.TILE_SIZE);
+    const minTileZ = Math.floor((zoneMinZ + halfTile) / this.CONFIG.TILE_SIZE);
+    const maxTileZ = Math.floor((zoneMaxZ + halfTile) / this.CONFIG.TILE_SIZE);
 
     const tileKeys: string[] = [];
     const tilesToRegenerate: Array<{ x: number; z: number }> = [];
@@ -2890,7 +2928,7 @@ export class TerrainSystem extends System {
           `[TerrainSystem] Regenerating ${filteredTiles.length} terrain tiles for flat zone "${zone.id}"`,
         );
         for (const tile of filteredTiles) {
-          this.regenerateTerrainTile(tile.x, tile.z);
+          this.regenerateTerrainTile(tile.x, tile.z, "flat_zone");
           this._pendingTileRegeneration.delete(`${tile.x}_${tile.z}`);
         }
       }
@@ -2905,7 +2943,11 @@ export class TerrainSystem extends System {
    * use getHeightAt() which checks flat zones dynamically, so physics doesn't
    * need regeneration.
    */
-  private regenerateTerrainTile(tileX: number, tileZ: number): void {
+  private regenerateTerrainTile(
+    tileX: number,
+    tileZ: number,
+    reason: "flat_zone" | "road" | "other" = "other",
+  ): void {
     const key = `${tileX}_${tileZ}`;
     const existingTile = this.terrainTiles.get(key);
     if (!existingTile || !existingTile.mesh) return;
@@ -2920,8 +2962,17 @@ export class TerrainSystem extends System {
     existingTile.mesh.geometry.computeBoundingBox();
 
     console.log(
-      `[TerrainSystem] Regenerated terrain tile (${tileX},${tileZ}) for flat zone`,
+      `[TerrainSystem] Regenerated terrain tile (${tileX},${tileZ}) for ${reason}`,
     );
+
+    // Emit event so VegetationSystem can regenerate grass/vegetation for this tile
+    this.world.emit(EventType.TERRAIN_TILE_REGENERATED, {
+      tileId: key,
+      tileX,
+      tileZ,
+      biome: existingTile.biome || "grassland",
+      reason,
+    });
   }
 
   /**
@@ -3036,81 +3087,94 @@ export class TerrainSystem extends System {
     }
 
     for (const [areaId, area] of Object.entries(ALL_WORLD_AREAS)) {
-      if (!area.stations) {
-        continue;
-      }
-
-      console.log(
-        `[TerrainSystem] Area "${areaId}" has ${area.stations.length} stations`,
-      );
-
-      for (const station of area.stations) {
-        const stationData = stationDataProvider.getStationData(station.type);
-
-        // Skip if station type not found or doesn't want ground flattening
-        if (!stationData) {
-          console.log(
-            `[TerrainSystem] Station "${station.id}" type "${station.type}" not found in stationDataProvider`,
-          );
-          continue;
-        }
-
-        if (!stationData.flattenGround) {
-          console.log(
-            `[TerrainSystem] Station "${station.id}" has flattenGround=false, skipping`,
-          );
-          continue;
-        }
-
-        // Get footprint from model bounds (returns movement tiles, e.g., {x: 2, z: 2})
-        const footprint = stationDataProvider.getFootprint(station.type);
-        const size = resolveFootprint(footprint);
-
-        // Calculate flat zone dimensions in world units (meters)
-        const padding = stationData.flattenPadding;
-        const blendRadius = stationData.flattenBlendRadius;
-        const width = size.x * MOVEMENT_TILE_SIZE + padding * 2;
-        const depth = size.z * MOVEMENT_TILE_SIZE + padding * 2;
-
-        // Get procedural height at station center (what terrain would be without flattening)
-        const flatHeight = this.getProceduralHeightWithBoost(
-          station.position.x,
-          station.position.z,
-        );
-
-        const zone: FlatZone = {
-          id: `station_${station.id}`,
-          centerX: station.position.x,
-          centerZ: station.position.z,
-          width,
-          depth,
-          height: flatHeight,
-          blendRadius,
-        };
-
-        this.registerFlatZone(zone);
-        loadedCount++;
-
-        console.log(
-          `[TerrainSystem] Registered flat zone "${zone.id}" at (${zone.centerX}, ${zone.centerZ}) ` +
-            `size ${zone.width.toFixed(1)}x${zone.depth.toFixed(1)}m, height=${zone.height.toFixed(1)}m`,
-        );
-      }
-
-      // Also load explicit flatZones defined in the area config (e.g., duel arenas)
+      // Check for both stations and explicit flatZones
       const areaConfig = area as {
+        stations?: typeof area.stations;
         flatZones?: Array<{
           id: string;
           centerX: number;
           centerZ: number;
           width: number;
           depth: number;
-          height?: number; // Optional explicit height (if not provided, uses procedural)
-          heightOffset?: number; // Optional offset added to procedural height (e.g., floor thickness)
+          height?: number;
+          heightOffset?: number;
           blendRadius: number;
         }>;
       };
 
+      // Skip areas with neither stations nor flatZones
+      if (!areaConfig.stations?.length && !areaConfig.flatZones?.length) {
+        continue;
+      }
+
+      if (areaConfig.stations?.length) {
+        console.log(
+          `[TerrainSystem] Area "${areaId}" has ${areaConfig.stations.length} stations`,
+        );
+      }
+      if (areaConfig.flatZones?.length) {
+        console.log(
+          `[TerrainSystem] Area "${areaId}" has ${areaConfig.flatZones.length} explicit flat zones`,
+        );
+      }
+
+      // Process stations (if any)
+      if (areaConfig.stations) {
+        for (const station of areaConfig.stations) {
+          const stationData = stationDataProvider.getStationData(station.type);
+
+          // Skip if station type not found or doesn't want ground flattening
+          if (!stationData) {
+            console.log(
+              `[TerrainSystem] Station "${station.id}" type "${station.type}" not found in stationDataProvider`,
+            );
+            continue;
+          }
+
+          if (!stationData.flattenGround) {
+            console.log(
+              `[TerrainSystem] Station "${station.id}" has flattenGround=false, skipping`,
+            );
+            continue;
+          }
+
+          // Get footprint from model bounds (returns movement tiles, e.g., {x: 2, z: 2})
+          const footprint = stationDataProvider.getFootprint(station.type);
+          const size = resolveFootprint(footprint);
+
+          // Calculate flat zone dimensions in world units (meters)
+          const padding = stationData.flattenPadding;
+          const blendRadius = stationData.flattenBlendRadius;
+          const width = size.x * MOVEMENT_TILE_SIZE + padding * 2;
+          const depth = size.z * MOVEMENT_TILE_SIZE + padding * 2;
+
+          // Get procedural height at station center (what terrain would be without flattening)
+          const flatHeight = this.getProceduralHeightWithBoost(
+            station.position.x,
+            station.position.z,
+          );
+
+          const zone: FlatZone = {
+            id: `station_${station.id}`,
+            centerX: station.position.x,
+            centerZ: station.position.z,
+            width,
+            depth,
+            height: flatHeight,
+            blendRadius,
+          };
+
+          this.registerFlatZone(zone);
+          loadedCount++;
+
+          console.log(
+            `[TerrainSystem] Registered flat zone "${zone.id}" at (${zone.centerX}, ${zone.centerZ}) ` +
+              `size ${zone.width.toFixed(1)}x${zone.depth.toFixed(1)}m, height=${zone.height.toFixed(1)}m`,
+          );
+        }
+      }
+
+      // Also load explicit flatZones defined in the area config (e.g., duel arenas, special platforms)
       if (areaConfig.flatZones) {
         for (const zoneConfig of areaConfig.flatZones) {
           // Calculate base height from procedural terrain
@@ -3684,6 +3748,11 @@ export class TerrainSystem extends System {
     // Process queued collision generation on the server
     if (this.world.network?.isServer) {
       this.processCollisionGenerationQueue();
+    }
+
+    // Process pending resource instance creation (client only, spreads work across frames)
+    if (this.world.network?.isClient) {
+      this.processResourceInstanceQueue();
     }
 
     // Update instance visibility on client based on player position

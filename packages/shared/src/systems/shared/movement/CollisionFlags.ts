@@ -156,28 +156,35 @@ export type CollisionMaskValue =
   (typeof CollisionMask)[keyof typeof CollisionMask];
 
 /**
- * Get the opposite wall flag for a direction
+ * Get the wall flag that blocks movement from a given direction
  *
  * When checking if movement from tile A to tile B is blocked:
  * - Check if A has a wall blocking exit in that direction
  * - Check if B has a wall blocking entry from that direction
  *
- * @param dx - X direction (-1, 0, 1)
- * @param dz - Z direction (-1, 0, 1)
- * @returns Wall flag that blocks movement in that direction, or 0
+ * Coordinate system: North = -Z, South = +Z, East = +X, West = -X
+ *
+ * @param dx - X direction (-1, 0, 1) of the direction we're coming FROM
+ * @param dz - Z direction (-1, 0, 1) of the direction we're coming FROM
+ * @returns Wall flag that blocks entry from that direction, or 0
  */
 export function getWallFlagForDirection(dx: number, dz: number): number {
   // Cardinal directions
-  if (dx === 0 && dz === 1) return CollisionFlag.WALL_NORTH;
+  // Coming from north (-Z direction) = wall on north side blocks us
+  if (dx === 0 && dz === -1) return CollisionFlag.WALL_NORTH;
+  // Coming from south (+Z direction) = wall on south side blocks us
+  if (dx === 0 && dz === 1) return CollisionFlag.WALL_SOUTH;
+  // Coming from east (+X direction) = wall on east side blocks us
   if (dx === 1 && dz === 0) return CollisionFlag.WALL_EAST;
-  if (dx === 0 && dz === -1) return CollisionFlag.WALL_SOUTH;
+  // Coming from west (-X direction) = wall on west side blocks us
   if (dx === -1 && dz === 0) return CollisionFlag.WALL_WEST;
 
   // Diagonal directions
-  if (dx === -1 && dz === 1) return CollisionFlag.WALL_NORTH_WEST;
-  if (dx === 1 && dz === 1) return CollisionFlag.WALL_NORTH_EAST;
-  if (dx === 1 && dz === -1) return CollisionFlag.WALL_SOUTH_EAST;
-  if (dx === -1 && dz === -1) return CollisionFlag.WALL_SOUTH_WEST;
+  // NW = (-X, -Z), NE = (+X, -Z), SE = (+X, +Z), SW = (-X, +Z)
+  if (dx === -1 && dz === -1) return CollisionFlag.WALL_NORTH_WEST;
+  if (dx === 1 && dz === -1) return CollisionFlag.WALL_NORTH_EAST;
+  if (dx === 1 && dz === 1) return CollisionFlag.WALL_SOUTH_EAST;
+  if (dx === -1 && dz === 1) return CollisionFlag.WALL_SOUTH_WEST;
 
   return 0;
 }

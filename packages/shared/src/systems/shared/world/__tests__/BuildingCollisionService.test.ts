@@ -590,12 +590,13 @@ describe("BuildingCollisionService", () => {
       // Single cell should have walls on all 4 sides
       // Each side has 4 wall segments (one per tile along the edge)
       // Total: 4 sides × 4 tiles = 16 wall segments
-      // 1 side has door opening (4 segments with hasOpening=true)
+      // Door side: only CENTER 2 tiles have hasOpening=true, 2 side tiles remain closed
       // Remaining 3 sides have 12 solid wall segments
+      // Total closed: 2 (door side edges) + 12 (other sides) = 14
       const closedWalls = building!.floors[0].wallSegments.filter(
         (w) => !w.hasOpening,
       );
-      expect(closedWalls.length).toBe(12);
+      expect(closedWalls.length).toBe(14);
     });
 
     it("handles building at negative coordinates", () => {
@@ -829,11 +830,12 @@ describe("BuildingCollisionService", () => {
 
       if (northWall) {
         // Movement from this tile going north should be blocked
+        // North = -Z direction, so moving from tileZ to tileZ - 1
         const isBlocked = service.isWallBlocked(
           northWall.tileX,
           northWall.tileZ,
           northWall.tileX,
-          northWall.tileZ + 1,
+          northWall.tileZ - 1, // North = decreasing Z
           0,
         );
         expect(isBlocked).toBe(true);
@@ -1626,10 +1628,14 @@ describe("BuildingCollisionService", () => {
       expect(solidWall).toBeDefined();
 
       // Calculate the tile just outside this wall
+      // Coordinate system: North = -Z, South = +Z, East = +X, West = -X
+      // "Outside" means the tile on the far side of the wall from the building interior
       let outsideTileX = solidWall!.tileX;
       let outsideTileZ = solidWall!.tileZ;
-      if (solidWall!.side === "south") outsideTileZ -= 1;
-      else if (solidWall!.side === "north") outsideTileZ += 1;
+      if (solidWall!.side === "south")
+        outsideTileZ += 1; // South wall faces +Z, outside is z+1
+      else if (solidWall!.side === "north")
+        outsideTileZ -= 1; // North wall faces -Z, outside is z-1
       else if (solidWall!.side === "west") outsideTileX -= 1;
       else if (solidWall!.side === "east") outsideTileX += 1;
 
@@ -1943,10 +1949,13 @@ describe("BuildingCollisionService", () => {
       expect(solidWall).toBeDefined();
 
       // Calculate tile outside solid wall
+      // Coordinate system: North = -Z, South = +Z, East = +X, West = -X
       let solidOutsideX = solidWall!.tileX;
       let solidOutsideZ = solidWall!.tileZ;
-      if (solidWall!.side === "south") solidOutsideZ -= 1;
-      else if (solidWall!.side === "north") solidOutsideZ += 1;
+      if (solidWall!.side === "south")
+        solidOutsideZ += 1; // South wall faces +Z
+      else if (solidWall!.side === "north")
+        solidOutsideZ -= 1; // North wall faces -Z
       else if (solidWall!.side === "west") solidOutsideX -= 1;
       else if (solidWall!.side === "east") solidOutsideX += 1;
 

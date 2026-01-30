@@ -130,12 +130,10 @@ export function createVRMFactory(
           originalMat.emissive?.clone() ||
           baseColor.clone().multiplyScalar(0.15);
 
-        // NOTE: Use undefined instead of null for optional textures
+        // NOTE: Only include texture properties if they actually exist
+        // Passing undefined explicitly triggers THREE.js warnings
         // Setting null causes WebGPU texture cache corruption (WeakMap key error)
-        const newMat = new THREE.MeshStandardMaterial({
-          map: originalMat.map || undefined,
-          normalMap: originalMat.normalMap || undefined,
-          emissiveMap: originalMat.emissiveMap || undefined,
+        const materialParams: THREE.MeshStandardMaterialParameters = {
           color: baseColor,
           emissive: emissiveColor,
           emissiveIntensity: 0.3, // Subtle glow - matches PlayerEntity placeholder
@@ -146,7 +144,16 @@ export function createVRMFactory(
           roughness: 1.0,
           metalness: 0.0,
           envMapIntensity: 1.0, // Respond to environment map
-        });
+        };
+
+        // Only add texture properties if they exist (avoids THREE.js warnings)
+        if (originalMat.map) materialParams.map = originalMat.map;
+        if (originalMat.normalMap)
+          materialParams.normalMap = originalMat.normalMap;
+        if (originalMat.emissiveMap)
+          materialParams.emissiveMap = originalMat.emissiveMap;
+
+        const newMat = new THREE.MeshStandardMaterial(materialParams);
 
         // Copy name for debugging
         newMat.name = originalMat.name || "VRM_Standard";

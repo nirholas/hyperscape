@@ -15,3 +15,5 @@ export * from "./POISystem";
 export * from "./RoadNetworkSystem";
 export * from "./BuildingRenderingSystem";
 export * from "./BuildingCollisionService";
+export * from "./ProcgenTreeCache";
+export * from "./ProcgenTreeInstancer";

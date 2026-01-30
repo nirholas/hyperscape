@@ -58,6 +58,39 @@ export const TREE_LEVEL_REQUIREMENTS: Record<string, number> = {
 };
 
 /**
+ * Mapping from game tree subtypes to @hyperscape/procgen presets.
+ * Used for runtime procedural tree generation (visual variety).
+ *
+ * These presets define the visual characteristics of each tree type:
+ * - normal: Common deciduous tree (Quaking Aspen)
+ * - oak: Classic oak with spreading branches
+ * - willow: Distinctive drooping branches
+ * - teak: Tall tropical deciduous
+ * - maple: Multi-trunk with palmate leaves
+ * - mahogany: Large deciduous with dark wood
+ * - yew: Ancient coniferous tree
+ * - magic: Mystical tree with blossoms
+ */
+export const TREE_PROCGEN_PRESETS: Record<string, string> = {
+  normal: "quakingAspen",
+  oak: "blackOak",
+  willow: "weepingWillow",
+  teak: "blackTupelo",
+  maple: "acer",
+  mahogany: "sassafras",
+  yew: "europeanLarch",
+  magic: "hillCherry",
+};
+
+/**
+ * Get the procgen preset name for a tree subtype.
+ * Falls back to quakingAspen for unknown types.
+ */
+export function getTreeProcgenPreset(subType: string): string {
+  return TREE_PROCGEN_PRESETS[subType] ?? "quakingAspen";
+}
+
+/**
  * Level requirements for ore types (OSRS mining levels).
  * Single source of truth - used by both generation and tests.
  */

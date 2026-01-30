@@ -243,33 +243,37 @@ describe("CollisionMatrix", () => {
   });
 
   describe("isBlocked - directional walls", () => {
+    // Coordinate system: North = -Z, South = +Z, East = +X, West = -X
+    // Moving from z=6 to z=5 = dz=-1 = moving NORTH = coming FROM south
+    // Moving from z=4 to z=5 = dz=+1 = moving SOUTH = coming FROM north
+
     it("blocks entry from north when destination has WALL_NORTH", () => {
       matrix.setFlags(5, 5, CollisionFlag.WALL_NORTH);
-      // Moving from (5,6) to (5,5) - entering from north
-      expect(matrix.isBlocked(5, 6, 5, 5)).toBe(true);
+      // Moving from (5,4) to (5,5) - dz=+1 = moving south = coming from NORTH
+      expect(matrix.isBlocked(5, 4, 5, 5)).toBe(true);
     });
 
     it("allows entry from south when destination has WALL_NORTH", () => {
       matrix.setFlags(5, 5, CollisionFlag.WALL_NORTH);
-      // Moving from (5,4) to (5,5) - entering from south
-      expect(matrix.isBlocked(5, 4, 5, 5)).toBe(false);
+      // Moving from (5,6) to (5,5) - dz=-1 = moving north = coming from SOUTH
+      expect(matrix.isBlocked(5, 6, 5, 5)).toBe(false);
     });
 
     it("blocks entry from east when destination has WALL_EAST", () => {
       matrix.setFlags(5, 5, CollisionFlag.WALL_EAST);
-      // Moving from (6,5) to (5,5) - entering from east
+      // Moving from (6,5) to (5,5) - dx=-1 = moving west = coming from EAST
       expect(matrix.isBlocked(6, 5, 5, 5)).toBe(true);
     });
 
     it("blocks entry from south when destination has WALL_SOUTH", () => {
       matrix.setFlags(5, 5, CollisionFlag.WALL_SOUTH);
-      // Moving from (5,4) to (5,5) - entering from south
-      expect(matrix.isBlocked(5, 4, 5, 5)).toBe(true);
+      // Moving from (5,6) to (5,5) - dz=-1 = moving north = coming from SOUTH
+      expect(matrix.isBlocked(5, 6, 5, 5)).toBe(true);
     });
 
     it("blocks entry from west when destination has WALL_WEST", () => {
       matrix.setFlags(5, 5, CollisionFlag.WALL_WEST);
-      // Moving from (4,5) to (5,5) - entering from west
+      // Moving from (4,5) to (5,5) - dx=+1 = moving east = coming from WEST
       expect(matrix.isBlocked(4, 5, 5, 5)).toBe(true);
     });
 
@@ -336,20 +340,25 @@ describe("CollisionMatrix", () => {
   });
 
   describe("isBlocked - diagonal wall clipping", () => {
+    // Coordinate system: North = -Z, South = +Z, East = +X, West = -X
+    // Moving (5,5) -> (6,6) = dx=+1, dz=+1 = moving SOUTHEAST (east + south)
+
     it("blocks diagonal when horizontal adjacent has wall blocking Z direction", () => {
-      // Moving northeast (5,5) -> (6,6)
-      // Horizontal adjacent (6,5) - we're coming from Z=5 (south of Z=6)
-      // So we need WALL_SOUTH to block entry from the south (Z- direction)
-      // horizWallFlag = getWallFlagForDirection(0, -dz) = getWallFlagForDirection(0, -1) = WALL_SOUTH
-      matrix.setFlags(6, 5, CollisionFlag.WALL_SOUTH);
+      // Moving southeast (5,5) -> (6,6): dx=+1, dz=+1
+      // Horizontal adjacent is (6,5) - the tile east of source
+      // To get from (6,5) to (6,6) we move south (dz=+1), coming FROM north
+      // horizWallFlag = getWallFlagForDirection(0, -dz) = getWallFlagForDirection(0, -1)
+      // Coming from north (-Z) → WALL_NORTH blocks us
+      matrix.setFlags(6, 5, CollisionFlag.WALL_NORTH);
       expect(matrix.isBlocked(5, 5, 6, 6)).toBe(true);
     });
 
     it("blocks diagonal when vertical adjacent has wall blocking X direction", () => {
-      // Moving northeast (5,5) -> (6,6)
-      // Vertical adjacent (5,6) - we're coming from X=5 (west of X=6)
-      // So we need WALL_WEST to block entry from the west (X- direction)
-      // vertWallFlag = getWallFlagForDirection(-dx, 0) = getWallFlagForDirection(-1, 0) = WALL_WEST
+      // Moving southeast (5,5) -> (6,6): dx=+1, dz=+1
+      // Vertical adjacent is (5,6) - the tile south of source
+      // To get from (5,6) to (6,6) we move east (dx=+1), coming FROM west
+      // vertWallFlag = getWallFlagForDirection(-dx, 0) = getWallFlagForDirection(-1, 0)
+      // Coming from west (-X) → WALL_WEST blocks us
       matrix.setFlags(5, 6, CollisionFlag.WALL_WEST);
       expect(matrix.isBlocked(5, 5, 6, 6)).toBe(true);
     });

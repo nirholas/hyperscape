@@ -2,10 +2,11 @@
  * Rock Export Utilities
  *
  * Functions for exporting generated rocks to various formats.
+ * Uses consolidated GLBExporter from export module.
  */
 
 import * as THREE from "three";
-import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
+import { exportToGLB as coreExportToGLB } from "../export/GLBExporter.js";
 
 /**
  * Export options
@@ -36,39 +37,18 @@ export async function exportToGLB(
   mesh: THREE.Mesh,
   options: ExportOptions = {},
 ): Promise<ExportResult> {
-  const exporter = new GLTFExporter();
   const filename = options.filename || "rock";
 
-  // Clone and reset position for export
-  const exportMesh = mesh.clone();
-  exportMesh.position.set(0, 0, 0);
-
-  return new Promise((resolve, reject) => {
-    exporter.parse(
-      exportMesh,
-      (result) => {
-        const data = result as ArrayBuffer;
-        const exportResult: ExportResult = {
-          data,
-          filename: `${filename}.glb`,
-          mimeType: "application/octet-stream",
-        };
-
-        if (options.download && typeof window !== "undefined") {
-          downloadBlob(
-            new Blob([data], { type: exportResult.mimeType }),
-            exportResult.filename,
-          );
-        }
-
-        resolve(exportResult);
-      },
-      (error) => {
-        reject(error);
-      },
-      { binary: true },
-    );
+  const result = await coreExportToGLB(mesh, {
+    filename,
+    download: options.download,
   });
+
+  return {
+    data: result.data,
+    filename: result.filename,
+    mimeType: result.mimeType,
+  };
 }
 
 /**

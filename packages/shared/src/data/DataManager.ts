@@ -152,6 +152,12 @@ export interface ExternalResourceData {
   /** LOD1 model path for medium distance rendering */
   lod1ModelPath?: string | null;
   depletedModelPath: string | null;
+  /**
+   * Procgen preset name for procedural tree generation.
+   * Maps to @hyperscape/procgen presets (e.g., "blackOak", "weepingWillow").
+   * If specified, runtime procedural generation will be used instead of GLB model.
+   */
+  procgenPreset?: string;
   scale: number;
   depletedScale: number;
   harvestSkill: string;

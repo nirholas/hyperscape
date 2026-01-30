@@ -125,7 +125,7 @@ export async function exportToGLB(
         includeCustomExtensions: false,
         animations: options.includeAnimations
           ? collectAnimations(exportObject)
-          : undefined,
+          : [],
         maxTextureSize: options.maxTextureSize,
       },
     );

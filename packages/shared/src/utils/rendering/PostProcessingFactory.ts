@@ -11,9 +11,11 @@ import THREE, {
   texture3D,
   mix,
   smoothstep,
-  abs,
+  max,
+  min,
   sub,
   mul,
+  step,
 } from "../../extras/three/three";
 import type { ShaderNode, ShaderNodeInput } from "../../extras/three/three";
 import type { WebGPURenderer } from "./RendererFactory";
@@ -27,23 +29,26 @@ type LUT3DFunction = (
 ) => ShaderNode;
 type LUTLoaderResult = { texture3D: THREE.Data3DTexture };
 type LUTLoader = { loadAsync: (url: string) => Promise<LUTLoaderResult> };
-type BoxBlurFunction = (
+type HashBlurFunction = (
   input: ShaderNodeInput,
-  options: { size: ShaderNodeInput; separation: ShaderNodeInput },
+  blurAmount: ShaderNodeInput,
+  options?: { repeats?: ShaderNodeInput; premultipliedAlpha?: boolean },
 ) => ShaderNode;
 
 /** Default depth blur parameters (RuneScape-style DoF) */
 export const DEPTH_BLUR_DEFAULTS = {
   /** Focus distance in world units - objects at this distance are sharpest */
-  focusDistance: 60,
+  focusDistance: 100,
   /** Range over which blur transitions from 0 to max */
-  blurRange: 40,
+  blurRange: 100,
   /** Overall blur intensity 0-1 */
   intensity: 0.85,
-  /** Blur kernel size (higher = softer but more expensive) */
-  blurSize: 3,
-  /** Sample spread (higher = wider blur) */
-  blurSpread: 6,
+  /** Hash blur amount - controls blur radius (0.01-0.1 typical) */
+  blurAmount: 0.03,
+  /** Hash blur iterations - higher = smoother but more expensive */
+  blurRepeats: 30,
+  /** Sky cutoff distance - objects beyond this are not blurred (preserves sky) */
+  skyDistance: 500,
 } as const;
 
 /** LUT presets for color grading */
@@ -91,8 +96,10 @@ export interface PostProcessingOptions {
     focusDistance?: number;
     blurRange?: number;
     intensity?: number;
-    blurSize?: number;
-    blurSpread?: number;
+    /** Hash blur amount - controls blur radius (0.01-0.1 typical) */
+    blurAmount?: number;
+    /** Hash blur iterations - higher = smoother (30-100 typical) */
+    blurRepeats?: number;
   };
 }
 
@@ -101,7 +108,7 @@ let lut3DModule: { lut3D: LUT3DFunction } | null = null;
 let lutCubeLoaderModule: { LUTCubeLoader: new () => LUTLoader } | null = null;
 let lut3dlLoaderModule: { LUT3dlLoader: new () => LUTLoader } | null = null;
 let lutImageLoaderModule: { LUTImageLoader: new () => LUTLoader } | null = null;
-let boxBlurModule: { boxBlur: BoxBlurFunction } | null = null;
+let hashBlurModule: { hashBlur: HashBlurFunction } | null = null;
 
 // LUT texture cache
 const lutCache = new Map<string, { texture3D: THREE.Data3DTexture }>();
@@ -119,7 +126,7 @@ async function loadModules(): Promise<void> {
     lutImageLoaderModule
       ? null
       : import("three/examples/jsm/loaders/LUTImageLoader.js"),
-    boxBlurModule ? null : import("three/addons/tsl/display/boxBlur.js"),
+    hashBlurModule ? null : import("three/addons/tsl/display/hashBlur.js"),
   ]);
 
   if (imports[0]) lut3DModule = imports[0] as { lut3D: LUT3DFunction };
@@ -131,7 +138,7 @@ async function loadModules(): Promise<void> {
     lutImageLoaderModule = imports[3] as {
       LUTImageLoader: new () => LUTLoader;
     };
-  if (imports[4]) boxBlurModule = imports[4] as { boxBlur: BoxBlurFunction };
+  if (imports[4]) hashBlurModule = imports[4] as { hashBlur: HashBlurFunction };
 }
 
 /** Load a LUT texture by preset name */
@@ -219,11 +226,11 @@ export async function createPostProcessing(
   const depthBlurIntensityUniform = uniform(
     depthBlurActive ? userDepthBlurIntensity : 0,
   );
-  const depthBlurSizeUniform = uniform(
-    options.depthBlur?.blurSize ?? DEPTH_BLUR_DEFAULTS.blurSize,
+  const depthBlurAmountUniform = uniform(
+    options.depthBlur?.blurAmount ?? DEPTH_BLUR_DEFAULTS.blurAmount,
   );
-  const depthBlurSpreadUniform = uniform(
-    options.depthBlur?.blurSpread ?? DEPTH_BLUR_DEFAULTS.blurSpread,
+  const depthBlurRepeatsUniform = uniform(
+    options.depthBlur?.blurRepeats ?? DEPTH_BLUR_DEFAULTS.blurRepeats,
   );
 
   // PostProcessing instance
@@ -257,26 +264,39 @@ export async function createPostProcessing(
   const sceneColor = (scenePass as ScenePassWithNodes).getTextureNode();
   const sceneViewZ = (scenePass as ScenePassWithNodes).getViewZNode();
 
-  // Depth blur: mix sharp/blurred based on distance from focus plane
-  const blurredColor = boxBlurModule!.boxBlur(sceneColor as ShaderNodeInput, {
-    size: depthBlurSizeUniform as ShaderNodeInput,
-    separation: depthBlurSpreadUniform as ShaderNodeInput,
-  });
-  const depthFromFocus = abs(
-    sub(
-      mul(sceneViewZ as ShaderNodeInput, -1),
-      depthBlurFocusUniform as ShaderNodeInput,
-    ),
+  // Depth blur: only blur objects BEYOND the focus distance (far blur only)
+  // hashBlur uses randomized sampling for smooth, organic blur (no grid artifacts)
+  const blurredColor = hashBlurModule!.hashBlur(
+    sceneColor as ShaderNodeInput,
+    depthBlurAmountUniform as ShaderNodeInput,
+    { repeats: depthBlurRepeatsUniform as ShaderNodeInput },
   );
-  const blurAmount = smoothstep(
+
+  // viewZ is negative in view space, so we negate it to get positive depth
+  const depth = mul(sceneViewZ as ShaderNodeInput, -1);
+  // Only blur objects further than focus distance (max clamps negative to 0 = no blur for near)
+  const depthBeyondFocus = max(
+    sub(depth, depthBlurFocusUniform as ShaderNodeInput),
+    uniform(0),
+  );
+  const blurFactor = smoothstep(
     uniform(0),
     depthBlurRangeUniform as ShaderNodeInput,
-    depthFromFocus,
+    depthBeyondFocus,
+  );
+  // Exclude sky from blur: step returns 1 when depth >= skyDistance, we subtract to get 0
+  const skyMask = sub(
+    uniform(1),
+    step(uniform(DEPTH_BLUR_DEFAULTS.skyDistance), depth),
+  );
+  const finalBlurFactor = mul(
+    mul(blurFactor, depthBlurIntensityUniform as ShaderNodeInput),
+    skyMask,
   );
   const depthBlurOutput = mix(
     sceneColor as ShaderNodeInput,
     blurredColor,
-    mul(blurAmount, depthBlurIntensityUniform as ShaderNodeInput),
+    finalBlurFactor,
   );
 
   // Tone mapping

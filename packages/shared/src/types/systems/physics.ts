@@ -261,13 +261,7 @@ export interface ControlsWithEnabled extends System {
   enabled?: boolean;
 }
 
-// Wind system interfaces
-export interface WindUniforms {
-  time: { value: number };
-  windDirection: { value: THREE.Vector3 };
-  windStrength: { value: number };
-  windFrequency: { value: number };
-}
+// Wind system interfaces are defined in Wind.ts - import from there
 
 // TerrainSystem interface in system-interfaces.ts is the full system interface
 

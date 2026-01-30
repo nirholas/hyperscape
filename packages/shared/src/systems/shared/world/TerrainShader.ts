@@ -262,6 +262,149 @@ export function sampleNoiseAtPosition(
   return (noise + 1) * 0.5;
 }
 
+/**
+ * Check if terrain at a given position should display as grass (green).
+ * Uses the same logic as the terrain shader to determine surface type.
+ *
+ * Grass appears when:
+ * - Not in a dirt patch (noise-based brown areas)
+ * - Not on steep slopes (dirt/rock)
+ * - Not in natural shoreline zone (near water level)
+ * - Below snow line (height < 45)
+ *
+ * Note: Flat zones (buildings, arenas) should always have grass regardless of height,
+ * since they're artificial surfaces. Detected by very low slope.
+ *
+ * @param worldX - World X position
+ * @param worldZ - World Z position
+ * @param height - Terrain height at position (Y value)
+ * @param slope - Terrain slope at position (0-1, where 0 is flat, 1 is vertical)
+ * @param seed - Noise seed (default 12345)
+ * @returns Value from 0-1 indicating how "grassy" the terrain is (1 = full grass, 0 = no grass)
+ */
+export function getGrassiness(
+  worldX: number,
+  worldZ: number,
+  height: number,
+  slope: number,
+  seed: number = 12345,
+): number {
+  // Start with full grassiness
+  let grassiness = 1.0;
+
+  // Detect if this is likely a flat zone (artificial flat surface)
+  // Flat zones have near-zero slope, natural terrain rarely does
+  const isFlatZone = slope < 0.05;
+
+  // === DIRT PATCHES (matches terrain shader logic) ===
+  // Dirt patches appear on flat terrain where noise > DIRT_THRESHOLD
+  // Only check for natural terrain, not flat zones (which are artificial)
+  // NOTE: Terrain shader BLENDS grass+dirt, so even "dirt" areas have some green.
+  // We reduce grassiness but don't eliminate grass entirely - shorter/sparser grass
+  // should still appear in brownish-green transition zones.
+  if (!isFlatZone) {
+    const noiseValue = sampleNoiseAtPosition(worldX, worldZ, seed);
+
+    // Match terrain shader's dirt patch logic:
+    // dirtPatchFactor = smoothstep(DIRT_THRESHOLD - 0.05, DIRT_THRESHOLD + 0.15, noiseValue)
+    const dirtPatchFactor = smoothstepCPU(
+      TERRAIN_CONSTANTS.DIRT_THRESHOLD - 0.05,
+      TERRAIN_CONSTANTS.DIRT_THRESHOLD + 0.15,
+      noiseValue,
+    );
+
+    // Dirt only appears on relatively flat terrain (matches shader's flatnessFactor)
+    const flatnessFactor = smoothstepCPU(0.3, 0.05, slope);
+
+    // Reduce grassiness in dirt patches but keep some grass for blended zones
+    // The shader blends colors, so grass blades should still appear (just sparser)
+    grassiness -= dirtPatchFactor * flatnessFactor * 0.5;
+  }
+
+  // === SLOPE-BASED DIRT/ROCK ===
+  // Steeper terrain = more dirt, less grass (matches shader's slope-based dirt)
+  // Shader uses 0.6 multiplier, we use 0.3 to keep some grass on moderate slopes
+  const slopeDirtFactor = smoothstepCPU(0.15, 0.5, slope) * 0.3;
+  grassiness -= slopeDirtFactor;
+
+  // Very steep slopes = rock, no grass (this should exclude completely)
+  const rockFactor = smoothstepCPU(0.5, 0.75, slope);
+  grassiness -= rockFactor;
+
+  // === SHORELINE/WATER ZONES ===
+  // Only applies to NATURAL terrain near water level
+  if (!isFlatZone) {
+    const waterLevel = TERRAIN_CONSTANTS.WATER_LEVEL;
+    const shorelineTop = waterLevel + 4.0; // 9m
+
+    if (height > waterLevel && height < shorelineTop) {
+      const shorelineFactor = smoothstepCPU(
+        shorelineTop,
+        waterLevel + 1.0,
+        height,
+      );
+      grassiness -= shorelineFactor * 0.8;
+    }
+  }
+
+  // === SNOW AT HIGH ELEVATION ===
+  const snowFactor = smoothstepCPU(
+    TERRAIN_CONSTANTS.SNOW_HEIGHT - 5.0,
+    TERRAIN_CONSTANTS.SNOW_HEIGHT + 5.0,
+    height,
+  );
+  grassiness -= snowFactor;
+
+  // Clamp to 0-1
+  return Math.max(0, Math.min(1, grassiness));
+}
+
+/**
+ * CPU-side smoothstep matching GLSL behavior
+ */
+function smoothstepCPU(edge0: number, edge1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * Calculate terrain slope from height samples.
+ * Uses central difference method with 4 neighboring samples.
+ *
+ * @param getHeight - Function to get terrain height at (x, z)
+ * @param x - World X position
+ * @param z - World Z position
+ * @param sampleDistance - Distance between height samples (default 1.0m)
+ * @returns Slope value from 0 (flat) to 1 (vertical)
+ */
+export function calculateSlope(
+  getHeight: (x: number, z: number) => number,
+  x: number,
+  z: number,
+  sampleDistance: number = 1.0,
+): number {
+  // Sample heights at neighboring points
+  const hCenter = getHeight(x, z);
+  const hPosX = getHeight(x + sampleDistance, z);
+  const hNegX = getHeight(x - sampleDistance, z);
+  const hPosZ = getHeight(x, z + sampleDistance);
+  const hNegZ = getHeight(x, z - sampleDistance);
+
+  // Calculate gradients using central difference
+  const dhdx = (hPosX - hNegX) / (2 * sampleDistance);
+  const dhdz = (hPosZ - hNegZ) / (2 * sampleDistance);
+
+  // Gradient magnitude
+  const gradientMag = Math.sqrt(dhdx * dhdx + dhdz * dhdz);
+
+  // Convert to slope (matching shader's: slope = 1 - abs(normal.y))
+  // normal.y = 1 / sqrt(1 + gradientMag^2)
+  const normalY = 1 / Math.sqrt(1 + gradientMag * gradientMag);
+  const slope = 1 - Math.abs(normalY);
+
+  return slope;
+}
+
 // ============================================================================
 // TERRAIN MATERIAL - OSRS Style (No Textures)
 // ============================================================================

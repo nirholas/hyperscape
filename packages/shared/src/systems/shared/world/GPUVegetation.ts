@@ -108,8 +108,8 @@ export const GPU_VEG_CONFIG = {
   /** Sharpness of the cutoff edge (higher = sharper, more binary like RuneScape) */
   OCCLUSION_EDGE_SHARPNESS: 0.5,
 
-  /** Maximum occlusion dissolve strength (0.7 = partial dissolve for subtle visibility) */
-  OCCLUSION_STRENGTH: 0.7,
+  /** Maximum occlusion dissolve strength (0 = disabled, matches buildings) */
+  OCCLUSION_STRENGTH: 0.0,
 
   // ========== NEAR-CAMERA DISSOLVE (RuneScape-style depth fade) ==========
   // Prevents hard geometry clipping when camera clips through objects
@@ -169,12 +169,12 @@ export interface LODDistancesWithSq extends LODDistances {
  * Categories can be customized based on object size and visual importance.
  */
 export const LOD_DISTANCES: Record<string, LODDistances> = {
-  // Large vegetation (high visual impact)
+  // Large vegetation - aggressive LOD for performance
   tree: {
-    lod1Distance: 60,
-    lod2Distance: 120,
-    imposterDistance: 200,
-    fadeDistance: 350,
+    lod1Distance: 30,
+    lod2Distance: 60,
+    imposterDistance: 100,
+    fadeDistance: 180,
   },
 
   // Medium vegetation
@@ -231,10 +231,10 @@ export const LOD_DISTANCES: Record<string, LODDistances> = {
     fadeDistance: 200,
   },
   tree_resource: {
-    lod1Distance: 60,
-    lod2Distance: 140,
-    imposterDistance: 200,
-    fadeDistance: 350,
+    lod1Distance: 25, // Switch to LOD1 very early
+    lod2Distance: 50,
+    imposterDistance: 80, // Switch to impostor ASAP
+    fadeDistance: 150, // Fade out earlier
   },
   rock_resource: {
     lod1Distance: 50,

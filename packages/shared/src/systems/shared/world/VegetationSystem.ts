@@ -55,6 +55,7 @@ import {
   type LODDistancesWithSq,
 } from "./GPUVegetation";
 import { csmLevels } from "./Environment";
+import { updateTreeInstances } from "./ProcgenTreeCache";
 import type { RoadNetworkSystem } from "./RoadNetworkSystem";
 // Octahedral impostor for high-quality multi-angle billboard rendering
 import {
@@ -580,13 +581,10 @@ export class VegetationSystem extends System {
 
   /**
    * Whitelist of vegetation assets to load.
-   * Set to null to load all assets, or provide an array of asset IDs to filter.
-   * WIP: Currently limited to tree1 and mushroom until other vegetation rendering is fixed.
+   * Set to null to load all assets from the manifest.
+   * Assets are loaded based on biome configuration which references asset IDs.
    */
-  private static readonly VEGETATION_ASSET_WHITELIST: string[] | null = [
-    "tree1",
-    "mushroom",
-  ];
+  private static readonly VEGETATION_ASSET_WHITELIST: string[] | null = null;
 
   /**
    * Load vegetation asset definitions from manifest
@@ -650,9 +648,7 @@ export class VegetationSystem extends System {
 
       const response = await fetch(manifestUrl);
       if (!response.ok) {
-        console.warn(
-          `[VegetationSystem] LOD settings manifest not found, using defaults`,
-        );
+        // LOD settings are optional - silently use defaults
         return;
       }
 
@@ -753,6 +749,10 @@ export class VegetationSystem extends System {
     this.world.on(
       EventType.TERRAIN_TILE_UNLOADED,
       this.onTileUnloaded.bind(this),
+    );
+    this.world.on(
+      EventType.TERRAIN_TILE_REGENERATED,
+      this.onTileRegenerated.bind(this),
     );
 
     console.log(
@@ -948,6 +948,105 @@ export class VegetationSystem extends System {
     // Remove tile-chunk relationships and dispose orphaned chunks
     // This handles actual mesh cleanup, quadtree removal, and imposter disposal
     this.removeTileChunkRelationships(key);
+  }
+
+  /**
+   * Handle terrain tile regeneration - clear and regenerate vegetation
+   * Called when terrain is modified (e.g., flat zones registered for buildings)
+   */
+  private async onTileRegenerated(data: {
+    tileX: number;
+    tileZ: number;
+    biome: string;
+    reason: string;
+  }): Promise<void> {
+    const key = `${data.tileX}_${data.tileZ}`;
+
+    console.log(
+      `[VegetationSystem] 🔄 Regenerating vegetation for tile ${key} (reason: ${data.reason})`,
+    );
+
+    // Get terrain tile size for bounds calculation
+    const terrainSystem = this.world.getSystem("terrain") as {
+      CONFIG?: { TILE_SIZE: number };
+    } | null;
+    const tileSize = terrainSystem?.CONFIG?.TILE_SIZE ?? 100;
+    const tileWorldX = data.tileX * tileSize;
+    const tileWorldZ = data.tileZ * tileSize;
+
+    // AGGRESSIVE CLEANUP: Find and remove ALL chunks that overlap this terrain tile
+    // This ensures vegetation at different heights is properly cleared
+    const chunksToRemove: string[] = [];
+    for (const [chunkKey, chunked] of this.chunkedMeshes) {
+      // Check if chunk overlaps with the terrain tile
+      if (
+        chunked.maxX >= tileWorldX &&
+        chunked.minX <= tileWorldX + tileSize &&
+        chunked.maxZ >= tileWorldZ &&
+        chunked.minZ <= tileWorldZ + tileSize
+      ) {
+        chunksToRemove.push(chunkKey);
+      }
+    }
+
+    // Remove overlapping chunks from scene and tracking
+    for (const chunkKey of chunksToRemove) {
+      // Remove LOD0
+      const chunked = this.chunkedMeshes.get(chunkKey);
+      if (chunked && this.vegetationGroup) {
+        this.vegetationGroup.remove(chunked.mesh);
+        chunked.mesh.geometry.dispose();
+        this.chunkedMeshes.delete(chunkKey);
+      }
+
+      // Remove LOD1
+      const lod1Key = `${chunkKey}_lod1`;
+      const lod1Chunked = this.lod1ChunkedMeshes.get(lod1Key);
+      if (lod1Chunked && this.vegetationGroup) {
+        this.vegetationGroup.remove(lod1Chunked.mesh);
+        lod1Chunked.mesh.geometry.dispose();
+        this.lod1ChunkedMeshes.delete(lod1Key);
+      }
+
+      // Remove LOD2
+      const lod2Key = `${chunkKey}_lod2`;
+      const lod2Chunked = this.lod2ChunkedMeshes.get(lod2Key);
+      if (lod2Chunked && this.vegetationGroup) {
+        this.vegetationGroup.remove(lod2Chunked.mesh);
+        lod2Chunked.mesh.geometry.dispose();
+        this.lod2ChunkedMeshes.delete(lod2Key);
+      }
+
+      // Remove from quadtree and other tracking
+      if (this.chunkQuadtree) {
+        this.chunkQuadtree.remove(chunkKey);
+      }
+      this._lastVisibleChunks.delete(chunkKey);
+      this.chunkLODStates.delete(chunkKey);
+      this.chunkInstanceData.delete(chunkKey);
+      this.chunkTileRefs.delete(chunkKey);
+      this.removeChunkFromImposter(chunkKey);
+    }
+
+    if (chunksToRemove.length > 0) {
+      console.log(
+        `[VegetationSystem] Removed ${chunksToRemove.length} overlapping chunks for tile ${key}`,
+      );
+    }
+
+    // Clear tile tracking data
+    if (this.tileVegetation.has(key)) {
+      this.tileVegetation.delete(key);
+    }
+    this.tileChunks.delete(key);
+    this.pendingTiles.delete(key);
+
+    // Now regenerate vegetation with updated terrain heights
+    await this.onTileGenerated({
+      tileX: data.tileX,
+      tileZ: data.tileZ,
+      biome: data.biome,
+    });
   }
 
   /**
@@ -1496,13 +1595,16 @@ export class VegetationSystem extends System {
   /**
    * Estimate terrain slope at a position
    */
+  /**
+   * Estimate terrain slope at a position using central differences.
+   * Returns the magnitude of the gradient vector (rise/run).
+   */
   private estimateSlope(
     x: number,
     z: number,
     getHeight: (x: number, z: number) => number,
   ): number {
     const delta = 1.0;
-    const _hCenter = getHeight(x, z); // Not used but called for consistency
     const hN = getHeight(x, z - delta);
     const hS = getHeight(x, z + delta);
     const hE = getHeight(x + delta, z);
@@ -2650,6 +2752,10 @@ export class VegetationSystem extends System {
       // CPU culling: hide chunks outside camera frustum or beyond render distance
       // This is more efficient than GPU culling because we skip entire draw calls
       this.updateChunkVisibility(cameraPos.x, cameraPos.z);
+
+      // Update procgen tree instances (LOD transitions, wind animation)
+      // Pass delta time for wind animation and cross-fade transitions
+      updateTreeInstances(cameraPos, _delta);
 
       // Update ClientLoader with player position for priority-based loading
       // This allows distant tiles to be loaded with lower priority

@@ -190,13 +190,8 @@ function createOctPlaneIndices(
 /**
  * Map points to hemisphere octahedron
  * Reference: Godot Octahedral Impostors
- * Supports non-square grids (gridSizeX != gridSizeY)
  */
-function mapToHemisphere(
-  points: number[],
-  _gridSizeX?: number,
-  _gridSizeY?: number,
-): void {
+function mapToHemisphere(points: number[]): void {
   const radius = 0.5;
 
   for (let i = 0; i < points.length; i += 3) {
@@ -220,13 +215,8 @@ function mapToHemisphere(
 /**
  * Map points to full sphere octahedron
  * Reference: Godot Octahedral Impostors
- * Supports non-square grids (gridSizeX != gridSizeY)
  */
-function mapToFullSphere(
-  points: number[],
-  _gridSizeX?: number,
-  _gridSizeY?: number,
-): void {
+function mapToFullSphere(points: number[]): void {
   const radius = 0.5;
 
   for (let i = 0; i < points.length; i += 3) {
@@ -298,9 +288,9 @@ export function buildOctahedronMesh(
   // Create octahedron-mapped points
   const octPoints = planePoints.slice();
   if (octType === OctahedronType.HEMI) {
-    mapToHemisphere(octPoints, gridSizeX, gridSizeY);
+    mapToHemisphere(octPoints);
   } else {
-    mapToFullSphere(octPoints, gridSizeX, gridSizeY);
+    mapToFullSphere(octPoints);
   }
 
   const normals = toSphereNormals(octPoints);

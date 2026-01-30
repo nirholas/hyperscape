@@ -286,6 +286,12 @@ export interface ResourceEntityConfig
   modelScale?: number;
   depletedModelScale?: number;
   /**
+   * Procgen preset name for procedural tree generation.
+   * Maps to @hyperscape/procgen presets (e.g., "blackOak", "weepingWillow").
+   * If specified, runtime procedural generation will be used instead of GLB model.
+   */
+  procgenPreset?: string;
+  /**
    * Path to LOD1 (low-poly) model for medium-distance rendering
    * If not specified, full model is used until imposter distance
    * Recommended for trees and large resources to improve mid-range performance

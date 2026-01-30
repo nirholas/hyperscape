@@ -1558,19 +1558,6 @@ export function createImpostorMaterial(
   const fadeStartSq = fadeStart * fadeStart;
   const fadeEndSq = fadeEnd * fadeEnd;
 
-  // Debug: Log material creation
-  console.log("[ImpostorMaterial] Creating material:", {
-    gridSizeX,
-    gridSizeY,
-    useAAA,
-    useDissolve,
-    useLighting,
-    enableDepthBlending,
-    enableSpecular,
-    hasDepthAtlas: !!depthAtlasTexture,
-    hasPBRAtlas: !!pbrAtlasTexture,
-  });
-
   // =========================================================================
   // BUILD UNIFORMS
   // =========================================================================

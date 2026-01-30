@@ -959,12 +959,12 @@ export class TownSystem extends System {
         // Cache the layout for BuildingRenderingSystem to reuse
         this.buildingLayouts.set(building.id, generated.layout);
 
-        // Get ground height at building position
-        const groundY =
-          this.terrainSystem?.getHeightAt(
-            building.position.x,
-            building.position.z,
-          ) ?? building.position.y;
+        // Use the building's stored Y position directly
+        // This was set when the building was created (before any flat zones)
+        // DO NOT query terrain height here - previous buildings in this batch
+        // may have already registered flat zones, which would include
+        // FOUNDATION_HEIGHT in the terrain height, causing double-counting
+        const groundY = building.position.y;
 
         // Convert BuildingLayout to BuildingLayoutInput for collision service
         const layoutInput = this.convertLayoutToInput(generated.layout);
@@ -1055,19 +1055,25 @@ export class TownSystem extends System {
         errorsFound++;
       }
 
-      // Check for doors using helper
-      const doorWalls =
-        BuildingCollisionService.getDoorWallSegments(groundFloor);
-      const doorCount = doorWalls.length;
-      if (doorCount === 0) {
+      // Check for entrances (doors OR arches - both allow passage)
+      const entranceWalls = groundFloor.wallSegments.filter(
+        (wall) =>
+          wall.hasOpening &&
+          (wall.openingType === "door" || wall.openingType === "arch"),
+      );
+      const entranceCount = entranceWalls.length;
+      if (entranceCount === 0) {
         Logger.systemError(
           "TownSystem",
-          `Building ${building.buildingId} has NO doors! Players cannot enter.`,
+          `Building ${building.buildingId} has NO entrances (doors or arches)! Players cannot enter.`,
         );
         errorsFound++;
       }
 
       // Verify terrain flat zone exists for this building
+      // NOTE: We query the building center, but for L-shaped buildings the center may be
+      // outside flat zone cells. Use a higher tolerance (2m) to avoid false positives.
+      // The actual gameplay uses per-tile height queries which work correctly.
       if (this.terrainSystem) {
         const centerHeight = this.terrainSystem.getHeightAt(
           building.worldPosition.x,
@@ -1076,7 +1082,7 @@ export class TownSystem extends System {
         const expectedFloor = groundFloor.elevation;
         const heightDiff = Math.abs((centerHeight ?? 0) - expectedFloor);
 
-        if (heightDiff > 0.5) {
+        if (heightDiff > 2.0) {
           Logger.systemWarn(
             "TownSystem",
             `Building ${building.buildingId} terrain height mismatch: ` +
@@ -1085,33 +1091,35 @@ export class TownSystem extends System {
         }
       }
 
-      // Validate door tiles are reachable from outside
-      const doorTiles = this.collisionService.getDoorTiles(building.buildingId);
-      if (doorTiles.length > 0) {
-        let reachableDoors = 0;
-        for (const door of doorTiles) {
+      // Validate entrance tiles (doors AND arches) are reachable from outside
+      const entranceTiles = this.collisionService.getEntranceTiles(
+        building.buildingId,
+      );
+      if (entranceTiles.length > 0) {
+        let reachableEntrances = 0;
+        for (const entrance of entranceTiles) {
           // Check if the exterior approach tile is walkable
           const exteriorWalkable =
             this.collisionService.isTileWalkableInBuilding(
-              door.tileX,
-              door.tileZ,
+              entrance.tileX,
+              entrance.tileZ,
               0,
             );
           if (exteriorWalkable) {
-            reachableDoors++;
+            reachableEntrances++;
           } else {
             Logger.systemWarn(
               "TownSystem",
-              `Building ${building.buildingId} door at (${door.tileX},${door.tileZ}) ` +
+              `Building ${building.buildingId} entrance at (${entrance.tileX},${entrance.tileZ}) ` +
                 `exterior approach tile is NOT walkable!`,
             );
           }
         }
 
-        if (reachableDoors === 0) {
+        if (reachableEntrances === 0) {
           Logger.systemError(
             "TownSystem",
-            `Building ${building.buildingId} has ${doorTiles.length} doors but NONE are reachable from outside!`,
+            `Building ${building.buildingId} has ${entranceTiles.length} entrances but NONE are reachable from outside!`,
           );
           errorsFound++;
         }
@@ -1136,10 +1144,18 @@ export class TownSystem extends System {
       const floor0 = BuildingCollisionService.getGroundFloorFromData(b);
       return sum + (floor0?.walkableTiles.size ?? 0);
     }, 0);
-    const totalDoors = allBuildings.reduce((sum, b) => {
+    const totalEntrances = allBuildings.reduce((sum, b) => {
       const floor0 = BuildingCollisionService.getGroundFloorFromData(b);
       if (!floor0) return sum;
-      return sum + BuildingCollisionService.getDoorWallSegments(floor0).length;
+      // Count both doors and arches as entrances
+      return (
+        sum +
+        floor0.wallSegments.filter(
+          (w) =>
+            w.hasOpening &&
+            (w.openingType === "door" || w.openingType === "arch"),
+        ).length
+      );
     }, 0);
 
     // Print prominent success message
@@ -1158,7 +1174,7 @@ export class TownSystem extends System {
     console.log(
       `║  Total walkable tiles: ${String(totalWalkableTiles).padEnd(38)}║`,
     );
-    console.log(`║  Total doors: ${String(totalDoors).padEnd(47)}║`);
+    console.log(`║  Total entrances: ${String(totalEntrances).padEnd(43)}║`);
     console.log(`║  Towns: ${String(this.towns.length).padEnd(53)}║`);
     console.log(
       `╚══════════════════════════════════════════════════════════════╝\n`,
@@ -1211,19 +1227,21 @@ export class TownSystem extends System {
         continue;
       }
 
-      // Get ALL doors for this building - test each one
-      const allDoors = this.collisionService.getDoorTiles(building.buildingId);
-      if (allDoors.length === 0) {
+      // Get ALL entrances (doors AND arches) for this building - test each one
+      const allEntrances = this.collisionService.getEntranceTiles(
+        building.buildingId,
+      );
+      if (allEntrances.length === 0) {
         Logger.systemError(
           "TownSystem",
-          `VALIDATION ERROR [${building.buildingId}]: No doors found! Building is inaccessible.`,
+          `VALIDATION ERROR [${building.buildingId}]: No entrances (doors or arches) found! Building is inaccessible.`,
         );
         pathfindingErrors++;
-        failedBuildings.push(`${building.buildingId}:no-doors`);
+        failedBuildings.push(`${building.buildingId}:no-entrances`);
         continue;
       }
 
-      // Define walkability check using collision service (reused for all doors)
+      // Define walkability check using collision service (reused for all entrances)
       const isWalkable = (
         tile: { x: number; z: number },
         fromTile?: { x: number; z: number },
@@ -1251,42 +1269,40 @@ export class TownSystem extends System {
         return true;
       };
 
-      // Test EACH door for this building
-      let doorsWorking = 0;
-      let doorsFailed = 0;
-      const doorResults: string[] = [];
+      // Test EACH entrance (door or arch) for this building
+      let entrancesWorking = 0;
+      let entrancesFailed = 0;
+      const entranceResults: string[] = [];
 
-      for (const doorInfo of allDoors) {
-        // doorInfo has: tileX, tileZ (exterior approach), direction
-        // But doorInfo.tileX/tileZ are already the EXTERIOR tiles from getDoorTiles()
-        // We need to recalculate to get proper interior
-        // Actually, getDoorTiles returns exterior tiles, so we need the interior
-        const exteriorX = doorInfo.tileX;
-        const exteriorZ = doorInfo.tileZ;
+      for (const entranceInfo of allEntrances) {
+        // entranceInfo has: tileX, tileZ (exterior approach), direction
+        // getEntranceTiles returns exterior tiles, so we need to calculate interior
+        const exteriorX = entranceInfo.tileX;
+        const exteriorZ = entranceInfo.tileZ;
 
-        // Interior tile is one step INTO the building (opposite of door direction)
+        // Interior tile is one step INTO the building (opposite of entrance direction)
         let interiorX = exteriorX;
         let interiorZ = exteriorZ;
-        switch (doorInfo.direction) {
+        switch (entranceInfo.direction) {
           case "north":
             interiorZ += 1;
-            break; // Door faces north, interior is south (higher Z)
+            break; // Entrance faces north, interior is south (higher Z)
           case "south":
             interiorZ -= 1;
-            break; // Door faces south, interior is north (lower Z)
+            break; // Entrance faces south, interior is north (lower Z)
           case "east":
             interiorX -= 1;
-            break; // Door faces east, interior is west (lower X)
+            break; // Entrance faces east, interior is west (lower X)
           case "west":
             interiorX += 1;
-            break; // Door faces west, interior is east (higher X)
+            break; // Entrance faces west, interior is east (higher X)
         }
 
-        // Start from 5 tiles AWAY from door in the approach direction
+        // Start from 5 tiles AWAY from entrance in the approach direction
         let startX = exteriorX;
         let startZ = exteriorZ;
         const approachDistance = 5;
-        switch (doorInfo.direction) {
+        switch (entranceInfo.direction) {
           case "north":
             startZ -= approachDistance;
             break;
@@ -1301,7 +1317,7 @@ export class TownSystem extends System {
             break;
         }
 
-        // TEST 1: Can we path from outside to door EXTERIOR?
+        // TEST 1: Can we path from outside to entrance EXTERIOR?
         const pathToExterior = pathfinder.findPath(
           { x: startX, z: startZ },
           { x: exteriorX, z: exteriorZ },
@@ -1309,57 +1325,59 @@ export class TownSystem extends System {
         );
 
         if (pathToExterior.length === 0) {
-          doorsFailed++;
-          doorResults.push(`door@(${exteriorX},${exteriorZ}):no-path`);
+          entrancesFailed++;
+          entranceResults.push(`entrance@(${exteriorX},${exteriorZ}):no-path`);
           continue;
         }
 
         // Verify path reaches exterior (not truncated)
         const lastTile = pathToExterior[pathToExterior.length - 1];
         if (lastTile.x !== exteriorX || lastTile.z !== exteriorZ) {
-          doorsFailed++;
-          doorResults.push(`door@(${exteriorX},${exteriorZ}):truncated`);
+          entrancesFailed++;
+          entranceResults.push(
+            `entrance@(${exteriorX},${exteriorZ}):truncated`,
+          );
           continue;
         }
 
-        // TEST 2: Can we step from door exterior to door INTERIOR?
-        const canEnterDoor = isWalkable(
+        // TEST 2: Can we step from entrance exterior to entrance INTERIOR?
+        const canEnter = isWalkable(
           { x: interiorX, z: interiorZ },
           { x: exteriorX, z: exteriorZ },
         );
-        if (!canEnterDoor) {
-          doorsFailed++;
-          doorResults.push(`door@(${exteriorX},${exteriorZ}):blocked`);
+        if (!canEnter) {
+          entrancesFailed++;
+          entranceResults.push(`entrance@(${exteriorX},${exteriorZ}):blocked`);
           continue;
         }
 
-        doorsWorking++;
-        doorResults.push(
-          `door@(${exteriorX},${exteriorZ}):OK[${pathToExterior.length}]`,
+        entrancesWorking++;
+        entranceResults.push(
+          `entrance@(${exteriorX},${exteriorZ}):OK[${pathToExterior.length}]`,
         );
       }
 
-      // Building passes if AT LEAST ONE door works
-      if (doorsWorking === 0) {
+      // Building passes if AT LEAST ONE entrance works
+      if (entrancesWorking === 0) {
         Logger.systemError(
           "TownSystem",
-          `ALL DOORS FAILED [${building.buildingId}]: ${doorsFailed} doors tested, none accessible. ${doorResults.join(", ")}`,
+          `ALL ENTRANCES FAILED [${building.buildingId}]: ${entrancesFailed} entrances tested, none accessible. ${entranceResults.join(", ")}`,
         );
         pathfindingErrors++;
-        failedBuildings.push(`${building.buildingId}:all-doors-failed`);
+        failedBuildings.push(`${building.buildingId}:all-entrances-failed`);
         continue;
       }
 
       buildingsTested++;
-      if (doorsFailed > 0) {
+      if (entrancesFailed > 0) {
         Logger.systemWarn(
           "TownSystem",
-          `Building ${building.buildingId}: ${doorsWorking}/${allDoors.length} doors work (${doorsFailed} blocked)`,
+          `Building ${building.buildingId}: ${entrancesWorking}/${allEntrances.length} entrances work (${entrancesFailed} blocked)`,
         );
       }
       Logger.system(
         "TownSystem",
-        `✓ Building ${building.buildingId}: ${doorsWorking}/${allDoors.length} doors accessible`,
+        `✓ Building ${building.buildingId}: ${entrancesWorking}/${allEntrances.length} entrances accessible`,
       );
     }
 
@@ -1375,7 +1393,7 @@ export class TownSystem extends System {
     if (buildingsTested === 0 && allBuildings.length > 0) {
       throw new Error(
         `[TownSystem] CRITICAL: ${allBuildings.length} buildings exist but ZERO were validated! ` +
-          `All buildings failed pre-checks (no ground floor, no doors, or no walkable tiles).`,
+          `All buildings failed pre-checks (no ground floor, no entrances, or no walkable tiles).`,
       );
     }
 
@@ -1406,9 +1424,12 @@ export class TownSystem extends System {
         BuildingCollisionService.getGroundFloorFromData(building);
       if (!groundFloor) continue;
 
-      // Get door walls once for the entire building check
-      const doorWalls =
-        BuildingCollisionService.getDoorWallSegments(groundFloor);
+      // Get entrance walls (doors and arches) once for the entire building check
+      const entranceWalls = groundFloor.wallSegments.filter(
+        (w) =>
+          w.hasOpening &&
+          (w.openingType === "door" || w.openingType === "arch"),
+      );
 
       // Check ALL tiles within the building's bounding box
       for (let tx = bbox.minTileX; tx <= bbox.maxTileX; tx++) {
@@ -1443,10 +1464,10 @@ export class TownSystem extends System {
               tz < bbox.maxTileZ - margin;
 
             if (isInterior && isWalkable) {
-              // Interior non-floor tile SHOULD be blocked (unless it's a door exterior)
-              // Check against pre-fetched door walls
-              let isDoorExterior = false;
-              for (const wall of doorWalls) {
+              // Interior non-floor tile SHOULD be blocked (unless it's an entrance exterior)
+              // Check against pre-fetched entrance walls (doors and arches)
+              let isEntranceExterior = false;
+              for (const wall of entranceWalls) {
                 const doorTiles =
                   BuildingCollisionService.getDoorExteriorAndInterior(
                     wall.tileX,
@@ -1454,12 +1475,12 @@ export class TownSystem extends System {
                     wall.side,
                   );
                 if (doorTiles.exteriorX === tx && doorTiles.exteriorZ === tz) {
-                  isDoorExterior = true;
+                  isEntranceExterior = true;
                   break;
                 }
               }
 
-              if (!isDoorExterior) {
+              if (!isEntranceExterior) {
                 errors++;
                 if (failedChecks.length < 5) {
                   failedChecks.push(
@@ -1501,23 +1522,12 @@ export class TownSystem extends System {
    * 2. getHeightAt() returns the flat zone height instead of procedural terrain
    * 3. Players naturally walk at the correct elevation
    *
-   * **Door Approach Y-Transition:**
+   * **IMPORTANT:** Creates ONE flat zone per building (not per-cell) to avoid
+   * seams between adjacent cells. The `getFlatZoneHeight` function only uses
+   * the first matching zone, so multiple overlapping zones cause hard edges.
    *
-   * When a player walks from terrain to a building through a door, the Y-elevation
-   * transitions as follows:
-   *
-   * 1. **Far approach** (outside blend radius): Terrain height from procedural generation
-   * 2. **Blend zone** (within blendRadius of flat zone edge): Smooth interpolation
-   *    between terrain height and building floor height
-   * 3. **Door exterior** (within padding area): Building floor height (part of flat zone)
-   * 4. **Door interior** (on building floor tile): Building floor height
-   *
-   * The padding and blend radius are carefully chosen to prevent sharp Y-jumps:
-   * - Padding (3m) extends the flat zone beyond the building walls to cover entrance
-   *   steps and door approach tiles (which are 1m outside the building bbox)
-   * - Blend radius (4m) provides gradual transition from natural terrain to flat zone
-   *
-   * Total smooth transition zone: ~7m (3m padding + 4m blend) on each side of building.
+   * For L-shaped buildings, we flatten the entire bounding box, which is
+   * acceptable since the unused corners are typically small.
    *
    * @param building - The building to register a flat zone for
    * @param layout - The building's generated layout
@@ -1530,56 +1540,90 @@ export class TownSystem extends System {
   ): void {
     if (!this.terrainSystem) return;
 
-    // Calculate building dimensions in world units
-    // Building width/depth are in cells, each cell is CELL_SIZE meters (4m)
-    const buildingWidth = layout.width * CELL_SIZE;
-    const buildingDepth = layout.depth * CELL_SIZE;
-
     // Floor height is ground + foundation
-    // This is where players stand when inside the building
     const floorHeight = groundY + FOUNDATION_HEIGHT;
 
-    // Create flat zone matching building footprint with generous padding
-    // Building visuals extend beyond the cell grid:
-    // - Wall thickness: 0.22m at cell boundaries
-    // - Foundation overhang: 0.15m past walls
-    // - Entrance steps: 2 steps × 0.4m depth = 0.8m
-    // - Total visual extension: ~1.2m
-    //
-    // We add extra padding to ensure terrain doesn't poke through and
-    // to cover door approach tiles (1 tile = 1m outside building bbox):
-    // - 3m padding covers entrance steps + approach area + 2m safety margin
-    // - 4m blend radius provides smooth transition to natural terrain
-    // - Together with collision margin (1 tile), this prevents clipping
-    //
-    // IMPORTANT: If changing these values, consider the door approach Y-transition.
-    // The flat zone MUST extend at least 1m past the building bbox to cover
-    // door approach tiles, otherwise players will experience Y-jumps at doors.
-    const padding = 3; // 3m padding for entrance steps and foundation overhang
-    const blendRadius = 4; // Smooth terrain transition over 4m
+    // Get ground floor footprint
+    const groundFloor = layout.floorPlans[0];
+    if (!groundFloor?.footprint) {
+      Logger.systemWarn(
+        "TownSystem",
+        `No ground floor footprint for ${building.id}, skipping flat zone`,
+      );
+      return;
+    }
+
+    const footprint = groundFloor.footprint;
+
+    // Find the bounding box of all occupied cells
+    let minCol = Infinity,
+      maxCol = -Infinity;
+    let minRow = Infinity,
+      maxRow = -Infinity;
+    let cellCount = 0;
+
+    for (let row = 0; row < footprint.length; row++) {
+      for (let col = 0; col < footprint[row].length; col++) {
+        if (footprint[row][col]) {
+          minCol = Math.min(minCol, col);
+          maxCol = Math.max(maxCol, col);
+          minRow = Math.min(minRow, row);
+          maxRow = Math.max(maxRow, row);
+          cellCount++;
+        }
+      }
+    }
+
+    if (cellCount === 0) {
+      Logger.systemWarn(
+        "TownSystem",
+        `Empty footprint for ${building.id}, skipping flat zone`,
+      );
+      return;
+    }
+
+    // Terrain registration function
+    const terrain = this.terrainSystem as {
+      registerFlatZone?: (zone: FlatZone) => void;
+    };
+    if (!terrain.registerFlatZone) return;
+
+    // Calculate flat zone dimensions for the entire building footprint
+    // Add padding around exterior for door approach areas
+    const exteriorPadding = 1.5; // 1.5m around building (covers steps)
+    const blendRadius = 8.0; // 8m smooth blend for natural transitions
+
+    // Calculate building bounds in local space
+    // Layout origin is at building center, cells are CELL_SIZE x CELL_SIZE
+    const buildingMinX = (minCol - layout.width / 2) * CELL_SIZE;
+    const buildingMaxX = (maxCol + 1 - layout.width / 2) * CELL_SIZE;
+    const buildingMinZ = (minRow - layout.depth / 2) * CELL_SIZE;
+    const buildingMaxZ = (maxRow + 1 - layout.depth / 2) * CELL_SIZE;
+
+    // Flat zone dimensions including padding
+    const zoneWidth = buildingMaxX - buildingMinX + exteriorPadding * 2;
+    const zoneDepth = buildingMaxZ - buildingMinZ + exteriorPadding * 2;
+
+    // Flat zone center in world coordinates
+    const zoneCenterX = building.position.x + (buildingMinX + buildingMaxX) / 2;
+    const zoneCenterZ = building.position.z + (buildingMinZ + buildingMaxZ) / 2;
 
     const zone: FlatZone = {
       id: `building_${building.id}`,
-      centerX: building.position.x,
-      centerZ: building.position.z,
-      width: buildingWidth + padding * 2,
-      depth: buildingDepth + padding * 2,
+      centerX: zoneCenterX,
+      centerZ: zoneCenterZ,
+      width: zoneWidth,
+      depth: zoneDepth,
       height: floorHeight,
       blendRadius,
     };
 
-    // Register with TerrainSystem
-    const terrain = this.terrainSystem as {
-      registerFlatZone?: (zone: FlatZone) => void;
-    };
-    if (terrain.registerFlatZone) {
-      terrain.registerFlatZone(zone);
-      Logger.system(
-        "TownSystem",
-        `Registered flat zone for ${building.id} at (${zone.centerX.toFixed(0)}, ${zone.centerZ.toFixed(0)}) ` +
-          `size ${zone.width.toFixed(0)}x${zone.depth.toFixed(0)}m, height=${zone.height.toFixed(2)}m`,
-      );
-    }
+    terrain.registerFlatZone(zone);
+
+    Logger.system(
+      "TownSystem",
+      `Registered flat zone for ${building.id}: ${zoneWidth.toFixed(1)}x${zoneDepth.toFixed(1)}m at (${zoneCenterX.toFixed(0)}, ${zoneCenterZ.toFixed(0)}), height=${floorHeight.toFixed(2)}m`,
+    );
   }
 
   /**

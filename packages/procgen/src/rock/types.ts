@@ -289,16 +289,5 @@ export type RockGenerationOptions = {
   params?: PartialRockParams;
 };
 
-/**
- * RNG interface for deterministic generation
- */
-export type RNG = {
-  /** Get next random number in [0, 1) */
-  next(): number;
-  /** Get random integer in [min, max] inclusive */
-  int(min: number, max: number): number;
-  /** Return true with given probability */
-  chance(probability: number): boolean;
-  /** Pick random element from array */
-  pick<T>(list: T[]): T | null;
-};
+// RNG interface is imported from consolidated math/Random.ts
+export type { RNG } from "../math/Random.js";

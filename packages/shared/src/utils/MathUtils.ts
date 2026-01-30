@@ -29,6 +29,16 @@ export function calculateDistance2D(pos1: Vector3, pos2: Vector3): number {
 }
 
 /**
+ * Calculate 2D distance from raw coordinates (no object allocation)
+ * Optimized for hot paths where Vector3 objects are not available
+ */
+export function dist2D(x1: number, z1: number, x2: number, z2: number): number {
+  const dx = x2 - x1;
+  const dz = z2 - z1;
+  return Math.sqrt(dx * dx + dz * dz);
+}
+
+/**
  * Clamp a value between min and max
  */
 export function clamp(value: number, min: number, max: number): number {

@@ -165,45 +165,56 @@ describe("CollisionFlags", () => {
   });
 
   describe("getWallFlagForDirection", () => {
+    // Coordinate system: North = -Z, South = +Z, East = +X, West = -X
+    // The function returns the wall that blocks entry from the given direction
+
     describe("cardinal directions", () => {
-      it("returns WALL_NORTH for north (0, 1)", () => {
-        expect(getWallFlagForDirection(0, 1)).toBe(CollisionFlag.WALL_NORTH);
+      it("returns WALL_NORTH for coming from north (0, -1)", () => {
+        // Coming from -Z direction (north) → wall on north side blocks us
+        expect(getWallFlagForDirection(0, -1)).toBe(CollisionFlag.WALL_NORTH);
       });
 
-      it("returns WALL_EAST for east (1, 0)", () => {
+      it("returns WALL_SOUTH for coming from south (0, 1)", () => {
+        // Coming from +Z direction (south) → wall on south side blocks us
+        expect(getWallFlagForDirection(0, 1)).toBe(CollisionFlag.WALL_SOUTH);
+      });
+
+      it("returns WALL_EAST for coming from east (1, 0)", () => {
+        // Coming from +X direction (east) → wall on east side blocks us
         expect(getWallFlagForDirection(1, 0)).toBe(CollisionFlag.WALL_EAST);
       });
 
-      it("returns WALL_SOUTH for south (0, -1)", () => {
-        expect(getWallFlagForDirection(0, -1)).toBe(CollisionFlag.WALL_SOUTH);
-      });
-
-      it("returns WALL_WEST for west (-1, 0)", () => {
+      it("returns WALL_WEST for coming from west (-1, 0)", () => {
+        // Coming from -X direction (west) → wall on west side blocks us
         expect(getWallFlagForDirection(-1, 0)).toBe(CollisionFlag.WALL_WEST);
       });
     });
 
     describe("diagonal directions", () => {
-      it("returns WALL_NORTH_WEST for northwest (-1, 1)", () => {
-        expect(getWallFlagForDirection(-1, 1)).toBe(
+      it("returns WALL_NORTH_WEST for coming from northwest (-1, -1)", () => {
+        // NW = (-X, -Z)
+        expect(getWallFlagForDirection(-1, -1)).toBe(
           CollisionFlag.WALL_NORTH_WEST,
         );
       });
 
-      it("returns WALL_NORTH_EAST for northeast (1, 1)", () => {
-        expect(getWallFlagForDirection(1, 1)).toBe(
+      it("returns WALL_NORTH_EAST for coming from northeast (1, -1)", () => {
+        // NE = (+X, -Z)
+        expect(getWallFlagForDirection(1, -1)).toBe(
           CollisionFlag.WALL_NORTH_EAST,
         );
       });
 
-      it("returns WALL_SOUTH_EAST for southeast (1, -1)", () => {
-        expect(getWallFlagForDirection(1, -1)).toBe(
+      it("returns WALL_SOUTH_EAST for coming from southeast (1, 1)", () => {
+        // SE = (+X, +Z)
+        expect(getWallFlagForDirection(1, 1)).toBe(
           CollisionFlag.WALL_SOUTH_EAST,
         );
       });
 
-      it("returns WALL_SOUTH_WEST for southwest (-1, -1)", () => {
-        expect(getWallFlagForDirection(-1, -1)).toBe(
+      it("returns WALL_SOUTH_WEST for coming from southwest (-1, 1)", () => {
+        // SW = (-X, +Z)
+        expect(getWallFlagForDirection(-1, 1)).toBe(
           CollisionFlag.WALL_SOUTH_WEST,
         );
       });

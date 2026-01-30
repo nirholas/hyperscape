@@ -76,6 +76,12 @@ import { GrassSystem } from "../systems/shared";
 import { BuildingRenderingSystem } from "../systems/shared";
 import { Physics } from "../systems/shared";
 
+// Tree cache pre-warming for faster world loading
+import {
+  prewarmCache as prewarmTreeCache,
+  TREE_PRESETS,
+} from "../systems/shared/world/ProcgenTreeCache";
+
 // RPG systems are registered via SystemLoader to keep them modular
 import { registerSystems } from "../systems/shared";
 
@@ -199,11 +205,23 @@ export function createClientWorld() {
   world.register("terrain", TerrainSystem);
 
   // ============================================================================
+  // VEGETATION SYSTEM
+  // ============================================================================
+  // GPU-instanced vegetation (trees, bushes, grass, rocks, flowers)
+  // Must be registered after terrain (listens to TERRAIN_TILE_GENERATED)
+  // Must be registered BEFORE towns (listens to TERRAIN_TILE_REGENERATED when
+  // flat zones modify terrain heights - grass needs to regenerate)
+
+  world.register("vegetation", VegetationSystem);
+
+  // ============================================================================
   // TOWN AND ROAD SYSTEMS
   // ============================================================================
   // Procedural town generation with flatness-based placement
   // Road network connects towns using A* pathfinding with terrain costs
   // Roads are rendered via vertex coloring in the terrain shader
+  // NOTE: Towns register flat zones which emit TERRAIN_TILE_REGENERATED events
+  // that VegetationSystem receives to regenerate grass at correct heights
 
   world.register("towns", TownSystem);
   world.register("pois", POISystem);
@@ -215,14 +233,6 @@ export function createClientWorld() {
   // Procedural building mesh rendering for towns
   // Must be registered after towns system as it depends on town data
   world.register("building-rendering", BuildingRenderingSystem);
-
-  // ============================================================================
-  // VEGETATION SYSTEM
-  // ============================================================================
-  // GPU-instanced vegetation (trees, bushes, grass, rocks, flowers)
-  // Must be registered after terrain as it listens to terrain tile events
-
-  world.register("vegetation", VegetationSystem);
 
   // ============================================================================
   // VISUAL EFFECTS SYSTEMS
@@ -280,6 +290,12 @@ export function createClientWorld() {
   (async () => {
     try {
       await registerSystems(world);
+
+      // Pre-warm procgen tree cache in parallel (prevents hitches when trees first appear)
+      // This runs async and doesn't block other init - trees will be ready when needed
+      prewarmTreeCache([...TREE_PRESETS]).catch((err) => {
+        console.warn("[createClientWorld] Tree cache pre-warm failed:", err);
+      });
 
       // CRITICAL: Initialize newly registered systems
       const worldOptions = {

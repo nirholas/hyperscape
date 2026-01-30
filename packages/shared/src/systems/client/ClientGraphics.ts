@@ -234,8 +234,8 @@ export class ClientGraphics extends System {
             intensity: depthBlurIntensity,
             focusDistance: depthBlurDistance,
             blurRange: DEPTH_BLUR_DEFAULTS.blurRange,
-            blurSize: DEPTH_BLUR_DEFAULTS.blurSize,
-            blurSpread: DEPTH_BLUR_DEFAULTS.blurSpread,
+            blurAmount: DEPTH_BLUR_DEFAULTS.blurAmount,
+            blurRepeats: DEPTH_BLUR_DEFAULTS.blurRepeats,
           },
         },
       );

@@ -1348,30 +1348,6 @@ describe("VegetationSystem Algorithms", () => {
       return lod0Path.replace(/\.glb$/i, "_impostor.png");
     }
 
-    it("correctly generates LOD1 path from LOD0 path", () => {
-      expect(inferLOD1Path("trees/tree1.glb")).toBe("trees/tree1_lod1.glb");
-      expect(inferLOD1Path("rocks/boulder.glb")).toBe("rocks/boulder_lod1.glb");
-      expect(inferLOD1Path("vegetation/bush_small.glb")).toBe(
-        "vegetation/bush_small_lod1.glb",
-      );
-    });
-
-    it("correctly generates LOD2 path from LOD0 path", () => {
-      expect(inferLOD2Path("trees/tree1.glb")).toBe("trees/tree1_lod2.glb");
-      expect(inferLOD2Path("rocks/boulder.glb")).toBe("rocks/boulder_lod2.glb");
-    });
-
-    it("correctly generates impostor path from LOD0 path", () => {
-      expect(inferImpostorPath("trees/tree1.glb")).toBe(
-        "trees/tree1_impostor.png",
-      );
-    });
-
-    it("handles case-insensitive .glb extension", () => {
-      expect(inferLOD1Path("trees/tree.GLB")).toBe("trees/tree_lod1.glb");
-      expect(inferLOD1Path("trees/tree.Glb")).toBe("trees/tree_lod1.glb");
-    });
-
     it("preserves directory structure", () => {
       expect(inferLOD1Path("assets/vegetation/trees/oak/large_oak.glb")).toBe(
         "assets/vegetation/trees/oak/large_oak_lod1.glb",

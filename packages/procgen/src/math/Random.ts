@@ -36,15 +36,17 @@ function mul32(a: number, b: number): number {
 export class SeededRandom {
   private mt: Uint32Array;
   private mti: number;
+  private currentSeed: number;
 
   /**
    * Create a new seeded random number generator.
    * @param seed - Integer seed value (will be converted to 32-bit unsigned)
    */
-  constructor(seed: number) {
+  constructor(seed?: number) {
     this.mt = new Uint32Array(N);
     this.mti = N + 1;
-    this.seed(seed);
+    this.currentSeed = seed ?? Date.now();
+    this.seed(this.currentSeed);
   }
 
   /**
@@ -101,10 +103,23 @@ export class SeededRandom {
    * @param seed - Integer seed value
    */
   seed(seed: number): void {
-    // Convert to 32-bit unsigned integer
-    seed = seed >>> 0;
+    this.currentSeed = seed >>> 0;
     // Python uses init_by_array even for single integers
-    this.initByArray([seed]);
+    this.initByArray([this.currentSeed]);
+  }
+
+  /**
+   * Alias for seed() - set the random seed
+   */
+  setSeed(seed: number): void {
+    this.seed(seed);
+  }
+
+  /**
+   * Get the current seed value
+   */
+  getSeed(): number {
+    return this.currentSeed;
   }
 
   /**
@@ -160,10 +175,93 @@ export class SeededRandom {
   }
 
   /**
+   * Alias for uniform - generate a random float in [min, max)
+   */
+  range(min: number, max: number): number {
+    return this.uniform(min, max);
+  }
+
+  /**
+   * Generate a random float with additive offset [-range, range]
+   */
+  rangeAdd(range: number): number {
+    return this.uniform(-range, range);
+  }
+
+  /**
+   * Generate a random float with multiplicative offset [1-range, 1+range]
+   */
+  rangeMult(range: number): number {
+    return 1.0 + this.rangeAdd(range);
+  }
+
+  /**
    * Generate a random integer in [a, b] inclusive
    */
   randint(a: number, b: number): number {
     return Math.floor(this.uniform(a, b + 1));
+  }
+
+  /**
+   * Alias for randint - generate a random integer in [min, max] inclusive
+   */
+  rangeInt(min: number, max: number): number {
+    return this.randint(min, max);
+  }
+
+  /**
+   * Generate a gaussian-distributed random number using Box-Muller transform
+   */
+  gaussian(mean: number = 0, stdDev: number = 1): number {
+    let u = 0,
+      v = 0;
+    while (u === 0) u = this.random();
+    while (v === 0) v = this.random();
+    const num = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+    return num * stdDev + mean;
+  }
+
+  /**
+   * Random boolean with given probability of true
+   */
+  boolean(probability: number = 0.5): boolean {
+    return this.random() < probability;
+  }
+
+  /**
+   * Alias for boolean - return true with given probability
+   */
+  chance(probability: number): boolean {
+    return this.boolean(probability);
+  }
+
+  /**
+   * Pick a random element from an array
+   */
+  pick<T>(array: T[]): T {
+    return array[Math.floor(this.random() * array.length)];
+  }
+
+  /**
+   * Shuffle an array in place using Fisher-Yates algorithm
+   */
+  shuffle<T>(array: T[]): T[] {
+    for (let i = array.length - 1; i > 0; i--) {
+      const j = Math.floor(this.random() * (i + 1));
+      [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
+  }
+
+  /**
+   * Generate an array of random floats
+   */
+  manyFloats(count: number): number[] {
+    const result: number[] = new Array(count);
+    for (let i = 0; i < count; i++) {
+      result[i] = this.random();
+    }
+    return result;
   }
 
   /**
@@ -205,4 +303,98 @@ export function randInRange(
   upper: number,
 ): number {
   return rng.random() * (upper - lower) + lower;
+}
+
+/**
+ * Hash a string to a numeric seed using FNV-1a algorithm
+ */
+export function hashSeed(text: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+/**
+ * RNG interface used by rock and building generators
+ */
+export interface RNG {
+  /** Get next random number in [0, 1) */
+  next(): number;
+  /** Get random integer in [min, max] inclusive */
+  int(min: number, max: number): number;
+  /** Return true with given probability */
+  chance(probability: number): boolean;
+  /** Pick random element from array */
+  pick<T>(list: T[]): T | null;
+  /** Shuffle array (building generator) */
+  shuffle<T>(list: T[]): T[];
+}
+
+/**
+ * Create an RNG instance from a seed (string or number)
+ * Compatible with rock/building generator interfaces
+ */
+export function createRng(seed: string | number): RNG {
+  const numericSeed = typeof seed === "string" ? hashSeed(seed) : seed;
+  const rng = new SeededRandom(numericSeed);
+
+  return {
+    next(): number {
+      return rng.random();
+    },
+    int(min: number, max: number): number {
+      return rng.randint(min, max);
+    },
+    chance(probability: number): boolean {
+      return rng.chance(probability);
+    },
+    pick<T>(list: T[]): T | null {
+      if (list.length === 0) return null;
+      return rng.pick(list);
+    },
+    shuffle<T>(list: T[]): T[] {
+      const array = list.slice();
+      return rng.shuffle(array);
+    },
+  };
+}
+
+/**
+ * Global seeded random instance
+ */
+let globalRandom = new SeededRandom(12345);
+
+/**
+ * Set the global random seed
+ */
+export function setGlobalSeed(seed: number): void {
+  globalRandom.setSeed(seed);
+}
+
+/**
+ * Get the global random instance
+ */
+export function getGlobalRandom(): SeededRandom {
+  return globalRandom;
+}
+
+/**
+ * Generate a typed seed for a specific parameter type
+ * Ensures different random streams for different aspects of generation
+ */
+export function genTypedSeed(
+  baseSeed: number,
+  type: string,
+  index: number = 0,
+): number {
+  // Simple hash combining
+  let hash = baseSeed;
+  for (let i = 0; i < type.length; i++) {
+    hash = (hash << 5) - hash + type.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash + index * 7919); // 7919 is a prime
 }

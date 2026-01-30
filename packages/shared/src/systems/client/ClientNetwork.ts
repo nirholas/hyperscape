@@ -3194,10 +3194,11 @@ export class ClientNetwork extends SystemBase {
       getHeightAt?: (x: number, z: number) => number | null;
     } | null;
 
-    // Get building collision service for building proximity checks
+    // Get building collision service for building proximity and step height checks
     const townSystem = this.world.getSystem("town") as {
       getCollisionService?: () => {
         isNearBuildingForElevation: (x: number, z: number) => boolean;
+        getStepHeightAtWorld: (x: number, z: number) => number | null;
       };
     } | null;
     const collisionService = townSystem?.getCollisionService?.();
@@ -3241,6 +3242,10 @@ export class ClientNetwork extends SystemBase {
       collisionService
         ? (x: number, z: number) =>
             collisionService.isNearBuildingForElevation(x, z)
+        : undefined,
+      // Pass step height function for smooth entrance stair walking
+      collisionService
+        ? (x: number, z: number) => collisionService.getStepHeightAtWorld(x, z)
         : undefined,
     );
   }

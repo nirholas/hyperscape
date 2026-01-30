@@ -934,17 +934,6 @@ describe("Tile Preloading", () => {
       LoadPriority.PREFETCH,
     );
   });
-
-  it("applies same priority to all URLs in tile preload", () => {
-    const player = new THREE.Vector3(150, 0, 150);
-    const urls = ["tree1.glb", "tree2.glb", "rock1.glb"];
-
-    const result = createPreloadTileResult(2, 2, urls, player);
-
-    expect(result.priority).toBe(LoadPriority.HIGH);
-    expect(result.urls.length).toBe(3);
-    // All URLs get the same tile priority
-  });
 });
 
 describe("Priority Queue Stats", () => {

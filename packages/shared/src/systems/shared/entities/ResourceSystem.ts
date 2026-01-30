@@ -957,6 +957,11 @@ export class ResourceSystem extends SystemBase {
           spawnPoint.subType,
         ),
         lod1ModelScale: finalScale, // Same scale variation as main model
+        // Procgen preset for runtime procedural tree generation
+        procgenPreset: this.getProcgenPresetForResource(
+          resource.type,
+          spawnPoint.subType,
+        ),
         // OSRS-ACCURACY: Tile-based positioning for face direction and interaction
         footprint,
         anchorTile,
@@ -1079,6 +1084,25 @@ export class ResourceSystem extends SystemBase {
     }
 
     return manifestData.depletedScale;
+  }
+
+  /**
+   * Get procgen preset for resource type from manifest.
+   * Returns undefined if not specified (will fall back to GLB model).
+   */
+  private getProcgenPresetForResource(
+    type: string,
+    subType?: string,
+  ): string | undefined {
+    const variantKey = subType ? `${type}_${subType}` : `${type}_normal`;
+    const manifestData = getExternalResource(variantKey);
+
+    if (!manifestData) {
+      // Don't throw - procgen is optional
+      return undefined;
+    }
+
+    return manifestData.procgenPreset;
   }
 
   /**

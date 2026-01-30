@@ -47,9 +47,11 @@ const MANIFEST_FILES = [
   "vegetation.json",
   "world-areas.json",
   // Items directory
+  "items/ammunition.json",
   "items/food.json",
   "items/misc.json",
   "items/resources.json",
+  "items/runes.json",
   "items/tools.json",
   "items/weapons.json",
   // Gathering directory
@@ -94,11 +96,13 @@ async function getMissingRequiredManifests(
   );
 
   const requiredItemCategoryFiles = [
-    "weapons",
-    "tools",
-    "resources",
+    "ammunition",
     "food",
     "misc",
+    "resources",
+    "runes",
+    "tools",
+    "weapons",
   ] as const;
 
   let hasAllItemCategoryFiles = true;

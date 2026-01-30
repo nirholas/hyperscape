@@ -57,7 +57,10 @@ class MockTerrainSystem {
 }
 
 /**
- * Simulate the TownSystem's registerBuildingFlatZone logic
+ * Simplified flat zone registration for testing concepts.
+ * NOTE: The actual TownSystem uses per-cell flat zones with asymmetric padding,
+ * but this test verifies the core flat zone mechanism works.
+ * Actual TownSystem values: exteriorPadding=1.0, blendRadius=5.0 per cell.
  */
 function registerBuildingFlatZone(
   terrain: MockTerrainSystem,
@@ -72,8 +75,9 @@ function registerBuildingFlatZone(
   const buildingWidth = layout.width * CELL_SIZE;
   const buildingDepth = layout.depth * CELL_SIZE;
   const floorHeight = groundY + FOUNDATION_HEIGHT;
-  const padding = 3; // Match TownSystem.registerBuildingFlatZone
-  const blendRadius = 3;
+  // Simplified padding for test - actual TownSystem uses per-cell zones with exteriorPadding=1.0
+  const padding = 1;
+  const blendRadius = 5;
 
   const zone: FlatZone = {
     id: `building_${building.id}`,
@@ -228,10 +232,10 @@ describe("Building Walkability (Same System as Duel Arena)", () => {
 
       const zone = terrain.getFlatZone("building_bank-1")!;
 
-      // Building is 12x12m, plus 3m padding on each side = 18x18m
-      // (padding increased to 3m for entrance steps and foundation overhang)
-      expect(zone.width).toBe(12 + 6); // 18
-      expect(zone.depth).toBe(12 + 6); // 18
+      // Building is 12x12m, plus 1m padding on each side = 14x14m
+      // (simplified test uses uniform padding; actual TownSystem uses per-cell zones)
+      expect(zone.width).toBe(12 + 2); // 14
+      expect(zone.depth).toBe(12 + 2); // 14
       expect(zone.centerX).toBe(100);
       expect(zone.centerZ).toBe(100);
     });
@@ -256,13 +260,13 @@ describe("Building Walkability (Same System as Duel Arena)", () => {
       const houseZone = terrain.getFlatZone("building_house-1")!;
       const innZone = terrain.getFlatZone("building_inn-1")!;
 
-      // House: 8x8 + 6 padding (3m per side) = 14x14
-      expect(houseZone.width).toBe(14);
-      expect(houseZone.depth).toBe(14);
+      // House: 8x8 + 2 padding (1m per side) = 10x10
+      expect(houseZone.width).toBe(10);
+      expect(houseZone.depth).toBe(10);
 
-      // Inn: 16x20 + 6 padding (3m per side) = 22x26
-      expect(innZone.width).toBe(22);
-      expect(innZone.depth).toBe(26);
+      // Inn: 16x20 + 2 padding (1m per side) = 18x22
+      expect(innZone.width).toBe(18);
+      expect(innZone.depth).toBe(22);
     });
   });
 

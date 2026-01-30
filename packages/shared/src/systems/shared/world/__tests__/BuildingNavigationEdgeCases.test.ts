@@ -1328,3 +1328,293 @@ describe("Full Navigation Simulation - Outside → Door → Stairs → Second Fl
     console.log(`[Full Nav] === SIMULATION COMPLETE ===\n`);
   });
 });
+
+// ============================================================================
+// CRITICAL VALIDATION TESTS - These must pass for the system to be correct
+// ============================================================================
+
+describe("Critical System Validation", () => {
+  let world: World;
+  let collisionService: BuildingCollisionService;
+  const BUILDING_ID = "validation-building";
+  const BUILDING_POS = { x: 800, y: 0, z: 800 };
+
+  beforeAll(() => {
+    world = new World({ isServer: true, isClient: false });
+    collisionService = new BuildingCollisionService(world);
+
+    // Register a 2-story building with stairs
+    const layout = createTwoStoryBuilding();
+    collisionService.registerBuilding(
+      BUILDING_ID,
+      "validation_town",
+      layout,
+      BUILDING_POS,
+      0,
+    );
+  });
+
+  afterAll(() => {
+    world.destroy();
+  });
+
+  describe("Stair Tiles Cover Full Cell (Fix Validation)", () => {
+    it("should have 16 stair tiles per stair cell (4x4 tiles)", () => {
+      const building = collisionService.getBuilding(BUILDING_ID)!;
+      const floor0 = building.floors.find((f) => f.floorIndex === 0)!;
+
+      // Bottom stairs (non-landing) should have 16 tiles
+      const bottomStairs = floor0.stairTiles.filter((s) => !s.isLanding);
+
+      // If stairs exist, there should be at least 16 tiles (one full cell)
+      // Each cell is 4x4 = 16 tiles
+      if (bottomStairs.length > 0) {
+        console.log(
+          `[Validation] Bottom stair tiles: ${bottomStairs.length} (expected >=16)`,
+        );
+        expect(bottomStairs.length).toBeGreaterThanOrEqual(16);
+      }
+
+      // Landing tiles should also have 16 tiles
+      const landings = floor0.stairTiles.filter((s) => s.isLanding);
+      if (landings.length > 0) {
+        console.log(
+          `[Validation] Landing stair tiles: ${landings.length} (expected >=16)`,
+        );
+        expect(landings.length).toBeGreaterThanOrEqual(16);
+      }
+    });
+
+    it("should detect ALL stair tiles via isTileInBuildingAnyFloor", () => {
+      const building = collisionService.getBuilding(BUILDING_ID)!;
+      const floor0 = building.floors.find((f) => f.floorIndex === 0)!;
+
+      let detectedCount = 0;
+      let totalStairs = 0;
+
+      for (const stair of floor0.stairTiles) {
+        totalStairs++;
+        const result = collisionService.isTileInBuildingAnyFloor(
+          stair.tileX,
+          stair.tileZ,
+        );
+
+        if (result !== null && result.buildingId === BUILDING_ID) {
+          detectedCount++;
+        } else {
+          console.error(
+            `[Validation] FAIL: Stair tile (${stair.tileX},${stair.tileZ}) not detected!`,
+          );
+        }
+      }
+
+      console.log(
+        `[Validation] Detected ${detectedCount}/${totalStairs} stair tiles`,
+      );
+
+      // ALL stair tiles must be detected
+      expect(detectedCount).toBe(totalStairs);
+    });
+  });
+
+  describe("Layer Separation Prevents Invalid Paths", () => {
+    it("should NOT allow paths that bypass building walls", () => {
+      const pathfinder = new BFSPathfinder();
+      const building = collisionService.getBuilding(BUILDING_ID)!;
+      const bbox = building.boundingBox;
+
+      // Start outside building (north of building)
+      const startTile: TileCoord = { x: bbox.minTileX, z: bbox.minTileZ - 5 };
+
+      // Target inside building (should NOT be reachable without going through door)
+      const floor0Tiles = getAllWalkableTiles(collisionService, BUILDING_ID, 0);
+      const centerTile = floor0Tiles[Math.floor(floor0Tiles.length / 2)];
+
+      // Create walkability function that simulates GROUND layer (player outside)
+      const groundLayerWalkable = (
+        tile: TileCoord,
+        fromTile?: TileCoord,
+      ): boolean => {
+        // Check if tile is a WALKABLE building tile
+        const buildingId = collisionService.isTileInBuildingFootprint(
+          tile.x,
+          tile.z,
+        );
+
+        if (buildingId) {
+          // Building tile - only allow if it's a door tile
+          const doorOpenings = collisionService.getDoorOpeningsAtTile(
+            tile.x,
+            tile.z,
+            0,
+          );
+          if (doorOpenings.length === 0) {
+            return false; // Not a door - blocked
+          }
+        }
+
+        // Check if tile is UNDER building (bbox but not footprint)
+        const inBbox = collisionService.isTileInBuildingBoundingBox(
+          tile.x,
+          tile.z,
+        );
+        if (inBbox && !buildingId) {
+          const walkableInBuilding = collisionService.isTileWalkableInBuilding(
+            tile.x,
+            tile.z,
+            0,
+          );
+          if (!walkableInBuilding) {
+            return false; // Under building but not walkable
+          }
+        }
+
+        return true;
+      };
+
+      const path = pathfinder.findPath(
+        startTile,
+        centerTile,
+        groundLayerWalkable,
+      );
+
+      console.log(
+        `[Validation] Path from outside to center: ${path.length} tiles`,
+      );
+
+      // Path should either:
+      // 1. Be empty (no valid path found)
+      // 2. Go through a door tile
+      if (path.length > 0) {
+        // Verify path goes through door
+        let foundDoor = false;
+        for (const tile of path) {
+          const doorOpenings = collisionService.getDoorOpeningsAtTile(
+            tile.x,
+            tile.z,
+            0,
+          );
+          if (doorOpenings.length > 0) {
+            foundDoor = true;
+            break;
+          }
+        }
+
+        // If path reaches the center, it MUST go through a door
+        const reachesCenter = path.some(
+          (t) => t.x === centerTile.x && t.z === centerTile.z,
+        );
+        if (reachesCenter) {
+          console.log(
+            `[Validation] Path reaches center, found door: ${foundDoor}`,
+          );
+          expect(foundDoor).toBe(true);
+        }
+      }
+    });
+
+    it("should block tiles under building (in bbox but not footprint)", () => {
+      const building = collisionService.getBuilding(BUILDING_ID)!;
+      const bbox = building.boundingBox;
+      const floor0 = building.floors.find((f) => f.floorIndex === 0)!;
+
+      let blockedCount = 0;
+      let checkedCount = 0;
+
+      // Check all tiles in bounding box
+      for (let x = bbox.minTileX; x <= bbox.maxTileX; x++) {
+        for (let z = bbox.minTileZ; z <= bbox.maxTileZ; z++) {
+          const inFootprint =
+            collisionService.isTileInBuildingFootprint(x, z) !== null;
+
+          if (!inFootprint) {
+            // Tile is in bbox but NOT in footprint
+            checkedCount++;
+            const walkable = collisionService.isTileWalkableInBuilding(x, z, 0);
+
+            // Should NOT be walkable unless it's a door exterior
+            if (!walkable) {
+              blockedCount++;
+            }
+          }
+        }
+      }
+
+      console.log(
+        `[Validation] Tiles under building: ${blockedCount}/${checkedCount} blocked`,
+      );
+
+      // Most non-footprint tiles in bbox should be blocked
+      // (Some may be door exteriors which are allowed)
+      const blockRate = checkedCount > 0 ? blockedCount / checkedCount : 1;
+      expect(blockRate).toBeGreaterThan(0.5); // At least 50% blocked
+    });
+  });
+
+  describe("Elevation Transition Validation", () => {
+    it("exterior door tiles should NOT get building floor elevation", () => {
+      const doorTiles = collisionService.getDoorTiles(BUILDING_ID);
+      expect(doorTiles.length).toBeGreaterThan(0);
+
+      for (const door of doorTiles) {
+        // Exterior tile (outside building)
+        const exteriorX = door.tileX;
+        const exteriorZ = door.tileZ;
+
+        // Check if exterior tile is in footprint (it shouldn't be)
+        const inFootprint = collisionService.isTileInBuildingFootprint(
+          exteriorX,
+          exteriorZ,
+        );
+
+        console.log(
+          `[Validation] Door exterior (${exteriorX},${exteriorZ}) in footprint: ${inFootprint !== null}`,
+        );
+
+        // Exterior door tiles should NOT be in footprint
+        // (They're the approach tiles OUTSIDE the building)
+        // This ensures they get terrain elevation, not building floor elevation
+        expect(inFootprint).toBeNull();
+      }
+    });
+
+    it("interior door tiles SHOULD be in footprint and get floor elevation", () => {
+      const doorTiles = collisionService.getDoorTiles(BUILDING_ID);
+      expect(doorTiles.length).toBeGreaterThan(0);
+
+      for (const door of doorTiles) {
+        // Interior tile is calculated based on door direction
+        let interiorX = door.tileX;
+        let interiorZ = door.tileZ;
+
+        // Interior is one step INSIDE from exterior based on door direction
+        switch (door.direction) {
+          case "north":
+            interiorZ += 1;
+            break;
+          case "south":
+            interiorZ -= 1;
+            break;
+          case "east":
+            interiorX -= 1;
+            break;
+          case "west":
+            interiorX += 1;
+            break;
+        }
+
+        const inFootprint = collisionService.isTileInBuildingFootprint(
+          interiorX,
+          interiorZ,
+        );
+
+        console.log(
+          `[Validation] Door interior (${interiorX},${interiorZ}) in footprint: ${inFootprint !== null}`,
+        );
+
+        // Interior door tiles SHOULD be in footprint
+        expect(inFootprint).not.toBeNull();
+      }
+    });
+  });
+});

@@ -76,6 +76,17 @@ export {
   type ProcgenWorkerInput,
   type ProcgenWorkerOutput,
 } from "./ProcgenWorker";
+export {
+  getGrassWorkerPool,
+  generateGrassPlacementsAsync,
+  generateGrassChunksBatch,
+  terminateGrassWorkerPool,
+  isGrassWorkerAvailable,
+  type GrassWorkerInput,
+  type GrassWorkerOutput,
+  type GrassPlacementData,
+  type GrassBatchResult,
+} from "./GrassWorker";
 
 // PhysX Worker - Offloads physics simulation to web worker
 export {

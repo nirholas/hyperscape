@@ -555,11 +555,6 @@ export class ImpostorBaker {
     const originalViewport = new THREE.Vector4();
     this.renderer.getViewport(originalViewport);
 
-    // Log renderer settings for debugging
-    console.log(
-      `[ImpostorBaker.bake] RenderTarget colorSpace=${renderTarget.texture.colorSpace}`,
-    );
-
     // Disable tone mapping during baking to get accurate colors
     // Works with both WebGPU and WebGL renderers
     const renderer = this.renderer as CompatibleRenderer;
@@ -621,10 +616,6 @@ export class ImpostorBaker {
     if (originalToneMappingExposure !== undefined) {
       renderer.toneMappingExposure = originalToneMappingExposure;
     }
-
-    console.log(
-      `[ImpostorBaker.bake] Baked atlas ${atlasWidth}x${atlasHeight}, ${gridSizeX}x${gridSizeY} cells`,
-    );
 
     // Restore renderer state
     this.renderer.setScissorTest(false);
@@ -761,33 +752,6 @@ export class ImpostorBaker {
     sourceCopy.scale.setScalar(scaleFactor);
     sourceCopy.position.multiplyScalar(scaleFactor);
 
-    console.log(
-      `[ImpostorBaker] Box size: ${boxSize.x.toFixed(2)} x ${boxSize.y.toFixed(2)} x ${boxSize.z.toFixed(2)}`,
-    );
-    console.log(
-      `[ImpostorBaker] maxDimension: ${maxDimension.toFixed(2)}, scaleFactor: ${scaleFactor.toFixed(4)}`,
-    );
-    console.log(
-      `[ImpostorBaker] Final sourceCopy position: ${sourceCopy.position.toArray().map((v) => v.toFixed(4))}`,
-    );
-
-    // Compute actual world-space bounds after transforms
-    sourceCopy.updateMatrixWorld(true);
-    const transformedBox = new THREE.Box3().setFromObject(sourceCopy);
-    const transformedCenter = new THREE.Vector3();
-    transformedBox.getCenter(transformedCenter);
-    const transformedSize = new THREE.Vector3();
-    transformedBox.getSize(transformedSize);
-    console.log(
-      `[ImpostorBaker] ACTUAL transformed bounds: center=(${transformedCenter.x.toFixed(3)}, ${transformedCenter.y.toFixed(3)}, ${transformedCenter.z.toFixed(3)})`,
-    );
-    console.log(
-      `[ImpostorBaker] ACTUAL transformed size: (${transformedSize.x.toFixed(3)}, ${transformedSize.y.toFixed(3)}, ${transformedSize.z.toFixed(3)})`,
-    );
-    console.log(
-      `[ImpostorBaker] Camera frustum: -0.5 to 0.5, object should fit within this`,
-    );
-
     // Store original state
     const originalRenderTarget = this.renderer.getRenderTarget();
     const originalViewport = new THREE.Vector4();
@@ -799,28 +763,16 @@ export class ImpostorBaker {
     // Normal material - uses Three.js built-in MeshNormalMaterial
     // This is WebGPU/TSL compatible and outputs view-space normals as colors
     // Encoded as RGB: normal * 0.5 + 0.5, so (0,0,1) facing camera = (0.5, 0.5, 1.0) = blue
-    // MeshNormalMaterial works with both WebGL and WebGPU renderers
     const normalMaterial = new THREE.MeshNormalMaterial({
-      side: THREE.DoubleSide,
-      flatShading: false, // Smooth normals for better blending
-    });
-    console.log(
-      "[ImpostorBaker] Created view-space normal material (MeshNormalMaterial)",
-    );
-
-    // For InstancedMesh, MeshNormalMaterial also works correctly
-    // It handles the instance transforms internally
-    const instancedNormalMaterial = new THREE.MeshNormalMaterial({
       side: THREE.DoubleSide,
       flatShading: false,
     });
 
-    console.log(
-      "[ImpostorBaker] View-space normal materials created for normal map atlas...",
-    );
-
-    // Track if any normals were rendered
-    let normalRenderCount = 0;
+    // For InstancedMesh, MeshNormalMaterial also works correctly
+    const instancedNormalMaterial = new THREE.MeshNormalMaterial({
+      side: THREE.DoubleSide,
+      flatShading: false,
+    });
 
     // Store original materials - we'll use them directly for baking
     // This captures the actual appearance (textures, shaders, effects)
@@ -882,10 +834,6 @@ export class ImpostorBaker {
       }
     });
 
-    console.log(
-      `[ImpostorBaker.bakeWithNormals] Created ${unlitMaterials.size} unlit materials for albedo baking`,
-    );
-
     // Remove all scene lights - we want completely unlit output
     this.renderScene.remove(this.ambientLight);
     this.renderScene.remove(this.directionalLight);
@@ -901,13 +849,6 @@ export class ImpostorBaker {
     if (renderer.toneMappingExposure !== undefined) {
       renderer.toneMappingExposure = 1.0;
     }
-
-    console.log(
-      `[ImpostorBaker.bakeWithNormals] Baking UNLIT albedo (no scene lights)`,
-    );
-    console.log(
-      `[ImpostorBaker.bakeWithNormals] colorRenderTarget colorSpace=${colorRenderTarget.texture.colorSpace}`,
-    );
 
     // Render each cell - first color pass, then normal pass
     for (let rowIdx = 0; rowIdx < gridSizeY; rowIdx++) {
@@ -941,85 +882,16 @@ export class ImpostorBaker {
           backgroundAlpha ?? 0,
         );
         this.renderer.clear();
-
-        // Log material colors for first cell
-        if (rowIdx === 0 && colIdx === 0) {
-          sourceCopy.traverse((n) => {
-            if (n instanceof THREE.Mesh) {
-              const mat = n.material as THREE.MeshBasicMaterial;
-              if (mat.color) {
-                const c = mat.color;
-                console.log(
-                  `[ImpostorBaker] Color pass (UNLIT) - Mesh "${n.name}" color: R=${(c.r * 255).toFixed(0)}, G=${(c.g * 255).toFixed(0)}, B=${(c.b * 255).toFixed(0)}`,
-                );
-              }
-            }
-          });
-        }
-
         this.renderer.render(this.renderScene, this.renderCamera);
 
         // Normal pass - swap materials to normal material
-        let meshCount = 0;
-        let instancedCount = 0;
         sourceCopy.traverse((node) => {
           if (node instanceof THREE.InstancedMesh) {
             node.material = instancedNormalMaterial;
-            instancedCount++;
           } else if (node instanceof THREE.Mesh) {
-            const oldMat = node.material;
             node.material = normalMaterial;
-            meshCount++;
-            // Log first cell material change
-            if (rowIdx === 0 && colIdx === 0) {
-              console.log(
-                `[ImpostorBaker] Mesh "${node.name}": changed material from`,
-                oldMat,
-                "to",
-                node.material,
-              );
-              console.log(
-                `[ImpostorBaker] Mesh visible: ${node.visible}, geometry vertices: ${node.geometry?.attributes?.position?.count}`,
-              );
-            }
           }
         });
-
-        // Log first cell to verify
-        if (rowIdx === 0 && colIdx === 0) {
-          console.log(
-            `[ImpostorBaker] Normal pass: ${meshCount} meshes, ${instancedCount} instanced meshes`,
-          );
-          console.log(
-            `[ImpostorBaker] viewDir for cell (0,0): ${viewDir.x.toFixed(2)}, ${viewDir.y.toFixed(2)}, ${viewDir.z.toFixed(2)}`,
-          );
-          console.log(
-            `[ImpostorBaker] Camera position:`,
-            this.renderCamera.position.toArray().map((v) => v.toFixed(2)),
-          );
-          console.log(
-            `[ImpostorBaker] Bounding sphere center:`,
-            boundingSphere.center.toArray().map((v) => v.toFixed(2)),
-          );
-          console.log(
-            `[ImpostorBaker] Bounding sphere radius:`,
-            boundingSphere.radius.toFixed(2),
-          );
-
-          // Check if materials are correctly assigned
-          sourceCopy.traverse((n) => {
-            if (n instanceof THREE.Mesh) {
-              console.log(
-                `[ImpostorBaker] Mesh "${n.name}" material:`,
-                n.material.type,
-                "visible:",
-                n.visible,
-                "frustumCulled:",
-                n.frustumCulled,
-              );
-            }
-          });
-        }
 
         // CRITICAL: Switch to linear output for normal pass to prevent gamma distortion
         // Normals are data, not colors - they should not be gamma encoded
@@ -1035,7 +907,6 @@ export class ImpostorBaker {
         this.renderer.setClearColor(0x8080ff, 1); // Neutral normal: (0,0,1) facing camera -> encoded as (0.5, 0.5, 1.0)
         this.renderer.clear();
         this.renderer.render(this.renderScene, this.renderCamera);
-        normalRenderCount++;
 
         // Restore original color space for next color pass
         if (originalColorSpace !== undefined) {
@@ -1050,10 +921,6 @@ export class ImpostorBaker {
         });
       }
     }
-
-    console.log(
-      `[ImpostorBaker] bakeWithNormals: Rendered ${normalRenderCount} normal cells, atlas ${atlasWidth}x${atlasHeight}`,
-    );
 
     // Restore scene lights
     this.renderScene.add(this.ambientLight);
@@ -1309,8 +1176,6 @@ export class ImpostorBaker {
   } {
     const { backgroundColor, backgroundAlpha } = options;
 
-    console.log("[ImpostorBaker.bakeHybrid] Starting hybrid bake...");
-
     // Step 1: Use regular bake() for color atlas (this works correctly)
     // Merge background options into config
     const bakeConfig = {
@@ -1319,7 +1184,6 @@ export class ImpostorBaker {
       backgroundAlpha,
     };
     const colorResult = this.bake(source, bakeConfig);
-    console.log("[ImpostorBaker.bakeHybrid] Color atlas baked successfully");
 
     // Step 2: Bake normals separately using same grid settings from colorResult
     const gridSizeX = colorResult.gridSizeX;
@@ -1430,8 +1294,6 @@ export class ImpostorBaker {
       }
     }
 
-    console.log("[ImpostorBaker.bakeHybrid] Normal atlas baked successfully");
-
     // Restore renderer state
     renderer.outputColorSpace = originalColorSpace;
     this.renderer.setScissorTest(false);
@@ -1447,8 +1309,6 @@ export class ImpostorBaker {
       }
     });
     normalMaterial.dispose();
-
-    console.log("[ImpostorBaker.bakeHybrid] Hybrid bake complete");
 
     return {
       ...colorResult,
@@ -1493,16 +1353,6 @@ export class ImpostorBaker {
 
     const nearPlane = depthNear ?? 0.001;
     const farPlane = depthFar ?? 10;
-
-    console.log(
-      `[ImpostorBaker.bakeFull] Starting AAA bake with mode ${pbrMode}`,
-    );
-    console.log(
-      `[ImpostorBaker.bakeFull] Atlas: ${atlasWidth}x${atlasHeight}, Grid: ${gridSizeX}x${gridSizeY}`,
-    );
-    console.log(
-      `[ImpostorBaker.bakeFull] Depth range: ${nearPlane} - ${farPlane}`,
-    );
 
     // CRITICAL: Save and reset pixel ratio for atlas rendering
     const originalPixelRatio = this.renderer.getPixelRatio();
@@ -1610,10 +1460,6 @@ export class ImpostorBaker {
     const scaleFactor = 1.0 / maxDimension;
     sourceCopy.scale.setScalar(scaleFactor);
     sourceCopy.position.multiplyScalar(scaleFactor);
-
-    console.log(
-      `[ImpostorBaker.bakeFull] Object maxDimension: ${maxDimension.toFixed(3)}, scaleFactor: ${scaleFactor.toFixed(4)}`,
-    );
 
     // Store original state
     const originalRenderTarget = this.renderer.getRenderTarget();
@@ -1918,10 +1764,6 @@ export class ImpostorBaker {
       }
     }
 
-    console.log(
-      `[ImpostorBaker.bakeFull] Baked ${gridSizeX * gridSizeY} cells with all channels`,
-    );
-
     // =========================================================================
     // CLEANUP AND RESTORE
     // =========================================================================
@@ -1957,8 +1799,6 @@ export class ImpostorBaker {
     depthMaterial.dispose();
     unlitMaterials.forEach((mat) => mat.dispose());
     pbrMaterials?.forEach((mat) => mat.dispose());
-
-    console.log("[ImpostorBaker.bakeFull] AAA bake complete");
 
     return {
       atlasTexture: colorRenderTarget.texture,

@@ -8,6 +8,7 @@ import * as THREE from "three";
 import type { TextureParams, UVMethodType, RockParams } from "./types";
 import { TexturePattern, UVMethod } from "./types";
 import { SimplexNoise } from "./noise";
+import { clamp } from "../math/Vector3.js";
 
 // ============================================================================
 // COLOR UTILITIES
@@ -35,10 +36,6 @@ function lerpColor(
     g: c1.g + (c2.g - c1.g) * t,
     b: c1.b + (c2.b - c1.b) * t,
   };
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
 }
 
 // ============================================================================

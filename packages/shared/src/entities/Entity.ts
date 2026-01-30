@@ -141,8 +141,8 @@ export class Entity implements IEntity {
   static HLOD_DEBUG = false;
 
   /**
-   * Enable visual LOD debug labels (floating numbers above entities)
-   * Shows: 0 = LOD0 (full), 1 = LOD1 (frozen), I = Impostor, X = Culled
+   * Enable visual LOD debug labels (floating text above entities)
+   * Shows: LOD0 (green/full), LOD1 (yellow/simplified), B (orange/billboard), CULL (red/hidden)
    * Enable in browser console: Entity.LOD_DEBUG_LABELS = true
    */
   static LOD_DEBUG_LABELS = false;
@@ -2263,10 +2263,10 @@ export class Entity implements IEntity {
     // Don't create on server
     if (this.world.isServer) return;
 
-    // Create canvas for rendering text
+    // Create canvas for rendering text (larger for better visibility)
     const canvas = document.createElement("canvas");
-    canvas.width = 64;
-    canvas.height = 64;
+    canvas.width = 96;
+    canvas.height = 48;
     this._lodDebugCanvas = canvas;
 
     // Create texture from canvas
@@ -2283,9 +2283,9 @@ export class Entity implements IEntity {
       depthWrite: false,
     });
 
-    // Create sprite
+    // Create sprite (wider for text labels)
     const sprite = new THREE.Sprite(material);
-    sprite.scale.set(1.5, 1.5, 1);
+    sprite.scale.set(2.0, 1.0, 1);
     sprite.name = `LOD_Debug_${this.id}`;
 
     // Set to layer 1 (main camera) - matches other game objects
@@ -2311,6 +2311,7 @@ export class Entity implements IEntity {
 
   /**
    * Draw the LOD level label on canvas
+   * Shows: LOD0 (green), LOD1 (yellow), B (orange billboard/impostor), CULL (red)
    */
   private drawLODDebugLabel(lodLevel: LODLevel): void {
     if (!this._lodDebugCanvas || !this._lodDebugTexture) return;
@@ -2318,8 +2319,11 @@ export class Entity implements IEntity {
     const ctx = this._lodDebugCanvas.getContext("2d");
     if (!ctx) return;
 
+    const w = this._lodDebugCanvas.width;
+    const h = this._lodDebugCanvas.height;
+
     // Clear canvas
-    ctx.clearRect(0, 0, 64, 64);
+    ctx.clearRect(0, 0, w, h);
 
     // Get label text and color based on LOD level
     let label: string;
@@ -2327,29 +2331,31 @@ export class Entity implements IEntity {
 
     switch (lodLevel) {
       case LODLevel.LOD0:
-        label = "0";
-        bgColor = "#00aa00"; // Green - full detail
+        label = "LOD0";
+        bgColor = "#00cc00"; // Bright green - full detail (expensive!)
         break;
       case LODLevel.LOD1:
-        label = "1";
-        bgColor = "#aaaa00"; // Yellow - medium detail
+        label = "LOD1";
+        bgColor = "#ffcc00"; // Yellow - medium detail
         break;
       case LODLevel.IMPOSTOR:
-        label = "I";
-        bgColor = "#aa5500"; // Orange - impostor
+        label = "B"; // Billboard
+        bgColor = "#ff6600"; // Orange - impostor/billboard
         break;
       case LODLevel.CULLED:
-        label = "X";
-        bgColor = "#aa0000"; // Red - culled
+        label = "CULL";
+        bgColor = "#cc0000"; // Red - culled (not rendered)
         break;
       default:
         label = "?";
         bgColor = "#555555";
     }
 
-    // Draw circular background
+    // Draw rounded rectangle background
+    const padding = 4;
+    const radius = 8;
     ctx.beginPath();
-    ctx.arc(32, 32, 28, 0, Math.PI * 2);
+    ctx.roundRect(padding, padding, w - padding * 2, h - padding * 2, radius);
     ctx.fillStyle = bgColor;
     ctx.fill();
 
@@ -2358,12 +2364,15 @@ export class Entity implements IEntity {
     ctx.strokeStyle = "#000000";
     ctx.stroke();
 
-    // Draw label text
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 36px Arial";
+    // Draw label text with shadow for visibility
+    ctx.fillStyle = "#000000";
+    ctx.font = "bold 28px monospace";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(label, 32, 34);
+    ctx.fillText(label, w / 2 + 1, h / 2 + 1); // Shadow
+
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(label, w / 2, h / 2);
 
     // Update texture
     this._lodDebugTexture.needsUpdate = true;

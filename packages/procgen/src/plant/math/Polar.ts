@@ -4,34 +4,25 @@
 
 import type { Point2D, Point3D, Polar } from "../types.js";
 
-/** Pi constant */
-export const PI = Math.PI;
+// Import angle conversion utilities from shared math module for local use
+import {
+  PI as _PI,
+  PI2 as _PI2,
+  HALF_PI as _HALF_PI,
+  DEG_TO_RAD as _DEG_TO_RAD,
+  RAD_TO_DEG as _RAD_TO_DEG,
+  radians as _radians,
+  degrees as _degrees,
+} from "../../math/Vector3.js";
 
-/** 2 * Pi */
-export const PI2 = Math.PI * 2;
-
-/** Pi / 2 */
-export const HALF_PI = Math.PI / 2;
-
-/** Degrees to radians conversion factor */
-export const DEG_TO_RAD = Math.PI / 180;
-
-/** Radians to degrees conversion factor */
-export const RAD_TO_DEG = 180 / Math.PI;
-
-/**
- * Convert degrees to radians
- */
-export function radians(degrees: number): number {
-  return degrees * DEG_TO_RAD;
-}
-
-/**
- * Convert radians to degrees
- */
-export function degrees(radians: number): number {
-  return radians * RAD_TO_DEG;
-}
+// Re-export for consumers of this module
+export const PI = _PI;
+export const PI2 = _PI2;
+export const HALF_PI = _HALF_PI;
+export const DEG_TO_RAD = _DEG_TO_RAD;
+export const RAD_TO_DEG = _RAD_TO_DEG;
+export const radians = _radians;
+export const degrees = _degrees;
 
 /**
  * Create a polar coordinate
@@ -43,7 +34,7 @@ export function polar(
 ): Polar {
   return {
     radius,
-    angle: inDegrees ? radians(angle) : angle,
+    angle: inDegrees ? _radians(angle) : angle,
   };
 }
 
@@ -107,8 +98,8 @@ export function angleBetween3D(p0: Point3D, p1: Point3D): number {
  * Normalize angle to [0, 2π)
  */
 export function normalizeAngle(angle: number): number {
-  while (angle < 0) angle += PI2;
-  while (angle >= PI2) angle -= PI2;
+  while (angle < 0) angle += _PI2;
+  while (angle >= _PI2) angle -= _PI2;
   return angle;
 }
 
@@ -116,8 +107,8 @@ export function normalizeAngle(angle: number): number {
  * Normalize angle to [-π, π)
  */
 export function normalizeAngleSigned(angle: number): number {
-  while (angle < -PI) angle += PI2;
-  while (angle >= PI) angle -= PI2;
+  while (angle < -_PI) angle += _PI2;
+  while (angle >= _PI) angle -= _PI2;
   return angle;
 }
 
@@ -126,7 +117,7 @@ export function normalizeAngleSigned(angle: number): number {
  */
 export function lerpAngle(a: number, b: number, t: number): number {
   let diff = b - a;
-  while (diff > PI) diff -= PI2;
-  while (diff < -PI) diff += PI2;
+  while (diff > _PI) diff -= _PI2;
+  while (diff < -_PI) diff += _PI2;
   return a + diff * t;
 }

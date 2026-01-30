@@ -117,6 +117,13 @@ export class TileMovementManager {
   private currentPlayerFloor: number = 0;
 
   /**
+   * Current player's building ID for layer separation.
+   * If null, player is on ground layer (outside buildings).
+   * If set, player is in building layer and BFS should ONLY explore building tiles.
+   */
+  private currentPlayerBuildingId: string | null = null;
+
+  /**
    * Get EntityManager for spatial registry updates (cached lazy lookup)
    */
   private get entityManager() {
@@ -220,10 +227,15 @@ export class TileMovementManager {
   }
 
   /**
-   * Check if a tile is walkable based on collision and terrain constraints
-   * Checks CollisionMatrix for static objects (trees, rocks, stations),
-   * building collision (walls and floors), and TerrainSystem for water level,
-   * slope, and biome rules.
+   * Check if a tile is walkable based on collision and terrain constraints.
+   *
+   * STRICT LAYER SEPARATION:
+   * - When player is on GROUND (currentPlayerBuildingId === null):
+   *   Only GROUND tiles are walkable. Building tiles are blocked EXCEPT door tiles
+   *   which serve as transition points.
+   * - When player is in BUILDING (currentPlayerBuildingId !== null):
+   *   Only tiles within the SAME building are walkable. Ground tiles are blocked
+   *   EXCEPT door approach tiles which serve as exit transition points.
    *
    * @param tile - Target tile to check walkability
    * @param fromTile - Optional source tile for directional wall checks
@@ -232,14 +244,156 @@ export class TileMovementManager {
   private isTileWalkable(tile: TileCoord, fromTile?: TileCoord): boolean {
     const towns = this.townSystem;
     const playerFloor = this.currentPlayerFloor;
+    const playerBuildingId = this.currentPlayerBuildingId;
     const debug = this._debugWalkability;
 
-    // FIRST: Check wall blocking between tiles (this handles building walls)
-    // This MUST be checked regardless of whether tiles are inside/outside buildings
-    // because walls block entry/exit at building boundaries
-    if (fromTile && towns) {
-      const collisionService = towns.getCollisionService();
+    // Get collision service once for all checks
+    const collisionService = towns?.getCollisionService();
 
+    // Check if target tile is inside a building's WALKABLE footprint
+    const targetBuildingId = collisionService?.isTileInBuildingFootprint(
+      tile.x,
+      tile.z,
+    );
+    const targetIsBuilding = targetBuildingId !== null;
+
+    // ALSO check if tile is inside a building's BOUNDING BOX (even if not walkable)
+    // This catches tiles UNDER buildings that shouldn't be pathable
+    const targetInBuildingBbox = collisionService?.isTileInBuildingBoundingBox(
+      tile.x,
+      tile.z,
+    );
+    const targetUnderBuilding =
+      targetInBuildingBbox !== null && !targetIsBuilding;
+
+    // =========================================================================
+    // LAYER SEPARATION: Ground vs Building
+    // =========================================================================
+
+    if (playerBuildingId === null) {
+      // PLAYER IS ON GROUND LAYER
+
+      // Block tiles UNDER buildings that aren't walkable floor tiles
+      // (These are tiles inside building bbox but not in walkable footprint)
+      if (targetUnderBuilding && collisionService) {
+        // Check if this is a door EXTERIOR tile (approach area)
+        const isWalkableUnderBuilding =
+          collisionService.isTileWalkableInBuilding(
+            tile.x,
+            tile.z,
+            0, // Ground floor
+          );
+        if (!isWalkableUnderBuilding) {
+          if (debug) {
+            console.log(
+              `[isTileWalkable] BLOCKED by layer separation: tile (${tile.x},${tile.z}) ` +
+                `is under building ${targetInBuildingBbox} but not walkable`,
+            );
+          }
+          return false;
+        }
+      }
+
+      // Building tiles (in walkable footprint) are UNWALKABLE unless this is a door transition
+      if (targetIsBuilding && collisionService) {
+        // Check if this is a door tile (transition point INTO building)
+        const doorOpenings = collisionService.getDoorOpeningsAtTile(
+          tile.x,
+          tile.z,
+          0, // Ground floor for entering
+        );
+        if (doorOpenings.length === 0) {
+          // Not a door tile - building interior is unwalkable from ground
+          if (debug) {
+            console.log(
+              `[isTileWalkable] BLOCKED by layer separation: ground player cannot enter ` +
+                `building tile (${tile.x},${tile.z}) building=${targetBuildingId} (not a door)`,
+            );
+          }
+          return false;
+        }
+        // Door tile - allow as transition point
+      }
+    } else {
+      // PLAYER IS IN BUILDING LAYER
+
+      // Block tiles under a DIFFERENT building
+      if (targetUnderBuilding && targetInBuildingBbox !== playerBuildingId) {
+        if (debug) {
+          console.log(
+            `[isTileWalkable] BLOCKED by layer separation: building player (${playerBuildingId}) ` +
+              `cannot path through different building ${targetInBuildingBbox} bbox at (${tile.x},${tile.z})`,
+          );
+        }
+        return false;
+      }
+
+      if (targetIsBuilding) {
+        // Target is a building tile - only allow if SAME building
+        if (targetBuildingId !== playerBuildingId) {
+          if (debug) {
+            console.log(
+              `[isTileWalkable] BLOCKED by layer separation: building player (${playerBuildingId}) ` +
+                `cannot enter different building (${targetBuildingId}) at (${tile.x},${tile.z})`,
+            );
+          }
+          return false;
+        }
+        // Same building - proceed with standard checks
+      } else {
+        // Target is a GROUND tile - only allow if this is a door exit transition
+        if (collisionService && fromTile) {
+          // Check if we're exiting through a door
+          const fromBuildingId = collisionService.isTileInBuildingFootprint(
+            fromTile.x,
+            fromTile.z,
+          );
+          if (fromBuildingId === playerBuildingId) {
+            // Moving from inside building to ground - check for door
+            const doorOpenings = collisionService.getDoorOpeningsAtTile(
+              fromTile.x,
+              fromTile.z,
+              playerFloor,
+            );
+            const dx = tile.x - fromTile.x;
+            const dz = tile.z - fromTile.z;
+            let exitDirection: "north" | "south" | "east" | "west" | null =
+              null;
+            if (dx === 1) exitDirection = "east";
+            else if (dx === -1) exitDirection = "west";
+            else if (dz === 1) exitDirection = "south";
+            else if (dz === -1) exitDirection = "north";
+
+            if (!exitDirection || !doorOpenings.includes(exitDirection)) {
+              if (debug) {
+                console.log(
+                  `[isTileWalkable] BLOCKED by layer separation: building player cannot exit ` +
+                    `to ground tile (${tile.x},${tile.z}) without door. fromTile doors=[${doorOpenings.join(",")}]`,
+                );
+              }
+              return false;
+            }
+            // Door exit - allow as transition point
+          }
+        } else if (!fromTile) {
+          // No fromTile - this is a destination check, not a path step
+          // Ground tiles are not valid destinations from inside building
+          // (Two-stage nav will find the door first)
+          if (debug) {
+            console.log(
+              `[isTileWalkable] BLOCKED by layer separation: building player ` +
+                `cannot target ground tile (${tile.x},${tile.z}) directly`,
+            );
+          }
+          return false;
+        }
+      }
+    }
+
+    // =========================================================================
+    // WALL BLOCKING: Check directional blocking between tiles
+    // =========================================================================
+    if (fromTile && towns && collisionService) {
       // Check building wall blocking (handles entry, exit, and internal movement)
       const wallBlocked = towns.isBuildingWallBlocked(
         fromTile.x,
@@ -280,14 +434,29 @@ export class TileMovementManager {
         }
         return false;
       }
+
+      // Check step directional blocking (can only approach steps from front)
+      const stepBlocked = collisionService.isStepBlocked(
+        fromTile.x,
+        fromTile.z,
+        tile.x,
+        tile.z,
+      );
+      if (stepBlocked) {
+        if (debug) {
+          console.log(
+            `[isTileWalkable] BLOCKED by step side approach: (${fromTile.x},${fromTile.z}) -> (${tile.x},${tile.z})`,
+          );
+        }
+        return false;
+      }
     }
 
-    // SECOND: Check if target tile is inside a building's footprint
-    // This blocks ALL tiles under buildings except explicitly walkable floor tiles
-    if (towns) {
-      const collisionService = towns.getCollisionService();
-
-      // Check if tile is walkable in building system
+    // =========================================================================
+    // BUILDING FLOOR WALKABILITY
+    // =========================================================================
+    if (targetIsBuilding && collisionService) {
+      // Check if tile is walkable on this floor
       const isWalkableInBuilding = collisionService.isTileWalkableInBuilding(
         tile.x,
         tile.z,
@@ -300,39 +469,29 @@ export class TileMovementManager {
             tile.x,
             tile.z,
           );
-          const inFootprint = collisionService.isTileInBuildingFootprint(
-            tile.x,
-            tile.z,
-          );
           console.log(
             `[isTileWalkable] BLOCKED by building system: (${tile.x},${tile.z}) floor=${playerFloor}` +
-              ` | inBbox=${inBbox || "no"} | inFootprint=${inFootprint || "no"}`,
+              ` | inBbox=${inBbox || "no"} | building=${targetBuildingId}`,
           );
         }
         return false;
       }
 
-      // If tile is a walkable building floor, skip terrain checks
-      const buildingId = collisionService.isTileInBuildingFootprint(
-        tile.x,
-        tile.z,
-      );
-      if (buildingId) {
-        // Inside building footprint and walkable - skip terrain checks
-        if (debug) {
-          console.log(
-            `[isTileWalkable] ALLOWED (building floor): (${tile.x},${tile.z}) floor=${playerFloor} building=${buildingId}`,
-          );
-        }
-        return true;
+      // Walkable building tile - skip terrain checks
+      if (debug) {
+        console.log(
+          `[isTileWalkable] ALLOWED (building floor): (${tile.x},${tile.z}) floor=${playerFloor} building=${targetBuildingId}`,
+        );
       }
+      return true;
     }
 
-    // THIRD: Not inside a building - use standard collision checks
+    // =========================================================================
+    // GROUND LAYER CHECKS (static objects, terrain)
+    // =========================================================================
 
     // Check CollisionMatrix for static objects (trees, rocks, furnaces, etc.)
     // BLOCKS_WALK includes BLOCKED, WATER, STEEP_SLOPE - excludes OCCUPIED
-    // (players should be able to walk through other players for pathfinding)
     if (
       this.world.collision.hasFlags(tile.x, tile.z, CollisionMask.BLOCKS_WALK)
     ) {
@@ -567,13 +726,14 @@ export class TileMovementManager {
       return; // Too many pathfind requests
     }
 
-    // Set player floor for floor-aware pathfinding collision checks
+    // Set player floor and building ID for floor-aware pathfinding with layer separation
     const towns = this.townSystem;
     if (towns) {
       const playerState = towns
         .getCollisionService()
         .getPlayerBuildingState(playerId as EntityID);
       this.currentPlayerFloor = playerState.currentFloor;
+      this.currentPlayerBuildingId = playerState.insideBuildingId;
     }
 
     // === TWO-STAGE BUILDING NAVIGATION ===
@@ -624,12 +784,12 @@ export class TileMovementManager {
       };
 
       if (targetInsideBuilding && !playerInSameBuilding) {
-        // Player is outside, target is inside - need door-based navigation
+        // CASE 1: Player is OUTSIDE, target is INSIDE - need door-based navigation to ENTER
         const buildingId = targetResult.buildingId!;
 
         if (this._debugWalkability) {
           console.log(
-            `[TileMovement] TWO-STAGE NAV: Player at (${state.currentTile.x},${state.currentTile.z}) ` +
+            `[TileMovement] TWO-STAGE NAV (ENTER): Player at (${state.currentTile.x},${state.currentTile.z}) ` +
               `clicking inside ${buildingId} at (${payload.targetTile.x},${payload.targetTile.z})`,
           );
         }
@@ -655,7 +815,7 @@ export class TileMovementManager {
 
           if (this._debugWalkability) {
             console.log(
-              `[TileMovement] TWO-STAGE NAV: Found door - exterior=(${exteriorTile.x},${exteriorTile.z}) ` +
+              `[TileMovement] TWO-STAGE NAV (ENTER): Found door - exterior=(${exteriorTile.x},${exteriorTile.z}) ` +
                 `interior=(${interiorDoorTile.x},${interiorDoorTile.z}) direction=${doorTile.direction}`,
             );
           }
@@ -670,7 +830,7 @@ export class TileMovementManager {
 
           if (this._debugWalkability) {
             console.log(
-              `[TileMovement] TWO-STAGE NAV: Stage 1 path to exterior door: ${path.length} tiles`,
+              `[TileMovement] TWO-STAGE NAV (ENTER): Stage 1 path to exterior door: ${path.length} tiles`,
             );
           }
 
@@ -685,20 +845,98 @@ export class TileMovementManager {
 
             if (this._debugWalkability) {
               console.log(
-                `[TileMovement] TWO-STAGE NAV: Path extended with interior tile, total=${path.length} tiles`,
+                `[TileMovement] TWO-STAGE NAV (ENTER): Path extended with interior tile, total=${path.length} tiles`,
               );
             }
           } else {
             if (this._debugWalkability) {
               console.log(
-                `[TileMovement] TWO-STAGE NAV: FAILED - no path to exterior door tile`,
+                `[TileMovement] TWO-STAGE NAV (ENTER): FAILED - no path to exterior door tile`,
               );
             }
           }
         } else {
           if (this._debugWalkability) {
             console.log(
-              `[TileMovement] TWO-STAGE NAV: FAILED - no door found for ${buildingId}`,
+              `[TileMovement] TWO-STAGE NAV (ENTER): FAILED - no door found for ${buildingId}`,
+            );
+          }
+        }
+      } else if (!targetInsideBuilding && playerInBuilding !== null) {
+        // CASE 2: Player is INSIDE a building, target is OUTSIDE - need door-based navigation to EXIT
+        const buildingId = playerInBuilding.buildingId;
+
+        if (this._debugWalkability) {
+          console.log(
+            `[TileMovement] TWO-STAGE NAV (EXIT): Player inside ${buildingId} at (${state.currentTile.x},${state.currentTile.z}) ` +
+              `clicking outside at (${payload.targetTile.x},${payload.targetTile.z})`,
+          );
+        }
+
+        // Find nearest door to player's current position (for exiting)
+        const doorTile = collisionService.findClosestDoorTile(
+          buildingId,
+          state.currentTile.x,
+          state.currentTile.z,
+        );
+
+        if (doorTile) {
+          // Store the final destination for stage 2 (after exiting building)
+          finalDestination = payload.targetTile;
+
+          // INTERIOR door tile is inside the building (where player is)
+          const interiorDoorTile = {
+            x: doorTile.interiorTileX,
+            z: doorTile.interiorTileZ,
+          };
+          // EXTERIOR door tile is the approach tile OUTSIDE the building
+          const exteriorTile = { x: doorTile.tileX, z: doorTile.tileZ };
+
+          if (this._debugWalkability) {
+            console.log(
+              `[TileMovement] TWO-STAGE NAV (EXIT): Found door - interior=(${interiorDoorTile.x},${interiorDoorTile.z}) ` +
+                `exterior=(${exteriorTile.x},${exteriorTile.z}) direction=${doorTile.direction}`,
+            );
+          }
+
+          // Stage 1: Path to the INTERIOR door tile (approach from inside)
+          path = this.pathfinder.findPath(
+            state.currentTile,
+            interiorDoorTile,
+            (tile, fromTile) => this.isTileWalkable(tile, fromTile),
+          );
+
+          if (this._debugWalkability) {
+            console.log(
+              `[TileMovement] TWO-STAGE NAV (EXIT): Stage 1 path to interior door: ${path.length} tiles`,
+            );
+          }
+
+          if (path.length > 0) {
+            // Append the exterior door tile to the path so player steps out
+            path.push(exteriorTile);
+
+            // Store pending destination for stage 2 (from exterior door to final destination)
+            state.pendingDestination = finalDestination;
+            state.pendingBuildingId = null; // Exiting to ground layer
+            waypointDoor = exteriorTile; // Stage 2 starts when we reach exterior
+
+            if (this._debugWalkability) {
+              console.log(
+                `[TileMovement] TWO-STAGE NAV (EXIT): Path extended with exterior tile, total=${path.length} tiles`,
+              );
+            }
+          } else {
+            if (this._debugWalkability) {
+              console.log(
+                `[TileMovement] TWO-STAGE NAV (EXIT): FAILED - no path to interior door tile`,
+              );
+            }
+          }
+        } else {
+          if (this._debugWalkability) {
+            console.log(
+              `[TileMovement] TWO-STAGE NAV (EXIT): FAILED - no door found for ${buildingId}`,
             );
           }
         }
@@ -1065,30 +1303,50 @@ export class TileMovementManager {
 
       // === TWO-STAGE BUILDING NAVIGATION: Check if we reached the door ===
       // If path is complete and there's a pending destination, continue to it
-      if (
+      // pendingBuildingId can be:
+      //   - a building ID (entering building)
+      //   - null (exiting to ground)
+      //   - undefined (no two-stage nav in progress)
+      const hasPendingTwoStage =
         state.pathIndex >= state.path.length &&
-        state.pendingDestination &&
-        state.pendingBuildingId
-      ) {
-        // We've reached the door - now path to the final destination inside the building
+        state.pendingDestination !== null &&
+        state.pendingDestination !== undefined &&
+        state.pendingBuildingId !== undefined;
+
+      if (hasPendingTwoStage) {
+        const isExiting = state.pendingBuildingId === null;
         const towns = this.townSystem;
         if (towns) {
           console.log(
-            `[TileMovement] TWO-STAGE NAV: Stage 2 - Reached door at (${state.currentTile.x},${state.currentTile.z}), ` +
-              `pathing to (${state.pendingDestination.x},${state.pendingDestination.z}) in ${state.pendingBuildingId}`,
+            `[TileMovement] TWO-STAGE NAV: Stage 2 (${isExiting ? "EXIT" : "ENTER"}) - Reached door at (${state.currentTile.x},${state.currentTile.z}), ` +
+              `pathing to (${state.pendingDestination!.x},${state.pendingDestination!.z})${isExiting ? " on ground" : ` in ${state.pendingBuildingId}`}`,
           );
 
-          // Update player floor now that we're inside the building
           const collisionService = towns.getCollisionService();
+
+          // CRITICAL: Update player building state FIRST with current position
+          // before getting the floor index. We just stepped through the door
+          // but updatePlayerBuildingState hasn't been called yet for this tick.
+          // Get current world Y from entity for proper floor detection
+          const worldY = entity?.position?.y ?? 0;
+          collisionService.updatePlayerBuildingState(
+            playerId as EntityID,
+            state.currentTile.x,
+            state.currentTile.z,
+            worldY,
+          );
+
+          // NOW get the updated player floor and building ID
           const playerState = collisionService.getPlayerBuildingState(
             playerId as EntityID,
           );
           this.currentPlayerFloor = playerState.currentFloor;
+          this.currentPlayerBuildingId = playerState.insideBuildingId;
 
           // Calculate new path from door to final destination
           const newPath = this.pathfinder.findPath(
             state.currentTile,
-            state.pendingDestination,
+            state.pendingDestination!,
             (tile, fromTile) => this.isTileWalkable(tile, fromTile),
           );
 
@@ -1096,7 +1354,46 @@ export class TileMovementManager {
             `[TileMovement] TWO-STAGE NAV: Stage 2 path length: ${newPath.length}`,
           );
 
-          if (newPath.length > 0) {
+          // Validate Stage 2 path doesn't go through walls
+          let pathValid = true;
+          if (newPath.length > 1) {
+            for (let i = 0; i < newPath.length - 1; i++) {
+              const from = newPath[i];
+              const to = newPath[i + 1];
+              const wallBlocked = collisionService.isWallBlocked(
+                from.x,
+                from.z,
+                to.x,
+                to.z,
+                this.currentPlayerFloor,
+              );
+              if (wallBlocked) {
+                console.error(
+                  `[TileMovement] TWO-STAGE NAV: Stage 2 path goes through wall! Step ${i}: (${from.x},${from.z}) -> (${to.x},${to.z})`,
+                );
+                const fromInfo = collisionService.queryCollision(
+                  from.x,
+                  from.z,
+                  this.currentPlayerFloor,
+                );
+                const toInfo = collisionService.queryCollision(
+                  to.x,
+                  to.z,
+                  this.currentPlayerFloor,
+                );
+                console.error(
+                  `  From tile: inside=${fromInfo.isInsideBuilding}, walls=${JSON.stringify(fromInfo.wallBlocking)}`,
+                );
+                console.error(
+                  `  To tile: inside=${toInfo.isInsideBuilding}, walls=${JSON.stringify(toInfo.wallBlocking)}`,
+                );
+                pathValid = false;
+                break;
+              }
+            }
+          }
+
+          if (newPath.length > 0 && pathValid) {
             // Continue with the second stage of navigation
             state.path = newPath;
             state.pathIndex = 0;
@@ -1124,8 +1421,12 @@ export class TileMovementManager {
             });
           } else {
             // Stage 2 FAILED - player stuck at door, implement graceful recovery
+            // This can happen if no path found OR if path goes through walls
+            const reason = !pathValid
+              ? "path goes through walls"
+              : "no path found";
             console.warn(
-              `[TileMovement] TWO-STAGE NAV: Stage 2 failed, player stopping at door\n` +
+              `[TileMovement] TWO-STAGE NAV: Stage 2 failed (${reason}), player stopping at door\n` +
                 `  Current tile (door): (${state.currentTile.x}, ${state.currentTile.z})\n` +
                 `  Target tile: (${state.pendingDestination.x}, ${state.pendingDestination.z})\n` +
                 `  Building: ${state.pendingBuildingId}\n` +
@@ -1241,12 +1542,13 @@ export class TileMovementManager {
           playerId as EntityID,
         );
 
-        // Check if tile is in ANY building's bounding box (for elevation purposes)
-        // This includes both walkable floor tiles AND non-walkable tiles under the building structure
-        // We use bounding box check (not footprint) to ensure consistent Y-elevation for all tiles
-        // within a building, preventing players from dropping to terrain height on "hole" tiles
+        // Check if tile is a WALKABLE building floor tile (in footprint)
+        // Use FOOTPRINT check (not bounding box) to ensure correct elevation transitions:
+        // - Inside building (footprint) → use building floor elevation
+        // - Outside building (exterior door tiles, etc.) → use terrain elevation
+        // This prevents players floating in the air on exterior door approach tiles
         const buildingIdForElevation =
-          collisionService.isTileInBuildingBoundingBox(
+          collisionService.isTileInBuildingFootprint(
             state.currentTile.x,
             state.currentTile.z,
           );
@@ -1483,14 +1785,15 @@ export class TileMovementManager {
       // First, get current player state to know which floor they're on
       const playerState = collisionService.getPlayerBuildingState(entityId);
 
-      // Check if this tile is inside any building's bounding box (for elevation purposes)
-      // Use bounding box check (not footprint) to ensure consistent Y-elevation for all tiles
-      // within a building, including "hole" tiles in L-shaped buildings
-      const buildingIdForElevation =
-        collisionService.isTileInBuildingBoundingBox(
-          state.currentTile.x,
-          state.currentTile.z,
-        );
+      // Check if this tile is a WALKABLE building floor tile (in footprint)
+      // Use FOOTPRINT check (not bounding box) to ensure correct elevation transitions:
+      // - Inside building (footprint) → use building floor elevation
+      // - Outside building (exterior door tiles, etc.) → use terrain elevation
+      // This prevents players floating in the air on exterior door approach tiles
+      const buildingIdForElevation = collisionService.isTileInBuildingFootprint(
+        state.currentTile.x,
+        state.currentTile.z,
+      );
 
       // DIAGNOSTIC: Log elevation decision once per tile change
       if (
@@ -1498,14 +1801,14 @@ export class TileMovementManager {
         (state.previousTile?.x !== state.currentTile.x ||
           state.previousTile?.z !== state.currentTile.z)
       ) {
-        const inFootprint = collisionService.isTileInBuildingFootprint(
+        const inBbox = collisionService.isTileInBuildingBoundingBox(
           state.currentTile.x,
           state.currentTile.z,
         );
         const terrainH = terrain?.getHeightAt(worldPos.x, worldPos.z);
         console.log(
           `[ELEVATION] Tile (${state.currentTile.x},${state.currentTile.z}): ` +
-            `bbox=${buildingIdForElevation ?? "none"} footprint=${inFootprint ?? "none"} terrain=${terrainH?.toFixed(2) ?? "null"}`,
+            `footprint=${buildingIdForElevation ?? "none"} bbox=${inBbox ?? "none"} terrain=${terrainH?.toFixed(2) ?? "null"}`,
         );
       }
 
@@ -1575,9 +1878,10 @@ export class TileMovementManager {
         }
       }
 
-      // Cache current floor for subsequent walkability checks
+      // Cache current floor and building ID for subsequent walkability checks
       const updatedState = collisionService.getPlayerBuildingState(entityId);
       this.currentPlayerFloor = updatedState.currentFloor;
+      this.currentPlayerBuildingId = updatedState.insideBuildingId;
     }
 
     // Fall back to terrain height if not using building elevation
@@ -2003,13 +2307,14 @@ export class TileMovementManager {
       destinationTile = this._targetTile;
     }
 
-    // Set player floor for floor-aware pathfinding collision checks
+    // Set player floor and building ID for floor-aware pathfinding with layer separation
     const townsForPath = this.townSystem;
     if (townsForPath) {
       const playerState = townsForPath
         .getCollisionService()
         .getPlayerBuildingState(playerId as EntityID);
       this.currentPlayerFloor = playerState.currentFloor;
+      this.currentPlayerBuildingId = playerState.insideBuildingId;
     }
 
     // Calculate BFS path to the destination tile (NOT to target, then truncate!)

@@ -43,8 +43,8 @@ export {
 } from "./presets";
 
 // Utilities
-export { SimplexNoise, hashSeed } from "./noise";
-export { createRng } from "./rng";
+export { SimplexNoise } from "./noise";
+export { createRng, hashSeed } from "./rng";
 
 // Triplanar material
 export {

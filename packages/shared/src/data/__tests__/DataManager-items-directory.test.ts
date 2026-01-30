@@ -127,8 +127,9 @@ describe.skipIf(!manifestsAvailable)(
         const weapons = Array.from(ITEMS.values()).filter(
           (item) => item.type === "weapon" && !item.id.endsWith("_noted"),
         );
-        // 6 swords: bronze, iron, steel, mithril, adamant, rune
-        expect(weapons.length).toBe(6);
+        // Weapons include swords, scimitars, daggers, maces, etc across all tiers
+        // Count grows as new weapon types are added to the game
+        expect(weapons.length).toBe(16);
       });
 
       it("has correct tool count", () => {

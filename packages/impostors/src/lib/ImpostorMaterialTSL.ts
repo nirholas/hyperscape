@@ -169,8 +169,6 @@ export function createTSLImpostorMaterial(
     enableAAA = !!(depthAtlasTexture || normalAtlasTexture),
     enableDepthBlending = !!depthAtlasTexture,
     enableSpecular = !!normalAtlasTexture,
-    depthNear = 0.001,
-    depthFar = 10,
     debugMode = 0,
   } = options;
 
@@ -205,12 +203,6 @@ export function createTSLImpostorMaterial(
   const uNormalAtlasTexture = texture(normalAtlasTexture ?? placeholderTex);
   const uDepthAtlasTexture = texture(depthAtlasTexture ?? placeholderTex);
   const uPBRAtlasTexture = texture(pbrAtlasTexture ?? placeholderTex);
-
-  // Depth params (reserved for future parallax/depth output)
-  const _uDepthNear = depthNear;
-  const _uDepthFar = depthFar;
-  void _uDepthNear; // Suppress unused warning
-  void _uDepthFar; // Suppress unused warning
 
   const uUseDepthBlending = uniform(int(enableDepthBlending ? 1 : 0));
   const uUsePBR = uniform(int(pbrAtlasTexture ? 1 : 0));
@@ -1021,8 +1013,3 @@ export function isTSLImpostorMaterial(
     "updateView" in material
   );
 }
-
-// Note: Lit impostor material with normal atlas support requires additional TSL functions
-// (normalize, cross, pow, min, cameraPosition, select) that have different API signatures.
-// For lit impostors with WebGPU, use the GLSL version with WebGL renderer for now,
-// or implement using MeshStandardNodeMaterial with custom lighting nodes.

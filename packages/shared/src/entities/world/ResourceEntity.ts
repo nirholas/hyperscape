@@ -76,6 +76,14 @@ import {
   type DissolveMaterial,
 } from "../../systems/shared/world/GPUVegetation";
 import { getCameraPosition } from "../../utils/rendering/AnimationLOD";
+import {
+  getTreeMeshClone,
+  getTreeLOD1Clone,
+  getVariantIndex,
+  addTreeInstance,
+  removeTreeInstance,
+  setProcgenTreeWorld,
+} from "../../systems/shared/world/ProcgenTreeCache";
 
 /**
  * NOTE: LOD1 models are PRE-BAKED offline using scripts/bake-lod.sh (Blender).
@@ -496,6 +504,7 @@ export class ResourceEntity extends InteractableEntity {
       modelScale: this.config.modelScale,
       depletedModelScale: this.config.depletedModelScale,
       depletedModelPath: this.config.depletedModelPath,
+      procgenPreset: this.config.procgenPreset,
     } as EntityData;
   }
 
@@ -515,6 +524,7 @@ export class ResourceEntity extends InteractableEntity {
       modelScale: this.config.modelScale,
       depletedModelScale: this.config.depletedModelScale,
       depletedModelPath: this.config.depletedModelPath,
+      procgenPreset: this.config.procgenPreset,
     };
   }
 
@@ -537,6 +547,22 @@ export class ResourceEntity extends InteractableEntity {
   protected async createMesh(): Promise<void> {
     if (this.world.isServer) {
       return;
+    }
+
+    // For trees with procgenPreset, use procedural generation
+    if (this.config.resourceType === "tree" && this.config.procgenPreset) {
+      const procgenSuccess = await this.createProcgenTreeMesh();
+      if (procgenSuccess) {
+        return; // Successfully created procgen tree
+      }
+      // If no model fallback, warn and use placeholder
+      if (!this.config.model) {
+        console.warn(
+          `[ResourceEntity] Procgen failed for ${this.config.procgenPreset}, no GLB fallback - using placeholder`,
+        );
+        // Fall through to placeholder
+      }
+      // Otherwise fall through to GLB model loading
     }
 
     // Try to load 3D model if available
@@ -660,6 +686,282 @@ export class ResourceEntity extends InteractableEntity {
 
     // Apply dissolve shader for distance-based fade (matching vegetation)
     this.applyDissolveMaterials();
+  }
+
+  /**
+   * Create a procedurally generated tree mesh using @hyperscape/procgen.
+   *
+   * Uses cached variants (3 per preset) with additional rotation/scale variation
+   * for visual diversity without excessive memory usage.
+   *
+   * @returns true if successfully created, false to fall back to GLB model
+   */
+  /** Flag to track if using instanced rendering */
+  private _useInstancedTree = false;
+  /** Current instanced LOD level */
+  private _instancedLOD = 0;
+
+  /**
+   * Create a procedurally generated tree using INSTANCED RENDERING.
+   * All trees of the same preset batch into a SINGLE draw call.
+   */
+  private async createProcgenTreeMesh(): Promise<boolean> {
+    const presetName = this.config.procgenPreset;
+    if (!presetName) {
+      return false;
+    }
+
+    try {
+      // Set up the world reference for instancing
+      setProcgenTreeWorld(this.world);
+
+      // Calculate transform
+      const baseScale = this.config.modelScale ?? 1.0;
+      const scaleHash = this.hashString(this.id + "_scale");
+      const scaleVariation = 0.85 + (scaleHash % 300) / 1000;
+      const finalScale = baseScale * scaleVariation;
+
+      const rotHash = this.hashString(
+        `${this.id}_${this.position.x.toFixed(1)}_${this.position.z.toFixed(1)}`,
+      );
+      const rotation = ((rotHash % 1000) / 1000) * Math.PI * 2;
+
+      // World position from node
+      const worldPos = new THREE.Vector3();
+      this.node.getWorldPosition(worldPos);
+
+      // Add as instanced tree (LOD0 initially)
+      const success = await addTreeInstance(
+        presetName,
+        this.id,
+        worldPos,
+        rotation,
+        finalScale,
+        0, // Start at LOD0
+      );
+
+      if (success) {
+        this._useInstancedTree = true;
+        this._instancedLOD = 0;
+
+        // Create invisible collision proxy for interactions
+        this.createTreeCollisionProxy(finalScale);
+        return true;
+      }
+
+      // Fallback to individual mesh if instancing failed
+      return this.createProcgenTreeMeshFallback();
+    } catch (error) {
+      console.error(
+        `[ResourceEntity] Error creating instanced tree for ${presetName}:`,
+        error,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Create invisible collision proxy for instanced trees.
+   * Allows raycasting/interaction even though visual is rendered by instancer.
+   */
+  private createTreeCollisionProxy(scale: number): void {
+    const height = 8 * scale;
+    const radius = 1 * scale;
+    const geometry = new THREE.CylinderGeometry(radius, radius, height, 6);
+    const material = new THREE.MeshBasicMaterial({ visible: false });
+    const proxy = new THREE.Mesh(geometry, material);
+    proxy.position.y = height / 2;
+    proxy.name = `TreeProxy_${this.id}`;
+    proxy.userData = {
+      type: "resource",
+      entityId: this.id,
+      name: this.config.name,
+      interactable: true,
+      resourceType: this.config.resourceType,
+      procgenPreset: this.config.procgenPreset,
+    };
+    proxy.layers.set(1);
+    this.node.add(proxy);
+    this.mesh = proxy;
+  }
+
+  /**
+   * Fallback: Create individual mesh if instancing fails.
+   */
+  private async createProcgenTreeMeshFallback(): Promise<boolean> {
+    const presetName = this.config.procgenPreset;
+    if (!presetName) return false;
+
+    const treeGroup = await getTreeMeshClone(presetName, this.id);
+    if (!treeGroup) return false;
+
+    this.mesh = treeGroup;
+    this.mesh.name = `Resource_tree_procgen_${presetName}`;
+    this.mesh.visible = !this.config.depleted;
+
+    const baseScale = this.config.modelScale ?? 1.0;
+    const scaleHash = this.hashString(this.id + "_scale");
+    const finalScale = baseScale * (0.85 + (scaleHash % 300) / 1000);
+    this.mesh.scale.setScalar(finalScale);
+
+    const rotHash = this.hashString(
+      `${this.id}_${this.position.x.toFixed(1)}_${this.position.z.toFixed(1)}`,
+    );
+    this.mesh.rotation.y = ((rotHash % 1000) / 1000) * Math.PI * 2;
+
+    this.mesh.layers.set(1);
+    this.mesh.traverse((child) => {
+      child.layers.set(1);
+      if (child instanceof THREE.Mesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+
+    this.mesh.userData = {
+      type: "resource",
+      entityId: this.id,
+      name: this.config.name,
+      interactable: true,
+      resourceType: this.config.resourceType,
+      depleted: this.config.depleted,
+      procgenPreset: presetName,
+    };
+
+    const bbox = new THREE.Box3().setFromObject(this.mesh);
+    this.mesh.position.set(0, -bbox.min.y, 0);
+    this.node.add(this.mesh);
+
+    return true;
+  }
+
+  /**
+   * Simple string hash for deterministic randomization.
+   */
+  private hashString(str: string): number {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = (hash * 31 + str.charCodeAt(i)) | 0;
+    }
+    return Math.abs(hash);
+  }
+
+  /**
+   * Get LOD1 mesh for procgen trees.
+   *
+   * First tries to get the cached decimated LOD1 mesh (30% of original vertices).
+   * Falls back to a simple cone + cylinder shape if decimation is unavailable.
+   *
+   * LOD1 is used at medium distance (40-120m) before impostor kicks in.
+   */
+  private async getProcgenLOD1(
+    presetName: string,
+    fullMesh: THREE.Group,
+  ): Promise<THREE.Group | null> {
+    // Try to get the cached decimated LOD1 mesh first
+    const cachedLOD1 = await getTreeLOD1Clone(presetName, this.id);
+
+    if (cachedLOD1) {
+      // Apply same transform as full mesh
+      cachedLOD1.position.copy(fullMesh.position);
+      cachedLOD1.rotation.copy(fullMesh.rotation);
+      cachedLOD1.scale.copy(fullMesh.scale);
+
+      // Set layers to match full mesh
+      cachedLOD1.layers.set(1);
+      cachedLOD1.traverse((child) => {
+        child.layers.set(1);
+        if (child instanceof THREE.Mesh) {
+          child.castShadow = true;
+          // Setup materials with world
+          if (this.world.setupMaterial) {
+            const materials = Array.isArray(child.material)
+              ? child.material
+              : [child.material];
+            for (const mat of materials) {
+              this.world.setupMaterial(mat);
+            }
+          }
+        }
+      });
+
+      return cachedLOD1;
+    }
+
+    // Fallback: Create simple cone + cylinder shape
+    return this.createSimpleLOD1(fullMesh);
+  }
+
+  /**
+   * Create a simple LOD1 mesh as fallback (cone + cylinder).
+   *
+   * Used when decimation is unavailable. Creates a basic tree silhouette
+   * with ~14 triangles instead of thousands.
+   */
+  private createSimpleLOD1(fullMesh: THREE.Group): THREE.Group {
+    const lod1 = new THREE.Group();
+    lod1.name = "LOD1_Tree_Simple";
+
+    // Calculate bounds of original mesh
+    const bbox = new THREE.Box3().setFromObject(fullMesh);
+    const size = new THREE.Vector3();
+    bbox.getSize(size);
+
+    const height = size.y;
+    const width = Math.max(size.x, size.z);
+
+    // Create trunk (cylinder)
+    const trunkHeight = height * 0.3;
+    const trunkRadius = width * 0.05;
+    const trunkGeometry = new THREE.CylinderGeometry(
+      trunkRadius * 0.7, // top radius
+      trunkRadius, // bottom radius
+      trunkHeight,
+      6, // radial segments (low poly)
+      1, // height segments
+    );
+    const trunkMaterial = new THREE.MeshLambertMaterial({
+      color: 0x4a3728, // Brown bark color
+    });
+    const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
+    trunk.position.y = trunkHeight / 2;
+    trunk.castShadow = true;
+    lod1.add(trunk);
+
+    // Create canopy (cone)
+    const canopyHeight = height * 0.75;
+    const canopyRadius = width * 0.45;
+    const canopyGeometry = new THREE.ConeGeometry(
+      canopyRadius,
+      canopyHeight,
+      8, // radial segments (low poly)
+      1, // height segments
+    );
+    const canopyMaterial = new THREE.MeshLambertMaterial({
+      color: 0x2d5a27, // Green foliage color
+    });
+    const canopy = new THREE.Mesh(canopyGeometry, canopyMaterial);
+    canopy.position.y = trunkHeight + canopyHeight / 2;
+    canopy.castShadow = true;
+    lod1.add(canopy);
+
+    // Copy transform from full mesh
+    lod1.position.copy(fullMesh.position);
+    lod1.rotation.copy(fullMesh.rotation);
+    lod1.scale.copy(fullMesh.scale);
+
+    // Set layers to match full mesh
+    lod1.layers.set(1);
+    trunk.layers.set(1);
+    canopy.layers.set(1);
+
+    // Setup materials with world
+    if (this.world.setupMaterial) {
+      this.world.setupMaterial(trunkMaterial);
+      this.world.setupMaterial(canopyMaterial);
+    }
+
+    return lod1;
   }
 
   /**
@@ -834,14 +1136,13 @@ export class ResourceEntity extends InteractableEntity {
         }
 
         // Create dissolve version of the material
-        // Use same fade distances as vegetation for consistency
+        // Match building shader: only near-camera fade, no player occlusion
         const dissolveMat = createDissolveMaterial(mat, {
           fadeStart: GPU_VEG_CONFIG.FADE_START,
           fadeEnd: GPU_VEG_CONFIG.FADE_END,
-          enableNearFade: true,
-          nearFadeStart: GPU_VEG_CONFIG.NEAR_FADE_START,
-          nearFadeEnd: GPU_VEG_CONFIG.NEAR_FADE_END,
+          enableNearFade: false, // Use camera-based near fade, not player-based
           enableWaterCulling: false, // Resources aren't affected by water culling
+          enableOcclusionDissolve: false, // Disable occlusion (matches buildings)
         });
 
         // Set up the material with world
@@ -944,14 +1245,13 @@ export class ResourceEntity extends InteractableEntity {
 
       if (geometry && material) {
         // Create SHARED dissolve material for all entities using this LOD1 model
-        // This enables batching - all instances share one material = 1 draw call
+        // Match building shader: only near-camera fade, no player occlusion
         const dissolveMaterial = createDissolveMaterial(material, {
           fadeStart: GPU_VEG_CONFIG.FADE_START,
           fadeEnd: GPU_VEG_CONFIG.FADE_END,
-          enableNearFade: true,
-          nearFadeStart: GPU_VEG_CONFIG.NEAR_FADE_START,
-          nearFadeEnd: GPU_VEG_CONFIG.NEAR_FADE_END,
+          enableNearFade: false, // Use camera-based near fade, not player-based
           enableWaterCulling: false,
+          enableOcclusionDissolve: false, // Disable occlusion (matches buildings)
         });
 
         // Setup for CSM shadows
@@ -1196,6 +1496,16 @@ export class ResourceEntity extends InteractableEntity {
 
     // NOTE: Impostor cleanup is handled by Entity's disposeHLOD() method
     // which is called by super.destroy() below
+
+    // Clean up instanced tree if using instancing
+    if (this._useInstancedTree && this.config.procgenPreset) {
+      removeTreeInstance(
+        this.config.procgenPreset,
+        this.id,
+        this._instancedLOD,
+      );
+      this._useInstancedTree = false;
+    }
 
     // Call parent destroy
     super.destroy(local);

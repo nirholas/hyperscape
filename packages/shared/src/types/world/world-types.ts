@@ -994,6 +994,30 @@ export interface RoadTileSegment {
 }
 
 /**
+ * Edge of a tile where a road exits
+ */
+export type TileEdge = "north" | "south" | "east" | "west";
+
+/**
+ * Represents a point where a road exits a tile boundary.
+ * Used for cross-tile road continuity - adjacent tiles can pick up
+ * these exit points to continue the road seamlessly.
+ */
+export interface RoadBoundaryExit {
+  /** ID of the road that exits */
+  roadId: string;
+  /** Position where road crosses the boundary (world coordinates) */
+  position: { x: number; z: number };
+  /** Direction the road was heading when it hit the boundary (radians) */
+  direction: number;
+  /** Tile coordinates where the exit occurs */
+  tileX: number;
+  tileZ: number;
+  /** Which edge of the tile the road exits through */
+  edge: TileEdge;
+}
+
+/**
  * Complete procedural road network data
  */
 export interface RoadNetwork {
@@ -1007,6 +1031,8 @@ export interface RoadNetwork {
   seed: number;
   /** Generation timestamp */
   generatedAt: number;
+  /** Boundary exit points for cross-tile continuity */
+  boundaryExits?: RoadBoundaryExit[];
 }
 
 // ============== WORLD CONFIG MANIFEST TYPES ==============

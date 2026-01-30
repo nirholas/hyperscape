@@ -56,6 +56,7 @@ import {
   type FloorCollisionData,
   type WallSegment,
   type StairTile,
+  type StepTile,
   type WallDirection,
   type PlayerBuildingState,
   type BuildingCollisionResult,
@@ -74,6 +75,12 @@ import {
   FLOOR_HEIGHT,
   FOUNDATION_HEIGHT,
   TILES_PER_CELL,
+  DOOR_WIDTH,
+  ENTRANCE_STEP_DEPTH,
+  ENTRANCE_STEP_HEIGHT,
+  ENTRANCE_STEP_COUNT,
+  TERRAIN_STEP_COUNT,
+  FOUNDATION_OVERHANG,
 } from "@hyperscape/procgen/building";
 
 /** Wall direction to CollisionFlag mapping */
@@ -133,6 +140,9 @@ export class BuildingCollisionService {
 
   /** Spatial index: tile key -> building IDs that cover this tile */
   private tileToBuildings: Map<string, Set<string>> = new Map();
+
+  /** Step tile spatial index: tile key -> StepTile data */
+  private tileToStepTile: Map<string, StepTile> = new Map();
 
   /** Player floor states by entity ID */
   private playerFloorStates: Map<EntityID, PlayerBuildingState> = new Map();
@@ -268,19 +278,22 @@ export class BuildingCollisionService {
       );
     }
 
-    // Warn (but don't throw) if no doors - some test buildings may intentionally have none
-    if (doorCount === 0) {
+    // Count arches for entrance check
+    const archCount =
+      floor0?.wallSegments.filter(
+        (w) => w.hasOpening && w.openingType === "arch",
+      ).length ?? 0;
+
+    // Warn (but don't throw) if no entrances - some test buildings may intentionally have none
+    // Both doors AND arches count as valid entrances
+    if (doorCount === 0 && archCount === 0) {
       console.warn(
-        `[BuildingCollision] WARNING: Building ${buildingId} has NO DOORS! Players cannot enter.`,
+        `[BuildingCollision] WARNING: Building ${buildingId} has NO ENTRANCES (doors or arches)! Players cannot enter.`,
       );
     }
 
     // Detailed debug logging (when enabled)
     if (this._debugLogging) {
-      const archCount =
-        floor0?.wallSegments.filter(
-          (w) => w.hasOpening && w.openingType === "arch",
-        ).length ?? 0;
       const stairCount = floor0?.stairTiles.length ?? 0;
       console.log(
         `[BuildingCollision] Registered ${buildingId} at (${worldPosition.x.toFixed(0)}, ${worldPosition.z.toFixed(0)}) ` +
@@ -392,6 +405,14 @@ export class BuildingCollisionService {
       floors.push(roofFloor);
     }
 
+    // Generate entrance step tiles (outside building, directional walkability)
+    const stepTiles = this.generateStepTiles(
+      buildingId,
+      layout,
+      worldPosition,
+      rotation,
+    );
+
     return {
       buildingId,
       townId,
@@ -400,6 +421,7 @@ export class BuildingCollisionService {
       cellWidth: layout.width,
       cellDepth: layout.depth,
       floors,
+      stepTiles,
       boundingBox: {
         minTileX,
         maxTileX,
@@ -591,12 +613,35 @@ export class BuildingCollisionService {
               (worldDir === "west" && dtx === -halfTiles); // West edge (min X within cell)
 
             if (isOnEdge) {
+              // For doors, only the CENTER tiles of the edge should have openings
+              // Doors are ~1.6m wide (DOOR_WIDTH), which is ~2 tiles
+              // A cell edge has 4 tiles, so only tiles at dtx/dtz = -1 and 0 (center 2) are door tiles
+              let tileHasOpening = hasOpening;
+              let tileOpeningType = openingType;
+
+              if (hasOpening && openingType === "door") {
+                // Determine if this tile is in the center of the edge (door width)
+                // For north/south walls, check dtx position
+                // For east/west walls, check dtz position
+                const isNorthSouth =
+                  worldDir === "north" || worldDir === "south";
+                const edgeOffset = isNorthSouth ? dtx : dtz;
+                // Center tiles are at offset -1 and 0 (indices 1 and 2 of 4)
+                const isCenterTile = edgeOffset === -1 || edgeOffset === 0;
+
+                if (!isCenterTile) {
+                  // This is a side tile, not part of the door opening
+                  tileHasOpening = false;
+                  tileOpeningType = undefined;
+                }
+              }
+
               walls.push({
                 tileX: centerTile.x + dtx,
                 tileZ: centerTile.z + dtz,
                 side: worldDir,
-                hasOpening,
-                openingType,
+                hasOpening: tileHasOpening,
+                openingType: tileOpeningType,
               });
             }
           }
@@ -620,10 +665,12 @@ export class BuildingCollisionService {
   ): StairTile[] {
     const stairTiles: StairTile[] = [];
     const direction = toWallDirection(stairs.direction);
+    const tilesPerCell = TILES_PER_CELL;
+    const halfTiles = Math.floor(tilesPerCell / 2);
 
-    // Bottom stair tile (departure from this floor)
+    // Bottom stair cell (departure from this floor)
     const bottomCell: CellCoord = { col: stairs.col, row: stairs.row };
-    const bottomWorldTile = cellToWorldTile(
+    const bottomCenterTile = cellToWorldTile(
       bottomCell,
       worldPosition.x,
       worldPosition.z,
@@ -633,21 +680,27 @@ export class BuildingCollisionService {
       CELL_SIZE,
     );
 
-    stairTiles.push({
-      tileX: bottomWorldTile.x,
-      tileZ: bottomWorldTile.z,
-      fromFloor: floorIndex,
-      toFloor: floorIndex + 1,
-      direction: rotateWallDirection(direction, rotation),
-      isLanding: false,
-    });
+    // Generate stair tiles for ALL tiles in the bottom stair cell (4x4 = 16 tiles)
+    // This ensures stair elevation works regardless of which tile in the cell the player walks on
+    for (let dtx = -halfTiles; dtx < tilesPerCell - halfTiles; dtx++) {
+      for (let dtz = -halfTiles; dtz < tilesPerCell - halfTiles; dtz++) {
+        stairTiles.push({
+          tileX: bottomCenterTile.x + dtx,
+          tileZ: bottomCenterTile.z + dtz,
+          fromFloor: floorIndex,
+          toFloor: floorIndex + 1,
+          direction: rotateWallDirection(direction, rotation),
+          isLanding: false,
+        });
+      }
+    }
 
-    // Top landing tile (arrival to next floor)
+    // Top landing cell (arrival to next floor)
     const topCell: CellCoord = {
       col: stairs.landing.col,
       row: stairs.landing.row,
     };
-    const topWorldTile = cellToWorldTile(
+    const topCenterTile = cellToWorldTile(
       topCell,
       worldPosition.x,
       worldPosition.z,
@@ -657,14 +710,22 @@ export class BuildingCollisionService {
       CELL_SIZE,
     );
 
-    stairTiles.push({
-      tileX: topWorldTile.x,
-      tileZ: topWorldTile.z,
-      fromFloor: floorIndex + 1,
-      toFloor: floorIndex,
-      direction: rotateWallDirection(getOppositeDirection(direction), rotation),
-      isLanding: true,
-    });
+    // Generate stair tiles for ALL tiles in the top landing cell (4x4 = 16 tiles)
+    for (let dtx = -halfTiles; dtx < tilesPerCell - halfTiles; dtx++) {
+      for (let dtz = -halfTiles; dtz < tilesPerCell - halfTiles; dtz++) {
+        stairTiles.push({
+          tileX: topCenterTile.x + dtx,
+          tileZ: topCenterTile.z + dtz,
+          fromFloor: floorIndex + 1,
+          toFloor: floorIndex,
+          direction: rotateWallDirection(
+            getOppositeDirection(direction),
+            rotation,
+          ),
+          isLanding: true,
+        });
+      }
+    }
 
     return stairTiles;
   }
@@ -754,6 +815,156 @@ export class BuildingCollisionService {
     };
   }
 
+  /**
+   * Generate entrance step tiles for building doors
+   *
+   * Steps are outside the building and can only be walked onto from the front.
+   * Side approach is blocked to enforce using the stairs properly.
+   *
+   * Step area: ~1.8m wide (door width + 0.2m) × ~2.4m deep (6 steps)
+   * Only the center 2 tiles (aligned with door) are walkable.
+   *
+   * Step heights match the visual geometry from BuildingGenerator:
+   * - Upper steps (ENTRANCE_STEP_COUNT): Go from FOUNDATION_HEIGHT down to 0
+   * - Lower steps (TERRAIN_STEP_COUNT): Go from 0 down into terrain
+   */
+  private generateStepTiles(
+    buildingId: string,
+    layout: BuildingLayoutInput,
+    worldPosition: { x: number; y: number; z: number },
+    rotation: number,
+  ): StepTile[] {
+    const stepTiles: StepTile[] = [];
+    const groundFloor = layout.floorPlans[0];
+    if (!groundFloor) return stepTiles;
+
+    const halfCell = CELL_SIZE / 2;
+    const totalSteps = ENTRANCE_STEP_COUNT + TERRAIN_STEP_COUNT;
+    const stepDepthTotal = totalSteps * ENTRANCE_STEP_DEPTH;
+
+    // Distance where upper steps end and terrain steps begin
+    const upperStepsEndDist =
+      halfCell +
+      FOUNDATION_OVERHANG +
+      ENTRANCE_STEP_DEPTH * ENTRANCE_STEP_COUNT;
+
+    // Building's base terrain height (before flat zone modifications)
+    const terrainHeight = worldPosition.y;
+
+    // Find all ground floor doors
+    for (const [key, opening] of groundFloor.externalOpenings) {
+      if (opening !== "door") continue;
+
+      const [colStr, rowStr, side] = key.split(",");
+      const col = parseInt(colStr, 10);
+      const row = parseInt(rowStr, 10);
+
+      // Get cell center in world coordinates
+      const cell: CellCoord = { col, row };
+      const cellCenter = cellToWorldTile(
+        cell,
+        worldPosition.x,
+        worldPosition.z,
+        layout.width,
+        layout.depth,
+        rotation,
+        CELL_SIZE,
+      );
+
+      // Use the tile boundary as the door center (not tile center)
+      // This aligns step tiles with door tiles which are at the center of the cell edge
+      // Door tiles are at dtx=-1,0 (or dtz=-1,0), so the center is at the tile boundary
+      const cellWorldX = cellCenter.x;
+      const cellWorldZ = cellCenter.z;
+
+      // Determine step direction based on door side
+      const rawDir = toWallDirection(side);
+      const worldDir = rotateWallDirection(rawDir, rotation);
+
+      // Step direction vectors
+      let dirX = 0;
+      let dirZ = 0;
+      switch (worldDir) {
+        case "north":
+          dirZ = -1;
+          break;
+        case "south":
+          dirZ = 1;
+          break;
+        case "east":
+          dirX = 1;
+          break;
+        case "west":
+          dirX = -1;
+          break;
+      }
+
+      // Step area starts at building edge (halfCell from cell center)
+      // and extends outward by stepDepthTotal
+      const startDist = halfCell + FOUNDATION_OVERHANG;
+      const endDist = startDist + stepDepthTotal;
+
+      // Generate step tiles - only the center 2 tiles in the perpendicular direction
+      // (matching the door width which is only 2 tiles)
+      for (let depth = 0; depth < Math.ceil(endDist); depth++) {
+        const dist = startDist + depth + 0.5; // Center of each tile
+        if (dist > endDist + 0.5) break;
+
+        // Calculate step height based on distance from building
+        // This matches the visual geometry from BuildingGenerator
+        let stepHeight: number;
+        if (dist < upperStepsEndDist) {
+          // Upper steps: go from FOUNDATION_HEIGHT down to 0
+          // Linear interpolation from foundation to ground level
+          const t = (dist - startDist) / (upperStepsEndDist - startDist);
+          stepHeight = FOUNDATION_HEIGHT * (1 - t);
+        } else {
+          // Lower (terrain) steps: go from 0 down into terrain
+          // Linear interpolation from 0 to negative
+          const terrainDist = dist - upperStepsEndDist;
+          const terrainDepth = TERRAIN_STEP_COUNT * ENTRANCE_STEP_DEPTH;
+          const t = Math.min(1, terrainDist / terrainDepth);
+          // At end of terrain steps, height is -(TERRAIN_STEP_COUNT - 1) * ENTRANCE_STEP_HEIGHT
+          stepHeight = -t * (TERRAIN_STEP_COUNT - 1) * ENTRANCE_STEP_HEIGHT;
+        }
+
+        const stepWorldX = cellWorldX + dirX * dist;
+        const stepWorldZ = cellWorldZ + dirZ * dist;
+
+        // Only add center tiles (perpendicular offsets -1, 0, but not -2 or +1)
+        // This creates a 2-tile wide walkable path on the steps
+        const perpX = -dirZ; // Perpendicular direction
+        const perpZ = dirX;
+
+        // Center 2 tiles only (matching door width of 2 tiles)
+        for (const offset of [-0.5, 0.5]) {
+          const finalTileX = Math.floor(stepWorldX + perpX * offset);
+          const finalTileZ = Math.floor(stepWorldZ + perpZ * offset);
+
+          // Avoid duplicates (keep higher step if overlapping)
+          const existing = stepTiles.find(
+            (s) => s.tileX === finalTileX && s.tileZ === finalTileZ,
+          );
+          if (!existing) {
+            stepTiles.push({
+              tileX: finalTileX,
+              tileZ: finalTileZ,
+              approachDirection: worldDir,
+              buildingId,
+              stepHeight,
+              terrainHeight,
+            });
+          } else if (stepHeight > existing.stepHeight) {
+            // If overlapping steps from multiple doors, use the higher one
+            existing.stepHeight = stepHeight;
+          }
+        }
+      }
+    }
+
+    return stepTiles;
+  }
+
   // ============================================================================
   // COLLISION MATRIX INTEGRATION
   // ============================================================================
@@ -835,6 +1046,7 @@ export class BuildingCollisionService {
    * Update spatial index with building tiles
    */
   private updateSpatialIndex(building: BuildingCollisionData): void {
+    // Index walkable floor tiles
     for (const floor of building.floors) {
       for (const key of floor.walkableTiles) {
         let buildings = this.tileToBuildings.get(key);
@@ -845,12 +1057,19 @@ export class BuildingCollisionService {
         buildings.add(building.buildingId);
       }
     }
+
+    // Index step tiles
+    for (const stepTile of building.stepTiles) {
+      const key = tileKey(stepTile.tileX, stepTile.tileZ);
+      this.tileToStepTile.set(key, stepTile);
+    }
   }
 
   /**
    * Remove building from spatial index
    */
   private removeSpatialIndex(building: BuildingCollisionData): void {
+    // Remove walkable floor tiles
     for (const floor of building.floors) {
       for (const key of floor.walkableTiles) {
         const buildings = this.tileToBuildings.get(key);
@@ -861,6 +1080,12 @@ export class BuildingCollisionService {
           }
         }
       }
+    }
+
+    // Remove step tiles
+    for (const stepTile of building.stepTiles) {
+      const key = tileKey(stepTile.tileX, stepTile.tileZ);
+      this.tileToStepTile.delete(key);
     }
   }
 
@@ -1136,21 +1361,30 @@ export class BuildingCollisionService {
     const dz = toZ - fromZ;
 
     // Determine movement direction
+    // exitDir = which edge of SOURCE tile we're crossing (wall we need to exit through)
+    // entryDir = which edge of DEST tile we're entering (wall we need to enter through)
+    //
+    // Coordinate system: North = -Z, South = +Z, East = +X, West = -X
+    // Moving from z to z+1 = moving SOUTH = exit through SOUTH edge, enter through NORTH edge
     let exitDir: WallDirection | null = null;
     let entryDir: WallDirection | null = null;
 
     if (dx === 0 && dz === 1) {
-      exitDir = "north";
-      entryDir = "south";
+      // Moving south (increasing Z)
+      exitDir = "south"; // Exit through south edge of source
+      entryDir = "north"; // Enter through north edge of dest
     } else if (dx === 0 && dz === -1) {
-      exitDir = "south";
-      entryDir = "north";
+      // Moving north (decreasing Z)
+      exitDir = "north"; // Exit through north edge of source
+      entryDir = "south"; // Enter through south edge of dest
     } else if (dx === 1 && dz === 0) {
-      exitDir = "east";
-      entryDir = "west";
+      // Moving east (increasing X)
+      exitDir = "east"; // Exit through east edge of source
+      entryDir = "west"; // Enter through west edge of dest
     } else if (dx === -1 && dz === 0) {
-      exitDir = "west";
-      entryDir = "east";
+      // Moving west (decreasing X)
+      exitDir = "west"; // Exit through west edge of source
+      entryDir = "east"; // Enter through east edge of dest
     }
 
     if (!exitDir || !entryDir) {
@@ -1163,9 +1397,12 @@ export class BuildingCollisionService {
 
         // If destination is inside a building, check wall blocking more strictly
         if (toResult.isInsideBuilding) {
-          // Determine the two cardinal entry directions for this diagonal
-          const horizontalEntry: WallDirection = dx > 0 ? "west" : "east"; // Entry from horizontal
-          const verticalEntry: WallDirection = dz > 0 ? "south" : "north"; // Entry from vertical
+          // Determine the two cardinal entry edges for this diagonal movement
+          // When moving diagonally into a tile, we enter through two edges
+          // dx > 0 (moving east) = enter through WEST edge of dest tile
+          // dz > 0 (moving south) = enter through NORTH edge of dest tile
+          const horizontalEntry: WallDirection = dx > 0 ? "west" : "east";
+          const verticalEntry: WallDirection = dz > 0 ? "north" : "south";
 
           // If destination has a wall blocking EITHER entry direction, block the diagonal
           // This prevents corner clipping where one wall exists but the other doesn't
@@ -1286,6 +1523,232 @@ export class BuildingCollisionService {
     }
 
     return false;
+  }
+
+  /**
+   * Check if movement onto a step tile from the side is blocked
+   *
+   * Steps can only be walked onto from the approach direction (front of building)
+   * or from deeper into the steps (toward/away from building).
+   * Walking onto steps from the perpendicular side is blocked.
+   *
+   * @param fromX - Source tile X
+   * @param fromZ - Source tile Z
+   * @param toX - Destination tile X
+   * @param toZ - Destination tile Z
+   * @returns true if movement is blocked by step directional restriction
+   */
+  isStepBlocked(
+    fromX: number,
+    fromZ: number,
+    toX: number,
+    toZ: number,
+  ): boolean {
+    const toKey = tileKey(toX, toZ);
+    const stepTile = this.tileToStepTile.get(toKey);
+
+    if (!stepTile) {
+      // Destination is not a step tile - not blocked by steps
+      return false;
+    }
+
+    // Calculate movement direction
+    const dx = toX - fromX;
+    const dz = toZ - fromZ;
+
+    // Determine the approach direction vector based on step's approach direction
+    // The step's approachDirection points AWAY from the building (outward)
+    let approachDx = 0;
+    let approachDz = 0;
+    switch (stepTile.approachDirection) {
+      case "north":
+        approachDz = -1;
+        break; // Steps go north from building
+      case "south":
+        approachDz = 1;
+        break; // Steps go south from building
+      case "east":
+        approachDx = 1;
+        break; // Steps go east from building
+      case "west":
+        approachDx = -1;
+        break; // Steps go west from building
+    }
+
+    // Valid movement directions:
+    // 1. Along the approach axis (toward or away from building)
+    // 2. From adjacent step tiles (already on the steps)
+
+    // If source tile is also a step tile, allow movement (already on steps)
+    const fromKey = tileKey(fromX, fromZ);
+    const fromStepTile = this.tileToStepTile.get(fromKey);
+    if (fromStepTile) {
+      return false; // Already on steps, allow any movement
+    }
+
+    // Movement must be along the approach axis (toward or away from building)
+    // That means dx/dz should align with approachDx/approachDz
+    const isAlongApproachAxis =
+      (dx !== 0 && dx === approachDx * Math.abs(dx) && dz === 0) ||
+      (dz !== 0 && dz === approachDz * Math.abs(dz) && dx === 0) ||
+      (dx === -approachDx && dz === 0) || // Coming from deeper in steps
+      (dz === -approachDz && dx === 0); // Coming from deeper in steps
+
+    // Diagonal movement - check if it's mostly along approach axis
+    const isDiagonalAlongApproach =
+      Math.abs(dx) === 1 &&
+      Math.abs(dz) === 1 &&
+      (dx === approachDx || dx === -approachDx || approachDx === 0) &&
+      (dz === approachDz || dz === -approachDz || approachDz === 0);
+
+    if (!isAlongApproachAxis && !isDiagonalAlongApproach) {
+      if (this._debugLogging) {
+        console.log(
+          `[isStepBlocked] BLOCKED side approach to step: (${fromX},${fromZ}) → (${toX},${toZ}) | ` +
+            `step approach=${stepTile.approachDirection}, movement=(${dx},${dz})`,
+        );
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Check if a tile is a step tile
+   */
+  isStepTile(tileX: number, tileZ: number): boolean {
+    const key = tileKey(tileX, tileZ);
+    return this.tileToStepTile.has(key);
+  }
+
+  /**
+   * Get step tile data for a position
+   */
+  getStepTile(tileX: number, tileZ: number): StepTile | null {
+    const key = tileKey(tileX, tileZ);
+    return this.tileToStepTile.get(key) ?? null;
+  }
+
+  /**
+   * Get the world Y position for a step tile
+   *
+   * Returns the correct elevation for a player standing on entrance steps.
+   * This enables smooth walking up/down stairs.
+   *
+   * @param tileX - World tile X coordinate
+   * @param tileZ - World tile Z coordinate
+   * @returns World Y position for the step, or null if not a step tile
+   */
+  getStepHeight(tileX: number, tileZ: number): number | null {
+    const stepTile = this.getStepTile(tileX, tileZ);
+    if (!stepTile) return null;
+
+    // World Y = terrain height + step height above terrain
+    return stepTile.terrainHeight + stepTile.stepHeight;
+  }
+
+  /**
+   * Get the step height at a world position (sub-tile precision)
+   *
+   * Interpolates between step tiles for smooth height transitions.
+   * Used by client-side movement for smooth stepping animations.
+   *
+   * @param worldX - World X coordinate
+   * @param worldZ - World Z coordinate
+   * @returns World Y position for the step, or null if not on steps
+   */
+  getStepHeightAtWorld(worldX: number, worldZ: number): number | null {
+    const tileX = Math.floor(worldX);
+    const tileZ = Math.floor(worldZ);
+
+    const stepTile = this.getStepTile(tileX, tileZ);
+    if (!stepTile) return null;
+
+    // For smooth movement, interpolate based on position within tile
+    // and neighboring step tiles
+    const fracX = worldX - tileX;
+    const fracZ = worldZ - tileZ;
+
+    // Get neighboring step tiles for interpolation
+    let height = stepTile.terrainHeight + stepTile.stepHeight;
+
+    // Determine approach axis based on step direction
+    const isNorthSouth =
+      stepTile.approachDirection === "north" ||
+      stepTile.approachDirection === "south";
+
+    if (isNorthSouth) {
+      // North/South steps - interpolate along Z axis
+      const nextZ =
+        stepTile.approachDirection === "north" ? tileZ - 1 : tileZ + 1;
+      const prevZ =
+        stepTile.approachDirection === "north" ? tileZ + 1 : tileZ - 1;
+
+      const nextStep = this.getStepTile(tileX, nextZ);
+      const prevStep = this.getStepTile(tileX, prevZ);
+
+      // Interpolate toward next/prev step based on Z fraction
+      if (stepTile.approachDirection === "north") {
+        // Moving north (decreasing Z) goes up the steps
+        if (fracZ < 0.5 && nextStep) {
+          const t = 0.5 - fracZ;
+          const nextHeight = nextStep.terrainHeight + nextStep.stepHeight;
+          height = height + (nextHeight - height) * t;
+        } else if (fracZ > 0.5 && prevStep) {
+          const t = fracZ - 0.5;
+          const prevHeight = prevStep.terrainHeight + prevStep.stepHeight;
+          height = height + (prevHeight - height) * t;
+        }
+      } else {
+        // Moving south (increasing Z) goes up the steps
+        if (fracZ > 0.5 && nextStep) {
+          const t = fracZ - 0.5;
+          const nextHeight = nextStep.terrainHeight + nextStep.stepHeight;
+          height = height + (nextHeight - height) * t;
+        } else if (fracZ < 0.5 && prevStep) {
+          const t = 0.5 - fracZ;
+          const prevHeight = prevStep.terrainHeight + prevStep.stepHeight;
+          height = height + (prevHeight - height) * t;
+        }
+      }
+    } else {
+      // East/West steps - interpolate along X axis
+      const nextX =
+        stepTile.approachDirection === "east" ? tileX + 1 : tileX - 1;
+      const prevX =
+        stepTile.approachDirection === "east" ? tileX - 1 : tileX + 1;
+
+      const nextStep = this.getStepTile(nextX, tileZ);
+      const prevStep = this.getStepTile(prevX, tileZ);
+
+      // Interpolate toward next/prev step based on X fraction
+      if (stepTile.approachDirection === "east") {
+        // Moving east (increasing X) goes up the steps
+        if (fracX > 0.5 && nextStep) {
+          const t = fracX - 0.5;
+          const nextHeight = nextStep.terrainHeight + nextStep.stepHeight;
+          height = height + (nextHeight - height) * t;
+        } else if (fracX < 0.5 && prevStep) {
+          const t = 0.5 - fracX;
+          const prevHeight = prevStep.terrainHeight + prevStep.stepHeight;
+          height = height + (prevHeight - height) * t;
+        }
+      } else {
+        // Moving west (decreasing X) goes up the steps
+        if (fracX < 0.5 && nextStep) {
+          const t = 0.5 - fracX;
+          const nextHeight = nextStep.terrainHeight + nextStep.stepHeight;
+          height = height + (nextHeight - height) * t;
+        } else if (fracX > 0.5 && prevStep) {
+          const t = fracX - 0.5;
+          const prevHeight = prevStep.terrainHeight + prevStep.stepHeight;
+          height = height + (prevHeight - height) * t;
+        }
+      }
+    }
+
+    return height;
   }
 
   /**
@@ -1954,12 +2417,38 @@ export class BuildingCollisionService {
   }
 
   /**
+   * Get all entrance wall segments from a floor (doors AND arches).
+   * Both doors and arches allow passage into the building.
+   *
+   * @param floor - Floor collision data
+   */
+  static getEntranceWallSegments(floor: FloorCollisionData): WallSegment[] {
+    return floor.wallSegments.filter(
+      (wall) =>
+        wall.hasOpening &&
+        (wall.openingType === "door" || wall.openingType === "arch"),
+    );
+  }
+
+  /**
    * Check if a wall segment is a door.
    *
    * @param wall - Wall segment to check
    */
   static isDoorWall(wall: WallSegment): boolean {
     return wall.hasOpening && wall.openingType === "door";
+  }
+
+  /**
+   * Check if a wall segment is an entrance (door or arch).
+   *
+   * @param wall - Wall segment to check
+   */
+  static isEntranceWall(wall: WallSegment): boolean {
+    return (
+      wall.hasOpening &&
+      (wall.openingType === "door" || wall.openingType === "arch")
+    );
   }
 
   /**
@@ -2077,6 +2566,40 @@ export class BuildingCollisionService {
       return {
         tileX: doorCalc.exteriorX,
         tileZ: doorCalc.exteriorZ,
+        direction: wall.side,
+      };
+    });
+  }
+
+  /**
+   * Get entrance tiles (doors AND arches) for a building on ground floor.
+   * Both doors and arches allow passage into the building.
+   * Used for pathfinding validation - when clicking inside a building from outside,
+   * path to the nearest entrance first.
+   *
+   * @param buildingId - Building ID to get entrances for
+   * @returns Array of entrance tile coordinates with entry direction
+   */
+  getEntranceTiles(
+    buildingId: string,
+  ): Array<{ tileX: number; tileZ: number; direction: WallDirection }> {
+    // Use helper method for ground floor lookup
+    const groundFloor = this.getGroundFloor(buildingId);
+    if (!groundFloor) return [];
+
+    // Use helper method to get entrance wall segments (doors AND arches)
+    const entranceWalls =
+      BuildingCollisionService.getEntranceWallSegments(groundFloor);
+
+    return entranceWalls.map((wall) => {
+      const entranceCalc = BuildingCollisionService.getDoorExteriorAndInterior(
+        wall.tileX,
+        wall.tileZ,
+        wall.side,
+      );
+      return {
+        tileX: entranceCalc.exteriorX,
+        tileZ: entranceCalc.exteriorZ,
         direction: wall.side,
       };
     });
@@ -2241,6 +2764,7 @@ export class BuildingCollisionService {
 
     this.buildings.clear();
     this.tileToBuildings.clear();
+    this.tileToStepTile.clear();
     this.playerFloorStates.clear();
   }
 }

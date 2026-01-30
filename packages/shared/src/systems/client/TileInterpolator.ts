@@ -623,9 +623,12 @@ export class TileInterpolator {
       } else if (dist > MAX_DESYNC_DISTANCE && hasActivePath) {
         // Large desync but we have an active path - trust our path, ignore server
         // This prevents glitching back to old positions when server has stale data
-        console.warn(
-          `[TileInterpolator] Ignoring large desync (${dist} tiles) - trusting active path. Server: (${serverTile.x},${serverTile.z}), Client: (${currentTile.x},${currentTile.z})`,
-        );
+        // Don't warn if client is at (0,0) - that's an uninitialized state during entity creation
+        if (currentTile.x !== 0 || currentTile.z !== 0) {
+          console.warn(
+            `[TileInterpolator] Ignoring large desync (${dist} tiles) - trusting active path. Server: (${serverTile.x},${serverTile.z}), Client: (${currentTile.x},${currentTile.z})`,
+          );
+        }
       }
       // Otherwise ignore - we'll continue on our predicted path
     }
@@ -757,6 +760,7 @@ export class TileInterpolator {
    * @param getTerrainHeight - Optional function to get terrain height at X/Z (for smooth Y)
    * @param onMovementComplete - Optional callback when an entity finishes moving (arrives at destination)
    * @param isNearBuilding - Optional function to check if position is near a building (preserve server Y for elevation)
+   * @param getStepHeight - Optional function to get entrance step height at X/Z (for smooth stair walking)
    */
   update(
     deltaTime: number,
@@ -776,6 +780,7 @@ export class TileInterpolator {
       position: { x: number; y: number; z: number },
     ) => void,
     isNearBuilding?: (x: number, z: number) => boolean,
+    getStepHeight?: (x: number, z: number) => number | null,
   ): void {
     // OPTIMIZATION: Use cached array to avoid Map->Array conversion each frame
     if (this._entityArrayDirty) {
@@ -812,7 +817,7 @@ export class TileInterpolator {
         state.fullPath.length === 0 ||
         state.targetTileIndex >= state.fullPath.length
       ) {
-        // Update Y: building floor takes priority over terrain
+        // Update Y: building floor > entrance steps > terrain
         // Check if near building - if so, preserve server Y (correct floor elevation)
         const inBuilding =
           isNearBuilding &&
@@ -822,8 +827,26 @@ export class TileInterpolator {
           // In building - preserve server Y (floor elevation set by server)
           const serverY = state.serverConfirmedY ?? state.visualPosition.y;
           state.visualPosition.y = serverY;
+        } else if (getStepHeight) {
+          // Check if on entrance steps (smooth stair walking)
+          const stepY = getStepHeight(
+            state.visualPosition.x,
+            state.visualPosition.z,
+          );
+          if (stepY !== null && Number.isFinite(stepY)) {
+            state.visualPosition.y = stepY;
+          } else if (getTerrainHeight) {
+            // Not on steps - use terrain height
+            const height = getTerrainHeight(
+              state.visualPosition.x,
+              state.visualPosition.z,
+            );
+            if (height !== null && Number.isFinite(height)) {
+              state.visualPosition.y = height; // Feet at ground level
+            }
+          }
         } else if (getTerrainHeight) {
-          // Not in building - use terrain height
+          // No step height function - use terrain height
           const height = getTerrainHeight(
             state.visualPosition.x,
             state.visualPosition.z,
@@ -1063,7 +1086,7 @@ export class TileInterpolator {
         }
       }
 
-      // Update Y: building floor takes priority over terrain
+      // Update Y: building floor > entrance steps > terrain
       // Check if near building - if so, preserve server Y (correct floor elevation)
       const inBuilding =
         isNearBuilding &&
@@ -1073,8 +1096,26 @@ export class TileInterpolator {
         // In building - preserve server Y (floor elevation set by server)
         const serverY = state.serverConfirmedY ?? state.visualPosition.y;
         state.visualPosition.y = serverY;
+      } else if (getStepHeight) {
+        // Check if on entrance steps (smooth stair walking)
+        const stepY = getStepHeight(
+          state.visualPosition.x,
+          state.visualPosition.z,
+        );
+        if (stepY !== null && Number.isFinite(stepY)) {
+          state.visualPosition.y = stepY;
+        } else if (getTerrainHeight) {
+          // Not on steps - use terrain height for smooth ground following
+          const height = getTerrainHeight(
+            state.visualPosition.x,
+            state.visualPosition.z,
+          );
+          if (height !== null && Number.isFinite(height)) {
+            state.visualPosition.y = height; // Feet at ground level
+          }
+        }
       } else if (getTerrainHeight) {
-        // Not in building - use terrain height for smooth ground following
+        // No step height function - use terrain height for smooth ground following
         const height = getTerrainHeight(
           state.visualPosition.x,
           state.visualPosition.z,

@@ -139,20 +139,21 @@ describe("Depth Blur Default Values", () => {
     expect(typeof DEPTH_BLUR_DEFAULTS.focusDistance).toBe("number");
     expect(typeof DEPTH_BLUR_DEFAULTS.blurRange).toBe("number");
     expect(typeof DEPTH_BLUR_DEFAULTS.intensity).toBe("number");
-    expect(typeof DEPTH_BLUR_DEFAULTS.blurSize).toBe("number");
-    expect(typeof DEPTH_BLUR_DEFAULTS.blurSpread).toBe("number");
+    expect(typeof DEPTH_BLUR_DEFAULTS.blurAmount).toBe("number");
+    expect(typeof DEPTH_BLUR_DEFAULTS.blurRepeats).toBe("number");
+    expect(typeof DEPTH_BLUR_DEFAULTS.skyDistance).toBe("number");
   });
 
-  it("should have RuneScape-style focus distance (~60 world units)", () => {
+  it("should have RuneScape-style focus distance (~100 world units)", () => {
     // Focus far out so player and nearby objects stay sharp
-    expect(DEPTH_BLUR_DEFAULTS.focusDistance).toBe(60);
-    expect(DEPTH_BLUR_DEFAULTS.focusDistance).toBeGreaterThan(40);
-    expect(DEPTH_BLUR_DEFAULTS.focusDistance).toBeLessThan(100);
+    expect(DEPTH_BLUR_DEFAULTS.focusDistance).toBe(100);
+    expect(DEPTH_BLUR_DEFAULTS.focusDistance).toBeGreaterThanOrEqual(40);
+    expect(DEPTH_BLUR_DEFAULTS.focusDistance).toBeLessThanOrEqual(150);
   });
 
   it("should have blur range for distant background blur", () => {
-    // Blur starts at 60 and transitions over 40 units (full blur at ~100 units)
-    expect(DEPTH_BLUR_DEFAULTS.blurRange).toBe(40);
+    // Blur transitions over this range after focus distance
+    expect(DEPTH_BLUR_DEFAULTS.blurRange).toBe(100);
     expect(DEPTH_BLUR_DEFAULTS.blurRange).toBeGreaterThan(0);
   });
 
@@ -163,18 +164,26 @@ describe("Depth Blur Default Values", () => {
     expect(DEPTH_BLUR_DEFAULTS.intensity).toBeLessThanOrEqual(1);
   });
 
-  it("should have larger blur kernel size for soft blur", () => {
-    // Size 3 gives softer, more visible blur
-    expect(DEPTH_BLUR_DEFAULTS.blurSize).toBe(3);
-    expect(DEPTH_BLUR_DEFAULTS.blurSize).toBeGreaterThanOrEqual(1);
-    expect(DEPTH_BLUR_DEFAULTS.blurSize).toBeLessThanOrEqual(5);
+  it("should have appropriate blur amount for smooth blur", () => {
+    // blurAmount controls the radius of the hash blur (0.01-0.1 typical)
+    expect(DEPTH_BLUR_DEFAULTS.blurAmount).toBe(0.03);
+    expect(DEPTH_BLUR_DEFAULTS.blurAmount).toBeGreaterThanOrEqual(0.01);
+    expect(DEPTH_BLUR_DEFAULTS.blurAmount).toBeLessThanOrEqual(0.1);
   });
 
-  it("should have wide blur spread for heavy blur", () => {
-    // Wider spread for more prominent blur effect
-    expect(DEPTH_BLUR_DEFAULTS.blurSpread).toBe(6);
-    expect(DEPTH_BLUR_DEFAULTS.blurSpread).toBeGreaterThanOrEqual(1);
-    expect(DEPTH_BLUR_DEFAULTS.blurSpread).toBeLessThanOrEqual(10);
+  it("should have enough blur iterations for smooth blur", () => {
+    // Higher repeats = smoother, less noisy blur
+    expect(DEPTH_BLUR_DEFAULTS.blurRepeats).toBe(30);
+    expect(DEPTH_BLUR_DEFAULTS.blurRepeats).toBeGreaterThanOrEqual(20);
+    expect(DEPTH_BLUR_DEFAULTS.blurRepeats).toBeLessThanOrEqual(100);
+  });
+
+  it("should have sky distance cutoff to preserve skybox", () => {
+    // Sky is at far depth - exclude it from blur to keep it sharp
+    expect(DEPTH_BLUR_DEFAULTS.skyDistance).toBe(500);
+    expect(DEPTH_BLUR_DEFAULTS.skyDistance).toBeGreaterThan(
+      DEPTH_BLUR_DEFAULTS.focusDistance + DEPTH_BLUR_DEFAULTS.blurRange,
+    );
   });
 });
 
@@ -693,7 +702,7 @@ describe("Identity LUT Generation", () => {
 // ============================================================================
 
 describe("Depth Blur Math", () => {
-  // Test the depth blur calculation logic
+  // Test the depth blur calculation logic (FAR BLUR ONLY - RuneScape style)
 
   // Smoothstep function (matches GLSL smoothstep)
   function smoothstep(edge0: number, edge1: number, x: number): number {
@@ -701,14 +710,15 @@ describe("Depth Blur Math", () => {
     return t * t * (3 - 2 * t);
   }
 
-  // Calculate blur amount given depth
+  // Calculate blur amount - FAR BLUR ONLY (objects beyond focus get blurred)
   function calculateBlurAmount(
     depth: number,
     focusDistance: number,
     blurRange: number,
   ): number {
-    const depthDifference = Math.abs(depth - focusDistance);
-    return smoothstep(0, blurRange, depthDifference);
+    // Only blur objects BEYOND focus distance (near objects stay sharp)
+    const depthBeyondFocus = Math.max(0, depth - focusDistance);
+    return smoothstep(0, blurRange, depthBeyondFocus);
   }
 
   describe("smoothstep function", () => {
@@ -733,11 +743,11 @@ describe("Depth Blur Math", () => {
     });
   });
 
-  describe("blur amount calculation", () => {
-    const focusDistance = 15;
-    const blurRange = 30;
+  describe("blur amount calculation (far blur only)", () => {
+    const focusDistance = 60;
+    const blurRange = 40;
 
-    it("should return 0 at focus distance", () => {
+    it("should return 0 at focus distance (sharp)", () => {
       const amount = calculateBlurAmount(
         focusDistance,
         focusDistance,
@@ -746,7 +756,14 @@ describe("Depth Blur Math", () => {
       expect(amount).toBe(0);
     });
 
-    it("should return 1 at focus + range", () => {
+    it("should return 0 for near objects (player stays sharp)", () => {
+      // Objects closer than focus should have NO blur
+      const nearDepth = 10;
+      const amount = calculateBlurAmount(nearDepth, focusDistance, blurRange);
+      expect(amount).toBe(0);
+    });
+
+    it("should return 1 at focus + range (full blur)", () => {
       const amount = calculateBlurAmount(
         focusDistance + blurRange,
         focusDistance,
@@ -755,21 +772,15 @@ describe("Depth Blur Math", () => {
       expect(amount).toBe(1);
     });
 
-    it("should return intermediate values in between", () => {
+    it("should return intermediate values for mid-distance objects", () => {
       const midDepth = focusDistance + blurRange / 2;
       const amount = calculateBlurAmount(midDepth, focusDistance, blurRange);
       expect(amount).toBeGreaterThan(0);
       expect(amount).toBeLessThan(1);
     });
 
-    it("should blur near objects (closer than focus)", () => {
-      const nearDepth = focusDistance - blurRange;
-      const amount = calculateBlurAmount(nearDepth, focusDistance, blurRange);
-      expect(amount).toBe(1);
-    });
-
-    it("should blur far objects (beyond focus)", () => {
-      const farDepth = focusDistance + blurRange;
+    it("should blur far objects (beyond focus + range)", () => {
+      const farDepth = focusDistance + blurRange + 50;
       const amount = calculateBlurAmount(farDepth, focusDistance, blurRange);
       expect(amount).toBe(1);
     });

@@ -1045,59 +1045,46 @@ export class TownGenerator {
   // ============================================================
 
   /**
-   * Generate paths from roads to building entrances
+   * Generate perpendicular walkways from roads to building entrances.
+   * Uses building's assigned road when available, otherwise finds closest road.
    */
   private generatePaths(town: GeneratedTown): TownPath[] {
     const paths: TownPath[] = [];
     const roads = town.internalRoads ?? [];
+    if (roads.length === 0) return paths;
 
     for (const building of town.buildings) {
       if (!building.entrance) continue;
 
-      // Find closest point on any road to the entrance
-      let closestPoint: { x: number; z: number } | null = null;
-      let closestDistance = Infinity;
+      // Find road connection point (perpendicular projection of building onto road)
+      const roadPoint = this.findRoadConnectionPoint(building, roads);
+      if (!roadPoint) continue;
 
-      for (const road of roads) {
-        const point = this.closestPointOnSegment(
-          building.entrance.x,
-          building.entrance.z,
-          road.start.x,
-          road.start.z,
-          road.end.x,
-          road.end.z,
-        );
+      // Calculate direction from road to building
+      const dx = building.position.x - roadPoint.x;
+      const dz = building.position.z - roadPoint.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
 
-        const dist = dist2D(
-          building.entrance.x,
-          building.entrance.z,
-          point.x,
-          point.z,
-        );
-        if (dist < closestDistance) {
-          closestDistance = dist;
-          closestPoint = point;
-        }
-      }
+      // Skip if building is too close to road
+      if (dist < 2) continue;
 
-      if (!closestPoint || closestDistance > 30 || closestDistance < 1)
-        continue;
+      // Normalize and offset by road half-width
+      const dirX = dx / dist;
+      const dirZ = dz / dist;
+      const pathStartX = roadPoint.x + dirX * TOWN_CONSTANTS.ROAD_HALF_WIDTH;
+      const pathStartZ = roadPoint.z + dirZ * TOWN_CONSTANTS.ROAD_HALF_WIDTH;
 
-      // Direction from road to entrance
-      const dx = building.entrance.x - closestPoint.x;
-      const dz = building.entrance.z - closestPoint.z;
-      const len = Math.sqrt(dx * dx + dz * dz);
-
-      if (len < 0.1) continue;
-
-      // Path starts at road edge
-      const pathStart = {
-        x: closestPoint.x + (dx / len) * TOWN_CONSTANTS.ROAD_HALF_WIDTH,
-        z: closestPoint.z + (dz / len) * TOWN_CONSTANTS.ROAD_HALF_WIDTH,
-      };
+      // Validate path length
+      const pathLength = dist2D(
+        pathStartX,
+        pathStartZ,
+        building.entrance.x,
+        building.entrance.z,
+      );
+      if (pathLength < 0.5 || pathLength > 30) continue;
 
       paths.push({
-        start: pathStart,
+        start: { x: pathStartX, z: pathStartZ },
         end: { x: building.entrance.x, z: building.entrance.z },
         width: TOWN_CONSTANTS.PATH_WIDTH,
         buildingId: building.id,
@@ -1105,6 +1092,55 @@ export class TownGenerator {
     }
 
     return paths;
+  }
+
+  /**
+   * Find the perpendicular connection point from a building to its road.
+   */
+  private findRoadConnectionPoint(
+    building: TownBuilding,
+    roads: TownInternalRoad[],
+  ): { x: number; z: number } | null {
+    const { x, z } = building.position;
+
+    // Use assigned road if valid
+    if (
+      building.roadId !== undefined &&
+      building.roadId >= 0 &&
+      building.roadId < roads.length
+    ) {
+      const road = roads[building.roadId];
+      return this.closestPointOnSegment(
+        x,
+        z,
+        road.start.x,
+        road.start.z,
+        road.end.x,
+        road.end.z,
+      );
+    }
+
+    // Fallback: find closest road
+    let closest: { x: number; z: number } | null = null;
+    let minDist = Infinity;
+
+    for (const road of roads) {
+      const point = this.closestPointOnSegment(
+        x,
+        z,
+        road.start.x,
+        road.start.z,
+        road.end.x,
+        road.end.z,
+      );
+      const d = dist2D(x, z, point.x, point.z);
+      if (d < minDist) {
+        minDist = d;
+        closest = point;
+      }
+    }
+
+    return closest;
   }
 
   /**

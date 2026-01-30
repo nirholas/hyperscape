@@ -1092,10 +1092,12 @@ export class BuildingRenderingSystem extends SystemBase {
             building.position.z,
           );
 
-          // Get ground height at snapped building position
-          const groundY =
-            terrainSystem?.getHeightAt?.(snappedPos.x, snappedPos.z) ??
-            building.position.y;
+          // Use the building's stored Y position, NOT terrain getHeightAt()
+          // The building position was set BEFORE flat zones were registered,
+          // so it contains the original terrain height. Using getHeightAt() here
+          // would return the flat zone height (terrain + FOUNDATION_HEIGHT),
+          // causing buildings to be positioned 0.5m too high.
+          const groundY = building.position.y;
 
           // Position and rotate the mesh (using grid-aligned position)
           mesh.position.set(snappedPos.x, groundY, snappedPos.z);

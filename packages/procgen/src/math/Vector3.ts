@@ -48,18 +48,33 @@ export function rotatedVector(
   return result;
 }
 
+/** Degrees to radians conversion factor */
+export const DEG_TO_RAD = Math.PI / 180;
+
+/** Radians to degrees conversion factor */
+export const RAD_TO_DEG = 180 / Math.PI;
+
+/** Pi constant */
+export const PI = Math.PI;
+
+/** 2 * Pi */
+export const PI2 = Math.PI * 2;
+
+/** Pi / 2 */
+export const HALF_PI = Math.PI / 2;
+
 /**
  * Convert degrees to radians.
  */
 export function radians(degrees: number): number {
-  return (degrees * Math.PI) / 180;
+  return degrees * DEG_TO_RAD;
 }
 
 /**
  * Convert radians to degrees.
  */
 export function degrees(radians: number): number {
-  return (radians * 180) / Math.PI;
+  return radians * RAD_TO_DEG;
 }
 
 /**
@@ -157,4 +172,25 @@ export function lerpVec3(
     a.y + (b.y - a.y) * t,
     a.z + (b.z - a.z) * t,
   );
+}
+
+/**
+ * Clamp a value between min and max.
+ */
+export function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+/**
+ * Clamp a value between 0 and 1.
+ */
+export function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+/**
+ * Linear interpolation between two numbers.
+ */
+export function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
 }

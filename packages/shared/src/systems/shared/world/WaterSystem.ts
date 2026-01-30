@@ -38,6 +38,7 @@ import THREE, {
 } from "../../../extras/three/three";
 import type { World } from "../../../types";
 import type { TerrainTile } from "../../../types/world/terrain";
+import type { Wind } from "./Wind";
 
 // ============================================================================
 // CONFIGURATION
@@ -72,13 +73,11 @@ type WaveParams = {
   A: number;
 };
 
-// Reduced from 7 to 5 waves for better performance (smallest waves barely visible)
+// 5 Gerstner waves for realistic water motion (performance optimized)
 const WAVES: WaveParams[] = [
   { A: 0.07, wavelength: 20, Q: 0.3, Dx: 0.7, Dz: 0.71 },
   { A: 0.05, wavelength: 14, Q: 0.25, Dx: -0.5, Dz: 0.87 },
   { A: 0.035, wavelength: 8, Q: 0.22, Dx: 0.9, Dz: -0.44 },
-  { A: 0.025, wavelength: 5, Q: 0.2, Dx: 0.26, Dz: 0.97 },
-  { A: 0.015, wavelength: 2.5, Q: 0.15, Dx: -0.8, Dz: 0.6 },
   { A: 0.025, wavelength: 5, Q: 0.2, Dx: 0.26, Dz: 0.97 },
   { A: 0.015, wavelength: 2.5, Q: 0.15, Dx: -0.8, Dz: 0.6 },
 ].map(({ A, wavelength, Q, Dx, Dz }) => {
@@ -161,6 +160,9 @@ export class WaterSystem {
 
   // User preference for reflections (can be toggled)
   private _reflectionsEnabled = true;
+
+  // Wind system reference for coordinated wind effects
+  private windSystem: Wind | null = null;
 
   constructor(world: World) {
     this.world = world;
@@ -249,11 +251,11 @@ export class WaterSystem {
   async init(): Promise<void> {
     if (this.world.isServer) return;
 
-    // Create procedural textures asynchronously with yielding (prevents main thread blocking)
+    // Create procedural textures with yielding (prevents main thread blocking)
     // These are CPU-intensive nested loops that can block for 50-100ms without yielding
-    this.normalTex1 = await this.createNormalMapAsync(256, 1.0, 42);
-    this.normalTex2 = await this.createNormalMapAsync(128, 2.0, 137);
-    this.foamTex = await this.createFoamTextureAsync(128);
+    this.normalTex1 = await this.createNormalMap(256, 1.0, 42);
+    this.normalTex2 = await this.createNormalMap(128, 2.0, 137);
+    this.foamTex = await this.createFoamTexture(128);
 
     // Create TSL reflector for planar reflections (lake water only)
     // This handles all the reflection camera, render target, and UV calculation automatically
@@ -287,128 +289,14 @@ export class WaterSystem {
   }
 
   // ==========================================================================
-  // PROCEDURAL TEXTURES
+  // PROCEDURAL TEXTURES (Async with yielding to prevent main thread blocking)
   // ==========================================================================
 
-  private createNormalMap(
-    size: number,
-    freq: number,
-    seed: number,
-  ): THREE.Texture {
-    const data = new Uint8Array(size * size * 4);
-    const TAU = Math.PI * 2;
-
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        const nx = x / size,
-          ny = y / size;
-        const cx = Math.cos(nx * TAU),
-          sx = Math.sin(nx * TAU);
-        const cy = Math.cos(ny * TAU),
-          sy = Math.sin(ny * TAU);
-
-        let dx = 0,
-          dy = 0;
-        for (let oct = 0; oct < 4; oct++) {
-          const f = freq * (1 << oct);
-          const amp = 0.4 / (1 << oct);
-          const s = seed + oct * 100;
-          const x4 = cx * f,
-            y4 = sx * f,
-            z4 = cy * f * 0.618,
-            w4 = sy * f * 0.618;
-          dx +=
-            (Math.sin(x4 + s + Math.cos(z4 * 0.7 + s * 0.3)) * 0.3 +
-              Math.cos(y4 + s * 0.5 + Math.sin(w4 * 1.3 + s * 0.7)) * 0.3 +
-              Math.sin(z4 * 1.1 + x4 * 0.8 + s * 0.2) * 0.2 +
-              Math.cos(w4 * 0.9 + y4 * 0.6 + s * 0.9) * 0.2) *
-            amp;
-          dy +=
-            (Math.sin(x4 + s + 50 + Math.cos(z4 * 0.7 + s * 0.3 + 50)) * 0.3 +
-              Math.cos(y4 + s * 0.5 + 50 + Math.sin(w4 * 1.3 + s * 0.7 + 50)) *
-                0.3 +
-              Math.sin(z4 * 1.1 + x4 * 0.8 + s * 0.2 + 50) * 0.2 +
-              Math.cos(w4 * 0.9 + y4 * 0.6 + s * 0.9 + 50) * 0.2) *
-            amp;
-        }
-
-        const idx = (y * size + x) * 4;
-        data[idx] = Math.floor(Math.max(0, Math.min(255, 128 + dx * 80)));
-        data[idx + 1] = Math.floor(Math.max(0, Math.min(255, 128 + dy * 80)));
-        data[idx + 2] = 220;
-        data[idx + 3] = 255;
-      }
-    }
-
-    const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.magFilter = THREE.LinearFilter;
-    tex.minFilter = THREE.LinearMipmapLinearFilter;
-    tex.generateMipmaps = true;
-    tex.needsUpdate = true;
-    return tex;
-  }
-
-  private createFoamTexture(size: number): THREE.Texture {
-    const data = new Uint8Array(size * size * 4);
-
-    const cells: { x: number; y: number }[] = [];
-    let s = 12345;
-    for (let i = 0; i < 32; i++) {
-      s = (s * 1103515245 + 12345) & 0x7fffffff;
-      const cx = (s % 1000) / 1000;
-      s = (s * 1103515245 + 12345) & 0x7fffffff;
-      cells.push({ x: cx, y: (s % 1000) / 1000 });
-    }
-
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        const px = x / size,
-          py = y / size;
-        let d1 = 999,
-          d2 = 999;
-
-        for (const c of cells) {
-          let dx = Math.abs(px - c.x),
-            dy = Math.abs(py - c.y);
-          if (dx > 0.5) dx = 1 - dx;
-          if (dy > 0.5) dy = 1 - dy;
-          const d = Math.sqrt(dx * dx + dy * dy);
-          if (d < d1) {
-            d2 = d1;
-            d1 = d;
-          } else if (d < d2) d2 = d;
-        }
-
-        const edge = d2 - d1;
-        const foam = Math.pow(Math.max(0, 1 - edge * 8), 2);
-        const noise =
-          0.7 +
-          (Math.sin(px * 47 + py * 31) * 0.5 +
-            Math.sin(px * 97 + py * 67) * 0.25 +
-            Math.sin(px * 157 + py * 113) * 0.25) *
-            0.3;
-        const v = Math.floor(Math.max(0, Math.min(255, foam * noise * 255)));
-
-        const idx = (y * size + x) * 4;
-        data[idx] = data[idx + 1] = data[idx + 2] = data[idx + 3] = v;
-      }
-    }
-
-    const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.magFilter = THREE.LinearFilter;
-    tex.minFilter = THREE.LinearMipmapLinearFilter;
-    tex.generateMipmaps = true;
-    tex.needsUpdate = true;
-    return tex;
-  }
-
   /**
-   * Async version of createNormalMap with row-based yielding to prevent main thread blocking.
-   * Processes ROW_BATCH_SIZE rows at a time, yielding between batches.
+   * Create a procedural normal map texture.
+   * Processes rows in batches, yielding between batches to prevent main thread blocking.
    */
-  private async createNormalMapAsync(
+  private async createNormalMap(
     size: number,
     freq: number,
     seed: number,
@@ -480,9 +368,10 @@ export class WaterSystem {
   }
 
   /**
-   * Async version of createFoamTexture with row-based yielding to prevent main thread blocking.
+   * Create a procedural foam texture.
+   * Processes rows in batches, yielding between batches to prevent main thread blocking.
    */
-  private async createFoamTextureAsync(size: number): Promise<THREE.Texture> {
+  private async createFoamTexture(size: number): Promise<THREE.Texture> {
     const data = new Uint8Array(size * size * 4);
     const ROW_BATCH_SIZE = 16; // Process 16 rows per batch (foam has more computation per pixel)
 
@@ -1426,11 +1315,22 @@ export class WaterSystem {
       typeof deltaTime === "number" && isFinite(deltaTime) ? deltaTime : 1 / 60;
     this.waterTime += dt;
 
+    // Get wind system reference lazily (it's registered before water)
+    if (!this.windSystem) {
+      this.windSystem =
+        (this.world.getSystem("wind") as Wind | undefined) ?? null;
+    }
+
     const sunAngle = this.waterTime * 0.005;
     const sunX = Math.cos(sunAngle) * 0.4;
     const sunY = 0.75 + Math.sin(sunAngle * 0.3) * 0.1;
     const sunZ = Math.sin(sunAngle) * 0.4;
-    const windStrength = 0.9 + Math.sin(this.waterTime * 0.1) * 0.1;
+
+    // Use wind system strength with subtle wave oscillation overlay
+    const baseWindStrength =
+      this.windSystem?.uniforms.windStrength.value ?? 1.0;
+    const waveOscillation = Math.sin(this.waterTime * 0.1) * 0.1;
+    const windStrength = baseWindStrength * (0.9 + waveOscillation);
 
     // Update lake water uniforms
     if (this.uniforms) {

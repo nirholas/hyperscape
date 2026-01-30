@@ -19,6 +19,8 @@ import type {
 import { NoiseGenerator } from "../../../utils/NoiseGenerator";
 import { Logger } from "../../../utils/Logger";
 import { DataManager } from "../../../data/DataManager";
+import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
+import { dist2D } from "../../../utils/MathUtils";
 import type { TownSystem } from "./TownSystem";
 
 // Default configuration values
@@ -108,9 +110,6 @@ const POI_NAME_SUFFIXES: Record<POICategory, string[]> = {
   crossing: ["Bridge", "Ford", "Pass", "Crossing", "Gate", "Gap"],
   waystation: ["Rest", "Inn", "Stop", "Shelter", "Post", "Lodge"],
 };
-
-const dist2D = (x1: number, z1: number, x2: number, z2: number): number =>
-  Math.sqrt((x2 - x1) ** 2 + (z2 - z1) ** 2);
 
 /**
  * Load POI configuration from DataManager
@@ -211,7 +210,8 @@ export class POISystem extends System {
     const categories = Object.keys(
       this.config.countPerCategory,
     ) as POICategory[];
-    const worldSize = 10000; // TODO: Get from config
+    // World is 100 tiles of TERRAIN_TILE_SIZE meters each
+    const worldSize = TERRAIN_CONSTANTS.TERRAIN_TILE_SIZE * 100;
     const halfWorld = worldSize / 2;
 
     let totalGenerated = 0;
