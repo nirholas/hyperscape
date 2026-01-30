@@ -168,17 +168,22 @@ function generatePlacements(input) {
   
   const spacing = Math.sqrt(1 / baseDensity);
   
-  // Grid-jittered placement for even distribution
+  // Randomized placement with loose grid for even coverage but organic look
   for (let gx = 0; gx < size && placements.length < instanceCount; gx += spacing) {
     for (let gz = 0; gz < size && placements.length < instanceCount; gz += spacing) {
       candidatesGenerated++;
       
-      // Jitter position within grid cell
-      const jitterX = (nextRandom() - 0.5) * spacing * 0.8;
-      const jitterZ = (nextRandom() - 0.5) * spacing * 0.8;
+      // Large jitter (1.2x spacing) allows grass to cross cell boundaries for organic look
+      const jitterX = (nextRandom() - 0.5) * spacing * 1.2;
+      const jitterZ = (nextRandom() - 0.5) * spacing * 1.2;
       
-      const worldX = originX + gx + jitterX;
-      const worldZ = originZ + gz + jitterZ;
+      // Secondary noise-based offset to break up grid pattern
+      // Uses position-seeded noise for determinism
+      const noiseOffsetX = (noise2D(gx * 0.5, gz * 0.5, chunkSeed) - 0.5) * spacing * 0.6;
+      const noiseOffsetZ = (noise2D(gz * 0.5 + 100, gx * 0.5 + 100, chunkSeed) - 0.5) * spacing * 0.6;
+      
+      const worldX = originX + gx + jitterX + noiseOffsetX;
+      const worldZ = originZ + gz + jitterZ + noiseOffsetZ;
       
       // NO noise-based filtering - generates even grass coverage
       // Density variation is handled by distance-based LOD at render time

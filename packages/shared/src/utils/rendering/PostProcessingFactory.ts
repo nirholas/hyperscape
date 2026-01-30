@@ -335,10 +335,55 @@ export async function createPostProcessing(
 
   const isAnyEffectActive = () => lutEnabled || depthBlurActive;
 
+  // Suppress expected "NodeMaterial: Material X is not compatible" warnings
+  // These occur when WebGPU PostProcessing encounters GLSL ShaderMaterials
+  // The materials still render correctly, this just prevents console noise
+  const originalWarn = console.warn;
+  const suppressedWarningPattern =
+    /NodeMaterial: Material .* is not compatible/;
+
+  const withSuppressedWarnings = <T>(fn: () => T): T => {
+    console.warn = (...args: Parameters<typeof console.warn>) => {
+      const message = args[0];
+      if (
+        typeof message === "string" &&
+        suppressedWarningPattern.test(message)
+      ) {
+        return; // Suppress this expected warning
+      }
+      originalWarn.apply(console, args);
+    };
+    try {
+      return fn();
+    } finally {
+      console.warn = originalWarn;
+    }
+  };
+
+  const withSuppressedWarningsAsync = async <T>(
+    fn: () => Promise<T>,
+  ): Promise<T> => {
+    console.warn = (...args: Parameters<typeof console.warn>) => {
+      const message = args[0];
+      if (
+        typeof message === "string" &&
+        suppressedWarningPattern.test(message)
+      ) {
+        return; // Suppress this expected warning
+      }
+      originalWarn.apply(console, args);
+    };
+    try {
+      return await fn();
+    } finally {
+      console.warn = originalWarn;
+    }
+  };
+
   return {
     render: () => {
       if (isAnyEffectActive()) {
-        postProcessing.render();
+        withSuppressedWarnings(() => postProcessing.render());
       } else {
         renderer.render(scene, camera);
       }
@@ -346,7 +391,7 @@ export async function createPostProcessing(
 
     renderAsync: async () => {
       if (isAnyEffectActive()) {
-        await postProcessing.renderAsync();
+        await withSuppressedWarningsAsync(() => postProcessing.renderAsync());
       } else {
         await renderer.renderAsync(scene, camera);
       }

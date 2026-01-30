@@ -88,22 +88,22 @@ export const GRASS_CONFIG = {
   BLADES_PER_TUFT: 4,
 
   /** Maximum instances per chunk (power of 2 for GPU memory alignment) */
-  MAX_INSTANCES_PER_CHUNK: 65536,
+  MAX_INSTANCES_PER_CHUNK: 32768,
 
-  /** Chunk size in meters (should match or subdivide terrain tile) */
-  CHUNK_SIZE: 25,
+  /** Chunk size in meters (larger = fewer draw calls, better for distance) */
+  CHUNK_SIZE: 50,
 
   /** Terrain tile size in meters (must match TerrainSystem.CONFIG.TILE_SIZE) */
   TILE_SIZE: 100,
 
   /** Base density: tufts per square meter (each tuft has BLADES_PER_TUFT blades) */
-  BASE_DENSITY: 32,
+  BASE_DENSITY: 40,
 
   /** Distance where grass starts fading (meters from player) */
-  FADE_START: 60,
+  FADE_START: 80,
 
   /** Distance where grass is fully invisible */
-  FADE_END: 100,
+  FADE_END: 120,
 
   /**
    * Shoreline grass cutoff - matches terrain shader's visual zones:
@@ -442,14 +442,15 @@ function createGrassMaterial(): GrassMaterial {
   const flutterIntensity = float(GRASS_CONFIG.FLUTTER_INTENSITY);
 
   // LOD density thresholds (squared distances for performance)
-  // Very dense close, rapidly thinning - creates natural look
-  const lodHalfDensitySq = float(10 * 10); // 10m: 1/2 density
+  // Very dense near camera, rapid falloff for performance
+  const lodHalfDensitySq = float(8 * 8); // 8m: 1/2 density
   const lodQuarterDensitySq = float(20 * 20); // 20m: 1/4 density
-  const lodEighthDensitySq = float(35 * 35); // 35m: 1/8 density
+  const lodEighthDensitySq = float(40 * 40); // 40m: 1/8 density
+  const lodSixteenthDensitySq = float(60 * 60); // 60m: 1/16 density
 
-  // Clumping threshold - beyond this distance, grass appears in clumps
-  const clumpStartSq = float(15 * 15); // 15m: start clumping
-  const clumpFullSq = float(30 * 30); // 30m: full clumping effect
+  // Clumping threshold - beyond this distance, grass appears in random clumps
+  const clumpStartSq = float(20 * 20); // 20m: start clumping
+  const clumpFullSq = float(40 * 40); // 40m: full clumping effect
 
   // Terrain colors (OSRS palette - same as TerrainShader)
   const terrainGrassGreen = vec3(0.3, 0.55, 0.15);
@@ -1244,11 +1245,6 @@ export class GrassSystem extends System {
       return;
     }
 
-    // Log for debugging tile loading issues
-    console.log(
-      `[GrassSystem] Tile event: (${tileX},${tileZ}) biome=${biome} pos=(${position.x},${position.z})`,
-    );
-
     // Generate grass chunks for this tile (async, fire-and-forget)
     this.generateGrassForTile(
       position.x,
@@ -1705,7 +1701,7 @@ export class GrassSystem extends System {
     const spacing = Math.sqrt(1 / baseDensity);
     const biomeHeightMult = grassConfig.heightMultiplier ?? 1.0;
 
-    // Grid-jittered placement with yielding (matches GrassWorker algorithm)
+    // Randomized placement with loose grid (matches GrassWorker algorithm)
     for (let gx = 0; gx < size && count < instanceCount; gx += spacing) {
       for (let gz = 0; gz < size && count < instanceCount; gz += spacing) {
         iterations++;
@@ -1715,12 +1711,20 @@ export class GrassSystem extends System {
           await new Promise<void>((resolve) => setTimeout(resolve, 0));
         }
 
-        // Jitter position within grid cell
-        const jitterX = (nextRandom() - 0.5) * spacing * 0.8;
-        const jitterZ = (nextRandom() - 0.5) * spacing * 0.8;
+        // Large jitter (1.2x spacing) allows grass to cross cell boundaries for organic look
+        const jitterX = (nextRandom() - 0.5) * spacing * 1.2;
+        const jitterZ = (nextRandom() - 0.5) * spacing * 1.2;
 
-        const worldX = originX + gx + jitterX;
-        const worldZ = originZ + gz + jitterZ;
+        // Secondary noise-based offset to break up grid pattern
+        const noiseOffsetX =
+          (noise2D(gx * 0.5, gz * 0.5, chunkSeed) - 0.5) * spacing * 0.6;
+        const noiseOffsetZ =
+          (noise2D(gz * 0.5 + 100, gx * 0.5 + 100, chunkSeed) - 0.5) *
+          spacing *
+          0.6;
+
+        const worldX = originX + gx + jitterX + noiseOffsetX;
+        const worldZ = originZ + gz + jitterZ + noiseOffsetZ;
 
         // Get terrain height
         const worldY = getHeight(worldX, worldZ);
@@ -1852,6 +1856,9 @@ export class GrassSystem extends System {
     mesh.castShadow = false;
     mesh.receiveShadow = true;
     mesh.name = `GrassChunk_${key}`;
+
+    // Set to layer 1 - excludes grass from minimap/overhead camera (which only sees layer 0)
+    mesh.layers.set(1);
 
     return {
       key,
