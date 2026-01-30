@@ -423,22 +423,18 @@ export class CombatSystem extends SystemBase {
     const attackType = weapon.attackType?.toLowerCase();
     const weaponType = weapon.weaponType?.toLowerCase();
 
-    // Check weapon's attackType property
+    // Check weapon's attackType property for ranged
+    // Note: Magic only activates via autocast (checked above) - staffs melee by default
     if (attackType === "ranged") {
       return AttackType.RANGED;
     }
-    if (attackType === "magic") {
-      return AttackType.MAGIC;
-    }
 
-    // Fall back to weaponType for legacy compatibility
+    // Fall back to weaponType for legacy compatibility (ranged only)
     if (weaponType === "bow" || weaponType === "crossbow") {
       return AttackType.RANGED;
     }
-    if (weaponType === "staff" || weaponType === "wand") {
-      return AttackType.MAGIC;
-    }
 
+    // Default to melee (includes staffs/wands without autocast - OSRS accurate)
     return AttackType.MELEE;
   }
 
@@ -3000,8 +2996,11 @@ export class CombatSystem extends SystemBase {
           attackerType: "player",
           targetType: combatState.targetType,
         });
-        // Update next attack tick
-        combatState.nextAttackTick = tickNumber + combatState.attackSpeedTicks;
+        // Update combat tick state (same as melee path) to prevent timeout.
+        // OSRS: player stays in combat even if attack fails (no runes, etc.)
+        // If handleAttack succeeded, enterCombat() already created a fresh state
+        // that supersedes this one. If it failed, these extensions keep combat alive.
+        this.updateCombatTickState(combatState, typedAttackerId, tickNumber);
         return;
       }
     }

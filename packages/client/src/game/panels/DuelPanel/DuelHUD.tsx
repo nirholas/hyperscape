@@ -10,7 +10,13 @@
  * Positioned at top center of screen, above the game world.
  */
 
-import { useState, useCallback, useEffect, type CSSProperties } from "react";
+import {
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+  type CSSProperties,
+} from "react";
 import { useThemeStore } from "@/ui";
 import type { DuelRules } from "@hyperscape/shared";
 
@@ -62,15 +68,29 @@ const RULE_ICONS: Partial<
 // Component
 // ============================================================================
 
+const FORFEIT_CONFIRM_TIMEOUT = 3000;
+
 export function DuelHUD({ state, onForfeit }: DuelHUDProps) {
   const theme = useThemeStore((s) => s.theme);
   const [forfeitHover, setForfeitHover] = useState(false);
   const [forfeitConfirm, setForfeitConfirm] = useState(false);
+  const forfeitTimerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  // Clean up forfeit timer on unmount
+  useEffect(() => {
+    return () => {
+      if (forfeitTimerRef.current) clearTimeout(forfeitTimerRef.current);
+    };
+  }, []);
 
   // Reset confirm state when HUD hides
   useEffect(() => {
     if (!state.visible) {
       setForfeitConfirm(false);
+      if (forfeitTimerRef.current) {
+        clearTimeout(forfeitTimerRef.current);
+        forfeitTimerRef.current = undefined;
+      }
     }
   }, [state.visible]);
 
@@ -78,10 +98,17 @@ export function DuelHUD({ state, onForfeit }: DuelHUDProps) {
     if (forfeitConfirm) {
       onForfeit();
       setForfeitConfirm(false);
+      if (forfeitTimerRef.current) {
+        clearTimeout(forfeitTimerRef.current);
+        forfeitTimerRef.current = undefined;
+      }
     } else {
       setForfeitConfirm(true);
-      // Auto-reset after 3 seconds
-      setTimeout(() => setForfeitConfirm(false), 3000);
+      // Auto-reset after timeout
+      forfeitTimerRef.current = setTimeout(
+        () => setForfeitConfirm(false),
+        FORFEIT_CONFIRM_TIMEOUT,
+      );
     }
   }, [forfeitConfirm, onForfeit]);
 

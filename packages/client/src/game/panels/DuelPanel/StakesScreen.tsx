@@ -13,7 +13,8 @@
 
 import { useState, useCallback, useMemo, type CSSProperties } from "react";
 import { useThemeStore, type Theme } from "@/ui";
-import { getItem } from "@hyperscape/shared";
+import { formatGoldValue, calculateTotalValue } from "./utils";
+import { StakeGrid, StakeInventoryPanel, StakeContextMenu } from "./components";
 
 // ============================================================================
 // Types
@@ -56,34 +57,6 @@ const STAKE_GRID_ROWS = 7;
 const STAKE_SLOTS = STAKE_GRID_COLS * STAKE_GRID_ROWS;
 const INVENTORY_COLS = 4;
 const INVENTORY_ROWS = 7;
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-function formatQuantity(quantity: number): string {
-  if (quantity >= 10_000_000) {
-    return `${Math.floor(quantity / 1_000_000)}M`;
-  } else if (quantity >= 100_000) {
-    return `${Math.floor(quantity / 1_000)}K`;
-  }
-  return quantity.toString();
-}
-
-function formatGoldValue(value: number): string {
-  if (value >= 1_000_000_000) {
-    return `${(value / 1_000_000_000).toFixed(1)}B`;
-  } else if (value >= 1_000_000) {
-    return `${(value / 1_000_000).toFixed(1)}M`;
-  } else if (value >= 1_000) {
-    return `${(value / 1_000).toFixed(1)}K`;
-  }
-  return value.toString();
-}
-
-function calculateTotalValue(stakes: StakedItem[]): number {
-  return stakes.reduce((sum, item) => sum + item.value, 0);
-}
 
 // ============================================================================
 // Memoized Styles Hook
@@ -253,35 +226,6 @@ function useStakesScreenStyles(theme: Theme, myAccepted: boolean) {
 }
 
 /**
- * Get slot style based on item and staked state (called per item)
- */
-function getSlotStyle(
-  theme: Theme,
-  hasItem: boolean,
-  isStaked?: boolean,
-): CSSProperties {
-  return {
-    aspectRatio: "1",
-    minWidth: 0,
-    minHeight: 0,
-    background: hasItem
-      ? theme.colors.background.secondary
-      : theme.colors.background.primary,
-    border: `1px solid ${isStaked ? theme.colors.accent.primary : theme.colors.border.default}`,
-    borderRadius: theme.borderRadius.sm,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    cursor: hasItem ? "pointer" : "default",
-    position: "relative",
-    fontSize: theme.typography.fontSize.xs,
-    padding: 2,
-    overflow: "hidden",
-  };
-}
-
-/**
  * Get status dot style based on accepted state
  */
 function getStatusDotStyle(theme: Theme, accepted: boolean): CSSProperties {
@@ -373,14 +317,6 @@ export function StakesScreen({
     [stakedSlots],
   );
 
-  // Handle stake removal
-  const handleRemoveStake = useCallback(
-    (index: number) => {
-      onRemoveStake(index);
-    },
-    [onRemoveStake],
-  );
-
   // Close context menu
   const closeContextMenu = useCallback(() => {
     setContextMenu(null);
@@ -399,77 +335,6 @@ export function StakesScreen({
     [contextMenu, onAddStake, closeContextMenu],
   );
 
-  // Render stake item
-  const renderStakeItem = (
-    item: StakedItem | undefined,
-    index: number,
-    isMine: boolean,
-  ) => {
-    if (!item) {
-      return <div key={index} style={getSlotStyle(theme, false)} />;
-    }
-
-    const itemData = getItem(item.itemId);
-    const displayName = itemData?.name || item.itemId;
-
-    return (
-      <div
-        key={index}
-        style={getSlotStyle(theme, true)}
-        onClick={
-          isMine ? () => handleRemoveStake(myStakes.indexOf(item)) : undefined
-        }
-        title={`${displayName}${isMine ? " (click to remove)" : ""}`}
-      >
-        <span
-          style={{ fontSize: "10px", textAlign: "center", overflow: "hidden" }}
-        >
-          {displayName.substring(0, 8)}
-        </span>
-        {item.quantity > 1 && (
-          <span style={styles.quantityStyle}>
-            {formatQuantity(item.quantity)}
-          </span>
-        )}
-      </div>
-    );
-  };
-
-  // Render inventory item
-  const renderInventoryItem = (
-    item: InventoryItem | undefined,
-    slotIndex: number,
-  ) => {
-    if (!item) {
-      return <div key={slotIndex} style={getSlotStyle(theme, false)} />;
-    }
-
-    const isStaked = stakedSlots.has(item.slot);
-    const itemData = getItem(item.itemId);
-    const displayName = itemData?.name || item.itemId;
-
-    return (
-      <div
-        key={slotIndex}
-        style={getSlotStyle(theme, true, isStaked)}
-        onClick={() => !isStaked && handleInventoryClick(item)}
-        onContextMenu={(e) => handleInventoryRightClick(e, item)}
-        title={isStaked ? `${displayName} (staked)` : displayName}
-      >
-        <span
-          style={{ fontSize: "10px", textAlign: "center", overflow: "hidden" }}
-        >
-          {displayName.substring(0, 8)}
-        </span>
-        {item.quantity > 1 && (
-          <span style={styles.quantityStyle}>
-            {formatQuantity(item.quantity)}
-          </span>
-        )}
-      </div>
-    );
-  };
-
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* Anti-scam warning banners */}
@@ -484,43 +349,51 @@ export function StakesScreen({
 
       <div style={styles.containerStyle}>
         {/* My Stakes */}
-        <div style={styles.panelStyle}>
-          <div style={styles.headerStyle}>Your Stakes</div>
-          <div style={styles.gridStyle}>
-            {Array.from({ length: STAKE_SLOTS }).map((_, i) =>
-              renderStakeItem(myStakes[i], i, true),
-            )}
-          </div>
-          <div style={styles.valueStyle}>
-            Value: {formatGoldValue(myTotalValue)} gp
-          </div>
-        </div>
+        <StakeGrid
+          title="Your Stakes"
+          stakes={myStakes}
+          allStakes={myStakes}
+          isMine={true}
+          totalValue={myTotalValue}
+          totalSlots={STAKE_SLOTS}
+          theme={theme}
+          panelStyle={styles.panelStyle}
+          headerStyle={styles.headerStyle}
+          gridStyle={styles.gridStyle}
+          valueStyle={styles.valueStyle}
+          quantityStyle={styles.quantityStyle}
+          onRemoveStake={onRemoveStake}
+        />
 
         {/* Opponent Stakes */}
-        <div style={styles.panelStyle}>
-          <div style={styles.headerStyle}>{opponentName}'s Stakes</div>
-          <div style={styles.gridStyle}>
-            {Array.from({ length: STAKE_SLOTS }).map((_, i) =>
-              renderStakeItem(opponentStakes[i], i, false),
-            )}
-          </div>
-          <div style={styles.valueStyle}>
-            Value: {formatGoldValue(opponentTotalValue)} gp
-          </div>
-        </div>
+        <StakeGrid
+          title={`${opponentName}'s Stakes`}
+          stakes={opponentStakes}
+          allStakes={opponentStakes}
+          isMine={false}
+          totalValue={opponentTotalValue}
+          totalSlots={STAKE_SLOTS}
+          theme={theme}
+          panelStyle={styles.panelStyle}
+          headerStyle={styles.headerStyle}
+          gridStyle={styles.gridStyle}
+          valueStyle={styles.valueStyle}
+          quantityStyle={styles.quantityStyle}
+        />
 
         {/* Inventory */}
-        <div style={styles.inventoryPanelStyle}>
-          <div style={styles.headerStyle}>Inventory</div>
-          <div style={styles.inventoryGridStyle}>
-            {Array.from({ length: INVENTORY_COLS * INVENTORY_ROWS }).map(
-              (_, i) => {
-                const item = inventory.find((inv) => inv.slot === i);
-                return renderInventoryItem(item, i);
-              },
-            )}
-          </div>
-        </div>
+        <StakeInventoryPanel
+          inventory={inventory}
+          stakedSlots={stakedSlots}
+          totalSlots={INVENTORY_COLS * INVENTORY_ROWS}
+          theme={theme}
+          panelStyle={styles.inventoryPanelStyle}
+          headerStyle={styles.headerStyle}
+          gridStyle={styles.inventoryGridStyle}
+          quantityStyle={styles.quantityStyle}
+          onItemClick={handleInventoryClick}
+          onItemRightClick={handleInventoryRightClick}
+        />
       </div>
 
       {/* Acceptance Status */}
@@ -551,32 +424,15 @@ export function StakesScreen({
 
       {/* Context Menu */}
       {contextMenu && (
-        <div
-          style={{
-            position: "fixed",
-            left: contextMenu.x,
-            top: contextMenu.y,
-            ...styles.contextMenuStyle,
-          }}
-          onMouseLeave={closeContextMenu}
-        >
-          {[1, 5, 10, "all"].map((qty) => (
-            <div
-              key={qty}
-              onClick={() => handleContextOption(qty as number | "all")}
-              style={styles.contextMenuItemStyle}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.background =
-                  theme.colors.background.tertiary)
-              }
-              onMouseLeave={(e) =>
-                (e.currentTarget.style.background = "transparent")
-              }
-            >
-              Stake {qty === "all" ? "All" : qty}
-            </div>
-          ))}
-        </div>
+        <StakeContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          theme={theme}
+          menuStyle={styles.contextMenuStyle}
+          menuItemStyle={styles.contextMenuItemStyle}
+          onSelect={handleContextOption}
+          onClose={closeContextMenu}
+        />
       )}
     </div>
   );

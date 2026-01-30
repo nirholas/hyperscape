@@ -3733,6 +3733,22 @@ export class ClientNetwork extends SystemBase {
           z: pos.z,
         });
 
+        // Update lerpPosition with teleport snap so PlayerRemote.update()
+        // doesn't revert to a stale position on the next frame
+        const remoteWithLerp = remotePlayer as {
+          lerpPosition?: {
+            pushArray: (arr: number[], teleport: number | null) => void;
+          };
+          teleport?: number;
+        };
+        if (remoteWithLerp.lerpPosition) {
+          remoteWithLerp.teleport = (remoteWithLerp.teleport || 0) + 1;
+          remoteWithLerp.lerpPosition.pushArray(
+            [pos.x, pos.y, pos.z],
+            remoteWithLerp.teleport,
+          );
+        }
+
         // Update their position directly
         if (remotePlayer.position) {
           remotePlayer.position.x = pos.x;
@@ -3743,6 +3759,20 @@ export class ClientNetwork extends SystemBase {
         // Also update node position if available
         if (remotePlayer.node) {
           remotePlayer.node.position.set(pos.x, pos.y, pos.z);
+        }
+
+        // Update base position + transform for immediate VRM visual update
+        const remoteWithBase = remotePlayer as {
+          base?: {
+            position: { set: (x: number, y: number, z: number) => void };
+            updateTransform?: () => void;
+          };
+        };
+        if (remoteWithBase.base?.position) {
+          remoteWithBase.base.position.set(pos.x, pos.y, pos.z);
+          if (remoteWithBase.base.updateTransform) {
+            remoteWithBase.base.updateTransform();
+          }
         }
 
         // Apply rotation if provided

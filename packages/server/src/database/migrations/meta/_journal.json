@@ -197,6 +197,13 @@
       "when": 1769660224747,
       "tag": "0027_messy_dorian_gray",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1769723433000,
+      "tag": "0028_add_inventory_quantity_constraint",
+      "breakpoints": true
     }
   ]
 }

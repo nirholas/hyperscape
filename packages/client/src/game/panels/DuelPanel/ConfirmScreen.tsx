@@ -18,6 +18,7 @@ import {
   DUEL_RULE_LABELS,
   EQUIPMENT_SLOT_LABELS,
 } from "@hyperscape/shared";
+import { formatQuantity, formatGoldValue, calculateTotalValue } from "./utils";
 
 // ============================================================================
 // Types
@@ -55,36 +56,6 @@ interface ConfirmScreenProps {
   onAccept: () => void;
   onCancel: () => void;
 }
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-function formatQuantity(quantity: number): string {
-  if (quantity >= 10_000_000) {
-    return `${Math.floor(quantity / 1_000_000)}M`;
-  } else if (quantity >= 100_000) {
-    return `${Math.floor(quantity / 1_000)}K`;
-  }
-  return quantity.toString();
-}
-
-function formatGoldValue(value: number): string {
-  if (value >= 1_000_000_000) {
-    return `${(value / 1_000_000_000).toFixed(1)}B`;
-  } else if (value >= 1_000_000) {
-    return `${(value / 1_000_000).toFixed(1)}M`;
-  } else if (value >= 1_000) {
-    return `${(value / 1_000).toFixed(1)}K`;
-  }
-  return value.toString();
-}
-
-function calculateTotalValue(stakes: StakedItem[]): number {
-  return stakes.reduce((sum, item) => sum + item.value, 0);
-}
-
-// Rule and equipment labels now imported from @hyperscape/shared/data/duel-manifest
 
 // ============================================================================
 // Memoized Styles Hook

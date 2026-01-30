@@ -513,6 +513,11 @@ export class PlayerDeathSystem extends SystemBase {
         );
       }
 
+      // Award combat XP to the killer - duels should grant XP (OSRS-accurate)
+      // Pass killedBy directly since CombatSystem clears attacker states on ENTITY_DEATH
+      // before PlayerDeathSystem runs, making stateService queries unreliable
+      this.emitCombatKillForPvP(playerId, data.killedBy);
+
       return;
     }
 
@@ -797,7 +802,7 @@ export class PlayerDeathSystem extends SystemBase {
     playerId: string,
     deathPosition: { x: number; y: number; z: number },
     itemsToDrop: InventoryItem[],
-    _killedBy: string,
+    killedBy: string,
   ): void {
     const deathData: DeathLocationData = {
       playerId,
@@ -809,7 +814,9 @@ export class PlayerDeathSystem extends SystemBase {
 
     // PVP XP: Emit COMBAT_KILL event if killed by another player
     // This allows SkillsSystem to award XP for PvP kills
-    this.emitCombatKillForPvP(playerId);
+    // Pass killedBy directly since CombatSystem clears attacker states on ENTITY_DEATH
+    // before PlayerDeathSystem runs, making stateService queries unreliable
+    this.emitCombatKillForPvP(playerId, killedBy);
 
     // Set player as dead and disable movement
     this.emitTypedEvent(EventType.PLAYER_SET_DEAD, {
@@ -889,10 +896,23 @@ export class PlayerDeathSystem extends SystemBase {
 
   /**
    * Emit COMBAT_KILL event for PvP kills so SkillsSystem can award XP.
-   * Uses CombatStateService to find the attacker who killed the player.
+   *
+   * Uses killedBy from the ENTITY_DEATH event as the primary attacker source.
+   * CombatSystem handles ENTITY_DEATH before PlayerDeathSystem and clears all
+   * attacker states via clearStatesTargeting(), so the stateService query is
+   * used only as a fallback for multi-attacker scenarios.
    */
-  private emitCombatKillForPvP(deadPlayerId: string): void {
-    // Get CombatSystem to access stateService
+  private emitCombatKillForPvP(deadPlayerId: string, killedBy?: string): void {
+    // Collect unique player attacker IDs
+    const playerAttackerIds = new Set<string>();
+
+    // Primary: use killedBy from the death event (always available, not cleared)
+    if (killedBy && this.world.entities?.players?.has(killedBy)) {
+      playerAttackerIds.add(killedBy);
+    }
+
+    // Secondary: try stateService for any additional attackers (may be empty
+    // if CombatSystem already cleared states, which is the common case)
     const combatSystem = this.world.getSystem("combat") as {
       stateService?: {
         getAttackersTargeting: (
@@ -904,14 +924,20 @@ export class PlayerDeathSystem extends SystemBase {
       };
     } | null;
 
-    if (!combatSystem?.stateService) {
-      return;
+    if (combatSystem?.stateService) {
+      const attackers =
+        combatSystem.stateService.getAttackersTargeting(deadPlayerId);
+      for (const attackerId of attackers) {
+        const attackerIdStr = attackerId.toString();
+        const combatData =
+          combatSystem.stateService.getCombatData(attackerIdStr);
+        if (combatData?.attackerType === "player") {
+          playerAttackerIds.add(attackerIdStr);
+        }
+      }
     }
 
-    // Get all attackers who were targeting the dead player
-    const attackers =
-      combatSystem.stateService.getAttackersTargeting(deadPlayerId);
-    if (attackers.length === 0) {
+    if (playerAttackerIds.size === 0) {
       return;
     }
 
@@ -930,15 +956,7 @@ export class PlayerDeathSystem extends SystemBase {
     } | null;
 
     // Emit COMBAT_KILL for each player attacker (award XP to all who contributed)
-    for (const attackerId of attackers) {
-      const attackerIdStr = attackerId.toString();
-
-      // Check if this attacker is a player (not a mob)
-      const combatData = combatSystem.stateService.getCombatData(attackerIdStr);
-      if (!combatData || combatData.attackerType !== "player") {
-        continue;
-      }
-
+    for (const attackerIdStr of playerAttackerIds) {
       // Get attacker's attack style
       const attackStyleData =
         playerSystem?.getPlayerAttackStyle?.(attackerIdStr);

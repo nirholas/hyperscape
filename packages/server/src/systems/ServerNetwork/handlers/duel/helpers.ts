@@ -109,6 +109,59 @@ export function sendSuccessToast(socket: ServerSocket, message: string): void {
   sendToSocket(socket, "showToast", { type: "success", message });
 }
 
+// ============================================================================
+// Auth Middleware
+// ============================================================================
+
+/**
+ * Validate socket authentication and get DuelSystem in one call.
+ * Eliminates the repeated playerId + duelSystem boilerplate in every handler.
+ *
+ * @returns { playerId, duelSystem } on success, null on failure (error already sent)
+ */
+export function withDuelAuth(
+  socket: ServerSocket,
+  world: World,
+): {
+  playerId: string;
+  duelSystem: import("../../../DuelSystem").DuelSystem;
+} | null {
+  const playerId = getPlayerId(socket);
+  if (!playerId) {
+    sendDuelError(socket, "Not authenticated", "NOT_AUTHENTICATED");
+    return null;
+  }
+  const duelSystem = getDuelSystem(world);
+  if (!duelSystem) {
+    sendDuelError(socket, "Duel system unavailable", "SYSTEM_ERROR");
+    return null;
+  }
+  return { playerId, duelSystem };
+}
+
+// ============================================================================
+// Packet Name Constants
+// ============================================================================
+
+/**
+ * Duel packet event names sent to clients.
+ * Centralizes magic strings to prevent typos and enable refactoring.
+ */
+export const DUEL_PACKETS = {
+  SESSION_STARTED: "duelSessionStarted",
+  CHALLENGE_SENT: "duelChallengeSent",
+  CHALLENGE_RECEIVED: "duelChallengeReceived",
+  RULES_UPDATED: "duelRulesUpdated",
+  EQUIPMENT_UPDATED: "duelEquipmentUpdated",
+  ACCEPTANCE_UPDATED: "duelAcceptanceUpdated",
+  STATE_CHANGED: "duelStateChanged",
+  STAKES_UPDATED: "duelStakesUpdated",
+  CANCELLED: "duelCancelled",
+  CHAT_ADDED: "chatAdded",
+  ERROR: "duelError",
+  TOAST: "showToast",
+} as const;
+
 // Re-export common utilities for convenience
 export { sendToSocket, getPlayerId } from "../common";
 

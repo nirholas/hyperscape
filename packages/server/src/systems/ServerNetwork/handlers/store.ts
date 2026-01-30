@@ -99,6 +99,15 @@ export function handleStoreOpen(
     return;
   }
 
+  // Block shop access during duels
+  const duelSystemStore = world.getSystem("duel") as
+    | { isPlayerInDuel?: (id: string) => boolean }
+    | undefined;
+  if (duelSystemStore?.isPlayerInDuel?.(playerId)) {
+    sendErrorToast(socket, "You can't use a shop during a duel.");
+    return;
+  }
+
   // Emit STORE_OPEN_REQUEST - EventBridge handles store lookup and state sending
   // InteractionSessionManager listens to this event and creates session with targetEntityId
   world.emit(EventType.STORE_OPEN_REQUEST, {
@@ -400,6 +409,23 @@ export async function handleStoreSell(
   if (!isValidQuantity(data.quantity)) {
     sendErrorToast(socket, "Invalid quantity");
     return;
+  }
+
+  // Block selling staked items during duels
+  const duelSystemSell = world.getSystem("duel") as
+    | {
+        getStakedSlots?: (id: string) => Set<number>;
+        isPlayerInDuel?: (id: string) => boolean;
+      }
+    | undefined;
+  if (duelSystemSell?.isPlayerInDuel?.(ctx.playerId)) {
+    const stakedSlotsSell = duelSystemSell.getStakedSlots?.(ctx.playerId);
+    if (stakedSlotsSell && stakedSlotsSell.size > 0) {
+      // Player has staked items — block all sell operations during duel
+      // (We can't know which slots will be affected without querying the DB first)
+      sendErrorToast(socket, "You can't sell items during a duel.");
+      return;
+    }
   }
 
   // Step 3: Validate store exists and accepts buyback

@@ -12,7 +12,7 @@
  * Used by: Equipment system, combat calculations, character display
  */
 
-import { eq } from "drizzle-orm";
+import { eq, and, notInArray } from "drizzle-orm";
 import { BaseRepository } from "./BaseRepository";
 import * as schema from "../schema";
 import type { EquipmentRow, EquipmentSaveItem } from "../../shared/types";
@@ -46,9 +46,9 @@ export class EquipmentRepository extends BaseRepository {
   /**
    * Save player equipment to database
    *
-   * Performs an atomic replace of all equipment slots within a transaction.
-   * Deletes existing equipment and inserts new state atomically - either
-   * both operations succeed or both are rolled back.
+   * Uses upsert pattern to handle concurrent saves safely.
+   * For each equipped item, inserts or updates the row.
+   * Removes any slots not in the current equipment set.
    *
    * @param playerId - The player ID to save equipment for
    * @param items - Complete equipment state to save
@@ -64,24 +64,42 @@ export class EquipmentRepository extends BaseRepository {
 
     this.ensureDatabase();
 
-    // Wrap delete and insert in a transaction for atomicity
-    // This prevents equipment loss if server crashes between operations
     await this.db.transaction(async (tx) => {
-      // Delete existing equipment
-      await tx
-        .delete(schema.equipment)
-        .where(eq(schema.equipment.playerId, playerId));
-
-      // Insert new equipment
       if (items.length > 0) {
-        await tx.insert(schema.equipment).values(
-          items.map((item) => ({
-            playerId,
-            slotType: item.slotType,
-            itemId: item.itemId || null,
-            quantity: item.quantity ?? 1,
-          })),
-        );
+        // Upsert each equipment slot - handles concurrent saves safely
+        for (const item of items) {
+          await tx
+            .insert(schema.equipment)
+            .values({
+              playerId,
+              slotType: item.slotType,
+              itemId: item.itemId || null,
+              quantity: item.quantity ?? 1,
+            })
+            .onConflictDoUpdate({
+              target: [schema.equipment.playerId, schema.equipment.slotType],
+              set: {
+                itemId: item.itemId || null,
+                quantity: item.quantity ?? 1,
+              },
+            });
+        }
+
+        // Delete any slots not in the current equipment set
+        const equippedSlots = items.map((item) => item.slotType);
+        await tx
+          .delete(schema.equipment)
+          .where(
+            and(
+              eq(schema.equipment.playerId, playerId),
+              notInArray(schema.equipment.slotType, equippedSlots),
+            ),
+          );
+      } else {
+        // No equipment - delete all
+        await tx
+          .delete(schema.equipment)
+          .where(eq(schema.equipment.playerId, playerId));
       }
     });
   }

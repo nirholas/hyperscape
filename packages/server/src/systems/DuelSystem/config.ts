@@ -150,6 +150,13 @@ export const MAX_STAKES_PER_PLAYER = 28;
  */
 export const POSITION_TOLERANCE = 0.5;
 
+/**
+ * Cooldown (in ms) before a challenger can re-challenge the same target
+ * after a decline or expiry. Prevents harassment spam.
+ * 10 seconds.
+ */
+export const CHALLENGE_COOLDOWN_MS = 10_000;
+
 // ============================================================================
 // DEFAULT VALUES
 // ============================================================================
@@ -175,6 +182,17 @@ export const DEFAULT_EQUIPMENT_RESTRICTIONS = {
  * Equipment slot type for type safety
  */
 export type EquipmentSlot = keyof typeof DEFAULT_EQUIPMENT_RESTRICTIONS;
+
+// ============================================================================
+// ID GENERATION
+// ============================================================================
+
+/**
+ * Generate a unique duel-related ID (shared between DuelSessionManager and PendingDuelManager)
+ */
+export function generateDuelId(): string {
+  return `duel_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+}
 
 // ============================================================================
 // DUEL STATES

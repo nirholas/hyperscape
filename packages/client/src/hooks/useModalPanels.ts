@@ -705,17 +705,25 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
         });
       }
 
-      // Duel state changed (e.g., RULES -> STAKES -> CONFIRMING)
+      // Duel state changed (e.g., RULES -> STAKES -> CONFIRMING -> COUNTDOWN)
       if (d.component === "duelStateChange") {
         const stateData = d.data as {
           duelId: string;
-          state: "RULES" | "STAKES" | "CONFIRMING";
+          state: string;
         };
         setDuelData((prev) => {
           if (!prev || prev.duelId !== stateData.duelId) return prev;
+          // Close panel for non-panel states (COUNTDOWN, FIGHTING, etc.)
+          // The panel only displays RULES, STAKES, and CONFIRMING screens.
+          // When the duel transitions to COUNTDOWN, the panel should close
+          // and the countdown overlay takes over.
+          const panelStates = new Set(["RULES", "STAKES", "CONFIRMING"]);
+          if (!panelStates.has(stateData.state)) {
+            return null;
+          }
           return {
             ...prev,
-            screenState: stateData.state,
+            screenState: stateData.state as "RULES" | "STAKES" | "CONFIRMING",
             myAccepted: false,
             opponentAccepted: false,
           };

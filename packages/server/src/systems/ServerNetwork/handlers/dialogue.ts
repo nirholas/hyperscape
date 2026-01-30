@@ -44,6 +44,14 @@ export function handleDialogueResponse(
     return;
   }
 
+  // Block NPC dialogue during active duels
+  const duelSystemDialogue = world.getSystem("duel") as
+    | { isPlayerInActiveDuel?: (id: string) => boolean }
+    | undefined;
+  if (duelSystemDialogue?.isPlayerInActiveDuel?.(playerId)) {
+    return;
+  }
+
   // Input validation - prevent DoS from large strings
   if (!isValidNpcId(data.npcId)) {
     sendErrorToast(socket, "Invalid dialogue");
@@ -80,6 +88,14 @@ export function handleDialogueContinue(
 ): void {
   const playerId = getPlayerId(socket);
   if (!playerId) {
+    return;
+  }
+
+  // Block NPC dialogue during active duels
+  const duelSystemContinue = world.getSystem("duel") as
+    | { isPlayerInActiveDuel?: (id: string) => boolean }
+    | undefined;
+  if (duelSystemContinue?.isPlayerInActiveDuel?.(playerId)) {
     return;
   }
 

@@ -92,6 +92,14 @@ class HomeTeleportManager {
       return "You can't teleport during combat!";
     }
 
+    // Block home teleport during any duel state (not just active combat)
+    const duelSystem = this.world.getSystem("duel") as {
+      isPlayerInDuel?: (id: string) => boolean;
+    } | null;
+    if (duelSystem?.isPlayerInDuel?.(playerId)) {
+      return "You can't teleport during a duel!";
+    }
+
     const healthComponent = (player.data as PlayerData)?.properties
       ?.healthComponent;
     if (healthComponent?.isDead) return "You can't teleport while dead!";
