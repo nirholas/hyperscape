@@ -413,7 +413,8 @@ export class DuelCombatResolver {
   // ==========================================================================
 
   /**
-   * Restore player to full health after duel (OSRS-accurate: no death in duels)
+   * Restore player to full stats after duel
+   * OSRS-accurate: Both winner and loser get full HP, prayer, stamina restored
    * @param spawnPosition - Must match the teleport destination to avoid lerpPosition conflicts
    */
   private restorePlayerHealth(
@@ -424,9 +425,35 @@ export class DuelCombatResolver {
     const playerEntity = this.world.entities?.get?.(playerId);
     if (playerEntity instanceof PlayerEntity) {
       playerEntity.resetDeathState();
+
+      // Restore health directly (more reliable than relying on event chain)
+      playerEntity.setHealth(playerEntity.getMaxHealth());
+
+      // Restore stamina to max
+      const staminaData = (
+        playerEntity as unknown as {
+          playerData?: { stamina?: { max: number } };
+        }
+      ).playerData?.stamina;
+      if (staminaData) {
+        playerEntity.setStamina(staminaData.max);
+      }
+
+      // Restore prayer points to max
+      const prayerSystem = this.world.getSystem?.("prayer") as {
+        restorePrayerPoints?: (playerId: string, amount: number) => void;
+        getMaxPrayerPoints?: (playerId: string) => number;
+      } | null;
+
+      if (prayerSystem?.restorePrayerPoints) {
+        const maxPrayer = prayerSystem.getMaxPrayerPoints?.(playerId) ?? 99;
+        prayerSystem.restorePrayerPoints(playerId, maxPrayer);
+      }
+
+      playerEntity.markNetworkDirty();
     }
 
-    // Emit PLAYER_RESPAWNED to trigger health restoration in PlayerSystem
+    // Emit PLAYER_RESPAWNED to trigger PlayerSystem state updates (alive flag, position)
     this.world.emit(EventType.PLAYER_RESPAWNED, {
       playerId,
       spawnPosition,

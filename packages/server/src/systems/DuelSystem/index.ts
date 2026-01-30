@@ -25,6 +25,7 @@
 import type { World } from "@hyperscape/shared";
 import {
   EventType,
+  PlayerEntity,
   type DuelRules,
   type DuelState,
   type StakedItem,
@@ -1241,6 +1242,10 @@ export class DuelSystem {
     session.state = "FIGHTING";
     session.fightStartedAt = Date.now();
 
+    // OSRS-accurate: Restore both players to full stats before the fight
+    this.restorePlayerStats(session.challengerId);
+    this.restorePlayerStats(session.targetId);
+
     // Get arena bounds for client-side enforcement
     const bounds = session.arenaId
       ? this.arenaPool.getArenaBounds(session.arenaId)
@@ -1254,6 +1259,42 @@ export class DuelSystem {
       arenaId: session.arenaId,
       bounds,
     });
+  }
+
+  /**
+   * Restore a player to full health, prayer, and stamina before a duel fight
+   * OSRS-accurate: Players always start duels at full stats
+   */
+  private restorePlayerStats(playerId: string): void {
+    const playerEntity = this.world.entities?.get?.(playerId);
+    if (!(playerEntity instanceof PlayerEntity)) return;
+
+    // Restore health to max
+    playerEntity.setHealth(playerEntity.getMaxHealth());
+
+    // Restore stamina to max
+    const staminaData = (
+      playerEntity as { playerData?: { stamina?: { max: number } } }
+    ).playerData?.stamina;
+    if (staminaData) {
+      playerEntity.setStamina(staminaData.max);
+    }
+
+    // Restore prayer points to max
+    const prayerSystem = this.world.getSystem?.("prayer") as {
+      restorePrayerPoints?: (playerId: string, amount: number) => void;
+      getMaxPrayerPoints?: (playerId: string) => number;
+    } | null;
+
+    if (prayerSystem?.restorePrayerPoints) {
+      const maxPrayer = prayerSystem.getMaxPrayerPoints?.(playerId) ?? 99;
+      prayerSystem.restorePrayerPoints(playerId, maxPrayer);
+    }
+
+    // Mark entity dirty so clients receive the updated stats
+    if ("markNetworkDirty" in playerEntity) {
+      (playerEntity as { markNetworkDirty: () => void }).markNetworkDirty();
+    }
   }
 
   /**

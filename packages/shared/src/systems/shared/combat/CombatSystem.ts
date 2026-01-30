@@ -2996,8 +2996,11 @@ export class CombatSystem extends SystemBase {
           attackerType: "player",
           targetType: combatState.targetType,
         });
-        // Update next attack tick
-        combatState.nextAttackTick = tickNumber + combatState.attackSpeedTicks;
+        // Update combat tick state (same as melee path) to prevent timeout.
+        // OSRS: player stays in combat even if attack fails (no runes, etc.)
+        // If handleAttack succeeded, enterCombat() already created a fresh state
+        // that supersedes this one. If it failed, these extensions keep combat alive.
+        this.updateCombatTickState(combatState, typedAttackerId, tickNumber);
         return;
       }
     }
