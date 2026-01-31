@@ -81,6 +81,8 @@ export interface PlayerRow {
   agilityXp: number;
   craftingLevel: number;
   craftingXp: number;
+  fletchingLevel: number;
+  fletchingXp: number;
 }
 
 // Item definition row

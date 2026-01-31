@@ -207,6 +207,7 @@ export const characters = pgTable(
     smithingLevel: integer("smithingLevel").default(1),
     agilityLevel: integer("agilityLevel").default(1),
     craftingLevel: integer("craftingLevel").default(1),
+    fletchingLevel: integer("fletchingLevel").default(1),
 
     // Experience points
     attackXp: integer("attackXp").default(0),
@@ -224,6 +225,7 @@ export const characters = pgTable(
     smithingXp: integer("smithingXp").default(0),
     agilityXp: integer("agilityXp").default(0),
     craftingXp: integer("craftingXp").default(0),
+    fletchingXp: integer("fletchingXp").default(0),
 
     // Prayer points (current and max)
     prayerPoints: integer("prayerPoints").default(1),

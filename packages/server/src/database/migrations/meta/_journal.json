@@ -211,6 +211,13 @@
       "when": 1769810000000,
       "tag": "0029_add_crafting_skill",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1769900000000,
+      "tag": "0030_add_fletching_skill",
+      "breakpoints": true
     }
   ]
 }

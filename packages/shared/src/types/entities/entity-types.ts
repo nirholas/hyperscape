@@ -30,6 +30,7 @@ export interface Skills {
   smithing: SkillData;
   agility: SkillData;
   crafting: SkillData;
+  fletching: SkillData;
 }
 
 // Component data map - strongly typed, no optionals
