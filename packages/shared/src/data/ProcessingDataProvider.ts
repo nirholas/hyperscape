@@ -225,6 +225,8 @@ export interface SmithingRecipeManifest {
   xp: number;
   ticks: number;
   category: string;
+  /** Number of items produced per action (default: 1). Used for arrowtips (15 per action). */
+  outputQuantity?: number;
 }
 
 /**
@@ -276,6 +278,8 @@ export interface SmithingRecipeData {
   category: SmithingCategory;
   /** Time in game ticks (600ms per tick). Default: 4 */
   ticks: number;
+  /** Number of items produced per action. Default: 1. Arrowtips produce 15. */
+  outputQuantity: number;
 }
 
 /**
@@ -654,6 +658,7 @@ export class ProcessingDataProvider {
         xp: recipe.xp,
         category: recipe.category as SmithingCategory,
         ticks: recipe.ticks ?? SMITHING_CONSTANTS.DEFAULT_SMITHING_TICKS,
+        outputQuantity: recipe.outputQuantity ?? 1,
       };
 
       // Add to main map (keyed by output item ID)
@@ -750,6 +755,7 @@ export class ProcessingDataProvider {
           category: item.smithing.category as SmithingCategory,
           ticks:
             item.smithing.ticks ?? SMITHING_CONSTANTS.DEFAULT_SMITHING_TICKS,
+          outputQuantity: item.smithing.outputQuantity ?? 1,
         };
 
         // Add to main map (keyed by output item ID)

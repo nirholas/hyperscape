@@ -110,6 +110,7 @@ export interface SmithingRecipe {
   levelRequired: number;
   xp: number;
   category: string;
+  outputQuantity?: number;
 }
 
 /** Smithing data structure */

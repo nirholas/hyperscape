@@ -285,6 +285,8 @@ export interface Item {
     category: string;
     /** Time in game ticks (600ms per tick). Default: 4 ticks */
     ticks?: number;
+    /** Number of items produced per action. Default: 1. Arrowtips produce 15. */
+    outputQuantity?: number;
   };
 
   // === TIER-BASED EQUIPMENT SYSTEM ===

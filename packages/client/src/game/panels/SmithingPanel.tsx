@@ -22,6 +22,7 @@ interface SmithingRecipe {
   levelRequired: number;
   xp: number;
   category: string;
+  outputQuantity?: number;
 }
 
 interface SmithingPanelProps {
@@ -94,7 +95,7 @@ function getBarIcon(barType: string): string {
 /**
  * Category order for display
  */
-const CATEGORY_ORDER = ["weapons", "armor", "tools", "misc"];
+const CATEGORY_ORDER = ["weapons", "armor", "tools", "arrowtips", "misc"];
 
 /** localStorage key for Make X memory */
 const SMITHING_LAST_X_KEY = "smithing_last_x";
@@ -285,6 +286,9 @@ export function SmithingPanel({
                             style={{ color: theme.colors.accent.primary }}
                           >
                             {recipe.name || formatItemName(recipe.itemId)}
+                            {recipe.outputQuantity && recipe.outputQuantity > 1
+                              ? ` (x${recipe.outputQuantity})`
+                              : ""}
                           </div>
                           <div
                             className="text-[9px] flex items-center gap-1"
@@ -325,6 +329,10 @@ export function SmithingPanel({
                       >
                         {selectedRecipe.name ||
                           formatItemName(selectedRecipe.itemId)}
+                        {selectedRecipe.outputQuantity &&
+                        selectedRecipe.outputQuantity > 1
+                          ? ` (x${selectedRecipe.outputQuantity})`
+                          : ""}
                       </div>
                       <div
                         className="text-xs"

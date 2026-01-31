@@ -184,6 +184,7 @@ export class SmithingSystem extends SystemBase {
         levelRequired: recipe.levelRequired,
         xp: recipe.xp,
         category: recipe.category,
+        outputQuantity: recipe.outputQuantity,
         meetsLevel: recipe.meetsLevel,
         hasBars: recipe.hasBars,
       })),
@@ -337,13 +338,14 @@ export class SmithingSystem extends SystemBase {
       quantity: recipe.barsRequired,
     });
 
-    // Add smithed item to inventory
+    // Add smithed item(s) to inventory
+    const qty = recipe.outputQuantity || 1;
     this.emitTypedEvent(EventType.INVENTORY_ITEM_ADDED, {
       playerId,
       item: {
         id: `inv_${playerId}_${Date.now()}`,
         itemId: recipe.itemId,
-        quantity: 1,
+        quantity: qty,
         slot: -1,
         metadata: null,
       },
@@ -359,9 +361,10 @@ export class SmithingSystem extends SystemBase {
     session.smithed++;
 
     // Success message (OSRS style - shows item name)
+    const qtyText = qty > 1 ? `${qty} ${recipe.name}` : `a ${recipe.name}`;
     this.emitTypedEvent(EventType.UI_MESSAGE, {
       playerId,
-      message: `You hammer the ${recipe.barType.replace("_bar", "")} and make a ${recipe.name}.`,
+      message: `You hammer the ${recipe.barType.replace("_bar", "")} and make ${qtyText}.`,
       type: "success",
     });
 
