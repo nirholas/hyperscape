@@ -45,6 +45,7 @@ import {
   type SmithingManifest,
   type CraftingManifest,
   type TanningManifest,
+  type FletchingManifest,
 } from "./ProcessingDataProvider";
 import {
   stationDataProvider,
@@ -920,6 +921,18 @@ export class DataManager {
       );
     }
 
+    // Load fletching recipes
+    try {
+      const fletchingRes = await fetch(`${baseUrl}/recipes/fletching.json`);
+      const fletchingManifest =
+        (await fletchingRes.json()) as FletchingManifest;
+      processingDataProvider.loadFletchingRecipes(fletchingManifest);
+    } catch {
+      console.warn(
+        "[DataManager] recipes/fletching.json not found, fletching will be unavailable",
+      );
+    }
+
     // Rebuild ProcessingDataProvider to use the loaded manifests
     // This is necessary in case it was already lazy-initialized before manifests loaded
     processingDataProvider.rebuild();
@@ -1041,6 +1054,18 @@ export class DataManager {
     } catch {
       console.warn(
         "[DataManager] recipes/tanning.json not found, tanning will be unavailable",
+      );
+    }
+
+    // Load fletching recipes
+    try {
+      const fletchingPath = path.join(recipesDir, "fletching.json");
+      const fletchingData = await fs.readFile(fletchingPath, "utf-8");
+      const fletchingManifest = JSON.parse(fletchingData) as FletchingManifest;
+      processingDataProvider.loadFletchingRecipes(fletchingManifest);
+    } catch {
+      console.warn(
+        "[DataManager] recipes/fletching.json not found, fletching will be unavailable",
       );
     }
 
