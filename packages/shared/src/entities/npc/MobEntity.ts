@@ -69,7 +69,8 @@
  * @public
  */
 
-import THREE from "../../extras/three/three";
+import THREE, { MeshStandardNodeMaterial } from "../../extras/three/three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 import type {
   EntityData,
   MeshUserData,
@@ -1069,11 +1070,15 @@ export class MobEntity extends CombatantEntity {
    */
   private async loadIdleAnimation(): Promise<void> {
     if (!this.mesh || !this.world.loader) {
-      return;
+      throw new Error(
+        `[MobEntity] Cannot load animation: mesh=${!!this.mesh}, loader=${!!this.world.loader}`,
+      );
     }
 
     const modelPath = this.config.model;
-    if (!modelPath) return;
+    if (!modelPath) {
+      throw new Error(`[MobEntity] Cannot load animation: no model path`);
+    }
 
     const modelDir = modelPath.substring(0, modelPath.lastIndexOf("/"));
 
@@ -1192,11 +1197,10 @@ export class MobEntity extends CombatantEntity {
       RAYCAST_PROXY.CAP_SEGMENTS,
       RAYCAST_PROXY.HEIGHT_SEGMENTS,
     );
-    const material = new THREE.MeshBasicMaterial({
-      visible: false, // Invisible - only for click detection
-      transparent: true,
-      opacity: 0,
-    });
+    const material = new MeshBasicNodeMaterial();
+    material.visible = false; // Invisible - only for click detection
+    material.transparent = true;
+    material.opacity = 0;
 
     const hitbox = new THREE.Mesh(geometry, material);
     hitbox.name = `Mob_Hitbox_${this.config.mobType}_${this.id}`;
@@ -1297,7 +1301,12 @@ export class MobEntity extends CombatantEntity {
         this.mesh = scene;
         this.mesh.name = `Mob_${this.config.mobType}_${this.id}`;
 
+        // CRITICAL: Hide GLB mesh immediately to prevent T-pose flash
+        // The mesh will be shown only after idle animation is loaded and applied
+        this.mesh.visible = false;
+
         // Scale root mesh (cm to meters) and apply manifest scale
+        // GLB models are typically in centimeters (100 units = 1 meter)
         const modelScale = 100; // cm to meters
         const configScale = this.config.scale;
         this.mesh.scale.set(
@@ -1351,16 +1360,57 @@ export class MobEntity extends CombatantEntity {
         this.mesh.quaternion.identity();
         this.node.add(this.mesh);
 
-        // Always try to load external animations (most mobs use separate files)
-        await this.loadIdleAnimation();
+        // Try to load external animations (most mobs use separate animation files)
+        // If external animations fail, fall back to inline animations
+        let hasAnimation = false;
+        try {
+          await this.loadIdleAnimation();
+          hasAnimation = true;
+        } catch (err) {
+          // Log the actual error - don't silently swallow it
+          // This helps debug missing animations vs real loading failures
+          const errMsg = err instanceof Error ? err.message : String(err);
+          if (
+            !errMsg.includes("NO CLIPS") &&
+            !errMsg.includes("404") &&
+            !errMsg.includes("not found")
+          ) {
+            // Real error, not just "animation not found"
+            console.warn(
+              `[MobEntity] Animation load error for ${this.config.mobType}:`,
+              errMsg,
+            );
+          }
+          // Try inline animations below
+        }
 
-        // Also try inline animations if they exist
+        // Try inline animations if external animations failed or as additional animations
         if (animations.length > 0) {
           const mixer = (this as { mixer?: THREE.AnimationMixer }).mixer;
           if (!mixer) {
             await this.setupAnimations(animations);
+            hasAnimation = true;
           }
         }
+
+        // CRITICAL: Only make mesh visible if we have an animation
+        // Without animation, the mesh shows T-pose (bind pose) which looks broken
+        // skeleton.pose() does NOT help - it resets TO bind pose (usually T-pose)
+        if (!hasAnimation && this.mesh) {
+          // No animations available - keep mesh HIDDEN to avoid T-pose
+          // This is better than showing a broken-looking T-pose mob
+          console.error(
+            `[MobEntity] ❌ No animations found for ${this.config.mobType} (${this.config.model}). ` +
+              `Mesh will remain hidden to avoid T-pose. Add animations to: ` +
+              `${this.config.model.substring(0, this.config.model.lastIndexOf("/"))}/animations/`,
+          );
+          // Keep mesh hidden - do NOT set visible = true
+          // The raycast proxy is still functional for interaction
+          return;
+        }
+
+        // NOW make GLB mesh visible - animation is confirmed to be playing
+        this.mesh.visible = true;
 
         // Initialize HLOD impostor support for non-instanced GLB mobs
         // (Instanced mobs use MobInstancedRenderer's impostor system instead)
@@ -1437,10 +1487,10 @@ export class MobEntity extends CombatantEntity {
       4,
       8,
     );
-    // Use MeshStandardMaterial for proper lighting (responds to sun, moon, and environment maps)
+    // Use MeshStandardNodeMaterial for WebGPU-native TSL dissolve support
     // Add subtle emissive so mobs pop at night (matches player rendering)
     const emissiveColor = color.clone();
-    const material = new THREE.MeshStandardMaterial({
+    const material = new MeshStandardNodeMaterial({
       color: color.getHex(),
       emissive: emissiveColor,
       emissiveIntensity: 0.3, // Subtle glow - matches PlayerEntity and VRM avatars
@@ -2390,7 +2440,10 @@ export class MobEntity extends CombatantEntity {
               if (child instanceof THREE.SkinnedMesh && child.skeleton) {
                 const bones = child.skeleton.bones;
                 for (let i = 0; i < bones.length; i++) {
-                  bones[i].updateMatrixWorld();
+                  const bone = bones[i];
+                  if (bone) {
+                    bone.updateMatrixWorld();
+                  }
                 }
               }
             });
@@ -2704,7 +2757,10 @@ export class MobEntity extends CombatantEntity {
       // Update bone matrices using for-loop instead of forEach to avoid callback allocation
       const bones = skeleton.bones;
       for (let i = 0; i < bones.length; i++) {
-        bones[i].updateMatrixWorld();
+        const bone = bones[i];
+        if (bone) {
+          bone.updateMatrixWorld();
+        }
       }
       skeleton.update();
 

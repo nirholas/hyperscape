@@ -1,4 +1,5 @@
 import THREE, { CSMShadowNode } from "../../../extras/three/three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 
 import { Node as NodeClass } from "../../../nodes/Node";
 import { System } from "../infrastructure/System";
@@ -327,10 +328,16 @@ export class Environment extends System {
 
     if (!this.sky) {
       const geometry = new THREE.SphereGeometry(1000, 60, 40);
-      const material = new THREE.MeshBasicMaterial({ side: THREE.BackSide });
+      // Use MeshBasicNodeMaterial for WebGPU compatibility
+      const material = new MeshBasicNodeMaterial();
+      material.side = THREE.BackSide;
       this.sky = new THREE.Mesh(geometry, material);
       this.sky.geometry.computeBoundsTree();
-      const skyMaterial = this.sky.material as THREE.MeshBasicMaterial;
+      const skyMaterial = this.sky.material as {
+        fog?: boolean;
+        toneMapped?: boolean;
+        needsUpdate?: boolean;
+      };
       skyMaterial.fog = false;
       skyMaterial.toneMapped = false;
       skyMaterial.needsUpdate = true;
@@ -871,13 +878,14 @@ export class Environment extends System {
   }
 
   /**
-   * Build directional light (sun/moon) with CSMShadowNode for WebGPU cascaded shadows
+   * Build directional light (sun/moon) with CSMShadowNode for cascaded shadows
    * CSMShadowNode handles cascade splitting internally - we just configure it
+   *
+   * Note: WebGPU is required. CSM shadows only work with WebGPU's TSL pipeline.
    */
   buildSunLight(): void {
     if (!this.isClientWithGraphics) return;
 
-    const useWebGPU = this.world.graphics?.isWebGPU !== false;
     const shadowsLevel = this.world.prefs?.shadows || "med";
     const csmConfig =
       csmLevels[shadowsLevel as keyof typeof csmLevels] || csmLevels.med;
@@ -914,7 +922,7 @@ export class Environment extends System {
 
     // Create directional light for CSM
     this.sunLight = new THREE.DirectionalLight(0xffffff, 1.8);
-    this.sunLight.name = useWebGPU ? "SunLight_CSM" : "SunLight_WebGL";
+    this.sunLight.name = "SunLight_CSM";
     this.sunLight.castShadow = true;
 
     // Shadow map settings (CSMShadowNode will use this as base resolution per cascade)
@@ -923,15 +931,12 @@ export class Environment extends System {
     this.sunLight.shadow.bias = csmConfig.shadowBias;
     this.sunLight.shadow.normalBias = csmConfig.shadowNormalBias;
 
-    // Shadow camera settings
-    // CSMShadowNode overrides these per-cascade (WebGPU), but we set reasonable defaults.
+    // Shadow camera settings - CSMShadowNode overrides these per-cascade
     const shadowCam = this.sunLight.shadow.camera;
     shadowCam.near = 0.5;
     shadowCam.far = this.LIGHT_DISTANCE + 200; // Light distance + scene depth
-    // Base frustum:
-    // - WebGPU: CSMShadowNode will manage actual cascade frustums.
-    // - WebGL fallback: this frustum is the only shadow coverage area.
-    const baseFrustumSize = useWebGPU ? 100 : Math.min(250, csmConfig.maxFar);
+    // Base frustum - CSMShadowNode will manage actual cascade frustums
+    const baseFrustumSize = 100;
     shadowCam.left = -baseFrustumSize;
     shadowCam.right = baseFrustumSize;
     shadowCam.top = baseFrustumSize;
@@ -942,18 +947,7 @@ export class Environment extends System {
     this.sunLight.position.set(100, 200, 100);
     this.sunLight.target.position.set(0, 0, 0);
 
-    // WebGL fallback: single directional light shadows (no cascades / no shadowNode)
-    if (!useWebGPU) {
-      this.csmShadowNode = null;
-      this.needsFrustumUpdate = false;
-
-      scene.add(this.sunLight);
-      scene.add(this.sunLight.target);
-
-      return;
-    }
-
-    // Create CSMShadowNode for WebGPU cascaded shadows
+    // Create CSMShadowNode for cascaded shadows
     // Light direction is derived from sunLight.position and sunLight.target.position
     this.csmShadowNode = new CSMShadowNode(this.sunLight, {
       cascades: csmConfig.cascades,

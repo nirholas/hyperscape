@@ -28,6 +28,7 @@ import { XPProgressOrb } from "./hud/XPProgressOrb";
 import { LevelUpNotification } from "./hud/level-up";
 import { EscapeMenu } from "./hud/EscapeMenu";
 import { ConnectionIndicator } from "./hud/ConnectionIndicator";
+import { GrassDebugPanel } from "./hud/GrassDebugPanel";
 import { NotificationContainer } from "@/ui/components";
 import { Disconnected, KickedOverlay, DeathScreen } from "./hud/overlays";
 import {
@@ -424,6 +425,7 @@ export function CoreUI({ world }: { world: ClientWorld }) {
           {ready && uiVisible && isTouch && <TouchBtns world={world} />}
           {ready && <EntityContextMenu world={world} />}
           {ready && <EscapeMenu world={world} />}
+          {ready && <GrassDebugPanel world={world} />}
           <div id="core-ui-portal" />
         </div>
         {/* Non-scaled overlays - full screen elements */}

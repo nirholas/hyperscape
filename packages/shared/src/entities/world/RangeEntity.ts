@@ -21,7 +21,7 @@
  * **Runs on**: Server (authoritative), Client (visual)
  */
 
-import THREE from "../../extras/three/three";
+import THREE, { MeshStandardNodeMaterial } from "../../extras/three/three";
 import type { World } from "../../core/World";
 import { EntityType, InteractionType } from "../../types/entities";
 import type { EntityInteractionData } from "../../types/entities";
@@ -244,7 +244,7 @@ export class RangeEntity extends InteractableEntity {
     // FALLBACK: Create a red box for the range (placeholder, 1 tile size)
     const boxHeight = 0.8;
     const geometry = new THREE.BoxGeometry(0.9, boxHeight, 0.9);
-    const material = new THREE.MeshStandardMaterial({
+    const material = new MeshStandardNodeMaterial({
       color: 0xcc3333, // Red (placeholder)
       roughness: 0.5,
       metalness: 0.3,

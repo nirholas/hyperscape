@@ -725,7 +725,7 @@ export class TerrainSystem extends System {
   private createTileGeometryFromWorkerData(
     workerData: TerrainWorkerOutput,
   ): THREE.PlaneGeometry {
-    const { tileX, tileZ, heightData, colorData, biomeData } = workerData;
+    const { tileX, tileZ, colorData, biomeData } = workerData;
 
     // Clone template geometry
     const template = this.getOrCreateTemplateGeometry();
@@ -734,9 +734,21 @@ export class TerrainSystem extends System {
     const positions = geometry.attributes.position;
     const roadInfluences = new Float32Array(positions.count);
 
-    // Apply pre-computed height data
+    // CRITICAL: Recompute heights on main thread using getHeightAtComputed
+    // The worker heights lack shoreline adjustment (adjustHeightForShoreline),
+    // which causes seams at tile boundaries near water.
+    // Use the same deterministic computation as createTileGeometry for consistency.
+    const heightData = new Float32Array(positions.count);
     for (let i = 0; i < positions.count; i++) {
-      positions.setY(i, heightData[i]);
+      const localX = positions.getX(i);
+      const localZ = positions.getZ(i);
+      const worldX = localX + tileX * this.CONFIG.TILE_SIZE;
+      const worldZ = localZ + tileZ * this.CONFIG.TILE_SIZE;
+
+      // Use deterministic computed height (includes shoreline adjustment)
+      const height = this.getHeightAtComputed(worldX, worldZ);
+      positions.setY(i, height);
+      heightData[i] = height;
     }
 
     // OPTIMIZATION: Get road segments once for the entire tile (not per vertex)
@@ -968,7 +980,7 @@ export class TerrainSystem extends System {
 
     // Generate content (resources, visual features, water)
     const isServer = this.world.network?.isServer || false;
-    const isClient = this.world.network?.isClient || false;
+    const isClient = this.world.isClient || false;
 
     if (isServer) {
       this.generateTileResources(tile);
@@ -1580,7 +1592,7 @@ export class TerrainSystem extends System {
       treeSize.y,
       treeSize.z,
     );
-    const treeMaterial = new THREE.MeshStandardMaterial({ color: 0x2f7d32 });
+    const treeMaterial = new MeshStandardNodeMaterial({ color: 0x2f7d32 });
     this.instancedMeshManager.registerMesh(
       "tree",
       treeGeometry,
@@ -1869,7 +1881,7 @@ export class TerrainSystem extends System {
 
     if (generateContent) {
       const isServer = this.world.network?.isServer || false;
-      const isClient = this.world.network?.isClient || false;
+      const isClient = this.world.isClient || false;
 
       // Server generates authoritative resources
       if (isServer) {
@@ -1940,7 +1952,7 @@ export class TerrainSystem extends System {
       });
     } else if (
       tile.resources.length > 0 &&
-      this.world.network?.isClient &&
+      this.world.isClient &&
       !this.world.network?.isServer
     ) {
       const spawnPoints = tile.resources.map((r) => {
@@ -2021,39 +2033,22 @@ export class TerrainSystem extends System {
     }
 
     // Generate heightmap and vertex colors
+    // IMPORTANT: Always use getHeightAtComputed during tile generation to ensure
+    // deterministic heights. Cached heights (from other tiles) use bilinear interpolation
+    // which can differ slightly from computed values, causing seams at ANY position
+    // where the shoreline adjustment samples across tile boundaries.
     for (let i = 0; i < positions.count; i++) {
       const localX = positions.getX(i);
       const localZ = positions.getZ(i);
 
-      // Ensure edge vertices align exactly between tiles
-      // Snap edge vertices to exact tile boundaries to prevent seams
-      let x = localX + tileX * this.CONFIG.TILE_SIZE;
-      let z = localZ + tileZ * this.CONFIG.TILE_SIZE;
+      // Convert to world coordinates
+      const x = localX + tileX * this.CONFIG.TILE_SIZE;
+      const z = localZ + tileZ * this.CONFIG.TILE_SIZE;
 
-      // Snap to grid at tile boundaries for seamless edges
-      const epsilon = 0.001;
-      const tileMinX = tileX * this.CONFIG.TILE_SIZE;
-      const tileMaxX = (tileX + 1) * this.CONFIG.TILE_SIZE;
-      const tileMinZ = tileZ * this.CONFIG.TILE_SIZE;
-      const tileMaxZ = (tileZ + 1) * this.CONFIG.TILE_SIZE;
-
-      // Track if this is an edge vertex (for consistent height computation)
-      const isEdgeX =
-        Math.abs(x - tileMinX) < epsilon || Math.abs(x - tileMaxX) < epsilon;
-      const isEdgeZ =
-        Math.abs(z - tileMinZ) < epsilon || Math.abs(z - tileMaxZ) < epsilon;
-      const isEdgeVertex = isEdgeX || isEdgeZ;
-
-      if (Math.abs(x - tileMinX) < epsilon) x = tileMinX;
-      if (Math.abs(x - tileMaxX) < epsilon) x = tileMaxX;
-      if (Math.abs(z - tileMinZ) < epsilon) z = tileMinZ;
-      if (Math.abs(z - tileMaxZ) < epsilon) z = tileMaxZ;
-
-      // Generate height - use computed (deterministic) values for edge vertices
-      // to ensure consistency across tile boundaries, avoiding cache inconsistencies
-      const height = isEdgeVertex
-        ? this.getHeightAtComputed(x, z)
-        : this.getHeightAt(x, z);
+      // Always use deterministic computed heights during tile generation
+      // This ensures identical heights regardless of which tiles are loaded
+      // and eliminates seams from cache interpolation differences
+      const height = this.getHeightAtComputed(x, z);
 
       positions.setY(i, height);
       heightData.push(height);
@@ -3801,10 +3796,13 @@ export class TerrainSystem extends System {
 
     // TEMPORARILY DISABLED - debugging leaf rendering
     // this.generateTreesForTile(tile, biomeData);
-    // this.generateOtherResourcesForTile(tile, biomeData);
+
+    // Re-enabled for ore LOD testing
+    this.generateOtherResourcesForTile(tile, biomeData);
+
     // Generate decorative rocks (client only)
     // NOTE: Plants disabled - not working/looking good yet
-    // const isClient = this.world.network?.isClient || false;
+    // const isClient = this.world.isClient || false;
     // if (isClient) {
     //   this.generateDecorativeRocksForTile(tile, biomeData);
     //   // this.generateDecorativePlantsForTile(tile, biomeData); // DISABLED
@@ -4268,12 +4266,12 @@ export class TerrainSystem extends System {
     }
 
     // Process pending resource instance creation (client only, spreads work across frames)
-    if (this.world.network?.isClient) {
+    if (this.world.isClient) {
       this.processResourceInstanceQueue();
     }
 
     // Update instance visibility on client based on player position
-    if (this.world.network?.isClient && this.instancedMeshManager) {
+    if (this.world.isClient && this.instancedMeshManager) {
       this.instancedMeshManager.updateAllInstanceVisibility();
 
       // Update procgen rock and plant instancers for LOD transitions
@@ -4295,7 +4293,7 @@ export class TerrainSystem extends System {
     }
 
     // Animate water, grass, and terrain caustics (client-side only)
-    if (this.world.network?.isClient) {
+    if (this.world.isClient) {
       const dt =
         typeof _deltaTime === "number" && isFinite(_deltaTime)
           ? _deltaTime

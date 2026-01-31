@@ -73,6 +73,7 @@ import { createNode } from "../../extras/three/createNode";
 import { Layers } from "../../physics/Layers";
 import { Emotes, essentialEmotes } from "../../data/playerEmotes";
 import THREE from "../../extras/three/three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 import { UI, UIText, UIView } from "../../nodes";
 import type {
   HealthBars as HealthBarsSystem,
@@ -535,7 +536,7 @@ export class PlayerLocal extends Entity implements HotReloadable {
   // CRITICAL: Silhouette MUST be opaque (transparent: false) because
   // Three.js renders transparent objects AFTER all opaques, breaking render order!
   private _silhouetteMeshes: THREE.SkinnedMesh[] = [];
-  private _silhouetteMaterial?: THREE.MeshBasicMaterial;
+  private _silhouetteMaterial?: THREE.Material; // MeshBasicNodeMaterial for WebGPU
   private static readonly SILHOUETTE_CONFIG = {
     /** Color of the silhouette (dark blue-gray, visible but not jarring) */
     COLOR: 0x1a1a2a,
@@ -1670,13 +1671,13 @@ export class PlayerLocal extends Entity implements HotReloadable {
     this.destroyPlayerSilhouette();
 
     // Material: depthTest=false draws everywhere, transparent=false for correct render order
-    this._silhouetteMaterial = new THREE.MeshBasicMaterial({
-      color: PlayerLocal.SILHOUETTE_CONFIG.COLOR,
-      transparent: false,
-      depthTest: false,
-      depthWrite: false,
-      side: THREE.FrontSide,
-    });
+    const mat = new MeshBasicNodeMaterial();
+    mat.color = new THREE.Color(PlayerLocal.SILHOUETTE_CONFIG.COLOR);
+    mat.transparent = false;
+    mat.depthTest = false;
+    mat.depthWrite = false;
+    mat.side = THREE.FrontSide;
+    this._silhouetteMaterial = mat;
 
     const { SILHOUETTE_RENDER_ORDER, PLAYER_RENDER_ORDER } =
       PlayerLocal.SILHOUETTE_CONFIG;
@@ -1695,6 +1696,10 @@ export class PlayerLocal extends Entity implements HotReloadable {
       silhouetteMesh.renderOrder = SILHOUETTE_RENDER_ORDER;
       silhouetteMesh.frustumCulled = false;
       silhouetteMesh.name = `Silhouette_${skinnedMesh.name}`;
+
+      // PERFORMANCE: Set silhouette to layer 1 (main camera only, not minimap)
+      // Minimap only renders terrain (layer 0) and uses 2D dots for entities
+      silhouetteMesh.layers.set(1);
 
       (skinnedMesh.parent ?? vrmScene).add(silhouetteMesh);
       this._silhouetteMeshes.push(silhouetteMesh);

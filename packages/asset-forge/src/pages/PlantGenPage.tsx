@@ -24,6 +24,7 @@ import {
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
+import { MeshStandardNodeMaterial } from "three/webgpu";
 import {
   generateFromPreset,
   getPresetNames,
@@ -360,10 +361,9 @@ export const PlantGenPage: React.FC = () => {
 
     // Ground plane
     const groundGeo = new THREE.CircleGeometry(5, 64);
-    const groundMat = new THREE.MeshStandardMaterial({
-      color: 0x2d4a3e,
-      roughness: 0.95,
-    });
+    const groundMat = new MeshStandardNodeMaterial();
+    groundMat.color = new THREE.Color(0x2d4a3e);
+    groundMat.roughness = 0.95;
     const ground = new THREE.Mesh(groundGeo, groundMat);
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;

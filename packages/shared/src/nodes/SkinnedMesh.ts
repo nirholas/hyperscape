@@ -69,7 +69,32 @@ export class SkinnedMesh extends Node implements HotReloadable {
     this.bones = null;
     this.animNames = [];
 
+    // Validate skeletons before cloning - filter out undefined bones (can happen with WebGPU)
+    this._object3d!.traverse((child) => {
+      if (child instanceof THREE.SkinnedMesh && child.skeleton) {
+        const validBones = child.skeleton.bones.filter(
+          (bone): bone is THREE.Bone => bone !== undefined && bone !== null,
+        );
+        if (validBones.length !== child.skeleton.bones.length) {
+          child.skeleton.bones = validBones;
+        }
+      }
+    });
+
     this.obj = SkeletonUtils.clone(this._object3d!) as THREE.Object3D;
+
+    // Validate cloned skeletons - filter out undefined bones (can happen with WebGPU)
+    this.obj!.traverse((child) => {
+      if (child instanceof THREE.SkinnedMesh && child.skeleton) {
+        const validBones = child.skeleton.bones.filter(
+          (bone): bone is THREE.Bone => bone !== undefined && bone !== null,
+        );
+        if (validBones.length !== child.skeleton.bones.length) {
+          child.skeleton.bones = validBones;
+        }
+      }
+    });
+
     this.obj!.matrixWorld.copy(this.matrixWorld);
     this.obj!.matrixAutoUpdate = false;
     this.obj!.matrixWorldAutoUpdate = false;

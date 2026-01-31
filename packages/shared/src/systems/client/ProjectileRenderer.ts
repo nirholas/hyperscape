@@ -24,6 +24,7 @@
  */
 
 import THREE from "../../extras/three/three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 import { System } from "../shared/infrastructure/System";
 import { EventType } from "../../types/events";
 import type { World } from "../../core/World";
@@ -245,7 +246,9 @@ export class ProjectileRenderer extends System {
     shaftGeometry.rotateX(Math.PI / 2);
     shaftGeometry.translate(0, 0, -shaftLength / 2 - headLength / 2);
 
-    const shaftMaterial = new THREE.MeshBasicMaterial({ color: shaftColor });
+    // Use MeshBasicNodeMaterial for WebGPU compatibility
+    const shaftMaterial = new MeshBasicNodeMaterial();
+    shaftMaterial.color = new THREE.Color(shaftColor);
     const shaft = new THREE.Mesh(shaftGeometry, shaftMaterial);
     group.add(shaft);
 
@@ -254,7 +257,8 @@ export class ProjectileRenderer extends System {
     // Rotate so cone points along +Z
     headGeometry.rotateX(Math.PI / 2);
 
-    const headMaterial = new THREE.MeshBasicMaterial({ color: headColor });
+    const headMaterial = new MeshBasicNodeMaterial();
+    headMaterial.color = new THREE.Color(headColor);
     const head = new THREE.Mesh(headGeometry, headMaterial);
     group.add(head);
 

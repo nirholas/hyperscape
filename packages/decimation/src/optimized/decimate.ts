@@ -16,6 +16,7 @@ import {
   StopReason,
   INF,
   NULL_INDEX,
+  NULL_INDEX_UINT32,
 } from "./types.js";
 import { buildEdgeFlaps, buildSeamEdges } from "./connectivity.js";
 import { computeVertexMetrics } from "./quadric.js";
@@ -31,14 +32,21 @@ import { tryCollapseEdge } from "./collapse.js";
  * Clean mesh by compacting deleted faces and remapping indices.
  * Uses typed array bit-masks instead of Set to avoid allocations.
  *
+ * IMPORTANT: Deleted faces are marked with NULL_INDEX (-1), which is stored
+ * as 0xFFFFFFFF in Uint32Array. We use DELETED_MARKER (0xFFFFFFFF) for comparisons
+ * since JavaScript number comparison with -1 doesn't work for Uint32Array values.
+ *
  * @param mesh Input mesh (modified in place)
  * @returns Cleaned mesh with compacted arrays
  */
 export function cleanMesh(mesh: OptimizedMeshData): OptimizedMeshData {
-  // Count valid faces
+  // Count valid faces using NULL_INDEX_UINT32 (the unsigned representation of -1)
   let validFaceCount = 0;
   for (let fi = 0; fi < mesh.faceCount; fi++) {
-    if (!mesh.isFaceDeleted(fi)) validFaceCount++;
+    const idx0 = mesh.faceVertices[fi * 3];
+    if (idx0 !== NULL_INDEX_UINT32) {
+      validFaceCount++;
+    }
   }
 
   if (validFaceCount === mesh.faceCount) return mesh;
@@ -51,8 +59,12 @@ export function cleanMesh(mesh: OptimizedMeshData): OptimizedMeshData {
 
   // Mark used vertices and TCs using bit operations
   for (let fi = 0; fi < mesh.faceCount; fi++) {
-    if (mesh.isFaceDeleted(fi)) continue;
     const base = fi * 3;
+    const idx0 = mesh.faceVertices[base];
+
+    // Skip deleted faces (NULL_INDEX_UINT32 is the unsigned representation of -1)
+    if (idx0 === NULL_INDEX_UINT32) continue;
+
     for (let c = 0; c < 3; c++) {
       const vi = mesh.faceVertices[base + c];
       const tci = mesh.faceTexCoords[base + c];
@@ -89,15 +101,43 @@ export function cleanMesh(mesh: OptimizedMeshData): OptimizedMeshData {
   const newFaceVertices = new Uint32Array(validFaceCount * 3);
   const newFaceTexCoords = new Uint32Array(validFaceCount * 3);
 
-  // Copy positions (single pass using remap)
+  // Allocate skin weight arrays if present
+  let newSkinIndices: Uint16Array | null = null;
+  let newSkinWeights: Float32Array | null = null;
+  if (mesh.skinIndices && mesh.skinWeights) {
+    newSkinIndices = new Uint16Array(newVertexCount * 4);
+    newSkinWeights = new Float32Array(newVertexCount * 4);
+  }
+
+  // Copy positions and skin weights (single pass using remap)
   for (let vi = 0; vi < mesh.vertexCount; vi++) {
     const newVi = vertexRemap[vi];
     if (newVi !== NULL_INDEX) {
+      // Copy position
       const srcOff = vi * 3,
         dstOff = newVi * 3;
       newPositions[dstOff] = mesh.positions[srcOff];
       newPositions[dstOff + 1] = mesh.positions[srcOff + 1];
       newPositions[dstOff + 2] = mesh.positions[srcOff + 2];
+
+      // Copy skin weights if present
+      if (
+        newSkinIndices &&
+        newSkinWeights &&
+        mesh.skinIndices &&
+        mesh.skinWeights
+      ) {
+        const srcSkinOff = vi * 4,
+          dstSkinOff = newVi * 4;
+        newSkinIndices[dstSkinOff] = mesh.skinIndices[srcSkinOff];
+        newSkinIndices[dstSkinOff + 1] = mesh.skinIndices[srcSkinOff + 1];
+        newSkinIndices[dstSkinOff + 2] = mesh.skinIndices[srcSkinOff + 2];
+        newSkinIndices[dstSkinOff + 3] = mesh.skinIndices[srcSkinOff + 3];
+        newSkinWeights[dstSkinOff] = mesh.skinWeights[srcSkinOff];
+        newSkinWeights[dstSkinOff + 1] = mesh.skinWeights[srcSkinOff + 1];
+        newSkinWeights[dstSkinOff + 2] = mesh.skinWeights[srcSkinOff + 2];
+        newSkinWeights[dstSkinOff + 3] = mesh.skinWeights[srcSkinOff + 3];
+      }
     }
   }
 
@@ -115,10 +155,14 @@ export function cleanMesh(mesh: OptimizedMeshData): OptimizedMeshData {
   // Copy faces with remapped indices
   let newFaceIndex = 0;
   for (let fi = 0; fi < mesh.faceCount; fi++) {
-    if (mesh.isFaceDeleted(fi)) continue;
-    const srcBase = fi * 3,
-      dstBase = newFaceIndex * 3;
-    newFaceVertices[dstBase] = vertexRemap[mesh.faceVertices[srcBase]];
+    const srcBase = fi * 3;
+    const idx0 = mesh.faceVertices[srcBase];
+
+    // Skip deleted faces (NULL_INDEX_UINT32 is 0xFFFFFFFF, the unsigned representation of -1)
+    if (idx0 === NULL_INDEX_UINT32) continue;
+
+    const dstBase = newFaceIndex * 3;
+    newFaceVertices[dstBase] = vertexRemap[idx0];
     newFaceVertices[dstBase + 1] = vertexRemap[mesh.faceVertices[srcBase + 1]];
     newFaceVertices[dstBase + 2] = vertexRemap[mesh.faceVertices[srcBase + 2]];
     newFaceTexCoords[dstBase] = tcRemap[mesh.faceTexCoords[srcBase]];
@@ -132,6 +176,8 @@ export function cleanMesh(mesh: OptimizedMeshData): OptimizedMeshData {
     newUVs,
     newFaceVertices,
     newFaceTexCoords,
+    newSkinIndices,
+    newSkinWeights,
   );
 }
 

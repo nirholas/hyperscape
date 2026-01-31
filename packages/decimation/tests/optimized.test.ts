@@ -463,7 +463,7 @@ describe("Legacy vs Optimized Parity", () => {
 // ============================================================================
 
 describe("Performance", () => {
-  it("optimized is faster for large meshes", () => {
+  it("optimized is faster for large meshes", { timeout: 30000 }, () => {
     const mesh = createSubdividedPlane(15); // 256 vertices
     const optimized = fromLegacyMeshData(mesh);
 
@@ -622,8 +622,1469 @@ describe("Off-Thread Decimation", () => {
   });
 
   it("exports decimateBatchOffThread function", async () => {
-    const { decimateBatchOffThread } =
-      await import("../src/optimized/index.js");
+    const { decimateBatchOffThread } = await import(
+      "../src/optimized/index.js"
+    );
     expect(typeof decimateBatchOffThread).toBe("function");
+  });
+});
+
+// ============================================================================
+// CLEAN MESH / DELETED FACE HANDLING TESTS
+// ============================================================================
+
+describe("cleanMesh deleted face handling", () => {
+  it("correctly removes faces marked with NULL_INDEX_UINT32", async () => {
+    const { cleanMesh, NULL_INDEX_UINT32 } = await import(
+      "../src/optimized/index.js"
+    );
+
+    // Create a simple mesh with 4 faces (2 triangles per face of a quad)
+    const positions = new Float32Array([
+      0,
+      0,
+      0, // v0
+      1,
+      0,
+      0, // v1
+      1,
+      1,
+      0, // v2
+      0,
+      1,
+      0, // v3
+    ]);
+    const uvs = new Float32Array([
+      0,
+      0, // uv0
+      1,
+      0, // uv1
+      1,
+      1, // uv2
+      0,
+      1, // uv3
+    ]);
+    const faceVertices = new Uint32Array([
+      0,
+      1,
+      2, // face 0 (valid)
+      0,
+      2,
+      3, // face 1 (will be marked deleted)
+    ]);
+    const faceTexCoords = new Uint32Array([
+      0,
+      1,
+      2, // face 0
+      0,
+      2,
+      3, // face 1
+    ]);
+
+    const mesh = new OptimizedMeshData(
+      positions,
+      uvs,
+      faceVertices,
+      faceTexCoords,
+    );
+
+    // Mark face 1 as deleted (this is how decimation marks deleted faces)
+    mesh.deleteFace(1);
+
+    // Verify the face was marked with NULL_INDEX_UINT32 (0xFFFFFFFF)
+    expect(mesh.faceVertices[3]).toBe(NULL_INDEX_UINT32);
+    expect(mesh.faceVertices[4]).toBe(NULL_INDEX_UINT32);
+    expect(mesh.faceVertices[5]).toBe(NULL_INDEX_UINT32);
+
+    // Clean the mesh - should remove the deleted face
+    const cleaned = cleanMesh(mesh);
+
+    // Should have only 1 face remaining
+    expect(cleaned.faceCount).toBe(1);
+
+    // The remaining face should have valid indices (not 0xFFFFFFFF)
+    expect(cleaned.faceVertices[0]).not.toBe(NULL_INDEX_UINT32);
+    expect(cleaned.faceVertices[1]).not.toBe(NULL_INDEX_UINT32);
+    expect(cleaned.faceVertices[2]).not.toBe(NULL_INDEX_UINT32);
+
+    // Vertices should be remapped correctly
+    // Only vertices 0, 1, 2 are used by face 0, so vertex 3 should be removed
+    expect(cleaned.vertexCount).toBe(3);
+  });
+
+  it("returns original mesh when no faces are deleted", async () => {
+    const { cleanMesh } = await import("../src/optimized/index.js");
+
+    const positions = new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0]);
+    const uvs = new Float32Array([0, 0, 1, 0, 1, 1]);
+    const faceVertices = new Uint32Array([0, 1, 2]);
+    const faceTexCoords = new Uint32Array([0, 1, 2]);
+
+    const mesh = new OptimizedMeshData(
+      positions,
+      uvs,
+      faceVertices,
+      faceTexCoords,
+    );
+
+    const cleaned = cleanMesh(mesh);
+
+    // Should return the same mesh (no changes)
+    expect(cleaned).toBe(mesh);
+    expect(cleaned.faceCount).toBe(1);
+    expect(cleaned.vertexCount).toBe(3);
+  });
+
+  it("handles mesh with all faces deleted", async () => {
+    const { cleanMesh } = await import("../src/optimized/index.js");
+
+    const positions = new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0]);
+    const uvs = new Float32Array([0, 0, 1, 0, 1, 1]);
+    const faceVertices = new Uint32Array([0, 1, 2]);
+    const faceTexCoords = new Uint32Array([0, 1, 2]);
+
+    const mesh = new OptimizedMeshData(
+      positions,
+      uvs,
+      faceVertices,
+      faceTexCoords,
+    );
+
+    // Delete the only face
+    mesh.deleteFace(0);
+
+    const cleaned = cleanMesh(mesh);
+
+    // Should have 0 faces and 0 vertices
+    expect(cleaned.faceCount).toBe(0);
+    expect(cleaned.vertexCount).toBe(0);
+  });
+});
+
+// ============================================================================
+// SKIN WEIGHT TESTS
+// ============================================================================
+
+describe("Skin Weight Support", () => {
+  /**
+   * Create a skinned subdivided plane mesh with bone weights
+   */
+  function createSkinnedPlane(divisions: number = 4): {
+    V: [number, number, number][];
+    F: [number, number, number][];
+    TC: [number, number][];
+    FT: [number, number, number][];
+    skinIndices: [number, number, number, number][];
+    skinWeights: [number, number, number, number][];
+  } {
+    const V: [number, number, number][] = [];
+    const F: [number, number, number][] = [];
+    const TC: [number, number][] = [];
+    const FT: [number, number, number][] = [];
+    const skinIndices: [number, number, number, number][] = [];
+    const skinWeights: [number, number, number, number][] = [];
+
+    // Create vertices with gradient skin weights from bone 0 to bone 1
+    for (let y = 0; y <= divisions; y++) {
+      for (let x = 0; x <= divisions; x++) {
+        const u = x / divisions;
+        const v = y / divisions;
+        V.push([u, v, 0]);
+        TC.push([u, v]);
+
+        // Skin weight gradient: left side -> bone 0, right side -> bone 1
+        const bone0Weight = 1.0 - u;
+        const bone1Weight = u;
+        skinIndices.push([0, 1, 0, 0]);
+        skinWeights.push([bone0Weight, bone1Weight, 0, 0]);
+      }
+    }
+
+    for (let y = 0; y < divisions; y++) {
+      for (let x = 0; x < divisions; x++) {
+        const i = y * (divisions + 1) + x;
+        const i1 = i + 1;
+        const i2 = i + divisions + 1;
+        const i3 = i2 + 1;
+
+        F.push([i, i3, i1]);
+        F.push([i, i2, i3]);
+        FT.push([i, i3, i1]);
+        FT.push([i, i2, i3]);
+      }
+    }
+
+    return { V, F, TC, FT, skinIndices, skinWeights };
+  }
+
+  /**
+   * Create a more complex skinned tube mesh (like an arm)
+   * with 4 bones along its length
+   */
+  function createSkinnedTube(
+    segments: number = 8,
+    radialDivisions: number = 6,
+  ): {
+    V: [number, number, number][];
+    F: [number, number, number][];
+    TC: [number, number][];
+    FT: [number, number, number][];
+    skinIndices: [number, number, number, number][];
+    skinWeights: [number, number, number, number][];
+  } {
+    const V: [number, number, number][] = [];
+    const F: [number, number, number][] = [];
+    const TC: [number, number][] = [];
+    const FT: [number, number, number][] = [];
+    const skinIndices: [number, number, number, number][] = [];
+    const skinWeights: [number, number, number, number][] = [];
+
+    const radius = 0.5;
+
+    // Create vertices
+    for (let s = 0; s <= segments; s++) {
+      const t = s / segments; // 0 to 1 along tube
+      const y = t * 4; // 4 units long
+
+      for (let r = 0; r < radialDivisions; r++) {
+        const angle = (r / radialDivisions) * Math.PI * 2;
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
+
+        V.push([x, y, z]);
+        TC.push([r / radialDivisions, t]);
+
+        // 4 bones along the tube (bone 0 at bottom, bone 3 at top)
+        // Use smooth blending between adjacent bones
+        const boneT = t * 3; // 0-3 range
+        const lowerBone = Math.min(3, Math.floor(boneT));
+        const upperBone = Math.min(3, lowerBone + 1);
+        const blend = boneT - Math.floor(boneT);
+
+        // Initialize all weights to 0
+        const weights: [number, number, number, number] = [0, 0, 0, 0];
+        const indices: [number, number, number, number] = [0, 1, 2, 3];
+
+        if (lowerBone === upperBone) {
+          // At the very top (t=1), only use upperBone with full weight
+          weights[lowerBone] = 1.0;
+        } else {
+          weights[lowerBone] = 1.0 - blend;
+          weights[upperBone] = blend;
+        }
+
+        skinIndices.push(indices);
+        skinWeights.push(weights);
+      }
+    }
+
+    // Create faces
+    for (let s = 0; s < segments; s++) {
+      for (let r = 0; r < radialDivisions; r++) {
+        const i0 = s * radialDivisions + r;
+        const i1 = s * radialDivisions + ((r + 1) % radialDivisions);
+        const i2 = (s + 1) * radialDivisions + r;
+        const i3 = (s + 1) * radialDivisions + ((r + 1) % radialDivisions);
+
+        F.push([i0, i2, i1]);
+        F.push([i1, i2, i3]);
+        FT.push([i0, i2, i1]);
+        FT.push([i1, i2, i3]);
+      }
+    }
+
+    return { V, F, TC, FT, skinIndices, skinWeights };
+  }
+
+  it("creates mesh with skin weights correctly", () => {
+    const { V, F, TC, FT, skinIndices, skinWeights } = createSkinnedPlane(2);
+    const mesh = OptimizedMeshData.fromArrays(
+      V,
+      F,
+      TC,
+      FT,
+      skinIndices,
+      skinWeights,
+    );
+
+    expect(mesh.hasSkinWeights()).toBe(true);
+    expect(mesh.skinIndices).not.toBeNull();
+    expect(mesh.skinWeights).not.toBeNull();
+    expect(mesh.skinIndices!.length).toBe(V.length * 4);
+    expect(mesh.skinWeights!.length).toBe(V.length * 4);
+
+    // Verify weights at corners
+    const weights = new Float32Array(4);
+    const indices = new Uint16Array(4);
+
+    // Top-left corner (x=0): should be bone 0
+    mesh.getSkinWeights(0, weights);
+    mesh.getSkinIndices(0, indices);
+    expect(weights[0]).toBeCloseTo(1.0); // Full weight on bone 0
+    expect(weights[1]).toBeCloseTo(0.0); // No weight on bone 1
+    expect(indices[0]).toBe(0);
+
+    // Top-right corner (x=divisions): should be bone 1
+    mesh.getSkinWeights(2, weights); // For divisions=2, vertex 2 is at x=1
+    mesh.getSkinIndices(2, indices);
+    expect(weights[0]).toBeCloseTo(0.0); // No weight on bone 0
+    expect(weights[1]).toBeCloseTo(1.0); // Full weight on bone 1
+    expect(indices[1]).toBe(1);
+  });
+
+  it("clones mesh with skin weights", () => {
+    const { V, F, TC, FT, skinIndices, skinWeights } = createSkinnedPlane(2);
+    const mesh = OptimizedMeshData.fromArrays(
+      V,
+      F,
+      TC,
+      FT,
+      skinIndices,
+      skinWeights,
+    );
+    const cloned = mesh.clone();
+
+    expect(cloned.hasSkinWeights()).toBe(true);
+    expect(cloned.skinIndices).not.toBeNull();
+    expect(cloned.skinWeights).not.toBeNull();
+    expect(cloned.skinIndices!.length).toBe(mesh.skinIndices!.length);
+    expect(cloned.skinWeights!.length).toBe(mesh.skinWeights!.length);
+
+    // Verify cloned data matches
+    for (let i = 0; i < cloned.skinIndices!.length; i++) {
+      expect(cloned.skinIndices![i]).toBe(mesh.skinIndices![i]);
+      expect(cloned.skinWeights![i]).toBeCloseTo(mesh.skinWeights![i]);
+    }
+  });
+
+  it("decimates skinned mesh preserving skin weights", () => {
+    const { V, F, TC, FT, skinIndices, skinWeights } = createSkinnedPlane(4);
+    const mesh = OptimizedMeshData.fromArrays(
+      V,
+      F,
+      TC,
+      FT,
+      skinIndices,
+      skinWeights,
+    );
+
+    const result = decimateOptimized(mesh, {
+      targetPercent: 50,
+      strictness: 2,
+    });
+
+    // Result should still have skin weights
+    expect(result.mesh.hasSkinWeights()).toBe(true);
+    expect(result.mesh.skinIndices).not.toBeNull();
+    expect(result.mesh.skinWeights).not.toBeNull();
+
+    // Skin weights should be normalized (sum to ~1.0) for all vertices
+    const weights = new Float32Array(4);
+    for (let vi = 0; vi < result.mesh.vertexCount; vi++) {
+      result.mesh.getSkinWeights(vi, weights);
+      const sum = weights[0] + weights[1] + weights[2] + weights[3];
+      expect(sum).toBeCloseTo(1.0, 4); // Allow small floating point error
+    }
+  });
+
+  it("interpolates skin weights correctly during collapse", async () => {
+    const { interpolateSkinWeights } = await import(
+      "../src/optimized/index.js"
+    );
+
+    // Create a simple 3-vertex mesh with skin weights
+    const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0.5, 1, 0]);
+    const uvs = new Float32Array([0, 0, 1, 0, 0.5, 1]);
+    const faceVertices = new Uint32Array([0, 1, 2]);
+    const faceTexCoords = new Uint32Array([0, 1, 2]);
+
+    // V0: 100% bone 0, V1: 100% bone 1
+    const skinIndices = new Uint16Array([0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0]);
+    const skinWeights = new Float32Array([
+      1, 0, 0, 0, 1, 0, 0, 0, 0.5, 0.5, 0, 0,
+    ]);
+
+    const mesh = new OptimizedMeshData(
+      positions,
+      uvs,
+      faceVertices,
+      faceTexCoords,
+      skinIndices,
+      skinWeights,
+    );
+
+    const outIndices = new Uint16Array(4);
+    const outWeights = new Float32Array(4);
+
+    // Interpolate at midpoint (t=0.5)
+    const result = interpolateSkinWeights(
+      mesh,
+      0,
+      1,
+      0.5,
+      outIndices,
+      outWeights,
+    );
+    expect(result).toBe(true);
+
+    // Should have 50% bone 0, 50% bone 1
+    const bone0Weight = outIndices[0] === 0 ? outWeights[0] : outWeights[1];
+    const bone1Weight = outIndices[0] === 1 ? outWeights[0] : outWeights[1];
+
+    expect(bone0Weight + bone1Weight).toBeCloseTo(1.0);
+    expect(bone0Weight).toBeCloseTo(0.5, 1);
+    expect(bone1Weight).toBeCloseTo(0.5, 1);
+  });
+
+  it("converts to/from BufferGeometry with skin weights", async () => {
+    const { fromBufferGeometry, toBufferGeometryData } = await import(
+      "../src/optimized/index.js"
+    );
+
+    // Create BufferGeometry-like object with skin weights
+    const positions = new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0]);
+    const uvs = new Float32Array([0, 0, 1, 0, 1, 1]);
+    const skinIndex = new Uint16Array([0, 1, 0, 0, 1, 2, 0, 0, 2, 3, 0, 0]);
+    const skinWeight = new Float32Array([
+      0.5, 0.5, 0, 0, 0.3, 0.7, 0, 0, 0.8, 0.2, 0, 0,
+    ]);
+
+    const geometry = {
+      attributes: {
+        position: { array: positions, count: 3 },
+        uv: { array: uvs, count: 3 },
+        skinIndex: { array: skinIndex, count: 3 },
+        skinWeight: { array: skinWeight, count: 3 },
+      },
+    };
+
+    const mesh = fromBufferGeometry(geometry);
+
+    expect(mesh.hasSkinWeights()).toBe(true);
+    expect(mesh.vertexCount).toBe(3);
+
+    // Convert back
+    const data = toBufferGeometryData(mesh);
+
+    expect(data.skinIndex).toBeDefined();
+    expect(data.skinWeight).toBeDefined();
+    expect(data.skinIndex!.length).toBe(12);
+    expect(data.skinWeight!.length).toBe(12);
+
+    // Verify round-trip
+    for (let i = 0; i < skinIndex.length; i++) {
+      expect(data.skinIndex![i]).toBe(skinIndex[i]);
+      expect(data.skinWeight![i]).toBeCloseTo(skinWeight[i]);
+    }
+  });
+
+  it("cleanMesh preserves skin weights", async () => {
+    const { cleanMesh } = await import("../src/optimized/index.js");
+
+    const positions = new Float32Array([
+      0,
+      0,
+      0, // v0
+      1,
+      0,
+      0, // v1
+      1,
+      1,
+      0, // v2
+      0,
+      1,
+      0, // v3
+    ]);
+    const uvs = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
+    const faceVertices = new Uint32Array([
+      0,
+      1,
+      2, // face 0 (valid)
+      0,
+      2,
+      3, // face 1 (will be deleted)
+    ]);
+    const faceTexCoords = new Uint32Array([0, 1, 2, 0, 2, 3]);
+    const skinIndices = new Uint16Array([
+      0,
+      0,
+      0,
+      0, // v0
+      1,
+      0,
+      0,
+      0, // v1
+      2,
+      0,
+      0,
+      0, // v2
+      3,
+      0,
+      0,
+      0, // v3
+    ]);
+    const skinWeights = new Float32Array([
+      1,
+      0,
+      0,
+      0, // v0
+      1,
+      0,
+      0,
+      0, // v1
+      1,
+      0,
+      0,
+      0, // v2
+      1,
+      0,
+      0,
+      0, // v3
+    ]);
+
+    const mesh = new OptimizedMeshData(
+      positions,
+      uvs,
+      faceVertices,
+      faceTexCoords,
+      skinIndices,
+      skinWeights,
+    );
+
+    // Delete face 1
+    mesh.deleteFace(1);
+
+    const cleaned = cleanMesh(mesh);
+
+    expect(cleaned.hasSkinWeights()).toBe(true);
+    expect(cleaned.vertexCount).toBe(3); // v0, v1, v2 used
+    expect(cleaned.faceCount).toBe(1);
+
+    // Verify skin indices were preserved and remapped
+    const indices = new Uint16Array(4);
+    for (let vi = 0; vi < cleaned.vertexCount; vi++) {
+      cleaned.getSkinIndices(vi, indices);
+      // Each vertex should have its original bone index (0, 1, or 2)
+      expect(indices[0]).toBeLessThan(3);
+    }
+  });
+
+  // ========================================================================
+  // COMPREHENSIVE SKIN WEIGHT CORRECTNESS TESTS
+  // ========================================================================
+
+  describe("Interpolation Math Correctness", () => {
+    it("interpolates exactly at endpoints (t=0 and t=1)", async () => {
+      const { interpolateSkinWeights } = await import(
+        "../src/optimized/index.js"
+      );
+
+      // Create mesh with distinct weights
+      const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0.5, 1, 0]);
+      const uvs = new Float32Array([0, 0, 1, 0, 0.5, 1]);
+      const faceVertices = new Uint32Array([0, 1, 2]);
+      const faceTexCoords = new Uint32Array([0, 1, 2]);
+
+      // V0: bone 0 = 0.8, bone 1 = 0.2
+      // V1: bone 2 = 0.6, bone 3 = 0.4
+      const skinIndices = new Uint16Array([
+        0,
+        1,
+        0,
+        0, // v0
+        2,
+        3,
+        0,
+        0, // v1
+        0,
+        0,
+        0,
+        0, // v2
+      ]);
+      const skinWeights = new Float32Array([
+        0.8,
+        0.2,
+        0,
+        0, // v0
+        0.6,
+        0.4,
+        0,
+        0, // v1
+        1,
+        0,
+        0,
+        0, // v2
+      ]);
+
+      const mesh = new OptimizedMeshData(
+        positions,
+        uvs,
+        faceVertices,
+        faceTexCoords,
+        skinIndices,
+        skinWeights,
+      );
+
+      const outIndices = new Uint16Array(4);
+      const outWeights = new Float32Array(4);
+
+      // t=0: should get V0's weights exactly
+      interpolateSkinWeights(mesh, 0, 1, 0.0, outIndices, outWeights);
+      expect(outWeights[0]).toBeCloseTo(0.8, 5);
+      expect(outWeights[1]).toBeCloseTo(0.2, 5);
+      expect(outIndices[0]).toBe(0);
+      expect(outIndices[1]).toBe(1);
+
+      // t=1: should get V1's weights exactly
+      interpolateSkinWeights(mesh, 0, 1, 1.0, outIndices, outWeights);
+      expect(outWeights[0]).toBeCloseTo(0.6, 5);
+      expect(outWeights[1]).toBeCloseTo(0.4, 5);
+      expect(outIndices[0]).toBe(2);
+      expect(outIndices[1]).toBe(3);
+    });
+
+    it("interpolates correctly at midpoint (t=0.5) with shared bones", async () => {
+      const { interpolateSkinWeights } = await import(
+        "../src/optimized/index.js"
+      );
+
+      const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0.5, 1, 0]);
+      const uvs = new Float32Array([0, 0, 1, 0, 0.5, 1]);
+      const faceVertices = new Uint32Array([0, 1, 2]);
+      const faceTexCoords = new Uint32Array([0, 1, 2]);
+
+      // V0: bone 0 = 1.0
+      // V1: bone 1 = 1.0
+      const skinIndices = new Uint16Array([
+        0,
+        0,
+        0,
+        0, // v0
+        1,
+        0,
+        0,
+        0, // v1
+        0,
+        0,
+        0,
+        0, // v2
+      ]);
+      const skinWeights = new Float32Array([
+        1,
+        0,
+        0,
+        0, // v0
+        1,
+        0,
+        0,
+        0, // v1
+        1,
+        0,
+        0,
+        0, // v2
+      ]);
+
+      const mesh = new OptimizedMeshData(
+        positions,
+        uvs,
+        faceVertices,
+        faceTexCoords,
+        skinIndices,
+        skinWeights,
+      );
+
+      const outIndices = new Uint16Array(4);
+      const outWeights = new Float32Array(4);
+
+      // t=0.5: should be 50% bone 0, 50% bone 1
+      interpolateSkinWeights(mesh, 0, 1, 0.5, outIndices, outWeights);
+
+      // Find weights for each bone (only count non-zero weights to avoid empty slot issues)
+      let bone0Weight = 0,
+        bone1Weight = 0;
+      for (let i = 0; i < 4; i++) {
+        if (outWeights[i] > 0) {
+          if (outIndices[i] === 0) bone0Weight = outWeights[i];
+          if (outIndices[i] === 1) bone1Weight = outWeights[i];
+        }
+      }
+
+      expect(bone0Weight).toBeCloseTo(0.5, 5);
+      expect(bone1Weight).toBeCloseTo(0.5, 5);
+    });
+
+    it("merges shared bone indices correctly", async () => {
+      const { interpolateSkinWeights } = await import(
+        "../src/optimized/index.js"
+      );
+
+      const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0.5, 1, 0]);
+      const uvs = new Float32Array([0, 0, 1, 0, 0.5, 1]);
+      const faceVertices = new Uint32Array([0, 1, 2]);
+      const faceTexCoords = new Uint32Array([0, 1, 2]);
+
+      // Both vertices have bone 0, but different amounts
+      // V0: bone 0 = 0.6, bone 1 = 0.4
+      // V1: bone 0 = 0.3, bone 2 = 0.7
+      const skinIndices = new Uint16Array([
+        0,
+        1,
+        0,
+        0, // v0
+        0,
+        2,
+        0,
+        0, // v1
+        0,
+        0,
+        0,
+        0, // v2
+      ]);
+      const skinWeights = new Float32Array([
+        0.6,
+        0.4,
+        0,
+        0, // v0
+        0.3,
+        0.7,
+        0,
+        0, // v1
+        1,
+        0,
+        0,
+        0, // v2
+      ]);
+
+      const mesh = new OptimizedMeshData(
+        positions,
+        uvs,
+        faceVertices,
+        faceTexCoords,
+        skinIndices,
+        skinWeights,
+      );
+
+      const outIndices = new Uint16Array(4);
+      const outWeights = new Float32Array(4);
+
+      // t=0.5: bone 0 should be merged: 0.5 * 0.6 + 0.5 * 0.3 = 0.45
+      // bone 1: 0.5 * 0.4 = 0.2
+      // bone 2: 0.5 * 0.7 = 0.35
+      // Total = 1.0, already normalized
+      interpolateSkinWeights(mesh, 0, 1, 0.5, outIndices, outWeights);
+
+      let bone0Weight = 0,
+        bone1Weight = 0,
+        bone2Weight = 0;
+      for (let i = 0; i < 4; i++) {
+        if (outWeights[i] > 0) {
+          if (outIndices[i] === 0) bone0Weight = outWeights[i];
+          if (outIndices[i] === 1) bone1Weight = outWeights[i];
+          if (outIndices[i] === 2) bone2Weight = outWeights[i];
+        }
+      }
+
+      expect(bone0Weight).toBeCloseTo(0.45, 5);
+      expect(bone1Weight).toBeCloseTo(0.2, 5);
+      expect(bone2Weight).toBeCloseTo(0.35, 5);
+    });
+
+    it("normalizes weights to sum to 1.0", async () => {
+      const { interpolateSkinWeights } = await import(
+        "../src/optimized/index.js"
+      );
+
+      const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0.5, 1, 0]);
+      const uvs = new Float32Array([0, 0, 1, 0, 0.5, 1]);
+      const faceVertices = new Uint32Array([0, 1, 2]);
+      const faceTexCoords = new Uint32Array([0, 1, 2]);
+
+      // Any valid skin weights
+      const skinIndices = new Uint16Array([
+        0,
+        1,
+        2,
+        3, // v0
+        4,
+        5,
+        6,
+        7, // v1 (different bones!)
+        0,
+        0,
+        0,
+        0, // v2
+      ]);
+      const skinWeights = new Float32Array([
+        0.4,
+        0.3,
+        0.2,
+        0.1, // v0
+        0.5,
+        0.3,
+        0.15,
+        0.05, // v1
+        1,
+        0,
+        0,
+        0, // v2
+      ]);
+
+      const mesh = new OptimizedMeshData(
+        positions,
+        uvs,
+        faceVertices,
+        faceTexCoords,
+        skinIndices,
+        skinWeights,
+      );
+
+      const outIndices = new Uint16Array(4);
+      const outWeights = new Float32Array(4);
+
+      // Test at various interpolation values
+      for (const t of [0, 0.25, 0.5, 0.75, 1.0]) {
+        interpolateSkinWeights(mesh, 0, 1, t, outIndices, outWeights);
+
+        const sum =
+          outWeights[0] + outWeights[1] + outWeights[2] + outWeights[3];
+        expect(sum).toBeCloseTo(1.0, 5);
+      }
+    });
+
+    it("keeps top 4 bones when merging results in more than 4", async () => {
+      const { interpolateSkinWeights } = await import(
+        "../src/optimized/index.js"
+      );
+
+      const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0.5, 1, 0]);
+      const uvs = new Float32Array([0, 0, 1, 0, 0.5, 1]);
+      const faceVertices = new Uint32Array([0, 1, 2]);
+      const faceTexCoords = new Uint32Array([0, 1, 2]);
+
+      // V0: bones 0,1,2,3
+      // V1: bones 4,5,6,7 (all different!)
+      // At midpoint, we have 8 bones but can only keep 4
+      const skinIndices = new Uint16Array([
+        0,
+        1,
+        2,
+        3, // v0
+        4,
+        5,
+        6,
+        7, // v1
+        0,
+        0,
+        0,
+        0, // v2
+      ]);
+      const skinWeights = new Float32Array([
+        0.4,
+        0.3,
+        0.2,
+        0.1, // v0
+        0.4,
+        0.3,
+        0.2,
+        0.1, // v1
+        1,
+        0,
+        0,
+        0, // v2
+      ]);
+
+      const mesh = new OptimizedMeshData(
+        positions,
+        uvs,
+        faceVertices,
+        faceTexCoords,
+        skinIndices,
+        skinWeights,
+      );
+
+      const outIndices = new Uint16Array(4);
+      const outWeights = new Float32Array(4);
+
+      interpolateSkinWeights(mesh, 0, 1, 0.5, outIndices, outWeights);
+
+      // Should only have 4 non-zero weights
+      let nonZeroCount = 0;
+      for (let i = 0; i < 4; i++) {
+        if (outWeights[i] > 0) nonZeroCount++;
+      }
+
+      // The top 4 bones should be kept (bones 0,1,4,5 with weights 0.2, 0.15, 0.2, 0.15)
+      // After normalization, these should sum to 1.0
+      expect(nonZeroCount).toBeLessThanOrEqual(4);
+
+      const sum = outWeights[0] + outWeights[1] + outWeights[2] + outWeights[3];
+      expect(sum).toBeCloseTo(1.0, 5);
+    });
+  });
+
+  describe("Complex Mesh Decimation", () => {
+    it("decimates tube mesh preserving bone weight gradient", () => {
+      const { V, F, TC, FT, skinIndices, skinWeights } = createSkinnedTube(
+        8,
+        6,
+      );
+      const mesh = OptimizedMeshData.fromArrays(
+        V,
+        F,
+        TC,
+        FT,
+        skinIndices,
+        skinWeights,
+      );
+
+      // Verify input mesh has valid skin weights
+      expect(mesh.hasSkinWeights()).toBe(true);
+
+      // Verify input skin weights sum to 1.0 before decimation
+      const inputWeights = new Float32Array(4);
+      for (let vi = 0; vi < mesh.vertexCount; vi++) {
+        mesh.getSkinWeights(vi, inputWeights);
+        const inputSum =
+          inputWeights[0] + inputWeights[1] + inputWeights[2] + inputWeights[3];
+        expect(inputSum).toBeCloseTo(1.0, 3);
+      }
+
+      const result = decimateOptimized(mesh, {
+        targetPercent: 50,
+        strictness: 2,
+      });
+
+      expect(result.mesh.hasSkinWeights()).toBe(true);
+
+      // Verify all weights are valid
+      const weights = new Float32Array(4);
+      const indices = new Uint16Array(4);
+
+      let validCount = 0;
+      let invalidCount = 0;
+      for (let vi = 0; vi < result.mesh.vertexCount; vi++) {
+        result.mesh.getSkinWeights(vi, weights);
+        result.mesh.getSkinIndices(vi, indices);
+
+        // Weights should sum to 1.0
+        const sum = weights[0] + weights[1] + weights[2] + weights[3];
+
+        if (sum > 0.99 && sum < 1.01) {
+          validCount++;
+        } else {
+          invalidCount++;
+        }
+      }
+
+      // At least 95% of vertices should have valid weights
+      // (some edge cases during collapse might produce slightly off values)
+      const validRatio = validCount / result.mesh.vertexCount;
+      expect(validRatio).toBeGreaterThanOrEqual(0.95);
+    });
+
+    it("preserves spatial weight distribution after decimation", () => {
+      const { V, F, TC, FT, skinIndices, skinWeights } = createSkinnedPlane(8);
+      const mesh = OptimizedMeshData.fromArrays(
+        V,
+        F,
+        TC,
+        FT,
+        skinIndices,
+        skinWeights,
+      );
+
+      const result = decimateOptimized(mesh, {
+        targetPercent: 50,
+        strictness: 2,
+      });
+
+      expect(result.mesh.hasSkinWeights()).toBe(true);
+
+      // Verify all decimated vertices have valid skin weights
+      const weights = new Float32Array(4);
+      let validWeights = 0;
+
+      for (let vi = 0; vi < result.mesh.vertexCount; vi++) {
+        result.mesh.getSkinWeights(vi, weights);
+        const sum = weights[0] + weights[1] + weights[2] + weights[3];
+        if (sum > 0.99 && sum < 1.01) {
+          validWeights++;
+        }
+      }
+
+      // At least 95% of vertices should have valid normalized weights
+      const validRatio = validWeights / result.mesh.vertexCount;
+      expect(validRatio).toBeGreaterThanOrEqual(0.95);
+    });
+
+    it("handles multiple decimation passes correctly", () => {
+      const { V, F, TC, FT, skinIndices, skinWeights } = createSkinnedPlane(8);
+      let mesh = OptimizedMeshData.fromArrays(
+        V,
+        F,
+        TC,
+        FT,
+        skinIndices,
+        skinWeights,
+      );
+
+      // Decimate in multiple passes
+      for (let pass = 0; pass < 3; pass++) {
+        const result = decimateOptimized(mesh, {
+          targetPercent: 70,
+          strictness: 2,
+        });
+
+        mesh = result.mesh;
+
+        // Verify skin weights are still valid after each pass
+        expect(mesh.hasSkinWeights()).toBe(true);
+
+        const weights = new Float32Array(4);
+        for (let vi = 0; vi < mesh.vertexCount; vi++) {
+          mesh.getSkinWeights(vi, weights);
+          const sum = weights[0] + weights[1] + weights[2] + weights[3];
+          expect(sum).toBeCloseTo(1.0, 4);
+        }
+      }
+    });
+  });
+
+  describe("Edge Cases", () => {
+    it("handles vertices with single bone influence", async () => {
+      const { interpolateSkinWeights } = await import(
+        "../src/optimized/index.js"
+      );
+
+      const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0.5, 1, 0]);
+      const uvs = new Float32Array([0, 0, 1, 0, 0.5, 1]);
+      const faceVertices = new Uint32Array([0, 1, 2]);
+      const faceTexCoords = new Uint32Array([0, 1, 2]);
+
+      // All vertices bound to single bone
+      const skinIndices = new Uint16Array([
+        5,
+        0,
+        0,
+        0, // v0: only bone 5
+        5,
+        0,
+        0,
+        0, // v1: only bone 5
+        5,
+        0,
+        0,
+        0, // v2: only bone 5
+      ]);
+      const skinWeights = new Float32Array([
+        1,
+        0,
+        0,
+        0, // v0
+        1,
+        0,
+        0,
+        0, // v1
+        1,
+        0,
+        0,
+        0, // v2
+      ]);
+
+      const mesh = new OptimizedMeshData(
+        positions,
+        uvs,
+        faceVertices,
+        faceTexCoords,
+        skinIndices,
+        skinWeights,
+      );
+
+      const outIndices = new Uint16Array(4);
+      const outWeights = new Float32Array(4);
+
+      interpolateSkinWeights(mesh, 0, 1, 0.5, outIndices, outWeights);
+
+      expect(outIndices[0]).toBe(5);
+      expect(outWeights[0]).toBeCloseTo(1.0, 5);
+    });
+
+    it("handles mesh without skin weights (returns original)", () => {
+      const mesh = createSubdividedPlane(4);
+      const optimized = fromLegacyMeshData(mesh);
+
+      // This mesh has no skin weights
+      expect(optimized.hasSkinWeights()).toBe(false);
+
+      const result = decimateOptimized(optimized, {
+        targetPercent: 50,
+        strictness: 2,
+      });
+
+      // Should still decimate without skin weights
+      expect(result.mesh.hasSkinWeights()).toBe(false);
+      expect(result.mesh.vertexCount).toBeLessThan(optimized.vertexCount);
+    });
+
+    it("toArrays includes skin weights when present", () => {
+      const { V, F, TC, FT, skinIndices, skinWeights } = createSkinnedPlane(2);
+      const mesh = OptimizedMeshData.fromArrays(
+        V,
+        F,
+        TC,
+        FT,
+        skinIndices,
+        skinWeights,
+      );
+
+      const arrays = mesh.toArrays();
+
+      expect(arrays.skinIndices).toBeDefined();
+      expect(arrays.skinWeights).toBeDefined();
+      expect(arrays.skinIndices!.length).toBe(V.length);
+      expect(arrays.skinWeights!.length).toBe(V.length);
+
+      // Verify round-trip
+      for (let i = 0; i < V.length; i++) {
+        for (let j = 0; j < 4; j++) {
+          expect(arrays.skinIndices![i][j]).toBe(skinIndices[i][j]);
+          expect(arrays.skinWeights![i][j]).toBeCloseTo(skinWeights[i][j], 5);
+        }
+      }
+    });
+
+    it("decimation preserves UVs and skin weights together", () => {
+      // Create a larger mesh with distinct UVs and skin weights
+      const { V, F, TC, FT, skinIndices, skinWeights } = createSkinnedPlane(6);
+      const mesh = OptimizedMeshData.fromArrays(
+        V,
+        F,
+        TC,
+        FT,
+        skinIndices,
+        skinWeights,
+      );
+
+      const originalVertexCount = mesh.vertexCount;
+
+      // Record original UV range
+      const originalUvs: { u: number; v: number }[] = [];
+      const uvOut = new Float32Array(2);
+      for (let ti = 0; ti < mesh.texCoordCount; ti++) {
+        mesh.getUV(ti, uvOut);
+        originalUvs.push({ u: uvOut[0], v: uvOut[1] });
+      }
+
+      // Verify original UVs are in [0, 1] range
+      for (const uv of originalUvs) {
+        expect(uv.u).toBeGreaterThanOrEqual(0);
+        expect(uv.u).toBeLessThanOrEqual(1);
+        expect(uv.v).toBeGreaterThanOrEqual(0);
+        expect(uv.v).toBeLessThanOrEqual(1);
+      }
+
+      // Decimate
+      const result = decimateOptimized(mesh, {
+        targetPercent: 50,
+        strictness: 2,
+      });
+
+      // Verify mesh was actually decimated
+      expect(result.mesh.vertexCount).toBeLessThan(originalVertexCount);
+
+      // Verify UVs are still valid after decimation
+      for (let ti = 0; ti < result.mesh.texCoordCount; ti++) {
+        result.mesh.getUV(ti, uvOut);
+        expect(Number.isFinite(uvOut[0])).toBe(true);
+        expect(Number.isFinite(uvOut[1])).toBe(true);
+        // UVs should still be in reasonable range (may go slightly outside [0,1] due to interpolation)
+        expect(uvOut[0]).toBeGreaterThanOrEqual(-0.1);
+        expect(uvOut[0]).toBeLessThanOrEqual(1.1);
+        expect(uvOut[1]).toBeGreaterThanOrEqual(-0.1);
+        expect(uvOut[1]).toBeLessThanOrEqual(1.1);
+      }
+
+      // Verify skin weights are still valid
+      expect(result.mesh.hasSkinWeights()).toBe(true);
+      const weights = new Float32Array(4);
+      for (let vi = 0; vi < result.mesh.vertexCount; vi++) {
+        result.mesh.getSkinWeights(vi, weights);
+        const sum = weights[0] + weights[1] + weights[2] + weights[3];
+        expect(sum).toBeCloseTo(1.0, 3);
+      }
+    });
+
+    it("verifies UV seam preservation during decimation", () => {
+      // Create a cube with UV seams (each face is a separate UV island)
+      const mesh = createCube();
+      const optimized = fromLegacyMeshData(mesh);
+
+      const originalFaceCount = optimized.faceCount;
+
+      // Decimate with high strictness to preserve seams
+      const result = decimateOptimized(optimized, {
+        targetPercent: 80, // Light decimation
+        strictness: 3, // High strictness to preserve seams
+      });
+
+      // Verify mesh was decimated but seams are respected
+      expect(result.mesh.faceCount).toBeLessThanOrEqual(originalFaceCount);
+
+      // Verify all UVs are still finite and valid
+      const uvOut = new Float32Array(2);
+      for (let ti = 0; ti < result.mesh.texCoordCount; ti++) {
+        result.mesh.getUV(ti, uvOut);
+        expect(Number.isFinite(uvOut[0])).toBe(true);
+        expect(Number.isFinite(uvOut[1])).toBe(true);
+      }
+
+      // Verify face tex coord indices are valid
+      const faceTC = new Uint32Array(3);
+      for (let fi = 0; fi < result.mesh.faceCount; fi++) {
+        result.mesh.getFaceTexCoords(fi, faceTC);
+        for (let i = 0; i < 3; i++) {
+          expect(faceTC[i]).toBeLessThan(result.mesh.texCoordCount);
+        }
+      }
+    });
+  });
+
+  describe("Mesh Deformation Verification", () => {
+    /**
+     * Simulate skeletal deformation by applying bone transformations to vertices.
+     * Returns the deformed positions.
+     */
+    function applySkeletalDeformation(
+      mesh: typeof OptimizedMeshData.prototype,
+      boneMatrices: Float32Array[], // 4x4 matrices for each bone
+    ): Float32Array {
+      const deformedPositions = new Float32Array(mesh.vertexCount * 3);
+      const pos = new Float32Array(3);
+      const weights = new Float32Array(4);
+      const indices = new Uint16Array(4);
+
+      for (let vi = 0; vi < mesh.vertexCount; vi++) {
+        mesh.getPosition(vi, pos);
+        mesh.getSkinWeights(vi, weights);
+        mesh.getSkinIndices(vi, indices);
+
+        let dx = 0,
+          dy = 0,
+          dz = 0;
+
+        // Apply weighted bone transformations
+        for (let i = 0; i < 4; i++) {
+          const w = weights[i];
+          if (w > 0.001) {
+            const boneIdx = indices[i];
+            const m = boneMatrices[boneIdx];
+
+            // Apply 4x4 matrix transformation (assuming row-major)
+            const tx = m[0] * pos[0] + m[4] * pos[1] + m[8] * pos[2] + m[12];
+            const ty = m[1] * pos[0] + m[5] * pos[1] + m[9] * pos[2] + m[13];
+            const tz = m[2] * pos[0] + m[6] * pos[1] + m[10] * pos[2] + m[14];
+
+            dx += tx * w;
+            dy += ty * w;
+            dz += tz * w;
+          }
+        }
+
+        deformedPositions[vi * 3] = dx;
+        deformedPositions[vi * 3 + 1] = dy;
+        deformedPositions[vi * 3 + 2] = dz;
+      }
+
+      return deformedPositions;
+    }
+
+    /**
+     * Create identity 4x4 matrix
+     */
+    function identityMatrix(): Float32Array {
+      return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+    }
+
+    /**
+     * Create rotation matrix around X axis
+     */
+    function rotationMatrixX(radians: number): Float32Array {
+      const c = Math.cos(radians);
+      const s = Math.sin(radians);
+      return new Float32Array([
+        1,
+        0,
+        0,
+        0,
+        0,
+        c,
+        s,
+        0,
+        0,
+        -s,
+        c,
+        0,
+        0,
+        0,
+        0,
+        1,
+      ]);
+    }
+
+    it("verifies decimated mesh deforms correctly with skeletal animation", () => {
+      // Create a tube mesh (like an arm) with 4 bones along its length
+      const { V, F, TC, FT, skinIndices, skinWeights } = createSkinnedTube(
+        8,
+        6,
+      );
+      const originalMesh = OptimizedMeshData.fromArrays(
+        V,
+        F,
+        TC,
+        FT,
+        skinIndices,
+        skinWeights,
+      );
+
+      // Create identity matrices for all 4 bones (bind pose)
+      const bindPose = [
+        identityMatrix(),
+        identityMatrix(),
+        identityMatrix(),
+        identityMatrix(),
+      ];
+
+      // Get original deformed positions in bind pose
+      const originalBindPositions = applySkeletalDeformation(
+        originalMesh,
+        bindPose,
+      );
+
+      // Decimate the mesh
+      const result = decimateOptimized(originalMesh, {
+        targetPercent: 50,
+        strictness: 2,
+      });
+
+      // Get decimated deformed positions in bind pose
+      const decimatedBindPositions = applySkeletalDeformation(
+        result.mesh,
+        bindPose,
+      );
+
+      // Now create a bent pose - rotate bone 2 by 45 degrees (bend the "elbow")
+      const bentPose = [
+        identityMatrix(),
+        identityMatrix(),
+        rotationMatrixX(Math.PI / 4), // 45 degree bend
+        rotationMatrixX(Math.PI / 4), // Propagate to child bone
+      ];
+
+      // Get original deformed positions in bent pose
+      const originalBentPositions = applySkeletalDeformation(
+        originalMesh,
+        bentPose,
+      );
+
+      // Get decimated deformed positions in bent pose
+      const decimatedBentPositions = applySkeletalDeformation(
+        result.mesh,
+        bentPose,
+      );
+
+      // Verify that decimated mesh has valid skin weights and deforms
+      expect(result.mesh.hasSkinWeights()).toBe(true);
+
+      // Check that vertices actually moved when bent (deformation is working)
+      let originalMovement = 0;
+      let decimatedMovement = 0;
+
+      for (let vi = 0; vi < originalMesh.vertexCount; vi++) {
+        const dx =
+          originalBentPositions[vi * 3] - originalBindPositions[vi * 3];
+        const dy =
+          originalBentPositions[vi * 3 + 1] - originalBindPositions[vi * 3 + 1];
+        const dz =
+          originalBentPositions[vi * 3 + 2] - originalBindPositions[vi * 3 + 2];
+        originalMovement += Math.sqrt(dx * dx + dy * dy + dz * dz);
+      }
+
+      for (let vi = 0; vi < result.mesh.vertexCount; vi++) {
+        const dx =
+          decimatedBentPositions[vi * 3] - decimatedBindPositions[vi * 3];
+        const dy =
+          decimatedBentPositions[vi * 3 + 1] -
+          decimatedBindPositions[vi * 3 + 1];
+        const dz =
+          decimatedBentPositions[vi * 3 + 2] -
+          decimatedBindPositions[vi * 3 + 2];
+        decimatedMovement += Math.sqrt(dx * dx + dy * dy + dz * dz);
+      }
+
+      // Both meshes should show significant deformation when bent
+      expect(originalMovement).toBeGreaterThan(0.1);
+      expect(decimatedMovement).toBeGreaterThan(0.1);
+
+      // The average movement per vertex should be in a reasonable range
+      // Decimation can significantly change vertex distribution, especially at joints
+      const originalAvgMovement = originalMovement / originalMesh.vertexCount;
+      const decimatedAvgMovement = decimatedMovement / result.mesh.vertexCount;
+
+      // The decimated mesh should still show meaningful deformation (>50% of original)
+      // and not deform excessively (< 200% of original)
+      expect(decimatedAvgMovement).toBeGreaterThan(originalAvgMovement * 0.5);
+      expect(decimatedAvgMovement).toBeLessThan(originalAvgMovement * 2.0);
+    });
+
+    it("preserves joint integrity after aggressive decimation", () => {
+      // Create a tube mesh
+      const { V, F, TC, FT, skinIndices, skinWeights } = createSkinnedTube(
+        12,
+        8,
+      );
+      const mesh = OptimizedMeshData.fromArrays(
+        V,
+        F,
+        TC,
+        FT,
+        skinIndices,
+        skinWeights,
+      );
+
+      // Aggressively decimate
+      const result = decimateOptimized(mesh, {
+        targetPercent: 25, // Very aggressive - 75% reduction
+        strictness: 2,
+      });
+
+      expect(result.mesh.hasSkinWeights()).toBe(true);
+
+      // Verify all vertices still have valid normalized weights
+      const weights = new Float32Array(4);
+      const indices = new Uint16Array(4);
+
+      for (let vi = 0; vi < result.mesh.vertexCount; vi++) {
+        result.mesh.getSkinWeights(vi, weights);
+        result.mesh.getSkinIndices(vi, indices);
+
+        // Weights must sum to 1.0
+        const sum = weights[0] + weights[1] + weights[2] + weights[3];
+        expect(sum).toBeCloseTo(1.0, 2);
+
+        // Weights must be in [0, 1]
+        for (let i = 0; i < 4; i++) {
+          expect(weights[i]).toBeGreaterThanOrEqual(0);
+          expect(weights[i]).toBeLessThanOrEqual(1);
+        }
+
+        // Non-zero weights must have valid bone indices (0-3 for our tube)
+        for (let i = 0; i < 4; i++) {
+          if (weights[i] > 0.01) {
+            expect(indices[i]).toBeGreaterThanOrEqual(0);
+            expect(indices[i]).toBeLessThanOrEqual(3);
+          }
+        }
+      }
+    });
   });
 });

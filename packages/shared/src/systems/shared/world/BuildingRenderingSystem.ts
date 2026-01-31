@@ -75,6 +75,7 @@ import THREE, {
   abs,
   viewportCoordinate,
 } from "../../../extras/three/three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { SystemBase } from "../infrastructure/SystemBase";
 import type { World } from "../../../types";
@@ -1494,12 +1495,12 @@ export class BuildingRenderingSystem extends SystemBase {
     // Create shared impostor material for atlas
     // Note: This uses a simplified material since we can't use the @hyperscape/impostor
     // material directly with atlas (it expects individual textures)
-    const atlasMaterial = new THREE.MeshBasicMaterial({
-      map: atlasTexture.texture,
-      transparent: true,
-      alphaTest: 0.1,
-      side: THREE.DoubleSide,
-    });
+    // Use MeshBasicNodeMaterial for WebGPU compatibility
+    const atlasMaterial = new MeshBasicNodeMaterial();
+    atlasMaterial.map = atlasTexture.texture;
+    atlasMaterial.transparent = true;
+    atlasMaterial.alphaTest = 0.1;
+    atlasMaterial.side = THREE.DoubleSide;
     this.world.setupMaterial(atlasMaterial);
 
     // Create billboard geometry (unit plane)
@@ -1784,7 +1785,7 @@ export class BuildingRenderingSystem extends SystemBase {
 
       if (mergedFloorGeo) {
         // Floors use a simple material (no occlusion needed - they're walkable)
-        const floorMaterial = new THREE.MeshStandardMaterial({
+        const floorMaterial = new MeshStandardNodeMaterial({
           vertexColors: true,
           roughness: 0.85,
           metalness: 0.05,

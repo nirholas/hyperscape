@@ -59,7 +59,7 @@
  * @public
  */
 
-import THREE from "../../extras/three/three";
+import THREE, { MeshStandardNodeMaterial } from "../../extras/three/three";
 import type { World } from "../../core/World";
 import type { EntityData, Vector3 } from "../../types";
 import type {
@@ -604,8 +604,8 @@ export class PlayerEntity extends CombatantEntity {
   protected async createMesh(): Promise<void> {
     // Create player capsule geometry (represents the player body)
     const geometry = new THREE.CapsuleGeometry(0.4, 1.2, 4, 8);
-    // Use MeshStandardMaterial for proper lighting (responds to sun, moon, and environment maps)
-    const material = new THREE.MeshStandardMaterial({
+    // Use MeshStandardNodeMaterial for WebGPU-native TSL dissolve support
+    const material = new MeshStandardNodeMaterial({
       color: 0x4169e1, // Royal blue for player
       emissive: 0x1a3470,
       emissiveIntensity: 0.15,

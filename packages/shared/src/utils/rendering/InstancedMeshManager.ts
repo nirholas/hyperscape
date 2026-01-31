@@ -715,6 +715,8 @@ type MobInstancedGroup = {
   isFrozen: boolean;
   /** Merged geometry (if multiple skinned meshes were merged) */
   mergedGeometry?: THREE.BufferGeometry;
+  /** VRM humanoid for bone propagation (cloned per group) */
+  vrmHumanoid?: VRMHumanoidLike;
 };
 
 /**
@@ -756,6 +758,18 @@ type MobImposterModel = {
   gridSizeY: number;
 };
 
+/** VRM humanoid interface for bone propagation */
+type VRMHumanoidLike = {
+  update?: (delta: number) => void;
+  clone?: () => VRMHumanoidLike;
+  _rawHumanBones?: {
+    humanBones?: Record<string, { node?: THREE.Object3D }>;
+  };
+  _normalizedHumanBones?: {
+    humanBones?: Record<string, { node?: THREE.Object3D }>;
+  };
+};
+
 type MobInstancedModel = {
   modelPath: string;
   templateScene: THREE.Object3D;
@@ -766,6 +780,8 @@ type MobInstancedModel = {
   imposter: MobImposterModel | null;
   /** Bounding box dimensions for imposter sizing */
   boundingBox: THREE.Box3;
+  /** VRM humanoid for bone propagation (normalized -> raw) */
+  vrmHumanoid?: VRMHumanoidLike;
 };
 
 type MobInstanceRegistration = {
@@ -777,7 +793,7 @@ type MobInstanceRegistration = {
   initialState: MobAnimationState;
 };
 
-const MOB_MODEL_SCALE = 100; // cm to meters (matches MobEntity)
+const MOB_MODEL_SCALE = 100; // GLB models are in centimeters, need cm→m conversion
 const DEFAULT_MOB_VARIANTS = 3; // animation phase buckets per state
 
 // Note: Imposter distances are now dynamic, initialized from shadow quality
@@ -1026,6 +1042,11 @@ export class MobInstancedRenderer {
       variant,
     );
 
+    // VRM avatars are already normalized to ~1.6m (meters), don't apply cm→m scale
+    // GLB models are typically in centimeters and need the 100x scale
+    const isVRM = registration.modelPath.toLowerCase().endsWith(".vrm");
+    const scaleMultiplier = isVRM ? 1 : MOB_MODEL_SCALE;
+
     const handle: MobInstancedHandle = {
       id: registration.id,
       modelKey: model.modelPath,
@@ -1034,9 +1055,9 @@ export class MobInstancedRenderer {
       index: -1,
       hidden: false,
       scale: new THREE.Vector3(
-        registration.scale.x * MOB_MODEL_SCALE,
-        registration.scale.y * MOB_MODEL_SCALE,
-        registration.scale.z * MOB_MODEL_SCALE,
+        registration.scale.x * scaleMultiplier,
+        registration.scale.y * scaleMultiplier,
+        registration.scale.z * scaleMultiplier,
       ),
       position: registration.position.clone(),
       quaternion: registration.quaternion.clone(),
@@ -1323,6 +1344,13 @@ export class MobInstancedRenderer {
           if (group.mixer) {
             group.mixer.update(lod.effectiveDelta);
           }
+
+          // CRITICAL: Propagate VRM normalized bone transforms to raw bones
+          // Without this, animations on normalized bones never reach the visible skeleton
+          if (group.vrmHumanoid?.update) {
+            group.vrmHumanoid.update(lod.effectiveDelta);
+          }
+
           // Update skeletons with per-frame budget
           if (
             group.skeletons.length > 0 &&
@@ -1333,7 +1361,10 @@ export class MobInstancedRenderer {
                 break;
               const bones = skeleton.bones;
               for (let i = 0; i < bones.length; i += 1) {
-                bones[i].updateMatrixWorld();
+                const bone = bones[i];
+                if (bone) {
+                  bone.updateMatrixWorld();
+                }
               }
               skeleton.update();
               skeletonUpdatesThisFrame++;
@@ -1365,13 +1396,13 @@ export class MobInstancedRenderer {
 
       // Apply cached rest pose matrices to bones
       for (let i = 0; i < bones.length && i < restMatrices.length; i += 1) {
-        bones[i].matrix.copy(restMatrices[i]);
-        bones[i].matrix.decompose(
-          bones[i].position,
-          bones[i].quaternion,
-          bones[i].scale,
-        );
-        bones[i].updateMatrixWorld(true);
+        const bone = bones[i];
+        const restMatrix = restMatrices[i];
+        if (bone && restMatrix) {
+          bone.matrix.copy(restMatrix);
+          bone.matrix.decompose(bone.position, bone.quaternion, bone.scale);
+          bone.updateMatrixWorld(true);
+        }
       }
       skeleton.update();
     }
@@ -1580,16 +1611,16 @@ export class MobInstancedRenderer {
 
   /**
    * Switch a mob from imposter billboard back to 3D mesh.
+   *
+   * CRITICAL: Add to 3D mesh FIRST, then remove from imposter.
+   * This prevents any empty frame where the mob is not visible in either.
    */
   private switchTo3D(handle: MobInstancedHandle): void {
     const model = this.models.get(handle.modelKey);
     if (!model || !model.imposter) return;
 
-    // Remove from imposter mesh
-    this.removeFromImposter(model.imposter, handle);
-    this.imposterHandles.delete(handle.id);
-
-    // Add back to 3D group
+    // Add back to 3D group FIRST (before removing from imposter)
+    // This ensures the mob is always visible during the transition
     const group = this.getOrCreateGroup(model, handle.state, handle.variant);
     this.addInstanceToGroup(
       group,
@@ -1598,6 +1629,10 @@ export class MobInstancedRenderer {
       handle.quaternion,
       false,
     );
+
+    // NOW remove from imposter mesh (after 3D is visible)
+    this.removeFromImposter(model.imposter, handle);
+    this.imposterHandles.delete(handle.id);
   }
 
   /**
@@ -2171,6 +2206,9 @@ export class MobInstancedRenderer {
     return instanced;
   }
 
+  // Cache for VRM bone name mappings (VRM standard name -> actual bone node name)
+  private vrmBoneNameMaps = new Map<string, Map<string, string>>();
+
   private async getOrLoadModel(
     modelPath: string,
   ): Promise<MobInstancedModel | null> {
@@ -2179,10 +2217,140 @@ export class MobInstancedRenderer {
       return cached.supportsInstancing ? cached : null;
     }
 
-    const { scene, animations } = await modelCache.loadModel(
-      modelPath,
-      this.world,
-    );
+    const isVRM = modelPath.toLowerCase().endsWith(".vrm");
+    let scene: THREE.Object3D;
+    let animations: THREE.AnimationClip[];
+    let vrmBoneNameMap: Map<string, string> | undefined;
+    let vrmHumanoid: VRMHumanoidLike | undefined;
+
+    if (isVRM && this.world.loader) {
+      // For VRM files, load via avatar loader to get proper VRM processing with normalized bones
+      try {
+        type LoadedAvatarType = {
+          factory?: {
+            create: (
+              matrix: THREE.Matrix4,
+              hooks?: unknown,
+            ) => {
+              raw?: {
+                scene?: THREE.Object3D;
+                humanoid?: VRMHumanoidLike;
+                userData?: { vrm?: { humanoid?: VRMHumanoidLike } };
+              };
+              humanoid?: {
+                getNormalizedBoneNode?: (
+                  boneName: string,
+                ) => THREE.Object3D | null;
+                update?: (delta: number) => void;
+                clone?: () => VRMHumanoidLike;
+                _rawHumanBones?: unknown;
+                _normalizedHumanBones?: unknown;
+              };
+            };
+          };
+        };
+
+        const avatarResult = (await this.world.loader.load(
+          "avatar",
+          modelPath,
+        )) as LoadedAvatarType;
+
+        if (!avatarResult?.factory?.create) {
+          throw new Error("Avatar loader returned invalid factory");
+        }
+
+        // Create a VRM instance to extract the scene and bone mapping
+        // IMPORTANT: Don't pass a scene - we don't want the VRM added to the world scene yet
+        // We'll extract its raw scene and use it as a template for cloning
+        const vrmInstance = avatarResult.factory.create(new THREE.Matrix4(), {
+          scene: undefined, // Don't add to any scene
+          camera: this.world.camera,
+          loader: this.world.loader,
+          templateMode: true, // Suppress "no scene" error - we're extracting template data only
+        });
+
+        if (!vrmInstance?.raw?.scene) {
+          throw new Error("VRM instance has no scene");
+        }
+
+        scene = vrmInstance.raw.scene;
+        animations = []; // VRM doesn't have embedded animations, we load emotes separately
+
+        // Store VRM humanoid for bone propagation (normalized -> raw)
+        // This is CRITICAL for VRM animations to work - without humanoid.update(),
+        // normalized bone transforms never propagate to the visible raw bones
+        // The humanoid is stored in userData.vrm (from cloneGLB) with remapped bone references
+        const clonedVRM = vrmInstance.raw?.userData?.vrm;
+        if (clonedVRM?.humanoid?.update) {
+          vrmHumanoid = clonedVRM.humanoid as VRMHumanoidLike;
+          console.log(
+            `[MobInstancedRenderer] ✅ Got VRM humanoid for bone propagation: ${modelPath}`,
+          );
+        } else {
+          console.warn(
+            `[MobInstancedRenderer] ⚠️ No VRM humanoid.update() available - animations may not work correctly: ${modelPath}`,
+          );
+        }
+
+        // Build bone name mapping from VRM humanoid
+        if (vrmInstance.humanoid?.getNormalizedBoneNode) {
+          vrmBoneNameMap = new Map<string, string>();
+          const vrmBoneNames = [
+            "hips",
+            "spine",
+            "chest",
+            "upperChest",
+            "neck",
+            "head",
+            "leftShoulder",
+            "leftUpperArm",
+            "leftLowerArm",
+            "leftHand",
+            "rightShoulder",
+            "rightUpperArm",
+            "rightLowerArm",
+            "rightHand",
+            "leftUpperLeg",
+            "leftLowerLeg",
+            "leftFoot",
+            "leftToes",
+            "rightUpperLeg",
+            "rightLowerLeg",
+            "rightFoot",
+            "rightToes",
+          ];
+          for (const boneName of vrmBoneNames) {
+            const node = vrmInstance.humanoid.getNormalizedBoneNode(
+              boneName as Parameters<
+                typeof vrmInstance.humanoid.getNormalizedBoneNode
+              >[0],
+            );
+            if (node?.name) {
+              vrmBoneNameMap.set(boneName, node.name);
+            }
+          }
+          this.vrmBoneNameMaps.set(modelPath, vrmBoneNameMap);
+        }
+
+        console.log(
+          `[MobInstancedRenderer] ✅ Loaded VRM with normalized bones: ${modelPath}`,
+        );
+      } catch (err) {
+        console.warn(
+          `[MobInstancedRenderer] VRM avatar loader failed, falling back to GLTF: ${modelPath}`,
+          err,
+        );
+        // Fallback to regular GLTF loading
+        const result = await modelCache.loadModel(modelPath, this.world);
+        scene = result.scene;
+        animations = result.animations;
+      }
+    } else {
+      // Non-VRM or no loader available - use regular GLTF loading
+      const result = await modelCache.loadModel(modelPath, this.world);
+      scene = result.scene;
+      animations = result.animations;
+    }
 
     const skinnedMeshes: THREE.SkinnedMesh[] = [];
     const nonSkinnedMeshes: THREE.Mesh[] = [];
@@ -2197,10 +2365,29 @@ export class MobInstancedRenderer {
       }
     });
 
+    // Validate skeletons - filter out undefined bones (can happen with WebGPU)
+    for (const mesh of skinnedMeshes) {
+      if (mesh.skeleton) {
+        const validBones = mesh.skeleton.bones.filter(
+          (bone): bone is THREE.Bone => bone !== undefined && bone !== null,
+        );
+        if (validBones.length !== mesh.skeleton.bones.length) {
+          console.warn(
+            `[MobInstancedRenderer] Cleaned ${mesh.skeleton.bones.length - validBones.length} undefined bones from skeleton in ${modelPath}`,
+          );
+          mesh.skeleton.bones = validBones;
+        }
+      }
+    }
+
     const supportsInstancing =
       skinnedMeshes.length > 0 && nonSkinnedMeshes.length === 0;
 
-    const clips = await this.resolveAnimationClips(modelPath, animations);
+    const clips = await this.resolveAnimationClips(
+      modelPath,
+      animations,
+      scene,
+    );
 
     // Calculate bounding box for imposter sizing
     const boundingBox = new THREE.Box3();
@@ -2231,6 +2418,7 @@ export class MobInstancedRenderer {
       groups: new Map(),
       imposter: null,
       boundingBox,
+      vrmHumanoid,
     };
 
     // Create imposter for this model (only if we can render)
@@ -2259,10 +2447,14 @@ export class MobInstancedRenderer {
     scene: THREE.Object3D,
   ): MobImposterModel | null {
     // Calculate dimensions from bounding box
+    // VRM avatars are already in meters, GLB models are in centimeters
+    const isVRM = model.modelPath.toLowerCase().endsWith(".vrm");
+    const scaleMultiplier = isVRM ? 1 : MOB_MODEL_SCALE;
+
     const size = new THREE.Vector3();
     model.boundingBox.getSize(size);
-    const width = Math.max(size.x, size.z) * MOB_MODEL_SCALE;
-    const height = size.y * MOB_MODEL_SCALE;
+    const width = Math.max(size.x, size.z) * scaleMultiplier;
+    const height = size.y * scaleMultiplier;
 
     // Extract model ID from path for caching
     const pathParts = model.modelPath.split("/");
@@ -2293,6 +2485,7 @@ export class MobInstancedRenderer {
             bakeResult,
             width,
             height,
+            isVRM,
           );
         }
       })
@@ -2325,6 +2518,18 @@ export class MobInstancedRenderer {
       return null;
     }
 
+    // Validate skeletons before cloning - filter out undefined bones (can happen with WebGPU)
+    scene.traverse((child) => {
+      if (child instanceof THREE.SkinnedMesh && child.skeleton) {
+        const validBones = child.skeleton.bones.filter(
+          (bone): bone is THREE.Bone => bone !== undefined && bone !== null,
+        );
+        if (validBones.length !== child.skeleton.bones.length) {
+          child.skeleton.bones = validBones;
+        }
+      }
+    });
+
     // Clone scene to prepare for baking (set idle pose)
     const bakeScene = SkeletonUtils.clone(scene);
 
@@ -2335,6 +2540,18 @@ export class MobInstancedRenderer {
         skinnedMeshes.push(child);
       }
     });
+
+    // Validate cloned skeletons - filter out undefined bones (can happen with WebGPU)
+    for (const mesh of skinnedMeshes) {
+      if (mesh.skeleton) {
+        const validBones = mesh.skeleton.bones.filter(
+          (bone): bone is THREE.Bone => bone !== undefined && bone !== null,
+        );
+        if (validBones.length !== mesh.skeleton.bones.length) {
+          mesh.skeleton.bones = validBones;
+        }
+      }
+    }
 
     if (model.clips.idle && skinnedMeshes.length > 0) {
       const mixer = new THREE.AnimationMixer(skinnedMeshes[0]);
@@ -2371,15 +2588,19 @@ export class MobInstancedRenderer {
     bakeResult: ImpostorBakeResult,
     width: number,
     height: number,
+    isVRM: boolean,
   ): MobImposterModel {
     const { atlasTexture, gridSizeX, gridSizeY, boundingSphere } = bakeResult;
 
+    // VRM avatars are already in meters, GLB models need cm→m conversion
+    const scaleMultiplier = isVRM ? 1 : MOB_MODEL_SCALE;
+
     // Use bounding sphere for sizing if available
     const finalWidth = boundingSphere
-      ? boundingSphere.radius * 2 * MOB_MODEL_SCALE
+      ? boundingSphere.radius * 2 * scaleMultiplier
       : width;
     const finalHeight = boundingSphere
-      ? boundingSphere.radius * 2 * MOB_MODEL_SCALE
+      ? boundingSphere.radius * 2 * scaleMultiplier
       : height;
 
     // Create material using appropriate type based on renderer backend
@@ -2434,9 +2655,22 @@ export class MobInstancedRenderer {
   // NOTE: Simple billboard and CDN-based octahedral impostor methods removed.
   // All impostor baking is now handled by ImpostorManager using @hyperscape/impostor.
 
+  /**
+   * Convert VRM standard bone name to normalized bone node name.
+   * VRM library creates normalized bones with "Normalized_" prefix and PascalCase.
+   * @param vrmBoneName - VRM standard name (e.g., "hips", "leftUpperArm")
+   * @returns Normalized bone node name (e.g., "Normalized_Hips", "Normalized_LeftUpperArm")
+   */
+  private toNormalizedBoneName(vrmBoneName: string): string {
+    if (!vrmBoneName) return vrmBoneName;
+    // Capitalize first letter and prepend "Normalized_"
+    return `Normalized_${vrmBoneName.charAt(0).toUpperCase()}${vrmBoneName.slice(1)}`;
+  }
+
   private async resolveAnimationClips(
     modelPath: string,
     animations: THREE.AnimationClip[],
+    scene?: THREE.Object3D,
   ): Promise<MobAnimationClips> {
     const clips: MobAnimationClips = {};
 
@@ -2451,6 +2685,92 @@ export class MobInstancedRenderer {
     // Return early if found
     if (clips.idle || clips.walk) {
       clips.idle ??= clips.walk;
+      return clips;
+    }
+
+    // For VRM avatars, load emote animations with proper retargeting
+    // VRM avatars use the shared emote system with Mixamo→VRM bone name mapping
+    const isVRM = modelPath.toLowerCase().endsWith(".vrm");
+    if (isVRM && this.world.loader) {
+      // Get cached bone name mapping for this VRM (built during getOrLoadModel)
+      const boneNameMap = this.vrmBoneNameMaps.get(modelPath);
+
+      // Check if scene has normalized bones (VRM was loaded with VRM loader)
+      const hasNormalizedBones =
+        scene && !!scene.getObjectByName("Normalized_Hips");
+
+      // Load emote GLB files using the emote loader for proper retargeting
+      const emoteFiles = [
+        { name: "idle", path: "asset://emotes/emote-idle.glb" },
+        { name: "walk", path: "asset://emotes/emote-walk.glb" },
+      ];
+
+      type EmoteLoaderResult = {
+        toClip: (options?: {
+          rootToHips?: number;
+          version?: string;
+          getBoneName?: (name: string) => string | undefined;
+        }) => THREE.AnimationClip;
+      };
+
+      for (const { name, path } of emoteFiles) {
+        try {
+          // Use emote loader which creates retargetable animation factory
+          const emoteFactory = (await this.world.loader.load(
+            "emote",
+            path,
+          )) as EmoteLoaderResult;
+
+          if (emoteFactory?.toClip) {
+            // Create getBoneName function based on available bone mapping
+            let getBoneName:
+              | ((vrmBoneName: string) => string | undefined)
+              | undefined;
+
+            if (boneNameMap && boneNameMap.size > 0) {
+              // Use cached bone name mapping from VRM humanoid
+              getBoneName = (vrmBoneName: string) =>
+                boneNameMap.get(vrmBoneName);
+            } else if (hasNormalizedBones) {
+              // Fallback to normalized bone naming convention
+              getBoneName = (vrmBoneName: string) =>
+                this.toNormalizedBoneName(vrmBoneName);
+            }
+
+            // Create retargeted clip with VRM bone names
+            const clip = emoteFactory.toClip({
+              rootToHips: 1.0, // Standard VRM height ratio
+              version: "1", // VRM 1.0 format
+              getBoneName,
+            });
+
+            if (name === "idle") {
+              clips.idle ??= clip;
+              console.log(
+                `[MobInstancedRenderer] ✅ Loaded idle emote for ${modelPath}`,
+              );
+            }
+            if (name === "walk") {
+              clips.walk ??= clip;
+              console.log(
+                `[MobInstancedRenderer] ✅ Loaded walk emote for ${modelPath}`,
+              );
+            }
+          }
+        } catch (err) {
+          // Emote files should always exist - log error if not found
+          console.warn(
+            `[MobInstancedRenderer] ❌ Failed to load emote ${path}:`,
+            err,
+          );
+        }
+      }
+      clips.idle ??= clips.walk;
+      if (!clips.idle && !clips.walk) {
+        console.error(
+          `[MobInstancedRenderer] ❌ No animations loaded for VRM ${modelPath}! Characters will be in T-pose.`,
+        );
+      }
       return clips;
     }
 
@@ -2627,12 +2947,33 @@ export class MobInstancedRenderer {
     const sourceScene = SkeletonUtils.clone(model.templateScene);
     sourceScene.updateMatrixWorld(true);
 
+    // Clone and remap humanoid for this group's scene
+    // Each group needs its own humanoid that references its own cloned bones
+    let groupHumanoid: VRMHumanoidLike | undefined;
+    if (model.vrmHumanoid?.clone) {
+      groupHumanoid = model.vrmHumanoid.clone();
+      // Remap humanoid bone references to cloned scene
+      this.remapHumanoidBones(groupHumanoid, sourceScene);
+    }
+
     const skinnedMeshes: THREE.SkinnedMesh[] = [];
     sourceScene.traverse((child) => {
       if (child instanceof THREE.SkinnedMesh) {
         skinnedMeshes.push(child);
       }
     });
+
+    // Validate cloned skeletons - filter out undefined bones (can happen with WebGPU)
+    for (const mesh of skinnedMeshes) {
+      if (mesh.skeleton) {
+        const validBones = mesh.skeleton.bones.filter(
+          (bone): bone is THREE.Bone => bone !== undefined && bone !== null,
+        );
+        if (validBones.length !== mesh.skeleton.bones.length) {
+          mesh.skeleton.bones = validBones;
+        }
+      }
+    }
 
     const clip = state === "walk" ? model.clips.walk : model.clips.idle;
     let mixer: THREE.AnimationMixer | undefined;
@@ -2649,6 +2990,33 @@ export class MobInstancedRenderer {
         clip.duration > 0 ? (variant / this.variantCount) * clip.duration : 0;
       action.time = offset;
       mixer.update(0);
+
+      // CRITICAL: Propagate VRM normalized bone transforms to raw bones
+      // This is where A-pose handling happens - without this, animations don't reach visible skeleton
+      if (groupHumanoid?.update) {
+        groupHumanoid.update(0);
+      }
+
+      // CRITICAL: Update skeleton immediately to apply animation pose
+      // Without this, the skinned mesh stays in T-pose until the update loop runs
+      for (const mesh of skinnedMeshes) {
+        if (mesh.skeleton) {
+          for (const bone of mesh.skeleton.bones) {
+            if (bone) bone.updateMatrixWorld(true);
+          }
+          mesh.skeleton.update();
+        }
+      }
+    } else if (skinnedMeshes.length > 0) {
+      // No animation clip available - this is a PROBLEM for skinned meshes
+      // skeleton.pose() does NOT help - it resets TO bind pose (usually T-pose)
+      // Log error so developers know to add animations
+      console.error(
+        `[MobInstancedRenderer] ❌ No animation clip for ${model.modelPath} state=${state}. ` +
+          `Instanced mobs will show T-pose! Add animations to fix.`,
+      );
+      // We can't hide individual instances easily, so we proceed but log the error
+      // The bones will be in their default loaded state (which might be T-pose)
     }
 
     const skeletons: THREE.Skeleton[] = [];
@@ -2725,6 +3093,7 @@ export class MobInstancedRenderer {
       restPose,
       isFrozen: false,
       mergedGeometry,
+      vrmHumanoid: groupHumanoid,
     };
 
     model.groups.set(key, group);
@@ -2765,10 +3134,74 @@ export class MobInstancedRenderer {
     }
 
     // Capture bone local matrices (these are now from the animated skeleton)
+    // Guard against undefined bones or matrices
+    const boneMatrices = skeleton.bones
+      .filter((bone) => bone && bone.matrix)
+      .map((bone) => bone.matrix.clone());
+
     return {
-      boneMatrices: skeleton.bones.map((bone) => bone.matrix.clone()),
+      boneMatrices,
       applied: false,
     };
+  }
+
+  /**
+   * Remap VRM humanoid bone references to a cloned scene.
+   * After SkeletonUtils.clone(), the humanoid still references original bones.
+   * This updates the references to point to the cloned bones.
+   */
+  private remapHumanoidBones(
+    humanoid: VRMHumanoidLike,
+    clonedScene: THREE.Object3D,
+  ): void {
+    // Build map of cloned bones by name
+    const clonedBonesByName = new Map<string, THREE.Bone>();
+    const clonedObjectsByName = new Map<string, THREE.Object3D>();
+
+    clonedScene.traverse((obj) => {
+      if (obj instanceof THREE.Bone) {
+        clonedBonesByName.set(obj.name, obj);
+      }
+      if (obj.name) {
+        clonedObjectsByName.set(obj.name, obj);
+      }
+    });
+
+    // Remap raw bones
+    const rawRig = humanoid._rawHumanBones;
+    if (rawRig?.humanBones) {
+      const newHumanBones: Record<string, { node?: THREE.Object3D }> = {};
+      for (const [boneName, boneData] of Object.entries(rawRig.humanBones)) {
+        const typedBoneData = boneData as { node?: THREE.Object3D };
+        if (typedBoneData?.node) {
+          const clonedBone = clonedBonesByName.get(typedBoneData.node.name);
+          if (clonedBone) {
+            newHumanBones[boneName] = { ...typedBoneData, node: clonedBone };
+          } else {
+            newHumanBones[boneName] = { ...typedBoneData };
+          }
+        }
+      }
+      rawRig.humanBones = newHumanBones;
+    }
+
+    // Remap normalized bones
+    const normRig = humanoid._normalizedHumanBones;
+    if (normRig?.humanBones) {
+      const newHumanBones: Record<string, { node?: THREE.Object3D }> = {};
+      for (const [boneName, boneData] of Object.entries(normRig.humanBones)) {
+        const typedBoneData = boneData as { node?: THREE.Object3D };
+        if (typedBoneData?.node) {
+          const clonedObj = clonedObjectsByName.get(typedBoneData.node.name);
+          if (clonedObj) {
+            newHumanBones[boneName] = { ...typedBoneData, node: clonedObj };
+          } else {
+            newHumanBones[boneName] = { ...typedBoneData };
+          }
+        }
+      }
+      normRig.humanBones = newHumanBones;
+    }
   }
 
   /**
@@ -2962,26 +3395,38 @@ export class MobInstancedRenderer {
     // Create TSL node material
     const material = new MeshStandardNodeMaterial();
 
+    // Check if source is a PBR-like material (MeshStandardMaterial, MeshPhysicalMaterial, or MeshStandardNodeMaterial)
+    const isPBRMaterial =
+      source instanceof THREE.MeshStandardMaterial ||
+      source instanceof THREE.MeshPhysicalMaterial ||
+      (source as MeshStandardNodeMaterial).isMeshStandardNodeMaterial === true;
+
     // Copy properties from source material
-    if (source instanceof THREE.MeshStandardMaterial) {
-      material.color.copy(source.color);
-      material.roughness = source.roughness;
-      material.metalness = source.metalness;
-      material.emissive.copy(source.emissive);
-      material.emissiveIntensity = source.emissiveIntensity;
-      material.vertexColors = source.vertexColors;
-      material.side = source.side;
+    if (isPBRMaterial) {
+      const pbrSource = source as
+        | THREE.MeshStandardMaterial
+        | MeshStandardNodeMaterial;
+      material.color.copy(pbrSource.color);
+      material.roughness = pbrSource.roughness;
+      material.metalness = pbrSource.metalness;
+      material.emissive.copy(pbrSource.emissive);
+      material.emissiveIntensity = pbrSource.emissiveIntensity;
+      material.vertexColors = pbrSource.vertexColors;
+      material.side = pbrSource.side;
       material.transparent = false; // Cutout rendering
       material.depthWrite = true;
       material.opacity = 1.0;
 
       // Copy textures if present
-      if (source.map) material.map = source.map;
-      if (source.normalMap) material.normalMap = source.normalMap;
-      if (source.emissiveMap) material.emissiveMap = source.emissiveMap;
-      if (source.roughnessMap) material.roughnessMap = source.roughnessMap;
-      if (source.metalnessMap) material.metalnessMap = source.metalnessMap;
-      if (source.aoMap) material.aoMap = source.aoMap;
+      if (pbrSource.map) material.map = pbrSource.map;
+      if (pbrSource.normalMap) material.normalMap = pbrSource.normalMap;
+      if (pbrSource.emissiveMap) material.emissiveMap = pbrSource.emissiveMap;
+      if (pbrSource.roughnessMap)
+        material.roughnessMap = pbrSource.roughnessMap;
+      if (pbrSource.metalnessMap)
+        material.metalnessMap = pbrSource.metalnessMap;
+      if ((pbrSource as THREE.MeshStandardMaterial).aoMap)
+        material.aoMap = (pbrSource as THREE.MeshStandardMaterial).aoMap;
     } else {
       // Fallback for non-standard materials (e.g., VRM)
       material.color.set(0x888888);
@@ -3079,29 +3524,43 @@ export class MobInstancedRenderer {
 
   private isVertexColorOnlyMaterial(
     material: THREE.Material,
-  ): material is THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial {
-    if (
-      !(material instanceof THREE.MeshStandardMaterial) &&
-      !(material instanceof THREE.MeshPhysicalMaterial)
-    ) {
+  ): material is
+    | THREE.MeshStandardMaterial
+    | THREE.MeshPhysicalMaterial
+    | MeshStandardNodeMaterial {
+    // Check if it's a PBR-like material (standard, physical, or node)
+    const isPBRMaterial =
+      material instanceof THREE.MeshStandardMaterial ||
+      material instanceof THREE.MeshPhysicalMaterial ||
+      (material as MeshStandardNodeMaterial).isMeshStandardNodeMaterial ===
+        true;
+
+    if (!isPBRMaterial) {
       return false;
     }
-    const standard = material as THREE.MeshStandardMaterial;
+
+    // Cast to access PBR material properties
+    const standard = material as
+      | THREE.MeshStandardMaterial
+      | MeshStandardNodeMaterial;
     const hasMaps = Boolean(
       standard.map ||
         standard.normalMap ||
         standard.emissiveMap ||
         standard.roughnessMap ||
         standard.metalnessMap ||
-        standard.alphaMap ||
-        standard.aoMap ||
-        standard.lightMap,
+        (standard as THREE.MeshStandardMaterial).alphaMap ||
+        (standard as THREE.MeshStandardMaterial).aoMap ||
+        (standard as THREE.MeshStandardMaterial).lightMap,
     );
     return standard.vertexColors === true && !hasMaps;
   }
 
   private getVertexColorMaterialKey(
-    material: THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial,
+    material:
+      | THREE.MeshStandardMaterial
+      | THREE.MeshPhysicalMaterial
+      | MeshStandardNodeMaterial,
   ): string {
     const color = material.color.getHex();
     const emissive = material.emissive.getHex();

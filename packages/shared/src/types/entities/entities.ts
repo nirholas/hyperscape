@@ -292,8 +292,8 @@ export interface ResourceEntityConfig
    */
   procgenPreset?: string;
   /**
-   * Path to LOD1 (low-poly) model for medium-distance rendering
-   * If not specified, full model is used until imposter distance
+   * Path to LOD1 (low-poly ~30%) model for medium-distance rendering
+   * If not specified, full model is used until LOD2 or imposter distance
    * Recommended for trees and large resources to improve mid-range performance
    */
   lod1Model?: string | null;
@@ -302,12 +302,24 @@ export interface ResourceEntityConfig
    */
   lod1ModelScale?: number;
   /**
+   * Path to LOD2 (very low-poly ~10%) model for far-distance rendering
+   * If not specified, LOD1 is used until imposter distance
+   * Recommended for trees and large resources to improve far-range performance
+   */
+  lod2Model?: string | null;
+  /**
+   * Scale for LOD2 model (defaults to modelScale if not specified)
+   */
+  lod2ModelScale?: number;
+  /**
    * LOD configuration for this resource
    */
   lodConfig?: {
-    /** Distance to switch from LOD0 to LOD1 (default: 60) */
+    /** Distance to switch from LOD0 to LOD1 (default: 50) */
     lod1Distance?: number;
-    /** Distance to switch to imposter billboard (default: 120) */
+    /** Distance to switch from LOD1 to LOD2 (default: 100) */
+    lod2Distance?: number;
+    /** Distance to switch to imposter billboard (default: 150) */
     imposterDistance?: number;
   };
   /**

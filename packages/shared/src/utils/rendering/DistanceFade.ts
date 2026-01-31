@@ -440,7 +440,15 @@ export type DissolveUniforms = {
 /**
  * Apply GLSL-based dissolve shader to material (WebGL fallback).
  * Returns uniform refs for updating fade.
- * @deprecated Prefer TSL path via applyDissolveTSL for WebGPU
+ *
+ * @deprecated This function uses GLSL shaders which are not WebGPU-native.
+ * Prefer converting materials to MeshStandardNodeMaterial and using
+ * applyDissolveTSL() for WebGPU-compatible dissolve effects.
+ *
+ * Migration path:
+ * 1. Replace MeshStandardMaterial with MeshStandardNodeMaterial
+ * 2. Use applyDissolveTSL() instead of this function
+ * 3. The TSL path provides identical visual effects with WebGPU compatibility
  */
 function applyDissolveShaderGLSL(
   material: THREE.Material,
@@ -577,7 +585,10 @@ export class DistanceFadeController {
 
   /**
    * Initialize shader-based fade for all meshes in the hierarchy.
-   * Prefers TSL path for MeshStandardNodeMaterial, falls back to GLSL for standard materials.
+   * Requires MeshStandardNodeMaterial for WebGPU-native TSL dissolve.
+   *
+   * NOTE: Materials should be created as MeshStandardNodeMaterial at the source.
+   * If you see warnings about non-node materials, convert them at creation time.
    */
   private initializeShaderFade(): void {
     this.rootObject.traverse((child) => {
@@ -592,7 +603,7 @@ export class DistanceFadeController {
             continue;
           }
 
-          // Try TSL path first for node materials
+          // Apply TSL dissolve to node materials
           if (isNodeMaterial(material)) {
             const uniforms = applyDissolveTSL(
               material as THREE.MeshStandardNodeMaterial,
@@ -603,19 +614,9 @@ export class DistanceFadeController {
               this.materialUniforms.push(uniforms);
               this.useShaderFade = true;
               this.useTSL = true;
-              continue;
             }
           }
-
-          // Fall back to GLSL path for standard materials
-          const uniforms = applyDissolveShaderGLSL(
-            material,
-            this.config.enableOcclusionDissolve,
-          );
-          if (uniforms) {
-            this.materialUniforms.push(uniforms);
-            this.useShaderFade = true;
-          }
+          // Skip non-node materials - they should be converted at the source
         }
       }
     });

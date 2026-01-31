@@ -9,3 +9,4 @@ export { ContextMenu } from "./ContextMenu";
 export { EntityContextMenu } from "./EntityContextMenu";
 export { EscapeMenu } from "./EscapeMenu";
 export { ConnectionIndicator } from "./ConnectionIndicator";
+export { GrassDebugPanel } from "./GrassDebugPanel";

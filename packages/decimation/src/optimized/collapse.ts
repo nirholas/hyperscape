@@ -13,6 +13,7 @@ import {
   PlacementBuffer,
   NULL_INDEX,
   MATRIX_6X6_SIZE,
+  MAX_BONES_PER_VERTEX,
 } from "./types.js";
 import {
   HalfEdgeBundle,
@@ -39,6 +40,16 @@ const uv = new Float32Array(2);
 const uv1 = new Float32Array(2);
 const uv2 = new Float32Array(2);
 const newUV = new Float32Array(2);
+
+// Skin weight workspace
+const skinIndicesA = new Uint16Array(MAX_BONES_PER_VERTEX);
+const skinWeightsA = new Float32Array(MAX_BONES_PER_VERTEX);
+const skinIndicesB = new Uint16Array(MAX_BONES_PER_VERTEX);
+const skinWeightsB = new Float32Array(MAX_BONES_PER_VERTEX);
+const mergedIndices = new Uint16Array(MAX_BONES_PER_VERTEX * 2);
+const mergedWeights = new Float32Array(MAX_BONES_PER_VERTEX * 2);
+const resultIndices = new Uint16Array(MAX_BONES_PER_VERTEX);
+const resultWeights = new Float32Array(MAX_BONES_PER_VERTEX);
 
 // ============================================================================
 // COLLAPSE RESULT
@@ -69,6 +80,149 @@ const collapseResult: CollapseResult = {
   affectedEdges: new Int32Array(256),
   affectedCount: 0,
 };
+
+// ============================================================================
+// SKIN WEIGHT INTERPOLATION
+// ============================================================================
+
+/**
+ * Interpolate skin weights from two vertices with optional blend factor.
+ * Combines bone influences, keeping only the top MAX_BONES_PER_VERTEX.
+ *
+ * @param mesh Mesh with skin data
+ * @param vi0 First vertex index
+ * @param vi1 Second vertex index
+ * @param t Blend factor: 0.0 = use vi0, 1.0 = use vi1, 0.5 = average
+ * @param outIndices Output bone indices (4)
+ * @param outWeights Output bone weights (4)
+ * @returns True if skin data was interpolated
+ */
+export function interpolateSkinWeights(
+  mesh: OptimizedMeshData,
+  vi0: number,
+  vi1: number,
+  t: number,
+  outIndices: Uint16Array,
+  outWeights: Float32Array,
+): boolean {
+  if (!mesh.hasSkinWeights()) return false;
+
+  // Get skin weights from both vertices
+  mesh.getSkinIndices(vi0, skinIndicesA);
+  mesh.getSkinWeights(vi0, skinWeightsA);
+  mesh.getSkinIndices(vi1, skinIndicesB);
+  mesh.getSkinWeights(vi1, skinWeightsB);
+
+  // Blend factor for each vertex
+  const w0 = 1.0 - t;
+  const w1 = t;
+
+  // Collect all bone influences with merged weights
+  let mergedCount = 0;
+
+  // Add influences from vertex A
+  for (let i = 0; i < MAX_BONES_PER_VERTEX; i++) {
+    if (skinWeightsA[i] > 0) {
+      const boneIndex = skinIndicesA[i];
+      const weight = skinWeightsA[i] * w0;
+
+      // Check if this bone already exists in merged
+      let found = false;
+      for (let j = 0; j < mergedCount; j++) {
+        if (mergedIndices[j] === boneIndex) {
+          mergedWeights[j] += weight;
+          found = true;
+          break;
+        }
+      }
+
+      if (!found && mergedCount < MAX_BONES_PER_VERTEX * 2) {
+        mergedIndices[mergedCount] = boneIndex;
+        mergedWeights[mergedCount] = weight;
+        mergedCount++;
+      }
+    }
+  }
+
+  // Add influences from vertex B
+  for (let i = 0; i < MAX_BONES_PER_VERTEX; i++) {
+    if (skinWeightsB[i] > 0) {
+      const boneIndex = skinIndicesB[i];
+      const weight = skinWeightsB[i] * w1;
+
+      // Check if this bone already exists in merged
+      let found = false;
+      for (let j = 0; j < mergedCount; j++) {
+        if (mergedIndices[j] === boneIndex) {
+          mergedWeights[j] += weight;
+          found = true;
+          break;
+        }
+      }
+
+      if (!found && mergedCount < MAX_BONES_PER_VERTEX * 2) {
+        mergedIndices[mergedCount] = boneIndex;
+        mergedWeights[mergedCount] = weight;
+        mergedCount++;
+      }
+    }
+  }
+
+  // Sort by weight (descending) using simple selection sort
+  // We only need to find the top MAX_BONES_PER_VERTEX
+  for (let i = 0; i < Math.min(MAX_BONES_PER_VERTEX, mergedCount); i++) {
+    let maxIdx = i;
+    for (let j = i + 1; j < mergedCount; j++) {
+      if (mergedWeights[j] > mergedWeights[maxIdx]) {
+        maxIdx = j;
+      }
+    }
+    // Swap
+    if (maxIdx !== i) {
+      const tmpIdx = mergedIndices[i];
+      const tmpWeight = mergedWeights[i];
+      mergedIndices[i] = mergedIndices[maxIdx];
+      mergedWeights[i] = mergedWeights[maxIdx];
+      mergedIndices[maxIdx] = tmpIdx;
+      mergedWeights[maxIdx] = tmpWeight;
+    }
+  }
+
+  // Take top MAX_BONES_PER_VERTEX and normalize
+  let totalWeight = 0;
+  const count = Math.min(MAX_BONES_PER_VERTEX, mergedCount);
+
+  for (let i = 0; i < count; i++) {
+    resultIndices[i] = mergedIndices[i];
+    resultWeights[i] = mergedWeights[i];
+    totalWeight += mergedWeights[i];
+  }
+
+  // Fill remaining slots with zeros
+  for (let i = count; i < MAX_BONES_PER_VERTEX; i++) {
+    resultIndices[i] = 0;
+    resultWeights[i] = 0;
+  }
+
+  // Normalize weights to sum to 1.0
+  if (totalWeight > 0) {
+    for (let i = 0; i < count; i++) {
+      resultWeights[i] /= totalWeight;
+    }
+  } else if (mergedCount === 0) {
+    // No influences - fallback to first bone with full weight
+    resultIndices[0] = 0;
+    resultWeights[0] = 1.0;
+  }
+
+  // Copy to output
+  for (let i = 0; i < MAX_BONES_PER_VERTEX; i++) {
+    outIndices[i] = resultIndices[i];
+    outWeights[i] = resultWeights[i];
+  }
+
+  return true;
+}
 
 // ============================================================================
 // FOLDOVER CHECK
@@ -204,6 +358,17 @@ export function tryCollapseEdge(
   // Perform the collapse
   const faceCount = mesh.faceCount;
 
+  // CRITICAL: Validate placement positions before applying collapse
+  // This catches any NaN/Infinity that might have slipped through cost computation
+  if (
+    !Number.isFinite(placement.position[0]) ||
+    !Number.isFinite(placement.position[1]) ||
+    !Number.isFinite(placement.position[2])
+  ) {
+    // Reject collapse with invalid position
+    return collapseResult;
+  }
+
   if (collapseOnSeam) {
     if (placement.tcCount !== 2 || placement.metricCount !== 2) {
       return collapseResult;
@@ -292,6 +457,14 @@ export function tryCollapseEdge(
     metrics.deleteAllMetrics(d);
 
     metrics.setMetric(s, sTc, placement.metrics.subarray(0, MATRIX_6X6_SIZE));
+  }
+
+  // Update skin weights if mesh has them
+  if (mesh.hasSkinWeights() && placement.hasSkinData) {
+    // Apply the interpolated skin weights from placement to the surviving vertex
+    mesh.setSkinData(s, placement.skinIndices, placement.skinWeights);
+    // Also update d since it points to same position (will be cleaned up later)
+    mesh.setSkinData(d, placement.skinIndices, placement.skinWeights);
   }
 
   // Track affected edges for queue update

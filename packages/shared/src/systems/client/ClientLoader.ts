@@ -26,6 +26,7 @@ import { LoadPriority, type PrioritizedLoadRequest } from "../../types";
 import type { AvatarFactory } from "../../types/rendering/nodes";
 import { EventType } from "../../types/events";
 import { SystemBase } from "../shared/infrastructure/SystemBase";
+import { modelCache } from "../../utils/rendering/ModelCache";
 
 // Browser API declarations for requestIdleCallback
 declare function requestIdleCallback(
@@ -829,18 +830,6 @@ export class ClientLoader extends SystemBase {
       typeof import("../../utils/rendering/ModelCache").modelCache.getStats
     >;
   } {
-    // Import dynamically to avoid circular dependency
-    // eslint-disable-next-line no-undef
-    const { modelCache } = require("../../utils/rendering/ModelCache") as {
-      modelCache: {
-        getStats: () => {
-          total: number;
-          paths: string[];
-          totalClones: number;
-          materialsSaved: number;
-        };
-      };
-    };
     return {
       ...this.stats,
       modelCacheStats: modelCache.getStats(),

@@ -744,14 +744,20 @@ export class ImpostorBaker {
       atlasWidth,
       atlasHeight,
       gridSizeX,
-      gridSizeY,
       octType,
       backgroundColor,
       backgroundAlpha,
+      verticalPacking = 1,
     } = finalConfig;
 
+    // Apply vertical packing ratio to gridSizeY
+    const effectiveGridSizeY = Math.max(
+      1,
+      Math.round(gridSizeX * verticalPacking),
+    );
+
     console.log(
-      "[ImpostorBaker] Starting WebGPU RenderTarget-based atlas generation...",
+      `[ImpostorBaker] Starting WebGPU atlas: gridX=${gridSizeX}, gridY=${effectiveGridSizeY} (packing=${verticalPacking})`,
     );
 
     // CRITICAL: Save and reset pixel ratio for atlas rendering
@@ -764,10 +770,11 @@ export class ImpostorBaker {
     boundingBox.getBoundingSphere(boundingSphere);
 
     // Build octahedron mesh to get view directions
+    // Uses effectiveGridSizeY for vertical packing
     const octMeshData = buildOctahedronMesh(
       octType,
       gridSizeX,
-      gridSizeY,
+      effectiveGridSizeY,
       [0, 0, 0],
       false,
     );
@@ -813,8 +820,12 @@ export class ImpostorBaker {
     // Render each cell to small target, then blit to atlas position
     // =========================================================================
 
-    const numCells = gridSizeX;
-    const cellSize = Math.floor(atlasWidth / numCells);
+    // Cell counts for X and Y axes (may differ with vertical packing)
+    const numCellsX = gridSizeX;
+    const numCellsY = effectiveGridSizeY;
+    const cellSizeX = Math.floor(atlasWidth / numCellsX);
+    const cellSizeY = Math.floor(atlasHeight / numCellsY);
+    const cellSize = Math.min(cellSizeX, cellSizeY); // For square cell render target
 
     // Save original state
     const originalRenderTarget = this.renderer.getRenderTarget();
@@ -853,7 +864,7 @@ export class ImpostorBaker {
     });
 
     console.log(
-      `[ImpostorBaker] Starting WebGPU atlas: ${numCells}x${numCells} cells, ${cellSize}px each`,
+      `[ImpostorBaker] Starting WebGPU atlas: ${numCellsX}x${numCellsY} cells, cell render=${cellSize}px`,
     );
 
     const webgpuRenderer = this.renderer as THREE_WEBGPU.WebGPURenderer;
@@ -885,9 +896,10 @@ export class ImpostorBaker {
     webgpuRenderer.autoClear = false;
 
     let renderedCells = 0;
-    for (let rowIdx = 0; rowIdx <= numCells; rowIdx++) {
-      for (let colIdx = 0; colIdx <= numCells; colIdx++) {
-        const flatIdx = rowIdx * numCells + colIdx;
+    for (let rowIdx = 0; rowIdx <= numCellsY; rowIdx++) {
+      for (let colIdx = 0; colIdx <= numCellsX; colIdx++) {
+        // Use numCellsX for row stride to index into view points array
+        const flatIdx = rowIdx * numCellsX + colIdx;
         if (flatIdx * 3 + 2 >= viewPoints.length) continue;
 
         const px = viewPoints[flatIdx * 3];
@@ -910,10 +922,10 @@ export class ImpostorBaker {
         webgpuRenderer.render(this.renderScene, this.renderCamera);
 
         // Calculate cell position in atlas
-        // Reference uses: pixelX = (colIdx / numCells) * atlasWidth
-        // Convert to NDC (-1 to 1): position at cell center
-        const cellW = 2 / numCells; // Cell width in NDC (atlas spans -1 to 1 = 2 units)
-        const cellH = 2 / numCells;
+        // Cell dimensions in NDC (atlas spans -1 to 1 = 2 units)
+        // Cells stretch to fill the atlas based on X and Y counts
+        const cellW = 2 / numCellsX;
+        const cellH = 2 / numCellsY;
 
         // Cell center position in NDC
         // Flip Y: rowIdx=0 should be at TOP (NDC Y = 1), not bottom
@@ -968,14 +980,14 @@ export class ImpostorBaker {
     console.log("[ImpostorBaker] Atlas generated using WebGPU RenderTarget:", {
       width: atlasWidth,
       height: atlasHeight,
-      gridSize: `${gridSizeX}x${gridSizeY}`,
+      gridSize: `${gridSizeX}x${effectiveGridSizeY}`,
     });
 
     return {
       atlasTexture: renderTarget.texture,
       renderTarget,
       gridSizeX,
-      gridSizeY,
+      gridSizeY: effectiveGridSizeY,
       octType,
       boundingSphere,
       boundingBox,

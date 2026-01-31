@@ -23,7 +23,7 @@
  * @see ProcessingDataProvider for smithing recipes
  */
 
-import THREE from "../../extras/three/three";
+import THREE, { MeshStandardNodeMaterial } from "../../extras/three/three";
 import type { World } from "../../core/World";
 import { EntityType, InteractionType } from "../../types/entities";
 import type { EntityInteractionData } from "../../types/entities";
@@ -240,7 +240,7 @@ export class AnvilEntity extends InteractableEntity {
 
     // FALLBACK: Create anvil visual (blue box proxy)
     const geometry = new THREE.BoxGeometry(1.0, 0.8, 0.6);
-    const material = new THREE.MeshStandardMaterial({
+    const material = new MeshStandardNodeMaterial({
       color: 0x0066ff, // Blue for anvil
       roughness: 0.5,
       metalness: 0.3,

@@ -5,11 +5,10 @@
  */
 
 import { WorkerPool } from "./WorkerPool";
-import {
-  decimate as realDecimate,
-  fromBufferGeometry,
-  toBufferGeometry,
-} from "@hyperscape/decimation";
+import { decimateOptimized, optimized } from "@hyperscape/decimation";
+
+// Use optimized functions that support skin weights
+const { fromBufferGeometry, toBufferGeometryData } = optimized;
 
 export interface LODLevelConfig {
   name: string;
@@ -23,6 +22,10 @@ export interface LODWorkerInput {
   positions: Float32Array;
   indices: Uint16Array | Uint32Array;
   uvs?: Float32Array;
+  /** Skin bone indices (4 per vertex) for skinned meshes like characters */
+  skinIndex?: Uint16Array;
+  /** Skin bone weights (4 per vertex) for skinned meshes like characters */
+  skinWeight?: Float32Array;
   lodConfigs: LODLevelConfig[];
   category?: string;
 }
@@ -32,6 +35,10 @@ export interface LODLevelOutput {
   positions: Float32Array;
   indices: Uint32Array;
   uvs: Float32Array;
+  /** Preserved skin bone indices (4 per vertex) - only present for skinned meshes */
+  skinIndex?: Uint16Array;
+  /** Preserved skin bone weights (4 per vertex) - only present for skinned meshes */
+  skinWeight?: Float32Array;
   originalVertices: number;
   finalVertices: number;
   reductionPercent: number;
@@ -86,11 +93,45 @@ export function generateLODsSync(input: LODWorkerInput): LODWorkerOutput {
         ? input.lodConfigs
         : (LOD_PRESETS[input.category ?? "default"] ?? LOD_PRESETS.default);
 
-    const meshData = fromBufferGeometry(
-      input.positions,
-      input.indices,
-      input.uvs,
-    );
+    // Build geometry object for fromBufferGeometry, including skin weights if present
+    const geometryInput: {
+      attributes: {
+        position: { array: Float32Array; count: number };
+        uv?: { array: Float32Array; count: number };
+        skinIndex?: { array: Uint16Array; count: number };
+        skinWeight?: { array: Float32Array; count: number };
+      };
+      index?: { array: Uint16Array | Uint32Array };
+    } = {
+      attributes: {
+        position: { array: input.positions, count: originalVertices },
+      },
+    };
+
+    if (input.uvs) {
+      geometryInput.attributes.uv = {
+        array: input.uvs,
+        count: input.uvs.length / 2,
+      };
+    }
+
+    if (input.skinIndex && input.skinWeight) {
+      geometryInput.attributes.skinIndex = {
+        array: input.skinIndex,
+        count: originalVertices,
+      };
+      geometryInput.attributes.skinWeight = {
+        array: input.skinWeight,
+        count: originalVertices,
+      };
+    }
+
+    if (input.indices) {
+      geometryInput.index = { array: input.indices };
+    }
+
+    const meshData = fromBufferGeometry(geometryInput);
+    const hasSkinWeights = meshData.hasSkinWeights();
 
     for (const config of configs) {
       const levelStart = performance.now();
@@ -102,14 +143,12 @@ export function generateLODsSync(input: LODWorkerInput): LODWorkerOutput {
       }
 
       const meshCopy = meshData.clone();
-      const decimationResult = realDecimate(meshCopy, {
+      const decimationResult = decimateOptimized(meshCopy, {
         targetPercent: effectiveTargetPercent,
         strictness: config.strictness ?? 2,
       });
 
-      const { positions, indices, uvs } = toBufferGeometry(
-        decimationResult.mesh,
-      );
+      const outputData = toBufferGeometryData(decimationResult.mesh);
       const reductionPercent =
         originalVertices > 0
           ? ((originalVertices - decimationResult.finalVertices) /
@@ -117,16 +156,24 @@ export function generateLODsSync(input: LODWorkerInput): LODWorkerOutput {
             100
           : 0;
 
-      levels.push({
+      const levelOutput: LODLevelOutput = {
         name: config.name,
-        positions,
-        indices,
-        uvs,
+        positions: outputData.position,
+        indices: outputData.index,
+        uvs: outputData.uv,
         originalVertices,
         finalVertices: decimationResult.finalVertices,
         reductionPercent,
         processingTimeMs: performance.now() - levelStart,
-      });
+      };
+
+      // Include skin weights if the mesh had them
+      if (hasSkinWeights && outputData.skinIndex && outputData.skinWeight) {
+        levelOutput.skinIndex = outputData.skinIndex;
+        levelOutput.skinWeight = outputData.skinWeight;
+      }
+
+      levels.push(levelOutput);
     }
 
     return {

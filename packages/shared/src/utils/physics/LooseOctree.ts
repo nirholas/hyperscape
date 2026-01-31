@@ -35,7 +35,7 @@
  */
 
 import { isBoolean } from "lodash-es";
-import THREE from "../../extras/three/three";
+import THREE, { LineBasicNodeMaterial } from "../../extras/three/three";
 import type {
   RenderHelperItem,
   ExtendedIntersection,
@@ -591,9 +591,8 @@ function createHelper(octree: LooseOctree) {
   // Remove unused offset and scale attributes
   geometry.instanceCount = 0;
   // Create material using TSL Node Material for WebGPU compatibility
-  const material = new THREE.LineBasicMaterial({
-    color: "red",
-  });
+  const material = new LineBasicNodeMaterial();
+  material.color = new THREE.Color("red");
   // Note: The instance matrix transform is handled by Three.js's built-in
   // instancing support when using InstancedBufferGeometry with iMatrix attribute.
   // For WebGPU, the transformation is applied automatically.

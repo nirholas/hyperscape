@@ -350,8 +350,8 @@ export class VRMImposterBaker {
       `[VRMImposterBaker] Baking ${request.assetId} with pose '${usedAnimationName}', bounds radius: ${boundingSphere.radius.toFixed(2)}`,
     );
 
-    // Bake imposter atlas
-    const bakeResult = this.baker.bake(vrm.scene, {
+    // Bake imposter atlas - bake() is async and must be awaited
+    const bakeResult = await this.baker.bake(vrm.scene, {
       atlasWidth: request.config.atlasWidth,
       atlasHeight: request.config.atlasHeight,
       gridSizeX: request.config.gridSizeX,

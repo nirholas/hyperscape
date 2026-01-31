@@ -18,8 +18,15 @@ export const EPS = 1e-8;
 /** Positive infinity marker */
 export const INF = Infinity;
 
-/** Null index marker for deleted/invalid elements */
+/** Null index marker for deleted/invalid elements (signed representation) */
 export const NULL_INDEX = -1;
+
+/**
+ * Unsigned representation of NULL_INDEX when stored in Uint32Array.
+ * -1 as a signed 32-bit integer becomes 0xFFFFFFFF (4294967295) when viewed as unsigned.
+ * Use this constant when comparing values from Uint32Array.
+ */
+export const NULL_INDEX_UINT32 = 0xffffffff;
 
 /** Size of a 6x6 matrix (for 5D QEM + homogeneous coordinate) */
 export const MATRIX_6X6_SIZE = 36;
@@ -29,6 +36,9 @@ export const MATRIX_8X8_SIZE = 64;
 
 /** Maximum texture coordinates per vertex (for seam vertices) */
 export const MAX_TC_PER_VERTEX = 8;
+
+/** Maximum bone influences per vertex (standard for GPU skinning) */
+export const MAX_BONES_PER_VERTEX = 4;
 
 // ============================================================================
 // OPTIMIZED MESH DATA
@@ -42,6 +52,8 @@ export const MAX_TC_PER_VERTEX = 8;
  * - uvs: [u0, v0, u1, v1, ...] (TC × 2 floats)
  * - faceVertices: [v0_f0, v1_f0, v2_f0, v0_f1, ...] (F × 3 indices)
  * - faceTexCoords: [t0_f0, t1_f0, t2_f0, t0_f1, ...] (F × 3 indices)
+ * - skinIndices: [b0, b1, b2, b3, b0, b1, ...] (V × 4 bone indices, optional)
+ * - skinWeights: [w0, w1, w2, w3, w0, w1, ...] (V × 4 weights, optional)
  */
 export class OptimizedMeshData {
   /** Vertex positions: [x, y, z, x, y, z, ...] */
@@ -55,6 +67,12 @@ export class OptimizedMeshData {
 
   /** Face texture coordinate indices: [t0, t1, t2, t0, t1, t2, ...] */
   faceTexCoords: Uint32Array;
+
+  /** Skin bone indices: [b0, b1, b2, b3, ...] (4 per vertex), null if not skinned */
+  skinIndices: Uint16Array | null;
+
+  /** Skin weights: [w0, w1, w2, w3, ...] (4 per vertex), null if not skinned */
+  skinWeights: Float32Array | null;
 
   /** Number of vertices */
   vertexCount: number;
@@ -70,14 +88,25 @@ export class OptimizedMeshData {
     uvs: Float32Array,
     faceVertices: Uint32Array,
     faceTexCoords: Uint32Array,
+    skinIndices: Uint16Array | null = null,
+    skinWeights: Float32Array | null = null,
   ) {
     this.positions = positions;
     this.uvs = uvs;
     this.faceVertices = faceVertices;
     this.faceTexCoords = faceTexCoords;
+    this.skinIndices = skinIndices;
+    this.skinWeights = skinWeights;
     this.vertexCount = positions.length / 3;
     this.texCoordCount = uvs.length / 2;
     this.faceCount = faceVertices.length / 3;
+  }
+
+  /**
+   * Check if mesh has skin weight data
+   */
+  hasSkinWeights(): boolean {
+    return this.skinIndices !== null && this.skinWeights !== null;
   }
 
   /**
@@ -88,6 +117,8 @@ export class OptimizedMeshData {
     F: [number, number, number][],
     TC: [number, number][],
     FT: [number, number, number][],
+    skinIndices?: [number, number, number, number][],
+    skinWeights?: [number, number, number, number][],
   ): OptimizedMeshData {
     const positions = new Float32Array(V.length * 3);
     for (let i = 0; i < V.length; i++) {
@@ -116,7 +147,35 @@ export class OptimizedMeshData {
       faceTexCoords[i * 3 + 2] = FT[i][2];
     }
 
-    return new OptimizedMeshData(positions, uvs, faceVertices, faceTexCoords);
+    // Handle skin weights
+    let skinIndicesArray: Uint16Array | null = null;
+    let skinWeightsArray: Float32Array | null = null;
+
+    if (skinIndices && skinWeights && skinIndices.length === V.length) {
+      skinIndicesArray = new Uint16Array(V.length * 4);
+      skinWeightsArray = new Float32Array(V.length * 4);
+
+      for (let i = 0; i < V.length; i++) {
+        const base = i * 4;
+        skinIndicesArray[base] = skinIndices[i][0];
+        skinIndicesArray[base + 1] = skinIndices[i][1];
+        skinIndicesArray[base + 2] = skinIndices[i][2];
+        skinIndicesArray[base + 3] = skinIndices[i][3];
+        skinWeightsArray[base] = skinWeights[i][0];
+        skinWeightsArray[base + 1] = skinWeights[i][1];
+        skinWeightsArray[base + 2] = skinWeights[i][2];
+        skinWeightsArray[base + 3] = skinWeights[i][3];
+      }
+    }
+
+    return new OptimizedMeshData(
+      positions,
+      uvs,
+      faceVertices,
+      faceTexCoords,
+      skinIndicesArray,
+      skinWeightsArray,
+    );
   }
 
   /**
@@ -127,6 +186,8 @@ export class OptimizedMeshData {
     F: [number, number, number][];
     TC: [number, number][];
     FT: [number, number, number][];
+    skinIndices?: [number, number, number, number][];
+    skinWeights?: [number, number, number, number][];
   } {
     const V: [number, number, number][] = [];
     for (let i = 0; i < this.vertexCount; i++) {
@@ -157,7 +218,41 @@ export class OptimizedMeshData {
       ]);
     }
 
-    return { V, F, TC, FT };
+    const result: {
+      V: [number, number, number][];
+      F: [number, number, number][];
+      TC: [number, number][];
+      FT: [number, number, number][];
+      skinIndices?: [number, number, number, number][];
+      skinWeights?: [number, number, number, number][];
+    } = { V, F, TC, FT };
+
+    // Include skin weights if present
+    if (this.skinIndices && this.skinWeights) {
+      const skinIndices: [number, number, number, number][] = [];
+      const skinWeights: [number, number, number, number][] = [];
+
+      for (let i = 0; i < this.vertexCount; i++) {
+        const base = i * 4;
+        skinIndices.push([
+          this.skinIndices[base],
+          this.skinIndices[base + 1],
+          this.skinIndices[base + 2],
+          this.skinIndices[base + 3],
+        ]);
+        skinWeights.push([
+          this.skinWeights[base],
+          this.skinWeights[base + 1],
+          this.skinWeights[base + 2],
+          this.skinWeights[base + 3],
+        ]);
+      }
+
+      result.skinIndices = skinIndices;
+      result.skinWeights = skinWeights;
+    }
+
+    return result;
   }
 
   /**
@@ -169,6 +264,8 @@ export class OptimizedMeshData {
       new Float32Array(this.uvs),
       new Uint32Array(this.faceVertices),
       new Uint32Array(this.faceTexCoords),
+      this.skinIndices ? new Uint16Array(this.skinIndices) : null,
+      this.skinWeights ? new Float32Array(this.skinWeights) : null,
     );
   }
 
@@ -245,9 +342,68 @@ export class OptimizedMeshData {
 
   /**
    * Check if face is deleted
+   * NOTE: NULL_INDEX is -1, but Uint32Array stores it as 0xFFFFFFFF (4294967295)
+   * so we check for the unsigned representation (NULL_INDEX_UINT32).
    */
   isFaceDeleted(fi: number): boolean {
-    return this.faceVertices[fi * 3] === NULL_INDEX;
+    return this.faceVertices[fi * 3] === NULL_INDEX_UINT32;
+  }
+
+  /**
+   * Get skin indices at vertex index (4 bone indices)
+   * Returns false if no skin data
+   */
+  getSkinIndices(vi: number, out: Uint16Array): boolean {
+    if (!this.skinIndices) return false;
+    const base = vi * 4;
+    out[0] = this.skinIndices[base];
+    out[1] = this.skinIndices[base + 1];
+    out[2] = this.skinIndices[base + 2];
+    out[3] = this.skinIndices[base + 3];
+    return true;
+  }
+
+  /**
+   * Get skin weights at vertex index (4 weights)
+   * Returns false if no skin data
+   */
+  getSkinWeights(vi: number, out: Float32Array): boolean {
+    if (!this.skinWeights) return false;
+    const base = vi * 4;
+    out[0] = this.skinWeights[base];
+    out[1] = this.skinWeights[base + 1];
+    out[2] = this.skinWeights[base + 2];
+    out[3] = this.skinWeights[base + 3];
+    return true;
+  }
+
+  /**
+   * Set skin data at vertex index
+   */
+  setSkinData(vi: number, indices: Uint16Array, weights: Float32Array): void {
+    if (!this.skinIndices || !this.skinWeights) return;
+    const base = vi * 4;
+    this.skinIndices[base] = indices[0];
+    this.skinIndices[base + 1] = indices[1];
+    this.skinIndices[base + 2] = indices[2];
+    this.skinIndices[base + 3] = indices[3];
+    this.skinWeights[base] = weights[0];
+    this.skinWeights[base + 1] = weights[1];
+    this.skinWeights[base + 2] = weights[2];
+    this.skinWeights[base + 3] = weights[3];
+  }
+
+  /**
+   * Copy skin data from one vertex to another
+   */
+  copySkinData(fromVi: number, toVi: number): void {
+    if (!this.skinIndices || !this.skinWeights) return;
+    const fromBase = fromVi * 4;
+    const toBase = toVi * 4;
+    for (let i = 0; i < 4; i++) {
+      this.skinIndices[toBase + i] = this.skinIndices[fromBase + i];
+      this.skinWeights[toBase + i] = this.skinWeights[fromBase + i];
+    }
   }
 }
 
@@ -368,9 +524,11 @@ export class OptimizedEdgeFlaps {
 
   /**
    * Check if edge is deleted
+   * NOTE: NULL_INDEX is -1, but Uint32Array stores it as 0xFFFFFFFF (4294967295)
+   * so we check for the unsigned representation (NULL_INDEX_UINT32).
    */
   isEdgeDeleted(ei: number): boolean {
-    return this.edges[ei * 2] === NULL_INDEX;
+    return this.edges[ei * 2] === NULL_INDEX_UINT32;
   }
 }
 
@@ -879,12 +1037,24 @@ export class PlacementBuffer {
   /** Number of metrics */
   metricCount: number;
 
+  /** Interpolated skin bone indices (4 per vertex) */
+  skinIndices: Uint16Array;
+
+  /** Interpolated skin weights (4 per vertex) */
+  skinWeights: Float32Array;
+
+  /** Whether skin data is set */
+  hasSkinData: boolean;
+
   constructor() {
     this.position = new Float32Array(3);
     this.tcs = new Float32Array(4); // 2 TCs × 2 components
     this.tcCount = 0;
     this.metrics = new Float64Array(MATRIX_6X6_SIZE * 2);
     this.metricCount = 0;
+    this.skinIndices = new Uint16Array(MAX_BONES_PER_VERTEX);
+    this.skinWeights = new Float32Array(MAX_BONES_PER_VERTEX);
+    this.hasSkinData = false;
   }
 
   /**
@@ -893,6 +1063,7 @@ export class PlacementBuffer {
   reset(): void {
     this.tcCount = 0;
     this.metricCount = 0;
+    this.hasSkinData = false;
   }
 
   /**
@@ -909,6 +1080,17 @@ export class PlacementBuffer {
    */
   getTC(index: number): [number, number] {
     return [this.tcs[index * 2], this.tcs[index * 2 + 1]];
+  }
+
+  /**
+   * Set skin data (interpolated bone weights from edge collapse)
+   */
+  setSkinData(indices: Uint16Array, weights: Float32Array): void {
+    for (let i = 0; i < MAX_BONES_PER_VERTEX; i++) {
+      this.skinIndices[i] = indices[i];
+      this.skinWeights[i] = weights[i];
+    }
+    this.hasSkinData = true;
   }
 }
 

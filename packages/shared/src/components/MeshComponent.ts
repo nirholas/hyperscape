@@ -1,6 +1,7 @@
 import { Component } from "./Component";
 import type { Entity } from "../entities/Entity";
-import THREE from "../extras/three/three";
+import THREE, { MeshStandardNodeMaterial } from "../extras/three/three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 
 /**
  * Mesh Component
@@ -109,17 +110,22 @@ export class MeshComponent extends Component {
     this.geometry = new THREE.PlaneGeometry(width, height);
   }
 
-  // Create basic materials
+  // Create basic materials using Node materials for WebGPU compatibility
   createBasicMaterial(color = 0xffffff): void {
-    this.material = new THREE.MeshBasicMaterial({ color });
+    const mat = new MeshBasicNodeMaterial();
+    mat.color = new THREE.Color(color);
+    this.material = mat;
   }
 
   createLambertMaterial(color = 0xffffff): void {
-    this.material = new THREE.MeshLambertMaterial({ color });
+    // Lambert material not available in WebGPU - use MeshBasicNodeMaterial
+    const mat = new MeshBasicNodeMaterial();
+    mat.color = new THREE.Color(color);
+    this.material = mat;
   }
 
   createStandardMaterial(color = 0xffffff, metalness = 0, roughness = 1): void {
-    this.material = new THREE.MeshStandardMaterial({
+    this.material = new MeshStandardNodeMaterial({
       color,
       metalness,
       roughness,

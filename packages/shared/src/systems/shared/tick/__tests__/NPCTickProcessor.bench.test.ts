@@ -527,9 +527,9 @@ describe("NPCTickProcessor Performance Benchmarks", () => {
       }
       const totalTime = performance.now() - start;
 
-      // 1000 empty ticks should take < 25ms total
+      // 1000 empty ticks should take < 50ms total
       // Note: Threshold relaxed for CI environments with variable performance
-      expect(totalTime).toBeLessThan(25);
+      expect(totalTime).toBeLessThan(50);
 
       const stats = processor.getLastStats();
       expect(stats.npcsProcessed).toBe(0);

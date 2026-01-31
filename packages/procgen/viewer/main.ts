@@ -5,6 +5,7 @@
  */
 
 import * as THREE from "three";
+import * as THREE_WEBGPU from "three/webgpu";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import {
@@ -367,7 +368,7 @@ let fpsUpdateTime = 0;
 // Three.js setup
 let scene: THREE.Scene;
 let camera: THREE.PerspectiveCamera;
-let renderer: THREE.WebGLRenderer;
+let renderer: THREE_WEBGPU.WebGPURenderer;
 let controls: OrbitControls;
 let directionalLight: THREE.DirectionalLight;
 let ambientLight: THREE.AmbientLight;
@@ -424,9 +425,9 @@ let debugCube: THREE.Mesh | null = null;
 type ImpostorSourceMode = "tree" | "flattened" | "debugCube";
 
 /**
- * Initialize the Three.js scene.
+ * Initialize the Three.js scene with WebGPU renderer.
  */
-function initScene(): void {
+async function initScene(): Promise<void> {
   // Scene
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x1a1a2e);
@@ -440,12 +441,14 @@ function initScene(): void {
   );
   camera.position.set(15, 10, 15);
 
-  // Renderer
-  renderer = new THREE.WebGLRenderer({ antialias: true });
+  // WebGPU Renderer
+  renderer = new THREE_WEBGPU.WebGPURenderer({ antialias: true });
   renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+  // Initialize WebGPU - this is async and required before rendering
+  await renderer.init();
+
   canvasContainer.appendChild(renderer.domElement);
 
   // Controls
@@ -2316,8 +2319,8 @@ function setupEventListeners(): void {
 /**
  * Initialize the application.
  */
-function init(): void {
-  initScene();
+async function init(): Promise<void> {
+  await initScene();
   populatePlantPresets();
   updateRockPresetOptions();
   populateBuildingTypes();

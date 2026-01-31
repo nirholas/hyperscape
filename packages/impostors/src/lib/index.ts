@@ -74,6 +74,7 @@ export {
 export type {
   OctahedronTypeValue,
   PBRBakeModeValue,
+  VerticalPackingRatio,
   ImpostorBakeConfig,
   ImpostorBakeResult,
   OctahedronMeshData,

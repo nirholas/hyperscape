@@ -24,6 +24,7 @@
  */
 
 import THREE from "../../extras/three/three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 import type { World } from "../../core/World";
 import { EntityType, InteractionType } from "../../types/entities";
 import type { EntityInteractionData } from "../../types/entities";
@@ -115,11 +116,10 @@ export class FireEntity extends InteractableEntity {
 
     // Create fire mesh (orange/red box for now, can be replaced with particle system)
     const fireGeometry = new THREE.BoxGeometry(0.6, 0.4, 0.6);
-    const fireMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff4400,
-      transparent: true,
-      opacity: 0.9,
-    });
+    const fireMaterial = new MeshBasicNodeMaterial();
+    fireMaterial.color = new THREE.Color(0xff4400);
+    fireMaterial.transparent = true;
+    fireMaterial.opacity = 0.9;
     const fireMesh = new THREE.Mesh(fireGeometry, fireMaterial);
     fireMesh.name = "FireMesh";
     fireMesh.position.y = 0.2;
@@ -127,11 +127,10 @@ export class FireEntity extends InteractableEntity {
 
     // Add inner flame (brighter)
     const innerGeometry = new THREE.BoxGeometry(0.3, 0.5, 0.3);
-    const innerMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffaa00,
-      transparent: true,
-      opacity: 0.95,
-    });
+    const innerMaterial = new MeshBasicNodeMaterial();
+    innerMaterial.color = new THREE.Color(0xffaa00);
+    innerMaterial.transparent = true;
+    innerMaterial.opacity = 0.95;
     const innerMesh = new THREE.Mesh(innerGeometry, innerMaterial);
     innerMesh.name = "InnerFlame";
     innerMesh.position.y = 0.25;

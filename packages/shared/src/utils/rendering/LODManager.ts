@@ -4,7 +4,7 @@
  * Integrated with ModelCache.loadModel() - use options.generateLODs=true to enable.
  */
 
-import THREE from "../../extras/three/three";
+import THREE, { MeshBasicNodeMaterial } from "../../extras/three/three";
 import {
   generateLODsAsync,
   generateLODsSync,
@@ -266,7 +266,8 @@ export class LODManager {
         source instanceof THREE.BufferGeometry
           ? this.geometryToMesh(source)
           : source;
-      bundle.impostor = this.octahedralImpostor.bake(bakeSource, {
+      // bake() is async and must be awaited
+      bundle.impostor = await this.octahedralImpostor.bake(bakeSource, {
         atlasWidth: opts.impostorAtlasSize,
         atlasHeight: opts.impostorAtlasSize,
         gridSizeX: opts.impostorGridX,
@@ -352,10 +353,10 @@ export class LODManager {
   }
 
   private geometryToMesh(geometry: THREE.BufferGeometry): THREE.Mesh {
-    return new THREE.Mesh(
-      geometry,
-      new THREE.MeshBasicMaterial({ color: 0xffffff }),
-    );
+    // Use MeshBasicNodeMaterial for WebGPU compatibility
+    const mat = new MeshBasicNodeMaterial();
+    mat.color = new THREE.Color(0xffffff);
+    return new THREE.Mesh(geometry, mat);
   }
 
   private async loadFromIndexedDB(id: string): Promise<LODBundle | null> {

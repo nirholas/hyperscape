@@ -24,7 +24,7 @@ import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { SSAOPass } from "three/examples/jsm/postprocessing/SSAOPass.js";
-import { WebGPURenderer } from "three/webgpu";
+import { WebGPURenderer, MeshBasicNodeMaterial } from "three/webgpu";
 
 import { getTierColor } from "../../constants/materials";
 import { ENVIRONMENTS } from "../../constants/three";
@@ -3374,15 +3374,15 @@ const ThreeViewer = forwardRef(
       console.log("   Scene children count:", scene.children.length);
 
       // Create bone highlight sphere (will be positioned on selected bone)
+      const highlightMat = new MeshBasicNodeMaterial();
+      highlightMat.color = new THREE.Color(0x00ff00);
+      highlightMat.transparent = true;
+      highlightMat.opacity = 0.6;
+      highlightMat.depthTest = false;
+      highlightMat.depthWrite = false;
       const highlightSphere = new THREE.Mesh(
         new THREE.SphereGeometry(0.15, 16, 16),
-        new THREE.MeshBasicMaterial({
-          color: 0x00ff00,
-          transparent: true,
-          opacity: 0.6,
-          depthTest: false,
-          depthWrite: false,
-        }),
+        highlightMat,
       );
       highlightSphere.visible = false;
       highlightSphere.renderOrder = 998; // Render before gizmo

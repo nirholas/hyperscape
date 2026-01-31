@@ -49,7 +49,8 @@
  * @public
  */
 
-import THREE from "../../extras/three/three";
+import THREE, { MeshStandardNodeMaterial } from "../../extras/three/three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 import type { World } from "../../core/World";
 import type { EntityData } from "../../types";
 import {
@@ -105,6 +106,13 @@ function inferLOD1Path(lod0Path: string): string {
 }
 
 /**
+ * Infer LOD2 model path from LOD0 path.
+ */
+function inferLOD2Path(lod0Path: string): string {
+  return lod0Path.replace(/\.glb$/i, "_lod2.glb");
+}
+
+/**
  * Cached LOD1 data per model path.
  * Contains shared geometry and shared dissolve material for batching.
  */
@@ -154,17 +162,50 @@ const pendingLOD1Loads = new Map<string, Promise<void>>();
 const SKIP_LOD1_TYPES = new Set(["herb", "fishing_spot"]);
 
 /**
- * Update all shared LOD1 materials with current camera and player positions.
+ * Cached LOD2 data per model path.
+ * Contains shared geometry and shared dissolve material for batching.
+ */
+interface LOD2CacheEntry {
+  /** Shared geometry (read-only, do not modify) */
+  geometry: THREE.BufferGeometry;
+  /** Original material from model (for reference) */
+  originalMaterial: THREE.Material;
+  /** Shared dissolve material - all entities use this same instance */
+  dissolveMaterial: DissolveMaterial;
+  /** Reference count for cleanup */
+  refCount: number;
+}
+
+/**
+ * Cache for loaded LOD2 meshes by model path.
+ * Stores shared geometry and SHARED dissolve material for batching.
+ * All entities using the same LOD2 model share one material = 1 draw call.
+ */
+const lod2MeshCache = new Map<string, LOD2CacheEntry | null>();
+
+/**
+ * Set of all active shared LOD2 dissolve materials.
+ * Updated globally once per frame for efficient uniform updates.
+ */
+const activeLOD2Materials = new Set<DissolveMaterial>();
+
+/**
+ * Pending LOD2 load promises to prevent duplicate loads.
+ */
+const pendingLOD2Loads = new Map<string, Promise<void>>();
+
+/**
+ * Update all shared LOD1 and LOD2 materials with current camera and player positions.
  * Skips update if positions haven't moved more than 1 unit (reduces uniform uploads).
  *
- * This batch-updates ALL shared LOD1 materials once, instead of each entity
+ * This batch-updates ALL shared LOD materials once, instead of each entity
  * updating its own cloned material. Result: O(types) instead of O(entities).
  *
  * For occlusion dissolve:
  * - cameraPos = camera position (for distance fade AND occlusion ray origin)
  * - playerPos = player position (for occlusion target - what we want to keep visible)
  */
-function updateSharedLOD1Materials(
+function updateSharedLODMaterials(
   cameraPos: { x: number; y?: number; z: number },
   playerPos: { x: number; y?: number; z: number },
 ): void {
@@ -182,9 +223,13 @@ function updateSharedLOD1Materials(
 
   // Update all shared LOD1 materials (one per model type)
   for (const mat of activeLOD1Materials) {
-    // playerPos = actual player (occlusion target)
     mat.dissolveUniforms.playerPos.value.set(playerPos.x, plrY, playerPos.z);
-    // cameraPos = camera (occlusion ray origin)
+    mat.dissolveUniforms.cameraPos.value.set(cameraPos.x, camY, cameraPos.z);
+  }
+
+  // Update all shared LOD2 materials (one per model type)
+  for (const mat of activeLOD2Materials) {
+    mat.dissolveUniforms.playerPos.value.set(playerPos.x, plrY, playerPos.z);
     mat.dissolveUniforms.cameraPos.value.set(cameraPos.x, camY, cameraPos.z);
   }
 }
@@ -201,17 +246,15 @@ const _tempPos = new THREE.Vector3();
 
 // PERFORMANCE: Shared placeholder materials (avoid creating new material per entity)
 // These are reused across all ResourceEntity instances
-const _sharedPlaceholderMaterials = new Map<
-  string,
-  THREE.MeshStandardMaterial
->();
+// Uses MeshStandardNodeMaterial for WebGPU-native TSL dissolve support
+const _sharedPlaceholderMaterials = new Map<string, MeshStandardNodeMaterial>();
 
 function getSharedPlaceholderMaterial(
   resourceType: string,
-): THREE.MeshStandardMaterial {
+): MeshStandardNodeMaterial {
   if (!_sharedPlaceholderMaterials.has(resourceType)) {
     const color = resourceType === "tree" ? 0x8b4513 : 0x808080;
-    const material = new THREE.MeshStandardMaterial({ color });
+    const material = new MeshStandardNodeMaterial({ color });
     _sharedPlaceholderMaterials.set(resourceType, material);
   }
   return _sharedPlaceholderMaterials.get(resourceType)!;
@@ -251,13 +294,15 @@ export class ResourceEntity extends InteractableEntity {
   /** Whether dissolve has been initialized on this resource */
   private dissolveInitialized = false;
 
-  // LOD (Level of Detail) system
-  /** LOD1 mesh (low-poly) for medium distance rendering (client-only) */
+  // LOD (Level of Detail) system - 3-tier: LOD0 → LOD1 → LOD2 → Impostor (HLOD)
+  /** LOD1 mesh (low-poly ~30%) for medium distance rendering (client-only) */
   private lod1Mesh?: THREE.Object3D;
-  /** Current LOD level: 0 = full detail, 1 = low poly (impostors handled by Entity.hlodState) */
-  private currentLOD: 0 | 1 = 0;
-  // NOTE: LOD1 materials are now SHARED across all entities via activeLOD1Materials
-  // They're updated globally in updateSharedLOD1Materials() for efficiency
+  /** LOD2 mesh (very low-poly ~10%) for far distance rendering (client-only) */
+  private lod2Mesh?: THREE.Object3D;
+  /** Current LOD level: 0 = full detail, 1 = low poly, 2 = very low poly (impostors handled by Entity.hlodState) */
+  private currentLOD: 0 | 1 | 2 = 0;
+  // NOTE: LOD1/LOD2 materials are now SHARED across all entities via activeLOD1Materials/activeLOD2Materials
+  // They're updated globally in updateSharedLODMaterials() for efficiency
   // NOTE: Impostor billboard is handled by Entity's HLOD system (initHLOD/updateHLOD)
 
   constructor(world: World, config: ResourceEntityConfig) {
@@ -634,8 +679,12 @@ export class ResourceEntity extends InteractableEntity {
           hemisphere: true, // Most resources are viewed from above
         });
 
-        // Load LOD1 (low-poly) model if specified
-        await this.loadLOD1Model(modelScale);
+        // Load LOD1 and LOD2 (low-poly) models if available
+        // These are loaded in parallel for performance
+        await Promise.all([
+          this.loadLOD1Model(modelScale),
+          this.loadLOD2Model(modelScale),
+        ]);
 
         return;
       } catch (error) {
@@ -768,7 +817,9 @@ export class ResourceEntity extends InteractableEntity {
     const height = 8 * scale;
     const radius = 1 * scale;
     const geometry = new THREE.CylinderGeometry(radius, radius, height, 6);
-    const material = new THREE.MeshBasicMaterial({ visible: false });
+    // Use MeshBasicNodeMaterial for WebGPU compatibility
+    const material = new MeshBasicNodeMaterial();
+    material.visible = false;
     const proxy = new THREE.Mesh(geometry, material);
     proxy.position.y = height / 2;
     proxy.name = `TreeProxy_${this.id}`;
@@ -1014,14 +1065,14 @@ export class ResourceEntity extends InteractableEntity {
   }): void {
     this.rippleRings = [];
 
+    // Use MeshBasicNodeMaterial for WebGPU compatibility
     for (let i = 0; i < variant.rippleCount; i++) {
       const geometry = new THREE.RingGeometry(0.3, 0.4, 32);
-      const material = new THREE.MeshBasicMaterial({
-        color: variant.color,
-        transparent: true,
-        opacity: 0,
-        side: THREE.DoubleSide,
-      });
+      const material = new MeshBasicNodeMaterial();
+      material.color = new THREE.Color(variant.color);
+      material.transparent = true;
+      material.opacity = 0;
+      material.side = THREE.DoubleSide;
 
       const ring = new THREE.Mesh(geometry, material);
       ring.rotation.x = -Math.PI / 2; // Horizontal
@@ -1069,7 +1120,8 @@ export class ResourceEntity extends InteractableEntity {
         } else {
           opacity = 0.6 * (1 - (phase - 0.3) / 0.7); // Fade out
         }
-        (ring.material as THREE.MeshBasicMaterial).opacity = opacity;
+        // MeshBasicNodeMaterial has opacity property
+        (ring.material as { opacity: number }).opacity = opacity;
       }
 
       this.animationFrameId = requestAnimationFrame(animate);
@@ -1083,12 +1135,12 @@ export class ResourceEntity extends InteractableEntity {
    */
   private createGlowIndicator(): void {
     const geometry = new THREE.CircleGeometry(0.6, 16);
-    const material = new THREE.MeshBasicMaterial({
-      color: 0x4488ff,
-      transparent: true,
-      opacity: 0.3,
-      side: THREE.DoubleSide,
-    });
+    // Use MeshBasicNodeMaterial for WebGPU compatibility
+    const material = new MeshBasicNodeMaterial();
+    material.color = new THREE.Color(0x4488ff);
+    material.transparent = true;
+    material.opacity = 0.3;
+    material.side = THREE.DoubleSide;
 
     this.glowMesh = new THREE.Mesh(geometry, material);
     this.glowMesh.rotation.x = -Math.PI / 2; // Horizontal
@@ -1327,13 +1379,182 @@ export class ResourceEntity extends InteractableEntity {
 
     this.node.add(this.lod1Mesh);
 
-    // LOD1 dissolve uniforms are updated globally via updateSharedLOD1Materials()
+    // LOD1 dissolve uniforms are updated globally via updateSharedLODMaterials()
     // No per-entity tracking needed
   }
 
   /**
-   * Client-side update for dissolve shader uniforms and LOD0/LOD1 transitions.
-   * Handles 2-tier LOD system: LOD0 (full) -> LOD1 (low poly).
+   * Load pre-baked LOD2 (very low-poly) model for far-distance rendering.
+   * LOD2 files are created by scripts/bake-lod.sh and follow naming: model_lod2.glb
+   *
+   * Uses a shared cache to avoid loading the same LOD2 file multiple times.
+   */
+  private async loadLOD2Model(lod0Scale: number): Promise<void> {
+    if (this.world.isServer) return;
+
+    const modelPath = this.config.model;
+    if (!modelPath) return;
+
+    // Skip LOD2 for small resource types (they go directly to imposter)
+    if (SKIP_LOD1_TYPES.has(this.config.resourceType)) {
+      return;
+    }
+
+    // Check if LOD2 is already cached
+    if (lod2MeshCache.has(modelPath)) {
+      const cached = lod2MeshCache.get(modelPath);
+      if (cached) {
+        this.createLOD2MeshFromCache(cached, lod0Scale);
+      }
+      // If cached as null, LOD2 load was attempted but file doesn't exist
+      return;
+    }
+
+    // Check if load is already in progress
+    const pending = pendingLOD2Loads.get(modelPath);
+    if (pending) {
+      await pending;
+      const cached = lod2MeshCache.get(modelPath);
+      if (cached) {
+        this.createLOD2MeshFromCache(cached, lod0Scale);
+      }
+      return;
+    }
+
+    // Start LOD2 load with a promise to prevent duplicate loads
+    const loadPromise = this.loadAndCacheLOD2(modelPath, lod0Scale);
+    pendingLOD2Loads.set(modelPath, loadPromise);
+
+    try {
+      await loadPromise;
+    } finally {
+      pendingLOD2Loads.delete(modelPath);
+    }
+  }
+
+  /**
+   * Load pre-baked LOD2 file and cache it for reuse.
+   */
+  private async loadAndCacheLOD2(
+    modelPath: string,
+    lod0Scale: number,
+  ): Promise<void> {
+    // Determine LOD2 path: use config value or infer from model path
+    const lod2ModelPath = this.config.lod2Model || inferLOD2Path(modelPath);
+
+    try {
+      const { scene: lod2Scene } = await modelCache.loadModel(
+        lod2ModelPath,
+        this.world,
+      );
+
+      // Extract geometry and material from loaded scene
+      let foundGeometry: THREE.BufferGeometry | null = null;
+      let foundMaterial: THREE.Material | null = null;
+      lod2Scene.traverse((child) => {
+        if (child instanceof THREE.Mesh && child.geometry && !foundGeometry) {
+          foundGeometry = child.geometry;
+          foundMaterial = Array.isArray(child.material)
+            ? child.material[0]
+            : child.material;
+        }
+      });
+
+      // Type assertions needed because TypeScript can't track traverse callback mutations
+      const geometry = foundGeometry as THREE.BufferGeometry | null;
+      const material = foundMaterial as THREE.Material | null;
+
+      if (geometry && material) {
+        // Create SHARED dissolve material for all entities using this LOD2 model
+        // Match building shader: only near-camera fade, no player occlusion
+        const dissolveMaterial = createDissolveMaterial(material, {
+          fadeStart: GPU_VEG_CONFIG.FADE_START,
+          fadeEnd: GPU_VEG_CONFIG.FADE_END,
+          enableNearFade: false, // Use camera-based near fade, not player-based
+          enableWaterCulling: false,
+          enableOcclusionDissolve: false, // Disable occlusion (matches buildings)
+        });
+
+        // Setup for CSM shadows
+        this.world.setupMaterial(dissolveMaterial);
+
+        // Register in the global active materials set for batch updates
+        activeLOD2Materials.add(dissolveMaterial);
+
+        const cacheEntry: LOD2CacheEntry = {
+          geometry,
+          originalMaterial: material,
+          dissolveMaterial,
+          refCount: 0,
+        };
+        lod2MeshCache.set(modelPath, cacheEntry);
+        this.createLOD2MeshFromCache(cacheEntry, lod0Scale);
+        console.log(
+          `[ResourceEntity] ✅ LOD2 for ${this.config.resourceType}: ${geometry.attributes.position?.count ?? 0} verts (pre-baked, SHARED material)`,
+        );
+        return;
+      }
+    } catch {
+      // LOD2 file not found - this is normal if it hasn't been baked yet
+      // Resource will use LOD1 -> Imposter transition instead
+    }
+
+    // Cache null to indicate LOD2 is not available for this model
+    lod2MeshCache.set(modelPath, null);
+  }
+
+  /**
+   * Create LOD2 mesh from cached shared geometry and material.
+   * Uses the SHARED dissolve material - no cloning needed.
+   */
+  private createLOD2MeshFromCache(
+    cached: LOD2CacheEntry,
+    lod0Scale: number,
+  ): void {
+    // Create mesh using SHARED geometry and SHARED dissolve material
+    // NO CLONING - all entities share the same material for batching
+    this.lod2Mesh = new THREE.Mesh(cached.geometry, cached.dissolveMaterial);
+    this.lod2Mesh.name = `ResourceLOD2_${this.config.resourceType}`;
+
+    // Increment reference count
+    cached.refCount++;
+
+    // Use LOD2 scale or fall back to LOD0 scale
+    const lod2Scale = this.config.lod2ModelScale ?? lod0Scale;
+    this.lod2Mesh.scale.set(lod2Scale, lod2Scale, lod2Scale);
+
+    // Set layer for minimap exclusion and enable shadows
+    this.lod2Mesh.layers.set(1);
+    this.lod2Mesh.castShadow = true;
+    this.lod2Mesh.receiveShadow = true;
+
+    // Set up userData (same as LOD0)
+    this.lod2Mesh.userData = {
+      type: "resource",
+      entityId: this.id,
+      name: this.config.name,
+      interactable: true,
+      resourceType: this.config.resourceType,
+      depleted: this.config.depleted,
+    };
+
+    // Position same as LOD0 mesh
+    const bbox = new THREE.Box3().setFromObject(this.lod2Mesh);
+    const minY = bbox.min.y;
+    this.lod2Mesh.position.set(0, -minY, 0);
+
+    // Start hidden - LOD0 is shown first
+    this.lod2Mesh.visible = false;
+
+    this.node.add(this.lod2Mesh);
+
+    // LOD2 dissolve uniforms are updated globally via updateSharedLODMaterials()
+    // No per-entity tracking needed
+  }
+
+  /**
+   * Client-side update for dissolve shader uniforms and LOD0/LOD1/LOD2 transitions.
+   * Handles 3-tier LOD system: LOD0 (full) -> LOD1 (low poly) -> LOD2 (very low poly).
    * NOTE: Impostor (billboard) rendering is handled by Entity's HLOD system (initHLOD/updateHLOD).
    */
   public clientUpdate(_delta: number): void {
@@ -1366,12 +1587,16 @@ export class ResourceEntity extends InteractableEntity {
     const lodConfig = this.config.lodConfig || {};
     const lod1Distance =
       lodConfig.lod1Distance ?? DEFAULT_RESOURCE_LOD.lod1Distance;
+    const lod2Distance =
+      lodConfig.lod2Distance ?? DEFAULT_RESOURCE_LOD.lod2Distance;
     const lod1DistanceSq = lod1Distance * lod1Distance;
+    const lod2DistanceSq = lod2Distance * lod2Distance;
     const hysteresisSq = 0.81; // 0.9^2 - 10% hysteresis squared
 
-    // Determine target LOD based on distance (LOD0/LOD1 only - HLOD handles impostor)
+    // Determine target LOD based on distance (LOD0/LOD1/LOD2 - HLOD handles impostor)
     const hasLOD1 = !!this.lod1Mesh;
-    let targetLOD: 0 | 1;
+    const hasLOD2 = !!this.lod2Mesh;
+    let targetLOD: 0 | 1 | 2;
 
     if (distSq < lod1DistanceSq * hysteresisSq) {
       // Very close - use LOD0 (full detail)
@@ -1379,31 +1604,51 @@ export class ResourceEntity extends InteractableEntity {
     } else if (distSq < lod1DistanceSq) {
       // In LOD0/LOD1 transition zone - use hysteresis
       targetLOD = this.currentLOD === 0 ? 0 : hasLOD1 ? 1 : 0;
-    } else {
-      // Medium/far distance - use LOD1 if available, otherwise LOD0
-      // Note: At far distance, Entity's HLOD system will show impostor instead
+    } else if (distSq < lod2DistanceSq * hysteresisSq) {
+      // Medium distance - use LOD1 if available
       targetLOD = hasLOD1 ? 1 : 0;
+    } else if (distSq < lod2DistanceSq) {
+      // In LOD1/LOD2 transition zone - use hysteresis
+      if (this.currentLOD <= 1) {
+        targetLOD = hasLOD1 ? 1 : 0;
+      } else {
+        targetLOD = hasLOD2 ? 2 : hasLOD1 ? 1 : 0;
+      }
+    } else {
+      // Far distance - use LOD2 if available, then LOD1, else LOD0
+      // Note: At very far distance, Entity's HLOD system will show impostor instead
+      targetLOD = hasLOD2 ? 2 : hasLOD1 ? 1 : 0;
     }
 
-    // Apply LOD transition if needed (only for LOD0/LOD1 - HLOD handles impostor visibility)
+    // Apply LOD transition if needed (only for LOD0/LOD1/LOD2 - HLOD handles impostor visibility)
     if (targetLOD !== this.currentLOD && this.mesh) {
-      // Update visibility based on target LOD
+      // Hide all LOD meshes first
+      this.mesh.visible = false;
+      if (this.lod1Mesh) this.lod1Mesh.visible = false;
+      if (this.lod2Mesh) this.lod2Mesh.visible = false;
+
+      // Show the target LOD mesh
       if (targetLOD === 0) {
-        // LOD0 (full detail)
         this.mesh.visible = true;
-        if (this.lod1Mesh) this.lod1Mesh.visible = false;
+      } else if (targetLOD === 1 && this.lod1Mesh) {
+        this.lod1Mesh.visible = true;
+      } else if (targetLOD === 2 && this.lod2Mesh) {
+        this.lod2Mesh.visible = true;
       } else {
-        // LOD1 (low poly)
-        this.mesh.visible = false;
-        if (this.lod1Mesh) this.lod1Mesh.visible = true;
+        // Fallback: show best available
+        if (this.lod1Mesh) {
+          this.lod1Mesh.visible = true;
+        } else {
+          this.mesh.visible = true;
+        }
       }
       this.currentLOD = targetLOD;
     }
 
-    // Update shared LOD1 materials (batch update, once per type not once per entity)
+    // Update shared LOD1/LOD2 materials (batch update, once per type not once per entity)
     // This is much more efficient than per-entity updates
     // Pass both camera and player positions for occlusion dissolve
-    updateSharedLOD1Materials(cameraPos, playerPos);
+    updateSharedLODMaterials(cameraPos, playerPos);
 
     // Throttle per-entity dissolve updates: only update if camera moved significantly (> 1m)
     // NOTE: LOD1 materials are now shared and updated globally above
@@ -1492,6 +1737,27 @@ export class ResourceEntity extends InteractableEntity {
       }
       this.node.remove(this.lod1Mesh);
       this.lod1Mesh = undefined;
+    }
+
+    // Clean up LOD2 mesh
+    // NOTE: LOD2 uses SHARED geometry and SHARED material, so we:
+    // - DO remove the mesh from the scene
+    // - DO NOT dispose geometry (shared)
+    // - DO NOT dispose material (shared)
+    // - DO decrement refCount
+    if (this.lod2Mesh) {
+      // Decrement reference count for shared LOD2 cache
+      const modelPath = this.config.model;
+      if (modelPath) {
+        const cached = lod2MeshCache.get(modelPath);
+        if (cached) {
+          cached.refCount--;
+          // If refCount reaches 0, we could clean up, but for now keep cached
+          // for potential future entities (memory vs. load time tradeoff)
+        }
+      }
+      this.node.remove(this.lod2Mesh);
+      this.lod2Mesh = undefined;
     }
 
     // NOTE: Impostor cleanup is handled by Entity's disposeHLOD() method

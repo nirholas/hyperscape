@@ -1,3 +1,42 @@
+/**
+ * Equirectangular Panorama Snapshot Utility
+ *
+ * Captures a 360° panoramic view from the player's position and returns
+ * it as a base64-encoded JPEG image.
+ *
+ * WEBGPU COMPATIBILITY NOTE:
+ * This script currently uses WebGL-specific features:
+ * - THREE.WebGLCubeRenderTarget for cube map capture
+ * - THREE.ShaderMaterial with GLSL for equirectangular projection
+ * - Synchronous readRenderTargetPixels (WebGPU requires async)
+ *
+ * For WebGPU, would need:
+ * - Use THREE.CubeRenderTarget (works with both renderers)
+ * - Use MeshBasicNodeMaterial with TSL for projection
+ * - Use async readRenderTargetPixelsAsync for pixel reading
+ * - Cube texture sampling in TSL: textureCube(envMap, direction)
+ *
+ * TSL equivalent of the projection shader would be:
+ * ```
+ * import { MeshBasicNodeMaterial, cubeTexture } from "three/webgpu";
+ * const { Fn, uv, uniform, float, vec3, sin, cos, mul, sub, PI } = THREE_WEBGPU.TSL;
+ *
+ * const material = new MeshBasicNodeMaterial();
+ * const uEnvMap = uniform(cubeRenderTarget.texture);
+ * material.colorNode = Fn(() => {
+ *   const uvCoord = uv();
+ *   const flippedU = sub(float(1.0), uvCoord.x);
+ *   const theta = mul(flippedU, mul(float(2.0), PI));
+ *   const phi = mul(uvCoord.y, PI);
+ *   const dir = vec3(
+ *     mul(sin(theta), sin(phi)),
+ *     cos(phi),
+ *     mul(cos(theta), sin(phi))
+ *   );
+ *   return cubeTexture(uEnvMap, dir);
+ * })();
+ * ```
+ */
 window.snapshotEquirectangular = async function (playerData) {
   // THREE is already available via import maps in index.html
   const renderer = window.renderer;
@@ -5,6 +44,8 @@ window.snapshotEquirectangular = async function (playerData) {
 
   const size = 1024;
 
+  // Note: Using WebGLCubeRenderTarget for now (works with both renderers)
+  // For native WebGPU, would use THREE.CubeRenderTarget
   const cubeRenderTarget = new THREE.WebGLCubeRenderTarget(size, {
     format: THREE.RGBAFormat,
     type: THREE.UnsignedByteType,
@@ -25,6 +66,8 @@ window.snapshotEquirectangular = async function (playerData) {
   const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   const sceneRTT = new THREE.Scene();
 
+  // GLSL ShaderMaterial for equirectangular projection
+  // TODO: Replace with MeshBasicNodeMaterial + TSL when WebGPU pipeline is ready
   const material = new THREE.ShaderMaterial({
     uniforms: {
       envMap: { value: cubeRenderTarget.texture },

@@ -1,4 +1,8 @@
 import * as THREE from "three";
+import type {
+  MeshStandardNodeMaterial,
+  MeshBasicNodeMaterial,
+} from "three/webgpu";
 
 // Three.js geometry types
 export type ThreeGeometry =
@@ -8,13 +12,15 @@ export type ThreeGeometry =
   | THREE.CylinderGeometry
   | THREE.PlaneGeometry;
 
-// Three.js material types
+// Three.js material types (including WebGPU/TSL Node materials)
 export type ThreeMaterial =
   | THREE.Material
   | THREE.MeshStandardMaterial
   | THREE.MeshBasicMaterial
   | THREE.MeshPhongMaterial
-  | THREE.MeshLambertMaterial;
+  | THREE.MeshLambertMaterial
+  | MeshStandardNodeMaterial
+  | MeshBasicNodeMaterial;
 
 // Three.js object types
 export interface ThreeObject3D extends THREE.Object3D {

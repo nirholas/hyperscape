@@ -24,6 +24,7 @@ import {
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
+import { MeshStandardNodeMaterial } from "three/webgpu";
 import {
   RockGenerator,
   SHAPE_PRESETS,
@@ -351,10 +352,9 @@ export const RockGenPage: React.FC = () => {
 
     // Ground plane
     const groundGeo = new THREE.PlaneGeometry(20, 20);
-    const groundMat = new THREE.MeshStandardMaterial({
-      color: 0x3a5a40,
-      roughness: 0.95,
-    });
+    const groundMat = new MeshStandardNodeMaterial();
+    groundMat.color = new THREE.Color(0x3a5a40);
+    groundMat.roughness = 0.95;
     const ground = new THREE.Mesh(groundGeo, groundMat);
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;

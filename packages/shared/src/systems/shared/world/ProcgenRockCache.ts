@@ -18,6 +18,7 @@
  */
 
 import * as THREE from "three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 import { ProcgenRockInstancer } from "./ProcgenRockInstancer";
 import type { World } from "../../../core/World";
 
@@ -162,6 +163,7 @@ function generateLOD1Rock(
   >,
   presetName: string,
   seed: number,
+  useTSL = false,
 ): { mesh: THREE.Mesh; vertexCount: number; triangleCount: number } | null {
   const result = generator.generateFromPreset(presetName, {
     seed,
@@ -169,6 +171,7 @@ function generateLOD1Rock(
       subdivisions: LOD1_SUBDIVISIONS,
       smooth: { iterations: 1, strength: 0.3 },
     },
+    useTSL,
   });
 
   if (!result) return null;
@@ -235,10 +238,10 @@ function generateLOD2CardRock(
   const cardHeight = height * LOD2_CARD_OPTIONS.cardSizeMultiplier;
   const cardGeometry = new THREE.PlaneGeometry(cardWidth, cardHeight);
 
-  const cardMaterial = new THREE.MeshBasicMaterial({
-    color: averageColor,
-    side: THREE.DoubleSide,
-  });
+  // Use MeshBasicNodeMaterial for WebGPU compatibility
+  const cardMaterial = new MeshBasicNodeMaterial();
+  cardMaterial.color = new THREE.Color(averageColor);
+  cardMaterial.side = THREE.DoubleSide;
 
   const centerY = height * 0.5;
 
@@ -268,6 +271,9 @@ async function generateVariants(presetName: string): Promise<RockVariant[]> {
     return [];
   }
 
+  // Detect WebGPU to use TSL materials (avoids ShaderMaterial compatibility issues)
+  const useTSL = worldRef?.graphics?.isWebGPU === true;
+
   const variants: RockVariant[] = [];
   const generator = new RockGenerator();
 
@@ -282,10 +288,11 @@ async function generateVariants(presetName: string): Promise<RockVariant[]> {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
 
-    // Generate LOD0 (full detail)
+    // Generate LOD0 (full detail) - use TSL for WebGPU compatibility
     const result = generator.generateFromPreset(presetName, {
       seed,
       params: { subdivisions: LOD0_SUBDIVISIONS },
+      useTSL,
     });
 
     if (!result) {
@@ -300,7 +307,7 @@ async function generateVariants(presetName: string): Promise<RockVariant[]> {
     const { averageColor, dimensions } = extractRockMetadata(result.mesh);
 
     // Generate LOD1 and LOD2
-    const lod1Result = generateLOD1Rock(generator, presetName, seed);
+    const lod1Result = generateLOD1Rock(generator, presetName, seed, useTSL);
     const lod2Group = generateLOD2CardRock(dimensions, averageColor);
 
     variants.push({
@@ -324,7 +331,7 @@ async function generateVariants(presetName: string): Promise<RockVariant[]> {
     const avgTris = Math.round(totalTris / variants.length);
     console.log(
       `[ProcgenRockCache] Generated ${variants.length} variants for "${presetName}" ` +
-        `(avg: ${avgVerts} verts, ${avgTris} tris)`,
+        `(avg: ${avgVerts} verts, ${avgTris} tris, TSL: ${useTSL})`,
     );
   }
 

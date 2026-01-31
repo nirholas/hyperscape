@@ -46,7 +46,8 @@ import type { VRMHumanBoneName } from "@pixiv/three-vrm";
 
 import { getTextureBytesFromMaterial } from "./getTextureBytesFromMaterial";
 import { getTrianglesFromGeometry } from "./getTrianglesFromGeometry";
-import THREE from "./three";
+import THREE, { MeshStandardNodeMaterial } from "./three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 
 const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
@@ -68,7 +69,7 @@ const _tempMatrix2 = new THREE.Matrix4();
 // The VRM factory's update() function passes delta directly to the AnimationMixer
 // without any internal accumulation or rate limiting.
 
-const material = new THREE.MeshBasicMaterial();
+const material = new MeshBasicNodeMaterial();
 
 /**
  * Create VRM Avatar Factory
@@ -101,10 +102,10 @@ export function createVRMFactory(
       obj.castShadow = true;
       obj.receiveShadow = true;
 
-      // Convert materials to MeshStandardMaterial for proper sun/moon/environment lighting
+      // Convert materials to MeshStandardNodeMaterial for WebGPU-native TSL support
       const convertMaterial = (
         mat: THREE.Material,
-      ): THREE.MeshStandardMaterial => {
+      ): MeshStandardNodeMaterial => {
         // Extract textures and colors from original material
         const originalMat = mat as THREE.Material & {
           map?: THREE.Texture | null;
@@ -153,7 +154,7 @@ export function createVRMFactory(
         if (originalMat.emissiveMap)
           materialParams.emissiveMap = originalMat.emissiveMap;
 
-        const newMat = new THREE.MeshStandardMaterial(materialParams);
+        const newMat = new MeshStandardNodeMaterial(materialParams);
 
         // Copy name for debugging
         newMat.name = originalMat.name || "VRM_Standard";
@@ -391,7 +392,8 @@ export function createVRMFactory(
         "[VRMFactory] WARNING: No scene in hooks, using alternate scene from node.ctx.stage.scene",
       );
       alternateScene.add(vrm.scene);
-    } else {
+    } else if (!hooks?.templateMode) {
+      // Only log error if not in template mode - template extraction doesn't need a scene
       console.error(
         "[VRMFactory] ERROR: No scene available, VRM will not be visible!",
       );
@@ -516,7 +518,10 @@ export function createVRMFactory(
       // Use for-loop instead of forEach to avoid callback allocation
       const bones = skeleton.bones;
       for (let i = 0; i < bones.length; i++) {
-        bones[i].updateMatrixWorld();
+        const bone = bones[i];
+        if (bone) {
+          bone.updateMatrixWorld();
+        }
       }
       skeleton.update();
 
@@ -603,7 +608,18 @@ export function createVRMFactory(
               version,
               getBoneName,
             });
-            const action = mixer.clipAction(clip);
+            // Filter out tracks targeting non-existent nodes to prevent THREE.js warnings
+            // This happens when animations have tracks for bones the VRM model doesn't have (e.g., finger bones)
+            const validTracks = clip.tracks.filter((track) => {
+              const nodeName = track.name.split(".")[0];
+              return vrm.scene.getObjectByName(nodeName) !== null;
+            });
+            const validClip = new THREE.AnimationClip(
+              clip.name,
+              clip.duration,
+              validTracks,
+            );
+            const action = mixer.clipAction(validClip);
             action.timeScale = speed;
             newEmote.action = action;
             newEmote.loading = false;
@@ -668,7 +684,17 @@ export function createVRMFactory(
             version,
             getBoneName,
           });
-          const action = mixer.clipAction(clip);
+          // Filter out tracks targeting non-existent nodes to prevent THREE.js warnings
+          const validTracks = clip.tracks.filter((track) => {
+            const nodeName = track.name.split(".")[0];
+            return vrm.scene.getObjectByName(nodeName) !== null;
+          });
+          const validClip = new THREE.AnimationClip(
+            clip.name,
+            clip.duration,
+            validTracks,
+          );
+          const action = mixer.clipAction(validClip);
           action.timeScale = speed;
           newEmote.action = action;
           newEmote.loading = false;
@@ -767,7 +793,17 @@ export function createVRMFactory(
               version,
               getBoneName,
             });
-            const action = mixer.clipAction(clip);
+            // Filter out tracks targeting non-existent nodes to prevent THREE.js warnings
+            const validTracks = clip.tracks.filter((track) => {
+              const nodeName = track.name.split(".")[0];
+              return vrm.scene.getObjectByName(nodeName) !== null;
+            });
+            const validClip = new THREE.AnimationClip(
+              clip.name,
+              clip.duration,
+              validTracks,
+            );
+            const action = mixer.clipAction(validClip);
             action.timeScale = speed;
             newEmote.action = action;
             newEmote.loading = false;
@@ -1036,8 +1072,32 @@ export function createVRMFactory(
  * - Hyperscape: efficient cloning for multiple instances
  */
 function cloneGLB(glb: GLBData): GLBData {
+  // Validate skeletons before cloning - filter out undefined bones (can happen with WebGPU)
+  glb.scene.traverse((child) => {
+    if (child instanceof THREE.SkinnedMesh && child.skeleton) {
+      const validBones = child.skeleton.bones.filter(
+        (bone): bone is THREE.Bone => bone !== undefined && bone !== null,
+      );
+      if (validBones.length !== child.skeleton.bones.length) {
+        child.skeleton.bones = validBones;
+      }
+    }
+  });
+
   // Deep clone the scene (including skeleton and skinned meshes)
   const clonedScene = SkeletonUtils.clone(glb.scene) as THREE.Scene;
+
+  // Validate cloned skeletons - filter out undefined bones (can happen with WebGPU)
+  clonedScene.traverse((child) => {
+    if (child instanceof THREE.SkinnedMesh && child.skeleton) {
+      const validBones = child.skeleton.bones.filter(
+        (bone): bone is THREE.Bone => bone !== undefined && bone !== null,
+      );
+      if (validBones.length !== child.skeleton.bones.length) {
+        child.skeleton.bones = validBones;
+      }
+    }
+  });
 
   // CRITICAL: Preserve scale from original scene (height normalization)
   clonedScene.scale.copy(glb.scene.scale);

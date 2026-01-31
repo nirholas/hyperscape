@@ -322,16 +322,16 @@ describe("Grass Chunk Math", () => {
     const density = GRASS_CONFIG.BASE_DENSITY;
     const instanceCount = Math.floor(chunkSize * chunkSize * density);
 
-    // 25m * 25m * 32 density = 20000 tuft instances (each with BLADES_PER_TUFT blades)
-    expect(instanceCount).toBe(20000);
+    // 25m * 25m * 48 density = 30000 tuft instances (each with BLADES_PER_TUFT blades)
+    expect(instanceCount).toBe(30000);
   });
 
   it("should calculate correct spacing from density", () => {
     const density = GRASS_CONFIG.BASE_DENSITY;
     const spacing = Math.sqrt(1 / density);
 
-    // sqrt(1/32) ≈ 0.177m between grass tufts
-    expect(spacing).toBeCloseTo(0.177, 2);
+    // sqrt(1/48) ≈ 0.144m between grass tufts
+    expect(spacing).toBeCloseTo(0.144, 2);
   });
 
   it("should calculate correct bounding sphere radius", () => {
@@ -339,8 +339,8 @@ describe("Grass Chunk Math", () => {
     const expectedRadius =
       (Math.sqrt(2) * size) / 2 + GRASS_CONFIG.BLADE_HEIGHT;
 
-    // sqrt(2) * 25 / 2 + 0.4 ≈ 18.07
-    expect(expectedRadius).toBeCloseTo(18.07, 1);
+    // sqrt(2) * 25 / 2 + 0.35 ≈ 18.02
+    expect(expectedRadius).toBeCloseTo(18.02, 1);
   });
 });
 
@@ -533,9 +533,9 @@ describe("Distance Calculations", () => {
     const fadeStartSq = GRASS_CONFIG.FADE_START * GRASS_CONFIG.FADE_START;
     const fadeEndSq = GRASS_CONFIG.FADE_END * GRASS_CONFIG.FADE_END;
 
-    // Fade at 60-100m for longer fade out
-    expect(fadeStartSq).toBe(60 * 60);
-    expect(fadeEndSq).toBe(100 * 100);
+    // Fade at 80-120m for longer draw distance
+    expect(fadeStartSq).toBe(80 * 80);
+    expect(fadeEndSq).toBe(120 * 120);
   });
 
   it("should correctly determine if position is in fade range", () => {
@@ -544,24 +544,24 @@ describe("Distance Calculations", () => {
 
     const playerPos = { x: 0, z: 0 };
 
-    // Test position at 40m - should be fully visible (before fade starts at 60m)
-    const pos40 = { x: 40, z: 0 };
-    const distSq40 =
-      (pos40.x - playerPos.x) ** 2 + (pos40.z - playerPos.z) ** 2;
-    expect(distSq40).toBeLessThan(fadeStartSq);
+    // Test position at 60m - should be fully visible (before fade starts at 80m)
+    const pos60 = { x: 60, z: 0 };
+    const distSq60 =
+      (pos60.x - playerPos.x) ** 2 + (pos60.z - playerPos.z) ** 2;
+    expect(distSq60).toBeLessThan(fadeStartSq);
 
-    // Test position at 80m - should be fading (between 60m and 100m)
-    const pos80 = { x: 80, z: 0 };
-    const distSq80 =
-      (pos80.x - playerPos.x) ** 2 + (pos80.z - playerPos.z) ** 2;
-    expect(distSq80).toBeGreaterThan(fadeStartSq);
-    expect(distSq80).toBeLessThan(fadeEndSq);
+    // Test position at 100m - should be fading (between 80m and 120m)
+    const pos100 = { x: 100, z: 0 };
+    const distSq100 =
+      (pos100.x - playerPos.x) ** 2 + (pos100.z - playerPos.z) ** 2;
+    expect(distSq100).toBeGreaterThan(fadeStartSq);
+    expect(distSq100).toBeLessThan(fadeEndSq);
 
-    // Test position at 110m - should be fully hidden (past 100m fade end)
-    const pos110 = { x: 110, z: 0 };
-    const distSq110 =
-      (pos110.x - playerPos.x) ** 2 + (pos110.z - playerPos.z) ** 2;
-    expect(distSq110).toBeGreaterThan(fadeEndSq);
+    // Test position at 130m - should be fully hidden (past 120m fade end)
+    const pos130 = { x: 130, z: 0 };
+    const distSq130 =
+      (pos130.x - playerPos.x) ** 2 + (pos130.z - playerPos.z) ** 2;
+    expect(distSq130).toBeGreaterThan(fadeEndSq);
   });
 });
 
@@ -635,6 +635,7 @@ describe("Frustum Culling", () => {
       (Math.sqrt(2) * size) / 2 + GRASS_CONFIG.BLADE_HEIGHT,
     );
 
+    // With CHUNK_SIZE=25: center.x = 100+25/2=112.5, center.z = 200+25/2=212.5
     expect(boundingSphere.center.x).toBe(112.5);
     expect(boundingSphere.center.z).toBe(212.5);
     expect(boundingSphere.radius).toBeGreaterThan(0);

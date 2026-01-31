@@ -21,7 +21,7 @@
  * **Runs on**: Server (authoritative), Client (visual)
  */
 
-import THREE from "../../extras/three/three";
+import THREE, { MeshStandardNodeMaterial } from "../../extras/three/three";
 import type { World } from "../../core/World";
 import type { EntityInteractionData } from "../../types/entities";
 import { EntityType, InteractionType } from "../../types/entities";
@@ -169,7 +169,7 @@ export class StarterChestEntity extends InteractableEntity {
 
     // Main chest body (wood brown)
     const geometry = new THREE.BoxGeometry(boxWidth, boxHeight, boxDepth);
-    const material = new THREE.MeshStandardMaterial({
+    const material = new MeshStandardNodeMaterial({
       color: 0x8b4513, // Saddle brown (wood color)
       roughness: 0.7,
       metalness: 0.1,
@@ -187,7 +187,7 @@ export class StarterChestEntity extends InteractableEntity {
       0.05,
       boxDepth + 0.05,
     );
-    const trimMaterial = new THREE.MeshStandardMaterial({
+    const trimMaterial = new MeshStandardNodeMaterial({
       color: 0xffd700, // Gold
       roughness: 0.3,
       metalness: 0.8,

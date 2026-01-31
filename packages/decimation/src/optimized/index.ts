@@ -17,9 +17,11 @@ export {
   EPS,
   INF,
   NULL_INDEX,
+  NULL_INDEX_UINT32,
   MATRIX_6X6_SIZE,
   MATRIX_8X8_SIZE,
   MAX_TC_PER_VERTEX,
+  MAX_BONES_PER_VERTEX,
 } from "./types.js";
 export type {
   OptimizedDecimationOptions,
@@ -48,7 +50,11 @@ export { EdgePriorityQueue } from "./priority-queue.js";
 export { computeCostAndPlacement } from "./cost-placement.js";
 
 // Re-export collapse
-export { tryCollapseEdge, type CollapseResult } from "./collapse.js";
+export {
+  tryCollapseEdge,
+  interpolateSkinWeights,
+  type CollapseResult,
+} from "./collapse.js";
 
 // Re-export main decimation function
 export { decimateOptimized, cleanMesh } from "./decimate.js";
@@ -171,15 +177,26 @@ export function decimateLegacy(
 // ============================================================================
 
 /**
- * Convert Three.js BufferGeometry to OptimizedMeshData
+ * Geometry input type for fromBufferGeometry.
+ * Supports Three.js BufferGeometry-like objects with optional skin weights.
  */
-export function fromBufferGeometry(geometry: {
+export interface BufferGeometryLike {
   attributes: {
     position: { array: Float32Array | number[]; count: number };
     uv?: { array: Float32Array | number[]; count: number };
+    skinIndex?: { array: Uint16Array | Float32Array | number[]; count: number };
+    skinWeight?: { array: Float32Array | number[]; count: number };
   };
   index?: { array: Uint32Array | Uint16Array | number[] };
-}): OptimizedMeshData {
+}
+
+/**
+ * Convert Three.js BufferGeometry to OptimizedMeshData.
+ * Supports skinned meshes with skinIndex and skinWeight attributes.
+ */
+export function fromBufferGeometry(
+  geometry: BufferGeometryLike,
+): OptimizedMeshData {
   const posArray = geometry.attributes.position.array;
   const positions =
     posArray instanceof Float32Array
@@ -227,28 +244,85 @@ export function fromBufferGeometry(geometry: {
     }
   }
 
-  return new OptimizedMeshData(positions, uvs, faceVertices, faceTexCoords);
+  // Handle skin weights
+  let skinIndices: Uint16Array | null = null;
+  let skinWeights: Float32Array | null = null;
+
+  if (geometry.attributes.skinIndex && geometry.attributes.skinWeight) {
+    const skinIdxArray = geometry.attributes.skinIndex.array;
+    const skinWgtArray = geometry.attributes.skinWeight.array;
+
+    // Convert to Uint16Array for indices (Three.js may use Float32Array)
+    if (skinIdxArray instanceof Uint16Array) {
+      skinIndices = new Uint16Array(skinIdxArray);
+    } else {
+      skinIndices = new Uint16Array(vertexCount * 4);
+      for (let i = 0; i < vertexCount * 4; i++) {
+        skinIndices[i] = Math.round(skinIdxArray[i]);
+      }
+    }
+
+    // Copy skin weights
+    skinWeights =
+      skinWgtArray instanceof Float32Array
+        ? new Float32Array(skinWgtArray)
+        : new Float32Array(skinWgtArray);
+  }
+
+  return new OptimizedMeshData(
+    positions,
+    uvs,
+    faceVertices,
+    faceTexCoords,
+    skinIndices,
+    skinWeights,
+  );
 }
 
 /**
- * Create attributes object from OptimizedMeshData for Three.js BufferGeometry
- *
- * Usage:
- * ```typescript
- * const { position, uv, index } = toBufferGeometryData(mesh);
- * geometry.setAttribute('position', new THREE.BufferAttribute(position, 3));
- * geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
- * geometry.setIndex(new THREE.BufferAttribute(index, 1));
- * ```
+ * Output type for toBufferGeometryData.
+ * Includes optional skin weight data for skinned meshes.
  */
-export function toBufferGeometryData(mesh: OptimizedMeshData): {
+export interface BufferGeometryData {
   position: Float32Array;
   uv: Float32Array;
   index: Uint32Array;
-} {
-  return {
+  skinIndex?: Uint16Array;
+  skinWeight?: Float32Array;
+}
+
+/**
+ * Create attributes object from OptimizedMeshData for Three.js BufferGeometry.
+ * Includes skin weight data if present in the mesh.
+ *
+ * Usage:
+ * ```typescript
+ * const data = toBufferGeometryData(mesh);
+ * geometry.setAttribute('position', new THREE.BufferAttribute(data.position, 3));
+ * geometry.setAttribute('uv', new THREE.BufferAttribute(data.uv, 2));
+ * geometry.setIndex(new THREE.BufferAttribute(data.index, 1));
+ *
+ * // For skinned meshes:
+ * if (data.skinIndex && data.skinWeight) {
+ *   geometry.setAttribute('skinIndex', new THREE.BufferAttribute(data.skinIndex, 4));
+ *   geometry.setAttribute('skinWeight', new THREE.BufferAttribute(data.skinWeight, 4));
+ * }
+ * ```
+ */
+export function toBufferGeometryData(
+  mesh: OptimizedMeshData,
+): BufferGeometryData {
+  const result: BufferGeometryData = {
     position: new Float32Array(mesh.positions),
     uv: new Float32Array(mesh.uvs),
     index: new Uint32Array(mesh.faceVertices),
   };
+
+  // Include skin weights if present
+  if (mesh.skinIndices && mesh.skinWeights) {
+    result.skinIndex = new Uint16Array(mesh.skinIndices);
+    result.skinWeight = new Float32Array(mesh.skinWeights);
+  }
+
+  return result;
 }

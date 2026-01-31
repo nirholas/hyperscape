@@ -6,13 +6,16 @@
 
 import { vi } from "vitest";
 
-// Re-export MockWorld
-export {
+// Import MockWorld for internal use
+import {
   createMockWorld,
   type MockWorld,
   asClientWorld,
   createEventTracker,
 } from "./MockWorld";
+
+// Re-export MockWorld
+export { createMockWorld, type MockWorld, asClientWorld, createEventTracker };
 
 // Type alias for consistency with existing tests
 export type MockClientWorld = import("./MockWorld").MockWorld;
@@ -21,7 +24,6 @@ export type MockClientWorld = import("./MockWorld").MockWorld;
  * Create a mock world without network capabilities
  */
 export function createMockWorldWithoutNetwork(): MockClientWorld {
-  const { createMockWorld } = require("./MockWorld");
   const world = createMockWorld();
   world.network = undefined as unknown as typeof world.network;
   return world;

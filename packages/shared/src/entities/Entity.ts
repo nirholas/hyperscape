@@ -82,6 +82,7 @@ import type { Entity as IEntity, Quaternion, Vector3 } from "../types";
 import type { EntityData } from "../types/index";
 import { Component, createComponent } from "../components";
 import THREE from "../extras/three/three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 import { getPhysX } from "../physics/PhysXManager";
 // NOTE: Import directly to avoid circular dependency through barrel file
 // The barrel imports combat which imports MobEntity which extends Entity
@@ -112,12 +113,9 @@ import {
 } from "../systems/shared/rendering";
 import {
   createTSLImpostorMaterial,
-  createImpostorMaterial,
-  updateImpostorMaterial,
   type TSLImpostorMaterial,
   type ImpostorBakeResult,
   type DissolveConfig,
-  type ImpostorViewData,
 } from "@hyperscape/impostor";
 import {
   getLODDistances,
@@ -146,6 +144,14 @@ export class Entity implements IEntity {
    * Enable in browser console: Entity.LOD_DEBUG_LABELS = true
    */
   static LOD_DEBUG_LABELS = false;
+
+  /**
+   * Enable impostor debug mode - shows impostor 5m above entity regardless of distance.
+   * This lets you visually verify impostor baking is working correctly.
+   * Also forces LOD labels to show.
+   * Enable in browser console: Entity.IMPOSTOR_DEBUG = true
+   */
+  static IMPOSTOR_DEBUG = false;
 
   world: World;
   data: EntityData;
@@ -202,8 +208,8 @@ export class Entity implements IEntity {
     lod1Mesh: THREE.Object3D | null;
     /** Impostor mesh (billboard) */
     impostorMesh: THREE.Mesh | null;
-    /** Impostor material (TSL for WebGPU, ShaderMaterial for WebGL) */
-    impostorMaterial: TSLImpostorMaterial | THREE.ShaderMaterial | null;
+    /** Impostor material (TSL only - WebGPU) */
+    impostorMaterial: TSLImpostorMaterial | null;
     /** Whether using WebGPU (TSL) or WebGL (GLSL) material */
     usesTSL: boolean;
     /** Bake result */
@@ -218,6 +224,10 @@ export class Entity implements IEntity {
     raycastMesh: THREE.Mesh | null;
     /** AAA LOD: Whether animations should freeze at LOD1 distance */
     freezeAnimationAtLOD1: boolean;
+    /** Debug impostor mesh shown 5m above entity (only when IMPOSTOR_DEBUG=true) */
+    debugImpostorMesh: THREE.Mesh | null;
+    /** Debug impostor material (TSL only - WebGPU) */
+    debugImpostorMaterial: TSLImpostorMaterial | null;
   } | null = null;
 
   // Temp objects for HLOD update loop (avoid allocations)
@@ -232,6 +242,9 @@ export class Entity implements IEntity {
   private _lodDebugCanvas: HTMLCanvasElement | null = null;
   private _lodDebugTexture: THREE.CanvasTexture | null = null;
   private _lodDebugLastLevel: number = -1; // Track changes to avoid redraws
+  private _loggedNoHLOD: boolean = false; // Track if we've logged "no HLOD" warning
+  private _lodDebugFirstLog: boolean = false; // Track first updateHLOD call for debugging
+  private _loggedNoCamera: boolean = false; // Track if we've logged "no camera" warning
 
   protected health: number = 0;
   protected maxHealth: number = 100;
@@ -1476,6 +1489,34 @@ export class Entity implements IEntity {
     // Update HLOD impostor if initialized
     if (this.hlodState && this.world.camera) {
       this.updateHLOD(this.world.camera.position);
+    } else if (this.hlodState && !this.world.camera && Entity.IMPOSTOR_DEBUG) {
+      // Log once per entity to diagnose missing camera issue
+      if (!this._loggedNoCamera) {
+        this._loggedNoCamera = true;
+        console.warn(
+          `[Entity HLOD Debug] ⚠️ Entity "${this.name}" has hlodState but world.camera is null - ` +
+            `updateHLOD cannot run, LOD labels will not appear`,
+        );
+      }
+    }
+
+    // Show LOD debug labels for entities WITHOUT HLOD (they're always at LOD0)
+    // This ensures ALL entities show their LOD status when debugging
+    if (!this.hlodState && this.world.camera) {
+      if (Entity.LOD_DEBUG_LABELS || Entity.IMPOSTOR_DEBUG) {
+        // Entity without HLOD is always at LOD0
+        // Log once per entity to help identify missing HLOD support
+        if (Entity.IMPOSTOR_DEBUG && !this._loggedNoHLOD) {
+          this._loggedNoHLOD = true;
+          console.warn(
+            `[Entity HLOD Debug] ⚠️ Entity "${this.name}" (${this.type}) has NO HLOD support - ` +
+              `consider adding initHLOD() call after mesh loads`,
+          );
+        }
+        this.updateLODDebugLabel(LODLevel.LOD0, this.world.camera.position);
+      } else if (this._lodDebugSprite) {
+        this.destroyLODDebugLabel();
+      }
     }
 
     // Subclasses can override for additional client-specific logic
@@ -1511,23 +1552,9 @@ export class Entity implements IEntity {
     // Compute bounding size from mesh if not explicitly provided
     const lodConfig = getLODConfig(category, options.boundingSize ?? this.mesh);
 
-    // Detect if we're using WebGPU (TSL) or WebGL (GLSL)
-    // WebGPU backend has isWebGPUBackend = true on renderer.backend
-    const renderer = this.world.graphics?.renderer;
-    const backend = renderer?.backend as
-      | { isWebGPUBackend?: boolean }
-      | undefined;
-    const isWebGPU = !!backend?.isWebGPUBackend;
-
-    // Diagnostic logging for renderer detection
-    console.log(`[Entity HLOD] Renderer detection for ${this.name}:`, {
-      hasGraphics: !!this.world.graphics,
-      hasRenderer: !!renderer,
-      hasBackend: !!backend,
-      isWebGPUBackend: backend?.isWebGPUBackend,
-      usesTSL: isWebGPU,
-      rendererType: renderer?.constructor?.name ?? "unknown",
-    });
+    // Always use TSL (WebGPU) materials - GLSL is deprecated
+    // The renderer should always be WebGPURenderer (with WebGL fallback backend if needed)
+    const usesTSL = true;
 
     // Initialize HLOD state
     this.hlodState = {
@@ -1553,7 +1580,9 @@ export class Entity implements IEntity {
           : null),
       raycastMesh: null,
       freezeAnimationAtLOD1: options.freezeAnimationAtLOD1 ?? false,
-      usesTSL: isWebGPU,
+      usesTSL,
+      debugImpostorMesh: null,
+      debugImpostorMaterial: null,
     };
 
     // Request impostor generation (non-blocking)
@@ -1699,47 +1728,18 @@ export class Entity implements IEntity {
       dissolveEnabled: !!this.hlodState.dissolveConfig,
     });
 
-    let material: TSLImpostorMaterial | THREE.ShaderMaterial;
-
-    if (this.hlodState.usesTSL) {
-      console.log(`[Entity HLOD] Creating TSL material for ${this.name}`);
-      // Debug modes for diagnosing impostor issues:
-      // 0 = normal rendering (default)
-      // 4 = solid red (verify shader runs)
-      // 5 = sample texture at (0.5, 0.5) - verify texture has content
-      // 6 = sample with raw billboard UVs - verify UV mapping
-      const TSL_DEBUG_MODE = 0 as 0 | 1 | 2 | 3 | 4 | 5 | 6;
-      material = createTSLImpostorMaterial({
-        atlasTexture,
-        gridSizeX,
-        gridSizeY,
-        transparent: true,
-        depthWrite: true,
-        dissolve: this.hlodState.dissolveConfig ?? undefined,
-        debugMode: TSL_DEBUG_MODE,
-      });
-      console.log(`[Entity HLOD] TSL material created:`, {
-        materialType: material.constructor.name,
-        hasColorNode: !!(material as TSLImpostorMaterial).colorNode,
-        hasImpostorUniforms: !!(material as TSLImpostorMaterial)
-          .impostorUniforms,
-        debugMode: TSL_DEBUG_MODE,
-        atlasTextureUuid: atlasTexture?.uuid ?? "none",
-        atlasTextureSource: atlasTexture?.source?.uuid ?? "none",
-        atlasIsRenderTargetTexture:
-          atlasTexture?.isRenderTargetTexture ?? false,
-      });
-    } else {
-      console.log(`[Entity HLOD] Creating GLSL material for ${this.name}`);
-      material = createImpostorMaterial({
-        atlasTexture,
-        gridSizeX,
-        gridSizeY,
-        transparent: true,
-        depthWrite: true,
-        dissolve: this.hlodState.dissolveConfig ?? undefined,
-      });
-    }
+    // Always use TSL material (WebGPU) - GLSL is not compatible with WebGPURenderer
+    // Debug modes: 0=normal, 1=raw texture, 2=UV, 3=face indices, 4=solid red, 5=center sample
+    const TSL_DEBUG_MODE = 0 as 0 | 1 | 2 | 3 | 4 | 5 | 6;
+    const material = createTSLImpostorMaterial({
+      atlasTexture,
+      gridSizeX,
+      gridSizeY,
+      transparent: true,
+      depthWrite: true,
+      dissolve: this.hlodState.dissolveConfig ?? undefined,
+      debugMode: TSL_DEBUG_MODE,
+    });
 
     // Create billboard mesh
     const geometry = new THREE.PlaneGeometry(width, height);
@@ -1817,16 +1817,147 @@ export class Entity implements IEntity {
     // Create raycast mesh for view direction lookup
     if (bakeResult.octMeshData?.filledMesh) {
       const raycastGeometry = bakeResult.octMeshData.filledMesh.geometry;
-      const raycastMesh = new THREE.Mesh(
-        raycastGeometry,
-        new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }),
-      );
+      const raycastMaterial = new MeshBasicNodeMaterial();
+      raycastMaterial.visible = false;
+      raycastMaterial.side = THREE.DoubleSide;
+      const raycastMesh = new THREE.Mesh(raycastGeometry, raycastMaterial);
       raycastMesh.position.set(0, 0, 0);
       raycastMesh.updateMatrixWorld(true);
       this.hlodState.raycastMesh = raycastMesh;
     }
 
+    // Create debug impostor mesh (5m above entity) if debug mode is enabled
+    // This is created lazily when IMPOSTOR_DEBUG is first enabled
+    this.createDebugImpostorMeshIfNeeded(
+      bakeResult,
+      width,
+      height,
+      heightOffset,
+    );
+
     return true;
+  }
+
+  /**
+   * Create debug impostor mesh that hovers 5m above the entity.
+   * Used for visually verifying impostor baking is working correctly.
+   *
+   * VALIDATION: This method validates all inputs and logs errors on failure.
+   */
+  private createDebugImpostorMeshIfNeeded(
+    bakeResult: ImpostorBakeResult,
+    width: number,
+    height: number,
+    heightOffset: number,
+  ): void {
+    if (!this.hlodState || !Entity.IMPOSTOR_DEBUG) return;
+
+    // Don't create duplicate
+    if (this.hlodState.debugImpostorMesh) return;
+
+    // VALIDATION: Check bakeResult has required fields
+    if (!bakeResult) {
+      console.error(
+        `[Entity HLOD Debug] ❌ Cannot create debug impostor for ${this.name}: bakeResult is null`,
+      );
+      return;
+    }
+
+    const { gridSizeX, gridSizeY, atlasTexture } = bakeResult;
+
+    // VALIDATION: Check atlas texture exists
+    if (!atlasTexture) {
+      console.error(
+        `[Entity HLOD Debug] ❌ Cannot create debug impostor for ${this.name}: atlasTexture is null`,
+      );
+      return;
+    }
+
+    // VALIDATION: Check grid size is valid
+    if (!gridSizeX || !gridSizeY || gridSizeX <= 0 || gridSizeY <= 0) {
+      console.error(
+        `[Entity HLOD Debug] ❌ Invalid grid size for ${this.name}: ${gridSizeX}x${gridSizeY}`,
+      );
+      return;
+    }
+
+    // VALIDATION: Check dimensions are valid
+    if (
+      !Number.isFinite(width) ||
+      !Number.isFinite(height) ||
+      width <= 0 ||
+      height <= 0
+    ) {
+      console.error(
+        `[Entity HLOD Debug] ❌ Invalid dimensions for ${this.name}: ${width}x${height}`,
+      );
+      return;
+    }
+
+    // VALIDATION: Check heightOffset is valid
+    if (!Number.isFinite(heightOffset)) {
+      console.error(
+        `[Entity HLOD Debug] ❌ Invalid heightOffset for ${this.name}: ${heightOffset}`,
+      );
+      return;
+    }
+
+    // Create TSL material for debug impostor (WebGPU only - no GLSL)
+    // Debug mode 0 = normal rendering (shows actual baked impostor texture)
+    let debugMaterial: TSLImpostorMaterial;
+
+    try {
+      debugMaterial = createTSLImpostorMaterial({
+        atlasTexture,
+        gridSizeX,
+        gridSizeY,
+        transparent: true,
+        depthWrite: true,
+        debugMode: 0, // Normal rendering
+      });
+    } catch (err) {
+      console.error(
+        `[Entity HLOD Debug] ❌ Failed to create material for ${this.name}:`,
+        err,
+      );
+      return;
+    }
+
+    // Create debug billboard mesh
+    const debugGeometry = new THREE.PlaneGeometry(width, height);
+    const debugMesh = new THREE.Mesh(debugGeometry, debugMaterial);
+    debugMesh.name = `HLOD_Debug_${this.name}`;
+    debugMesh.visible = true; // Always visible in debug mode
+    debugMesh.layers.set(1);
+
+    // IMPORTANT: Make material double-sided so impostor is visible from all angles
+    // This is necessary because lookAt() may not be called if camera is null
+    debugMaterial.side = THREE.DoubleSide;
+
+    // Position 5m above the entity's impostor position
+    debugMesh.position.set(0, heightOffset + 5, 0);
+
+    // Initial orientation: face the default camera direction (positive Z)
+    // This will be updated every frame by updateDebugImpostorView() if camera exists
+    debugMesh.rotation.set(0, Math.PI, 0); // Face forward
+
+    // Add to entity's node
+    this.node.add(debugMesh);
+
+    this.hlodState.debugImpostorMesh = debugMesh;
+    this.hlodState.debugImpostorMaterial = debugMaterial;
+
+    // Log success with atlas texture info for verification
+    const atlasInfo = atlasTexture.image
+      ? `${atlasTexture.image.width}x${atlasTexture.image.height}`
+      : atlasTexture.isRenderTargetTexture
+        ? "RenderTarget"
+        : "no-image";
+    console.log(
+      `[Entity HLOD Debug] ✅ Created debug impostor for ${this.name}: ` +
+        `height=${(heightOffset + 5).toFixed(1)}m, size=${width.toFixed(1)}x${height.toFixed(1)}, ` +
+        `atlas=${atlasInfo}, grid=${gridSizeX}x${gridSizeY}`,
+    );
   }
 
   /**
@@ -1837,6 +1968,10 @@ export class Entity implements IEntity {
    * - LOD1: Frozen animations (medium distance) - uses lod1Mesh if available, else lod0Mesh
    * - IMPOSTOR: Billboard (far distance)
    * - CULLED: Not rendered (very far)
+   *
+   * Debug Mode (Entity.IMPOSTOR_DEBUG):
+   * - Shows debug impostor 5m above entity (always visible)
+   * - Forces LOD labels to display
    */
   protected updateHLOD(cameraPosition: THREE.Vector3): void {
     if (!this.hlodState) return;
@@ -1848,7 +1983,54 @@ export class Entity implements IEntity {
       impostorMesh,
       impostorReady,
       freezeAnimationAtLOD1,
+      bakeResult,
     } = this.hlodState;
+
+    // Handle debug mode - create debug impostor if toggled on
+    if (
+      Entity.IMPOSTOR_DEBUG &&
+      !this.hlodState.debugImpostorMesh &&
+      bakeResult
+    ) {
+      // Calculate dimensions for debug mesh (same as main impostor)
+      let width: number;
+      let height: number;
+      let heightOffset: number;
+
+      if (bakeResult.boundingBox) {
+        const size = new THREE.Vector3();
+        bakeResult.boundingBox.getSize(size);
+        const maxDim = Math.max(size.x, size.y, size.z);
+        width = maxDim;
+        height = maxDim;
+        const boxMin = bakeResult.boundingBox.min.y;
+        heightOffset = boxMin + size.y / 2;
+        if (Math.abs(boxMin) > size.y) {
+          heightOffset = size.y / 2;
+        }
+      } else {
+        width = bakeResult.boundingSphere.radius * 2;
+        height = bakeResult.boundingSphere.radius * 2;
+        heightOffset = bakeResult.boundingSphere.center.y;
+      }
+
+      this.createDebugImpostorMeshIfNeeded(
+        bakeResult,
+        width,
+        height,
+        heightOffset,
+      );
+    }
+
+    // Clean up debug mesh if debug mode disabled
+    if (!Entity.IMPOSTOR_DEBUG && this.hlodState.debugImpostorMesh) {
+      this.hlodState.debugImpostorMesh.visible = false;
+      this.node.remove(this.hlodState.debugImpostorMesh);
+      this.hlodState.debugImpostorMesh.geometry.dispose();
+      this.hlodState.debugImpostorMaterial?.dispose();
+      this.hlodState.debugImpostorMesh = null;
+      this.hlodState.debugImpostorMaterial = null;
+    }
 
     // Calculate squared distance to camera (horizontal only)
     const dx = this.node.position.x - cameraPosition.x;
@@ -1912,8 +2094,17 @@ export class Entity implements IEntity {
       this.transitionHLOD(currentLOD, targetLOD);
     }
 
-    // Update LOD debug label if enabled
-    if (Entity.LOD_DEBUG_LABELS) {
+    // Update LOD debug label if enabled (or if IMPOSTOR_DEBUG forces it)
+    const shouldShowLabels = Entity.LOD_DEBUG_LABELS || Entity.IMPOSTOR_DEBUG;
+    if (shouldShowLabels) {
+      // Log first time to verify this code path is reached
+      if (!this._lodDebugFirstLog) {
+        this._lodDebugFirstLog = true;
+        console.log(
+          `[Entity LOD Debug] updateHLOD called for ${this.name}, ` +
+            `LOD=${this.hlodState.currentLOD}, camera=${!!cameraPosition}`,
+        );
+      }
       this.updateLODDebugLabel(this.hlodState.currentLOD, cameraPosition);
     } else if (this._lodDebugSprite) {
       // Clean up label if debug was disabled
@@ -1924,23 +2115,68 @@ export class Entity implements IEntity {
     if (this.hlodState.currentLOD === LODLevel.IMPOSTOR && impostorMesh) {
       this.updateHLODImpostorView(cameraPosition);
 
-      // Update dissolve player position uniform based on material type
+      // Update dissolve player position uniform (TSL material only)
       const mat = this.hlodState.impostorMaterial;
-      if (mat) {
-        if (this.hlodState.usesTSL) {
-          // TSL material
-          const tslMat = mat as TSLImpostorMaterial;
-          if (tslMat.impostorUniforms?.playerPos) {
-            tslMat.impostorUniforms.playerPos.value.copy(cameraPosition);
-          }
-        } else {
-          // GLSL material
-          const glslMat = mat as THREE.ShaderMaterial & {
-            dissolveUniforms?: { playerPos: { value: THREE.Vector3 } };
-          };
-          if (glslMat.dissolveUniforms?.playerPos) {
-            glslMat.dissolveUniforms.playerPos.value.copy(cameraPosition);
-          }
+      if (mat?.impostorUniforms?.playerPos) {
+        mat.impostorUniforms.playerPos.value.copy(cameraPosition);
+      }
+    }
+
+    // Update debug impostor if in debug mode (always visible, shows impostor 5m above)
+    if (Entity.IMPOSTOR_DEBUG && this.hlodState.debugImpostorMesh) {
+      this.updateDebugImpostorView(cameraPosition);
+    }
+  }
+
+  /**
+   * Update debug impostor view direction (billboard toward camera)
+   */
+  private updateDebugImpostorView(cameraPosition: THREE.Vector3): void {
+    if (
+      !this.hlodState?.debugImpostorMesh ||
+      !this.hlodState.debugImpostorMaterial
+    )
+      return;
+
+    const debugMesh = this.hlodState.debugImpostorMesh;
+
+    // Make debug mesh always visible
+    debugMesh.visible = true;
+
+    // Billboard toward camera
+    debugMesh.lookAt(cameraPosition);
+
+    // Update view direction using raycast mesh if available
+    if (this.hlodState.raycastMesh) {
+      this._hlodViewDir
+        .subVectors(cameraPosition, this.node.position)
+        .normalize();
+
+      this._hlodRayOrigin.copy(this._hlodViewDir).multiplyScalar(2);
+      this._hlodRayDirection.copy(this._hlodViewDir).negate();
+
+      this._hlodRaycaster.ray.origin.copy(this._hlodRayOrigin);
+      this._hlodRaycaster.ray.direction.copy(this._hlodRayDirection);
+
+      const intersects = this._hlodRaycaster.intersectObject(
+        this.hlodState.raycastMesh,
+        false,
+      );
+      if (intersects.length > 0) {
+        const hit = intersects[0];
+        if (hit.face && hit.barycoord) {
+          const faceIndices = new THREE.Vector3(
+            hit.face.a,
+            hit.face.b,
+            hit.face.c,
+          );
+          const faceWeights = hit.barycoord.clone();
+
+          // Update debug material view (TSL only)
+          this.hlodState.debugImpostorMaterial.updateView(
+            faceIndices,
+            faceWeights,
+          );
         }
       }
     }
@@ -1951,6 +2187,9 @@ export class Entity implements IEntity {
    *
    * AAA LOD: When transitioning to LOD1 without a lod1Mesh, we keep lod0Mesh visible
    * but animations will be frozen (checked via shouldUpdateAnimationsForLOD).
+   *
+   * CRITICAL: When transitioning FROM IMPOSTOR to LOD, we show the new LOD FIRST
+   * before hiding the impostor. This prevents any empty frame during the transition.
    */
   private transitionHLOD(from: LODLevel, to: LODLevel): void {
     if (!this.hlodState) return;
@@ -1970,6 +2209,28 @@ export class Entity implements IEntity {
     const hasValidImpostor = !!impostorMesh;
     const goingToImpostor = to === LODLevel.IMPOSTOR;
     const goingToCulled = to === LODLevel.CULLED;
+    const comingFromImpostor = from === LODLevel.IMPOSTOR;
+
+    // CRITICAL: When transitioning FROM IMPOSTOR to LOD0/LOD1, show new LOD FIRST
+    // This prevents any empty frame where nothing is visible
+    if (comingFromImpostor && (to === LODLevel.LOD0 || to === LODLevel.LOD1)) {
+      // Show the new LOD mesh BEFORE hiding impostor
+      if (to === LODLevel.LOD0) {
+        if (lod0Mesh) lod0Mesh.visible = true;
+      } else if (to === LODLevel.LOD1) {
+        if (lod1Mesh) {
+          lod1Mesh.visible = true;
+        } else if (lod0Mesh) {
+          lod0Mesh.visible = true;
+        }
+      }
+      // Now hide the impostor (after LOD mesh is visible)
+      if (impostorMesh) impostorMesh.visible = false;
+      this.hlodState.currentLOD = to;
+      return;
+    }
+
+    // For all other transitions, use standard order: hide old, show new
 
     // Hide previous LOD
     switch (from) {
@@ -2010,6 +2271,8 @@ export class Entity implements IEntity {
         }
         break;
       case LODLevel.IMPOSTOR:
+        // Already handled above for LOD0/LOD1 targets
+        // This case handles IMPOSTOR -> CULLED
         if (impostorMesh) impostorMesh.visible = false;
         break;
     }
@@ -2088,21 +2351,8 @@ export class Entity implements IEntity {
           );
           const faceWeights = hit.barycoord.clone();
 
-          // Update material based on type (TSL or GLSL)
-          if (this.hlodState.usesTSL) {
-            // TSL material has updateView method
-            (this.hlodState.impostorMaterial as TSLImpostorMaterial).updateView(
-              faceIndices,
-              faceWeights,
-            );
-          } else {
-            // GLSL material uses updateImpostorMaterial
-            const viewData: ImpostorViewData = { faceIndices, faceWeights };
-            updateImpostorMaterial(
-              this.hlodState.impostorMaterial as THREE.ShaderMaterial,
-              viewData,
-            );
-          }
+          // Update TSL material view (WebGPU only)
+          this.hlodState.impostorMaterial?.updateView(faceIndices, faceWeights);
         }
       }
     }
@@ -2196,7 +2446,13 @@ export class Entity implements IEntity {
   protected disposeHLOD(): void {
     if (!this.hlodState) return;
 
-    const { impostorMesh, impostorMaterial, raycastMesh } = this.hlodState;
+    const {
+      impostorMesh,
+      impostorMaterial,
+      raycastMesh,
+      debugImpostorMesh,
+      debugImpostorMaterial,
+    } = this.hlodState;
 
     if (impostorMesh) {
       impostorMesh.geometry.dispose();
@@ -2212,6 +2468,18 @@ export class Entity implements IEntity {
     if (raycastMesh) {
       raycastMesh.geometry.dispose();
       (raycastMesh.material as THREE.Material).dispose();
+    }
+
+    // Clean up debug impostor
+    if (debugImpostorMesh) {
+      debugImpostorMesh.geometry.dispose();
+      if (debugImpostorMesh.parent) {
+        debugImpostorMesh.parent.remove(debugImpostorMesh);
+      }
+    }
+
+    if (debugImpostorMaterial) {
+      debugImpostorMaterial.dispose();
     }
 
     this.hlodState = null;
@@ -2261,7 +2529,14 @@ export class Entity implements IEntity {
    */
   private createLODDebugSprite(): void {
     // Don't create on server
-    if (this.world.isServer) return;
+    if (this.world.isServer) {
+      console.log(
+        `[Entity LOD Label] Skipping sprite creation for ${this.name} - server`,
+      );
+      return;
+    }
+
+    console.log(`[Entity LOD Label] Creating sprite for ${this.name}...`);
 
     // Create canvas for rendering text (larger for better visibility)
     const canvas = document.createElement("canvas");

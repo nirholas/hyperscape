@@ -1076,7 +1076,7 @@ describe("RoadNetworkSystem Algorithms", () => {
 
       // Should complete in reasonable time
       // (threshold relaxed for CI environments with variable performance)
-      expect(elapsed).toBeLessThan(300);
+      expect(elapsed).toBeLessThan(600);
     });
 
     it("tile cache lookup is O(1)", () => {

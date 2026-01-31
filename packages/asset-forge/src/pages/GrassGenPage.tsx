@@ -8,6 +8,15 @@
  * - Biome density presets
  * - Performance statistics
  * - Export grass configuration
+ *
+ * NOTE: This preview page uses GLSL ShaderMaterial for the grass visualization.
+ * This is intentional for the asset-forge tooling environment which may run
+ * in WebGL contexts. The actual game engine uses TSL/WebGPU for grass rendering
+ * via the VegetationSystem and GPUVegetation systems in packages/shared.
+ *
+ * For WebGPU-compatible grass rendering at runtime, see:
+ * - packages/shared/src/systems/shared/world/VegetationSystem.ts
+ * - packages/shared/src/systems/shared/world/GPUVegetation.ts
  */
 
 import React, { useRef, useEffect, useState, useCallback } from "react";
@@ -24,6 +33,7 @@ import {
 } from "lucide-react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { MeshStandardNodeMaterial } from "three/webgpu";
 import { notify } from "@/utils/notify";
 
 // ============================================================================
@@ -434,10 +444,9 @@ export const GrassGenPage: React.FC = () => {
 
     // Ground plane
     const groundGeometry = new THREE.PlaneGeometry(50, 50);
-    const groundMaterial = new THREE.MeshStandardMaterial({
-      color: isDarkMode ? 0x2d4a1c : 0x3d5a2c,
-      roughness: 1,
-    });
+    const groundMaterial = new MeshStandardNodeMaterial();
+    groundMaterial.color = new THREE.Color(isDarkMode ? 0x2d4a1c : 0x3d5a2c);
+    groundMaterial.roughness = 1;
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -0.01;

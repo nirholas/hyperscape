@@ -22,10 +22,11 @@ const MANIFESTS_DIR = path.join(ASSETS_DIR, "manifests");
  * Find all LOD1 files in asset directories
  */
 async function findLOD1Files() {
+  // Note: Rocks are now procedurally generated via @hyperscape/procgen/rock
+  // and do not need static LOD GLB files
   const patterns = [
     "vegetation/**/*_lod1.glb",
     "trees/**/*_lod1.glb",
-    "rocks/**/*_lod1.glb",
     "grass/**/*_lod1.glb",
   ];
 

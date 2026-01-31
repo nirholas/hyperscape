@@ -6,7 +6,10 @@
 
 import { every, isArray, isBoolean, isNumber, isString } from "lodash-es";
 import Yoga from "yoga-layout";
-import THREE from "../extras/three/three";
+import THREE, {
+  MeshStandardNodeMaterial,
+  MeshBasicNodeMaterial,
+} from "../extras/three/three";
 import type { Entity } from "../entities/Entity";
 import { fillRoundRect } from "../extras/ui/roundRect";
 import {
@@ -643,9 +646,10 @@ export class UI extends Node implements HotReloadable {
   }
 
   createMaterial(lit, texture, transparent, doubleside) {
+    // Use Node materials for WebGPU compatibility
     const material = lit
-      ? new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0 })
-      : new THREE.MeshBasicMaterial({});
+      ? new MeshStandardNodeMaterial({ roughness: 1, metalness: 0 })
+      : new MeshBasicNodeMaterial();
     material.color.set("white");
     material.transparent = transparent;
     // material.depthTest = true

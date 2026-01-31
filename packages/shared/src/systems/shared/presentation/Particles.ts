@@ -37,6 +37,7 @@
 
 import type { World } from "../../../core/World";
 import THREE from "../../../extras/three/three";
+import { MeshStandardNodeMaterial, MeshBasicNodeMaterial } from "three/webgpu";
 import { uuid } from "../../../utils";
 import { SystemBase } from "../infrastructure/SystemBase";
 import type {
@@ -235,23 +236,37 @@ function createEmitter(
     });
   }
 
-  // Create basic material (simplified for strong typing)
-  const BaseMaterial = node._lit
-    ? THREE.MeshStandardMaterial
-    : THREE.MeshBasicMaterial;
-  const material = new BaseMaterial({
-    map: texture,
-    ...(node._lit ? { roughness: 1, metalness: 0 } : {}),
-    blending:
+  // Create WebGPU-compatible NodeMaterial for particle rendering
+  let material: THREE.Material;
+  if (node._lit) {
+    const mat = new MeshStandardNodeMaterial();
+    mat.map = texture;
+    mat.roughness = 1;
+    mat.metalness = 0;
+    mat.blending =
       node._blending === "additive"
         ? THREE.AdditiveBlending
-        : THREE.NormalBlending,
-    transparent: true,
-    color: "white",
-    side: THREE.DoubleSide,
-    depthWrite: false,
-    depthTest: true,
-  });
+        : THREE.NormalBlending;
+    mat.transparent = true;
+    mat.color = new THREE.Color("white");
+    mat.side = THREE.DoubleSide;
+    mat.depthWrite = false;
+    mat.depthTest = true;
+    material = mat;
+  } else {
+    const mat = new MeshBasicNodeMaterial();
+    mat.map = texture;
+    mat.blending =
+      node._blending === "additive"
+        ? THREE.AdditiveBlending
+        : THREE.NormalBlending;
+    mat.transparent = true;
+    mat.color = new THREE.Color("white");
+    mat.side = THREE.DoubleSide;
+    mat.depthWrite = false;
+    mat.depthTest = true;
+    material = mat;
+  }
   const mesh = new THREE.InstancedMesh(
     geometry,
     material,

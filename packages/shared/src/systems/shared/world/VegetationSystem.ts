@@ -26,7 +26,7 @@
  * **Runs on:** Client only (vegetation is purely visual)
  */
 
-import THREE from "../../../extras/three/three";
+import THREE, { MeshStandardNodeMaterial } from "../../../extras/three/three";
 import { System } from "../infrastructure/System";
 import type { World, WorldOptions } from "../../../types";
 import type {
@@ -1673,8 +1673,8 @@ export class VegetationSystem extends System {
     const color = matAny.color || new THREE.Color(0xffffff);
     const alphaMap = hasVertexColors ? undefined : matAny.alphaMap || undefined;
 
-    // Create fresh MeshStandardMaterial for vegetation
-    const stdMat = new THREE.MeshStandardMaterial({
+    // Create fresh MeshStandardNodeMaterial for WebGPU-native TSL dissolve support
+    const stdMat = new MeshStandardNodeMaterial({
       color: color,
       map: map,
       alphaMap: alphaMap,
@@ -2460,7 +2460,7 @@ export class VegetationSystem extends System {
       // Extract geometry and material from loaded scene (LOD0 - full detail)
       let geometry: THREE.BufferGeometry | null = null;
       let material: THREE.Material | THREE.Material[] =
-        new THREE.MeshStandardMaterial();
+        new MeshStandardNodeMaterial();
 
       scene.traverse((child) => {
         if (child instanceof THREE.Mesh && !geometry) {
@@ -2589,7 +2589,7 @@ export class VegetationSystem extends System {
 
     this.imposterBakeProcessing = true;
 
-    const processBake = () => {
+    const processBake = async () => {
       // Stop if system was destroyed
       if (this.isDestroyed) {
         this.imposterBakeProcessing = false;
@@ -2629,9 +2629,9 @@ export class VegetationSystem extends System {
         return;
       }
 
-      // Bake the model into an octahedral atlas
+      // Bake the model into an octahedral atlas - bake() is async
       // Uses hemisphere mapping (HEMI) since vegetation is viewed from ground level
-      const bakeResult = this.octahedralImpostor.bake(modelScene, {
+      const bakeResult = await this.octahedralImpostor.bake(modelScene, {
         atlasWidth: VegetationSystem.IMPOSTER_ATLAS_SIZE,
         atlasHeight: VegetationSystem.IMPOSTER_ATLAS_SIZE,
         gridSizeX: VegetationSystem.IMPOSTER_GRID_X,
@@ -2791,7 +2791,8 @@ export class VegetationSystem extends System {
 
       // Update procgen tree instances (LOD transitions, wind animation)
       // Pass delta time for wind animation and cross-fade transitions
-      updateTreeInstances(cameraPos, _delta);
+      // TEMPORARILY DISABLED - debugging grass/ground rendering
+      // updateTreeInstances(cameraPos, _delta);
 
       // Update ClientLoader with player position for priority-based loading
       // This allows distant tiles to be loaded with lower priority

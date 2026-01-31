@@ -1,5 +1,6 @@
 import * as THREE from "three";
 
+import { MeshBasicNodeMaterial } from "three/webgpu";
 import { ArmorFittingService } from "../../../../services/fitting/ArmorFittingService";
 import { ExportType } from "../types";
 
@@ -94,9 +95,11 @@ export function useExportHandlers({
             });
 
             // Add visualization
+            // Use MeshBasicNodeMaterial for WebGPU compatibility
             scaledBones.forEach((bone) => {
               const helper = new THREE.BoxGeometry(0.02, 0.02, 0.02);
-              const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+              const material = new MeshBasicNodeMaterial();
+              material.color = new THREE.Color(0xff0000);
               const box = new THREE.Mesh(helper, material);
               bone.add(box);
             });

@@ -10,6 +10,7 @@
  */
 
 import * as THREE from "three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 import type { World } from "../../../../core/World";
 import type { Position3D } from "../../../../types/core/base-types";
 import { VISUAL, TIMING } from "../constants";
@@ -65,14 +66,14 @@ export class VisualFeedbackService {
     const geometry = new THREE.PlaneGeometry(tileSize, tileSize, 4, 4);
     geometry.rotateX(-Math.PI / 2); // Lay flat on ground
 
-    const material = new THREE.MeshBasicMaterial({
-      color: VISUAL.TARGET_MARKER_COLOR,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: VISUAL.TARGET_MARKER_OPACITY,
-      depthWrite: false,
-      depthTest: true,
-    });
+    // Use MeshBasicNodeMaterial for WebGPU compatibility
+    const material = new MeshBasicNodeMaterial();
+    material.color = new THREE.Color(VISUAL.TARGET_MARKER_COLOR);
+    material.side = THREE.DoubleSide;
+    material.transparent = true;
+    material.opacity = VISUAL.TARGET_MARKER_OPACITY;
+    material.depthWrite = false;
+    material.depthTest = true;
 
     this.targetMarker = new THREE.Mesh(geometry, material);
     this.targetMarker.visible = false;
@@ -101,12 +102,12 @@ export class VisualFeedbackService {
     );
     circleGeometry.rotateX(-Math.PI / 2); // Lay flat on ground
 
-    const circleMaterial = new THREE.MeshBasicMaterial({
-      color: MOVEMENT_INDICATOR_COLOR,
-      side: THREE.DoubleSide,
-      depthTest: false,
-      depthWrite: false,
-    });
+    // Use MeshBasicNodeMaterial for WebGPU compatibility
+    const circleMaterial = new MeshBasicNodeMaterial();
+    circleMaterial.color = new THREE.Color(MOVEMENT_INDICATOR_COLOR);
+    circleMaterial.side = THREE.DoubleSide;
+    circleMaterial.depthTest = false;
+    circleMaterial.depthWrite = false;
 
     this.movementCircle = new THREE.Mesh(circleGeometry, circleMaterial);
     this.movementCircle.position.y = 0.02;
@@ -149,10 +150,10 @@ export class VisualFeedbackService {
     // Center the extrusion
     chevronGeometry.translate(0, 0, -extrudeDepth / 2);
 
-    const chevronMaterial = new THREE.MeshBasicMaterial({
-      color: MOVEMENT_INDICATOR_COLOR,
-      side: THREE.DoubleSide,
-    });
+    // Use MeshBasicNodeMaterial for WebGPU compatibility
+    const chevronMaterial = new MeshBasicNodeMaterial();
+    chevronMaterial.color = new THREE.Color(MOVEMENT_INDICATOR_COLOR);
+    chevronMaterial.side = THREE.DoubleSide;
 
     const chevron = new THREE.Mesh(chevronGeometry, chevronMaterial);
     chevron.position.y = chevronHeight;

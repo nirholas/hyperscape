@@ -56,11 +56,20 @@
  * References: Entity.ts, PlayerEntity.ts, MobEntity.ts, NPCEntity.ts
  */
 
-// IMPORTANT: Entity type imports are done lazily to avoid circular dependencies.
-// The circular dependency chain is: Entities.ts → PlayerLocal → Entity → types → back to systems
-// By deferring imports until first use, we break this cycle.
 import { Entity } from "../../../entities/Entity";
-import type { PlayerLocal } from "../../../entities/player/PlayerLocal";
+import { PlayerLocal } from "../../../entities/player/PlayerLocal";
+import { PlayerRemote } from "../../../entities/player/PlayerRemote";
+import { PlayerEntity } from "../../../entities/player/PlayerEntity";
+import { MobEntity } from "../../../entities/npc/MobEntity";
+import { NPCEntity } from "../../../entities/npc/NPCEntity";
+import { ItemEntity } from "../../../entities/world/ItemEntity";
+import { ResourceEntity } from "../../../entities/world/ResourceEntity";
+import { HeadstoneEntity } from "../../../entities/world/HeadstoneEntity";
+import { BankEntity } from "../../../entities/world/BankEntity";
+import { FurnaceEntity } from "../../../entities/world/FurnaceEntity";
+import { AnvilEntity } from "../../../entities/world/AnvilEntity";
+import { AltarEntity } from "../../../entities/world/AltarEntity";
+import { RangeEntity } from "../../../entities/world/RangeEntity";
 import type {
   ComponentDefinition,
   EntityConstructor,
@@ -117,41 +126,11 @@ const EntityTypes: Record<string, EntityConstructor> = {
 
 /**
  * Initialize entity type registry with all built-in entity types.
- * Called lazily on first access to avoid circular dependency issues.
+ * Called lazily on first access.
  */
 function initializeEntityTypes(): void {
   if (_entityTypesInitialized) return;
   _entityTypesInitialized = true;
-
-  // Dynamic imports to break circular dependency
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { PlayerLocal } = require("../../../entities/player/PlayerLocal");
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { PlayerRemote } = require("../../../entities/player/PlayerRemote");
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { PlayerEntity } = require("../../../entities/player/PlayerEntity");
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { MobEntity } = require("../../../entities/npc/MobEntity");
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { NPCEntity } = require("../../../entities/npc/NPCEntity");
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { ItemEntity } = require("../../../entities/world/ItemEntity");
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { ResourceEntity } = require("../../../entities/world/ResourceEntity");
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const {
-    HeadstoneEntity,
-  } = require("../../../entities/world/HeadstoneEntity");
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { BankEntity } = require("../../../entities/world/BankEntity");
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { FurnaceEntity } = require("../../../entities/world/FurnaceEntity");
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { AnvilEntity } = require("../../../entities/world/AnvilEntity");
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { AltarEntity } = require("../../../entities/world/AltarEntity");
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { RangeEntity } = require("../../../entities/world/RangeEntity");
 
   EntityTypes.player = PlayerEntity as EntityConstructor;
   EntityTypes.playerLocal = PlayerLocal as EntityConstructor;

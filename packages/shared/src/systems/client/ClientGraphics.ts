@@ -161,23 +161,26 @@ export class ClientGraphics extends System {
     this.world.camera.aspect = this.aspect;
     this.world.camera.updateProjectionMatrix();
 
-    // Create renderer (WebGPU preferred, WebGL fallback)
+    // Create WebGPU renderer (REQUIRED - will throw if unavailable)
     this.renderer = await getRenderer();
-    this.isWebGPU = isWebGPURenderer(this.renderer);
+    this.isWebGPU = true; // WebGPU is required, always true now
 
-    // Log backend capabilities
-    const webglForced = isWebGLForced();
-    if (isWebGPURenderer(this.renderer)) {
-      logWebGPUInfo(this.renderer);
-      const caps = getWebGPUCapabilities(this.renderer);
-      console.log("[ClientGraphics] WebGPU features:", caps.features.length);
-    } else if (webglForced) {
-      console.log("[ClientGraphics] WebGL forced via PUBLIC_FORCE_WEBGL");
-    } else {
-      console.warn(
-        "[ClientGraphics] WebGPU unavailable (falling back to WebGL renderer)",
+    // Verify WebGPU backend
+    if (!isWebGPURenderer(this.renderer)) {
+      throw new Error(
+        "[ClientGraphics] FATAL: Expected WebGPU renderer but got WebGL. " +
+          "WebGPU is required for Hyperscape.",
       );
     }
+
+    // Log WebGPU capabilities
+    logWebGPUInfo(this.renderer);
+    const caps = getWebGPUCapabilities(this.renderer);
+    console.log(
+      "[ClientGraphics] WebGPU initialized with",
+      caps.features.length,
+      "features",
+    );
 
     // Configure renderer
     configureRenderer(this.renderer, {
@@ -201,21 +204,18 @@ export class ClientGraphics extends System {
     this.maxAnisotropy = getMaxAnisotropy(this.renderer);
     THREE.Texture.DEFAULT_ANISOTROPY = this.maxAnisotropy;
 
-    // Initialize GPU compute infrastructure (WebGPU only)
-    if (this.isWebGPU) {
-      this.gpuCompute = setupGPUCompute(this.renderer, this.world);
-      if (this.gpuCompute) {
-        console.log("[ClientGraphics] GPU compute initialized:", {
-          grass: !!this.gpuCompute.grass?.isReady(),
-          particles: !!this.gpuCompute.particles?.isReady(),
-          terrain: !!this.gpuCompute.terrain?.isReady(),
-        });
-      }
+    // Initialize GPU compute infrastructure
+    this.gpuCompute = setupGPUCompute(this.renderer, this.world);
+    if (this.gpuCompute) {
+      console.log("[ClientGraphics] GPU compute initialized:", {
+        grass: !!this.gpuCompute.grass?.isReady(),
+        particles: !!this.gpuCompute.particles?.isReady(),
+        terrain: !!this.gpuCompute.terrain?.isReady(),
+      });
     }
 
-    // Setup post-processing with TSL
-    this.usePostprocessing =
-      (this.world.prefs?.postprocessing ?? false) && this.isWebGPU;
+    // Setup post-processing with TSL (always available with WebGPU)
+    this.usePostprocessing = this.world.prefs?.postprocessing ?? false;
 
     if (this.usePostprocessing && isWebGPURenderer(this.renderer)) {
       // Get color grading settings from preferences
@@ -395,10 +395,9 @@ export class ClientGraphics extends System {
       this.renderer.setPixelRatio(changes.dpr.value);
       this.resize(this.width, this.height);
     }
-    // postprocessing
+    // postprocessing (always available with WebGPU)
     if (changes.postprocessing) {
-      // WebGL fallback currently runs without TSL post-processing.
-      this.usePostprocessing = changes.postprocessing.value && this.isWebGPU;
+      this.usePostprocessing = changes.postprocessing.value;
     }
     // color grading LUT
     if (changes.colorGrading && this.composer) {

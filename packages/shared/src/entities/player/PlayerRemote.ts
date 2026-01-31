@@ -61,6 +61,7 @@ import { createNode } from "../../extras/three/createNode";
 import { LerpQuaternion } from "../../extras/animation/LerpQuaternion";
 import { LerpVector3 } from "../../extras/animation/LerpVector3";
 import THREE from "../../extras/three/three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 import { Entity } from "../Entity";
 import { Avatar, Group, Mesh, UI, UIView, UIText } from "../../nodes";
 import { EventType } from "../../types/events";
@@ -82,6 +83,11 @@ import {
   ENTITY_FADE_CONFIGS,
   FadeState,
 } from "../../utils/rendering/DistanceFade";
+import { MobInstancedRenderer } from "../../utils/rendering/InstancedMeshManager";
+import type {
+  MobAnimationState,
+  MobInstancedHandle,
+} from "../../types/rendering/nodes";
 
 interface AvatarWithInstance {
   instance: {
@@ -172,6 +178,10 @@ export class PlayerRemote extends Entity implements HotReloadable {
   /** Distance fade controller - dissolve effect for entities near render distance */
   private _distanceFade: DistanceFadeController | null = null;
 
+  /** GPU instancing for batched rendering of player avatars */
+  private _instancedRenderer: MobInstancedRenderer | null = null;
+  private _instancedHandle: MobInstancedHandle | null = null;
+
   constructor(world: World, data: EntityData, local?: boolean) {
     super(world, data, local);
     this.isPlayer = true;
@@ -217,12 +227,9 @@ export class PlayerRemote extends Entity implements HotReloadable {
     // PERFORMANCE: VRM SkinnedMesh raycast is extremely slow (~700ms) because THREE.js
     // must transform every vertex by bone weights. This simple capsule mesh is instant.
     // The proxy is added directly to THREE.Scene, bypassing the Node system entirely.
-    this.raycastProxy = new THREE.Mesh(
-      capsuleGeometry,
-      new THREE.MeshBasicMaterial({
-        visible: false, // Invisible but still raycastable
-      }),
-    );
+    const proxyMaterial = new MeshBasicNodeMaterial();
+    proxyMaterial.visible = false; // Invisible but still raycastable
+    this.raycastProxy = new THREE.Mesh(capsuleGeometry, proxyMaterial);
     this.raycastProxy.userData = {
       type: "player",
       entityId: this.id,
@@ -313,8 +320,11 @@ export class PlayerRemote extends Entity implements HotReloadable {
       return;
     }
 
-    // Skip if avatar already loaded
-    if (this.avatarUrl === avatarUrl && this.avatar) {
+    // Skip if avatar already loaded (either instanced or individual)
+    if (
+      this.avatarUrl === avatarUrl &&
+      (this.avatar || this._instancedHandle)
+    ) {
       return;
     }
 
@@ -328,6 +338,18 @@ export class PlayerRemote extends Entity implements HotReloadable {
 
     let loadSuccess = false;
     try {
+      // TODO: GPU instanced rendering disabled pending animation fixes
+      // The instanced renderer has issues with VRM bone propagation causing T-pose
+      // Re-enable once VRM animation retargeting is working correctly
+      //
+      // Clean up previous instanced handle if switching avatars
+      if (this._instancedHandle && this._instancedRenderer) {
+        this._instancedRenderer.remove(this._instancedHandle);
+        this._instancedHandle = null;
+        this._instancedRenderer = null;
+      }
+
+      // Load VRM avatar using individual loading (known working path)
       const src = (await this.world.loader.load(
         "avatar",
         avatarUrl,
@@ -345,8 +367,8 @@ export class PlayerRemote extends Entity implements HotReloadable {
 
       // CRITICAL: Pass VRM hooks to toNodes() so VRMFactory applies normalization and rotation
       // This must happen DURING toNodes() call, not after
-      const vrmHooks: VRMHooks = {
-        scene: this.world.stage.scene,
+      const vrmHooks = {
+        scene: this.world.stage.scene!, // Non-null assertion - scene must exist for avatar loading
         octree: this.world.stage.octree as VRMHooks["octree"],
         camera: this.world.camera,
         loader: this.world.loader,
@@ -562,6 +584,37 @@ export class PlayerRemote extends Entity implements HotReloadable {
   }
 
   update(delta: number): void {
+    // GPU INSTANCING: Update instanced rendering position/state
+    // If using instanced rendering, the renderer handles LOD, culling, and animation
+    if (this._instancedHandle && this._instancedRenderer) {
+      // Update position from interpolation
+      this.node.position.copy(this.position);
+      this._instancedRenderer.updateTransform(
+        this._instancedHandle,
+        this.position,
+        this.base.quaternion,
+      );
+
+      // Update animation state based on movement
+      const speed = this.velocity.length();
+      const targetState: MobAnimationState = speed > 0.1 ? "walk" : "idle";
+      if (this._instancedHandle.state !== targetState) {
+        this._instancedRenderer.updateState(
+          this._instancedHandle,
+          targetState,
+          this.position,
+          this.base.quaternion,
+        );
+      }
+      // Instanced renderer handles everything else (LOD, fade, animation)
+      // But we still need to sync raycast proxy
+      if (this.raycastProxy) {
+        this.raycastProxy.position.copy(this.position);
+        this.raycastProxy.position.y += 0.8; // capsule center offset
+      }
+      return;
+    }
+
     // DISTANCE FADE: Apply dissolve effect and cull distant players
     const cameraPos = getCameraPosition(this.world);
     if (cameraPos) {
@@ -1104,7 +1157,14 @@ export class PlayerRemote extends Entity implements HotReloadable {
     // Entity.destroy() sets it, and if we set it first, super.destroy() will
     // immediately return and the node won't be removed from the scene.
 
-    // 1. Remove raycast proxy from scene
+    // 1a. Clean up instanced rendering handle
+    if (this._instancedHandle && this._instancedRenderer) {
+      this._instancedRenderer.remove(this._instancedHandle);
+      this._instancedHandle = null;
+      this._instancedRenderer = null;
+    }
+
+    // 1b. Remove raycast proxy from scene
     if (this.raycastProxy) {
       const scene = this.world.stage?.scene;
       if (scene) {

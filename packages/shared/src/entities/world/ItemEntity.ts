@@ -53,7 +53,7 @@
  * @public
  */
 
-import THREE from "../../extras/three/three";
+import THREE, { MeshStandardNodeMaterial } from "../../extras/three/three";
 import type { World } from "../../core/World";
 import type { ItemType, MeshUserData, Item } from "../../types/core/core";
 import { EquipmentSlotName, WeaponType } from "../../types/core/core";
@@ -173,8 +173,8 @@ export class ItemEntity extends InteractableEntity {
       const geometry = new THREE.PlaneGeometry(0.3, 0.4);
 
       // Paper/parchment material - cream colored with slight transparency
-      // Use MeshStandardMaterial for proper lighting (responds to sun, moon, and environment maps)
-      const material = new THREE.MeshStandardMaterial({
+      // Use MeshStandardNodeMaterial for WebGPU-native TSL dissolve support
+      const material = new MeshStandardNodeMaterial({
         color: 0xf5ebd2, // Cream/parchment color
         transparent: true,
         opacity: 0.95,
@@ -210,8 +210,8 @@ export class ItemEntity extends InteractableEntity {
         color = 0x8b4513;
       else if (nameLower.includes("fish")) color = 0xb0e0e6;
 
-      // Use MeshStandardMaterial for proper lighting (responds to sun, moon, and environment maps)
-      const material = new THREE.MeshStandardMaterial({
+      // Use MeshStandardNodeMaterial for WebGPU-native TSL dissolve support
+      const material = new MeshStandardNodeMaterial({
         color: color,
         transparent: true,
         opacity: 0.6,

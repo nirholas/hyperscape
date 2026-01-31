@@ -995,12 +995,15 @@ export class DataManager {
     // Load prayer manifest
     try {
       const prayersRes = await fetch(`${baseUrl}/prayers.json`);
+      if (!prayersRes.ok) {
+        throw new Error(`HTTP ${prayersRes.status}: ${prayersRes.statusText}`);
+      }
       const prayersManifest = (await prayersRes.json()) as PrayersManifest;
       prayerDataProvider.loadPrayers(prayersManifest);
       prayerDataProvider.rebuild();
-    } catch {
+    } catch (err) {
       console.warn(
-        "[DataManager] prayers.json not found, prayer system will be unavailable",
+        `[DataManager] prayers.json not found (${err instanceof Error ? err.message : String(err)}), prayer system will be unavailable`,
       );
     }
 
@@ -1095,9 +1098,9 @@ export class DataManager {
       const prayersManifest = JSON.parse(prayersData) as PrayersManifest;
       prayerDataProvider.loadPrayers(prayersManifest);
       prayerDataProvider.rebuild();
-    } catch {
+    } catch (err) {
       console.warn(
-        "[DataManager] prayers.json not found, prayer system will be unavailable",
+        `[DataManager] prayers.json not found (${err instanceof Error ? err.message : String(err)}), prayer system will be unavailable`,
       );
     }
 

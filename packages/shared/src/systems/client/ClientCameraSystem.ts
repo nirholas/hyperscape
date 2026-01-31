@@ -149,9 +149,11 @@ export class ClientCameraSystem extends SystemBase {
       (data: { playerId: string; avatar: unknown; camHeight: number }) =>
         this.onAvatarReady({
           playerId: data.playerId,
-          avatar:
-            (data.avatar as { base?: THREE.Object3D }).base ??
-            ({} as THREE.Object3D),
+          // Handle null avatar (from instanced rendering) or extract base from avatar object
+          avatar: data.avatar
+            ? ((data.avatar as { base?: THREE.Object3D }).base ??
+              ({} as THREE.Object3D))
+            : ({} as THREE.Object3D),
           camHeight: data.camHeight,
         }),
     );

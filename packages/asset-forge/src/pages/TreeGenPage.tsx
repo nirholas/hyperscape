@@ -3,11 +3,13 @@
  * Page for procedural tree generation using Weber & Penn algorithm
  *
  * Features:
- * - 19 species presets
+ * - 19 species presets with full parameter customization
+ * - Branch, trunk, and leaf settings
+ * - Side-by-side LOD preview (LOD0, LOD1, LOD2, Impostor)
+ * - LOD settings (distances, vertex percentages)
  * - Custom preset saving (seed + settings)
  * - Batch generation (generate multiple variations)
  * - GLB export
- * - LOD preview
  */
 
 import React, { useRef, useEffect, useState, useCallback } from "react";
@@ -19,13 +21,21 @@ import {
   Save,
   FolderOpen,
   Grid3x3,
-  Layers,
   Trash2,
-  Copy,
-  Plus,
   Database,
+  Eye,
+  Layers,
+  ChevronDown,
+  ChevronRight,
+  Image,
+  Sliders,
 } from "lucide-react";
-import * as THREE from "three";
+import {
+  THREE,
+  createWebGPURenderer,
+  type AssetForgeRenderer,
+} from "@/utils/webgpu-renderer";
+import { MeshStandardNodeMaterial, MeshBasicNodeMaterial } from "three/webgpu";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import {
@@ -33,23 +43,93 @@ import {
   getPresetNames,
   getPreset,
   disposeTreeMesh,
-  generateTreeVariations,
+  createTreeParams,
+  TreeImpostor,
+  TreeShape,
+  LeafShape,
+  createInstancedLeafMaterialWebGPU,
+  TREE_LOD_PRESETS,
   type TreeMeshResult,
+  type TreeParams,
+  type TreeShapeType,
+  type LeafShapeType,
+  type GeometryOptions,
 } from "@hyperscape/procgen";
 import { notify } from "@/utils/notify";
-import type { TreePreset, GeneratedProcgenAsset } from "@/types/ProcgenPresets";
+import type { TreePreset } from "@/types/ProcgenPresets";
+import {
+  DEFAULT_CATEGORY_LOD_SETTINGS,
+  type CategoryLODDefaults,
+} from "@/types/LODBundle";
 
 // API base
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3401";
 
+// Tree shape options for dropdown
+const TREE_SHAPE_OPTIONS: { value: TreeShapeType; label: string }[] = [
+  { value: TreeShape.Conical, label: "Conical" },
+  { value: TreeShape.Spherical, label: "Spherical" },
+  { value: TreeShape.Hemispherical, label: "Hemispherical" },
+  { value: TreeShape.Cylindrical, label: "Cylindrical" },
+  { value: TreeShape.TaperedCylindrical, label: "Tapered Cylindrical" },
+  { value: TreeShape.Flame, label: "Flame" },
+  { value: TreeShape.InverseConical, label: "Inverse Conical" },
+  { value: TreeShape.TendFlame, label: "Tend Flame" },
+  { value: TreeShape.Envelope, label: "Envelope/Custom" },
+];
+
+// Leaf shape options for dropdown
+const LEAF_SHAPE_OPTIONS: { value: LeafShapeType; label: string }[] = [
+  { value: LeafShape.Default, label: "Default (Elliptic)" },
+  { value: LeafShape.Ovate, label: "Ovate" },
+  { value: LeafShape.Linear, label: "Linear" },
+  { value: LeafShape.Cordate, label: "Cordate (Heart)" },
+  { value: LeafShape.Maple, label: "Maple" },
+  { value: LeafShape.Palmate, label: "Palmate" },
+  { value: LeafShape.SpikyOak, label: "Spiky Oak" },
+  { value: LeafShape.RoundedOak, label: "Rounded Oak" },
+  { value: LeafShape.Elliptic, label: "Elliptic" },
+  { value: LeafShape.Rectangle, label: "Rectangle" },
+  { value: LeafShape.Triangle, label: "Triangle" },
+];
+
+// Type for LOD data
+type LODData = {
+  mesh: TreeMeshResult | null;
+  vertices: number;
+  triangles: number;
+  // Target values for decimated LODs (what we want to achieve)
+  targetVertices?: number;
+  targetTriangles?: number;
+};
+
+// Type for impostor data
+type ImpostorData = {
+  impostor: TreeImpostor | null;
+  atlasTexture: THREE.Texture | null;
+  mesh: THREE.Mesh | null;
+};
+
 export const TreeGenPage: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const rendererRef = useRef<AssetForgeRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const currentTreeRef = useRef<TreeMeshResult | null>(null);
   const batchTreesRef = useRef<TreeMeshResult[]>([]);
+
+  // LOD refs for multi-view
+  const lodMeshRefs = useRef<{
+    lod0: THREE.Group | null;
+    lod1: THREE.Group | null;
+    lod2: THREE.Group | null;
+    impostor: THREE.Mesh | null;
+  }>({ lod0: null, lod1: null, lod2: null, impostor: null });
+  const impostorRef = useRef<TreeImpostor | null>(null);
+  const impostorInstanceRef = useRef<ReturnType<
+    TreeImpostor["createInstance"]
+  > | null>(null);
 
   // Generation state
   const [preset, setPreset] = useState("quakingAspen");
@@ -63,6 +143,27 @@ export const TreeGenPage: React.FC = () => {
     triangles: number;
     time: number;
   } | null>(null);
+
+  // Advanced tree parameters (override preset)
+  const [useAdvancedParams, setUseAdvancedParams] = useState(false);
+  const [advancedParams, setAdvancedParams] = useState<Partial<TreeParams>>({});
+
+  // Panel collapse state
+  const [expandedPanels, setExpandedPanels] = useState<{
+    shape: boolean;
+    trunk: boolean;
+    branches: boolean;
+    leaves: boolean;
+    lod: boolean;
+    impostor: boolean;
+  }>({
+    shape: true,
+    trunk: false,
+    branches: false,
+    leaves: false,
+    lod: false,
+    impostor: false,
+  });
 
   // Batch generation state
   const [batchMode, setBatchMode] = useState(false);
@@ -79,11 +180,47 @@ export const TreeGenPage: React.FC = () => {
 
   // LOD preview state
   const [showLODPreview, setShowLODPreview] = useState(false);
-  const [currentLOD, setCurrentLOD] = useState<"lod0" | "lod1" | "lod2">(
-    "lod0",
+  const [lodData, setLodData] = useState<{
+    lod0: LODData;
+    lod1: LODData;
+    lod2: LODData;
+  }>({
+    lod0: { mesh: null, vertices: 0, triangles: 0 },
+    lod1: { mesh: null, vertices: 0, triangles: 0 },
+    lod2: { mesh: null, vertices: 0, triangles: 0 },
+  });
+
+  // LOD settings (editable)
+  const [lodSettings, setLodSettings] = useState<CategoryLODDefaults>(
+    DEFAULT_CATEGORY_LOD_SETTINGS.tree,
   );
 
+  // Impostor state
+  const [impostorData, setImpostorData] = useState<ImpostorData>({
+    impostor: null,
+    atlasTexture: null,
+    mesh: null,
+  });
+  const [impostorSettings, setImpostorSettings] = useState({
+    atlasSize: 2048,
+    gridSize: 16,
+    enableLighting: true,
+  });
+
   const presetNames = getPresetNames();
+
+  // Toggle panel expand/collapse
+  const togglePanel = (panel: keyof typeof expandedPanels) => {
+    setExpandedPanels((prev) => ({ ...prev, [panel]: !prev[panel] }));
+  };
+
+  // Update a single advanced param
+  const updateAdvancedParam = <K extends keyof TreeParams>(
+    key: K,
+    value: TreeParams[K],
+  ) => {
+    setAdvancedParams((prev) => ({ ...prev, [key]: value }));
+  };
 
   // Load saved presets on mount
   useEffect(() => {
@@ -306,9 +443,13 @@ export const TreeGenPage: React.FC = () => {
     setSelectedBatchIndex(null);
   }, []);
 
-  // Initialize Three.js scene
+  // Initialize Three.js scene with WebGPU
   useEffect(() => {
     if (!containerRef.current) return;
+
+    let mounted = true;
+    let animationId: number;
+    let renderer: AssetForgeRenderer;
 
     // Scene
     const scene = new THREE.Scene();
@@ -322,26 +463,55 @@ export const TreeGenPage: React.FC = () => {
     camera.position.set(15, 10, 15);
     cameraRef.current = camera;
 
-    // Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(
-      containerRef.current.clientWidth,
-      containerRef.current.clientHeight,
-    );
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    containerRef.current.appendChild(renderer.domElement);
-    rendererRef.current = renderer;
+    const containerEl = containerRef.current;
 
-    // Controls
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.target.set(0, 5, 0);
-    controlsRef.current = controls;
+    // Async WebGPU initialization
+    const initRenderer = async () => {
+      renderer = await createWebGPURenderer({
+        antialias: true,
+        alpha: true,
+      });
 
-    // Lighting
+      if (!mounted) {
+        renderer.dispose();
+        return;
+      }
+
+      renderer.setSize(containerEl.clientWidth, containerEl.clientHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1;
+
+      containerEl.appendChild(renderer.domElement);
+      rendererRef.current = renderer;
+
+      // Controls (after renderer is ready)
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
+      controls.target.set(0, 5, 0);
+      controlsRef.current = controls;
+
+      // Animation loop
+      const animate = () => {
+        if (!mounted) return;
+        animationId = requestAnimationFrame(animate);
+        controls.update();
+        // Update impostor to face camera (critical for correct atlas sampling)
+        if (impostorInstanceRef.current) {
+          impostorInstanceRef.current.update(camera);
+        }
+        renderer.render(scene, camera);
+      };
+      animate();
+    };
+
+    initRenderer();
+
+    // Lighting (can be added before renderer is ready)
     const ambient = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambient);
 
@@ -365,10 +535,9 @@ export const TreeGenPage: React.FC = () => {
 
     // Ground plane
     const groundGeo = new THREE.CircleGeometry(50, 64);
-    const groundMat = new THREE.MeshStandardMaterial({
-      color: 0x3a5a40,
-      roughness: 0.9,
-    });
+    const groundMat = new MeshStandardNodeMaterial();
+    groundMat.color = new THREE.Color(0x3a5a40);
+    groundMat.roughness = 0.9;
     const ground = new THREE.Mesh(groundGeo, groundMat);
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
@@ -379,27 +548,19 @@ export const TreeGenPage: React.FC = () => {
     grid.position.y = 0.01;
     scene.add(grid);
 
-    // Animation loop
-    let animationId: number;
-    const animate = () => {
-      animationId = requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
-    };
-    animate();
-
     // Resize handler
     const handleResize = () => {
-      if (!containerRef.current) return;
+      if (!containerRef.current || !rendererRef.current) return;
       const w = containerRef.current.clientWidth;
       const h = containerRef.current.clientHeight;
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
+      rendererRef.current.setSize(w, h);
     };
     window.addEventListener("resize", handleResize);
 
     return () => {
+      mounted = false;
       window.removeEventListener("resize", handleResize);
       cancelAnimationFrame(animationId);
 
@@ -414,10 +575,40 @@ export const TreeGenPage: React.FC = () => {
       }
       batchTreesRef.current = [];
 
+      // Clean up LOD meshes
+      if (lodMeshRefs.current.lod0) {
+        scene.remove(lodMeshRefs.current.lod0);
+        lodMeshRefs.current.lod0 = null;
+      }
+      if (lodMeshRefs.current.lod1) {
+        scene.remove(lodMeshRefs.current.lod1);
+        lodMeshRefs.current.lod1 = null;
+      }
+      if (lodMeshRefs.current.lod2) {
+        scene.remove(lodMeshRefs.current.lod2);
+        lodMeshRefs.current.lod2 = null;
+      }
+      if (lodMeshRefs.current.impostor) {
+        scene.remove(lodMeshRefs.current.impostor);
+        lodMeshRefs.current.impostor = null;
+      }
+      if (impostorInstanceRef.current) {
+        impostorInstanceRef.current.dispose();
+        impostorInstanceRef.current = null;
+      }
+      if (impostorRef.current) {
+        impostorRef.current.dispose();
+        impostorRef.current = null;
+      }
+
       ground.geometry.dispose();
       groundMat.dispose();
 
-      renderer.dispose();
+      if (rendererRef.current) {
+        containerEl.removeChild(rendererRef.current.domElement);
+        rendererRef.current.dispose();
+        rendererRef.current = null;
+      }
 
       if (
         containerRef.current &&
@@ -428,6 +619,299 @@ export const TreeGenPage: React.FC = () => {
     };
   }, []);
 
+  // Clear LOD previews
+  const clearLODPreviews = useCallback(() => {
+    if (!sceneRef.current) return;
+
+    // Remove all LOD meshes
+    if (lodMeshRefs.current.lod0) {
+      sceneRef.current.remove(lodMeshRefs.current.lod0);
+      lodMeshRefs.current.lod0 = null;
+    }
+    if (lodMeshRefs.current.lod1) {
+      sceneRef.current.remove(lodMeshRefs.current.lod1);
+      lodMeshRefs.current.lod1 = null;
+    }
+    if (lodMeshRefs.current.lod2) {
+      sceneRef.current.remove(lodMeshRefs.current.lod2);
+      lodMeshRefs.current.lod2 = null;
+    }
+    if (lodMeshRefs.current.impostor) {
+      sceneRef.current.remove(lodMeshRefs.current.impostor);
+      lodMeshRefs.current.impostor = null;
+    }
+    // Remove atlas debug plane if present
+    const debugPlane = sceneRef.current.getObjectByName("atlasDebugPlane");
+    if (debugPlane) {
+      sceneRef.current.remove(debugPlane);
+    }
+
+    // Dispose impostor instance and tree impostor
+    if (impostorInstanceRef.current) {
+      impostorInstanceRef.current.dispose();
+      impostorInstanceRef.current = null;
+    }
+    if (impostorRef.current) {
+      impostorRef.current.dispose();
+      impostorRef.current = null;
+    }
+
+    setLodData({
+      lod0: { mesh: null, vertices: 0, triangles: 0 },
+      lod1: { mesh: null, vertices: 0, triangles: 0 },
+      lod2: { mesh: null, vertices: 0, triangles: 0 },
+    });
+    setImpostorData({ impostor: null, atlasTexture: null, mesh: null });
+  }, []);
+
+  // Count actual vertices and triangles in a group
+  const countGeometryStats = useCallback(
+    (group: THREE.Group): { vertices: number; triangles: number } => {
+      let totalVertices = 0;
+      let totalTriangles = 0;
+
+      group.traverse((obj) => {
+        if (obj instanceof THREE.Mesh && obj.geometry) {
+          const geo = obj.geometry as THREE.BufferGeometry;
+
+          const posAttr = geo.getAttribute("position");
+          if (posAttr) {
+            totalVertices += posAttr.count;
+          }
+
+          const indexAttr = geo.getIndex();
+          if (indexAttr) {
+            totalTriangles += Math.floor(indexAttr.count / 3);
+          } else if (posAttr) {
+            totalTriangles += Math.floor(posAttr.count / 3);
+          }
+        }
+      });
+
+      return { vertices: totalVertices, triangles: totalTriangles };
+    },
+    [],
+  );
+
+  // Decimate geometry (simple vertex reduction - currently just clones with target stats)
+  // TODO: Implement actual decimation algorithm (meshopt, simplify-js, etc.)
+  const decimateGeometry = useCallback(
+    (
+      sourceGroup: THREE.Group,
+      targetPercent: number,
+    ): {
+      group: THREE.Group;
+      vertices: number;
+      triangles: number;
+      targetVertices: number;
+      targetTriangles: number;
+    } => {
+      const clonedGroup = sourceGroup.clone(true);
+
+      // Count actual vertices in the cloned geometry
+      const actualStats = countGeometryStats(clonedGroup);
+
+      // Calculate target (what we want after decimation)
+      const targetVertices = Math.floor(
+        actualStats.vertices * (targetPercent / 100),
+      );
+      const targetTriangles = Math.floor(
+        actualStats.triangles * (targetPercent / 100),
+      );
+
+      return {
+        group: clonedGroup,
+        vertices: actualStats.vertices,
+        triangles: actualStats.triangles,
+        targetVertices,
+        targetTriangles,
+      };
+    },
+    [countGeometryStats],
+  );
+
+  // Generate LOD variants by REGENERATING with different geometry options
+  // This is the correct approach - not decimation - for procedural trees
+  const generateLODPreviews = useCallback(async () => {
+    if (
+      !sceneRef.current ||
+      !rendererRef.current ||
+      !currentTreeRef.current?.group
+    ) {
+      notify.error("Generate a tree first");
+      return;
+    }
+
+    setIsGenerating(true);
+    clearLODPreviews();
+
+    try {
+      const spacing = 20; // Space between LOD views
+
+      // Get current tree params for regeneration
+      const basePresetParams = getPreset(preset);
+      const treeParams = useAdvancedParams
+        ? createTreeParams({ ...basePresetParams, ...advancedParams })
+        : basePresetParams;
+
+      // Create shared leaf material for all LODs
+      const lodLeafMaterial = createInstancedLeafMaterialWebGPU({
+        color: new THREE.Color(0x3d7a3d),
+        colorVariation: 0.15,
+        alphaTest: 0.5,
+        leafShape: "elliptic",
+        subsurfaceScatter: 0.35,
+      });
+
+      // Helper to generate a tree at specific LOD level
+      const generateAtLOD = (
+        lodPreset: GeometryOptions,
+        position: number,
+      ): TreeMeshResult => {
+        // Apply leaf scale multiplier to tree params for this LOD
+        // This makes fewer leaves bigger to maintain visual coverage
+        const multiplier = lodPreset.leafScaleMultiplier ?? 1.0;
+        const lodParams: TreeParams = {
+          ...treeParams,
+          leafScale: treeParams.leafScale * multiplier,
+        };
+
+        const result = generateTree(lodParams, {
+          generation: { seed }, // Same seed = same tree structure
+          geometry: lodPreset,
+          mesh: {
+            useInstancedLeaves: true,
+            leafMaterial: lodLeafMaterial,
+          },
+        });
+        result.group.position.set(position, 0, 0);
+        result.group.traverse((obj) => {
+          if (obj instanceof THREE.Mesh) {
+            obj.castShadow = true;
+            obj.receiveShadow = true;
+          }
+        });
+        return result;
+      };
+
+      // LOD0 - Full quality (use preset or current tree's settings)
+      const lod0Result = generateAtLOD(TREE_LOD_PRESETS.lod0, -spacing * 1.5);
+      sceneRef.current.add(lod0Result.group);
+      lodMeshRefs.current.lod0 = lod0Result.group;
+
+      // LOD1 - Medium quality (~30% vertices)
+      const lod1Result = generateAtLOD(TREE_LOD_PRESETS.lod1, -spacing * 0.5);
+      sceneRef.current.add(lod1Result.group);
+      lodMeshRefs.current.lod1 = lod1Result.group;
+
+      // LOD2 - Low quality (~10% vertices)
+      const lod2Result = generateAtLOD(TREE_LOD_PRESETS.lod2, spacing * 0.5);
+      sceneRef.current.add(lod2Result.group);
+      lodMeshRefs.current.lod2 = lod2Result.group;
+
+      // Generate Impostor from LOD0 (full quality source)
+      console.log("[TreeGenPage] Creating TreeImpostor...");
+      const treeImpostor = new TreeImpostor({
+        atlasSize: impostorSettings.atlasSize,
+        gridSizeX: impostorSettings.gridSize,
+        gridSizeY: impostorSettings.gridSize,
+        enableLighting: impostorSettings.enableLighting,
+      });
+
+      console.log("[TreeGenPage] Baking impostor...");
+      // Cast renderer for impostor baking (WebGPU renderer is compatible)
+      // IMPORTANT: bake() is async for WebGPU - must await before createInstance()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await treeImpostor.bake(lod0Result, rendererRef.current as any);
+      impostorRef.current = treeImpostor;
+      console.log(
+        "[TreeGenPage] Bake complete, bakeResult:",
+        treeImpostor.getBakeResult(),
+      );
+
+      // Use TSL material for WebGPU renderer
+      console.log("[TreeGenPage] Creating impostor instance...");
+      const impostorInstance = treeImpostor.createInstance(1, { useTSL: true });
+      console.log("[TreeGenPage] Instance created:", impostorInstance.mesh);
+      impostorInstance.mesh.position.set(
+        spacing * 1.5,
+        impostorInstance.mesh.position.y,
+        0,
+      );
+      sceneRef.current.add(impostorInstance.mesh);
+      lodMeshRefs.current.impostor = impostorInstance.mesh;
+      impostorInstanceRef.current = impostorInstance; // Store for update loop
+      console.log("[TreeGenPage] Impostor added to scene");
+
+      // Add debug atlas plane to visualize the baked texture (positioned above the impostor)
+      const atlasTexture = treeImpostor.getAtlasTexture();
+      if (atlasTexture) {
+        const debugPlaneMat = new MeshBasicNodeMaterial();
+        debugPlaneMat.map = atlasTexture;
+        debugPlaneMat.side = THREE.DoubleSide;
+        debugPlaneMat.transparent = true;
+        const debugPlaneGeo = new THREE.PlaneGeometry(15, 15);
+        const debugPlane = new THREE.Mesh(debugPlaneGeo, debugPlaneMat);
+        debugPlane.position.set(spacing * 1.5, 25, 0); // Above the impostor
+        debugPlane.name = "atlasDebugPlane";
+        sceneRef.current.add(debugPlane);
+        console.log("[TreeGenPage] Added atlas debug plane at y=25");
+      }
+
+      // Update LOD data state with ACTUAL vertex counts from regenerated LODs
+      setLodData({
+        lod0: {
+          mesh: lod0Result,
+          vertices: lod0Result.vertexCount,
+          triangles: lod0Result.triangleCount,
+        },
+        lod1: {
+          mesh: lod1Result,
+          vertices: lod1Result.vertexCount,
+          triangles: lod1Result.triangleCount,
+          // Target is now what we actually achieved (no longer "target" since we regenerate)
+          targetVertices: Math.round(lod0Result.vertexCount * 0.3),
+          targetTriangles: Math.round(lod0Result.triangleCount * 0.3),
+        },
+        lod2: {
+          mesh: lod2Result,
+          vertices: lod2Result.vertexCount,
+          triangles: lod2Result.triangleCount,
+          targetVertices: Math.round(lod0Result.vertexCount * 0.1),
+          targetTriangles: Math.round(lod0Result.triangleCount * 0.1),
+        },
+      });
+
+      setImpostorData({
+        impostor: treeImpostor,
+        atlasTexture: treeImpostor.getAtlasTexture(),
+        mesh: impostorInstance.mesh,
+      });
+
+      // Zoom camera out to see all LODs
+      if (cameraRef.current && controlsRef.current) {
+        cameraRef.current.position.set(60, 30, 60);
+        controlsRef.current.target.set(0, 5, 0);
+        controlsRef.current.update();
+      }
+
+      setShowLODPreview(true);
+      notify.success("LOD previews generated");
+    } catch (error) {
+      console.error("LOD generation error:", error);
+      notify.error("Failed to generate LOD previews");
+    }
+
+    setIsGenerating(false);
+  }, [
+    clearLODPreviews,
+    preset,
+    seed,
+    useAdvancedParams,
+    advancedParams,
+    impostorSettings,
+  ]);
+
   // Generate single tree
   const generateTreeMesh = useCallback(() => {
     if (!sceneRef.current) return;
@@ -435,6 +919,12 @@ export const TreeGenPage: React.FC = () => {
     // Clear batch mode if active
     if (batchMode) {
       clearBatchResults();
+    }
+
+    // Clear LOD previews if active
+    if (showLODPreview) {
+      clearLODPreviews();
+      setShowLODPreview(false);
     }
 
     setIsGenerating(true);
@@ -451,18 +941,35 @@ export const TreeGenPage: React.FC = () => {
 
     try {
       // Get preset parameters
-      const presetParams = getPreset(preset);
-      if (!presetParams) {
+      const basePresetParams = getPreset(preset);
+      if (!basePresetParams) {
         console.error(`Preset not found: ${preset}`);
         notify.error(`Preset not found: ${preset}`);
         setIsGenerating(false);
         return;
       }
 
-      // Generate tree
-      const result = generateTree(preset, {
+      // Merge with advanced params if enabled
+      const treeParams = useAdvancedParams
+        ? createTreeParams({ ...basePresetParams, ...advancedParams })
+        : basePresetParams;
+
+      // Generate tree with params
+      // Use TSL (WebGPU-compatible) instanced leaf material for full performance
+      const webGPULeafMaterial = createInstancedLeafMaterialWebGPU({
+        color: new THREE.Color(0x3d7a3d),
+        colorVariation: 0.15,
+        alphaTest: 0.5,
+        leafShape: "elliptic",
+        subsurfaceScatter: 0.35,
+      });
+      const result = generateTree(treeParams, {
         generation: { seed },
         geometry: { radialSegments: 8 },
+        mesh: {
+          useInstancedLeaves: true,
+          leafMaterial: webGPULeafMaterial,
+        },
       });
 
       if (result.group) {
@@ -507,7 +1014,17 @@ export const TreeGenPage: React.FC = () => {
     }
 
     setIsGenerating(false);
-  }, [preset, seed, showLeaves, batchMode, clearBatchResults]);
+  }, [
+    preset,
+    seed,
+    showLeaves,
+    batchMode,
+    clearBatchResults,
+    useAdvancedParams,
+    advancedParams,
+    showLODPreview,
+    clearLODPreviews,
+  ]);
 
   // Generate batch of trees
   const generateBatch = useCallback(() => {
@@ -536,12 +1053,26 @@ export const TreeGenPage: React.FC = () => {
       const gridSize = Math.ceil(Math.sqrt(batchCount));
       const spacing = 15; // Space between trees
 
+      // Create shared TSL material for batch (WebGPU-compatible instanced rendering)
+      const batchLeafMaterial = createInstancedLeafMaterialWebGPU({
+        color: new THREE.Color(0x3d7a3d),
+        colorVariation: 0.15,
+        alphaTest: 0.5,
+        leafShape: "elliptic",
+        subsurfaceScatter: 0.35,
+      });
+
       for (let i = 0; i < batchCount; i++) {
         const batchSeed = seed + i * 1000;
 
+        // Use TSL instanced leaf material for WebGPU
         const result = generateTree(preset, {
           generation: { seed: batchSeed },
           geometry: { radialSegments: 8 },
+          mesh: {
+            useInstancedLeaves: true,
+            leafMaterial: batchLeafMaterial,
+          },
         });
 
         if (result.group) {
@@ -635,22 +1166,46 @@ export const TreeGenPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Get current preset params for display
+  const currentPresetParams = getPreset(preset);
+
   return (
     <div className="p-6 h-full flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold text-text-primary flex items-center gap-3">
             <TreePine size={28} />
-            Tree Generator
+            Tree Editor
           </h1>
           <p className="text-text-secondary mt-1">
-            Generate procedural trees using the Weber & Penn algorithm with 19
-            species presets
+            Full tree customization with LOD preview and impostor generation
           </p>
         </div>
 
         <div className="flex items-center gap-2">
+          {/* LOD Preview Toggle */}
+          <button
+            onClick={() => {
+              if (showLODPreview) {
+                clearLODPreviews();
+                setShowLODPreview(false);
+              } else {
+                generateLODPreviews();
+              }
+            }}
+            disabled={!currentTreeRef.current || isGenerating}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all ${
+              showLODPreview
+                ? "bg-purple-600 text-white"
+                : "bg-bg-tertiary text-text-secondary hover:text-text-primary"
+            } disabled:opacity-50`}
+            title="Show all LODs and impostor side by side"
+          >
+            <Eye size={18} />
+            LOD View
+          </button>
+
           {/* Batch Mode Toggle */}
           <button
             onClick={() => setBatchMode(!batchMode)}
@@ -678,10 +1233,10 @@ export const TreeGenPage: React.FC = () => {
             onClick={() => saveToAssets()}
             disabled={!currentTreeRef.current}
             className="flex items-center gap-2 px-4 py-2 bg-green-600/20 text-green-500 hover:bg-green-600/30 rounded-lg transition-all disabled:opacity-50"
-            title="Save to Assets for LOD/Impostor processing"
+            title="Save GLB to assets (loses instancing - for external tools only)"
           >
             <Database size={18} />
-            Save
+            Assets
           </button>
 
           {/* Export */}
@@ -689,9 +1244,10 @@ export const TreeGenPage: React.FC = () => {
             onClick={() => (batchMode ? exportBatchToGLB() : exportToGLB())}
             disabled={!currentTreeRef.current && batchResults.length === 0}
             className="flex items-center gap-2 px-4 py-2 bg-bg-tertiary text-text-secondary hover:text-text-primary rounded-lg transition-all disabled:opacity-50"
+            title="Export GLB (bakes geometry - loses instancing)"
           >
             <Download size={18} />
-            Export
+            Export GLB
           </button>
 
           {/* Generate */}
@@ -709,25 +1265,29 @@ export const TreeGenPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex-1 flex gap-6">
+      <div className="flex-1 flex gap-4">
         {/* Controls Panel */}
-        <div className="w-72 flex-shrink-0 space-y-4 overflow-y-auto">
-          {/* Generation Settings */}
+        <div className="w-80 flex-shrink-0 space-y-3 overflow-y-auto max-h-[calc(100vh-180px)]">
+          {/* Base Settings */}
           <div className="bg-bg-secondary rounded-lg p-4 border border-border-primary">
-            <h3 className="font-semibold text-text-primary mb-4 flex items-center gap-2">
+            <h3 className="font-semibold text-text-primary mb-3 flex items-center gap-2">
               <Settings2 size={18} />
-              Generation Settings
+              Base Settings
             </h3>
 
-            <div className="space-y-4">
+            <div className="space-y-3">
               <div>
-                <label className="block text-sm text-text-secondary mb-2">
+                <label className="block text-sm text-text-secondary mb-1">
                   Tree Species
                 </label>
                 <select
                   value={preset}
-                  onChange={(e) => setPreset(e.target.value)}
-                  className="w-full px-3 py-2 bg-bg-tertiary border border-border-primary rounded-md text-text-primary"
+                  onChange={(e) => {
+                    setPreset(e.target.value);
+                    // Reset advanced params when changing preset
+                    setAdvancedParams({});
+                  }}
+                  className="w-full px-3 py-2 bg-bg-tertiary border border-border-primary rounded-md text-text-primary text-sm"
                 >
                   {presetNames.map((name) => (
                     <option key={name} value={name}>
@@ -741,7 +1301,7 @@ export const TreeGenPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-sm text-text-secondary mb-2">
+                <label className="block text-sm text-text-secondary mb-1">
                   Seed
                 </label>
                 <div className="flex gap-2">
@@ -749,11 +1309,11 @@ export const TreeGenPage: React.FC = () => {
                     type="number"
                     value={seed}
                     onChange={(e) => setSeed(parseInt(e.target.value) || 0)}
-                    className="flex-1 px-3 py-2 bg-bg-tertiary border border-border-primary rounded-md text-text-primary"
+                    className="flex-1 px-3 py-1.5 bg-bg-tertiary border border-border-primary rounded-md text-text-primary text-sm"
                   />
                   <button
                     onClick={() => setSeed(Math.floor(Math.random() * 1000000))}
-                    className="px-3 py-2 bg-bg-tertiary border border-border-primary rounded-md text-text-secondary hover:text-text-primary transition-colors"
+                    className="px-3 py-1.5 bg-bg-tertiary border border-border-primary rounded-md text-text-secondary hover:text-text-primary transition-colors"
                     title="Random seed"
                   >
                     🎲
@@ -761,7 +1321,7 @@ export const TreeGenPage: React.FC = () => {
                 </div>
               </div>
 
-              <div>
+              <div className="flex items-center gap-4">
                 <label className="flex items-center gap-2 text-sm text-text-primary cursor-pointer">
                   <input
                     type="checkbox"
@@ -771,13 +1331,22 @@ export const TreeGenPage: React.FC = () => {
                   />
                   Show Leaves
                 </label>
+                <label className="flex items-center gap-2 text-sm text-text-primary cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={useAdvancedParams}
+                    onChange={(e) => setUseAdvancedParams(e.target.checked)}
+                    className="rounded"
+                  />
+                  Advanced
+                </label>
               </div>
 
               {/* Batch Count */}
               {batchMode && (
                 <div>
-                  <label className="block text-sm text-text-secondary mb-2">
-                    Batch Count
+                  <label className="block text-sm text-text-secondary mb-1">
+                    Batch Count: {batchCount}
                   </label>
                   <input
                     type="range"
@@ -787,20 +1356,13 @@ export const TreeGenPage: React.FC = () => {
                     onChange={(e) => setBatchCount(parseInt(e.target.value))}
                     className="w-full"
                   />
-                  <div className="flex justify-between text-xs text-text-secondary mt-1">
-                    <span>2</span>
-                    <span className="text-text-primary font-medium">
-                      {batchCount}
-                    </span>
-                    <span>25</span>
-                  </div>
                 </div>
               )}
 
               <button
                 onClick={batchMode ? generateBatch : generateTreeMesh}
                 disabled={isGenerating}
-                className="w-full py-2 bg-primary hover:bg-primary-dark text-white rounded-md transition-all disabled:opacity-50"
+                className="w-full py-2 bg-primary hover:bg-primary-dark text-white rounded-md transition-all disabled:opacity-50 text-sm"
               >
                 {isGenerating
                   ? "Generating..."
@@ -809,6 +1371,688 @@ export const TreeGenPage: React.FC = () => {
                     : "Generate Tree"}
               </button>
             </div>
+          </div>
+
+          {/* Tree Shape Settings */}
+          {useAdvancedParams && (
+            <div className="bg-bg-secondary rounded-lg border border-border-primary overflow-hidden">
+              <button
+                onClick={() => togglePanel("shape")}
+                className="w-full px-4 py-3 flex items-center justify-between text-text-primary hover:bg-bg-tertiary transition-colors"
+              >
+                <span className="font-semibold flex items-center gap-2">
+                  <TreePine size={16} />
+                  Tree Shape
+                </span>
+                {expandedPanels.shape ? (
+                  <ChevronDown size={18} />
+                ) : (
+                  <ChevronRight size={18} />
+                )}
+              </button>
+              {expandedPanels.shape && (
+                <div className="px-4 pb-4 space-y-3">
+                  <div>
+                    <label className="block text-xs text-text-secondary mb-1">
+                      Shape Type
+                    </label>
+                    <select
+                      value={
+                        advancedParams.shape ?? currentPresetParams?.shape ?? 0
+                      }
+                      onChange={(e) =>
+                        updateAdvancedParam(
+                          "shape",
+                          parseInt(e.target.value) as TreeShapeType,
+                        )
+                      }
+                      className="w-full px-2 py-1.5 bg-bg-tertiary border border-border-primary rounded text-text-primary text-sm"
+                    >
+                      {TREE_SHAPE_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs text-text-secondary mb-1">
+                        Scale (
+                        {(
+                          advancedParams.gScale ??
+                          currentPresetParams?.gScale ??
+                          10
+                        ).toFixed(1)}
+                        )
+                      </label>
+                      <input
+                        type="range"
+                        min={1}
+                        max={50}
+                        step={0.5}
+                        value={
+                          advancedParams.gScale ??
+                          currentPresetParams?.gScale ??
+                          10
+                        }
+                        onChange={(e) =>
+                          updateAdvancedParam(
+                            "gScale",
+                            parseFloat(e.target.value),
+                          )
+                        }
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-text-secondary mb-1">
+                        Levels (
+                        {advancedParams.levels ??
+                          currentPresetParams?.levels ??
+                          3}
+                        )
+                      </label>
+                      <input
+                        type="range"
+                        min={1}
+                        max={4}
+                        step={1}
+                        value={
+                          advancedParams.levels ??
+                          currentPresetParams?.levels ??
+                          3
+                        }
+                        onChange={(e) =>
+                          updateAdvancedParam(
+                            "levels",
+                            parseInt(e.target.value),
+                          )
+                        }
+                        className="w-full"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs text-text-secondary mb-1">
+                        Ratio (
+                        {(
+                          advancedParams.ratio ??
+                          currentPresetParams?.ratio ??
+                          0.015
+                        ).toFixed(3)}
+                        )
+                      </label>
+                      <input
+                        type="range"
+                        min={0.001}
+                        max={0.1}
+                        step={0.001}
+                        value={
+                          advancedParams.ratio ??
+                          currentPresetParams?.ratio ??
+                          0.015
+                        }
+                        onChange={(e) =>
+                          updateAdvancedParam(
+                            "ratio",
+                            parseFloat(e.target.value),
+                          )
+                        }
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-text-secondary mb-1">
+                        Flare (
+                        {(
+                          advancedParams.flare ??
+                          currentPresetParams?.flare ??
+                          0
+                        ).toFixed(2)}
+                        )
+                      </label>
+                      <input
+                        type="range"
+                        min={0}
+                        max={2}
+                        step={0.05}
+                        value={
+                          advancedParams.flare ??
+                          currentPresetParams?.flare ??
+                          0
+                        }
+                        onChange={(e) =>
+                          updateAdvancedParam(
+                            "flare",
+                            parseFloat(e.target.value),
+                          )
+                        }
+                        className="w-full"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Trunk Settings */}
+          {useAdvancedParams && (
+            <div className="bg-bg-secondary rounded-lg border border-border-primary overflow-hidden">
+              <button
+                onClick={() => togglePanel("trunk")}
+                className="w-full px-4 py-3 flex items-center justify-between text-text-primary hover:bg-bg-tertiary transition-colors"
+              >
+                <span className="font-semibold flex items-center gap-2">
+                  <Layers size={16} />
+                  Trunk
+                </span>
+                {expandedPanels.trunk ? (
+                  <ChevronDown size={18} />
+                ) : (
+                  <ChevronRight size={18} />
+                )}
+              </button>
+              {expandedPanels.trunk && (
+                <div className="px-4 pb-4 space-y-3">
+                  <div>
+                    <label className="block text-xs text-text-secondary mb-1">
+                      Base Splits (
+                      {advancedParams.baseSplits ??
+                        currentPresetParams?.baseSplits ??
+                        0}
+                      )
+                    </label>
+                    <input
+                      type="range"
+                      min={0}
+                      max={5}
+                      step={1}
+                      value={
+                        advancedParams.baseSplits ??
+                        currentPresetParams?.baseSplits ??
+                        0
+                      }
+                      onChange={(e) =>
+                        updateAdvancedParam(
+                          "baseSplits",
+                          parseInt(e.target.value),
+                        )
+                      }
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-text-secondary mb-1">
+                      Ratio Power (
+                      {(
+                        advancedParams.ratioPower ??
+                        currentPresetParams?.ratioPower ??
+                        1.2
+                      ).toFixed(2)}
+                      )
+                    </label>
+                    <input
+                      type="range"
+                      min={0.5}
+                      max={3}
+                      step={0.1}
+                      value={
+                        advancedParams.ratioPower ??
+                        currentPresetParams?.ratioPower ??
+                        1.2
+                      }
+                      onChange={(e) =>
+                        updateAdvancedParam(
+                          "ratioPower",
+                          parseFloat(e.target.value),
+                        )
+                      }
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Branch Settings */}
+          {useAdvancedParams && (
+            <div className="bg-bg-secondary rounded-lg border border-border-primary overflow-hidden">
+              <button
+                onClick={() => togglePanel("branches")}
+                className="w-full px-4 py-3 flex items-center justify-between text-text-primary hover:bg-bg-tertiary transition-colors"
+              >
+                <span className="font-semibold flex items-center gap-2">
+                  <TreePine size={16} />
+                  Branches
+                </span>
+                {expandedPanels.branches ? (
+                  <ChevronDown size={18} />
+                ) : (
+                  <ChevronRight size={18} />
+                )}
+              </button>
+              {expandedPanels.branches && (
+                <div className="px-4 pb-4 space-y-2">
+                  <p className="text-xs text-text-secondary italic">
+                    Branch parameters are per-level arrays [trunk, level1,
+                    level2, level3]. Adjusting these requires editing the preset
+                    JSON directly.
+                  </p>
+                  <div className="text-xs text-text-secondary">
+                    <p>
+                      Current preset branch count: [
+                      {currentPresetParams?.branches?.join(", ")}]
+                    </p>
+                    <p>
+                      Down angles: [{currentPresetParams?.downAngle?.join(", ")}
+                      ]°
+                    </p>
+                    <p>
+                      Rotation: [{currentPresetParams?.rotate?.join(", ")}]°
+                    </p>
+                    <p>
+                      Length: [
+                      {currentPresetParams?.length
+                        ?.map((l) => l.toFixed(2))
+                        .join(", ")}
+                      ]
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Leaf Settings */}
+          {useAdvancedParams && (
+            <div className="bg-bg-secondary rounded-lg border border-border-primary overflow-hidden">
+              <button
+                onClick={() => togglePanel("leaves")}
+                className="w-full px-4 py-3 flex items-center justify-between text-text-primary hover:bg-bg-tertiary transition-colors"
+              >
+                <span className="font-semibold flex items-center gap-2">
+                  <TreePine size={16} />
+                  Leaves
+                </span>
+                {expandedPanels.leaves ? (
+                  <ChevronDown size={18} />
+                ) : (
+                  <ChevronRight size={18} />
+                )}
+              </button>
+              {expandedPanels.leaves && (
+                <div className="px-4 pb-4 space-y-3">
+                  <div>
+                    <label className="block text-xs text-text-secondary mb-1">
+                      Leaf Shape
+                    </label>
+                    <select
+                      value={
+                        advancedParams.leafShape ??
+                        currentPresetParams?.leafShape ??
+                        8
+                      }
+                      onChange={(e) =>
+                        updateAdvancedParam(
+                          "leafShape",
+                          parseInt(e.target.value) as LeafShapeType,
+                        )
+                      }
+                      className="w-full px-2 py-1.5 bg-bg-tertiary border border-border-primary rounded text-text-primary text-sm"
+                    >
+                      {LEAF_SHAPE_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs text-text-secondary mb-1">
+                        Leaf Scale (
+                        {(
+                          advancedParams.leafScale ??
+                          currentPresetParams?.leafScale ??
+                          0.2
+                        ).toFixed(2)}
+                        )
+                      </label>
+                      <input
+                        type="range"
+                        min={0.01}
+                        max={1}
+                        step={0.01}
+                        value={
+                          advancedParams.leafScale ??
+                          currentPresetParams?.leafScale ??
+                          0.2
+                        }
+                        onChange={(e) =>
+                          updateAdvancedParam(
+                            "leafScale",
+                            parseFloat(e.target.value),
+                          )
+                        }
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-text-secondary mb-1">
+                        Width Scale (
+                        {(
+                          advancedParams.leafScaleX ??
+                          currentPresetParams?.leafScaleX ??
+                          1
+                        ).toFixed(2)}
+                        )
+                      </label>
+                      <input
+                        type="range"
+                        min={0.1}
+                        max={2}
+                        step={0.05}
+                        value={
+                          advancedParams.leafScaleX ??
+                          currentPresetParams?.leafScaleX ??
+                          1
+                        }
+                        onChange={(e) =>
+                          updateAdvancedParam(
+                            "leafScaleX",
+                            parseFloat(e.target.value),
+                          )
+                        }
+                        className="w-full"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs text-text-secondary mb-1">
+                        Leaf Count (
+                        {advancedParams.leafBlosNum ??
+                          currentPresetParams?.leafBlosNum ??
+                          40}
+                        )
+                      </label>
+                      <input
+                        type="range"
+                        min={1}
+                        max={100}
+                        step={1}
+                        value={
+                          advancedParams.leafBlosNum ??
+                          currentPresetParams?.leafBlosNum ??
+                          40
+                        }
+                        onChange={(e) =>
+                          updateAdvancedParam(
+                            "leafBlosNum",
+                            parseInt(e.target.value),
+                          )
+                        }
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-text-secondary mb-1">
+                        Leaf Bend (
+                        {(
+                          advancedParams.leafBend ??
+                          currentPresetParams?.leafBend ??
+                          0.3
+                        ).toFixed(2)}
+                        )
+                      </label>
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={
+                          advancedParams.leafBend ??
+                          currentPresetParams?.leafBend ??
+                          0.3
+                        }
+                        onChange={(e) =>
+                          updateAdvancedParam(
+                            "leafBend",
+                            parseFloat(e.target.value),
+                          )
+                        }
+                        className="w-full"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* LOD Settings */}
+          <div className="bg-bg-secondary rounded-lg border border-border-primary overflow-hidden">
+            <button
+              onClick={() => togglePanel("lod")}
+              className="w-full px-4 py-3 flex items-center justify-between text-text-primary hover:bg-bg-tertiary transition-colors"
+            >
+              <span className="font-semibold flex items-center gap-2">
+                <Sliders size={16} />
+                LOD Settings
+              </span>
+              {expandedPanels.lod ? (
+                <ChevronDown size={18} />
+              ) : (
+                <ChevronRight size={18} />
+              )}
+            </button>
+            {expandedPanels.lod && (
+              <div className="px-4 pb-4 space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs text-text-secondary mb-1">
+                      LOD1 % ({lodSettings.lod1.targetPercent}%)
+                    </label>
+                    <input
+                      type="range"
+                      min={10}
+                      max={60}
+                      step={5}
+                      value={lodSettings.lod1.targetPercent}
+                      onChange={(e) =>
+                        setLodSettings((prev) => ({
+                          ...prev,
+                          lod1: {
+                            ...prev.lod1,
+                            targetPercent: parseInt(e.target.value),
+                          },
+                        }))
+                      }
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-text-secondary mb-1">
+                      LOD1 Dist ({lodSettings.lod1.distance}m)
+                    </label>
+                    <input
+                      type="range"
+                      min={20}
+                      max={200}
+                      step={10}
+                      value={lodSettings.lod1.distance}
+                      onChange={(e) =>
+                        setLodSettings((prev) => ({
+                          ...prev,
+                          lod1: {
+                            ...prev.lod1,
+                            distance: parseInt(e.target.value),
+                          },
+                        }))
+                      }
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs text-text-secondary mb-1">
+                      LOD2 % ({lodSettings.lod2.targetPercent}%)
+                    </label>
+                    <input
+                      type="range"
+                      min={5}
+                      max={30}
+                      step={5}
+                      value={lodSettings.lod2.targetPercent}
+                      onChange={(e) =>
+                        setLodSettings((prev) => ({
+                          ...prev,
+                          lod2: {
+                            ...prev.lod2,
+                            targetPercent: parseInt(e.target.value),
+                          },
+                        }))
+                      }
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-text-secondary mb-1">
+                      LOD2 Dist ({lodSettings.lod2.distance}m)
+                    </label>
+                    <input
+                      type="range"
+                      min={50}
+                      max={400}
+                      step={10}
+                      value={lodSettings.lod2.distance}
+                      onChange={(e) =>
+                        setLodSettings((prev) => ({
+                          ...prev,
+                          lod2: {
+                            ...prev.lod2,
+                            distance: parseInt(e.target.value),
+                          },
+                        }))
+                      }
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+                <button
+                  onClick={generateLODPreviews}
+                  disabled={!currentTreeRef.current || isGenerating}
+                  className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md transition-all disabled:opacity-50 text-sm flex items-center justify-center gap-2"
+                >
+                  <Eye size={16} />
+                  Generate LOD Preview
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Impostor Settings */}
+          <div className="bg-bg-secondary rounded-lg border border-border-primary overflow-hidden">
+            <button
+              onClick={() => togglePanel("impostor")}
+              className="w-full px-4 py-3 flex items-center justify-between text-text-primary hover:bg-bg-tertiary transition-colors"
+            >
+              <span className="font-semibold flex items-center gap-2">
+                <Image size={16} />
+                Impostor Settings
+              </span>
+              {expandedPanels.impostor ? (
+                <ChevronDown size={18} />
+              ) : (
+                <ChevronRight size={18} />
+              )}
+            </button>
+            {expandedPanels.impostor && (
+              <div className="px-4 pb-4 space-y-3">
+                <div>
+                  <label className="block text-xs text-text-secondary mb-1">
+                    Atlas Size: {impostorSettings.atlasSize}px
+                  </label>
+                  <select
+                    value={impostorSettings.atlasSize}
+                    onChange={(e) =>
+                      setImpostorSettings((prev) => ({
+                        ...prev,
+                        atlasSize: parseInt(e.target.value),
+                      }))
+                    }
+                    className="w-full px-2 py-1.5 bg-bg-tertiary border border-border-primary rounded text-text-primary text-sm"
+                  >
+                    <option value={512}>512px</option>
+                    <option value={1024}>1024px</option>
+                    <option value={2048}>2048px</option>
+                    <option value={4096}>4096px</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-text-secondary mb-1">
+                    Grid Size: {impostorSettings.gridSize}x
+                    {impostorSettings.gridSize}
+                  </label>
+                  <input
+                    type="range"
+                    min={8}
+                    max={32}
+                    step={1}
+                    value={impostorSettings.gridSize}
+                    onChange={(e) =>
+                      setImpostorSettings((prev) => ({
+                        ...prev,
+                        gridSize: parseInt(e.target.value),
+                      }))
+                    }
+                    className="w-full"
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-xs text-text-primary cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={impostorSettings.enableLighting}
+                    onChange={(e) =>
+                      setImpostorSettings((prev) => ({
+                        ...prev,
+                        enableLighting: e.target.checked,
+                      }))
+                    }
+                    className="rounded"
+                  />
+                  Enable Dynamic Lighting
+                </label>
+                <div>
+                  <label className="block text-xs text-text-secondary mb-1">
+                    Impostor Distance: {lodSettings.imposter.activationDistance}
+                    m
+                  </label>
+                  <input
+                    type="range"
+                    min={100}
+                    max={500}
+                    step={25}
+                    value={lodSettings.imposter.activationDistance}
+                    onChange={(e) =>
+                      setLodSettings((prev) => ({
+                        ...prev,
+                        imposter: {
+                          ...prev.imposter,
+                          activationDistance: parseInt(e.target.value),
+                        },
+                      }))
+                    }
+                    className="w-full"
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Saved Presets */}
@@ -851,10 +2095,150 @@ export const TreeGenPage: React.FC = () => {
           {stats && (
             <div className="bg-bg-secondary rounded-lg p-4 border border-border-primary">
               <h3 className="font-semibold text-text-primary mb-3">
-                {batchMode ? "Batch Stats" : "Generation Stats"}
+                {showLODPreview
+                  ? "LOD Comparison"
+                  : batchMode
+                    ? "Batch Stats"
+                    : "Generation Stats"}
               </h3>
+
+              {/* Instancing Badge - show in normal mode */}
+              {!showLODPreview && !batchMode && (
+                <div className="mb-3 p-2 bg-green-900/30 border border-green-600/50 rounded-md">
+                  <div className="text-xs font-semibold text-green-400 flex items-center gap-1">
+                    <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
+                    WebGPU Instanced Rendering
+                  </div>
+                  <p className="text-xs text-green-300/80 mt-1">
+                    TSL shader - 1 draw call for all leaves per tree
+                  </p>
+                </div>
+              )}
+
               <div className="space-y-2 text-sm">
-                {batchMode ? (
+                {showLODPreview ? (
+                  <>
+                    {/* LOD0 Stats */}
+                    <div className="p-2 bg-bg-tertiary rounded">
+                      <div className="text-xs font-semibold text-blue-400 mb-1">
+                        LOD0 (Original)
+                      </div>
+                      <div className="flex justify-between text-text-secondary text-xs">
+                        <span>Vertices:</span>
+                        <span className="text-text-primary font-mono">
+                          {lodData.lod0.vertices.toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-text-secondary text-xs">
+                        <span>Triangles:</span>
+                        <span className="text-text-primary font-mono">
+                          {lodData.lod0.triangles.toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
+                    {/* LOD1 Stats */}
+                    <div className="p-2 bg-bg-tertiary rounded">
+                      <div className="text-xs font-semibold text-green-400 mb-1">
+                        LOD1 @ {lodSettings.lod1.distance}m
+                      </div>
+                      <div className="flex justify-between text-text-secondary text-xs">
+                        <span>Vertices:</span>
+                        <span className="text-text-primary font-mono">
+                          {lodData.lod1.vertices.toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-text-secondary text-xs">
+                        <span>Triangles:</span>
+                        <span className="text-text-primary font-mono">
+                          {lodData.lod1.triangles.toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-text-secondary text-xs mt-1 pt-1 border-t border-border-primary/50">
+                        <span>Reduction:</span>
+                        <span
+                          className={`font-mono ${lodData.lod1.vertices < lodData.lod0.vertices * 0.4 ? "text-green-400" : "text-yellow-400"}`}
+                        >
+                          {lodData.lod0.vertices > 0
+                            ? Math.round(
+                                (1 -
+                                  lodData.lod1.vertices /
+                                    lodData.lod0.vertices) *
+                                  100,
+                              )
+                            : 0}
+                          % fewer
+                        </span>
+                      </div>
+                    </div>
+                    {/* LOD2 Stats */}
+                    <div className="p-2 bg-bg-tertiary rounded">
+                      <div className="text-xs font-semibold text-yellow-400 mb-1">
+                        LOD2 @ {lodSettings.lod2.distance}m
+                      </div>
+                      <div className="flex justify-between text-text-secondary text-xs">
+                        <span>Vertices:</span>
+                        <span className="text-text-primary font-mono">
+                          {lodData.lod2.vertices.toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-text-secondary text-xs">
+                        <span>Triangles:</span>
+                        <span className="text-text-primary font-mono">
+                          {lodData.lod2.triangles.toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-text-secondary text-xs mt-1 pt-1 border-t border-border-primary/50">
+                        <span>Reduction:</span>
+                        <span
+                          className={`font-mono ${lodData.lod2.vertices < lodData.lod0.vertices * 0.15 ? "text-green-400" : "text-yellow-400"}`}
+                        >
+                          {lodData.lod0.vertices > 0
+                            ? Math.round(
+                                (1 -
+                                  lodData.lod2.vertices /
+                                    lodData.lod0.vertices) *
+                                  100,
+                              )
+                            : 0}
+                          % fewer
+                        </span>
+                      </div>
+                    </div>
+                    {/* Impostor Stats */}
+                    <div className="p-2 bg-bg-tertiary rounded">
+                      <div className="text-xs font-semibold text-purple-400 mb-1">
+                        Impostor @ {lodSettings.imposter.activationDistance}m
+                      </div>
+                      <div className="flex justify-between text-text-secondary text-xs">
+                        <span>Vertices:</span>
+                        <span className="text-text-primary font-mono">4</span>
+                      </div>
+                      <div className="flex justify-between text-text-secondary text-xs">
+                        <span>Triangles:</span>
+                        <span className="text-text-primary font-mono">2</span>
+                      </div>
+                      <div className="flex justify-between text-text-secondary text-xs mt-1 pt-1 border-t border-border-primary/50">
+                        <span>Atlas:</span>
+                        <span className="text-text-primary font-mono">
+                          {impostorSettings.atlasSize}x
+                          {impostorSettings.atlasSize}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-text-secondary text-xs">
+                        <span>Grid:</span>
+                        <span className="text-text-primary font-mono">
+                          {impostorSettings.gridSize}x
+                          {impostorSettings.gridSize}
+                        </span>
+                      </div>
+                    </div>
+                    {/* Note about LOD regeneration */}
+                    <div className="text-xs text-text-secondary/60 italic mt-2">
+                      LODs are regenerated with reduced geometry (branches,
+                      leaves, radial segments) - not decimated.
+                    </div>
+                  </>
+                ) : batchMode ? (
                   <>
                     <div className="flex justify-between text-text-secondary">
                       <span>Trees:</span>
@@ -863,6 +2247,18 @@ export const TreeGenPage: React.FC = () => {
                     <div className="flex justify-between text-text-secondary">
                       <span>With Leaves:</span>
                       <span className="text-text-primary">{stats.leaves}</span>
+                    </div>
+                    <div className="flex justify-between text-text-secondary">
+                      <span>Total Vertices:</span>
+                      <span className="text-text-primary">
+                        {stats.vertices.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-text-secondary">
+                      <span>Total Triangles:</span>
+                      <span className="text-text-primary">
+                        {stats.triangles.toLocaleString()}
+                      </span>
                     </div>
                   </>
                 ) : (
@@ -879,25 +2275,112 @@ export const TreeGenPage: React.FC = () => {
                         {stats.leaves.toLocaleString()}
                       </span>
                     </div>
+                    <div className="flex justify-between text-text-secondary">
+                      <span>Total Vertices:</span>
+                      <span className="text-text-primary">
+                        {stats.vertices.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-text-secondary">
+                      <span>Total Triangles:</span>
+                      <span className="text-text-primary">
+                        {stats.triangles.toLocaleString()}
+                      </span>
+                    </div>
                   </>
                 )}
-                <div className="flex justify-between text-text-secondary">
-                  <span>Total Vertices:</span>
-                  <span className="text-text-primary">
-                    {stats.vertices.toLocaleString()}
-                  </span>
-                </div>
-                <div className="flex justify-between text-text-secondary">
-                  <span>Total Triangles:</span>
-                  <span className="text-text-primary">
-                    {stats.triangles.toLocaleString()}
-                  </span>
-                </div>
                 <div className="flex justify-between text-text-secondary">
                   <span>Gen Time:</span>
                   <span className="text-text-primary">{stats.time}ms</span>
                 </div>
+
+                {/* Runtime vs Export info - show in normal mode */}
+                {!showLODPreview && !batchMode && (
+                  <div className="mt-3 pt-3 border-t border-border-primary">
+                    <div className="text-xs text-text-secondary space-y-1">
+                      <p className="font-medium text-text-primary">
+                        Runtime (Game):
+                      </p>
+                      <p>
+                        • {stats.vertices.toLocaleString()} verts (instanced
+                        leaves)
+                      </p>
+                      <p>• 1 draw call per preset per LOD</p>
+                      <p>• All leaves in single global buffer</p>
+                      <p className="font-medium text-text-primary mt-2">
+                        GLB Export:
+                      </p>
+                      <p>
+                        • ~{(stats.triangles * 3).toLocaleString()} verts
+                        (baked)
+                      </p>
+                      <p>• Instancing lost - for external tools</p>
+                    </div>
+                  </div>
+                )}
               </div>
+            </div>
+          )}
+
+          {/* Impostor Atlas Preview */}
+          {showLODPreview && impostorData.atlasTexture && (
+            <div className="bg-bg-secondary rounded-lg p-4 border border-border-primary">
+              <h3 className="font-semibold text-text-primary mb-3 flex items-center gap-2">
+                <Image size={16} />
+                Impostor Atlas
+              </h3>
+              <div className="relative aspect-square bg-black rounded overflow-hidden">
+                <canvas
+                  ref={(canvas) => {
+                    if (!canvas || !impostorData.atlasTexture) return;
+                    const ctx = canvas.getContext("2d");
+                    if (!ctx) return;
+
+                    // Handle both WebGL (.image) and WebGPU (.source) texture sources
+                    const texture = impostorData.atlasTexture;
+                    const imageSource = texture.image ?? texture.source;
+
+                    // Check if we have a valid drawable source
+                    if (
+                      imageSource &&
+                      (imageSource instanceof HTMLCanvasElement ||
+                        imageSource instanceof HTMLImageElement ||
+                        imageSource instanceof ImageBitmap ||
+                        imageSource instanceof OffscreenCanvas)
+                    ) {
+                      canvas.width = 256;
+                      canvas.height = 256;
+                      ctx.drawImage(imageSource, 0, 0, 256, 256);
+                    } else {
+                      // Fallback: WebGPU textures can't be drawn to 2D canvas directly
+                      canvas.width = 256;
+                      canvas.height = 256;
+                      ctx.fillStyle = "#1a1a2e";
+                      ctx.fillRect(0, 0, 256, 256);
+                      ctx.fillStyle = "#6a6a8a";
+                      ctx.font = "11px sans-serif";
+                      ctx.textAlign = "center";
+                      // Show that we have a texture but it's GPU-resident
+                      if (texture && texture.uuid) {
+                        ctx.fillText("WebGPU Atlas (GPU)", 128, 120);
+                        ctx.fillStyle = "#4a8a4a";
+                        ctx.fillText(
+                          `${impostorSettings.atlasSize}x${impostorSettings.atlasSize}`,
+                          128,
+                          140,
+                        );
+                      } else {
+                        ctx.fillText("Atlas rendering...", 128, 128);
+                      }
+                    }
+                  }}
+                  className="w-full h-full"
+                />
+              </div>
+              <p className="text-xs text-text-secondary mt-2 text-center">
+                {impostorSettings.gridSize}x{impostorSettings.gridSize}{" "}
+                octahedral views
+              </p>
             </div>
           )}
 
@@ -953,8 +2436,42 @@ export const TreeGenPage: React.FC = () => {
         </div>
 
         {/* Viewer */}
-        <div className="flex-1 bg-bg-secondary rounded-xl overflow-hidden border border-border-primary">
+        <div className="flex-1 bg-bg-secondary rounded-xl overflow-hidden border border-border-primary relative">
           <div ref={containerRef} className="w-full h-full" />
+
+          {/* LOD Labels overlay when in LOD preview mode */}
+          {showLODPreview && (
+            <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-16 pointer-events-none">
+              <div className="text-center">
+                <div className="bg-blue-500/80 text-white text-xs px-3 py-1 rounded-full font-semibold">
+                  LOD0
+                </div>
+                <div className="text-xs text-white/80 mt-1">Original</div>
+              </div>
+              <div className="text-center">
+                <div className="bg-green-500/80 text-white text-xs px-3 py-1 rounded-full font-semibold">
+                  LOD1
+                </div>
+                <div className="text-xs text-white/80 mt-1">
+                  {lodSettings.lod1.targetPercent}%
+                </div>
+              </div>
+              <div className="text-center">
+                <div className="bg-yellow-500/80 text-white text-xs px-3 py-1 rounded-full font-semibold">
+                  LOD2
+                </div>
+                <div className="text-xs text-white/80 mt-1">
+                  {lodSettings.lod2.targetPercent}%
+                </div>
+              </div>
+              <div className="text-center">
+                <div className="bg-purple-500/80 text-white text-xs px-3 py-1 rounded-full font-semibold">
+                  Impostor
+                </div>
+                <div className="text-xs text-white/80 mt-1">Billboard</div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

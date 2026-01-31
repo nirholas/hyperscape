@@ -25,6 +25,7 @@
  */
 
 import * as THREE from "three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 import { System } from "../shared/infrastructure/System";
 import type { World } from "../../core/World";
 import type { TownSystem } from "../shared/world/TownSystem";
@@ -73,8 +74,8 @@ export class PathfindingDebugSystem extends System {
   private tileGeometry: THREE.PlaneGeometry | null = null;
   private wallGeometry: THREE.BoxGeometry | null = null;
 
-  // Materials cache
-  private materials: Map<number, THREE.MeshBasicMaterial> = new Map();
+  // Materials cache (MeshBasicNodeMaterial for WebGPU)
+  private materials: Map<number, THREE.Material> = new Map();
 
   // Instanced mesh rendering for performance
   private instancedMeshes: Map<TileCategory, THREE.InstancedMesh> = new Map();
@@ -179,14 +180,14 @@ export class PathfindingDebugSystem extends System {
       { name: "terrainBlocked", color: 0x888888 },
     ];
 
+    // Use MeshBasicNodeMaterial for WebGPU compatibility
     for (const { name, color } of categories) {
-      const material = new THREE.MeshBasicMaterial({
-        color,
-        transparent: true,
-        opacity: 0.5,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      });
+      const material = new MeshBasicNodeMaterial();
+      material.color = new THREE.Color(color);
+      material.transparent = true;
+      material.opacity = 0.5;
+      material.side = THREE.DoubleSide;
+      material.depthWrite = false;
 
       const mesh = new THREE.InstancedMesh(
         this.tileGeometry,
@@ -808,15 +809,15 @@ export class PathfindingDebugSystem extends System {
   /**
    * Get or create material for color
    */
-  private getMaterial(color: number): THREE.MeshBasicMaterial {
+  private getMaterial(color: number): THREE.Material {
     if (!this.materials.has(color)) {
-      const material = new THREE.MeshBasicMaterial({
-        color,
-        transparent: true,
-        opacity: 0.5,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      });
+      // Use MeshBasicNodeMaterial for WebGPU compatibility
+      const material = new MeshBasicNodeMaterial();
+      material.color = new THREE.Color(color);
+      material.transparent = true;
+      material.opacity = 0.5;
+      material.side = THREE.DoubleSide;
+      material.depthWrite = false;
       this.materials.set(color, material);
     }
     return this.materials.get(color)!;

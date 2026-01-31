@@ -12,7 +12,12 @@ import { SkeletonHelper } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { WebGPURenderer } from "three/webgpu";
+import {
+  WebGPURenderer,
+  MeshBasicNodeMaterial,
+  MeshStandardNodeMaterial,
+  LineBasicNodeMaterial,
+} from "three/webgpu";
 
 export interface Transform {
   position: { x: number; y: number; z: number };
@@ -212,11 +217,10 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
 
       // Ground plane
       const groundGeometry = new THREE.PlaneGeometry(20, 20);
-      const groundMaterial = new THREE.MeshStandardMaterial({
-        color: 0x444444,
-        roughness: 0.8,
-        metalness: 0.2,
-      });
+      const groundMaterial = new MeshStandardNodeMaterial();
+      groundMaterial.color = new THREE.Color(0x444444);
+      groundMaterial.roughness = 0.8;
+      groundMaterial.metalness = 0.2;
       const ground = new THREE.Mesh(groundGeometry, groundMaterial);
       ground.rotation.x = -Math.PI / 2;
       ground.position.y = 0;
@@ -1524,12 +1528,13 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
         avatarRef.current.traverse((child) => {
           if (child instanceof THREE.SkinnedMesh && child.skeleton) {
             const helper = new THREE.SkeletonHelper(child.skeleton.bones[0]);
-            helper.material = new THREE.LineBasicMaterial({
-              color: 0x00ff00,
-              linewidth: 2,
-              depthTest: false,
-              depthWrite: false,
-            });
+            // Use LineBasicNodeMaterial for WebGPU compatibility
+            const helperMat = new LineBasicNodeMaterial();
+            helperMat.color = new THREE.Color(0x00ff00);
+            helperMat.linewidth = 2;
+            helperMat.depthTest = false;
+            helperMat.depthWrite = false;
+            helper.material = helperMat;
             sceneRef.current!.add(helper);
             skeletonHelperRef.current = helper;
           }
@@ -2114,15 +2119,18 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
       const sphereRadius = avatarHeight * 0.03; // 3% of avatar height
 
       // Create hand sphere (blue)
+      // Use MeshBasicNodeMaterial for WebGPU compatibility
       const handGeometry = new THREE.SphereGeometry(sphereRadius, 16, 16);
-      const handMaterial = new THREE.MeshBasicMaterial({ color: 0x0000ff });
+      const handMaterial = new MeshBasicNodeMaterial();
+      handMaterial.color = new THREE.Color(0x0000ff);
       const handSphere = new THREE.Mesh(handGeometry, handMaterial);
       handSphere.position.copy(handPosition);
       sceneRef.current?.add(handSphere);
 
       // Create grip sphere (red)
       const gripGeometry = new THREE.SphereGeometry(sphereRadius, 16, 16);
-      const gripMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+      const gripMaterial = new MeshBasicNodeMaterial();
+      gripMaterial.color = new THREE.Color(0xff0000);
       const gripSphere = new THREE.Mesh(gripGeometry, gripMaterial);
       gripSphere.position.copy(gripPosition);
       sceneRef.current?.add(gripSphere);
@@ -2134,7 +2142,8 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
           16,
           16,
         );
-        const centerMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+        const centerMaterial = new MeshBasicNodeMaterial();
+        centerMaterial.color = new THREE.Color(0xffff00);
         const centerSphere = new THREE.Mesh(centerGeometry, centerMaterial);
 
         // Get the actual weapon mesh center
@@ -2156,10 +2165,9 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
           handPosition,
           gripPosition,
         ]);
-        const lineMaterial = new THREE.LineBasicMaterial({
-          color: 0x00ff00,
-          linewidth: 2,
-        });
+        const lineMaterial = new LineBasicNodeMaterial();
+        lineMaterial.color = new THREE.Color(0x00ff00);
+        lineMaterial.linewidth = 2;
         const line = new THREE.Line(lineGeometry, lineMaterial);
         sceneRef.current?.add(line);
 
@@ -2169,11 +2177,10 @@ const EquipmentViewer = forwardRef<EquipmentViewerRef, EquipmentViewerProps>(
           16,
           16,
         );
-        const wristMaterial = new THREE.MeshBasicMaterial({
-          color: 0x9900ff,
-          transparent: true,
-          opacity: 0.7,
-        });
+        const wristMaterial = new MeshBasicNodeMaterial();
+        wristMaterial.color = new THREE.Color(0x9900ff);
+        wristMaterial.transparent = true;
+        wristMaterial.opacity = 0.7;
         const wristSphere = new THREE.Mesh(wristGeometry, wristMaterial);
         wristSphere.position.copy(handPosition);
         // Move it back by the hand offset amount to show original wrist position

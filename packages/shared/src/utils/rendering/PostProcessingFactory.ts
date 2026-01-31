@@ -335,21 +335,25 @@ export async function createPostProcessing(
 
   const isAnyEffectActive = () => lutEnabled || depthBlurActive;
 
-  // Suppress expected "NodeMaterial: Material X is not compatible" warnings
-  // These occur when WebGPU PostProcessing encounters GLSL ShaderMaterials
-  // The materials still render correctly, this just prevents console noise
+  // Detect incompatible GLSL ShaderMaterials during rendering
+  // All materials should now use TSL (NodeMaterial). If we see this warning,
+  // it means there's a GLSL ShaderMaterial that wasn't converted - treat as error.
   const originalWarn = console.warn;
-  const suppressedWarningPattern =
+  const incompatibleMaterialPattern =
     /NodeMaterial: Material .* is not compatible/;
 
-  const withSuppressedWarnings = <T>(fn: () => T): T => {
+  const wrapWithMaterialCheck = <T>(fn: () => T): T => {
     console.warn = (...args: Parameters<typeof console.warn>) => {
       const message = args[0];
       if (
         typeof message === "string" &&
-        suppressedWarningPattern.test(message)
+        incompatibleMaterialPattern.test(message)
       ) {
-        return; // Suppress this expected warning
+        // Log as error - this should not happen with proper TSL materials
+        console.error(
+          "[PostProcessing] GLSL ShaderMaterial detected! All materials must use TSL for WebGPU:",
+          message,
+        );
       }
       originalWarn.apply(console, args);
     };
@@ -360,16 +364,20 @@ export async function createPostProcessing(
     }
   };
 
-  const withSuppressedWarningsAsync = async <T>(
+  const wrapWithMaterialCheckAsync = async <T>(
     fn: () => Promise<T>,
   ): Promise<T> => {
     console.warn = (...args: Parameters<typeof console.warn>) => {
       const message = args[0];
       if (
         typeof message === "string" &&
-        suppressedWarningPattern.test(message)
+        incompatibleMaterialPattern.test(message)
       ) {
-        return; // Suppress this expected warning
+        // Log as error - this should not happen with proper TSL materials
+        console.error(
+          "[PostProcessing] GLSL ShaderMaterial detected! All materials must use TSL for WebGPU:",
+          message,
+        );
       }
       originalWarn.apply(console, args);
     };
@@ -382,19 +390,25 @@ export async function createPostProcessing(
 
   return {
     render: () => {
-      if (isAnyEffectActive()) {
-        withSuppressedWarnings(() => postProcessing.render());
-      } else {
-        renderer.render(scene, camera);
-      }
+      // Check for incompatible materials during render
+      wrapWithMaterialCheck(() => {
+        if (isAnyEffectActive()) {
+          postProcessing.render();
+        } else {
+          renderer.render(scene, camera);
+        }
+      });
     },
 
     renderAsync: async () => {
-      if (isAnyEffectActive()) {
-        await withSuppressedWarningsAsync(() => postProcessing.renderAsync());
-      } else {
-        await renderer.renderAsync(scene, camera);
-      }
+      // Check for incompatible materials during render
+      await wrapWithMaterialCheckAsync(async () => {
+        if (isAnyEffectActive()) {
+          await postProcessing.renderAsync();
+        } else {
+          await renderer.renderAsync(scene, camera);
+        }
+      });
     },
 
     setSize: (_width: number, _height: number) => {

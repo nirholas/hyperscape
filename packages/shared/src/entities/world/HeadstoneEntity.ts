@@ -55,7 +55,7 @@
  * @public
  */
 
-import THREE from "../../extras/three/three";
+import THREE, { MeshStandardNodeMaterial } from "../../extras/three/three";
 import type { World } from "../../core/World";
 import type {
   HeadstoneEntityConfig,
@@ -664,8 +664,8 @@ export class HeadstoneEntity extends InteractableEntity {
 
     // Create a tombstone/pile visual for the corpse
     const geometry = new THREE.BoxGeometry(1.5, 0.5, 1.0);
-    // Use MeshStandardMaterial for proper lighting (responds to sun, moon, and environment maps)
-    const material = new THREE.MeshStandardMaterial({
+    // Use MeshStandardNodeMaterial for WebGPU-native TSL dissolve support
+    const material = new MeshStandardNodeMaterial({
       color: 0x4a4a4a, // Gray for corpse
       roughness: 0.9,
       metalness: 0.0,

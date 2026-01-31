@@ -90,14 +90,14 @@ export const GRASS_CONFIG = {
   /** Maximum instances per chunk (power of 2 for GPU memory alignment) */
   MAX_INSTANCES_PER_CHUNK: 32768,
 
-  /** Chunk size in meters (larger = fewer draw calls, better for distance) */
-  CHUNK_SIZE: 50,
+  /** Chunk size in meters (25m balances draw calls vs instance count) */
+  CHUNK_SIZE: 25,
 
   /** Terrain tile size in meters (must match TerrainSystem.CONFIG.TILE_SIZE) */
   TILE_SIZE: 100,
 
   /** Base density: tufts per square meter (each tuft has BLADES_PER_TUFT blades) */
-  BASE_DENSITY: 40,
+  BASE_DENSITY: 48,
 
   /** Distance where grass starts fading (meters from player) */
   FADE_START: 80,
@@ -624,11 +624,11 @@ function createGrassMaterial(): GrassMaterial {
   })();
 
   // ========== OPACITY NODE (BASE FADE + DISTANCE FADE + LOD DENSITY + CLUMPING) ==========
-  // Performance optimization: reduce density at distance with clumping
-  // - Near (0-10m): very dense, uniform
-  // - Mid (10-20m): medium density
-  // - Far (20-35m): sparse, clumped
-  // - Beyond 35m: very sparse, strongly clumped
+  // Performance optimization: reduce density at distance with organic clumping
+  // - Near (0-8m): very dense, uniform
+  // - Mid (8-20m): medium density, slight clumping
+  // - Far (20-40m): sparse, clumped into natural patches
+  // - Beyond 40m: very sparse, strongly clumped
   material.opacityNode = Fn(() => {
     const worldPos = positionWorld;
 
@@ -642,15 +642,31 @@ function createGrassMaterial(): GrassMaterial {
       mul(toPlayer.z, toPlayer.z),
     );
 
-    // ========== CLUMPING NOISE ==========
-    // Sample noise texture at world position to create clumps
-    // Larger scale = bigger clumps
-    const clumpScale = float(0.15); // ~6-7m clumps
-    const clumpUV = vec2(
-      mul(worldPos.x, clumpScale),
-      mul(worldPos.z, clumpScale),
+    // ========== MULTI-OCTAVE CLUMPING NOISE ==========
+    // Sample noise at multiple scales to create organic, non-gridded clumps
+    // Large scale (0.08) = ~12m patches, small scale (0.25) = ~4m variation
+    const largeClumpUV = vec2(
+      mul(worldPos.x, float(0.08)),
+      mul(worldPos.z, float(0.08)),
     );
-    const clumpNoise = texture(noiseTex, clumpUV).r;
+    const smallClumpUV = vec2(
+      mul(worldPos.x, float(0.25)),
+      mul(worldPos.z, float(0.25)),
+    );
+    // Offset small noise to avoid correlation
+    const smallClumpUVOffset = vec2(
+      add(smallClumpUV.x, float(0.5)),
+      add(smallClumpUV.y, float(0.33)),
+    );
+
+    const largeNoise = texture(noiseTex, largeClumpUV).r;
+    const smallNoise = texture(noiseTex, smallClumpUVOffset).r;
+
+    // Combine: 70% large patches + 30% small variation
+    const clumpNoise = add(
+      mul(largeNoise, float(0.7)),
+      mul(smallNoise, float(0.3)),
+    );
 
     // How much clumping to apply based on distance
     // 0 at close range, 1 at far range
@@ -658,24 +674,33 @@ function createGrassMaterial(): GrassMaterial {
 
     // Clump threshold: at distance, grass only appears where noise > threshold
     // Close: threshold = 0 (all grass visible)
-    // Far: threshold = 0.5 (only high-noise areas have grass)
-    const clumpThreshold = mul(clumpStrength, float(0.55));
+    // Far: threshold = 0.45 (only high-noise areas have grass - creates patches)
+    const clumpThreshold = mul(clumpStrength, float(0.45));
     const clumpVisible = smoothstep(
       clumpThreshold,
-      add(clumpThreshold, float(0.1)),
+      add(clumpThreshold, float(0.15)),
       clumpNoise,
     );
 
     // ========== DISTANCE-BASED LOD DENSITY CULLING ==========
-    // Use instance index hash to deterministically cull instances at distance
-    // Golden ratio hash gives good distribution
-    const instanceHash = fract(mul(float(instanceIndex), float(0.61803398875)));
+    // Use instance index hash with position perturbation for less uniform culling
+    // Golden ratio hash + position-based offset breaks up grid patterns
+    const posHash = fract(
+      add(mul(worldPos.x, float(0.1234)), mul(worldPos.z, float(0.5678))),
+    );
+    const instanceHash = fract(
+      add(
+        mul(float(instanceIndex), float(0.61803398875)),
+        mul(posHash, float(0.1)),
+      ),
+    );
 
-    // Calculate threshold based on distance with more aggressive falloff
+    // Calculate threshold based on distance with aggressive falloff
     // At distance 0: threshold = 1.0 (all visible)
-    // At distance 10m: threshold = 0.5
+    // At distance 8m: threshold = 0.5
     // At distance 20m: threshold = 0.25
-    // At distance 35m+: threshold = 0.125
+    // At distance 40m: threshold = 0.125
+    // At distance 60m+: threshold = 0.0625
     const threshold1 = mix(
       float(1.0),
       float(0.5),
@@ -686,10 +711,15 @@ function createGrassMaterial(): GrassMaterial {
       float(0.25),
       smoothstep(lodHalfDensitySq, lodQuarterDensitySq, distSq),
     );
-    const lodThreshold = mix(
+    const threshold3 = mix(
       threshold2,
       float(0.125),
       smoothstep(lodQuarterDensitySq, lodEighthDensitySq, distSq),
+    );
+    const lodThreshold = mix(
+      threshold3,
+      float(0.0625),
+      smoothstep(lodEighthDensitySq, lodSixteenthDensitySq, distSq),
     );
 
     // Cull instance if hash >= threshold (returns 0 if culled, 1 if visible)
@@ -819,13 +849,158 @@ export class GrassSystem extends System {
   private gpuCullingEnabled = false;
   private gpuCullingInitialized = false;
 
+  // IndexedDB cache for grass placements (persistent across page loads)
+  // DISABLED: Caching causes stale data issues when terrain changes
+  private placementCache: IDBDatabase | null = null;
+  private cacheInitialized = false;
+  private cacheEnabled = false;
+
   constructor(world: World) {
     super(world);
   }
 
+  /**
+   * Initialize IndexedDB cache for grass placements.
+   * Placements are keyed by chunk coordinates + world seed for deterministic caching.
+   */
+  private async initPlacementCache(): Promise<void> {
+    if (this.cacheInitialized || !this.cacheEnabled) return;
+    this.cacheInitialized = true;
+
+    // Skip if IndexedDB not available (server-side or unsupported browser)
+    if (typeof indexedDB === "undefined") {
+      console.log("[GrassSystem] IndexedDB not available, caching disabled");
+      return;
+    }
+
+    try {
+      const request = indexedDB.open("GrassPlacementCache", 1);
+
+      request.onerror = () => {
+        console.warn("[GrassSystem] Failed to open IndexedDB cache");
+        this.placementCache = null;
+      };
+
+      request.onupgradeneeded = (event) => {
+        const db = (event.target as IDBOpenDBRequest).result;
+        // Create object store for placements, keyed by "seed_chunkX_chunkZ"
+        if (!db.objectStoreNames.contains("placements")) {
+          db.createObjectStore("placements", { keyPath: "key" });
+        }
+      };
+
+      request.onsuccess = (event) => {
+        this.placementCache = (event.target as IDBOpenDBRequest).result;
+        console.log("[GrassSystem] IndexedDB cache initialized");
+      };
+
+      // Wait for database to open
+      await new Promise<void>((resolve) => {
+        request.onsuccess = (event) => {
+          this.placementCache = (event.target as IDBOpenDBRequest).result;
+          console.log("[GrassSystem] IndexedDB cache initialized");
+          resolve();
+        };
+        request.onerror = () => resolve();
+      });
+    } catch (err) {
+      console.warn("[GrassSystem] IndexedDB initialization error:", err);
+    }
+  }
+
+  /**
+   * Get cached placement data for a chunk.
+   * Returns null if not cached or cache unavailable.
+   */
+  private async getCachedPlacements(
+    chunkKey: string,
+  ): Promise<GrassPlacementData[] | null> {
+    if (!this.placementCache) return null;
+
+    const cacheKey = `${this.worldSeed}_${chunkKey}`;
+
+    return new Promise((resolve) => {
+      try {
+        const transaction = this.placementCache!.transaction(
+          ["placements"],
+          "readonly",
+        );
+        const store = transaction.objectStore("placements");
+        const request = store.get(cacheKey);
+
+        request.onsuccess = () => {
+          const result = request.result;
+          if (result && result.placements) {
+            resolve(result.placements);
+          } else {
+            resolve(null);
+          }
+        };
+
+        request.onerror = () => resolve(null);
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+
+  /**
+   * Cache placement data for a chunk.
+   */
+  private async cachePlacements(
+    chunkKey: string,
+    placements: GrassPlacementData[],
+  ): Promise<void> {
+    if (!this.placementCache || placements.length === 0) return;
+
+    const cacheKey = `${this.worldSeed}_${chunkKey}`;
+
+    return new Promise((resolve) => {
+      try {
+        const transaction = this.placementCache!.transaction(
+          ["placements"],
+          "readwrite",
+        );
+        const store = transaction.objectStore("placements");
+        store.put({ key: cacheKey, placements, timestamp: Date.now() });
+
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => resolve();
+      } catch {
+        resolve();
+      }
+    });
+  }
+
+  /**
+   * Clear the placement cache (useful when world changes).
+   */
+  public async clearPlacementCache(): Promise<void> {
+    if (!this.placementCache) return;
+
+    return new Promise((resolve) => {
+      try {
+        const transaction = this.placementCache!.transaction(
+          ["placements"],
+          "readwrite",
+        );
+        const store = transaction.objectStore("placements");
+        store.clear();
+
+        transaction.oncomplete = () => {
+          console.log("[GrassSystem] Placement cache cleared");
+          resolve();
+        };
+        transaction.onerror = () => resolve();
+      } catch {
+        resolve();
+      }
+    });
+  }
+
   start(): void {
     // Only run on client
-    if (!this.world.network?.isClient) {
+    if (!this.world.isClient) {
       console.log("[GrassSystem] Skipping - server-side");
       return;
     }
@@ -847,6 +1022,11 @@ export class GrassSystem extends System {
     // Initialize noise from world seed and cache for worker
     this.worldSeed = this.getWorldSeed();
     this.noise = new NoiseGenerator(this.worldSeed);
+
+    // Initialize placement cache (async, non-blocking)
+    this.initPlacementCache().catch(() => {
+      // Cache init failed, continue without caching
+    });
 
     // Log worker availability for grass generation
     console.log(
@@ -976,7 +1156,20 @@ export class GrassSystem extends System {
     let tilesProcessed = 0;
     let tilesSkipped = 0;
 
-    for (const tile of loadedTiles) {
+    // Sort tiles by distance from player (spiral outward from player)
+    const playerPos = this.getPlayerPosition();
+    const playerTileX = Math.floor(playerPos.x / GRASS_CONFIG.TILE_SIZE);
+    const playerTileZ = Math.floor(playerPos.z / GRASS_CONFIG.TILE_SIZE);
+
+    const sortedTiles = [...loadedTiles].sort((a, b) => {
+      const distA =
+        Math.abs(a.tileX - playerTileX) + Math.abs(a.tileZ - playerTileZ);
+      const distB =
+        Math.abs(b.tileX - playerTileX) + Math.abs(b.tileZ - playerTileZ);
+      return distA - distB;
+    });
+
+    for (const tile of sortedTiles) {
       const position = {
         x: tile.tileX * GRASS_CONFIG.TILE_SIZE,
         z: tile.tileZ * GRASS_CONFIG.TILE_SIZE,
@@ -1145,53 +1338,11 @@ export class GrassSystem extends System {
    * - Grass: Green channel > Red channel (greenish)
    * - Dirt: Red channel > Green channel (brownish)
    */
-  private getTerrainGrassFactor(worldX: number, worldZ: number): number {
-    if (!this.terrainSystem?.getTerrainColorAt) {
-      return 1.0; // No color sampling available, assume grass
-    }
-
-    try {
-      const color = this.terrainSystem.getTerrainColorAt(worldX, worldZ);
-      if (!color) {
-        return 1.0; // No color data, assume grass
-      }
-
-      // Calculate "grassiness" based on color
-      // Grass colors: green > red (e.g., 0.55 > 0.3)
-      // Dirt colors: red > green (e.g., 0.45 > 0.32)
-      const { r, g, b } = color;
-
-      // Skip very dark areas (shadows, deep water)
-      const brightness = r + g + b;
-      if (brightness < 0.3) {
-        return 0.0; // Too dark, no grass
-      }
-
-      // Calculate green-to-red ratio
-      // High ratio = grassy, Low ratio = dirt/brown
-      const greenRatio = g / Math.max(r, 0.01);
-
-      // Thresholds based on terrain colors:
-      // - grassGreen: g/r = 0.55/0.3 = 1.83
-      // - grassDark: g/r = 0.42/0.22 = 1.9
-      // - dirtBrown: g/r = 0.32/0.45 = 0.71
-      // - dirtDark: g/r = 0.22/0.32 = 0.69
-      // - sandYellow: g/r = 0.6/0.7 = 0.86
-
-      // Use smoothstep for gradual transition
-      // Below 0.9: dirt (0%), Above 1.2: grass (100%), between: fade
-      const grassFactor = Math.min(
-        1.0,
-        Math.max(0.0, (greenRatio - 0.9) / 0.3),
-      );
-
-      // Also check absolute green level (low green = not grass)
-      const greenLevel = Math.min(1.0, g / 0.35); // 0.35 is midpoint between grass and dirt green
-
-      return grassFactor * greenLevel;
-    } catch {
-      return 1.0; // On error, assume grass
-    }
+  private getTerrainGrassFactor(_worldX: number, _worldZ: number): number {
+    // DISABLED: Terrain color sampling causes missing grass on tiles where
+    // terrain geometry hasn't finished loading. The shader handles dirt/grass
+    // color matching via noise, so we don't need CPU-side filtering.
+    return 1.0;
   }
 
   /**
@@ -1354,11 +1505,24 @@ export class GrassSystem extends System {
       GRASS_CONFIG.BASE_DENSITY * grassConfig.densityMultiplier;
     const heightMultiplier = grassConfig.heightMultiplier ?? 1.0;
 
-    // Collect chunks that need generation
+    // Get player position and camera frustum for prioritization
+    const playerPos = this.getPlayerPosition();
+    const frustum = this.getCameraFrustum();
+
+    // Calculate the chunk the player is standing on (highest priority)
+    const playerChunkX = Math.floor(playerPos.x / chunkSize);
+    const playerChunkZ = Math.floor(playerPos.z / chunkSize);
+
+    // Collect chunks that need generation with priority info
     const chunksToGenerate: Array<{
       key: string;
       originX: number;
       originZ: number;
+      distanceSq: number;
+      chunkDistSq: number; // Distance in chunk coordinates (for spiral)
+      inFrustum: boolean;
+      isPlayerChunk: boolean;
+      isAdjacentToPlayer: boolean;
     }> = [];
 
     for (let cx = 0; cx < chunksPerTile; cx++) {
@@ -1373,10 +1537,49 @@ export class GrassSystem extends System {
         if (this.chunks.has(key) || this.pendingChunkGeneration.has(key))
           continue;
 
+        // Check if this is the chunk the player is standing on
+        const isPlayerChunk =
+          chunkX === playerChunkX && chunkZ === playerChunkZ;
+
+        // Check if adjacent to player chunk (8 surrounding chunks)
+        const chunkDx = Math.abs(chunkX - playerChunkX);
+        const chunkDz = Math.abs(chunkZ - playerChunkZ);
+        const isAdjacentToPlayer =
+          chunkDx <= 1 && chunkDz <= 1 && !isPlayerChunk;
+
+        // Chunk distance in grid units (for spiral outward)
+        const chunkDistSq = chunkDx * chunkDx + chunkDz * chunkDz;
+
+        // Calculate chunk center for distance/frustum checks
+        const centerX = chunkOriginX + chunkSize / 2;
+        const centerZ = chunkOriginZ + chunkSize / 2;
+        const centerY = this.terrainSystem
+          ? this.terrainSystem.getHeightAt(centerX, centerZ)
+          : 0;
+
+        // Distance from player in world units (squared for performance)
+        const dx = centerX - playerPos.x;
+        const dz = centerZ - playerPos.z;
+        const distanceSq = dx * dx + dz * dz;
+
+        // Check if chunk bounding sphere is in camera frustum
+        const boundingSphere = new THREE.Sphere(
+          new THREE.Vector3(centerX, centerY, centerZ),
+          (Math.sqrt(2) * chunkSize) / 2 + GRASS_CONFIG.BLADE_HEIGHT,
+        );
+        const inFrustum = frustum
+          ? frustum.intersectsSphere(boundingSphere)
+          : true;
+
         chunksToGenerate.push({
           key,
           originX: chunkOriginX,
           originZ: chunkOriginZ,
+          distanceSq,
+          chunkDistSq,
+          inFrustum,
+          isPlayerChunk,
+          isAdjacentToPlayer,
         });
         this.pendingChunkGeneration.add(key);
       }
@@ -1384,53 +1587,23 @@ export class GrassSystem extends System {
 
     if (chunksToGenerate.length === 0) return;
 
-    // Try to use worker for placement generation
-    if (isGrassWorkerAvailable()) {
-      // Generate all chunks in parallel using workers
-      const workerPromises = chunksToGenerate.map(async (chunk) => {
-        try {
-          const result = await generateGrassPlacementsAsync(
-            chunk.key,
-            chunk.originX,
-            chunk.originZ,
-            chunkSize,
-            baseDensity,
-            this.worldSeed,
-            heightMultiplier,
-            GRASS_CONFIG.MAX_INSTANCES_PER_CHUNK,
-          );
-          if (result && result.placements.length > 0) {
-            // Process worker placements on main thread (height, collision, etc.)
-            await this.processWorkerPlacements(
-              chunk.key,
-              chunk.originX,
-              chunk.originZ,
-              chunkSize,
-              result.placements,
-              grassConfig,
-            );
-          }
-        } catch (err) {
-          console.warn(
-            `[GrassSystem] Worker failed for chunk ${chunk.key}, falling back to sync`,
-            err,
-          );
-          // Fallback to synchronous generation with yielding
-          await this.generateChunkWithYielding(
-            chunk.key,
-            chunk.originX,
-            chunk.originZ,
-            chunkSize,
-            grassConfig,
-          );
-        } finally {
-          this.pendingChunkGeneration.delete(chunk.key);
-        }
-      });
-      await Promise.all(workerPromises);
-    } else {
-      // No workers available - use synchronous generation with yielding
-      for (const chunk of chunksToGenerate) {
+    // Sort chunks by distance from player (spiral outward)
+    chunksToGenerate.sort((a, b) => {
+      // Player chunk first
+      if (a.isPlayerChunk && !b.isPlayerChunk) return -1;
+      if (!a.isPlayerChunk && b.isPlayerChunk) return 1;
+      // Then by grid distance (spiral)
+      return a.chunkDistSq - b.chunkDistSq;
+    });
+
+    console.log(
+      `[GrassSystem] Generating ${chunksToGenerate.length} chunks for tile at (${originX}, ${originZ})`,
+    );
+
+    // SIMPLIFIED: Generate chunks sequentially without worker batching
+    // This is more reliable and easier to debug
+    for (const chunk of chunksToGenerate) {
+      try {
         await this.generateChunkWithYielding(
           chunk.key,
           chunk.originX,
@@ -1438,9 +1611,59 @@ export class GrassSystem extends System {
           chunkSize,
           grassConfig,
         );
+      } catch (err) {
+        console.error(
+          `[GrassSystem] Failed to generate chunk ${chunk.key}:`,
+          err,
+        );
+      } finally {
         this.pendingChunkGeneration.delete(chunk.key);
       }
     }
+  }
+
+  /**
+   * Get current player position for chunk prioritization.
+   */
+  private getPlayerPosition(): THREE.Vector3 {
+    const stage = this.world.stage as {
+      camera?: THREE.Camera;
+      localPlayer?: { position?: THREE.Vector3 };
+    } | null;
+
+    // Try local player position first
+    if (stage?.localPlayer?.position) {
+      return stage.localPlayer.position;
+    }
+
+    // Fall back to camera position
+    if (stage?.camera) {
+      return stage.camera.position;
+    }
+
+    return new THREE.Vector3(0, 0, 0);
+  }
+
+  /**
+   * Get current camera frustum for chunk prioritization.
+   * Returns null if camera is not available.
+   */
+  private getCameraFrustum(): THREE.Frustum | null {
+    const stage = this.world.stage as { camera?: THREE.Camera } | null;
+    if (!stage?.camera) return null;
+
+    const camera = stage.camera;
+    camera.updateMatrixWorld();
+
+    const frustum = new THREE.Frustum();
+    const projScreenMatrix = new THREE.Matrix4();
+    projScreenMatrix.multiplyMatrices(
+      camera.projectionMatrix,
+      camera.matrixWorldInverse,
+    );
+    frustum.setFromProjectionMatrix(projScreenMatrix);
+
+    return frustum;
   }
 
   /**
@@ -1510,37 +1733,14 @@ export class GrassSystem extends System {
       // Get terrain height (main thread only)
       const worldY = getHeight(worldX, worldZ);
 
-      // Skip grass in excluded areas: buildings, roads, flat zones (arenas, pads)
-      if (
-        this.isInsideBuilding(worldX, worldZ) ||
-        this.isOnRoad(worldX, worldZ) ||
-        this.isInFlatZone(worldX, worldZ)
-      ) {
+      // Skip grass in flat zones (arenas, building pads)
+      if (this.isInFlatZone(worldX, worldZ)) {
         continue;
       }
 
       // Skip grass below shoreline cutoff (9m = mud zone, no grass)
       if (worldY < GRASS_CONFIG.SHORELINE_FADE_END) {
         continue;
-      }
-
-      // Check terrain color - skip grass on dirt/brown areas
-      const terrainGrassFactor = this.getTerrainGrassFactor(worldX, worldZ);
-      if (terrainGrassFactor < 0.1) {
-        continue; // Pure dirt area, no grass
-      }
-
-      // Use terrain factor for density thinning at edges
-      // On transitions (factor 0.1-1.0), probabilistically skip grass for natural fade
-      if (terrainGrassFactor < 1.0) {
-        // Use placement position as deterministic random seed
-        const hash = Math.abs(
-          Math.sin(worldX * 12.9898 + worldZ * 78.233) * 43758.5453,
-        );
-        const rand = hash - Math.floor(hash);
-        if (rand > terrainGrassFactor) {
-          continue; // Skip this grass blade based on terrain grass factor
-        }
       }
 
       // Apply shoreline height reduction (grass gets shorter near water)
@@ -1555,9 +1755,7 @@ export class GrassSystem extends System {
         ),
       );
 
-      // Combine factors: shoreline affects height, terrain factor also reduces height at edges
-      const heightMultiplier =
-        shorelineFactor * (0.5 + 0.5 * terrainGrassFactor);
+      const heightMultiplier = shorelineFactor;
 
       // Set instance attributes
       positionArray.setXYZW(
@@ -1729,29 +1927,14 @@ export class GrassSystem extends System {
         // Get terrain height
         const worldY = getHeight(worldX, worldZ);
 
-        // Skip grass in excluded areas: buildings, roads, flat zones (arenas, pads)
-        if (
-          this.isInsideBuilding(worldX, worldZ) ||
-          this.isOnRoad(worldX, worldZ) ||
-          this.isInFlatZone(worldX, worldZ)
-        ) {
+        // Skip grass in flat zones (arenas, building pads)
+        if (this.isInFlatZone(worldX, worldZ)) {
           continue;
         }
 
         // Skip grass below shoreline cutoff (9m = mud zone, no grass)
         if (worldY < GRASS_CONFIG.SHORELINE_FADE_END) {
           continue;
-        }
-
-        // Check terrain color - skip grass on dirt/brown areas
-        const terrainGrassFactor = this.getTerrainGrassFactor(worldX, worldZ);
-        if (terrainGrassFactor < 0.1) {
-          continue; // Pure dirt area, no grass
-        }
-
-        // Use terrain factor for density thinning at edges
-        if (terrainGrassFactor < 1.0 && nextRandom() > terrainGrassFactor) {
-          continue; // Skip this grass blade based on terrain grass factor
         }
 
         // Apply shoreline height reduction (grass gets shorter near water)
@@ -1765,11 +1948,8 @@ export class GrassSystem extends System {
           ),
         );
 
-        // Combine factors: shoreline affects height, terrain factor also reduces height at edges
-        const heightMultiplier =
-          shorelineFactor * (0.5 + 0.5 * terrainGrassFactor);
         const heightScale =
-          (0.7 + nextRandom() * 0.6) * biomeHeightMult * heightMultiplier;
+          (0.7 + nextRandom() * 0.6) * biomeHeightMult * shorelineFactor;
         const rotation = nextRandom() * Math.PI * 2;
         const widthScale = 0.8 + nextRandom() * 0.4;
         const colorVar = nextRandom();
@@ -1811,9 +1991,14 @@ export class GrassSystem extends System {
       this.grassContainer.add(chunk.mesh);
       chunk.visible = true;
       this.chunks.set(key, chunk);
+      console.log(
+        `[GrassSystem] Chunk ${key} created with ${count} instances at (${originX}, ${originZ})`,
+      );
     } else {
       // No valid grass placements - return chunk to pool for reuse
-      // Don't track empty chunks so they can be retried later if conditions change
+      console.warn(
+        `[GrassSystem] Chunk ${key} has 0 instances - iterations=${iterations}, terrainAvailable=${!!this.terrainSystem}`,
+      );
       this.chunkPool.push(chunk);
     }
   }

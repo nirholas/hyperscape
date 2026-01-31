@@ -25,8 +25,19 @@ import React, {
   useMemo,
 } from "react";
 import * as THREE from "three";
+import {
+  MeshStandardNodeMaterial,
+  MeshBasicNodeMaterial,
+  LineBasicNodeMaterial,
+} from "three/webgpu";
 
 import type { WorldCreationConfig } from "./types";
+
+// Type aliases for clarity (all WebGPU-compatible NodeMaterials)
+const TownBasicMat = MeshBasicNodeMaterial;
+const TownLineMat = LineBasicNodeMaterial;
+const TownStdMat = MeshStandardNodeMaterial;
+const VegStdMat = MeshStandardNodeMaterial;
 
 // ============== CONSTANTS ==============
 
@@ -532,29 +543,31 @@ function createTemplateGeometry(
 
 /**
  * Create terrain material with vertex colors
+ * Uses MeshStandardNodeMaterial for WebGPU compatibility
  */
-function createTerrainMaterial(): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    roughness: 0.9,
-    metalness: 0.0,
-    flatShading: false,
-    side: THREE.FrontSide,
-  });
+function createTerrainMaterial(): THREE.Material {
+  const material = new MeshStandardNodeMaterial();
+  material.vertexColors = true;
+  material.roughness = 0.9;
+  material.metalness = 0.0;
+  material.flatShading = false;
+  material.side = THREE.FrontSide;
+  return material;
 }
 
 /**
  * Create water material
+ * Uses MeshStandardNodeMaterial for WebGPU compatibility
  */
-function createWaterMaterial(): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({
-    color: WATER_COLOR,
-    transparent: true,
-    opacity: WATER_OPACITY,
-    roughness: 0.1,
-    metalness: 0.3,
-    side: THREE.DoubleSide,
-  });
+function createWaterMaterial(): THREE.Material {
+  const material = new MeshStandardNodeMaterial();
+  material.color = new THREE.Color(WATER_COLOR);
+  material.transparent = true;
+  material.opacity = WATER_OPACITY;
+  material.roughness = 0.1;
+  material.metalness = 0.3;
+  material.side = THREE.DoubleSide;
+  return material;
 }
 
 /**
@@ -658,8 +671,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   // Terrain state
   const tilesRef = useRef<Map<string, TileData>>(new Map());
   const templateGeometryRef = useRef<THREE.PlaneGeometry | null>(null);
-  const terrainMaterialRef = useRef<THREE.MeshStandardMaterial | null>(null);
-  const waterMaterialRef = useRef<THREE.MeshStandardMaterial | null>(null);
+  const terrainMaterialRef = useRef<THREE.Material | null>(null); // MeshStandardNodeMaterial for WebGPU
+  const waterMaterialRef = useRef<THREE.Material | null>(null); // MeshStandardNodeMaterial for WebGPU
   const terrainContainerRef = useRef<THREE.Group | null>(null);
   const waterContainerRef = useRef<THREE.Group | null>(null);
   const townMarkersRef = useRef<THREE.Group | null>(null);
@@ -1325,13 +1338,12 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     );
     wildernessGeometry.rotateX(-Math.PI / 2); // Make horizontal
 
-    const wildernessMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff0000,
-      transparent: true,
-      opacity: 0.15,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
+    const wildernessMaterial = new MeshBasicNodeMaterial();
+    wildernessMaterial.color = new THREE.Color(0xff0000);
+    wildernessMaterial.transparent = true;
+    wildernessMaterial.opacity = 0.15;
+    wildernessMaterial.side = THREE.DoubleSide;
+    wildernessMaterial.depthWrite = false;
 
     const wildernessOverlay = new THREE.Mesh(
       wildernessGeometry,
@@ -1424,7 +1436,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
       // Cone marker pointing down at town location (main selectable element)
       const coneGeometry = new THREE.ConeGeometry(20, 50, 8);
-      const coneMaterial = new THREE.MeshBasicMaterial({ color });
+      const coneMaterial = new MeshBasicNodeMaterial();
+      coneMaterial.color = new THREE.Color(color);
       const marker = new THREE.Mesh(coneGeometry, coneMaterial);
       marker.position.set(markerX, markerY + 60, markerZ);
       marker.rotation.x = Math.PI; // Point downward
@@ -1438,12 +1451,11 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         town.safeZoneRadius,
         48,
       );
-      const ringMaterial = new THREE.MeshBasicMaterial({
-        color,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.4,
-      });
+      const ringMaterial = new MeshBasicNodeMaterial();
+      ringMaterial.color = new THREE.Color(color);
+      ringMaterial.side = THREE.DoubleSide;
+      ringMaterial.transparent = true;
+      ringMaterial.opacity = 0.4;
       const ring = new THREE.Mesh(ringGeometry, ringMaterial);
       ring.rotation.x = -Math.PI / 2;
       ring.position.set(markerX, markerY + 2, markerZ);
@@ -1453,7 +1465,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
       // Town center marker (small pillar) - also selectable
       const pillarGeometry = new THREE.CylinderGeometry(3, 3, 30, 8);
-      const pillarMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+      const pillarMaterial = new TownBasicMat();
+      pillarMaterial.color = new THREE.Color(0xffffff);
       const pillar = new THREE.Mesh(pillarGeometry, pillarMaterial);
       pillar.position.set(markerX, markerY + 15, markerZ);
       pillar.userData = townUserData;
@@ -1479,10 +1492,10 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           const roadGeometry = new THREE.BufferGeometry().setFromPoints(
             roadPoints,
           );
-          const roadLine = new THREE.Line(
-            roadGeometry,
-            new THREE.LineBasicMaterial({ color: 0x8b7355, linewidth: 2 }),
-          );
+          const roadLineMat = new TownLineMat();
+          roadLineMat.color = new THREE.Color(0x8b7355);
+          roadLineMat.linewidth = 2;
+          const roadLine = new THREE.Line(roadGeometry, roadLineMat);
           townMarkers.add(roadLine);
         }
       }
@@ -1529,11 +1542,10 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             buildingHeight,
             buildingDepth,
           );
-          const detailMaterial = new THREE.MeshStandardMaterial({
-            color: 0xd4a373,
-            roughness: 0.7,
-            metalness: 0.1,
-          });
+          const detailMaterial = new TownStdMat();
+          detailMaterial.color = new THREE.Color(0xd4a373);
+          detailMaterial.roughness = 0.7;
+          detailMaterial.metalness = 0.1;
           fullDetailMesh = new THREE.Mesh(detailGeometry, detailMaterial);
           fullDetailMesh.position.y = buildingHeight / 2;
           fullDetailMesh.castShadow = true;
@@ -1546,10 +1558,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           buildingHeight,
           buildingDepth,
         );
-        const simpleMaterial = new THREE.MeshStandardMaterial({
-          color: 0xd4a373,
-          roughness: 0.9,
-        });
+        const simpleMaterial = new TownStdMat();
+        simpleMaterial.color = new THREE.Color(0xd4a373);
+        simpleMaterial.roughness = 0.9;
         const simpleMesh = new THREE.Mesh(simpleGeometry, simpleMaterial);
         simpleMesh.position.y = buildingHeight / 2;
         simpleMesh.castShadow = false;
@@ -1564,9 +1575,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           1,
           1,
         );
-        const farMaterial = new THREE.MeshBasicMaterial({
-          color: 0xc9a577,
-        });
+        const farMaterial = new TownBasicMat();
+        farMaterial.color = new THREE.Color(0xc9a577);
         const farMesh = new THREE.Mesh(farGeometry, farMaterial);
         farMesh.position.y = buildingHeight / 2;
 
@@ -1604,10 +1614,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
     // Generate roads between towns (simple MST-like approach for preview)
     if (townResult.towns.length >= 2) {
-      const roadMaterial = new THREE.MeshBasicMaterial({
-        color: 0x6b5344,
-        side: THREE.DoubleSide,
-      });
+      const roadMaterial = new MeshBasicNodeMaterial();
+      roadMaterial.color = new THREE.Color(0x6b5344);
+      roadMaterial.side = THREE.DoubleSide;
 
       // Create simple road connections between nearby towns
       const connectedPairs = new Set<string>();
@@ -1751,10 +1760,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       // Tree instanced mesh (cone + cylinder)
       const treeGeometry = new THREE.ConeGeometry(3, 8, 6);
       treeGeometry.translate(0, 8, 0);
-      const treeMaterial = new THREE.MeshStandardMaterial({
-        color: VEGETATION_TYPES.tree.color,
-        flatShading: true,
-      });
+      const treeMaterial = new MeshStandardNodeMaterial();
+      treeMaterial.color = new THREE.Color(VEGETATION_TYPES.tree.color);
+      treeMaterial.flatShading = true;
       const treeInstances = new THREE.InstancedMesh(
         treeGeometry,
         treeMaterial,
@@ -1766,9 +1774,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       // Trunk instanced mesh
       const trunkGeometry = new THREE.CylinderGeometry(0.5, 0.7, 4, 6);
       trunkGeometry.translate(0, 2, 0);
-      const trunkMaterial = new THREE.MeshStandardMaterial({
-        color: VEGETATION_TYPES.tree.trunkColor,
-      });
+      const trunkMaterial = new VegStdMat();
+      trunkMaterial.color = new THREE.Color(VEGETATION_TYPES.tree.trunkColor);
       const trunkInstances = new THREE.InstancedMesh(
         trunkGeometry,
         trunkMaterial,
@@ -1778,10 +1785,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       // Rock instanced mesh (dodecahedron for irregular shape)
       const rockGeometry = new THREE.DodecahedronGeometry(1, 0);
       rockGeometry.translate(0, 0.5, 0);
-      const rockMaterial = new THREE.MeshStandardMaterial({
-        color: VEGETATION_TYPES.rock.color,
-        flatShading: true,
-      });
+      const rockMaterial = new VegStdMat();
+      rockMaterial.color = new THREE.Color(VEGETATION_TYPES.rock.color);
+      rockMaterial.flatShading = true;
       const rockInstances = new THREE.InstancedMesh(
         rockGeometry,
         rockMaterial,
@@ -2107,12 +2113,11 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         size.y + 4,
         size.z + 4,
       );
-      const outlineMaterial = new THREE.MeshBasicMaterial({
-        color: 0x00ff00,
-        wireframe: true,
-        transparent: true,
-        opacity: 0.8,
-      });
+      const outlineMaterial = new MeshBasicNodeMaterial();
+      outlineMaterial.color = new THREE.Color(0x00ff00);
+      outlineMaterial.wireframe = true;
+      outlineMaterial.transparent = true;
+      outlineMaterial.opacity = 0.8;
       const outline = new THREE.Mesh(outlineGeometry, outlineMaterial);
       outline.position.copy(center);
       outline.renderOrder = 999; // Render on top

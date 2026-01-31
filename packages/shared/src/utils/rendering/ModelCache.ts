@@ -13,7 +13,7 @@
  * - Enable via options.generateLODs when loading
  */
 
-import THREE from "../../extras/three/three";
+import THREE, { MeshStandardNodeMaterial } from "../../extras/three/three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import type { World } from "../../core/World";
@@ -88,55 +88,85 @@ export class ModelCache {
   }
 
   /**
-   * Convert a material to MeshStandardMaterial for proper PBR lighting
-   * This ensures models respond correctly to sun, moon, and environment maps
+   * Convert a material to MeshStandardNodeMaterial for proper PBR lighting with WebGPU/TSL support.
+   * This ensures models respond correctly to sun, moon, and environment maps,
+   * and enables WebGPU-native TSL dissolve effects (DistanceFade).
    */
   private convertToStandardMaterial(
     mat: THREE.Material,
     hasVertexColors = false,
-  ): THREE.MeshStandardMaterial {
-    // Extract textures and colors from original material
+  ): MeshStandardNodeMaterial {
+    // Extract textures and colors from original material (handles MeshStandardMaterial, MeshPhysicalMaterial, etc.)
     const originalMat = mat as THREE.Material & {
       map?: THREE.Texture | null;
       normalMap?: THREE.Texture | null;
+      normalScale?: THREE.Vector2;
       emissiveMap?: THREE.Texture | null;
+      roughnessMap?: THREE.Texture | null;
+      metalnessMap?: THREE.Texture | null;
+      aoMap?: THREE.Texture | null;
+      aoMapIntensity?: number;
       color?: THREE.Color;
       emissive?: THREE.Color;
       emissiveIntensity?: number;
+      roughness?: number;
+      metalness?: number;
+      envMapIntensity?: number;
       opacity?: number;
       transparent?: boolean;
       alphaTest?: number;
       side?: THREE.Side;
       vertexColors?: boolean;
+      flatShading?: boolean;
+      fog?: boolean;
     };
 
-    // NOTE: Only include texture properties if they have valid values
-    // Passing undefined/null causes Three.js to log warnings
-    const materialParams: THREE.MeshStandardMaterialParameters = {
-      color: originalMat.color?.clone() || new THREE.Color(0xffffff),
-      emissive: originalMat.emissive?.clone() || new THREE.Color(0x000000),
-      emissiveIntensity: originalMat.emissiveIntensity ?? 0,
-      opacity: originalMat.opacity ?? 1,
-      transparent: originalMat.transparent ?? false,
-      alphaTest: originalMat.alphaTest ?? 0,
-      side: originalMat.side ?? THREE.FrontSide,
-      roughness: 0.7,
-      metalness: 0.0,
-      envMapIntensity: 1.0, // Respond to environment map
-      // Enable vertex colors if the geometry has them
-      vertexColors: hasVertexColors || originalMat.vertexColors || false,
-    };
+    // Create WebGPU-compatible MeshStandardNodeMaterial
+    const newMat = new MeshStandardNodeMaterial();
 
-    // Only set texture properties if they have actual texture values
-    if (originalMat.map) materialParams.map = originalMat.map;
-    if (originalMat.normalMap) materialParams.normalMap = originalMat.normalMap;
-    if (originalMat.emissiveMap)
-      materialParams.emissiveMap = originalMat.emissiveMap;
+    // Copy color properties
+    newMat.color = originalMat.color?.clone() || new THREE.Color(0xffffff);
+    newMat.emissive =
+      originalMat.emissive?.clone() || new THREE.Color(0x000000);
+    newMat.emissiveIntensity = originalMat.emissiveIntensity ?? 0;
 
-    const newMat = new THREE.MeshStandardMaterial(materialParams);
+    // Copy PBR properties (preserve original values from MeshStandardMaterial)
+    newMat.roughness = originalMat.roughness ?? 0.7;
+    newMat.metalness = originalMat.metalness ?? 0.0;
+    newMat.envMapIntensity = originalMat.envMapIntensity ?? 1.0;
+
+    // Copy transparency/alpha properties
+    newMat.opacity = originalMat.opacity ?? 1;
+    newMat.transparent = originalMat.transparent ?? false;
+    newMat.alphaTest = originalMat.alphaTest ?? 0;
+    newMat.side = originalMat.side ?? THREE.FrontSide;
+
+    // Copy other rendering properties
+    newMat.flatShading = originalMat.flatShading ?? false;
+    newMat.fog = originalMat.fog ?? true;
+
+    // Enable vertex colors if the geometry has them
+    newMat.vertexColors = hasVertexColors || originalMat.vertexColors || false;
+
+    // Copy texture maps (only if they have actual values)
+    if (originalMat.map) newMat.map = originalMat.map;
+    if (originalMat.normalMap) {
+      newMat.normalMap = originalMat.normalMap;
+      if (originalMat.normalScale)
+        newMat.normalScale.copy(originalMat.normalScale);
+    }
+    if (originalMat.emissiveMap) newMat.emissiveMap = originalMat.emissiveMap;
+    if (originalMat.roughnessMap)
+      newMat.roughnessMap = originalMat.roughnessMap;
+    if (originalMat.metalnessMap)
+      newMat.metalnessMap = originalMat.metalnessMap;
+    if (originalMat.aoMap) {
+      newMat.aoMap = originalMat.aoMap;
+      newMat.aoMapIntensity = originalMat.aoMapIntensity ?? 1.0;
+    }
 
     // Copy name for debugging
-    newMat.name = originalMat.name || "GLB_Standard";
+    newMat.name = originalMat.name || "GLB_NodeMaterial";
 
     // Dispose old material
     originalMat.dispose();
@@ -219,14 +249,11 @@ export class ModelCache {
         // Check if geometry has vertex colors
         const hasVertexColors = mesh.geometry?.attributes?.color !== undefined;
 
-        // Convert materials to MeshStandardMaterial for proper sun/moon/environment lighting
+        // Convert ALL materials to MeshStandardNodeMaterial for WebGPU-native TSL dissolve support
+        // This is required for DistanceFade dissolve effects to work on loaded models
         const convertMaterial = (mat: THREE.Material): THREE.Material => {
-          // If already a PBR material, just set it up (and enable vertex colors if needed)
-          if (
-            mat instanceof THREE.MeshStandardMaterial ||
-            mat instanceof THREE.MeshPhysicalMaterial
-          ) {
-            // Enable vertex colors if geometry has them
+          // If already a MeshStandardNodeMaterial, just set it up
+          if (mat instanceof MeshStandardNodeMaterial) {
             if (hasVertexColors && !mat.vertexColors) {
               mat.vertexColors = true;
               mat.needsUpdate = true;
@@ -234,7 +261,7 @@ export class ModelCache {
             this.setupSingleMaterial(mat, world);
             return mat;
           }
-          // Convert non-PBR materials (MeshBasicMaterial, MeshPhongMaterial, etc.)
+          // Convert ALL other materials (including MeshStandardMaterial) to MeshStandardNodeMaterial
           const newMat = this.convertToStandardMaterial(mat, hasVertexColors);
           this.setupSingleMaterial(newMat, world);
           return newMat;
@@ -603,6 +630,26 @@ export class ModelCache {
         // especially when exported without "Apply Transforms" in Blender.
         // This bakes ALL transforms into vertex positions, guaranteeing correct rendering.
         this.bakeTransformsToGeometry(gltf.scene);
+
+        // Validate skeletons - filter out undefined bones (can happen with WebGPU)
+        // Must happen before any cloning or animation setup
+        gltf.scene.traverse((child) => {
+          if (
+            (child as THREE.SkinnedMesh).isSkinnedMesh &&
+            (child as THREE.SkinnedMesh).skeleton
+          ) {
+            const skeleton = (child as THREE.SkinnedMesh).skeleton;
+            const validBones = skeleton.bones.filter(
+              (bone): bone is THREE.Bone => bone !== undefined && bone !== null,
+            );
+            if (validBones.length !== skeleton.bones.length) {
+              console.warn(
+                `[ModelCache] Cleaned ${skeleton.bones.length - validBones.length} undefined bones from ${resolvedPath}`,
+              );
+              skeleton.bones = validBones;
+            }
+          }
+        });
 
         // CRITICAL: Setup materials on the original scene for WebGPU/CSM
         // This ensures all clones will have properly configured materials

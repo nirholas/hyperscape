@@ -191,6 +191,12 @@ export interface DecimationOptions {
   strictness?: 0 | 1 | 2;
   /** Minimum vertices to preserve */
   minVertices?: number;
+  /**
+   * Strip skeleton and skinning data (JOINTS_0, WEIGHTS_0).
+   * Creates a static mesh suitable for vertex-color-only LOD rendering.
+   * Use this for LOD1 meshes where animation is frozen.
+   */
+  stripSkeleton?: boolean;
 }
 
 export interface GLBDecimationResult {
@@ -358,6 +364,8 @@ export class GLBDecimationService {
         totalFinalFaces += result.finalFaces;
 
         // Write decimated geometry to buffer
+        // stripSkeleton: Remove bone data for static LOD meshes (vertex-color-only rendering)
+        const stripSkeleton = options.stripSkeleton ?? false;
         const { bufferData, accessors, accessorObjects, bufferViews } =
           this.writeDecimatedGeometry(
             result,
@@ -365,6 +373,7 @@ export class GLBDecimationService {
             currentOffset,
             newAccessors.length,
             newBufferViews.length,
+            stripSkeleton,
           );
 
         // Update primitive accessors with new indices
@@ -381,12 +390,17 @@ export class GLBDecimationService {
         if (accessors.indices !== undefined) {
           primitive.indices = accessors.indices;
         }
-        // Preserve skinning data for animated meshes
-        if (accessors.joints !== undefined) {
+        // Preserve skinning data for animated meshes (unless stripSkeleton is true)
+        if (!stripSkeleton && accessors.joints !== undefined) {
           primitive.attributes.JOINTS_0 = accessors.joints;
         }
-        if (accessors.weights !== undefined) {
+        if (!stripSkeleton && accessors.weights !== undefined) {
           primitive.attributes.WEIGHTS_0 = accessors.weights;
+        }
+        // Remove skinning attributes if stripping skeleton
+        if (stripSkeleton) {
+          delete primitive.attributes.JOINTS_0;
+          delete primitive.attributes.WEIGHTS_0;
         }
 
         // Add accessor objects and buffer views to the new arrays
@@ -407,8 +421,27 @@ export class GLBDecimationService {
       gltf.buffers[0].byteLength = newBinary.length;
     }
 
+    // Strip skeleton data if requested (for static LOD meshes)
+    if (options.stripSkeleton) {
+      // Remove skins array
+      delete gltf.skins;
+      // Remove skin references from nodes
+      if (gltf.nodes) {
+        for (const node of gltf.nodes) {
+          delete node.skin;
+        }
+      }
+      // Remove animations (static meshes don't animate)
+      delete gltf.animations;
+      console.log(
+        `[GLBDecimationService] Stripped skeleton: skins, animations, node.skin references removed`,
+      );
+    }
+
     // Update asset info
-    gltf.asset.generator = "Hyperscape GLB Decimation Service";
+    gltf.asset.generator = options.stripSkeleton
+      ? "Hyperscape GLB Decimation Service (Static LOD)"
+      : "Hyperscape GLB Decimation Service";
 
     const outputBuffer = this.buildGLB(gltf, newBinary);
 
@@ -621,8 +654,46 @@ export class GLBDecimationService {
         "SCALAR",
       );
       if (indices) {
+        // Filter out primitive restart indices (0xFFFFFFFF = 4294967295)
+        // and invalid indices that reference non-existent vertices
+        const maxValidIndex = vertices.length - 1;
+        const PRIMITIVE_RESTART = 0xffffffff;
+
         for (let i = 0; i < indices.length; i += 3) {
-          faces.push([indices[i], indices[i + 1], indices[i + 2]]);
+          const i0 = indices[i];
+          const i1 = indices[i + 1];
+          const i2 = indices[i + 2];
+
+          // Skip triangles with primitive restart indices or negative values (unsigned overflow)
+          if (
+            i0 === PRIMITIVE_RESTART ||
+            i1 === PRIMITIVE_RESTART ||
+            i2 === PRIMITIVE_RESTART ||
+            i0 < 0 ||
+            i1 < 0 ||
+            i2 < 0
+          ) {
+            continue;
+          }
+
+          // Skip triangles with out-of-range indices
+          if (i0 > maxValidIndex || i1 > maxValidIndex || i2 > maxValidIndex) {
+            continue;
+          }
+
+          // Skip degenerate triangles (two or more identical indices)
+          if (i0 === i1 || i1 === i2 || i0 === i2) {
+            continue;
+          }
+
+          faces.push([i0, i1, i2]);
+        }
+
+        // Only warn if ALL triangles were filtered (indicates a problem)
+        if (faces.length === 0 && indices.length > 0) {
+          console.warn(
+            `[GLBDecimationService] All ${indices.length / 3} triangles filtered out - check for primitive restart or invalid indices`,
+          );
         }
       }
     } else {
@@ -843,7 +914,14 @@ export class GLBDecimationService {
 
   /**
    * Write decimated geometry to buffer
-   * Preserves skinning data (JOINTS_0, WEIGHTS_0) for animated meshes
+   * Preserves skinning data (JOINTS_0, WEIGHTS_0) for animated meshes unless stripSkeleton is true.
+   *
+   * @param result - Decimation result with new mesh data
+   * @param original - Original mesh data including skinning
+   * @param baseOffset - Starting byte offset in buffer
+   * @param baseAccessorIdx - Starting accessor index
+   * @param baseBufferViewIdx - Starting buffer view index
+   * @param stripSkeleton - If true, omits JOINTS_0 and WEIGHTS_0 (for static LOD meshes)
    */
   private writeDecimatedGeometry(
     result: DecimationResult,
@@ -859,6 +937,7 @@ export class GLBDecimationService {
     baseOffset: number,
     baseAccessorIdx: number,
     baseBufferViewIdx: number,
+    stripSkeleton: boolean = false,
   ): {
     bufferData: Buffer;
     accessors: Record<string, number>;
@@ -1043,7 +1122,13 @@ export class GLBDecimationService {
 
     // Write skinning data (JOINTS_0) - critical for animated meshes!
     // For collapsed vertices, we pick the joints from the vertex with highest total weight
-    if (original.joints && original.joints.length > 0 && original.weights) {
+    // Skip if stripSkeleton is true (for static LOD meshes that don't need animation)
+    if (
+      !stripSkeleton &&
+      original.joints &&
+      original.joints.length > 0 &&
+      original.weights
+    ) {
       const remappedJoints = this.remapSkinningData(
         original.joints,
         original.weights,

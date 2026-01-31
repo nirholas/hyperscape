@@ -404,10 +404,14 @@ class GlobalLeafInstancer {
       g = color.g,
       b = color.b;
 
+    let skipped = 0;
     for (const transform of leafTransforms) {
       // Get next available index
       const idx = this.freeIndices.pop() ?? this.nextIndex++;
-      if (idx >= MAX_GLOBAL_LEAVES) continue;
+      if (idx >= MAX_GLOBAL_LEAVES) {
+        skipped++;
+        continue;
+      }
 
       indices.push(idx);
 
@@ -424,6 +428,14 @@ class GlobalLeafInstancer {
       this.fades[idx] = 1;
 
       this.count = Math.max(this.count, idx + 1);
+    }
+
+    // Warn if capacity exceeded
+    if (skipped > 0) {
+      console.warn(
+        `[GlobalLeafInstancer] Capacity exceeded: skipped ${skipped} leaves for tree ${treeId}. ` +
+          `Consider increasing MAX_GLOBAL_LEAVES (currently ${MAX_GLOBAL_LEAVES}).`,
+      );
     }
 
     this.leafMap.set(treeId, indices);
@@ -511,43 +523,72 @@ function copyMaterialProps(
   target: THREE.MeshStandardNodeMaterial,
   source: THREE.Material,
 ): void {
-  if (source instanceof THREE.MeshStandardMaterial) {
+  // Handle MeshStandardNodeMaterial (from procgen) or MeshStandardMaterial (from GLB)
+  // Check for PBR properties using duck typing to support both material types
+  const srcWithPBR = source as THREE.Material & {
+    color?: THREE.Color;
+    roughness?: number;
+    metalness?: number;
+    map?: THREE.Texture | null;
+    normalMap?: THREE.Texture | null;
+    normalScale?: THREE.Vector2;
+    roughnessMap?: THREE.Texture | null;
+    metalnessMap?: THREE.Texture | null;
+    aoMap?: THREE.Texture | null;
+    aoMapIntensity?: number;
+    emissive?: THREE.Color;
+    emissiveMap?: THREE.Texture | null;
+    emissiveIntensity?: number;
+    envMap?: THREE.Texture | null;
+    envMapIntensity?: number;
+    vertexColors?: boolean;
+    flatShading?: boolean;
+  };
+
+  // Check if source has PBR properties (MeshStandardMaterial or MeshStandardNodeMaterial)
+  if (
+    srcWithPBR.roughness !== undefined &&
+    srcWithPBR.metalness !== undefined
+  ) {
     // Color and basic properties
-    target.color.copy(source.color);
-    target.roughness = source.roughness;
-    target.metalness = source.metalness;
+    if (srcWithPBR.color) target.color.copy(srcWithPBR.color);
+    target.roughness = srcWithPBR.roughness;
+    target.metalness = srcWithPBR.metalness;
     target.side = source.side;
     target.opacity = source.opacity;
     target.alphaTest = source.alphaTest;
-    target.flatShading = source.flatShading;
+    if (srcWithPBR.flatShading !== undefined)
+      target.flatShading = srcWithPBR.flatShading;
 
     // Textures - critical for proper rendering
-    if (source.map) {
-      target.map = source.map;
+    if (srcWithPBR.map) {
+      target.map = srcWithPBR.map;
       target.map.needsUpdate = true;
     }
-    if (source.normalMap) {
-      target.normalMap = source.normalMap;
-      target.normalScale.copy(source.normalScale);
+    if (srcWithPBR.normalMap) {
+      target.normalMap = srcWithPBR.normalMap;
+      if (srcWithPBR.normalScale)
+        target.normalScale.copy(srcWithPBR.normalScale);
     }
-    if (source.roughnessMap) target.roughnessMap = source.roughnessMap;
-    if (source.metalnessMap) target.metalnessMap = source.metalnessMap;
-    if (source.aoMap) {
-      target.aoMap = source.aoMap;
-      target.aoMapIntensity = source.aoMapIntensity;
+    if (srcWithPBR.roughnessMap) target.roughnessMap = srcWithPBR.roughnessMap;
+    if (srcWithPBR.metalnessMap) target.metalnessMap = srcWithPBR.metalnessMap;
+    if (srcWithPBR.aoMap) {
+      target.aoMap = srcWithPBR.aoMap;
+      target.aoMapIntensity = srcWithPBR.aoMapIntensity ?? 1.0;
     }
-    if (source.emissiveMap) {
-      target.emissiveMap = source.emissiveMap;
-      target.emissive.copy(source.emissive);
-      target.emissiveIntensity = source.emissiveIntensity;
+    if (srcWithPBR.emissiveMap) {
+      target.emissiveMap = srcWithPBR.emissiveMap;
+      if (srcWithPBR.emissive) target.emissive.copy(srcWithPBR.emissive);
+      target.emissiveIntensity = srcWithPBR.emissiveIntensity ?? 1.0;
     }
-    if (source.envMap) {
-      target.envMap = source.envMap;
-      target.envMapIntensity = source.envMapIntensity;
+    if (srcWithPBR.envMap) {
+      target.envMap = srcWithPBR.envMap;
+      target.envMapIntensity = srcWithPBR.envMapIntensity ?? 1.0;
     }
 
     // Copy vertex colors flag
-    target.vertexColors = source.vertexColors;
+    if (srcWithPBR.vertexColors !== undefined)
+      target.vertexColors = srcWithPBR.vertexColors;
   } else if (source instanceof THREE.MeshLambertMaterial) {
     target.color.copy(source.color);
     target.side = source.side;
@@ -939,11 +980,33 @@ export class ProcgenTreeInstancer {
           }
 
           // Extract leaf color from material
+          // Handle standard materials, shader materials, and TSL node materials
           const mat = Array.isArray(child.material)
             ? child.material[0]
             : child.material;
-          if (mat && "color" in mat) {
-            leafColor = (mat as THREE.MeshStandardMaterial).color.clone();
+          if (mat) {
+            if (mat instanceof THREE.ShaderMaterial && mat.uniforms?.uColor) {
+              // ShaderMaterial with uColor uniform (procgen leaves)
+              const uColor = mat.uniforms.uColor.value;
+              if (uColor instanceof THREE.Color) {
+                leafColor = uColor.clone();
+              }
+            } else if (
+              mat instanceof MeshStandardNodeMaterial &&
+              "leafUniforms" in mat
+            ) {
+              // TSL node material with leafUniforms (GlobalLeafInstancer style)
+              const leafMat = mat as LeafNodeMaterial;
+              if (leafMat.leafUniforms?.baseColor?.value) {
+                leafColor = leafMat.leafUniforms.baseColor.value.clone();
+              }
+            } else if (
+              "color" in mat &&
+              (mat as THREE.MeshStandardMaterial).color
+            ) {
+              // Standard material with color property
+              leafColor = (mat as THREE.MeshStandardMaterial).color.clone();
+            }
           }
         }
         return;

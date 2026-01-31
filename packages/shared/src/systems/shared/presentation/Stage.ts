@@ -48,7 +48,8 @@
 import { isNumber } from "lodash-es";
 
 import { LooseOctree } from "../../../utils/physics/LooseOctree";
-import THREE from "../../../extras/three/three";
+import THREE, { MeshStandardNodeMaterial } from "../../../extras/three/three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 import { SystemBase } from "../infrastructure/SystemBase";
 import { World } from "../../../core/World";
 
@@ -367,11 +368,12 @@ export class Stage extends SystemBase {
     if (options.raw) {
       raw = options.raw.clone();
     } else if (options.unlit) {
-      raw = new THREE.MeshBasicMaterial({
-        color: options.color || "white",
-      });
+      // Use MeshBasicNodeMaterial for WebGPU compatibility
+      const unlitMat = new MeshBasicNodeMaterial();
+      unlitMat.color = new THREE.Color(options.color || "white");
+      raw = unlitMat;
     } else {
-      raw = new THREE.MeshStandardMaterial({
+      raw = new MeshStandardNodeMaterial({
         color: options.color || "white",
         metalness: isNumber(options.metalness) ? options.metalness : 0,
         roughness: isNumber(options.roughness) ? options.roughness : 1,

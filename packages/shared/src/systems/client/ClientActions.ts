@@ -31,7 +31,7 @@
  * **Referenced by:** Interaction system, resource gathering, item pickup
  */
 
-import THREE from "../../extras/three/three";
+import THREE, { MeshBasicNodeMaterial } from "../../extras/three/three";
 
 import { ControlPriorities } from "../../systems/client/ControlPriorities";
 import type { Action } from "../../nodes/Action";
@@ -458,9 +458,11 @@ function createBoard(
       ])
       geometry.setIndex(new THREE.BufferAttribute(indices, 1));
       // Compute normals for WebGPU TSL compatibility
-      // (TSL checks for normal attribute even on MeshBasicMaterial)
+      // (TSL checks for normal attribute even on MeshBasicNodeMaterial)
       geometry.computeVertexNormals();
-      const material = new THREE.MeshBasicMaterial({ map: texture });
+      // Use MeshBasicNodeMaterial for WebGPU compatibility
+      const material = new MeshBasicNodeMaterial();
+      material.map = texture;
       material.toneMapped = false;
       // create mesh
       mesh = new THREE.Mesh(geometry, material);

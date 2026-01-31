@@ -109,17 +109,24 @@ export class TreeImpostor {
    * Bake an impostor atlas from a tree mesh.
    * If enableLighting is true (default), also bakes a normal atlas for dynamic lighting.
    *
+   * Supports both WebGL and WebGPU renderers natively.
+   * IMPORTANT: This is an async method - you must await it before calling createInstance().
+   *
    * @param treeMesh - Tree mesh result from TreeGenerator
-   * @param renderer - Three.js WebGL renderer
+   * @param renderer - Three.js WebGL or WebGPU renderer
    * @returns This instance for chaining
    */
-  bake(treeMesh: TreeMeshResult, renderer: THREE.WebGLRenderer): this {
+  async bake(
+    treeMesh: TreeMeshResult,
+    renderer: CompatibleRenderer,
+  ): Promise<this> {
+    // Detect if renderer is WebGPU (for logging)
+    const isWebGPU =
+      (renderer as { isWebGPURenderer?: boolean }).isWebGPURenderer === true;
+
     // Create impostor system if not exists
     if (!this.impostor) {
-      // Cast renderer - WebGLRenderer implements all required CompatibleRenderer methods
-      this.impostor = new OctahedralImpostor(
-        renderer as unknown as CompatibleRenderer,
-      );
+      this.impostor = new OctahedralImpostor(renderer);
     }
 
     const bakeConfig = {
@@ -136,17 +143,22 @@ export class TreeImpostor {
     const bakeMode =
       this.options.bakeMode ??
       (this.options.enableLighting ? "hybrid" : "standard");
-    console.log(`[TreeImpostor] Baking with mode: ${bakeMode}`);
+    console.log(
+      `[TreeImpostor] Baking with mode: ${bakeMode}${isWebGPU ? " (WebGPU)" : " (WebGL)"}`,
+    );
 
-    // Bake based on mode
+    // Bake based on mode - all bake methods are async and must be awaited
     switch (bakeMode) {
       case "hybrid":
         // Best of both: correct colors + normal maps
-        this.bakeResult = this.impostor.bakeHybrid(treeMesh.group, bakeConfig);
+        this.bakeResult = await this.impostor.bakeHybrid(
+          treeMesh.group,
+          bakeConfig,
+        );
         break;
       case "withNormals":
         // Original method (may have color issues)
-        this.bakeResult = this.impostor.bakeWithNormals(
+        this.bakeResult = await this.impostor.bakeWithNormals(
           treeMesh.group,
           bakeConfig,
         );
@@ -154,12 +166,12 @@ export class TreeImpostor {
       case "standard":
       default:
         // Simple bake without normals
-        this.bakeResult = this.impostor.bake(treeMesh.group, bakeConfig);
+        this.bakeResult = await this.impostor.bake(treeMesh.group, bakeConfig);
         break;
     }
 
     // Calculate tree dimensions from bounding box (for proper aspect ratio)
-    if (this.bakeResult.boundingBox) {
+    if (this.bakeResult?.boundingBox) {
       const boxSize = new THREE.Vector3();
       this.bakeResult.boundingBox.getSize(boxSize);
       this.treeWidth = Math.max(boxSize.x, boxSize.z); // Horizontal extent
@@ -170,7 +182,7 @@ export class TreeImpostor {
       const boxCenter = new THREE.Vector3();
       this.bakeResult.boundingBox.getCenter(boxCenter);
       this.heightOffset = boxCenter.y - boxSize.y / 2;
-    } else {
+    } else if (this.bakeResult?.boundingSphere) {
       // Fallback to sphere-based calculation
       this.treeSize = this.bakeResult.boundingSphere.radius * 2;
       this.treeWidth = this.treeSize;
@@ -333,12 +345,12 @@ export class TreeImpostor {
 /**
  * Convenience function to bake a tree impostor.
  */
-export function bakeTreeImpostor(
+export async function bakeTreeImpostor(
   treeMesh: TreeMeshResult,
-  renderer: THREE.WebGLRenderer,
+  renderer: CompatibleRenderer,
   options?: TreeImpostorOptions,
-): TreeImpostor {
+): Promise<TreeImpostor> {
   const impostor = new TreeImpostor(options);
-  impostor.bake(treeMesh, renderer);
+  await impostor.bake(treeMesh, renderer);
   return impostor;
 }

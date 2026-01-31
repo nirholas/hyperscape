@@ -189,7 +189,9 @@ export class BoneDiagnostics {
     console.log(`\n=== GLTF EXPORT TEST ===`);
 
     const scene = new THREE.Scene();
-    const material = new THREE.MeshBasicMaterial();
+    // Use MeshBasicNodeMaterial for WebGPU compatibility
+    const { MeshBasicNodeMaterial } = await import("three/webgpu");
+    const material = new MeshBasicNodeMaterial();
 
     // Create skinned mesh
     const mesh = new THREE.SkinnedMesh(geometry, material);

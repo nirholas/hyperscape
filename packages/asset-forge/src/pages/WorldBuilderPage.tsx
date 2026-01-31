@@ -48,6 +48,11 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
+import { MeshStandardNodeMaterial, MeshBasicNodeMaterial } from "three/webgpu";
+
+// Type aliases for WebGPU-compatible NodeMaterials
+const TerrainNodeMat = MeshStandardNodeMaterial;
+const BasicNodeMat = MeshBasicNodeMaterial;
 
 import {
   Button,
@@ -3632,7 +3637,7 @@ export const WorldBuilderPage: React.FC = () => {
   const controlsRef = useRef<OrbitControls | null>(null);
   const gridRef = useRef<THREE.GridHelper | null>(null);
   const currentBuildingRef = useRef<THREE.Mesh | THREE.Group | null>(null);
-  const uberMaterialRef = useRef<THREE.MeshStandardMaterial | null>(null);
+  const uberMaterialRef = useRef<THREE.Material | null>(null); // MeshStandardNodeMaterial for WebGPU
   const animationIdRef = useRef<number>(0);
   const flythroughStateRef = useRef<FlythroughState>({
     moveForward: false,
@@ -3859,19 +3864,22 @@ export const WorldBuilderPage: React.FC = () => {
     gridRef.current = grid;
 
     // Ground
+    const groundMaterial = new MeshStandardNodeMaterial();
+    groundMaterial.color = new THREE.Color(0x10151c);
+    groundMaterial.roughness = 1;
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(140, 140),
-      new THREE.MeshStandardMaterial({ color: 0x10151c, roughness: 1 }),
+      groundMaterial,
     );
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -0.01;
     scene.add(ground);
 
     // Uber material
-    uberMaterialRef.current = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.9,
-    });
+    const uberMat = new MeshStandardNodeMaterial();
+    uberMat.vertexColors = true;
+    uberMat.roughness = 0.9;
+    uberMaterialRef.current = uberMat;
 
     // Animation loop with flythrough support
     const animate = () => {
@@ -4093,7 +4101,7 @@ export const WorldBuilderPage: React.FC = () => {
       buildingType,
       rng,
       showRoof,
-      uberMaterialRef.current,
+      uberMaterialRef.current as THREE.MeshStandardMaterial, // NodeMaterial is compatible
     );
 
     // Remove old building and dispose all geometries
@@ -4550,11 +4558,10 @@ export const WorldBuilderPage: React.FC = () => {
         geometry.setIndex(indices);
         geometry.computeVertexNormals();
 
-        const material = new THREE.MeshStandardMaterial({
-          vertexColors: true,
-          roughness: 0.9,
-          flatShading: true,
-        });
+        const material = new MeshStandardNodeMaterial();
+        material.vertexColors = true;
+        material.roughness = 0.9;
+        material.flatShading = true;
 
         const terrainMesh = new THREE.Mesh(geometry, material);
         terrainMesh.receiveShadow = true;
@@ -4563,12 +4570,11 @@ export const WorldBuilderPage: React.FC = () => {
 
         // Add water plane
         const waterGeometry = new THREE.PlaneGeometry(totalSize, totalSize);
-        const waterMaterial = new THREE.MeshStandardMaterial({
-          color: 0x4a90d9,
-          transparent: true,
-          opacity: 0.7,
-          roughness: 0.1,
-        });
+        const waterMaterial = new MeshStandardNodeMaterial();
+        waterMaterial.color = new THREE.Color(0x4a90d9);
+        waterMaterial.transparent = true;
+        waterMaterial.opacity = 0.7;
+        waterMaterial.roughness = 0.1;
         const waterMesh = new THREE.Mesh(waterGeometry, waterMaterial);
         waterMesh.rotation.x = -Math.PI / 2;
         waterMesh.position.y = worldConfig.terrain.waterThreshold;
@@ -4595,10 +4601,13 @@ export const WorldBuilderPage: React.FC = () => {
 
             // Create marker
             const markerGeometry = new THREE.ConeGeometry(2, 5, 8);
-            const markerMaterial = new THREE.MeshStandardMaterial({
-              color: i < 2 ? 0xff0000 : i < 5 ? 0xff8800 : 0xffff00,
-              emissive: i < 2 ? 0x330000 : i < 5 ? 0x331100 : 0x333300,
-            });
+            const markerMaterial = new TerrainNodeMat();
+            markerMaterial.color = new THREE.Color(
+              i < 2 ? 0xff0000 : i < 5 ? 0xff8800 : 0xffff00,
+            );
+            markerMaterial.emissive = new THREE.Color(
+              i < 2 ? 0x330000 : i < 5 ? 0x331100 : 0x333300,
+            );
             const marker = new THREE.Mesh(markerGeometry, markerMaterial);
             marker.position.set(x, y + 3, z);
             townsGroup.add(marker);
@@ -4609,12 +4618,11 @@ export const WorldBuilderPage: React.FC = () => {
               worldConfig.towns.townSizes.hamlet.safeZoneRadius,
               32,
             );
-            const ringMaterial = new THREE.MeshBasicMaterial({
-              color: 0x00ff00,
-              transparent: true,
-              opacity: 0.3,
-              side: THREE.DoubleSide,
-            });
+            const ringMaterial = new BasicNodeMat();
+            ringMaterial.color = new THREE.Color(0x00ff00);
+            ringMaterial.transparent = true;
+            ringMaterial.opacity = 0.3;
+            ringMaterial.side = THREE.DoubleSide;
             const ring = new THREE.Mesh(ringGeometry, ringMaterial);
             ring.rotation.x = -Math.PI / 2;
             ring.position.set(x, y + 0.1, z);

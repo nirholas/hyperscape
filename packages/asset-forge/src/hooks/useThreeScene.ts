@@ -122,12 +122,13 @@ export function useThreeScene(
         scene.add(gridHelper);
 
         // Ground plane
+        // Use MeshStandardNodeMaterial for WebGPU compatibility
+        const { MeshStandardNodeMaterial } = await import("three/webgpu");
         const groundGeometry = new THREE.PlaneGeometry(20, 20);
-        const groundMaterial = new THREE.MeshStandardMaterial({
-          color: 0x444444,
-          roughness: 0.8,
-          metalness: 0.2,
-        });
+        const groundMaterial = new MeshStandardNodeMaterial();
+        groundMaterial.color = new THREE.Color(0x444444);
+        groundMaterial.roughness = 0.8;
+        groundMaterial.metalness = 0.2;
         const ground = new THREE.Mesh(groundGeometry, groundMaterial);
         ground.rotation.x = -Math.PI / 2;
         ground.position.y = 0;

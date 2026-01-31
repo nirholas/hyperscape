@@ -40,13 +40,14 @@ else:
 TEMP_DIR = os.environ.get("LOD_TEMP_DIR", "")
 
 # Configuration
+# Note: Rocks are now procedurally generated via @hyperscape/procgen/rock
+# and do not need static LOD GLB files
 CONFIG = {
     "dry_run": False,
     "verbose": False,
     "input_dirs": [
         "packages/server/world/assets/vegetation",
         "assets/trees",
-        "assets/rocks",
         "assets/grass",
     ],
     # LOD ratios by category (inferred from path)
@@ -60,6 +61,8 @@ CONFIG = {
         "mushroom": 0.0,   # Mushrooms: skip LOD1 (too small)
         "ivy": 0.25,       # Ivy: 25%
         "fallen": 0.10,    # Fallen trees: 10%
+        "avatar": 0.06,    # Avatars: 6% (~30K from 500K)
+        "character": 0.06, # Characters: 6%
         "default": 0.15,   # Default: 15%
     },
     "min_vertices": {
@@ -70,6 +73,8 @@ CONFIG = {
         "flower": 10,
         "ivy": 20,
         "fallen": 80,
+        "avatar": 5000,    # Avatars need reasonable minimum for bone deformation
+        "character": 5000,
         "default": 50,
     },
     # Skip LOD1 if original is under this many vertices
@@ -183,7 +188,12 @@ def infer_category(filepath: Path) -> str:
     """Infer asset category from file path"""
     path_str = str(filepath).lower()
     
-    if "tree" in path_str:
+    # Check for avatar/character files first (VRM format)
+    if "avatar" in path_str or filepath.suffix.lower() == ".vrm":
+        return "avatar"
+    elif "character" in path_str:
+        return "character"
+    elif "tree" in path_str:
         if "fallen" in path_str:
             return "fallen"
         return "tree"

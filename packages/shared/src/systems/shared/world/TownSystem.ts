@@ -50,6 +50,7 @@ import {
 } from "@hyperscape/procgen/building";
 import { BuildingCollisionService } from "./BuildingCollisionService";
 import type { FlatZone } from "../../../types/world/terrain";
+import { BFSPathfinder } from "../movement/BFSPathfinder";
 
 // Default configuration values
 const DEFAULTS = {
@@ -1199,7 +1200,6 @@ export class TownSystem extends System {
     allBuildings: import("../../../types/world/building-collision-types").BuildingCollisionData[],
   ): void {
     // Import BFSPathfinder for testing (lazy import to avoid circular deps)
-    const { BFSPathfinder } = require("../../shared/movement/BFSPathfinder");
     const pathfinder = new BFSPathfinder();
 
     let buildingsTested = 0;

@@ -16,7 +16,7 @@
  * **Runs on**: Server (authoritative), Client (visual)
  */
 
-import THREE from "../../extras/three/three";
+import THREE, { MeshStandardNodeMaterial } from "../../extras/three/three";
 import type { World } from "../../core/World";
 import type { EntityInteractionData } from "../../types/entities";
 import { EntityType, InteractionType } from "../../types/entities";
@@ -241,7 +241,7 @@ export class AltarEntity extends InteractableEntity {
     // FALLBACK: Create a purple box for the altar (1 tile size, altar-like proportions)
     const boxHeight = 0.8;
     const geometry = new THREE.BoxGeometry(0.9, boxHeight, 0.9);
-    const material = new THREE.MeshStandardMaterial({
+    const material = new MeshStandardNodeMaterial({
       color: 0x9932cc, // Bright purple (DarkOrchid)
       roughness: 0.5,
       metalness: 0.3,

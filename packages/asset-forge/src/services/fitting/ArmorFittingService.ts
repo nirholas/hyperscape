@@ -9,6 +9,7 @@ import {
   Skeleton,
   Bone,
 } from "three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 
 import { MeshFittingService } from "./MeshFittingService";
 import { WeightTransferService } from "./WeightTransferService";
@@ -872,12 +873,11 @@ export class ArmorFittingService {
     geometry.computeVertexNormals();
     geometry.computeBoundingBox();
 
-    const material = new THREE.MeshBasicMaterial({
-      color: 0x00ff00,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.5,
-    });
+    const material = new MeshBasicNodeMaterial();
+    material.color = new THREE.Color(0x00ff00);
+    material.wireframe = true;
+    material.transparent = true;
+    material.opacity = 0.5;
 
     return new THREE.Mesh(geometry, material);
   }

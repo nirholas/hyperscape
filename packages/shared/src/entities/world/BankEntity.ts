@@ -16,7 +16,7 @@
  * **Runs on**: Server (authoritative), Client (visual)
  */
 
-import THREE from "../../extras/three/three";
+import THREE, { MeshStandardNodeMaterial } from "../../extras/three/three";
 import type { World } from "../../core/World";
 import type {
   EntityInteractionData,
@@ -229,7 +229,7 @@ export class BankEntity extends InteractableEntity {
     // FALLBACK: Create a black box for the bank (1 tile size, chest-like proportions)
     const boxHeight = 0.7;
     const geometry = new THREE.BoxGeometry(0.9, boxHeight, 0.9);
-    const material = new THREE.MeshStandardMaterial({
+    const material = new MeshStandardNodeMaterial({
       color: 0x111111, // Very dark black
       roughness: 0.3,
       metalness: 0.8, // Metallic chest

@@ -25,8 +25,10 @@
  * // In clientUpdate
  * const lod = this.animLOD.update(playerDistance, deltaTime);
  * if (lod.shouldApplyRestPose) {
- *   // Apply canonical idle pose once when entering freeze
- *   this.skeleton.pose();
+ *   // Freeze at current idle pose when entering frozen state
+ *   // NOTE: Do NOT use skeleton.pose() - that resets to BIND pose (T-pose)
+ *   // Instead, ensure idle animation is playing and call mixer.update(0)
+ *   this.mixer.update(0); // Apply current animation frame
  * }
  * if (lod.shouldUpdate) {
  *   this.mixer.update(lod.effectiveDelta);

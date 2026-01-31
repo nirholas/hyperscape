@@ -18,6 +18,7 @@
  */
 
 import * as THREE from "three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 import { ProcgenPlantInstancer } from "./ProcgenPlantInstancer";
 import type { World } from "../../../core/World";
 
@@ -211,12 +212,12 @@ function generateLOD2CardPlant(
   const cardHeight = height * LOD2_CARD_OPTIONS.cardSizeMultiplier;
   const cardGeometry = new THREE.PlaneGeometry(cardWidth, cardHeight);
 
-  const cardMaterial = new THREE.MeshBasicMaterial({
-    color: leafColor,
-    side: THREE.DoubleSide,
-    transparent: true,
-    alphaTest: 0.1,
-  });
+  // Use MeshBasicNodeMaterial for WebGPU compatibility
+  const cardMaterial = new MeshBasicNodeMaterial();
+  cardMaterial.color = new THREE.Color(leafColor);
+  cardMaterial.side = THREE.DoubleSide;
+  cardMaterial.transparent = true;
+  cardMaterial.alphaTest = 0.1;
 
   const centerY = height * 0.5;
 

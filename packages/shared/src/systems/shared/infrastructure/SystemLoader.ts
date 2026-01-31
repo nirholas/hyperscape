@@ -82,6 +82,8 @@ import { getSystem } from "../../../utils/SystemUtils";
 import type { World } from "../../../core/World";
 import { System } from "./System";
 import { MobInstancedRenderer } from "../../../utils/rendering/InstancedMeshManager";
+import { ImpostorManager } from "../rendering";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 
 // Helper function to check truthy values
 function isTruthy(value: string | undefined): boolean {
@@ -716,7 +718,6 @@ function setupAPI(world: World, systems: Systems): void {
       // Client-side only - returns null on server
       if (world.isServer) return null;
       // Get the ImpostorManager singleton for this world
-      const { ImpostorManager } = require("../rendering");
       const manager = ImpostorManager.getInstance(world);
       return manager.getStats();
     },
@@ -1452,8 +1453,10 @@ function setupAPI(world: World, systems: Systems): void {
           return null;
         }
 
+        // Use MeshBasicNodeMaterial for WebGPU compatibility
         const geometry = new THREE.BoxGeometry(0.6, 1.8, 0.6);
-        const material = new THREE.MeshBasicMaterial({ color });
+        const material = new MeshBasicNodeMaterial();
+        material.color = new THREE.Color(color);
         const mesh = new THREE.Mesh(geometry, material);
         mesh.name = `TestPlayer_${Date.now()}`;
         mesh.position.set(x, 0.9, z);
@@ -1475,8 +1478,10 @@ function setupAPI(world: World, systems: Systems): void {
           return null;
         }
 
+        // Use MeshBasicNodeMaterial for WebGPU compatibility
         const geometry = new THREE.BoxGeometry(0.8, 1.6, 0.8);
-        const material = new THREE.MeshBasicMaterial({ color });
+        const material = new MeshBasicNodeMaterial();
+        material.color = new THREE.Color(color);
         const mesh = new THREE.Mesh(geometry, material);
         mesh.name = `TestGoblin_${Date.now()}`;
         mesh.position.set(x, 0.8, z);
@@ -1502,8 +1507,10 @@ function setupAPI(world: World, systems: Systems): void {
           return null;
         }
 
+        // Use MeshBasicNodeMaterial for WebGPU compatibility
         const geometry = new THREE.BoxGeometry(0.5, 0.5, 0.5);
-        const material = new THREE.MeshBasicMaterial({ color });
+        const material = new MeshBasicNodeMaterial();
+        material.color = new THREE.Color(color);
         const mesh = new THREE.Mesh(geometry, material);
         mesh.name = `TestItem_${itemType}_${Date.now()}`;
         mesh.position.set(x, 0.25, z);

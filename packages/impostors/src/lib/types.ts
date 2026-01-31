@@ -53,6 +53,17 @@ export type PBRBakeModeValue = (typeof PBRBakeMode)[keyof typeof PBRBakeMode];
  * - Atlas has 31x31 cells
  * - Each cell occupies 1/31 of atlas width/height
  */
+/**
+ * Vertical packing ratio for atlas
+ * Controls the ratio of vertical to horizontal cells:
+ * - 0.25: 1/4 as many vertical cells (wide atlas)
+ * - 0.5: 1/2 as many vertical cells
+ * - 1: Square (same horizontal and vertical)
+ * - 2: 2x as many vertical cells
+ * - 4: 4x as many vertical cells (tall atlas)
+ */
+export type VerticalPackingRatio = 0.25 | 0.5 | 1 | 2 | 4;
+
 export interface ImpostorBakeConfig {
   /** Atlas texture width in pixels */
   atlasWidth: number;
@@ -74,6 +85,10 @@ export interface ImpostorBakeConfig {
   depthNear?: number;
   /** Far plane for depth baking (default: 10) */
   depthFar?: number;
+  /** Vertical packing ratio (default: 1 = square).
+   * 0.5 = half as many vertical views, 2 = twice as many vertical views.
+   * Cells are stretched to fill the atlas. */
+  verticalPacking?: VerticalPackingRatio;
 }
 
 /**

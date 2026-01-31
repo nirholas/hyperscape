@@ -17,9 +17,11 @@ import {
   NULL_INDEX,
   MATRIX_6X6_SIZE,
   MATRIX_8X8_SIZE,
+  MAX_BONES_PER_VERTEX,
 } from "./types.js";
 import { HalfEdgeBundle, getHalfEdgeBundle } from "./connectivity.js";
 import { getCombinedMetric } from "./quadric.js";
+import { interpolateSkinWeights } from "./collapse.js";
 import {
   dot5,
   norm5,
@@ -97,6 +99,10 @@ const tcj_val = new Float32Array(2);
 // Seam neighbors
 const seamNeighbors = new Int32Array(8);
 const vjTCs = new Int32Array(4);
+
+// Skin weight interpolation workspace
+const skinIndicesOut = new Uint16Array(MAX_BONES_PER_VERTEX);
+const skinWeightsOut = new Float32Array(MAX_BONES_PER_VERTEX);
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -386,6 +392,22 @@ function computeSeamEdgeCost(
       placement.metrics.set(m0, 0);
       placement.metrics.set(m1, MATRIX_6X6_SIZE);
 
+      // Interpolate skin weights: collapse to the fixed end
+      // t = 0 when end = 0 (use vi[0]'s weights), t = 1 when end = 1 (use vi[1]'s weights)
+      const t = end === 0 ? 0.0 : 1.0;
+      if (
+        interpolateSkinWeights(
+          mesh,
+          vi[0],
+          vi[1],
+          t,
+          skinIndicesOut,
+          skinWeightsOut,
+        )
+      ) {
+        placement.setSkinData(skinIndicesOut, skinWeightsOut);
+      }
+
       return cost;
     }
   }
@@ -581,10 +603,16 @@ function computeSeamOptimalPlacement(
     0,
   );
 
+  // Check ALL output components for validity, not just x and u
   if (
     !Number.isFinite(cost) ||
     !Number.isFinite(x_8[0]) ||
-    !Number.isFinite(x_8[3])
+    !Number.isFinite(x_8[1]) ||
+    !Number.isFinite(x_8[2]) ||
+    !Number.isFinite(x_8[3]) ||
+    !Number.isFinite(x_8[4]) ||
+    !Number.isFinite(x_8[5]) ||
+    !Number.isFinite(x_8[6])
   ) {
     return INF;
   }
@@ -597,6 +625,36 @@ function computeSeamOptimalPlacement(
   placement.metricCount = 2;
   placement.metrics.set(m0Metric, 0);
   placement.metrics.set(m1Metric, MATRIX_6X6_SIZE);
+
+  // Compute interpolation factor t from position along edge
+  // Use positions from eP0[0] and eP1[0] (the first side's vertices)
+  const edgeDx = p1[0] - p0[0];
+  const edgeDy = p1[1] - p0[1];
+  const edgeDz = p1[2] - p0[2];
+  const edgeLenSq = edgeDx * edgeDx + edgeDy * edgeDy + edgeDz * edgeDz;
+
+  let t = 0.5; // Default to midpoint
+  if (edgeLenSq > EPS) {
+    const dotProduct =
+      (x_8[0] - p0[0]) * edgeDx +
+      (x_8[1] - p0[1]) * edgeDy +
+      (x_8[2] - p0[2]) * edgeDz;
+    t = Math.max(0, Math.min(1, dotProduct / edgeLenSq));
+  }
+
+  // Interpolate skin weights
+  if (
+    interpolateSkinWeights(
+      mesh,
+      eP0[0].vi,
+      eP1[0].vi,
+      t,
+      skinIndicesOut,
+      skinWeightsOut,
+    )
+  ) {
+    placement.setSkinData(skinIndicesOut, skinWeightsOut);
+  }
 
   return cost;
 }
@@ -645,6 +703,20 @@ function computeRegularEdgeCost(
     placement.metricCount = 1;
     placement.metrics.set(combinedMetric, 0);
 
+    // Interpolate skin weights: t=0 means use vi0's weights
+    if (
+      interpolateSkinWeights(
+        mesh,
+        vi0,
+        vi1,
+        0.0,
+        skinIndicesOut,
+        skinWeightsOut,
+      )
+    ) {
+      placement.setSkinData(skinIndicesOut, skinWeightsOut);
+    }
+
     return cost;
   }
 
@@ -663,6 +735,20 @@ function computeRegularEdgeCost(
     placement.setTC(0, midUV[0], midUV[1]);
     placement.metricCount = 1;
     placement.metrics.set(combinedMetric, 0);
+
+    // Interpolate skin weights: t=1 means use vi1's weights
+    if (
+      interpolateSkinWeights(
+        mesh,
+        vi0,
+        vi1,
+        1.0,
+        skinIndicesOut,
+        skinWeightsOut,
+      )
+    ) {
+      placement.setSkinData(skinIndicesOut, skinWeightsOut);
+    }
 
     return cost;
   }
@@ -726,10 +812,14 @@ function computeRegularEdgeCost(
     0,
   );
 
+  // Check ALL output components for validity (x, y, z, u, v)
   if (
     !Number.isFinite(cost) ||
     !Number.isFinite(x_6[0]) ||
-    !Number.isFinite(x_6[3])
+    !Number.isFinite(x_6[1]) ||
+    !Number.isFinite(x_6[2]) ||
+    !Number.isFinite(x_6[3]) ||
+    !Number.isFinite(x_6[4])
   ) {
     // Fallback to midpoint
     placement.position[0] = midPos[0];
@@ -738,6 +828,20 @@ function computeRegularEdgeCost(
     placement.setTC(0, midUV[0], midUV[1]);
     placement.metricCount = 1;
     placement.metrics.set(combinedMetric, 0);
+
+    // Interpolate skin weights at midpoint (t=0.5)
+    if (
+      interpolateSkinWeights(
+        mesh,
+        vi0,
+        vi1,
+        0.5,
+        skinIndicesOut,
+        skinWeightsOut,
+      )
+    ) {
+      placement.setSkinData(skinIndicesOut, skinWeightsOut);
+    }
 
     v6[0] = midPos[0];
     v6[1] = midPos[1];
@@ -755,6 +859,29 @@ function computeRegularEdgeCost(
   placement.setTC(0, x_6[3], x_6[4]);
   placement.metricCount = 1;
   placement.metrics.set(combinedMetric, 0);
+
+  // Compute interpolation factor t from position along edge
+  // t = |newPos - p0| / |p1 - p0|
+  const edgeDx = p1[0] - p0[0];
+  const edgeDy = p1[1] - p0[1];
+  const edgeDz = p1[2] - p0[2];
+  const edgeLenSq = edgeDx * edgeDx + edgeDy * edgeDy + edgeDz * edgeDz;
+
+  let t = 0.5; // Default to midpoint
+  if (edgeLenSq > EPS) {
+    const dotProduct =
+      (x_6[0] - p0[0]) * edgeDx +
+      (x_6[1] - p0[1]) * edgeDy +
+      (x_6[2] - p0[2]) * edgeDz;
+    t = Math.max(0, Math.min(1, dotProduct / edgeLenSq));
+  }
+
+  // Interpolate skin weights
+  if (
+    interpolateSkinWeights(mesh, vi0, vi1, t, skinIndicesOut, skinWeightsOut)
+  ) {
+    placement.setSkinData(skinIndicesOut, skinWeightsOut);
+  }
 
   return cost;
 }

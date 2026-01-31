@@ -12,6 +12,7 @@ import React, {
 } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { MeshStandardNodeMaterial, MeshBasicNodeMaterial } from "three/webgpu";
 
 export interface TerrainPreviewConfig {
   seed: number;
@@ -342,12 +343,11 @@ export const TerrainPreview: React.FC<TerrainPreviewProps> = ({
     geometry.computeVertexNormals();
 
     // Create material
-    const material = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      flatShading: false,
-      wireframe: config.wireframe,
-      side: THREE.DoubleSide,
-    });
+    const material = new MeshStandardNodeMaterial();
+    material.vertexColors = true;
+    material.flatShading = false;
+    material.wireframe = config.wireframe;
+    material.side = THREE.DoubleSide;
 
     // Create mesh
     const terrainMesh = new THREE.Mesh(geometry, material);
@@ -361,15 +361,12 @@ export const TerrainPreview: React.FC<TerrainPreviewProps> = ({
         worldSizeMeters,
       );
       waterGeom.rotateX(-Math.PI / 2);
-      const waterMesh = new THREE.Mesh(
-        waterGeom,
-        new THREE.MeshStandardMaterial({
-          color: 0x4a90d9,
-          transparent: true,
-          opacity: 0.6,
-          side: THREE.DoubleSide,
-        }),
-      );
+      const waterMat = new MeshStandardNodeMaterial();
+      waterMat.color = new THREE.Color(0x4a90d9);
+      waterMat.transparent = true;
+      waterMat.opacity = 0.6;
+      waterMat.side = THREE.DoubleSide;
+      const waterMesh = new THREE.Mesh(waterGeom, waterMat);
       waterMesh.position.y = config.waterThreshold;
       scene.add(waterMesh);
       waterMeshRef.current = waterMesh;
@@ -412,27 +409,29 @@ export const TerrainPreview: React.FC<TerrainPreviewProps> = ({
         const { x, y, z } = town.position;
 
         // Cone marker
+        const markerMat = new MeshBasicNodeMaterial();
+        markerMat.color = new THREE.Color(color);
         const marker = new THREE.Mesh(
           new THREE.ConeGeometry(10, 30, 8),
-          new THREE.MeshBasicMaterial({ color }),
+          markerMat,
         );
         marker.position.set(x, y + 20, z);
         marker.rotation.x = Math.PI;
         townMarkersRef.current.add(marker);
 
         // Safe zone ring
+        const ringMat = new MeshBasicNodeMaterial();
+        ringMat.color = new THREE.Color(color);
+        ringMat.side = THREE.DoubleSide;
+        ringMat.transparent = true;
+        ringMat.opacity = 0.3;
         const ring = new THREE.Mesh(
           new THREE.RingGeometry(
             town.safeZoneRadius - 2,
             town.safeZoneRadius,
             32,
           ),
-          new THREE.MeshBasicMaterial({
-            color,
-            side: THREE.DoubleSide,
-            transparent: true,
-            opacity: 0.3,
-          }),
+          ringMat,
         );
         ring.rotation.x = -Math.PI / 2;
         ring.position.set(x, y + 0.5, z);

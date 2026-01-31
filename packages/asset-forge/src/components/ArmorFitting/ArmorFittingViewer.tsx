@@ -9,6 +9,7 @@ import React, {
   useState,
 } from "react";
 import * as THREE from "three";
+import { MeshBasicNodeMaterial, LineBasicNodeMaterial } from "three/webgpu";
 // import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter'
 import { GLTF, GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
@@ -972,7 +973,8 @@ export const ArmorFittingViewer = forwardRef<
     clearVisualization();
 
     const sphereGeometry = new THREE.SphereGeometry(0.01, 8, 8);
-    const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+    const material = new MeshBasicNodeMaterial();
+    material.color = new THREE.Color(0xff0000);
 
     collisions.forEach((collision) => {
       const sphere = new THREE.Mesh(sphereGeometry, material);
@@ -988,10 +990,9 @@ export const ArmorFittingViewer = forwardRef<
             collision.normal.clone().multiplyScalar(collision.penetrationDepth),
           ),
       ]);
-      const line = new THREE.Line(
-        lineGeometry,
-        new THREE.LineBasicMaterial({ color: 0xff0000 }),
-      );
+      const lineMat = new LineBasicNodeMaterial();
+      lineMat.color = new THREE.Color(0xff0000);
+      const line = new THREE.Line(lineGeometry, lineMat);
       visualizationGroupRef.current.add(line);
     });
   };
@@ -1085,10 +1086,9 @@ export const ArmorFittingViewer = forwardRef<
       geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 
       // Use a simple material with vertex colors
-      const material = new THREE.MeshBasicMaterial({
-        vertexColors: true,
-        side: THREE.DoubleSide,
-      });
+      const material = new MeshBasicNodeMaterial();
+      material.vertexColors = true;
+      material.side = THREE.DoubleSide;
 
       avatarMeshRef.current.material = material;
     }, 50);

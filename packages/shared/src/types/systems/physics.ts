@@ -678,7 +678,7 @@ export interface CameraSystem {
 
 // VRM factory interfaces
 export interface VRMHooks {
-  scene: THREE.Scene;
+  scene?: THREE.Scene;
   octree?: {
     insert: (item: unknown) => void;
     move?: (item: unknown) => void;
@@ -686,6 +686,12 @@ export interface VRMHooks {
   };
   camera?: unknown;
   loader?: unknown;
+  /**
+   * When true, the VRM is being created for template/cloning purposes only.
+   * No scene is required and no error will be logged if scene is undefined.
+   * Used by InstancedMeshManager when extracting model data for GPU instancing.
+   */
+  templateMode?: boolean;
 }
 
 // Global THREE.js interface

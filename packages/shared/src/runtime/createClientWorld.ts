@@ -72,7 +72,7 @@ import { TownSystem } from "../systems/shared";
 import { POISystem } from "../systems/shared";
 import { RoadNetworkSystem } from "../systems/shared";
 import { VegetationSystem } from "../systems/shared";
-import { GrassSystem } from "../systems/shared";
+import { ProceduralGrassSystem } from "../systems/shared";
 import { BuildingRenderingSystem } from "../systems/shared";
 import { Physics } from "../systems/shared";
 
@@ -223,18 +223,16 @@ export function createClientWorld() {
   // NOTE: Towns register flat zones which emit TERRAIN_TILE_REGENERATED events
   // that VegetationSystem receives to regenerate grass at correct heights
 
-  // TEMPORARILY DISABLED - debugging terrain rendering
-  // world.register("towns", TownSystem);
-  // world.register("pois", POISystem);
-  // world.register("roads", RoadNetworkSystem);
+  world.register("towns", TownSystem);
+  world.register("pois", POISystem);
+  world.register("roads", RoadNetworkSystem);
 
   // ============================================================================
   // BUILDING RENDERING SYSTEM
   // ============================================================================
   // Procedural building mesh rendering for towns
   // Must be registered after towns system as it depends on town data
-  // TEMPORARILY DISABLED - debugging terrain rendering
-  // world.register("building-rendering", BuildingRenderingSystem);
+  world.register("building-rendering", BuildingRenderingSystem);
 
   // ============================================================================
   // VISUAL EFFECTS SYSTEMS
@@ -247,17 +245,17 @@ export function createClientWorld() {
   world.register("equipment-visual", EquipmentVisualSystem); // Visual weapon/equipment attachment
   world.register("zone-detection", ZoneDetectionSystem); // Zone type detection (safe/pvp/wilderness)
   world.register("zone-visuals", ZoneVisualsSystem); // PvP zone ground overlays and warnings
-  world.register("resource-tile-debug", ResourceTileDebugSystem); // Debug: shows resource tile occupancy
+  // TEMPORARILY DISABLED - debugging terrain rendering
+  // world.register("resource-tile-debug", ResourceTileDebugSystem); // Debug: shows resource tile occupancy
   world.register("particles", Particles); // Particle effects system
   world.register("wind", Wind); // Environmental wind effects
 
   // ============================================================================
   // GRASS SYSTEM
   // ============================================================================
-  // Procedural WebGPU grass rendering with wind animation
-  // Must be registered after terrain (listens to tile events) and wind (uses wind uniforms)
+  // GPU Procedural grass with heightmap sampling
 
-  world.register("grass", GrassSystem);
+  world.register("grass", ProceduralGrassSystem);
 
   // ============================================================================
   // THREE.JS SETUP

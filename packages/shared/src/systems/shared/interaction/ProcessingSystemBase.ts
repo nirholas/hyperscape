@@ -11,6 +11,7 @@
  */
 
 import THREE from "../../../extras/three/three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 import { Fire, ProcessingAction } from "../../../types/core/core";
 import { EventType } from "../../../types/events";
 import { SystemBase } from "../infrastructure/SystemBase";
@@ -239,12 +240,12 @@ export abstract class ProcessingSystemBase
     if (!this.world.isClient) return;
 
     // Create fire mesh - orange glowing cube for now
+    // Use MeshBasicNodeMaterial for WebGPU compatibility
     const fireGeometry = new THREE.BoxGeometry(0.5, 0.8, 0.5);
-    const fireMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff4500, // Orange red
-      transparent: true,
-      opacity: 0.8,
-    });
+    const fireMaterial = new MeshBasicNodeMaterial();
+    fireMaterial.color = new THREE.Color(0xff4500); // Orange red
+    fireMaterial.transparent = true;
+    fireMaterial.opacity = 0.8;
 
     const fireMesh = new THREE.Mesh(fireGeometry, fireMaterial);
     fireMesh.name = `Fire_${fire.id}`;

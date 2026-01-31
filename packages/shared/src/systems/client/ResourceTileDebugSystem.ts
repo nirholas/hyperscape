@@ -15,6 +15,7 @@
  */
 
 import THREE from "../../extras/three/three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 import { SystemBase } from "../shared/infrastructure/SystemBase";
 import type { World } from "../../types";
 import {
@@ -44,7 +45,7 @@ export class ResourceTileDebugSystem extends SystemBase {
   private debugTiles: Map<string, DebugTileHandle[]> = new Map();
   private enabled = false;
   private sharedGeometry: THREE.PlaneGeometry | null = null;
-  private sharedMaterial: THREE.MeshBasicMaterial | null = null;
+  private sharedMaterial: THREE.Material | null = null; // MeshBasicNodeMaterial for WebGPU
 
   constructor(world: World) {
     super(world, {
@@ -63,13 +64,14 @@ export class ResourceTileDebugSystem extends SystemBase {
       TILE_SIZE * 0.95,
       TILE_SIZE * 0.95,
     );
-    this.sharedMaterial = new THREE.MeshBasicMaterial({
-      color: DEBUG_TILE_COLOR,
-      transparent: true,
-      opacity: DEBUG_TILE_OPACITY,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
+    // Use MeshBasicNodeMaterial for WebGPU compatibility
+    const mat = new MeshBasicNodeMaterial();
+    mat.color = new THREE.Color(DEBUG_TILE_COLOR);
+    mat.transparent = true;
+    mat.opacity = DEBUG_TILE_OPACITY;
+    mat.side = THREE.DoubleSide;
+    mat.depthWrite = false;
+    this.sharedMaterial = mat;
 
     // Subscribe to resource spawn events
     this.subscribe(

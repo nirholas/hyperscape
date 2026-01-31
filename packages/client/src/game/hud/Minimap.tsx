@@ -1104,141 +1104,159 @@ export function Minimap({
         const pipsArray = entityPipsRefForRender.current;
         for (let pipIdx = 0; pipIdx < pipsArray.length; pipIdx++) {
           const pip = pipsArray[pipIdx];
-          // Convert world position to screen position using cached matrix
-          // This keeps pips synced with the throttled 3D render (not the live camera)
-          if (_hasCachedMatrix) {
+
+          // LOCAL PLAYER: Always draw at exact center of minimap
+          // The minimap camera follows the player, so the player is always at center by design.
+          // Don't project through the cached matrix as it causes jerky movement due to
+          // the 4-frame throttle on matrix updates while player position updates every frame.
+          const isLocalPlayer =
+            pip.id === "local-player" || pip.id === "spectated-player";
+
+          let x: number;
+          let y: number;
+
+          if (isLocalPlayer) {
+            // Fixed at center - no projection needed
+            x = widthRef.current / 2;
+            y = heightRef.current / 2;
+          } else if (_hasCachedMatrix) {
+            // Other entities: project through cached matrix
             // Reuse pre-allocated vector instead of cloning to avoid GC pressure
             _tempProjectVec.copy(pip.position);
             // Apply cached projection-view matrix manually instead of using project()
             _tempProjectVec.applyMatrix4(_cachedProjectionViewMatrix);
 
             // Use refs for width/height to avoid stale closure values during resize
-            const x = (_tempProjectVec.x * 0.5 + 0.5) * widthRef.current;
-            const y = (_tempProjectVec.y * -0.5 + 0.5) * heightRef.current;
+            x = (_tempProjectVec.x * 0.5 + 0.5) * widthRef.current;
+            y = (_tempProjectVec.y * -0.5 + 0.5) * heightRef.current;
+          } else {
+            // No matrix yet, skip this pip
+            continue;
+          }
 
-            // Only draw if within bounds (use refs for current dimensions)
+          // Only draw if within bounds (use refs for current dimensions)
+          // Local player is always at center, so always in bounds
+          if (
+            x >= 0 &&
+            x <= widthRef.current &&
+            y >= 0 &&
+            y <= heightRef.current
+          ) {
+            // Set pip properties based on type
+            let radius = 3;
+            let borderColor = "#ffffff";
+            let borderWidth = 1;
+
+            switch (pip.type) {
+              case "player":
+                // RS3-style: simple dot for player, no arrow
+                // Use group color if in a group
+                radius =
+                  pip.groupIndex !== undefined && pip.groupIndex >= 0 ? 5 : 4;
+                borderWidth = 1;
+                break;
+              case "enemy":
+                radius = 3;
+                borderColor = "#ffffff";
+                borderWidth = 1;
+                break;
+              case "building":
+                radius = 4;
+                borderColor = "#000000";
+                borderWidth = 2;
+                break;
+              case "item":
+                radius = 2;
+                borderColor = "#ffffff";
+                borderWidth = 1;
+                break;
+              case "resource":
+                radius = 3;
+                borderColor = "#ffffff";
+                borderWidth = 1;
+                break;
+              case "quest":
+                // Quest markers are larger and more visible
+                radius = pip.isActive ? 7 : 5;
+                borderColor = "#000000";
+                borderWidth = 1;
+                break;
+            }
+
+            // Determine pip color (group members use GROUP_COLORS)
+            let pipColor = pip.color;
             if (
-              x >= 0 &&
-              x <= widthRef.current &&
-              y >= 0 &&
-              y <= heightRef.current
+              pip.type === "player" &&
+              pip.groupIndex !== undefined &&
+              pip.groupIndex >= 0
             ) {
-              // Set pip properties based on type
-              let radius = 3;
-              let borderColor = "#ffffff";
-              let borderWidth = 1;
+              pipColor = GROUP_COLORS[pip.groupIndex % GROUP_COLORS.length];
+            }
 
-              switch (pip.type) {
-                case "player":
-                  // RS3-style: simple dot for player, no arrow
-                  // Use group color if in a group
-                  radius =
-                    pip.groupIndex !== undefined && pip.groupIndex >= 0 ? 5 : 4;
-                  borderWidth = 1;
-                  break;
-                case "enemy":
-                  radius = 3;
-                  borderColor = "#ffffff";
-                  borderWidth = 1;
-                  break;
-                case "building":
-                  radius = 4;
-                  borderColor = "#000000";
-                  borderWidth = 2;
-                  break;
-                case "item":
-                  radius = 2;
-                  borderColor = "#ffffff";
-                  borderWidth = 1;
-                  break;
-                case "resource":
-                  radius = 3;
-                  borderColor = "#ffffff";
-                  borderWidth = 1;
-                  break;
-                case "quest":
-                  // Quest markers are larger and more visible
-                  radius = pip.isActive ? 7 : 5;
-                  borderColor = "#000000";
-                  borderWidth = 1;
-                  break;
+            // In debug mode, modify colors to show visible vs nearby
+            // Visible entities (in camera frustum) are bright, nearby are dimmed
+            const isDebug = debugModeRef.current;
+            const isVisible = pip.inFrustum === true;
+            if (isDebug && pip.type !== "player") {
+              if (!isVisible) {
+                // Dim nearby entities that aren't visible
+                pipColor = "#666666";
+                borderColor = "#444444";
               }
+            }
 
-              // Determine pip color (group members use GROUP_COLORS)
-              let pipColor = pip.color;
-              if (
-                pip.type === "player" &&
-                pip.groupIndex !== undefined &&
-                pip.groupIndex >= 0
-              ) {
-                pipColor = GROUP_COLORS[pip.groupIndex % GROUP_COLORS.length];
-              }
+            // Apply pulse animation for active pips (quests, etc.)
+            let pulseScale = 1;
+            if (pip.isActive) {
+              // Create pulsing effect using time
+              const pulseTime = Date.now() / 500; // 500ms per cycle
+              pulseScale = 1 + 0.15 * Math.sin(pulseTime * Math.PI * 2);
+            }
 
-              // In debug mode, modify colors to show visible vs nearby
-              // Visible entities (in camera frustum) are bright, nearby are dimmed
-              const isDebug = debugModeRef.current;
-              const isVisible = pip.inFrustum === true;
-              if (isDebug && pip.type !== "player") {
-                if (!isVisible) {
-                  // Dim nearby entities that aren't visible
-                  pipColor = "#666666";
-                  borderColor = "#444444";
-                }
-              }
+            // Draw pip
+            ctx.fillStyle = pipColor;
+            ctx.beginPath();
 
-              // Apply pulse animation for active pips (quests, etc.)
-              let pulseScale = 1;
+            // Draw different shapes for different types
+            if (pip.type === "building") {
+              // Square for buildings
+              ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+              ctx.strokeStyle = borderColor;
+              ctx.lineWidth = borderWidth;
+              ctx.strokeRect(x - radius, y - radius, radius * 2, radius * 2);
+            } else if (pip.type === "quest" || pip.icon === "star") {
+              // Star for quest markers
+              const scaledRadius = radius * pulseScale;
+              drawStar(ctx, x, y, scaledRadius, scaledRadius * 0.5, 5);
+              ctx.fill();
+              ctx.strokeStyle = borderColor;
+              ctx.lineWidth = borderWidth;
+              ctx.stroke();
+
+              // Add glow effect for active quests
               if (pip.isActive) {
-                // Create pulsing effect using time
-                const pulseTime = Date.now() / 500; // 500ms per cycle
-                pulseScale = 1 + 0.15 * Math.sin(pulseTime * Math.PI * 2);
+                ctx.save();
+                ctx.shadowColor = pipColor;
+                ctx.shadowBlur = 8;
+                ctx.fill();
+                ctx.restore();
               }
+            } else if (pip.icon === "diamond") {
+              // Diamond shape
+              drawDiamond(ctx, x, y, radius);
+              ctx.fill();
+              ctx.strokeStyle = borderColor;
+              ctx.lineWidth = borderWidth;
+              ctx.stroke();
+            } else {
+              // Circle for everything else
+              ctx.arc(x, y, radius, 0, 2 * Math.PI);
+              ctx.fill();
 
-              // Draw pip
-              ctx.fillStyle = pipColor;
-              ctx.beginPath();
-
-              // Draw different shapes for different types
-              if (pip.type === "building") {
-                // Square for buildings
-                ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
-                ctx.strokeStyle = borderColor;
-                ctx.lineWidth = borderWidth;
-                ctx.strokeRect(x - radius, y - radius, radius * 2, radius * 2);
-              } else if (pip.type === "quest" || pip.icon === "star") {
-                // Star for quest markers
-                const scaledRadius = radius * pulseScale;
-                drawStar(ctx, x, y, scaledRadius, scaledRadius * 0.5, 5);
-                ctx.fill();
-                ctx.strokeStyle = borderColor;
-                ctx.lineWidth = borderWidth;
-                ctx.stroke();
-
-                // Add glow effect for active quests
-                if (pip.isActive) {
-                  ctx.save();
-                  ctx.shadowColor = pipColor;
-                  ctx.shadowBlur = 8;
-                  ctx.fill();
-                  ctx.restore();
-                }
-              } else if (pip.icon === "diamond") {
-                // Diamond shape
-                drawDiamond(ctx, x, y, radius);
-                ctx.fill();
-                ctx.strokeStyle = borderColor;
-                ctx.lineWidth = borderWidth;
-                ctx.stroke();
-              } else {
-                // Circle for everything else
-                ctx.arc(x, y, radius, 0, 2 * Math.PI);
-                ctx.fill();
-
-                // Add border for better visibility
-                ctx.strokeStyle = borderColor;
-                ctx.lineWidth = borderWidth;
-                ctx.stroke();
-              }
+              // Add border for better visibility
+              ctx.strokeStyle = borderColor;
+              ctx.lineWidth = borderWidth;
+              ctx.stroke();
             }
           }
         }

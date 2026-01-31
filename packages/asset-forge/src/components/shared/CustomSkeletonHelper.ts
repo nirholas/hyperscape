@@ -4,6 +4,7 @@
  */
 
 import * as THREE from "three";
+import { LineBasicNodeMaterial } from "three/webgpu";
 
 const _vector = new THREE.Vector3();
 const _boneMatrix = new THREE.Matrix4();
@@ -46,12 +47,12 @@ export class CustomSkeletonHelper extends THREE.LineSegments {
     );
     geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
 
-    const material = new THREE.LineBasicMaterial({
-      vertexColors: true,
-      depthTest: false,
-      depthWrite: false,
-      transparent: true,
-    });
+    // Use LineBasicNodeMaterial for WebGPU compatibility
+    const material = new LineBasicNodeMaterial();
+    material.vertexColors = true;
+    material.depthTest = false;
+    material.depthWrite = false;
+    material.transparent = true;
 
     super(geometry, material);
 

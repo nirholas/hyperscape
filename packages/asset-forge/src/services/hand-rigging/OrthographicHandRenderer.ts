@@ -5,6 +5,7 @@
  */
 
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 
 import {
   THREE,
@@ -229,13 +230,17 @@ export class OrthographicHandRenderer {
       if (child instanceof THREE.Mesh || child instanceof THREE.SkinnedMesh) {
         if (child.material) {
           // Create simple materials for better hand detection
-          const simpleMaterial = new THREE.MeshBasicMaterial({
-            color: 0xffa080, // More visible skin color
-            side: THREE.DoubleSide,
-          });
+          const simpleMaterial = new MeshBasicNodeMaterial();
+          simpleMaterial.color = new THREE.Color(0xffa080); // More visible skin color
+          simpleMaterial.side = THREE.DoubleSide;
 
           if (Array.isArray(child.material)) {
-            child.material = child.material.map(() => simpleMaterial.clone());
+            child.material = child.material.map(() => {
+              const mat = new MeshBasicNodeMaterial();
+              mat.color = new THREE.Color(0xffa080);
+              mat.side = THREE.DoubleSide;
+              return mat;
+            });
           } else {
             child.material = simpleMaterial;
           }

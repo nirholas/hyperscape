@@ -19,7 +19,7 @@
  * @see ProcessingDataProvider for smelting recipes
  */
 
-import THREE from "../../extras/three/three";
+import THREE, { MeshStandardNodeMaterial } from "../../extras/three/three";
 import type { World } from "../../core/World";
 import { EntityType, InteractionType } from "../../types/entities";
 import type { EntityInteractionData } from "../../types/entities";
@@ -236,7 +236,7 @@ export class FurnaceEntity extends InteractableEntity {
 
     // FALLBACK: Create furnace visual (blue box proxy)
     const geometry = new THREE.BoxGeometry(1.2, 1.4, 1.2);
-    const material = new THREE.MeshStandardMaterial({
+    const material = new MeshStandardNodeMaterial({
       color: 0x0066ff, // Blue for furnace
       roughness: 0.5,
       metalness: 0.3,

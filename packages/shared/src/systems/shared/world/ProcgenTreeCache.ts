@@ -61,11 +61,84 @@
  */
 
 import * as THREE from "three";
+import * as THREE_WEBGPU from "three/webgpu";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 import { ProcgenTreeInstancer } from "./ProcgenTreeInstancer";
 import type { World } from "../../../core/World";
 
+// TSL functions from three/webgpu
+const {
+  Fn,
+  uv,
+  uniform,
+  float,
+  vec2,
+  vec3,
+  vec4,
+  add,
+  sub,
+  mul,
+  div,
+  abs,
+  sin,
+  cos,
+  atan,
+  pow,
+  floor,
+  fract,
+  length,
+  max,
+  mix,
+  smoothstep,
+  dot,
+  step,
+} = THREE_WEBGPU.TSL;
+
 /** Number of variants to cache per tree preset */
 const VARIANTS_PER_PRESET = 3;
+
+/**
+ * Crown shape types for LOD2 procedural billboards.
+ * Different tree types have different crown silhouettes.
+ */
+type CrownType = "rounded" | "conical" | "weeping" | "columnar" | "spreading";
+
+/**
+ * Map tree presets to their appropriate crown shapes.
+ * This ensures LOD2 billboards match the tree's silhouette.
+ */
+const PRESET_CROWN_TYPES: Record<string, CrownType> = {
+  // Deciduous - rounded crowns
+  quakingAspen: "rounded",
+  blackOak: "spreading",
+  blackTupelo: "rounded",
+  acer: "spreading", // Japanese maple has wide spread
+  sassafras: "rounded",
+  hillCherry: "rounded",
+
+  // Conifers - conical crowns
+  balsamFir: "conical",
+  douglasFir: "conical",
+  europeanLarch: "conical",
+  smallPine: "conical",
+
+  // Special shapes
+  weepingWillow: "weeping",
+  lombardyPoplar: "columnar",
+  palm: "spreading", // Palm fronds spread out
+  fanPalm: "spreading",
+  bamboo: "columnar",
+
+  // Default for any unknown preset
+  default: "rounded",
+};
+
+/**
+ * Get the crown type for a tree preset.
+ */
+function getCrownType(presetName: string): CrownType {
+  return PRESET_CROWN_TYPES[presetName] ?? PRESET_CROWN_TYPES.default!;
+}
 
 /** World reference for instancer registration */
 let worldRef: World | null = null;
@@ -101,36 +174,51 @@ const VARIANT_SEEDS = [12345, 67890, 24680];
  */
 
 /**
- * LOD0 geometry options - AAA close-up detail
- * Target: ~3000-5000 triangles per tree
+ * LOD0 geometry options - High-quality close-up detail
+ * Target: ~15,000-25,000 triangles per tree (acceptable for close-up)
  *
- * Key insight: Leaves are already instanced as 2-tri cards,
- * so 2500 leaves = 5000 tris for foliage alone
+ * LOD0 is only used for trees within ~30m of the player.
+ * Typically only 5-15 trees at LOD0 at any time, so we can afford quality.
+ * The LOD system handles the transition to lower detail at distance.
  *
- * maxStems: 500 prevents memory issues for complex presets like
- * Black Oak (30 × 120 = 3600 stems at depth 2) by keeping the most
- * important branches (sorted by depth, then radius).
+ * Settings for nice-looking close-up trees:
+ * - maxStems: 150 keeps full branch structure for visual appeal
+ * - maxBranchDepth: 3 includes secondary branches for realism
+ * - radialSegments: 6 (smooth cylindrical branches)
+ * - maxLeaves: 2000 instanced cards for dense foliage
+ * - segmentSamples: 3 for smooth curves
+ *
+ * Budget breakdown for a typical tree:
+ * - 150 stems × ~12 ring samples × 6 radial × 2 tris = ~21,600 branch tris
+ * - 2000 leaf cards × 2 tris = 4,000 leaf tris
+ * - Total: ~25,600 tris (acceptable for LOD0)
  */
 const LOD0_GEOMETRY_OPTIONS = {
-  radialSegments: 5, // Pentagon cross-section (smooth enough)
-  maxLeaves: 2500, // 2500 instanced leaf cards = 5000 tris
-  maxBranchDepth: 3, // Allow full depth for trees that have it
-  maxStems: 500, // Safety limit - keeps trunk + main branches + some secondary
+  radialSegments: 6, // Hexagonal cross-section (smooth branches)
+  maxLeaves: 2000, // Dense foliage for close-up viewing
+  maxBranchDepth: 3, // Full branch structure
+  maxStems: 150, // Enough for detailed tree structure
+  segmentSamples: 3, // Smooth curves
 };
 
 /**
- * LOD1 geometry options - medium distance silhouette
- * Target: ~200-500 triangles per tree
+ * LOD1 geometry options - medium distance detail
+ * Target: ~2,000-4,000 triangles per tree
  *
- * At 30-60m, players can't count individual leaves.
- * maxStems: 50 gives a good silhouette with main branches visible.
- * Leaves are still rendered at their correct world positions.
+ * LOD1 is used for trees 30-60m away. Still visible but not inspected closely.
+ * More trees at LOD1 than LOD0, but still reasonable to have decent detail.
+ *
+ * Budget breakdown:
+ * - 50 stems × ~8 ring samples × 4 radial × 2 tris = ~3,200 branch tris
+ * - 400 leaf cards × 2 tris = 800 leaf tris
+ * - Total: ~4,000 tris (good for medium distance)
  */
 const LOD1_GEOMETRY_OPTIONS = {
-  radialSegments: 3, // Triangle cross-section (minimum)
-  maxLeaves: 150, // Just enough for silhouette shape
+  radialSegments: 4, // Square cross-section (smoothed by normals)
+  maxLeaves: 400, // Enough for crown shape
   maxBranchDepth: 2, // Trunk + main branches
-  maxStems: 50, // Safety limit - simplified branch structure
+  maxStems: 50, // Main branch structure visible
+  segmentSamples: 2, // Fewer samples than LOD0
 };
 
 /**
@@ -142,6 +230,7 @@ const LOD1_GEOMETRY_OPTIONS = {
  */
 const LOD2_CARD_OPTIONS = {
   trunkSegments: 3, // 3-sided trunk (triangle)
+  crownType: "rounded" as CrownType, // Default crown shape
   trunkHeightRatio: 0.35, // Trunk is 35% of tree height
   numCrossCards: 2, // 2 perpendicular billboard cards (cross pattern)
   cardSize: 0.8, // Cards are 80% of crown width for coverage
@@ -303,6 +392,7 @@ async function generateLOD1Tree(
  */
 /**
  * Extract colors and dimensions from a generated tree.
+ * Handles both standard materials and shader materials (instanced leaves).
  */
 function extractTreeMetadata(group: THREE.Group): {
   leafColor: THREE.Color;
@@ -315,11 +405,39 @@ function extractTreeMetadata(group: THREE.Group): {
   // Extract colors from materials
   group.traverse((child) => {
     if (child instanceof THREE.Mesh && child.material) {
-      const mat = child.material as THREE.MeshStandardMaterial;
-      if (child.name === "Leaves" || child.name.includes("leaf")) {
-        if (mat.color) leafColor = mat.color.clone();
-      } else if (child.name === "Trunk" || child.name.includes("branch")) {
-        if (mat.color) barkColor = mat.color.clone();
+      const mat = child.material;
+
+      // Check for instanced leaves (ShaderMaterial with uColor uniform)
+      if (
+        (child.name === "InstancedLeaves" ||
+          child.name === "Leaves" ||
+          child.name.toLowerCase().includes("leaf")) &&
+        mat instanceof THREE.ShaderMaterial &&
+        mat.uniforms?.uColor
+      ) {
+        const uColor = mat.uniforms.uColor.value;
+        if (uColor instanceof THREE.Color) {
+          leafColor = uColor.clone();
+        }
+      }
+      // Check for standard/node material leaves (supports both MeshStandardMaterial and MeshStandardNodeMaterial)
+      else if (
+        (child.name === "Leaves" ||
+          child.name.toLowerCase().includes("leaf")) &&
+        "color" in mat &&
+        mat.color instanceof THREE.Color
+      ) {
+        leafColor = mat.color.clone();
+      }
+      // Check for trunk/branches (supports both MeshStandardMaterial and MeshStandardNodeMaterial)
+      else if (
+        (child.name === "Trunk" ||
+          child.name === "Branches" ||
+          child.name.toLowerCase().includes("branch")) &&
+        "color" in mat &&
+        mat.color instanceof THREE.Color
+      ) {
+        barkColor = mat.color.clone();
       }
     }
   });
@@ -341,13 +459,188 @@ function extractTreeMetadata(group: THREE.Group): {
 }
 
 /**
+ * TSL Crown material type with uniforms
+ */
+type TSLCrownMaterial = MeshBasicNodeMaterial & {
+  crownUniforms: {
+    color: { value: THREE.Color };
+    seed: { value: number };
+  };
+};
+
+/**
+ * Create a procedural crown material for LOD2 billboard cards using TSL (WebGPU).
+ * Generates a crown silhouette with leaf-like edges and color variation.
+ * Supports different crown shapes: rounded, conical, weeping, columnar, spreading.
+ */
+function createProceduralCrownMaterialTSL(
+  leafColor: THREE.Color,
+  crownType: CrownType = "rounded",
+  seed: number = 0,
+): TSLCrownMaterial {
+  const material = new MeshBasicNodeMaterial();
+
+  // Uniforms
+  const uColor = uniform(leafColor);
+  const uSeed = uniform(seed);
+
+  // ========== TSL HELPER FUNCTIONS ==========
+
+  // Hash function for noise
+  const hashFn = Fn(([p]: [ReturnType<typeof vec2>]) => {
+    return fract(mul(sin(dot(p, vec2(127.1, 311.7))), float(43758.5453123)));
+  });
+
+  // 2D noise function
+  const noiseFn = Fn(([p]: [ReturnType<typeof vec2>]) => {
+    const i = floor(p);
+    const f = fract(p);
+    const smoothF = mul(mul(f, f), sub(vec2(3.0, 3.0), mul(f, float(2.0))));
+
+    const a = hashFn(i);
+    const b = hashFn(add(i, vec2(1.0, 0.0)));
+    const c = hashFn(add(i, vec2(0.0, 1.0)));
+    const d = hashFn(add(i, vec2(1.0, 1.0)));
+
+    return mix(mix(a, b, smoothF.x), mix(c, d, smoothF.x), smoothF.y);
+  });
+
+  // 4-octave FBM (unrolled loop)
+  const fbmFn = Fn(([p]: [ReturnType<typeof vec2>]) => {
+    const n1 = mul(noiseFn(p), float(0.5));
+    const n2 = mul(noiseFn(mul(p, float(2.0))), float(0.25));
+    const n3 = mul(noiseFn(mul(p, float(4.0))), float(0.125));
+    const n4 = mul(noiseFn(mul(p, float(8.0))), float(0.0625));
+    return add(add(add(n1, n2), n3), n4);
+  });
+
+  // Crown shape functions based on type (compile-time selection)
+  const getCrownRadiusFn = Fn(
+    ([p, edgeNoise]: [ReturnType<typeof vec2>, ReturnType<typeof float>]) => {
+      if (crownType === "conical") {
+        // Conical/pyramidal shape for conifers
+        const baseRadius = add(
+          float(0.15),
+          mul(sub(float(0.5), p.y), float(0.6)),
+        );
+        const clampedRadius = max(baseRadius, float(0.05));
+        return add(clampedRadius, mul(edgeNoise, float(0.5)));
+      } else if (crownType === "weeping") {
+        // Weeping shape - wider at top, droops down
+        const baseRadius = float(0.35);
+        const verticalShape = add(float(1.0), mul(p.y, float(0.4)));
+        // Add droop effect at the bottom using smoothstep
+        const droopAmount = mul(
+          smoothstep(float(-0.1), float(-0.4), p.y),
+          mul(abs(add(p.y, float(0.1))), float(0.5)),
+        );
+        return add(mul(baseRadius, add(verticalShape, droopAmount)), edgeNoise);
+      } else if (crownType === "columnar") {
+        // Narrow columnar shape (like Lombardy poplar)
+        const baseRadius = float(0.15);
+        const verticalShape = sub(float(1.0), mul(abs(p.y), float(0.2)));
+        return add(mul(baseRadius, verticalShape), mul(edgeNoise, float(0.3)));
+      } else if (crownType === "spreading") {
+        // Wide spreading shape (like oak or maple)
+        const baseRadius = float(0.45);
+        const verticalShape = sub(
+          float(1.0),
+          mul(pow(abs(p.y), float(1.5)), float(0.4)),
+        );
+        return add(mul(baseRadius, verticalShape), edgeNoise);
+      } else {
+        // Default: rounded deciduous tree shape
+        const baseRadius = float(0.4);
+        const verticalShape = sub(float(1.0), mul(abs(p.y), float(0.3)));
+        return add(mul(baseRadius, verticalShape), edgeNoise);
+      }
+    },
+  );
+
+  // ========== COLOR NODE ==========
+  material.colorNode = Fn(() => {
+    const uvCoord = uv();
+
+    // Center UV around (0.5, 0.5)
+    const p = sub(uvCoord, vec2(0.5, 0.5));
+
+    // Angle and distance from center
+    const angle = atan(p.y, p.x);
+    const r = length(p);
+
+    // Add noise-based variation to the edge (like leaf clusters)
+    const edgeNoise = mul(
+      fbmFn(vec2(add(mul(angle, float(3.0)), uSeed), uSeed)),
+      float(0.12),
+    );
+
+    // Get crown radius based on shape type
+    const crownRadius = getCrownRadiusFn(p, edgeNoise);
+
+    // Alpha based on distance from center vs crown radius
+    const alpha = sub(
+      float(1.0),
+      smoothstep(mul(crownRadius, float(0.85)), crownRadius, r),
+    );
+
+    // Add internal leaf cluster variation (darker/lighter spots)
+    const internalNoise = fbmFn(add(mul(uvCoord, float(8.0)), uSeed));
+    const clusterDark = smoothstep(float(0.3), float(0.7), internalNoise);
+
+    // Color variation - simulate light/shadow on leaf clusters
+    const darkColor = mul(uColor, float(0.6));
+    const lightColor = mul(uColor, float(1.2));
+    const baseColor = mix(darkColor, lightColor, clusterDark);
+
+    // Add slight ambient occlusion at edges
+    const ao = smoothstep(crownRadius, mul(crownRadius, float(0.5)), r);
+    const finalColor = mul(baseColor, add(float(0.8), mul(ao, float(0.2))));
+
+    return vec4(finalColor, alpha);
+  })();
+
+  // ========== OPACITY NODE ==========
+  material.opacityNode = Fn(() => {
+    const uvCoord = uv();
+    const p = sub(uvCoord, vec2(0.5, 0.5));
+    const angle = atan(p.y, p.x);
+    const r = length(p);
+    const edgeNoise = mul(
+      fbmFn(vec2(add(mul(angle, float(3.0)), uSeed), uSeed)),
+      float(0.12),
+    );
+    const crownRadius = getCrownRadiusFn(p, edgeNoise);
+    return sub(
+      float(1.0),
+      smoothstep(mul(crownRadius, float(0.85)), crownRadius, r),
+    );
+  })();
+
+  // Material settings
+  material.side = THREE.DoubleSide;
+  material.transparent = true;
+  material.depthWrite = true;
+  material.alphaTest = 0.1;
+
+  // Store uniforms for runtime updates
+  const tslMaterial = material as TSLCrownMaterial;
+  tslMaterial.crownUniforms = {
+    color: uColor,
+    seed: uSeed,
+  };
+
+  return tslMaterial;
+}
+
+/**
  * Generate LOD2 "card tree" using cross-billboard technique.
  *
  * Cross-billboard: Two perpendicular planes intersecting at center.
  * This is the industry-standard technique for distant vegetation:
  * - Looks good from any viewing angle
  * - Only 4 triangles for the foliage
- * - Simple trunk cylinder
+ * - Procedural crown shader for organic silhouette
+ * - Crown shape matches tree type (rounded, conical, weeping, etc.)
  *
  * Total: ~12 triangles per tree
  */
@@ -355,7 +648,10 @@ function generateLOD2CardTree(
   dimensions: { width: number; height: number; trunkHeight: number },
   leafColor: THREE.Color,
   barkColor: THREE.Color,
+  presetName: string,
+  seed: number = 0,
 ): { group: THREE.Group; vertexCount: number; triangleCount: number } {
+  const crownType = getCrownType(presetName);
   const group = new THREE.Group();
   group.name = "LOD2_CardTree";
 
@@ -372,9 +668,9 @@ function generateLOD2CardTree(
     1,
     false, // No caps needed at this distance
   );
-  const trunkMaterial = new THREE.MeshBasicMaterial({
-    color: barkColor,
-  });
+  // Use MeshBasicNodeMaterial for WebGPU compatibility
+  const trunkMaterial = new MeshBasicNodeMaterial();
+  trunkMaterial.color = new THREE.Color(barkColor);
   const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
   trunk.position.y = trunkHeight / 2;
   trunk.name = "LOD2_Trunk";
@@ -386,14 +682,12 @@ function generateLOD2CardTree(
   const cardHeight = crownHeight * 1.1; // Slightly taller to cover crown
   const cardGeometry = new THREE.PlaneGeometry(cardWidth, cardHeight);
 
-  // Foliage material - slightly transparent for better blending
-  const cardMaterial = new THREE.MeshBasicMaterial({
-    color: leafColor,
-    side: THREE.DoubleSide,
-    transparent: true,
-    alphaTest: 0.1, // Alpha test for hard edges (better than blending)
-    depthWrite: true,
-  });
+  // Procedural crown material with organic leaf-cluster silhouette (TSL for WebGPU)
+  const cardMaterial = createProceduralCrownMaterialTSL(
+    leafColor,
+    crownType,
+    seed,
+  );
 
   const crownCenter = trunkHeight + crownHeight * 0.45;
 
@@ -405,7 +699,13 @@ function generateLOD2CardTree(
   group.add(card1);
 
   // Card 2: Facing Z axis (perpendicular to Card 1)
-  const card2 = new THREE.Mesh(cardGeometry, cardMaterial);
+  // Use different seed for visual variation between cards
+  const card2Material = createProceduralCrownMaterialTSL(
+    leafColor,
+    crownType,
+    seed + 12345,
+  );
+  const card2 = new THREE.Mesh(cardGeometry, card2Material);
   card2.position.set(0, crownCenter, 0);
   card2.rotation.y = Math.PI / 2; // Face along Z
   card2.name = "LOD2_CrossCard_Z";
@@ -483,8 +783,15 @@ async function generateVariants(presetName: string): Promise<TreeVariant[]> {
       // Generate LOD1 using procgen with reduced settings (same seed for visual consistency)
       const lod1Result = await generateLOD1Tree(presetName, seed);
 
-      // Generate LOD2 "card tree" - ultra-simplified
-      const lod2Result = generateLOD2CardTree(dimensions, leafColor, barkColor);
+      // Generate LOD2 "card tree" - ultra-simplified with procedural crown
+      // Crown shape is determined by the tree preset (conical for conifers, rounded for deciduous, etc.)
+      const lod2Result = generateLOD2CardTree(
+        dimensions,
+        leafColor,
+        barkColor,
+        presetName,
+        seed,
+      );
 
       // Store the variant
       variants.push({
@@ -956,4 +1263,35 @@ export function getTreeInstanceStats(): {
     console.warn("[ProcgenTreeCache] Failed to get instancer stats:", error);
     return null;
   }
+}
+
+/**
+ * Get instancing statistics (alias for getTreeInstanceStats with globalLeaves).
+ * Used by DevStats for displaying tree instancing information.
+ */
+export function getInstancingStats(): {
+  presets: number;
+  totalInstances: number;
+  drawCalls: number;
+  byLOD: {
+    lod0: number;
+    lod1: number;
+    lod2: number;
+    impostor: number;
+    culled: number;
+  };
+  details: Record<
+    string,
+    { lod0: number; lod1: number; lod2: number; impostor: number }
+  >;
+  globalLeaves: { count: number } | null;
+} | null {
+  const stats = getTreeInstanceStats();
+  if (!stats) return null;
+
+  // Add globalLeaves for backwards compatibility with DevStats
+  return {
+    ...stats,
+    globalLeaves: null, // No leaf data currently tracked
+  };
 }

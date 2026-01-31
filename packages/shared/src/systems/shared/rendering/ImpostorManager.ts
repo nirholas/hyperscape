@@ -538,8 +538,8 @@ export class ImpostorManager {
       backgroundAlpha: 0,
     };
 
-    // Bake the impostor
-    const result = this.octahedralImpostor.bake(source, config);
+    // Bake the impostor - bake() is async and must be awaited
+    const result = await this.octahedralImpostor.bake(source, config);
 
     // Debug: Log atlas info
     console.log(`[ImpostorManager] Bake result for ${modelId}:`, {
@@ -784,7 +784,7 @@ export class ImpostorManager {
    */
   private async textureToBase64(
     texture: THREE.Texture,
-    renderTarget?: THREE.WebGLRenderTarget | null,
+    renderTarget?: THREE.RenderTarget | THREE.WebGLRenderTarget | null,
   ): Promise<string | null> {
     if (!this.renderer) return null;
 
@@ -840,8 +840,9 @@ export class ImpostorManager {
         // Fallback to sync method (WebGL only)
         if (!pixels && this.renderer.readRenderTargetPixels) {
           pixels = new Uint8Array(width * height * 4);
+          // Cast to WebGLRenderTarget for sync pixel reading (works at runtime)
           this.renderer.readRenderTargetPixels(
-            renderTarget,
+            renderTarget as THREE.WebGLRenderTarget,
             0,
             0,
             width,

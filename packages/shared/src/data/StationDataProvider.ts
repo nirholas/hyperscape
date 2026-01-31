@@ -296,14 +296,28 @@ export class StationDataProvider {
       return { width: 1, depth: 1 };
     }
 
+    // SAFETY: Detect corrupted bounds data (values > 1000 are clearly wrong)
+    // This catches the 32767 overflow issue in model-bounds.json
+    const MAX_REASONABLE_DIMENSION = 100; // 100 meters max for any model
+    if (
+      bounds.dimensions.x > MAX_REASONABLE_DIMENSION ||
+      bounds.dimensions.z > MAX_REASONABLE_DIMENSION
+    ) {
+      console.warn(
+        `[StationDataProvider] Corrupted bounds for ${modelPath}: ${bounds.dimensions.x}x${bounds.dimensions.z}m - using default 1x1`,
+      );
+      return { width: 1, depth: 1 };
+    }
+
     // Apply scale to raw dimensions to get actual visual footprint
     const scaledWidth = bounds.dimensions.x * modelScale;
     const scaledDepth = bounds.dimensions.z * modelScale;
 
     // Round to nearest tile (not ceil - avoids over-blocking)
+    // Also clamp to max 10 tiles per dimension as a final safety net
     return {
-      width: Math.max(1, Math.round(scaledWidth / TILE_SIZE)),
-      depth: Math.max(1, Math.round(scaledDepth / TILE_SIZE)),
+      width: Math.min(10, Math.max(1, Math.round(scaledWidth / TILE_SIZE))),
+      depth: Math.min(10, Math.max(1, Math.round(scaledDepth / TILE_SIZE))),
     };
   }
 

@@ -17,7 +17,7 @@
  * - Base coordinates: x=60, z=80 (near spawn)
  */
 
-import THREE from "../../extras/three/three";
+import THREE, { MeshStandardNodeMaterial } from "../../extras/three/three";
 import { System } from "../shared/infrastructure/System";
 import type { World } from "../../core/World";
 import type { WorldOptions } from "../../types/index";
@@ -253,7 +253,7 @@ export class DuelArenaVisualsSystem extends System {
       floorLength,
     );
 
-    const material = new THREE.MeshStandardMaterial({
+    const material = new MeshStandardNodeMaterial({
       color: ARENA_FLOOR_COLOR,
       emissive: ARENA_FLOOR_COLOR,
       emissiveIntensity: 0.3,
@@ -297,7 +297,7 @@ export class DuelArenaVisualsSystem extends System {
     // Get terrain height at center
     const terrainY = this.getTerrainHeight(centerX, centerZ);
 
-    const wallMaterial = new THREE.MeshStandardMaterial({
+    const wallMaterial = new MeshStandardNodeMaterial({
       color: ARENA_WALL_COLOR,
       emissive: ARENA_WALL_COLOR,
       emissiveIntensity: 0.3,
@@ -391,7 +391,7 @@ export class DuelArenaVisualsSystem extends System {
       LOBBY_LENGTH,
     );
 
-    const material = new THREE.MeshStandardMaterial({
+    const material = new MeshStandardNodeMaterial({
       color: LOBBY_FLOOR_COLOR,
       emissive: LOBBY_FLOOR_COLOR,
       emissiveIntensity: 0.3,
@@ -443,7 +443,7 @@ export class DuelArenaVisualsSystem extends System {
       HOSPITAL_LENGTH,
     );
 
-    const material = new THREE.MeshStandardMaterial({
+    const material = new MeshStandardNodeMaterial({
       color: HOSPITAL_FLOOR_COLOR,
       emissive: HOSPITAL_FLOOR_COLOR,
       emissiveIntensity: 0.3,
@@ -486,7 +486,7 @@ export class DuelArenaVisualsSystem extends System {
    * Create a red cross on the hospital floor
    */
   private createHospitalCross(x: number, z: number, floorY: number): void {
-    const crossMaterial = new THREE.MeshStandardMaterial({
+    const crossMaterial = new MeshStandardNodeMaterial({
       color: 0xff0000,
       emissive: 0xff0000,
       emissiveIntensity: 0.5,
@@ -565,7 +565,7 @@ export class DuelArenaVisualsSystem extends System {
       8, // radial segments
     );
 
-    const material = new THREE.MeshStandardMaterial({
+    const material = new MeshStandardNodeMaterial({
       color: FORFEIT_PILLAR_COLOR,
       emissive: FORFEIT_PILLAR_EMISSIVE,
       emissiveIntensity: 0.2,

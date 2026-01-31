@@ -7,6 +7,7 @@
 
 import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
+import { MeshBasicNodeMaterial, LineBasicNodeMaterial } from "three/webgpu";
 
 import type {
   GeneratedBiome,
@@ -45,12 +46,11 @@ function createTownMarker(
 
   // Create a ring geometry for the town marker
   const geometry = new THREE.RingGeometry(radius * 0.8, radius, 32);
-  const material = new THREE.MeshBasicMaterial({
-    color,
-    side: THREE.DoubleSide,
-    transparent: true,
-    opacity: 0.6,
-  });
+  const material = new MeshBasicNodeMaterial();
+  material.color = new THREE.Color(color);
+  material.side = THREE.DoubleSide;
+  material.transparent = true;
+  material.opacity = 0.6;
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.rotation.x = -Math.PI / 2;
@@ -82,10 +82,9 @@ function createSelectionHighlight(
   }
 
   const geometry = new THREE.BufferGeometry().setFromPoints(points);
-  const material = new THREE.LineBasicMaterial({
-    color,
-    linewidth: 2,
-  });
+  const material = new LineBasicNodeMaterial();
+  material.color = new THREE.Color(color);
+  material.linewidth = 2;
 
   return new THREE.Line(geometry, material);
 }
@@ -137,11 +136,10 @@ function createBiomeBoundary(
 function createNPCMarker(position: WorldPosition): THREE.Mesh {
   // Simple cylinder for NPC
   const geometry = new THREE.CylinderGeometry(2, 2, 8, 8);
-  const material = new THREE.MeshBasicMaterial({
-    color: 0x00d4ff,
-    transparent: true,
-    opacity: 0.7,
-  });
+  const material = new MeshBasicNodeMaterial();
+  material.color = new THREE.Color(0x00d4ff);
+  material.transparent = true;
+  material.opacity = 0.7;
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.set(position.x, position.y + 4, position.z);
@@ -160,11 +158,10 @@ function createBossMarker(
 
   // Boss position marker (skull-like shape using cones)
   const skullGeometry = new THREE.ConeGeometry(5, 10, 4);
-  const skullMaterial = new THREE.MeshBasicMaterial({
-    color: 0xff0000,
-    transparent: true,
-    opacity: 0.8,
-  });
+  const skullMaterial = new MeshBasicNodeMaterial();
+  skullMaterial.color = new THREE.Color(0xff0000);
+  skullMaterial.transparent = true;
+  skullMaterial.opacity = 0.8;
   const skull = new THREE.Mesh(skullGeometry, skullMaterial);
   skull.position.set(position.x, position.y + 8, position.z);
   skull.rotation.x = Math.PI;

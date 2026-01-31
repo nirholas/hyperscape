@@ -9,6 +9,7 @@
  */
 
 import THREE from "../../extras/three/three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 import { SystemBase } from "../shared/infrastructure/SystemBase";
 import type { World } from "../../types";
 import { ZoneDetectionSystem } from "../shared/death/ZoneDetectionSystem";
@@ -89,14 +90,13 @@ export class ZoneVisualsSystem extends SystemBase {
       const geometry = new THREE.PlaneGeometry(width, height);
       const color = area.pvpEnabled ? ZONE_COLORS.PVP : ZONE_COLORS.WILDERNESS;
 
-      // Use MeshBasicMaterial - doesn't require lighting, always visible
-      const material = new THREE.MeshBasicMaterial({
-        color,
-        transparent: true,
-        opacity: 0.5,
-        side: THREE.DoubleSide,
-        depthWrite: false, // Don't write to depth buffer (renders on top)
-      });
+      // Use MeshBasicNodeMaterial - doesn't require lighting, always visible, WebGPU compatible
+      const material = new MeshBasicNodeMaterial();
+      material.color = new THREE.Color(color);
+      material.transparent = true;
+      material.opacity = 0.5;
+      material.side = THREE.DoubleSide;
+      material.depthWrite = false; // Don't write to depth buffer (renders on top)
 
       // Get terrain height at center of zone
       let terrainY = 0;

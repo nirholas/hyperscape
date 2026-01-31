@@ -10,6 +10,7 @@ export * from "./WaterSystem";
 export * from "./Wind";
 export * from "./VegetationSystem";
 export * from "./GrassSystem";
+export * from "./ProceduralGrass";
 export * from "./TownSystem";
 export * from "./POISystem";
 export * from "./RoadNetworkSystem";
