@@ -147,6 +147,7 @@ function DesktopInterfaceManager({
     smeltingData,
     smithingData,
     craftingData,
+    fletchingData,
     tanningData,
     lootWindowData,
     questStartData,
@@ -160,6 +161,7 @@ function DesktopInterfaceManager({
     setSmeltingData,
     setSmithingData,
     setCraftingData,
+    setFletchingData,
     setTanningData,
     setLootWindowData,
     setQuestStartData,
@@ -412,6 +414,7 @@ function DesktopInterfaceManager({
           smeltingData={smeltingData}
           smithingData={smithingData}
           craftingData={craftingData}
+          fletchingData={fletchingData}
           tanningData={tanningData}
           questStartData={questStartData}
           questCompleteData={questCompleteData}
@@ -428,6 +431,7 @@ function DesktopInterfaceManager({
           setSmeltingData={setSmeltingData}
           setSmithingData={setSmithingData}
           setCraftingData={setCraftingData}
+          setFletchingData={setFletchingData}
           setTanningData={setTanningData}
           setQuestStartData={setQuestStartData}
           setQuestCompleteData={setQuestCompleteData}

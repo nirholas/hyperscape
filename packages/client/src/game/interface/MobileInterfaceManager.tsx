@@ -34,6 +34,7 @@ import { DialoguePanel } from "../../game/panels/DialoguePanel";
 import { SmeltingPanel } from "../../game/panels/SmeltingPanel";
 import { SmithingPanel } from "../../game/panels/SmithingPanel";
 import { CraftingPanel } from "../../game/panels/CraftingPanel";
+import { FletchingPanel } from "../../game/panels/FletchingPanel";
 import { TanningPanel } from "../../game/panels/TanningPanel";
 import { LootWindowPanel } from "../../game/panels/LootWindowPanel";
 import { QuestStartPanel } from "../../game/panels/QuestStartPanel";
@@ -102,6 +103,7 @@ export function MobileInterfaceManager({
     smeltingData,
     smithingData,
     craftingData,
+    fletchingData,
     tanningData,
     questStartData,
     questCompleteData,
@@ -113,6 +115,7 @@ export function MobileInterfaceManager({
     setSmeltingData,
     setSmithingData,
     setCraftingData,
+    setFletchingData,
     setTanningData,
     setQuestStartData,
     setQuestCompleteData,
@@ -681,6 +684,22 @@ export function MobileInterfaceManager({
             availableRecipes={craftingData.availableRecipes}
             station={craftingData.station}
             onClose={() => setCraftingData(null)}
+          />
+        </ModalWindow>
+      )}
+
+      {fletchingData?.visible && (
+        <ModalWindow
+          visible={true}
+          onClose={() => setFletchingData(null)}
+          title="Fletching"
+          maxWidth="90vw"
+          maxHeight="80vh"
+        >
+          <FletchingPanel
+            world={world}
+            availableRecipes={fletchingData.availableRecipes}
+            onClose={() => setFletchingData(null)}
           />
         </ModalWindow>
       )}

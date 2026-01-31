@@ -22,6 +22,7 @@ import type {
   SmeltingData,
   SmithingData,
   CraftingData,
+  FletchingData,
   TanningData,
   LootWindowData,
   QuestStartData,
@@ -36,6 +37,7 @@ import { DialoguePanel } from "../panels/DialoguePanel";
 import { SmeltingPanel } from "../panels/SmeltingPanel";
 import { SmithingPanel } from "../panels/SmithingPanel";
 import { CraftingPanel } from "../panels/CraftingPanel";
+import { FletchingPanel } from "../panels/FletchingPanel";
 import { TanningPanel } from "../panels/TanningPanel";
 import { StatsPanel } from "../panels/StatsPanel";
 import { LootWindowPanel } from "../panels/LootWindowPanel";
@@ -617,6 +619,7 @@ export interface InterfaceModalsRendererProps {
   smeltingData: SmeltingData | null;
   smithingData: SmithingData | null;
   craftingData: CraftingData | null;
+  fletchingData: FletchingData | null;
   tanningData: TanningData | null;
   questStartData: QuestStartData | null;
   questCompleteData: QuestCompleteData | null;
@@ -639,6 +642,7 @@ export interface InterfaceModalsRendererProps {
   setSmeltingData: React.Dispatch<React.SetStateAction<SmeltingData | null>>;
   setSmithingData: React.Dispatch<React.SetStateAction<SmithingData | null>>;
   setCraftingData: React.Dispatch<React.SetStateAction<CraftingData | null>>;
+  setFletchingData: React.Dispatch<React.SetStateAction<FletchingData | null>>;
   setTanningData: React.Dispatch<React.SetStateAction<TanningData | null>>;
   setQuestStartData: React.Dispatch<
     React.SetStateAction<QuestStartData | null>
@@ -675,6 +679,7 @@ export function InterfaceModalsRenderer({
   smeltingData,
   smithingData,
   craftingData,
+  fletchingData,
   tanningData,
   questStartData,
   questCompleteData,
@@ -691,6 +696,7 @@ export function InterfaceModalsRenderer({
   setSmeltingData,
   setSmithingData,
   setCraftingData,
+  setFletchingData,
   setTanningData,
   setQuestStartData,
   setQuestCompleteData,
@@ -846,6 +852,22 @@ export function InterfaceModalsRenderer({
             availableRecipes={craftingData.availableRecipes}
             world={world}
             onClose={() => setCraftingData(null)}
+          />
+        </ModalWindow>
+      )}
+
+      {/* Fletching Panel */}
+      {fletchingData?.visible && (
+        <ModalWindow
+          visible={true}
+          onClose={() => setFletchingData(null)}
+          title="Fletching"
+          width={480}
+        >
+          <FletchingPanel
+            availableRecipes={fletchingData.availableRecipes}
+            world={world}
+            onClose={() => setFletchingData(null)}
           />
         </ModalWindow>
       )}
