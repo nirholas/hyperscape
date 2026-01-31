@@ -175,7 +175,9 @@ export function createTSLImpostorMaterial(
   // Ensure render target textures work with TSL
   const setupTexture = (tex: THREE_NAMESPACE.Texture | undefined) => {
     if (!tex) return;
-    tex.needsUpdate = true;
+    if (!tex.isRenderTargetTexture) {
+      tex.needsUpdate = true;
+    }
     tex.wrapS = THREE_NAMESPACE.ClampToEdgeWrapping;
     tex.wrapT = THREE_NAMESPACE.ClampToEdgeWrapping;
     // For WebGPU, ensure the texture is marked ready
@@ -328,6 +330,8 @@ export function createTSLImpostorMaterial(
     })();
   } else if (debugMode === 4) {
     // Mode 4: Solid red - verifies shader runs at all
+    // Also disable alpha test for this mode
+    material.alphaTest = 0;
     colorNode = Fn(() => {
       return vec4(1, 0, 0, 1);
     })();
@@ -1012,4 +1016,92 @@ export function isTSLImpostorMaterial(
     "impostorUniforms" in material &&
     "updateView" in material
   );
+}
+
+// ============================================================================
+// SIMPLE IMPOSTOR MATERIAL (TSL)
+// ============================================================================
+
+/**
+ * Simple TSL impostor material type - single view, no blending
+ */
+export type TSLSimpleImpostorMaterial = MeshBasicNodeMaterial & {
+  impostorUniforms: {
+    gridSize: { value: THREE_NAMESPACE.Vector2 };
+    cellIndex: { value: THREE_NAMESPACE.Vector2 };
+  };
+};
+
+/**
+ * Create a simplified TSL impostor material for static billboards.
+ * Uses single-view sampling without dynamic view updates.
+ * WebGPU-compatible version of createSimpleImpostorMaterial().
+ *
+ * @param config - Material configuration
+ * @returns TSL material for simple impostor rendering
+ */
+export function createSimpleTSLImpostorMaterial(
+  config: ImpostorMaterialConfig,
+): TSLSimpleImpostorMaterial {
+  const {
+    atlasTexture,
+    gridSizeX,
+    gridSizeY,
+    transparent = true,
+    depthTest = true,
+    depthWrite = true,
+    side = THREE_NAMESPACE.DoubleSide,
+  } = config;
+
+  const material = new MeshBasicNodeMaterial();
+
+  // Center cell index - middle of the grid
+  const centerCellX = Math.floor(gridSizeX / 2);
+  const centerCellY = Math.floor(gridSizeY / 2);
+
+  // Uniforms - texture is passed directly to texture() function, not wrapped in uniform
+  const uGridSize = uniform(new THREE_NAMESPACE.Vector2(gridSizeX, gridSizeY));
+  const uCellIndex = uniform(
+    new THREE_NAMESPACE.Vector2(centerCellX, centerCellY),
+  );
+
+  // Color node - simple atlas sampling at fixed cell
+  material.colorNode = Fn(() => {
+    const uvCoord = uv();
+
+    // Calculate cell UV (scale and offset by cell index)
+    const cellSize = div(vec2(1.0, 1.0), uGridSize);
+    const cellOffset = mul(uCellIndex, cellSize);
+    const cellUV = add(cellOffset, mul(uvCoord, cellSize));
+
+    // Sample atlas at cell UV
+    const color = texture(atlasTexture, cellUV);
+
+    return color;
+  })();
+
+  // Opacity from alpha channel
+  material.opacityNode = Fn(() => {
+    const uvCoord = uv();
+    const cellSize = div(vec2(1.0, 1.0), uGridSize);
+    const cellOffset = mul(uCellIndex, cellSize);
+    const cellUV = add(cellOffset, mul(uvCoord, cellSize));
+    return texture(atlasTexture, cellUV).a;
+  })();
+
+  // Material settings
+  material.transparent = transparent;
+  material.depthTest = depthTest;
+  material.depthWrite = depthWrite;
+  material.side = side;
+  material.alphaTest = 0.01;
+
+  // Store uniforms for runtime updates
+  const tslMaterial = material as TSLSimpleImpostorMaterial;
+  tslMaterial.impostorUniforms = {
+    gridSize: uGridSize,
+    cellIndex: uCellIndex,
+  };
+
+  return tslMaterial;
 }

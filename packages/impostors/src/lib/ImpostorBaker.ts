@@ -9,12 +9,171 @@
  */
 
 import * as THREE from "three";
+import { MeshBasicNodeMaterial, MeshStandardNodeMaterial } from "three/webgpu";
 import type { ImpostorBakeConfig, ImpostorBakeResult } from "./types";
 import { OctahedronType, PBRBakeMode } from "./types";
 import {
   buildOctahedronMesh,
   lerpOctahedronGeometry,
 } from "./OctahedronGeometry";
+
+import * as THREE_WEBGPU from "three/webgpu";
+
+// TSL functions from three/webgpu for baking materials
+const {
+  Fn,
+  uv,
+  positionView,
+  uniform,
+  texture,
+  float,
+  vec4,
+  sub,
+  div,
+  mul,
+  clamp,
+} = THREE_WEBGPU.TSL;
+
+// ============================================================================
+// TSL BAKING MATERIALS (WebGPU-native)
+// ============================================================================
+
+/**
+ * TSL depth material type with uniforms for camera planes
+ */
+type TSLDepthMaterial = MeshBasicNodeMaterial & {
+  depthUniforms: {
+    cameraNear: { value: number };
+    cameraFar: { value: number };
+  };
+};
+
+/**
+ * Create a TSL depth material for baking linear depth to atlas.
+ * WebGPU-compatible version of the GLSL depthMaterial.
+ *
+ * @param nearPlane - Camera near plane distance
+ * @param farPlane - Camera far plane distance
+ * @returns TSL material that outputs linear depth
+ */
+export function createTSLDepthMaterial(
+  nearPlane: number,
+  farPlane: number,
+): TSLDepthMaterial {
+  const material = new MeshBasicNodeMaterial();
+
+  const uNear = uniform(nearPlane);
+  const uFar = uniform(farPlane);
+
+  // Color node outputs linear depth in all channels
+  material.colorNode = Fn(() => {
+    // Get view-space Z (positionView.z is negative for visible objects)
+    const viewZ = mul(positionView.z, float(-1.0));
+
+    // Linear depth normalized to 0-1 range (0 = near, 1 = far)
+    const linearDepth = clamp(
+      div(sub(viewZ, uNear), sub(uFar, uNear)),
+      float(0.0),
+      float(1.0),
+    );
+
+    // Output depth in RGB, alpha=1 for valid pixel
+    return vec4(linearDepth, linearDepth, linearDepth, float(1.0));
+  })();
+
+  material.side = THREE.DoubleSide;
+
+  const tslMaterial = material as TSLDepthMaterial;
+  tslMaterial.depthUniforms = {
+    cameraNear: uNear,
+    cameraFar: uFar,
+  };
+
+  return tslMaterial;
+}
+
+/**
+ * TSL PBR material type with uniforms
+ */
+type TSLPBRMaterial = MeshBasicNodeMaterial & {
+  pbrUniforms: {
+    roughness: { value: number };
+    metalness: { value: number };
+    aoMapIntensity: { value: number };
+  };
+};
+
+/**
+ * Create a TSL PBR channel material for baking roughness/metallic/AO to atlas.
+ * WebGPU-compatible version of the GLSL pbrShader.
+ *
+ * @param roughnessVal - Base roughness value
+ * @param metalnessVal - Base metalness value
+ * @param aoIntensity - AO map intensity
+ * @param roughnessMap - Optional roughness texture
+ * @param metalnessMap - Optional metalness texture
+ * @param aoMap - Optional ambient occlusion texture
+ * @returns TSL material that outputs PBR channels to RGB
+ */
+export function createTSLPBRMaterial(
+  roughnessVal: number,
+  metalnessVal: number,
+  aoIntensity: number,
+  roughnessMap: THREE.Texture | null = null,
+  metalnessMap: THREE.Texture | null = null,
+  aoMap: THREE.Texture | null = null,
+): TSLPBRMaterial {
+  const material = new MeshBasicNodeMaterial();
+
+  const uRoughness = uniform(roughnessVal);
+  const uMetalness = uniform(metalnessVal);
+  const uAOIntensity = uniform(aoIntensity);
+
+  // Color node outputs PBR channels: R=roughness, G=metallic, B=AO
+  material.colorNode = Fn(() => {
+    const uvCoord = uv();
+
+    // Sample or use uniform for roughness (R channel)
+    let r;
+    if (roughnessMap) {
+      const roughTex = texture(roughnessMap, uvCoord);
+      r = mul(roughTex.g, uRoughness);
+    } else {
+      r = uRoughness;
+    }
+
+    // Sample or use uniform for metalness (G channel)
+    let g;
+    if (metalnessMap) {
+      const metalTex = texture(metalnessMap, uvCoord);
+      g = mul(metalTex.b, uMetalness);
+    } else {
+      g = uMetalness;
+    }
+
+    // Sample or use default for AO (B channel)
+    let b;
+    if (aoMap) {
+      const aoTex = texture(aoMap, uvCoord);
+      b = mul(aoTex.r, uAOIntensity);
+    } else {
+      b = float(1.0);
+    }
+
+    return vec4(r, g, b, float(1.0));
+  })();
+
+  material.side = THREE.FrontSide;
+
+  const tslMaterial = material as TSLPBRMaterial;
+  tslMaterial.pbrUniforms = {
+    roughness: uRoughness,
+    metalness: uMetalness,
+    aoMapIntensity: uAOIntensity,
+  };
+
+  return tslMaterial;
+}
 
 /**
  * Renderer interface that works with WebGPURenderer (primary) and WebGLRenderer (fallback).
@@ -45,6 +204,8 @@ export interface CompatibleRenderer {
   setClearColor(color: THREE.ColorRepresentation, alpha?: number): void;
   clear(color?: boolean, depth?: boolean, stencil?: boolean): void;
   render(scene: THREE.Object3D, camera: THREE.Camera): void;
+  // Async render for WebGPU - required for render targets to work properly
+  renderAsync?(scene: THREE.Object3D, camera: THREE.Camera): Promise<void>;
   // Pixel ratio methods - critical for correct atlas rendering
   getPixelRatio(): number;
   setPixelRatio(value: number): void;
@@ -93,7 +254,7 @@ export const DEFAULT_BAKE_CONFIG: ImpostorBakeConfig = {
  * The baker renders the source mesh from multiple view angles and
  * composites them into a single atlas texture using octahedral mapping.
  *
- * Supports both WebGLRenderer and WebGPURenderer.
+ * WebGPU only.
  */
 export class ImpostorBaker {
   private renderer: CompatibleRenderer;
@@ -126,6 +287,33 @@ export class ImpostorBaker {
 
     this.renderScene.add(this.ambientLight);
     this.renderScene.add(this.directionalLight);
+  }
+
+  /**
+   * Render helper - uses renderAsync for WebGPU render targets
+   */
+  private async doRender(
+    scene: THREE.Object3D,
+    camera: THREE.Camera,
+  ): Promise<void> {
+    if (this.renderer.renderAsync) {
+      await this.renderer.renderAsync(scene, camera);
+    } else {
+      this.renderer.render(scene, camera);
+    }
+  }
+
+  private configureAtlasRenderTarget(
+    target: THREE.RenderTarget,
+    colorSpace: THREE.ColorSpace,
+  ): void {
+    target.texture.colorSpace = colorSpace;
+    target.texture.minFilter = THREE.LinearFilter;
+    target.texture.magFilter = THREE.LinearFilter;
+    target.texture.wrapS = THREE.ClampToEdgeWrapping;
+    target.texture.wrapT = THREE.ClampToEdgeWrapping;
+    target.texture.generateMipmaps = false;
+    target.texture.flipY = false;
   }
 
   /**
@@ -207,6 +395,35 @@ export class ImpostorBaker {
     mat: THREE.Material,
     defaultColor: THREE.Color,
   ): THREE.Color {
+    console.log(
+      "[extractColorFromMaterial] Material type:",
+      mat.type,
+      mat.constructor.name,
+    );
+
+    // WebGPU node materials
+    if (
+      mat instanceof MeshBasicNodeMaterial ||
+      mat instanceof MeshStandardNodeMaterial
+    ) {
+      console.log(
+        "[extractColorFromMaterial] Extracted color:",
+        mat.color.getHexString(),
+      );
+      return mat.color.clone();
+    }
+    // WebGL materials
+    if (
+      mat instanceof THREE.MeshStandardMaterial ||
+      mat instanceof THREE.MeshBasicMaterial
+    ) {
+      console.log(
+        "[extractColorFromMaterial] Extracted color:",
+        mat.color.getHexString(),
+      );
+      return mat.color.clone();
+    }
+    // ShaderMaterial with color uniforms
     if (mat instanceof THREE.ShaderMaterial) {
       if (mat.uniforms?.leafColor) {
         return mat.uniforms.leafColor.value;
@@ -214,60 +431,115 @@ export class ImpostorBaker {
       if (mat.uniforms?.uColor) {
         return mat.uniforms.uColor.value;
       }
-    } else if (
-      mat instanceof THREE.MeshStandardMaterial ||
-      mat instanceof THREE.MeshBasicMaterial
-    ) {
-      return mat.color.clone();
     }
+    console.log(
+      "[extractColorFromMaterial] Using default color:",
+      defaultColor.getHexString(),
+    );
     return defaultColor.clone();
   }
 
   /**
-   * Clone a material for baking, preserving its type for proper rendering
+   * Clone a material for baking, preserving its type for proper rendering.
+   * Uses standard Three.js materials which work with both WebGL and WebGPU.
    */
   private cloneMaterialForBaking(mat: THREE.Material): THREE.Material {
-    // For MeshBasicMaterial, preserve it since it doesn't need lighting
+    console.log(
+      "[cloneMaterialForBaking] Material type:",
+      mat.type,
+      mat.constructor.name,
+    );
+
+    // Check for WebGPU node materials first (using instanceof)
+    if (mat instanceof MeshBasicNodeMaterial) {
+      const basicMat = mat;
+      console.log(
+        "[cloneMaterialForBaking] Detected MeshBasicNodeMaterial, color:",
+        basicMat.color.getHexString(),
+      );
+      const newMat = new MeshBasicNodeMaterial();
+      newMat.color = basicMat.color.clone();
+      newMat.side = basicMat.side;
+      newMat.transparent = basicMat.transparent;
+      newMat.opacity = basicMat.opacity;
+      newMat.alphaTest = basicMat.alphaTest;
+      newMat.map = basicMat.map ?? null;
+      return newMat;
+    }
+
+    if (mat instanceof MeshStandardNodeMaterial) {
+      const stdMat = mat;
+      const newMat = new MeshStandardNodeMaterial();
+      newMat.color = stdMat.color.clone();
+      newMat.side = stdMat.side;
+      newMat.roughness = stdMat.roughness;
+      newMat.metalness = stdMat.metalness;
+      newMat.transparent = stdMat.transparent;
+      newMat.opacity = stdMat.opacity;
+      newMat.alphaTest = stdMat.alphaTest;
+      newMat.map = stdMat.map ?? null;
+      newMat.roughnessMap = stdMat.roughnessMap ?? null;
+      newMat.metalnessMap = stdMat.metalnessMap ?? null;
+      newMat.aoMap = stdMat.aoMap ?? null;
+      newMat.aoMapIntensity = stdMat.aoMapIntensity;
+      return newMat;
+    }
+
+    // Convert WebGL materials to Node materials
     if (mat instanceof THREE.MeshBasicMaterial) {
-      return new THREE.MeshBasicMaterial({
-        color: mat.color.clone(),
-        side: mat.side,
-        transparent: mat.transparent,
-        opacity: mat.opacity,
-      });
+      const basicMat = mat;
+      const newMat = new MeshBasicNodeMaterial();
+      newMat.color = basicMat.color.clone();
+      newMat.side = basicMat.side;
+      newMat.transparent = basicMat.transparent;
+      newMat.opacity = basicMat.opacity;
+      newMat.alphaTest = basicMat.alphaTest;
+      newMat.map = basicMat.map ?? null;
+      return newMat;
     }
 
-    // For MeshStandardMaterial, clone with basic properties
     if (mat instanceof THREE.MeshStandardMaterial) {
-      return new THREE.MeshStandardMaterial({
-        color: mat.color.clone(),
-        side: mat.side,
-        roughness: mat.roughness,
-        metalness: mat.metalness,
-        transparent: mat.transparent,
-        opacity: mat.opacity,
-      });
+      const stdMat = mat;
+      const newMat = new MeshStandardNodeMaterial();
+      newMat.color = stdMat.color.clone();
+      newMat.side = stdMat.side;
+      newMat.roughness = stdMat.roughness;
+      newMat.metalness = stdMat.metalness;
+      newMat.transparent = stdMat.transparent;
+      newMat.opacity = stdMat.opacity;
+      newMat.alphaTest = stdMat.alphaTest;
+      newMat.map = stdMat.map ?? null;
+      newMat.roughnessMap = stdMat.roughnessMap ?? null;
+      newMat.metalnessMap = stdMat.metalnessMap ?? null;
+      newMat.aoMap = stdMat.aoMap ?? null;
+      newMat.aoMapIntensity = stdMat.aoMapIntensity;
+      return newMat;
     }
 
-    // For ShaderMaterial, extract color and create a standard material
+    // For ShaderMaterial, extract color and create a standard node material
     if (mat instanceof THREE.ShaderMaterial) {
       const color = this.extractColorFromMaterial(
         mat,
         new THREE.Color(0x888888),
       );
-      return new THREE.MeshStandardMaterial({
-        color,
-        side: mat.side,
-        roughness: 0.8,
-      });
+      const newMat = new MeshStandardNodeMaterial();
+      newMat.color = color;
+      newMat.side = mat.side;
+      newMat.roughness = 0.8;
+      return newMat;
     }
 
     // Default: create a standard material with gray color
-    return new THREE.MeshStandardMaterial({
-      color: 0x888888,
-      side: mat.side ?? THREE.FrontSide,
-      roughness: 0.8,
-    });
+    console.warn(
+      "[ImpostorBaker] Unknown material type, using gray default:",
+      mat.type,
+      mat,
+    );
+    const defaultMat = new MeshStandardNodeMaterial();
+    defaultMat.color = new THREE.Color(0x888888);
+    defaultMat.side = mat.side ?? THREE.FrontSide;
+    defaultMat.roughness = 0.8;
+    return defaultMat;
   }
 
   /**
@@ -396,11 +668,10 @@ export class ImpostorBaker {
           new THREE.Color(0x228b22),
         );
 
-        const bakeMaterial = new THREE.MeshStandardMaterial({
-          color,
-          side: THREE.DoubleSide,
-          roughness: 0.8,
-        });
+        const bakeMaterial = new MeshStandardNodeMaterial();
+        bakeMaterial.color = color;
+        bakeMaterial.side = THREE.DoubleSide;
+        bakeMaterial.roughness = 0.8;
 
         const bakedMesh = new THREE.Mesh(mergedGeo, bakeMaterial);
         result.add(bakedMesh);
@@ -461,10 +732,10 @@ export class ImpostorBaker {
    * @param config - Baking configuration (merged with defaults)
    * @returns The bake result containing the atlas texture and metadata
    */
-  bake(
+  async bake(
     source: THREE.Object3D,
     config: Partial<ImpostorBakeConfig> = {},
-  ): ImpostorBakeResult {
+  ): Promise<ImpostorBakeResult> {
     const finalConfig: ImpostorBakeConfig = {
       ...DEFAULT_BAKE_CONFIG,
       ...config,
@@ -479,33 +750,13 @@ export class ImpostorBaker {
       backgroundAlpha,
     } = finalConfig;
 
+    console.log(
+      "[ImpostorBaker] Starting WebGPU RenderTarget-based atlas generation...",
+    );
+
     // CRITICAL: Save and reset pixel ratio for atlas rendering
-    // Pixel ratio affects viewport/scissor calculations, causing cells to be wrong size
     const originalPixelRatio = this.renderer.getPixelRatio();
     this.renderer.setPixelRatio(1);
-
-    // SIMPLIFIED COLOR SPACE: Don't change renderer settings during baking.
-    // Bake with whatever the renderer normally uses (typically sRGB).
-    // Mark the atlas as sRGB so sampling is consistent.
-
-    // Create render target (supports non-square atlases)
-    // Works with both WebGL and WebGPU renderers
-    const renderTarget = new THREE.WebGLRenderTarget(atlasWidth, atlasHeight, {
-      minFilter: THREE.LinearFilter,
-      magFilter: THREE.LinearFilter,
-      format: THREE.RGBAFormat,
-      type: THREE.UnsignedByteType, // Explicit type for WebGPU compatibility
-      depthBuffer: false, // Don't need depth for atlas
-      stencilBuffer: false,
-    });
-    // Match demo behavior and prevent edge wrapping artifacts
-    renderTarget.texture.wrapS = THREE.ClampToEdgeWrapping;
-    renderTarget.texture.wrapT = THREE.ClampToEdgeWrapping;
-    // Atlas stores sRGB data (baked with normal sRGB output)
-    renderTarget.texture.colorSpace = THREE.SRGBColorSpace;
-    renderTarget.texture.needsUpdate = true;
-    // Ensure texture is marked for GPU upload
-    renderTarget.texture.generateMipmaps = false;
 
     // Compute bounding box from original (does NOT modify source)
     const boundingBox = this.computeBoundingBox(source);
@@ -513,8 +764,6 @@ export class ImpostorBaker {
     boundingBox.getBoundingSphere(boundingSphere);
 
     // Build octahedron mesh to get view directions
-    // gridSizeX/Y = number of points/cells per axis
-    // Use corner points (useCellCenters=false) to match original shader sampling
     const octMeshData = buildOctahedronMesh(
       octType,
       gridSizeX,
@@ -526,37 +775,51 @@ export class ImpostorBaker {
 
     // Pre-morph the geometry to octahedron shape for consistent raycasting
     lerpOctahedronGeometry(octMeshData, 1.0);
-    // Compute bounds for both geometries (filledMesh is used for raycasting)
     octMeshData.filledMesh.geometry.computeBoundingSphere();
     octMeshData.filledMesh.geometry.computeBoundingBox();
     octMeshData.wireframeMesh.geometry.computeBoundingSphere();
     octMeshData.wireframeMesh.geometry.computeBoundingBox();
 
-    // Clone source for rendering, handling InstancedMesh properly
+    // Clone source for rendering
     const sourceCopy = this.cloneForRendering(source);
     this.renderScene.add(sourceCopy);
 
-    // Center the cloned mesh at origin
+    // Debug: log what's in the render scene
+    let meshCount = 0;
+    sourceCopy.traverse((node) => {
+      if (node instanceof THREE.Mesh) {
+        meshCount++;
+        console.log(
+          `[ImpostorBaker] Mesh ${meshCount}: geometry vertices=${node.geometry.attributes.position?.count ?? 0}, material=${node.material.constructor.name}`,
+        );
+      }
+    });
+    console.log(`[ImpostorBaker] Total meshes in render scene: ${meshCount}`);
+
+    // Center and scale the mesh to fit in camera view
+    // Reference: scale so mesh fits in orthoSize (0.5) with some margin
     const center = boundingSphere.center.clone();
     sourceCopy.position.set(-center.x, -center.y, -center.z);
 
-    // Scale to fit exactly in camera view based on BOUNDING BOX (not sphere)
-    // This minimizes padding - the object fills the full atlas cell
-    // Camera sees [-0.5, 0.5], so scale the largest dimension to fit
-    const boxSize = new THREE.Vector3();
-    boundingBox.getSize(boxSize);
-    const maxDimension = Math.max(boxSize.x, boxSize.y, boxSize.z);
-    const scaleFactor = 1.0 / maxDimension; // Scale so max dimension = 1.0 (fills -0.5 to 0.5)
+    // Scale to fit in camera view: orthoSize is 0.5, so mesh should fit in 0.5 radius
+    // Reference uses: scaleFactor = 0.5 / (boundingSphere.radius * 1.5)
+    const radius = boundingSphere.radius * 1.5; // Add margin
+    const scaleFactor = 0.5 / radius;
     sourceCopy.scale.setScalar(scaleFactor);
     sourceCopy.position.multiplyScalar(scaleFactor);
 
-    // Store original render target and viewport
-    const originalRenderTarget = this.renderer.getRenderTarget();
-    const originalViewport = new THREE.Vector4();
-    this.renderer.getViewport(originalViewport);
+    // =========================================================================
+    // WEBGPU ATLAS GENERATION - Cell-by-cell blit approach
+    // Render each cell to small target, then blit to atlas position
+    // =========================================================================
 
-    // Disable tone mapping during baking to get accurate colors
-    // Works with both WebGPU and WebGL renderers
+    const numCells = gridSizeX;
+    const cellSize = Math.floor(atlasWidth / numCells);
+
+    // Save original state
+    const originalRenderTarget = this.renderer.getRenderTarget();
+
+    // Disable tone mapping during baking
     const renderer = this.renderer as CompatibleRenderer;
     const originalToneMapping = renderer.toneMapping;
     const originalToneMappingExposure = renderer.toneMappingExposure;
@@ -567,23 +830,65 @@ export class ImpostorBaker {
       renderer.toneMappingExposure = 1.0;
     }
 
-    // Cell sizes: gridSize cells per axis (matching old code)
-    // cellSize = atlasSize / gridSize
-    const cellWidth = atlasWidth / gridSizeX;
-    const cellHeight = atlasHeight / gridSizeY;
+    // Create full-size render target for atlas
+    const renderTarget = new THREE_WEBGPU.RenderTarget(
+      atlasWidth,
+      atlasHeight,
+      {
+        format: THREE.RGBAFormat,
+        type: THREE.UnsignedByteType,
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        generateMipmaps: false,
+      },
+    );
 
-    // Render each cell (row = Y, col = X)
-    // gridSizeX/Y points per axis => valid indices 0..gridSize-1
-    for (let rowIdx = 0; rowIdx < gridSizeY; rowIdx++) {
-      for (let colIdx = 0; colIdx < gridSizeX; colIdx++) {
-        // Cell position: each cell occupies 1/gridSize of the atlas
-        // This matches the shader which divides by gridSize
-        const pixelX = (colIdx / gridSizeX) * atlasWidth;
-        const pixelY = (rowIdx / gridSizeY) * atlasHeight;
+    // Create cell-sized render target for individual views
+    const cellRenderTarget = new THREE_WEBGPU.RenderTarget(cellSize, cellSize, {
+      format: THREE.RGBAFormat,
+      type: THREE.UnsignedByteType,
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      generateMipmaps: false,
+    });
 
-        // Get view direction from octahedron mapping
-        // Point index: row * gridSizeX + col (using gridSizeX as row stride)
-        const flatIdx = rowIdx * gridSizeX + colIdx;
+    console.log(
+      `[ImpostorBaker] Starting WebGPU atlas: ${numCells}x${numCells} cells, ${cellSize}px each`,
+    );
+
+    const webgpuRenderer = this.renderer as THREE_WEBGPU.WebGPURenderer;
+
+    // Clear atlas first
+    webgpuRenderer.setRenderTarget(renderTarget);
+    webgpuRenderer.setClearColor(
+      backgroundColor ?? 0x000000,
+      backgroundAlpha ?? 0,
+    );
+    webgpuRenderer.clear();
+
+    // Create blit geometry and material with transparency support
+    const blitGeo = new THREE.PlaneGeometry(2, 2);
+    const blitMat = new THREE_WEBGPU.MeshBasicNodeMaterial();
+    const cellTex = cellRenderTarget.texture;
+    blitMat.colorNode = THREE_WEBGPU.TSL.texture(cellTex);
+    blitMat.opacityNode = THREE_WEBGPU.TSL.texture(cellTex).a;
+    blitMat.transparent = true;
+    blitMat.depthTest = false;
+    blitMat.depthWrite = false;
+    const blitMesh = new THREE.Mesh(blitGeo, blitMat);
+    const blitScene = new THREE.Scene();
+    blitScene.add(blitMesh);
+    const blitCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+    // Save autoClear state and disable it for blitting
+    const originalAutoClear = webgpuRenderer.autoClear;
+    webgpuRenderer.autoClear = false;
+
+    let renderedCells = 0;
+    for (let rowIdx = 0; rowIdx <= numCells; rowIdx++) {
+      for (let colIdx = 0; colIdx <= numCells; colIdx++) {
+        const flatIdx = rowIdx * numCells + colIdx;
+        if (flatIdx * 3 + 2 >= viewPoints.length) continue;
 
         const px = viewPoints[flatIdx * 3];
         const py = viewPoints[flatIdx * 3 + 1];
@@ -592,22 +897,50 @@ export class ImpostorBaker {
         const viewDir = new THREE.Vector3(px, py, pz).normalize();
 
         // Position camera
-        this.renderCamera.position.copy(viewDir.multiplyScalar(1.1));
+        this.renderCamera.position.copy(viewDir.clone().multiplyScalar(1.1));
         this.renderCamera.lookAt(0, 0, 0);
 
-        // Render to atlas cell
-        this.renderer.setRenderTarget(renderTarget);
-        this.renderer.setScissorTest(true);
-        this.renderer.setScissor(pixelX, pixelY, cellWidth, cellHeight);
-        this.renderer.setViewport(pixelX, pixelY, cellWidth, cellHeight);
-        this.renderer.setClearColor(
+        // Render to cell render target (with clear)
+        webgpuRenderer.setRenderTarget(cellRenderTarget);
+        webgpuRenderer.setClearColor(
           backgroundColor ?? 0x000000,
           backgroundAlpha ?? 0,
         );
-        this.renderer.clear();
-        this.renderer.render(this.renderScene, this.renderCamera);
+        webgpuRenderer.clear();
+        webgpuRenderer.render(this.renderScene, this.renderCamera);
+
+        // Calculate cell position in atlas
+        // Reference uses: pixelX = (colIdx / numCells) * atlasWidth
+        // Convert to NDC (-1 to 1): position at cell center
+        const cellW = 2 / numCells; // Cell width in NDC (atlas spans -1 to 1 = 2 units)
+        const cellH = 2 / numCells;
+
+        // Cell center position in NDC
+        // Flip Y: rowIdx=0 should be at TOP (NDC Y = 1), not bottom
+        // This matches how the impostor material samples the atlas
+        const ndcX = -1 + (colIdx + 0.5) * cellW;
+        const ndcY = 1 - (rowIdx + 0.5) * cellH; // Flipped Y
+
+        blitMesh.position.set(ndcX, ndcY, 0);
+        blitMesh.scale.set(cellW / 2, cellH / 2, 1); // PlaneGeometry is 2x2, so scale by half
+
+        // Blit cell to atlas (no clear!)
+        webgpuRenderer.setRenderTarget(renderTarget);
+        webgpuRenderer.render(blitScene, blitCam);
+
+        renderedCells++;
       }
     }
+
+    // Restore autoClear
+    webgpuRenderer.autoClear = originalAutoClear;
+
+    console.log(`[ImpostorBaker] Rendered ${renderedCells} cells to atlas`);
+
+    // Cleanup blit resources
+    blitGeo.dispose();
+    blitMat.dispose();
+    cellRenderTarget.dispose();
 
     // Restore tone mapping
     if (originalToneMapping !== undefined) {
@@ -618,9 +951,7 @@ export class ImpostorBaker {
     }
 
     // Restore renderer state
-    this.renderer.setScissorTest(false);
     this.renderer.setRenderTarget(originalRenderTarget);
-    this.renderer.setViewport(originalViewport);
     this.renderer.setPixelRatio(originalPixelRatio);
 
     // Clean up render scene
@@ -632,6 +963,12 @@ export class ImpostorBaker {
           node.material.dispose();
         }
       }
+    });
+
+    console.log("[ImpostorBaker] Atlas generated using WebGPU RenderTarget:", {
+      width: atlasWidth,
+      height: atlasHeight,
+      gridSize: `${gridSizeX}x${gridSizeY}`,
     });
 
     return {
@@ -656,10 +993,10 @@ export class ImpostorBaker {
    * @param config - Baking configuration
    * @returns Result containing both color and normal atlases
    */
-  bakeWithNormals(
+  async bakeWithNormals(
     source: THREE.Object3D,
     config: Partial<ImpostorBakeConfig> = {},
-  ): ImpostorBakeResult {
+  ): Promise<ImpostorBakeResult> {
     const finalConfig: ImpostorBakeConfig = {
       ...DEFAULT_BAKE_CONFIG,
       ...config,
@@ -683,36 +1020,22 @@ export class ImpostorBaker {
     // Mark the atlas as sRGB so sampling is consistent.
 
     // Create render targets for color and normal atlases
-    const colorRenderTarget = new THREE.WebGLRenderTarget(
+    // WebGPU render targets - no options
+    const colorRenderTarget = new THREE_WEBGPU.RenderTarget(
       atlasWidth,
       atlasHeight,
-      {
-        minFilter: THREE.LinearFilter,
-        magFilter: THREE.LinearFilter,
-        format: THREE.RGBAFormat,
-      },
     );
-    colorRenderTarget.texture.wrapS = THREE.ClampToEdgeWrapping;
-    colorRenderTarget.texture.wrapT = THREE.ClampToEdgeWrapping;
-    // Use SRGBColorSpace - Three.js will convert linear output to sRGB when writing
-    // This stores brighter sRGB values, matching the regular bake() behavior
-    colorRenderTarget.texture.colorSpace = THREE.SRGBColorSpace;
-    colorRenderTarget.texture.needsUpdate = true;
-
-    const normalRenderTarget = new THREE.WebGLRenderTarget(
+    const normalRenderTarget = new THREE_WEBGPU.RenderTarget(
       atlasWidth,
       atlasHeight,
-      {
-        minFilter: THREE.LinearFilter,
-        magFilter: THREE.LinearFilter,
-        format: THREE.RGBAFormat,
-      },
     );
-    normalRenderTarget.texture.wrapS = THREE.ClampToEdgeWrapping;
-    normalRenderTarget.texture.wrapT = THREE.ClampToEdgeWrapping;
-    // Normal atlas stores linear data (vectors, not colors)
-    normalRenderTarget.texture.colorSpace = THREE.NoColorSpace;
-    normalRenderTarget.texture.needsUpdate = true;
+    const outputColorSpace =
+      this.renderer.outputColorSpace ?? THREE.SRGBColorSpace;
+    this.configureAtlasRenderTarget(colorRenderTarget, outputColorSpace);
+    this.configureAtlasRenderTarget(
+      normalRenderTarget,
+      THREE.LinearSRGBColorSpace,
+    );
 
     // Compute bounding box from original (does NOT modify source)
     const boundingBox = this.computeBoundingBox(source);
@@ -757,8 +1080,8 @@ export class ImpostorBaker {
     const originalViewport = new THREE.Vector4();
     this.renderer.getViewport(originalViewport);
 
-    const cellWidth = atlasWidth / gridSizeX;
-    const cellHeight = atlasHeight / gridSizeY;
+    const cellWidth = Math.floor(atlasWidth / gridSizeX);
+    const cellHeight = Math.floor(atlasHeight / gridSizeY);
 
     // Normal material - uses Three.js built-in MeshNormalMaterial
     // This is WebGPU/TSL compatible and outputs view-space normals as colors
@@ -817,18 +1140,22 @@ export class ImpostorBaker {
         );
 
         // Check if original material has a map (texture)
+        const isStdMat =
+          singleMat instanceof THREE.MeshStandardMaterial ||
+          singleMat instanceof MeshStandardNodeMaterial;
         const hasMap =
-          singleMat instanceof THREE.MeshStandardMaterial && singleMat.map;
+          isStdMat && (singleMat as THREE.MeshStandardMaterial).map;
 
-        // Create unlit material - MeshBasicMaterial doesn't do any lighting calculations
-        const unlitMat = new THREE.MeshBasicMaterial({
-          color: hasMap ? 0xffffff : color, // Use white if textured, color otherwise
-          map: hasMap ? (singleMat as THREE.MeshStandardMaterial).map : null,
-          side: singleMat.side ?? THREE.FrontSide,
-          transparent: singleMat.transparent,
-          alphaTest: singleMat.alphaTest,
-          opacity: singleMat.opacity,
-        });
+        // Create unlit material
+        const unlitMat = new MeshBasicNodeMaterial();
+        unlitMat.color = new THREE.Color(hasMap ? 0xffffff : color);
+        if (hasMap) {
+          unlitMat.map = (singleMat as THREE.MeshStandardMaterial).map;
+        }
+        unlitMat.side = singleMat.side ?? THREE.FrontSide;
+        unlitMat.transparent = singleMat.transparent;
+        unlitMat.alphaTest = singleMat.alphaTest;
+        unlitMat.opacity = singleMat.opacity;
 
         unlitMaterials.set(node, unlitMat);
       }
@@ -853,8 +1180,10 @@ export class ImpostorBaker {
     // Render each cell - first color pass, then normal pass
     for (let rowIdx = 0; rowIdx < gridSizeY; rowIdx++) {
       for (let colIdx = 0; colIdx < gridSizeX; colIdx++) {
-        const pixelX = (colIdx / gridSizeX) * atlasWidth;
-        const pixelY = (rowIdx / gridSizeY) * atlasHeight;
+        const pixelX = Math.floor((colIdx / gridSizeX) * atlasWidth);
+        const pixelY = Math.floor((rowIdx / gridSizeY) * atlasHeight);
+        const scissorWidth = Math.min(cellWidth, atlasWidth - pixelX);
+        const scissorHeight = Math.min(cellHeight, atlasHeight - pixelY);
         const flatIdx = rowIdx * gridSizeX + colIdx;
 
         const px = viewPoints[flatIdx * 3];
@@ -875,14 +1204,14 @@ export class ImpostorBaker {
 
         this.renderer.setRenderTarget(colorRenderTarget);
         this.renderer.setScissorTest(true);
-        this.renderer.setScissor(pixelX, pixelY, cellWidth, cellHeight);
-        this.renderer.setViewport(pixelX, pixelY, cellWidth, cellHeight);
+        this.renderer.setScissor(pixelX, pixelY, scissorWidth, scissorHeight);
+        this.renderer.setViewport(pixelX, pixelY, scissorWidth, scissorHeight);
         this.renderer.setClearColor(
           backgroundColor ?? 0x000000,
           backgroundAlpha ?? 0,
         );
         this.renderer.clear();
-        this.renderer.render(this.renderScene, this.renderCamera);
+        await this.doRender(this.renderScene, this.renderCamera);
 
         // Normal pass - swap materials to normal material
         sourceCopy.traverse((node) => {
@@ -902,11 +1231,11 @@ export class ImpostorBaker {
 
         this.renderer.setRenderTarget(normalRenderTarget);
         this.renderer.setScissorTest(true);
-        this.renderer.setScissor(pixelX, pixelY, cellWidth, cellHeight);
-        this.renderer.setViewport(pixelX, pixelY, cellWidth, cellHeight);
+        this.renderer.setScissor(pixelX, pixelY, scissorWidth, scissorHeight);
+        this.renderer.setViewport(pixelX, pixelY, scissorWidth, scissorHeight);
         this.renderer.setClearColor(0x8080ff, 1); // Neutral normal: (0,0,1) facing camera -> encoded as (0.5, 0.5, 1.0)
         this.renderer.clear();
-        this.renderer.render(this.renderScene, this.renderCamera);
+        await this.doRender(this.renderScene, this.renderCamera);
 
         // Restore original color space for next color pass
         if (originalColorSpace !== undefined) {
@@ -958,6 +1287,22 @@ export class ImpostorBaker {
     instancedNormalMaterial.dispose();
     unlitMaterials.forEach((mat) => mat.dispose());
 
+    // Mark textures as needing update for proper GPU upload (skip RTT textures)
+    if (!colorRenderTarget.texture.isRenderTargetTexture) {
+      colorRenderTarget.texture.needsUpdate = true;
+    }
+    if (!normalRenderTarget.texture.isRenderTargetTexture) {
+      normalRenderTarget.texture.needsUpdate = true;
+    }
+
+    // Ensure GPU operations complete by doing a final flush
+    // This is critical for WebGPU - without it, textures may not be ready when sampled
+    this.renderer.setRenderTarget(null);
+    if (this.renderer.renderAsync) {
+      // Force a frame flush to ensure all RTT operations complete
+      await this.renderer.renderAsync(new THREE.Scene(), this.renderCamera);
+    }
+
     return {
       atlasTexture: colorRenderTarget.texture,
       renderTarget: colorRenderTarget,
@@ -975,7 +1320,7 @@ export class ImpostorBaker {
   /**
    * Bake with custom lighting setup
    */
-  bakeWithLighting(
+  async bakeWithLighting(
     source: THREE.Object3D,
     config: Partial<ImpostorBakeConfig> = {},
     lightingSetup: {
@@ -986,7 +1331,7 @@ export class ImpostorBaker {
         position: THREE.Vector3;
       };
     } = {},
-  ): ImpostorBakeResult {
+  ): Promise<ImpostorBakeResult> {
     // Apply custom lighting
     if (lightingSetup.ambient) {
       this.ambientLight.color.setHex(lightingSetup.ambient.color);
@@ -998,7 +1343,7 @@ export class ImpostorBaker {
       this.directionalLight.position.copy(lightingSetup.directional.position);
     }
 
-    const result = this.bake(source, config);
+    const result = await this.bake(source, config);
 
     // Restore default lighting
     this.ambientLight.color.setHex(0xffffff);
@@ -1057,7 +1402,7 @@ export class ImpostorBaker {
     const { width, height } = renderTarget;
     let pixels: Uint8Array | null = null;
 
-    // Try async method first (works on both WebGL and WebGPU)
+    // Use async read for WebGPU
     if (this.renderer.readRenderTargetPixelsAsync) {
       try {
         const pixelResult = await this.renderer.readRenderTargetPixelsAsync(
@@ -1162,7 +1507,7 @@ export class ImpostorBaker {
    * The color atlas will have scene lighting baked in (same as regular bake).
    * The normal atlas provides surface detail for additional dynamic lighting.
    */
-  bakeHybrid(
+  async bakeHybrid(
     source: THREE.Object3D,
     config: Partial<ImpostorBakeConfig> = {},
     options: {
@@ -1170,10 +1515,12 @@ export class ImpostorBaker {
       backgroundAlpha?: number;
       alphaTest?: number;
     } = {},
-  ): ImpostorBakeResult & {
-    normalAtlasTexture: THREE.Texture;
-    normalRenderTarget: THREE.WebGLRenderTarget;
-  } {
+  ): Promise<
+    ImpostorBakeResult & {
+      normalAtlasTexture: THREE.Texture;
+      normalRenderTarget: THREE.RenderTarget;
+    }
+  > {
     const { backgroundColor, backgroundAlpha } = options;
 
     // Step 1: Use regular bake() for color atlas (this works correctly)
@@ -1183,7 +1530,7 @@ export class ImpostorBaker {
       backgroundColor,
       backgroundAlpha,
     };
-    const colorResult = this.bake(source, bakeConfig);
+    const colorResult = await this.bake(source, bakeConfig);
 
     // Step 2: Bake normals separately using same grid settings from colorResult
     const gridSizeX = colorResult.gridSizeX;
@@ -1192,23 +1539,18 @@ export class ImpostorBaker {
     // Get atlas dimensions from color render target
     const atlasWidth = colorResult.renderTarget.width;
     const atlasHeight = colorResult.renderTarget.height;
-    const cellWidth = atlasWidth / gridSizeX;
-    const cellHeight = atlasHeight / gridSizeY;
+    const cellWidth = Math.floor(atlasWidth / gridSizeX);
+    const cellHeight = Math.floor(atlasHeight / gridSizeY);
 
-    // Create normal render target
-    const normalRenderTarget = new THREE.WebGLRenderTarget(
+    // Create normal render target - WebGPU only
+    const normalRenderTarget = new THREE_WEBGPU.RenderTarget(
       atlasWidth,
       atlasHeight,
-      {
-        minFilter: THREE.LinearFilter,
-        magFilter: THREE.LinearFilter,
-        format: THREE.RGBAFormat,
-      },
     );
-    normalRenderTarget.texture.wrapS = THREE.ClampToEdgeWrapping;
-    normalRenderTarget.texture.wrapT = THREE.ClampToEdgeWrapping;
-    normalRenderTarget.texture.colorSpace = THREE.NoColorSpace;
-    normalRenderTarget.texture.needsUpdate = true;
+    this.configureAtlasRenderTarget(
+      normalRenderTarget,
+      THREE.LinearSRGBColorSpace,
+    );
 
     // Clone source for normal rendering
     const sourceCopy = this.cloneForRendering(source);
@@ -1265,8 +1607,10 @@ export class ImpostorBaker {
 
     for (let rowIdx = 0; rowIdx < gridSizeY; rowIdx++) {
       for (let colIdx = 0; colIdx < gridSizeX; colIdx++) {
-        const pixelX = (colIdx / gridSizeX) * atlasWidth;
-        const pixelY = (rowIdx / gridSizeY) * atlasHeight;
+        const pixelX = Math.floor((colIdx / gridSizeX) * atlasWidth);
+        const pixelY = Math.floor((rowIdx / gridSizeY) * atlasHeight);
+        const scissorWidth = Math.min(cellWidth, atlasWidth - pixelX);
+        const scissorHeight = Math.min(cellHeight, atlasHeight - pixelY);
         const flatIdx = rowIdx * gridSizeX + colIdx;
 
         const px = viewPoints[flatIdx * 3];
@@ -1286,11 +1630,11 @@ export class ImpostorBaker {
 
         this.renderer.setRenderTarget(normalRenderTarget);
         this.renderer.setScissorTest(true);
-        this.renderer.setScissor(pixelX, pixelY, cellWidth, cellHeight);
-        this.renderer.setViewport(pixelX, pixelY, cellWidth, cellHeight);
+        this.renderer.setScissor(pixelX, pixelY, scissorWidth, scissorHeight);
+        this.renderer.setViewport(pixelX, pixelY, scissorWidth, scissorHeight);
         this.renderer.setClearColor(0x8080ff, 1); // Neutral normal facing camera
         this.renderer.clear();
-        this.renderer.render(this.renderScene, this.renderCamera);
+        await this.doRender(this.renderScene, this.renderCamera);
       }
     }
 
@@ -1330,10 +1674,10 @@ export class ImpostorBaker {
    * @param config - Baking configuration
    * @returns Complete bake result with all atlas textures
    */
-  bakeFull(
+  async bakeFull(
     source: THREE.Object3D,
     config: Partial<ImpostorBakeConfig> = {},
-  ): ImpostorBakeResult {
+  ): Promise<ImpostorBakeResult> {
     const finalConfig: ImpostorBakeConfig = {
       ...DEFAULT_BAKE_CONFIG,
       ...config,
@@ -1358,70 +1702,44 @@ export class ImpostorBaker {
     const originalPixelRatio = this.renderer.getPixelRatio();
     this.renderer.setPixelRatio(1);
 
-    // Create render targets for all channels
-    // Color atlas - sRGB color space for albedo
-    const colorRenderTarget = new THREE.WebGLRenderTarget(
+    // Create render targets for all channels - WebGPU only
+    const colorRenderTarget = new THREE_WEBGPU.RenderTarget(
       atlasWidth,
       atlasHeight,
-      {
-        minFilter: THREE.LinearFilter,
-        magFilter: THREE.LinearFilter,
-        format: THREE.RGBAFormat,
-        type: THREE.UnsignedByteType,
-      },
     );
-    colorRenderTarget.texture.wrapS = THREE.ClampToEdgeWrapping;
-    colorRenderTarget.texture.wrapT = THREE.ClampToEdgeWrapping;
-    colorRenderTarget.texture.colorSpace = THREE.SRGBColorSpace;
-    colorRenderTarget.texture.needsUpdate = true;
 
-    // Normal atlas - linear color space for vector data
-    const normalRenderTarget = new THREE.WebGLRenderTarget(
+    // Normal atlas - WebGPU only
+    const normalRenderTarget = new THREE_WEBGPU.RenderTarget(
       atlasWidth,
       atlasHeight,
-      {
-        minFilter: THREE.LinearFilter,
-        magFilter: THREE.LinearFilter,
-        format: THREE.RGBAFormat,
-        type: THREE.UnsignedByteType,
-      },
     );
-    normalRenderTarget.texture.wrapS = THREE.ClampToEdgeWrapping;
-    normalRenderTarget.texture.wrapT = THREE.ClampToEdgeWrapping;
-    normalRenderTarget.texture.colorSpace = THREE.NoColorSpace;
-    normalRenderTarget.texture.needsUpdate = true;
 
-    // Depth atlas - linear color space, high precision for depth values
-    // Use HalfFloatType for better depth precision (16-bit float)
-    const depthRenderTarget = new THREE.WebGLRenderTarget(
+    // Depth atlas - WebGPU only
+    const depthRenderTarget = new THREE_WEBGPU.RenderTarget(
       atlasWidth,
       atlasHeight,
-      {
-        minFilter: THREE.LinearFilter,
-        magFilter: THREE.LinearFilter,
-        format: THREE.RGBAFormat,
-        type: THREE.HalfFloatType,
-      },
     );
-    depthRenderTarget.texture.wrapS = THREE.ClampToEdgeWrapping;
-    depthRenderTarget.texture.wrapT = THREE.ClampToEdgeWrapping;
-    depthRenderTarget.texture.colorSpace = THREE.NoColorSpace;
-    depthRenderTarget.texture.needsUpdate = true;
 
-    // PBR atlas - linear color space for material properties
-    // Only create if COMPLETE mode
-    let pbrRenderTarget: THREE.WebGLRenderTarget | undefined;
+    const outputColorSpace =
+      this.renderer.outputColorSpace ?? THREE.SRGBColorSpace;
+    this.configureAtlasRenderTarget(colorRenderTarget, outputColorSpace);
+    this.configureAtlasRenderTarget(
+      normalRenderTarget,
+      THREE.LinearSRGBColorSpace,
+    );
+    this.configureAtlasRenderTarget(
+      depthRenderTarget,
+      THREE.LinearSRGBColorSpace,
+    );
+
+    // PBR atlas - only create if COMPLETE mode
+    let pbrRenderTarget: THREE_WEBGPU.RenderTarget | undefined;
     if (pbrMode === PBRBakeMode.COMPLETE) {
-      pbrRenderTarget = new THREE.WebGLRenderTarget(atlasWidth, atlasHeight, {
-        minFilter: THREE.LinearFilter,
-        magFilter: THREE.LinearFilter,
-        format: THREE.RGBAFormat,
-        type: THREE.UnsignedByteType,
-      });
-      pbrRenderTarget.texture.wrapS = THREE.ClampToEdgeWrapping;
-      pbrRenderTarget.texture.wrapT = THREE.ClampToEdgeWrapping;
-      pbrRenderTarget.texture.colorSpace = THREE.NoColorSpace;
-      pbrRenderTarget.texture.needsUpdate = true;
+      pbrRenderTarget = new THREE_WEBGPU.RenderTarget(atlasWidth, atlasHeight);
+      this.configureAtlasRenderTarget(
+        pbrRenderTarget,
+        THREE.LinearSRGBColorSpace,
+      );
     }
 
     // Compute bounding box from original (does NOT modify source)
@@ -1466,8 +1784,8 @@ export class ImpostorBaker {
     const originalViewport = new THREE.Vector4();
     this.renderer.getViewport(originalViewport);
 
-    const cellWidth = atlasWidth / gridSizeX;
-    const cellHeight = atlasHeight / gridSizeY;
+    const cellWidth = Math.floor(atlasWidth / gridSizeX);
+    const cellHeight = Math.floor(atlasHeight / gridSizeY);
 
     // =========================================================================
     // CREATE MATERIALS FOR EACH PASS
@@ -1488,7 +1806,7 @@ export class ImpostorBaker {
       }
     });
 
-    // Unlit materials for albedo pass (MeshBasicMaterial - no lighting calculations)
+    // Unlit materials for albedo pass (MeshBasicMaterial - no lighting calculations, works with both WebGL and WebGPU)
     const unlitMaterials = new Map<THREE.Mesh, THREE.Material>();
     sourceCopy.traverse((node) => {
       if (node instanceof THREE.Mesh) {
@@ -1500,17 +1818,22 @@ export class ImpostorBaker {
           singleMat,
           new THREE.Color(0x888888),
         );
+        const isStdMat =
+          singleMat instanceof THREE.MeshStandardMaterial ||
+          singleMat instanceof MeshStandardNodeMaterial;
         const hasMap =
-          singleMat instanceof THREE.MeshStandardMaterial && singleMat.map;
+          isStdMat && (singleMat as THREE.MeshStandardMaterial).map;
 
-        const unlitMat = new THREE.MeshBasicMaterial({
-          color: hasMap ? 0xffffff : color,
-          map: hasMap ? (singleMat as THREE.MeshStandardMaterial).map : null,
-          side: singleMat.side ?? THREE.FrontSide,
-          transparent: singleMat.transparent,
-          alphaTest: singleMat.alphaTest,
-          opacity: singleMat.opacity,
-        });
+        // Create unlit material - WebGPU only
+        const unlitMat = new MeshBasicNodeMaterial();
+        unlitMat.color = new THREE.Color(hasMap ? 0xffffff : color);
+        if (hasMap) {
+          unlitMat.map = (singleMat as THREE.MeshStandardMaterial).map;
+        }
+        unlitMat.side = singleMat.side ?? THREE.FrontSide;
+        unlitMat.transparent = singleMat.transparent;
+        unlitMat.alphaTest = singleMat.alphaTest;
+        unlitMat.opacity = singleMat.opacity;
         unlitMaterials.set(node, unlitMat);
       }
     });
@@ -1521,39 +1844,11 @@ export class ImpostorBaker {
       flatShading: false,
     });
 
-    // Depth material - custom shader that outputs linear depth
-    // MeshDepthMaterial uses logarithmic depth, so we create a custom shader for linear depth
-    const depthMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        cameraNear: { value: nearPlane },
-        cameraFar: { value: farPlane },
-      },
-      vertexShader: /* glsl */ `
-        varying float vViewZ;
-        void main() {
-          vec4 viewPos = modelViewMatrix * vec4(position, 1.0);
-          vViewZ = -viewPos.z; // View-space Z (positive = in front of camera)
-          gl_Position = projectionMatrix * viewPos;
-        }
-      `,
-      fragmentShader: /* glsl */ `
-        uniform float cameraNear;
-        uniform float cameraFar;
-        varying float vViewZ;
-        void main() {
-          // Linear depth normalized to 0-1 range
-          // 0 = near plane, 1 = far plane
-          float linearDepth = (vViewZ - cameraNear) / (cameraFar - cameraNear);
-          linearDepth = clamp(linearDepth, 0.0, 1.0);
-          // Store in all channels for robustness (R=depth, GBA=1 for valid pixel)
-          gl_FragColor = vec4(linearDepth, linearDepth, linearDepth, 1.0);
-        }
-      `,
-      side: THREE.DoubleSide,
-    });
+    // Depth material - TSL for WebGPU
+    const depthMaterial = createTSLDepthMaterial(nearPlane, farPlane);
 
     // PBR material - extracts roughness, metallic, AO from original materials
-    let pbrMaterials: Map<THREE.Mesh, THREE.ShaderMaterial> | undefined;
+    let pbrMaterials: Map<THREE.Mesh, THREE.Material> | undefined;
     if (pbrMode === PBRBakeMode.COMPLETE) {
       pbrMaterials = new Map();
       sourceCopy.traverse((node) => {
@@ -1580,59 +1875,17 @@ export class ImpostorBaker {
             aoMap = singleMat.aoMap;
           }
 
-          // Create shader that outputs PBR channels to RGB
-          const pbrShader = new THREE.ShaderMaterial({
-            uniforms: {
-              roughness: { value: roughness },
-              metalness: { value: metalness },
-              aoMapIntensity: { value: aoMapIntensity },
-              roughnessMap: { value: roughnessMap },
-              metalnessMap: { value: metalnessMap },
-              aoMap: { value: aoMap },
-              hasRoughnessMap: { value: roughnessMap !== null },
-              hasMetalnessMap: { value: metalnessMap !== null },
-              hasAOMap: { value: aoMap !== null },
-            },
-            vertexShader: /* glsl */ `
-              varying vec2 vUv;
-              void main() {
-                vUv = uv;
-                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-              }
-            `,
-            fragmentShader: /* glsl */ `
-              uniform float roughness;
-              uniform float metalness;
-              uniform float aoMapIntensity;
-              uniform sampler2D roughnessMap;
-              uniform sampler2D metalnessMap;
-              uniform sampler2D aoMap;
-              uniform bool hasRoughnessMap;
-              uniform bool hasMetalnessMap;
-              uniform bool hasAOMap;
-              varying vec2 vUv;
-              void main() {
-                // R = Roughness
-                float r = roughness;
-                if (hasRoughnessMap) {
-                  r *= texture2D(roughnessMap, vUv).g; // Roughness often in G channel
-                }
-                // G = Metallic
-                float g = metalness;
-                if (hasMetalnessMap) {
-                  g *= texture2D(metalnessMap, vUv).b; // Metallic often in B channel
-                }
-                // B = Ambient Occlusion
-                float b = 1.0;
-                if (hasAOMap) {
-                  b = mix(1.0, texture2D(aoMap, vUv).r, aoMapIntensity);
-                }
-                gl_FragColor = vec4(r, g, b, 1.0);
-              }
-            `,
-            side: singleMat.side ?? THREE.FrontSide,
-          });
-          pbrMaterials!.set(node, pbrShader);
+          // TSL PBR material - WebGPU only
+          const pbrMaterial = createTSLPBRMaterial(
+            roughness,
+            metalness,
+            aoMapIntensity,
+            roughnessMap,
+            metalnessMap,
+            aoMap,
+          );
+          pbrMaterial.side = singleMat.side ?? THREE.FrontSide;
+          pbrMaterials!.set(node, pbrMaterial);
         }
       });
     }
@@ -1659,8 +1912,10 @@ export class ImpostorBaker {
 
     for (let rowIdx = 0; rowIdx < gridSizeY; rowIdx++) {
       for (let colIdx = 0; colIdx < gridSizeX; colIdx++) {
-        const pixelX = (colIdx / gridSizeX) * atlasWidth;
-        const pixelY = (rowIdx / gridSizeY) * atlasHeight;
+        const pixelX = Math.floor((colIdx / gridSizeX) * atlasWidth);
+        const pixelY = Math.floor((rowIdx / gridSizeY) * atlasHeight);
+        const scissorWidth = Math.min(cellWidth, atlasWidth - pixelX);
+        const scissorHeight = Math.min(cellHeight, atlasHeight - pixelY);
         const flatIdx = rowIdx * gridSizeX + colIdx;
 
         const px = viewPoints[flatIdx * 3];
@@ -1687,14 +1942,14 @@ export class ImpostorBaker {
 
         this.renderer.setRenderTarget(colorRenderTarget);
         this.renderer.setScissorTest(true);
-        this.renderer.setScissor(pixelX, pixelY, cellWidth, cellHeight);
-        this.renderer.setViewport(pixelX, pixelY, cellWidth, cellHeight);
+        this.renderer.setScissor(pixelX, pixelY, scissorWidth, scissorHeight);
+        this.renderer.setViewport(pixelX, pixelY, scissorWidth, scissorHeight);
         this.renderer.setClearColor(
           backgroundColor ?? 0x000000,
           backgroundAlpha ?? 0,
         );
         this.renderer.clear();
-        this.renderer.render(this.renderScene, this.renderCamera);
+        await this.doRender(this.renderScene, this.renderCamera);
 
         // =====================================================================
         // PASS 2: NORMALS (view-space)
@@ -1712,12 +1967,12 @@ export class ImpostorBaker {
 
         this.renderer.setRenderTarget(normalRenderTarget);
         this.renderer.setScissorTest(true);
-        this.renderer.setScissor(pixelX, pixelY, cellWidth, cellHeight);
-        this.renderer.setViewport(pixelX, pixelY, cellWidth, cellHeight);
+        this.renderer.setScissor(pixelX, pixelY, scissorWidth, scissorHeight);
+        this.renderer.setViewport(pixelX, pixelY, scissorWidth, scissorHeight);
         // Neutral normal: (0,0,1) facing camera → encoded as (0.5, 0.5, 1.0) → 0x8080ff
         this.renderer.setClearColor(0x8080ff, 1);
         this.renderer.clear();
-        this.renderer.render(this.renderScene, this.renderCamera);
+        await this.doRender(this.renderScene, this.renderCamera);
 
         // =====================================================================
         // PASS 3: DEPTH (linear)
@@ -1730,12 +1985,12 @@ export class ImpostorBaker {
 
         this.renderer.setRenderTarget(depthRenderTarget);
         this.renderer.setScissorTest(true);
-        this.renderer.setScissor(pixelX, pixelY, cellWidth, cellHeight);
-        this.renderer.setViewport(pixelX, pixelY, cellWidth, cellHeight);
+        this.renderer.setScissor(pixelX, pixelY, scissorWidth, scissorHeight);
+        this.renderer.setViewport(pixelX, pixelY, scissorWidth, scissorHeight);
         // Clear to max depth (1.0 = far plane, fully transparent areas)
         this.renderer.setClearColor(0xffffff, 0);
         this.renderer.clear();
-        this.renderer.render(this.renderScene, this.renderCamera);
+        await this.doRender(this.renderScene, this.renderCamera);
 
         // =====================================================================
         // PASS 4: PBR CHANNELS (if COMPLETE mode)
@@ -1749,12 +2004,17 @@ export class ImpostorBaker {
 
           this.renderer.setRenderTarget(pbrRenderTarget);
           this.renderer.setScissorTest(true);
-          this.renderer.setScissor(pixelX, pixelY, cellWidth, cellHeight);
-          this.renderer.setViewport(pixelX, pixelY, cellWidth, cellHeight);
+          this.renderer.setScissor(pixelX, pixelY, scissorWidth, scissorHeight);
+          this.renderer.setViewport(
+            pixelX,
+            pixelY,
+            scissorWidth,
+            scissorHeight,
+          );
           // Default PBR: roughness=0.8, metallic=0, ao=1.0
           this.renderer.setClearColor(0xcc00ff, 0); // R=0.8, G=0, B=1.0 approximately
           this.renderer.clear();
-          this.renderer.render(this.renderScene, this.renderCamera);
+          await this.doRender(this.renderScene, this.renderCamera);
         }
 
         // Restore color space for next cell's albedo pass
@@ -1799,6 +2059,28 @@ export class ImpostorBaker {
     depthMaterial.dispose();
     unlitMaterials.forEach((mat) => mat.dispose());
     pbrMaterials?.forEach((mat) => mat.dispose());
+
+    // Mark textures as needing update for proper GPU upload (skip RTT textures)
+    if (!colorRenderTarget.texture.isRenderTargetTexture) {
+      colorRenderTarget.texture.needsUpdate = true;
+    }
+    if (!normalRenderTarget.texture.isRenderTargetTexture) {
+      normalRenderTarget.texture.needsUpdate = true;
+    }
+    if (!depthRenderTarget.texture.isRenderTargetTexture) {
+      depthRenderTarget.texture.needsUpdate = true;
+    }
+    if (pbrRenderTarget && !pbrRenderTarget.texture.isRenderTargetTexture) {
+      pbrRenderTarget.texture.needsUpdate = true;
+    }
+
+    // Ensure GPU operations complete by doing a final flush
+    // This is critical for WebGPU - without it, textures may not be ready when sampled
+    this.renderer.setRenderTarget(null);
+    if (this.renderer.renderAsync) {
+      // Force a frame flush to ensure all RTT operations complete
+      await this.renderer.renderAsync(new THREE.Scene(), this.renderCamera);
+    }
 
     return {
       atlasTexture: colorRenderTarget.texture,

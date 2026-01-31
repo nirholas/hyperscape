@@ -7,6 +7,7 @@
  */
 
 import * as THREE from "three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 import type {
   OctahedronTypeValue,
   OctahedronMeshData,
@@ -303,10 +304,10 @@ export function buildOctahedronMesh(
   });
 
   // Create meshes
-  const wireframeMesh = new THREE.Mesh(
-    geometry,
-    new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true }),
-  );
+  const wireframeMat = new MeshBasicNodeMaterial();
+  wireframeMat.color = new THREE.Color(0xffffff);
+  wireframeMat.wireframe = true;
+  const wireframeMesh = new THREE.Mesh(geometry, wireframeMat);
   const filledMesh = new THREE.Mesh(geometry, createDebugMaterial());
 
   // Apply position

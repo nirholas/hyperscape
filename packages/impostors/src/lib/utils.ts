@@ -3,6 +3,7 @@
  */
 
 import * as THREE from "three";
+import { MeshBasicNodeMaterial, MeshStandardNodeMaterial } from "three/webgpu";
 
 /**
  * Create a colored cube with different colors on each face (useful for debugging)
@@ -19,9 +20,11 @@ export function createColoredCube(size: number = 1): THREE.Mesh {
     0x00ffff, // Cyan - -Z
   ];
 
-  const materials = colors.map(
-    (color) => new THREE.MeshBasicMaterial({ color }),
-  );
+  const materials = colors.map((color) => {
+    const mat = new MeshBasicNodeMaterial();
+    mat.color = new THREE.Color(color);
+    return mat;
+  });
 
   return new THREE.Mesh(geometry, materials);
 }
@@ -99,7 +102,8 @@ export function computeCombinedBoundingSphere(
  */
 export function createTestTorusKnot(): THREE.Mesh {
   const geometry = new THREE.TorusKnotGeometry(0.5, 0.15, 100, 16);
-  const material = new THREE.MeshStandardMaterial({ color: 0xff69b4 });
+  const material = new MeshStandardNodeMaterial();
+  material.color = new THREE.Color(0xff69b4);
   return new THREE.Mesh(geometry, material);
 }
 

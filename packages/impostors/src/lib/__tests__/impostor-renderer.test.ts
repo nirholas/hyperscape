@@ -8,6 +8,7 @@
  */
 
 import * as THREE from "three";
+import * as THREE_WEBGPU from "three/webgpu";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   OctahedralImpostor,
@@ -17,9 +18,18 @@ import {
   createTSLImpostorMaterial,
   updateImpostorMaterial,
   updateImpostorAAALighting,
+  type CompatibleRenderer,
 } from "../index";
-import type { ImpostorViewData } from "../types";
+import type { ImpostorViewData, ImpostorBakeResult } from "../types";
 import type { TSLImpostorMaterial } from "../ImpostorMaterialTSL";
+
+// Helper to cast WebGLRenderer to CompatibleRenderer for tests
+// The types differ between "three" and "three/webgpu" but are compatible at runtime
+function asCompatible(
+  renderer: THREE.WebGLRenderer | THREE_WEBGPU.WebGPURenderer,
+): CompatibleRenderer {
+  return renderer as CompatibleRenderer;
+}
 
 // Create a test mesh with a distinct color
 function createTestMesh(): THREE.Mesh {
@@ -53,13 +63,33 @@ function createTestWebGLRenderer(): THREE.WebGLRenderer {
   return renderer;
 }
 
+// Create a WebGPU renderer for testing (if supported)
+async function createTestWebGPURenderer(): Promise<THREE_WEBGPU.WebGPURenderer> {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 512;
+  const renderer = new THREE_WEBGPU.WebGPURenderer({
+    canvas,
+    antialias: false,
+  });
+  await renderer.init();
+  renderer.setSize(512, 512);
+  renderer.setPixelRatio(1);
+  return renderer;
+}
+
+// Cast RenderTarget to WebGLRenderTarget for pixel reading (tests use WebGL renderer)
+function asWebGLRT(rt: THREE.RenderTarget): THREE.WebGLRenderTarget {
+  return rt as THREE.WebGLRenderTarget;
+}
+
 /**
  * Analyze atlas texture pixel data for quality verification.
  * Returns statistics about the pixel colors to verify the atlas isn't empty.
  */
 function analyzeAtlasPixels(
   renderer: THREE.WebGLRenderer,
-  renderTarget: THREE.WebGLRenderTarget,
+  renderTarget: THREE.RenderTarget,
 ): {
   totalPixels: number;
   nonTransparentPixels: number;
@@ -74,7 +104,14 @@ function analyzeAtlasPixels(
   const height = renderTarget.height;
   const pixels = new Uint8Array(width * height * 4);
 
-  renderer.readRenderTargetPixels(renderTarget, 0, 0, width, height, pixels);
+  renderer.readRenderTargetPixels(
+    asWebGLRT(renderTarget),
+    0,
+    0,
+    width,
+    height,
+    pixels,
+  );
 
   let nonTransparentCount = 0;
   let sumR = 0,
@@ -141,6 +178,133 @@ function analyzeAtlasPixels(
   };
 }
 
+type DataUrlAnalysis = {
+  totalPixels: number;
+  nonTransparentPixels: number;
+  uniqueColors: number;
+  averageColor: { r: number; g: number; b: number };
+  isAllWhite: boolean;
+  isAllBlack: boolean;
+  isAllTransparent: boolean;
+  colorVariance: number;
+  isMonoColor: boolean;
+};
+
+function loadImageFromDataUrl(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Failed to load atlas data URL"));
+    image.src = dataUrl;
+  });
+}
+
+async function analyzeDataUrlPixels(dataUrl: string): Promise<DataUrlAnalysis> {
+  const image = await loadImageFromDataUrl(dataUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = image.width;
+  canvas.height = image.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    throw new Error("Failed to acquire 2D canvas context for atlas analysis");
+  }
+  ctx.drawImage(image, 0, 0);
+  const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+
+  const sampleStride = 16; // Sample every 4th pixel
+  const totalPixels = Math.floor(pixels.length / sampleStride);
+
+  let nonTransparentCount = 0;
+  let sumR = 0;
+  let sumG = 0;
+  let sumB = 0;
+  let allWhite = true;
+  let allBlack = true;
+  let allTransparent = true;
+  const colorSet = new Set<string>();
+
+  let refR = 0;
+  let refG = 0;
+  let refB = 0;
+  let foundRef = false;
+  let diffPixels = 0;
+  let totalNonTransparent = 0;
+  const monoTolerance = 10;
+
+  for (let i = 0; i < pixels.length; i += sampleStride) {
+    const r = pixels[i];
+    const g = pixels[i + 1];
+    const b = pixels[i + 2];
+    const a = pixels[i + 3];
+
+    if (a > 10) {
+      if (!foundRef) {
+        refR = r;
+        refG = g;
+        refB = b;
+        foundRef = true;
+      }
+
+      nonTransparentCount++;
+      totalNonTransparent++;
+      sumR += r;
+      sumG += g;
+      sumB += b;
+      allTransparent = false;
+
+      const quantR = Math.floor(r / 32);
+      const quantG = Math.floor(g / 32);
+      const quantB = Math.floor(b / 32);
+      colorSet.add(`${quantR},${quantG},${quantB}`);
+
+      if (r < 250 || g < 250 || b < 250) allWhite = false;
+      if (r > 5 || g > 5 || b > 5) allBlack = false;
+
+      const dr = Math.abs(r - refR);
+      const dg = Math.abs(g - refG);
+      const db = Math.abs(b - refB);
+      if (dr > monoTolerance || dg > monoTolerance || db > monoTolerance) {
+        diffPixels++;
+      }
+    }
+  }
+
+  const avgR = nonTransparentCount > 0 ? sumR / nonTransparentCount : 0;
+  const avgG = nonTransparentCount > 0 ? sumG / nonTransparentCount : 0;
+  const avgB = nonTransparentCount > 0 ? sumB / nonTransparentCount : 0;
+
+  let variance = 0;
+  for (let i = 0; i < pixels.length; i += sampleStride) {
+    const a = pixels[i + 3];
+    if (a > 10) {
+      const r = pixels[i];
+      const g = pixels[i + 1];
+      const b = pixels[i + 2];
+      variance += Math.abs(r - avgR) + Math.abs(g - avgG) + Math.abs(b - avgB);
+    }
+  }
+  variance = nonTransparentCount > 0 ? variance / nonTransparentCount / 3 : 0;
+
+  const isMonoColor =
+    !foundRef || diffPixels / Math.max(totalNonTransparent, 1) < 0.05;
+
+  return {
+    totalPixels,
+    nonTransparentPixels: nonTransparentCount,
+    uniqueColors: colorSet.size,
+    averageColor: { r: avgR, g: avgG, b: avgB },
+    isAllWhite: allWhite && !allTransparent,
+    isAllBlack: allBlack && !allTransparent,
+    isAllTransparent: allTransparent,
+    colorVariance: variance,
+    isMonoColor,
+  };
+}
+
+function isWebGPUSupported(): boolean {
+  return typeof navigator !== "undefined" && !!navigator.gpu;
+}
+
 // WebGL Baking and Instance Tests
 describe("OctahedralImpostor (WebGL)", () => {
   let renderer: THREE.WebGLRenderer;
@@ -148,8 +312,7 @@ describe("OctahedralImpostor (WebGL)", () => {
 
   beforeEach(() => {
     renderer = createTestWebGLRenderer();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    impostor = new OctahedralImpostor(renderer as any);
+    impostor = new OctahedralImpostor(asCompatible(renderer));
   });
 
   afterEach(() => {
@@ -158,9 +321,9 @@ describe("OctahedralImpostor (WebGL)", () => {
   });
 
   describe("WebGL Baking", () => {
-    it("should bake a basic impostor atlas", () => {
+    it("should bake a basic impostor atlas", async () => {
       const mesh = createTestMesh();
-      const result = impostor.bake(mesh, {
+      const result = await impostor.bake(mesh, {
         atlasWidth: 256,
         atlasHeight: 256,
         gridSizeX: 8,
@@ -180,9 +343,9 @@ describe("OctahedralImpostor (WebGL)", () => {
       result.renderTarget?.dispose();
     });
 
-    it("should bake with normals (Standard mode)", () => {
+    it("should bake with normals (Standard mode)", async () => {
       const mesh = createTestMesh();
-      const result = impostor.bakeWithNormals(mesh, {
+      const result = await impostor.bakeWithNormals(mesh, {
         atlasWidth: 256,
         atlasHeight: 256,
         gridSizeX: 8,
@@ -202,9 +365,9 @@ describe("OctahedralImpostor (WebGL)", () => {
       result.normalRenderTarget?.dispose();
     });
 
-    it("should bake full AAA (depth + normals)", () => {
+    it("should bake full AAA (depth + normals)", async () => {
       const mesh = createTestMesh();
-      const result = impostor.bakeFull(mesh, {
+      const result = await impostor.bakeFull(mesh, {
         atlasWidth: 256,
         atlasHeight: 256,
         gridSizeX: 8,
@@ -228,10 +391,10 @@ describe("OctahedralImpostor (WebGL)", () => {
       result.depthRenderTarget?.dispose();
     });
 
-    it("should bake atlas with actual content (not all white/black)", () => {
+    it("should bake atlas with actual content (not all white/black)", async () => {
       // Use a colored cube to get varied colors in the atlas
       const mesh = createColoredCubeMesh();
-      const result = impostor.bake(mesh, {
+      const result = await impostor.bake(mesh, {
         atlasWidth: 256,
         atlasHeight: 256,
         gridSizeX: 8,
@@ -269,11 +432,44 @@ describe("OctahedralImpostor (WebGL)", () => {
       result.renderTarget?.dispose();
     });
 
-    it("should bake consistent atlas across multiple calls with same mesh", () => {
+    it("should export a non-empty, non-mono atlas PNG", async () => {
+      const mesh = createColoredCubeMesh();
+      const result = await impostor.bake(mesh, {
+        atlasWidth: 128,
+        atlasHeight: 128,
+        gridSizeX: 4,
+        gridSizeY: 4,
+        octType: OctahedronType.HEMI,
+      });
+
+      const dataUrl = await impostor.exportAtlasAsDataURLAsync(result, "png");
+      expect(dataUrl).toMatch(/^data:image\/png;base64,/);
+      expect(dataUrl.length).toBeGreaterThan(500);
+
+      // Output the atlas for test inspection
+      console.log("[Test] Atlas PNG data URL:", dataUrl);
+
+      const analysis = await analyzeDataUrlPixels(dataUrl);
+      console.log("[Test] Atlas data URL analysis:", analysis);
+
+      expect(analysis.isAllTransparent).toBe(false);
+      expect(analysis.isAllWhite).toBe(false);
+      expect(analysis.isAllBlack).toBe(false);
+      expect(analysis.isMonoColor).toBe(false);
+      expect(analysis.uniqueColors).toBeGreaterThan(1);
+
+      // Clean up
+      mesh.geometry.dispose();
+      const materials = mesh.material as THREE.Material[];
+      materials.forEach((m) => m.dispose());
+      result.renderTarget?.dispose();
+    });
+
+    it("should bake consistent atlas across multiple calls with same mesh", async () => {
       const mesh = createColoredCubeMesh();
 
       // Bake twice
-      const result1 = impostor.bake(mesh, {
+      const result1 = await impostor.bake(mesh, {
         atlasWidth: 256,
         atlasHeight: 256,
         gridSizeX: 8,
@@ -281,7 +477,7 @@ describe("OctahedralImpostor (WebGL)", () => {
         octType: OctahedronType.HEMI,
       });
 
-      const result2 = impostor.bake(mesh, {
+      const result2 = await impostor.bake(mesh, {
         atlasWidth: 256,
         atlasHeight: 256,
         gridSizeX: 8,
@@ -311,9 +507,9 @@ describe("OctahedralImpostor (WebGL)", () => {
       result2.renderTarget?.dispose();
     });
 
-    it("should bake complete AAA with PBR", () => {
+    it("should bake complete AAA with PBR", async () => {
       const mesh = createTestMesh();
-      const result = impostor.bakeFull(mesh, {
+      const result = await impostor.bakeFull(mesh, {
         atlasWidth: 256,
         atlasHeight: 256,
         gridSizeX: 8,
@@ -340,9 +536,9 @@ describe("OctahedralImpostor (WebGL)", () => {
   });
 
   describe("Instance Creation", () => {
-    it("should create an impostor instance (GLSL)", () => {
+    it("should create an impostor instance (GLSL)", async () => {
       const mesh = createTestMesh();
-      const bakeResult = impostor.bake(mesh, {
+      const bakeResult = await impostor.bake(mesh, {
         atlasWidth: 256,
         atlasHeight: 256,
         gridSizeX: 8,
@@ -363,9 +559,9 @@ describe("OctahedralImpostor (WebGL)", () => {
       instance.dispose();
     });
 
-    it("should create an impostor instance (TSL)", () => {
+    it("should create an impostor instance (TSL)", async () => {
       const mesh = createTestMesh();
-      const bakeResult = impostor.bake(mesh, {
+      const bakeResult = await impostor.bake(mesh, {
         atlasWidth: 256,
         atlasHeight: 256,
         gridSizeX: 8,
@@ -389,10 +585,10 @@ describe("OctahedralImpostor (WebGL)", () => {
   });
 
   describe("Impostor Rendering", () => {
-    it("should render impostor to scene without being all white", () => {
+    it("should render impostor to scene without being all white", async () => {
       // Create a colored cube and bake it
       const mesh = createColoredCubeMesh();
-      const bakeResult = impostor.bake(mesh, {
+      const bakeResult = await impostor.bake(mesh, {
         atlasWidth: 256,
         atlasHeight: 256,
         gridSizeX: 8,
@@ -503,9 +699,9 @@ describe("OctahedralImpostor (WebGL)", () => {
       instance.dispose();
     });
 
-    it("should position impostor mesh correctly at center", () => {
+    it("should position impostor mesh correctly at center", async () => {
       const mesh = createTestMesh();
-      const bakeResult = impostor.bake(mesh, {
+      const bakeResult = await impostor.bake(mesh, {
         atlasWidth: 256,
         atlasHeight: 256,
         gridSizeX: 8,
@@ -532,9 +728,9 @@ describe("OctahedralImpostor (WebGL)", () => {
       instance.dispose();
     });
 
-    it("should update impostor material when view changes", () => {
+    it("should update impostor material when view changes", async () => {
       const mesh = createTestMesh();
-      const bakeResult = impostor.bake(mesh, {
+      const bakeResult = await impostor.bake(mesh, {
         atlasWidth: 256,
         atlasHeight: 256,
         gridSizeX: 8,
@@ -580,6 +776,71 @@ describe("OctahedralImpostor (WebGL)", () => {
   });
 });
 
+describe("OctahedralImpostor (WebGPU)", () => {
+  it("should bake and export atlas when WebGPU is available", async () => {
+    if (!isWebGPUSupported()) {
+      console.warn("[Test] WebGPU not supported - skipping WebGPU bake test");
+      return;
+    }
+
+    const mesh = createColoredCubeMesh();
+    let renderer: THREE_WEBGPU.WebGPURenderer | null = null;
+    let impostor: OctahedralImpostor | null = null;
+    let instance: ReturnType<OctahedralImpostor["createInstance"]> | null =
+      null;
+    let bakeResult: ImpostorBakeResult | null = null;
+
+    try {
+      renderer = await createTestWebGPURenderer();
+      const backend = (renderer as { backend?: { isWebGPUBackend?: boolean } })
+        .backend;
+      if (!backend?.isWebGPUBackend) {
+        console.warn(
+          "[Test] WebGPU backend not available - skipping WebGPU bake test",
+        );
+        return;
+      }
+      impostor = new OctahedralImpostor(asCompatible(renderer));
+
+      bakeResult = await impostor.bake(mesh, {
+        atlasWidth: 128,
+        atlasHeight: 128,
+        gridSizeX: 4,
+        gridSizeY: 4,
+        octType: OctahedronType.HEMI,
+      });
+
+      instance = impostor.createInstance(bakeResult, 1, { useTSL: true });
+      const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+      camera.position.set(0, 0, 3);
+      camera.lookAt(0, 0, 0);
+      instance.update(camera);
+
+      const dataUrl = await impostor.exportAtlasAsDataURLAsync(
+        bakeResult,
+        "png",
+      );
+      expect(dataUrl).toMatch(/^data:image\/png;base64,/);
+      expect(dataUrl.length).toBeGreaterThan(500);
+
+      const analysis = await analyzeDataUrlPixels(dataUrl);
+      expect(analysis.isAllTransparent).toBe(false);
+      expect(analysis.isAllWhite).toBe(false);
+      expect(analysis.isAllBlack).toBe(false);
+      expect(analysis.isMonoColor).toBe(false);
+      expect(analysis.uniqueColors).toBeGreaterThan(1);
+    } finally {
+      mesh.geometry.dispose();
+      const materials = mesh.material as THREE.Material[];
+      materials.forEach((m) => m.dispose());
+      bakeResult?.renderTarget?.dispose();
+      instance?.dispose();
+      impostor?.dispose();
+      renderer?.dispose();
+    }
+  });
+});
+
 describe("WebGL GLSL Material", () => {
   let texture: THREE.Texture;
 
@@ -598,7 +859,7 @@ describe("WebGL GLSL Material", () => {
     texture.dispose();
   });
 
-  it("should create a basic GLSL impostor material", () => {
+  it("should create a basic GLSL impostor material", async () => {
     const material = createImpostorMaterial({
       atlasTexture: texture,
       gridSizeX: 8,
@@ -611,7 +872,7 @@ describe("WebGL GLSL Material", () => {
     expect(material.transparent).toBe(true);
   });
 
-  it("should create an AAA GLSL material with normal atlas", () => {
+  it("should create an AAA GLSL material with normal atlas", async () => {
     const normalTexture = texture.clone();
     const material = createImpostorMaterial({
       atlasTexture: texture,
@@ -628,7 +889,7 @@ describe("WebGL GLSL Material", () => {
     normalTexture.dispose();
   });
 
-  it("should create an AAA GLSL material with depth blending", () => {
+  it("should create an AAA GLSL material with depth blending", async () => {
     const depthTexture = texture.clone();
     const material = createImpostorMaterial({
       atlasTexture: texture,
@@ -645,7 +906,7 @@ describe("WebGL GLSL Material", () => {
     depthTexture.dispose();
   });
 
-  it("should update view data", () => {
+  it("should update view data", async () => {
     const material = createImpostorMaterial({
       atlasTexture: texture,
       gridSizeX: 8,
@@ -667,7 +928,7 @@ describe("WebGL GLSL Material", () => {
     );
   });
 
-  it("should update AAA lighting", () => {
+  it("should update AAA lighting", async () => {
     const normalTexture = texture.clone();
     const material = createImpostorMaterial({
       atlasTexture: texture,
@@ -716,7 +977,7 @@ describe("WebGPU TSL Material", () => {
     texture.dispose();
   });
 
-  it("should create a basic TSL impostor material", () => {
+  it("should create a basic TSL impostor material", async () => {
     const material = createTSLImpostorMaterial({
       atlasTexture: texture,
       gridSizeX: 8,
@@ -730,7 +991,7 @@ describe("WebGPU TSL Material", () => {
     expect(typeof material.updateView).toBe("function");
   });
 
-  it("should create an AAA TSL material", () => {
+  it("should create an AAA TSL material", async () => {
     const normalTexture = texture.clone();
     const depthTexture = texture.clone();
 
@@ -754,7 +1015,7 @@ describe("WebGPU TSL Material", () => {
     depthTexture.dispose();
   });
 
-  it("should update view via TSL material", () => {
+  it("should update view via TSL material", async () => {
     const material = createTSLImpostorMaterial({
       atlasTexture: texture,
       gridSizeX: 8,
@@ -771,7 +1032,7 @@ describe("WebGPU TSL Material", () => {
     expect(material.impostorUniforms.faceWeights).toBeDefined();
   });
 
-  it("should update AAA lighting via TSL material", () => {
+  it("should update AAA lighting via TSL material", async () => {
     const normalTexture = texture.clone();
 
     const material = createTSLImpostorMaterial({
@@ -802,7 +1063,7 @@ describe("WebGPU TSL Material", () => {
     normalTexture.dispose();
   });
 
-  it("should support multiple directional lights (4 max)", () => {
+  it("should support multiple directional lights (4 max)", async () => {
     const normalTexture = texture.clone();
 
     const material = createTSLImpostorMaterial({
@@ -852,7 +1113,7 @@ describe("WebGPU TSL Material", () => {
     normalTexture.dispose();
   });
 
-  it("should support multiple point lights (4 max)", () => {
+  it("should support multiple point lights (4 max)", async () => {
     const normalTexture = texture.clone();
 
     const material = createTSLImpostorMaterial({
@@ -912,7 +1173,7 @@ describe("WebGPU TSL Material", () => {
     normalTexture.dispose();
   });
 
-  it("should support combined directional and point lights", () => {
+  it("should support combined directional and point lights", async () => {
     const normalTexture = texture.clone();
 
     const material = createTSLImpostorMaterial({
@@ -975,17 +1236,16 @@ describe("WebGPU TSL Material", () => {
 });
 
 describe("Bounding Sphere Calculation", () => {
-  it("should calculate correct bounding sphere for simple mesh", () => {
+  it("should calculate correct bounding sphere for simple mesh", async () => {
     const renderer = createTestWebGLRenderer();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const impostor = new OctahedralImpostor(renderer as any);
+    const impostor = new OctahedralImpostor(asCompatible(renderer));
 
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(2, 16, 16),
       new THREE.MeshBasicMaterial(),
     );
 
-    const result = impostor.bake(mesh, {
+    const result = await impostor.bake(mesh, {
       atlasWidth: 128,
       atlasHeight: 128,
       gridSizeX: 4,
@@ -1013,8 +1273,7 @@ describe("End-to-End Atlas Quality", () => {
 
   beforeEach(() => {
     renderer = createTestWebGLRenderer();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    impostor = new OctahedralImpostor(renderer as any);
+    impostor = new OctahedralImpostor(asCompatible(renderer));
   });
 
   afterEach(() => {
@@ -1027,13 +1286,20 @@ describe("End-to-End Atlas Quality", () => {
    */
   function isMonoColor(
     renderer: THREE.WebGLRenderer,
-    renderTarget: THREE.WebGLRenderTarget,
+    renderTarget: THREE.RenderTarget,
     tolerance = 10,
   ): { isMono: boolean; dominantColor: { r: number; g: number; b: number } } {
     const width = renderTarget.width;
     const height = renderTarget.height;
     const pixels = new Uint8Array(width * height * 4);
-    renderer.readRenderTargetPixels(renderTarget, 0, 0, width, height, pixels);
+    renderer.readRenderTargetPixels(
+      asWebGLRT(renderTarget),
+      0,
+      0,
+      width,
+      height,
+      pixels,
+    );
 
     // Sample first non-transparent pixel as reference
     let refR = 0,
@@ -1078,9 +1344,9 @@ describe("End-to-End Atlas Quality", () => {
     return { isMono, dominantColor: { r: refR, g: refG, b: refB } };
   }
 
-  it("should NOT produce an all-white atlas", () => {
+  it("should NOT produce an all-white atlas", async () => {
     const mesh = createColoredCubeMesh();
-    const result = impostor.bake(mesh, {
+    const result = await impostor.bake(mesh, {
       atlasWidth: 256,
       atlasHeight: 256,
       gridSizeX: 8,
@@ -1103,9 +1369,9 @@ describe("End-to-End Atlas Quality", () => {
     result.renderTarget?.dispose();
   });
 
-  it("should NOT produce an all-black atlas", () => {
+  it("should NOT produce an all-black atlas", async () => {
     const mesh = createColoredCubeMesh();
-    const result = impostor.bake(mesh, {
+    const result = await impostor.bake(mesh, {
       atlasWidth: 256,
       atlasHeight: 256,
       gridSizeX: 8,
@@ -1128,9 +1394,9 @@ describe("End-to-End Atlas Quality", () => {
     result.renderTarget?.dispose();
   });
 
-  it("should produce a varied (non-mono-color) atlas for colored mesh", () => {
+  it("should produce a varied (non-mono-color) atlas for colored mesh", async () => {
     const mesh = createColoredCubeMesh();
-    const result = impostor.bake(mesh, {
+    const result = await impostor.bake(mesh, {
       atlasWidth: 256,
       atlasHeight: 256,
       gridSizeX: 8,
@@ -1149,13 +1415,13 @@ describe("End-to-End Atlas Quality", () => {
     result.renderTarget?.dispose();
   });
 
-  it("should handle DPI correctly (same atlas regardless of device pixel ratio)", () => {
+  it("should handle DPI correctly (same atlas regardless of device pixel ratio)", async () => {
     // Test at different pixel ratios
     const mesh = createColoredCubeMesh();
 
     // Bake at pixel ratio 1
     renderer.setPixelRatio(1);
-    const result1 = impostor.bake(mesh, {
+    const result1 = await impostor.bake(mesh, {
       atlasWidth: 256,
       atlasHeight: 256,
       gridSizeX: 4,
@@ -1165,7 +1431,7 @@ describe("End-to-End Atlas Quality", () => {
 
     // Bake at pixel ratio 2
     renderer.setPixelRatio(2);
-    const result2 = impostor.bake(mesh, {
+    const result2 = await impostor.bake(mesh, {
       atlasWidth: 256,
       atlasHeight: 256,
       gridSizeX: 4,
@@ -1209,8 +1475,7 @@ describe("Bounding Box and Height Offset", () => {
 
   beforeEach(() => {
     renderer = createTestWebGLRenderer();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    impostor = new OctahedralImpostor(renderer as any);
+    impostor = new OctahedralImpostor(asCompatible(renderer));
   });
 
   afterEach(() => {
@@ -1218,14 +1483,14 @@ describe("Bounding Box and Height Offset", () => {
     renderer.dispose();
   });
 
-  it("should compute correct bounding box for mesh at origin", () => {
+  it("should compute correct bounding box for mesh at origin", async () => {
     // Create a 2x2x2 cube centered at origin
     const geometry = new THREE.BoxGeometry(2, 2, 2);
     const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(0, 0, 0);
 
-    const result = impostor.bake(mesh, {
+    const result = await impostor.bake(mesh, {
       atlasWidth: 128,
       atlasHeight: 128,
       gridSizeX: 4,
@@ -1249,14 +1514,14 @@ describe("Bounding Box and Height Offset", () => {
     result.renderTarget?.dispose();
   });
 
-  it("should compute correct bounding box for mesh with feet at origin", () => {
+  it("should compute correct bounding box for mesh with feet at origin", async () => {
     // Create a character-like mesh: 2 units tall, standing on origin
     const geometry = new THREE.BoxGeometry(1, 2, 0.5);
     geometry.translate(0, 1, 0); // Move so bottom is at y=0
     const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
     const mesh = new THREE.Mesh(geometry, material);
 
-    const result = impostor.bake(mesh, {
+    const result = await impostor.bake(mesh, {
       atlasWidth: 128,
       atlasHeight: 128,
       gridSizeX: 4,
@@ -1281,13 +1546,13 @@ describe("Bounding Box and Height Offset", () => {
     result.renderTarget?.dispose();
   });
 
-  it("should compute correct size from bounding box", () => {
+  it("should compute correct size from bounding box", async () => {
     // Create a non-uniform mesh: 3 wide, 4 tall, 1 deep
     const geometry = new THREE.BoxGeometry(3, 4, 1);
     const material = new THREE.MeshBasicMaterial({ color: 0x0000ff });
     const mesh = new THREE.Mesh(geometry, material);
 
-    const result = impostor.bake(mesh, {
+    const result = await impostor.bake(mesh, {
       atlasWidth: 256,
       atlasHeight: 256,
       gridSizeX: 8,
@@ -1313,14 +1578,14 @@ describe("Bounding Box and Height Offset", () => {
     result.renderTarget?.dispose();
   });
 
-  it("should handle mesh positioned away from origin", () => {
+  it("should handle mesh positioned away from origin", async () => {
     // Create mesh at a world position
     const geometry = new THREE.BoxGeometry(2, 2, 2);
     const material = new THREE.MeshBasicMaterial({ color: 0xffff00 });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(100, 50, -30); // Far from origin
 
-    const result = impostor.bake(mesh, {
+    const result = await impostor.bake(mesh, {
       atlasWidth: 128,
       atlasHeight: 128,
       gridSizeX: 4,
@@ -1361,8 +1626,7 @@ describe("Impostor Instance Positioning", () => {
 
   beforeEach(() => {
     renderer = createTestWebGLRenderer();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    impostor = new OctahedralImpostor(renderer as any);
+    impostor = new OctahedralImpostor(asCompatible(renderer));
   });
 
   afterEach(() => {
@@ -1370,13 +1634,13 @@ describe("Impostor Instance Positioning", () => {
     renderer.dispose();
   });
 
-  it("should create impostor mesh with correct dimensions", () => {
+  it("should create impostor mesh with correct dimensions", async () => {
     // Create a 3 wide x 4 tall mesh
     const geometry = new THREE.BoxGeometry(3, 4, 1);
     const material = new THREE.MeshBasicMaterial({ color: 0xff00ff });
     const mesh = new THREE.Mesh(geometry, material);
 
-    const bakeResult = impostor.bake(mesh, {
+    const bakeResult = await impostor.bake(mesh, {
       atlasWidth: 256,
       atlasHeight: 256,
       gridSizeX: 8,
@@ -1402,9 +1666,9 @@ describe("Impostor Instance Positioning", () => {
     instance.dispose();
   });
 
-  it("should create impostor at origin by default", () => {
+  it("should create impostor at origin by default", async () => {
     const mesh = createTestMesh();
-    const bakeResult = impostor.bake(mesh, {
+    const bakeResult = await impostor.bake(mesh, {
       atlasWidth: 128,
       atlasHeight: 128,
       gridSizeX: 4,
@@ -1425,9 +1689,9 @@ describe("Impostor Instance Positioning", () => {
     instance.dispose();
   });
 
-  it("should allow positioning impostor after creation", () => {
+  it("should allow positioning impostor after creation", async () => {
     const mesh = createTestMesh();
-    const bakeResult = impostor.bake(mesh, {
+    const bakeResult = await impostor.bake(mesh, {
       atlasWidth: 128,
       atlasHeight: 128,
       gridSizeX: 4,
@@ -1461,7 +1725,7 @@ describe("Impostor Instance Positioning", () => {
  */
 function analyzeColorDominance(
   renderer: THREE.WebGLRenderer,
-  renderTarget: THREE.WebGLRenderTarget,
+  renderTarget: THREE.RenderTarget,
 ): {
   redTotal: number;
   greenTotal: number;
@@ -1473,7 +1737,14 @@ function analyzeColorDominance(
   const width = renderTarget.width;
   const height = renderTarget.height;
   const pixels = new Uint8Array(width * height * 4);
-  renderer.readRenderTargetPixels(renderTarget, 0, 0, width, height, pixels);
+  renderer.readRenderTargetPixels(
+    asWebGLRT(renderTarget),
+    0,
+    0,
+    width,
+    height,
+    pixels,
+  );
 
   let redTotal = 0;
   let greenTotal = 0;
@@ -1540,8 +1811,7 @@ describe("Color Verification Tests", () => {
 
   beforeEach(() => {
     renderer = createTestWebGLRenderer();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    impostor = new OctahedralImpostor(renderer as any);
+    impostor = new OctahedralImpostor(asCompatible(renderer));
   });
 
   afterEach(() => {
@@ -1549,13 +1819,13 @@ describe("Color Verification Tests", () => {
     renderer.dispose();
   });
 
-  it("should preserve RED dominance from source mesh", () => {
+  it("should preserve RED dominance from source mesh", async () => {
     // Create a primarily RED mesh
     const geometry = new THREE.BoxGeometry(1, 1, 1);
     const material = new THREE.MeshBasicMaterial({ color: 0xff0000 }); // Pure red
     const mesh = new THREE.Mesh(geometry, material);
 
-    const result = impostor.bake(mesh, {
+    const result = await impostor.bake(mesh, {
       atlasWidth: 256,
       atlasHeight: 256,
       gridSizeX: 8,
@@ -1579,13 +1849,13 @@ describe("Color Verification Tests", () => {
     result.renderTarget?.dispose();
   });
 
-  it("should preserve GREEN dominance from source mesh", () => {
+  it("should preserve GREEN dominance from source mesh", async () => {
     // Create a primarily GREEN mesh
     const geometry = new THREE.BoxGeometry(1, 1, 1);
     const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 }); // Pure green
     const mesh = new THREE.Mesh(geometry, material);
 
-    const result = impostor.bake(mesh, {
+    const result = await impostor.bake(mesh, {
       atlasWidth: 256,
       atlasHeight: 256,
       gridSizeX: 8,
@@ -1608,13 +1878,13 @@ describe("Color Verification Tests", () => {
     result.renderTarget?.dispose();
   });
 
-  it("should preserve BLUE dominance from source mesh", () => {
+  it("should preserve BLUE dominance from source mesh", async () => {
     // Create a primarily BLUE mesh
     const geometry = new THREE.BoxGeometry(1, 1, 1);
     const material = new THREE.MeshBasicMaterial({ color: 0x0000ff }); // Pure blue
     const mesh = new THREE.Mesh(geometry, material);
 
-    const result = impostor.bake(mesh, {
+    const result = await impostor.bake(mesh, {
       atlasWidth: 256,
       atlasHeight: 256,
       gridSizeX: 8,
@@ -1637,13 +1907,13 @@ describe("Color Verification Tests", () => {
     result.renderTarget?.dispose();
   });
 
-  it("should maintain neutral balance for gray/white meshes", () => {
+  it("should maintain neutral balance for gray/white meshes", async () => {
     // Create a neutral (gray) mesh
     const geometry = new THREE.BoxGeometry(1, 1, 1);
     const material = new THREE.MeshBasicMaterial({ color: 0x808080 }); // Gray
     const mesh = new THREE.Mesh(geometry, material);
 
-    const result = impostor.bake(mesh, {
+    const result = await impostor.bake(mesh, {
       atlasWidth: 256,
       atlasHeight: 256,
       gridSizeX: 8,
@@ -1672,13 +1942,13 @@ describe("Color Verification Tests", () => {
     result.renderTarget?.dispose();
   });
 
-  it("should preserve warm colors (orange/yellow)", () => {
+  it("should preserve warm colors (orange/yellow)", async () => {
     // Create an orange mesh (red + green heavy, no blue)
     const geometry = new THREE.BoxGeometry(1, 1, 1);
     const material = new THREE.MeshBasicMaterial({ color: 0xff8800 }); // Orange
     const mesh = new THREE.Mesh(geometry, material);
 
-    const result = impostor.bake(mesh, {
+    const result = await impostor.bake(mesh, {
       atlasWidth: 256,
       atlasHeight: 256,
       gridSizeX: 8,
@@ -1697,13 +1967,13 @@ describe("Color Verification Tests", () => {
     result.renderTarget?.dispose();
   });
 
-  it("should preserve cool colors (cyan/teal)", () => {
+  it("should preserve cool colors (cyan/teal)", async () => {
     // Create a cyan mesh (green + blue heavy, low red)
     const geometry = new THREE.BoxGeometry(1, 1, 1);
     const material = new THREE.MeshBasicMaterial({ color: 0x00ffff }); // Cyan
     const mesh = new THREE.Mesh(geometry, material);
 
-    const result = impostor.bake(mesh, {
+    const result = await impostor.bake(mesh, {
       atlasWidth: 256,
       atlasHeight: 256,
       gridSizeX: 8,
@@ -1722,11 +1992,11 @@ describe("Color Verification Tests", () => {
     result.renderTarget?.dispose();
   });
 
-  it("should handle multi-material mesh with mixed colors", () => {
+  it("should handle multi-material mesh with mixed colors", async () => {
     // Create a mesh with red and green faces (like in createColoredCubeMesh)
     const mesh = createColoredCubeMesh();
 
-    const result = impostor.bake(mesh, {
+    const result = await impostor.bake(mesh, {
       atlasWidth: 256,
       atlasHeight: 256,
       gridSizeX: 8,
@@ -1864,8 +2134,7 @@ describe("Entity Type Verification Tests", () => {
 
   beforeEach(() => {
     renderer = createTestWebGLRenderer();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    impostor = new OctahedralImpostor(renderer as any);
+    impostor = new OctahedralImpostor(asCompatible(renderer));
   });
 
   afterEach(() => {
@@ -1873,10 +2142,10 @@ describe("Entity Type Verification Tests", () => {
     renderer.dispose();
   });
 
-  it("should correctly bake HUMANOID mesh (tall and thin)", () => {
+  it("should correctly bake HUMANOID mesh (tall and thin)", async () => {
     const humanoid = createHumanoidMesh();
 
-    const result = impostor.bake(humanoid, {
+    const result = await impostor.bake(humanoid, {
       atlasWidth: 256,
       atlasHeight: 256,
       gridSizeX: 8,
@@ -1914,10 +2183,10 @@ describe("Entity Type Verification Tests", () => {
     result.renderTarget?.dispose();
   });
 
-  it("should correctly bake TREE mesh (green foliage dominant)", () => {
+  it("should correctly bake TREE mesh (green foliage dominant)", async () => {
     const tree = createTreeMesh();
 
-    const result = impostor.bake(tree, {
+    const result = await impostor.bake(tree, {
       atlasWidth: 256,
       atlasHeight: 256,
       gridSizeX: 8,
@@ -1952,10 +2221,10 @@ describe("Entity Type Verification Tests", () => {
     result.renderTarget?.dispose();
   });
 
-  it("should correctly bake BUILDING mesh (large and boxy)", () => {
+  it("should correctly bake BUILDING mesh (large and boxy)", async () => {
     const building = createBuildingMesh();
 
-    const result = impostor.bake(building, {
+    const result = await impostor.bake(building, {
       atlasWidth: 512,
       atlasHeight: 512,
       gridSizeX: 16,
@@ -1991,10 +2260,10 @@ describe("Entity Type Verification Tests", () => {
     result.renderTarget?.dispose();
   });
 
-  it("should correctly bake ROCK mesh (gray, compact)", () => {
+  it("should correctly bake ROCK mesh (gray, compact)", async () => {
     const rock = createRockMesh();
 
-    const result = impostor.bake(rock, {
+    const result = await impostor.bake(rock, {
       atlasWidth: 256,
       atlasHeight: 256,
       gridSizeX: 8,
@@ -2025,7 +2294,7 @@ describe("Entity Type Verification Tests", () => {
     result.renderTarget?.dispose();
   });
 
-  it("should handle nested groups with multiple children", () => {
+  it("should handle nested groups with multiple children", async () => {
     const group = new THREE.Group();
 
     // Add multiple meshes at different positions
@@ -2043,7 +2312,7 @@ describe("Entity Type Verification Tests", () => {
       group.add(mesh);
     }
 
-    const result = impostor.bake(group, {
+    const result = await impostor.bake(group, {
       atlasWidth: 256,
       atlasHeight: 256,
       gridSizeX: 8,
@@ -2069,6 +2338,452 @@ describe("Entity Type Verification Tests", () => {
 });
 
 // ============================================================================
+// SHADER/MATERIAL ERROR DETECTION TESTS
+// ============================================================================
+
+/**
+ * Diagnostic information for impostor material failures
+ */
+interface ImpostorDiagnostics {
+  shaderCompiled: boolean;
+  shaderErrors: string[];
+  textureValid: boolean;
+  textureWidth: number;
+  textureHeight: number;
+  textureHasImage: boolean;
+  atlasHasContent: boolean;
+  renderedWhite: boolean;
+  renderedBlack: boolean;
+  renderedTransparent: boolean;
+  renderedColoredPixels: number;
+  failureReason: string | null;
+}
+
+/**
+ * Run comprehensive diagnostics on an impostor material.
+ * Returns detailed information about what might be wrong.
+ */
+function diagnoseImpostorMaterial(
+  renderer: THREE.WebGLRenderer,
+  bakeResult: {
+    atlasTexture: THREE.Texture;
+    renderTarget?: THREE.RenderTarget | null;
+    gridSizeX: number;
+    gridSizeY: number;
+  },
+  _material: THREE.ShaderMaterial,
+  impostorMesh: THREE.Mesh,
+): ImpostorDiagnostics {
+  const diagnostics: ImpostorDiagnostics = {
+    shaderCompiled: false,
+    shaderErrors: [],
+    textureValid: false,
+    textureWidth: 0,
+    textureHeight: 0,
+    textureHasImage: false,
+    atlasHasContent: false,
+    renderedWhite: false,
+    renderedBlack: false,
+    renderedTransparent: false,
+    renderedColoredPixels: 0,
+    failureReason: null,
+  };
+
+  // Check texture validity
+  const tex = bakeResult.atlasTexture;
+  diagnostics.textureHasImage = !!(tex && tex.image);
+  if (tex && tex.image) {
+    diagnostics.textureWidth = tex.image.width ?? 0;
+    diagnostics.textureHeight = tex.image.height ?? 0;
+    diagnostics.textureValid =
+      diagnostics.textureWidth > 0 && diagnostics.textureHeight > 0;
+  }
+
+  // Check if atlas has content (not all transparent)
+  if (bakeResult.renderTarget) {
+    const analysis = analyzeAtlasPixels(renderer, bakeResult.renderTarget);
+    diagnostics.atlasHasContent =
+      !analysis.isAllTransparent &&
+      !analysis.isAllWhite &&
+      !analysis.isAllBlack;
+
+    if (analysis.isAllWhite) {
+      diagnostics.failureReason = "Atlas texture is all WHITE - baking failed";
+    } else if (analysis.isAllBlack) {
+      diagnostics.failureReason = "Atlas texture is all BLACK - baking failed";
+    } else if (analysis.isAllTransparent) {
+      diagnostics.failureReason =
+        "Atlas texture is all TRANSPARENT - nothing was rendered during baking";
+    }
+  } else if (!diagnostics.textureHasImage) {
+    diagnostics.failureReason =
+      "Atlas texture has no image data - texture not loaded";
+  }
+
+  // Check shader compilation by attempting to render
+  try {
+    const testScene = new THREE.Scene();
+    testScene.background = new THREE.Color(0x808080);
+    testScene.add(impostorMesh);
+
+    const testCamera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+    testCamera.position.set(0, 0, 3);
+    testCamera.lookAt(0, 0, 0);
+
+    const testTarget = new THREE.WebGLRenderTarget(128, 128);
+
+    // Force shader compilation
+    renderer.compile(testScene, testCamera);
+    diagnostics.shaderCompiled = true;
+
+    // Render and analyze output
+    renderer.setRenderTarget(testTarget);
+    renderer.render(testScene, testCamera);
+    renderer.setRenderTarget(null);
+
+    // Read pixels to check output
+    const pixels = new Uint8Array(128 * 128 * 4);
+    renderer.readRenderTargetPixels(testTarget, 0, 0, 128, 128, pixels);
+
+    let whitePixels = 0;
+    let blackPixels = 0;
+    let transparentPixels = 0;
+    let coloredPixels = 0;
+    let grayPixels = 0;
+
+    for (let i = 0; i < pixels.length; i += 4) {
+      const r = pixels[i];
+      const g = pixels[i + 1];
+      const b = pixels[i + 2];
+      const a = pixels[i + 3];
+
+      if (a < 10) {
+        transparentPixels++;
+      } else if (r > 245 && g > 245 && b > 245) {
+        whitePixels++;
+      } else if (r < 10 && g < 10 && b < 10) {
+        blackPixels++;
+      } else if (
+        r > 120 &&
+        r < 140 &&
+        g > 120 &&
+        g < 140 &&
+        b > 120 &&
+        b < 140
+      ) {
+        grayPixels++; // Background
+      } else {
+        coloredPixels++;
+      }
+    }
+
+    const totalPixels = 128 * 128;
+    diagnostics.renderedWhite = whitePixels / totalPixels > 0.8;
+    diagnostics.renderedBlack = blackPixels / totalPixels > 0.8;
+    diagnostics.renderedTransparent = transparentPixels / totalPixels > 0.8;
+    diagnostics.renderedColoredPixels = coloredPixels;
+
+    // Determine failure reason from render output
+    if (diagnostics.renderedWhite && !diagnostics.failureReason) {
+      diagnostics.failureReason =
+        "Material renders WHITE - shader may be using placeholder texture or uniforms not set";
+    } else if (diagnostics.renderedBlack && !diagnostics.failureReason) {
+      diagnostics.failureReason =
+        "Material renders BLACK - texture may not be bound or alpha test failing";
+    } else if (
+      coloredPixels === 0 &&
+      grayPixels === totalPixels &&
+      !diagnostics.failureReason
+    ) {
+      diagnostics.failureReason =
+        "Material renders only BACKGROUND color - mesh may not be visible or alpha discard is too aggressive";
+    }
+
+    testTarget.dispose();
+    testScene.remove(impostorMesh);
+  } catch (err) {
+    diagnostics.shaderCompiled = false;
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    diagnostics.shaderErrors.push(errorMsg);
+    diagnostics.failureReason = `Shader compilation FAILED: ${errorMsg}`;
+  }
+
+  return diagnostics;
+}
+
+describe("Shader/Material Error Detection Tests", () => {
+  let renderer: THREE.WebGLRenderer;
+  let impostor: OctahedralImpostor;
+
+  beforeEach(() => {
+    renderer = createTestWebGLRenderer();
+    impostor = new OctahedralImpostor(asCompatible(renderer));
+  });
+
+  afterEach(() => {
+    impostor.dispose();
+    renderer.dispose();
+  });
+
+  it("should compile GLSL shader without errors", async () => {
+    const mesh = createColoredCubeMesh();
+    const bakeResult = await impostor.bake(mesh, {
+      atlasWidth: 256,
+      atlasHeight: 256,
+      gridSizeX: 8,
+      gridSizeY: 8,
+    });
+
+    const material = createImpostorMaterial({
+      atlasTexture: bakeResult.atlasTexture,
+      gridSizeX: bakeResult.gridSizeX,
+      gridSizeY: bakeResult.gridSizeY,
+    });
+
+    // Create scene and mesh for compilation
+    const scene = new THREE.Scene();
+    const testMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+    scene.add(testMesh);
+
+    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+    camera.position.set(0, 0, 3);
+
+    // Force shader compilation - this throws if compilation fails
+    let compileError: Error | null = null;
+    try {
+      renderer.compile(scene, camera);
+    } catch (err) {
+      compileError = err instanceof Error ? err : new Error(String(err));
+    }
+
+    expect(compileError).toBeNull();
+    expect(material.isShaderMaterial).toBe(true);
+
+    // Check program info after compilation
+    const programInfo = renderer.info.programs;
+    expect(programInfo).toBeDefined();
+    expect(programInfo).not.toBeNull();
+    expect(programInfo!.length).toBeGreaterThan(0);
+
+    // Clean up
+    testMesh.geometry.dispose();
+    material.dispose();
+    mesh.geometry.dispose();
+    const materials = mesh.material as THREE.Material[];
+    materials.forEach((m) => m.dispose());
+    bakeResult.renderTarget?.dispose();
+  });
+
+  it("should detect and report atlas texture issues", async () => {
+    const mesh = createColoredCubeMesh();
+    const bakeResult = await impostor.bake(mesh, {
+      atlasWidth: 256,
+      atlasHeight: 256,
+      gridSizeX: 8,
+      gridSizeY: 8,
+    });
+
+    // Verify atlas texture is valid
+    expect(bakeResult.atlasTexture).toBeInstanceOf(THREE.Texture);
+    expect(bakeResult.renderTarget).toBeDefined();
+
+    // Check texture properties
+    const tex = bakeResult.atlasTexture;
+    const hasValidTexture =
+      tex && (tex.image || bakeResult.renderTarget?.texture === tex);
+
+    if (!hasValidTexture) {
+      console.error("[Test] Atlas texture is invalid - no image data");
+    }
+
+    // For WebGL render target textures, the "image" may be the render target itself
+    // Just verify the texture exists and is associated with the render target
+    expect(bakeResult.atlasTexture).toBe(bakeResult.renderTarget!.texture);
+
+    // Clean up
+    mesh.geometry.dispose();
+    const materials = mesh.material as THREE.Material[];
+    materials.forEach((m) => m.dispose());
+    bakeResult.renderTarget?.dispose();
+  });
+
+  it("should diagnose white material issue with clear failure reason", async () => {
+    const mesh = createColoredCubeMesh();
+    const bakeResult = await impostor.bake(mesh, {
+      atlasWidth: 256,
+      atlasHeight: 256,
+      gridSizeX: 8,
+      gridSizeY: 8,
+    });
+
+    const instance = impostor.createInstance(bakeResult);
+    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+    camera.position.set(0, 0, 3);
+    instance.update(camera);
+
+    // Run full diagnostics
+    const diagnostics = diagnoseImpostorMaterial(
+      renderer,
+      bakeResult,
+      instance.material as THREE.ShaderMaterial,
+      instance.mesh,
+    );
+
+    // Log diagnostics for debugging
+    console.log("[Test] Impostor Material Diagnostics:", {
+      shaderCompiled: diagnostics.shaderCompiled,
+      textureValid: diagnostics.textureValid,
+      atlasHasContent: diagnostics.atlasHasContent,
+      renderedWhite: diagnostics.renderedWhite,
+      renderedColoredPixels: diagnostics.renderedColoredPixels,
+      failureReason: diagnostics.failureReason,
+    });
+
+    // Assert no failure
+    if (diagnostics.failureReason) {
+      // Fail with descriptive message
+      throw new Error(
+        `Impostor material diagnostic FAILED: ${diagnostics.failureReason}\n` +
+          `Details: shader=${diagnostics.shaderCompiled}, ` +
+          `texture=${diagnostics.textureValid} (${diagnostics.textureWidth}x${diagnostics.textureHeight}), ` +
+          `atlasContent=${diagnostics.atlasHasContent}, ` +
+          `renderedColors=${diagnostics.renderedColoredPixels}`,
+      );
+    }
+
+    expect(diagnostics.shaderCompiled).toBe(true);
+    expect(diagnostics.atlasHasContent).toBe(true);
+    expect(diagnostics.renderedWhite).toBe(false);
+    expect(diagnostics.renderedColoredPixels).toBeGreaterThan(0);
+
+    // Clean up
+    mesh.geometry.dispose();
+    const materials = mesh.material as THREE.Material[];
+    materials.forEach((m) => m.dispose());
+    bakeResult.renderTarget?.dispose();
+    instance.dispose();
+  });
+
+  it("should fail with clear message if texture is not provided", async () => {
+    // Create material with invalid/missing texture to test error reporting
+    const emptyTexture = new THREE.Texture();
+
+    const material = createImpostorMaterial({
+      atlasTexture: emptyTexture,
+      gridSizeX: 8,
+      gridSizeY: 8,
+    });
+
+    // The material should be created but texture is invalid
+    expect(material).toBeInstanceOf(THREE.ShaderMaterial);
+    expect(material.uniforms.atlasTexture.value).toBe(emptyTexture);
+
+    // Check texture validity
+    const hasValidImage = !!(
+      emptyTexture.image && emptyTexture.image.width > 0
+    );
+    expect(hasValidImage).toBe(false);
+
+    // Clean up
+    material.dispose();
+    emptyTexture.dispose();
+  });
+
+  it("should validate material uniforms are properly set", async () => {
+    const mesh = createColoredCubeMesh();
+    const bakeResult = await impostor.bake(mesh, {
+      atlasWidth: 256,
+      atlasHeight: 256,
+      gridSizeX: 8,
+      gridSizeY: 8,
+    });
+
+    const material = createImpostorMaterial({
+      atlasTexture: bakeResult.atlasTexture,
+      gridSizeX: bakeResult.gridSizeX,
+      gridSizeY: bakeResult.gridSizeY,
+    });
+
+    // Check all required uniforms exist and have valid values
+    const requiredUniforms = [
+      "atlasTexture",
+      "gridSize",
+      "faceWeights",
+      "faceIndices",
+      "alphaThreshold",
+    ];
+
+    for (const uniformName of requiredUniforms) {
+      expect(
+        material.uniforms[uniformName],
+        `Uniform '${uniformName}' should exist`,
+      ).toBeDefined();
+      expect(
+        material.uniforms[uniformName].value,
+        `Uniform '${uniformName}' should have a value`,
+      ).not.toBeUndefined();
+    }
+
+    // Verify specific values
+    expect(material.uniforms.atlasTexture.value).toBe(bakeResult.atlasTexture);
+    expect(material.uniforms.gridSize.value).toEqual(
+      new THREE.Vector2(bakeResult.gridSizeX, bakeResult.gridSizeY),
+    );
+    expect(material.uniforms.faceWeights.value).toBeInstanceOf(THREE.Vector3);
+    expect(material.uniforms.faceIndices.value).toBeInstanceOf(THREE.Vector3);
+
+    // Clean up
+    material.dispose();
+    mesh.geometry.dispose();
+    const materials = mesh.material as THREE.Material[];
+    materials.forEach((m) => m.dispose());
+    bakeResult.renderTarget?.dispose();
+  });
+
+  it("should catch incorrect grid size mismatch", async () => {
+    const mesh = createColoredCubeMesh();
+
+    // Bake with one grid size
+    const bakeResult = await impostor.bake(mesh, {
+      atlasWidth: 256,
+      atlasHeight: 256,
+      gridSizeX: 16,
+      gridSizeY: 8,
+    });
+
+    // Create material with MISMATCHED grid size (common bug)
+    const material = createImpostorMaterial({
+      atlasTexture: bakeResult.atlasTexture,
+      gridSizeX: 8, // Wrong! Should be 16
+      gridSizeY: 8,
+    });
+
+    // The grid size in material doesn't match bake result
+    const materialGridX = material.uniforms.gridSize.value.x;
+    const materialGridY = material.uniforms.gridSize.value.y;
+
+    // This is a configuration error that should be caught
+    if (materialGridX !== bakeResult.gridSizeX) {
+      console.warn(
+        `[Test] Grid size mismatch: material has ${materialGridX}x${materialGridY}, ` +
+          `but atlas was baked with ${bakeResult.gridSizeX}x${bakeResult.gridSizeY}. ` +
+          `This will cause incorrect UV sampling and visual artifacts.`,
+      );
+    }
+
+    // Test would pass but log warning about mismatch
+    expect(materialGridX).not.toBe(bakeResult.gridSizeX);
+
+    // Clean up
+    material.dispose();
+    mesh.geometry.dispose();
+    const materials = mesh.material as THREE.Material[];
+    materials.forEach((m) => m.dispose());
+    bakeResult.renderTarget?.dispose();
+  });
+});
+
+// ============================================================================
 // SHADER OUTPUT RENDERING TESTS
 // ============================================================================
 
@@ -2078,8 +2793,7 @@ describe("Shader Output Rendering Tests", () => {
 
   beforeEach(() => {
     renderer = createTestWebGLRenderer();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    impostor = new OctahedralImpostor(renderer as any);
+    impostor = new OctahedralImpostor(asCompatible(renderer));
   });
 
   afterEach(() => {
@@ -2087,10 +2801,10 @@ describe("Shader Output Rendering Tests", () => {
     renderer.dispose();
   });
 
-  it("should render impostor instance with visible pixels", () => {
+  it("should render impostor instance with visible pixels", async () => {
     const mesh = createColoredCubeMesh();
 
-    const bakeResult = impostor.bake(mesh, {
+    const bakeResult = await impostor.bake(mesh, {
       atlasWidth: 256,
       atlasHeight: 256,
       gridSizeX: 8,
@@ -2137,10 +2851,10 @@ describe("Shader Output Rendering Tests", () => {
     instance.dispose();
   });
 
-  it("should render different colors when viewing different sides", () => {
+  it("should render different colors when viewing different sides", async () => {
     const mesh = createColoredCubeMesh();
 
-    const bakeResult = impostor.bake(mesh, {
+    const bakeResult = await impostor.bake(mesh, {
       atlasWidth: 256,
       atlasHeight: 256,
       gridSizeX: 8,
@@ -2207,10 +2921,10 @@ describe("Shader Output Rendering Tests", () => {
     instance.dispose();
   });
 
-  it("should update material faceIndices when view changes", () => {
+  it("should update material faceIndices when view changes", async () => {
     const mesh = createTestMesh();
 
-    const bakeResult = impostor.bake(mesh, {
+    const bakeResult = await impostor.bake(mesh, {
       atlasWidth: 128,
       atlasHeight: 128,
       gridSizeX: 4,

@@ -7,7 +7,12 @@
 
 import * as THREE from "three";
 import * as THREE_WEBGPU from "three/webgpu";
+import { MeshBasicNodeMaterial } from "three/webgpu";
+import { texture as tslTexture } from "three/tsl";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+
+/** Material type for WebGPU */
+type BasicMaterial = MeshBasicNodeMaterial;
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { Pane } from "tweakpane";
 
@@ -17,7 +22,6 @@ import {
   PBRBakeMode,
   buildOctahedronMesh,
   lerpOctahedronGeometry,
-  createImpostorMaterial,
   createTSLImpostorMaterial,
   updateImpostorMaterial,
   updateImpostorAAALighting,
@@ -124,7 +128,7 @@ export class ImpostorViewer {
     null;
   private wireframeMesh: THREE.Mesh | null = null;
   private atlasPlaneMesh: THREE.Mesh | null = null;
-  private atlasRenderTarget!: THREE.WebGLRenderTarget;
+  private atlasRenderTarget!: THREE.RenderTarget;
 
   // Octahedron meshes
   private fullOct: OctahedronMeshData | null = null;
@@ -164,7 +168,7 @@ export class ImpostorViewer {
       gridSizeY: config.gridSizeY ?? 31,
       octType: config.octType ?? OctahedronType.HEMI,
       showDebugUI: config.showDebugUI ?? true,
-      pbrMode: config.pbrMode ?? PBRBakeMode.FULL,
+      pbrMode: config.pbrMode ?? PBRBakeMode.BASIC, // Use BASIC for Canvas-based atlas
       rendererType: config.rendererType ?? "webgl",
     };
 
@@ -213,46 +217,56 @@ export class ImpostorViewer {
     this.scene.add(directionalLight);
 
     // Initialize renderer (WebGPU requires async init)
-    this.initRenderer(config.container).then(() => {
-      this.completeInitialization(config.container);
-    });
+    // Use IIFE to handle async in constructor
+    void (async () => {
+      await this.initRenderer(config.container);
+      await this.completeInitialization(config.container);
+    })();
   }
 
   /**
-   * Initialize the appropriate renderer (WebGL or WebGPU)
+   * Create a basic material for WebGPU (MeshBasicNodeMaterial).
+   * Uses colorNode with tslTexture() for render target textures.
+   */
+  private createBasicMaterial(options?: {
+    color?: THREE.ColorRepresentation;
+    map?: THREE.Texture | null;
+    side?: THREE.Side;
+    wireframe?: boolean;
+    transparent?: boolean;
+  }): BasicMaterial {
+    const mat = new MeshBasicNodeMaterial();
+    if (options?.color !== undefined)
+      mat.color = new THREE.Color(options.color);
+    if (options?.map !== undefined && options.map !== null) {
+      // Following Three.js WebGPU RTT example: direct texture() call without Fn() wrapper
+      mat.colorNode = tslTexture(options.map);
+    }
+    if (options?.side !== undefined) mat.side = options.side;
+    if (options?.wireframe !== undefined) mat.wireframe = options.wireframe;
+    if (options?.transparent !== undefined)
+      mat.transparent = options.transparent;
+    return mat;
+  }
+
+  /**
+   * Initialize WebGPU renderer
    */
   private async initRenderer(container: HTMLElement): Promise<void> {
-    if (this.isWebGPU) {
-      // Check WebGPU support
-      if (!navigator.gpu) {
-        console.warn(
-          "[ImpostorViewer] WebGPU not supported, falling back to WebGL",
-        );
-        this.isWebGPU = false;
-        this.rendererType = "webgl";
-      }
+    if (!navigator.gpu) {
+      throw new Error("WebGPU is required");
     }
 
-    if (this.isWebGPU) {
-      // Initialize WebGPU renderer
-      console.log("[ImpostorViewer] Initializing WebGPU renderer...");
-      const webgpuRenderer = new THREE_WEBGPU.WebGPURenderer({
-        antialias: true,
-      });
-      await webgpuRenderer.init();
-      webgpuRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      webgpuRenderer.setSize(container.clientWidth, container.clientHeight);
-      this.renderer = webgpuRenderer;
-      console.log("[ImpostorViewer] WebGPU renderer initialized");
-    } else {
-      // Initialize WebGL renderer
-      console.log("[ImpostorViewer] Initializing WebGL renderer...");
-      const webglRenderer = new THREE.WebGLRenderer({ antialias: true });
-      webglRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      webglRenderer.setSize(container.clientWidth, container.clientHeight);
-      this.renderer = webglRenderer;
-      console.log("[ImpostorViewer] WebGL renderer initialized");
-    }
+    console.log("[ImpostorViewer] Initializing WebGPU renderer...");
+    const webgpuRenderer = new THREE_WEBGPU.WebGPURenderer({
+      antialias: true,
+    });
+    await webgpuRenderer.init();
+    webgpuRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    webgpuRenderer.setSize(container.clientWidth, container.clientHeight);
+    this.renderer = webgpuRenderer;
+    this.isWebGPU = true;
+    console.log("[ImpostorViewer] WebGPU renderer initialized");
 
     container.appendChild(this.renderer.domElement);
   }
@@ -260,41 +274,25 @@ export class ImpostorViewer {
   /**
    * Complete initialization after renderer is ready
    */
-  private completeInitialization(container: HTMLElement): void {
+  private async completeInitialization(container: HTMLElement): Promise<void> {
     // Setup controls
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
 
-    // Create impostor system (uses WebGL renderer for baking even in WebGPU mode)
-    // Note: Baking always uses WebGL because render targets work better
-    if (this.isWebGPU) {
-      // For WebGPU, we create a temporary WebGL renderer for baking
-      const bakingRenderer = new THREE.WebGLRenderer({ antialias: false });
-      bakingRenderer.setPixelRatio(1);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      this.impostor = new OctahedralImpostor(bakingRenderer as any);
-    } else {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      this.impostor = new OctahedralImpostor(this.renderer as any);
-    }
+    // Create impostor system - works with both WebGL and WebGPU renderers
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.impostor = new OctahedralImpostor(this.renderer as any);
 
-    // Create atlas render target
-    this.atlasRenderTarget = new THREE.WebGLRenderTarget(
+    // Create atlas render target - following Three.js WebGPU RTT example pattern
+    this.atlasRenderTarget = new THREE_WEBGPU.RenderTarget(
       this.atlasWidth,
       this.atlasHeight,
-      {
-        minFilter: THREE.LinearFilter,
-        magFilter: THREE.LinearFilter,
-        format: THREE.RGBAFormat,
-      },
     );
     this.atlasRenderTarget.texture.wrapS = THREE.ClampToEdgeWrapping;
     this.atlasRenderTarget.texture.wrapT = THREE.ClampToEdgeWrapping;
-    this.atlasRenderTarget.texture.colorSpace = THREE.NoColorSpace;
-    this.atlasRenderTarget.texture.needsUpdate = true;
 
     // Create atlas plane
     const atlasPlaneGeo = new THREE.PlaneGeometry(1, 1);
-    const atlasPlaneMat = new THREE.MeshBasicMaterial({
+    const atlasPlaneMat = this.createBasicMaterial({
       map: this.atlasRenderTarget.texture,
       side: THREE.DoubleSide,
     });
@@ -303,9 +301,10 @@ export class ImpostorViewer {
     this.scene.add(this.atlasPlaneMesh);
 
     // Create debug intersection point
+    const debugMat = this.createBasicMaterial({ color: "white" });
     this.intersectDebug = new THREE.Mesh(
       new THREE.SphereGeometry(0.01),
-      new THREE.MeshBasicMaterial({ color: "white" }),
+      debugMat,
     );
     this.scene.add(this.intersectDebug);
 
@@ -331,8 +330,8 @@ export class ImpostorViewer {
     // Setup file upload (drag & drop + file input)
     this.setupFileUpload();
 
-    // Load default mesh
-    this.setSourceMesh(createColoredCube());
+    // Load default mesh (await for WebGPU async baking)
+    await this.setSourceMesh(createColoredCube());
 
     // Mark as initialized
     this.isInitialized = true;
@@ -441,7 +440,7 @@ export class ImpostorViewer {
       (gltf) => {
         URL.revokeObjectURL(url);
         console.log(`[ImpostorViewer] Loaded: ${file.name}`);
-        this.setSourceMesh(gltf.scene);
+        void this.setSourceMesh(gltf.scene);
       },
       (progress) => {
         if (progress.total > 0) {
@@ -466,7 +465,7 @@ export class ImpostorViewer {
       url,
       (gltf) => {
         console.log(`[ImpostorViewer] Loaded from URL: ${url}`);
-        this.setSourceMesh(gltf.scene);
+        void this.setSourceMesh(gltf.scene);
       },
       (progress) => {
         if (progress.total > 0) {
@@ -483,14 +482,14 @@ export class ImpostorViewer {
   /**
    * Set the source mesh to create impostor from
    */
-  setSourceMesh(mesh: THREE.Mesh | THREE.Group): void {
+  async setSourceMesh(mesh: THREE.Mesh | THREE.Group): Promise<void> {
     // Remove old mesh
     if (this.sourceMesh) {
       this.scene.remove(this.sourceMesh);
     }
 
     this.sourceMesh = mesh;
-    this.generate();
+    await this.generate();
   }
 
   /**
@@ -500,7 +499,7 @@ export class ImpostorViewer {
    * - gridSizeX/Y represents the number of points/cells per axis
    * - Points are at grid corners (not cell centers) to match shader sampling
    */
-  generate(): void {
+  async generate(): Promise<void> {
     if (!this.sourceMesh) return;
 
     this.cleanup();
@@ -556,10 +555,10 @@ export class ImpostorViewer {
     });
     this.sourceMesh.position.copy(this.boundingSphere.center);
 
-    // Bake impostor
+    // Bake impostor (async for WebGPU renderAsync support)
     const activeOct =
       this.octType === OctahedronType.HEMI ? this.hemiOct : this.fullOct;
-    this.populateAtlas(activeOct);
+    await this.populateAtlas(activeOct);
 
     // Create debug visualization
     this.createDebugVisualization();
@@ -568,7 +567,7 @@ export class ImpostorViewer {
     this.createImpostorMesh();
   }
 
-  private populateAtlas(_oct: OctahedronMeshData): void {
+  private async populateAtlas(_oct: OctahedronMeshData): Promise<void> {
     if (!this.sourceMesh) return;
 
     // Use the AAA baker for full quality impostor baking
@@ -579,9 +578,10 @@ export class ImpostorViewer {
     this.sourceMesh.scale.setScalar(1);
 
     // Use the appropriate bake method based on PBR mode
+    // All bake methods are async for WebGPU renderAsync() support
     if (this.pbrMode === PBRBakeMode.BASIC) {
       // Basic: just albedo (uses legacy bake)
-      this.bakeResult = this.impostor.bake(this.sourceMesh, {
+      this.bakeResult = await this.impostor.bake(this.sourceMesh, {
         atlasWidth: this.atlasWidth,
         atlasHeight: this.atlasHeight,
         gridSizeX: this.gridSizeX,
@@ -590,7 +590,7 @@ export class ImpostorViewer {
       });
     } else if (this.pbrMode === PBRBakeMode.STANDARD) {
       // Standard: albedo + normals
-      this.bakeResult = this.impostor.bakeWithNormals(this.sourceMesh, {
+      this.bakeResult = await this.impostor.bakeWithNormals(this.sourceMesh, {
         atlasWidth: this.atlasWidth,
         atlasHeight: this.atlasHeight,
         gridSizeX: this.gridSizeX,
@@ -599,7 +599,7 @@ export class ImpostorViewer {
       });
     } else {
       // FULL or COMPLETE: albedo + normals + depth (+ PBR)
-      this.bakeResult = this.impostor.bakeFull(this.sourceMesh, {
+      this.bakeResult = await this.impostor.bakeFull(this.sourceMesh, {
         atlasWidth: this.atlasWidth,
         atlasHeight: this.atlasHeight,
         gridSizeX: this.gridSizeX,
@@ -610,50 +610,60 @@ export class ImpostorViewer {
     }
 
     // Update the atlas render target with the baked texture
-    // Copy from bake result to our display render target
-    if (this.bakeResult.atlasTexture) {
-      // Update atlas plane material directly with the baked texture
+    if (this.bakeResult.renderTarget) {
       if (this.atlasPlaneMesh) {
-        const mat = this.atlasPlaneMesh.material as THREE.MeshBasicMaterial;
-        mat.map = this.bakeResult.atlasTexture;
-        mat.needsUpdate = true;
+        const oldMat = this.atlasPlaneMesh.material as BasicMaterial;
+        oldMat.dispose();
+
+        // Use the texture directly - DON'T modify StorageTexture properties after compute!
+        // The baker returns a StorageTexture that's ready to use as-is
+        const rt = this.bakeResult.renderTarget;
+        const newMat = this.createBasicMaterial({
+          map: rt.texture,
+          side: THREE.DoubleSide,
+        });
+        this.atlasPlaneMesh.material = newMat;
+
+        console.log("[populateAtlas] Atlas RT:", rt.width, "x", rt.height);
       }
     }
 
     // Create/update normal atlas preview plane
-    if (this.bakeResult.normalAtlasTexture) {
-      if (!this.normalAtlasPlane) {
-        const geo = new THREE.PlaneGeometry(0.5, 0.5);
-        const mat = new THREE.MeshBasicMaterial({
-          map: this.bakeResult.normalAtlasTexture,
-          side: THREE.DoubleSide,
-        });
-        this.normalAtlasPlane = new THREE.Mesh(geo, mat);
-        this.normalAtlasPlane.position.set(-0.8, 1.5, 0);
-        this.scene.add(this.normalAtlasPlane);
-      } else {
-        const mat = this.normalAtlasPlane.material as THREE.MeshBasicMaterial;
-        mat.map = this.bakeResult.normalAtlasTexture;
-        mat.needsUpdate = true;
+    if (this.bakeResult.normalRenderTarget) {
+      if (this.normalAtlasPlane) {
+        this.scene.remove(this.normalAtlasPlane);
+        (this.normalAtlasPlane.material as BasicMaterial).dispose();
+        this.normalAtlasPlane.geometry.dispose();
       }
+      const geo = new THREE.PlaneGeometry(0.5, 0.5);
+      const normalRT = this.bakeResult.normalRenderTarget;
+      // Don't modify texture properties - use as-is from baker
+      const mat = this.createBasicMaterial({
+        map: normalRT.texture,
+        side: THREE.DoubleSide,
+      });
+      this.normalAtlasPlane = new THREE.Mesh(geo, mat);
+      this.normalAtlasPlane.position.set(-0.8, 1.5, 0);
+      this.scene.add(this.normalAtlasPlane);
     }
 
     // Create/update depth atlas preview plane
-    if (this.bakeResult.depthAtlasTexture) {
-      if (!this.depthAtlasPlane) {
-        const geo = new THREE.PlaneGeometry(0.5, 0.5);
-        const mat = new THREE.MeshBasicMaterial({
-          map: this.bakeResult.depthAtlasTexture,
-          side: THREE.DoubleSide,
-        });
-        this.depthAtlasPlane = new THREE.Mesh(geo, mat);
-        this.depthAtlasPlane.position.set(0.8, 1.5, 0);
-        this.scene.add(this.depthAtlasPlane);
-      } else {
-        const mat = this.depthAtlasPlane.material as THREE.MeshBasicMaterial;
-        mat.map = this.bakeResult.depthAtlasTexture;
-        mat.needsUpdate = true;
+    if (this.bakeResult.depthRenderTarget) {
+      if (this.depthAtlasPlane) {
+        this.scene.remove(this.depthAtlasPlane);
+        (this.depthAtlasPlane.material as BasicMaterial).dispose();
+        this.depthAtlasPlane.geometry.dispose();
       }
+      const geo = new THREE.PlaneGeometry(0.5, 0.5);
+      const depthRT = this.bakeResult.depthRenderTarget;
+      // Don't modify texture properties - use as-is from baker
+      const mat = this.createBasicMaterial({
+        map: depthRT.texture,
+        side: THREE.DoubleSide,
+      });
+      this.depthAtlasPlane = new THREE.Mesh(geo, mat);
+      this.depthAtlasPlane.position.set(0.8, 1.5, 0);
+      this.scene.add(this.depthAtlasPlane);
     }
 
     // Update atlas plane scale
@@ -720,9 +730,10 @@ export class ImpostorViewer {
 
     for (let i = 0; i < oct.octPoints.length; i += 3) {
       // Sphere on octahedron
+      const sphereMat = this.createBasicMaterial({ color: sampleColors[i] });
       const sphereOnMesh = new THREE.Mesh(
         new THREE.SphereGeometry(0.01, 16, 16),
-        new THREE.MeshBasicMaterial({ color: sampleColors[i] }),
+        sphereMat,
       );
       sphereOnMesh.position.set(
         oct.octPoints[i],
@@ -735,18 +746,21 @@ export class ImpostorViewer {
       this.samplePointsOnMesh.push(sphereOnMesh);
 
       // Sphere on atlas
-      const mat = new THREE.Matrix4().makeRotationX((3 * Math.PI) / 2);
+      const rotMat = new THREE.Matrix4().makeRotationX((3 * Math.PI) / 2);
       const pos = new THREE.Vector3(
         oct.planePoints[i],
         oct.planePoints[i + 1],
         oct.planePoints[i + 2],
       );
-      pos.applyMatrix4(mat);
+      pos.applyMatrix4(rotMat);
       pos.y += 1.5;
 
+      const atlasSphereMat = this.createBasicMaterial({
+        color: sampleColors[i],
+      });
       const sphereOnAtlas = new THREE.Mesh(
         new THREE.SphereGeometry(0.01, 16, 16),
-        new THREE.MeshBasicMaterial({ color: sampleColors[i] }),
+        atlasSphereMat,
       );
       sphereOnAtlas.position.copy(pos);
       sphereOnAtlas.visible = this.debugState.atlasSamples;
@@ -791,92 +805,44 @@ export class ImpostorViewer {
       return;
     }
 
-    // Create material based on renderer type
-    if (this.isWebGPU) {
-      // WebGPU: Use TSL material
-      console.log("[ImpostorViewer] Creating TSL material for WebGPU...");
-      this.impostorMaterial = createTSLImpostorMaterial({
-        atlasTexture: this.bakeResult.atlasTexture,
-        normalAtlasTexture: this.bakeResult.normalAtlasTexture,
-        depthAtlasTexture: this.bakeResult.depthAtlasTexture,
-        pbrAtlasTexture: this.bakeResult.pbrAtlasTexture,
-        gridSizeX: this.gridSizeX,
-        gridSizeY: this.gridSizeY,
-        enableAAA: !!(
-          this.bakeResult.normalAtlasTexture ||
-          this.bakeResult.depthAtlasTexture
-        ),
-        enableDepthBlending: !!this.bakeResult.depthAtlasTexture,
-        enableSpecular: !!this.bakeResult.normalAtlasTexture,
-        depthNear: this.bakeResult.depthNear ?? 0.001,
-        depthFar: this.bakeResult.depthFar ?? 10,
-      });
+    // Create TSL material for WebGPU
+    console.log("[ImpostorViewer] Creating TSL material...");
 
-      // Set default lighting for TSL AAA material
-      const tslMat = this.impostorMaterial as TSLImpostorMaterial;
-      if (
-        tslMat.updateLighting &&
-        (this.bakeResult.normalAtlasTexture ||
-          this.bakeResult.depthAtlasTexture)
-      ) {
-        tslMat.updateLighting({
-          ambientColor: new THREE.Vector3(1, 1, 1),
-          ambientIntensity: 0.4,
-          directionalLights: [
-            {
-              direction: new THREE.Vector3(0.5, 0.8, 0.3).normalize(),
-              color: new THREE.Vector3(1, 0.98, 0.95),
-              intensity: 1.2,
-            },
-          ],
-          specular: {
-            shininess: 32,
-            intensity: 0.5,
-          },
-        });
-      }
-    } else {
-      // WebGL: Use GLSL ShaderMaterial
-      console.log("[ImpostorViewer] Creating GLSL material for WebGL...");
-      this.impostorMaterial = createImpostorMaterial({
-        atlasTexture: this.bakeResult.atlasTexture,
-        normalAtlasTexture: this.bakeResult.normalAtlasTexture,
-        depthAtlasTexture: this.bakeResult.depthAtlasTexture,
-        pbrAtlasTexture: this.bakeResult.pbrAtlasTexture,
-        gridSizeX: this.gridSizeX,
-        gridSizeY: this.gridSizeY,
-        enableLighting: !!this.bakeResult.normalAtlasTexture,
-        enableDepthBlending: !!this.bakeResult.depthAtlasTexture,
-        enableSpecular: !!this.bakeResult.normalAtlasTexture,
-        depthNear: this.bakeResult.depthNear ?? 0.001,
-        depthFar: this.bakeResult.depthFar ?? 10,
-        objectScale: 1,
-      });
+    this.impostorMaterial = createTSLImpostorMaterial({
+      atlasTexture: this.bakeResult.atlasTexture,
+      normalAtlasTexture: this.bakeResult.normalAtlasTexture,
+      depthAtlasTexture: this.bakeResult.depthAtlasTexture,
+      pbrAtlasTexture: this.bakeResult.pbrAtlasTexture,
+      gridSizeX: this.gridSizeX,
+      gridSizeY: this.gridSizeY,
+      enableAAA: !!this.bakeResult.normalAtlasTexture,
+      enableDepthBlending: !!this.bakeResult.depthAtlasTexture,
+      enableSpecular: !!this.bakeResult.normalAtlasTexture,
+      depthNear: this.bakeResult.depthNear ?? 0.001,
+      depthFar: this.bakeResult.depthFar ?? 10,
+    });
 
-      // Set default lighting for GLSL AAA material
-      if (
-        this.bakeResult.normalAtlasTexture ||
-        this.bakeResult.depthAtlasTexture
-      ) {
-        updateImpostorAAALighting(
-          this.impostorMaterial as THREE.ShaderMaterial,
+    // Set default lighting
+    const tslMat = this.impostorMaterial as TSLImpostorMaterial;
+    if (
+      tslMat.updateLighting &&
+      (this.bakeResult.normalAtlasTexture || this.bakeResult.depthAtlasTexture)
+    ) {
+      tslMat.updateLighting({
+        ambientColor: new THREE.Vector3(1, 1, 1),
+        ambientIntensity: 0.4,
+        directionalLights: [
           {
-            ambientColor: new THREE.Vector3(1, 1, 1),
-            ambientIntensity: 0.4,
-            directionalLights: [
-              {
-                direction: new THREE.Vector3(0.5, 0.8, 0.3).normalize(),
-                color: new THREE.Vector3(1, 0.98, 0.95),
-                intensity: 1.2,
-              },
-            ],
-            specular: {
-              shininess: 32,
-              intensity: 0.5,
-            },
+            direction: new THREE.Vector3(0.5, 0.8, 0.3).normalize(),
+            color: new THREE.Vector3(1, 0.98, 0.95),
+            intensity: 1.2,
           },
-        );
-      }
+        ],
+        specular: {
+          shininess: 32,
+          intensity: 0.5,
+        },
+      });
     }
 
     this.impostorMesh = new THREE.Mesh(
@@ -886,22 +852,36 @@ export class ImpostorViewer {
     this.impostorMesh.position.z = 2;
     this.scene.add(this.impostorMesh);
 
+    const wireframeMat = this.createBasicMaterial({
+      wireframe: true,
+      color: "red",
+    });
     this.wireframeMesh = new THREE.Mesh(
       new THREE.PlaneGeometry(1, 1),
-      new THREE.MeshBasicMaterial({ wireframe: true, color: "red" }),
+      wireframeMat,
     );
     this.wireframeMesh.position.z = 2;
     this.wireframeMesh.visible = this.debugState.showWireframe;
     this.scene.add(this.wireframeMesh);
 
     console.log(
-      `[ImpostorViewer] Created ${this.isWebGPU ? "WebGPU/TSL" : "WebGL/GLSL"} impostor mesh with lighting=${!!this.bakeResult.normalAtlasTexture}, depth=${!!this.bakeResult.depthAtlasTexture}`,
+      `[ImpostorViewer] Created ${this.isWebGPU ? "WebGPU/TSL" : "WebGL/GLSL"} impostor mesh`,
+      {
+        hasAtlas: !!this.bakeResult.atlasTexture,
+        hasNormals: !!this.bakeResult.normalAtlasTexture,
+        hasDepth: !!this.bakeResult.depthAtlasTexture,
+        gridSize: `${this.gridSizeX}x${this.gridSizeY}`,
+        meshPosition: this.impostorMesh?.position.toArray(),
+        meshVisible: this.impostorMesh?.visible,
+      },
     );
   }
 
   private cleanup(): void {
-    // Clear atlas
-    this.renderer.setRenderTarget(this.atlasRenderTarget);
+    // Clear atlas (cast for type compatibility - works with both WebGL and WebGPU)
+    this.renderer.setRenderTarget(
+      this.atlasRenderTarget as THREE.WebGLRenderTarget,
+    );
     this.renderer.setClearColor(0x000000, 0);
     this.renderer.clear();
     this.renderer.setRenderTarget(null);
@@ -1120,7 +1100,7 @@ export class ImpostorViewer {
       .on("change", ({ value }) => {
         this.atlasWidth = value;
         this.atlasRenderTarget.setSize(this.atlasWidth, this.atlasHeight);
-        this.generate();
+        void this.generate();
       });
     atlasFolder
       .addBinding(params, "atlasHeight", {
@@ -1137,7 +1117,7 @@ export class ImpostorViewer {
       .on("change", ({ value }) => {
         this.atlasHeight = value;
         this.atlasRenderTarget.setSize(this.atlasWidth, this.atlasHeight);
-        this.generate();
+        void this.generate();
       });
 
     // Grid dimensions (separate horizontal/vertical)
@@ -1175,7 +1155,7 @@ export class ImpostorViewer {
       })
       .on("change", ({ value }) => {
         this.octType = value;
-        this.generate();
+        void this.generate();
       });
 
     // Bake mode selector
@@ -1192,12 +1172,12 @@ export class ImpostorViewer {
       })
       .on("change", ({ value }) => {
         this.pbrMode = value;
-        this.generate();
+        void this.generate();
       });
 
     generalFolder
       .addButton({ title: "Re-Generate" })
-      .on("click", () => this.generate());
+      .on("click", () => void this.generate());
 
     // Lighting controls (only shown for AAA modes)
     const lightingFolder = this.pane.addFolder({
@@ -1329,7 +1309,7 @@ export class ImpostorViewer {
       .renderer as THREE.WebGLRenderer;
     if (bakingRenderer && bakingRenderer.readRenderTargetPixels) {
       bakingRenderer.readRenderTargetPixels(
-        renderTarget,
+        renderTarget as THREE.WebGLRenderTarget,
         0,
         0,
         width,
@@ -1339,7 +1319,7 @@ export class ImpostorViewer {
     } else if (!this.isWebGPU && this.renderer instanceof THREE.WebGLRenderer) {
       // Fallback for WebGL mode
       this.renderer.readRenderTargetPixels(
-        this.atlasRenderTarget,
+        this.atlasRenderTarget as THREE.WebGLRenderTarget,
         0,
         0,
         width,

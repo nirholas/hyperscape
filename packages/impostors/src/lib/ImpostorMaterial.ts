@@ -1473,10 +1473,24 @@ const IMPOSTOR_AAA_FRAGMENT_SHADER_DISSOLVE = /* glsl */ `
 export interface ImpostorMaterialConfigExtended extends ImpostorMaterialConfig {
   /** Dissolve configuration for distance-based fade */
   dissolve?: DissolveConfig;
+  /**
+   * Debug mode for diagnosing rendering issues:
+   * - -1: Solid cyan (verify shader runs)
+   * - 0: Normal rendering (default)
+   * - 1: Show UV coordinates
+   * - 2: Show barycentric weights
+   * - 3: Show cell indices/atlas UVs
+   * - 4: Raw normal atlas (AAA mode)
+   * - 5: Decoded normals (AAA mode)
+   */
+  debugMode?: -1 | 0 | 1 | 2 | 3 | 4 | 5;
 }
 
 /**
- * Create an impostor material for runtime rendering
+ * Create an impostor material for runtime rendering (GLSL version)
+ *
+ * @deprecated Use createTSLImpostorMaterial() from ImpostorMaterialTSL.ts for WebGPU-compatible rendering.
+ * This GLSL version is retained for backward compatibility with WebGL renderers.
  *
  * gridSizeX/Y represents the number of points/cells per axis.
  * This matches the old code convention where GRID_SIZE=31 means 31 cells.
@@ -1537,6 +1551,7 @@ export function createImpostorMaterial(
     depthFar = 10,
     objectScale = 1,
     dissolve,
+    debugMode,
   } = config;
 
   // Determine which shader variant to use
@@ -1567,7 +1582,7 @@ export function createImpostorMaterial(
     gridSize: { value: new THREE.Vector2(gridSizeX, gridSizeY) },
     faceWeights: { value: new THREE.Vector3(0.34, 0.33, 0.33) },
     faceIndices: { value: new THREE.Vector3(centerIdx, rightIdx, topIdx) },
-    debugMode: { value: globalDebugMode },
+    debugMode: { value: debugMode ?? globalDebugMode },
     alphaThreshold: { value: globalAlphaThreshold },
   };
 
@@ -2049,7 +2064,10 @@ export function updateImpostorMaterial(
 
 /**
  * Create a billboard material variant that doesn't require view data updates
- * Uses a simplified single-view sampling approach
+ * Uses a simplified single-view sampling approach (GLSL version)
+ *
+ * @deprecated Use createSimpleTSLImpostorMaterial() from ImpostorMaterialTSL.ts for WebGPU-compatible rendering.
+ * This GLSL version is retained for backward compatibility with WebGL renderers.
  */
 export function createSimpleImpostorMaterial(
   config: ImpostorMaterialConfig,
@@ -2130,3 +2148,265 @@ export const ImpostorShaders = {
   vertex: IMPOSTOR_VERTEX_SHADER,
   fragment: IMPOSTOR_FRAGMENT_SHADER,
 };
+
+// ============================================================================
+// RUNTIME DIAGNOSTICS & VALIDATION
+// ============================================================================
+
+/**
+ * Diagnostic result for impostor material validation.
+ * Contains detailed information about potential issues.
+ */
+export interface ImpostorDiagnosticResult {
+  /** Whether all validations passed */
+  valid: boolean;
+  /** List of issues found (empty if valid) */
+  issues: string[];
+  /** List of warnings (non-fatal issues) */
+  warnings: string[];
+  /** Detailed info for debugging */
+  details: {
+    hasAtlasTexture: boolean;
+    atlasTextureValid: boolean;
+    atlasSize: { width: number; height: number } | null;
+    gridSize: { x: number; y: number };
+    hasNormalAtlas: boolean;
+    hasDepthAtlas: boolean;
+    hasPBRAtlas: boolean;
+    uniformsSet: boolean;
+    materialType: string;
+  };
+}
+
+/**
+ * Validate an impostor material and texture configuration.
+ * Call this at runtime to diagnose "white material" or other rendering issues.
+ *
+ * @param material - The impostor ShaderMaterial to validate
+ * @param options - Optional configuration that was used to create the material
+ * @returns Diagnostic result with issues, warnings, and details
+ *
+ * @example
+ * ```typescript
+ * const material = createImpostorMaterial({ atlasTexture, gridSizeX, gridSizeY });
+ * const diagnostics = validateImpostorMaterial(material);
+ * if (!diagnostics.valid) {
+ *   console.error('[Impostor] Material issues:', diagnostics.issues);
+ * }
+ * ```
+ */
+export function validateImpostorMaterial(
+  material: THREE.ShaderMaterial,
+  options?: {
+    expectedGridSizeX?: number;
+    expectedGridSizeY?: number;
+  },
+): ImpostorDiagnosticResult {
+  const result: ImpostorDiagnosticResult = {
+    valid: true,
+    issues: [],
+    warnings: [],
+    details: {
+      hasAtlasTexture: false,
+      atlasTextureValid: false,
+      atlasSize: null,
+      gridSize: { x: 0, y: 0 },
+      hasNormalAtlas: false,
+      hasDepthAtlas: false,
+      hasPBRAtlas: false,
+      uniformsSet: false,
+      materialType: material.type,
+    },
+  };
+
+  // Check if material has uniforms
+  if (!material.uniforms) {
+    result.valid = false;
+    result.issues.push(
+      "Material has no uniforms - may not be an impostor material",
+    );
+    return result;
+  }
+
+  result.details.uniformsSet = true;
+
+  // Check atlas texture
+  const atlasUniform = material.uniforms.atlasTexture;
+  if (!atlasUniform || !atlasUniform.value) {
+    result.valid = false;
+    result.issues.push(
+      "Atlas texture uniform is missing or null - impostor will render white",
+    );
+  } else {
+    result.details.hasAtlasTexture = true;
+    const tex = atlasUniform.value as THREE.Texture;
+
+    // Check if texture has valid image data
+    // Note: For RenderTarget textures, tex.image may be a RenderTarget
+    // or the texture may not have image until first render
+    const hasImage = !!(
+      tex.image &&
+      (tex.image.width || tex.image instanceof RenderTarget)
+    );
+
+    if (!hasImage && !tex.source?.data) {
+      result.warnings.push(
+        "Atlas texture has no image data yet - may not be uploaded to GPU. " +
+          "Ensure texture.needsUpdate = true or render target is bound.",
+      );
+    }
+
+    if (tex.image && tex.image.width) {
+      result.details.atlasSize = {
+        width: tex.image.width,
+        height: tex.image.height,
+      };
+      result.details.atlasTextureValid = true;
+    } else if (tex instanceof THREE.Texture) {
+      // Texture exists but may be render target texture
+      result.details.atlasTextureValid = true;
+    }
+
+    // Check color space
+    if (tex.colorSpace !== THREE.SRGBColorSpace) {
+      result.warnings.push(
+        `Atlas texture colorSpace is '${tex.colorSpace}', expected 'srgb'. ` +
+          "Colors may appear incorrect (washed out or too dark).",
+      );
+    }
+  }
+
+  // Check grid size
+  const gridSizeUniform = material.uniforms.gridSize;
+  if (!gridSizeUniform || !gridSizeUniform.value) {
+    result.valid = false;
+    result.issues.push(
+      "Grid size uniform is missing - shader will sample incorrectly",
+    );
+  } else {
+    const gridSize = gridSizeUniform.value as THREE.Vector2;
+    result.details.gridSize = { x: gridSize.x, y: gridSize.y };
+
+    if (gridSize.x <= 0 || gridSize.y <= 0) {
+      result.valid = false;
+      result.issues.push(
+        `Grid size is invalid (${gridSize.x}x${gridSize.y}) - must be positive integers`,
+      );
+    }
+
+    // Check for grid size mismatch if expected values provided
+    if (
+      options?.expectedGridSizeX &&
+      gridSize.x !== options.expectedGridSizeX
+    ) {
+      result.warnings.push(
+        `Grid size X mismatch: material has ${gridSize.x} but expected ${options.expectedGridSizeX}. ` +
+          "This causes incorrect UV sampling and visual artifacts.",
+      );
+    }
+    if (
+      options?.expectedGridSizeY &&
+      gridSize.y !== options.expectedGridSizeY
+    ) {
+      result.warnings.push(
+        `Grid size Y mismatch: material has ${gridSize.y} but expected ${options.expectedGridSizeY}. ` +
+          "This causes incorrect UV sampling and visual artifacts.",
+      );
+    }
+  }
+
+  // Check face indices and weights
+  const faceIndicesUniform = material.uniforms.faceIndices;
+  const faceWeightsUniform = material.uniforms.faceWeights;
+
+  if (!faceIndicesUniform || !faceIndicesUniform.value) {
+    result.warnings.push(
+      "Face indices uniform not set - impostor may not respond to view angle changes",
+    );
+  }
+
+  if (!faceWeightsUniform || !faceWeightsUniform.value) {
+    result.warnings.push(
+      "Face weights uniform not set - blending between atlas cells will not work",
+    );
+  }
+
+  // Check optional atlases
+  if (material.uniforms.normalAtlasTexture?.value) {
+    result.details.hasNormalAtlas = true;
+  }
+  if (material.uniforms.depthAtlasTexture?.value) {
+    result.details.hasDepthAtlas = true;
+  }
+  if (material.uniforms.pbrAtlasTexture?.value) {
+    result.details.hasPBRAtlas = true;
+  }
+
+  // Log summary if there are issues
+  if (result.issues.length > 0) {
+    console.error(
+      "[ImpostorMaterial] Validation FAILED:",
+      result.issues.join("; "),
+    );
+  }
+  if (result.warnings.length > 0) {
+    console.warn(
+      "[ImpostorMaterial] Validation warnings:",
+      result.warnings.join("; "),
+    );
+  }
+
+  return result;
+}
+
+/**
+ * Debug helper: Log detailed information about an impostor material.
+ * Useful for diagnosing "white material" issues at runtime.
+ *
+ * @param material - The impostor material to inspect
+ * @param label - Optional label for the log output
+ */
+export function debugImpostorMaterial(
+  material: THREE.ShaderMaterial,
+  label = "ImpostorMaterial",
+): void {
+  const diagnostics = validateImpostorMaterial(material);
+
+  console.group(`[${label}] Debug Info`);
+  console.log("Valid:", diagnostics.valid);
+  console.log("Material Type:", diagnostics.details.materialType);
+  console.log(
+    "Atlas Texture:",
+    diagnostics.details.hasAtlasTexture ? "present" : "MISSING",
+  );
+  console.log("Atlas Valid:", diagnostics.details.atlasTextureValid);
+  console.log("Atlas Size:", diagnostics.details.atlasSize);
+  console.log("Grid Size:", diagnostics.details.gridSize);
+  console.log("Has Normal Atlas:", diagnostics.details.hasNormalAtlas);
+  console.log("Has Depth Atlas:", diagnostics.details.hasDepthAtlas);
+  console.log("Has PBR Atlas:", diagnostics.details.hasPBRAtlas);
+
+  if (diagnostics.issues.length > 0) {
+    console.error("Issues:", diagnostics.issues);
+  }
+  if (diagnostics.warnings.length > 0) {
+    console.warn("Warnings:", diagnostics.warnings);
+  }
+
+  // Log raw uniform values for deep debugging
+  if (material.uniforms) {
+    console.log("Uniforms:", {
+      atlasTexture: material.uniforms.atlasTexture?.value ? "Texture" : null,
+      gridSize: material.uniforms.gridSize?.value,
+      faceIndices: material.uniforms.faceIndices?.value,
+      faceWeights: material.uniforms.faceWeights?.value,
+      debugMode: material.uniforms.debugMode?.value,
+      alphaThreshold: material.uniforms.alphaThreshold?.value,
+    });
+  }
+
+  console.groupEnd();
+}
+
+// Type declaration for RenderTarget check (avoid importing full Three.js types)
+declare class RenderTarget {}

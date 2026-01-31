@@ -1,12 +1,7 @@
 /**
  * Octahedral Impostor Viewer - Application Entry Point
  *
- * This is the entry point for the standalone viewer application.
- * Supports both WebGL and WebGPU renderers.
- *
- * URL Parameters:
- *   ?renderer=webgl   - Use WebGL renderer (default)
- *   ?renderer=webgpu  - Use WebGPU renderer
+ * WebGPU-only viewer with TSL shaders.
  */
 
 import "../style.css";
@@ -14,16 +9,17 @@ import { ImpostorViewer, type RendererType } from "./ImpostorViewer";
 import { OctahedronType } from "../lib";
 import { createColoredCube, createTestTorusKnot } from "../lib/utils";
 import * as THREE from "three";
+import { MeshStandardNodeMaterial } from "three/webgpu";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 /**
- * Get renderer type from URL parameter
+ * WebGPU only
  */
 function getRendererTypeFromURL(): RendererType {
-  const params = new URLSearchParams(window.location.search);
-  const renderer = params.get("renderer");
-  if (renderer === "webgpu") return "webgpu";
-  return "webgl";
+  if (!navigator.gpu) {
+    throw new Error("WebGPU required");
+  }
+  return "webgpu";
 }
 
 // Wait for DOM
@@ -73,16 +69,16 @@ function setupDemoMeshSwitcher(
   window.addEventListener("keydown", (event) => {
     switch (event.key) {
       case "1":
-        viewer.setSourceMesh(createColoredCube());
+        void viewer.setSourceMesh(createColoredCube());
         break;
       case "2":
-        viewer.setSourceMesh(createTestTorusKnot());
+        void viewer.setSourceMesh(createTestTorusKnot());
         break;
       case "3":
-        viewer.setSourceMesh(createSphere());
+        void viewer.setSourceMesh(createSphere());
         break;
       case "4":
-        viewer.setSourceMesh(createMonkey());
+        void viewer.setSourceMesh(createMonkey());
         break;
       case "5":
         loadTree(viewer);
@@ -95,7 +91,7 @@ function setupDemoMeshSwitcher(
     // Use cached tree if available
     if (cachedTree) {
       const clone = cachedTree.clone(true);
-      viewer.setSourceMesh(clone);
+      void viewer.setSourceMesh(clone);
       console.log("[Tree] Using cached tree model");
       return;
     }
@@ -118,7 +114,7 @@ function setupDemoMeshSwitcher(
 
         // Clone for use (keep original cached)
         const clone = cachedTree.clone(true);
-        viewer.setSourceMesh(clone);
+        void viewer.setSourceMesh(clone);
 
         console.log("[Tree] Loaded successfully");
       },
@@ -147,8 +143,8 @@ function setupDemoMeshSwitcher(
 ║  WebGPU Status: ${webgpuStatus.padEnd(47)}║
 ║                                                                ║
 ║  SWITCH RENDERER (URL parameters):                             ║
-║    ?renderer=webgl   - Use WebGL renderer (GLSL shaders)       ║
-║    ?renderer=webgpu  - Use WebGPU renderer (TSL shaders)       ║
+║    WebGPU (TSL) is default when available                      ║
+║    ?renderer=webgl  - Force WebGL renderer (GLSL shaders)      ║
 ║                                                                ║
 ║  UPLOAD:                                                       ║
 ║    - Drag & drop a GLB/GLTF file onto the window               ║
@@ -171,28 +167,26 @@ function setupDemoMeshSwitcher(
 
 function createSphere(): THREE.Mesh {
   const geometry = new THREE.SphereGeometry(0.5, 32, 32);
-  const material = new THREE.MeshStandardMaterial({
-    color: 0x4488ff,
-    roughness: 0.3,
-    metalness: 0.7,
-  });
+  const material = new MeshStandardNodeMaterial();
+  material.color = new THREE.Color(0x4488ff);
+  material.roughness = 0.3;
+  material.metalness = 0.7;
   return new THREE.Mesh(geometry, material);
 }
 
 function createMonkey(): THREE.Group {
-  // Create a simple "monkey head" approximation using primitives
   const group = new THREE.Group();
 
   // Head
-  const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.4, 32, 32),
-    new THREE.MeshStandardMaterial({ color: 0x8b4513 }),
-  );
+  const headMat = new MeshStandardNodeMaterial();
+  headMat.color = new THREE.Color(0x8b4513);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.4, 32, 32), headMat);
   group.add(head);
 
   // Eyes
   const eyeGeom = new THREE.SphereGeometry(0.08, 16, 16);
-  const eyeMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+  const eyeMat = new MeshStandardNodeMaterial();
+  eyeMat.color = new THREE.Color(0xffffff);
 
   const leftEye = new THREE.Mesh(eyeGeom, eyeMat);
   leftEye.position.set(-0.15, 0.1, 0.35);
@@ -204,7 +198,8 @@ function createMonkey(): THREE.Group {
 
   // Pupils
   const pupilGeom = new THREE.SphereGeometry(0.04, 16, 16);
-  const pupilMat = new THREE.MeshStandardMaterial({ color: 0x000000 });
+  const pupilMat = new MeshStandardNodeMaterial();
+  pupilMat.color = new THREE.Color(0x000000);
 
   const leftPupil = new THREE.Mesh(pupilGeom, pupilMat);
   leftPupil.position.set(-0.15, 0.1, 0.42);
@@ -216,7 +211,8 @@ function createMonkey(): THREE.Group {
 
   // Ears
   const earGeom = new THREE.SphereGeometry(0.15, 16, 16);
-  const earMat = new THREE.MeshStandardMaterial({ color: 0x8b4513 });
+  const earMat = new MeshStandardNodeMaterial();
+  earMat.color = new THREE.Color(0x8b4513);
 
   const leftEar = new THREE.Mesh(earGeom, earMat);
   leftEar.position.set(-0.4, 0.15, 0);
@@ -229,10 +225,9 @@ function createMonkey(): THREE.Group {
   group.add(rightEar);
 
   // Snout
-  const snout = new THREE.Mesh(
-    new THREE.SphereGeometry(0.2, 16, 16),
-    new THREE.MeshStandardMaterial({ color: 0xa0522d }),
-  );
+  const snoutMat = new MeshStandardNodeMaterial();
+  snoutMat.color = new THREE.Color(0xa0522d);
+  const snout = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 16), snoutMat);
   snout.position.set(0, -0.1, 0.35);
   snout.scale.set(1.2, 0.8, 0.8);
   group.add(snout);

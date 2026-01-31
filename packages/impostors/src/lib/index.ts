@@ -34,10 +34,14 @@ export {
   setImpostorAlphaThreshold,
   getImpostorAlphaThreshold,
   unregisterMaterial,
+  // Runtime diagnostics
+  validateImpostorMaterial,
+  debugImpostorMaterial,
   type ImpostorDebugMode,
   type DissolveConfig,
   type ImpostorMaterialConfigExtended,
   type AAALightingConfig,
+  type ImpostorDiagnosticResult,
 } from "./ImpostorMaterial";
 
 // Materials (TSL - WebGPU compatible)

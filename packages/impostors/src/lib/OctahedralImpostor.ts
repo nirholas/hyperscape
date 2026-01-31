@@ -5,6 +5,7 @@
  */
 
 import * as THREE from "three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 import type {
   ImpostorBakeConfig,
   ImpostorBakeResult,
@@ -104,21 +105,21 @@ export class OctahedralImpostor {
    * @param config - Baking configuration
    * @returns The bake result
    */
-  bake(
+  async bake(
     source: THREE.Object3D,
     config: Partial<ImpostorBakeConfig> = {},
-  ): ImpostorBakeResult {
+  ): Promise<ImpostorBakeResult> {
     return this.baker.bake(source, config);
   }
 
   /**
    * Bake with custom lighting
    */
-  bakeWithLighting(
+  async bakeWithLighting(
     source: THREE.Object3D,
     config: Partial<ImpostorBakeConfig> = {},
     lighting: Parameters<ImpostorBaker["bakeWithLighting"]>[2] = {},
-  ): ImpostorBakeResult {
+  ): Promise<ImpostorBakeResult> {
     return this.baker.bakeWithLighting(source, config, lighting);
   }
 
@@ -132,10 +133,10 @@ export class OctahedralImpostor {
    * @param config - Baking configuration
    * @returns Bake result with both color and normal atlases
    */
-  bakeWithNormals(
+  async bakeWithNormals(
     source: THREE.Object3D,
     config: Partial<ImpostorBakeConfig> = {},
-  ): ImpostorBakeResult {
+  ): Promise<ImpostorBakeResult> {
     return this.baker.bakeWithNormals(source, config);
   }
 
@@ -151,10 +152,10 @@ export class OctahedralImpostor {
    * @param config - Baking configuration
    * @returns Bake result with both color and normal atlases
    */
-  bakeHybrid(
+  async bakeHybrid(
     source: THREE.Object3D,
     config: Partial<ImpostorBakeConfig> = {},
-  ): ImpostorBakeResult {
+  ): Promise<ImpostorBakeResult> {
     return this.baker.bakeHybrid(source, config);
   }
 
@@ -172,10 +173,10 @@ export class OctahedralImpostor {
    * @param config - Baking configuration (including pbrMode)
    * @returns Complete bake result with all atlas textures
    */
-  bakeFull(
+  async bakeFull(
     source: THREE.Object3D,
     config: Partial<ImpostorBakeConfig> = {},
-  ): ImpostorBakeResult {
+  ): Promise<ImpostorBakeResult> {
     return this.baker.bakeFull(source, config);
   }
 
@@ -231,6 +232,10 @@ export class OctahedralImpostor {
 
     // Determine if this is an AAA bake (has depth atlas)
     const isAAA = !!depthAtlasTexture;
+    const hasNormalAtlas = !!normalAtlasTexture;
+    const hasDepthAtlas = !!depthAtlasTexture;
+    const hasPbrAtlas = !!pbrAtlasTexture;
+    const enableTSLAAA = hasNormalAtlas || hasDepthAtlas || hasPbrAtlas;
     const useTSL = options?.useTSL ?? false;
 
     // Create material based on renderer type
@@ -246,9 +251,9 @@ export class OctahedralImpostor {
         pbrAtlasTexture,
         gridSizeX,
         gridSizeY,
-        enableAAA: isAAA,
-        enableDepthBlending: !!depthAtlasTexture,
-        enableSpecular: !!normalAtlasTexture,
+        enableAAA: enableTSLAAA,
+        enableDepthBlending: hasDepthAtlas,
+        enableSpecular: hasNormalAtlas,
         depthNear: depthNear ?? 0.001,
         depthFar: depthFar ?? 10,
         dissolve: options?.dissolve,
@@ -332,10 +337,10 @@ export class OctahedralImpostor {
     // IMPORTANT: Must use filledMesh.geometry which has proper triangle indices,
     // NOT wireframeMesh.geometry which is LineSegments with no triangle data
     const raycastGeometry = octMesh.filledMesh.geometry;
-    const raycastMesh = new THREE.Mesh(
-      raycastGeometry,
-      new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }),
-    );
+    const raycastMaterial = new MeshBasicNodeMaterial();
+    raycastMaterial.visible = false;
+    raycastMaterial.side = THREE.DoubleSide;
+    const raycastMesh = new THREE.Mesh(raycastGeometry, raycastMaterial);
     raycastMesh.position.set(0, 0, 0);
     raycastMesh.updateMatrixWorld(true);
 
@@ -487,15 +492,17 @@ export class OctahedralImpostor {
    * @param bakeResult - The bake result
    * @param count - Number of instances
    * @param size - Size of each impostor
+   * @param options - Optional configuration (useTSL for WebGPU compatibility)
    * @returns Instanced mesh and update function
    */
   createInstancedMesh(
     bakeResult: ImpostorBakeResult,
     count: number,
     size: number = 1,
+    options?: { useTSL?: boolean },
   ): {
     mesh: THREE.InstancedMesh;
-    material: THREE.ShaderMaterial;
+    material: THREE.ShaderMaterial | TSLImpostorMaterial;
     setPosition: (index: number, position: THREE.Vector3) => void;
     update: (camera: THREE.Camera) => void;
     dispose: () => void;
@@ -508,14 +515,26 @@ export class OctahedralImpostor {
       octMeshData,
     } = bakeResult;
 
+    const useTSL = options?.useTSL ?? false;
+
     // Create material with lighting support if normal atlas exists
-    const material = createImpostorMaterial({
-      atlasTexture,
-      normalAtlasTexture, // Include normal atlas for lighting
-      gridSizeX,
-      gridSizeY,
-      enableLighting: normalAtlasTexture != null,
-    });
+    // Use TSL for WebGPU, GLSL for WebGL
+    const material: THREE.ShaderMaterial | TSLImpostorMaterial = useTSL
+      ? createTSLImpostorMaterial({
+          atlasTexture,
+          normalAtlasTexture,
+          gridSizeX,
+          gridSizeY,
+          enableAAA: !!normalAtlasTexture,
+          enableSpecular: !!normalAtlasTexture,
+        })
+      : createImpostorMaterial({
+          atlasTexture,
+          normalAtlasTexture,
+          gridSizeX,
+          gridSizeY,
+          enableLighting: normalAtlasTexture != null,
+        });
 
     const geometry = new THREE.PlaneGeometry(size, size);
     const mesh = new THREE.InstancedMesh(geometry, material, count);
@@ -528,6 +547,10 @@ export class OctahedralImpostor {
     // Raycaster for atlas view selection
     const raycaster = new THREE.Raycaster();
     const viewDir = new THREE.Vector3();
+
+    // Reusable vectors for view data
+    const faceIndices = new THREE.Vector3();
+    const faceWeights = new THREE.Vector3();
 
     return {
       mesh,
@@ -562,9 +585,20 @@ export class OctahedralImpostor {
                 )
               : new THREE.Vector3(0.34, 0.33, 0.33);
 
-            // Update material uniforms with view data
-            material.uniforms.faceIndices.value.set(face.a, face.b, face.c);
-            material.uniforms.faceWeights.value.copy(bary);
+            faceIndices.set(face.a, face.b, face.c);
+            faceWeights.copy(bary);
+
+            // Update material - handle both TSL and GLSL interfaces
+            if (useTSL) {
+              (material as TSLImpostorMaterial).updateView(
+                faceIndices,
+                faceWeights,
+              );
+            } else {
+              const glslMat = material as THREE.ShaderMaterial;
+              glslMat.uniforms.faceIndices.value.set(face.a, face.b, face.c);
+              glslMat.uniforms.faceWeights.value.copy(bary);
+            }
           }
         }
 

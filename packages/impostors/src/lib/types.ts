@@ -84,15 +84,15 @@ export interface ImpostorBakeResult {
   /** The baked atlas texture (color/albedo) - sRGB color space */
   atlasTexture: THREE.Texture;
   /** The render target containing the atlas */
-  renderTarget: THREE.WebGLRenderTarget;
+  renderTarget: THREE.RenderTarget;
   /** Normal atlas texture for dynamic lighting (view-space normals) - linear color space */
   normalAtlasTexture?: THREE.Texture;
   /** The render target for normals */
-  normalRenderTarget?: THREE.WebGLRenderTarget;
+  normalRenderTarget?: THREE.RenderTarget;
   /** Depth atlas texture for parallax/depth blending (linear depth 0-1) - linear color space */
   depthAtlasTexture?: THREE.Texture;
   /** The render target for depth */
-  depthRenderTarget?: THREE.WebGLRenderTarget;
+  depthRenderTarget?: THREE.RenderTarget;
   /** PBR atlas texture containing packed material properties:
    * R = Roughness (0=smooth, 1=rough)
    * G = Metallic (0=dielectric, 1=metal)
@@ -101,7 +101,7 @@ export interface ImpostorBakeResult {
    */
   pbrAtlasTexture?: THREE.Texture;
   /** The render target for PBR channels */
-  pbrRenderTarget?: THREE.WebGLRenderTarget;
+  pbrRenderTarget?: THREE.RenderTarget;
   /** Horizontal grid size (columns) used for baking */
   gridSizeX: number;
   /** Vertical grid size (rows) used for baking */
