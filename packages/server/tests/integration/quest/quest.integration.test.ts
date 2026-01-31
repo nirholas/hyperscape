@@ -294,7 +294,9 @@ describe("QuestSystem Integration Tests", () => {
       mockWorld as unknown as import("@hyperscape/shared").World,
     );
 
-    // Inject mock quest definitions (bypassing file loading)
+    await questSystem.init();
+
+    // Inject mock quest definitions AFTER init (to override any loaded manifest)
     // @ts-expect-error - accessing private for testing
     questSystem.questDefinitions = new Map(
       Object.entries(mockQuestDefinitions),
@@ -302,7 +304,21 @@ describe("QuestSystem Integration Tests", () => {
     // @ts-expect-error - accessing private for testing
     questSystem.manifestLoaded = true;
 
-    await questSystem.init();
+    // Clear stage caches since we replaced the definitions
+    // @ts-expect-error - accessing private for testing
+    questSystem._stageByIdCache.clear();
+    // @ts-expect-error - accessing private for testing
+    questSystem._stageIndexCache.clear();
+    // @ts-expect-error - accessing private for testing
+    questSystem._gatherStageCache.clear();
+    // @ts-expect-error - accessing private for testing
+    questSystem._interactStageCache.clear();
+
+    // Rebuild caches for mock definitions
+    for (const [questId, definition] of Object.entries(mockQuestDefinitions)) {
+      // @ts-expect-error - accessing private for testing
+      questSystem.buildStageCaches(questId, definition);
+    }
 
     // Simulate player registration to initialize player state
     eventBus.emitEvent(EventType.PLAYER_REGISTERED, { playerId: "player-1" });
@@ -869,7 +885,9 @@ describe("QuestSystem Integration Tests", () => {
 
     it("accumulates quest points across completions", async () => {
       // Complete goblin_slayer (1 QP)
-      await questSystem.startQuest("player-1", "goblin_slayer");
+      const gs1 = await questSystem.startQuest("player-1", "goblin_slayer");
+      expect(gs1).toBe(true);
+
       for (let i = 0; i < 15; i++) {
         mockWorld.$eventBus!.emitEvent(EventType.NPC_DIED, {
           killedBy: "player-1",
@@ -877,12 +895,15 @@ describe("QuestSystem Integration Tests", () => {
           npcId: `goblin-${i}`,
         });
       }
-      await questSystem.completeQuest("player-1", "goblin_slayer");
+      const gc1 = await questSystem.completeQuest("player-1", "goblin_slayer");
+      expect(gc1).toBe(true);
 
       expect(questSystem.getQuestPoints("player-1")).toBe(1);
 
       // Complete advanced_quest (2 QP)
-      await questSystem.startQuest("player-1", "advanced_quest");
+      const as2 = await questSystem.startQuest("player-1", "advanced_quest");
+      expect(as2).toBe(true);
+
       for (let i = 0; i < 10; i++) {
         mockWorld.$eventBus!.emitEvent(EventType.NPC_DIED, {
           killedBy: "player-1",
@@ -890,7 +911,12 @@ describe("QuestSystem Integration Tests", () => {
           npcId: `orc-${i}`,
         });
       }
-      await questSystem.completeQuest("player-1", "advanced_quest");
+      // Verify quest status is ready to complete before completing
+      const status2 = questSystem.getQuestStatus("player-1", "advanced_quest");
+      expect(status2).toBe("ready_to_complete");
+
+      const ac2 = await questSystem.completeQuest("player-1", "advanced_quest");
+      expect(ac2).toBe(true);
 
       expect(questSystem.getQuestPoints("player-1")).toBe(3);
     });

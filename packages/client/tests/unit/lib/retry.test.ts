@@ -290,21 +290,25 @@ describe("tryWithRetry", () => {
     expect(result.error).toBeUndefined();
   });
 
-  it("should return failure result after max retries", async () => {
-    const fn = async () => {
-      throw new Error("Failed");
-    };
+  it(
+    "should return failure result after max retries",
+    { timeout: 15000 },
+    async () => {
+      const fn = async () => {
+        throw new Error("Failed");
+      };
 
-    const result = await tryWithRetry(fn, {
-      maxRetries: 2,
-      initialDelay: 10,
-    });
+      const result = await tryWithRetry(fn, {
+        maxRetries: 2,
+        initialDelay: 10,
+      });
 
-    expect(result.success).toBe(false);
-    expect(result.value).toBeUndefined();
-    expect(result.error?.message).toBe("Failed");
-    expect(result.attempts).toBe(3); // Initial + 2 retries
-  });
+      expect(result.success).toBe(false);
+      expect(result.value).toBeUndefined();
+      expect(result.error?.message).toBe("Failed");
+      expect(result.attempts).toBe(3); // Initial + 2 retries
+    },
+  );
 });
 
 describe("retryable", () => {

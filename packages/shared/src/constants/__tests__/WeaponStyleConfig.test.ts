@@ -58,7 +58,8 @@ describe("WeaponStyleConfig", () => {
       expect(styles).not.toContain("controlled");
     });
 
-    it("returns accurate, rapid, longrange for ranged weapons", () => {
+    it("returns OSRS-accurate styles for ranged weapons", () => {
+      // Ranged weapons: accurate, rapid, longrange
       expect(getAvailableStyles(WeaponType.BOW)).toEqual([
         "accurate",
         "rapid",
@@ -71,7 +72,8 @@ describe("WeaponStyleConfig", () => {
       ]);
     });
 
-    it("returns accurate, longrange, autocast for magic weapons", () => {
+    it("returns OSRS-accurate styles for magic weapons", () => {
+      // Magic weapons: accurate, longrange, autocast
       expect(getAvailableStyles(WeaponType.STAFF)).toEqual([
         "accurate",
         "longrange",
@@ -190,13 +192,14 @@ describe("WeaponStyleConfig", () => {
     });
 
     it("all style arrays contain only valid CombatStyle values", () => {
+      // CombatStyleExtended includes melee, ranged, and magic styles
       const validStyles = [
         "accurate",
         "aggressive",
         "defensive",
         "controlled",
-        "rapid",
         "longrange",
+        "rapid",
         "autocast",
       ];
       Object.values(WEAPON_STYLE_CONFIG).forEach((styles) => {

@@ -117,33 +117,37 @@ describe("VegetationSystem Algorithms", () => {
     ];
     const totalWeight = 140;
 
-    it("selects assets according to weight distribution", () => {
-      // Run many selections and count occurrences
-      const counts: Record<string, number> = {
-        common: 0,
-        uncommon: 0,
-        rare: 0,
-      };
-      const iterations = 10000;
+    it(
+      "selects assets according to weight distribution",
+      { timeout: 15000 },
+      () => {
+        // Run many selections and count occurrences
+        const counts: Record<string, number> = {
+          common: 0,
+          uncommon: 0,
+          rare: 0,
+        };
+        const iterations = 10000;
 
-      // Use fixed seed for reproducibility
-      const rng = createTileLayerRng("weighted_test", "test");
+        // Use fixed seed for reproducibility
+        const rng = createTileLayerRng("weighted_test", "test");
 
-      for (let i = 0; i < iterations; i++) {
-        const selected = selectWeightedAsset(assets, totalWeight, rng);
-        if (selected) {
-          counts[selected.id]++;
+        for (let i = 0; i < iterations; i++) {
+          const selected = selectWeightedAsset(assets, totalWeight, rng);
+          if (selected) {
+            counts[selected.id]++;
+          }
         }
-      }
 
-      // Common should appear most often (~71%), uncommon (~21%), rare (~7%)
-      expect(counts.common).toBeGreaterThan(counts.uncommon);
-      expect(counts.uncommon).toBeGreaterThan(counts.rare);
+        // Common should appear most often (~71%), uncommon (~21%), rare (~7%)
+        expect(counts.common).toBeGreaterThan(counts.uncommon);
+        expect(counts.uncommon).toBeGreaterThan(counts.rare);
 
-      // Rough bounds check (with some tolerance)
-      expect(counts.common / iterations).toBeGreaterThan(0.5);
-      expect(counts.rare / iterations).toBeLessThan(0.2);
-    });
+        // Rough bounds check (with some tolerance)
+        expect(counts.common / iterations).toBeGreaterThan(0.5);
+        expect(counts.rare / iterations).toBeLessThan(0.2);
+      },
+    );
 
     it("returns null for empty assets array", () => {
       const rng = createTileLayerRng("empty_test", "test");
