@@ -34,8 +34,36 @@ function snapToGrid(value: number, gridSize: number): number {
   return Math.round(value / gridSize) * gridSize;
 }
 
-/** Mobile breakpoint threshold */
-const MOBILE_BREAKPOINT = 768;
+/** Mobile breakpoint threshold - increased for better tablet support */
+const MOBILE_BREAKPOINT = 1024;
+
+/** Design resolution used as stable reference for scaling */
+const DESIGN_RESOLUTION = { width: 1920, height: 1080 };
+
+/** Maximum scale ratio to prevent extreme scaling */
+const MAX_SCALE_RATIO = 2.0;
+
+/** Minimum scale ratio to prevent extreme scaling */
+const MIN_SCALE_RATIO = 0.5;
+
+/**
+ * Clamp a scale ratio to prevent extreme scaling
+ * Returns 1.0 (no scaling) if ratio is outside safe bounds
+ */
+function clampScaleRatio(ratio: number): number {
+  if (ratio > MAX_SCALE_RATIO || ratio < MIN_SCALE_RATIO) {
+    // For extreme ratios, return 1.0 to avoid corrupted state
+    return 1.0;
+  }
+  return ratio;
+}
+
+/**
+ * Check if a scale ratio is within safe bounds
+ */
+function isScaleRatioSafe(ratio: number): boolean {
+  return ratio >= MIN_SCALE_RATIO && ratio <= MAX_SCALE_RATIO;
+}
 
 /**
  * Get the current scaled viewport dimensions
@@ -51,6 +79,7 @@ function getScaledViewport(): { width: number; height: number } {
 
 /**
  * Calculate proportionally scaled size for a window
+ * Uses clamped scale ratios to prevent extreme scaling
  */
 function scaleWindowSize(
   currentSize: { width: number; height: number },
@@ -59,8 +88,12 @@ function scaleWindowSize(
   minSize: { width: number; height: number },
   maxSize?: { width: number; height: number },
 ): { width: number; height: number } {
-  const widthScale = newViewport.width / oldViewport.width;
-  const heightScale = newViewport.height / oldViewport.height;
+  const rawWidthScale = newViewport.width / oldViewport.width;
+  const rawHeightScale = newViewport.height / oldViewport.height;
+
+  // Clamp scale ratios to prevent extreme scaling
+  const widthScale = clampScaleRatio(rawWidthScale);
+  const heightScale = clampScaleRatio(rawHeightScale);
 
   let newWidth = Math.round(currentSize.width * widthScale);
   let newHeight = Math.round(currentSize.height * heightScale);
@@ -90,7 +123,6 @@ function getPanelIdFromWindow(win: WindowState): string {
 /** IDs for right column windows (need to scale together) */
 const RIGHT_COLUMN_WINDOW_IDS = [
   "minimap-window",
-  "combat-window",
   "skills-prayer-window",
   "inventory-window",
   "menubar-window",
@@ -133,9 +165,11 @@ function scaleLeftColumnPanels(
 
   if (leftColumnWindows.length === 0) return updates;
 
-  // Calculate scale ratios
-  const widthScale = newViewport.width / oldViewport.width;
-  const heightScale = newViewport.height / oldViewport.height;
+  // Calculate scale ratios with clamping
+  const rawWidthScale = newViewport.width / oldViewport.width;
+  const rawHeightScale = newViewport.height / oldViewport.height;
+  const widthScale = clampScaleRatio(rawWidthScale);
+  const heightScale = clampScaleRatio(rawHeightScale);
 
   // Left edge X position is always 0
   const leftColumnX = 0;
@@ -179,7 +213,6 @@ function scaleLeftColumnPanels(
 
 /** IDs for bottom stack (attached together, menubar at bottom) */
 const BOTTOM_STACK_WINDOW_IDS = [
-  "combat-window",
   "skills-prayer-window",
   "inventory-window",
   "menubar-window",
@@ -225,9 +258,11 @@ function scaleRightColumnPanels(
     .filter((w) => BOTTOM_STACK_WINDOW_IDS.includes(w.id))
     .sort((a, b) => a.position.y - b.position.y); // Sort top to bottom
 
-  // Calculate scale ratios
-  const widthScale = newViewport.width / oldViewport.width;
-  const heightScale = newViewport.height / oldViewport.height;
+  // Calculate scale ratios with clamping
+  const rawWidthScale = newViewport.width / oldViewport.width;
+  const rawHeightScale = newViewport.height / oldViewport.height;
+  const widthScale = clampScaleRatio(rawWidthScale);
+  const heightScale = clampScaleRatio(rawHeightScale);
 
   // Calculate new width for right column (all panels share same width)
   const firstPanel = rightColumnWindows[0];
@@ -275,29 +310,25 @@ function scaleRightColumnPanels(
   if (minimapWindow) {
     const minimapConfig = getPanelConfig("minimap");
 
-    // Calculate gap proportionally (original gap = space between minimap bottom and combat top)
+    // Calculate gap proportionally (original gap = space between minimap bottom and skills top)
     const originalMinimapBottom =
       minimapWindow.position.y + minimapWindow.size.height;
-    const combatWindow = bottomStackWindows.find(
-      (w) => w.id === "combat-window",
+    const skillsWindow = bottomStackWindows.find(
+      (w) => w.id === "skills-prayer-window",
     );
-    const originalGap = combatWindow
-      ? combatWindow.position.y - originalMinimapBottom
-      : 20; // Default gap if combat not found
+    const originalGap = skillsWindow
+      ? skillsWindow.position.y - originalMinimapBottom
+      : 20; // Default gap if skills not found
 
     // Scale gap proportionally
     const newGap = Math.max(10, Math.round(originalGap * heightScale));
 
-    // Combat Y in new viewport (top of bottom stack)
-    const newCombatY =
-      bottomStackY +
-      (bottomStackUpdates.find((u) => u.win.id === "combat-window")?.y ??
-        bottomStackY);
-    const actualCombatY =
-      updates.get("combat-window")?.position.y ?? bottomStackY;
+    // Skills Y in new viewport (top of bottom stack)
+    const actualSkillsY =
+      updates.get("skills-prayer-window")?.position.y ?? bottomStackY;
 
-    // Minimap fills from top (y=0) down to gap above combat
-    let newMinimapHeight = actualCombatY - newGap;
+    // Minimap fills from top (y=0) down to gap above skills
+    let newMinimapHeight = actualSkillsY - newGap;
     newMinimapHeight = Math.max(minimapConfig.minSize.height, newMinimapHeight);
     newMinimapHeight = snapToGrid(newMinimapHeight, gridSize);
 
@@ -309,6 +340,59 @@ function scaleRightColumnPanels(
 
   return updates;
 }
+
+/**
+ * Validate that a layout is sane after scaling
+ * Returns true if layout is valid, false if it needs reset
+ */
+function validateLayout(
+  windows: WindowState[],
+  viewport: { width: number; height: number },
+): boolean {
+  for (const win of windows) {
+    // Check if window is completely off-screen
+    if (
+      win.position.x + win.size.width < 0 ||
+      win.position.x > viewport.width
+    ) {
+      return false;
+    }
+    if (
+      win.position.y + win.size.height < 0 ||
+      win.position.y > viewport.height
+    ) {
+      return false;
+    }
+
+    // Check if window size is too small (less than 50% of minSize)
+    const panelId = getPanelIdFromWindow(win);
+    const config = getPanelConfig(panelId);
+    if (win.size.width < config.minSize.width * 0.5) {
+      return false;
+    }
+    if (win.size.height < config.minSize.height * 0.5) {
+      return false;
+    }
+
+    // Check for NaN or invalid values
+    if (
+      !Number.isFinite(win.position.x) ||
+      !Number.isFinite(win.position.y) ||
+      !Number.isFinite(win.size.width) ||
+      !Number.isFinite(win.size.height)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Saved desktop layout state for restoring after mobile mode */
+type SavedLayoutState = Array<{
+  id: string;
+  position: { x: number; y: number };
+  size: { width: number; height: number };
+}>;
 
 /**
  * Hook for handling viewport resize with proportional scaling
@@ -329,12 +413,28 @@ export function useViewportResize() {
     height: typeof window !== "undefined" ? window.innerHeight : 1080,
   });
 
+  // Reference viewport for stable scaling calculations
+  // This is the baseline desktop viewport - updated only when in stable desktop state
+  const referenceViewportRef = useRef<{ width: number; height: number }>({
+    width:
+      typeof window !== "undefined" && window.innerWidth >= MOBILE_BREAKPOINT
+        ? window.innerWidth
+        : DESIGN_RESOLUTION.width,
+    height:
+      typeof window !== "undefined" && window.innerWidth >= MOBILE_BREAKPOINT
+        ? window.innerHeight
+        : DESIGN_RESOLUTION.height,
+  });
+
   // Track previous mobile state to detect mobile <-> desktop transitions
   const wasMobileRef = useRef<boolean>(
     typeof window !== "undefined"
       ? window.innerWidth < MOBILE_BREAKPOINT
       : false,
   );
+
+  // Saved desktop layout for restoring after mobile mode
+  const savedDesktopLayoutRef = useRef<SavedLayoutState | null>(null);
 
   // Viewport resize handling with anchor-based repositioning
   useEffect(() => {
@@ -360,27 +460,104 @@ export function useViewportResize() {
         // Update mobile state tracking
         wasMobileRef.current = nowMobile;
 
-        // On mobile <-> desktop transition, reset to default layout
+        // On mobile <-> desktop transition, handle layout save/restore
         if (transitionedFromMobile || transitionedToMobile) {
+          const windowStoreUpdate = useWindowStore.getState().updateWindow;
+          const allWindows = useWindowStore.getState().getAllWindows();
+
+          if (transitionedToMobile) {
+            // Save current desktop layout before going to mobile
+            savedDesktopLayoutRef.current = allWindows.map((win) => ({
+              id: win.id,
+              position: { ...win.position },
+              size: { ...win.size },
+            }));
+            // Also save reference viewport
+            referenceViewportRef.current = {
+              width: prevWidth,
+              height: prevHeight,
+            };
+          }
+
           if (transitionedFromMobile) {
-            const defaultWindows = createDefaultWindows();
-            const windowStoreUpdate = useWindowStore.getState().updateWindow;
-            const allWindows = useWindowStore.getState().getAllWindows();
+            // Restore saved desktop layout OR reset to default
+            if (
+              savedDesktopLayoutRef.current &&
+              savedDesktopLayoutRef.current.length > 0
+            ) {
+              // Restore saved layout, scaled to current viewport if different
+              const savedViewport = referenceViewportRef.current;
+              const currentViewport = { width: newWidth, height: newHeight };
 
-            const defaultConfigs = new Map(
-              defaultWindows.map((w) => [w.id, w]),
-            );
+              // Check if we need to scale the saved layout
+              const widthRatio = currentViewport.width / savedViewport.width;
+              const heightRatio = currentViewport.height / savedViewport.height;
+              const needsScaling =
+                isScaleRatioSafe(widthRatio) &&
+                isScaleRatioSafe(heightRatio) &&
+                (Math.abs(widthRatio - 1) > 0.01 ||
+                  Math.abs(heightRatio - 1) > 0.01);
 
-            allWindows.forEach((win) => {
-              const defaultWin = defaultConfigs.get(win.id);
-              if (defaultWin) {
+              savedDesktopLayoutRef.current.forEach((saved) => {
+                const win = allWindows.find((w) => w.id === saved.id);
+                if (!win) return;
+
+                let newPosition = saved.position;
+                let newSize = saved.size;
+
+                if (needsScaling) {
+                  // Scale position and size proportionally
+                  newPosition = {
+                    x: Math.round(saved.position.x * widthRatio),
+                    y: Math.round(saved.position.y * heightRatio),
+                  };
+                  const panelId = getPanelIdFromWindow(win);
+                  const config = getPanelConfig(panelId);
+                  newSize = scaleWindowSize(
+                    saved.size,
+                    savedViewport,
+                    currentViewport,
+                    config.minSize,
+                    config.maxSize,
+                  );
+                }
+
                 windowStoreUpdate(win.id, {
-                  position: defaultWin.position,
-                  size: defaultWin.size,
-                  anchor: defaultWin.anchor ?? getDefaultAnchor(win.id),
+                  position: newPosition,
+                  size: newSize,
+                  anchor: win.anchor ?? getDefaultAnchor(win.id),
                 });
-              }
-            });
+              });
+
+              // Update reference viewport to current
+              referenceViewportRef.current = currentViewport;
+            } else {
+              // No saved layout - reset to default
+              const defaultWindows = createDefaultWindows();
+              const defaultConfigs = new Map(
+                defaultWindows.map((w) => [w.id, w]),
+              );
+
+              allWindows.forEach((win) => {
+                const defaultWin = defaultConfigs.get(win.id);
+                if (defaultWin) {
+                  windowStoreUpdate(win.id, {
+                    position: defaultWin.position,
+                    size: defaultWin.size,
+                    anchor: defaultWin.anchor ?? getDefaultAnchor(win.id),
+                  });
+                }
+              });
+
+              // Update reference viewport
+              referenceViewportRef.current = {
+                width: newWidth,
+                height: newHeight,
+              };
+            }
+
+            // Clear saved layout after restore
+            savedDesktopLayoutRef.current = null;
           }
 
           prevViewportRef.current = { width: newWidth, height: newHeight };
@@ -554,8 +731,36 @@ export function useViewportResize() {
             }
           });
 
+        // Validate the layout after scaling
+        const updatedWindows = useWindowStore.getState().getAllWindows();
+        if (!validateLayout(updatedWindows, newViewport)) {
+          // Layout is invalid - reset to default
+          console.warn(
+            "[useViewportResize] Layout validation failed after scaling, resetting to default",
+          );
+          const defaultWindows = createDefaultWindows();
+          const defaultConfigs = new Map(defaultWindows.map((w) => [w.id, w]));
+
+          updatedWindows.forEach((win) => {
+            const defaultWin = defaultConfigs.get(win.id);
+            if (defaultWin) {
+              windowStoreUpdate(win.id, {
+                position: defaultWin.position,
+                size: defaultWin.size,
+                anchor: defaultWin.anchor ?? getDefaultAnchor(win.id),
+              });
+            }
+          });
+        }
+
         // Update tracked viewport size
         prevViewportRef.current = { width: newWidth, height: newHeight };
+
+        // Update reference viewport only when in stable desktop state
+        if (!nowMobile) {
+          referenceViewportRef.current = { width: newWidth, height: newHeight };
+        }
+
         useWindowStore.getState().setSavedViewportSize(newViewport);
       }, 100);
     };
