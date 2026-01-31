@@ -840,7 +840,12 @@ export type {
   PlayerCombatStyle,
 } from "./types/entities";
 export type { GroupType } from "./types/rendering/nodes";
-export type { InventoryItemInfo } from "./types/events";
+export type {
+  InventoryItemInfo,
+  ActionBarSlotContent,
+  ActionBarSlotUpdatePayload,
+  ActionBarSlotSwapPayload,
+} from "./types/events";
 
 // Export database/event types
 export type {

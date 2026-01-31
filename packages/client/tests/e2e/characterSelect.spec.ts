@@ -53,8 +53,16 @@ test.describe("Character Selection Screen", () => {
       '[data-testid="character-select"], [class*="character-select"], [class*="CharacterSelect"]',
     );
 
-    // Wait for character selection to potentially appear
-    await page.waitForTimeout(3000);
+    // Wait for app to initialize - look for any main UI element
+    await page
+      .waitForFunction(
+        () =>
+          document.querySelector(
+            'canvas, [class*="character"], [data-testid]',
+          ) !== null,
+        { timeout: 10000 },
+      )
+      .catch(() => {});
 
     // Check if character list container exists
     const characterList = page.locator(
@@ -75,7 +83,13 @@ test.describe("Character Selection Screen", () => {
       '[data-testid="create-character"], button:has-text("Create"), button:has-text("New Character")',
     );
 
-    await page.waitForTimeout(2000);
+    // Wait for UI to stabilize
+    await page
+      .waitForFunction(
+        () => document.querySelector('button, [class*="character"]') !== null,
+        { timeout: 5000 },
+      )
+      .catch(() => {});
 
     if (
       await createButton
@@ -95,7 +109,12 @@ test.describe("Character Selection Screen", () => {
   });
 
   test("should validate character name input", async ({ page }) => {
-    await page.waitForTimeout(2000);
+    // Wait for UI to initialize
+    await page
+      .waitForFunction(() => document.querySelector("input, button") !== null, {
+        timeout: 5000,
+      })
+      .catch(() => {});
 
     // Find the character name input
     const nameInput = page
@@ -142,7 +161,13 @@ test.describe("Character Selection Screen", () => {
   test("should display character preview on hover or selection", async ({
     page,
   }) => {
-    await page.waitForTimeout(2000);
+    // Wait for character cards to potentially load
+    await page
+      .waitForFunction(
+        () => document.querySelector('[class*="character"], canvas') !== null,
+        { timeout: 5000 },
+      )
+      .catch(() => {});
 
     // Look for character cards/items
     const characterCards = page.locator(
@@ -165,7 +190,16 @@ test.describe("Character Selection Screen", () => {
   });
 
   test("should handle empty characters state", async ({ page }) => {
-    await page.waitForTimeout(2000);
+    // Wait for page content to stabilize
+    await page
+      .waitForFunction(
+        () =>
+          document.querySelector(
+            '[class*="character"], [class*="empty"], button',
+          ) !== null,
+        { timeout: 5000 },
+      )
+      .catch(() => {});
 
     // Look for empty state message
     const emptyState = page.locator(
@@ -187,7 +221,16 @@ test.describe("Character Selection Screen", () => {
   });
 
   test("should select character and proceed to world", async ({ page }) => {
-    await page.waitForTimeout(2000);
+    // Wait for character cards to load
+    await page
+      .waitForFunction(
+        () =>
+          document.querySelector(
+            '[class*="character-card"], [data-testid*="character"]',
+          ) !== null,
+        { timeout: 5000 },
+      )
+      .catch(() => {});
 
     // Find playable character cards
     const characterCards = page.locator(
@@ -229,7 +272,13 @@ test.describe("Character Selection Screen", () => {
   });
 
   test("should show character stats and details", async ({ page }) => {
-    await page.waitForTimeout(2000);
+    // Wait for character UI to load
+    await page
+      .waitForFunction(
+        () => document.querySelector('[class*="character"], canvas') !== null,
+        { timeout: 5000 },
+      )
+      .catch(() => {});
 
     const characterCards = page.locator(
       '[data-testid="character-card"], [class*="character-card"]',
@@ -254,7 +303,13 @@ test.describe("Character Selection Screen", () => {
   });
 
   test("should display music toggle control", async ({ page }) => {
-    await page.waitForTimeout(2000);
+    // Wait for page content to stabilize
+    await page
+      .waitForFunction(
+        () => document.querySelector('button, [class*="control"]') !== null,
+        { timeout: 5000 },
+      )
+      .catch(() => {});
 
     // Look for music toggle
     const musicToggle = page.locator(
@@ -267,7 +322,13 @@ test.describe("Character Selection Screen", () => {
   });
 
   test("should handle character deletion confirmation", async ({ page }) => {
-    await page.waitForTimeout(2000);
+    // Wait for character cards to potentially load
+    await page
+      .waitForFunction(
+        () => document.querySelector('[class*="character"], button') !== null,
+        { timeout: 5000 },
+      )
+      .catch(() => {});
 
     const characterCards = page.locator(
       '[data-testid="character-card"], [class*="character-card"]',
@@ -315,7 +376,17 @@ test.describe("Character Selection Screen", () => {
   test("should take screenshot of character selection screen", async ({
     page,
   }) => {
-    await page.waitForTimeout(3000);
+    // Wait for UI to fully render
+    await page
+      .waitForFunction(
+        () =>
+          document.querySelector('canvas, [class*="character"], button') !==
+          null,
+        { timeout: 10000 },
+      )
+      .catch(() => {});
+    // Small delay for animations to settle
+    await page.waitForLoadState("domcontentloaded");
 
     // Take screenshot for visual verification
     await takeGameScreenshot(page, "character-select-screen");
@@ -326,7 +397,13 @@ test.describe("Character Creation Flow", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto(BASE_URL);
     await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(2000);
+    // Wait for page content to initialize
+    await page
+      .waitForFunction(
+        () => document.querySelector("button, input, canvas") !== null,
+        { timeout: 5000 },
+      )
+      .catch(() => {});
   });
 
   test("should show avatar selection options", async ({ page }) => {
@@ -342,7 +419,16 @@ test.describe("Character Creation Flow", () => {
         .catch(() => false)
     ) {
       await createButton.first().click();
-      await page.waitForTimeout(1000);
+      // Wait for form to appear
+      await page
+        .waitForFunction(
+          () =>
+            document.querySelector(
+              '[class*="avatar"], input, [class*="form"]',
+            ) !== null,
+          { timeout: 5000 },
+        )
+        .catch(() => {});
 
       // Look for avatar selection
       const avatarOptions = page.locator(
@@ -416,7 +502,13 @@ test.describe("Character Selection - Agent Mode", () => {
   test("should display agent templates when available", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(2000);
+    // Wait for UI elements to load
+    await page
+      .waitForFunction(
+        () => document.querySelector('button, [class*="template"]') !== null,
+        { timeout: 5000 },
+      )
+      .catch(() => {});
 
     // Look for agent/AI character creation option
     const agentOption = page.locator(
@@ -447,7 +539,19 @@ test.describe("Character Selection - WebSocket Connection", () => {
   test("should establish WebSocket connection", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(3000);
+    // Wait for app to initialize and potentially establish WebSocket
+    await page
+      .waitForFunction(
+        () => {
+          const win = window as unknown as { world?: { network?: unknown } };
+          return (
+            win.world?.network !== undefined ||
+            document.querySelector("canvas") !== null
+          );
+        },
+        { timeout: 10000 },
+      )
+      .catch(() => {});
 
     // Check for WebSocket connection status
     const wsStatus = await page.evaluate(() => {

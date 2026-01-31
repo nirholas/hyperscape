@@ -211,6 +211,13 @@
       "when": 1769900000000,
       "tag": "0030_add_fletching_skill",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1769986400000,
+      "tag": "0031_add_operations_log_fk",
+      "breakpoints": true
     }
   ]
 }

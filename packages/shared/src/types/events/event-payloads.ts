@@ -1323,6 +1323,38 @@ export interface XpLampAppliedPayload {
   xpAmount: number;
 }
 
+// =========================================================================
+// ACTION BAR EVENT PAYLOADS
+// =========================================================================
+
+/** Action bar slot content - can be an item, skill, spell, prayer, or combat style */
+export interface ActionBarSlotContent {
+  type: "item" | "skill" | "spell" | "prayer" | "combatstyle" | "empty";
+  id: string;
+  itemId?: string;
+  skillId?: string;
+  spellId?: string;
+  prayerId?: string;
+  combatStyleId?: string;
+  quantity?: number;
+  icon?: string;
+  label?: string;
+}
+
+/** Payload for action bar slot update events */
+export interface ActionBarSlotUpdatePayload {
+  barId: number;
+  slotIndex: number;
+  slot: ActionBarSlotContent;
+}
+
+/** Payload for action bar slot swap events */
+export interface ActionBarSlotSwapPayload {
+  barId: number;
+  fromIndex: number;
+  toIndex: number;
+}
+
 // Generic event base type
 export type AnyEvent = Record<string, unknown>;
 

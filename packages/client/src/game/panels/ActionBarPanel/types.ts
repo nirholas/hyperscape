@@ -4,6 +4,16 @@
 
 import type { ClientWorld } from "../../../types";
 
+// Re-export shared types for backward compatibility
+export type {
+  ActionBarSlotContent,
+  ActionBarSlotUpdatePayload,
+  ActionBarSlotSwapPayload,
+} from "@hyperscape/shared";
+
+// Import for local use
+import type { ActionBarSlotContent } from "@hyperscape/shared";
+
 // ============================================================================
 // Event Payload Types (for proper type safety instead of unknown)
 // ============================================================================
@@ -40,13 +50,6 @@ export interface ActionBarStatePayload {
   slots: ActionBarSlotContent[];
 }
 
-/** Payload for action bar slot swap events */
-export interface ActionBarSlotSwapPayload {
-  barId: number;
-  fromIndex: number;
-  toIndex: number;
-}
-
 /** Extended network interface with attack style cache */
 export interface ActionBarNetworkExtensions {
   lastAttackStyleByPlayerId?: Record<string, string>;
@@ -55,20 +58,6 @@ export interface ActionBarNetworkExtensions {
 // ============================================================================
 // Core Types
 // ============================================================================
-
-/** Action bar slot content - can be an item, skill, spell, prayer, or combat style */
-export interface ActionBarSlotContent {
-  type: "item" | "skill" | "spell" | "prayer" | "combatstyle" | "empty";
-  id: string;
-  itemId?: string;
-  skillId?: string;
-  spellId?: string;
-  prayerId?: string;
-  combatStyleId?: string;
-  quantity?: number;
-  icon?: string;
-  label?: string;
-}
 
 export interface ActionBarPanelProps {
   world: ClientWorld;
@@ -85,13 +74,6 @@ export interface ActionBarPanelProps {
   showShortcuts?: boolean;
   /** Whether to show control buttons (+/-, lock) (default: true) */
   showControls?: boolean;
-}
-
-/** Payload for action bar slot update events */
-export interface ActionBarSlotUpdatePayload {
-  barId: number;
-  slotIndex: number;
-  slot: ActionBarSlotContent;
 }
 
 export interface ContextMenuItem {

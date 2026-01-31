@@ -439,6 +439,7 @@ export function useViewportResize() {
   // Viewport resize handling with anchor-based repositioning
   useEffect(() => {
     let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
+    let isMounted = true; // Track mount state to prevent post-unmount execution
 
     const handleResize = () => {
       const newWidth = window.innerWidth;
@@ -453,6 +454,9 @@ export function useViewportResize() {
       // Debounce the window repositioning
       if (resizeTimeout) clearTimeout(resizeTimeout);
       resizeTimeout = setTimeout(() => {
+        // Early exit if component has unmounted
+        if (!isMounted) return;
+
         // Detect mobile <-> desktop UI mode transition
         const transitionedFromMobile = wasMobile && !nowMobile;
         const transitionedToMobile = !wasMobile && nowMobile;
@@ -770,6 +774,7 @@ export function useViewportResize() {
 
     window.addEventListener("resize", handleResize);
     return () => {
+      isMounted = false; // Mark as unmounted first to prevent callback execution
       window.removeEventListener("resize", handleResize);
       if (resizeTimeout) clearTimeout(resizeTimeout);
     };

@@ -1013,7 +1013,9 @@ export const operationsLog = pgTable(
   "operations_log",
   {
     id: text("id").primaryKey(), // UUID
-    playerId: text("playerId").notNull(),
+    playerId: text("playerId")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
     operationType: text("operationType").notNull(), // 'trade', 'bank', 'equipment', 'inventory'
     operationState: jsonb("operationState").notNull(), // Full operation data for replay
     completed: boolean("completed").default(false),
