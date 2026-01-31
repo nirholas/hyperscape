@@ -137,6 +137,7 @@ import { SkillsSystem } from "..";
 import { SmeltingSystem } from "..";
 import { SmithingSystem } from "..";
 import { CraftingSystem } from "..";
+import { FletchingSystem } from "..";
 import { TanningSystem } from "..";
 import { HealthRegenSystem } from "..";
 import { PrayerSystem } from "..";
@@ -342,6 +343,9 @@ export async function registerSystems(world: World): Promise<void> {
 
   // 18c. Crafting system - Leather, jewelry, gem cutting (depends on inventory, skills)
   world.register("crafting", CraftingSystem);
+
+  // 18e. Fletching system - Knife + logs, stringing, arrow tipping (depends on inventory, skills)
+  world.register("fletching", FletchingSystem);
 
   // 18d. Tanning system - NPC tanner: hides → leather (depends on inventory)
   world.register("tanning", TanningSystem);

@@ -473,6 +473,13 @@ export enum EventType {
   CRAFTING_COMPLETE = "crafting:complete",
   PROCESSING_CRAFTING_REQUEST = "processing:crafting:request",
 
+  // Fletching Events (knife + logs, stringing, arrow tipping)
+  FLETCHING_INTERACT = "fletching:interact",
+  FLETCHING_INTERFACE_OPEN = "fletching:interface:open",
+  FLETCHING_START = "fletching:start",
+  FLETCHING_COMPLETE = "fletching:complete",
+  PROCESSING_FLETCHING_REQUEST = "processing:fletching:request",
+
   // Tanning Events (NPC tanner: hides → leather)
   TANNING_INTERACT = "tanning:interact",
   TANNING_INTERFACE_OPEN = "tanning:interface:open",

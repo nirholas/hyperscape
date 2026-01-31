@@ -697,6 +697,71 @@ export interface CraftingCompletePayload {
 }
 
 // =========================================================================
+// FLETCHING EVENT PAYLOADS
+// =========================================================================
+
+/**
+ * Player initiated fletching (used knife on logs, or item-on-item like bowstring + unstrung bow)
+ */
+export interface FletchingInteractPayload {
+  playerId: string;
+  /** How the fletching was initiated */
+  triggerType: "knife" | "item_on_item";
+  /** Primary input item (e.g., "oak_logs", "bowstring") */
+  inputItemId: string;
+  /** Secondary input for item-on-item (e.g., "shortbow_u", "headless_arrow") */
+  secondaryItemId?: string;
+}
+
+/**
+ * Fletching interface opened - show available recipes to player
+ */
+export interface FletchingInterfaceOpenPayload {
+  playerId: string;
+  availableRecipes: Array<{
+    recipeId: string;
+    output: string;
+    name: string;
+    category: string;
+    outputQuantity: number;
+    inputs: Array<{ item: string; amount: number }>;
+    tools: string[];
+    level: number;
+    xp: number;
+    meetsLevel: boolean;
+    hasInputs: boolean;
+  }>;
+}
+
+/**
+ * Request to fletch a specific recipe
+ */
+export interface ProcessingFletchingRequestPayload {
+  playerId: string;
+  recipeId: string;
+  quantity: number;
+}
+
+/**
+ * Fletching process started
+ */
+export interface FletchingStartPayload {
+  playerId: string;
+  recipeId: string;
+}
+
+/**
+ * Fletching batch completed
+ */
+export interface FletchingCompletePayload {
+  playerId: string;
+  recipeId: string;
+  outputItemId: string;
+  totalCrafted: number;
+  totalXp: number;
+}
+
+// =========================================================================
 // TANNING EVENT PAYLOADS
 // =========================================================================
 
@@ -1092,6 +1157,13 @@ export interface EventMap {
   [EventType.CRAFTING_START]: CraftingStartPayload;
   [EventType.CRAFTING_COMPLETE]: CraftingCompletePayload;
   [EventType.PROCESSING_CRAFTING_REQUEST]: ProcessingCraftingRequestPayload;
+
+  // Fletching Events (knife + logs, stringing, arrow tipping)
+  [EventType.FLETCHING_INTERACT]: FletchingInteractPayload;
+  [EventType.FLETCHING_INTERFACE_OPEN]: FletchingInterfaceOpenPayload;
+  [EventType.FLETCHING_START]: FletchingStartPayload;
+  [EventType.FLETCHING_COMPLETE]: FletchingCompletePayload;
+  [EventType.PROCESSING_FLETCHING_REQUEST]: ProcessingFletchingRequestPayload;
 
   // Tanning Events (NPC tanner: hides → leather)
   [EventType.TANNING_INTERACT]: TanningInteractPayload;
