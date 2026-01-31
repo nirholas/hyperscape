@@ -9,7 +9,7 @@
  * - Sends crafting request to server
  */
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import type { ClientWorld } from "../../types";
 import { useThemeStore } from "@/ui";
 import { formatItemName } from "@/utils";
@@ -145,6 +145,13 @@ export function CraftingPanel({
     }
 
     return sorted;
+  }, [availableRecipes]);
+
+  // Auto-select when only one recipe (e.g., chisel + uncut gem → skip to quantity)
+  useEffect(() => {
+    if (availableRecipes.length === 1) {
+      setSelectedRecipe(availableRecipes[0]);
+    }
   }, [availableRecipes]);
 
   const handleCraft = (recipe: CraftingRecipe, qty: number) => {
