@@ -22,6 +22,7 @@ import {
 import { processingDataProvider } from "../../../data/ProcessingDataProvider";
 import type { CraftingRecipeData } from "../../../data/ProcessingDataProvider";
 import { EventType } from "../../../types/events";
+import { Skill } from "../character/SkillsSystem";
 import { SystemBase } from "../infrastructure/SystemBase";
 import type { World } from "../../../types/index";
 
@@ -29,7 +30,6 @@ import type { World } from "../../../types/index";
 interface CraftingSession {
   playerId: string;
   recipeId: string; // Output item ID (e.g., "leather_body")
-  startTime: number;
   quantity: number;
   crafted: number;
   /** Tick when current craft action completes (tick-based timing) */
@@ -68,7 +68,12 @@ export class CraftingSystem extends SystemBase {
     // Listen for crafting interaction (player used needle/chisel/gold bar on furnace)
     this.subscribe(
       EventType.CRAFTING_INTERACT,
-      (data: { playerId: string; triggerType: string; stationId?: string }) => {
+      (data: {
+        playerId: string;
+        triggerType: string;
+        stationId?: string;
+        inputItemId?: string;
+      }) => {
         this.handleCraftingInteract(data);
       },
     );
@@ -295,7 +300,6 @@ export class CraftingSystem extends SystemBase {
     const session: CraftingSession = {
       playerId,
       recipeId,
-      startTime: Date.now(),
       quantity: Math.max(1, quantity),
       crafted: 0,
       completionTick: currentTick + recipe.ticks,
@@ -440,7 +444,7 @@ export class CraftingSystem extends SystemBase {
     // Grant XP
     this.emitTypedEvent(EventType.SKILLS_XP_GAINED, {
       playerId,
-      skill: "crafting",
+      skill: Skill.CRAFTING,
       amount: recipe.xp,
     });
 
@@ -562,7 +566,7 @@ export class CraftingSystem extends SystemBase {
   private getCraftingLevel(playerId: string): number {
     // Check cached skills first
     const cachedSkills = this.playerSkills.get(playerId);
-    if (cachedSkills?.crafting?.level) {
+    if (cachedSkills?.crafting?.level != null) {
       return cachedSkills.crafting.level;
     }
 

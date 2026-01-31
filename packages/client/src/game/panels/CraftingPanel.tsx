@@ -27,7 +27,6 @@ interface CraftingRecipe {
 
 interface CraftingPanelProps {
   availableRecipes: CraftingRecipe[];
-  station: string;
   world: ClientWorld;
   onClose: () => void;
 }
@@ -105,7 +104,6 @@ const CRAFTING_LAST_X_KEY = "crafting_last_x";
 
 export function CraftingPanel({
   availableRecipes,
-  station: _station,
   world,
   onClose,
 }: CraftingPanelProps) {

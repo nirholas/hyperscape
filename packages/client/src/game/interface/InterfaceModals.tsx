@@ -844,7 +844,6 @@ export function InterfaceModalsRenderer({
         >
           <CraftingPanel
             availableRecipes={craftingData.availableRecipes}
-            station={craftingData.station}
             world={world}
             onClose={() => setCraftingData(null)}
           />

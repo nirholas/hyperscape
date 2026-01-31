@@ -645,6 +645,8 @@ export interface CraftingInteractPayload {
   triggerType: "needle" | "chisel" | "furnace";
   /** Optional station entity ID for furnace crafting */
   stationId?: string;
+  /** Specific input material for recipe filtering (e.g., "leather", "uncut_sapphire") */
+  inputItemId?: string;
 }
 
 /**
