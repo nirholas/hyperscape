@@ -44,6 +44,7 @@ import { SmithingSourceInteractionHandler } from "./handlers/SmithingSourceInter
 import { AltarInteractionHandler } from "./handlers/AltarInteractionHandler";
 import { StarterChestInteractionHandler } from "./handlers/StarterChestInteractionHandler";
 import { ForfeitPillarInteractionHandler } from "./handlers/ForfeitPillarInteractionHandler";
+import { RunecraftingAltarInteractionHandler } from "./handlers/RunecraftingAltarInteractionHandler";
 
 /**
  * Targeting mode state for "Use X on Y" interactions
@@ -163,6 +164,12 @@ export class InteractionRouter extends System {
     this.handlers.set(
       "altar",
       new AltarInteractionHandler(this.world, this.actionQueue),
+    );
+
+    // Runecrafting altar (essence → runes)
+    this.handlers.set(
+      "runecrafting_altar",
+      new RunecraftingAltarInteractionHandler(this.world, this.actionQueue),
     );
 
     // Starter chest (new player equipment)

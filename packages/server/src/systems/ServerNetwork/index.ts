@@ -1882,6 +1882,45 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       });
     };
 
+    // Runecrafting - player clicked runecrafting altar
+    // SERVER-AUTHORITATIVE: Emit RUNECRAFTING_INTERACT event for RunecraftingSystem to handle
+    this.handlers["onRunecraftingAltarInteract"] = (socket, data) => {
+      const player = socket.player;
+      if (!player) return;
+
+      // Rate limiting
+      if (!this.canProcessRequest(player.id)) {
+        return;
+      }
+
+      const payload = data as {
+        altarId?: unknown;
+        runeType?: unknown;
+      };
+
+      // Validate altarId
+      if (typeof payload.altarId !== "string" || payload.altarId.length > 64) {
+        return;
+      }
+
+      // Validate runeType
+      if (
+        typeof payload.runeType !== "string" ||
+        payload.runeType.length > 32
+      ) {
+        return;
+      }
+
+      // Emit event for RunecraftingSystem to handle
+      this.world.emit(EventType.RUNECRAFTING_INTERACT, {
+        playerId: player.id,
+        altarId: payload.altarId,
+        runeType: payload.runeType,
+      });
+    };
+    this.handlers["runecraftingAltarInteract"] =
+      this.handlers["onRunecraftingAltarInteract"];
+
     // Route movement and combat through action queue for OSRS-style tick processing
     // Actions are queued and processed on tick boundaries, not immediately
     this.handlers["onMoveRequest"] = (socket, data) => {
