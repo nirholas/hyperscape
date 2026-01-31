@@ -27,6 +27,10 @@ import {
   type AltarEntityConfig,
 } from "../../../entities/world/AltarEntity";
 import {
+  RunecraftingAltarEntity,
+  type RunecraftingAltarEntityConfig,
+} from "../../../entities/world/RunecraftingAltarEntity";
+import {
   StarterChestEntity,
   type StarterChestEntityConfig,
 } from "../../../entities/world/StarterChestEntity";
@@ -385,6 +389,13 @@ export class EntityManager extends SystemBase {
       case EntityType.ALTAR:
       case "altar":
         entity = new AltarEntity(this.world, config as AltarEntityConfig);
+        break;
+      case EntityType.RUNECRAFTING_ALTAR:
+      case "runecrafting_altar":
+        entity = new RunecraftingAltarEntity(
+          this.world,
+          config as unknown as RunecraftingAltarEntityConfig,
+        );
         break;
       case EntityType.STARTER_CHEST:
       case "starter_chest":

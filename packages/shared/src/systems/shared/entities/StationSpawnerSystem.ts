@@ -94,6 +94,7 @@ export class StationSpawnerSystem extends SystemBase {
           anvil: EntityType.ANVIL,
           altar: EntityType.ALTAR,
           range: EntityType.RANGE,
+          runecrafting_altar: EntityType.RUNECRAFTING_ALTAR,
         };
 
         const entityType = entityTypeMap[station.type] ?? station.type;
@@ -109,6 +110,11 @@ export class StationSpawnerSystem extends SystemBase {
             properties: {
               bankId: station.bankId ?? "spawn_bank",
             },
+          }),
+          // Runecrafting altar: pass runeType for altar identification
+          ...(station.type === "runecrafting_altar" && {
+            runeType:
+              (station as unknown as { runeType?: string }).runeType ?? "air",
           }),
         };
 
