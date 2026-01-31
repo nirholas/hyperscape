@@ -23,6 +23,7 @@ import { processingDataProvider } from "../../../data/ProcessingDataProvider";
 import type { CraftingRecipeData } from "../../../data/ProcessingDataProvider";
 import { EventType } from "../../../types/events";
 import { Skill } from "../character/SkillsSystem";
+import { Logger } from "../../../utils/Logger";
 import { SystemBase } from "../infrastructure/SystemBase";
 import type { World } from "../../../types/index";
 
@@ -449,6 +450,17 @@ export class CraftingSystem extends SystemBase {
     });
 
     session.crafted++;
+
+    // Audit log for economic tracking
+    Logger.system("CraftingSystem", "craft_complete", {
+      playerId,
+      recipeId: session.recipeId,
+      output: recipe.output,
+      inputsConsumed: recipe.inputs.map((i) => `${i.amount}x${i.item}`),
+      xpAwarded: recipe.xp,
+      crafted: session.crafted,
+      batchTotal: session.quantity,
+    });
 
     // Success message (OSRS style - shows item name)
     const itemName = recipe.name || recipe.output.replace(/_/g, " ");

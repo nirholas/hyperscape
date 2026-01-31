@@ -1664,6 +1664,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       const player = socket.player;
       if (!player) return;
 
+      // Rate limiting - prevent inventory/recipe computation spam
+      if (!this.canProcessRequest(player.id)) {
+        return;
+      }
+
       const payload = data as {
         triggerType?: string;
         stationId?: string;
