@@ -413,6 +413,29 @@ export abstract class ProcessingSystemBase
       },
     );
 
+    // Cancel processing on movement (OSRS: any click cancels skilling)
+    this.subscribe<{
+      playerId: string;
+      targetPosition: { x: number; y: number; z: number };
+    }>(EventType.MOVEMENT_CLICK_TO_MOVE, (data) => {
+      if (this.activeProcessing.has(data.playerId)) {
+        this.cleanupPlayer({ id: data.playerId });
+      }
+    });
+
+    // Cancel processing on combat start
+    this.subscribe(
+      EventType.COMBAT_STARTED,
+      (data: { attackerId: string; targetId: string }) => {
+        if (this.activeProcessing.has(data.attackerId)) {
+          this.cleanupPlayer({ id: data.attackerId });
+        }
+        if (this.activeProcessing.has(data.targetId)) {
+          this.cleanupPlayer({ id: data.targetId });
+        }
+      },
+    );
+
     // Listen for player cleanup
     this.subscribe(
       EventType.PLAYER_UNREGISTERED,

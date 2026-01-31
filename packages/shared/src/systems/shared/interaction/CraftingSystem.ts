@@ -98,6 +98,29 @@ export class CraftingSystem extends SystemBase {
       },
     );
 
+    // Cancel crafting on movement (OSRS: any click cancels skilling)
+    this.subscribe<{
+      playerId: string;
+      targetPosition: { x: number; y: number; z: number };
+    }>(EventType.MOVEMENT_CLICK_TO_MOVE, (data) => {
+      if (this.activeSessions.has(data.playerId)) {
+        this.cancelCrafting(data.playerId);
+      }
+    });
+
+    // Cancel crafting on combat start
+    this.subscribe(
+      EventType.COMBAT_STARTED,
+      (data: { attackerId: string; targetId: string }) => {
+        if (this.activeSessions.has(data.attackerId)) {
+          this.cancelCrafting(data.attackerId);
+        }
+        if (this.activeSessions.has(data.targetId)) {
+          this.cancelCrafting(data.targetId);
+        }
+      },
+    );
+
     // Clean up on player disconnect
     this.subscribe(
       EventType.PLAYER_UNREGISTERED,
