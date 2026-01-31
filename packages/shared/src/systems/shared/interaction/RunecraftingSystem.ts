@@ -97,9 +97,6 @@ export class RunecraftingSystem extends SystemBase {
 
     // Get player's runecrafting level
     const rcLevel = this.getRunecraftingLevel(playerId);
-    console.log(
-      `[RunecraftingSystem] Player ${playerId} attempting ${runeType} runes. RC level: ${rcLevel}, required: ${recipe.levelRequired}`,
-    );
 
     // Check level requirement
     if (rcLevel < recipe.levelRequired) {
