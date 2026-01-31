@@ -32,3 +32,6 @@ export * from "./FletchingSystem";
 
 // Tanning system (NPC tanner: hides → leather)
 export * from "./TanningSystem";
+
+// Runecrafting skill system (essence + altar → runes)
+export * from "./RunecraftingSystem";

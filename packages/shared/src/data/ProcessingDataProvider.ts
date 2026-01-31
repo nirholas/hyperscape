@@ -148,6 +148,25 @@ export interface FletchingManifest {
 }
 
 /**
+ * Runecrafting recipe from recipes/runecrafting.json
+ */
+export interface RunecraftingRecipeManifest {
+  runeType: string;
+  runeItemId: string;
+  levelRequired: number;
+  xpPerEssence: number;
+  essenceTypes: string[];
+  multiRuneLevels: number[];
+}
+
+/**
+ * Full manifest structure for recipes/runecrafting.json
+ */
+export interface RunecraftingManifest {
+  recipes: RunecraftingRecipeManifest[];
+}
+
+/**
  * Tanning recipe data for runtime use
  */
 export interface TanningRecipeData {
@@ -186,6 +205,27 @@ export interface FletchingRecipeData {
   xp: number;
   /** Time in game ticks (600ms per tick) */
   ticks: number;
+}
+
+/**
+ * Runecrafting recipe data for runtime use.
+ * Keyed by runeType (e.g., "air", "water", "chaos").
+ */
+export interface RunecraftingRecipeData {
+  /** Rune type identifier (e.g., "air", "mind", "water") */
+  runeType: string;
+  /** Output rune item ID (e.g., "air_rune") */
+  runeItemId: string;
+  /** Display name for the rune */
+  name: string;
+  /** Runecrafting level required */
+  levelRequired: number;
+  /** XP granted per essence converted */
+  xpPerEssence: number;
+  /** Essence item IDs that can be used (e.g., ["rune_essence", "pure_essence"]) */
+  essenceTypes: string[];
+  /** Levels at which the player crafts an additional rune per essence (sorted ascending) */
+  multiRuneLevels: number[];
 }
 
 /**
@@ -372,6 +412,10 @@ export class ProcessingDataProvider {
   private fletchingInputsByTool = new Map<string, Set<string>>();
   private allFletchingInputIds = new Set<string>();
 
+  // Runecrafting lookup tables (built from recipes/runecrafting.json)
+  private runecraftingRecipeMap = new Map<string, RunecraftingRecipeData>();
+  private runecraftingEssenceTypes = new Set<string>();
+
   // Loaded recipe manifests (set by DataManager)
   private cookingManifest: CookingManifest | null = null;
   private firemakingManifest: FiremakingManifest | null = null;
@@ -380,6 +424,7 @@ export class ProcessingDataProvider {
   private craftingManifest: CraftingManifest | null = null;
   private tanningManifest: TanningManifest | null = null;
   private fletchingManifest: FletchingManifest | null = null;
+  private runecraftingManifest: RunecraftingManifest | null = null;
 
   // Tanning lookup tables
   private tanningRecipeMap = new Map<string, TanningRecipeData>();
@@ -460,6 +505,13 @@ export class ProcessingDataProvider {
   }
 
   /**
+   * Load runecrafting recipes from manifest
+   */
+  public loadRunecraftingRecipes(manifest: RunecraftingManifest): void {
+    this.runecraftingManifest = manifest;
+  }
+
+  /**
    * Check if recipe manifests are loaded
    */
   public hasRecipeManifests(): boolean {
@@ -470,7 +522,8 @@ export class ProcessingDataProvider {
       this.smithingManifest ||
       this.craftingManifest ||
       this.tanningManifest ||
-      this.fletchingManifest
+      this.fletchingManifest ||
+      this.runecraftingManifest
     );
   }
 
@@ -521,10 +574,14 @@ export class ProcessingDataProvider {
       this.buildFletchingDataFromManifest();
     }
 
+    if (this.runecraftingManifest) {
+      this.buildRunecraftingDataFromManifest();
+    }
+
     this.isInitialized = true;
 
     console.log(
-      `[ProcessingDataProvider] Initialized: ${this.cookableItemIds.size} cookable items, ${this.burneableLogIds.size} burnable logs, ${this.smeltableBarIds.size} smeltable bars, ${this.smithableItemIds.size} smithable items, ${this.craftableItemIds.size} craftable items, ${this.tanningRecipeMap.size} tanning recipes, ${this.fletchingRecipeMap.size} fletching recipes`,
+      `[ProcessingDataProvider] Initialized: ${this.cookableItemIds.size} cookable items, ${this.burneableLogIds.size} burnable logs, ${this.smeltableBarIds.size} smeltable bars, ${this.smithableItemIds.size} smithable items, ${this.craftableItemIds.size} craftable items, ${this.tanningRecipeMap.size} tanning recipes, ${this.fletchingRecipeMap.size} fletching recipes, ${this.runecraftingRecipeMap.size} runecrafting recipes`,
     );
   }
 
@@ -553,6 +610,8 @@ export class ProcessingDataProvider {
     this.fletchingRecipesByInput.clear();
     this.fletchingInputsByTool.clear();
     this.allFletchingInputIds.clear();
+    this.runecraftingRecipeMap.clear();
+    this.runecraftingEssenceTypes.clear();
     this.isInitialized = false;
     this.initialize();
   }
@@ -1930,6 +1989,154 @@ export class ProcessingDataProvider {
   }
 
   // ==========================================================================
+  // BUILD RUNECRAFTING DATA FROM MANIFEST
+  // ==========================================================================
+
+  /**
+   * Build runecrafting lookup tables from recipes/runecrafting.json
+   */
+  private buildRunecraftingDataFromManifest(): void {
+    if (!this.runecraftingManifest) return;
+
+    const errors: string[] = [];
+
+    for (let i = 0; i < this.runecraftingManifest.recipes.length; i++) {
+      const recipe = this.runecraftingManifest.recipes[i];
+      const label = recipe.runeType || `index ${i}`;
+
+      // Required string fields
+      if (!recipe.runeType || typeof recipe.runeType !== "string") {
+        errors.push(`[${label}] missing or invalid 'runeType'`);
+        continue;
+      }
+      if (!recipe.runeItemId || typeof recipe.runeItemId !== "string") {
+        errors.push(`[${label}] missing or invalid 'runeItemId'`);
+        continue;
+      }
+
+      // Level: integer in [1, 99]
+      if (
+        typeof recipe.levelRequired !== "number" ||
+        !Number.isFinite(recipe.levelRequired) ||
+        recipe.levelRequired < 1 ||
+        recipe.levelRequired > 99
+      ) {
+        errors.push(
+          `[${label}] levelRequired must be 1–99, got ${recipe.levelRequired}`,
+        );
+        continue;
+      }
+
+      // XP > 0
+      if (
+        typeof recipe.xpPerEssence !== "number" ||
+        !Number.isFinite(recipe.xpPerEssence) ||
+        recipe.xpPerEssence <= 0
+      ) {
+        errors.push(
+          `[${label}] xpPerEssence must be > 0, got ${recipe.xpPerEssence}`,
+        );
+        continue;
+      }
+
+      // Essence types: non-empty array
+      if (
+        !Array.isArray(recipe.essenceTypes) ||
+        recipe.essenceTypes.length === 0
+      ) {
+        errors.push(`[${label}] essenceTypes must be a non-empty array`);
+        continue;
+      }
+
+      // Multi-rune levels: must be an array of numbers (can be empty)
+      if (!Array.isArray(recipe.multiRuneLevels)) {
+        errors.push(`[${label}] multiRuneLevels must be an array`);
+        continue;
+      }
+
+      // ---- Validated — build runtime data ----
+
+      const item = ITEMS.get(recipe.runeItemId);
+      const name = item?.name || recipe.runeItemId;
+
+      const recipeData: RunecraftingRecipeData = {
+        runeType: recipe.runeType,
+        runeItemId: recipe.runeItemId,
+        name,
+        levelRequired: recipe.levelRequired,
+        xpPerEssence: recipe.xpPerEssence,
+        essenceTypes: recipe.essenceTypes,
+        multiRuneLevels: [...recipe.multiRuneLevels].sort((a, b) => a - b),
+      };
+
+      this.runecraftingRecipeMap.set(recipe.runeType, recipeData);
+
+      for (const essenceType of recipe.essenceTypes) {
+        this.runecraftingEssenceTypes.add(essenceType);
+      }
+    }
+
+    if (errors.length > 0) {
+      console.warn(
+        `[ProcessingDataProvider] Runecrafting manifest validation errors (${errors.length}):\n  ${errors.join("\n  ")}`,
+      );
+    }
+  }
+
+  // ==========================================================================
+  // RUNECRAFTING ACCESSORS
+  // ==========================================================================
+
+  /**
+   * Get runecrafting recipe by rune type (e.g., "air", "water", "chaos")
+   */
+  public getRunecraftingRecipe(
+    runeType: string,
+  ): RunecraftingRecipeData | null {
+    this.ensureInitialized();
+    return this.runecraftingRecipeMap.get(runeType) || null;
+  }
+
+  /**
+   * Get all runecrafting recipes
+   */
+  public getAllRunecraftingRecipes(): RunecraftingRecipeData[] {
+    this.ensureInitialized();
+    return Array.from(this.runecraftingRecipeMap.values());
+  }
+
+  /**
+   * Check if an item is a runecrafting essence
+   */
+  public isRunecraftingEssence(itemId: string): boolean {
+    this.ensureInitialized();
+    return this.runecraftingEssenceTypes.has(itemId);
+  }
+
+  /**
+   * Calculate the multi-rune multiplier for a given rune type and level.
+   * Returns how many runes are produced per essence at the given level.
+   *
+   * In OSRS, each threshold in multiRuneLevels grants +1 rune per essence.
+   * e.g., air rune thresholds [11, 22, 33, ...]: at level 22, you get 3 runes per essence.
+   */
+  public getRunecraftingMultiplier(runeType: string, level: number): number {
+    this.ensureInitialized();
+    const recipe = this.runecraftingRecipeMap.get(runeType);
+    if (!recipe) return 1;
+
+    let multiplier = 1;
+    for (const threshold of recipe.multiRuneLevels) {
+      if (level >= threshold) {
+        multiplier++;
+      } else {
+        break; // Sorted ascending, no need to check further
+      }
+    }
+    return multiplier;
+  }
+
+  // ==========================================================================
   // UTILITY
   // ==========================================================================
 
@@ -1961,6 +2168,7 @@ export class ProcessingDataProvider {
     craftingRecipes: number;
     tanningRecipes: number;
     fletchingRecipes: number;
+    runecraftingRecipes: number;
     isInitialized: boolean;
   } {
     this.ensureInitialized();
@@ -1972,6 +2180,7 @@ export class ProcessingDataProvider {
       craftingRecipes: this.craftingRecipeMap.size,
       tanningRecipes: this.tanningRecipeMap.size,
       fletchingRecipes: this.fletchingRecipeMap.size,
+      runecraftingRecipes: this.runecraftingRecipeMap.size,
       isInitialized: this.isInitialized,
     };
   }
